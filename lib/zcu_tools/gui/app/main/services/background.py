@@ -26,15 +26,10 @@ from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Iterator, Optional
 
-from qtpy.QtCore import (  # type: ignore[attr-defined]
-    QObject,
-    QRunnable,
-    QThread,
-    QThreadPool,
-    Signal,  # type: ignore[reportPrivateImportUsage]
-)
+from qtpy.QtCore import QObject  # type: ignore[attr-defined]
 
 from zcu_tools.experiment.v2.runner.base import ActiveTask
+from zcu_tools.gui.background import NO_RESULT, BackgroundRunner
 from zcu_tools.gui.plotting import routing_scope
 from zcu_tools.liveplot.backend import set_liveplot_backend
 from zcu_tools.progress_bar.interface import use_pbar_factory
@@ -42,10 +37,9 @@ from zcu_tools.progress_bar.interface import use_pbar_factory
 if TYPE_CHECKING:
     from zcu_tools.gui.plotting import FigureContainer
 
-# Sentinel distinguishing "the thunk never produced a value" from "the thunk
-# returned None" (a legitimate result, e.g. save). The dedicated worker also
-# uses it to assert it never settles without an outcome.
-NO_RESULT: Any = object()
+# Re-exported from the shared mechanism so main's call sites keep importing it
+# from here (the sentinel's identity is what matters; it is defined once).
+__all__ = ["NO_RESULT", "OffMainScopes", "BackgroundService"]
 
 
 @dataclass(frozen=True)
@@ -93,71 +87,18 @@ def _entered(scopes: OffMainScopes) -> Iterator[None]:
         yield
 
 
-class _OpSignals(QObject):
-    """Main-thread-affinity signal carrier for a pooled runnable (a QRunnable is
-    not a QObject, so it cannot own signals)."""
-
-    done: Signal = Signal(object)
-    failed: Signal = Signal(object)
-
-
-class _PoolRunnable(QRunnable):
-    """Run ``thunk`` on a pool thread; emit the outcome via main-thread signals."""
-
-    def __init__(self, thunk: Callable[[], Any], signals: _OpSignals) -> None:
-        super().__init__()
-        self._thunk = thunk
-        self._signals = signals
-
-    def run(self) -> None:  # pragma: no cover - exercised via QThreadPool
-        try:
-            result = self._thunk()
-        except Exception as exc:  # noqa: BLE001 - forwarded to on_error on main
-            self._signals.failed.emit(exc)
-        else:
-            self._signals.done.emit(result)
-
-
-class _OpWorker(QThread):
-    """Dedicated-thread worker: run ``thunk`` in ``run()`` (worker thread), then
-    emit ``done``/``failed`` from ``_emit`` (which runs on the main thread, the
-    worker QObject's affinity, via the ``finished`` signal)."""
-
-    done: Signal = Signal(object)
-    failed: Signal = Signal(object)
-
-    def __init__(self, thunk: Callable[[], Any], parent: QObject) -> None:
-        super().__init__(parent)
-        self._thunk = thunk
-        self._result: Any = NO_RESULT
-        self._error: Optional[Exception] = None
-        self.finished.connect(self._emit)
-
-    def run(self) -> None:
-        try:
-            self._result = self._thunk()
-        except Exception as exc:  # noqa: BLE001 - forwarded to on_error on main
-            self._error = exc
-
-    def _emit(self) -> None:
-        if self._error is not None:
-            self.failed.emit(self._error)
-        elif self._result is not NO_RESULT:
-            self.done.emit(self._result)
-        else:
-            raise RuntimeError("BackgroundService worker settled without an outcome")
-
-
 class BackgroundService(QObject):
-    """Run thunks off the main thread with opt-in ambient scopes (ADR-0019)."""
+    """Run thunks off the main thread with opt-in ambient scopes (ADR-0019).
+
+    The off-main execution itself is the app-agnostic ``BackgroundRunner``; this
+    service composes one and owns only the main-local *scope* policy — which
+    standard ambient scopes (routing+liveplot / pbar / cancel) a thunk opts into,
+    realised by the ``_entered`` context manager passed as the runner's ``enter``.
+    """
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
-        self._pool = QThreadPool(self)
-        # Hold dedicated workers until they settle so the Python wrapper is not
-        # GC'd before ``finished`` fires (parent= keeps the C++ object; the set
-        # keeps the Python ref symmetric and explicit).
-        self._workers: set[_OpWorker] = set()
+        self._runner = BackgroundRunner(self)
 
     def submit(
         self,
@@ -176,26 +117,10 @@ class BackgroundService(QObject):
         thread when the thunk is invoked, never here at build time.
         """
         effective_scopes = scopes if scopes is not None else OffMainScopes()
-
-        def thunk() -> Any:
-            with _entered(effective_scopes):
-                return work()
-
-        if run_in_pool:
-            # Parent the signal carrier to bg so it outlives the pool runnable;
-            # deleteLater (queued after on_done/on_error) frees it on the main
-            # thread once the outcome has been delivered.
-            signals = _OpSignals(self)
-            signals.done.connect(on_done)
-            signals.failed.connect(on_error)
-            signals.done.connect(signals.deleteLater)
-            signals.failed.connect(signals.deleteLater)
-            self._pool.start(_PoolRunnable(thunk, signals))
-        else:
-            worker = _OpWorker(thunk, parent=self)
-            worker.done.connect(on_done)
-            worker.failed.connect(on_error)
-            self._workers.add(worker)
-            worker.finished.connect(lambda w=worker: self._workers.discard(w))
-            worker.finished.connect(worker.deleteLater)
-            worker.start()
+        self._runner.submit(
+            work,
+            on_done=on_done,
+            on_error=on_error,
+            run_in_pool=run_in_pool,
+            enter=_entered(effective_scopes),
+        )

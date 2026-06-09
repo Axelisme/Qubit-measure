@@ -9,18 +9,15 @@ smoothing are Qt sliders; Select/Erase is a combo box.
 
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 import numpy as np
 from matplotlib.backend_bases import MouseEvent
 from numpy.typing import NDArray
 from qtpy.QtCore import (  # type: ignore[attr-defined]
-    QObject,
-    QRunnable,
     Qt,
-    QThreadPool,
     QTimer,
-    Signal,  # type: ignore[attr-defined]
 )
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QCheckBox,
@@ -31,12 +28,15 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.gui.background import BackgroundRunner
 from zcu_tools.notebook.analysis.fluxdep.processing import (
     cast2real_and_norm,
     spectrum2d_findpoint,
 )
 
 from .base import InteractiveMplWidget
+
+logger = logging.getLogger(__name__)
 
 _SCALE = 1000  # int-QSlider scale for float sliders
 
@@ -83,54 +83,6 @@ def toggle_near_mask(
         mask &= ~region
 
 
-class _FindPointsSignals(QObject):
-    # (generation, real_signals, s_dev_values, s_freqs)
-    done = Signal(int, object, object, object)
-
-
-class _FindPointsWorker(QRunnable):
-    """Off-main-thread cast2real + spectrum2d_findpoint for one parameter set.
-
-    Carries a ``generation`` stamp; the widget ignores any result whose
-    generation is no longer the latest (a newer parameter change superseded it),
-    which is the "instant cancel" — a stale computation's result is discarded
-    rather than interrupted mid-flight. The numerical core releases the GIL
-    enough that the Qt main thread stays responsive (measured).
-    """
-
-    def __init__(
-        self,
-        generation: int,
-        signals: NDArray[np.complex128],
-        dev_values: NDArray[np.float64],
-        freqs: NDArray[np.float64],
-        threshold: float,
-        smooth: float,
-        mask: NDArray[np.bool_],
-        sink: _FindPointsSignals,
-    ) -> None:
-        super().__init__()
-        self._gen = generation
-        self._signals = signals
-        self._dev_values = dev_values
-        self._freqs = freqs
-        self._threshold = threshold
-        self._smooth = smooth
-        self._mask = mask
-        self._sink = sink
-
-    def run(self) -> None:
-        real_signals = cast2real_and_norm(self._signals, sigma=self._smooth)
-        s_dev, s_freq = spectrum2d_findpoint(
-            self._dev_values,
-            self._freqs,
-            real_signals,
-            self._threshold,
-            weight=self._mask,
-        )
-        self._sink.done.emit(self._gen, real_signals, s_dev, s_freq)
-
-
 class FindPointsWidget(InteractiveMplWidget):
     """Brush-mask point selection for a two-tone flux spectrum."""
 
@@ -154,9 +106,7 @@ class FindPointsWidget(InteractiveMplWidget):
         # Off-main-thread point detection with instant-cancel by generation:
         # a parameter change bumps the generation and (after a short debounce)
         # launches a worker; results from an older generation are dropped.
-        self._pool = QThreadPool.globalInstance() or QThreadPool(self)
-        self._worker_signals = _FindPointsSignals()
-        self._worker_signals.done.connect(self._on_worker_done)
+        self._runner = BackgroundRunner(self)
         self._generation = 0
         self._debounce = QTimer(self)
         self._debounce.setSingleShot(True)
@@ -281,17 +231,35 @@ class FindPointsWidget(InteractiveMplWidget):
         self._debounce.start()
 
     def _launch_worker(self) -> None:
-        worker = _FindPointsWorker(
-            self._generation,
-            self._signals,
-            self._dev_values,
-            self._freqs,
-            self._threshold_val(),
-            self._smooth_val(),
-            self._mask.copy(),  # snapshot so later edits don't race the worker
-            self._worker_signals,
+        # Capture the generation + an immutable parameter snapshot in the closure;
+        # the staleness check (cancellation by discarding stale-generation results)
+        # stays in this widget, not the runner.
+        generation = self._generation
+        signals = self._signals
+        dev_values = self._dev_values
+        freqs = self._freqs
+        threshold = self._threshold_val()
+        smooth = self._smooth_val()
+        mask = self._mask.copy()  # snapshot so later edits don't race the worker
+
+        def _compute() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+            real_signals = cast2real_and_norm(signals, sigma=smooth)
+            s_dev, s_freq = spectrum2d_findpoint(
+                dev_values, freqs, real_signals, threshold, weight=mask
+            )
+            return real_signals, s_dev, s_freq
+
+        self._runner.submit(
+            _compute,
+            on_done=lambda r, g=generation: self._on_worker_done(g, *r),
+            on_error=self._on_worker_error,
+            run_in_pool=True,
         )
-        self._pool.start(worker)
+
+    def _on_worker_error(self, exc: Exception) -> None:
+        # A point re-detection failing is non-fatal (a transient parameter combo);
+        # log and leave the prior result on screen rather than crashing the picker.
+        logger.exception("find-points worker failed", exc_info=exc)
 
     def _on_worker_done(
         self,

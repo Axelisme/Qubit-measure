@@ -16,11 +16,12 @@ The pipeline (each step enabled only once the prior completes — fast-fail UX):
    accepted values are the final fit). The button is disabled while computing.
 5. **Export** — write the dispersive section back to params.json.
 
-The heavy work (preprocess, predict) runs on a ``QThreadPool`` worker that calls only
-the pure ``compute_*`` / ``predict_*`` controller methods and returns plain data; the
-worker's ``done`` slot — on the Qt main thread — records State and draws the figure
-(the worker never touches Qt widgets or pyplot, per ADR-0017). The figures live on
-local ``FigureCanvasQTAgg`` widgets in the tabs.
+The heavy work (preprocess, predict, auto-tune) runs off-main via the shared
+``BackgroundRunner`` (pool strategy), calling only the pure ``compute_*`` /
+``predict_*`` / ``auto_tune`` controller methods and returning plain data; the
+runner's ``on_done`` callback — on the Qt main thread — records State and draws the
+figure (the worker never touches Qt widgets or pyplot, per ADR-0017). The figures
+live on local ``FigureCanvasQTAgg`` widgets in the tabs.
 """
 
 from __future__ import annotations
@@ -33,12 +34,6 @@ from typing import Optional
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from qtpy.QtCore import (  # type: ignore[attr-defined]
-    QObject,
-    QRunnable,
-    QThreadPool,
-    Signal,  # type: ignore[attr-defined]
-)
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QFileDialog,
     QGroupBox,
@@ -63,6 +58,7 @@ from zcu_tools.gui.app.dispersive.services.viz import (
     update_sample_dots,
 )
 from zcu_tools.gui.app.dispersive.state import PreprocessResult
+from zcu_tools.gui.background import BackgroundRunner
 from zcu_tools.gui.widgets.project_dialog import ProjectDialog
 
 from .error_messages import friendly_fit_message, friendly_io_message
@@ -99,59 +95,6 @@ class _TuneData:
     bare_rf: float
 
 
-class _WorkerSignals(QObject):
-    done = Signal(object)
-    failed = Signal(str)
-
-
-class _PreprocessWorker(QRunnable):
-    """Runs the pure ``compute_preprocess`` off the main thread (numba edelay kernel).
-
-    The kernel is a single black-box call (~0.1s), so there is no per-flux progress —
-    the panel shows a busy bar. No pbar factory is needed.
-    """
-
-    def __init__(self, ctrl: Controller) -> None:
-        super().__init__()
-        self.signals = _WorkerSignals()
-        self._ctrl = ctrl
-
-    def run(self) -> None:
-        try:
-            result = self._ctrl.compute_preprocess()
-        except Exception as exc:  # noqa: BLE001 — surface to the panel
-            logger.exception("preprocess worker failed")
-            self.signals.failed.emit(str(exc))
-            return
-        self.signals.done.emit(result)
-
-
-class _PredictWorker(QRunnable):
-    """Runs the LRU-cached predictor off the main thread for the tuning figure.
-
-    Returns ``_TuneData`` (the rf arrays + axis + the g/bare_rf used); the main-thread
-    ``done`` slot draws it and records the result. The predictor reads State but does
-    not write it, so it is safe off-main.
-    """
-
-    def __init__(self, ctrl: Controller, params: "_TuneParams") -> None:
-        super().__init__()
-        self.signals = _WorkerSignals()
-        self._ctrl = ctrl
-        self._p = params
-
-    def run(self) -> None:
-        try:
-            p = self._p
-            rf_0, rf_1 = self._ctrl.predict_dispersive(p.g, p.bare_rf, return_dim=2)
-            t_fluxs = self._ctrl.predict_flux_axis()
-        except Exception as exc:  # noqa: BLE001 — surface to the panel
-            logger.exception("predict worker failed")
-            self.signals.failed.emit(str(exc))
-            return
-        self.signals.done.emit(_TuneData(rf_0, rf_1, t_fluxs, p.g, p.bare_rf))
-
-
 @dataclass(frozen=True)
 class _AutoTuneParams:
     sample_fluxs: np.ndarray
@@ -167,33 +110,6 @@ class _AutoTuneResult:
     bare_rf: float  # GHz
 
 
-class _AutoTuneWorker(QRunnable):
-    """Runs the (slow, iterative) scipy auto-tune off the main thread.
-
-    Optimises (g, bare_rf) to best match the sample-flux lines; the main-thread
-    ``done`` slot writes the result back into the sliders. Pure read of State, no
-    write, so it is safe off-main.
-    """
-
-    def __init__(self, ctrl: Controller, params: "_AutoTuneParams") -> None:
-        super().__init__()
-        self.signals = _WorkerSignals()
-        self._ctrl = ctrl
-        self._p = params
-
-    def run(self) -> None:
-        try:
-            p = self._p
-            g, bare_rf = self._ctrl.auto_tune(
-                p.sample_fluxs, p.g0, p.bare_rf0, p.g_bounds, p.rf_bounds
-            )
-        except Exception as exc:  # noqa: BLE001 — surface to the panel
-            logger.exception("auto-tune worker failed")
-            self.signals.failed.emit(str(exc))
-            return
-        self.signals.done.emit(_AutoTuneResult(g, bare_rf))
-
-
 class PipelinePanelWidget(QWidget):
     """The dispersive single-flow analysis panel."""
 
@@ -202,7 +118,7 @@ class PipelinePanelWidget(QWidget):
 
         super().__init__(parent)
         self._ctrl = ctrl
-        self._pool = QThreadPool.globalInstance() or QThreadPool(self)
+        self._runner = BackgroundRunner(self)
         self._tune_artists = None
         # Points at whichever step's busy bar is currently active (preprocess /
         # predict). Both run a black-box compute, so the bars are indeterminate.
@@ -479,10 +395,14 @@ class PipelinePanelWidget(QWidget):
         self._begin_progress(
             self._progress
         )  # busy/indeterminate (numba is a black box)
-        worker = _PreprocessWorker(self._ctrl)
-        worker.signals.done.connect(self._on_preprocess_done)
-        worker.signals.failed.connect(self._on_preprocess_failed)
-        self._pool.start(worker)
+        # Pure ``compute_preprocess`` off-main (numba edelay kernel, a single
+        # black-box call); no routing/pbar scope, so enter=None.
+        self._runner.submit(
+            self._ctrl.compute_preprocess,
+            on_done=self._on_preprocess_done,
+            on_error=self._on_preprocess_failed,
+            run_in_pool=True,
+        )
 
     def _on_preprocess_done(self, result: PreprocessResult) -> None:
         self._ctrl.record_preprocess(result)
@@ -529,10 +449,11 @@ class PipelinePanelWidget(QWidget):
         frac = (rf_ghz - self._rf_lo_ghz) / span
         return min(max(int(round(frac * _RF_TICKS)), 0), _RF_TICKS)
 
-    def _on_preprocess_failed(self, message: str) -> None:
+    def _on_preprocess_failed(self, exc: Exception) -> None:
+        logger.exception("preprocess worker failed", exc_info=exc)
         self._preprocess_btn.setEnabled(True)
         self._end_progress()
-        self._warn("Preprocess failed", friendly_fit_message("Preprocess", message))
+        self._warn("Preprocess failed", friendly_fit_message("Preprocess", exc))
 
     def _render_diagnostic(self, result: PreprocessResult) -> None:
         """The 3-panel diagnostic (signal magnitude / edelay / norm phases)."""
@@ -688,10 +609,21 @@ class PipelinePanelWidget(QWidget):
         )
         self._tune_btn.setEnabled(False)
         self._begin_progress(self._tune_progress)
-        worker = _PredictWorker(self._ctrl, params)
-        worker.signals.done.connect(self._on_tune_done)
-        worker.signals.failed.connect(self._on_tune_failed)
-        self._pool.start(worker)
+        ctrl = self._ctrl
+
+        def _predict() -> "_TuneData":
+            # The LRU-cached predictor reads State but does not write it, so it is
+            # safe off-main; no routing/pbar scope, so enter=None.
+            rf_0, rf_1 = ctrl.predict_dispersive(params.g, params.bare_rf, return_dim=2)
+            t_fluxs = ctrl.predict_flux_axis()
+            return _TuneData(rf_0, rf_1, t_fluxs, params.g, params.bare_rf)
+
+        self._runner.submit(
+            _predict,
+            on_done=self._on_tune_done,
+            on_error=self._on_tune_failed,
+            run_in_pool=True,
+        )
 
     def _on_tune_done(self, data: _TuneData) -> None:
         self._tune_btn.setEnabled(True)
@@ -713,10 +645,11 @@ class PipelinePanelWidget(QWidget):
         self._show_tab(self._tune_canvas)
         self._sync_enabled()
 
-    def _on_tune_failed(self, message: str) -> None:
+    def _on_tune_failed(self, exc: Exception) -> None:
+        logger.exception("predict worker failed", exc_info=exc)
         self._tune_btn.setEnabled(True)
         self._end_progress()
-        self._warn("Tune failed", friendly_fit_message("Tune", message))
+        self._warn("Tune failed", friendly_fit_message("Tune", exc))
 
     # --- auto tune (scipy optimiser over the sample lines) ---------------
 
@@ -744,10 +677,26 @@ class PipelinePanelWidget(QWidget):
         )
         self._auto_tune_btn.setEnabled(False)
         self._begin_progress(self._tune_progress)
-        worker = _AutoTuneWorker(self._ctrl, params)
-        worker.signals.done.connect(self._on_auto_tune_done)
-        worker.signals.failed.connect(self._on_auto_tune_failed)
-        self._pool.start(worker)
+        ctrl = self._ctrl
+
+        def _optimise() -> "_AutoTuneResult":
+            # The slow iterative scipy search reads State but does not write it, so
+            # it is safe off-main; no routing/pbar scope, so enter=None.
+            g, bare_rf = ctrl.auto_tune(
+                params.sample_fluxs,
+                params.g0,
+                params.bare_rf0,
+                params.g_bounds,
+                params.rf_bounds,
+            )
+            return _AutoTuneResult(g, bare_rf)
+
+        self._runner.submit(
+            _optimise,
+            on_done=self._on_auto_tune_done,
+            on_error=self._on_auto_tune_failed,
+            run_in_pool=True,
+        )
 
     def _on_auto_tune_done(self, result: _AutoTuneResult) -> None:
         self._end_progress()
@@ -757,10 +706,11 @@ class PipelinePanelWidget(QWidget):
         self._g_slider.setValue(int(round(1e3 * result.g)))
         self._rf_slider.setValue(self._rf_tick_for(result.bare_rf))
 
-    def _on_auto_tune_failed(self, message: str) -> None:
+    def _on_auto_tune_failed(self, exc: Exception) -> None:
+        logger.exception("auto-tune worker failed", exc_info=exc)
         self._end_progress()
         self._sync_auto_tune_enabled()
-        self._warn("Auto tune failed", friendly_fit_message("Auto tune", message))
+        self._warn("Auto tune failed", friendly_fit_message("Auto tune", exc))
 
     # --- tabs + export --------------------------------------------------
 

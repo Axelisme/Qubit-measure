@@ -21,12 +21,8 @@ from matplotlib.backend_bases import MouseEvent
 from matplotlib.patches import Ellipse
 from numpy.typing import NDArray
 from qtpy.QtCore import (  # type: ignore[attr-defined]
-    QObject,
-    QRunnable,
     Qt,
-    QThreadPool,
     QTimer,
-    Signal,  # type: ignore[attr-defined]
 )
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QComboBox,
@@ -36,6 +32,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.gui.background import BackgroundRunner
 from zcu_tools.notebook.analysis.fluxdep.processing import (
     cast2real_and_norm,
     downsample_points,
@@ -45,38 +42,6 @@ from zcu_tools.notebook.persistance import SpectrumResult
 from .base import InteractiveMplWidget
 
 _SCALE = 1000
-
-
-class _DownsampleSignals(QObject):
-    done = Signal(int, object)  # (generation, filter_mask)
-
-
-class _DownsampleWorker(QRunnable):
-    """Off-main-thread downsample_points for one parameter set.
-
-    O(N²), so it stalls the UI on large point clouds (measured ~1.3 s at 5000
-    points). Generation-stamped: a result whose generation is stale (a newer
-    parameter change happened) is dropped by the widget — the "instant cancel".
-    """
-
-    def __init__(
-        self,
-        generation: int,
-        sel_x: NDArray[np.float64],
-        sel_y: NDArray[np.float64],
-        threshold: float,
-        sink: _DownsampleSignals,
-    ) -> None:
-        super().__init__()
-        self._gen = generation
-        self._sel_x = sel_x
-        self._sel_y = sel_y
-        self._threshold = threshold
-        self._sink = sink
-
-    def run(self) -> None:
-        mask = downsample_points(self._sel_x, self._sel_y, self._threshold)
-        self._sink.done.emit(self._gen, mask)
 
 
 class SelectorWidget(InteractiveMplWidget):
@@ -109,9 +74,7 @@ class SelectorWidget(InteractiveMplWidget):
         self._temp_timer: Optional[QTimer] = None
 
         # Off-main-thread downsample with instant-cancel by generation (O(N²)).
-        self._pool = QThreadPool.globalInstance() or QThreadPool(self)
-        self._worker_signals = _DownsampleSignals()
-        self._worker_signals.done.connect(self._on_worker_done)
+        self._runner = BackgroundRunner(self)
         self._generation = 0
         self._debounce = QTimer(self)
         self._debounce.setSingleShot(True)
@@ -278,11 +241,27 @@ class SelectorWidget(InteractiveMplWidget):
         self._set_filter_mask(mask)
 
     def _launch_worker(self) -> None:
+        # Capture the generation + a parameter snapshot in the closure; the
+        # staleness check (cancellation by discarding stale-generation results)
+        # stays in this widget, not the runner.
+        generation = self._generation
         sel_x, sel_y = self._selected_normalised()
-        worker = _DownsampleWorker(
-            self._generation, sel_x, sel_y, self._thresh_val(), self._worker_signals
+        threshold = self._thresh_val()
+
+        def _compute() -> NDArray[np.bool_]:
+            return downsample_points(sel_x, sel_y, threshold)
+
+        self._runner.submit(
+            _compute,
+            on_done=lambda mask, g=generation: self._on_worker_done(g, mask),
+            on_error=self._on_worker_error,
+            run_in_pool=True,
         )
-        self._pool.start(worker)
+
+    def _on_worker_error(self, exc: Exception) -> None:
+        # A downsample failing is non-fatal (a transient parameter combo); log and
+        # keep the prior filter on screen rather than crashing the selector.
+        logger.exception("downsample worker failed", exc_info=exc)
 
     def _on_worker_done(self, generation: int, filter_mask: NDArray[np.bool_]) -> None:
         if generation != self._generation:

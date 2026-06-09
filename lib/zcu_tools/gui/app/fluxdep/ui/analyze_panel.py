@@ -20,17 +20,12 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Optional
+from contextlib import ExitStack, contextmanager
+from typing import Iterator, Optional
 
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from qtpy.QtCore import (  # type: ignore[attr-defined]
-    QObject,
-    QRunnable,
-    QThreadPool,
-    Signal,  # type: ignore[attr-defined]
-)
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QCheckBox,
     QComboBox,
@@ -52,7 +47,9 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.services.fit import SearchResult
 from zcu_tools.gui.app.fluxdep.services.viz import derive_auto_limits, render_fit_figure
+from zcu_tools.gui.background import BackgroundRunner
 from zcu_tools.gui.plotting import FigureContainer, routing_scope
+from zcu_tools.progress_bar.interface import use_pbar_factory
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
 
 from .error_messages import friendly_fit_message
@@ -106,37 +103,19 @@ def _set_freq(edit: QLineEdit, value: "float | None") -> None:
     edit.setText("" if value is None else f"{value:g}")
 
 
-class _SearchSignals(QObject):
-    done = Signal(object)
-    failed = Signal(str)
+@contextmanager
+def _search_scopes(container, pbar_factory) -> Iterator[None]:
+    """The ambient scopes the search runs inside, entered on the worker thread.
 
-
-class _SearchWorker(QRunnable):
-    """Runs the PURE ``compute_search`` off the main thread (it releases the GIL)."""
-
-    def __init__(self, ctrl: Controller, pbar_factory, container) -> None:
-        super().__init__()
-        self.signals = _SearchSignals()
-        self._ctrl = ctrl
-        self._pbar_factory = pbar_factory
-        # The worker enters this container's routing_scope ITSELF: a ContextVar
-        # set on the main thread is not visible to a QThreadPool worker, so the
-        # routing target must be captured here and entered inside run().
-        self._container = container
-
-    def run(self) -> None:
-        try:
-            # compute_search's plot=True does plt.figure() on this worker thread;
-            # the shared backend reads the current routing container, so scope it.
-            with routing_scope(self._container):
-                result = self._ctrl.compute_search(
-                    pbar_factory=self._pbar_factory, plot=True
-                )
-        except Exception as exc:  # noqa: BLE001 — surface to the panel
-            logger.exception("search worker failed")
-            self.signals.failed.emit(str(exc))
-            return
-        self.signals.done.emit(result)
+    A ContextVar set on the main thread is not visible to a worker thread, so the
+    routing target (``compute_search``'s ``plot=True`` does ``plt.figure()`` on the
+    worker; the shared backend reads the current routing container) and the per-
+    search pbar factory must both be entered here, inside the worker thunk.
+    """
+    with ExitStack() as stack:
+        stack.enter_context(routing_scope(container))
+        stack.enter_context(use_pbar_factory(pbar_factory))
+        yield
 
 
 class AnalyzePanelWidget(QWidget):
@@ -145,7 +124,7 @@ class AnalyzePanelWidget(QWidget):
     def __init__(self, ctrl: Controller, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._ctrl = ctrl
-        self._pool = QThreadPool.globalInstance() or QThreadPool(self)
+        self._runner = BackgroundRunner(self)
         self._channel = GuiProgressBarChannel()
         self._channel.progress.connect(self._on_progress)
         self._filter_widget: Optional[QWidget] = None
@@ -485,14 +464,17 @@ class AnalyzePanelWidget(QWidget):
         plt.close("all")
         self._diag_container.clear_dynamic_canvases()
 
-        # The worker enters routing_scope(self._diag_container) itself (R4) — the
-        # diagnostic figure created on the worker thread routes here.
-        worker = _SearchWorker(
-            self._ctrl, self._channel.factory(), self._diag_container
+        # Run the PURE ``compute_search`` off the main thread (it releases the GIL).
+        # The diagnostic figure is created on the worker thread, so routing +
+        # the Qt-signalling pbar factory must be entered there (R4) — passed as
+        # the runner's ``enter`` scope, entered inside the worker thunk.
+        self._runner.submit(
+            lambda: self._ctrl.compute_search(plot=True),
+            on_done=self._on_search_done,
+            on_error=self._on_search_error,
+            run_in_pool=True,
+            enter=_search_scopes(self._diag_container, self._channel.factory()),
         )
-        worker.signals.done.connect(self._on_search_done)  # type: ignore[arg-type]
-        worker.signals.failed.connect(self._on_search_failed)
-        self._pool.start(worker)
 
     def _on_progress(self, n: float, total: float, desc: str) -> None:
         if total > 0:
@@ -515,11 +497,12 @@ class AnalyzePanelWidget(QWidget):
         # The Show tab is rendered and ready, but stay on Search so the result
         # (EJ/EC/EL + diagnostic) is visible; the user switches to Show when ready.
 
-    def _on_search_failed(self, message: str) -> None:
+    def _on_search_error(self, exc: Exception) -> None:
+        logger.exception("search worker failed", exc_info=exc)
         self._search_btn.setEnabled(True)
         self._progress.setVisible(False)
         self._status.setText("Search failed.")
-        self._show_message("Search failed", friendly_fit_message("Search", message))
+        self._show_message("Search failed", friendly_fit_message("Search", exc))
 
     def _on_export(self) -> None:
         try:

@@ -242,7 +242,8 @@ def test_tune_button_disabled_during_compute(qapp, monkeypatch):
 
     panel._on_tune()  # spawns the worker
     assert panel._tune_btn.isEnabled() is False
-    panel._pool.waitForDone(5000)  # let the spawned worker finish before teardown
+    # Let the spawned pool worker finish before teardown (drain the runner's pool).
+    panel._runner._pool.waitForDone(5000)
     # the done slot re-enables it
     t = np.linspace(0.0, 1.0, 12)
     panel._on_tune_done(_TuneData(np.full(12, 5.4), np.full(12, 5.6), t, 0.06, 5.3))
@@ -404,4 +405,5 @@ def test_auto_tune_disables_button_during_compute(qapp, monkeypatch):
     panel._on_add_sample()
     panel._on_auto_tune()  # spawns the worker
     assert panel._auto_tune_btn.isEnabled() is False
-    panel._pool.waitForDone(5000)  # let the spawned worker finish before teardown
+    # Let the spawned pool worker finish before teardown (drain the runner's pool).
+    panel._runner._pool.waitForDone(5000)
