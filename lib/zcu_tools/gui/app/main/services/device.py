@@ -24,9 +24,14 @@ from zcu_tools.gui.session.events import (
     DeviceSetupStartedPayload,
 )
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
+from zcu_tools.gui.session.ports import (
+    ExclusionGate,
+    OperationConflictError,
+    OperationKind,
+)
 
 from .background import BackgroundService, OffMainScopes
-from .operation_gate import OperationConflictError, OperationGate, OperationKind
+from .operation_gate import OperationGate
 
 # DeviceMemoryInfo lives in the contract layer (ports) — the element type of
 # RememberedDevicePort, used here as the parameter type of
@@ -177,7 +182,7 @@ class DeviceService(QObject):
         self,
         bus: "EventBus",
         state: "State",
-        gate: OperationGate | None = None,
+        gate: ExclusionGate | None = None,
         handles: OperationHandles | None = None,
         bg: BackgroundService | None = None,
         parent: Optional[QObject] = None,

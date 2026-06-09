@@ -14,10 +14,9 @@ from zcu_tools.gui.session.events import (
     SocChangedPayload,
 )
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
+from zcu_tools.gui.session.ports import ExclusionGate, OperationKind
 from zcu_tools.gui.session.types import SocCfgHandle, SocHandle
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
-
-from .operation_gate import OperationGate, OperationKind
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.event_bus import EventBus
@@ -138,7 +137,7 @@ class ConnectionService(QObject):
         self,
         state: "State",
         bus: "EventBus",
-        gate: OperationGate,
+        gate: ExclusionGate,
         handles: OperationHandles,
         parent: Optional[QObject] = None,
     ) -> None:

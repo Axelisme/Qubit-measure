@@ -1,5 +1,7 @@
 """Services encapsulating domain logic, decoupled from the Controller Façade."""
 
+from zcu_tools.gui.session.ports import OperationConflictError
+
 from .analyze import AnalyzeService
 from .app_services import AppServices, build_app_services
 from .caretaker import PersistenceCaretaker, RestoreOutcome
@@ -21,11 +23,7 @@ from .guard import (
     SavePermit,
     WritebackPermit,
 )
-from .operation_gate import (
-    OperationConflictError,
-    OperationGate,
-    OperationKind,
-)
+from .operation_gate import OperationGate, OperationKind
 from .persistence_types import (
     APP_STATE_VERSION,
     DEFAULT_LEFT_PANEL_WIDTH,

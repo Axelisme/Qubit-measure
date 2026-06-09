@@ -1,15 +1,21 @@
-"""OperationGate — hardware mutual-exclusion, the Exclusion facet (ADR-0019).
+"""OperationGate — measure-gui's hardware mutual-exclusion policy (ADR-0019).
 
 Owns only the "can this hardware operation start right now" concern: the set of
 active leases and the conflict rules. It is execution- and handle-agnostic — the
 async handle (poll / await / cancel / operation_id) lives in the sibling
 ``OperationHandles`` leaf, and the off-main execution in ``BackgroundService``.
 
+The conflict *policy* is per-app (session-core extraction, decision 3): the
+session services name session kinds through the ``ExclusionGate`` port
+(``gui/session/ports``), and this concrete gate spans those session kinds **and**
+measure's own ``RUN`` kind (RUN blocks every hardware op, and vice-versa). The
+gate keys leases by the kind's wire string, so a session kind and ``RUN`` — which
+live in separate enums — compare uniformly without sharing one enum.
+
 A hardware op (run / device mutation / soc connect) composes both: it mints a
 token + handle in ``OperationHandles``, then ``register``s an exclusion here
 under the *same* token; the terminal path settles the handle then ``release``s
-the exclusion. An analyze / interactive op takes no exclusion at all (it never
-conflicts) — so it no longer fakes a lease just to obtain a handle.
+the exclusion. An analyze / interactive op takes no exclusion at all.
 """
 
 from __future__ import annotations
@@ -18,38 +24,51 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
+from zcu_tools.gui.session.ports import (
+    ExclusionGate,
+    OperationConflictError,
+)
+from zcu_tools.gui.session.ports import (
+    OperationKind as SessionOpKind,
+)
 
-class OperationKind(Enum):
+__all__ = ["OperationKind", "OperationConflictError", "OperationGate"]
+
+
+class OperationKind(str, Enum):
+    """Measure-gui's app-specific operation kinds (added to the session ones)."""
+
     RUN = "run"
-    SOC_CONNECT = "soc_connect"
-    DEVICE_CONNECT = "device_connect"
-    DEVICE_DISCONNECT = "device_disconnect"
-    DEVICE_SETUP = "device_setup"
 
 
-class OperationConflictError(RuntimeError):
-    """Raised when a hardware operation conflicts with an active operation."""
-
-
+# Conflict vocabulary as wire strings (session kinds + measure's RUN), so leases
+# from the two separate enums compare uniformly.
+_RUN = OperationKind.RUN.value
+_SOC_CONNECT = SessionOpKind.SOC_CONNECT.value
 _DEVICE_MUTATIONS = frozenset(
     {
-        OperationKind.DEVICE_CONNECT,
-        OperationKind.DEVICE_DISCONNECT,
-        OperationKind.DEVICE_SETUP,
+        SessionOpKind.DEVICE_CONNECT.value,
+        SessionOpKind.DEVICE_DISCONNECT.value,
+        SessionOpKind.DEVICE_SETUP.value,
     }
 )
+
+
+def _norm(kind: str) -> str:
+    """The kind's wire string (an ``Enum`` member -> its value, else as-is)."""
+    return kind.value if isinstance(kind, Enum) else str(kind)
 
 
 @dataclass(frozen=True)
 class _ActiveLease:
     """An active exclusion lease (the value side of the token-keyed active map)."""
 
-    kind: OperationKind
+    kind: str  # wire string of the OperationKind
     owner_id: str
     resource_id: Optional[str] = None
 
 
-class OperationGate:
+class OperationGate(ExclusionGate):
     """Mutual exclusion among active hardware operations (ADR-0019).
 
     Keyed by the operation token minted in ``OperationHandles`` (one token
@@ -62,28 +81,29 @@ class OperationGate:
     def __init__(self) -> None:
         self._active: dict[int, _ActiveLease] = {}
 
-    def ensure_can_start(self, kind: OperationKind) -> None:
+    def ensure_can_start(self, kind: str) -> None:
         """Fail-fast guard: raise ``OperationConflictError`` if an active lease
         conflicts with ``kind``. Called before the handle is created, so a
         conflict aborts without leaving a half-built operation behind."""
+        requested = _norm(kind)
         conflicting = next(
             (
                 lease
                 for lease in self._active.values()
-                if self._conflicts(lease.kind, kind)
+                if self._conflicts(lease.kind, requested)
             ),
             None,
         )
         if conflicting is not None:
             raise OperationConflictError(
-                f"Cannot start {kind.value}: {conflicting.kind.value} is active "
+                f"Cannot start {requested}: {conflicting.kind} is active "
                 f"for {conflicting.owner_id!r}"
             )
 
     def register(
         self,
         token: int,
-        kind: OperationKind,
+        kind: str,
         *,
         owner_id: str,
         resource_id: Optional[str] = None,
@@ -93,7 +113,7 @@ class OperationGate:
         between the check and here)."""
         if not owner_id:
             raise ValueError("owner_id must not be empty")
-        self._active[token] = _ActiveLease(kind, owner_id, resource_id)
+        self._active[token] = _ActiveLease(_norm(kind), owner_id, resource_id)
 
     def release(self, token: int) -> None:
         """Free the hardware: remove the active lease (frees it for the next
@@ -103,8 +123,8 @@ class OperationGate:
             raise RuntimeError(f"Operation lease {token} is not active")
         del self._active[token]
 
-    def has_active(self, kind: OperationKind) -> bool:
-        return any(lease.kind is kind for lease in self._active.values())
+    def has_active(self, kind: str) -> bool:
+        return any(lease.kind == _norm(kind) for lease in self._active.values())
 
     def is_device_mutating(self, name: str) -> bool:
         return any(
@@ -113,19 +133,17 @@ class OperationGate:
         )
 
     @staticmethod
-    def _conflicts(existing: OperationKind, requested: OperationKind) -> bool:
-        if existing is OperationKind.RUN:
+    def _conflicts(existing: str, requested: str) -> bool:
+        if existing == _RUN:
             return (
-                requested is OperationKind.RUN
-                or requested is OperationKind.SOC_CONNECT
+                requested == _RUN
+                or requested == _SOC_CONNECT
                 or requested in _DEVICE_MUTATIONS
             )
-        if requested is OperationKind.RUN:
-            return (
-                existing is OperationKind.SOC_CONNECT or existing in _DEVICE_MUTATIONS
-            )
-        if existing is OperationKind.SOC_CONNECT:
-            return requested is OperationKind.SOC_CONNECT
+        if requested == _RUN:
+            return existing == _SOC_CONNECT or existing in _DEVICE_MUTATIONS
+        if existing == _SOC_CONNECT:
+            return requested == _SOC_CONNECT
         if existing in _DEVICE_MUTATIONS:
             return requested in _DEVICE_MUTATIONS
         return False

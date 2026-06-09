@@ -17,13 +17,10 @@ from zcu_tools.gui.app.main.services.device import (
     DisconnectDeviceRequest,
     SetupDeviceRequest,
 )
-from zcu_tools.gui.app.main.services.operation_gate import (
-    OperationConflictError,
-    OperationGate,
-    OperationKind,
-)
+from zcu_tools.gui.app.main.services.operation_gate import OperationGate
 from zcu_tools.gui.app.main.state import State
 from zcu_tools.gui.session.events import DeviceChangedPayload
+from zcu_tools.gui.session.ports import OperationConflictError, OperationKind
 
 
 @pytest.fixture(autouse=True)

@@ -17,13 +17,15 @@ from zcu_tools.gui.app.main.services.connection import (
     PredictorNotLoaded,
 )
 from zcu_tools.gui.app.main.services.operation_gate import (
-    OperationConflictError,
     OperationGate,
-    OperationKind,
+)
+from zcu_tools.gui.app.main.services.operation_gate import (
+    OperationKind as MeasureOpKind,
 )
 from zcu_tools.gui.app.main.state import ExpContext, State
 from zcu_tools.gui.session.events import SocChangedPayload
 from zcu_tools.gui.session.operation_handles import OperationHandles
+from zcu_tools.gui.session.ports import OperationConflictError, OperationKind
 
 
 def _make_svc(gate: OperationGate | None = None) -> ConnectionService:
@@ -151,7 +153,7 @@ def test_start_connect_remote_failure_emits_failed(qapp, monkeypatch):
 def test_start_connect_rejected_while_run_active(qapp):
     gate = OperationGate()
     svc = _make_svc(gate)
-    gate.register(1, OperationKind.RUN, owner_id="tab")
+    gate.register(1, MeasureOpKind.RUN, owner_id="tab")
 
     with pytest.raises(OperationConflictError, match="run is active"):
         svc.start_connect(ConnectMockRequest())

@@ -10,21 +10,23 @@ from __future__ import annotations
 
 import pytest
 from zcu_tools.gui.app.main.services.operation_gate import (
-    OperationConflictError,
     OperationGate,
-    OperationKind,
 )
+from zcu_tools.gui.app.main.services.operation_gate import (
+    OperationKind as MeasureOpKind,
+)
+from zcu_tools.gui.session.ports import OperationConflictError, OperationKind
 
 
 @pytest.mark.parametrize(
     ("active", "requested"),
     [
-        (OperationKind.RUN, OperationKind.RUN),
-        (OperationKind.RUN, OperationKind.SOC_CONNECT),
-        (OperationKind.RUN, OperationKind.DEVICE_CONNECT),
-        (OperationKind.SOC_CONNECT, OperationKind.RUN),
+        (MeasureOpKind.RUN, MeasureOpKind.RUN),
+        (MeasureOpKind.RUN, OperationKind.SOC_CONNECT),
+        (MeasureOpKind.RUN, OperationKind.DEVICE_CONNECT),
+        (OperationKind.SOC_CONNECT, MeasureOpKind.RUN),
         (OperationKind.SOC_CONNECT, OperationKind.SOC_CONNECT),
-        (OperationKind.DEVICE_CONNECT, OperationKind.RUN),
+        (OperationKind.DEVICE_CONNECT, MeasureOpKind.RUN),
         (OperationKind.DEVICE_CONNECT, OperationKind.DEVICE_DISCONNECT),
         (OperationKind.DEVICE_SETUP, OperationKind.DEVICE_CONNECT),
     ],
@@ -65,16 +67,16 @@ def test_tracks_device_mutation_by_name() -> None:
 def test_release_frees_hardware_immediately() -> None:
     # Exclusion is removed on release so a conflicting op can start at once.
     gate = OperationGate()
-    gate.register(1, OperationKind.RUN, owner_id="tab")
+    gate.register(1, MeasureOpKind.RUN, owner_id="tab")
     gate.release(1)
     # No conflict now — RUN exclusion was dropped.
-    gate.ensure_can_start(OperationKind.RUN)
-    gate.register(2, OperationKind.RUN, owner_id="tab2")
+    gate.ensure_can_start(MeasureOpKind.RUN)
+    gate.register(2, MeasureOpKind.RUN, owner_id="tab2")
 
 
 def test_rejects_double_release() -> None:
     gate = OperationGate()
-    gate.register(1, OperationKind.RUN, owner_id="tab")
+    gate.register(1, MeasureOpKind.RUN, owner_id="tab")
     gate.release(1)
 
     with pytest.raises(RuntimeError, match="not active"):
@@ -84,4 +86,4 @@ def test_rejects_double_release() -> None:
 def test_register_rejects_empty_owner() -> None:
     gate = OperationGate()
     with pytest.raises(ValueError, match="owner_id"):
-        gate.register(1, OperationKind.RUN, owner_id="")
+        gate.register(1, MeasureOpKind.RUN, owner_id="")
