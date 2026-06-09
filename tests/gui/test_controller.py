@@ -27,7 +27,6 @@ from zcu_tools.gui.app.main.event_bus import (
     TabContentChangedPayload,
     TabInteractionChangedPayload,
 )
-from zcu_tools.gui.app.main.io_manager import IOManager
 from zcu_tools.gui.app.main.registry import Registry
 from zcu_tools.gui.app.main.services import PersistenceCaretaker, StartupProjectRequest
 from zcu_tools.gui.app.main.services.ports import RestoreIssue, RestoreReport
@@ -36,6 +35,7 @@ from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.plotting.routing import has_current_container
 from zcu_tools.gui.session.ports import OperationConflictError, OperationKind
 from zcu_tools.gui.session.services.device import ConnectDeviceRequest
+from zcu_tools.gui.session.services.io_manager import IOManager
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures

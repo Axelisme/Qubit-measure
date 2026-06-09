@@ -22,7 +22,6 @@ from zcu_tools.experiment.v2_gui.registry import register_all
 from zcu_tools.gui.app.main.adapter import ContextReadiness, ExpContext
 from zcu_tools.gui.app.main.controller import Controller
 from zcu_tools.gui.app.main.event_bus import EventBus
-from zcu_tools.gui.app.main.io_manager import IOManager
 from zcu_tools.gui.app.main.registry import Registry
 from zcu_tools.gui.app.main.services.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.main.services.remote.wire_version import (
@@ -30,6 +29,7 @@ from zcu_tools.gui.app.main.services.remote.wire_version import (
     WIRE_VERSION,
 )
 from zcu_tools.gui.app.main.state import State
+from zcu_tools.gui.session.services.io_manager import IOManager
 
 # ---------------------------------------------------------------------------
 # Fixtures

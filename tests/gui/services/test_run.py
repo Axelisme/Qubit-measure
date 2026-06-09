@@ -57,7 +57,7 @@ def _make_permit(state: State, tab_id: str, adapter: MagicMock) -> RunPermit:
 
 
 def _make_run_service(state: State) -> tuple[RunService, OperationGate, MagicMock]:
-    from zcu_tools.gui.app.main.services.progress import ProgressService
+    from zcu_tools.gui.session.services.progress import ProgressService
 
     from ._progress_fakes import DirectProgressTransport
 

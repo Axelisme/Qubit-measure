@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Optional
 
 logger = logging.getLogger(__name__)
 
-from .adapter import ExpContext
+from zcu_tools.gui.session.types import ExpContext
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import ExperimentManager

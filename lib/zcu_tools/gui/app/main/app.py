@@ -20,12 +20,12 @@ from typing import TYPE_CHECKING, Optional
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.adapter import ExpContext
     from zcu_tools.gui.app.main.controller import Controller
-    from zcu_tools.gui.app.main.io_manager import IOManager
     from zcu_tools.gui.app.main.registry import Registry
     from zcu_tools.gui.app.main.role_catalog import RoleCatalog
     from zcu_tools.gui.app.main.services.remote import ControlOptions
     from zcu_tools.gui.app.main.state import State
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
+    from zcu_tools.gui.session.services.io_manager import IOManager
 
 
 def _make_empty_ctx() -> "ExpContext":
@@ -71,8 +71,8 @@ def run_app(
 
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
 
-    from zcu_tools.gui.app.main.io_manager import IOManager
     from zcu_tools.gui.app.main.state import State
+    from zcu_tools.gui.session.services.io_manager import IOManager
 
     app = QApplication.instance() or QApplication(sys.argv)
 

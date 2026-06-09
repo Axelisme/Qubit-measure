@@ -17,13 +17,13 @@ from zcu_tools.experiment.v2_gui.registry import register_all
 from zcu_tools.gui.app.main.adapter import ContextReadiness, ExpContext
 from zcu_tools.gui.app.main.controller import Controller
 from zcu_tools.gui.app.main.event_bus import EventBus
-from zcu_tools.gui.app.main.io_manager import IOManager
 from zcu_tools.gui.app.main.registry import Registry
 from zcu_tools.gui.app.main.services.guard import GuardError
 from zcu_tools.gui.app.main.services.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.app.main.state import State
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.param_spec import validate_params
+from zcu_tools.gui.session.services.io_manager import IOManager
 
 
 def _make_controller(readiness: ContextReadiness) -> Controller:

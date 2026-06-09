@@ -15,10 +15,10 @@ from zcu_tools.gui.app.main.cfg_schemas import (
     waveform_cfg_to_value,
 )
 from zcu_tools.gui.app.main.event_bus import EventBus
-from zcu_tools.gui.app.main.io_manager import IOManager
 from zcu_tools.gui.app.main.services.cfg_lowering import lower_module, lower_waveform
 from zcu_tools.gui.app.main.state import ExpContext, State
 from zcu_tools.gui.session.services.context import ContextService
+from zcu_tools.gui.session.services.io_manager import IOManager
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 _READOUT_RAW = {

@@ -14,10 +14,10 @@ from zcu_tools.experiment.v2_gui.registry import register_all_roles
 from zcu_tools.gui.app.main.adapter import ContextReadiness, ExpContext
 from zcu_tools.gui.app.main.controller import Controller
 from zcu_tools.gui.app.main.event_bus import EventBus
-from zcu_tools.gui.app.main.io_manager import IOManager
 from zcu_tools.gui.app.main.registry import Registry
 from zcu_tools.gui.app.main.role_catalog import RoleCatalog
 from zcu_tools.gui.app.main.state import State
+from zcu_tools.gui.session.services.io_manager import IOManager
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 

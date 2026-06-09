@@ -18,6 +18,7 @@ from zcu_tools.gui.session.services.device import (
     DeviceEntry,
     DeviceSetupSnapshot,
 )
+from zcu_tools.gui.session.services.io_manager import IOManager
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 from .adapter import (
@@ -36,7 +37,6 @@ from .event_bus import (
     TabContentChangedPayload,
     TabInteractionChangedPayload,
 )
-from .io_manager import IOManager
 from .registry import Registry
 from .role_catalog import RoleCatalog
 from .services import (

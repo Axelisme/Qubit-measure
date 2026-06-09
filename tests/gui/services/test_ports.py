@@ -46,7 +46,7 @@ class _FakeProjectIO:
 
 
 def test_concrete_io_manager_satisfies_port():
-    from zcu_tools.gui.app.main.io_manager import IOManager
+    from zcu_tools.gui.session.services.io_manager import IOManager
 
     assert isinstance(IOManager(), ProjectIOPort)
 

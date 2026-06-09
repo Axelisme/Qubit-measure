@@ -8,7 +8,7 @@ No Qt here — the worker bar emits ``ProgressEvent``s through a
 
 from __future__ import annotations
 
-from zcu_tools.gui.app.main.services.progress import ProgressService
+from zcu_tools.gui.session.services.progress import ProgressService
 
 from ._progress_fakes import DirectProgressTransport
 
@@ -54,7 +54,7 @@ def test_live_model_computes_format_and_percent_on_query():
 
 def test_live_model_elapsed_advances_with_wall_clock(monkeypatch):
     """elapsed()/format() use wall-clock at read time, not a frozen value."""
-    import zcu_tools.gui.app.main.services.progress as prog
+    import zcu_tools.gui.session.services.progress as prog
 
     clock = {"t": 1000.0}
     monkeypatch.setattr(prog.time, "monotonic", lambda: clock["t"])

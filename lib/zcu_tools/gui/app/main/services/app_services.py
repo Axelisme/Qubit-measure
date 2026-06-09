@@ -8,6 +8,7 @@ from zcu_tools.gui.session.services.build import build_session_services
 from zcu_tools.gui.session.services.connection import ConnectionService
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.device import DeviceService
+from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.services.startup import StartupService
 
 from .analyze import AnalyzeService
@@ -15,7 +16,6 @@ from .background import BackgroundService
 from .cfg_editor import CfgEditorService
 from .guard import GuardService
 from .operation_gate import OperationGate
-from .progress import ProgressService
 from .run import RunService
 from .save import SaveService
 from .tab import TabService
@@ -24,10 +24,10 @@ from .writeback import WritebackService
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.event_bus import EventBus
-    from zcu_tools.gui.app.main.io_manager import IOManager
     from zcu_tools.gui.app.main.registry import Registry
     from zcu_tools.gui.app.main.state import State
     from zcu_tools.gui.session.ports import ProgressTransport
+    from zcu_tools.gui.session.services.io_manager import IOManager
 
     from .cfg_editor import CfgEditorHost
 

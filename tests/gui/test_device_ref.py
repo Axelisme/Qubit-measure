@@ -14,7 +14,6 @@ from zcu_tools.gui.app.main.event_bus import EventBus
 from zcu_tools.gui.app.main.live_model import DeviceRefLiveField, LiveModelEnv
 from zcu_tools.gui.app.main.services.background import BackgroundService
 from zcu_tools.gui.app.main.services.operation_gate import OperationGate
-from zcu_tools.gui.app.main.services.progress import ProgressService
 from zcu_tools.gui.app.main.state import State
 from zcu_tools.gui.session.events import DeviceChangedPayload, SessionEvent
 from zcu_tools.gui.session.services.device import (
@@ -22,6 +21,7 @@ from zcu_tools.gui.session.services.device import (
     DeviceService,
     DisconnectDeviceRequest,
 )
+from zcu_tools.gui.session.services.progress import ProgressService
 
 
 @pytest.fixture(autouse=True)

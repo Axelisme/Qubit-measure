@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.event_bus import EventBus
     from zcu_tools.gui.app.main.state import State
+    from zcu_tools.gui.session.services.progress import ProgressService
 
-    from .progress import ProgressService
     from .writeback import WritebackService
 
 

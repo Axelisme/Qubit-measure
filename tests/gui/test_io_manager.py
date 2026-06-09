@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.main.adapter import ExpContext
-from zcu_tools.gui.app.main.io_manager import IOManager
+from zcu_tools.gui.session.services.io_manager import IOManager
 
 
 def _make_base_ctx(**overrides) -> ExpContext:

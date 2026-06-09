@@ -27,7 +27,6 @@ from .adapter import (
     make_default_value,
     reconstruct_params,
 )
-from .io_manager import IOManager
 from .registry import Registry
 from .state import Session, State
 from .sweep_model import SweepEditor
@@ -42,7 +41,6 @@ __all__ = [
     "EvalValue",
     "ExpAdapterProtocol",
     "ExpContext",
-    "IOManager",
     "MetaDictWriteback",
     "ModuleRefSpec",
     "ModuleRefValue",
