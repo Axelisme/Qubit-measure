@@ -23,14 +23,14 @@ from zcu_tools.gui.remote.errors import RemoteError
 
 def test_coerce_connect_mock():
     req = coerce_connect_request({"kind": "mock"})
-    from zcu_tools.gui.app.main.services.connection import ConnectMockRequest
+    from zcu_tools.gui.session.services.connection import ConnectMockRequest
 
     assert isinstance(req, ConnectMockRequest)
 
 
 def test_coerce_connect_remote():
     req = coerce_connect_request({"kind": "remote", "ip": "192.168.1.1", "port": 8080})
-    from zcu_tools.gui.app.main.services.connection import ConnectRemoteRequest
+    from zcu_tools.gui.session.services.connection import ConnectRemoteRequest
 
     assert isinstance(req, ConnectRemoteRequest)
     assert req.ip == "192.168.1.1"

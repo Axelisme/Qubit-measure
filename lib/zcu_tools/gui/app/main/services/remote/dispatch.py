@@ -33,11 +33,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.main.controller import RenderView
 
     from .service import RemoteControlAdapter
-from zcu_tools.gui.app.main.services.connection import (
-    ConnectMockRequest,
-    ConnectRemoteRequest,
-    ConnectRequest,
-)
 from zcu_tools.gui.app.main.services.context import MlEntryValidationError
 from zcu_tools.gui.app.main.services.device import (
     ConnectDeviceRequest,
@@ -48,6 +43,11 @@ from zcu_tools.gui.app.main.services.session_codec import raw_to_schema, schema_
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.method_spec import BoundMethod, build_method_registry
 from zcu_tools.gui.remote.wire import optional_bool, require_int, require_str
+from zcu_tools.gui.session.services.connection import (
+    ConnectMockRequest,
+    ConnectRemoteRequest,
+    ConnectRequest,
+)
 
 from .method_specs import METHOD_SPECS
 
@@ -1522,7 +1522,7 @@ def _h_tab_get_current_figure(
 def _h_predictor_load(
     adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from zcu_tools.gui.app.main.services.connection import (
+    from zcu_tools.gui.session.services.connection import (
         LoadPredictorRequest,
         PredictorLoadError,
     )
@@ -1553,7 +1553,7 @@ def _h_predictor_clear(
 def _h_predictor_predict(
     adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from zcu_tools.gui.app.main.services.connection import (
+    from zcu_tools.gui.session.services.connection import (
         PredictFreqRequest,
         PredictorNotLoaded,
     )

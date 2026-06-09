@@ -473,7 +473,7 @@ class SetupDialog(QDialog):
         self._port_spin.setEnabled(not use_mock)
 
     def _on_connect_clicked(self) -> None:
-        from zcu_tools.gui.app.main.services.connection import (
+        from zcu_tools.gui.session.services.connection import (
             ConnectMockRequest,
             ConnectRemoteRequest,
         )

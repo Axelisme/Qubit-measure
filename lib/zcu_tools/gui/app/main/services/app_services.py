@@ -4,11 +4,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.session.operation_handles import OperationHandles
+from zcu_tools.gui.session.services.connection import ConnectionService
 
 from .analyze import AnalyzeService
 from .background import BackgroundService
 from .cfg_editor import CfgEditorService
-from .connection import ConnectionService
 from .context import ContextService
 from .device import DeviceService
 from .guard import GuardService

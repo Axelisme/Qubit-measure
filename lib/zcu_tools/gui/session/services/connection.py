@@ -19,8 +19,8 @@ from zcu_tools.gui.session.types import SocCfgHandle, SocHandle
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.event_bus import EventBus
-    from zcu_tools.gui.app.main.state import State
+    from zcu_tools.gui.event_bus import BaseEventBus
+    from zcu_tools.gui.session.state import SessionState
 
 
 # ---------------------------------------------------------------------------
@@ -135,8 +135,8 @@ class ConnectionService(QObject):
 
     def __init__(
         self,
-        state: "State",
-        bus: "EventBus",
+        state: "SessionState",
+        bus: "BaseEventBus",
         gate: ExclusionGate,
         handles: OperationHandles,
         parent: Optional[QObject] = None,

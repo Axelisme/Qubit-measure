@@ -9,6 +9,11 @@ logger = logging.getLogger(__name__)
 
 from zcu_tools.device.base import BaseDeviceInfo
 from zcu_tools.gui.plotting import FigureContainer
+from zcu_tools.gui.session.services.connection import (
+    ConnectRequest,
+    LoadPredictorRequest,
+    PredictFreqRequest,
+)
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 from .adapter import (
@@ -45,11 +50,6 @@ from .services import (
     StartupProjectRequest,
     TabSnapshot,
     build_app_services,
-)
-from .services.connection import (
-    ConnectRequest,
-    LoadPredictorRequest,
-    PredictFreqRequest,
 )
 from .services.device import (
     DeviceEntry,

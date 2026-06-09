@@ -137,7 +137,7 @@ class PredictorDialog(QDialog):
             self._path_edit.setText(path)
 
     def _on_accepted(self) -> None:
-        from zcu_tools.gui.app.main.services.connection import (
+        from zcu_tools.gui.session.services.connection import (
             LoadPredictorRequest,
             PredictorLoadError,
         )
@@ -161,7 +161,7 @@ class PredictorDialog(QDialog):
         logger.info("PredictorDialog: predictor cleared")
 
     def _on_predict_clicked(self) -> None:
-        from zcu_tools.gui.app.main.services.connection import (
+        from zcu_tools.gui.session.services.connection import (
             PredictFreqRequest,
             PredictorNotLoaded,
         )
