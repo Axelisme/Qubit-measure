@@ -20,8 +20,13 @@ The port is the union of exactly the methods the two dialogs call:
   device queries (``list_devices`` / ``get_device_snapshot`` /
   ``get_device_info`` / ``is_memory_device`` / ``get_active_device_setup``),
   and progress attach/read (``attach_progress`` / ``progress_bars``).
+- **inspect dialog base**: md read/edit (``get_current_md`` / ``coerce_md_value``
+  / ``set_md_attr`` / ``del_md_attr``) + ml view/rename/delete
+  (``get_current_ml`` / ``rename_ml_*`` / ``del_ml_*``). The ml create/modify
+  path drags the CfgEditor and stays measure-only (the ``InspectDialog``
+  subclass), so it is deliberately absent here.
 
-Both share ``get_bus`` (the event bus they subscribe to for live updates).
+All three share ``get_bus`` (the event bus they subscribe to for live updates).
 
 Return types are declared against the **shared base** (``BaseEventBus``) so an
 app's richer concrete type (measure's ``EventBus``) satisfies the port
@@ -32,7 +37,7 @@ site.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable, Optional, Protocol
+from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol
 
 if TYPE_CHECKING:
     from zcu_tools.device.base import BaseDeviceInfo
@@ -53,6 +58,7 @@ if TYPE_CHECKING:
         StartupProjectRequest,
     )
     from zcu_tools.gui.session.types import SocCfgHandle
+    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 
 class SessionControllerPort(Protocol):
@@ -109,3 +115,16 @@ class SessionControllerPort(Protocol):
     def progress_bars(
         self, owner_id: str
     ) -> "tuple[tuple[int, ProgressBarModel], ...]": ...
+
+    # --- inspect dialog: md edit + ml view/rename/delete --------------------
+    # (the ml create/modify path drags the CfgEditor and stays measure-only,
+    # in the InspectDialog subclass — these are the app-agnostic operations.)
+    def get_current_md(self) -> "MetaDict": ...
+    def get_current_ml(self) -> "ModuleLibrary": ...
+    def coerce_md_value(self, key: str, text: str) -> Any: ...
+    def set_md_attr(self, key: str, value: Any) -> None: ...
+    def del_md_attr(self, key: str) -> None: ...
+    def rename_ml_module(self, old: str, new: str) -> None: ...
+    def rename_ml_waveform(self, old: str, new: str) -> None: ...
+    def del_ml_module(self, name: str) -> None: ...
+    def del_ml_waveform(self, name: str) -> None: ...
