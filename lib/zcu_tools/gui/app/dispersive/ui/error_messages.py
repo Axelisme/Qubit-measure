@@ -3,13 +3,23 @@
 Pure functions (no Qt), shared by the panels that surface errors. Each maps a
 common dispersive-pipeline failure to a clear "what went wrong + how to fix it"
 message, keeping the raw error on a ``Details:`` line (the full traceback is in the
-debug log).
+debug log). The message *skeleton* (rule ladder + ``Details:`` tail + the fit→IO
+redirect) is the shared ``gui.error_messages`` framework; the dispersive-specific
+domain rules live here.
 """
 
 from __future__ import annotations
 
 import os
 from typing import Union
+
+from zcu_tools.gui.error_messages import (
+    FriendlyRule,
+    details_tail,
+    fit_io_redirect,
+    friendly_from_rules,
+    normalize_raw,
+)
 
 
 def friendly_io_message(action: str, filepath: str, exc: Exception) -> str:
@@ -45,36 +55,40 @@ def friendly_io_message(action: str, filepath: str, exc: Exception) -> str:
     else:
         head = f"{action} of {name!r} failed."
 
-    return f"{head}\n\nDetails: {raw if raw else type(exc).__name__}"
+    return head + details_tail(raw, type(exc).__name__)
+
+
+# Domain rules for friendly_fit_message — first match wins (substring on the
+# lowercased raw error). Covers the dispersive-pipeline preconditions.
+_FIT_RULES: list[FriendlyRule] = [
+    (
+        lambda low: "no fluxonium fit inputs" in low or "load params.json first" in low,
+        "Load the fit inputs (params.json) first.",
+    ),
+    (lambda low: "no one-tone" in low, "Load a one-tone spectrum first."),
+    (lambda low: "no preprocessing" in low, "Run preprocessing before fitting g."),
+    (
+        lambda low: "no bare_rf" in low,
+        "No bare_rf set — load the fit inputs to seed it.",
+    ),
+    (
+        lambda low: "no dispersive fit result" in low,
+        "Nothing to export yet — fit g first.",
+    ),
+]
 
 
 def friendly_fit_message(action: str, exc: Union[Exception, str]) -> str:
     """Message for a preprocess / auto-fit / export failure.
 
     ``action`` is "Preprocess" / "Auto-fit" / "Export". ``exc`` may be the exception
-    (caught locally) or its message string (crossing a worker signal). Covers the
-    domain preconditions and delegates a params.json write failure to
-    ``friendly_io_message``.
+    (caught locally) or its message string (crossing a worker signal). A params.json
+    write failure is delegated to ``friendly_io_message``; otherwise the domain rules
+    above match.
     """
-    raw = (str(exc) if not isinstance(exc, str) else exc).strip()
-    low = raw.lower()
-
-    if "unable to open file" in low or ("unable to" in low and "file" in low):
-        wrapped = exc if isinstance(exc, Exception) else OSError(raw)
-        return friendly_io_message("Export", "params.json", wrapped)
-
-    if "no fluxonium fit inputs" in low or "load params.json first" in low:
-        head = "Load the fit inputs (params.json) first."
-    elif "no one-tone" in low:
-        head = "Load a one-tone spectrum first."
-    elif "no preprocessing" in low:
-        head = "Run preprocessing before fitting g."
-    elif "no bare_rf" in low:
-        head = "No bare_rf set — load the fit inputs to seed it."
-    elif "no dispersive fit result" in low:
-        head = "Nothing to export yet — fit g first."
-    else:
-        head = f"{action} failed."
-
+    raw = normalize_raw(exc)
+    redirect = fit_io_redirect(exc, raw, friendly_io_message)
+    if redirect is not None:
+        return redirect
     fallback = type(exc).__name__ if isinstance(exc, Exception) else "error"
-    return f"{head}\n\nDetails: {raw if raw else fallback}"
+    return friendly_from_rules(action, raw, _FIT_RULES, fallback)

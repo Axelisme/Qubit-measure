@@ -35,27 +35,11 @@ from zcu_tools.notebook.analysis.fluxdep.processing import (
 )
 
 from .base import InteractiveMplWidget
+from .display import contrast_limits
 
 logger = logging.getLogger(__name__)
 
 _SCALE = 1000  # int-QSlider scale for float sliders
-
-
-def _contrast_limits(amp: np.ndarray) -> tuple[float, float]:
-    """Robust display limits (2nd–98th percentile) to boost feature contrast.
-
-    Clipping the colour range to percentiles (instead of min/max) keeps a few
-    outliers from compressing the dynamic range, so the spectral feature stands
-    out against the background. NaNs are ignored; a degenerate range falls back
-    to ``(min, max)``.
-    """
-    finite = amp[np.isfinite(amp)]
-    if finite.size == 0:
-        return 0.0, 1.0
-    lo, hi = np.percentile(finite, [2.0, 98.0])
-    if hi <= lo:
-        return float(finite.min()), float(finite.max()) or 1.0
-    return float(lo), float(hi)
 
 
 def toggle_near_mask(
@@ -185,7 +169,7 @@ class FindPointsWidget(InteractiveMplWidget):
             self._freqs[0] - dy / 2,
             self._freqs[-1] + dy / 2,
         )
-        vmin, vmax = _contrast_limits(amps)
+        vmin, vmax = contrast_limits(amps)
         # gray_r: low values white, high values (the resonance line) black — so a
         # red scatter point sitting on the line has strong colour + value contrast
         # (the points typically land on the high-value feature).
@@ -280,7 +264,7 @@ class FindPointsWidget(InteractiveMplWidget):
             else (self._mask * real_signals)
         )
         self._img.set_data(shown.T)
-        vmin, vmax = _contrast_limits(shown)
+        vmin, vmax = contrast_limits(shown)
         self._img.set_clim(vmin, vmax)
         self.redraw()
 

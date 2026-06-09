@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import os
 
-from zcu_tools.gui.project import ProjectInfo
+from zcu_tools.gui.project import ProjectInfo, nearest_existing
 
 # The repo's bundled simulation databases — the home of the precomputed *search*
 # database (fluxonium*.h5), a shared resource unrelated to a chip/qubit, so it is
@@ -29,30 +29,15 @@ def _sim_db_dir(root: str = "") -> str:
     return os.path.join(root, _SIM_DB_REL) if root else _SIM_DB_REL
 
 
-def _nearest_existing(path: str) -> str:
-    """The deepest existing ancestor of ``path`` (``path`` itself if it exists).
-
-    Lets a dialog open near a not-yet-created target instead of at the cwd/root.
-    Returns "" if nothing in the chain exists (then Qt opens the cwd).
-    """
-    path = os.path.abspath(path) if path else ""
-    while path and not os.path.isdir(path):
-        parent = os.path.dirname(path)
-        if parent == path:  # reached the filesystem root
-            return ""
-        path = parent
-    return path
-
-
 def raw_spectrum_dir(project: ProjectInfo) -> str:
     """Where raw spectrum hdf5 files live — the project's database_path root."""
-    return _nearest_existing(project.database_path)
+    return nearest_existing(project.database_path)
 
 
 def processed_spectrum_dir(project: ProjectInfo) -> str:
     """Where exported spectrums.hdf5 lives — ``<result_dir>/data/fluxdep``."""
     target = os.path.join(project.result_dir, "data", "fluxdep")
-    return _nearest_existing(target)
+    return nearest_existing(target)
 
 
 def database_dir(project: ProjectInfo, root: str = "") -> str:
@@ -64,12 +49,12 @@ def database_dir(project: ProjectInfo, root: str = "") -> str:
     (the injected repo root) anchors it there instead of relative to cwd.
     """
     del project  # search db location is project-independent
-    return _nearest_existing(_sim_db_dir(root))
+    return nearest_existing(_sim_db_dir(root))
 
 
 def params_dir(project: ProjectInfo) -> str:
     """Where params.json is written — the project's result_dir."""
-    return _nearest_existing(project.result_dir)
+    return nearest_existing(project.result_dir)
 
 
 def default_database_file(project: ProjectInfo, root: str = "") -> str:

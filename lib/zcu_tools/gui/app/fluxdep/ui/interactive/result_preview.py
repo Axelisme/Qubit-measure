@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
@@ -23,15 +22,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
 from zcu_tools.notebook.analysis.fluxdep.processing import cast2real_and_norm
 
-
-def _contrast_limits(amp: np.ndarray) -> tuple[float, float]:
-    finite = amp[np.isfinite(amp)]
-    if finite.size == 0:
-        return 0.0, 1.0
-    lo, hi = np.percentile(finite, [2.0, 98.0])
-    if hi <= lo:
-        return float(finite.min()), float(finite.max()) or 1.0
-    return float(lo), float(hi)
+from .display import contrast_limits
 
 
 class ResultPreviewWidget(QWidget):
@@ -73,7 +64,7 @@ class ResultPreviewWidget(QWidget):
         # OneTone is locked to magnitude (phase uninformative); TwoTone uses phase.
         use_phase = entry.spec_type != "OneTone"
         amp = cast2real_and_norm(entry.raw["signals"], use_phase=use_phase)  # no mask
-        vmin, vmax = _contrast_limits(amp)
+        vmin, vmax = contrast_limits(amp)
         ax.imshow(
             amp.T,
             aspect="auto",
