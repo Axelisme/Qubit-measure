@@ -27,6 +27,8 @@ from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol, runtime_che
 if TYPE_CHECKING:
     from zcu_tools.gui.plotting import FigureContainer
     from zcu_tools.gui.session.services.device import DeviceProtocol
+    from zcu_tools.gui.session.types import ExpContext
+    from zcu_tools.meta_tool import ModuleLibrary
 
 
 class OperationKind(str, Enum):
@@ -178,3 +180,41 @@ class RememberedDevicePort(Protocol):
     def register_remembered_devices(
         self, entries: "list[DeviceMemoryInfo]"
     ) -> None: ...
+
+
+@runtime_checkable
+class ProjectIOPort(Protocol):
+    """Experiment-project file I/O as used by ``ContextService``.
+
+    Implemented by ``IOManager`` (which wraps ``ExperimentManager``). This is the
+    file-backed project / flux-context store; the service never touches
+    ``ExperimentManager`` directly.
+    """
+
+    @property
+    def has_project(self) -> bool: ...
+    def setup(self, result_dir: str) -> None: ...
+    def list_contexts(self) -> list[str]: ...
+    def get_active_label(self) -> Optional[str]: ...
+    def use_context(self, label: str, base_ctx: "ExpContext") -> "ExpContext": ...
+    def new_context(
+        self,
+        base_ctx: "ExpContext",
+        value: Optional[float] = None,
+        unit: str = "none",
+        clone_from: Optional[str] = None,
+    ) -> "ExpContext": ...
+
+
+@runtime_checkable
+class ContextReadPort(Protocol):
+    """Read-only view of the active context's ModuleLibrary, as a CfgEditor needs.
+
+    A ``CfgEditorSession`` reads the current ml to seed a session opened
+    ``from_name`` (load an existing entry's shape). Reading only — all ml/md
+    *content writes* go through the app's ``ContextWritePort`` (ADR-0006:
+    ContextService is the single write authority). Symmetric name with
+    ``ContextWritePort``.
+    """
+
+    def get_current_ml(self) -> "ModuleLibrary": ...

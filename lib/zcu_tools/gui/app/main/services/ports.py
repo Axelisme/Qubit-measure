@@ -39,8 +39,6 @@ if TYPE_CHECKING:
         WritebackItem,
     )
     from zcu_tools.gui.app.main.state import TabInteractionState
-    from zcu_tools.gui.session.types import ExpContext
-    from zcu_tools.meta_tool import ModuleLibrary
 
     from .persistence_types import AppPersistedState
 
@@ -114,43 +112,6 @@ class PersistOriginatorPort(Protocol):
     def restore_persisted_state(
         self, state: "AppPersistedState"
     ) -> "RestoreReport": ...
-
-
-@runtime_checkable
-class ProjectIOPort(Protocol):
-    """Experiment-project file I/O as used by ``ContextService``.
-
-    Implemented by ``IOManager`` (which wraps ``ExperimentManager``). This is the
-    file-backed project / flux-context store; the service never touches
-    ``ExperimentManager`` directly.
-    """
-
-    @property
-    def has_project(self) -> bool: ...
-    def setup(self, result_dir: str) -> None: ...
-    def list_contexts(self) -> list[str]: ...
-    def get_active_label(self) -> Optional[str]: ...
-    def use_context(self, label: str, base_ctx: "ExpContext") -> "ExpContext": ...
-    def new_context(
-        self,
-        base_ctx: "ExpContext",
-        value: Optional[float] = None,
-        unit: str = "none",
-        clone_from: Optional[str] = None,
-    ) -> "ExpContext": ...
-
-
-@runtime_checkable
-class ContextReadPort(Protocol):
-    """Read-only view of the active context's ModuleLibrary, as a CfgEditor needs.
-
-    A ``CfgEditorSession`` reads the current ml to seed a session opened
-    ``from_name`` (load an existing entry's shape). Reading only — all ml/md
-    *content writes* go through ``ContextWritePort`` (ADR-0006: ContextService is
-    the single write authority). Symmetric name with ``ContextWritePort``.
-    """
-
-    def get_current_ml(self) -> "ModuleLibrary": ...
 
 
 @runtime_checkable

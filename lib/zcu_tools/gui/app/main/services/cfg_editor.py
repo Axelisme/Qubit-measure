@@ -60,8 +60,9 @@ from zcu_tools.gui.app.main.live_model import (
     SectionLiveField,
 )
 from zcu_tools.gui.app.main.specs import make_waveform_spec_by_style
+from zcu_tools.gui.session.ports import ContextReadPort
 
-from .ports import ContextReadPort, ContextWritePort
+from .ports import ContextWritePort
 from .remote.path_resolver import (
     list_settable_paths,
     list_settable_paths_full,

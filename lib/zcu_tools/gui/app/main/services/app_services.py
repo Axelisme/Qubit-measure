@@ -5,12 +5,12 @@ from typing import TYPE_CHECKING
 
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.services.connection import ConnectionService
+from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.device import DeviceService
 
 from .analyze import AnalyzeService
 from .background import BackgroundService
 from .cfg_editor import CfgEditorService
-from .context import ContextService
 from .guard import GuardService
 from .operation_gate import OperationGate
 from .progress import ProgressService

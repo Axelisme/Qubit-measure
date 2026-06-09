@@ -1,8 +1,10 @@
 """Tests for ContextService ml/md writes — the single write authority (ADR-0006).
 
-Writes take an un-lowered CfgSchema (``set_ml_*_from_schema`` / ``apply_writes``);
-ContextService lowers + registers + bumps "context" + emits. There is no public
-raw-dict entry anymore.
+ml writes go through ``apply_ml_writes``, which registers the entries (lowered by
+the app-injected ``lower_module`` / ``lower_waveform`` callbacks — here the real
+``cfg_lowering`` ones), bumps "context", and emits at most one MD/ML_CHANGED per
+batch. The CfgSchema lowering itself is experiment-coupled and lives app-side
+(``cfg_lowering`` / the Controller's ContextWritePort façade).
 """
 
 from __future__ import annotations
@@ -14,9 +16,9 @@ from zcu_tools.gui.app.main.cfg_schemas import (
 )
 from zcu_tools.gui.app.main.event_bus import EventBus
 from zcu_tools.gui.app.main.io_manager import IOManager
-from zcu_tools.gui.app.main.services.context import ContextService
-from zcu_tools.gui.app.main.services.ports import ContextWrites
+from zcu_tools.gui.app.main.services.cfg_lowering import lower_module, lower_waveform
 from zcu_tools.gui.app.main.state import ExpContext, State
+from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 _READOUT_RAW = {
@@ -57,15 +59,33 @@ def _make_svc() -> ContextService:
     return _make_svc_with_state()[0]
 
 
-def test_set_ml_module_from_schema_registers_module():
+def _apply(
+    svc: ContextService,
+    *,
+    md: dict | None = None,
+    modules: dict | None = None,
+    waveforms: dict | None = None,
+    dump: bool = True,
+) -> None:
+    svc.apply_ml_writes(
+        md or {},
+        modules or {},
+        waveforms or {},
+        lower_module=lower_module,
+        lower_waveform=lower_waveform,
+        dump=dump,
+    )
+
+
+def test_apply_ml_writes_registers_module():
     svc = _make_svc()
-    svc.set_ml_module_from_schema("readout_rf", _module_schema(_READOUT_RAW))
+    _apply(svc, modules={"readout_rf": _module_schema(_READOUT_RAW)}, dump=False)
     assert "readout_rf" in svc.get_current_ml().modules
 
 
-def test_set_ml_waveform_from_schema_registers_waveform():
+def test_apply_ml_writes_registers_waveform():
     svc = _make_svc()
-    svc.set_ml_waveform_from_schema("drive_wav", _waveform_schema(_WAVEFORM_RAW))
+    _apply(svc, waveforms={"drive_wav": _waveform_schema(_WAVEFORM_RAW)}, dump=False)
     assert "drive_wav" in svc.get_current_ml().waveforms
 
 
@@ -83,22 +103,21 @@ def test_md_write_bumps_context_version():
 def test_ml_write_bumps_context_version():
     svc, state = _make_svc_with_state()
     before = state.version.get("context")
-    svc.set_ml_waveform_from_schema("drive_wav", _waveform_schema(_WAVEFORM_RAW))
+    _apply(svc, waveforms={"drive_wav": _waveform_schema(_WAVEFORM_RAW)}, dump=False)
     assert state.version.get("context") == before + 1
     svc.del_ml_waveform("drive_wav")
     assert state.version.get("context") == before + 2
 
 
-def test_apply_writes_batch_is_one_bump():
+def test_apply_ml_writes_batch_is_one_bump():
     # A batch of md + ml writes lands as a single context bump (not N).
     svc, state = _make_svc_with_state()
     before = state.version.get("context")
-    svc.apply_writes(
-        ContextWrites(
-            md={"r_f": 6000.0},
-            ml_modules={"readout_rf": _module_schema(_READOUT_RAW)},
-            ml_waveforms={"drive_wav": _waveform_schema(_WAVEFORM_RAW)},
-        )
+    _apply(
+        svc,
+        md={"r_f": 6000.0},
+        modules={"readout_rf": _module_schema(_READOUT_RAW)},
+        waveforms={"drive_wav": _waveform_schema(_WAVEFORM_RAW)},
     )
     assert state.version.get("context") == before + 1
     ml = svc.get_current_ml()
@@ -106,14 +125,14 @@ def test_apply_writes_batch_is_one_bump():
     assert "drive_wav" in ml.waveforms
 
 
-def test_apply_writes_empty_is_noop():
+def test_apply_ml_writes_empty_is_noop():
     svc, state = _make_svc_with_state()
     before = state.version.get("context")
-    svc.apply_writes(ContextWrites(md={}, ml_modules={}, ml_waveforms={}))
+    _apply(svc)
     assert state.version.get("context") == before
 
 
-def test_apply_writes_emits_once_per_kind():
+def test_apply_ml_writes_emits_once_per_kind():
     svc = _make_svc()
     from zcu_tools.gui.session.events import MdChangedPayload, MlChangedPayload
 
@@ -130,12 +149,11 @@ def test_apply_writes_emits_once_per_kind():
 
     svc._bus.subscribe(MdChangedPayload, _on_md)
     svc._bus.subscribe(MlChangedPayload, _on_ml)
-    svc.apply_writes(
-        ContextWrites(
-            md={"r_f": 6000.0, "rf_w": 1.0},
-            ml_modules={"readout_rf": _module_schema(_READOUT_RAW)},
-            ml_waveforms={"drive_wav": _waveform_schema(_WAVEFORM_RAW)},
-        )
+    _apply(
+        svc,
+        md={"r_f": 6000.0, "rf_w": 1.0},
+        modules={"readout_rf": _module_schema(_READOUT_RAW)},
+        waveforms={"drive_wav": _waveform_schema(_WAVEFORM_RAW)},
     )
     assert md_events == 1  # one MD_CHANGED for two md writes
     assert ml_events == 1  # one ML_CHANGED for module + waveform

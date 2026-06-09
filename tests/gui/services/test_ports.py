@@ -13,7 +13,7 @@ from typing import Optional
 
 from zcu_tools.gui.app.main.adapter import ExpContext
 from zcu_tools.gui.app.main.event_bus import EventBus
-from zcu_tools.gui.app.main.services.ports import ProjectIOPort
+from zcu_tools.gui.session.ports import ProjectIOPort
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 
@@ -52,7 +52,7 @@ def test_concrete_io_manager_satisfies_port():
 
 
 def test_context_service_runs_against_fake_io():
-    from zcu_tools.gui.app.main.services.context import ContextService
+    from zcu_tools.gui.session.services.context import ContextService
 
     fake = _FakeProjectIO()
     assert isinstance(fake, ProjectIOPort)

@@ -33,13 +33,13 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.app.main.adapter import CfgSchema
-from zcu_tools.gui.app.main.services.context import MdValueError, MlEntryValidationError
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
     MdChangedPayload,
     MlChangedPayload,
     SessionPayload,
 )
+from zcu_tools.gui.session.services.context import MdValueError, MlEntryValidationError
 
 from .cfg_form import CfgFormWidget
 

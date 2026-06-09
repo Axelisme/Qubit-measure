@@ -55,6 +55,7 @@ from .services import (
     TabSnapshot,
     build_app_services,
 )
+from .services.cfg_lowering import lower_module, lower_waveform
 from .services.ports import ContextWrites
 from .services.remote.dialogs import DialogName
 from .state import State
@@ -724,16 +725,37 @@ class Controller:
         return self._ctx_svc.get_current_ml()
 
     def set_ml_module_from_schema(self, name: str, schema: CfgSchema) -> None:
-        self._ctx_svc.set_ml_module_from_schema(name, schema)
+        self._ctx_svc.apply_ml_writes(
+            {},
+            {name: schema},
+            {},
+            lower_module=lower_module,
+            lower_waveform=lower_waveform,
+            dump=False,
+        )
 
     def del_ml_module(self, name: str) -> None:
         self._ctx_svc.del_ml_module(name)
 
     def set_ml_waveform_from_schema(self, name: str, schema: CfgSchema) -> None:
-        self._ctx_svc.set_ml_waveform_from_schema(name, schema)
+        self._ctx_svc.apply_ml_writes(
+            {},
+            {},
+            {name: schema},
+            lower_module=lower_module,
+            lower_waveform=lower_waveform,
+            dump=False,
+        )
 
     def apply_writes(self, writes: "ContextWrites") -> None:
-        self._ctx_svc.apply_writes(writes)
+        self._ctx_svc.apply_ml_writes(
+            writes.md,
+            writes.ml_modules,
+            writes.ml_waveforms,
+            lower_module=lower_module,
+            lower_waveform=lower_waveform,
+            dump=True,
+        )
 
     def coerce_md_value(self, key: str, text: str) -> Any:
         return self._ctx_svc.coerce_md_value(key, text)

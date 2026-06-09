@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional
 
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
@@ -15,12 +15,10 @@ from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.adapter import CfgSchema
-    from zcu_tools.gui.app.main.event_bus import EventBus
-    from zcu_tools.gui.app.main.state import State
+    from zcu_tools.gui.event_bus import BaseEventBus
+    from zcu_tools.gui.session.ports import ProjectIOPort
+    from zcu_tools.gui.session.state import SessionState
     from zcu_tools.gui.session.types import ExpContext
-
-    from .ports import ContextWrites, ProjectIOPort
 
 
 class MlEntryValidationError(RuntimeError):
@@ -85,9 +83,9 @@ class ContextService:
 
     def __init__(
         self,
-        state: "State",
+        state: "SessionState",
         io_manager: "ProjectIOPort",
-        bus: "EventBus",
+        bus: "BaseEventBus",
     ) -> None:
         self._state = state
         self._io = io_manager
@@ -242,87 +240,53 @@ class ContextService:
     # ------------------------------------------------------------------
     # ml/md content writes — the single write authority (ADR-0006).
     #
-    # Sources holding an un-lowered CfgSchema (editor commit, writeback apply,
-    # inspect save, create_from_role) write through set_ml_*_from_schema /
-    # apply_writes; ContextService lowers (schema.to_raw_dict with the live md,
-    # so callers can never forget md) + registers + bumps + emits. There is no
-    # public raw-dict entry — raw lives only as an internal lowering detail.
+    # ``apply_ml_writes`` owns the *write transaction*: it sets md attrs +
+    # registers the (lowered) ml entries, then bumps the ``context`` version +
+    # emits at most one MD_CHANGED + one ML_CHANGED. The CfgSchema *lowering* is
+    # experiment-coupled, so it stays app-side and is injected as the
+    # ``lower_module`` / ``lower_waveform`` callbacks (the app's ContextWritePort
+    # façade builds them); this keeps ContextService free of the cfg-tree while
+    # still being the sole owner of the bump/emit/persistence.
     # ------------------------------------------------------------------
 
-    def _lower_module(self, schema: "CfgSchema", ml: ModuleLibrary, md: MetaDict):
-        from zcu_tools.program.v2 import ModuleCfgFactory
-
-        raw = schema.to_raw_dict(md, ml)
-        try:
-            return ModuleCfgFactory.from_raw(raw, ml=ml)
-        except Exception as exc:
-            raise MlEntryValidationError(
-                f"Invalid module configuration: {exc}"
-            ) from exc
-
-    def _lower_waveform(self, schema: "CfgSchema", ml: ModuleLibrary, md: MetaDict):
-        from zcu_tools.program.v2 import WaveformCfgFactory
-
-        raw = schema.to_raw_dict(md, ml)
-        try:
-            return WaveformCfgFactory.from_raw(raw, ml=ml)
-        except Exception as exc:
-            raise MlEntryValidationError(
-                f"Invalid waveform configuration: {exc}"
-            ) from exc
-
-    def set_ml_module_from_schema(self, name: str, schema: "CfgSchema") -> None:
-        """Lower (against live md) + register a Module cfg under name.
-
-        Raises MlEntryValidationError on validation / construction failure.
-        """
-        if not self.has_context():
-            raise RuntimeError("No experiment context.")
-        ctx = self._state.exp_context
-        module = self._lower_module(schema, ctx.ml, ctx.md)
-        ctx.ml.register_module(**{name: module})
-        self._state.version.bump("context")
-        self._bus.emit(MlChangedPayload(ml=ctx.ml))
-
-    def set_ml_waveform_from_schema(self, name: str, schema: "CfgSchema") -> None:
-        """Lower (against live md) + register a Waveform cfg under name.
-
-        Raises MlEntryValidationError on validation / construction failure.
-        """
-        if not self.has_context():
-            raise RuntimeError("No experiment context.")
-        ctx = self._state.exp_context
-        waveform = self._lower_waveform(schema, ctx.ml, ctx.md)
-        ctx.ml.register_waveform(**{name: waveform})
-        self._state.version.bump("context")
-        self._bus.emit(MlChangedPayload(ml=ctx.ml))
-
-    def apply_writes(self, writes: "ContextWrites") -> None:
+    def apply_ml_writes(
+        self,
+        md: Mapping[str, Any],
+        modules: Mapping[str, Any],
+        waveforms: Mapping[str, Any],
+        *,
+        lower_module: Callable[[Any, ModuleLibrary, MetaDict], Any],
+        lower_waveform: Callable[[Any, ModuleLibrary, MetaDict], Any],
+        dump: bool,
+    ) -> None:
         """Apply a batch of md/ml content writes atomically (ADR-0006).
 
-        One ``version.bump("context")``; at most one MD_CHANGED + one ML_CHANGED
-        (the per-write methods would emit N times — a batch avoids N redundant
-        full-refreshes). All lowering happens here, never at the call site.
-        """
+        ``md`` maps attr → value; ``modules`` / ``waveforms`` map entry name → an
+        opaque un-lowered entry (a ``CfgSchema``), lowered here via the injected
+        ``lower_module`` / ``lower_waveform`` (app-side; the cfg-tree never enters
+        this module). Lowering is interleaved with registration so a later entry
+        sees an earlier one. One ``version.bump("context")`` and at most one
+        MD_CHANGED + one ML_CHANGED (a batch avoids N redundant full-refreshes).
+        ``dump`` persists the ml when it has persistence (writeback batch persists;
+        a single editor commit does not). Raises MlEntryValidationError (from the
+        lowering callback) on a bad entry."""
         if not self.has_context():
             raise RuntimeError("No experiment context.")
         ctx = self._state.exp_context
-        for key, value in writes.md.items():
+        for key, value in md.items():
             setattr(ctx.md, key, value)
-        for name, schema in writes.ml_modules.items():
-            ctx.ml.register_module(**{name: self._lower_module(schema, ctx.ml, ctx.md)})
-        for name, schema in writes.ml_waveforms.items():
-            ctx.ml.register_waveform(
-                **{name: self._lower_waveform(schema, ctx.ml, ctx.md)}
-            )
-        touched_ml = bool(writes.ml_modules or writes.ml_waveforms)
-        if touched_ml and ctx.ml.has_persistence:
+        for name, entry in modules.items():
+            ctx.ml.register_module(**{name: lower_module(entry, ctx.ml, ctx.md)})
+        for name, entry in waveforms.items():
+            ctx.ml.register_waveform(**{name: lower_waveform(entry, ctx.ml, ctx.md)})
+        touched_ml = bool(modules or waveforms)
+        if dump and touched_ml and ctx.ml.has_persistence:
             ctx.ml.dump()
-        if writes.md or touched_ml:
+        if md or touched_ml:
             self._state.version.bump("context")
-        if writes.md:
+        if md:
             self._bus.emit(MdChangedPayload(md=ctx.md))
-        if writes.ml_modules or writes.ml_waveforms:
+        if modules or waveforms:
             self._bus.emit(MlChangedPayload(ml=ctx.ml))
 
     def del_ml_module(self, name: str) -> None:

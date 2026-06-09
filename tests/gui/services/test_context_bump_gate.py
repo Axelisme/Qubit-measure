@@ -25,13 +25,19 @@ import ast
 from pathlib import Path
 
 import zcu_tools.gui.app.main.services as services_pkg
+import zcu_tools.gui.session.services as session_services_pkg
 
 _SERVICES_DIR = Path(services_pkg.__file__).parent
+_SESSION_SERVICES_DIR = Path(session_services_pkg.__file__).parent
 
-# Modules that mutate MetaDict / ModuleLibrary *content* directly. ContextService
-# is the canonical owner; WritebackService writes ctx.md/ctx.ml without going
-# through it (ADR-0005: delegating would create an app-service inter-dependency).
-_MD_ML_WRITER_MODULES = ("context.py", "writeback.py")
+# Modules that mutate MetaDict / ModuleLibrary *content* directly. The session
+# ContextService (now in gui/session/services) is the canonical owner;
+# WritebackService writes ctx.md/ctx.ml without going through it (ADR-0005:
+# delegating would create an app-service inter-dependency).
+_MD_ML_WRITER_PATHS = (
+    _SESSION_SERVICES_DIR / "context.py",
+    _SERVICES_DIR / "writeback.py",
+)
 
 # ML write methods (called as ``<something>.<name>(...)``).
 _ML_WRITE_METHODS = frozenset(
@@ -85,8 +91,7 @@ def _calls_in(fn: ast.FunctionDef) -> list[ast.Call]:
 
 def test_md_ml_writers_bump_context_version():
     offenders: dict[str, list[str]] = {}
-    for module in _MD_ML_WRITER_MODULES:
-        path = _SERVICES_DIR / module
+    for path in _MD_ML_WRITER_PATHS:
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for fn in ast.walk(tree):
             if not isinstance(fn, ast.FunctionDef):
@@ -95,7 +100,7 @@ def test_md_ml_writers_bump_context_version():
             if not any(_is_md_ml_write(c) for c in calls):
                 continue  # function writes no md/ml content
             if not any(_is_context_bump(c) for c in calls):
-                offenders.setdefault(module, []).append(fn.name)
+                offenders.setdefault(path.name, []).append(fn.name)
 
     assert not offenders, (
         "every function that writes MetaDict/ModuleLibrary content must "

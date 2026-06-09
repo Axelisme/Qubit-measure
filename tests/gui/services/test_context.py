@@ -7,9 +7,9 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.main.adapter import ContextReadiness
-from zcu_tools.gui.app.main.services.context import ContextService
 from zcu_tools.gui.app.main.state import ExpContext, State
 from zcu_tools.gui.session.events import SessionEvent
+from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 
