@@ -176,27 +176,6 @@ class TabLifecyclePort(Protocol):
     def make_default_cfg(self, adapter_name: str) -> "CfgSchema": ...
 
 
-@runtime_checkable
-class StartupContextPort(Protocol):
-    """Context bootstrap commands as used by ``StartupService``.
-
-    ``StartupService`` orchestrates project startup (one-way command into the
-    context); it depends on this port, not the concrete ``ContextService``.
-    """
-
-    def set_startup_context(
-        self,
-        md: object,
-        ml: object,
-        chip_name: str,
-        qub_name: str,
-        res_name: str,
-        result_dir: str,
-        database_path: str,
-    ) -> None: ...
-    def setup_project(self, result_dir: str) -> None: ...
-
-
 class ProgressEventKind(Enum):
     """The three things a worker progress bar tells the main thread."""
 

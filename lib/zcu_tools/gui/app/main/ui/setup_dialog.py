@@ -285,7 +285,7 @@ class SetupDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _prefill_from_persistence(self) -> None:
-        from zcu_tools.gui.app.main.services.startup import derive_project_paths
+        from zcu_tools.gui.session.services.startup import derive_project_paths
 
         data = self._ctrl.get_persisted_startup()
         if data is None:
@@ -316,7 +316,7 @@ class SetupDialog(QDialog):
             self._port_spin.setValue(data.port)
 
     def _on_names_changed(self) -> None:
-        from zcu_tools.gui.app.main.services.startup import derive_project_paths
+        from zcu_tools.gui.session.services.startup import derive_project_paths
 
         chip = self._chip_edit.text().strip()
         qub = self._qub_edit.text().strip()

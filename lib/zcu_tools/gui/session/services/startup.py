@@ -1,3 +1,17 @@
+"""StartupService — session startup context + remembered-prefs capture/restore.
+
+Owns the session-core startup concern: bootstrap the active context from a
+project (chip/qub/res + paths), remember the prefill prefs + the remembered-device
+set, and project them to / from the persistence memento (``PersistedStartup``).
+It is the session half of the persistence split (P-c): the *session* memento
+slice lives here; an app combines it with its own experiment slice (measure:
+``AppPersistedState`` wraps this + ``PersistedSession``).
+
+App-agnostic: depends on the session ports (``StartupContextPort`` /
+``RememberedDevicePort``) + ``SessionState``; no disk I/O (the app's Caretaker
+owns that), no event bus.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -5,19 +19,46 @@ import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from zcu_tools.gui.app.main.state import StartupPrefs
+from pydantic import BaseModel, ConfigDict
+
 from zcu_tools.gui.session.ports import DeviceMemoryInfo
+from zcu_tools.gui.session.state import DEFAULT_LEFT_PANEL_WIDTH, StartupPrefs
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
-from .persistence_types import PersistedDeviceEntry, PersistedStartup
-
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.state import State
-    from zcu_tools.gui.session.ports import RememberedDevicePort
-
-    from .ports import StartupContextPort
+    from zcu_tools.gui.session.ports import RememberedDevicePort, StartupContextPort
+    from zcu_tools.gui.session.state import SessionState
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Session persistence memento slice (P-c): the startup prefs + remembered devices.
+# Pydantic v2 frozen models — the app's Caretaker writes/reads them as part of its
+# combined on-disk snapshot; pure data, no I/O.
+# ---------------------------------------------------------------------------
+
+
+class PersistedDeviceEntry(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    type_name: str
+    name: str
+    address: str
+
+
+class PersistedStartup(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    chip_name: str = ""
+    qub_name: str = ""
+    res_name: str = ""
+    result_dir: str = ""
+    database_path: str = ""
+    ip: str = "192.168.10.1"
+    port: int = 8887
+    devices: tuple[PersistedDeviceEntry, ...] = ()
+    left_panel_width: int = DEFAULT_LEFT_PANEL_WIDTH
 
 
 def derive_project_paths(chip_name: str, qub_name: str, root: str) -> tuple[str, str]:
@@ -83,7 +124,7 @@ class StartupService:
         self,
         context: "StartupContextPort",
         devices: "RememberedDevicePort",
-        state: "State",
+        state: "SessionState",
     ) -> None:
         self._context = context
         self._devices = devices

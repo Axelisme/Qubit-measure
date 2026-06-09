@@ -17,39 +17,24 @@ from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict
 
 from zcu_tools.gui.app.main.adapter import SavePaths
+from zcu_tools.gui.session.services.startup import (
+    PersistedDeviceEntry as PersistedDeviceEntry,  # noqa: F401  (re-export)
+)
+from zcu_tools.gui.session.services.startup import (
+    PersistedStartup,
+)
+from zcu_tools.gui.session.state import (
+    DEFAULT_LEFT_PANEL_WIDTH as DEFAULT_LEFT_PANEL_WIDTH,  # noqa: F401  (re-export)
+)
 
 # Single top-level version for the whole app-state snapshot (Phase 126 merged the
 # former startup_v2 + tab_session_v1 files into one). Bump on any incompatible
 # shape change; a mismatch makes the Caretaker fall back to defaults.
 APP_STATE_VERSION = 1
 
-DEFAULT_LEFT_PANEL_WIDTH = 500
-
 
 class PersistenceError(RuntimeError):
     """Expected failure while reading or writing the GUI state file."""
-
-
-class PersistedDeviceEntry(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    type_name: str
-    name: str
-    address: str
-
-
-class PersistedStartup(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    chip_name: str = ""
-    qub_name: str = ""
-    res_name: str = ""
-    result_dir: str = ""
-    database_path: str = ""
-    ip: str = "192.168.10.1"
-    port: int = 8887
-    devices: tuple[PersistedDeviceEntry, ...] = ()
-    left_panel_width: int = DEFAULT_LEFT_PANEL_WIDTH
 
 
 class PersistedTab(BaseModel):

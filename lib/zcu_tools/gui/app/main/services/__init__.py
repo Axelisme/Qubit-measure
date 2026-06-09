@@ -11,6 +11,11 @@ from zcu_tools.gui.session.services.device import (
     DisconnectDeviceRequest,
     SetupDeviceRequest,
 )
+from zcu_tools.gui.session.services.startup import (
+    StartupConnectionRequest,
+    StartupProjectRequest,
+    StartupService,
+)
 
 from .analyze import AnalyzeService
 from .app_services import AppServices, build_app_services
@@ -37,7 +42,6 @@ from .persistence_types import (
 from .ports import RestoreIssue, RestoreReport
 from .run import RunService
 from .save import SaveResultOutcome, SaveService
-from .startup import StartupConnectionRequest, StartupProjectRequest, StartupService
 from .tab import TabService, TabSnapshot
 from .workspace import WorkspaceService
 from .writeback import WritebackService

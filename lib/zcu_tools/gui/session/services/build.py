@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Optional
 from zcu_tools.gui.session.services.connection import ConnectionService
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.device import DeviceService
+from zcu_tools.gui.session.services.startup import StartupService
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus
@@ -41,6 +42,7 @@ class SessionServices:
     connection: ConnectionService
     context: ContextService
     device: DeviceService
+    startup: StartupService
 
 
 def build_session_services(
@@ -72,4 +74,9 @@ def build_session_services(
     )
     connection = ConnectionService(state, bus, gate, handles)
     context = ContextService(state, io_manager, bus)
-    return SessionServices(connection=connection, context=context, device=device)
+    # StartupService bridges the two session services it commands through their
+    # ports (context bootstrap + remembered-device registration) + State prefs.
+    startup = StartupService(context, device, state)
+    return SessionServices(
+        connection=connection, context=context, device=device, startup=startup
+    )

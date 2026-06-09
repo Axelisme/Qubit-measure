@@ -675,7 +675,7 @@ def _h_startup_apply(
     # layout. (The setup dialog keeps its own empty-result_dir = DRAFT path for
     # interactive use; this agent-facing entry intentionally defaults to runnable
     # rather than DRAFT.)
-    from zcu_tools.gui.app.main.services.startup import (
+    from zcu_tools.gui.session.services.startup import (
         StartupProjectRequest,
         derive_project_paths,
     )

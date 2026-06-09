@@ -218,3 +218,24 @@ class ContextReadPort(Protocol):
     """
 
     def get_current_ml(self) -> "ModuleLibrary": ...
+
+
+@runtime_checkable
+class StartupContextPort(Protocol):
+    """Context bootstrap commands as used by ``StartupService``.
+
+    ``StartupService`` orchestrates project startup (one-way command into the
+    context); it depends on this port, not the concrete ``ContextService``.
+    """
+
+    def set_startup_context(
+        self,
+        md: object,
+        ml: object,
+        chip_name: str,
+        qub_name: str,
+        res_name: str,
+        result_dir: str,
+        database_path: str,
+    ) -> None: ...
+    def setup_project(self, result_dir: str) -> None: ...

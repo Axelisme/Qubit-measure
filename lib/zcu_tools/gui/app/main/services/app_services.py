@@ -8,6 +8,7 @@ from zcu_tools.gui.session.services.build import build_session_services
 from zcu_tools.gui.session.services.connection import ConnectionService
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.device import DeviceService
+from zcu_tools.gui.session.services.startup import StartupService
 
 from .analyze import AnalyzeService
 from .background import BackgroundService
@@ -17,7 +18,6 @@ from .operation_gate import OperationGate
 from .progress import ProgressService
 from .run import RunService
 from .save import SaveService
-from .startup import StartupService
 from .tab import TabService
 from .workspace import WorkspaceService
 from .writeback import WritebackService
@@ -126,6 +126,6 @@ def build_app_services(
         save=SaveService(state, background, bus),
         writeback=writeback,
         workspace=WorkspaceService(state, tab, bus),
-        startup=StartupService(context, device, state),
+        startup=session.startup,
         cfg_editor=cfg_editor,
     )
