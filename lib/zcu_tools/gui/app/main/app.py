@@ -124,7 +124,7 @@ def _show_startup_dialog(ctrl: "Controller", parent: "MainWindow") -> None:
     from qtpy.QtCore import Qt  # type: ignore[attr-defined]
 
     from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
-    from zcu_tools.gui.app.main.ui.setup_dialog import SetupDialog
+    from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 
     dlg = SetupDialog(ctrl, parent=parent, startup_mode=True)
     dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)

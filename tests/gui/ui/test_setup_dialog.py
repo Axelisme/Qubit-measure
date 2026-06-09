@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from zcu_tools.gui.app.main.services import (
-    StartupConnectionRequest,
-    StartupProjectRequest,
-)
-from zcu_tools.gui.app.main.ui.setup_dialog import SetupDialog
 from zcu_tools.gui.session.services.connection import (
     ConnectMockRequest,
     ConnectRemoteRequest,
 )
+from zcu_tools.gui.session.services.startup import (
+    StartupConnectionRequest,
+    StartupProjectRequest,
+)
+from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 
 
 def _make_ctrl(**overrides: object) -> MagicMock:

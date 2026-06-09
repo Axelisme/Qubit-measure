@@ -1254,7 +1254,7 @@ class MainWindow(QMainWindow):
         keep test fixtures from pulling in unused dialog modules.
         """
         if name is DialogName.SETUP:
-            from .setup_dialog import SetupDialog
+            from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 
             return SetupDialog(self._ctrl, parent=self)
         if name is DialogName.DEVICE:
@@ -1274,7 +1274,7 @@ class MainWindow(QMainWindow):
             # by the application bootstrap, not by this generic factory. We
             # still build one here so a remote ``dialog.open STARTUP`` works
             # after the initial bootstrap has dismissed the original.
-            from .setup_dialog import SetupDialog
+            from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 
             return SetupDialog(self._ctrl, parent=self, startup_mode=True)
         raise ValueError(f"Unknown DialogName: {name!r}")  # pragma: no cover

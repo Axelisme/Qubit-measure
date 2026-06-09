@@ -30,14 +30,14 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.app.main.services import (
+from zcu_tools.gui.session.services.startup import (
     StartupConnectionRequest,
     StartupProjectRequest,
 )
 from zcu_tools.program import describe_soc
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.controller import Controller
+    from zcu_tools.gui.session.controller_port import SessionControllerPort
 
 
 @runtime_checkable
@@ -52,7 +52,7 @@ class SetupDialog(QDialog):
 
     def __init__(
         self,
-        controller: "Controller",
+        controller: "SessionControllerPort",
         parent: Optional[QWidget] = None,
         startup_mode: bool = False,
     ) -> None:
