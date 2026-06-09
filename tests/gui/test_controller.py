@@ -22,10 +22,10 @@ from zcu_tools.gui.app.main.adapter import (
 )
 from zcu_tools.gui.app.main.controller import Controller
 from zcu_tools.gui.app.main.event_bus import (
-    GuiEvent,
     RunFinishedPayload,
     RunStartedPayload,
     TabContentChangedPayload,
+    TabInteractionChangedPayload,
 )
 from zcu_tools.gui.app.main.io_manager import IOManager
 from zcu_tools.gui.app.main.registry import Registry
@@ -234,7 +234,7 @@ def test_start_run_uses_committed_state_schema(cf):
 def test_start_run_emits_run_started(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.ctrl.start_run(tab_id)
-    cf.bus.emit.assert_any_call(GuiEvent.RUN_STARTED, RunStartedPayload(tab_id=tab_id))
+    cf.bus.emit.assert_any_call(RunStartedPayload(tab_id=tab_id))
     _wait_for(lambda: not cf.state.is_tab_running(tab_id))
 
 
@@ -250,7 +250,6 @@ def test_run_finished_emits_run_finished(cf):
     cf.ctrl.start_run(tab_id)
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     cf.bus.emit.assert_any_call(
-        GuiEvent.RUN_FINISHED,
         RunFinishedPayload(tab_id=tab_id, outcome="finished"),
     )
 
@@ -259,9 +258,7 @@ def test_run_finished_calls_refresh_tab(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.ctrl.start_run(tab_id)
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
-    cf.bus.emit.assert_any_call(
-        GuiEvent.TAB_CONTENT_CHANGED, TabContentChangedPayload(tab_id=tab_id)
-    )
+    cf.bus.emit.assert_any_call(TabContentChangedPayload(tab_id=tab_id))
 
 
 def test_run_finished_skips_analyze_init_for_non_analysis_adapter(cf):
@@ -288,9 +285,7 @@ def test_run_finished_skips_analyze_init_for_non_analysis_adapter(cf):
     # run completes without surfacing an error dialog.
     no_analysis.get_analyze_params.assert_not_called()
     assert not cf.view.show_error_dialog.called
-    cf.bus.emit.assert_any_call(
-        GuiEvent.TAB_CONTENT_CHANGED, TabContentChangedPayload(tab_id=tab_id)
-    )
+    cf.bus.emit.assert_any_call(TabContentChangedPayload(tab_id=tab_id))
 
 
 # ---------------------------------------------------------------------------
@@ -462,8 +457,8 @@ def test_update_tab_cfg_does_not_emit_interaction_changed(cf):
     cf.ctrl.update_tab_cfg(tab_id, base)
 
     for call in cf.bus.emit.call_args_list:
-        event = call.args[0] if call.args else None
-        assert event != GuiEvent.TAB_INTERACTION_CHANGED, (
+        payload = call.args[0] if call.args else None
+        assert not isinstance(payload, TabInteractionChangedPayload), (
             f"update_tab_cfg emitted TAB_INTERACTION_CHANGED unexpectedly: {call}"
         )
 

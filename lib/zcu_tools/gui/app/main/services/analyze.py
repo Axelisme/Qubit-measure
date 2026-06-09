@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
 from zcu_tools.gui.app.main.adapter import AnalyzeRequest
-from zcu_tools.gui.app.main.event_bus import GuiEvent, TabInteractionChangedPayload
+from zcu_tools.gui.app.main.event_bus import TabInteractionChangedPayload
 from zcu_tools.gui.plotting import FigureContainer
 
 from .background import BackgroundService, OffMainScopes
@@ -102,7 +102,6 @@ class AnalyzeService(QObject):
             raise
         self._state.set_tab_analyzing(tab_id, True)
         self._bus.emit(
-            GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),
         )
         return token
@@ -120,7 +119,6 @@ class AnalyzeService(QObject):
         self._active_token = token
         self._state.set_tab_analyzing(tab_id, True)
         self._bus.emit(
-            GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),
         )
         return token
@@ -153,7 +151,6 @@ class AnalyzeService(QObject):
         # figure. Release before emitting so a synchronous awaiter unblocks.
         self._release(OperationOutcome("finished"))
         self._bus.emit(
-            GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),
         )
         self.analyze_finished.emit(tab_id, analyze_result)
@@ -163,7 +160,6 @@ class AnalyzeService(QObject):
         self._state.set_tab_analyzing(tab_id, False)
         self._release(OperationOutcome("failed", str(error)))
         self._bus.emit(
-            GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),
         )
         self.analyze_failed.emit(tab_id, error)

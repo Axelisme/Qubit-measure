@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.main.adapter import ContextReadiness
-from zcu_tools.gui.app.main.event_bus import EventBus, GuiEvent
+from zcu_tools.gui.app.main.event_bus import EventBus, TabInteractionChangedPayload
 from zcu_tools.gui.app.main.services.analyze import AnalyzeService
 from zcu_tools.gui.app.main.services.guard import AnalyzePermit
 from zcu_tools.gui.app.main.state import ExpContext, Session, State
@@ -73,7 +73,7 @@ def test_start_analyze_emits_interaction_event(qapp):  # noqa: ARG001
     state = _make_state()
     bus = EventBus()
     received: list[str] = []
-    bus.subscribe(GuiEvent.TAB_INTERACTION_CHANGED, lambda p: received.append(p.tab_id))
+    bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.tab_id))
 
     svc, _ = _make_service(state, bus)
     svc.start_analyze(AnalyzePermit(tab_id="tab1"), analyze_params_instance=object())
@@ -145,7 +145,7 @@ def test_on_analyze_finished_emits_interaction_event(qapp):  # noqa: ARG001
     state = _make_state()
     bus = EventBus()
     received: list[str] = []
-    bus.subscribe(GuiEvent.TAB_INTERACTION_CHANGED, lambda p: received.append(p.tab_id))
+    bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.tab_id))
     svc, _ = _make_service(state, bus)
 
     state.set_tab_analyzing("tab1", True)
@@ -233,7 +233,7 @@ def test_on_analyze_failed_emits_interaction_event(qapp):  # noqa: ARG001
     state = _make_state()
     bus = EventBus()
     received: list[str] = []
-    bus.subscribe(GuiEvent.TAB_INTERACTION_CHANGED, lambda p: received.append(p.tab_id))
+    bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.tab_id))
     svc, _ = _make_service(state, bus)
 
     state.set_tab_analyzing("tab1", True)

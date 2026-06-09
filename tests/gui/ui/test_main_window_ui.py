@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 from qtpy.QtCore import Qt
 from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
-from zcu_tools.gui.app.main.event_bus import EventBus, GuiEvent, SocChangedPayload
+from zcu_tools.gui.app.main.event_bus import EventBus, SocChangedPayload
 from zcu_tools.gui.app.main.services import TabSnapshot
 from zcu_tools.gui.app.main.state import TabInteractionState
 
@@ -377,7 +377,7 @@ def test_main_window_soc_changed_refreshes_run_lock(qapp):
     tab = MagicMock()
     window._tab_widgets["tab-1"] = tab
 
-    bus.emit(GuiEvent.SOC_CHANGED, SocChangedPayload(soc=None, soccfg=None))
+    bus.emit(SocChangedPayload(soc=None, soccfg=None))
 
     tab.update_interaction_state.assert_called()
 
@@ -393,7 +393,7 @@ def test_main_window_content_event_queries_single_tab_snapshot(qapp):
     window = MainWindow(ctrl)
     window._tab_widgets["tab-1"] = MagicMock()
 
-    bus.emit(GuiEvent.TAB_CONTENT_CHANGED, TabContentChangedPayload(tab_id="tab-1"))
+    bus.emit(TabContentChangedPayload(tab_id="tab-1"))
 
     ctrl.get_tab_snapshot.assert_called_once_with("tab-1")
 
@@ -401,7 +401,7 @@ def test_main_window_content_event_queries_single_tab_snapshot(qapp):
 def _emit_run_finished(bus, tab_id: str, outcome: str) -> None:
     from zcu_tools.gui.app.main.event_bus import RunFinishedPayload
 
-    bus.emit(GuiEvent.RUN_FINISHED, RunFinishedPayload(tab_id=tab_id, outcome=outcome))
+    bus.emit(RunFinishedPayload(tab_id=tab_id, outcome=outcome))
 
 
 def test_finished_run_auto_switches_to_analysis_tab(qapp):

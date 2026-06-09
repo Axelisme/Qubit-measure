@@ -17,7 +17,6 @@ from zcu_tools.gui.app.main.event_bus import (
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
     EventBus,
-    GuiEvent,
 )
 from zcu_tools.gui.app.main.services.device import (
     ConnectDeviceRequest,
@@ -101,8 +100,8 @@ def test_device_service_emits_started_and_finished_events(qapp):
     _connect(svc)
     started: list[DeviceSetupStartedPayload] = []
     finished: list[DeviceSetupFinishedPayload] = []
-    svc._bus.subscribe(GuiEvent.DEVICE_SETUP_STARTED, started.append)
-    svc._bus.subscribe(GuiEvent.DEVICE_SETUP_FINISHED, finished.append)
+    svc._bus.subscribe(DeviceSetupStartedPayload, started.append)
+    svc._bus.subscribe(DeviceSetupFinishedPayload, finished.append)
     loop = QEventLoop()
     svc.setup_finished.connect(lambda _name: loop.quit())
 

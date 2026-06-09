@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 from zcu_tools.gui.app.main.adapter import AnalysisMode, CfgSchema
 from zcu_tools.gui.app.main.event_bus import (
     ContextSwitchedPayload,
-    GuiEvent,
     MlChangedPayload,
     PredictorChangedPayload,
     RunFinishedPayload,
@@ -749,17 +748,17 @@ class MainWindow(QMainWindow):
         # EventBus subscriptions
         bus = self._ctrl.get_bus()
         bus.subscribe(
-            GuiEvent.TAB_INTERACTION_CHANGED, self._on_bus_tab_interaction_changed
+            TabInteractionChangedPayload, self._on_bus_tab_interaction_changed
         )
-        bus.subscribe(GuiEvent.RUN_STARTED, self._on_bus_run_started)
-        bus.subscribe(GuiEvent.RUN_FINISHED, self._on_bus_run_finished)
-        bus.subscribe(GuiEvent.CONTEXT_SWITCHED, self._on_bus_context_switched)
-        bus.subscribe(GuiEvent.ML_CHANGED, self._on_bus_ml_changed)
-        bus.subscribe(GuiEvent.TAB_ADDED, self._on_bus_tab_added)
-        bus.subscribe(GuiEvent.TAB_CLOSED, self._on_bus_tab_closed)
-        bus.subscribe(GuiEvent.TAB_CONTENT_CHANGED, self._on_bus_tab_content_changed)
-        bus.subscribe(GuiEvent.PREDICTOR_CHANGED, self._on_bus_predictor_changed)
-        bus.subscribe(GuiEvent.SOC_CHANGED, self._on_bus_soc_changed)
+        bus.subscribe(RunStartedPayload, self._on_bus_run_started)
+        bus.subscribe(RunFinishedPayload, self._on_bus_run_finished)
+        bus.subscribe(ContextSwitchedPayload, self._on_bus_context_switched)
+        bus.subscribe(MlChangedPayload, self._on_bus_ml_changed)
+        bus.subscribe(TabAddedPayload, self._on_bus_tab_added)
+        bus.subscribe(TabClosedPayload, self._on_bus_tab_closed)
+        bus.subscribe(TabContentChangedPayload, self._on_bus_tab_content_changed)
+        bus.subscribe(PredictorChangedPayload, self._on_bus_predictor_changed)
+        bus.subscribe(SocChangedPayload, self._on_bus_soc_changed)
 
         # Cleanup on destroy
         self.destroyed.connect(self._cleanup_bus_subscriptions)
@@ -767,17 +766,17 @@ class MainWindow(QMainWindow):
     def _cleanup_bus_subscriptions(self) -> None:
         bus = self._ctrl.get_bus()
         bus.unsubscribe(
-            GuiEvent.TAB_INTERACTION_CHANGED, self._on_bus_tab_interaction_changed
+            TabInteractionChangedPayload, self._on_bus_tab_interaction_changed
         )
-        bus.unsubscribe(GuiEvent.RUN_STARTED, self._on_bus_run_started)
-        bus.unsubscribe(GuiEvent.RUN_FINISHED, self._on_bus_run_finished)
-        bus.unsubscribe(GuiEvent.CONTEXT_SWITCHED, self._on_bus_context_switched)
-        bus.unsubscribe(GuiEvent.ML_CHANGED, self._on_bus_ml_changed)
-        bus.unsubscribe(GuiEvent.TAB_ADDED, self._on_bus_tab_added)
-        bus.unsubscribe(GuiEvent.TAB_CLOSED, self._on_bus_tab_closed)
-        bus.unsubscribe(GuiEvent.TAB_CONTENT_CHANGED, self._on_bus_tab_content_changed)
-        bus.unsubscribe(GuiEvent.PREDICTOR_CHANGED, self._on_bus_predictor_changed)
-        bus.unsubscribe(GuiEvent.SOC_CHANGED, self._on_bus_soc_changed)
+        bus.unsubscribe(RunStartedPayload, self._on_bus_run_started)
+        bus.unsubscribe(RunFinishedPayload, self._on_bus_run_finished)
+        bus.unsubscribe(ContextSwitchedPayload, self._on_bus_context_switched)
+        bus.unsubscribe(MlChangedPayload, self._on_bus_ml_changed)
+        bus.unsubscribe(TabAddedPayload, self._on_bus_tab_added)
+        bus.unsubscribe(TabClosedPayload, self._on_bus_tab_closed)
+        bus.unsubscribe(TabContentChangedPayload, self._on_bus_tab_content_changed)
+        bus.unsubscribe(PredictorChangedPayload, self._on_bus_predictor_changed)
+        bus.unsubscribe(SocChangedPayload, self._on_bus_soc_changed)
 
     def _on_bus_tab_interaction_changed(
         self, payload: TabInteractionChangedPayload

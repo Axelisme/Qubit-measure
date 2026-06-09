@@ -24,7 +24,6 @@ from .adapter import (
 )
 from .event_bus import (
     EventBus,
-    GuiEvent,
     TabContentChangedPayload,
     TabInteractionChangedPayload,
 )
@@ -279,17 +278,13 @@ class Controller:
             is not AnalysisMode.NONE
         ):
             self._tab_svc.initialize_tab_analyze_params(tab_id)
-        self._bus.emit(
-            GuiEvent.TAB_CONTENT_CHANGED, TabContentChangedPayload(tab_id=tab_id)
-        )
+        self._bus.emit(TabContentChangedPayload(tab_id=tab_id))
 
     def _on_run_failed(self, _tab_id: str, error: Exception) -> None:
         self._notify("error", "Run failed", str(error))
 
     def _on_analyze_finished(self, tab_id: str, _result: object) -> None:
-        self._bus.emit(
-            GuiEvent.TAB_CONTENT_CHANGED, TabContentChangedPayload(tab_id=tab_id)
-        )
+        self._bus.emit(TabContentChangedPayload(tab_id=tab_id))
 
     def _on_analyze_failed(self, _tab_id: str, error: Exception) -> None:
         self._notify("error", "Analyze failed", str(error))
@@ -1116,7 +1111,6 @@ class Controller:
     def update_tab_analyze_param_instance(self, tab_id: str, instance: object) -> None:
         self._tab_svc.update_tab_analyze_param_instance(tab_id, instance)
         self._bus.emit(
-            GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),
         )
 
@@ -1125,7 +1119,6 @@ class Controller:
     ) -> None:
         self._tab_svc.update_tab_save_path_overrides(tab_id, data_path, image_path)
         self._bus.emit(
-            GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),
         )
 

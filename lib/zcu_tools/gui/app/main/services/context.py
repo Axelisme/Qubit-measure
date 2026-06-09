@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any, Optional
 from zcu_tools.gui.app.main.adapter import ContextReadiness
 from zcu_tools.gui.app.main.event_bus import (
     ContextSwitchedPayload,
-    GuiEvent,
     MdChangedPayload,
     MlChangedPayload,
 )
@@ -172,7 +171,6 @@ class ContextService:
         # not bump, so context-switch callers bump here explicitly.
         self._state.version.bump("context")
         self._bus.emit(
-            GuiEvent.CONTEXT_SWITCHED,
             ContextSwitchedPayload(md=new_ctx.md, ml=new_ctx.ml),
         )
 
@@ -185,7 +183,6 @@ class ContextService:
         self._state.set_context(new_ctx)
         self._state.version.bump("context")
         self._bus.emit(
-            GuiEvent.CONTEXT_SWITCHED,
             ContextSwitchedPayload(md=new_ctx.md, ml=new_ctx.ml),
         )
 
@@ -211,7 +208,6 @@ class ContextService:
         self._state.set_context(new_ctx)
         self._state.version.bump("context")
         self._bus.emit(
-            GuiEvent.CONTEXT_SWITCHED,
             ContextSwitchedPayload(md=new_ctx.md, ml=new_ctx.ml),
         )
 
@@ -232,7 +228,7 @@ class ContextService:
         #   2. context-switch: setup_project / use_context / new_context  (whole md/ml swap)
         # Both bump "context"; only set_context() itself does NOT (pure swap).
         self._state.version.bump("context")
-        self._bus.emit(GuiEvent.MD_CHANGED, MdChangedPayload(md=md))
+        self._bus.emit(MdChangedPayload(md=md))
 
     def del_md_attr(self, key: str) -> None:
         if not self.has_context():
@@ -240,7 +236,7 @@ class ContextService:
         md = self._state.exp_context.md
         delattr(md, key)
         self._state.version.bump("context")
-        self._bus.emit(GuiEvent.MD_CHANGED, MdChangedPayload(md=md))
+        self._bus.emit(MdChangedPayload(md=md))
 
     # ------------------------------------------------------------------
     # ml/md content writes — the single write authority (ADR-0006).
@@ -285,7 +281,7 @@ class ContextService:
         module = self._lower_module(schema, ctx.ml, ctx.md)
         ctx.ml.register_module(**{name: module})
         self._state.version.bump("context")
-        self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ctx.ml))
+        self._bus.emit(MlChangedPayload(ml=ctx.ml))
 
     def set_ml_waveform_from_schema(self, name: str, schema: "CfgSchema") -> None:
         """Lower (against live md) + register a Waveform cfg under name.
@@ -298,7 +294,7 @@ class ContextService:
         waveform = self._lower_waveform(schema, ctx.ml, ctx.md)
         ctx.ml.register_waveform(**{name: waveform})
         self._state.version.bump("context")
-        self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ctx.ml))
+        self._bus.emit(MlChangedPayload(ml=ctx.ml))
 
     def apply_writes(self, writes: "ContextWrites") -> None:
         """Apply a batch of md/ml content writes atomically (ADR-0006).
@@ -324,9 +320,9 @@ class ContextService:
         if writes.md or touched_ml:
             self._state.version.bump("context")
         if writes.md:
-            self._bus.emit(GuiEvent.MD_CHANGED, MdChangedPayload(md=ctx.md))
+            self._bus.emit(MdChangedPayload(md=ctx.md))
         if writes.ml_modules or writes.ml_waveforms:
-            self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ctx.ml))
+            self._bus.emit(MlChangedPayload(ml=ctx.ml))
 
     def del_ml_module(self, name: str) -> None:
         if not self.has_context():
@@ -334,7 +330,7 @@ class ContextService:
         ml = self._state.exp_context.ml
         ml.delete_module(name)
         self._state.version.bump("context")
-        self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ml))
+        self._bus.emit(MlChangedPayload(ml=ml))
 
     def coerce_md_value(self, key: str, text: str) -> Any:
         """Convert a user-typed string into a typed value for MetaDict[key].
@@ -360,7 +356,7 @@ class ContextService:
         ml = self._state.exp_context.ml
         ml.delete_waveform(name)
         self._state.version.bump("context")
-        self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ml))
+        self._bus.emit(MlChangedPayload(ml=ml))
 
     def rename_ml_module(self, old: str, new: str) -> None:
         """Rename an ml module by re-registering under ``new`` and deleting ``old``.
@@ -381,7 +377,7 @@ class ContextService:
         ml.register_module(**{new: ml.modules[old]})
         ml.delete_module(old)
         self._state.version.bump("context")
-        self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ml))
+        self._bus.emit(MlChangedPayload(ml=ml))
 
     def rename_ml_waveform(self, old: str, new: str) -> None:
         """Rename an ml waveform (see :meth:`rename_ml_module`)."""
@@ -397,4 +393,4 @@ class ContextService:
         ml.register_waveform(**{new: ml.waveforms[old]})
         ml.delete_waveform(old)
         self._state.version.bump("context")
-        self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ml))
+        self._bus.emit(MlChangedPayload(ml=ml))

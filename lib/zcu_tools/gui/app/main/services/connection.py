@@ -11,7 +11,6 @@ from qtpy.QtCore import QObject, QThread, QTimer, Signal  # type: ignore[attr-de
 
 from zcu_tools.gui.app.main.adapter import SocCfgHandle, SocHandle
 from zcu_tools.gui.app.main.event_bus import (
-    GuiEvent,
     PredictorChangedPayload,
     SocChangedPayload,
 )
@@ -294,7 +293,6 @@ class ConnectionService(QObject):
         # dependent ops (run / editor.commit / writeback) stale.
         self._state.version.bump("soc")
         self._bus.emit(
-            GuiEvent.SOC_CHANGED,
             SocChangedPayload(soc=soc, soccfg=soccfg, is_mock=self._pending_is_mock),
         )
 
@@ -311,14 +309,14 @@ class ConnectionService(QObject):
         self._predictor_path = req.path
         new_ctx = dataclasses.replace(self._state.exp_context, predictor=predictor)
         self._state.set_context(new_ctx)
-        self._bus.emit(GuiEvent.PREDICTOR_CHANGED, PredictorChangedPayload())
+        self._bus.emit(PredictorChangedPayload())
 
     def clear_predictor(self) -> None:
         logger.info("clear_predictor")
         self._predictor_path = None
         new_ctx = dataclasses.replace(self._state.exp_context, predictor=None)
         self._state.set_context(new_ctx)
-        self._bus.emit(GuiEvent.PREDICTOR_CHANGED, PredictorChangedPayload())
+        self._bus.emit(PredictorChangedPayload())
 
     def predict_freq(self, req: PredictFreqRequest) -> float:
         predictor = self._state.exp_context.predictor

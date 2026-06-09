@@ -832,11 +832,11 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     assert ref_widget._combo.currentText() == "Lib: my_pulse (modified)"
 
     # 3. Trigger MD_CHANGED and verify it does not overwrite modified value
-    from zcu_tools.gui.app.main.event_bus import GuiEvent, MdChangedPayload
+    from zcu_tools.gui.app.main.event_bus import MdChangedPayload
     from zcu_tools.meta_tool import MetaDict
 
     md = MetaDict()
-    ctrl.get_bus.return_value.emit(GuiEvent.MD_CHANGED, MdChangedPayload(md=md))
+    ctrl.get_bus.return_value.emit(MdChangedPayload(md=md))
 
     # Should stay as user modified (8000.0), not library default (7000.0)
     mod_val = w.read_values().fields["mod"]

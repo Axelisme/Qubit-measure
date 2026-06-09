@@ -110,11 +110,11 @@ def test_start_run_releases_lease_when_submit_raises():
 
 
 def _last_run_finished_payload(bus_emit: MagicMock):
-    from zcu_tools.gui.app.main.event_bus import GuiEvent, RunFinishedPayload
+    from zcu_tools.gui.app.main.event_bus import RunFinishedPayload
 
     for call in reversed(bus_emit.call_args_list):
-        event, payload = call.args
-        if event is GuiEvent.RUN_FINISHED and isinstance(payload, RunFinishedPayload):
+        (payload,) = call.args
+        if isinstance(payload, RunFinishedPayload):
             return payload
     raise AssertionError("no RUN_FINISHED emitted")
 

@@ -108,7 +108,7 @@ def test_device_service_emits_pending_and_connected_events(qapp):
     device.get_info.return_value = FakeDeviceInfo(address="")
     svc, bus = _make_service(device)
     received: list[DeviceChangedPayload] = []
-    bus.subscribe(GuiEvent.DEVICE_CHANGED, received.append)
+    bus.subscribe(DeviceChangedPayload, received.append)
     loop = QEventLoop()
     svc.device_connected.connect(lambda _request: loop.quit())
 
@@ -131,7 +131,7 @@ def test_device_service_emits_pending_and_disconnected_events(qapp):
     )
     connect_loop.exec()
     received: list[DeviceChangedPayload] = []
-    bus.subscribe(GuiEvent.DEVICE_CHANGED, received.append)
+    bus.subscribe(DeviceChangedPayload, received.append)
     loop = QEventLoop()
     svc.device_disconnected.connect(lambda _request: loop.quit())
 

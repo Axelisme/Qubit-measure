@@ -18,7 +18,6 @@ from zcu_tools.gui.app.main.adapter import (
 )
 from zcu_tools.gui.app.main.event_bus import (
     EventBus,
-    GuiEvent,
     MdChangedPayload,
     MlChangedPayload,
 )
@@ -69,9 +68,9 @@ def _make_write_port(state: State, bus: EventBus):
         if writes.md or touched_ml:
             state.version.bump("context")
         if writes.md:
-            bus.emit(GuiEvent.MD_CHANGED, MdChangedPayload(md=ctx.md))
+            bus.emit(MdChangedPayload(md=ctx.md))
         if touched_ml:
-            bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ctx.ml))
+            bus.emit(MlChangedPayload(ml=ctx.ml))
 
     port.apply_writes.side_effect = _apply_writes
     return port
@@ -192,7 +191,7 @@ def test_apply_module_writeback_registers_and_emits():
     state = _make_state_with_tab()
     bus = EventBus()
     received: list = []
-    bus.subscribe(GuiEvent.ML_CHANGED, lambda p: received.append(p))
+    bus.subscribe(MlChangedPayload, lambda p: received.append(p))
     svc = _svc(state, bus)
     before = state.version.get("context")
 

@@ -1,14 +1,16 @@
-"""Wire serializers for ``GuiEvent`` push to remote clients.
+"""Wire serializers for measure-gui EventBus push to remote clients.
 
-Each entry in :data:`EVENT_SERIALIZERS` maps a ``GuiEvent`` to a function
+Each entry in :data:`EVENT_SERIALIZERS` maps a ``Payload`` *type* to a function
 producing the JSON-friendly ``payload`` dict that goes on the wire. Live
 Python references (``MetaDict``, ``ModuleLibrary``, ``SocHandle``,
 ``DeviceSetupSnapshot``, ``BaseDeviceInfo``, ``FluxoniumPredictor``) are
 **never** sent — instead the wire payload carries a ``requery`` hint
-listing the RPC method(s) the client should call to obtain current state.
+listing the RPC method(s) the client should call to obtain current state. The
+measure-gui EventBus subscribes by payload type (not an event enum), so the
+registry is keyed by type; ``payload.EVENT.value`` gives the wire name.
 
 Adding a new event:
-  1. Confirm the payload dataclass exists in ``gui/event_bus.py``.
+  1. Confirm the payload dataclass exists in ``event_bus.py``.
   2. Add a serializer returning either a JSON-able dict or ``None`` to
      suppress the push (None means "do not forward").
   3. Register in :data:`EVENT_SERIALIZERS`.
@@ -25,7 +27,6 @@ from zcu_tools.gui.app.main.event_bus import (
     DeviceChangedPayload,
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
-    GuiEvent,
     MdChangedPayload,
     MlChangedPayload,
     Payload,
@@ -143,29 +144,29 @@ def _ser_soc_changed(payload: Payload) -> WirePayload:
 # ---------------------------------------------------------------------------
 
 
-EVENT_SERIALIZERS: dict[GuiEvent, Serializer] = {
-    GuiEvent.TAB_ADDED: _ser_tab_added,
-    GuiEvent.TAB_CLOSED: _ser_tab_closed,
-    GuiEvent.TAB_CONTENT_CHANGED: _ser_tab_content_changed,
-    GuiEvent.TAB_INTERACTION_CHANGED: _ser_tab_interaction_changed,
-    GuiEvent.RUN_STARTED: _ser_run_started,
-    GuiEvent.RUN_FINISHED: _ser_run_finished,
-    GuiEvent.PREDICTOR_CHANGED: _ser_predictor_changed,
-    GuiEvent.DEVICE_CHANGED: _ser_device_changed,
-    GuiEvent.DEVICE_SETUP_STARTED: _ser_device_setup_started,
-    GuiEvent.DEVICE_SETUP_FINISHED: _ser_device_setup_finished,
-    GuiEvent.CONTEXT_SWITCHED: _ser_context_switched,
-    GuiEvent.MD_CHANGED: _ser_md_changed,
-    GuiEvent.ML_CHANGED: _ser_ml_changed,
-    GuiEvent.SOC_CHANGED: _ser_soc_changed,
+EVENT_SERIALIZERS: dict[type[Payload], Serializer] = {
+    TabAddedPayload: _ser_tab_added,
+    TabClosedPayload: _ser_tab_closed,
+    TabContentChangedPayload: _ser_tab_content_changed,
+    TabInteractionChangedPayload: _ser_tab_interaction_changed,
+    RunStartedPayload: _ser_run_started,
+    RunFinishedPayload: _ser_run_finished,
+    PredictorChangedPayload: _ser_predictor_changed,
+    DeviceChangedPayload: _ser_device_changed,
+    DeviceSetupStartedPayload: _ser_device_setup_started,
+    DeviceSetupFinishedPayload: _ser_device_setup_finished,
+    ContextSwitchedPayload: _ser_context_switched,
+    MdChangedPayload: _ser_md_changed,
+    MlChangedPayload: _ser_ml_changed,
+    SocChangedPayload: _ser_soc_changed,
 }
 
 
-def wire_event_name(event: GuiEvent) -> str:
-    """Map ``GuiEvent`` to its lowercase wire name.
+def wire_event_name(payload_type: type[Payload]) -> str:
+    """Map a ``Payload`` type to its lowercase wire event name.
 
-    ``GuiEvent`` already extends ``str`` with the lowercase value (e.g.
-    ``"tab_added"``), but this indirection keeps the wire schema explicit
-    and lets future renames stay coherent.
+    The enum value is the wire name (e.g. ``"tab_added"``); routing through
+    ``payload_type.EVENT`` keeps the wire schema explicit and lets future
+    renames stay coherent.
     """
-    return event.value
+    return payload_type.EVENT.value

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Optional
 from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
 from zcu_tools.gui.app.main.adapter import SaveDataRequest
-from zcu_tools.gui.app.main.event_bus import GuiEvent, TabInteractionChangedPayload
+from zcu_tools.gui.app.main.event_bus import TabInteractionChangedPayload
 from zcu_tools.gui.app.main.figure_export import save_figure_to_path
 from zcu_tools.utils.datasaver import safe_labber_filepath
 
@@ -167,7 +167,6 @@ class SaveService(QObject):
     def _mark_saving(self, tab_id: str, saving_data: bool) -> None:
         self._state.set_tab_saving_data(tab_id, saving_data)
         self._bus.emit(
-            GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),
         )
 

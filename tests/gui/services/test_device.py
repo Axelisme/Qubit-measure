@@ -9,7 +9,7 @@ import pytest
 from qtpy.QtCore import QEventLoop
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.fake import FakeDeviceInfo
-from zcu_tools.gui.app.main.event_bus import EventBus, GuiEvent
+from zcu_tools.gui.app.main.event_bus import DeviceChangedPayload, EventBus
 from zcu_tools.gui.app.main.services.device import (
     ConnectDeviceRequest,
     DeviceService,
@@ -258,22 +258,27 @@ def test_disconnect_close_failure_retains_connected_device_and_releases_gate(qap
     retry_loop.exec()
 
 
-def test_event_failure_before_worker_start_does_not_leak_device_lease(qapp):
+def test_failing_device_changed_subscriber_does_not_abort_connect(qapp):
     bus = EventBus()
     svc = DeviceService(
         bus,
         State(MagicMock()),
         driver_factory=lambda _type, _address: MagicMock(),  # type: ignore[arg-type]
     )
+    # A DEVICE_CHANGED subscriber raising (e.g. a View redraw bug) is swallowed +
+    # logged by the EventBus; it must NOT abort the connect or roll back the
+    # optimistic device state (one bad subscriber must not break the publisher).
     bus.subscribe(
-        GuiEvent.DEVICE_CHANGED,
+        DeviceChangedPayload,
         MagicMock(side_effect=RuntimeError("render failed")),
     )
 
-    with pytest.raises(RuntimeError, match="render failed"):
-        svc.start_connect_device(_req())
+    svc.start_connect_device(_req())  # no raise — the subscriber failure is swallowed
 
-    assert svc.get_device_snapshot("dev1") is None
+    # The optimistic device state survives (the operation proceeds; the lease is
+    # released at its real terminal, not on the subscriber's failure) — previously
+    # the re-raising bus rolled this back to None.
+    assert svc.get_device_snapshot("dev1") is not None
 
 
 def test_connect_writes_device_state_to_state_with_remember(qapp):
@@ -293,7 +298,7 @@ def test_get_device_info_unchanged_does_not_bump_or_emit(qapp):
     _connect(svc, _req())  # connected with FakeDeviceInfo(value=0.0)
     before = state.version.get("device:dev1")
     events: list[object] = []
-    svc._bus.subscribe(GuiEvent.DEVICE_CHANGED, lambda p: events.append(p.name))
+    svc._bus.subscribe(DeviceChangedPayload, lambda p: events.append(p.name))
 
     # Driver returns the same value already cached → pure cache sync.
     device.get_info.return_value = FakeDeviceInfo(address="addr", value=0.0)
@@ -312,7 +317,7 @@ def test_get_device_info_changed_bumps_and_emits(qapp):
     _connect(svc, _req())  # connected with FakeDeviceInfo(value=0.0)
     before = state.version.get("device:dev1")
     events: list[object] = []
-    svc._bus.subscribe(GuiEvent.DEVICE_CHANGED, lambda p: events.append(p.name))
+    svc._bus.subscribe(DeviceChangedPayload, lambda p: events.append(p.name))
 
     # Driver value moved underneath us (e.g. external hardware change).
     device.get_info.return_value = FakeDeviceInfo(address="addr", value=2.0)

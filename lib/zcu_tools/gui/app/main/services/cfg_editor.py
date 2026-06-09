@@ -242,15 +242,23 @@ class CfgEditorService:
         # ADR-0008/0004 Reaction: the service owns every cfg model, so it (not the
         # widget) refreshes their EvalValue snapshots when md/ml/context/device
         # change. Subscribe once; refresh_all fans out to every owned model.
-        from zcu_tools.gui.app.main.event_bus import GuiEvent
+        from zcu_tools.gui.app.main.event_bus import (
+            ContextSwitchedPayload,
+            DeviceChangedPayload,
+            MdChangedPayload,
+            MlChangedPayload,
+        )
 
-        for event in (
-            GuiEvent.MD_CHANGED,
-            GuiEvent.ML_CHANGED,
-            GuiEvent.CONTEXT_SWITCHED,
-            GuiEvent.DEVICE_CHANGED,
+        for payload_type in (
+            MdChangedPayload,
+            MlChangedPayload,
+            ContextSwitchedPayload,
+            DeviceChangedPayload,
         ):
-            bus.subscribe(event, lambda _payload, ev=event: self.refresh_all(ev))
+            bus.subscribe(
+                payload_type,
+                lambda payload: self.refresh_all(payload.EVENT),
+            )
 
     def set_change_listener(self, listener: Optional[ChangeListener]) -> None:
         """Inject the per-session push listener (remote layer wires this).

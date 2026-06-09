@@ -19,7 +19,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.main.event_bus import (
-    GuiEvent,
     MdChangedPayload,
     PredictorChangedPayload,
     RunFinishedPayload,
@@ -94,7 +93,7 @@ def test_subscribe_then_run_started_arrives(fx):
     try:
         call(sock, "events.subscribe", {"events": ["run_started"]})
         # Emit synthetically from the main thread (EventBus.emit is sync).
-        fx.bus.emit(GuiEvent.RUN_STARTED, RunStartedPayload(tab_id="tab-x"))
+        fx.bus.emit(RunStartedPayload(tab_id="tab-x"))
         msg = recv_push(sock, "run_started")
         assert msg["payload"]["tab_id"] == "tab-x"
     finally:
@@ -136,16 +135,12 @@ def test_unsubscribe_stops_push(fx):
     sock = open_client(fx.service.port)
     try:
         call(sock, "events.subscribe", {"events": ["tab_added"]})
-        fx.bus.emit(
-            GuiEvent.TAB_ADDED, TabAddedPayload(tab_id="a", adapter_name="fake")
-        )
+        fx.bus.emit(TabAddedPayload(tab_id="a", adapter_name="fake"))
         first = recv_push(sock, "tab_added")
         assert first["payload"]["tab_id"] == "a"
 
         call(sock, "events.unsubscribe", {"events": ["tab_added"]})
-        fx.bus.emit(
-            GuiEvent.TAB_ADDED, TabAddedPayload(tab_id="b", adapter_name="fake")
-        )
+        fx.bus.emit(TabAddedPayload(tab_id="b", adapter_name="fake"))
         # No further push should arrive — confirm by issuing an unrelated
         # RPC and verifying its reply comes back without a push in between.
         resp = call(sock, "state.has_context", rid="probe")
@@ -159,7 +154,7 @@ def test_md_changed_emits_requery_hint(fx):
     sock = open_client(fx.service.port)
     try:
         call(sock, "events.subscribe", {"events": ["md_changed"]})
-        fx.bus.emit(GuiEvent.MD_CHANGED, MdChangedPayload(md=MagicMock()))
+        fx.bus.emit(MdChangedPayload(md=MagicMock()))
         msg = recv_push(sock, "md_changed")
         assert msg["payload"] == {"requery": ["context.get_md_attr"]}
     finally:
@@ -180,7 +175,6 @@ def test_writer_queue_overflow_eventually_closes_wedged_client(fx, caplog):
         with caplog.at_level("WARNING"):
             for i in range(1024):
                 fx.bus.emit(
-                    GuiEvent.TAB_ADDED,
                     TabAddedPayload(tab_id=f"t{i}", adapter_name="fake"),
                 )
         # Confirm at least one WARN about the outbound queue being full.
@@ -194,14 +188,14 @@ def test_stop_unsubscribes_event_bus(qapp):  # noqa: ARG001
     f.start()
     # Confirm at least one subscription is installed.
     subs = f.bus._subs  # type: ignore[attr-defined]
-    assert subs.get(GuiEvent.RUN_FINISHED), "service should have subscribed"
+    assert subs.get(RunFinishedPayload), "service should have subscribed"
     f.stop()
     subs_after = f.bus._subs  # type: ignore[attr-defined]
     # The RemoteEventService's subscriptions are gone after stop. RUN_FINISHED
     # is remote-event-specific, so it must be empty. (MD_CHANGED is *also* held
     # permanently by CfgEditorService for owned-model refresh — ADR-0008 — so it
     # is not a clean proxy for the remote view's teardown.)
-    assert not subs_after.get(GuiEvent.RUN_FINISHED)
+    assert not subs_after.get(RunFinishedPayload)
 
 
 # ---------------------------------------------------------------------------

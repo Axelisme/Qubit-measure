@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any, Optional
 from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
 from zcu_tools.gui.app.main.event_bus import (
-    GuiEvent,
     RunFinishedPayload,
     RunStartedPayload,
     TabInteractionChangedPayload,
@@ -130,10 +129,9 @@ class RunService(QObject):
             raise
         self._state.set_tab_running(tab_id, True)
         self._bus.emit(
-            GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),
         )
-        self._bus.emit(GuiEvent.RUN_STARTED, RunStartedPayload(tab_id=tab_id))
+        self._bus.emit(RunStartedPayload(tab_id=tab_id))
         return token
 
     def cancel_run(self) -> None:
@@ -179,11 +177,9 @@ class RunService(QObject):
         self._state.set_tab_running(tab_id, False)
         self._release_lease(OperationOutcome("finished"))
         self._bus.emit(
-            GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),
         )
         self._bus.emit(
-            GuiEvent.RUN_FINISHED,
             RunFinishedPayload(tab_id=tab_id, outcome="finished"),
         )
         self.run_finished.emit(tab_id, result)
@@ -198,11 +194,9 @@ class RunService(QObject):
         self._state.set_tab_running(tab_id, False)
         self._release_lease(OperationOutcome("cancelled"))
         self._bus.emit(
-            GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),
         )
         self._bus.emit(
-            GuiEvent.RUN_FINISHED,
             RunFinishedPayload(tab_id=tab_id, outcome="cancelled"),
         )
         # A cancelled run is reported to View listeners via run_finished only if
@@ -215,11 +209,9 @@ class RunService(QObject):
         self._state.set_tab_running(tab_id, False)
         self._release_lease(OperationOutcome("failed", str(error)))
         self._bus.emit(
-            GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),
         )
         self._bus.emit(
-            GuiEvent.RUN_FINISHED,
             RunFinishedPayload(
                 tab_id=tab_id,
                 outcome="failed",

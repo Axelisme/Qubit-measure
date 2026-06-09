@@ -12,7 +12,6 @@ from zcu_tools.gui.app.main.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.main.event_bus import (
-    GuiEvent,
     TabContentChangedPayload,
 )
 
@@ -192,9 +191,7 @@ class WritebackService:
             ContextWrites(md=md, ml_modules=ml_modules, ml_waveforms=ml_waveforms)
         )
         tab.applied_session_ids.update(applied_ids)
-        self._bus.emit(
-            GuiEvent.TAB_CONTENT_CHANGED, TabContentChangedPayload(tab_id=tab_id)
-        )
+        self._bus.emit(TabContentChangedPayload(tab_id=tab_id))
         return applied_ids
 
     def _item_schema(self, item: "ModuleWriteback | WaveformWriteback") -> CfgSchema:

@@ -10,7 +10,6 @@ from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.gui.app.main.event_bus import (
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
-    GuiEvent,
 )
 from zcu_tools.gui.app.main.services.device import (
     DeviceSetupSnapshot,
@@ -44,14 +43,11 @@ def test_device_setup_started_and_finished_push(fx):
             "events.subscribe",
             {"events": ["device_setup_started", "device_setup_finished"]},
         )
-        fx.bus.emit(
-            GuiEvent.DEVICE_SETUP_STARTED, DeviceSetupStartedPayload(name="bias")
-        )
+        fx.bus.emit(DeviceSetupStartedPayload(name="bias"))
         started = recv_push(sock, "device_setup_started")
         assert started["payload"] == {"name": "bias"}
 
         fx.bus.emit(
-            GuiEvent.DEVICE_SETUP_FINISHED,
             DeviceSetupFinishedPayload(name="bias", outcome="finished"),
         )
         finished = recv_push(sock, "device_setup_finished")

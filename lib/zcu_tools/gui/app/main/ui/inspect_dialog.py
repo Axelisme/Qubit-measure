@@ -33,7 +33,12 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.app.main.adapter import CfgSchema
-from zcu_tools.gui.app.main.event_bus import GuiEvent, Payload
+from zcu_tools.gui.app.main.event_bus import (
+    ContextSwitchedPayload,
+    MdChangedPayload,
+    MlChangedPayload,
+    Payload,
+)
 from zcu_tools.gui.app.main.services.context import MdValueError, MlEntryValidationError
 
 from .cfg_form import CfgFormWidget
@@ -278,9 +283,9 @@ class InspectDialog(QDialog):
         layout.addWidget(self._tabs)
 
         # Subscribe to EventBus for auto-refresh
-        bus.subscribe(GuiEvent.CONTEXT_SWITCHED, self._on_bus_refresh)
-        bus.subscribe(GuiEvent.MD_CHANGED, self._on_bus_refresh)
-        bus.subscribe(GuiEvent.ML_CHANGED, self._on_bus_refresh)
+        bus.subscribe(ContextSwitchedPayload, self._on_bus_refresh)
+        bus.subscribe(MdChangedPayload, self._on_bus_refresh)
+        bus.subscribe(MlChangedPayload, self._on_bus_refresh)
         self._bus_subs_active = True
         self.finished.connect(self._cleanup_bus_subscriptions)
         self.destroyed.connect(self._cleanup_bus_subscriptions)
@@ -626,9 +631,9 @@ class InspectDialog(QDialog):
         if not self._bus_subs_active:
             logger.debug("_cleanup_bus_subscriptions called but already inactive")
             return
-        self._bus.unsubscribe(GuiEvent.CONTEXT_SWITCHED, self._on_bus_refresh)
-        self._bus.unsubscribe(GuiEvent.MD_CHANGED, self._on_bus_refresh)
-        self._bus.unsubscribe(GuiEvent.ML_CHANGED, self._on_bus_refresh)
+        self._bus.unsubscribe(ContextSwitchedPayload, self._on_bus_refresh)
+        self._bus.unsubscribe(MdChangedPayload, self._on_bus_refresh)
+        self._bus.unsubscribe(MlChangedPayload, self._on_bus_refresh)
         self._bus_subs_active = False
 
     def _on_bus_refresh(self, payload: Payload) -> None:

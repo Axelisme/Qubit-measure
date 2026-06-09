@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING
 
 from zcu_tools.gui.app.main.event_bus import (
     EventBus,
-    GuiEvent,
     TabAddedPayload,
     TabClosedPayload,
 )
@@ -40,7 +39,6 @@ class WorkspaceService:
         tab_id = self._tabs.new_tab(adapter_name)
         self._state.set_active_tab(tab_id)
         self._bus.emit(
-            GuiEvent.TAB_ADDED,
             TabAddedPayload(tab_id=tab_id, adapter_name=adapter_name),
         )
         return tab_id
@@ -49,7 +47,7 @@ class WorkspaceService:
         if self._state.is_tab_busy(tab_id):
             raise RuntimeError("Cannot close a busy tab")
         self._tabs.close_tab(tab_id)
-        self._bus.emit(GuiEvent.TAB_CLOSED, TabClosedPayload(tab_id=tab_id))
+        self._bus.emit(TabClosedPayload(tab_id=tab_id))
 
     def set_active_tab(self, tab_id: str) -> None:
         self._state.set_active_tab(tab_id)
@@ -109,7 +107,6 @@ class WorkspaceService:
             tab_id = self._tabs.new_tab(persisted_tab.adapter_name, from_dict=snapshot)
             restored_by_index[index] = tab_id
             self._bus.emit(
-                GuiEvent.TAB_ADDED,
                 TabAddedPayload(
                     tab_id=tab_id,
                     adapter_name=persisted_tab.adapter_name,

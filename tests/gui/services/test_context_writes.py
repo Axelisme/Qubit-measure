@@ -115,7 +115,7 @@ def test_apply_writes_empty_is_noop():
 
 def test_apply_writes_emits_once_per_kind():
     svc = _make_svc()
-    from zcu_tools.gui.app.main.event_bus import GuiEvent
+    from zcu_tools.gui.app.main.event_bus import MdChangedPayload, MlChangedPayload
 
     md_events = 0
     ml_events = 0
@@ -128,8 +128,8 @@ def test_apply_writes_emits_once_per_kind():
         nonlocal ml_events
         ml_events += 1
 
-    svc._bus.subscribe(GuiEvent.MD_CHANGED, _on_md)
-    svc._bus.subscribe(GuiEvent.ML_CHANGED, _on_ml)
+    svc._bus.subscribe(MdChangedPayload, _on_md)
+    svc._bus.subscribe(MlChangedPayload, _on_ml)
     svc.apply_writes(
         ContextWrites(
             md={"r_f": 6000.0, "rf_w": 1.0},

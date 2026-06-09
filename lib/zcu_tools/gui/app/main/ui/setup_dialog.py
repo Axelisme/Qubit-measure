@@ -228,12 +228,16 @@ class SetupDialog(QDialog):
         self._maybe_show_current_cfg()
 
         # EventBus subscriptions for live updates
-        from zcu_tools.gui.app.main.event_bus import GuiEvent
+        from zcu_tools.gui.app.main.event_bus import (
+            ContextSwitchedPayload,
+            DeviceChangedPayload,
+            SocChangedPayload,
+        )
 
         bus = controller.get_bus()
-        bus.subscribe(GuiEvent.CONTEXT_SWITCHED, self._on_bus_context_switched)
-        bus.subscribe(GuiEvent.SOC_CHANGED, self._on_bus_soc_changed)
-        bus.subscribe(GuiEvent.DEVICE_CHANGED, self._on_bus_device_changed)
+        bus.subscribe(ContextSwitchedPayload, self._on_bus_context_switched)
+        bus.subscribe(SocChangedPayload, self._on_bus_soc_changed)
+        bus.subscribe(DeviceChangedPayload, self._on_bus_device_changed)
         self._bus_subs_active = True
         self.finished.connect(self._cleanup_bus_subscriptions)
         self.destroyed.connect(self._cleanup_bus_subscriptions)
@@ -242,12 +246,16 @@ class SetupDialog(QDialog):
         if not self._bus_subs_active:
             logger.debug("_cleanup_bus_subscriptions called but already inactive")
             return
-        from zcu_tools.gui.app.main.event_bus import GuiEvent
+        from zcu_tools.gui.app.main.event_bus import (
+            ContextSwitchedPayload,
+            DeviceChangedPayload,
+            SocChangedPayload,
+        )
 
         bus = self._ctrl.get_bus()
-        bus.unsubscribe(GuiEvent.CONTEXT_SWITCHED, self._on_bus_context_switched)
-        bus.unsubscribe(GuiEvent.SOC_CHANGED, self._on_bus_soc_changed)
-        bus.unsubscribe(GuiEvent.DEVICE_CHANGED, self._on_bus_device_changed)
+        bus.unsubscribe(ContextSwitchedPayload, self._on_bus_context_switched)
+        bus.unsubscribe(SocChangedPayload, self._on_bus_soc_changed)
+        bus.unsubscribe(DeviceChangedPayload, self._on_bus_device_changed)
         self._bus_subs_active = False
 
     def _on_bus_context_switched(self, payload: object) -> None:

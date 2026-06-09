@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtCore import QEventLoop
-from zcu_tools.gui.app.main.event_bus import EventBus, GuiEvent
+from zcu_tools.gui.app.main.event_bus import EventBus, SocChangedPayload
 from zcu_tools.gui.app.main.services.connection import (
     ConnectionService,
     ConnectMockRequest,
@@ -162,8 +162,11 @@ def test_soc_changed_subscriber_failure_releases_connection_lease(qapp):
         ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
     )
     bus = EventBus()
+    # A SOC_CHANGED subscriber raising is swallowed + logged by the EventBus; it
+    # must NOT propagate out of _finish_success, and the lease is still released
+    # (the release is in a finally, independent of subscriber health).
     bus.subscribe(
-        GuiEvent.SOC_CHANGED, MagicMock(side_effect=RuntimeError("render failed"))
+        SocChangedPayload, MagicMock(side_effect=RuntimeError("render failed"))
     )
     handles = OperationHandles()
     svc = ConnectionService(state, bus, gate, handles)
@@ -171,6 +174,5 @@ def test_soc_changed_subscriber_failure_releases_connection_lease(qapp):
     token = handles.create()
     gate.register(token, OperationKind.SOC_CONNECT, owner_id="soc")
     svc._active_token = token
-    with pytest.raises(RuntimeError, match="render failed"):
-        svc._finish_success(MagicMock(), MagicMock())
+    svc._finish_success(MagicMock(), MagicMock())  # no raise — subscriber swallowed
     assert not gate.has_active(OperationKind.SOC_CONNECT)

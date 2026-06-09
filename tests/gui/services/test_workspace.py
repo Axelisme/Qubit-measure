@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import cast
 from unittest.mock import MagicMock
 
-from zcu_tools.gui.app.main.event_bus import EventBus, GuiEvent, TabAddedPayload
+from zcu_tools.gui.app.main.event_bus import EventBus, TabAddedPayload
 from zcu_tools.gui.app.main.services import workspace as workspace_mod
 from zcu_tools.gui.app.main.services.persistence_types import (
     PersistedSession,
@@ -31,7 +31,6 @@ def test_new_tab_owns_active_tab_and_event() -> None:
 
     assert state.active_tab_id == "tab-1"
     cast(MagicMock, bus.emit).assert_called_once_with(
-        GuiEvent.TAB_ADDED,
         TabAddedPayload(tab_id="tab-1", adapter_name="fake"),
     )
 

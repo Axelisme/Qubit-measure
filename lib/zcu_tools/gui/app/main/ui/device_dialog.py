@@ -31,7 +31,6 @@ from zcu_tools.gui.app.main.event_bus import (
     DeviceChangedPayload,
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
-    GuiEvent,
 )
 from zcu_tools.gui.app.main.services.device import (
     ConnectDeviceRequest,
@@ -327,9 +326,9 @@ class DeviceDialog(QDialog):
         layout.addWidget(self._progress)
 
         bus = self._ctrl.get_bus()
-        bus.subscribe(GuiEvent.DEVICE_CHANGED, self._on_device_changed)
-        bus.subscribe(GuiEvent.DEVICE_SETUP_STARTED, self._on_setup_started)
-        bus.subscribe(GuiEvent.DEVICE_SETUP_FINISHED, self._on_setup_finished)
+        bus.subscribe(DeviceChangedPayload, self._on_device_changed)
+        bus.subscribe(DeviceSetupStartedPayload, self._on_setup_started)
+        bus.subscribe(DeviceSetupFinishedPayload, self._on_setup_finished)
         self._bus_subs_active = True
         # Progress subscription for the currently-active setup's device (managed
         # in _render_setup as the active setup comes and goes). None when no
@@ -346,14 +345,12 @@ class DeviceDialog(QDialog):
         if not self._bus_subs_active:
             return
         self._ctrl.get_bus().unsubscribe(
-            GuiEvent.DEVICE_SETUP_STARTED, self._on_setup_started
+            DeviceSetupStartedPayload, self._on_setup_started
         )
         self._ctrl.get_bus().unsubscribe(
-            GuiEvent.DEVICE_SETUP_FINISHED, self._on_setup_finished
+            DeviceSetupFinishedPayload, self._on_setup_finished
         )
-        self._ctrl.get_bus().unsubscribe(
-            GuiEvent.DEVICE_CHANGED, self._on_device_changed
-        )
+        self._ctrl.get_bus().unsubscribe(DeviceChangedPayload, self._on_device_changed)
         self._detach_progress()
         self._bus_subs_active = False
 

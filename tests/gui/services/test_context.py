@@ -101,7 +101,7 @@ def test_context_service_set_startup_context():
     assert state.exp_context.readiness is ContextReadiness.DRAFT
     assert not svc.is_active_context()
     bus.emit.assert_called_once()
-    assert bus.emit.call_args[0][0] == GuiEvent.CONTEXT_SWITCHED
+    assert bus.emit.call_args[0][0].EVENT == GuiEvent.CONTEXT_SWITCHED
 
 
 def test_context_service_use_context():
@@ -166,7 +166,7 @@ def test_context_service_new_context():
         base_ctx, value=1.5, unit="V", clone_from="src_label"
     )
     bus.emit.assert_called_once()
-    assert bus.emit.call_args[0][0] == GuiEvent.CONTEXT_SWITCHED
+    assert bus.emit.call_args[0][0].EVENT == GuiEvent.CONTEXT_SWITCHED
     assert state.exp_context.active_label == "flux_1.5_V"
     assert state.exp_context.readiness is ContextReadiness.ACTIVE
 
@@ -248,7 +248,7 @@ def test_del_md_attr_emits_md_changed():
     svc.del_md_attr("r_f")
 
     bus.emit.assert_called()
-    event_calls = [c[0][0] for c in bus.emit.call_args_list]
+    event_calls = [c[0][0].EVENT for c in bus.emit.call_args_list]
     assert GuiEvent.MD_CHANGED in event_calls
 
 
@@ -280,7 +280,7 @@ def test_del_ml_module_emits_ml_changed():
 
     svc.del_ml_module("qub")
 
-    event_calls = [c[0][0] for c in bus.emit.call_args_list]
+    event_calls = [c[0][0].EVENT for c in bus.emit.call_args_list]
     assert GuiEvent.ML_CHANGED in event_calls
 
 
@@ -303,7 +303,7 @@ def test_rename_ml_module_moves_key_and_emits_once():
     assert "qub" not in ml.modules
     assert "qub2" in ml.modules
     assert state.version.get("context") == before + 1
-    event_calls = [c[0][0] for c in bus.emit.call_args_list]
+    event_calls = [c[0][0].EVENT for c in bus.emit.call_args_list]
     assert event_calls.count(GuiEvent.ML_CHANGED) == 1
 
 

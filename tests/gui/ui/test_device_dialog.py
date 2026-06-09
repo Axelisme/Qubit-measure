@@ -8,7 +8,6 @@ import pytest
 from zcu_tools.gui.app.main.event_bus import (
     DeviceSetupFinishedPayload,
     EventBus,
-    GuiEvent,
 )
 from zcu_tools.gui.app.main.services.device import (
     ConnectDeviceRequest,
@@ -221,7 +220,6 @@ def test_device_dialog_restores_background_setup_and_stops_it(qapp):
     # get_active_device_setup reports no active setup.
     ctrl.get_active_device_setup.return_value = None
     ctrl.get_bus.return_value.emit(
-        GuiEvent.DEVICE_SETUP_FINISHED,
         DeviceSetupFinishedPayload(name="fd", outcome="cancelled"),
     )
     assert dialog._apply_btn.text() == "Apply Changes"
@@ -243,4 +241,4 @@ def test_device_dialog_close_keeps_setup_running_and_unsubscribes(qapp):
     dialog.accept()
 
     ctrl.cancel_device_operation.assert_not_called()
-    assert ctrl.get_bus.return_value._subs[GuiEvent.DEVICE_SETUP_FINISHED] == []
+    assert ctrl.get_bus.return_value._subs[DeviceSetupFinishedPayload] == []

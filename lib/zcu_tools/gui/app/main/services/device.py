@@ -21,7 +21,6 @@ from zcu_tools.gui.app.main.event_bus import (
     DeviceChangedPayload,
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
-    GuiEvent,
 )
 from zcu_tools.gui.app.main.state import DeviceState, DeviceStatus
 
@@ -312,7 +311,6 @@ class DeviceService(QObject):
                 on_error=lambda exc: self._on_setup_failed(name, str(exc)),
             )
             self._bus.emit(
-                GuiEvent.DEVICE_SETUP_STARTED,
                 DeviceSetupStartedPayload(name=req.name),
             )
         except Exception:
@@ -546,22 +544,12 @@ class DeviceService(QObject):
         self._active_name = name
         self._active_prior = prior
         self._state.put_device(pending)
-        try:
-            self._emit_device_changed(name)
-        except Exception:
-            if prior is None:
-                self._state.remove_device(name)
-            else:
-                self._state.put_device(prior)
-            self._active_name = None
-            self._active_token = None
-            self._active_kind = None
-            self._active_prior = None
-            self._handles.settle(
-                token, OperationOutcome("failed", "operation failed to begin")
-            )
-            self._gate.release(token)
-            raise
+        # Announce the optimistic state. A DEVICE_CHANGED subscriber (e.g. a View
+        # redraw) raising here is swallowed + logged by the EventBus and does NOT
+        # abort the operation or roll back the optimistic write — the lease is
+        # released at the real terminal (_finish_operation), never on a
+        # subscriber's failure (one bad subscriber must not break the publisher).
+        self._emit_device_changed(name)
 
     def _finish_operation(self, name: str, outcome: OperationOutcome) -> None:
         if self._active_name != name or self._active_token is None:
@@ -671,7 +659,6 @@ class DeviceService(QObject):
         self._finish_operation(name, OperationOutcome("finished"))
         self._emit_device_changed(name)
         self._bus.emit(
-            GuiEvent.DEVICE_SETUP_FINISHED,
             DeviceSetupFinishedPayload(name=name, outcome="finished"),
         )
         self.setup_finished.emit(name)
@@ -681,7 +668,6 @@ class DeviceService(QObject):
         self._finish_operation(name, OperationOutcome("failed", error))
         self._emit_device_changed(name)
         self._bus.emit(
-            GuiEvent.DEVICE_SETUP_FINISHED,
             DeviceSetupFinishedPayload(
                 name=name, outcome="failed", error_message=error
             ),
@@ -695,7 +681,6 @@ class DeviceService(QObject):
         )
         self._emit_device_changed(name)
         self._bus.emit(
-            GuiEvent.DEVICE_SETUP_FINISHED,
             DeviceSetupFinishedPayload(name=name, outcome="cancelled"),
         )
         self.setup_cancelled.emit(name)
@@ -728,7 +713,7 @@ class DeviceService(QObject):
         # Pure signal: every caller has already written device state through a
         # State mutator (which bumps device:<name> on the main thread). This is
         # the notification half only — no state write, no version bump here.
-        self._bus.emit(GuiEvent.DEVICE_CHANGED, DeviceChangedPayload(name=name))
+        self._bus.emit(DeviceChangedPayload(name=name))
 
     def _reject_mutating_read(self, name: str) -> None:
         if self._gate.is_device_mutating(name):
