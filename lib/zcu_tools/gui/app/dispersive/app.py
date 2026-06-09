@@ -18,7 +18,8 @@ from typing import TYPE_CHECKING, Optional
 
 from zcu_tools.gui.app.dispersive.controller import Controller
 from zcu_tools.gui.app.dispersive.event_bus import EventBus
-from zcu_tools.gui.app.dispersive.state import DispersiveState, ProjectInfo
+from zcu_tools.gui.app.dispersive.state import DispersiveState
+from zcu_tools.gui.project import ProjectInfo
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.dispersive.services.remote.service import ControlOptions

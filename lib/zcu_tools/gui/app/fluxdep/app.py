@@ -18,7 +18,8 @@ from zcu_tools.gui.app.fluxdep.services.remote.service import (
     ControlOptions,
     RemoteControlAdapter,
 )
-from zcu_tools.gui.app.fluxdep.state import FluxDepState, ProjectInfo
+from zcu_tools.gui.app.fluxdep.state import FluxDepState
+from zcu_tools.gui.project import ProjectInfo
 
 
 def run_app(

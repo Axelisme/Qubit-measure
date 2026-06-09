@@ -7,8 +7,8 @@ from zcu_tools.gui.app.dispersive.event_bus import EventBus, ProjectChangedPaylo
 from zcu_tools.gui.app.dispersive.state import (
     PROJECT_VERSION_KEY,
     DispersiveState,
-    ProjectInfo,
 )
+from zcu_tools.gui.project import ProjectInfo
 
 
 def test_setup_project_writes_state_and_emits_event():

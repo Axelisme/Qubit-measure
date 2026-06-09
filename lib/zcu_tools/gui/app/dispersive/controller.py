@@ -37,8 +37,8 @@ from zcu_tools.gui.app.dispersive.services.project import ProjectService
 from zcu_tools.gui.app.dispersive.state import (
     DispersiveState,
     PreprocessResult,
-    ProjectInfo,
 )
+from zcu_tools.gui.project import ProjectInfo
 
 logger = logging.getLogger(__name__)
 

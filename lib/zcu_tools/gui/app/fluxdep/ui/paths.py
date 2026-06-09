@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import os
 
-from zcu_tools.gui.app.fluxdep.state import ProjectInfo
+from zcu_tools.gui.project import ProjectInfo
 
 # The repo's bundled simulation databases — the home of the precomputed *search*
 # database (fluxonium*.h5), a shared resource unrelated to a chip/qubit, so it is

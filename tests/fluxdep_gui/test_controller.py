@@ -13,7 +13,8 @@ from zcu_tools.gui.app.fluxdep.event_bus import (
     SpectrumChangedPayload,
     SpectrumRemovedPayload,
 )
-from zcu_tools.gui.app.fluxdep.state import FluxDepState, ProjectInfo
+from zcu_tools.gui.app.fluxdep.state import FluxDepState
+from zcu_tools.gui.project import ProjectInfo
 
 
 def _ctrl() -> Controller:

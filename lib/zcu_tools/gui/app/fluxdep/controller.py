@@ -33,7 +33,8 @@ from zcu_tools.gui.app.fluxdep.services.export import ExportService
 from zcu_tools.gui.app.fluxdep.services.fit import FitService, PbarFactory, SearchResult
 from zcu_tools.gui.app.fluxdep.services.load import LoadService
 from zcu_tools.gui.app.fluxdep.services.store import SelectionService, SpectrumStore
-from zcu_tools.gui.app.fluxdep.state import FluxDepState, ProjectInfo, SpecType
+from zcu_tools.gui.app.fluxdep.state import FluxDepState, SpecType
+from zcu_tools.gui.project import ProjectInfo
 from zcu_tools.notebook.persistance import TransitionDict
 
 logger = logging.getLogger(__name__)

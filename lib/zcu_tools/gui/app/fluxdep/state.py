@@ -14,13 +14,13 @@ replaces measure's tab/device/context model.
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass, field, replace
 from typing import Literal, Optional
 
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.gui.project import ProjectInfo
 from zcu_tools.notebook.persistance import PointsData, SpectrumData, TransitionDict
 
 logger = logging.getLogger(__name__)
@@ -98,95 +98,6 @@ def transitions_with_freqs(
 def spectrum_version_key(name: str) -> str:
     """Per-spectrum version key (``spectrum:<name>``)."""
     return f"spectrum:{name}"
-
-
-# Placeholder chip / qubit names used until the user sets a real project. They
-# live here (the ProjectInfo's home) so both the export path and ProjectInfo's
-# defaults share one source; export.py re-exports them for back-compat.
-DEFAULT_CHIP = "unknown_chip"
-DEFAULT_QUBIT = "unknown_qubit"
-
-
-def default_result_dir(chip_name: str, qub_name: str, root: str = "") -> str:
-    """The notebook-layout result dir for a chip/qubit (``result/<chip>/<qubit>``).
-
-    Empty names fall back to ``unknown_chip`` / ``unknown_qubit`` so the path is
-    always well-formed. ``root`` (the repo root, injected by the entry script)
-    anchors the result tree there instead of leaving it relative to cwd — a .bat
-    launcher does ``cd /d "%~dp0"`` into script/, which would otherwise scope the
-    default under script/. Empty ``root`` keeps the legacy cwd-relative form.
-    """
-    chip = chip_name or DEFAULT_CHIP
-    qub = qub_name or DEFAULT_QUBIT
-    return (
-        os.path.join(root, "result", chip, qub)
-        if root
-        else os.path.join("result", chip, qub)
-    )
-
-
-def default_database_root(chip_name: str, qub_name: str, root: str = "") -> str:
-    """The default *raw spectrum* root for a chip/qubit (``Database/<chip>/<qubit>``).
-
-    Raw measurement hdf5 files live under the repo's ``Database/`` tree per
-    chip/qubit (measure-gui saves to ``Database/<chip>/<qubit>/<date>/...``, e.g.
-    ``Database/Q5_2D/Q1/2026/05/Data_0504/R1_flux_2.hdf5``), NOT under ``result/``,
-    which holds *processed* outputs (the exported ``spectrums.hdf5``). Pointing the
-    load dialog at ``result/`` made it fall back to the bare ``result`` folder when
-    the chip/qubit subdir had no raw data. (This is the project's ``database_path``,
-    distinct from the precomputed *search* database, whose default is the bundled
-    ``Database/simulation`` — see ``ui/paths.database_dir``.) ``root`` anchors it at
-    the repo root (see ``default_result_dir``).
-    """
-    chip = chip_name or DEFAULT_CHIP
-    qub = qub_name or DEFAULT_QUBIT
-    return (
-        os.path.join(root, "Database", chip, qub)
-        if root
-        else os.path.join("Database", chip, qub)
-    )
-
-
-@dataclass
-class ProjectInfo:
-    """Where to read raw spectra from and where to write processed results.
-
-    Locates files only — there is no chip/qub connection concept (fluxdep never
-    touches hardware). A value-only block, so not versioned via a guarded op
-    unless ``project.setup`` bumps ``project`` on replacement. The chip / qubit
-    names default to the ``unknown_*`` placeholders.
-
-    ``result_dir`` and ``database_path`` are always concrete paths, never an empty
-    sentinel: leave a field unset (empty) at construction and ``__post_init__``
-    derives it from the chip/qubit names — so however a ``ProjectInfo`` is built,
-    both paths come out well-formed and every save site can
-    ``makedirs(exist_ok=True)`` a real directory without per-call-site fallback.
-    Pass a non-empty value to *override* the derivation (the GUI does this when the
-    user edits or browses the field). The empty placeholder never leaks out: it is
-    resolved in ``__post_init__`` before the instance is observable.
-    """
-
-    chip_name: str = DEFAULT_CHIP
-    qub_name: str = DEFAULT_QUBIT
-    # Empty = "derive from chip/qubit in __post_init__"; a value overrides it.
-    result_dir: str = ""  # → result/<chip>/<qubit>
-    database_path: str = ""  # raw spectrum root → Database/<chip>/<qubit>
-    # Base dir the derived defaults are anchored under (the repo root, injected by
-    # the entry script). Empty keeps the legacy cwd-relative default. Not a path
-    # itself — only seeds the derivation below; the GUI re-derives via the dialog.
-    root_dir: str = ""
-
-    def __post_init__(self) -> None:
-        # Single derivation point: an unset (empty) path becomes the chip/qubit
-        # default (anchored at root_dir); a provided path is kept as the override.
-        if not self.result_dir:
-            self.result_dir = default_result_dir(
-                self.chip_name, self.qub_name, self.root_dir
-            )
-        if not self.database_path:
-            self.database_path = default_database_root(
-                self.chip_name, self.qub_name, self.root_dir
-            )
 
 
 @dataclass

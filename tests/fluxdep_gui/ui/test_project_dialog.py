@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.app.fluxdep.state import ProjectInfo
-from zcu_tools.gui.app.fluxdep.ui.project_dialog import ProjectDialog
+from zcu_tools.gui.project import ProjectInfo
+from zcu_tools.gui.widgets.project_dialog import ProjectDialog
 
 
 @pytest.fixture

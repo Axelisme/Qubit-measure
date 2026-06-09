@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 import zcu_tools.gui.app.fluxdep.ui.paths as paths
-from zcu_tools.gui.app.fluxdep.state import ProjectInfo
+from zcu_tools.gui.project import ProjectInfo
 
 
 def test_processed_dir_derives_from_chip_qub_when_result_dir_unset():

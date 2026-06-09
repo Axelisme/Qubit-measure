@@ -15,9 +15,9 @@ from zcu_tools.gui.app.dispersive.state import (
     FluxoniumInputs,
     OnetoneEntry,
     PreprocessResult,
-    ProjectInfo,
     VersionTable,
 )
+from zcu_tools.gui.project import ProjectInfo
 from zcu_tools.notebook.persistance import SpectrumData
 
 

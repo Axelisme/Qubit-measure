@@ -9,7 +9,8 @@ import pytest
 from zcu_tools.gui.app.fluxdep.services.alignment import AlignmentService, PointsService
 from zcu_tools.gui.app.fluxdep.services.export import ExportService
 from zcu_tools.gui.app.fluxdep.services.load import LoadService
-from zcu_tools.gui.app.fluxdep.state import FluxDepState, ProjectInfo
+from zcu_tools.gui.app.fluxdep.state import FluxDepState
+from zcu_tools.gui.project import ProjectInfo
 from zcu_tools.notebook.persistance import load_spectrums
 
 

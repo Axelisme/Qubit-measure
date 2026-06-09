@@ -399,9 +399,11 @@ class MainWindow(QMainWindow):
 
     def _on_project_clicked(self) -> None:
         """Edit the project chip/qubit names (and optional roots)."""
-        from .project_dialog import ProjectDialog
+        from zcu_tools.gui.widgets.project_dialog import ProjectDialog
 
-        dialog = ProjectDialog(self._ctrl.state.project, parent=self)
+        dialog = ProjectDialog(
+            self._ctrl.state.project, parent=self, db_label="Database path"
+        )
         if dialog.exec() != int(dialog.DialogCode.Accepted):
             return
         self._ctrl.setup_project(dialog.result_project())

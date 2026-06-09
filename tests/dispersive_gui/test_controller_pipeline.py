@@ -19,7 +19,8 @@ from zcu_tools.gui.app.dispersive.event_bus import (
     OnetoneLoadedPayload,
     PreprocessChangedPayload,
 )
-from zcu_tools.gui.app.dispersive.state import DispersiveState, ProjectInfo
+from zcu_tools.gui.app.dispersive.state import DispersiveState
+from zcu_tools.gui.project import ProjectInfo
 
 
 def _stub(params, fluxs, bare_rf, g, *, progress=False, res_dim=4, **kw):

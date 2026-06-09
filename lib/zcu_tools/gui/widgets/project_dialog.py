@@ -1,11 +1,17 @@
 """ProjectDialog — set the project's chip / qubit names (and optional paths).
 
-The chip / qubit names locate the default layout (``result/<chip>/<qubit>/...``).
-Both ``result_dir`` (where params.json lives) and ``database_path`` (the raw
-one-tone root) auto-derive from the names and track them as the user types, until
-the user edits / browses a field — a manual change detaches that field from the
-derivation. Returns a ``ProjectInfo`` (or None on cancel). (Copied from fluxdep —
-the project shape is identical.)
+Shared by fluxdep-gui and dispersive-gui: the project shape is identical, so the
+dialog is too. The chip / qubit names locate the default output layout
+(``result_dir`` → ``result/<chip>/<qubit>`` for processed outputs,
+``database_path`` → ``Database/<chip>/<qubit>`` for raw measurement data). Both
+auto-derive from the names and track them as the user types, until the user edits
+/ browses a field — a manual change detaches that field from the derivation. Both
+have a Browse button (choose a folder). Returns a ``ProjectInfo`` (or None on
+cancel).
+
+The single per-app difference is the database field's label (``db_label``):
+fluxdep calls it "Database path" (the raw spectrum root), dispersive "One-tone
+dir" (its raw one-tone root). The app passes its label; everything else is shared.
 """
 
 from __future__ import annotations
@@ -23,26 +29,41 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.app.dispersive.state import (
+from zcu_tools.gui.project import (
     ProjectInfo,
     default_database_root,
     default_result_dir,
 )
 
+# fluxdep's label; the database field's default form-row label. dispersive passes
+# its own ("One-tone dir") explicitly.
+DEFAULT_DB_LABEL = "Database path"
+
 
 class ProjectDialog(QDialog):
     """Edit the project chip/qubit names (+ result/database roots, with Browse)."""
 
-    def __init__(self, project: ProjectInfo, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self,
+        project: ProjectInfo,
+        parent: Optional[QWidget] = None,
+        *,
+        db_label: str = DEFAULT_DB_LABEL,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Project")
         self.resize(560, 220)
+
+        self._db_label = db_label
 
         # Anchor derived defaults at the same repo root the project was built
         # with, so the auto-derivation matches the project's actual paths (else a
         # root-anchored project.result_dir would be mis-detected as overridden).
         self._root = project.root_dir
 
+        # Each path field tracks chip/qubit until the user edits / browses it.
+        # It counts as "overridden" if it already differs from what the names
+        # would derive (a previously-customised project).
         derived_result = default_result_dir(
             project.chip_name, project.qub_name, self._root
         )
@@ -71,7 +92,7 @@ class ProjectDialog(QDialog):
         self._database_edit = QLineEdit(project.database_path or derived_db)
         self._database_edit.textEdited.connect(self._on_database_edited)
         form.addRow(
-            "One-tone dir", self._dir_row(self._database_edit, self._browse_database)
+            self._db_label, self._dir_row(self._database_edit, self._browse_database)
         )
 
         buttons = QDialogButtonBox(
@@ -102,9 +123,11 @@ class ProjectDialog(QDialog):
             self._database_edit.setText(default_database_root(chip, qub, self._root))
 
     def _on_result_edited(self, _text: str) -> None:
+        # a manual edit detaches the result dir from the chip/qubit derivation
         self._result_overridden = True
 
     def _on_database_edited(self, _text: str) -> None:
+        # a manual edit detaches the database path from the chip/qubit derivation
         self._database_overridden = True
 
     # --- browse ----------------------------------------------------------
@@ -119,7 +142,7 @@ class ProjectDialog(QDialog):
 
     def _browse_database(self) -> None:
         path = QFileDialog.getExistingDirectory(
-            self, "Select one-tone dir", self._database_edit.text()
+            self, f"Select {self._db_label.lower()}", self._database_edit.text()
         )
         if path:
             self._database_overridden = True
@@ -128,7 +151,11 @@ class ProjectDialog(QDialog):
     # --- result ----------------------------------------------------------
 
     def result_project(self) -> ProjectInfo:
-        """The edited project info (names trimmed, paths always concrete)."""
+        """The edited project info (names trimmed, paths always concrete).
+
+        An empty path field is left empty so ``ProjectInfo.__post_init__`` derives
+        it; a non-empty field is the user's override.
+        """
         return ProjectInfo(
             chip_name=self._chip_edit.text().strip(),
             qub_name=self._qub_edit.text().strip(),

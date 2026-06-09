@@ -17,13 +17,13 @@ alignment + a bare_rf seed), which dispersive consumes as its inputs.
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass, replace
 from typing import Optional
 
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.gui.project import ProjectInfo
 from zcu_tools.notebook.persistance import SpectrumData
 
 logger = logging.getLogger(__name__)
@@ -42,86 +42,9 @@ ONETONE_VERSION_KEY = "onetone"
 PREPROCESS_VERSION_KEY = "preprocess"
 FIT_VERSION_KEY = "fit"
 
-# Placeholder chip / qubit names used until the user sets a real project. They
-# live here (the ProjectInfo's home) so both the export path and ProjectInfo's
-# defaults share one source.
-DEFAULT_CHIP = "unknown_chip"
-DEFAULT_QUBIT = "unknown_qubit"
-
 # bare_rf fallback when neither a prior dispersive section nor the fit's r_f is
 # present in params.json (the notebook's default, GHz).
 DEFAULT_BARE_RF = 5.0
-
-
-def default_result_dir(chip_name: str, qub_name: str, root: str = "") -> str:
-    """The notebook-layout result dir for a chip/qubit (``result/<chip>/<qubit>``).
-
-    Empty names fall back to ``unknown_chip`` / ``unknown_qubit`` so the path is
-    always well-formed. ``root`` (the repo root, injected by the entry script)
-    anchors the result tree there instead of leaving it relative to cwd — a .bat
-    launcher does ``cd /d "%~dp0"`` into script/, which would otherwise scope the
-    default under script/. Empty ``root`` keeps the legacy cwd-relative form.
-    """
-    chip = chip_name or DEFAULT_CHIP
-    qub = qub_name or DEFAULT_QUBIT
-    return (
-        os.path.join(root, "result", chip, qub)
-        if root
-        else os.path.join("result", chip, qub)
-    )
-
-
-def default_database_root(chip_name: str, qub_name: str, root: str = "") -> str:
-    """The default *raw one-tone* root for a chip/qubit (``Database/<chip>/<qubit>``).
-
-    Raw measurement hdf5 files live under the repo's ``Database/`` tree per
-    chip/qubit (the notebook reads e.g. ``Database/Q12_2D[5]/Q1/R1_flux_1.hdf5``),
-    NOT under ``result/`` (which is where processed outputs / params.json go).
-
-    Empty names fall back to ``unknown_chip`` / ``unknown_qubit`` so the path is
-    always well-formed. ``root`` anchors it at the repo root (see
-    ``default_result_dir``).
-    """
-    chip = chip_name or DEFAULT_CHIP
-    qub = qub_name or DEFAULT_QUBIT
-    return (
-        os.path.join(root, "Database", chip, qub)
-        if root
-        else os.path.join("Database", chip, qub)
-    )
-
-
-@dataclass
-class ProjectInfo:
-    """Where to read raw one-tone spectra from and where to write results.
-
-    Locates files only — dispersive never touches hardware. ``result_dir`` and
-    ``database_path`` are always concrete paths: leave a field empty at
-    construction and ``__post_init__`` derives it from the chip/qubit names
-    (``result/<chip>/<qubit>``); pass a non-empty value to override. The empty
-    placeholder never leaks out — it is resolved before the instance is
-    observable, so every save site can ``makedirs(exist_ok=True)`` a real dir.
-    """
-
-    chip_name: str = DEFAULT_CHIP
-    qub_name: str = DEFAULT_QUBIT
-    # Empty = "derive from chip/qubit in __post_init__"; a value overrides it.
-    result_dir: str = ""  # processed outputs / params.json → result/<chip>/<qubit>
-    database_path: str = ""  # raw one-tone root → Database/<chip>/<qubit>
-    # Base dir the derived defaults are anchored under (the repo root, injected by
-    # the entry script). Empty keeps the legacy cwd-relative default. Not a path
-    # itself — only seeds the derivation below; the GUI re-derives via the dialog.
-    root_dir: str = ""
-
-    def __post_init__(self) -> None:
-        if not self.result_dir:
-            self.result_dir = default_result_dir(
-                self.chip_name, self.qub_name, self.root_dir
-            )
-        if not self.database_path:
-            self.database_path = default_database_root(
-                self.chip_name, self.qub_name, self.root_dir
-            )
 
 
 @dataclass(frozen=True)

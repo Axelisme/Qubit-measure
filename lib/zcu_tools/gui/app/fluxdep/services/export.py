@@ -12,25 +12,12 @@ import logging
 import os
 from typing import Optional
 
-from zcu_tools.gui.app.fluxdep.state import (
-    DEFAULT_CHIP,
-    DEFAULT_QUBIT,
-    FluxDepState,
-    default_database_root,
-    default_result_dir,
-)
+from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.notebook.persistance import SpectrumResult, dump_spectrums
 
 logger = logging.getLogger(__name__)
 
-# ``default_result_dir`` / ``default_database_root`` / DEFAULT_* live in state.py
-# (the ProjectInfo's home); re-export them here for callers that import from this
-# service module.
 __all__ = [
-    "DEFAULT_CHIP",
-    "DEFAULT_QUBIT",
-    "default_result_dir",
-    "default_database_root",
     "default_export_path",
     "ExportService",
 ]

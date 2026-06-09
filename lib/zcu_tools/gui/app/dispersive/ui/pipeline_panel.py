@@ -63,9 +63,9 @@ from zcu_tools.gui.app.dispersive.services.viz import (
     update_sample_dots,
 )
 from zcu_tools.gui.app.dispersive.state import PreprocessResult
+from zcu_tools.gui.widgets.project_dialog import ProjectDialog
 
 from .error_messages import friendly_fit_message, friendly_io_message
-from .project_dialog import ProjectDialog
 from .tune_canvas import TuneCanvasWidget
 
 logger = logging.getLogger(__name__)
@@ -418,7 +418,7 @@ class PipelinePanelWidget(QWidget):
     # --- section 1: inputs ----------------------------------------------
 
     def _on_project(self) -> None:
-        dialog = ProjectDialog(self._ctrl.state.project, self)
+        dialog = ProjectDialog(self._ctrl.state.project, self, db_label="One-tone dir")
         if dialog.exec():
             self._ctrl.setup_project(dialog.result_project())
 

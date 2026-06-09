@@ -9,12 +9,12 @@ from zcu_tools.gui.app.fluxdep.state import (
     SELECTION_VERSION_KEY,
     SPECTRUM_SET_VERSION_KEY,
     FluxDepState,
-    ProjectInfo,
     SpectrumEntry,
     SpecType,
     VersionTable,
     spectrum_version_key,
 )
+from zcu_tools.gui.project import ProjectInfo
 from zcu_tools.notebook.persistance import PointsData, SpectrumData
 
 

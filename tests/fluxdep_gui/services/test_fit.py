@@ -22,9 +22,9 @@ from zcu_tools.gui.app.fluxdep.services.fit import (
 from zcu_tools.gui.app.fluxdep.state import (
     FIT_VERSION_KEY,
     FluxDepState,
-    ProjectInfo,
     SpectrumEntry,
 )
+from zcu_tools.gui.project import ProjectInfo
 from zcu_tools.notebook.persistance import PointsData, SpectrumData, TransitionDict
 
 # --- fixtures --------------------------------------------------------------

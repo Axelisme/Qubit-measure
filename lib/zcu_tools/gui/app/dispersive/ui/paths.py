@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 
-from zcu_tools.gui.app.dispersive.state import ProjectInfo
+from zcu_tools.gui.project import ProjectInfo
 
 
 def _nearest_existing(path: str) -> str:

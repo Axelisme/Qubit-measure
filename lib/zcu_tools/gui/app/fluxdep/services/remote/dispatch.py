@@ -125,7 +125,7 @@ def _h_state_check(
     adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    from zcu_tools.gui.app.fluxdep.state import DEFAULT_CHIP, DEFAULT_QUBIT
+    from zcu_tools.gui.project import DEFAULT_CHIP, DEFAULT_QUBIT
 
     state = adapter.ctrl.state
     project = state.project
