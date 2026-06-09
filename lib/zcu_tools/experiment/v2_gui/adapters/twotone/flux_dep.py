@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing_extensions import ClassVar, TypeAlias
+from typing_extensions import ClassVar, Sequence, TypeAlias
 
 from zcu_tools.experiment.v2.twotone.fluxdep import (
     FreqFluxCfg,
@@ -10,7 +10,10 @@ from zcu_tools.experiment.v2.twotone.fluxdep import (
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
+    FluxPickParams,
+    FluxPickResult,
     build_exp_spec,
+    build_flux_pick_session,
     make_pulse_module_spec,
     make_readout_module_spec,
     make_reset_module_spec,
@@ -21,22 +24,69 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AdapterGuide,
     AnalysisMode,
+    AnalyzeRequest,
     CfgSectionSpec,
     CfgSectionValue,
     DeviceRefSpec,
     ExpContext,
+    InteractiveHost,
+    InteractiveSession,
+    MetaDictWriteback,
     RunRequest,
     SweepSpec,
+    WritebackItem,
+    WritebackRequest,
 )
 
 FluxDepRunResult: TypeAlias = FreqFluxResult
 
 
-class FluxDepAdapter(BaseAdapter[FreqFluxCfg, FluxDepRunResult]):
+class FluxDepAdapter(
+    BaseAdapter[FreqFluxCfg, FluxDepRunResult, FluxPickResult, FluxPickParams]
+):
     exp_cls = FreqFluxExp
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        requires_soc=True, analysis=AnalysisMode.NONE
+        requires_soc=True, analysis=AnalysisMode.INTERACTIVE
     )
+
+    def get_analyze_params(
+        self, result: FluxDepRunResult, ctx: ExpContext
+    ) -> FluxPickParams:
+        del result, ctx
+        # Two-tone qubit spectra may carry useful phase information; leave the
+        # magnitude-only projection off by default (the user can toggle it).
+        return FluxPickParams(force_magnitude=False)
+
+    def setup_interactive_analysis(
+        self,
+        req: AnalyzeRequest[FluxDepRunResult, FluxPickParams],
+        host: InteractiveHost,
+    ) -> InteractiveSession:
+        return build_flux_pick_session(
+            req, host, force_magnitude=req.analyze_params.force_magnitude
+        )
+
+    def get_writeback_items(
+        self, req: WritebackRequest[FluxDepRunResult, FluxPickResult]
+    ) -> Sequence[WritebackItem]:
+        result = req.analyze_result
+        return [
+            MetaDictWriteback(
+                target_name="flx_half",
+                description="Half-flux (Φ₀/2) sweet-spot device value",
+                proposed_value=result.flx_half,
+            ),
+            MetaDictWriteback(
+                target_name="flx_int",
+                description="Integer-flux sweet-spot device value",
+                proposed_value=result.flx_int,
+            ),
+            MetaDictWriteback(
+                target_name="flx_period",
+                description="Flux period (device units) = 2·|flx_int − flx_half|",
+                proposed_value=result.flx_period,
+            ),
+        ]
 
     @classmethod
     def guide(cls) -> AdapterGuide:
@@ -68,10 +118,12 @@ class FluxDepAdapter(BaseAdapter[FreqFluxCfg, FluxDepRunResult]):
                 "default 'flux_yoko') — a device, not a library entry."
             ),
             typical_writeback=(
-                "No GUI analysis and no automatic writeback. The underlying "
-                "experiment offers interactive tools (used in notebooks) to pick "
-                "the flux arcs and the 'flx_half'/'flx_int' points by hand; those "
-                "are not wired through this adapter."
+                "Interactive analysis (not a fit): after the run, the user drags "
+                "two lines on the 2D map to mark the half-flux and integer-flux "
+                "sweet spots, then clicks Done. The result writes back 'flx_half', "
+                "'flx_int' and 'flx_period' (= 2·|flx_int − flx_half|) to the "
+                "MetaDict — the agent polls the analyze result, then applies the "
+                "writeback. Picking is the user's; the agent observes."
             ),
             recommended=(
                 "No fit options. Default sweep: flux ~101 points across roughly "

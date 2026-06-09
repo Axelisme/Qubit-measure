@@ -41,6 +41,12 @@ from .defaults import (
     make_two_pulse_reset_default,
     select_named_module_value,
 )
+from .interactive_flux_pick import (
+    FluxPickParams,
+    FluxPickResult,
+    FluxPickSession,
+    build_flux_pick_session,
+)
 from .spec_helpers import (
     build_exp_spec,
     declare_dev_spec,
@@ -56,6 +62,11 @@ from .spec_helpers import (
 __all__ = [
     # value-tree assembly
     "CfgBuilder",
+    # interactive flux-pick analysis (shared by onetone/twotone flux_dep)
+    "FluxPickParams",
+    "FluxPickResult",
+    "FluxPickSession",
+    "build_flux_pick_session",
     # ctx helpers
     "md_get_float",
     "md_get_int",

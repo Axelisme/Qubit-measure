@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing_extensions import ClassVar, TypeAlias, Union
+from typing_extensions import ClassVar, Sequence, TypeAlias, Union
 
 from zcu_tools.experiment.v2.onetone.flux_dep import (
     FluxDepCfg,
@@ -10,7 +10,10 @@ from zcu_tools.experiment.v2.onetone.flux_dep import (
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
+    FluxPickParams,
+    FluxPickResult,
     build_exp_spec,
+    build_flux_pick_session,
     make_pulse_readout_module_spec,
     md_get_float,
     md_has_key,
@@ -21,22 +24,30 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AdapterGuide,
     AnalysisMode,
+    AnalyzeRequest,
     CfgSectionSpec,
     CfgSectionValue,
     DeviceRefSpec,
     EvalValue,
     ExpContext,
+    InteractiveHost,
+    InteractiveSession,
+    MetaDictWriteback,
     RunRequest,
     SweepSpec,
+    WritebackItem,
+    WritebackRequest,
 )
 
 OneToneFluxDepRunResult: TypeAlias = FluxDepResult
 
 
-class OneToneFluxDepAdapter(BaseAdapter[FluxDepCfg, OneToneFluxDepRunResult]):
+class OneToneFluxDepAdapter(
+    BaseAdapter[FluxDepCfg, OneToneFluxDepRunResult, FluxPickResult, FluxPickParams]
+):
     exp_cls = FluxDepExp
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        requires_soc=True, analysis=AnalysisMode.NONE
+        requires_soc=True, analysis=AnalysisMode.INTERACTIVE
     )
 
     @classmethod
@@ -66,13 +77,16 @@ class OneToneFluxDepAdapter(BaseAdapter[FluxDepCfg, OneToneFluxDepRunResult]):
                 "waveform named 'ro_waveform' when present (optional)."
             ),
             typical_writeback=(
-                "No writeback — no automated analysis. The underlying experiment "
-                "opens an interactive line-picker for the user to mark the flux "
-                "points by hand; the chosen points are recorded manually "
-                "elsewhere, not through this adapter."
+                "Interactive analysis (not a fit): after the run, the user drags "
+                "two lines on the 2D map to mark the half-flux and integer-flux "
+                "sweet spots, then clicks Done. The result writes back 'flx_half', "
+                "'flx_int', and 'flx_period' (= 2·|flx_int − flx_half|) to the "
+                "MetaDict — feed the agent's analyze-result poll, then apply the "
+                "writeback. The picking is the user's; the agent observes."
             ),
             recommended=(
-                "No automated analysis. Also set the 'flux_dev' field — the "
+                "Interactive flux-line pick (no fit). Also set the 'flux_dev' "
+                "field — the "
                 "flux-bias device reference (default 'flux_yoko') — and confirm it "
                 "points at a connected device. Typical sweep: flux ~101 points "
                 "across one period (driven by flx_half/flx_int when calibrated), "
@@ -127,6 +141,46 @@ class OneToneFluxDepAdapter(BaseAdapter[FluxDepCfg, OneToneFluxDepRunResult]):
             .set_sweep("sweep.freq", proper_res_freq_range(ctx, 101, span_factor=1.0))
             .build()
         )
+
+    # -- interactive analysis: user picks the half/integer flux lines ----------
+
+    def get_analyze_params(
+        self, result: OneToneFluxDepRunResult, ctx: ExpContext
+    ) -> FluxPickParams:
+        del result, ctx
+        # One-tone resonator spectra are magnitude-only (phase is uninformative).
+        return FluxPickParams(force_magnitude=True)
+
+    def setup_interactive_analysis(
+        self,
+        req: AnalyzeRequest[OneToneFluxDepRunResult, FluxPickParams],
+        host: InteractiveHost,
+    ) -> InteractiveSession:
+        return build_flux_pick_session(
+            req, host, force_magnitude=req.analyze_params.force_magnitude
+        )
+
+    def get_writeback_items(
+        self, req: WritebackRequest[OneToneFluxDepRunResult, FluxPickResult]
+    ) -> Sequence[WritebackItem]:
+        result = req.analyze_result
+        return [
+            MetaDictWriteback(
+                target_name="flx_half",
+                description="Half-flux (Φ₀/2) sweet-spot device value",
+                proposed_value=result.flx_half,
+            ),
+            MetaDictWriteback(
+                target_name="flx_int",
+                description="Integer-flux sweet-spot device value",
+                proposed_value=result.flx_int,
+            ),
+            MetaDictWriteback(
+                target_name="flx_period",
+                description="Flux period (device units) = 2·|flx_int − flx_half|",
+                proposed_value=result.flx_period,
+            ),
+        ]
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FluxDepCfg:
         cfg_raw = dict(raw_cfg)
