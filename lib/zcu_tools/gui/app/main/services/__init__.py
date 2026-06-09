@@ -26,10 +26,6 @@ from .operation_gate import (
     OperationGate,
     OperationKind,
 )
-from .operation_handles import (
-    OperationHandles,
-    OperationOutcome,
-)
 from .persistence_types import (
     APP_STATE_VERSION,
     DEFAULT_LEFT_PANEL_WIDTH,
@@ -62,9 +58,7 @@ __all__ = [
     "SetupDeviceRequest",
     "OperationConflictError",
     "OperationGate",
-    "OperationHandles",
     "OperationKind",
-    "OperationOutcome",
     "GuardError",
     "GuardService",
     "RunPermit",

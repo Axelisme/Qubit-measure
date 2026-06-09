@@ -4,7 +4,7 @@ import logging
 from enum import Enum
 from typing import Callable, Optional
 
-from .operation_handles import OperationHandles
+from zcu_tools.gui.session.operation_handles import OperationHandles
 
 logger = logging.getLogger(__name__)
 

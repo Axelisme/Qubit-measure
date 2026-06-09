@@ -8,11 +8,11 @@ from __future__ import annotations
 import threading
 
 import pytest
-from zcu_tools.gui.app.main.services.operation_handles import (
+from zcu_tools.gui.app.main.services.shutdown import ShutdownCoordinator, ShutdownState
+from zcu_tools.gui.session.operation_handles import (
     OperationHandles,
     OperationOutcome,
 )
-from zcu_tools.gui.app.main.services.shutdown import ShutdownCoordinator, ShutdownState
 
 
 class _FakeClock:

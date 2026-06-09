@@ -23,9 +23,9 @@ from zcu_tools.gui.app.main.event_bus import EventBus
 from zcu_tools.gui.app.main.services.background import NO_RESULT
 from zcu_tools.gui.app.main.services.guard import RunPermit
 from zcu_tools.gui.app.main.services.operation_gate import OperationGate, OperationKind
-from zcu_tools.gui.app.main.services.operation_handles import OperationHandles
 from zcu_tools.gui.app.main.services.run import RunService
 from zcu_tools.gui.app.main.state import ExpContext, Session, State
+from zcu_tools.gui.session.operation_handles import OperationHandles
 
 
 def _empty_schema() -> CfgSchema:

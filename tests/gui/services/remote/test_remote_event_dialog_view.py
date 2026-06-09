@@ -19,11 +19,8 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.main.event_bus import (
-    MdChangedPayload,
-    PredictorChangedPayload,
     RunFinishedPayload,
     RunStartedPayload,
-    SocChangedPayload,
     TabAddedPayload,
 )
 from zcu_tools.gui.app.main.services.remote.events import (
@@ -31,6 +28,11 @@ from zcu_tools.gui.app.main.services.remote.events import (
     _ser_run_finished,
     _ser_run_started,
     _ser_soc_changed,
+)
+from zcu_tools.gui.session.events import (
+    MdChangedPayload,
+    PredictorChangedPayload,
+    SocChangedPayload,
 )
 
 from ._helpers import (

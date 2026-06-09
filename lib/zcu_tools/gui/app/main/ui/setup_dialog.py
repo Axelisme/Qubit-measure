@@ -228,7 +228,7 @@ class SetupDialog(QDialog):
         self._maybe_show_current_cfg()
 
         # EventBus subscriptions for live updates
-        from zcu_tools.gui.app.main.event_bus import (
+        from zcu_tools.gui.session.events import (
             ContextSwitchedPayload,
             DeviceChangedPayload,
             SocChangedPayload,
@@ -246,7 +246,7 @@ class SetupDialog(QDialog):
         if not self._bus_subs_active:
             logger.debug("_cleanup_bus_subscriptions called but already inactive")
             return
-        from zcu_tools.gui.app.main.event_bus import (
+        from zcu_tools.gui.session.events import (
             ContextSwitchedPayload,
             DeviceChangedPayload,
             SocChangedPayload,
@@ -263,7 +263,7 @@ class SetupDialog(QDialog):
         self._refresh_context_list()
 
     def _on_bus_soc_changed(self, payload: object) -> None:
-        from zcu_tools.gui.app.main.event_bus import SocChangedPayload
+        from zcu_tools.gui.session.events import SocChangedPayload
 
         self._connect_btn.setEnabled(True)
         if isinstance(payload, SocChangedPayload) and payload.soc is not None:

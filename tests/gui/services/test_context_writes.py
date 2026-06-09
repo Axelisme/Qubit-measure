@@ -115,7 +115,7 @@ def test_apply_writes_empty_is_noop():
 
 def test_apply_writes_emits_once_per_kind():
     svc = _make_svc()
-    from zcu_tools.gui.app.main.event_bus import MdChangedPayload, MlChangedPayload
+    from zcu_tools.gui.session.events import MdChangedPayload, MlChangedPayload
 
     md_events = 0
     ml_events = 0

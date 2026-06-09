@@ -33,13 +33,13 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.app.main.adapter import CfgSchema
-from zcu_tools.gui.app.main.event_bus import (
+from zcu_tools.gui.app.main.services.context import MdValueError, MlEntryValidationError
+from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
     MdChangedPayload,
     MlChangedPayload,
-    Payload,
+    SessionPayload,
 )
-from zcu_tools.gui.app.main.services.context import MdValueError, MlEntryValidationError
 
 from .cfg_form import CfgFormWidget
 
@@ -636,7 +636,7 @@ class InspectDialog(QDialog):
         self._bus.unsubscribe(MlChangedPayload, self._on_bus_refresh)
         self._bus_subs_active = False
 
-    def _on_bus_refresh(self, payload: Payload) -> None:
+    def _on_bus_refresh(self, payload: SessionPayload) -> None:
         """EventBus subscriber wrapper; payload is ignored, delegates to refresh()."""
         del payload
         self.refresh()

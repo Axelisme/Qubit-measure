@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from zcu_tools.gui.session.operation_handles import OperationHandles
+
 from .analyze import AnalyzeService
 from .background import BackgroundService
 from .cfg_editor import CfgEditorService
@@ -11,7 +13,6 @@ from .context import ContextService
 from .device import DeviceService
 from .guard import GuardService
 from .operation_gate import OperationGate
-from .operation_handles import OperationHandles
 from .progress import ProgressService
 from .run import RunService
 from .save import SaveService

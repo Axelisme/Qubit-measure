@@ -6,9 +6,10 @@ from unittest.mock import MagicMock
 
 from qtpy.QtCore import Qt
 from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
-from zcu_tools.gui.app.main.event_bus import EventBus, SocChangedPayload
+from zcu_tools.gui.app.main.event_bus import EventBus
 from zcu_tools.gui.app.main.services import TabSnapshot
 from zcu_tools.gui.app.main.state import TabInteractionState
+from zcu_tools.gui.session.events import SocChangedPayload
 
 
 def _mock_ctrl() -> MagicMock:

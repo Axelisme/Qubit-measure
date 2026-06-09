@@ -17,16 +17,16 @@ from typing import (
 from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
 from zcu_tools.device.base import BaseDeviceInfo
-from zcu_tools.gui.app.main.event_bus import (
+from zcu_tools.gui.app.main.state import DeviceState, DeviceStatus
+from zcu_tools.gui.session.events import (
     DeviceChangedPayload,
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
 )
-from zcu_tools.gui.app.main.state import DeviceState, DeviceStatus
+from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
 
 from .background import BackgroundService, OffMainScopes
 from .operation_gate import OperationConflictError, OperationGate, OperationKind
-from .operation_handles import OperationHandles, OperationOutcome
 
 # DeviceMemoryInfo lives in the contract layer (ports) — the element type of
 # RememberedDevicePort, used here as the parameter type of

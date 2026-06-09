@@ -6,11 +6,11 @@ from typing import TYPE_CHECKING, Any
 
 from zcu_tools.gui.app.main.adapter import (
     CfgSchema,
-    ContextReadiness,
     ExpAdapterProtocol,
     RunRequest,
     require_soc_handles,
 )
+from zcu_tools.gui.session.types import ContextReadiness
 
 logger = logging.getLogger(__name__)
 

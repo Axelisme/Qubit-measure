@@ -21,7 +21,7 @@ from zcu_tools.gui.app.main.adapter import (
     WaveformRefSpec,
     WaveformRefValue,
 )
-from zcu_tools.gui.app.main.event_bus import EventBus, GuiEvent
+from zcu_tools.gui.app.main.event_bus import EventBus
 from zcu_tools.gui.app.main.live_model import (
     CallbackList,
     LibraryBindingState,
@@ -31,6 +31,7 @@ from zcu_tools.gui.app.main.live_model import (
     SectionLiveField,
     SweepLiveField,
 )
+from zcu_tools.gui.session.events import SessionEvent
 from zcu_tools.meta_tool import ModuleLibrary
 
 
@@ -144,7 +145,7 @@ def test_scalar_eval_field_refresh_updates_snapshot(env):
     field.on_change.connect(cb)
 
     md.r_f = 6100.0
-    field.refresh_external(GuiEvent.MD_CHANGED)
+    field.refresh_external(SessionEvent.MD_CHANGED)
 
     val = field.get_value()
     assert isinstance(val, EvalValue)
@@ -411,7 +412,7 @@ def test_modified_ref_self_heals_when_library_key_deleted_at_runtime(env, monkey
     """A MODIFIED (edited) library ref whose key is deleted at runtime must also
     self-heal to Custom on ML_CHANGED — _refresh_library_binding's old LINKED-only
     guard skipped MODIFIED refs, leaving a dangling chosen_key that broke lowering."""
-    from zcu_tools.gui.app.main.event_bus import GuiEvent
+    from zcu_tools.gui.session.events import SessionEvent
 
     inner = CfgSectionSpec(
         label="Const",
@@ -458,7 +459,7 @@ def test_modified_ref_self_heals_when_library_key_deleted_at_runtime(env, monkey
     # Delete the library key, then notify: the MODIFIED ref must heal to Custom,
     # keeping the user's edited length (99.9).
     present["yes"] = False
-    field.refresh_external(GuiEvent.ML_CHANGED)
+    field.refresh_external(SessionEvent.ML_CHANGED)
 
     assert field.get_chosen_key() == "<Custom:Const>"
     assert field.is_valid() is True
@@ -545,7 +546,7 @@ def test_linked_ref_missing_key_is_invalid_and_relinks_on_readd(env, monkeypatch
 
     # Re-add an entry of that name → re-links to a valid LINKED ref.
     present["yes"] = True
-    field.refresh_external(GuiEvent.ML_CHANGED)
+    field.refresh_external(SessionEvent.ML_CHANGED)
     assert field.get_chosen_key() == "ro_waveform"
     assert field._binding_state is LibraryBindingState.LINKED
     assert field.has_missing_library_ref() is False

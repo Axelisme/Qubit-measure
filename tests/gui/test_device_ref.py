@@ -9,7 +9,7 @@ from qtpy.QtCore import QEventLoop
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.gui.app.main.adapter import DeviceRefSpec, DirectValue
-from zcu_tools.gui.app.main.event_bus import DeviceChangedPayload, EventBus, GuiEvent
+from zcu_tools.gui.app.main.event_bus import EventBus
 from zcu_tools.gui.app.main.live_model import DeviceRefLiveField, LiveModelEnv
 from zcu_tools.gui.app.main.services.device import (
     ConnectDeviceRequest,
@@ -17,6 +17,7 @@ from zcu_tools.gui.app.main.services.device import (
     DisconnectDeviceRequest,
 )
 from zcu_tools.gui.app.main.state import State
+from zcu_tools.gui.session.events import DeviceChangedPayload, SessionEvent
 
 
 @pytest.fixture(autouse=True)
@@ -97,7 +98,7 @@ def test_refresh_external_device_changed_updates_validity():
     field.on_validity_changed.connect(validity_events.append)
     field.env.ctrl.list_device_names.return_value = ["flux_yoko"]  # type: ignore[attr-defined]
 
-    field.refresh_external(GuiEvent.DEVICE_CHANGED)
+    field.refresh_external(SessionEvent.DEVICE_CHANGED)
 
     assert field.is_valid()
     assert True in validity_events

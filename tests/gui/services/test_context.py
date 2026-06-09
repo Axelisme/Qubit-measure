@@ -7,9 +7,9 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.main.adapter import ContextReadiness
-from zcu_tools.gui.app.main.event_bus import GuiEvent
 from zcu_tools.gui.app.main.services.context import ContextService
 from zcu_tools.gui.app.main.state import ExpContext, State
+from zcu_tools.gui.session.events import SessionEvent
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 
@@ -101,7 +101,7 @@ def test_context_service_set_startup_context():
     assert state.exp_context.readiness is ContextReadiness.DRAFT
     assert not svc.is_active_context()
     bus.emit.assert_called_once()
-    assert bus.emit.call_args[0][0].EVENT == GuiEvent.CONTEXT_SWITCHED
+    assert bus.emit.call_args[0][0].EVENT == SessionEvent.CONTEXT_SWITCHED
 
 
 def test_context_service_use_context():
@@ -166,7 +166,7 @@ def test_context_service_new_context():
         base_ctx, value=1.5, unit="V", clone_from="src_label"
     )
     bus.emit.assert_called_once()
-    assert bus.emit.call_args[0][0].EVENT == GuiEvent.CONTEXT_SWITCHED
+    assert bus.emit.call_args[0][0].EVENT == SessionEvent.CONTEXT_SWITCHED
     assert state.exp_context.active_label == "flux_1.5_V"
     assert state.exp_context.readiness is ContextReadiness.ACTIVE
 
@@ -249,7 +249,7 @@ def test_del_md_attr_emits_md_changed():
 
     bus.emit.assert_called()
     event_calls = [c[0][0].EVENT for c in bus.emit.call_args_list]
-    assert GuiEvent.MD_CHANGED in event_calls
+    assert SessionEvent.MD_CHANGED in event_calls
 
 
 # ---------------------------------------------------------------------------
@@ -281,7 +281,7 @@ def test_del_ml_module_emits_ml_changed():
     svc.del_ml_module("qub")
 
     event_calls = [c[0][0].EVENT for c in bus.emit.call_args_list]
-    assert GuiEvent.ML_CHANGED in event_calls
+    assert SessionEvent.ML_CHANGED in event_calls
 
 
 # ---------------------------------------------------------------------------
@@ -304,7 +304,7 @@ def test_rename_ml_module_moves_key_and_emits_once():
     assert "qub2" in ml.modules
     assert state.version.get("context") == before + 1
     event_calls = [c[0][0].EVENT for c in bus.emit.call_args_list]
-    assert event_calls.count(GuiEvent.ML_CHANGED) == 1
+    assert event_calls.count(SessionEvent.ML_CHANGED) == 1
 
 
 def test_rename_ml_module_clash_fails():

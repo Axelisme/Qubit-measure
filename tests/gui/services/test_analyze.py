@@ -40,7 +40,7 @@ def _make_service(
     state: State,
     bus: EventBus,
 ) -> tuple[AnalyzeService, MagicMock]:
-    from zcu_tools.gui.app.main.services.operation_handles import OperationHandles
+    from zcu_tools.gui.session.operation_handles import OperationHandles
 
     bg = MagicMock()  # BackgroundService stand-in; submit() is inspected per-test
     writeback = MagicMock()

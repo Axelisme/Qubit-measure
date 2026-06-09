@@ -242,7 +242,7 @@ class CfgEditorService:
         # ADR-0008/0004 Reaction: the service owns every cfg model, so it (not the
         # widget) refreshes their EvalValue snapshots when md/ml/context/device
         # change. Subscribe once; refresh_all fans out to every owned model.
-        from zcu_tools.gui.app.main.event_bus import (
+        from zcu_tools.gui.session.events import (
             ContextSwitchedPayload,
             DeviceChangedPayload,
             MdChangedPayload,

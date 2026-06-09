@@ -9,15 +9,15 @@ logger = logging.getLogger(__name__)
 
 from qtpy.QtCore import QObject, QThread, QTimer, Signal  # type: ignore[attr-defined]
 
-from zcu_tools.gui.app.main.adapter import SocCfgHandle, SocHandle
-from zcu_tools.gui.app.main.event_bus import (
+from zcu_tools.gui.session.events import (
     PredictorChangedPayload,
     SocChangedPayload,
 )
+from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
+from zcu_tools.gui.session.types import SocCfgHandle, SocHandle
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 from .operation_gate import OperationGate, OperationKind
-from .operation_handles import OperationHandles, OperationOutcome
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.event_bus import EventBus

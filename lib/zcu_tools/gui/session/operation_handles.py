@@ -12,6 +12,10 @@ here AND registers an ``OperationGate`` exclusion under the *same* token; an
 analyze / interactive op takes only a handle (no exclusion) — it no longer fakes
 a never-conflicting lease just to get an async handle. The terminal path settles
 the handle here, then frees the exclusion (if any).
+
+Session-core (``gui/session``): the handle lifecycle carries zero operation-kind
+knowledge, so it is shared verbatim by every session-driving app; each app keeps
+its own ``OperationGate`` exclusion policy.
 """
 
 from __future__ import annotations

@@ -5,10 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.main.event_bus import (
-    DeviceSetupFinishedPayload,
-    EventBus,
-)
+from zcu_tools.gui.app.main.event_bus import EventBus
 from zcu_tools.gui.app.main.services.device import (
     ConnectDeviceRequest,
     DeviceEntry,
@@ -19,6 +16,7 @@ from zcu_tools.gui.app.main.services.device import (
     SetupDeviceRequest,
 )
 from zcu_tools.gui.app.main.ui.device_dialog import DeviceDialog, _FakeDevicePanel
+from zcu_tools.gui.session.events import DeviceSetupFinishedPayload
 
 
 def _entry(

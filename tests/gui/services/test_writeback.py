@@ -16,14 +16,14 @@ from zcu_tools.gui.app.main.adapter import (
     ModuleWriteback,
     WaveformWriteback,
 )
-from zcu_tools.gui.app.main.event_bus import (
-    EventBus,
-    MdChangedPayload,
-    MlChangedPayload,
-)
+from zcu_tools.gui.app.main.event_bus import EventBus
 from zcu_tools.gui.app.main.services.guard import WritebackPermit
 from zcu_tools.gui.app.main.services.writeback import WritebackService
 from zcu_tools.gui.app.main.state import ExpContext, Session, State
+from zcu_tools.gui.session.events import (
+    MdChangedPayload,
+    MlChangedPayload,
+)
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 

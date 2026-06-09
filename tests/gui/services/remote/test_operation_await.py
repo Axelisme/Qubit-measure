@@ -10,9 +10,9 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.main.services.operation_handles import OperationOutcome
 from zcu_tools.gui.app.main.services.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+from zcu_tools.gui.session.operation_handles import OperationOutcome
 
 from ._helpers import dispatch_handler
 

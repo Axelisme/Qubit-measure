@@ -10,12 +10,8 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from zcu_tools.gui.app.main.adapter import AnalysisMode, CfgSchema
 from zcu_tools.gui.app.main.event_bus import (
-    ContextSwitchedPayload,
-    MlChangedPayload,
-    PredictorChangedPayload,
     RunFinishedPayload,
     RunStartedPayload,
-    SocChangedPayload,
     TabAddedPayload,
     TabClosedPayload,
     TabContentChangedPayload,
@@ -27,6 +23,12 @@ from zcu_tools.gui.plotting import (
     attach_existing_figure_to_container,
     remove_canvas,
     set_shutting_down,
+)
+from zcu_tools.gui.session.events import (
+    ContextSwitchedPayload,
+    MlChangedPayload,
+    PredictorChangedPayload,
+    SocChangedPayload,
 )
 
 logger = logging.getLogger(__name__)

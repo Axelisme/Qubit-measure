@@ -10,7 +10,7 @@ from __future__ import annotations
 import threading
 import time
 
-from zcu_tools.gui.app.main.services.operation_handles import (
+from zcu_tools.gui.session.operation_handles import (
     OperationHandles,
     OperationOutcome,
 )

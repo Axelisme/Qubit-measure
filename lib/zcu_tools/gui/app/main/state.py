@@ -7,11 +7,12 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from typing_extensions import Generic, TypeVar
 
+from zcu_tools.gui.session.types import ExpContext
+
 from .adapter import (
     AnalyzeResultWithFigure,
     CfgSchema,
     ExpAdapterProtocol,
-    ExpContext,
     SavePaths,
     T_AnalyzeParams,
     T_Cfg,

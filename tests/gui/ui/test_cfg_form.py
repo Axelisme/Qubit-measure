@@ -348,8 +348,8 @@ def test_cfg_form_reflects_model_external_refresh(qapp, ctrl):
     Here we drive the model directly (the service-bus path is covered in
     test_cfg_editor) and assert the widget's read-back + schema_changed fire.
     """
-    from zcu_tools.gui.app.main.event_bus import GuiEvent
     from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.session.events import SessionEvent
     from zcu_tools.meta_tool import MetaDict
 
     md = MetaDict()
@@ -365,7 +365,7 @@ def test_cfg_form_reflects_model_external_refresh(qapp, ctrl):
     model = _attach(w, schema, ctrl)
 
     md.r_f = 6100.0
-    model.refresh_external(GuiEvent.MD_CHANGED)  # the service does this in prod
+    model.refresh_external(SessionEvent.MD_CHANGED)  # the service does this in prod
 
     val = w.read_values().fields["freq"]
     assert isinstance(val, EvalValue)
@@ -832,7 +832,7 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     assert ref_widget._combo.currentText() == "Lib: my_pulse (modified)"
 
     # 3. Trigger MD_CHANGED and verify it does not overwrite modified value
-    from zcu_tools.gui.app.main.event_bus import MdChangedPayload
+    from zcu_tools.gui.session.events import MdChangedPayload
     from zcu_tools.meta_tool import MetaDict
 
     md = MetaDict()

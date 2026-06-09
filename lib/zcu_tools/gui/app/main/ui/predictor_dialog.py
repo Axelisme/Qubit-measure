@@ -120,7 +120,7 @@ class PredictorDialog(QDialog):
             self._set_status("Currently loaded", error=False)
 
         # EventBus subscription for live predictor state updates
-        from zcu_tools.gui.app.main.event_bus import PredictorChangedPayload
+        from zcu_tools.gui.session.events import PredictorChangedPayload
 
         self._bus_subscribed = False
         bus = controller.get_bus()
@@ -191,7 +191,7 @@ class PredictorDialog(QDialog):
     def _cleanup_bus(self, *_args: object) -> None:
         if not self._bus_subscribed:
             return
-        from zcu_tools.gui.app.main.event_bus import PredictorChangedPayload
+        from zcu_tools.gui.session.events import PredictorChangedPayload
 
         self._ctrl.get_bus().unsubscribe(
             PredictorChangedPayload, self._on_predictor_changed

@@ -488,9 +488,9 @@ class DeviceRefLiveField(LiveField):
         self._set_valid(self._chosen_name in names)
 
     def refresh_external(self, event: object) -> None:
-        from .event_bus import GuiEvent
+        from zcu_tools.gui.session.events import SessionEvent
 
-        if event is GuiEvent.DEVICE_CHANGED:
+        if event is SessionEvent.DEVICE_CHANGED:
             self._refresh_validity()
             self.on_change.emit(self.get_value())
 
@@ -790,9 +790,9 @@ class ModuleRefLiveField(LiveField):
             self.sub_field.teardown()
 
     def refresh_external(self, event: object) -> None:
-        from .event_bus import GuiEvent
+        from zcu_tools.gui.session.events import SessionEvent
 
-        if event in {GuiEvent.CONTEXT_SWITCHED, GuiEvent.ML_CHANGED}:
+        if event in {SessionEvent.CONTEXT_SWITCHED, SessionEvent.ML_CHANGED}:
             self._refresh_library_binding()
             if self._binding_state is LibraryBindingState.CUSTOM and self.sub_field:
                 self.sub_field.refresh_external(event)

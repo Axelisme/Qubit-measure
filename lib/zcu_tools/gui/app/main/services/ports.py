@@ -35,11 +35,11 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.main.adapter import (
         AdapterCapabilities,
         CfgSchema,
-        ExpContext,
         SavePaths,
         WritebackItem,
     )
     from zcu_tools.gui.app.main.state import TabInteractionState
+    from zcu_tools.gui.session.types import ExpContext
     from zcu_tools.meta_tool import ModuleLibrary
 
     from .device import DeviceProtocol

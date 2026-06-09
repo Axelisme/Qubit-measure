@@ -10,7 +10,8 @@ measure-gui EventBus subscribes by payload type (not an event enum), so the
 registry is keyed by type; ``payload.EVENT.value`` gives the wire name.
 
 Adding a new event:
-  1. Confirm the payload dataclass exists in ``event_bus.py``.
+  1. Confirm the payload dataclass exists (experiment payloads in
+     ``event_bus.py``; session-core payloads in ``gui/session/events.py``).
   2. Add a serializer returning either a JSON-able dict or ``None`` to
      suppress the push (None means "do not forward").
   3. Register in :data:`EVENT_SERIALIZERS`.
@@ -23,26 +24,28 @@ from __future__ import annotations
 from typing import Callable, Mapping, Optional
 
 from zcu_tools.gui.app.main.event_bus import (
+    RunFinishedPayload,
+    RunStartedPayload,
+    TabAddedPayload,
+    TabClosedPayload,
+    TabContentChangedPayload,
+    TabInteractionChangedPayload,
+)
+from zcu_tools.gui.event_bus import BasePayload
+from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
     DeviceChangedPayload,
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
     MdChangedPayload,
     MlChangedPayload,
-    Payload,
     PredictorChangedPayload,
-    RunFinishedPayload,
-    RunStartedPayload,
     SocChangedPayload,
-    TabAddedPayload,
-    TabClosedPayload,
-    TabContentChangedPayload,
-    TabInteractionChangedPayload,
 )
 
 # Wire payload type: a JSON-friendly mapping or ``None`` to drop the event.
 WirePayload = Optional[Mapping[str, object]]
-Serializer = Callable[[Payload], WirePayload]
+Serializer = Callable[[BasePayload], WirePayload]
 
 
 # ---------------------------------------------------------------------------
@@ -50,32 +53,32 @@ Serializer = Callable[[Payload], WirePayload]
 # ---------------------------------------------------------------------------
 
 
-def _ser_tab_added(payload: Payload) -> WirePayload:
+def _ser_tab_added(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, TabAddedPayload)
     return {"tab_id": payload.tab_id, "adapter_name": payload.adapter_name}
 
 
-def _ser_tab_closed(payload: Payload) -> WirePayload:
+def _ser_tab_closed(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, TabClosedPayload)
     return {"tab_id": payload.tab_id}
 
 
-def _ser_tab_content_changed(payload: Payload) -> WirePayload:
+def _ser_tab_content_changed(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, TabContentChangedPayload)
     return {"tab_id": payload.tab_id, "requery": ["tab.snapshot"]}
 
 
-def _ser_tab_interaction_changed(payload: Payload) -> WirePayload:
+def _ser_tab_interaction_changed(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, TabInteractionChangedPayload)
     return {"tab_id": payload.tab_id, "requery": ["tab.snapshot"]}
 
 
-def _ser_run_started(payload: Payload) -> WirePayload:
+def _ser_run_started(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, RunStartedPayload)
     return {"tab_id": payload.tab_id}
 
 
-def _ser_run_finished(payload: Payload) -> WirePayload:
+def _ser_run_finished(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, RunFinishedPayload)
     # outcome ∈ finished/failed/cancelled lets the agent tell success from
     # failure from cancellation; error_message only on failure.
@@ -89,25 +92,25 @@ def _ser_run_finished(payload: Payload) -> WirePayload:
     return out
 
 
-def _ser_predictor_changed(payload: Payload) -> WirePayload:
+def _ser_predictor_changed(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, PredictorChangedPayload)
     del payload
     # No scalar field worth shipping; client should requery if needed.
     return {}
 
 
-def _ser_device_changed(payload: Payload) -> WirePayload:
+def _ser_device_changed(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, DeviceChangedPayload)
     return {"name": payload.name, "requery": ["device.list"]}
 
 
-def _ser_device_setup_started(payload: Payload) -> WirePayload:
+def _ser_device_setup_started(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, DeviceSetupStartedPayload)
     # Live progress is polled via operation.progress (by operation_id), not pushed.
     return {"name": payload.name}
 
 
-def _ser_device_setup_finished(payload: Payload) -> WirePayload:
+def _ser_device_setup_finished(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, DeviceSetupFinishedPayload)
     out: dict[str, object] = {"name": payload.name, "outcome": payload.outcome}
     if payload.error_message is not None:
@@ -115,26 +118,26 @@ def _ser_device_setup_finished(payload: Payload) -> WirePayload:
     return out
 
 
-def _ser_context_switched(payload: Payload) -> WirePayload:
+def _ser_context_switched(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, ContextSwitchedPayload)
     # MetaDict / ModuleLibrary are live; let the client requery.
     del payload
     return {"requery": ["context.active"]}
 
 
-def _ser_md_changed(payload: Payload) -> WirePayload:
+def _ser_md_changed(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, MdChangedPayload)
     del payload
     return {"requery": ["context.get_md_attr"]}
 
 
-def _ser_ml_changed(payload: Payload) -> WirePayload:
+def _ser_ml_changed(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, MlChangedPayload)
     del payload
     return {"requery": ["context.get_ml"]}
 
 
-def _ser_soc_changed(payload: Payload) -> WirePayload:
+def _ser_soc_changed(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, SocChangedPayload)
     return {"connected": payload.soc is not None}
 
@@ -144,7 +147,7 @@ def _ser_soc_changed(payload: Payload) -> WirePayload:
 # ---------------------------------------------------------------------------
 
 
-EVENT_SERIALIZERS: dict[type[Payload], Serializer] = {
+EVENT_SERIALIZERS: dict[type[BasePayload], Serializer] = {
     TabAddedPayload: _ser_tab_added,
     TabClosedPayload: _ser_tab_closed,
     TabContentChangedPayload: _ser_tab_content_changed,
@@ -162,7 +165,7 @@ EVENT_SERIALIZERS: dict[type[Payload], Serializer] = {
 }
 
 
-def wire_event_name(payload_type: type[Payload]) -> str:
+def wire_event_name(payload_type: type[BasePayload]) -> str:
     """Map a ``Payload`` type to its lowercase wire event name.
 
     The enum value is the wire name (e.g. ``"tab_added"``); routing through

@@ -4,20 +4,21 @@ import dataclasses
 import logging
 from typing import TYPE_CHECKING, Any, Optional
 
-from zcu_tools.gui.app.main.adapter import ContextReadiness
-from zcu_tools.gui.app.main.event_bus import (
+from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
     MdChangedPayload,
     MlChangedPayload,
 )
+from zcu_tools.gui.session.types import ContextReadiness
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.adapter import CfgSchema, ExpContext
+    from zcu_tools.gui.app.main.adapter import CfgSchema
     from zcu_tools.gui.app.main.event_bus import EventBus
     from zcu_tools.gui.app.main.state import State
+    from zcu_tools.gui.session.types import ExpContext
 
     from .ports import ContextWrites, ProjectIOPort
 

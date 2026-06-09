@@ -22,6 +22,12 @@ _SHARED_MODULES = [
     "zcu_tools.gui.remote.param_spec",
     "zcu_tools.gui.remote.wire",
     "zcu_tools.gui.version_table",
+    # The session core (shared by measure + autofluxdep) must stay import-clean:
+    # session value types, the session event vocabulary, and the async-operation
+    # handle facet pull in neither Qt, matplotlib, nor any app package.
+    "zcu_tools.gui.session.types",
+    "zcu_tools.gui.session.events",
+    "zcu_tools.gui.session.operation_handles",
     # The plotting package + its backend-select module must stay import-clean so
     # an entry script can configure the matplotlib backend before any pyplot
     # import. The heavy plotting submodules (backend/host/container) DO pull in

@@ -12,11 +12,11 @@ from zcu_tools.gui.app.main.event_bus import (
     TabInteractionChangedPayload,
 )
 from zcu_tools.gui.plotting import FigureContainer
+from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
 
 from .background import NO_RESULT, BackgroundService, OffMainScopes
 from .guard import RunPermit
 from .operation_gate import OperationGate, OperationKind
-from .operation_handles import OperationHandles, OperationOutcome
 
 logger = logging.getLogger(__name__)
 

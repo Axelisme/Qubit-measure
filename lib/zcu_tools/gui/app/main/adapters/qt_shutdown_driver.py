@@ -6,12 +6,12 @@ from typing import Callable, Optional
 
 from qtpy.QtCore import QObject, QTimer  # type: ignore[attr-defined]
 
-from zcu_tools.gui.app.main.services.operation_handles import OperationHandles
 from zcu_tools.gui.app.main.services.shutdown import (
     DEFAULT_SHUTDOWN_TIMEOUT,
     ShutdownCoordinator,
     ShutdownState,
 )
+from zcu_tools.gui.session.operation_handles import OperationHandles
 
 logger = logging.getLogger(__name__)
 

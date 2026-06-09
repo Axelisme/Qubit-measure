@@ -8,10 +8,10 @@ from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 from zcu_tools.gui.app.main.adapter import AnalyzeRequest
 from zcu_tools.gui.app.main.event_bus import TabInteractionChangedPayload
 from zcu_tools.gui.plotting import FigureContainer
+from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
 
 from .background import BackgroundService, OffMainScopes
 from .guard import AnalyzePermit
-from .operation_handles import OperationHandles, OperationOutcome
 
 logger = logging.getLogger(__name__)
 

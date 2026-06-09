@@ -11,7 +11,7 @@ import time
 
 from qtpy.QtCore import QCoreApplication
 from zcu_tools.gui.app.main.adapters.qt_shutdown_driver import QtShutdownDriver
-from zcu_tools.gui.app.main.services.operation_handles import (
+from zcu_tools.gui.session.operation_handles import (
     OperationHandles,
     OperationOutcome,
 )
