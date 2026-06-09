@@ -174,4 +174,11 @@ WIRE_VERSION = 21
 #     settles the handle then frees the exclusion. Shutdown + operation.await read
 #     OperationHandles; active_operation_count = handles.live_count (now includes
 #     analyze / interactive). WIRE unchanged (no RPC/param/event change). Phase 147.
-GUI_VERSION = 23
+# v24: device execution onto BackgroundService (ADR-0019 follow-up, internal). The
+#     two device QThread workers (_DeviceCommandWorker / _DeviceSetupWorker) are
+#     replaced by bg.submit: connect/disconnect carry no scopes; setup carries the
+#     progress scope (the stop_event is captured by the work closure + polled by
+#     the driver, not an ActiveTask scope) and its cancel interpretation moves into
+#     DeviceService._on_setup_done. The "is a setup cancellable" check now reads
+#     _active_kind (no _setup_worker field). WIRE unchanged. Phase 148.
+GUI_VERSION = 24

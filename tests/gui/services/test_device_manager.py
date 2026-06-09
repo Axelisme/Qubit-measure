@@ -1,6 +1,6 @@
-"""Tests for the device registry, setup worker lifecycle, and progress events.
+"""Tests for the device registry, setup lifecycle, and progress events.
 
-Two driver styles coexist deliberately: the setup-worker / progress tests use a
+Two driver styles coexist deliberately: the setup / progress tests use a
 ``MagicMock`` driver (they assert on call interactions), while the registry CRUD
 tests use a real ``FakeDevice`` (they read/write real values through the
 GlobalDeviceManager registry).
@@ -8,7 +8,6 @@ GlobalDeviceManager registry).
 
 from __future__ import annotations
 
-import threading
 from unittest.mock import MagicMock
 
 import pytest
@@ -26,7 +25,6 @@ from zcu_tools.gui.app.main.services.device import (
     DeviceService,
     DisconnectDeviceRequest,
     SetupDeviceRequest,
-    _DeviceSetupWorker,
 )
 from zcu_tools.gui.app.main.state import State
 
@@ -60,57 +58,39 @@ def _connect(svc: DeviceService) -> None:
     loop.exec()
 
 
-def test_device_setup_worker_success(qapp):
-    dev = MagicMock()
-    dev.get_info.return_value = FakeDeviceInfo(address="none")
-    worker = _DeviceSetupWorker(
-        dev, "test_dev", FakeDeviceInfo(address="none"), None, threading.Event()
-    )
-    loop = QEventLoop()
-    completed: list[bool] = []
-    worker.setup_finished.connect(
-        lambda _name, _info: completed.append(not worker.isRunning()) or loop.quit()
-    )
-
-    worker.start()
-    loop.exec()
-
-    dev.setup.assert_called_once()
-    assert completed == [True]
-
-
-def test_device_setup_worker_failure(qapp):
-    dev = MagicMock()
-    dev.setup.side_effect = RuntimeError("setup failed")
-    worker = _DeviceSetupWorker(
-        dev, "test_dev", FakeDeviceInfo(address="none"), None, threading.Event()
-    )
+def test_device_setup_failure_emits_setup_failed(qapp):
+    # A setup whose driver raises is reported via setup_failed (bg on_error path).
+    svc, device = _make_svc()
+    _connect(svc)
+    device.setup.side_effect = RuntimeError("setup failed")
     loop = QEventLoop()
     errors: list[str] = []
-    worker.failed.connect(lambda _name, error: errors.append(error) or loop.quit())
+    svc.setup_failed.connect(lambda _name, error: errors.append(error) or loop.quit())
 
-    worker.start()
+    svc.start_setup_device(
+        SetupDeviceRequest(name="test_dev", info=FakeDeviceInfo(address="none"))
+    )
     loop.exec()
 
     assert errors == ["setup failed"]
 
 
-def test_device_setup_worker_cancel(qapp):
-    """Setting the stop_event the worker was handed makes it self-judge
-    'cancelled' (the worker has no cancel() — the owner sets the flag)."""
-    dev = MagicMock()
-    dev.get_info.return_value = FakeDeviceInfo(address="none")
-    dev.setup.side_effect = lambda _info, stop_event: stop_event.wait(0.1)
-    stop_event = threading.Event()
-    worker = _DeviceSetupWorker(
-        dev, "test_dev", FakeDeviceInfo(address="none"), None, stop_event
-    )
+def test_device_setup_cancel_emits_setup_cancelled(qapp):
+    # cancel_device_operation sets the stop_event via the handle; the driver's
+    # setup returns normally, and DeviceService relabels it 'cancelled' because
+    # the stop_event is set (the _on_setup_done cancel interpretation, ADR-0019).
+    svc, device = _make_svc()
+    _connect(svc)
+    device.get_info.return_value = FakeDeviceInfo(address="none")
+    device.setup.side_effect = lambda _info, stop_event: stop_event.wait(1.0)
     loop = QEventLoop()
     cancelled: list[str] = []
-    worker.cancelled.connect(lambda name: cancelled.append(name) or loop.quit())
+    svc.setup_cancelled.connect(lambda name: cancelled.append(name) or loop.quit())
 
-    worker.start()
-    stop_event.set()
+    svc.start_setup_device(
+        SetupDeviceRequest(name="test_dev", info=FakeDeviceInfo(address="none"))
+    )
+    svc.cancel_device_operation("test_dev")
     loop.exec()
 
     assert cancelled == ["test_dev"]

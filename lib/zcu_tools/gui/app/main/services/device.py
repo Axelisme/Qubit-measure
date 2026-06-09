@@ -14,7 +14,7 @@ from typing import (
     runtime_checkable,
 )
 
-from qtpy.QtCore import QObject, QThread, Signal  # type: ignore[attr-defined]
+from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
 from zcu_tools.device.base import BaseDeviceInfo
 from zcu_tools.gui.app.main.event_bus import (
@@ -25,6 +25,7 @@ from zcu_tools.gui.app.main.event_bus import (
 )
 from zcu_tools.gui.app.main.state import DeviceState, DeviceStatus
 
+from .background import BackgroundService, OffMainScopes
 from .operation_gate import OperationConflictError, OperationGate, OperationKind
 from .operation_handles import OperationHandles, OperationOutcome
 
@@ -51,7 +52,7 @@ class DeviceProtocol(Protocol):
     The semantic invariants an implementer must also honour — and which a bug
     silently violates — are:
 
-    - ``setup`` is called on a **worker QThread** (``_DeviceSetupWorker``), never
+    - ``setup`` runs **off the main thread** (via ``BackgroundService``), never
       the Qt main thread. It MUST poll ``stop_event`` during any long operation:
       cancellation works by ``stop_event.set()``, and the worker reports
       "cancelled" only if it returns with the event set. A ``setup`` that ignores
@@ -163,84 +164,6 @@ def _default_driver_factory(type_name: str, address: str) -> DeviceProtocol:
     return cast(DeviceProtocol, cls())
 
 
-class _DeviceCommandWorker(QThread):
-    succeeded: Signal = Signal(object)
-    failed: Signal = Signal(object)
-
-    def __init__(
-        self, command: Callable[[], object], parent: Optional[QObject] = None
-    ) -> None:
-        super().__init__(parent)
-        self._command = command
-        self._result: object | None = None
-        self._error: Exception | None = None
-        self.finished.connect(self._emit_outcome)
-
-    def run(self) -> None:
-        try:
-            self._result = self._command()
-        except Exception as exc:
-            self._error = exc
-
-    def _emit_outcome(self) -> None:
-        if self._error is not None:
-            self.failed.emit(self._error)
-            return
-        self.succeeded.emit(self._result)
-
-
-class _DeviceSetupWorker(QThread):
-    setup_finished: Signal = Signal(str, object)
-    failed: Signal = Signal(str, str)
-    cancelled: Signal = Signal(str)
-
-    def __init__(
-        self,
-        dev: DeviceProtocol,
-        name: str,
-        info: BaseDeviceInfo,
-        pbar_factory: Optional[Callable[..., Any]],
-        stop_event: threading.Event,
-        parent: Optional[QObject] = None,
-    ) -> None:
-        super().__init__(parent)
-        self._dev = dev
-        self._name = name
-        self._info = info
-        self._pbar_factory = pbar_factory
-        # The cancellation flag is owned by DeviceService and passed in, so the
-        # same handle is registered with the OperationGate (set on cancel).
-        self._stop_event = stop_event
-        self._completed = False
-        self._result: BaseDeviceInfo | None = None
-        self._error: Optional[str] = None
-        self.finished.connect(self._emit_outcome)
-
-    def run(self) -> None:
-        from zcu_tools.progress_bar import use_pbar_factory
-
-        try:
-            if self._pbar_factory is not None:
-                with use_pbar_factory(self._pbar_factory):
-                    self._dev.setup(self._info, stop_event=self._stop_event)
-            else:
-                self._dev.setup(self._info, stop_event=self._stop_event)
-            self._result = self._dev.get_info()
-            self._completed = True
-        except Exception as exc:
-            self._error = str(exc)
-
-    def _emit_outcome(self) -> None:
-        if self._error is not None:
-            self.failed.emit(self._name, self._error)
-        elif not self._completed or self._result is None:
-            raise RuntimeError("Device setup worker stopped without an outcome")
-        elif self._stop_event.is_set():
-            self.cancelled.emit(self._name)
-        else:
-            self.setup_finished.emit(self._name, self._result)
-
-
 class DeviceService(QObject):
     """Own device mutation workers and cached render snapshots."""
 
@@ -257,6 +180,7 @@ class DeviceService(QObject):
         state: "State",
         gate: OperationGate | None = None,
         handles: OperationHandles | None = None,
+        bg: BackgroundService | None = None,
         parent: Optional[QObject] = None,
         driver_factory: Optional["DriverFactoryPort"] = None,
         progress: "ProgressService | None" = None,
@@ -269,6 +193,10 @@ class DeviceService(QObject):
         # await + cancel for setup).
         self._gate = gate or OperationGate()
         self._handles = handles or OperationHandles()
+        # Device execution is the OffMain-thread strategy (ADR-0019): connect /
+        # disconnect carry no scopes; setup carries the progress scope + a
+        # directly-polled stop_event (not an ActiveTask scope).
+        self._bg = bg or BackgroundService()
         self._driver_factory = driver_factory or _default_driver_factory
         if progress is None:
             from zcu_tools.gui.app.main.adapters.qt_progress_transport import (
@@ -289,8 +217,6 @@ class DeviceService(QObject):
         # Rollback buffer for the in-flight transition (worker-bound, not
         # serializable, so it stays here rather than in State).
         self._active_prior: DeviceState | None = None
-        self._command_worker: _DeviceCommandWorker | None = None
-        self._setup_worker: _DeviceSetupWorker | None = None
 
     def start_connect_device(self, req: ConnectDeviceRequest) -> int:
         current = self._state.get_device(req.name)
@@ -310,12 +236,11 @@ class DeviceService(QObject):
         )
         assert self._active_token is not None  # set by _begin_operation
         token = self._active_token
-        worker = _DeviceCommandWorker(lambda: self._connect(req), parent=self)
-        self._command_worker = worker
-        worker.succeeded.connect(lambda info: self._on_connect_succeeded(req, info))
-        worker.failed.connect(lambda error: self._on_operation_failed(req.name, error))
-        worker.finished.connect(worker.deleteLater)
-        self._start_command_worker(worker, req.name)
+        self._submit_command(
+            req.name,
+            lambda: self._connect(req),
+            on_done=lambda info: self._on_connect_succeeded(req, info),
+        )
         return token
 
     def start_reconnect_device(self, name: str) -> None:
@@ -340,12 +265,11 @@ class DeviceService(QObject):
         )
         assert self._active_token is not None  # set by _begin_operation
         token = self._active_token
-        worker = _DeviceCommandWorker(lambda: self._disconnect(req.name), parent=self)
-        self._command_worker = worker
-        worker.succeeded.connect(lambda _: self._on_disconnect_succeeded(req))
-        worker.failed.connect(lambda error: self._on_operation_failed(req.name, error))
-        worker.finished.connect(worker.deleteLater)
-        self._start_command_worker(worker, req.name)
+        self._submit_command(
+            req.name,
+            lambda: self._disconnect(req.name),
+            on_done=lambda _result: self._on_disconnect_succeeded(req),
+        )
         return token
 
     def start_setup_device(self, req: SetupDeviceRequest) -> int:
@@ -364,21 +288,29 @@ class DeviceService(QObject):
         )
         assert self._active_token is not None  # set by _begin_operation
         token = self._active_token
-        worker = _DeviceSetupWorker(
-            driver,
-            req.name,
-            req.info,
-            self._progress.make_factory(token, owner_id=req.name),
-            stop_event,
-            parent=self,
+        # Setup is the OffMain-thread strategy with the progress scope (no figure
+        # routing). The stop_event is NOT an ActiveTask scope — the driver's
+        # setup() polls it directly — so it is captured by the work closure, not
+        # OffMainScopes. Cancellation is interpreted in _on_setup_done (we own the
+        # stop_event); bg only reports done/failed.
+        scopes = OffMainScopes(
+            pbar_factory=self._progress.make_factory(token, owner_id=req.name)
         )
-        self._setup_worker = worker
-        worker.setup_finished.connect(self._on_setup_finished)
-        worker.failed.connect(self._on_setup_failed)
-        worker.cancelled.connect(self._on_setup_cancelled)
-        worker.finished.connect(worker.deleteLater)
+        name = req.name
+        info = req.info
+
+        def setup_work() -> object:
+            driver.setup(info, stop_event=stop_event)
+            return driver.get_info()
+
         try:
-            worker.start()
+            self._bg.submit(
+                setup_work,
+                scopes,
+                run_in_pool=False,
+                on_done=lambda result: self._on_setup_done(name, stop_event, result),
+                on_error=lambda exc: self._on_setup_failed(name, str(exc)),
+            )
             self._bus.emit(
                 GuiEvent.DEVICE_SETUP_STARTED,
                 DeviceSetupStartedPayload(name=req.name),
@@ -391,7 +323,7 @@ class DeviceService(QObject):
     def cancel_device_operation(self, name: str) -> None:
         if (
             self._active_name != name
-            or self._setup_worker is None
+            or self._active_kind is not OperationKind.DEVICE_SETUP
             or self._active_token is None
         ):
             raise RuntimeError(f"No cancellable device setup is active for {name!r}")
@@ -639,8 +571,6 @@ class DeviceService(QObject):
         self._active_token = None
         self._active_kind = None
         self._active_prior = None
-        self._command_worker = None
-        self._setup_worker = None
         # Destroy this operation's progress container (a no-op for connect/
         # disconnect, which never minted one; setup's leave=True bars never emit
         # CLOSE, so the terminal path must clear them), settle the handle, free
@@ -649,9 +579,22 @@ class DeviceService(QObject):
         self._handles.settle(token, outcome)
         self._gate.release(token)
 
-    def _start_command_worker(self, worker: _DeviceCommandWorker, name: str) -> None:
+    def _submit_command(
+        self,
+        name: str,
+        work: Callable[[], object],
+        on_done: Callable[[object], None],
+    ) -> None:
+        """Submit a connect/disconnect command off-main (OffMain-thread strategy,
+        no scopes — no progress, no cancellation point). Aborts the in-flight
+        transition if the submit fails to start."""
         try:
-            worker.start()
+            self._bg.submit(
+                work,
+                run_in_pool=False,
+                on_done=on_done,
+                on_error=lambda exc: self._on_operation_failed(name, exc),
+            )
         except Exception:
             self._abort_unstarted_operation(name)
             raise
@@ -700,6 +643,18 @@ class DeviceService(QObject):
         self._finish_operation(req.name, OperationOutcome("finished"))
         self._emit_device_changed(req.name)
         self.device_disconnected.emit(req)
+
+    def _on_setup_done(
+        self, name: str, stop_event: threading.Event, result: object
+    ) -> None:
+        # bg reports a normal return; we own the stop_event, so we interpret
+        # cancellation here (ADR-0019): the driver's setup() returns normally even
+        # when cancelled, so a set stop_event on a normal return is 'cancelled',
+        # otherwise 'finished'. A raise goes straight to _on_setup_failed.
+        if stop_event.is_set():
+            self._on_setup_cancelled(name)
+        else:
+            self._on_setup_finished(name, result)
 
     def _on_setup_finished(self, name: str, info: object) -> None:
         current = self._require_device(name)

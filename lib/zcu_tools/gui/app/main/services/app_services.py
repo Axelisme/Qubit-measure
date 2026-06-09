@@ -81,7 +81,9 @@ def build_app_services(
     handles = OperationHandles()
     background = BackgroundService()
     progress = ProgressService(progress_transport)
-    device = DeviceService(bus, state, operation_gate, handles, progress=progress)
+    device = DeviceService(
+        bus, state, operation_gate, handles, background, progress=progress
+    )
     context = ContextService(state, io_manager, bus)
     # cfg_editor owns the per-tab and per-writeback-item cfg models; WritebackService
     # builds/reads/tears those down, so it is built after cfg_editor (single-
