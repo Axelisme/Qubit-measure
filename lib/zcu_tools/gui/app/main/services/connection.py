@@ -17,12 +17,8 @@ from zcu_tools.gui.app.main.event_bus import (
 )
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
-from .operation_gate import (
-    OperationGate,
-    OperationKind,
-    OperationLease,
-    OperationOutcome,
-)
+from .operation_gate import OperationGate, OperationKind
+from .operation_handles import OperationHandles, OperationOutcome
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.event_bus import EventBus
@@ -144,15 +140,20 @@ class ConnectionService(QObject):
         state: "State",
         bus: "EventBus",
         gate: OperationGate,
+        handles: OperationHandles,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
         self._state = state
         self._bus = bus
+        # Connect composes both leaves (ADR-0019): an Exclusion lease
+        # (SOC_CONNECT vs run / another connect) + a Handle. A connect has no
+        # cancellation point, so the handle carries no stop_event.
         self._gate = gate
+        self._handles = handles
         self._predictor_path: Optional[str] = None
         self._active_worker: Optional[_ConnectWorker] = None
-        self._active_lease: Optional[OperationLease] = None
+        self._active_token: Optional[int] = None
         self._pending_is_mock: bool = False
 
     # ------------------------------------------------------------------
@@ -174,7 +175,7 @@ class ConnectionService(QObject):
         return self._pending_is_mock
 
     def is_connect_active(self) -> bool:
-        return self._active_lease is not None
+        return self._active_token is not None
 
     def get_predictor(self) -> Optional[FluxoniumPredictor]:
         return self._state.exp_context.predictor
@@ -200,11 +201,15 @@ class ConnectionService(QObject):
         if not isinstance(req, (ConnectMockRequest, ConnectRemoteRequest)):
             raise TypeError(f"Unsupported connect request: {type(req).__name__}")
 
-        # Symmetric release: this lease is released exactly-once on the terminal
-        # path via _release_lease, called from _finish_success / _finish_failure
-        # (mock dispatches them synchronously, remote from the worker slot).
-        lease = self._gate.acquire(OperationKind.SOC_CONNECT, owner_id="soc")
-        self._active_lease = lease
+        # Symmetric release: settled/freed exactly-once on the terminal path via
+        # _release_lease, called from _finish_success / _finish_failure (mock
+        # dispatches them synchronously, remote from the worker slot). Fail-fast
+        # on conflict before opening the handle (ADR-0019); no stop_event (connect
+        # has no cancellation point).
+        self._gate.ensure_can_start(OperationKind.SOC_CONNECT)
+        token = self._handles.create()
+        self._gate.register(token, OperationKind.SOC_CONNECT, owner_id="soc")
+        self._active_token = token
         self._pending_is_mock = isinstance(req, ConnectMockRequest)
 
         if isinstance(req, ConnectMockRequest):
@@ -220,9 +225,9 @@ class ConnectionService(QObject):
             except Exception as exc:
                 error = f"Mock SoC initialisation failed: {exc}"
                 QTimer.singleShot(0, lambda err=error: self._finish_failure(err))
-                return lease.token
+                return token
             QTimer.singleShot(0, lambda: self._finish_success(soc, soccfg))
-            return lease.token
+            return token
 
         # ConnectRemoteRequest
         ip = req.ip
@@ -250,7 +255,7 @@ class ConnectionService(QObject):
             self._active_worker = None
             self._release_lease(OperationOutcome("failed", "connect failed to start"))
             raise
-        return lease.token
+        return token
 
     def _on_remote_connected(self, soc: object, soccfg: object) -> None:
         self._active_worker = None
@@ -272,11 +277,12 @@ class ConnectionService(QObject):
         self.connection_failed.emit(error)
 
     def _release_lease(self, outcome: OperationOutcome) -> None:
-        lease = self._active_lease
-        if lease is None:
-            raise RuntimeError("Connection completed without an active operation lease")
-        self._active_lease = None
-        self._gate.release(lease, outcome)
+        token = self._active_token
+        if token is None:
+            raise RuntimeError("Connection completed without an active operation token")
+        self._active_token = None
+        self._handles.settle(token, outcome)
+        self._gate.release(token)
 
     def _apply_connection(self, soc: SocHandle, soccfg: SocCfgHandle) -> None:
         new_ctx = dataclasses.replace(self._state.exp_context, soc=soc, soccfg=soccfg)

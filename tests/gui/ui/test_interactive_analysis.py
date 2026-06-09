@@ -1,16 +1,34 @@
 """Tests for InteractiveAnalysisWidget (the measure-gui InteractiveHost).
 
 Headless: a fake InteractiveSession is bound and the widget is driven by
-clicking its rendered buttons and feeding it fake matplotlib mouse events.
+clicking its rendered buttons and feeding it fake matplotlib mouse events. The
+off-main work is delegated to an injected InteractiveHostEnv port (ADR-0019);
+tests pass a fake env that runs the compute synchronously (the real marshal is
+BackgroundService's job — see tests/gui/services/test_background.py).
 """
 
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Callable
 from unittest.mock import MagicMock
 
 from qtpy.QtWidgets import QPushButton
 from zcu_tools.gui.app.main.ui.interactive_analysis import InteractiveAnalysisWidget
+
+
+class _FakeEnv:
+    """InteractiveHostEnv stand-in: records run_background calls and runs the
+    compute synchronously, delivering the result to on_done."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[Callable[[], object], Callable[[object], None]]] = []
+
+    def run_background(
+        self, compute: Callable[[], object], on_done: Callable[[object], None]
+    ) -> None:
+        self.calls.append((compute, on_done))
+        on_done(compute())
 
 
 def _fake_session() -> MagicMock:
@@ -27,13 +45,13 @@ def _buttons(widget) -> dict[str, QPushButton]:
 def test_figure_property_is_a_real_figure(qapp):  # noqa: ARG001
     from matplotlib.figure import Figure
 
-    w = InteractiveAnalysisWidget()
+    w = InteractiveAnalysisWidget(_FakeEnv())
     assert isinstance(w.figure, Figure)
     w.deleteLater()
 
 
 def test_bind_renders_one_button_per_action_plus_done(qapp):  # noqa: ARG001
-    w = InteractiveAnalysisWidget()
+    w = InteractiveAnalysisWidget(_FakeEnv())
     w.bind(_fake_session(), on_done=lambda: None)
     labels = set(_buttons(w))
     assert {"Auto Align", "Swap", "Done"} <= labels
@@ -42,7 +60,7 @@ def test_bind_renders_one_button_per_action_plus_done(qapp):  # noqa: ARG001
 
 def test_action_button_dispatches_its_id(qapp):  # noqa: ARG001
     session = _fake_session()
-    w = InteractiveAnalysisWidget()
+    w = InteractiveAnalysisWidget(_FakeEnv())
     w.bind(session, on_done=lambda: None)
     _buttons(w)["Auto Align"].click()
     session.invoke_action.assert_called_once_with("auto_align")
@@ -51,7 +69,7 @@ def test_action_button_dispatches_its_id(qapp):  # noqa: ARG001
 
 def test_done_calls_on_done_and_disables_buttons(qapp):  # noqa: ARG001
     fired: list[bool] = []
-    w = InteractiveAnalysisWidget()
+    w = InteractiveAnalysisWidget(_FakeEnv())
     w.bind(_fake_session(), on_done=lambda: fired.append(True))
     done = _buttons(w)["Done"]
     done.click()
@@ -63,7 +81,7 @@ def test_done_calls_on_done_and_disables_buttons(qapp):  # noqa: ARG001
 
 def test_canvas_events_forward_to_session(qapp):  # noqa: ARG001
     session = _fake_session()
-    w = InteractiveAnalysisWidget()
+    w = InteractiveAnalysisWidget(_FakeEnv())
     w.bind(session, on_done=lambda: None)
     in_axes = SimpleNamespace(inaxes=object(), xdata=1.5, ydata=4.2)
     out_axes = SimpleNamespace(inaxes=None, xdata=None, ydata=None)
@@ -81,7 +99,7 @@ def test_canvas_events_forward_to_session(qapp):  # noqa: ARG001
 
 def test_redraw_refreshes_info_from_session(qapp):  # noqa: ARG001
     session = _fake_session()
-    w = InteractiveAnalysisWidget()
+    w = InteractiveAnalysisWidget(_FakeEnv())
     w.bind(session, on_done=lambda: None)
     session.info_text.return_value = "updated info"
     w.redraw()
@@ -89,17 +107,13 @@ def test_redraw_refreshes_info_from_session(qapp):  # noqa: ARG001
     w.deleteLater()
 
 
-def test_run_background_marshals_result_to_main_thread(qapp):
-    import time
-
-    w = InteractiveAnalysisWidget()
+def test_run_background_delegates_to_env(qapp):  # noqa: ARG001
+    env = _FakeEnv()
+    w = InteractiveAnalysisWidget(env)
     got: list[object] = []
     w.run_background(lambda: 42, on_done=got.append)
-    # Pump the event loop until the worker's queued done-signal is delivered.
-    for _ in range(100):
-        if got:
-            break
-        qapp.processEvents()
-        time.sleep(0.01)
+    # The widget forwards the compute + on_done to the injected env port; it owns
+    # no thread pool of its own.
+    assert len(env.calls) == 1
     assert got == [42]
     w.deleteLater()

@@ -25,7 +25,9 @@ from .operation_gate import (
     OperationConflictError,
     OperationGate,
     OperationKind,
-    OperationLease,
+)
+from .operation_handles import (
+    OperationHandles,
     OperationOutcome,
 )
 from .persistence_types import (
@@ -60,8 +62,8 @@ __all__ = [
     "SetupDeviceRequest",
     "OperationConflictError",
     "OperationGate",
+    "OperationHandles",
     "OperationKind",
-    "OperationLease",
     "OperationOutcome",
     "GuardError",
     "GuardService",

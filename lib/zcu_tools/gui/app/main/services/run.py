@@ -12,22 +12,17 @@ from zcu_tools.gui.app.main.event_bus import (
     RunStartedPayload,
     TabInteractionChangedPayload,
 )
-from zcu_tools.gui.app.main.runner import NO_RESULT
 from zcu_tools.gui.plotting import FigureContainer
 
+from .background import NO_RESULT, BackgroundService, OffMainScopes
 from .guard import RunPermit
-from .operation_gate import (
-    OperationGate,
-    OperationKind,
-    OperationLease,
-    OperationOutcome,
-)
+from .operation_gate import OperationGate, OperationKind
+from .operation_handles import OperationHandles, OperationOutcome
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.event_bus import EventBus
-    from zcu_tools.gui.app.main.runner import Runner
     from zcu_tools.gui.app.main.state import State
 
     from .progress import ProgressService
@@ -35,7 +30,8 @@ if TYPE_CHECKING:
 
 
 class RunService(QObject):
-    """Encapsulates execution of an experiment adapter via a Runner."""
+    """Encapsulates execution of an experiment adapter via BackgroundService
+    (OffMain-thread strategy with figure/progress/cancel scopes — ADR-0019)."""
 
     run_finished: Signal = Signal(str, object)
     run_failed: Signal = Signal(str, object)
@@ -43,24 +39,25 @@ class RunService(QObject):
     def __init__(
         self,
         state: "State",
-        runner: "Runner",
+        bg: BackgroundService,
         bus: "EventBus",
         gate: OperationGate,
+        handles: OperationHandles,
         writeback: "WritebackService",
         progress: "ProgressService",
     ) -> None:
         super().__init__()
         self._state = state
-        self._runner = runner
+        self._bg = bg
         self._bus = bus
+        # Run composes both leaves (ADR-0019): a Handle (operation_id + await +
+        # cancel) AND an Exclusion lease (RUN conflicts with soc/device ops),
+        # under one token.
         self._gate = gate
+        self._handles = handles
         self._writeback = writeback
         self._progress = progress
-        self._active_lease: Optional[OperationLease] = None
-
-        self._runner.run_finished.connect(self._on_run_finished)
-        self._runner.run_failed.connect(self._on_run_failed)
-        self._runner.run_cancelled.connect(self._on_run_cancelled)
+        self._active_token: Optional[int] = None
 
     def start_run(
         self,
@@ -86,34 +83,50 @@ class RunService(QObject):
         self._writeback.teardown_tab_items(tab_id)
         self._state.clear_tab_results(tab_id)
 
-        # Symmetric release: this lease is released exactly-once on the terminal
-        # path — _on_run_finished / _on_run_failed / _on_run_cancelled →
-        # _release_lease. A pre-worker failure releases in the except below.
-        # The stop_event is created here (single owner) and passed to both the
-        # gate (which sets it on cancel) and the worker (which polls/self-judges).
+        # Compose the two leaves (ADR-0019): fail-fast on hardware conflict
+        # *before* opening a handle (so a conflict leaves nothing behind), then
+        # mint the handle (holding the stop_event) and register the exclusion
+        # under that token. Released exactly-once on the terminal path —
+        # _on_run_finished / _failed / _cancelled → _release_lease; a pre-worker
+        # failure unwinds in the except below. The stop_event is created here
+        # (single owner): the handle sets it on cancel, the worker self-judges.
+        self._gate.ensure_can_start(OperationKind.RUN)
         stop_event = threading.Event()
-        lease = self._gate.acquire(
-            OperationKind.RUN, owner_id=tab_id, stop_event=stop_event
-        )
-        self._active_lease = lease
+        token = self._handles.create(stop_event=stop_event)
+        self._gate.register(token, OperationKind.RUN, owner_id=tab_id)
+        self._active_token = token
         # Progress factory is bound to this operation (owner = tab_id) only after
-        # the lease is minted; the worker gets it via the pbar ContextVar.
-        pbar_factory = self._progress.make_factory(lease.token, owner_id=tab_id)
+        # the token is minted; the worker gets it via the pbar ContextVar.
+        pbar_factory = self._progress.make_factory(token, owner_id=tab_id)
+        # Run is the OffMain-thread strategy with all three scopes (ADR-0019):
+        # figure routing+liveplot, progress, and cancel (ActiveTask). bg only
+        # reports done/failed; cancellation is *interpreted* here (we own the
+        # stop_event) — see _on_bg_done / _on_bg_error.
+        adapter = permit.adapter
+        request = permit.request
+        schema = permit.schema
+        scopes = OffMainScopes(
+            figure_container=live_container,
+            pbar_factory=pbar_factory,
+            stop_event=stop_event,
+        )
         try:
-            self._runner.start_run(
-                tab_id,
-                permit.adapter,
-                permit.request,
-                permit.schema,
-                stop_event,
-                pbar_factory=pbar_factory,
-                figure_container=live_container,
+            self._bg.submit(
+                lambda: adapter.run(request, schema),
+                scopes,
+                run_in_pool=False,
+                on_done=lambda result: self._on_bg_done(tab_id, stop_event, result),
+                on_error=lambda exc: self._on_bg_error(tab_id, stop_event, exc),
             )
         except Exception:
-            self._active_lease = None
-            # The run never started; settle the handle as failed and drop progress.
-            self._progress.discard_operation(lease.token)
-            self._gate.release(lease, OperationOutcome("failed", "run failed to start"))
+            self._active_token = None
+            # The run never started: drop progress, settle the handle as failed,
+            # free the exclusion.
+            self._progress.discard_operation(token)
+            self._handles.settle(
+                token, OperationOutcome("failed", "run failed to start")
+            )
+            self._gate.release(token)
             raise
         self._state.set_tab_running(tab_id, True)
         self._bus.emit(
@@ -121,16 +134,39 @@ class RunService(QObject):
             TabInteractionChangedPayload(tab_id=tab_id),
         )
         self._bus.emit(GuiEvent.RUN_STARTED, RunStartedPayload(tab_id=tab_id))
-        return lease.token
+        return token
 
     def cancel_run(self) -> None:
         logger.info("cancel_run")
-        # Async notification: set the operation's stop_event via the gate and
+        # Async notification: set the operation's stop_event via the handle and
         # return. The worker self-judges 'cancelled' (stop_event set) and emits
         # run_cancelled — no external "who I cancelled" bookkeeping needed.
-        lease = self._active_lease
-        if lease is not None:
-            self._gate.cancel(lease.token)
+        token = self._active_token
+        if token is not None:
+            self._handles.cancel(token)
+
+    # ------------------------------------------------------------------
+    # bg outcome -> cancel interpretation (we own the stop_event, ADR-0019)
+    # ------------------------------------------------------------------
+
+    def _on_bg_done(
+        self, tab_id: str, stop_event: threading.Event, result: Any
+    ) -> None:
+        # A cancelled run may still return a partial result before the stop_event
+        # tripped a hard interrupt: stop set + normal return -> cancelled(partial).
+        if stop_event.is_set():
+            self._on_run_cancelled(tab_id, result)
+        else:
+            self._on_run_finished(tab_id, result)
+
+    def _on_bg_error(
+        self, tab_id: str, stop_event: threading.Event, error: Exception
+    ) -> None:
+        # stop set + raise -> the run interrupted itself; cancelled with no result.
+        if stop_event.is_set():
+            self._on_run_cancelled(tab_id, NO_RESULT)
+        else:
+            self._on_run_failed(tab_id, error)
 
     def _on_run_finished(self, tab_id: str, result: Any) -> None:
         logger.info(
@@ -193,11 +229,14 @@ class RunService(QObject):
         self.run_failed.emit(tab_id, error)
 
     def _release_lease(self, outcome: OperationOutcome) -> None:
-        lease = self._active_lease
-        if lease is None:
-            raise RuntimeError("Run completed without an active operation lease")
-        self._active_lease = None
+        token = self._active_token
+        if token is None:
+            raise RuntimeError("Run completed without an active operation token")
+        self._active_token = None
         # Destroy the operation's progress container (leave=True bars never emit
-        # CLOSE, so the terminal path must clear them).
-        self._progress.discard_operation(lease.token)
-        self._gate.release(lease, outcome)
+        # CLOSE, so the terminal path must clear them), then settle the handle
+        # (wakes the awaiter — State is already updated by the caller) and free
+        # the exclusion.
+        self._progress.discard_operation(token)
+        self._handles.settle(token, outcome)
+        self._gate.release(token)

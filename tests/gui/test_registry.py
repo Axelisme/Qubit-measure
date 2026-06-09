@@ -86,6 +86,13 @@ class _DummyAdapter:
     def analyze(self, req: AnalyzeRequest[object, _DummyAnalyzeParams]):  # noqa: ARG002
         return _DummyAnalyzeResult()
 
+    def setup_interactive_analysis(
+        self,
+        req: AnalyzeRequest[object, _DummyAnalyzeParams],  # noqa: ARG002
+        host: object,  # noqa: ARG002
+    ):
+        raise NotImplementedError
+
     def get_writeback_items(
         self,
         req: WritebackRequest[object, _DummyAnalyzeResult],  # noqa: ARG002

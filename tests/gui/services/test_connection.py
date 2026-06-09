@@ -21,6 +21,7 @@ from zcu_tools.gui.app.main.services.operation_gate import (
     OperationGate,
     OperationKind,
 )
+from zcu_tools.gui.app.main.services.operation_handles import OperationHandles
 from zcu_tools.gui.app.main.state import ExpContext, State
 
 
@@ -28,7 +29,9 @@ def _make_svc(gate: OperationGate | None = None) -> ConnectionService:
     state = State(
         ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
     )
-    return ConnectionService(state, EventBus(), gate or OperationGate())
+    return ConnectionService(
+        state, EventBus(), gate or OperationGate(), OperationHandles()
+    )
 
 
 def test_start_connect_mock_emits_finished_and_updates_context(qapp):
@@ -76,7 +79,7 @@ def test_predictor_load_clear_does_not_bump_context_version(qapp):
 def test_start_connect_rejects_concurrent_calls(qapp):
     gate = OperationGate()
     svc = _make_svc(gate)
-    gate.acquire(OperationKind.SOC_CONNECT, owner_id="existing")
+    gate.register(1, OperationKind.SOC_CONNECT, owner_id="existing")
     with pytest.raises(OperationConflictError, match="soc_connect is active"):
         svc.start_connect(ConnectMockRequest())
 
@@ -147,7 +150,7 @@ def test_start_connect_remote_failure_emits_failed(qapp, monkeypatch):
 def test_start_connect_rejected_while_run_active(qapp):
     gate = OperationGate()
     svc = _make_svc(gate)
-    gate.acquire(OperationKind.RUN, owner_id="tab")
+    gate.register(1, OperationKind.RUN, owner_id="tab")
 
     with pytest.raises(OperationConflictError, match="run is active"):
         svc.start_connect(ConnectMockRequest())
@@ -162,8 +165,12 @@ def test_soc_changed_subscriber_failure_releases_connection_lease(qapp):
     bus.subscribe(
         GuiEvent.SOC_CHANGED, MagicMock(side_effect=RuntimeError("render failed"))
     )
-    svc = ConnectionService(state, bus, gate)
-    svc._active_lease = gate.acquire(OperationKind.SOC_CONNECT, owner_id="soc")
+    handles = OperationHandles()
+    svc = ConnectionService(state, bus, gate, handles)
+    # Simulate an in-flight connect: a live handle + registered exclusion.
+    token = handles.create()
+    gate.register(token, OperationKind.SOC_CONNECT, owner_id="soc")
+    svc._active_token = token
     with pytest.raises(RuntimeError, match="render failed"):
         svc._finish_success(MagicMock(), MagicMock())
     assert not gate.has_active(OperationKind.SOC_CONNECT)

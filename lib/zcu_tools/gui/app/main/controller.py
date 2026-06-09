@@ -31,7 +31,6 @@ from .event_bus import (
 from .io_manager import IOManager
 from .registry import Registry
 from .role_catalog import RoleCatalog
-from .runner import AnalyzeRunner, Runner, SaveDataRunner
 from .services import (
     AppPersistedState,
     ConnectDeviceRequest,
@@ -143,7 +142,6 @@ class Controller:
     def __init__(
         self,
         state: State,
-        runner: Runner,
         registry: Registry,
         io_manager: IOManager,
         view: Optional[ViewProtocol],
@@ -197,14 +195,13 @@ class Controller:
             bus=bus,
             registry=registry,
             io_manager=io_manager,
-            runner=runner,
-            analyze_runner=AnalyzeRunner(),
-            save_runner=SaveDataRunner(),
             cfg_editor_ctrl=self,
             progress_transport=transport,
         )
         self._services = services
         self._operation_gate = services.operation_gate
+        self._operation_handles = services.handles
+        self._background_svc = services.background
         self._progress_svc = services.progress
         self._guard_svc = services.guard
         self._dev_svc = services.device
@@ -273,7 +270,7 @@ class Controller:
         self._notify("error", title, str(error))
 
     def _on_run_finished(self, tab_id: str, _result: object) -> None:
-        # State is already updated in RunService/Runner. Only adapters that do
+        # State is already updated in RunService. Only adapters that do
         # analysis (mode != NONE) are routed into analyze-params init; the NONE
         # 2D sweeps (flux_dep / power_dep) have no analyze step, and their base
         # ``get_analyze_params`` is a Fast-Fail guard — never call it for them.
@@ -510,8 +507,10 @@ class Controller:
         """How many operations (run / device / connect) are live right now.
 
         The View reads this before closing to decide whether to confirm with the
-        user (a non-zero count means closing will cancel work in progress)."""
-        return self._operation_gate.active_count()
+        user (a non-zero count means closing will cancel work in progress).
+        Counts all live operations (run / device / connect AND analyze /
+        interactive) — Handles owns the lifecycle (ADR-0019)."""
+        return self._operation_handles.live_count()
 
     def begin_shutdown(self, on_closed: Callable[[], None]) -> None:
         """Cancel every live operation, wait (with a timeout) for them to stop,
@@ -523,7 +522,7 @@ class Controller:
         if self._shutdown_driver is None:
             from .adapters.qt_shutdown_driver import QtShutdownDriver
 
-            self._shutdown_driver = QtShutdownDriver(self._operation_gate)
+            self._shutdown_driver = QtShutdownDriver(self._operation_handles)
         self._shutdown_driver.begin(on_closed)
 
     def get_operation_progress(self, operation_id: int) -> tuple:
@@ -586,6 +585,22 @@ class Controller:
                 lambda session: self._analyze_svc.finish_interactive(tab_id, session),
             )
         return token
+
+    def run_background(
+        self, compute: Callable[[], object], on_done: Callable[[object], None]
+    ) -> None:
+        """InteractiveHostEnv (ADR-0019): run a short interactive compute off-main
+        via BackgroundService's pool, delivering the result to ``on_done`` on the
+        main thread. The interactive host has no error channel, so a failure is
+        logged (the user keeps the current picker state)."""
+        self._background_svc.submit(
+            compute,
+            run_in_pool=True,
+            on_done=on_done,
+            on_error=lambda exc: logger.warning(
+                "interactive run_background failed: %r", exc
+            ),
+        )
 
     # ------------------------------------------------------------------
     # Writeback (TabService)
@@ -983,9 +998,9 @@ class Controller:
         """Block until an async operation settles; return its OperationOutcome.
 
         Runs on an off-main IO thread (operation.await is off_main_thread) — only
-        touches the gate's thread-safe registry, no main-thread-owned state.
+        touches the thread-safe OperationHandles, no main-thread-owned state.
         """
-        return self._operation_gate.await_outcome(operation_id, timeout)
+        return self._operation_handles.await_outcome(operation_id, timeout)
 
     # ------------------------------------------------------------------
     # Startup application workflow (StartupService)

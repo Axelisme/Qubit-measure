@@ -25,13 +25,8 @@ from zcu_tools.gui.app.main.event_bus import (
 )
 from zcu_tools.gui.app.main.state import DeviceState, DeviceStatus
 
-from .operation_gate import (
-    OperationConflictError,
-    OperationGate,
-    OperationKind,
-    OperationLease,
-    OperationOutcome,
-)
+from .operation_gate import OperationConflictError, OperationGate, OperationKind
+from .operation_handles import OperationHandles, OperationOutcome
 
 # DeviceMemoryInfo lives in the contract layer (ports) — the element type of
 # RememberedDevicePort, used here as the parameter type of
@@ -261,6 +256,7 @@ class DeviceService(QObject):
         bus: "EventBus",
         state: "State",
         gate: OperationGate | None = None,
+        handles: OperationHandles | None = None,
         parent: Optional[QObject] = None,
         driver_factory: Optional["DriverFactoryPort"] = None,
         progress: "ProgressService | None" = None,
@@ -268,7 +264,11 @@ class DeviceService(QObject):
         super().__init__(parent)
         self._bus = bus
         self._state = state
+        # Device composes both leaves (ADR-0019): Exclusion (device mutation vs
+        # run / another mutation of the same device) + a Handle (operation_id +
+        # await + cancel for setup).
         self._gate = gate or OperationGate()
+        self._handles = handles or OperationHandles()
         self._driver_factory = driver_factory or _default_driver_factory
         if progress is None:
             from zcu_tools.gui.app.main.adapters.qt_progress_transport import (
@@ -283,7 +283,8 @@ class DeviceService(QObject):
         # live driver (in GlobalDeviceManager), the worker threads, and the
         # in-flight operation transient below. Setup progress lives in the
         # shared ProgressService, keyed by this operation's token (owner = name).
-        self._active_lease: OperationLease | None = None
+        self._active_token: int | None = None
+        self._active_kind: OperationKind | None = None
         self._active_name: str | None = None
         # Rollback buffer for the in-flight transition (worker-bound, not
         # serializable, so it stays here rather than in State).
@@ -307,8 +308,8 @@ class DeviceService(QObject):
             req.name,
             replace(initial, status=DeviceStatus.CONNECTING, error=None),
         )
-        assert self._active_lease is not None  # set by _begin_operation
-        token = self._active_lease.token
+        assert self._active_token is not None  # set by _begin_operation
+        token = self._active_token
         worker = _DeviceCommandWorker(lambda: self._connect(req), parent=self)
         self._command_worker = worker
         worker.succeeded.connect(lambda info: self._on_connect_succeeded(req, info))
@@ -337,8 +338,8 @@ class DeviceService(QObject):
             req.name,
             replace(current, status=DeviceStatus.DISCONNECTING, error=None),
         )
-        assert self._active_lease is not None  # set by _begin_operation
-        token = self._active_lease.token
+        assert self._active_token is not None  # set by _begin_operation
+        token = self._active_token
         worker = _DeviceCommandWorker(lambda: self._disconnect(req.name), parent=self)
         self._command_worker = worker
         worker.succeeded.connect(lambda _: self._on_disconnect_succeeded(req))
@@ -361,8 +362,8 @@ class DeviceService(QObject):
             replace(current, status=DeviceStatus.SETTING_UP, error=None),
             stop_event=stop_event,
         )
-        assert self._active_lease is not None  # set by _begin_operation
-        token = self._active_lease.token
+        assert self._active_token is not None  # set by _begin_operation
+        token = self._active_token
         worker = _DeviceSetupWorker(
             driver,
             req.name,
@@ -391,13 +392,13 @@ class DeviceService(QObject):
         if (
             self._active_name != name
             or self._setup_worker is None
-            or self._active_lease is None
+            or self._active_token is None
         ):
             raise RuntimeError(f"No cancellable device setup is active for {name!r}")
-        # Async notification via the gate: set the operation's stop_event and
+        # Async notification via the handle: set the operation's stop_event and
         # return. The worker self-judges 'cancelled' and emits its cancelled
         # signal — no direct worker.cancel() coupling.
-        self._gate.cancel(self._active_lease.token)
+        self._handles.cancel(self._active_token)
 
     def register_remembered_devices(self, entries: list[DeviceMemoryInfo]) -> None:
         for entry in entries:
@@ -600,11 +601,16 @@ class DeviceService(QObject):
         # every _on_*_finished/_failed/_cancelled and _on_operation_failed.
         # stop_event is set only for cancellable operations (setup); connect /
         # disconnect have no cancellation point, so cancel is a no-op for them.
-        lease = self._gate.acquire(
-            kind, owner_id=name, resource_id=name, stop_event=stop_event
-        )
+        # Compose both leaves (ADR-0019): fail-fast on conflict before the handle,
+        # then mint the handle (holding stop_event) and register the exclusion
+        # under the same token. _active_kind is tracked because outcome handling
+        # (_on_operation_failed) branches on the operation kind.
+        self._gate.ensure_can_start(kind)
+        token = self._handles.create(stop_event=stop_event)
+        self._gate.register(token, kind, owner_id=name, resource_id=name)
         prior = self._state.get_device(name)
-        self._active_lease = lease
+        self._active_token = token
+        self._active_kind = kind
         self._active_name = name
         self._active_prior = prior
         self._state.put_device(pending)
@@ -616,27 +622,32 @@ class DeviceService(QObject):
             else:
                 self._state.put_device(prior)
             self._active_name = None
-            self._active_lease = None
+            self._active_token = None
+            self._active_kind = None
             self._active_prior = None
-            self._gate.release(
-                lease, OperationOutcome("failed", "operation failed to begin")
+            self._handles.settle(
+                token, OperationOutcome("failed", "operation failed to begin")
             )
+            self._gate.release(token)
             raise
 
     def _finish_operation(self, name: str, outcome: OperationOutcome) -> None:
-        if self._active_name != name or self._active_lease is None:
-            raise RuntimeError(f"Device operation for {name!r} has no active lease")
-        lease = self._active_lease
+        if self._active_name != name or self._active_token is None:
+            raise RuntimeError(f"Device operation for {name!r} has no active operation")
+        token = self._active_token
         self._active_name = None
-        self._active_lease = None
+        self._active_token = None
+        self._active_kind = None
         self._active_prior = None
         self._command_worker = None
         self._setup_worker = None
         # Destroy this operation's progress container (a no-op for connect/
         # disconnect, which never minted one; setup's leave=True bars never emit
-        # CLOSE, so the terminal path must clear them).
-        self._progress.discard_operation(lease.token)
-        self._gate.release(lease, outcome)
+        # CLOSE, so the terminal path must clear them), settle the handle, free
+        # the exclusion.
+        self._progress.discard_operation(token)
+        self._handles.settle(token, outcome)
+        self._gate.release(token)
 
     def _start_command_worker(self, worker: _DeviceCommandWorker, name: str) -> None:
         try:
@@ -736,10 +747,8 @@ class DeviceService(QObject):
 
     def _on_operation_failed(self, name: str, error: object) -> None:
         message = str(error)
-        lease = self._active_lease
         if (
-            lease is not None
-            and lease.kind is OperationKind.DEVICE_CONNECT
+            self._active_kind is OperationKind.DEVICE_CONNECT
             and self._active_prior is None
         ):
             self._state.remove_device(name)

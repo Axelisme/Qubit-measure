@@ -155,4 +155,23 @@ WIRE_VERSION = 21
 #     setup_interactive_analysis; analyze degrades like a run (gui_analyze ->
 #     pending for an interactive pick) — see MCP 26. WIRE unchanged (no new RPC
 #     method / param / event). Phase 145.
-GUI_VERSION = 21
+# v22: BackgroundService extraction (ADR-0019, internal). The 3 per-op QThread
+#     workers + 3 runners (RunWorker/AnalyzeWorker/SaveDataWorker + runners)
+#     collapse into one BackgroundService.submit(work, scopes, *, run_in_pool,
+#     on_done, on_error) — the OffMain execution strategy with opt-in
+#     OffMainScopes (figure routing+liveplot / pbar / cancel). run / analyze
+#     (FIT) / save compose it; cancel interpretation (finished vs
+#     cancelled+partial) moves into RunService (it owns the stop_event). The
+#     interactive widget delegates run_background to a narrow InteractiveHostEnv
+#     port (the Controller, backed by bg's pool) instead of owning a QThreadPool.
+#     Pure-internal refactor; WIRE unchanged (no RPC/param/event change). Phase 146.
+# v23: Handle / Exclusion split (ADR-0019 Phase B, internal). The old OperationGate
+#     facade splits into OperationGate (pure hardware Exclusion: ensure_can_start /
+#     register / release) + OperationHandles (the async Handle/Cancel facet: create
+#     mints the token, settle / await_outcome / poll / cancel / cancel_all /
+#     live_count). run / device / connect compose both under one token; analyze /
+#     interactive take ONLY a handle (no fake exclusion lease). Terminal path
+#     settles the handle then frees the exclusion. Shutdown + operation.await read
+#     OperationHandles; active_operation_count = handles.live_count (now includes
+#     analyze / interactive). WIRE unchanged (no RPC/param/event change). Phase 147.
+GUI_VERSION = 23

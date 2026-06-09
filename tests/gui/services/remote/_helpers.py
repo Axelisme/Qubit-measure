@@ -21,7 +21,6 @@ from zcu_tools.gui.app.main.controller import Controller
 from zcu_tools.gui.app.main.event_bus import EventBus
 from zcu_tools.gui.app.main.io_manager import IOManager
 from zcu_tools.gui.app.main.registry import Registry
-from zcu_tools.gui.app.main.runner import Runner
 from zcu_tools.gui.app.main.services.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
 from zcu_tools.gui.app.main.state import State
@@ -89,7 +88,6 @@ class Fixture:
         self, opts: Optional[ControlOptions] = None, project_root: Optional[str] = None
     ) -> None:
         self.state = State(make_ctx())
-        self.runner = Runner()
         self.registry = Registry()
         register_all(self.registry)
         if not self.registry.has("fake"):
@@ -100,7 +98,6 @@ class Fixture:
         self.bus = EventBus()
         self.ctrl = Controller(
             state=self.state,
-            runner=self.runner,
             registry=self.registry,
             io_manager=io_manager,
             view=self.view,

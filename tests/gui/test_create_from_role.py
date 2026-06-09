@@ -17,7 +17,6 @@ from zcu_tools.gui.app.main.event_bus import EventBus
 from zcu_tools.gui.app.main.io_manager import IOManager
 from zcu_tools.gui.app.main.registry import Registry
 from zcu_tools.gui.app.main.role_catalog import RoleCatalog
-from zcu_tools.gui.app.main.runner import Runner
 from zcu_tools.gui.app.main.state import State
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
@@ -40,7 +39,6 @@ def _make_ctrl(md_values: dict) -> Controller:
     bus = EventBus()
     return Controller(
         state=State(ctx),
-        runner=Runner(),
         registry=Registry(),
         io_manager=io,
         view=None,
@@ -133,7 +131,6 @@ def test_no_catalog_wired_raises(qapp):  # noqa: ARG001
     io._em = MagicMock()
     ctrl = Controller(
         state=State(ctx),
-        runner=Runner(),
         registry=Registry(),
         io_manager=io,
         view=None,

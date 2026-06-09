@@ -1,7 +1,7 @@
 """Unit tests for AnalyzeService.
 
 Covers start_analyze, _on_analyze_finished, and _on_analyze_failed
-using a real State + real EventBus, with the runner mocked.
+using a real State + real EventBus, with BackgroundService mocked.
 """
 
 from __future__ import annotations
@@ -40,14 +40,15 @@ def _make_service(
     state: State,
     bus: EventBus,
 ) -> tuple[AnalyzeService, MagicMock]:
-    from zcu_tools.gui.app.main.services.operation_gate import OperationGate
+    from zcu_tools.gui.app.main.services.operation_handles import OperationHandles
 
-    runner = MagicMock()
+    bg = MagicMock()  # BackgroundService stand-in; submit() is inspected per-test
     writeback = MagicMock()
     writeback.compute_items_for_tab.return_value = []
-    # Real (Qt-free) gate so analyze takes a genuine async-handle lease.
-    svc = AnalyzeService(state, runner, bus, writeback, OperationGate())
-    return svc, runner
+    # Real (Qt-free) Handles so analyze takes a genuine async handle (no
+    # exclusion — ADR-0019).
+    svc = AnalyzeService(state, bg, bus, writeback, OperationHandles())
+    return svc, bg
 
 
 # ---------------------------------------------------------------------------
@@ -55,14 +56,16 @@ def _make_service(
 # ---------------------------------------------------------------------------
 
 
-def test_start_analyze_calls_runner(qapp):  # noqa: ARG001
+def test_start_analyze_submits_to_bg(qapp):  # noqa: ARG001
     state = _make_state()
     bus = EventBus()
-    svc, runner = _make_service(state, bus)
+    svc, bg = _make_service(state, bus)
 
     svc.start_analyze(AnalyzePermit(tab_id="tab1"), analyze_params_instance=object())
 
-    runner.start_analyze.assert_called_once()
+    bg.submit.assert_called_once()
+    # FIT analyze is the OffMain-thread strategy (not pooled).
+    assert bg.submit.call_args.kwargs["run_in_pool"] is False
     assert state.get_tab("tab1").is_analyzing is True
 
 
@@ -78,9 +81,9 @@ def test_start_analyze_emits_interaction_event(qapp):  # noqa: ARG001
     assert "tab1" in received
 
 
-def test_start_analyze_passes_figure_container(qapp):  # noqa: ARG001
+def test_start_analyze_passes_figure_container_in_scopes(qapp):  # noqa: ARG001
     state = _make_state()
-    svc, runner = _make_service(state, EventBus())
+    svc, bg = _make_service(state, EventBus())
     container = MagicMock()
 
     svc.start_analyze(
@@ -89,11 +92,9 @@ def test_start_analyze_passes_figure_container(qapp):  # noqa: ARG001
         figure_container=container,
     )
 
-    _, kwargs = runner.start_analyze.call_args
-    assert (
-        kwargs.get("figure_container") is container
-        or container in runner.start_analyze.call_args[0]
-    )
+    # The container is carried by the OffMainScopes (2nd positional arg to submit).
+    scopes = bg.submit.call_args.args[1]
+    assert scopes.figure_container is container
 
 
 # ---------------------------------------------------------------------------
@@ -161,15 +162,15 @@ def test_on_analyze_finished_emits_interaction_event(qapp):  # noqa: ARG001
 # ---------------------------------------------------------------------------
 
 
-def test_start_interactive_marks_analyzing_without_runner(qapp):  # noqa: ARG001
+def test_start_interactive_marks_analyzing_without_bg(qapp):  # noqa: ARG001
     state = _make_state()
-    svc, runner = _make_service(state, EventBus())
+    svc, bg = _make_service(state, EventBus())
 
     token = svc.start_interactive(AnalyzePermit(tab_id="tab1"))
 
     assert isinstance(token, int)
     assert state.get_tab("tab1").is_analyzing is True
-    runner.start_analyze.assert_not_called()  # INTERACTIVE never starts a worker
+    bg.submit.assert_not_called()  # INTERACTIVE never starts a worker (main-thread)
 
 
 def test_start_interactive_rejects_busy_tab(qapp):  # noqa: ARG001

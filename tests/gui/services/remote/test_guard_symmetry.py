@@ -19,7 +19,6 @@ from zcu_tools.gui.app.main.controller import Controller
 from zcu_tools.gui.app.main.event_bus import EventBus
 from zcu_tools.gui.app.main.io_manager import IOManager
 from zcu_tools.gui.app.main.registry import Registry
-from zcu_tools.gui.app.main.runner import Runner
 from zcu_tools.gui.app.main.services.guard import GuardError
 from zcu_tools.gui.app.main.services.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.app.main.state import State
@@ -50,7 +49,6 @@ def _make_controller(readiness: ContextReadiness) -> Controller:
     bus.emit = MagicMock()  # type: ignore[method-assign]
     return Controller(
         state=state,
-        runner=Runner(),
         registry=registry,
         io_manager=io_manager,
         view=view,

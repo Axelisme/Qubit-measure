@@ -1,7 +1,8 @@
 """QtShutdownDriver: the QTimer-driven adapter around ShutdownCoordinator.
 
 Verifies the two ends — immediate settle (no operations) and the polled wait
-until an operation releases — without reaching into the coordinator."""
+until an operation settles — without reaching into the coordinator. Operations
+are modelled directly as OperationHandles tokens (ADR-0019)."""
 
 from __future__ import annotations
 
@@ -10,9 +11,8 @@ import time
 
 from qtpy.QtCore import QCoreApplication
 from zcu_tools.gui.app.main.adapters.qt_shutdown_driver import QtShutdownDriver
-from zcu_tools.gui.app.main.services.operation_gate import (
-    OperationGate,
-    OperationKind,
+from zcu_tools.gui.app.main.services.operation_handles import (
+    OperationHandles,
     OperationOutcome,
 )
 
@@ -31,8 +31,8 @@ def _spin(condition, timeout_ms: int = 3000, step_ms: int = 10) -> bool:
 
 def test_begin_closes_immediately_when_idle(qapp) -> None:
     del qapp
-    gate = OperationGate()
-    driver = QtShutdownDriver(gate)
+    handles = OperationHandles()
+    driver = QtShutdownDriver(handles)
     closed: list[bool] = []
 
     driver.begin(lambda: closed.append(True))
@@ -42,30 +42,28 @@ def test_begin_closes_immediately_when_idle(qapp) -> None:
     assert closed == [True]
 
 
-def test_begin_waits_then_closes_when_operation_releases(qapp) -> None:
+def test_begin_waits_then_closes_when_operation_settles(qapp) -> None:
     del qapp
-    gate = OperationGate()
+    handles = OperationHandles()
     stop_event = threading.Event()
-    lease = gate.acquire(
-        OperationKind.DEVICE_SETUP, owner_id="d", stop_event=stop_event
-    )
-    driver = QtShutdownDriver(gate)
+    token = handles.create(stop_event=stop_event)
+    driver = QtShutdownDriver(handles)
     closed: list[bool] = []
 
     driver.begin(lambda: closed.append(True))
     assert stop_event.is_set()  # cancelled
-    assert closed == []  # still waiting — lease not released
+    assert closed == []  # still waiting — handle not settled
 
-    gate.release(lease, OperationOutcome("cancelled"))
-    assert _spin(lambda: closed == [True]), "driver did not close after release"
+    handles.settle(token, OperationOutcome("cancelled"))
+    assert _spin(lambda: closed == [True]), "driver did not close after settle"
 
 
 def test_timeout_forces_close(qapp) -> None:
     del qapp
-    gate = OperationGate()
+    handles = OperationHandles()
     # A connect has no stop_event → never settles → only the timeout closes it.
-    gate.acquire(OperationKind.SOC_CONNECT, owner_id="soc")
-    driver = QtShutdownDriver(gate, timeout=0.05)
+    handles.create()
+    driver = QtShutdownDriver(handles, timeout=0.05)
     closed: list[bool] = []
 
     driver.begin(lambda: closed.append(True))

@@ -8,22 +8,17 @@ on ``figure``, repaints via ``redraw``, and offloads a heavy step via
 events to the session, and shows ``session.info_text()`` verbatim.
 
 All interaction is on the Qt main thread (Case B of ADR-0017); only the compute
-passed to ``run_background`` runs on a worker, with its result marshalled back to
-the main thread via a queued signal (the same pattern as fluxdep's search worker).
+passed to ``run_background`` runs off-main, delegated to the app's
+``BackgroundService`` (pool strategy) through the injected ``InteractiveHostEnv``
+port (ADR-0019), which marshals the result back to the main thread.
 """
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Callable, Optional, Protocol
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from qtpy.QtCore import (  # type: ignore[attr-defined]
-    QObject,
-    QRunnable,
-    QThreadPool,
-    Signal,
-)
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QHBoxLayout,
     QLabel,
@@ -35,31 +30,29 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 from zcu_tools.gui.app.main.adapter import InteractiveSession
 
 
-class _BgSignals(QObject):
-    done = Signal(object)
+class InteractiveHostEnv(Protocol):
+    """The narrow capability the host widget needs from the app to run a heavy
+    interactive step off the main thread (ADR-0019). The Controller satisfies it
+    (delegating to ``BackgroundService``'s pool); tests inject a fake. The widget
+    is a passive host that issues no commands — this one capability is all it
+    pulls from the app, so it is injected as this port rather than the whole
+    Controller."""
 
-
-class _BgRunnable(QRunnable):
-    """Run ``compute`` on a pool thread and emit its result; the ``done`` signal
-    is owned by the main thread, so the connected slot runs there (queued)."""
-
-    def __init__(self, compute: Callable[[], object], signals: _BgSignals) -> None:
-        super().__init__()
-        self._compute = compute
-        self._signals = signals
-
-    def run(self) -> None:  # pragma: no cover - exercised via QThreadPool
-        self._signals.done.emit(self._compute())
+    def run_background(
+        self, compute: Callable[[], object], on_done: Callable[[object], None]
+    ) -> None: ...
 
 
 class InteractiveAnalysisWidget(QWidget):
     """Qt host for an interactive analysis session (implements InteractiveHost)."""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self, env: InteractiveHostEnv, parent: Optional[QWidget] = None
+    ) -> None:
         super().__init__(parent)
+        self._env = env
         self._figure = Figure(figsize=(8, 5))
         self._canvas = FigureCanvasQTAgg(self._figure)
-        self._pool = QThreadPool(self)
         self._session: Optional[InteractiveSession] = None
         self._on_done: Optional[Callable[[], None]] = None
 
@@ -95,9 +88,9 @@ class InteractiveAnalysisWidget(QWidget):
     def run_background(
         self, compute: Callable[[], object], on_done: Callable[[object], None]
     ) -> None:
-        signals = _BgSignals()
-        signals.done.connect(on_done)  # main-thread (queued from the pool thread)
-        self._pool.start(_BgRunnable(compute, signals))
+        # Delegate to the app's BackgroundService (pool strategy) via the injected
+        # env port; the widget no longer owns a thread pool or the marshal.
+        self._env.run_background(compute, on_done)
 
     # --- binding + lifecycle --------------------------------------------
 

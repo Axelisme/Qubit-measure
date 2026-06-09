@@ -1038,7 +1038,9 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         tab_w.reset_plot()
-        widget = InteractiveAnalysisWidget()
+        # The Controller satisfies InteractiveHostEnv (run_background via bg's
+        # pool); the widget pulls only that one capability through the port.
+        widget = InteractiveAnalysisWidget(self._ctrl)
         session = session_factory(widget)  # the widget IS the InteractiveHost
         widget.bind(session, on_done=lambda: on_finish(session))
         tab_w._plot_stack.addWidget(widget)

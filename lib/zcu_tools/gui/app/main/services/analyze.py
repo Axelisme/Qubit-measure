@@ -7,16 +7,11 @@ from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
 from zcu_tools.gui.app.main.adapter import AnalyzeRequest
 from zcu_tools.gui.app.main.event_bus import GuiEvent, TabInteractionChangedPayload
-from zcu_tools.gui.app.main.runner import AnalyzeRunner
 from zcu_tools.gui.plotting import FigureContainer
 
+from .background import BackgroundService, OffMainScopes
 from .guard import AnalyzePermit
-from .operation_gate import (
-    OperationGate,
-    OperationKind,
-    OperationLease,
-    OperationOutcome,
-)
+from .operation_handles import OperationHandles, OperationOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -35,31 +30,30 @@ class AnalyzeService(QObject):
     def __init__(
         self,
         state: "State",
-        runner: AnalyzeRunner,
+        bg: BackgroundService,
         bus: "EventBus",
         writeback: "WritebackService",
-        gate: OperationGate,
+        handles: OperationHandles,
     ) -> None:
         super().__init__()
         self._state = state
-        self._runner = runner
+        self._bg = bg
         self._bus = bus
         self._writeback = writeback
-        # Analyze runs on a worker thread (AnalyzeWorker), so it takes an
-        # operation lease purely for the async handle (operation_id + await) —
-        # ANALYZE never conflicts with hardware ops. The lease is released
-        # exactly once on the terminal slot (_on_analyze_finished / _failed).
-        self._gate = gate
-        self._active_lease: Optional[OperationLease] = None
-
-        self._runner.analyze_finished.connect(self._on_analyze_finished)
-        self._runner.analyze_failed.connect(self._on_analyze_failed)
+        # FIT analyze is the OffMain-thread strategy with only the figure-routing
+        # scope (no progress, no cancel). It takes **only a Handle, no exclusion**
+        # (ADR-0019): analyze never conflicts with hardware, so it no longer fakes
+        # an exclusion lease just to obtain the async handle (operation_id + await).
+        # The handle is settled exactly once on the terminal slot (_on_analyze_
+        # finished / _failed).
+        self._handles = handles
+        self._active_token: Optional[int] = None
 
     def _release(self, outcome: OperationOutcome) -> None:
-        lease = self._active_lease
-        if lease is not None:
-            self._active_lease = None
-            self._gate.release(lease, outcome)
+        token = self._active_token
+        if token is not None:
+            self._active_token = None
+            self._handles.settle(token, outcome)
 
     def start_analyze(
         self,
@@ -88,17 +82,20 @@ class AnalyzeService(QObject):
             tab_id,
             type(analyze_params_instance).__name__,
         )
-        # Lease for the async handle only (ANALYZE never conflicts); no stop_event
-        # (analyze is not cancellable in this minimal integration). Released
-        # exactly once on the terminal slot, or here if the worker fails to start.
-        lease = self._gate.acquire(OperationKind.ANALYZE, owner_id=tab_id)
-        self._active_lease = lease
+        # Handle only — no exclusion, no stop_event (analyze never conflicts and
+        # is not cancellable in this minimal integration). Settled exactly once on
+        # the terminal slot, or here if the worker fails to start.
+        token = self._handles.create()
+        self._active_token = token
+        adapter = tab.adapter
+        scopes = OffMainScopes(figure_container=figure_container)
         try:
-            self._runner.start_analyze(
-                tab_id,
-                tab.adapter,
-                req,
-                figure_container=figure_container,
+            self._bg.submit(
+                lambda: adapter.analyze(req),
+                scopes,
+                run_in_pool=False,
+                on_done=lambda result: self._on_analyze_finished(tab_id, result),
+                on_error=lambda exc: self._on_analyze_failed(tab_id, exc),
             )
         except Exception:
             self._release(OperationOutcome("failed", "analyze failed to start"))
@@ -108,24 +105,25 @@ class AnalyzeService(QObject):
             GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),
         )
-        return lease.token
+        return token
 
     def start_interactive(self, permit: AnalyzePermit) -> int:
-        """Begin an INTERACTIVE analysis: acquire the async handle and mark the
-        tab analyzing. There is NO worker — the View mounts the interactive canvas
-        on the main thread and the user paces the work; the lease is held until
-        ``finish_interactive`` (Done). Returns the operation token (handle)."""
+        """Begin an INTERACTIVE analysis: open the async handle and mark the tab
+        analyzing. There is NO worker — the View mounts the interactive canvas on
+        the main thread and the user paces the work (Main-thread-user-paced
+        strategy, ADR-0019); the handle is held until ``finish_interactive``
+        (Done). Returns the operation token (handle)."""
         tab_id = permit.tab_id
         if self._state.is_tab_busy(tab_id):
             raise RuntimeError(f"Tab {tab_id!r} is busy")
-        lease = self._gate.acquire(OperationKind.ANALYZE, owner_id=tab_id)
-        self._active_lease = lease
+        token = self._handles.create()
+        self._active_token = token
         self._state.set_tab_analyzing(tab_id, True)
         self._bus.emit(
             GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),
         )
-        return lease.token
+        return token
 
     def finish_interactive(self, tab_id: str, session: "InteractiveSession") -> None:
         """The user finished the interactive pick (Done): build the result and run

@@ -4,7 +4,7 @@ import logging
 from enum import Enum
 from typing import Callable, Optional
 
-from .operation_gate import OperationGate
+from .operation_handles import OperationHandles
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +25,10 @@ class ShutdownCoordinator:
     close (forcing past a deadline)".
 
     Pure logic so it is unit-testable without a Qt event loop: ``begin`` cancels
-    every live operation through the gate and records their tokens + a deadline;
-    ``tick`` polls those tokens (non-blocking) and reports whether they have all
-    settled, the deadline passed, or we are still waiting. The periodic driving
+    every live operation through OperationHandles and records their tokens + a
+    deadline; ``tick`` polls those tokens (non-blocking) and reports whether they
+    have all settled, the deadline passed, or we are still waiting. The periodic
+    driving
     (a QTimer) and the actual window teardown live in the Qt layer; this object
     only decides *when* it is time to close.
 
@@ -39,12 +40,12 @@ class ShutdownCoordinator:
 
     def __init__(
         self,
-        gate: OperationGate,
+        handles: OperationHandles,
         *,
         timeout: float = DEFAULT_SHUTDOWN_TIMEOUT,
         now: Callable[[], float],
     ) -> None:
-        self._gate = gate
+        self._handles = handles
         self._timeout = timeout
         self._now = now
         self._tokens: list[int] = []
@@ -61,7 +62,7 @@ class ShutdownCoordinator:
         if self._active:
             return
         self._active = True
-        self._tokens = self._gate.cancel_all()
+        self._tokens = self._handles.cancel_all()
         self._deadline = self._now() + self._timeout
         logger.info(
             "ShutdownCoordinator.begin: cancelled %d operation(s)", len(self._tokens)
@@ -76,7 +77,7 @@ class ShutdownCoordinator:
         """
         if not self._active or self._deadline is None:
             raise RuntimeError("ShutdownCoordinator.tick called before begin")
-        pending = [t for t in self._tokens if self._gate.poll(t) is None]
+        pending = [t for t in self._tokens if self._handles.poll(t) is None]
         if not pending:
             logger.info("ShutdownCoordinator: all operations settled")
             self._active = False

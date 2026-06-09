@@ -6,7 +6,7 @@ from typing import Callable, Optional
 
 from qtpy.QtCore import QObject, QTimer  # type: ignore[attr-defined]
 
-from zcu_tools.gui.app.main.services.operation_gate import OperationGate
+from zcu_tools.gui.app.main.services.operation_handles import OperationHandles
 from zcu_tools.gui.app.main.services.shutdown import (
     DEFAULT_SHUTDOWN_TIMEOUT,
     ShutdownCoordinator,
@@ -33,14 +33,14 @@ class QtShutdownDriver(QObject):
 
     def __init__(
         self,
-        gate: OperationGate,
+        handles: OperationHandles,
         *,
         timeout: float = DEFAULT_SHUTDOWN_TIMEOUT,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
         self._coordinator = ShutdownCoordinator(
-            gate, timeout=timeout, now=time.monotonic
+            handles, timeout=timeout, now=time.monotonic
         )
         self._timer = QTimer(self)
         self._timer.setInterval(_POLL_INTERVAL_MS)

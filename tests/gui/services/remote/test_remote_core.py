@@ -24,7 +24,6 @@ from zcu_tools.gui.app.main.controller import Controller
 from zcu_tools.gui.app.main.event_bus import EventBus
 from zcu_tools.gui.app.main.io_manager import IOManager
 from zcu_tools.gui.app.main.registry import Registry
-from zcu_tools.gui.app.main.runner import Runner
 from zcu_tools.gui.app.main.services.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.main.services.remote.wire_version import (
     GUI_VERSION,
@@ -63,7 +62,6 @@ class _Fixture:
 
     def __init__(self, opts: Optional[ControlOptions] = None) -> None:
         self.state = State(_make_ctx())
-        self.runner = Runner()
         self.registry = Registry()
         register_all(self.registry)
         if not self.registry.has("fake"):
@@ -74,7 +72,6 @@ class _Fixture:
         self.bus = EventBus()
         self.ctrl = Controller(
             state=self.state,
-            runner=self.runner,
             registry=self.registry,
             io_manager=io_manager,
             view=self.view,

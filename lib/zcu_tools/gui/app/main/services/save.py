@@ -10,9 +10,9 @@ from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 from zcu_tools.gui.app.main.adapter import SaveDataRequest
 from zcu_tools.gui.app.main.event_bus import GuiEvent, TabInteractionChangedPayload
 from zcu_tools.gui.app.main.figure_export import save_figure_to_path
-from zcu_tools.gui.app.main.runner import SaveDataRunner
 from zcu_tools.utils.datasaver import safe_labber_filepath
 
+from .background import BackgroundService
 from .guard import SavePermit
 
 logger = logging.getLogger(__name__)
@@ -40,19 +40,29 @@ class SaveService(QObject):
     def __init__(
         self,
         state: "State",
-        runner: SaveDataRunner,
+        bg: BackgroundService,
         bus: "EventBus",
     ) -> None:
         super().__init__()
         self._state = state
-        self._runner = runner
+        self._bg = bg
         self._bus = bus
         self._active_paths: dict[str, str] = {}
         # image_path and pre-captured image_error for pending save_both operations
         self._pending_image: dict[str, tuple[str, Optional[str]]] = {}
 
-        self._runner.save_finished.connect(self._on_save_finished)
-        self._runner.save_failed.connect(self._on_save_failed)
+    def _start_save(self, tab_id: str, req: SaveDataRequest) -> None:
+        """Save the data file off-main (OffMain fire-forget strategy, no scopes,
+        no handle — ADR-0019): adapter.save returns None, so on_done just flips
+        the saving flag. The data path is already known synchronously by the
+        caller; the worker only writes."""
+        adapter = self._state.get_tab(tab_id).adapter
+        self._bg.submit(
+            lambda: adapter.save(req),
+            run_in_pool=False,
+            on_done=lambda _result: self._on_save_finished(tab_id),
+            on_error=lambda exc: self._on_save_failed(tab_id, exc),
+        )
 
     def start_save_data(
         self, permit: SavePermit, data_path: str, comment: str = ""
@@ -64,10 +74,9 @@ class SaveService(QObject):
         # return the resolved path for the caller to report immediately.
         data_path = safe_labber_filepath(data_path)
         req = self._make_save_data_request(tab_id, data_path, comment=comment)
-        tab = self._state.get_tab(tab_id)
         logger.info("start_save_data: tab_id=%r path=%r", tab_id, data_path)
         self._ensure_parent_directory(data_path)
-        self._runner.start_save(tab_id, tab.adapter, req)
+        self._start_save(tab_id, req)
         self._active_paths[tab_id] = data_path
         self._mark_saving(tab_id, True)
         return data_path
@@ -113,7 +122,7 @@ class SaveService(QObject):
             "start_save_result: start_save tab_id=%r data_path=%r", tab_id, data_path
         )
         self._ensure_parent_directory(data_path)
-        self._runner.start_save(tab_id, tab.adapter, req)
+        self._start_save(tab_id, req)
         self._active_paths[tab_id] = data_path
         self._pending_image[tab_id] = (image_path, image_error)
         self._mark_saving(tab_id, True)

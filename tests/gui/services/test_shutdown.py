@@ -1,15 +1,15 @@
 """Qt-free ShutdownCoordinator: begin (cancel-all) + tick (poll) state machine.
 
-No Qt loop and a fake clock — the coordinator only decides *when* to close."""
+No Qt loop and a fake clock — the coordinator only decides *when* to close. It
+drives OperationHandles (cancel_all / poll), not the exclusion gate (ADR-0019)."""
 
 from __future__ import annotations
 
 import threading
 
 import pytest
-from zcu_tools.gui.app.main.services.operation_gate import (
-    OperationGate,
-    OperationKind,
+from zcu_tools.gui.app.main.services.operation_handles import (
+    OperationHandles,
     OperationOutcome,
 )
 from zcu_tools.gui.app.main.services.shutdown import ShutdownCoordinator, ShutdownState
@@ -23,14 +23,14 @@ class _FakeClock:
         return self.t
 
 
-def _coordinator(gate: OperationGate, clock: _FakeClock, timeout: float = 10.0):
-    return ShutdownCoordinator(gate, timeout=timeout, now=clock.now)
+def _coordinator(handles: OperationHandles, clock: _FakeClock, timeout: float = 10.0):
+    return ShutdownCoordinator(handles, timeout=timeout, now=clock.now)
 
 
 def test_settles_immediately_when_no_operations_active() -> None:
-    gate = OperationGate()
+    handles = OperationHandles()
     clock = _FakeClock()
-    coord = _coordinator(gate, clock)
+    coord = _coordinator(handles, clock)
 
     coord.begin()
     assert coord.tick() is ShutdownState.SETTLED
@@ -38,30 +38,28 @@ def test_settles_immediately_when_no_operations_active() -> None:
 
 
 def test_waits_until_a_cancellable_operation_self_settles() -> None:
-    gate = OperationGate()
+    handles = OperationHandles()
     clock = _FakeClock()
     stop_event = threading.Event()
-    lease = gate.acquire(
-        OperationKind.DEVICE_SETUP, owner_id="d", stop_event=stop_event
-    )
-    coord = _coordinator(gate, clock)
+    token = handles.create(stop_event=stop_event)
+    coord = _coordinator(handles, clock)
 
     coord.begin()
     assert stop_event.is_set()  # begin cancelled it
-    assert coord.tick() is ShutdownState.WAITING  # worker has not released yet
+    assert coord.tick() is ShutdownState.WAITING  # worker has not settled yet
 
-    # Worker self-judged cancelled and released the lease.
-    gate.release(lease, OperationOutcome("cancelled"))
+    # Worker self-judged cancelled and settled the handle.
+    handles.settle(token, OperationOutcome("cancelled"))
     assert coord.tick() is ShutdownState.SETTLED
 
 
 def test_times_out_when_an_operation_never_settles() -> None:
     # A connect has no stop_event: cancel is a no-op, so it never settles and
     # only the deadline ends the wait.
-    gate = OperationGate()
+    handles = OperationHandles()
     clock = _FakeClock()
-    gate.acquire(OperationKind.SOC_CONNECT, owner_id="soc")
-    coord = _coordinator(gate, clock, timeout=5.0)
+    handles.create()  # no stop_event
+    coord = _coordinator(handles, clock, timeout=5.0)
 
     coord.begin()
     assert coord.tick() is ShutdownState.WAITING
@@ -72,11 +70,10 @@ def test_times_out_when_an_operation_never_settles() -> None:
 
 
 def test_begin_is_idempotent_while_active() -> None:
-    gate = OperationGate()
+    handles = OperationHandles()
     clock = _FakeClock()
-    stop_event = threading.Event()
-    gate.acquire(OperationKind.DEVICE_SETUP, owner_id="d", stop_event=stop_event)
-    coord = _coordinator(gate, clock)
+    handles.create(stop_event=threading.Event())
+    coord = _coordinator(handles, clock)
 
     coord.begin()
     coord.begin()  # second begin while active: no-op, must not re-cancel/extend
@@ -84,8 +81,8 @@ def test_begin_is_idempotent_while_active() -> None:
 
 
 def test_tick_before_begin_raises() -> None:
-    gate = OperationGate()
+    handles = OperationHandles()
     clock = _FakeClock()
-    coord = _coordinator(gate, clock)
+    coord = _coordinator(handles, clock)
     with pytest.raises(RuntimeError, match="before begin"):
         coord.tick()

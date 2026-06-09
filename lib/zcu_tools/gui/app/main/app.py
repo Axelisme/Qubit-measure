@@ -23,7 +23,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.main.io_manager import IOManager
     from zcu_tools.gui.app.main.registry import Registry
     from zcu_tools.gui.app.main.role_catalog import RoleCatalog
-    from zcu_tools.gui.app.main.runner import Runner
     from zcu_tools.gui.app.main.services.remote import ControlOptions
     from zcu_tools.gui.app.main.state import State
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
@@ -73,18 +72,16 @@ def run_app(
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
 
     from zcu_tools.gui.app.main.io_manager import IOManager
-    from zcu_tools.gui.app.main.runner import Runner
     from zcu_tools.gui.app.main.state import State
 
     app = QApplication.instance() or QApplication(sys.argv)
 
     # --- wire up components ---
     state = State(_make_empty_ctx())
-    runner = Runner()
     io_manager = IOManager()
 
     ctrl, window = _build_window(
-        state, runner, registry, role_catalog, io_manager, project_root
+        state, registry, role_catalog, io_manager, project_root
     )
 
     # App-level PersistenceCaretaker (Memento Caretaker): owns the single
@@ -137,7 +134,6 @@ def _show_startup_dialog(ctrl: "Controller", parent: "MainWindow") -> None:
 
 def _build_window(
     state: "State",
-    runner: "Runner",
     registry: "Registry",
     role_catalog: "RoleCatalog",
     io_manager: "IOManager",
@@ -153,7 +149,6 @@ def _build_window(
 
     ctrl = Controller(
         state=state,
-        runner=runner,
         registry=registry,
         role_catalog=role_catalog,
         io_manager=io_manager,

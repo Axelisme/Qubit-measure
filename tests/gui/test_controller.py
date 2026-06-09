@@ -29,13 +29,11 @@ from zcu_tools.gui.app.main.event_bus import (
 )
 from zcu_tools.gui.app.main.io_manager import IOManager
 from zcu_tools.gui.app.main.registry import Registry
-from zcu_tools.gui.app.main.runner import Runner
 from zcu_tools.gui.app.main.services import PersistenceCaretaker, StartupProjectRequest
 from zcu_tools.gui.app.main.services.device import ConnectDeviceRequest
 from zcu_tools.gui.app.main.services.operation_gate import (
     OperationConflictError,
     OperationKind,
-    OperationOutcome,
 )
 from zcu_tools.gui.app.main.services.ports import RestoreIssue, RestoreReport
 from zcu_tools.gui.app.main.state import DeviceStatus, State
@@ -84,7 +82,6 @@ class ControllerFixture:
 
     def __init__(self, cache_dir=None, project_root=None) -> None:
         self.state = State(_make_ctx())
-        self.runner = Runner()
         self.registry = Registry()
         register_all(self.registry)
         if not self.registry.has("fake"):
@@ -98,7 +95,6 @@ class ControllerFixture:
         self.bus.emit = MagicMock()
         self.ctrl = Controller(
             state=self.state,
-            runner=self.runner,
             registry=self.registry,
             io_manager=io_manager,
             view=self.view,
@@ -352,14 +348,14 @@ def test_start_run_while_running_raises(cf):
 
 def test_start_run_while_device_setup_active_raises(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    lease = cf.ctrl._operation_gate.acquire(
-        OperationKind.DEVICE_SETUP, owner_id="flux", resource_id="flux"
+    cf.ctrl._operation_gate.register(
+        1, OperationKind.DEVICE_SETUP, owner_id="flux", resource_id="flux"
     )
 
     with pytest.raises(OperationConflictError, match="device_setup is active"):
         cf.ctrl.start_run(tab_id)
 
-    cf.ctrl._operation_gate.release(lease, OperationOutcome("finished"))
+    cf.ctrl._operation_gate.release(1)
 
 
 def test_draft_context_rejects_real_run_and_save(cf):
@@ -384,12 +380,12 @@ def test_draft_context_rejects_real_run_and_save(cf):
 
 def test_run_rejected_while_soc_connect_lease_active(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    lease = cf.ctrl._operation_gate.acquire(OperationKind.SOC_CONNECT, owner_id="soc")
+    cf.ctrl._operation_gate.register(1, OperationKind.SOC_CONNECT, owner_id="soc")
 
     with pytest.raises(OperationConflictError, match="soc_connect is active"):
         cf.ctrl.start_run(tab_id)
 
-    cf.ctrl._operation_gate.release(lease, OperationOutcome("finished"))
+    cf.ctrl._operation_gate.release(1)
 
 
 def test_device_connect_handler_is_ui_only_no_persistence_coordination(cf):

@@ -21,7 +21,6 @@ from zcu_tools.gui.app.main.services.operation_gate import (
     OperationConflictError,
     OperationGate,
     OperationKind,
-    OperationOutcome,
 )
 from zcu_tools.gui.app.main.state import State
 
@@ -104,9 +103,7 @@ def test_device_mutation_is_globally_exclusive_and_blocks_same_device_read(qapp)
     gate = OperationGate()
     svc, _device = _make_svc(gate=gate)
     _connect(svc, _req())
-    lease = gate.acquire(
-        OperationKind.DEVICE_SETUP, owner_id="held", resource_id="dev1"
-    )
+    gate.register(1, OperationKind.DEVICE_SETUP, owner_id="held", resource_id="dev1")
 
     with pytest.raises(OperationConflictError, match="Cannot start"):
         svc.start_setup_device(
@@ -116,7 +113,7 @@ def test_device_mutation_is_globally_exclusive_and_blocks_same_device_read(qapp)
         )
     with pytest.raises(OperationConflictError, match="Cannot read"):
         svc.get_device_info("dev1")
-    gate.release(lease, OperationOutcome("finished"))
+    gate.release(1)
 
 
 def test_device_connect_failure_is_reported_without_live_registration(qapp):
@@ -181,7 +178,7 @@ def test_wait_setup_done_wakes_from_worker_thread_without_deadlock(qapp):
 
     def waiter() -> None:
         t0 = time.monotonic()
-        outcome = svc._gate.await_outcome(token, timeout=3.0)
+        outcome = svc._handles.await_outcome(token, timeout=3.0)
         result["outcome"] = outcome
         result["dt"] = time.monotonic() - t0
 
@@ -223,7 +220,7 @@ def test_wait_setup_done_raises_on_setup_failure(qapp):
     result: dict[str, object] = {}
 
     def waiter() -> None:
-        result["outcome"] = svc._gate.await_outcome(token, timeout=3.0)
+        result["outcome"] = svc._handles.await_outcome(token, timeout=3.0)
 
     wt = threading.Thread(target=waiter)
     wt.start()

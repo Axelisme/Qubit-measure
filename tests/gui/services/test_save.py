@@ -34,22 +34,22 @@ def _make_service() -> tuple[SaveService, State, MagicMock]:
         Session(adapter_name="fake", adapter=adapter, cfg_schema=MagicMock()),
     )
     state.update_tab_result("tab", object())
-    runner = MagicMock()
-    svc = SaveService(state, runner, EventBus())
-    return svc, state, runner
+    bg = MagicMock()  # BackgroundService stand-in; submit() is inspected per-test
+    svc = SaveService(state, bg, EventBus())
+    return svc, state, bg
 
 
 def test_start_save_data_creates_parent_at_command_boundary(
     qapp,
     tmp_path: Path,  # noqa: ARG001
 ) -> None:
-    svc, _, runner = _make_service()
+    svc, _, bg = _make_service()
     data_path = tmp_path / "data" / "measurement"
 
     svc.start_save_data(SavePermit(tab_id="tab"), str(data_path))
 
     assert data_path.parent.is_dir()
-    runner.start_save.assert_called_once()
+    bg.submit.assert_called_once()
 
 
 def test_start_save_data_resolves_path_to_actual_hdf5(
@@ -59,18 +59,17 @@ def test_start_save_data_resolves_path_to_actual_hdf5(
     # The path handed to the saver (and reported to the agent) is normalised up
     # front to what actually lands on disk: .hdf5 extension + uniqueness suffix —
     # not the caller's raw stem (Phase 130 follow-up: display matches reality).
-    svc, _, runner = _make_service()
+    svc, _, _ = _make_service()
     data_path = tmp_path / "data" / "meas"  # no extension
 
     returned = svc.start_save_data(SavePermit(tab_id="tab"), str(data_path))
 
-    req = runner.start_save.call_args.args[2]
-    assert req.data_path.endswith("meas_1.hdf5")
-    # the reported path (consumed by _on_save_finished → diagnostic) matches
-    assert svc._active_paths["tab"] == req.data_path
-    # start_save_data returns that resolved path synchronously (so the RPC/agent
-    # gets it back immediately, not via a later diagnostic).
-    assert returned == req.data_path
+    # The path the saver actually writes (.hdf5 + uniqueness suffix) is resolved
+    # up front. The returned path and the reported _active_paths both reflect it
+    # (start_save_data returns it synchronously, so the RPC/agent gets it back
+    # immediately, not via a later diagnostic).
+    assert returned.endswith("meas_1.hdf5")
+    assert svc._active_paths["tab"] == returned
 
 
 def test_save_image_creates_parent_at_command_boundary(
@@ -93,11 +92,11 @@ def test_save_image_creates_parent_at_command_boundary(
 # ---------------------------------------------------------------------------
 
 
-def test_start_save_result_saves_image_and_starts_data_runner(
+def test_start_save_result_saves_image_and_starts_data_save(
     qapp,
     tmp_path: Path,
 ) -> None:
-    svc, state, runner = _make_service()
+    svc, state, bg = _make_service()
     figure = _make_figure()
     state.get_tab("tab").figure = figure
     data_path = tmp_path / "data" / "meas"
@@ -106,14 +105,14 @@ def test_start_save_result_saves_image_and_starts_data_runner(
     svc.start_save_result(SavePermit(tab_id="tab"), str(data_path), str(image_path))
 
     _assert_saved_fixed_size(figure, str(image_path))
-    runner.start_save.assert_called_once()
+    bg.submit.assert_called_once()
 
 
 def test_start_save_result_captures_image_error_and_continues_data(
     qapp,
     tmp_path: Path,
 ) -> None:
-    svc, state, runner = _make_service()
+    svc, state, bg = _make_service()
     figure = _make_figure()
     figure.savefig.side_effect = OSError("disk full")
     state.get_tab("tab").figure = figure
@@ -123,7 +122,7 @@ def test_start_save_result_captures_image_error_and_continues_data(
     # Should not raise — image error is captured, data save continues
     svc.start_save_result(SavePermit(tab_id="tab"), str(data_path), str(image_path))
 
-    runner.start_save.assert_called_once()
+    bg.submit.assert_called_once()
 
 
 def test_start_save_result_raises_if_no_figure(qapp) -> None:  # noqa: ARG001
@@ -138,7 +137,7 @@ def test_start_save_result_raises_if_no_figure(qapp) -> None:  # noqa: ARG001
 
 
 def test_on_save_finished_emits_save_finished(qapp) -> None:  # noqa: ARG001
-    svc, _, runner = _make_service()
+    svc, _, _ = _make_service()
     permit = SavePermit(tab_id="tab")
 
     finished: list = []
@@ -161,7 +160,7 @@ def test_on_save_finished_with_pending_image_emits_save_result_finished(
     qapp,
     tmp_path: Path,
 ) -> None:
-    svc, state, runner = _make_service()
+    svc, state, _ = _make_service()
     figure = _make_figure()
     state.get_tab("tab").figure = figure
     data_path = tmp_path / "data" / "meas"
@@ -182,7 +181,7 @@ def test_on_save_finished_with_pending_image_error_propagates(
     qapp,
     tmp_path: Path,
 ) -> None:
-    svc, state, runner = _make_service()
+    svc, state, _ = _make_service()
     figure = _make_figure()
     figure.savefig.side_effect = OSError("disk full")
     state.get_tab("tab").figure = figure
@@ -206,7 +205,7 @@ def test_on_save_finished_with_pending_image_error_propagates(
 
 
 def test_on_save_failed_emits_save_failed(qapp) -> None:  # noqa: ARG001
-    svc, _, runner = _make_service()
+    svc, _, _ = _make_service()
     permit = SavePermit(tab_id="tab")
 
     failed: list = []
@@ -225,7 +224,7 @@ def test_on_save_failed_with_pending_image_emits_save_result_finished(
     qapp,
     tmp_path: Path,
 ) -> None:
-    svc, state, runner = _make_service()
+    svc, state, _ = _make_service()
     figure = _make_figure()
     state.get_tab("tab").figure = figure
     data_path = tmp_path / "data" / "meas"
