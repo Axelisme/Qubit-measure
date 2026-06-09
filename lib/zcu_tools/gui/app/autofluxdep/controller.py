@@ -14,9 +14,11 @@ dependency model.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING, Callable
 
 from typing_extensions import Any, Optional
 
+from zcu_tools.gui.app.autofluxdep.background import BackgroundService
 from zcu_tools.gui.app.autofluxdep.derivation import DerivationService
 from zcu_tools.gui.app.autofluxdep.event_bus import (
     EventBus,
@@ -35,6 +37,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.synth import (
     DEFAULT_ACQUIRE_DELAY,
     DEFAULT_ROUNDS,
 )
+from zcu_tools.gui.app.autofluxdep.operation_gate import OperationGate
 from zcu_tools.gui.app.autofluxdep.orchestrator import (
     InfoStore,
     ModuleSource,
@@ -51,17 +54,95 @@ from zcu_tools.gui.app.autofluxdep.state import (
     SetupResources,
 )
 from zcu_tools.gui.app.autofluxdep.tools import SimplePredictor, Tools
+from zcu_tools.gui.session.operation_handles import OperationHandles
+from zcu_tools.gui.session.services.build import build_session_services
+from zcu_tools.gui.session.services.io_manager import IOManager
+from zcu_tools.gui.session.services.progress import ProgressService
+
+if TYPE_CHECKING:
+    from zcu_tools.device.base import BaseDeviceInfo
+    from zcu_tools.gui.session.pbar_host import ProgressBarModel
+    from zcu_tools.gui.session.ports import ProgressTransport
+    from zcu_tools.gui.session.services.connection import ConnectRequest
+    from zcu_tools.gui.session.services.device import (
+        ConnectDeviceRequest,
+        DeviceEntry,
+        DeviceSetupSnapshot,
+        DeviceSnapshot,
+        DisconnectDeviceRequest,
+        SetupDeviceRequest,
+    )
+    from zcu_tools.gui.session.services.startup import (
+        PersistedStartup,
+        StartupConnectionRequest,
+        StartupProjectRequest,
+    )
+    from zcu_tools.gui.session.types import SocCfgHandle
+    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 logger = logging.getLogger(__name__)
 
 
 class Controller:
-    def __init__(self, state: AutoFluxDepState, bus: EventBus) -> None:
+    def __init__(
+        self,
+        state: AutoFluxDepState,
+        bus: EventBus,
+        *,
+        io_manager: Optional[IOManager] = None,
+        progress_transport: Optional["ProgressTransport"] = None,
+        project_root: Optional[str] = None,
+    ) -> None:
         self._state = state
         self._bus = bus
         self._stop = False  # cooperative run-cancel flag
         self._running = False
         self._cur_idx = 0  # current flux index during a run (for POINT_DONE)
+
+        # Base directory default result/database paths are anchored under (the
+        # entry script injects the repo root). None falls back to cwd — fine for
+        # tests / a `python -m` run from the repo root.
+        import os
+
+        self._project_root = project_root if project_root is not None else os.getcwd()
+
+        # --- session-core infrastructure (this app owns its gate + executor) ---
+        # autofluxdep composes the shared session services (connection / context /
+        # device / startup) by injecting its own concrete infra through the session
+        # ports (ADR-0019, session-core extraction decision 3): an app-local
+        # OperationGate (conflict policy) + thin BackgroundService (no figure
+        # routing) alongside the shared OperationHandles / ProgressService /
+        # IOManager. The progress transport defaults to the Qt marshal so a GUI /
+        # agent process works without the entry point wiring it; tests inject a
+        # synchronous fake.
+        self._io_manager = io_manager if io_manager is not None else IOManager()
+        transport: "ProgressTransport"
+        if progress_transport is not None:
+            transport = progress_transport
+        else:
+            from zcu_tools.gui.session.adapters.qt_progress_transport import (
+                QtProgressTransport,
+            )
+
+            transport = QtProgressTransport()
+        self._operation_gate = OperationGate()
+        self._operation_handles = OperationHandles()
+        self._background_svc = BackgroundService()
+        self._progress_svc = ProgressService(transport)
+        session = build_session_services(
+            state=state,
+            bus=bus,
+            gate=self._operation_gate,
+            handles=self._operation_handles,
+            background=self._background_svc,
+            progress=self._progress_svc,
+            io_manager=self._io_manager,
+        )
+        self._session = session
+        self._conn_svc = session.connection
+        self._ctx_svc = session.context
+        self._dev_svc = session.device
+        self._startup_svc = session.startup
 
     # --- read-only accessors for the UI ---
 
@@ -76,6 +157,162 @@ class Controller:
     @property
     def is_running(self) -> bool:
         return self._running
+
+    # ------------------------------------------------------------------
+    # SessionControllerPort — the surface the shared setup / device / inspect
+    # dialogs depend on (gui/session/controller_port). Each method delegates to
+    # a session service; the dialogs never reach a concrete service, only this
+    # Protocol. pyright verifies conformance at the dialog call sites (S4-c).
+    # ------------------------------------------------------------------
+
+    def get_bus(self) -> EventBus:
+        return self._bus
+
+    # -- setup dialog: project / startup --
+    def apply_startup_project(self, req: StartupProjectRequest) -> bool:
+        self._startup_svc.apply_project(req)
+        return True
+
+    def get_persisted_startup(self) -> PersistedStartup:
+        return self._startup_svc.get_persisted()
+
+    def get_project_root(self) -> str:
+        return self._project_root
+
+    # -- setup dialog: context switching --
+    def use_context(self, label: str) -> None:
+        self._ctx_svc.use_context(label)
+
+    def new_context(
+        self,
+        bind_device: Optional[str] = None,
+        clone_from: Optional[str] = None,
+    ) -> None:
+        """Create a new flux context, optionally bound to a flux device.
+
+        ``bind_device`` (a connected device name) decides the flux unit/value:
+        the unit comes from the device-type whitelist (Fast-Fail if unknown) and
+        the value is *read* from the device's current state (never set).
+        ``bind_device=None`` makes an unbound context. ``clone_from`` clones an
+        existing context's ml/md.
+        """
+        if bind_device is not None:
+            unit = self._dev_svc.get_device_unit_strict(bind_device)
+            value = self._dev_svc.get_device_value_for_new_context(bind_device)
+        else:
+            unit, value = "none", None
+        self._ctx_svc.new_context(value=value, unit=unit, clone_from=clone_from)
+
+    def get_context_labels(self) -> list[str]:
+        return self._ctx_svc.get_context_labels()
+
+    def get_active_context_label(self) -> Optional[str]:
+        return self._ctx_svc.get_active_context_label()
+
+    # -- setup dialog: connection --
+    def start_connect(self, req: ConnectRequest) -> int:
+        return self._conn_svc.start_connect(req)
+
+    def bind_connection_outcome(
+        self,
+        on_finished: Callable[[], None],
+        on_failed: Callable[[str], None],
+    ) -> None:
+        """Bind the single connection observer (the open SetupDialog) without
+        exposing the service. Drops all prior slots first so a re-created dialog
+        does not leak the previous observer (a no-arg ``disconnect()`` clears
+        every connection)."""
+        for signal in (
+            self._conn_svc.connection_finished,
+            self._conn_svc.connection_failed,
+        ):
+            try:
+                signal.disconnect()
+            except (TypeError, RuntimeError):
+                pass  # no existing connections
+        self._conn_svc.connection_finished.connect(on_finished)
+        self._conn_svc.connection_failed.connect(on_failed)
+
+    def remember_startup_connection(self, req: StartupConnectionRequest) -> None:
+        self._startup_svc.remember_connection(req)
+
+    def get_soccfg(self) -> Optional[SocCfgHandle]:
+        return self._conn_svc.get_soccfg()
+
+    def get_device_unit(self, name: str) -> str:
+        return self._dev_svc.get_device_unit(name)
+
+    # -- device dialog: lifecycle --
+    def start_connect_device(self, req: ConnectDeviceRequest) -> int:
+        return self._dev_svc.start_connect_device(req)
+
+    def start_disconnect_device(self, req: DisconnectDeviceRequest) -> int:
+        return self._dev_svc.start_disconnect_device(req)
+
+    def start_reconnect_device(self, name: str) -> None:
+        self._dev_svc.start_reconnect_device(name)
+
+    def start_setup_device(self, req: SetupDeviceRequest) -> int:
+        return self._dev_svc.start_setup_device(req)
+
+    def forget_device(self, name: str) -> None:
+        self._dev_svc.forget_device(name)
+
+    def cancel_device_operation(self, name: str) -> None:
+        self._dev_svc.cancel_device_operation(name)
+
+    # -- device dialog: queries --
+    def list_devices(self) -> list[DeviceEntry]:
+        return self._dev_svc.list_devices()
+
+    def get_device_snapshot(self, name: str) -> Optional[DeviceSnapshot]:
+        return self._dev_svc.get_device_snapshot(name)
+
+    def get_device_info(self, name: str) -> Optional[BaseDeviceInfo]:
+        return self._dev_svc.get_device_info(name)
+
+    def is_memory_device(self, name: str) -> bool:
+        return self._dev_svc.is_memory_device(name)
+
+    def get_active_device_setup(self) -> Optional[DeviceSetupSnapshot]:
+        return self._dev_svc.get_active_setup()
+
+    # -- device dialog: progress --
+    def attach_progress(
+        self, owner_id: str, listener: Callable[[], None]
+    ) -> Callable[[], None]:
+        return self._progress_svc.attach_by_owner(owner_id, listener)
+
+    def progress_bars(self, owner_id: str) -> tuple[tuple[int, ProgressBarModel], ...]:
+        return self._progress_svc.bars_for_owner(owner_id)
+
+    # -- inspect dialog: md edit + ml view/rename/delete --
+    def get_current_md(self) -> MetaDict:
+        return self._ctx_svc.get_current_md()
+
+    def get_current_ml(self) -> ModuleLibrary:
+        return self._ctx_svc.get_current_ml()
+
+    def coerce_md_value(self, key: str, text: str) -> Any:
+        return self._ctx_svc.coerce_md_value(key, text)
+
+    def set_md_attr(self, key: str, value: Any) -> None:
+        self._ctx_svc.set_md_attr(key, value)
+
+    def del_md_attr(self, key: str) -> None:
+        self._ctx_svc.del_md_attr(key)
+
+    def rename_ml_module(self, old: str, new: str) -> None:
+        self._ctx_svc.rename_ml_module(old, new)
+
+    def rename_ml_waveform(self, old: str, new: str) -> None:
+        self._ctx_svc.rename_ml_waveform(old, new)
+
+    def del_ml_module(self, name: str) -> None:
+        self._ctx_svc.del_ml_module(name)
+
+    def del_ml_waveform(self, name: str) -> None:
+        self._ctx_svc.del_ml_waveform(name)
 
     # --- workflow definition (the only writes the user makes) ---
 
