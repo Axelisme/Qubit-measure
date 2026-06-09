@@ -5,7 +5,7 @@ from typing import Annotated, Literal, Optional
 
 from zcu_tools.gui.app.main.adapter import ParamMeta
 from zcu_tools.gui.app.main.ui.analyze_form import AnalyzeFormWidget
-from zcu_tools.gui.app.main.ui.widgets import TrimDoubleSpinBox
+from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 
 
 @dataclass

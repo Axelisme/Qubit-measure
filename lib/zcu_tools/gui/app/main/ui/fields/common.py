@@ -22,6 +22,8 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
+
 from ...adapter import DirectValue, EvalValue, default_value_for_type
 from ...live_model import (
     LiteralLiveField,
@@ -29,7 +31,6 @@ from ...live_model import (
     ScalarLiveField,
     SweepLiveField,
 )
-from ..widgets import TrimDoubleSpinBox
 from .registry import register_widget
 
 if TYPE_CHECKING:

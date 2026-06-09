@@ -14,9 +14,10 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
+
 from ..adapter.analyze_params import _resolve_field_info, reconstruct_params
 from .fields import make_value_widget, read_value_widget
-from .widgets import TrimDoubleSpinBox
 
 
 class AnalyzeFormWidget(QWidget):

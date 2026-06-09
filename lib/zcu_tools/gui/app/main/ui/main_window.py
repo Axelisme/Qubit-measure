@@ -1258,7 +1258,7 @@ class MainWindow(QMainWindow):
 
             return SetupDialog(self._ctrl, parent=self)
         if name is DialogName.DEVICE:
-            from .device_dialog import DeviceDialog
+            from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 
             return DeviceDialog(self._ctrl, parent=self)
         if name is DialogName.PREDICTOR:

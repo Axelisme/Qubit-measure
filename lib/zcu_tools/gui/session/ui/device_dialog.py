@@ -41,11 +41,10 @@ from zcu_tools.gui.session.services.device import (
     list_supported_device_types,
 )
 from zcu_tools.gui.session.ui.progress_stack import ProgressStack
-
-from .widgets import TrimDoubleSpinBox
+from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.controller import Controller
+    from zcu_tools.gui.session.controller_port import SessionControllerPort
 
 
 @runtime_checkable
@@ -233,7 +232,7 @@ class DeviceDialog(QDialog):
     """Resizable dialog combining device listing (left) and detail control (right)."""
 
     def __init__(
-        self, controller: Controller, parent: Optional[QWidget] = None
+        self, controller: "SessionControllerPort", parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
         self._ctrl = controller
