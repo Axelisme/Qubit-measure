@@ -9,6 +9,7 @@ import pytest
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
+    AnalysisMode,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -620,7 +621,7 @@ def _make_concrete_adapter() -> BaseAdapter:
     """Create a minimal concrete no-analysis adapter for shared-method tests."""
 
     class _FakeAdapter(BaseAdapter):
-        capabilities = AdapterCapabilities(supports_analysis=False)
+        capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE)
         exp_cls = MagicMock()
 
         @classmethod
@@ -716,7 +717,7 @@ def test_base_adapter_build_exp_cfg_delegates_to_make_cfg():
         pass
 
     class _Adapter(BaseAdapter):
-        capabilities = AdapterCapabilities(supports_analysis=False)
+        capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE)
         exp_cls = MagicMock()
         ExpCfg_cls = _Cfg
 
@@ -742,7 +743,7 @@ def test_base_adapter_build_exp_cfg_raises_without_expcfg_cls():
     """Neither ExpCfg_cls set nor build_exp_cfg overridden → Fast Fail."""
 
     class _Adapter(BaseAdapter):
-        capabilities = AdapterCapabilities(supports_analysis=False)
+        capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE)
         exp_cls = MagicMock()
 
         @classmethod
@@ -767,7 +768,7 @@ def test_base_adapter_build_exp_cfg_raises_without_expcfg_cls():
 def test_analyze_params_cls_fallback_when_no_annotation():
 
     class _UnannotatedAdapter(BaseAdapter):
-        capabilities = AdapterCapabilities(supports_analysis=False)
+        capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE)
         exp_cls = MagicMock()
 
         @classmethod

@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from qtpy.QtCore import Qt
-from zcu_tools.gui.app.main.adapter import AdapterCapabilities
+from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.main.event_bus import EventBus, GuiEvent, SocChangedPayload
 from zcu_tools.gui.app.main.services import TabSnapshot
 from zcu_tools.gui.app.main.state import TabInteractionState
@@ -55,7 +55,9 @@ def _snapshot(
         ),
         cfg_schema=MagicMock(),
         save_paths_override=None,
-        capabilities=AdapterCapabilities(supports_analysis=supports_analysis),
+        capabilities=AdapterCapabilities(
+            analysis=AnalysisMode.FIT if supports_analysis else AnalysisMode.NONE
+        ),
         analyze_params=MagicMock()
         if analyze_params is _DEFAULT_PARAMS
         else analyze_params,
@@ -291,7 +293,7 @@ def test_exp_tab_draft_context_allows_analysis_but_disables_run_and_save(qapp):
 
 
 def test_non_analysis_adapter_hides_analysis_widgets_but_keeps_save(qapp):
-    """flux_dep / power_dep adapters (supports_analysis=False) hide only the
+    """flux_dep / power_dep adapters (analysis=NONE) hide only the
     analysis widgets, never the Save section. Regression: the whole second tab
     used to be hidden, so the user could not save a 2D-sweep run at all."""
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
@@ -441,7 +443,7 @@ def test_stopped_run_does_not_auto_switch_to_analysis_tab(qapp):
 
 
 def test_non_analysis_adapter_run_auto_switches_to_second_tab(qapp):
-    """flux_dep / power_dep adapters (supports_analysis=False) keep the second
+    """flux_dep / power_dep adapters (analysis=NONE) keep the second
     tab — its analysis widgets are hidden but the Save section stays — so a
     finished run still switches there, landing the user on Save (where they save
     the 2D sweep). Regression: switching used to be skipped, and earlier the

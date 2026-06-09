@@ -269,17 +269,17 @@ def test_run_finished_calls_refresh_tab(cf):
 
 
 def test_run_finished_skips_analyze_init_for_non_analysis_adapter(cf):
-    """flux_dep / power_dep adapters declare ``supports_analysis=False`` and have
+    """flux_dep / power_dep adapters declare ``analysis=AnalysisMode.NONE`` and have
     no analyze step; run-finished must not route them into analyze-params init
     (whose base impl is a Fast-Fail raise). Regression: previously this raised
     NotImplementedError and surfaced as an error dialog at the end of every run.
     """
-    from zcu_tools.gui.app.main.adapter import AdapterCapabilities
+    from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
 
     tab_id = cf.ctrl.new_tab("fake")
     no_analysis = MagicMock(spec=FakeAdapter)
     no_analysis.run.return_value = object()  # any non-NO_RESULT run result
-    no_analysis.capabilities = AdapterCapabilities(supports_analysis=False)
+    no_analysis.capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE)
     no_analysis.get_analyze_params.side_effect = NotImplementedError(
         "declares no analysis support"
     )

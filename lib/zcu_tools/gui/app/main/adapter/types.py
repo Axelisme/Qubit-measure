@@ -62,12 +62,28 @@ class ExperimentProtocol(Protocol, Generic[T_Cfg_contra, T_Result_co]):
     def save(self, filepath: str, result: T_Result_co) -> None: ...
 
 
+class AnalysisMode(Enum):
+    """How an adapter's run result is turned into an analysis.
+
+    - ``NONE``: no analysis (a raw 2D/1D acquisition — flux_dep / power_dep).
+    - ``FIT``: a deterministic fit computed on a worker; the result is ready when
+      the synchronous ``analyze`` returns.
+    - ``INTERACTIVE``: the result is produced by the user interacting with the
+      plot (e.g. picking flux sweet-spot lines); it is deferred until the user
+      finishes, so the agent polls for it rather than getting it synchronously.
+    """
+
+    NONE = "none"
+    FIT = "fit"
+    INTERACTIVE = "interactive"
+
+
 @dataclass(frozen=True)
 class AdapterCapabilities:
     """Declared capability flags an adapter exposes to the framework."""
 
     requires_soc: bool = True
-    supports_analysis: bool = True
+    analysis: AnalysisMode = AnalysisMode.FIT
 
 
 @dataclass(frozen=True)

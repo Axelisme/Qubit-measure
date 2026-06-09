@@ -11,7 +11,14 @@ from zcu_tools.device.base import BaseDeviceInfo
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
-from .adapter import CfgSchema, ExpContext, SavePaths, SocCfgHandle, WritebackItem
+from .adapter import (
+    AnalysisMode,
+    CfgSchema,
+    ExpContext,
+    SavePaths,
+    SocCfgHandle,
+    WritebackItem,
+)
 from .event_bus import (
     EventBus,
     GuiEvent,
@@ -249,11 +256,14 @@ class Controller:
         self._notify("error", title, str(error))
 
     def _on_run_finished(self, tab_id: str, _result: object) -> None:
-        # State is already updated in RunService/Runner. Only adapters that
-        # declare analysis support are routed into analyze-params init; the rest
-        # (flux_dep / power_dep 2D sweeps) have no analyze step, and their base
+        # State is already updated in RunService/Runner. Only adapters that do
+        # analysis (mode != NONE) are routed into analyze-params init; the NONE
+        # 2D sweeps (flux_dep / power_dep) have no analyze step, and their base
         # ``get_analyze_params`` is a Fast-Fail guard — never call it for them.
-        if self._state.get_tab(tab_id).adapter.capabilities.supports_analysis:
+        if (
+            self._state.get_tab(tab_id).adapter.capabilities.analysis
+            is not AnalysisMode.NONE
+        ):
             self._tab_svc.initialize_tab_analyze_params(tab_id)
         self._bus.emit(
             GuiEvent.TAB_CONTENT_CHANGED, TabContentChangedPayload(tab_id=tab_id)

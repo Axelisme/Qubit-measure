@@ -731,7 +731,7 @@ def test_adapter_analyze_spec_reflects_params(fx):
 
 
 def test_adapter_analyze_spec_empty_for_no_analysis(fx):
-    # onetone/power_dep declares supports_analysis=False.
+    # onetone/power_dep declares analysis=NONE.
     sock = open_client(fx.service.port)
     try:
         resp = call(sock, "adapter.analyze_spec", {"adapter_name": "onetone/power_dep"})

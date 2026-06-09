@@ -20,6 +20,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AdapterGuide,
+    AnalysisMode,
     CfgSectionSpec,
     CfgSectionValue,
     DeviceRefSpec,
@@ -35,7 +36,7 @@ OneToneFluxDepRunResult: TypeAlias = FluxDepResult
 class OneToneFluxDepAdapter(BaseAdapter[FluxDepCfg, OneToneFluxDepRunResult]):
     exp_cls = FluxDepExp
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        requires_soc=True, supports_analysis=False
+        requires_soc=True, analysis=AnalysisMode.NONE
     )
 
     @classmethod

@@ -17,6 +17,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AdapterGuide,
+    AnalysisMode,
     CfgSectionSpec,
     CfgSectionValue,
     ExpContext,
@@ -30,7 +31,7 @@ class PowerDepAdapter(BaseAdapter[PowerCfg, PowerDepRunResult]):
     exp_cls = PowerExp
     ExpCfg_cls: ClassVar[Any] = PowerCfg
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        requires_soc=True, supports_analysis=False
+        requires_soc=True, analysis=AnalysisMode.NONE
     )
 
     @classmethod

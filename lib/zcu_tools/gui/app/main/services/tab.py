@@ -4,7 +4,12 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Optional
 
-from zcu_tools.gui.app.main.adapter import CfgSchema, CfgSectionSpec, SavePaths
+from zcu_tools.gui.app.main.adapter import (
+    AnalysisMode,
+    CfgSchema,
+    CfgSectionSpec,
+    SavePaths,
+)
 from zcu_tools.gui.app.main.state import Session, TabInteractionState
 
 from .ports import TabSnapshot
@@ -138,7 +143,7 @@ class TabService:
         from zcu_tools.gui.app.main.adapter import describe_analyze_params
 
         adapter = self._registry.create(adapter_name)
-        if not adapter.capabilities.supports_analysis:
+        if adapter.capabilities.analysis is AnalysisMode.NONE:
             return []
         return describe_analyze_params(adapter.analyze_params_cls())
 

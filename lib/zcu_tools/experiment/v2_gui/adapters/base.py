@@ -39,8 +39,8 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     The class is generic over the four experiment types. Adapters without analysis
     omit the last two parameters (PEP 696 defaults fill in ``NoAnalysisResult`` /
     ``NoAnalyzeParams``) and inherit the raising no-op analysis below; they declare
-    ``capabilities = AdapterCapabilities(supports_analysis=False)`` so the framework
-    never routes analysis to them.
+    ``capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE)`` so the
+    framework never routes analysis to them.
 
     Structurally satisfies ``zcu_tools.gui.app.main.adapter.ExpAdapterProtocol``; the GUI
     holds adapters only through that generic-free Protocol.
@@ -102,13 +102,13 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     def make_filename_stem(self, ctx: ExpContext) -> str:
         """Return the filename stem used by the default save path template."""
 
-    # -- analysis (raising no-op default; override when supports_analysis) --
+    # -- analysis (raising no-op default; override when analysis != NONE) --
 
     def get_analyze_params(self, result: T_Result, ctx: ExpContext) -> T_AnalyzeParams:
         """Build the analyze parameter instance presented to the user.
 
-        Default raises: an adapter that declares ``supports_analysis=True`` must
-        override this. Adapters with ``supports_analysis=False`` are never routed
+        Default raises: an adapter that declares ``analysis=AnalysisMode.FIT`` must
+        override this. Adapters with ``analysis=AnalysisMode.NONE`` are never routed
         here by the framework, so the raise is a Fast-Fail guard against a
         forgotten override, not a normal code path.
         """

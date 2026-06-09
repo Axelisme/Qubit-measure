@@ -7,6 +7,7 @@ from .protocol import ExpAdapterProtocol
 from .types import (
     AdapterCapabilities,
     AdapterGuide,
+    AnalysisMode,
     AnalyzeRequest,
     AnalyzeResultBase,
     AnalyzeResultWithFigure,

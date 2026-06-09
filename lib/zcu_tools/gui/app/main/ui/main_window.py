@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Optional
 
-from zcu_tools.gui.app.main.adapter import CfgSchema
+from zcu_tools.gui.app.main.adapter import AnalysisMode, CfgSchema
 from zcu_tools.gui.app.main.event_bus import (
     ContextSwitchedPayload,
     GuiEvent,
@@ -569,7 +569,7 @@ class ExpTabWidget(QWidget):
         # must stay reachable so any run can be saved. (Writeback is already
         # gated by item count in update_writeback_items; hide it here too so it
         # never lingers from a previous analysis adapter on the same tab.)
-        has_analysis = capabilities.supports_analysis
+        has_analysis = capabilities.analysis is not AnalysisMode.NONE
         self._analyze_section.setVisible(has_analysis)
         self.analyze_btn.setVisible(has_analysis)
         if not has_analysis:
@@ -911,7 +911,7 @@ class MainWindow(QMainWindow):
         # have no analyze params after a run — there is no analyze form to fill,
         # so skip before the Fast-Fail below (which guards the *analysis* adapter
         # contract: a run result must carry initialized params).
-        if not current.capabilities.supports_analysis:
+        if current.capabilities.analysis is AnalysisMode.NONE:
             return
         if not current.interaction.has_run_result:
             return

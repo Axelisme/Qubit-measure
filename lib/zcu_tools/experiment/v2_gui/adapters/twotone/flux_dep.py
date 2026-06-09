@@ -20,6 +20,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AdapterGuide,
+    AnalysisMode,
     CfgSectionSpec,
     CfgSectionValue,
     DeviceRefSpec,
@@ -34,7 +35,7 @@ FluxDepRunResult: TypeAlias = FreqFluxResult
 class FluxDepAdapter(BaseAdapter[FreqFluxCfg, FluxDepRunResult]):
     exp_cls = FreqFluxExp
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        requires_soc=True, supports_analysis=False
+        requires_soc=True, analysis=AnalysisMode.NONE
     )
 
     @classmethod
