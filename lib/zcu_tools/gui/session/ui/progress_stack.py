@@ -11,7 +11,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.pbar_host import ProgressBarModel
+    from zcu_tools.gui.session.pbar_host import ProgressBarModel
 
 
 class ProgressStack(QWidget):

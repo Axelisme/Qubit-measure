@@ -1,9 +1,9 @@
 """Progress-bar host: the worker-side bar and the main-thread bar model.
 
 Both classes here are **Qt-free**. The cross-thread marshal lives in a
-``ProgressTransport`` (a port; the Qt implementation is a driven adapter), and
-the container/ownership logic lives in ``services/progress.py``. This file holds
-only the two ends of a single bar:
+``ProgressTransport`` (a session port; the Qt implementation is a driven
+adapter), and the container/ownership logic lives in a progress service. This
+file holds only the two ends of a single bar:
 
   - ``ProgressBar`` (worker side): a ``BaseProgressBar`` the experiment code
     drives via the ``make_pbar`` factory. It is **pure transport + throttle** —
@@ -15,6 +15,9 @@ only the two ends of a single bar:
     (format string, percent, elapsed/remaining) are **methods computed live on
     query** — every reader (widget render, agent ``run.progress``) asks this
     object, so there is a single source of truth and no stale formatted string.
+
+App-agnostic session-core infra: every measurement-session app (measure /
+autofluxdep) reuses these for per-operation progress.
 """
 
 from __future__ import annotations
@@ -22,7 +25,7 @@ from __future__ import annotations
 import time
 from typing import Optional
 
-from zcu_tools.gui.app.main.services.ports import (
+from zcu_tools.gui.session.ports import (
     ProgressEvent,
     ProgressEventKind,
     ProgressTransport,

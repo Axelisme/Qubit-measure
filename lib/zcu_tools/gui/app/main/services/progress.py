@@ -25,9 +25,8 @@ import itertools
 import time
 from typing import Any, Callable
 
-from zcu_tools.gui.app.main.pbar_host import ProgressBar, ProgressBarModel
-
-from .ports import (
+from zcu_tools.gui.session.pbar_host import ProgressBar, ProgressBarModel
+from zcu_tools.gui.session.ports import (
     ProgressEvent,
     ProgressEventKind,
     ProgressTransport,

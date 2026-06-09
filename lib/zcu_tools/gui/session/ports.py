@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.services.device import DeviceProtocol
     from zcu_tools.gui.session.types import ExpContext
     from zcu_tools.meta_tool import ModuleLibrary
+    from zcu_tools.progress_bar.base import ProgressTotal, ProgressValue
 
 
 class OperationKind(str, Enum):
@@ -142,6 +143,53 @@ class ProgressHub(Protocol):
 
     def make_factory(self, operation_id: int, owner_id: str) -> Callable[..., Any]: ...
     def discard_operation(self, operation_id: int) -> None: ...
+
+
+class ProgressEventKind(Enum):
+    """The three things a worker progress bar tells the main thread."""
+
+    CREATE = "create"  # a new bar appears (main thread stamps its start_time)
+    UPDATE = "update"  # an existing bar advances / relabels
+    CLOSE = "close"  # a bar leaves (leave=False bars only)
+
+
+@dataclass(frozen=True)
+class ProgressEvent:
+    """One cross-thread progress notification.
+
+    ``operation_id`` selects the owning progress container; ``handle_id`` selects
+    a bar within it. The worker never picks a container — it emits these and the
+    consumer (main thread) routes by these ids, so a bar created under one
+    operation can never update under another.
+    """
+
+    operation_id: int
+    handle_id: int
+    kind: ProgressEventKind
+    label: str = ""
+    total: "ProgressTotal" = None  # carried on CREATE and UPDATE (total may change)
+    n: "ProgressValue" = 0  # meaningful on UPDATE
+
+
+@runtime_checkable
+class ProgressTransport(Protocol):
+    """Carries progress events from worker threads to a main-thread consumer.
+
+    The whole point of this port is to own the *cross-thread marshal* so the
+    consumer (``ProgressService``) stays Qt-free and lock-free. Contract:
+
+    - ``emit`` is thread-safe (called from any worker QThread, fire-and-forget).
+    - the receiver registered via ``set_receiver`` is invoked on the *consumer's*
+      thread (the main thread) — never on the worker thread.
+
+    The Qt implementation (``QtProgressTransport``) realises the marshal with a
+    queued signal connection; a synchronous in-memory implementation suffices
+    for single-threaded tests.
+    """
+
+    def emit(self, event: ProgressEvent) -> None: ...
+
+    def set_receiver(self, receiver: Callable[[ProgressEvent], None]) -> None: ...
 
 
 @runtime_checkable

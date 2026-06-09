@@ -13,7 +13,7 @@ pytest.importorskip("qtpy")
 
 
 def _make_stack(qapp):  # noqa: ARG001
-    from zcu_tools.gui.app.main.ui.progress_stack import ProgressStack
+    from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 
     return ProgressStack()
 
@@ -134,7 +134,7 @@ def test_total_setter(qapp):
     stack = _make_stack(qapp)
     factory = _make_factory(stack)
 
-    from zcu_tools.gui.app.main.pbar_host import _FLOAT_SCALE
+    from zcu_tools.gui.session.pbar_host import _FLOAT_SCALE
 
     # integer total → max == raw value
     pbar = factory(desc="t", total=5, leave=False)

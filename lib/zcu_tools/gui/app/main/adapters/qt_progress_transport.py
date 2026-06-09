@@ -13,7 +13,7 @@ from typing import Callable, Optional
 
 from qtpy.QtCore import QObject, Qt, Signal  # type: ignore[attr-defined]
 
-from zcu_tools.gui.app.main.services.ports import ProgressEvent
+from zcu_tools.gui.session.ports import ProgressEvent
 
 
 class QtProgressTransport(QObject):

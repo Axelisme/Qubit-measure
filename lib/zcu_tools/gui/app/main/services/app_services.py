@@ -27,9 +27,9 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.main.io_manager import IOManager
     from zcu_tools.gui.app.main.registry import Registry
     from zcu_tools.gui.app.main.state import State
+    from zcu_tools.gui.session.ports import ProgressTransport
 
     from .cfg_editor import CfgEditorHost
-    from .ports import ProgressTransport
 
 
 @dataclass(frozen=True)

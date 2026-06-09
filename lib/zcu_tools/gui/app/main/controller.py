@@ -61,10 +61,11 @@ from .services.remote.dialogs import DialogName
 from .state import State
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.session.pbar_host import ProgressBarModel
+    from zcu_tools.gui.session.ports import ProgressTransport
+
     from .adapters.qt_shutdown_driver import QtShutdownDriver
     from .guard import AnalyzePermit
-    from .pbar_host import ProgressBarModel
-    from .services.ports import ProgressTransport
 
 
 # A View has two distinct down-channels from the Controller (ADR-0013):

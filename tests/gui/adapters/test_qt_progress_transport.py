@@ -15,7 +15,7 @@ def test_emit_from_worker_thread_delivers_on_main_thread(qapp):
     from zcu_tools.gui.app.main.adapters.qt_progress_transport import (
         QtProgressTransport,
     )
-    from zcu_tools.gui.app.main.services.ports import ProgressEvent, ProgressEventKind
+    from zcu_tools.gui.session.ports import ProgressEvent, ProgressEventKind
 
     transport = QtProgressTransport()  # built on the main (test) thread
     main_thread = threading.current_thread()

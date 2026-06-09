@@ -60,6 +60,8 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.gui.session.ui.progress_stack import ProgressStack
+
 from .analyze_form import AnalyzeFormWidget
 from .cfg_form import (
     CfgFormWidget,
@@ -67,7 +69,6 @@ from .cfg_form import (
 from .fields import (
     _CollapsibleSection,
 )
-from .progress_stack import ProgressStack
 from .writeback_widget import WritebackWidget
 
 if TYPE_CHECKING:

@@ -76,7 +76,7 @@ def test_operation_progress_device_setup_bars(fx):
     # operation.progress covers device setup too: live (token, ProgressBarModel).
     import time
 
-    from zcu_tools.gui.app.main.pbar_host import ProgressBarModel
+    from zcu_tools.gui.session.pbar_host import ProgressBarModel
 
     m = ProgressBarModel(label="Ramp", total=10, start_time=time.monotonic())
     m.set_n(3)
@@ -115,7 +115,7 @@ def test_operation_progress_serializes_live_bars(fx):
     # wire layer reads the model's methods (computed at serialization time).
     import time
 
-    from zcu_tools.gui.app.main.pbar_host import ProgressBarModel
+    from zcu_tools.gui.session.pbar_host import ProgressBarModel
 
     t = time.monotonic()
     m1 = ProgressBarModel(label="Rounds", total=100, start_time=t)
@@ -144,7 +144,7 @@ def test_operation_progress_serializes_live_bars(fx):
 def test_operation_progress_unknown_total_has_null_percent(fx):
     import time
 
-    from zcu_tools.gui.app.main.pbar_host import ProgressBarModel
+    from zcu_tools.gui.session.pbar_host import ProgressBarModel
 
     m = ProgressBarModel(label="working", total=None, start_time=time.monotonic())
     fx.ctrl.get_operation_progress = MagicMock(  # type: ignore[method-assign]

@@ -40,8 +40,8 @@ from zcu_tools.gui.session.services.device import (
     SetupDeviceRequest,
     list_supported_device_types,
 )
+from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 
-from .progress_stack import ProgressStack
 from .widgets import TrimDoubleSpinBox
 
 if TYPE_CHECKING:
