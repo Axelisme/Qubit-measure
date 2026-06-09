@@ -9,12 +9,12 @@ from qtpy.QtCore import QEventLoop
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.gui.app.main.adapter import DeviceRefSpec, DirectValue
-from zcu_tools.gui.app.main.adapters.qt_progress_transport import QtProgressTransport
 from zcu_tools.gui.app.main.event_bus import EventBus
 from zcu_tools.gui.app.main.live_model import DeviceRefLiveField, LiveModelEnv
 from zcu_tools.gui.app.main.services.background import BackgroundService
 from zcu_tools.gui.app.main.services.operation_gate import OperationGate
 from zcu_tools.gui.app.main.state import State
+from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
 from zcu_tools.gui.session.events import DeviceChangedPayload, SessionEvent
 from zcu_tools.gui.session.services.device import (
     ConnectDeviceRequest,

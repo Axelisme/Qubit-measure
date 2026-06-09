@@ -25,7 +25,7 @@ def _make_factory(stack, *, operation_id: int = 1, owner_id: str = "owner"):
     owner-attached listener that re-renders the stack on every change, mirroring
     how a real View attaches. Returns the worker-side factory.
     """
-    from zcu_tools.gui.app.main.adapters.qt_progress_transport import (
+    from zcu_tools.gui.session.adapters.qt_progress_transport import (
         QtProgressTransport,
     )
     from zcu_tools.gui.session.services.progress import ProgressService

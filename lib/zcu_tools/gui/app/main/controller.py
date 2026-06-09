@@ -186,7 +186,7 @@ class Controller:
         if progress_transport is not None:
             transport = progress_transport
         else:
-            from zcu_tools.gui.app.main.adapters.qt_progress_transport import (
+            from zcu_tools.gui.session.adapters.qt_progress_transport import (
                 QtProgressTransport,
             )
 
