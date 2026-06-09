@@ -9,14 +9,17 @@ but the domain content is the Node graph, not spectra.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from typing_extensions import Any, Optional
 
 from zcu_tools.gui.app.autofluxdep.nodes.builder import PlacedNode
-from zcu_tools.gui.version_table import VersionTable
+from zcu_tools.gui.session.state import SessionState
+from zcu_tools.gui.session.types import ExpContext
 
-# VersionTable resource keys (optimistic concurrency, shared mechanism).
+# VersionTable resource keys (optimistic concurrency, shared mechanism). The
+# table itself is inherited from SessionState (one shared table, decision 6);
+# these workflow keys bump the same table as the inherited session keys.
 WORKFLOW_VERSION_KEY = "workflow"
 FLUX_VERSION_KEY = "flux"
 SETUP_VERSION_KEY = "setup"
@@ -74,9 +77,14 @@ class SetupResources:
     md: Any = None
 
 
-@dataclass
-class AutoFluxDepState:
+class AutoFluxDepState(SessionState):
     """Mutable working set: the workflow the user is assembling + run resources.
+
+    Extends ``SessionState`` (the active ``ExpContext`` + device set + startup
+    prefs + the shared ``VersionTable``) with autofluxdep's experiment slice: the
+    ordered Node placements, the flux sweep, the (transitional) Setup resources,
+    and the per-Node run Results. Workflow version keys bump the same shared table
+    as the inherited session keys (decision 6).
 
     ``run_results`` maps a provider name → its sweep-lived Result (the
     accumulated domain data — read by the Plotter, by saving, by an Info dialog
@@ -85,14 +93,19 @@ class AutoFluxDepState:
     in place. Filling pre-allocated numpy rows is NOT a State semantic write (no
     key add/remove, no version bump), so it does not violate the "State writes
     only on the main thread" invariant. Cleared/rebuilt at each Run start.
+
+    ``resources`` (``SetupResources``) is transitional — the soc / soccfg /
+    predictor it holds move into the inherited ``exp_context`` as the session
+    services take over Setup.
     """
 
-    project: Optional[ProjectInfo] = None
-    nodes: list[PlacedNode] = field(default_factory=list)
-    flux_values: list[float] = field(default_factory=list)
-    resources: Optional[SetupResources] = None
-    run_results: dict[str, Any] = field(default_factory=dict)
-    version: VersionTable = field(default_factory=VersionTable)
+    def __init__(self, ctx: ExpContext, project: Optional[ProjectInfo] = None) -> None:
+        super().__init__(ctx)
+        self.project: Optional[ProjectInfo] = project
+        self.nodes: list[PlacedNode] = []
+        self.flux_values: list[float] = []
+        self.resources: Optional[SetupResources] = None
+        self.run_results: dict[str, Any] = {}
 
     @property
     def has_setup(self) -> bool:

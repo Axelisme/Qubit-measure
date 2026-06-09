@@ -20,9 +20,17 @@ from zcu_tools.gui.app.autofluxdep.event_bus import EventBus
 from zcu_tools.gui.app.autofluxdep.state import AutoFluxDepState, ProjectInfo
 
 
+def _make_empty_ctx():
+    """Minimal startup context: real empty MetaDict/ModuleLibrary, no file sync."""
+    from zcu_tools.gui.session.types import ExpContext
+    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+
+    return ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+
+
 def build_core(project: Optional[ProjectInfo] = None) -> Controller:
     """Wire State + EventBus + Controller — the testable domain core."""
-    state = AutoFluxDepState(project=project)
+    state = AutoFluxDepState(_make_empty_ctx(), project=project)
     return Controller(state, EventBus())
 
 
