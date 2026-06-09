@@ -23,6 +23,8 @@ from .types import (
     ExpContext,
     ExperimentProtocol,
     FloatSpec,
+    InteractiveHost,
+    InteractiveSession,
     IntSpec,
     LiteralSpec,
     MetaDictWriteback,

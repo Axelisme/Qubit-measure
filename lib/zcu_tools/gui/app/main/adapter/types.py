@@ -218,6 +218,68 @@ class AnalyzeRequest(Generic[T_Result, T_AnalyzeParams]):
     predictor: Optional[FluxoniumPredictor]
 
 
+# ---------------------------------------------------------------------------
+# Interactive analysis (AnalysisMode.INTERACTIVE) — the result is produced by
+# the user interacting with the plot, deferred until they finish.
+# ---------------------------------------------------------------------------
+
+_T_Bg = TypeVar("_T_Bg")
+
+
+class InteractiveHost(Protocol):
+    """Host-side capabilities an interactive analysis ``InteractiveSession`` draws
+    on. The GUI implements it (a Qt canvas + worker pool); the adapter's session
+    is handed one and calls these to draw / repaint / offload a heavy step,
+    without knowing it is Qt. Adding a host capability extends this Protocol — not
+    ``setup_interactive_analysis``'s signature."""
+
+    @property
+    def figure(self) -> "Figure":
+        """The matplotlib Figure the session draws its interactive plot on."""
+        ...
+
+    def redraw(self) -> None:
+        """Repaint the canvas (and refresh any status display). The session calls
+        it whenever IT decides the view should update — fine-grained, mid-action."""
+        ...
+
+    def run_background(
+        self, compute: Callable[[], _T_Bg], on_done: Callable[[_T_Bg], None]
+    ) -> None:
+        """Run ``compute()`` off the main thread, then call ``on_done(result)`` on
+        the MAIN thread. The session offloads exactly the heavy inner step(s) it
+        chooses; the rest of the action flow stays on the main thread."""
+        ...
+
+
+class InteractiveSession(Protocol):
+    """An in-progress interactive analysis the user drives on the plot. Created by
+    ``adapter.setup_interactive_analysis(req, host)``; the GUI host forwards
+    pointer events + action-button clicks to it and, on Done, calls ``finish()``.
+    Qt-free: it deals in matplotlib coordinates + a host port, never Qt widgets."""
+
+    def on_press(self, x: Optional[float]) -> None: ...
+    def on_move(self, x: Optional[float]) -> None: ...
+    def on_release(self, x: Optional[float], y: Optional[float]) -> None: ...
+
+    def actions(self) -> "list[tuple[str, str]]":
+        """``[(action_id, label)]`` — generic toolbar buttons the host renders; on
+        click the host calls ``invoke_action(action_id)``. The host never learns
+        what an action does."""
+        ...
+
+    def invoke_action(self, action_id: str) -> None: ...
+
+    def info_text(self) -> str:
+        """A status line the host displays verbatim (it does not interpret it)."""
+        ...
+
+    def finish(self) -> AnalyzeResultBase:
+        """Build the analysis result from the user's current selection (called on
+        Done). The result flows through the same path as a FIT analyze result."""
+        ...
+
+
 @dataclass(frozen=True)
 class SaveDataRequest(Generic[T_Result]):
     run_result: T_Result

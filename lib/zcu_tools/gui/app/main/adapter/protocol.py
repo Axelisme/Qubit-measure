@@ -9,6 +9,8 @@ from .types import (
     CfgSchema,
     CfgSectionSpec,
     ExpContext,
+    InteractiveHost,
+    InteractiveSession,
     NoAnalysisResult,
     NoAnalyzeParams,
     RunRequest,
@@ -81,6 +83,12 @@ class ExpAdapterProtocol(Protocol):
 
     def analyze(self, req: AnalyzeRequest[Any, Any]) -> Any:
         """Run analysis on a completed run result."""
+        ...
+
+    def setup_interactive_analysis(
+        self, req: AnalyzeRequest[Any, Any], host: InteractiveHost
+    ) -> InteractiveSession:
+        """Set up an interactive analysis on the host's figure (INTERACTIVE)."""
         ...
 
     def get_writeback_items(

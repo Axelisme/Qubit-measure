@@ -6,7 +6,7 @@ Implements ViewProtocol; all state lives in Controller/State, never here.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from zcu_tools.gui.app.main.adapter import AnalysisMode, CfgSchema
 from zcu_tools.gui.app.main.event_bus import (
@@ -1018,6 +1018,31 @@ class MainWindow(QMainWindow):
             return None
         tab_w.reset_plot()  # clear prior liveplot before new run/analyze
         return tab_w._figure_container
+
+    def mount_interactive_analysis(
+        self,
+        tab_id: str,
+        session_factory: Callable[[Any], Any],
+        on_finish: Callable[[Any], None],
+    ) -> None:
+        """RenderHost impl: mount an INTERACTIVE adapter's live picker in the tab's
+        plot stack. Build the host widget, hand it to the adapter to set up the
+        session, render the session's actions, and wire Done -> on_finish(session).
+        The View knows nothing of the interaction (lines / flux); it just forwards
+        events and shows session.info_text()."""
+        from zcu_tools.gui.app.main.ui.interactive_analysis import (
+            InteractiveAnalysisWidget,
+        )
+
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return
+        tab_w.reset_plot()
+        widget = InteractiveAnalysisWidget()
+        session = session_factory(widget)  # the widget IS the InteractiveHost
+        widget.bind(session, on_done=lambda: on_finish(session))
+        tab_w._plot_stack.addWidget(widget)
+        tab_w._plot_stack.setCurrentWidget(widget)
 
     def current_left_panel_width(self) -> int:
         """RenderHost impl: the active tab's left-panel width (the single

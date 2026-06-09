@@ -21,6 +21,7 @@ from .operation_gate import (
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.app.main.adapter import InteractiveSession
     from zcu_tools.gui.app.main.event_bus import EventBus
     from zcu_tools.gui.app.main.state import State
 
@@ -108,6 +109,29 @@ class AnalyzeService(QObject):
             TabInteractionChangedPayload(tab_id=tab_id),
         )
         return lease.token
+
+    def start_interactive(self, permit: AnalyzePermit) -> int:
+        """Begin an INTERACTIVE analysis: acquire the async handle and mark the
+        tab analyzing. There is NO worker — the View mounts the interactive canvas
+        on the main thread and the user paces the work; the lease is held until
+        ``finish_interactive`` (Done). Returns the operation token (handle)."""
+        tab_id = permit.tab_id
+        if self._state.is_tab_busy(tab_id):
+            raise RuntimeError(f"Tab {tab_id!r} is busy")
+        lease = self._gate.acquire(OperationKind.ANALYZE, owner_id=tab_id)
+        self._active_lease = lease
+        self._state.set_tab_analyzing(tab_id, True)
+        self._bus.emit(
+            GuiEvent.TAB_INTERACTION_CHANGED,
+            TabInteractionChangedPayload(tab_id=tab_id),
+        )
+        return lease.token
+
+    def finish_interactive(self, tab_id: str, session: "InteractiveSession") -> None:
+        """The user finished the interactive pick (Done): build the result and run
+        the SAME terminal path as a FIT analyze (writeback compute + State update +
+        lease release + events), so the agent's analyze-result poll resolves."""
+        self._on_analyze_finished(tab_id, session.finish())
 
     def _on_analyze_finished(self, tab_id: str, analyze_result: Any) -> None:
         logger.info(

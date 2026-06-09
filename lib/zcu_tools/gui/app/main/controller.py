@@ -13,8 +13,11 @@ from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 from .adapter import (
     AnalysisMode,
+    AnalyzeRequest,
     CfgSchema,
     ExpContext,
+    InteractiveHost,
+    InteractiveSession,
     SavePaths,
     SocCfgHandle,
     WritebackItem,
@@ -60,6 +63,7 @@ from .state import State
 
 if TYPE_CHECKING:
     from .adapters.qt_shutdown_driver import QtShutdownDriver
+    from .guard import AnalyzePermit
     from .pbar_host import ProgressBarModel
     from .services.ports import ProgressTransport
 
@@ -95,6 +99,19 @@ class RenderHost(Protocol):
     View — they are minted by ProgressService, bound to the operation."""
 
     def make_live_container(self, tab_id: str) -> Optional[FigureContainer]: ...
+
+    def mount_interactive_analysis(
+        self,
+        tab_id: str,
+        session_factory: Callable[["InteractiveHost"], "InteractiveSession"],
+        on_finish: Callable[["InteractiveSession"], None],
+    ) -> None:
+        """Mount an interactive analysis on a tab's analysis area (INTERACTIVE
+        adapters). The View builds an ``InteractiveHost`` (its canvas + worker
+        pool), calls ``session_factory(host)`` to get the adapter's session,
+        renders its actions / forwards canvas events, and on Done calls
+        ``on_finish(session)``. The View knows nothing of the interaction."""
+        ...
 
     # The View's current left-panel width — the only persistence value sourced
     # from the View (the splitter widget); captured at flush time.
@@ -523,8 +540,18 @@ class Controller:
     # ------------------------------------------------------------------
 
     def analyze(self, tab_id: str, analyze_params_instance: object) -> int:
-        """Start analyze (async worker); returns the operation token to await."""
+        """Start analyze; returns the operation token to await.
+
+        FIT runs on a worker. INTERACTIVE mounts a live picker on the main thread
+        (no worker) and the lease is held until the user clicks Done — see
+        ``_start_interactive_analyze``.
+        """
         permit = self._guard_svc.acquire_analyze_permit(tab_id)
+        tab = self._state.get_tab(tab_id)
+        if tab.adapter.capabilities.analysis is AnalysisMode.INTERACTIVE:
+            return self._start_interactive_analyze(
+                tab_id, permit, analyze_params_instance
+            )
         host = self._render_host
         figure_container = (
             host.make_live_container(tab_id) if host is not None else None
@@ -532,6 +559,33 @@ class Controller:
         return self._analyze_svc.start_analyze(
             permit, analyze_params_instance, figure_container
         )
+
+    def _start_interactive_analyze(
+        self, tab_id: str, permit: "AnalyzePermit", analyze_params_instance: object
+    ) -> int:
+        tab = self._state.get_tab(tab_id)
+        ctx = self._state.exp_context
+        req = AnalyzeRequest(
+            run_result=tab.run_result,
+            analyze_params=analyze_params_instance,
+            md=ctx.md,
+            ml=ctx.ml,
+            predictor=ctx.predictor,
+        )
+        # Acquire the handle (marks analyzing) first, then ask the View to mount
+        # the interactive canvas. The View builds the InteractiveHost (its canvas
+        # + worker pool), gets the adapter's session, and wires Done back to
+        # AnalyzeService.finish_interactive — which runs the same terminal path as
+        # a FIT result.
+        token = self._analyze_svc.start_interactive(permit)
+        host = self._render_host
+        if host is not None:
+            host.mount_interactive_analysis(
+                tab_id,
+                lambda ihost: tab.adapter.setup_interactive_analysis(req, ihost),
+                lambda session: self._analyze_svc.finish_interactive(tab_id, session),
+            )
+        return token
 
     # ------------------------------------------------------------------
     # Writeback (TabService)

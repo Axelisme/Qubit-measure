@@ -13,6 +13,8 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
     ExpContext,
+    InteractiveHost,
+    InteractiveSession,
     NoAnalyzeParams,
     RunRequest,
     SaveDataRequest,
@@ -129,6 +131,23 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         raise NotImplementedError(
             f"{type(self).__name__} declares analysis support but does not "
             "override analyze"
+        )
+
+    def setup_interactive_analysis(
+        self,
+        req: AnalyzeRequest[T_Result, T_AnalyzeParams],
+        host: "InteractiveHost",
+    ) -> "InteractiveSession":
+        """Set up an interactive analysis on the host's figure and return the
+        in-progress session (used only by ``analysis=AnalysisMode.INTERACTIVE``).
+
+        Default raises — only INTERACTIVE adapters override it; FIT/NONE adapters
+        are never routed here (Fast-Fail guard against a forgotten override).
+        """
+        del req, host
+        raise NotImplementedError(
+            f"{type(self).__name__} declares INTERACTIVE analysis but does not "
+            "override setup_interactive_analysis"
         )
 
     # -- shared implementation (provided once) -----------------------------

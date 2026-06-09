@@ -157,6 +157,54 @@ def test_on_analyze_finished_emits_interaction_event(qapp):  # noqa: ARG001
 
 
 # ---------------------------------------------------------------------------
+# Interactive analysis (no worker; result produced on the user's Done)
+# ---------------------------------------------------------------------------
+
+
+def test_start_interactive_marks_analyzing_without_runner(qapp):  # noqa: ARG001
+    state = _make_state()
+    svc, runner = _make_service(state, EventBus())
+
+    token = svc.start_interactive(AnalyzePermit(tab_id="tab1"))
+
+    assert isinstance(token, int)
+    assert state.get_tab("tab1").is_analyzing is True
+    runner.start_analyze.assert_not_called()  # INTERACTIVE never starts a worker
+
+
+def test_start_interactive_rejects_busy_tab(qapp):  # noqa: ARG001
+    state = _make_state()
+    state.set_tab_running("tab1", True)
+    svc, _ = _make_service(state, EventBus())
+
+    with pytest.raises(RuntimeError, match="busy"):
+        svc.start_interactive(AnalyzePermit(tab_id="tab1"))
+
+
+def test_finish_interactive_runs_the_fit_terminal_path(qapp):  # noqa: ARG001
+    state = _make_state()
+    svc, _ = _make_service(state, EventBus())
+    svc.start_interactive(AnalyzePermit(tab_id="tab1"))
+
+    fake_result = MagicMock()
+    fake_result.figure = MagicMock()
+    session = MagicMock()
+    session.finish.return_value = fake_result
+
+    finished: list = []
+    svc.analyze_finished.connect(lambda tid, res: finished.append((tid, res)))
+
+    svc.finish_interactive("tab1", session)
+
+    session.finish.assert_called_once_with()
+    # Same terminal effects as a FIT result: State updated, analyzing cleared,
+    # lease released, analyze_finished emitted (so the agent's result-poll wakes).
+    assert state.get_tab("tab1").analyze_result is fake_result
+    assert state.get_tab("tab1").is_analyzing is False
+    assert finished == [("tab1", fake_result)]
+
+
+# ---------------------------------------------------------------------------
 # _on_analyze_failed
 # ---------------------------------------------------------------------------
 
