@@ -7,14 +7,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.device.yoko import YOKOGS200Info
-from zcu_tools.gui.app.main.services.device import (
-    DeviceSetupSnapshot,
-    SetupDeviceRequest,
-)
 from zcu_tools.gui.app.main.services.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.session.events import (
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
+)
+from zcu_tools.gui.session.services.device import (
+    DeviceSetupSnapshot,
+    SetupDeviceRequest,
 )
 from zcu_tools.mcp.measure.server import TOOLS
 

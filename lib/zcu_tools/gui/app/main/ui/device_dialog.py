@@ -27,18 +27,18 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.app.main.services.device import (
+from zcu_tools.gui.session.events import (
+    DeviceChangedPayload,
+    DeviceSetupFinishedPayload,
+    DeviceSetupStartedPayload,
+)
+from zcu_tools.gui.session.services.device import (
     ConnectDeviceRequest,
     DeviceSetupSnapshot,
     DeviceStatus,
     DisconnectDeviceRequest,
     SetupDeviceRequest,
     list_supported_device_types,
-)
-from zcu_tools.gui.session.events import (
-    DeviceChangedPayload,
-    DeviceSetupFinishedPayload,
-    DeviceSetupStartedPayload,
 )
 
 from .progress_stack import ProgressStack

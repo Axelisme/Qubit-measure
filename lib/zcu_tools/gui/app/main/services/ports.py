@@ -42,7 +42,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.types import ExpContext
     from zcu_tools.meta_tool import ModuleLibrary
 
-    from .device import DeviceProtocol
     from .persistence_types import AppPersistedState
 
 
@@ -142,27 +141,6 @@ class ProjectIOPort(Protocol):
 
 
 @runtime_checkable
-class DriverFactoryPort(Protocol):
-    """Constructs a live hardware driver from (type_name, address).
-
-    The driven adapter that touches pyvisa / instrument classes. ``DeviceService``
-    depends on this port (already injected as ``driver_factory``); the default
-    implementation ``_default_driver_factory`` is the concrete adapter. Tests
-    inject a fake factory to avoid real hardware.
-
-    Note (M1 scope): the *live-driver registry* ``GlobalDeviceManager`` is a
-    module-level singleton still accessed directly inside ``DeviceService``'s
-    worker-thread static helpers (``_connect``/``_disconnect``/``_set_value``).
-    That is the hardware-I/O boundary already isolated as static methods and
-    controlled in tests via fixture cleanup; it is intentionally left un-ported
-    in M1 to avoid churning the worker paths for marginal test value. Revisit if
-    a fake registry becomes needed.
-    """
-
-    def __call__(self, type_name: str, address: str) -> "DeviceProtocol": ...
-
-
-@runtime_checkable
 class ContextReadPort(Protocol):
     """Read-only view of the active context's ModuleLibrary, as a CfgEditor needs.
 
@@ -256,30 +234,6 @@ class StartupContextPort(Protocol):
         database_path: str,
     ) -> None: ...
     def setup_project(self, result_dir: str) -> None: ...
-
-
-@dataclass(frozen=True)
-class DeviceMemoryInfo:
-    """A remembered (memory-only) device's identity — the element type of
-    ``RememberedDevicePort.register_remembered_devices``. Lives in the contract
-    layer (ports) so both the device service and startup depend on it here, not
-    on each other's module.
-    """
-
-    type_name: str
-    name: str
-    address: str
-
-
-@runtime_checkable
-class RememberedDevicePort(Protocol):
-    """Remembered-device registration as used by ``StartupService.restore_devices``.
-
-    The one device command startup issues; depends on the port, not the concrete
-    ``DeviceService``.
-    """
-
-    def register_remembered_devices(self, entries: list[DeviceMemoryInfo]) -> None: ...
 
 
 class ProgressEventKind(Enum):

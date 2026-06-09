@@ -19,8 +19,14 @@ this module as the session services move in.
 
 from __future__ import annotations
 
+import threading
+from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, Protocol
+from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.plotting import FigureContainer
+    from zcu_tools.gui.session.services.device import DeviceProtocol
 
 
 class OperationKind(str, Enum):
@@ -75,3 +81,100 @@ class ExclusionGate(Protocol):
         """True while a device-mutation lease (connect/disconnect/setup) for
         ``name`` is active — guards a snapshot read against a racing mutation."""
         ...
+
+
+@dataclass(frozen=True)
+class OffMainScopes:
+    """The opt-in ambient scopes a thunk runs inside (ADR-0019). Each is
+    independently ``None``-able; only non-``None`` ones are entered, on the
+    worker thread.
+
+    - ``figure_container``: GUI matplotlib routing — sets the routing ContextVar
+      *and* installs ``QtLivePlotBackend`` together (one facet: both direct
+      ``plt.subplots`` and liveplot calls land in this container on the main
+      thread; the liveplot backend requires the routing container, so they are
+      co-dependent and driven by this single field).
+    - ``pbar_factory``: progress — the per-operation pbar factory (the Progress
+      facet's injection point; the owner mints it bound to the operation token).
+    - ``stop_event``: cancel — installs ``ActiveTask`` so the work can self-
+      interrupt cooperatively (the Cancel facet's off-main realisation).
+
+    The value lives here (session seam) so the ``BackgroundExecutor`` port and the
+    session services can name it; the *entering* logic (which pulls in the Qt
+    liveplot backend) stays in the app's concrete ``BackgroundService``.
+    """
+
+    figure_container: Optional["FigureContainer"] = None
+    pbar_factory: Optional[Callable[..., Any]] = None
+    stop_event: Optional[threading.Event] = None
+
+
+class BackgroundExecutor(Protocol):
+    """Off-main execution seam a session service depends on. The app injects its
+    concrete ``BackgroundService``; the session service never constructs one.
+
+    Mirrors ``BackgroundService.submit``: run ``work`` off-main inside ``scopes``,
+    delivering its result to ``on_done`` or its exception to ``on_error`` on the
+    main thread. ``run_in_pool`` picks the shared pool vs a dedicated thread.
+    """
+
+    def submit(
+        self,
+        work: Callable[[], Any],
+        scopes: Optional[OffMainScopes] = None,
+        *,
+        run_in_pool: bool,
+        on_done: Callable[[Any], None],
+        on_error: Callable[[Exception], None],
+    ) -> None: ...
+
+
+class ProgressHub(Protocol):
+    """Per-operation progress seam a session service depends on. The app injects
+    its concrete ``ProgressService``.
+
+    ``make_factory`` mints the per-operation pbar factory (placed into
+    ``OffMainScopes.pbar_factory``); ``discard_operation`` drops the operation's
+    progress container at the terminal path.
+    """
+
+    def make_factory(self, operation_id: int, owner_id: str) -> Callable[..., Any]: ...
+    def discard_operation(self, operation_id: int) -> None: ...
+
+
+@runtime_checkable
+class DriverFactoryPort(Protocol):
+    """Constructs a live hardware driver from (type_name, address).
+
+    The driven adapter that touches pyvisa / instrument classes. ``DeviceService``
+    depends on this port (injected as ``driver_factory``); the app's default
+    implementation is the concrete adapter. Tests inject a fake factory to avoid
+    real hardware.
+    """
+
+    def __call__(self, type_name: str, address: str) -> "DeviceProtocol": ...
+
+
+@dataclass(frozen=True)
+class DeviceMemoryInfo:
+    """A remembered (memory-only) device's identity — the element type of
+    ``RememberedDevicePort.register_remembered_devices``. Lives in the seam so both
+    the device service and startup depend on it here, not on each other's module.
+    """
+
+    type_name: str
+    name: str
+    address: str
+
+
+@runtime_checkable
+class RememberedDevicePort(Protocol):
+    """Remembered-device registration as used by ``StartupService.restore_devices``.
+
+    The one device command startup issues; depends on the port, not the concrete
+    ``DeviceService``.
+    """
+
+    def register_remembered_devices(
+        self, entries: "list[DeviceMemoryInfo]"
+    ) -> None: ...

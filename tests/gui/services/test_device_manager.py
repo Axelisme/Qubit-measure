@@ -13,18 +13,22 @@ from unittest.mock import MagicMock
 import pytest
 from qtpy.QtCore import QEventLoop
 from zcu_tools.device import FakeDevice, FakeDeviceInfo, GlobalDeviceManager
+from zcu_tools.gui.app.main.adapters.qt_progress_transport import QtProgressTransport
 from zcu_tools.gui.app.main.event_bus import EventBus
-from zcu_tools.gui.app.main.services.device import (
+from zcu_tools.gui.app.main.services.background import BackgroundService
+from zcu_tools.gui.app.main.services.operation_gate import OperationGate
+from zcu_tools.gui.app.main.services.progress import ProgressService
+from zcu_tools.gui.app.main.state import State
+from zcu_tools.gui.session.events import (
+    DeviceSetupFinishedPayload,
+    DeviceSetupStartedPayload,
+)
+from zcu_tools.gui.session.services.device import (
     ConnectDeviceRequest,
     DeviceRegistrationError,
     DeviceService,
     DisconnectDeviceRequest,
     SetupDeviceRequest,
-)
-from zcu_tools.gui.app.main.state import State
-from zcu_tools.gui.session.events import (
-    DeviceSetupFinishedPayload,
-    DeviceSetupStartedPayload,
 )
 
 
@@ -43,6 +47,9 @@ def _make_svc(driver: MagicMock | None = None) -> tuple[DeviceService, MagicMock
     svc = DeviceService(
         EventBus(),
         State(MagicMock()),
+        OperationGate(),
+        BackgroundService(),
+        ProgressService(QtProgressTransport()),
         driver_factory=lambda _type, _address: device,  # type: ignore[arg-type]
     )
     return svc, device
@@ -125,6 +132,9 @@ def _make_real_svc(driver: object | None = None) -> tuple[DeviceService, object]
     svc = DeviceService(
         EventBus(),
         State(MagicMock()),
+        OperationGate(),
+        BackgroundService(),
+        ProgressService(QtProgressTransport()),
         driver_factory=lambda _type, _address: fake_device,  # type: ignore[arg-type]
     )
     return svc, fake_device

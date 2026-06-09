@@ -2,12 +2,7 @@
 
 from zcu_tools.gui.session.ports import OperationConflictError
 from zcu_tools.gui.session.services.connection import ConnectionService
-
-from .analyze import AnalyzeService
-from .app_services import AppServices, build_app_services
-from .caretaker import PersistenceCaretaker, RestoreOutcome
-from .context import ContextService
-from .device import (
+from zcu_tools.gui.session.services.device import (
     ConnectDeviceRequest,
     DeviceService,
     DeviceSnapshot,
@@ -15,6 +10,11 @@ from .device import (
     DisconnectDeviceRequest,
     SetupDeviceRequest,
 )
+
+from .analyze import AnalyzeService
+from .app_services import AppServices, build_app_services
+from .caretaker import PersistenceCaretaker, RestoreOutcome
+from .context import ContextService
 from .guard import (
     AnalyzePermit,
     GuardError,

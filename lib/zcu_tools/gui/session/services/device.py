@@ -17,7 +17,6 @@ from typing import (
 from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
 from zcu_tools.device.base import BaseDeviceInfo
-from zcu_tools.gui.app.main.state import DeviceState, DeviceStatus
 from zcu_tools.gui.session.events import (
     DeviceChangedPayload,
     DeviceSetupFinishedPayload,
@@ -25,25 +24,20 @@ from zcu_tools.gui.session.events import (
 )
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
 from zcu_tools.gui.session.ports import (
+    BackgroundExecutor,
+    DeviceMemoryInfo,
+    DriverFactoryPort,
     ExclusionGate,
+    OffMainScopes,
     OperationConflictError,
     OperationKind,
+    ProgressHub,
 )
-
-from .background import BackgroundService, OffMainScopes
-from .operation_gate import OperationGate
-
-# DeviceMemoryInfo lives in the contract layer (ports) — the element type of
-# RememberedDevicePort, used here as the parameter type of
-# register_remembered_devices.
-from .ports import DeviceMemoryInfo
+from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.event_bus import EventBus
-    from zcu_tools.gui.app.main.state import State
-
-    from .ports import DriverFactoryPort
-    from .progress import ProgressService
+    from zcu_tools.gui.event_bus import BaseEventBus
+    from zcu_tools.gui.session.state import SessionState
 
 logger = logging.getLogger(__name__)
 
@@ -180,37 +174,32 @@ class DeviceService(QObject):
 
     def __init__(
         self,
-        bus: "EventBus",
-        state: "State",
-        gate: ExclusionGate | None = None,
-        handles: OperationHandles | None = None,
-        bg: BackgroundService | None = None,
+        bus: "BaseEventBus",
+        state: "SessionState",
+        gate: ExclusionGate,
+        bg: BackgroundExecutor,
+        progress: ProgressHub,
+        *,
+        handles: Optional[OperationHandles] = None,
+        driver_factory: Optional[DriverFactoryPort] = None,
         parent: Optional[QObject] = None,
-        driver_factory: Optional["DriverFactoryPort"] = None,
-        progress: "ProgressService | None" = None,
     ) -> None:
         super().__init__(parent)
         self._bus = bus
         self._state = state
         # Device composes both leaves (ADR-0019): Exclusion (device mutation vs
         # run / another mutation of the same device) + a Handle (operation_id +
-        # await + cancel for setup).
-        self._gate = gate or OperationGate()
+        # await + cancel for setup). The app injects the exclusion gate, the
+        # off-main executor and the progress hub via their session ports — this
+        # session service never constructs app/Qt infrastructure itself.
+        self._gate = gate
         self._handles = handles or OperationHandles()
         # Device execution is the OffMain-thread strategy (ADR-0019): connect /
         # disconnect carry no scopes; setup carries the progress scope + a
         # directly-polled stop_event (not an ActiveTask scope).
-        self._bg = bg or BackgroundService()
+        self._bg = bg
         self._driver_factory = driver_factory or _default_driver_factory
-        if progress is None:
-            from zcu_tools.gui.app.main.adapters.qt_progress_transport import (
-                QtProgressTransport,
-            )
-
-            from .progress import ProgressService
-
-            progress = ProgressService(QtProgressTransport(parent=self))
-        self._progress: "ProgressService" = progress
+        self._progress: ProgressHub = progress
         # Device state lives in State (the SSOT). This service holds only the
         # live driver (in GlobalDeviceManager), the worker threads, and the
         # in-flight operation transient below. Setup progress lives in the

@@ -21,47 +21,22 @@ state — the State main-thread invariant.
 
 from __future__ import annotations
 
-import threading
 from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Iterator, Optional
+from typing import Any, Callable, Iterator, Optional
 
 from qtpy.QtCore import QObject  # type: ignore[attr-defined]
 
 from zcu_tools.experiment.v2.runner.base import ActiveTask
 from zcu_tools.gui.background import NO_RESULT, BackgroundRunner
 from zcu_tools.gui.plotting import routing_scope
+from zcu_tools.gui.session.ports import OffMainScopes
 from zcu_tools.liveplot.backend import set_liveplot_backend
 from zcu_tools.progress_bar.interface import use_pbar_factory
 
-if TYPE_CHECKING:
-    from zcu_tools.gui.plotting import FigureContainer
-
-# Re-exported from the shared mechanism so main's call sites keep importing it
-# from here (the sentinel's identity is what matters; it is defined once).
+# ``OffMainScopes`` now lives in the session seam (``gui/session/ports``); it is
+# re-exported here so main's call sites keep importing it from ``.background``.
+# ``NO_RESULT``'s identity is what matters; it is defined once in the shared runner.
 __all__ = ["NO_RESULT", "OffMainScopes", "BackgroundService"]
-
-
-@dataclass(frozen=True)
-class OffMainScopes:
-    """The opt-in ambient scopes a thunk runs inside (ADR-0019). Each is
-    independently ``None``-able; only non-``None`` ones are entered, on the
-    worker thread.
-
-    - ``figure_container``: GUI matplotlib routing — sets the routing ContextVar
-      *and* installs ``QtLivePlotBackend`` together (one facet: both direct
-      ``plt.subplots`` and liveplot calls land in this container on the main
-      thread; the liveplot backend requires the routing container, so they are
-      co-dependent and driven by this single field).
-    - ``pbar_factory``: progress — the per-operation pbar factory (the Progress
-      facet's injection point; the owner mints it bound to the operation token).
-    - ``stop_event``: cancel — installs ``ActiveTask`` so the work can self-
-      interrupt cooperatively (the Cancel facet's off-main realisation).
-    """
-
-    figure_container: Optional["FigureContainer"] = None
-    pbar_factory: Optional[Callable[..., Any]] = None
-    stop_event: Optional[threading.Event] = None
 
 
 @contextmanager

@@ -5,12 +5,12 @@ from typing import TYPE_CHECKING
 
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.services.connection import ConnectionService
+from zcu_tools.gui.session.services.device import DeviceService
 
 from .analyze import AnalyzeService
 from .background import BackgroundService
 from .cfg_editor import CfgEditorService
 from .context import ContextService
-from .device import DeviceService
 from .guard import GuardService
 from .operation_gate import OperationGate
 from .progress import ProgressService
@@ -83,7 +83,7 @@ def build_app_services(
     background = BackgroundService()
     progress = ProgressService(progress_transport)
     device = DeviceService(
-        bus, state, operation_gate, handles, background, progress=progress
+        bus, state, operation_gate, background, progress, handles=handles
     )
     context = ContextService(state, io_manager, bus)
     # cfg_editor owns the per-tab and per-writeback-item cfg models; WritebackService

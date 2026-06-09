@@ -14,6 +14,10 @@ from zcu_tools.gui.session.services.connection import (
     LoadPredictorRequest,
     PredictFreqRequest,
 )
+from zcu_tools.gui.session.services.device import (
+    DeviceEntry,
+    DeviceSetupSnapshot,
+)
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 from .adapter import (
@@ -50,10 +54,6 @@ from .services import (
     StartupProjectRequest,
     TabSnapshot,
     build_app_services,
-)
-from .services.device import (
-    DeviceEntry,
-    DeviceSetupSnapshot,
 )
 from .services.ports import ContextWrites
 from .services.remote.dialogs import DialogName

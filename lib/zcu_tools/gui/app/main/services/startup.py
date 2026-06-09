@@ -6,15 +6,16 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.app.main.state import StartupPrefs
+from zcu_tools.gui.session.ports import DeviceMemoryInfo
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 from .persistence_types import PersistedDeviceEntry, PersistedStartup
-from .ports import DeviceMemoryInfo
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.state import State
+    from zcu_tools.gui.session.ports import RememberedDevicePort
 
-    from .ports import RememberedDevicePort, StartupContextPort
+    from .ports import StartupContextPort
 
 logger = logging.getLogger(__name__)
 
