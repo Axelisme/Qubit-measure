@@ -28,6 +28,8 @@ _SHARED_MODULES = [
     "zcu_tools.gui.session.types",
     "zcu_tools.gui.session.events",
     "zcu_tools.gui.session.operation_handles",
+    "zcu_tools.gui.session.ports",
+    "zcu_tools.gui.session.state",
     # The plotting package + its backend-select module must stay import-clean so
     # an entry script can configure the matplotlib backend before any pyplot
     # import. The heavy plotting submodules (backend/host/container) DO pull in
