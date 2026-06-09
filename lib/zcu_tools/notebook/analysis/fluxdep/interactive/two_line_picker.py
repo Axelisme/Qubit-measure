@@ -5,19 +5,27 @@ the 2D spectrum, and the device / frequency axes, it draws the spectrum plus a
 mirror-loss view, two draggable vertical lines (half=red, int=blue), and owns the
 drag / swap / auto-align / magnitude-toggle state.
 
-It is **passive** and toolkit-agnostic: its methods only mutate state (line
-positions, image data, the matplotlib artists) — they never repaint. The caller
-(fluxdep-gui's Qt ``LinePickerWidget`` or measure-gui's interactive analysis
-session) drives it with host-fed x/y coordinates and toolbar actions and decides
-when to repaint (it owns the canvas). The core never imports Qt or ipywidgets,
-and never touches threading: heavy work is exposed as a pure ``compute_*`` method
-the caller may run off-main, paired with a main-thread ``apply_*`` mutation. The
-notebook ``InteractiveLines`` (FuncAnimation/ipywidgets) keeps its own shell.
+It is toolkit-agnostic (matplotlib only — never imports Qt or ipywidgets). The
+caller (fluxdep-gui's Qt ``LinePickerWidget`` or measure-gui's interactive
+analysis session) owns the canvas *widget* + the surrounding controls (info
+label, buttons) and drives the picker with host-fed x/y coordinates and toolbar
+actions. Host-driven mutations (drag / swap / magnitude toggle) only change state
++ artists; the host repaints (it also refreshes its own info label).
+
+The one thing the picker owns itself is the **live mirror-loss refresh**: a
+backend-agnostic ``canvas.new_timer`` (the toolkit-agnostic equivalent of the
+original ``InteractiveLines`` ``FuncAnimation``) throttles the ``diff_mirror``
+recompute during a drag and repaints the figure via ``draw_idle`` — it fires on
+the GUI main thread and the host has no hook for it, so the picker drives it.
+Heavy *off-main* work (auto-align) stays a pure ``compute_*`` + a main-thread
+``apply_*`` so the caller may run it off the main thread; the picker never spawns
+threads itself. The notebook ``InteractiveLines`` (FuncAnimation/ipywidgets)
+keeps its own separate shell.
 """
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 from matplotlib.figure import Figure
@@ -28,6 +36,11 @@ from zcu_tools.notebook.analysis.fluxdep.processing import (
     cast2real_and_norm,
     diff_mirror,
 )
+
+# Throttle interval (ms) for the live mirror-loss refresh during a drag: the
+# timer fires at most this often at the latest line position, so diff_mirror is
+# not recomputed on every motion event but the view still follows the line.
+_LOSS_REFRESH_MS = 120
 
 
 def fold_initial_lines(
@@ -104,11 +117,13 @@ def find_best_mirror_position(
 class TwoLinePicker:
     """Draw + drive two draggable half/int flux lines on a caller-provided Figure.
 
-    The caller owns the ``Figure`` (and its canvas / repaint); this core lays out
-    a main spectrum subplot + a mirror-loss subplot on it and manages the line
-    state. Every method only **mutates** state — none repaints; the caller paints
-    when it chooses. Heavy work (auto-align) is a pure ``compute_*`` + a
-    main-thread ``apply_*`` so the caller may run the compute off the main thread.
+    The caller owns the ``Figure`` widget; this core lays out a main spectrum
+    subplot + a mirror-loss subplot on it and manages the line state. Host-driven
+    methods (drag / swap / magnitude / apply) only **mutate** state + artists and
+    leave the repaint to the caller; the picker self-repaints only for its own
+    throttled live mirror-loss timer (``_on_loss_timer`` → ``draw_idle``). Heavy
+    work (auto-align) is a pure ``compute_*`` + a main-thread ``apply_*`` so the
+    caller may run the compute off the main thread.
     """
 
     def __init__(
@@ -143,6 +158,13 @@ class TwoLinePicker:
         self._picked: Optional[Line2D] = None
 
         self._init_plots()
+
+        # Live mirror-loss refresh timer (toolkit-agnostic; the picker owns it
+        # because it fires on the GUI loop and the host has no hook). ``None`` on
+        # a headless / non-interactive backend (unit tests) — then the loss view
+        # simply refreshes on drag-release only, as before.
+        self._loss_refresh_pending = False
+        self._loss_timer = self._make_loss_timer()
 
     # --- queries ---------------------------------------------------------
 
@@ -245,6 +267,47 @@ class TwoLinePicker:
         self._loss_dot.set_ydata([y])
         self._loss_dot.set_color("r" if self._picked is self._half_line else "b")
 
+    # --- live mirror-loss refresh (picker-owned, backend-agnostic timer) --
+
+    def _make_loss_timer(self) -> Any:
+        """A single-shot backend-agnostic timer for the throttled loss refresh,
+        or ``None`` if the figure has no interactive canvas (headless tests)."""
+        canvas = getattr(self._figure, "canvas", None)
+        if canvas is None or not hasattr(canvas, "new_timer"):
+            return None
+        try:
+            timer = canvas.new_timer(interval=_LOSS_REFRESH_MS)
+        except (NotImplementedError, AttributeError):
+            return None
+        timer.single_shot = True
+        timer.add_callback(self._on_loss_timer)
+        return timer
+
+    def _schedule_loss_refresh(self) -> None:
+        """Throttle: arm the timer on the first drag motion; it fires once at the
+        latest line position, then re-arms on the next motion (so a continuous
+        drag updates at most every ``_LOSS_REFRESH_MS``). No-op when no line is
+        picked or the backend has no timer."""
+        if (
+            self._picked is None
+            or self._loss_timer is None
+            or self._loss_refresh_pending
+        ):
+            return
+        self._loss_refresh_pending = True
+        self._loss_timer.start()
+
+    def _on_loss_timer(self) -> None:
+        self._loss_refresh_pending = False
+        if self._picked is None:
+            return
+        # Recompute diff_mirror at the picked line's CURRENT position (always the
+        # latest); keep the loss view's vertical zoom centre where it is.
+        x = self.flux_half if self._picked is self._half_line else self.flux_int
+        y0, y1 = self._ax_loss.get_ylim()
+        self._update_loss_view(x, 0.5 * (y0 + y1))
+        self._figure.canvas.draw_idle()
+
     # --- mouse interaction (caller feeds coordinates from its canvas) -----
 
     def on_press(self, xdata: Optional[float]) -> None:
@@ -287,6 +350,8 @@ class TwoLinePicker:
             self.flux_int = x
 
         self._apply_line_positions()
+        # Keep the mirror-loss view following the dragged line (throttled).
+        self._schedule_loss_refresh()
 
     def on_release(self, xdata: Optional[float], ydata: Optional[float]) -> None:
         if self._picked is None or xdata is None or ydata is None:

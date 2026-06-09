@@ -1,9 +1,10 @@
 """Tests for the passive, toolkit-agnostic TwoLinePicker core (headless, no Qt).
 
 The core only needs a matplotlib Figure with a (headless Agg) canvas — it never
-imports Qt and never repaints — so it is driven here by feeding x/y coordinates
-straight to its mouse handlers and calling its toolbar-action methods, then
-asserting on the mutated state (positions).
+imports Qt and only repaints through matplotlib's own backend-agnostic
+timer/draw_idle — so it is driven here by feeding x/y coordinates straight to its
+mouse handlers and calling its toolbar-action methods, then asserting on the
+mutated state (positions, loss-view axes).
 """
 
 from __future__ import annotations
@@ -114,6 +115,31 @@ def test_swap_exchanges_positions():
     picker.swap()
     half1, int1 = picker.positions()
     assert (half1, int1) == (int0, half0)
+
+
+# --- live mirror-loss refresh (picker-owned throttle timer) ----------------
+
+
+def test_loss_timer_refreshes_view_at_picked_line():
+    # Dragging only moves the line; the throttle timer is what recomputes the
+    # mirror-loss view at the line's LATEST position. Fire it directly: the loss
+    # subplot's x-zoom must re-centre on the dragged line.
+    picker = _make_picker()
+    half0, _int0 = picker.positions()
+    picker.on_press(half0)  # grab the half line
+    target = half0 + 1.5
+    picker.on_move(target)  # line follows; loss not refreshed yet
+    picker._on_loss_timer()
+    lo, hi = picker._ax_loss.get_xlim()
+    assert abs((lo + hi) / 2 - target) < 1e-6
+
+
+def test_loss_refresh_is_noop_without_a_picked_line():
+    picker = _make_picker()
+    # Nothing picked -> scheduling does not arm, and firing is a safe no-op.
+    picker._schedule_loss_refresh()
+    assert picker._loss_refresh_pending is False
+    picker._on_loss_timer()  # must not raise
 
 
 # --- heavy action: compute (pure) + apply (main-thread mutate) -------------
