@@ -2,8 +2,8 @@
 
 Thin Qt chrome around the toolkit-agnostic ``TwoLinePicker`` core (in
 ``zcu_tools.notebook.analysis.fluxdep.interactive.two_line_picker``): the canvas
-is a Qt-embedded FigureCanvasQTAgg, the conjugate / magnitude toggles, swap /
-auto-align buttons and the info label are Qt widgets wired to the core, and
+is a Qt-embedded FigureCanvasQTAgg, the conjugate toggle, swap / auto-align
+buttons and the info label are Qt widgets wired to the core, and
 ``get_result`` returns the core's picked positions. The core is passive (it only
 mutates state), so this widget repaints (``_repaint``) after each interaction it
 drives. measure-gui drives the same core through its own interactive analysis
@@ -55,9 +55,9 @@ class LinePickerWidget(InteractiveMplWidget):
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
-        # OneTone spectra are locked to magnitude-only (phase is uninformative);
-        # the magnitude checkbox is hidden in that case.
-        self._force_magnitude = force_magnitude
+        # The magnitude-only projection is fixed by the spectrum type (OneTone
+        # True — phase uninformative; TwoTone False) via force_magnitude, applied
+        # to the core at construction — there is no runtime toggle.
         self._info: Optional[QLabel] = None
 
         # The core owns the data, plots, line state and interaction; this widget
@@ -82,12 +82,6 @@ class LinePickerWidget(InteractiveMplWidget):
         # Conjugate is a flag with no visual change until the next drag — no repaint.
         self._conjugate_checkbox.toggled.connect(self._picker.set_conjugate)
         self.controls_layout.addWidget(self._conjugate_checkbox)
-
-        # Magnitude toggle only when not forced (OneTone locks it on).
-        if not self._force_magnitude:
-            self._magnitude_checkbox = QCheckBox("Magnitude Only")
-            self._magnitude_checkbox.toggled.connect(self._on_toggle_magnitude)
-            self.controls_layout.addWidget(self._magnitude_checkbox)
 
         swap_button = QPushButton("Swap Lines")
         swap_button.clicked.connect(self._on_swap)
@@ -130,10 +124,6 @@ class LinePickerWidget(InteractiveMplWidget):
 
     def _on_auto_align(self) -> None:
         self._picker.auto_align()  # synchronous in fluxdep (small spectra)
-        self._repaint()
-
-    def _on_toggle_magnitude(self, checked: bool) -> None:
-        self._picker.set_magnitude_only(checked)
         self._repaint()
 
     # --- result ----------------------------------------------------------

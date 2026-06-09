@@ -148,17 +148,18 @@ class OneToneFluxDepAdapter(
         self, result: OneToneFluxDepRunResult, ctx: ExpContext
     ) -> FluxPickParams:
         del result, ctx
-        # One-tone resonator spectra are magnitude-only (phase is uninformative).
-        return FluxPickParams(force_magnitude=True)
+        # No tunable analyze params; the magnitude-only projection is hardcoded
+        # in setup_interactive_analysis (see below).
+        return FluxPickParams()
 
     def setup_interactive_analysis(
         self,
         req: AnalyzeRequest[OneToneFluxDepRunResult, FluxPickParams],
         host: InteractiveHost,
     ) -> InteractiveSession:
-        return build_flux_pick_session(
-            req, host, force_magnitude=req.analyze_params.force_magnitude
-        )
+        # One-tone resonator spectra are magnitude-only (phase is uninformative),
+        # so the projection is fixed True and not surfaced as an analyze param.
+        return build_flux_pick_session(req, host, force_magnitude=True)
 
     def get_writeback_items(
         self, req: WritebackRequest[OneToneFluxDepRunResult, FluxPickResult]

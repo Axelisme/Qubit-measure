@@ -4,17 +4,17 @@ Both onetone/flux_dep and twotone/flux_dep produce a 2D map whose half-flux /
 integer-flux sweet-spot lines the USER picks by dragging — there is no automatic
 fit. This module is their shared ``AnalysisMode.INTERACTIVE`` implementation:
 
-- ``FluxPickParams``: the analyze-params form (just ``force_magnitude`` for now);
-  seeds the picker before the user takes over.
+- ``FluxPickParams``: the analyze-params marker — these adapters expose no tunable
+  analyze params (the magnitude-only projection is fixed per adapter, not on the form).
 - ``FluxPickResult``: the deferred result (flx_half / flx_int / flx_period), built
   on the user's Done — flows through the same path as a FIT analyze result.
 - ``FluxPickSession``: the ``InteractiveSession`` wrapping the toolkit-agnostic
   ``TwoLinePicker`` on the host's figure; it offloads the heavy auto-align step to
   ``host.run_background`` and repaints via ``host.redraw``.
 
-The adapters call ``build_flux_pick_session(req, host)`` from
-``setup_interactive_analysis`` and return the flx_* writeback items from
-``get_writeback_items``.
+The adapters call ``build_flux_pick_session(req, host, force_magnitude=...)`` from
+``setup_interactive_analysis`` (passing their fixed projection) and return the
+flx_* writeback items from ``get_writeback_items``.
 """
 
 from __future__ import annotations
@@ -23,14 +23,12 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from matplotlib.figure import Figure
-from typing_extensions import Annotated
 
 from zcu_tools.gui.app.main.adapter import (
     AnalyzeRequest,
     AnalyzeResultBase,
     InteractiveHost,
     InteractiveSession,
-    ParamMeta,
 )
 from zcu_tools.notebook.analysis.fluxdep.interactive.two_line_picker import (
     TwoLinePicker,
@@ -39,9 +37,13 @@ from zcu_tools.notebook.analysis.fluxdep.interactive.two_line_picker import (
 
 @dataclass
 class FluxPickParams:
-    # Magnitude-only vs phase-folded spectrum projection. OneTone is magnitude-
-    # only (phase uninformative); TwoTone may use phase.
-    force_magnitude: Annotated[bool, ParamMeta(label="Magnitude only")]
+    """Analyze-params marker for the interactive flux-pick adapters.
+
+    These adapters expose no tunable analyze params: the magnitude-only spectrum
+    projection is fixed per adapter (one-tone True — phase uninformative; two-tone
+    False — phase may carry signal) and passed straight to
+    ``build_flux_pick_session`` by each adapter, never surfaced on the form.
+    """
 
 
 @dataclass

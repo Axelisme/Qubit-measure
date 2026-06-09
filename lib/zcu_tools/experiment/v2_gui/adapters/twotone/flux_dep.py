@@ -53,18 +53,18 @@ class FluxDepAdapter(
         self, result: FluxDepRunResult, ctx: ExpContext
     ) -> FluxPickParams:
         del result, ctx
-        # Two-tone qubit spectra may carry useful phase information; leave the
-        # magnitude-only projection off by default (the user can toggle it).
-        return FluxPickParams(force_magnitude=False)
+        # No tunable analyze params; the magnitude-only projection is hardcoded
+        # in setup_interactive_analysis (see below).
+        return FluxPickParams()
 
     def setup_interactive_analysis(
         self,
         req: AnalyzeRequest[FluxDepRunResult, FluxPickParams],
         host: InteractiveHost,
     ) -> InteractiveSession:
-        return build_flux_pick_session(
-            req, host, force_magnitude=req.analyze_params.force_magnitude
-        )
+        # Two-tone qubit spectra may carry useful phase information, so the
+        # magnitude-only projection is fixed False (not surfaced as an analyze param).
+        return build_flux_pick_session(req, host, force_magnitude=False)
 
     def get_writeback_items(
         self, req: WritebackRequest[FluxDepRunResult, FluxPickResult]

@@ -52,7 +52,7 @@ def _make_session(md: MetaDict | None = None, force_magnitude: bool = True):
     host = _FakeHost(fig)
     req = AnalyzeRequest(
         run_result=_run_result(),
-        analyze_params=FluxPickParams(force_magnitude=force_magnitude),
+        analyze_params=FluxPickParams(),
         md=md if md is not None else MetaDict(),
         ml=ModuleLibrary(),
         predictor=None,

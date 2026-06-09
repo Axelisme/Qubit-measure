@@ -70,22 +70,24 @@ def test_widget_finished_signal(widget):
     assert fired == [True]
 
 
-def test_force_magnitude_hides_checkbox(qapp):
+def test_force_magnitude_true_locks_on_no_toggle(qapp):
     from qtpy.QtWidgets import QCheckBox
 
     sig, devs, freqs = _spectrum()
     w = LinePickerWidget(sig, devs, freqs, force_magnitude=True)
     labels = [c.text() for c in w.findChildren(QCheckBox)]
-    assert "Magnitude Only" not in labels  # locked on, checkbox hidden
-    assert w._picker.magnitude_only is True
+    # The magnitude-only projection is hardcoded per spectrum type — never a toggle.
+    assert "Magnitude Only" not in labels
+    assert w._picker.magnitude_only is True  # OneTone: locked on
     w.deleteLater()
 
 
-def test_no_force_keeps_magnitude_checkbox(qapp):
+def test_force_magnitude_false_locks_off_no_toggle(qapp):
     from qtpy.QtWidgets import QCheckBox
 
     sig, devs, freqs = _spectrum()
-    w = LinePickerWidget(sig, devs, freqs)
+    w = LinePickerWidget(sig, devs, freqs)  # force_magnitude defaults False (TwoTone)
     labels = [c.text() for c in w.findChildren(QCheckBox)]
-    assert "Magnitude Only" in labels
+    assert "Magnitude Only" not in labels  # no runtime toggle anymore
+    assert w._picker.magnitude_only is False  # TwoTone: locked off
     w.deleteLater()

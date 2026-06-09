@@ -190,4 +190,10 @@ WIRE_VERSION = 21
 #      change). twotone/ro_optimize/length now exposes its t0 length-penalty knob
 #      (blank = raw SNR max). WIRE unchanged (the mcp forwards the spec / updates
 #      verbatim, never interpreting optional). Phase 149.
-GUI_VERSION = 25
+# v26: onetone/twotone flux_dep no longer expose the force_magnitude ("Magnitude
+#      only") analyze param — FluxPickParams is now an empty marker and the
+#      magnitude-only projection is hardcoded per adapter (one-tone True — phase
+#      uninformative; two-tone False) in setup_interactive_analysis. Observable as
+#      an empty analyze_spec for those two adapters. WIRE unchanged (analyze_spec
+#      content is per-adapter domain, not a wire-method contract).
+GUI_VERSION = 26
