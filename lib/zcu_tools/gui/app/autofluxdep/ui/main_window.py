@@ -38,8 +38,8 @@ from zcu_tools.gui.app.autofluxdep.event_bus import (
     RunFinishedPayload,
     RunStartedPayload,
     RunStoppedPayload,
-    SetupDonePayload,
 )
+from zcu_tools.gui.session.events import SocChangedPayload
 
 from .node_detail import NodeDetailPane
 from .node_list import NodeListPane
@@ -144,8 +144,9 @@ class MainWindow(QMainWindow):
         self._bridge.run_finished.connect(self._on_run_done)
         self._bridge.run_stopped.connect(self._on_run_done)
 
-        # also reflect workflow edits in the setup light / run-enabled
-        ctrl.bus.subscribe(SetupDonePayload, lambda p: self._list._refresh_buttons())
+        # a SoC connect (via the shared setup dialog) flips the setup light /
+        # run-enabled state — the run prerequisite is now "a SoC is connected".
+        ctrl.bus.subscribe(SocChangedPayload, lambda p: self._list._refresh_buttons())
 
         self._on_select(self._list.selected_index)
 

@@ -179,3 +179,15 @@ def test_sweep_skips_snr_trough_dead_points():
     n_good = int(np.sum(~np.isnan(res.fit_freq)))
     assert n_dead >= 1  # at least one SNR-trough dead point was rejected
     assert n_good >= 5  # most points still fit + drove feedback
+
+
+# --- predictor selection: no raw FluxoniumPredictor → SimplePredictor stand-in ---
+
+
+def test_build_tools_falls_back_to_simple_predictor():
+    # with no raw FluxoniumPredictor in the active context, the sweep's adaptive
+    # predictor is the SimplePredictor stand-in, so a mock / unconfigured run
+    # still drives the same calibrate loop.
+    ctrl = build_core()
+    tools = ctrl._build_tools()
+    assert isinstance(tools.predictor, SimplePredictor)

@@ -26,39 +26,21 @@ if TYPE_CHECKING:
 # these workflow keys bump the same table as the inherited session keys.
 WORKFLOW_VERSION_KEY = "workflow"
 FLUX_VERSION_KEY = "flux"
-SETUP_VERSION_KEY = "setup"
 
 
 @dataclass(frozen=True)
 class ProjectInfo:
     """Project handle — chip/qubit identity + where params.json lives.
 
-    The Setup step loads the FluxoniumPredictor from ``params_path`` (see
-    ``SetupRequest`` / ``Controller.setup``).
+    ``params_path`` is where a real FluxoniumPredictor would be loaded from when
+    predictor loading is wired (deferred to Phase B — the synthetic run uses a
+    SimplePredictor stand-in).
     """
 
     chip_name: str
     qub_name: str
     result_dir: str
     params_path: str
-
-
-@dataclass(frozen=True)
-class SetupRequest:
-    """What the Setup dialog asks the controller to build.
-
-    ``use_mock`` picks the offline path (MockSoc + FakeDevice + a SimplePredictor
-    stand-in) — every other field is then ignored. Otherwise the real path:
-    ``ip`` / ``port`` make the soc proxy, ``flux_device_address`` connects the
-    YOKOGS200 flux source, and ``params_path`` loads the FluxoniumPredictor (a
-    blank / missing / unloadable file degrades to a SimplePredictor).
-    """
-
-    use_mock: bool = True
-    ip: str = "192.168.10.179"
-    port: int = 8887
-    flux_device_address: str = ""
-    params_path: str = ""
 
 
 class AutoFluxDepState(SessionState):

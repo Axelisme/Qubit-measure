@@ -152,10 +152,10 @@ class NodeListPane(QWidget):
             self.select_index(idx)
 
     def _on_setup(self) -> None:
-        from .setup_dialog import SetupDialog
+        from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 
         dlg = SetupDialog(self._ctrl, self)
-        dlg.exec()  # setup() is called inside on OK; refresh either way
+        dlg.exec()  # the dialog drives ConnectionService; refresh either way
         self._refresh_buttons()
 
     # --- run / stop ---

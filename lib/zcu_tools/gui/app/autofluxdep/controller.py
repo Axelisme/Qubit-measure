@@ -14,7 +14,6 @@ dependency model.
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
 from typing import TYPE_CHECKING, Callable
 
 from typing_extensions import Any, Optional
@@ -29,7 +28,6 @@ from zcu_tools.gui.app.autofluxdep.event_bus import (
     RunFinishedPayload,
     RunStartedPayload,
     RunStoppedPayload,
-    SetupDonePayload,
     WorkflowChangedPayload,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, PlacedNode
@@ -48,10 +46,8 @@ from zcu_tools.gui.app.autofluxdep.orchestrator import (
 from zcu_tools.gui.app.autofluxdep.registry import create_placement
 from zcu_tools.gui.app.autofluxdep.state import (
     FLUX_VERSION_KEY,
-    SETUP_VERSION_KEY,
     WORKFLOW_VERSION_KEY,
     AutoFluxDepState,
-    SetupRequest,
 )
 from zcu_tools.gui.app.autofluxdep.tools import (
     FluxoniumPredictorAdapter,
@@ -83,7 +79,6 @@ if TYPE_CHECKING:
     )
     from zcu_tools.gui.session.types import SocCfgHandle
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary
-    from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 logger = logging.getLogger(__name__)
 
@@ -428,131 +423,6 @@ class Controller:
         else:
             logger.debug("set_flux_values: cleared")
         self._bus.emit(FluxChangedPayload(count=len(values)))
-
-    # --- setup (MockSoc + FakeDevice, or a real ZCU + YOKO + predictor) ---
-    # Transitional, synchronous Setup: it writes the soc / soccfg / predictor into
-    # the active ``exp_context`` (the session SSOT the run reads). This is the
-    # headless / test entry; the GUI's interactive connect goes through the shared
-    # ConnectionService (S4-c switches the dialog over and retires this path).
-
-    def setup(
-        self,
-        request: Optional[SetupRequest] = None,
-        *,
-        use_mock: bool = True,
-    ) -> None:
-        """Establish the run prerequisites into the active ``exp_context``.
-
-        With no ``request`` a mock setup is built (the convenience for tests /
-        the ``use_mock`` shorthand). Otherwise the request's ``use_mock`` picks
-        the path: mock (MockSoc + a FakeDevice flux board) or real (the soc proxy
-        + a YOKOGS200 flux source + a FluxoniumPredictor from params.json).
-
-        The mock path leaves ``predictor`` unset — the run falls back to a
-        ``SimplePredictor`` stand-in in ``_build_tools``. A real connection that
-        fails raises (Fast Fail — the dialog reports it and stays open); a missing
-        / unloadable predictor file leaves ``predictor`` None (same fallback).
-        """
-        if request is None:
-            request = SetupRequest(use_mock=use_mock)
-        if request.use_mock:
-            soc, soccfg, predictor = self._build_mock_setup()
-        else:
-            soc, soccfg, predictor = self._build_real_setup(request)
-        self._state.set_context(
-            replace(
-                self._state.exp_context, soc=soc, soccfg=soccfg, predictor=predictor
-            )
-        )
-        self._state.version.bump(SETUP_VERSION_KEY)
-        logger.info(
-            "setup done: soc=%s predictor=%s (use_mock=%s)",
-            type(soc).__name__ if soc is not None else None,
-            type(predictor).__name__ if predictor is not None else None,
-            request.use_mock,
-        )
-        self._bus.emit(SetupDonePayload())
-
-    @staticmethod
-    def _build_mock_setup() -> "tuple[Any, Any, Optional[FluxoniumPredictor]]":
-        """MockSoc + soccfg + a FakeDevice flux board; no predictor (the run uses
-        a SimplePredictor stand-in via ``_build_tools``)."""
-        from zcu_tools.device import FakeDevice, GlobalDeviceManager
-        from zcu_tools.program.v2.mocksoc import make_mock_soc, make_mock_soccfg
-
-        soc = make_mock_soc()
-        soccfg = make_mock_soccfg()
-        if "flux_dev" not in GlobalDeviceManager.get_all_devices():
-            GlobalDeviceManager.register_device("flux_dev", FakeDevice(fast_mode=True))
-        return soc, soccfg, None
-
-    @staticmethod
-    def _build_real_setup(
-        request: SetupRequest,
-    ) -> "tuple[Any, Any, Optional[FluxoniumPredictor]]":
-        """Connect a real ZCU + YOKOGS200 flux source + load the raw predictor.
-
-        Each step uses the existing library API directly (no gui-external module
-        is modified). A connection failure propagates (Fast Fail). The flux device
-        is registered as "flux_dev" in the global manager so the run finds it; the
-        predictor is the raw ``FluxoniumPredictor`` (or None if params.json is
-        absent / unloadable) — the adaptive wrapping happens in ``_build_tools``.
-        """
-        from zcu_tools.remote import make_soc_proxy
-
-        logger.info("connecting real ZCU at %s:%d", request.ip, request.port)
-        soc, soccfg = make_soc_proxy(request.ip, request.port)
-
-        Controller._connect_flux_device(request.flux_device_address)
-        predictor = Controller._load_predictor(request.params_path)
-        return soc, soccfg, predictor
-
-    @staticmethod
-    def _connect_flux_device(address: str) -> None:
-        """Connect a YOKOGS200 at ``address`` and register it as "flux_dev".
-
-        Raises if the address is blank (a real run needs a flux source) or the
-        VISA connection fails (Fast Fail — surfaced by the dialog).
-        """
-        from zcu_tools.device import GlobalDeviceManager
-        from zcu_tools.device.yoko import YOKOGS200
-
-        if not address.strip():
-            raise ValueError("A flux device address is required for a real setup")
-        import pyvisa  # type: ignore[import-untyped]
-
-        logger.info("connecting YOKOGS200 flux source at %s", address)
-        device = YOKOGS200(address.strip(), pyvisa.ResourceManager())
-        GlobalDeviceManager.register_device("flux_dev", device)
-
-    @staticmethod
-    def _load_predictor(params_path: str) -> "Optional[FluxoniumPredictor]":
-        """Load a raw ``FluxoniumPredictor`` from ``params_path``; None on blank /
-        unreadable.
-
-        The adaptive wrapping (``FluxoniumPredictorAdapter``) and the
-        ``SimplePredictor`` fallback happen in ``_build_tools``, so ``exp_context``
-        holds the raw library predictor (or None) — never autofluxdep's adaptive
-        wrapper.
-        """
-        if not params_path.strip():
-            logger.warning(
-                "no params.json given; predictor unset (run uses SimplePredictor)"
-            )
-            return None
-        try:
-            from zcu_tools.simulate.fluxonium import FluxoniumPredictor
-
-            fluxonium = FluxoniumPredictor.from_file(params_path.strip())
-            logger.info("loaded FluxoniumPredictor from %s", params_path)
-            return fluxonium
-        except Exception as exc:
-            logger.warning(
-                "could not load predictor from %s (%s); predictor unset",
-                params_path,
-                exc,
-            )
-            return None
 
     # --- run control (cancellable) ---
 

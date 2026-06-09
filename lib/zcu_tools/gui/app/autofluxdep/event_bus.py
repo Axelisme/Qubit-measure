@@ -25,7 +25,6 @@ class EventType(str, Enum):
 
     WORKFLOW_CHANGED = "workflow_changed"  # nodes added/removed/reordered/renamed
     FLUX_CHANGED = "flux_changed"
-    SETUP_DONE = "setup_done"  # resources built → Run enabled
     # run lifecycle (drive edit↔run UI + progress)
     RUN_STARTED = "run_started"
     NODE_ENTERED = "node_entered"  # a provider started running — auto-follow
@@ -51,11 +50,6 @@ class WorkflowChangedPayload(Payload):
 class FluxChangedPayload(Payload):
     EVENT: ClassVar[EventType] = EventType.FLUX_CHANGED
     count: int  # number of flux points now set
-
-
-@dataclass(frozen=True)
-class SetupDonePayload(Payload):
-    EVENT: ClassVar[EventType] = EventType.SETUP_DONE
 
 
 @dataclass(frozen=True)
