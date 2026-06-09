@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.session.operation_handles import OperationHandles
+from zcu_tools.gui.session.services.build import build_session_services
 from zcu_tools.gui.session.services.connection import ConnectionService
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.device import DeviceService
@@ -82,10 +83,17 @@ def build_app_services(
     handles = OperationHandles()
     background = BackgroundService()
     progress = ProgressService(progress_transport)
-    device = DeviceService(
-        bus, state, operation_gate, background, progress, handles=handles
+    session = build_session_services(
+        state=state,
+        bus=bus,
+        gate=operation_gate,
+        handles=handles,
+        background=background,
+        progress=progress,
+        io_manager=io_manager,
     )
-    context = ContextService(state, io_manager, bus)
+    context = session.context
+    device = session.device
     # cfg_editor owns the per-tab and per-writeback-item cfg models; WritebackService
     # builds/reads/tears those down, so it is built after cfg_editor (single-
     # direction command edge — cfg_editor never calls writeback, ADR-0004).
@@ -108,7 +116,7 @@ def build_app_services(
         progress=progress,
         guard=GuardService(state),
         device=device,
-        connection=ConnectionService(state, bus, operation_gate, handles),
+        connection=session.connection,
         context=context,
         tab=tab,
         run=RunService(
