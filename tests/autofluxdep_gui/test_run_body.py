@@ -14,6 +14,8 @@ from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import QubitFreqBuilder
 
+from ._helpers import connect_mock
+
 
 def _produce(predict_freq: float, flux=0.0, flux_idx: int = 0, sweep="-20,50,0.5"):
     """Build the Result + Node for one flux point and run produce.
@@ -110,7 +112,7 @@ def test_controller_run_drives_real_produce_with_predictor_service():
     ctrl = build_core()
     ctrl.add_node_by_type("qubit_freq")
     ctrl.state.nodes[0].params["acquire_delay"] = 0  # instant headless run
-    ctrl.setup(use_mock=True)
+    connect_mock(ctrl)
     ctrl.set_flux_values([0.0, 1.0])
     info = ctrl.start_run()
     # the predictor Service produced predict_freq + closed-loop feedback adapted

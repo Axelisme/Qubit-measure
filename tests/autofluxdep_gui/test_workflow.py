@@ -12,6 +12,8 @@ from __future__ import annotations
 import numpy as np
 from zcu_tools.gui.app.autofluxdep.app import build_core
 
+from ._helpers import connect_mock
+
 _ALL = ["qubit_freq", "lenrabi", "ro_optimize", "t1", "t2ramsey", "t2echo", "mist"]
 
 
@@ -23,7 +25,7 @@ def _run_all(flux_values):
     # integration run is instant (the delay is exercised in test_synth).
     for node in ctrl.state.nodes:
         node.params["acquire_delay"] = 0
-    ctrl.setup(use_mock=True)
+    connect_mock(ctrl)
     ctrl.set_flux_values(flux_values)
     info = ctrl.start_run()
     return ctrl, info

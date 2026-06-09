@@ -16,6 +16,8 @@ from zcu_tools.gui.app.autofluxdep.event_bus import (
     WorkflowChangedPayload,
 )
 
+from ._helpers import connect_mock
+
 
 def test_repeated_placement_auto_dedups_name():
     ctrl = build_core()
@@ -70,7 +72,7 @@ def test_two_mist_instances_get_independent_results():
     ctrl.rename_node(1, "e_mist")
     for node in ctrl.state.nodes:
         node.params["acquire_delay"] = 0  # instant headless run
-    ctrl.setup(use_mock=True)
+    connect_mock(ctrl)
     ctrl.set_flux_values([0.0, 0.5])
     ctrl.start_run()
 
@@ -100,7 +102,7 @@ def test_node_entered_excludes_predictor_service():
     ctrl.rename_node(1, "g_mist")
     for node in ctrl.state.nodes:
         node.params["acquire_delay"] = 0  # instant headless run
-    ctrl.setup(use_mock=True)
+    connect_mock(ctrl)
     ctrl.set_flux_values([0.0, 1.0])
 
     entered = []

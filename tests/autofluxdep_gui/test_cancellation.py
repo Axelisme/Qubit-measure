@@ -17,6 +17,8 @@ from zcu_tools.gui.app.autofluxdep.event_bus import (
     RunStoppedPayload,
 )
 
+from ._helpers import connect_mock
+
 _FLUX = [0.0, 0.25, 0.5, 0.75, 1.0]
 
 
@@ -26,7 +28,7 @@ def _build_ready_controller():
     # zero the GUI-pacing acquire delay so the headless run is instant
     for node in ctrl.state.nodes:
         node.params["acquire_delay"] = 0
-    ctrl.setup(use_mock=True)
+    connect_mock(ctrl)
     ctrl.set_flux_values(_FLUX)
     return ctrl
 

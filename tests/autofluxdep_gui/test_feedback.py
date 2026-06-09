@@ -21,6 +21,8 @@ from zcu_tools.gui.app.autofluxdep.tools import (
     Tools,
 )
 
+from ._helpers import connect_mock
+
 # --- SimplePredictor: calibrate folds the residual into the prediction ---
 
 
@@ -143,7 +145,7 @@ def test_sweep_adapts_prediction_to_measurements():
     for node in ctrl.state.nodes:
         node.params["acquire_delay"] = 0
         node.params["rounds"] = 2
-    ctrl.setup(use_mock=True)
+    connect_mock(ctrl)
     ctrl.set_flux_values([0.0, 0.2, 0.4, 0.6, 0.8])
     ctrl.start_run()
 
@@ -168,7 +170,7 @@ def test_sweep_skips_snr_trough_dead_points():
     for node in ctrl.state.nodes:
         node.params["acquire_delay"] = 0
         node.params["rounds"] = 4
-    ctrl.setup(use_mock=True)
+    connect_mock(ctrl)
     ctrl.set_flux_values(list(np.linspace(0.0, 1.0, 11)))
     ctrl.start_run()
 

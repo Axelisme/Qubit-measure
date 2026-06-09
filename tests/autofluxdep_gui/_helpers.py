@@ -9,7 +9,7 @@ params. Together they replace the old ``NodeSpec`` + injected ``run_node``.
 
 from __future__ import annotations
 
-from typing_extensions import Any, Callable, Optional
+from typing_extensions import TYPE_CHECKING, Any, Callable, Optional
 from zcu_tools.gui.app.autofluxdep.nodes.builder import (
     Builder,
     Node,
@@ -19,7 +19,31 @@ from zcu_tools.gui.app.autofluxdep.nodes.builder import (
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 
+if TYPE_CHECKING:
+    from zcu_tools.gui.app.autofluxdep.controller import Controller
+
 ProduceFn = Callable[[RunEnv, Snapshot], Patch]
+
+
+def connect_mock(ctrl: "Controller") -> None:
+    """Establish a mock SoC synchronously-enough for a headless test.
+
+    The session ``ConnectionService`` settles a mock connect via
+    ``QTimer.singleShot``, so we drive it through the controller's public connect
+    API and pump a ``QEventLoop`` until the outcome signal fires (the same pattern
+    measure-gui's tests use). The autouse ``qapp`` fixture has already created the
+    QApplication. On return, ``ctrl.state.exp_context.soc`` is the MockSoc and
+    ``has_setup`` is true.
+    """
+    from qtpy.QtCore import QEventLoop
+    from zcu_tools.gui.session.services.connection import ConnectMockRequest
+
+    loop = QEventLoop()
+    ctrl.bind_connection_outcome(
+        on_finished=loop.quit, on_failed=lambda _msg: loop.quit()
+    )
+    ctrl.start_connect(ConnectMockRequest())
+    loop.exec()
 
 
 class _FnNode(Node):

@@ -14,7 +14,7 @@ from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.ui.main_window import MainWindow
 
-from .._helpers import make_builder
+from .._helpers import connect_mock, make_builder
 
 
 @pytest.fixture
@@ -77,7 +77,7 @@ def test_selection_shows_node_form(app):
 def test_run_disabled_until_setup(app):
     ctrl, win = app
     assert not win._list._run_btn.isEnabled()  # no setup yet
-    ctrl.setup(use_mock=True)
+    connect_mock(ctrl)
     win._list._refresh_buttons()
     assert win._list._run_btn.isEnabled()
     assert "ok" in win._list._setup_light.text()
@@ -104,7 +104,7 @@ def _pump_until_done(ctrl, win):
 def _run_to_completion(ctrl, win):
     _zero_delays(ctrl)
     ctrl.set_flux_values([0.0, 1.0, 2.0])
-    ctrl.setup(use_mock=True)
+    connect_mock(ctrl)
     win._list._refresh_buttons()
     win._start()
     _pump_until_done(ctrl, win)
@@ -177,7 +177,7 @@ def test_multiple_real_experiments_each_get_a_liveplot(qapp):
 
     _zero_delays(ctrl)
     ctrl.set_flux_values([0.0, 0.5, 1.0])
-    ctrl.setup(use_mock=True)
+    connect_mock(ctrl)
     win._list._refresh_buttons()
     win._start()
     patch_counter()  # wrap after _build_plots created the plotter
@@ -212,7 +212,7 @@ def test_run_auto_follows_each_entered_node(qapp):
     win._bridge.node_entered.connect(on_entered)
     _zero_delays(ctrl)
     ctrl.set_flux_values([0.0, 0.5])
-    ctrl.setup(use_mock=True)
+    connect_mock(ctrl)
     win._list._refresh_buttons()
     win._start()
     _pump_until_done(ctrl, win)
@@ -242,7 +242,7 @@ def test_rename_updates_list_and_keeps_canvas_key(qapp):
 
     _zero_delays(ctrl)
     ctrl.set_flux_values([0.0, 0.5])
-    ctrl.setup(use_mock=True)
+    connect_mock(ctrl)
     win._list._refresh_buttons()
     win._start()
     _pump_until_done(ctrl, win)
@@ -267,7 +267,7 @@ def test_no_canvas_is_ever_a_toplevel_window(qapp):
     win._list.select_index(0)
     _zero_delays(ctrl)
     ctrl.set_flux_values([0.0, 0.5])
-    ctrl.setup(use_mock=True)
+    connect_mock(ctrl)
     win._list._refresh_buttons()
     win._start()
     _pump_until_done(ctrl, win)
