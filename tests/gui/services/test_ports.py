@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Optional
 
 from zcu_tools.gui.app.main.adapter import ExpContext
-from zcu_tools.gui.app.main.event_bus import EventBus
+from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.ports import ProjectIOPort
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
@@ -61,6 +61,40 @@ def test_context_service_runs_against_fake_io():
     assert svc.has_project() is False
     fake.setup("/tmp/whatever")
     assert svc.has_project() is True
+
+
+def test_writeback_service_satisfies_writeback_lifecycle_port():
+    """``WritebackService`` structurally satisfies ``WritebackLifecyclePort``."""
+    from unittest.mock import MagicMock
+
+    from zcu_tools.gui.app.main.services.ports import WritebackLifecyclePort
+    from zcu_tools.gui.app.main.services.writeback import WritebackService
+
+    svc = WritebackService(
+        state=_make_state(),
+        bus=EventBus(),
+        cfg_editor=MagicMock(),
+        write_port=MagicMock(),
+    )
+    assert isinstance(svc, WritebackLifecyclePort)
+
+
+def test_cfg_editor_service_satisfies_cfg_editor_port():
+    """``CfgEditorService`` structurally satisfies ``CfgEditorPort``."""
+    from unittest.mock import MagicMock
+
+    from zcu_tools.gui.app.main.services.cfg_editor import CfgEditorService
+    from zcu_tools.gui.app.main.services.ports import CfgEditorPort
+
+    svc = CfgEditorService(
+        env_ctrl=MagicMock(),
+        read_port=MagicMock(),
+        write_port=MagicMock(),
+        version_bump=MagicMock(),
+        version_drop=MagicMock(),
+        bus=EventBus(),
+    )
+    assert isinstance(svc, CfgEditorPort)
 
 
 def _make_state():

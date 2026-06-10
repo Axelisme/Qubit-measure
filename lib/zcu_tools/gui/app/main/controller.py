@@ -8,6 +8,7 @@ from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 logger = logging.getLogger(__name__)
 
 from zcu_tools.device.base import BaseDeviceInfo
+from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.services.connection import (
     ConnectRequest,
@@ -32,11 +33,7 @@ from .adapter import (
     SocCfgHandle,
     WritebackItem,
 )
-from .event_bus import (
-    EventBus,
-    TabContentChangedPayload,
-    TabInteractionChangedPayload,
-)
+from .events.tab import TabContentChangedPayload, TabInteractionChangedPayload
 from .registry import Registry
 from .role_catalog import RoleCatalog
 from .services import (

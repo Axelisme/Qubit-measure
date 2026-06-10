@@ -6,21 +6,22 @@ from typing import TYPE_CHECKING, Any, Optional
 from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
 from zcu_tools.gui.app.main.adapter import AnalyzeRequest
-from zcu_tools.gui.app.main.event_bus import TabInteractionChangedPayload
+from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
+from zcu_tools.gui.session.ports import BackgroundExecutor
 
-from .background import BackgroundService, OffMainScopes
+from .background import OffMainScopes
 from .guard import AnalyzePermit
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.adapter import InteractiveSession
-    from zcu_tools.gui.app.main.event_bus import EventBus
     from zcu_tools.gui.app.main.state import State
+    from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
-    from .writeback import WritebackService
+    from .ports import WritebackLifecyclePort
 
 
 class AnalyzeService(QObject):
@@ -30,9 +31,9 @@ class AnalyzeService(QObject):
     def __init__(
         self,
         state: "State",
-        bg: BackgroundService,
+        bg: BackgroundExecutor,
         bus: "EventBus",
-        writeback: "WritebackService",
+        writeback: "WritebackLifecyclePort",
         handles: OperationHandles,
     ) -> None:
         super().__init__()

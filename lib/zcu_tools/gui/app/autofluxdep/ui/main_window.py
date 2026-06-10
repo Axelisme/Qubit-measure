@@ -32,7 +32,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.app.autofluxdep.controller import Controller
-from zcu_tools.gui.app.autofluxdep.event_bus import (
+from zcu_tools.gui.app.autofluxdep.events.run import (
     NodeEnteredPayload,
     PointDonePayload,
     RunFinishedPayload,

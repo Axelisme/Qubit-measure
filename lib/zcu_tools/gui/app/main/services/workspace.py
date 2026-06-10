@@ -2,12 +2,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from zcu_tools.gui.app.main.event_bus import (
-    EventBus,
-    TabAddedPayload,
-    TabClosedPayload,
-)
+from zcu_tools.gui.app.main.events.tab import TabAddedPayload, TabClosedPayload
 from zcu_tools.gui.app.main.state import State
+from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
 from .persistence_types import PersistedSession, PersistedTab
 from .ports import RestoreIssue, RestoreReport, TabSnapshot

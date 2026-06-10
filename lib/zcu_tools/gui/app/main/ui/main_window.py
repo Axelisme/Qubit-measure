@@ -9,9 +9,8 @@ import logging
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from zcu_tools.gui.app.main.adapter import AnalysisMode, CfgSchema
-from zcu_tools.gui.app.main.event_bus import (
-    RunFinishedPayload,
-    RunStartedPayload,
+from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
+from zcu_tools.gui.app.main.events.tab import (
     TabAddedPayload,
     TabClosedPayload,
     TabContentChangedPayload,

@@ -4,11 +4,11 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.main.event_bus import EventBus
 from zcu_tools.gui.app.main.figure_export import SAVE_DPI, SAVE_FIGSIZE
 from zcu_tools.gui.app.main.services.guard import SavePermit
 from zcu_tools.gui.app.main.services.save import SaveResultOutcome, SaveService
 from zcu_tools.gui.app.main.state import Session, State
+from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
 
 def _make_figure() -> MagicMock:

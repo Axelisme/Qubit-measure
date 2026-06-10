@@ -10,10 +10,11 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.main.adapter import ContextReadiness
-from zcu_tools.gui.app.main.event_bus import EventBus, TabInteractionChangedPayload
+from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
 from zcu_tools.gui.app.main.services.analyze import AnalyzeService
 from zcu_tools.gui.app.main.services.guard import AnalyzePermit
 from zcu_tools.gui.app.main.state import ExpContext, Session, State
+from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 

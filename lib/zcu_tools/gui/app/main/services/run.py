@@ -6,26 +6,23 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
-from zcu_tools.gui.app.main.event_bus import (
-    RunFinishedPayload,
-    RunStartedPayload,
-    TabInteractionChangedPayload,
-)
+from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
+from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
+from zcu_tools.gui.session.ports import BackgroundExecutor, ExclusionGate, ProgressHub
 
-from .background import NO_RESULT, BackgroundService, OffMainScopes
+from .background import NO_RESULT, OffMainScopes
 from .guard import RunPermit
-from .operation_gate import OperationGate, OperationKind
+from .operation_gate import OperationKind
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.event_bus import EventBus
     from zcu_tools.gui.app.main.state import State
-    from zcu_tools.gui.session.services.progress import ProgressService
+    from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
-    from .writeback import WritebackService
+    from .ports import WritebackLifecyclePort
 
 
 class RunService(QObject):
@@ -38,12 +35,12 @@ class RunService(QObject):
     def __init__(
         self,
         state: "State",
-        bg: BackgroundService,
+        bg: BackgroundExecutor,
         bus: "EventBus",
-        gate: OperationGate,
+        gate: ExclusionGate,
         handles: OperationHandles,
-        writeback: "WritebackService",
-        progress: "ProgressService",
+        writeback: "WritebackLifecyclePort",
+        progress: ProgressHub,
     ) -> None:
         super().__init__()
         self._state = state

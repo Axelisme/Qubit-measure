@@ -13,10 +13,10 @@ from unittest.mock import MagicMock
 import pytest
 from qtpy.QtCore import QEventLoop
 from zcu_tools.device import FakeDevice, FakeDeviceInfo, GlobalDeviceManager
-from zcu_tools.gui.app.main.event_bus import EventBus
 from zcu_tools.gui.app.main.services.background import BackgroundService
 from zcu_tools.gui.app.main.services.operation_gate import OperationGate
 from zcu_tools.gui.app.main.state import State
+from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
 from zcu_tools.gui.session.events import (
     DeviceSetupFinishedPayload,

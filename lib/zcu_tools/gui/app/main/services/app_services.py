@@ -23,9 +23,9 @@ from .workspace import WorkspaceService
 from .writeback import WritebackService
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.event_bus import EventBus
     from zcu_tools.gui.app.main.registry import Registry
     from zcu_tools.gui.app.main.state import State
+    from zcu_tools.gui.event_bus import BaseEventBus as EventBus
     from zcu_tools.gui.session.ports import ProgressTransport
     from zcu_tools.gui.session.services.io_manager import IOManager
 

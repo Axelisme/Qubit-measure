@@ -24,9 +24,10 @@ and overrides only the narrow policy seams it needs. The read-only apps
 adds editor sessions, a version guard, off-main handlers and a diagnostic
 channel by overriding the seams.
 
-The event key is generic: ``measure-gui`` keys serializers by a ``GuiEvent``
-enum, the read-only apps by payload ``type`` — the base never inspects the key,
-it only passes it to ``bus.subscribe`` and the injected ``wire_event_name``.
+The event key is a payload ``type`` for all three apps: the base never inspects
+the key, it only passes it to ``bus.subscribe`` and the injected
+``wire_event_name``; each app supplies ``wire_event_name=lambda p: p.EVENT.value``
+so the wire name comes from the payload's own domain enum.
 
 Qt-aware (it composes :class:`MainThreadDispatcher`) but app-free: it imports
 nothing from ``gui.app``.

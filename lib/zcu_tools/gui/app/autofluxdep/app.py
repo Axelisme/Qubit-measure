@@ -16,8 +16,8 @@ import sys
 from typing_extensions import Optional
 
 from zcu_tools.gui.app.autofluxdep.controller import Controller
-from zcu_tools.gui.app.autofluxdep.event_bus import EventBus
 from zcu_tools.gui.app.autofluxdep.state import AutoFluxDepState, ProjectInfo
+from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
 
 def _make_empty_ctx():

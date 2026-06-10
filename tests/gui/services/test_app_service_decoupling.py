@@ -19,6 +19,12 @@ What does NOT count as a forbidden dependency, and why:
 - **TYPE_CHECKING-only imports** (e.g. ``WritebackService`` under
   ``if TYPE_CHECKING:`` for an annotation). These have no runtime effect; the
   runtime wiring goes through the injected port (``WritebackQueryPort``).
+
+Coverage includes the infrastructure modules that have session-layer ports:
+``background`` (port: ``BackgroundExecutor``), ``operation_gate`` (port:
+``ExclusionGate``), ``cfg_editor`` (port: ``CfgEditorPort``), and ``writeback``
+(port: ``WritebackLifecyclePort``).  These did NOT end in "Service" before the
+infra denylist was added — the ``_is_infra_symbol`` check fills that gap.
 """
 
 from __future__ import annotations
@@ -35,12 +41,18 @@ _SERVICES_DIR = Path(services_pkg.__file__).parent
 _SERVICES_PKG = services_pkg.__name__  # "zcu_tools.gui.app.main.services"
 
 # Modules that are application services (not ports / DTOs / infra adapters).
+# Includes the infrastructure modules that own concrete classes *with* declared
+# ports: background, operation_gate, cfg_editor.  Runtime imports of their
+# concrete classes by sibling app services are violations.
 _APP_SERVICE_MODULES = {
     "analyze",
+    "background",
+    "cfg_editor",
     "connection",
     "context",
     "device",
     "guard",
+    "operation_gate",
     "run",
     "save",
     "startup",
@@ -48,6 +60,18 @@ _APP_SERVICE_MODULES = {
     "workspace",
     "writeback",
 }
+
+# Explicit denylist of concrete infra class names that have declared ports.
+# Names in this set are banned even when they don't end in "Service"
+# (e.g. ``OperationGate`` whose port is ``ExclusionGate``).
+_CONCRETE_INFRA_NAMES: frozenset[str] = frozenset(
+    {
+        "BackgroundService",
+        "CfgEditorService",
+        "OperationGate",
+        "WritebackService",
+    }
+)
 
 
 def _is_service_symbol(name: str) -> bool:
@@ -57,8 +81,11 @@ def _is_service_symbol(name: str) -> bool:
     (``GuardService``, ``WritebackService``). Importing a credential type that
     merely lives in the same module (``AnalyzePermit``) is not — it is a typed
     token, not a handle to the service.
+
+    Also catches the explicit infra-with-port names in ``_CONCRETE_INFRA_NAMES``
+    (e.g. ``OperationGate`` which does not end in "Service").
     """
-    return name.endswith("Service")
+    return name.endswith("Service") or name in _CONCRETE_INFRA_NAMES
 
 
 def _imported_service_modules(path: Path) -> set[str]:

@@ -6,9 +6,9 @@ from unittest.mock import MagicMock
 
 from qtpy.QtCore import Qt
 from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
-from zcu_tools.gui.app.main.event_bus import EventBus
 from zcu_tools.gui.app.main.services import TabSnapshot
 from zcu_tools.gui.app.main.state import TabInteractionState
+from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.events import SocChangedPayload
 
 
@@ -384,7 +384,7 @@ def test_main_window_soc_changed_refreshes_run_lock(qapp):
 
 
 def test_main_window_content_event_queries_single_tab_snapshot(qapp):
-    from zcu_tools.gui.app.main.event_bus import TabContentChangedPayload
+    from zcu_tools.gui.app.main.events.tab import TabContentChangedPayload
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
     ctrl = MagicMock()
@@ -400,7 +400,7 @@ def test_main_window_content_event_queries_single_tab_snapshot(qapp):
 
 
 def _emit_run_finished(bus, tab_id: str, outcome: str) -> None:
-    from zcu_tools.gui.app.main.event_bus import RunFinishedPayload
+    from zcu_tools.gui.app.main.events.run import RunFinishedPayload
 
     bus.emit(RunFinishedPayload(tab_id=tab_id, outcome=outcome))
 

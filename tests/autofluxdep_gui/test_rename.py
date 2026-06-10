@@ -11,10 +11,8 @@ from __future__ import annotations
 
 import numpy as np
 from zcu_tools.gui.app.autofluxdep.app import build_core
-from zcu_tools.gui.app.autofluxdep.event_bus import (
-    NodeEnteredPayload,
-    WorkflowChangedPayload,
-)
+from zcu_tools.gui.app.autofluxdep.events.run import NodeEnteredPayload
+from zcu_tools.gui.app.autofluxdep.events.workflow import WorkflowChangedPayload
 
 from ._helpers import connect_mock
 

@@ -11,20 +11,17 @@ from zcu_tools.gui.app.main.adapter import (
     WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.gui.app.main.event_bus import (
-    TabContentChangedPayload,
-)
+from zcu_tools.gui.app.main.events.tab import TabContentChangedPayload
 
 from .guard import WritebackPermit
-from .ports import ContextWrites
+from .ports import CfgEditorPort, ContextWrites
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.event_bus import EventBus
     from zcu_tools.gui.app.main.state import State
+    from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
-    from .cfg_editor import CfgEditorService
     from .ports import ContextWritePort
 
 # kind prefix for the stable per-item session_id (``<kind>-<n>``).
@@ -43,7 +40,7 @@ class WritebackService:
 
     Writeback items are computed **once** when analyze finishes (``compute_items``)
     and stored on ``Session.writeback_items``. Each module/waveform item gets a
-    gc=False CfgEditorService model (seeded from its ``edit_schema``); the agent
+    gc=False cfg-editor model (seeded from its ``edit_schema``); the agent
     edits it via ``editor.set_field`` and the user's Edit dialog attaches to the
     same model (WYSIWYG). ``get_tab_writeback_items`` is a pure read of that
     persistent list — it never recomputes (which would discard live edits).
@@ -53,7 +50,7 @@ class WritebackService:
         self,
         state: "State",
         bus: "EventBus",
-        cfg_editor: "CfgEditorService",
+        cfg_editor: CfgEditorPort,
         write_port: "ContextWritePort",
     ) -> None:
         self._state = state

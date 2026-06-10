@@ -10,9 +10,9 @@ orchestrator over synthetic signals, no Qt.
 from __future__ import annotations
 
 from zcu_tools.gui.app.autofluxdep.app import build_core
-from zcu_tools.gui.app.autofluxdep.event_bus import (
-    EventType,
+from zcu_tools.gui.app.autofluxdep.events.run import (
     PointDonePayload,
+    RunEvent,
     RunFinishedPayload,
     RunStoppedPayload,
 )
@@ -36,7 +36,7 @@ def _build_ready_controller():
 def test_stop_run_mid_sweep_emits_run_stopped_not_finished():
     ctrl = _build_ready_controller()
 
-    events: list[EventType] = []
+    events: list[RunEvent] = []
     ctrl.bus.subscribe(RunStoppedPayload, lambda p: events.append(p.EVENT))
     ctrl.bus.subscribe(RunFinishedPayload, lambda p: events.append(p.EVENT))
 
@@ -52,7 +52,7 @@ def test_stop_run_mid_sweep_emits_run_stopped_not_finished():
     info = ctrl.start_run()
 
     # the run ended on RUN_STOPPED, and RUN_FINISHED never fired
-    assert events == [EventType.RUN_STOPPED]
+    assert events == [RunEvent.RUN_STOPPED]
     # only points 0 and 1 ran; the sweep broke before point 2 of 5
     assert points == [0, 1]
     # the returned InfoStore is partial: it reflects the last completed point
@@ -63,7 +63,7 @@ def test_full_run_without_stop_emits_run_finished():
     # control case: an un-cancelled run ends on RUN_FINISHED over every point.
     ctrl = _build_ready_controller()
 
-    events: list[EventType] = []
+    events: list[RunEvent] = []
     ctrl.bus.subscribe(RunStoppedPayload, lambda p: events.append(p.EVENT))
     ctrl.bus.subscribe(RunFinishedPayload, lambda p: events.append(p.EVENT))
 
@@ -72,6 +72,6 @@ def test_full_run_without_stop_emits_run_finished():
 
     info = ctrl.start_run()
 
-    assert events == [EventType.RUN_FINISHED]
+    assert events == [RunEvent.RUN_FINISHED]
     assert points == [0, 1, 2, 3, 4]
     assert info.point["flux_idx"] == 4

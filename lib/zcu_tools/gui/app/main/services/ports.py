@@ -34,6 +34,7 @@ if TYPE_CHECKING:
         SavePaths,
         WritebackItem,
     )
+    from zcu_tools.gui.app.main.live_model import SectionLiveField
     from zcu_tools.gui.app.main.state import TabInteractionState
 
     from .persistence_types import AppPersistedState
@@ -170,3 +171,45 @@ class TabLifecyclePort(Protocol):
     ) -> str: ...
     def close_tab(self, tab_id: str) -> None: ...
     def make_default_cfg(self, adapter_name: str) -> "CfgSchema": ...
+
+
+@runtime_checkable
+class WritebackLifecyclePort(Protocol):
+    """The writeback lifecycle surface consumed by ``RunService`` and
+    ``AnalyzeService``.
+
+    These services need to tear down per-tab writeback editor models before
+    clearing / replacing a run result, and to compute a fresh draft once an
+    analyze finishes (ADR-0008). Depending on this port instead of the concrete
+    ``WritebackService`` keeps the coupling at the interface level (ADR-0005).
+    """
+
+    def teardown_tab_items(self, tab_id: str) -> None: ...
+
+    def compute_items_for_tab(
+        self, tab_id: str, analyze_result: Any
+    ) -> "list[WritebackItem]": ...
+
+
+@runtime_checkable
+class CfgEditorPort(Protocol):
+    """The cfg-editor surface consumed by ``WritebackService``.
+
+    ``WritebackService`` opens a gc=False editor session for each
+    module/waveform writeback item (seeded from its ``edit_schema``), tears it
+    down on reanalyze/rerun, and snapshots the live draft at apply time.
+    Depending on this port instead of the concrete ``CfgEditorService`` keeps
+    the coupling at the interface level (ADR-0005).
+    """
+
+    def open_seeded(
+        self,
+        seed: "CfgSchema",
+        *,
+        gc: bool = False,
+        owner_key: Optional[str] = None,
+    ) -> "tuple[str, list[dict[str, object]]]": ...
+
+    def teardown(self, editor_id: str, *, reason: str = ...) -> None: ...
+
+    def get_root(self, editor_id: str) -> "SectionLiveField": ...

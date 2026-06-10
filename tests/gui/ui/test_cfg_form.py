@@ -21,8 +21,8 @@ from zcu_tools.gui.app.main.adapter import (
     WaveformRefSpec,
     WaveformRefValue,
 )
-from zcu_tools.gui.app.main.event_bus import EventBus
 from zcu_tools.gui.app.main.live_model import SweepLiveField
+from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
 # ---------------------------------------------------------------------------
 # Fixtures

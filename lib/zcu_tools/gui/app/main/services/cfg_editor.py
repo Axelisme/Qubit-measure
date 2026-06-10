@@ -70,7 +70,7 @@ from .remote.path_resolver import (
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.event_bus import EventBus
+    from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
 logger = logging.getLogger(__name__)
 

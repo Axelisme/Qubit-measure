@@ -10,8 +10,9 @@ measure-gui EventBus subscribes by payload type (not an event enum), so the
 registry is keyed by type; ``payload.EVENT.value`` gives the wire name.
 
 Adding a new event:
-  1. Confirm the payload dataclass exists (experiment payloads in
-     ``event_bus.py``; session-core payloads in ``gui/session/events.py``).
+  1. Confirm the payload dataclass exists (tab events in
+     ``app/main/events/tab.py``, run events in ``app/main/events/run.py``;
+     session-core payloads in ``gui/session/events.py``).
   2. Add a serializer returning either a JSON-able dict or ``None`` to
      suppress the push (None means "do not forward").
   3. Register in :data:`EVENT_SERIALIZERS`.
@@ -23,9 +24,8 @@ from __future__ import annotations
 
 from typing import Callable, Mapping, Optional
 
-from zcu_tools.gui.app.main.event_bus import (
-    RunFinishedPayload,
-    RunStartedPayload,
+from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
+from zcu_tools.gui.app.main.events.tab import (
     TabAddedPayload,
     TabClosedPayload,
     TabContentChangedPayload,

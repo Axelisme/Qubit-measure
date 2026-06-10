@@ -10,8 +10,8 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.main.event_bus import EventBus
 from zcu_tools.gui.app.main.services.cfg_editor import CfgEditorError, CfgEditorService
+from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 
@@ -458,8 +458,8 @@ def test_no_dangling_hook_after_every_removal_path(service):
 def _service_with_version_table(ctrl):
     """A CfgEditorService wired to a real VersionTable via bump/drop, so we can
     assert the editor:<id> resource version lifecycle (edit bumps, teardown drops)."""
-    from zcu_tools.gui.app.main.event_bus import EventBus
     from zcu_tools.gui.app.main.state import VersionTable
+    from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
     table = VersionTable()
 

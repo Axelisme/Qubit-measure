@@ -21,9 +21,8 @@ from zcu_tools.gui.app.main.adapter import (
     ExpContext,
 )
 from zcu_tools.gui.app.main.controller import Controller
-from zcu_tools.gui.app.main.event_bus import (
-    RunFinishedPayload,
-    RunStartedPayload,
+from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
+from zcu_tools.gui.app.main.events.tab import (
     TabContentChangedPayload,
     TabInteractionChangedPayload,
 )
@@ -86,9 +85,9 @@ class ControllerFixture:
         self.view = _make_view()
         io_manager = IOManager()
         io_manager._em = MagicMock()  # simulate a project being set up
-        from zcu_tools.gui.app.main.event_bus import EventBus
+        from zcu_tools.gui.event_bus import BaseEventBus
 
-        self.bus = EventBus()
+        self.bus = BaseEventBus()
         self.bus.emit = MagicMock()
         self.ctrl = Controller(
             state=self.state,

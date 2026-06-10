@@ -18,11 +18,8 @@ import base64
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.main.event_bus import (
-    RunFinishedPayload,
-    RunStartedPayload,
-    TabAddedPayload,
-)
+from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
+from zcu_tools.gui.app.main.events.tab import TabAddedPayload
 from zcu_tools.gui.app.main.services.remote.events import (
     _ser_predictor_changed,
     _ser_run_finished,
@@ -54,6 +51,50 @@ def fx(qapp):  # noqa: ARG001
     f.start()
     yield f
     f.stop()
+
+
+# ---------------------------------------------------------------------------
+# Wire-name lock: guard against silent renames when payloads move between files
+# ---------------------------------------------------------------------------
+
+_EXPECTED_WIRE_NAMES = frozenset(
+    {
+        # tab domain
+        "tab_added",
+        "tab_closed",
+        "tab_content_changed",
+        "tab_interaction_changed",
+        # run domain
+        "run_started",
+        "run_finished",
+        # session-core (device / context / predictor / soc)
+        "predictor_changed",
+        "device_changed",
+        "device_setup_started",
+        "device_setup_finished",
+        "context_switched",
+        "md_changed",
+        "ml_changed",
+        "soc_changed",
+    }
+)
+
+
+def test_event_serializers_wire_names_locked():
+    """All 14 measure-gui EVENT_SERIALIZERS wire names are byte-identical to the
+    documented set.  Any payload rename or accidental removal fails here first,
+    before a connected agent notices silent breakage."""
+    from zcu_tools.gui.app.main.services.remote.events import (
+        EVENT_SERIALIZERS,
+        wire_event_name,
+    )
+
+    actual = frozenset(wire_event_name(pt) for pt in EVENT_SERIALIZERS)
+    assert actual == _EXPECTED_WIRE_NAMES, (
+        f"Wire name set changed!\n"
+        f"  Added:   {sorted(actual - _EXPECTED_WIRE_NAMES)}\n"
+        f"  Removed: {sorted(_EXPECTED_WIRE_NAMES - actual)}"
+    )
 
 
 # ---------------------------------------------------------------------------

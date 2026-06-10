@@ -20,14 +20,15 @@ from typing_extensions import Any, Optional
 
 from zcu_tools.gui.app.autofluxdep.background import BackgroundService
 from zcu_tools.gui.app.autofluxdep.derivation import DerivationService
-from zcu_tools.gui.app.autofluxdep.event_bus import (
-    EventBus,
-    FluxChangedPayload,
+from zcu_tools.gui.app.autofluxdep.events.run import (
     NodeEnteredPayload,
     PointDonePayload,
     RunFinishedPayload,
     RunStartedPayload,
     RunStoppedPayload,
+)
+from zcu_tools.gui.app.autofluxdep.events.workflow import (
+    FluxChangedPayload,
     WorkflowChangedPayload,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, PlacedNode
@@ -54,6 +55,7 @@ from zcu_tools.gui.app.autofluxdep.tools import (
     SimplePredictor,
     Tools,
 )
+from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.services.build import build_session_services
 from zcu_tools.gui.session.services.io_manager import IOManager

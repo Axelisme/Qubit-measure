@@ -142,10 +142,10 @@ def _build_window(
     """Create Controller + MainWindow in the correct order."""
 
     from zcu_tools.gui.app.main.controller import Controller
-    from zcu_tools.gui.app.main.event_bus import EventBus
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
+    from zcu_tools.gui.event_bus import BaseEventBus
 
-    bus = EventBus()
+    bus = BaseEventBus()
 
     ctrl = Controller(
         state=state,

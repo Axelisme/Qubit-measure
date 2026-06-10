@@ -52,9 +52,8 @@ from .adapter import (
 from .sweep_model import SweepEditor
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.event_bus import BaseEventBus as EventBus
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary
-
-    from .event_bus import EventBus
 
 logger = logging.getLogger(__name__)
 

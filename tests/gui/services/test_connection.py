@@ -6,7 +6,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtCore import QEventLoop
-from zcu_tools.gui.app.main.event_bus import EventBus
 from zcu_tools.gui.app.main.services.operation_gate import (
     OperationGate,
 )
@@ -14,6 +13,7 @@ from zcu_tools.gui.app.main.services.operation_gate import (
     OperationKind as MeasureOpKind,
 )
 from zcu_tools.gui.app.main.state import ExpContext, State
+from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.events import SocChangedPayload
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.ports import OperationConflictError, OperationKind

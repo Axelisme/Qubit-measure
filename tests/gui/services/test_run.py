@@ -19,12 +19,12 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionValue,
     RunRequest,
 )
-from zcu_tools.gui.app.main.event_bus import EventBus
 from zcu_tools.gui.app.main.services.background import NO_RESULT
 from zcu_tools.gui.app.main.services.guard import RunPermit
 from zcu_tools.gui.app.main.services.operation_gate import OperationGate, OperationKind
 from zcu_tools.gui.app.main.services.run import RunService
 from zcu_tools.gui.app.main.state import ExpContext, Session, State
+from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.operation_handles import OperationHandles
 
 
@@ -110,7 +110,7 @@ def test_start_run_releases_lease_when_submit_raises():
 
 
 def _last_run_finished_payload(bus_emit: MagicMock):
-    from zcu_tools.gui.app.main.event_bus import RunFinishedPayload
+    from zcu_tools.gui.app.main.events.run import RunFinishedPayload
 
     for call in reversed(bus_emit.call_args_list):
         (payload,) = call.args
