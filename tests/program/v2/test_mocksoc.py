@@ -37,3 +37,13 @@ def test_mock_soc_methods():
 
     # Second poll should return empty
     assert soc.poll_data() == []
+
+
+def test_mock_soc_decimated_accumulated():
+    soc, _ = make_mock_soc()
+
+    dec = soc.get_decimated(0, 0, 50)
+    assert dec.shape == (50, 2)
+
+    acc = soc.get_accumulated(0, 0, 20)
+    assert acc.shape == (20, 2)
