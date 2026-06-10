@@ -63,7 +63,11 @@ if TYPE_CHECKING:
     from zcu_tools.device.base import BaseDeviceInfo
     from zcu_tools.gui.session.pbar_host import ProgressBarModel
     from zcu_tools.gui.session.ports import ProgressTransport
-    from zcu_tools.gui.session.services.connection import ConnectRequest
+    from zcu_tools.gui.session.services.connection import (
+        ConnectRequest,
+        LoadPredictorRequest,
+        PredictFreqRequest,
+    )
     from zcu_tools.gui.session.services.device import (
         ConnectDeviceRequest,
         DeviceEntry,
@@ -268,6 +272,19 @@ class Controller:
 
     def get_device_unit(self, name: str) -> str:
         return self._dev_svc.get_device_unit(name)
+
+    # -- predictor dialog: load / clear / predict (the shared PredictorDialog) --
+    def load_predictor(self, req: LoadPredictorRequest) -> None:
+        self._conn_svc.load_predictor(req)
+
+    def clear_predictor(self) -> None:
+        self._conn_svc.clear_predictor()
+
+    def predict_freq(self, req: PredictFreqRequest) -> float:
+        return self._conn_svc.predict_freq(req)
+
+    def get_predictor_info(self) -> Optional[dict]:
+        return self._conn_svc.get_predictor_info()
 
     # -- device dialog: lifecycle --
     def start_connect_device(self, req: ConnectDeviceRequest) -> int:

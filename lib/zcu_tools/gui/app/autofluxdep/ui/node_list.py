@@ -67,9 +67,11 @@ class NodeListPane(QWidget):
         setup_row = QHBoxLayout()
         self._setup_btn = _btn("Setup…", self._on_setup)
         self._devices_btn = _btn("Devices…", self._on_devices)
+        self._predictor_btn = _btn("Predictor…", self._on_predictor)
         self._setup_light = QLabel("● not set")
         setup_row.addWidget(self._setup_btn)
         setup_row.addWidget(self._devices_btn)
+        setup_row.addWidget(self._predictor_btn)
         setup_row.addWidget(self._setup_light)
         root.addLayout(setup_row)
 
@@ -169,6 +171,14 @@ class NodeListPane(QWidget):
         dlg.exec()
         self._refresh_buttons()
 
+    def _on_predictor(self) -> None:
+        from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
+
+        # The shared predictor dialog loads a FluxoniumPredictor into the active
+        # context; the run reads exp_context.predictor (synthetic + real paths).
+        dlg = PredictorDialog(self._ctrl, self)
+        dlg.exec()
+
     # --- run / stop ---
 
     def _on_run_stop(self) -> None:
@@ -201,6 +211,7 @@ class NodeListPane(QWidget):
             self._rename_btn,
             self._setup_btn,
             self._devices_btn,
+            self._predictor_btn,
             self._flux_start,
             self._flux_stop,
             self._flux_npts,

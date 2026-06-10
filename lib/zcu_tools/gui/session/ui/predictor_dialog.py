@@ -24,14 +24,19 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.controller import Controller
+    from zcu_tools.gui.session.controller_port import SessionControllerPort
 
 
 class PredictorDialog(QDialog):
-    """Modal dialog for loading a FluxoniumPredictor and predicting frequencies."""
+    """Modal dialog for loading a FluxoniumPredictor and predicting frequencies.
+
+    Shared session dialog: depends only on ``SessionControllerPort`` (the
+    load/clear/predict + predictor-info + bus surface), so both measure and
+    autofluxdep open it with their own Controller.
+    """
 
     def __init__(
-        self, controller: "Controller", parent: Optional[QWidget] = None
+        self, controller: "SessionControllerPort", parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
         self._ctrl = controller

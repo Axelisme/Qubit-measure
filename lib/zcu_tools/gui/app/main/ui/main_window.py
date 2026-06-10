@@ -1262,7 +1262,7 @@ class MainWindow(QMainWindow):
 
             return DeviceDialog(self._ctrl, parent=self)
         if name is DialogName.PREDICTOR:
-            from .predictor_dialog import PredictorDialog
+            from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
 
             return PredictorDialog(self._ctrl, parent=self)
         if name is DialogName.INSPECT:

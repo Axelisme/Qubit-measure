@@ -72,6 +72,18 @@ def test_devices_button_opens_shared_device_dialog(app):
     dlg.deleteLater()
 
 
+def test_predictor_button_opens_shared_predictor_dialog(app):
+    # the Predictor… button opens the shared session PredictorDialog (load a
+    # FluxoniumPredictor into the context) — runtime port conformance check.
+    from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
+
+    ctrl, win = app
+    assert hasattr(win._list, "_predictor_btn")
+    dlg = PredictorDialog(ctrl, win)  # must not raise
+    assert dlg._ctrl is ctrl
+    dlg.deleteLater()
+
+
 # --- selection drives the right pane ---
 
 
