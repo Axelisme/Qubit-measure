@@ -56,6 +56,13 @@ def _reference_matelements(operator):
     ],
 )
 def test_pinned_matches_blas_multithreaded(fn, opkey):
+    """Assert the BLAS-pinned result is numerically identical to a multithreaded run.
+
+    NOTE: under pytest-xdist workers tests/conftest.py pins BLAS to 1 thread
+    (OMP/OPENBLAS/MKL_NUM_THREADS=1), so both ``pinned`` and ``reference`` here
+    run single-threaded.  The "multithreaded" coverage of this test is only
+    exercised in serial runs (``pytest tests/`` without ``-n auto``).
+    """
     _, pinned = fn(PARAMS, FLUXS)
     reference = _reference_matelements(opkey)
     assert pinned.shape == (len(FLUXS), RETURN_DIM, RETURN_DIM)

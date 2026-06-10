@@ -26,6 +26,7 @@ import logging
 from typing import Optional
 
 from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QHBoxLayout,
     QLabel,
@@ -204,6 +205,11 @@ class MainWindow(QMainWindow):
 
     def _clear_editor(self) -> None:
         if self._current_editor is not None:
+            # Quiesce any in-flight pool worker before scheduling C++ deletion:
+            # FindPointsWidget owns a BackgroundRunner whose queued done delivery
+            # must be flushed while the carrier is still alive (prevents segfault).
+            if hasattr(self._current_editor, "quiesce"):
+                self._current_editor.quiesce()  # type: ignore[union-attr]
             self._editor_stack.removeWidget(self._current_editor)
             self._current_editor.deleteLater()
             self._current_editor = None
@@ -444,3 +450,22 @@ class MainWindow(QMainWindow):
         from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]
 
         QMessageBox.information(self, title, message)
+
+    # --- close path --------------------------------------------------------
+
+    def closeEvent(self, a0: Optional[QCloseEvent]) -> None:  # noqa: N802
+        """Quiesce all background workers before the C++ widget tree is torn down.
+
+        ``_current_editor`` (FindPointsWidget) is handled by ``_clear_editor`` when
+        it is replaced; but if it is still mounted at close time its worker must be
+        joined here.  ``_analyze_panel`` is a singleton that lives until the window
+        closes and owns both a search runner and an embedded SelectorWidget runner —
+        both must be joined before Qt destroys the child objects.
+        """
+        if self._current_editor is not None and hasattr(
+            self._current_editor, "quiesce"
+        ):
+            self._current_editor.quiesce()  # type: ignore[union-attr]
+        if self._analyze_panel is not None:
+            self._analyze_panel.quiesce()  # type: ignore[union-attr]
+        super().closeEvent(a0)

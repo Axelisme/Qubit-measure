@@ -99,3 +99,8 @@ class BackgroundService(QObject):
             run_in_pool=run_in_pool,
             enter=_entered(effective_scopes),
         )
+
+    def quiesce(self, timeout_ms: int = 5000) -> bool:
+        """Wait for in-flight work and flush its queued main-thread deliveries
+        (delegates to the underlying ``BackgroundRunner``; call from widget close)."""
+        return self._runner.quiesce(timeout_ms)

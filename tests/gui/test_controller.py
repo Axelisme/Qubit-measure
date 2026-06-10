@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import threading
 import time
+from typing import Iterator
 from unittest.mock import MagicMock
 
 import pytest
@@ -100,11 +101,24 @@ class ControllerFixture:
         self.caretaker = PersistenceCaretaker(self.ctrl, cache_dir=cache_dir)
         self.ctrl.attach_caretaker(self.caretaker)
 
+    def quiesce(self) -> None:
+        """Join the Controller's in-flight background work and flush its queued
+        main-thread deliveries (run/analyze/save/device all share one
+        BackgroundService). Must run before the fixture — and thus the Controller
+        and its QObject service graph — is GC'd: a run spawns a dedicated worker
+        thread whose finished→deleteLater and done delivery are posted to the main
+        thread. If the Controller is collected with those still queued, a later
+        test's event pump (QEventLoop.exec / processEvents) dispatches them onto a
+        freed C++ object and segfaults."""
+        self.ctrl._background_svc.quiesce()
+
 
 @pytest.fixture()
-def cf(qapp, tmp_path) -> ControllerFixture:  # noqa: ARG001
+def cf(qapp, tmp_path) -> Iterator[ControllerFixture]:  # noqa: ARG001
     # Scope persistence to a temp dir so tests never read/write the real cache.
-    return ControllerFixture(cache_dir=tmp_path)
+    fixture = ControllerFixture(cache_dir=tmp_path)
+    yield fixture
+    fixture.quiesce()
 
 
 def _default_fake_schema(ctx: ExpContext) -> CfgSchema:

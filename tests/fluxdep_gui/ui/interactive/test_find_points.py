@@ -35,7 +35,14 @@ def widget(qapp):
     sig, devs, freqs = _spectrum()
     w = FindPointsWidget(sig, devs, freqs, threshold=1.0, brush_width=0.05)
     yield w
+    # FindPointsWidget calls update_points() in __init__, starting an 80 ms debounce
+    # that submits a pool worker. Stop the timer so no NEW worker starts, then quiesce
+    # the runner: it joins any in-flight worker AND flushes its queued main-thread
+    # delivery, so deleting the widget can't leave a stale QMetaCallEvent (segfault).
+    w._debounce.stop()
+    w._runner.quiesce()
     w.deleteLater()
+    qapp.processEvents()
 
 
 def test_widget_builds(widget):

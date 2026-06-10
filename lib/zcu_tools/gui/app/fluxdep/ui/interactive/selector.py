@@ -328,6 +328,16 @@ class SelectorWidget(InteractiveMplWidget):
 
     # --- result ----------------------------------------------------------
 
+    def quiesce(self) -> None:
+        """Stop the debounce timer and join any in-flight pool worker.
+
+        Call this before ``deleteLater()`` (e.g. from ``AnalyzePanelWidget._refresh_filter_tab``
+        or the host window's ``closeEvent``) to prevent a pending ``QMetaCallEvent``
+        from being dispatched onto a freed C++ object after the widget is destroyed.
+        """
+        self._debounce.stop()
+        self._runner.quiesce()
+
     def get_result(
         self,
     ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.bool_]]:

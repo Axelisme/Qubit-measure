@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-development = ["pytest", "pytest-cov"]
+development = ["pytest", "pytest-cov", "pytest-xdist"]
 server = ["numpy==1.23.5"]
 client = [
   "h5py",

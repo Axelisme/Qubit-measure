@@ -26,6 +26,29 @@ from zcu_tools.gui.session.services.device import (
 from zcu_tools.gui.session.services.progress import ProgressService
 
 
+# Every BackgroundService created in a test is registered here so the autouse
+# teardown can quiesce it: a DeviceService runs its commands on a dedicated worker
+# thread whose done/failed outcome is delivered via a queued main-thread signal.
+# If the service (and its runner) is GC'd while that delivery is still queued, the
+# next processEvents() dispatches it onto a freed C++ object and segfaults.
+_LIVE_BG: list[BackgroundService] = []
+
+
+def _bg() -> BackgroundService:
+    bg = BackgroundService()
+    _LIVE_BG.append(bg)
+    return bg
+
+
+@pytest.fixture(autouse=True)
+def _quiesce_services():
+    """Drain every test-created BackgroundService before its objects are GC'd."""
+    yield
+    for bg in _LIVE_BG:
+        bg.quiesce()
+    _LIVE_BG.clear()
+
+
 @pytest.fixture(autouse=True)
 def _clean_devices():
     for name in list(GlobalDeviceManager.get_all_devices()):
@@ -45,7 +68,7 @@ def _make_svc(
             EventBus(),
             State(MagicMock()),
             gate or OperationGate(),
-            BackgroundService(),
+            _bg(),
             ProgressService(QtProgressTransport()),
             driver_factory=lambda _type, _address: device,  # type: ignore[arg-type]
         ),
@@ -267,7 +290,7 @@ def test_failing_device_changed_subscriber_does_not_abort_connect(qapp):
         bus,
         State(MagicMock()),
         OperationGate(),
-        BackgroundService(),
+        _bg(),
         ProgressService(QtProgressTransport()),
         driver_factory=lambda _type, _address: MagicMock(),  # type: ignore[arg-type]
     )

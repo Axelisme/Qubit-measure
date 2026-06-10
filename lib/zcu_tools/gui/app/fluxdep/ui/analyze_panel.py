@@ -21,7 +21,10 @@ from __future__ import annotations
 import logging
 import os
 from contextlib import ExitStack, contextmanager
-from typing import Iterator, Optional
+from typing import TYPE_CHECKING, Iterator, Optional
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
 
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
@@ -127,7 +130,7 @@ class AnalyzePanelWidget(QWidget):
         self._runner = BackgroundRunner(self)
         self._channel = GuiProgressBarChannel()
         self._channel.progress.connect(self._on_progress)
-        self._filter_widget: Optional[QWidget] = None
+        self._filter_widget: Optional[SelectorWidget] = None
 
         self._build_ui()
         self._load_from_state()
@@ -165,6 +168,10 @@ class AnalyzePanelWidget(QWidget):
         from zcu_tools.notebook.persistance import SpectrumResult
 
         if self._filter_widget is not None:
+            # Quiesce before deleteLater: the SelectorWidget may have a pooled
+            # worker in flight whose queued done delivery must be flushed now,
+            # while the carrier is still alive (prevents segfault on next pump).
+            self._filter_widget.quiesce()
             self._filter_layout.removeWidget(self._filter_widget)
             self._filter_widget.deleteLater()
             self._filter_widget = None
@@ -496,6 +503,20 @@ class AnalyzePanelWidget(QWidget):
         self._redraw_show()
         # The Show tab is rendered and ready, but stay on Search so the result
         # (EJ/EC/EL + diagnostic) is visible; the user switches to Show when ready.
+
+    def quiesce(self) -> None:
+        """Stop any in-flight search worker and the embedded selector's worker.
+
+        Call from the host window's ``closeEvent`` before the C++ object tree is
+        destroyed: both ``_runner`` (search) and the embedded ``SelectorWidget._runner``
+        (filter) may have queued main-thread deliveries that must be flushed while
+        their carriers are still alive.
+        """
+        # Quiesce the embedded SelectorWidget first (it has its own debounce + runner).
+        if self._filter_widget is not None:
+            self._filter_widget.quiesce()
+        # Then quiesce our own search runner.
+        self._runner.quiesce()
 
     def _on_search_error(self, exc: Exception) -> None:
         logger.exception("search worker failed", exc_info=exc)

@@ -31,6 +31,24 @@ from zcu_tools.gui.session.services.device import (
 )
 from zcu_tools.gui.session.services.progress import ProgressService
 
+# See tests/gui/services/test_device.py for why test-created BackgroundServices must
+# be quiesced before GC: a queued main-thread delivery to a GC'd runner segfaults.
+_LIVE_BG: list[BackgroundService] = []
+
+
+def _bg() -> BackgroundService:
+    bg = BackgroundService()
+    _LIVE_BG.append(bg)
+    return bg
+
+
+@pytest.fixture(autouse=True)
+def _quiesce_services():
+    yield
+    for bg in _LIVE_BG:
+        bg.quiesce()
+    _LIVE_BG.clear()
+
 
 @pytest.fixture(autouse=True)
 def _clean_devices():
@@ -48,7 +66,7 @@ def _make_svc(driver: MagicMock | None = None) -> tuple[DeviceService, MagicMock
         EventBus(),
         State(MagicMock()),
         OperationGate(),
-        BackgroundService(),
+        _bg(),
         ProgressService(QtProgressTransport()),
         driver_factory=lambda _type, _address: device,  # type: ignore[arg-type]
     )
@@ -133,7 +151,7 @@ def _make_real_svc(driver: object | None = None) -> tuple[DeviceService, object]
         EventBus(),
         State(MagicMock()),
         OperationGate(),
-        BackgroundService(),
+        _bg(),
         ProgressService(QtProgressTransport()),
         driver_factory=lambda _type, _address: fake_device,  # type: ignore[arg-type]
     )

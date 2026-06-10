@@ -27,6 +27,7 @@ from __future__ import annotations
 from typing import Any, Callable, ContextManager, Optional
 
 from qtpy.QtCore import (  # type: ignore[attr-defined]
+    QCoreApplication,
     QObject,
     QRunnable,
     QThread,
@@ -105,6 +106,10 @@ class BackgroundRunner(QObject):
         # GC'd before ``finished`` fires (parent= keeps the C++ object; the set
         # keeps the Python ref symmetric and explicit).
         self._workers: set[_OpWorker] = set()
+        # Hold pool signal carriers until their queued done/failed delivery fires,
+        # for the same reason: the carrier's C++ half must outlive the cross-thread
+        # ``QMetaCallEvent`` that delivers the outcome on the main thread.
+        self._pool_signals: set[_OpSignals] = set()
 
     def submit(
         self,
@@ -131,13 +136,16 @@ class BackgroundRunner(QObject):
 
         if run_in_pool:
             # Parent the signal carrier to the runner so it outlives the pool
-            # runnable; deleteLater (queued after on_done/on_error) frees it on the
-            # main thread once the outcome has been delivered.
+            # runnable and its C++ lifetime is tied to the runner's. The carrier is
+            # tracked in ``_pool_signals`` and freed only once its delivery has
+            # fired (see below), so a queued cross-thread emit never lands on a
+            # destroyed carrier — that is what ``quiesce`` guarantees on teardown.
             signals = _OpSignals(self)
             signals.done.connect(on_done)
             signals.failed.connect(on_error)
-            signals.done.connect(signals.deleteLater)
-            signals.failed.connect(signals.deleteLater)
+            self._pool_signals.add(signals)
+            signals.done.connect(lambda _=None, s=signals: self._free_signals(s))
+            signals.failed.connect(lambda _=None, s=signals: self._free_signals(s))
             self._pool.start(_PoolRunnable(thunk, signals))
         else:
             worker = _OpWorker(thunk, parent=self)
@@ -147,3 +155,38 @@ class BackgroundRunner(QObject):
             worker.finished.connect(lambda w=worker: self._workers.discard(w))
             worker.finished.connect(worker.deleteLater)
             worker.start()
+
+    def _free_signals(self, signals: _OpSignals) -> None:
+        """Release a pool signal carrier once its (already-delivered) outcome has
+        fired: drop the Python ref and schedule the C++ deletion. Runs on the main
+        thread (queued from the carrier's own done/failed signal), so by the time it
+        runs the delivery to ``on_done``/``on_error`` is already complete."""
+        self._pool_signals.discard(signals)
+        signals.deleteLater()
+
+    def quiesce(self, timeout_ms: int = 5000) -> bool:
+        """Wait for all in-flight work AND flush its queued main-thread deliveries.
+
+        ``QThreadPool.waitForDone`` only joins the worker *threads*; the outcome of a
+        pooled task is delivered to ``on_done``/``on_error`` via a *queued* cross-thread
+        signal that is still sitting in the main-thread event queue when ``run()``
+        returns. If the runner (and its signal carriers) are destroyed before that
+        queued ``QMetaCallEvent`` is dispatched — e.g. a short-lived runner GC'd at the
+        end of a test — ``processEvents`` later crashes delivering to a dead carrier.
+
+        ``quiesce`` closes that gap: join the pool and the dedicated workers, then
+        ``processEvents`` so every pending delivery (and the carrier's own deferred
+        delete) lands while its target is still alive. Call it from widget close and
+        test teardown before the runner goes out of scope. Returns ``True`` if every
+        substrate drained within ``timeout_ms``.
+        """
+        drained = self._pool.waitForDone(timeout_ms)
+        for worker in list(self._workers):
+            drained = worker.wait(timeout_ms) and drained
+        # Dispatch the queued done/failed deliveries (and the deferred-delete events
+        # they schedule) now, while the carriers/workers are still alive.
+        app = QCoreApplication.instance()
+        if app is not None:
+            app.processEvents()
+            app.processEvents()
+        return drained

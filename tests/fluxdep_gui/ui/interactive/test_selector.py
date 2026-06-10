@@ -39,7 +39,14 @@ def _spectrums() -> dict[str, SpectrumResult]:
 def widget(qapp):
     w = SelectorWidget(_spectrums(), brush_width=0.05)
     yield w
+    # Some tests call apply_filter() / _on_perform_all() which starts the 80 ms
+    # debounce that submits a pool worker. Stop the timer so no NEW worker starts,
+    # then quiesce the runner: it joins any in-flight worker AND flushes its queued
+    # main-thread delivery, so deleting the widget can't leave a stale QMetaCallEvent.
+    w._debounce.stop()
+    w._runner.quiesce()
     w.deleteLater()
+    qapp.processEvents()
 
 
 def test_widget_builds_all_selected_by_default(widget):
