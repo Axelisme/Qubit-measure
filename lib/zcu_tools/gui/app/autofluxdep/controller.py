@@ -83,6 +83,26 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class _MlModuleSource:
+    """Adapt a ``ModuleLibrary`` to the orchestrator's ``ModuleSource`` contract.
+
+    ``ModuleLibrary.get_module`` raises ``ValueError`` for an unknown module, but
+    the orchestrator's ``ModuleSource`` contract is "return None if absent" (the
+    snapshot then falls back to a Node-produced module or the dependency default).
+    This bridges the two at the GUI boundary so ``ModuleLibrary``'s raise-on-absent
+    never leaks into the domain orchestrator. ``get_module(name)`` returns the
+    preset module (a deep copy, per ModuleLibrary) or None.
+    """
+
+    def __init__(self, ml: "ModuleLibrary") -> None:
+        self._ml = ml
+
+    def get_module(self, name: str) -> Any:
+        if name not in self._ml.modules:
+            return None
+        return self._ml.get_module(name)
+
+
 class Controller:
     def __init__(
         self,
@@ -492,7 +512,11 @@ class Controller:
         )
         self._bus.emit(RunStartedPayload())
 
-        soc = self._state.exp_context.soc
+        ctx = self._state.exp_context
+        soc, soccfg = ctx.soc, ctx.soccfg
+        # Adapt the ModuleLibrary to the orchestrator's ModuleSource contract
+        # (None on absent rather than raise) before threading it in.
+        ml = _MlModuleSource(ctx.ml)
         # The UI pre-allocates Results (+ binds Plotters) before starting the
         # worker; a headless caller has not, so allocate here. Either way the
         # worker fills these exact containers in place.
@@ -524,7 +548,9 @@ class Controller:
         orch = Orchestrator(
             providers=self._build_providers(),
             tools=tools,
+            ml=ml,
             soc=soc,
+            soccfg=soccfg,
             results=results,
             notify=notify,
         )

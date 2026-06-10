@@ -240,6 +240,7 @@ class Orchestrator:
     tools: Tools = field(default_factory=Tools)
     ml: Optional[ModuleSource] = None
     soc: Any = None
+    soccfg: Any = None
     results: Mapping[str, Any] = field(default_factory=dict)
     notify: Optional[Notify] = None
     derivations: list[DerivationService] = field(default_factory=list)
@@ -274,6 +275,8 @@ class Orchestrator:
             flux_idx=idx,
             params=dict(provider.params),
             soc=self.soc,
+            soccfg=self.soccfg,
+            ml=self.ml,
             tools=self.tools,
             result=result,
             round_hook=round_hook,

@@ -43,16 +43,20 @@ class RunEnv:
     """The per-flux-point execution environment a Builder curries into a Node.
 
     ``flux`` / ``flux_idx`` — this point. ``params`` — the placed provider's
-    user-tuned params. ``soc`` / ``tools`` — sweep resources. ``result`` — the
-    sweep-lived Result this Node fills (its row ``flux_idx``); None for
-    pure-compute Nodes. ``round_hook`` — called by acquire each round (fill row
-    + notify); None for pure-compute Nodes.
+    user-tuned params. ``soc`` / ``soccfg`` / ``ml`` / ``tools`` — sweep
+    resources: the connected board + its QICK config, the active ModuleLibrary
+    (the Builder lowers it into the run cfg, Phase B), and the stateful tools.
+    ``result`` — the sweep-lived Result this Node fills (its row ``flux_idx``);
+    None for pure-compute Nodes. ``round_hook`` — called by acquire each round
+    (fill row + notify); None for pure-compute Nodes.
     """
 
     flux: float
     flux_idx: int
     params: Mapping[str, Any]
     soc: Any = None
+    soccfg: Any = None
+    ml: Any = None
     tools: Any = None
     result: Any = None
     round_hook: Optional[RoundHook] = None
