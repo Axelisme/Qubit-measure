@@ -131,20 +131,45 @@ class QubitFreqNode(Node):
     signal is synthesised because MockSoc gives only noise.
     """
 
-    def __init__(self, env: RunEnv) -> None:
+    def __init__(self, env: RunEnv, builder: "QubitFreqBuilder") -> None:
         self._env = env
+        self._builder = builder
+
+    def _maybe_make_cfg(self, snapshot: Snapshot) -> Optional[QubitFreqCfgTemplate]:
+        """Build the run cfg when the context is configured for it, else None.
+
+        ``make_cfg`` needs a readout module + the drive params; the default /
+        demo context (empty ml) has neither, so produce keeps the pure
+        snapshot-driven simulation there. No hardware is touched either way —
+        Phase B simulates the acquire uniformly; routing through ``make_cfg``
+        (when configured) exercises the real cfg pipeline and makes the cfg the
+        source of the drive centre frequency.
+        """
+        env = self._env
+        if (
+            env.ml is None
+            or snapshot.module("readout") is None
+            or not env.params.get("qub_waveform")
+            or env.params.get("qub_ch") is None
+        ):
+            return None
+        return self._builder.make_cfg(env, snapshot)
 
     def produce(self, snapshot: Snapshot) -> Patch:
         env = self._env
         pred_qf = float(snapshot["predict_freq"])
-        # fit_kappa is read smoothed (declared smooth="ewma") and the readout
-        # module latest-available — both required for the real drive-gain guess /
-        # readout cfg Phase B builds; the synthetic path here doesn't use them.
-        _ = snapshot["fit_kappa"], snapshot.module("readout")
+        _ = snapshot["fit_kappa"]  # smoothed kappa (drives the real drive-gain)
+
+        # Build the run cfg from the active context (when configured) and take the
+        # drive centre frequency from it; the acquire is SIMULATED below. With the
+        # demo / empty-ml context the cfg is None and the centre is the predicted
+        # freq directly (same value — make_cfg sets qub_pulse.freq = predict_freq).
+        cfg = self._maybe_make_cfg(snapshot)
+        center = float(cfg.modules.qub_pulse.freq) if cfg is not None else pred_qf
 
         result: QubitFreqResult = env.result
         detunes = result.detune
-        freqs = pred_qf + detunes  # absolute frequency axis
+        freqs = center + detunes  # absolute frequency axis
 
         # The drift / SNR use the flux point's NORMALISED position in the sweep
         # (0 → 1), not the raw flux value: real flux values are tiny (mA-scale),
@@ -327,7 +352,7 @@ class QubitFreqBuilder(Builder):
         return QubitFreqPlotter(figure)
 
     def build_node(self, env: RunEnv) -> QubitFreqNode:
-        return QubitFreqNode(env)
+        return QubitFreqNode(env, self)
 
     def make_cfg(self, env: RunEnv, snapshot: Snapshot) -> QubitFreqCfgTemplate:
         """Lower the active context + this point's snapshot into the base run cfg.
