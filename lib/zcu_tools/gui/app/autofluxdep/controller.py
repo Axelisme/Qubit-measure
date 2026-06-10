@@ -84,14 +84,16 @@ logger = logging.getLogger(__name__)
 
 
 class _MlModuleSource:
-    """Adapt a ``ModuleLibrary`` to the orchestrator's ``ModuleSource`` contract.
+    """Transparent ``ModuleLibrary`` proxy honouring the ``ModuleSource`` contract.
 
-    ``ModuleLibrary.get_module`` raises ``ValueError`` for an unknown module, but
-    the orchestrator's ``ModuleSource`` contract is "return None if absent" (the
-    snapshot then falls back to a Node-produced module or the dependency default).
-    This bridges the two at the GUI boundary so ``ModuleLibrary``'s raise-on-absent
-    never leaks into the domain orchestrator. ``get_module(name)`` returns the
-    preset module (a deep copy, per ModuleLibrary) or None.
+    Two consumers share the ml threaded into the run env: ``project_snapshot``
+    wants the orchestrator's ``ModuleSource`` contract — ``get_module(name)``
+    returns None if absent (the snapshot then falls back to a Node-produced
+    module / the dependency default) — whereas a node's cfg builder wants the full
+    ``ModuleLibrary`` surface (``get_waveform`` / ``make_cfg``, which *should*
+    raise on a missing reference). This proxy serves both: it overrides only
+    ``get_module``'s raise-on-absent (``ModuleLibrary`` raises ``ValueError``) into
+    None-on-absent, and forwards every other attribute to the wrapped library.
     """
 
     def __init__(self, ml: "ModuleLibrary") -> None:
@@ -101,6 +103,11 @@ class _MlModuleSource:
         if name not in self._ml.modules:
             return None
         return self._ml.get_module(name)
+
+    def __getattr__(self, attr: str) -> Any:
+        # forward get_waveform / make_cfg / etc. to the real library (called only
+        # for attributes not defined on this proxy; _ml is a real attribute).
+        return getattr(self._ml, attr)
 
 
 class Controller:
@@ -513,9 +520,10 @@ class Controller:
         self._bus.emit(RunStartedPayload())
 
         ctx = self._state.exp_context
-        soc, soccfg = ctx.soc, ctx.soccfg
+        soc, soccfg, md = ctx.soc, ctx.soccfg, ctx.md
         # Adapt the ModuleLibrary to the orchestrator's ModuleSource contract
-        # (None on absent rather than raise) before threading it in.
+        # (None on absent rather than raise) before threading it in; the proxy
+        # still forwards make_cfg / get_waveform for a node's cfg builder.
         ml = _MlModuleSource(ctx.ml)
         # The UI pre-allocates Results (+ binds Plotters) before starting the
         # worker; a headless caller has not, so allocate here. Either way the
@@ -551,6 +559,7 @@ class Controller:
             ml=ml,
             soc=soc,
             soccfg=soccfg,
+            md=md,
             results=results,
             notify=notify,
         )

@@ -241,6 +241,7 @@ class Orchestrator:
     ml: Optional[ModuleSource] = None
     soc: Any = None
     soccfg: Any = None
+    md: Any = None
     results: Mapping[str, Any] = field(default_factory=dict)
     notify: Optional[Notify] = None
     derivations: list[DerivationService] = field(default_factory=list)
@@ -277,6 +278,7 @@ class Orchestrator:
             soc=self.soc,
             soccfg=self.soccfg,
             ml=self.ml,
+            md=self.md,
             tools=self.tools,
             result=result,
             round_hook=round_hook,

@@ -45,6 +45,7 @@ import numpy as np
 from numpy.typing import NDArray
 from typing_extensions import Any, Mapping, Optional
 
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.result import QubitFreqResult
@@ -58,12 +59,24 @@ from zcu_tools.gui.app.autofluxdep.nodes.synth import (
     resolve_acquire_delay,
     resolve_rounds,
 )
+from zcu_tools.program.v2 import TwoToneCfg
 from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import rotate2real
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_DETUNE = (-20.0, 50.0, 0.5)  # MHz: start, stop, step
+
+
+class QubitFreqCfgTemplate(TwoToneCfg, ExpCfgModel):
+    """The base two-tone cfg qubit_freq lowers a context into.
+
+    Just ``TwoToneCfg`` (reps/rounds/relax + qub_pulse/readout modules) + the
+    ``ExpCfgModel`` device/save fields — the flux ``dev`` entry and the ``detune``
+    sweep are merged in by ``produce`` (the sweep recenters on the predicted freq,
+    and the dev carries this flux point's value), mirroring the lower-layer
+    ``experiment/v2/autofluxdep`` QubitFreqCfgTemplate.
+    """
 
 
 # --- placeholder external bindings (Phase B: inject from project/metadata) ---
@@ -297,6 +310,13 @@ class QubitFreqBuilder(Builder):
         "relax_delay",
         "earlystop_snr",
         "acquire_delay",
+        # the drive pulse "設定頭" — what the cfg builder lowers into qub_pulse
+        # (freq comes from the predicted qubit freq, readout from the snapshot)
+        "qub_waveform",
+        "qub_ch",
+        "qub_nqz",
+        "qub_gain",
+        "qub_length",
     )
 
     def make_init_result(self, params: Mapping[str, Any], flux: Any) -> QubitFreqResult:
@@ -308,3 +328,57 @@ class QubitFreqBuilder(Builder):
 
     def build_node(self, env: RunEnv) -> QubitFreqNode:
         return QubitFreqNode(env)
+
+    def make_cfg(self, env: RunEnv, snapshot: Snapshot) -> QubitFreqCfgTemplate:
+        """Lower the active context + this point's snapshot into the base run cfg.
+
+        Mirrors the notebook's qubit_freq ``cfg_maker`` (D1: runs in ``produce``,
+        where the snapshot is available): the drive pulse frequency is the
+        predicted qubit freq, the readout is the latest-available readout module,
+        and the pulse waveform / channel / gain / nqz come from the node's params
+        (the "設定頭"). The flux ``dev`` entry and the ``detune`` sweep are NOT here
+        — ``produce`` merges them (the dev with this point's flux value, the sweep
+        recentred on the predicted freq).
+
+        Raises if the readout module is unavailable or the drive params are unset
+        — a real run needs a concrete drive pulse (Fast Fail), unlike the
+        synthetic path which fabricates a signal.
+        """
+        params = env.params
+        ml = env.ml
+        if ml is None:
+            raise RuntimeError("qubit_freq.make_cfg needs an active ModuleLibrary")
+        readout = snapshot.module("readout")
+        if readout is None:
+            raise RuntimeError(
+                "qubit_freq.make_cfg needs a readout module (none produced or preset)"
+            )
+        waveform_name = params.get("qub_waveform")
+        ch = params.get("qub_ch")
+        if not waveform_name or ch is None:
+            raise RuntimeError(
+                "qubit_freq.make_cfg needs qub_waveform + qub_ch params set"
+            )
+        predict_freq = float(snapshot["predict_freq"])
+        return ml.make_cfg(
+            {
+                "modules": {
+                    "qub_pulse": {
+                        "type": "pulse",
+                        "waveform": ml.get_waveform(
+                            waveform_name,
+                            {"length": float(params.get("qub_length", 0.1))},
+                        ),
+                        "ch": int(ch),
+                        "nqz": int(params.get("qub_nqz", 2)),
+                        "gain": float(params.get("qub_gain", 0.05)),
+                        "freq": predict_freq,
+                    },
+                    "readout": readout,
+                },
+                "relax_delay": float(params.get("relax_delay", 0.5)),
+                "reps": int(params.get("reps", 1000)),
+                "rounds": int(params.get("rounds", 100)),
+            },
+            QubitFreqCfgTemplate,
+        )

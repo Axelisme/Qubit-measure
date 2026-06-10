@@ -57,6 +57,7 @@ class RunEnv:
     soc: Any = None
     soccfg: Any = None
     ml: Any = None
+    md: Any = None
     tools: Any = None
     result: Any = None
     round_hook: Optional[RoundHook] = None
