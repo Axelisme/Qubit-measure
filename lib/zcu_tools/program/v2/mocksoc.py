@@ -217,12 +217,6 @@ class MockQickSoc(QickConfig):
         self._poll_done = True
         return [(total_shots, (data, {}))]
 
-    def get_decimated(self, ch, address, length):
-        return np.random.randn(length, 2).astype(float)
-
-    def get_accumulated(self, ch, address, length):
-        return np.random.randint(-(2**15), 2**15, size=(length, 2), dtype=np.int64)
-
 
 def make_mock_soc(
     n_gens: int = 2, n_readouts: int = 1
