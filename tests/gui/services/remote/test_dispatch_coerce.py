@@ -83,3 +83,77 @@ def test_coerce_disconnect_device_request_ok():
     req = coerce_disconnect_device_request({"name": "lo"})
     assert req.name == "lo"
     assert req.remember is True
+
+
+# ---------------------------------------------------------------------------
+# method_specs ParamSpec validation for device.connect / device.disconnect
+# (Fix 2 regression: validate_params must reject wrong types before handler)
+# ---------------------------------------------------------------------------
+
+
+def test_device_connect_spec_rejects_non_string_type_name():
+    """type_name declared as STRING — an integer must be rejected with INVALID_PARAMS."""
+    from zcu_tools.gui.app.main.services.remote.method_specs import METHOD_SPECS
+    from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+    from zcu_tools.gui.remote.param_spec import validate_params
+
+    spec = METHOD_SPECS["device.connect"]
+    with pytest.raises(RemoteError) as exc_info:
+        validate_params(
+            spec.params,
+            {"type_name": 42, "name": "flux", "address": "GPIB::1"},
+        )
+    assert exc_info.value.code is ErrorCode.INVALID_PARAMS
+
+
+def test_device_connect_spec_remember_defaults_to_true():
+    """Omitting 'remember' must yield the default True (not None / missing)."""
+    from zcu_tools.gui.app.main.services.remote.method_specs import METHOD_SPECS
+    from zcu_tools.gui.remote.param_spec import validate_params
+
+    spec = METHOD_SPECS["device.connect"]
+    result = validate_params(
+        spec.params,
+        {"type_name": "FakeDevice", "name": "flux", "address": "fake://"},
+    )
+    assert result["remember"] is True
+
+
+def test_device_connect_spec_remember_explicit_false():
+    """Explicitly passing remember=False is valid and preserved."""
+    from zcu_tools.gui.app.main.services.remote.method_specs import METHOD_SPECS
+    from zcu_tools.gui.remote.param_spec import validate_params
+
+    spec = METHOD_SPECS["device.connect"]
+    result = validate_params(
+        spec.params,
+        {
+            "type_name": "FakeDevice",
+            "name": "flux",
+            "address": "fake://",
+            "remember": False,
+        },
+    )
+    assert result["remember"] is False
+
+
+def test_device_disconnect_spec_requires_name():
+    """Omitting the required 'name' must be rejected with INVALID_PARAMS."""
+    from zcu_tools.gui.app.main.services.remote.method_specs import METHOD_SPECS
+    from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+    from zcu_tools.gui.remote.param_spec import validate_params
+
+    spec = METHOD_SPECS["device.disconnect"]
+    with pytest.raises(RemoteError) as exc_info:
+        validate_params(spec.params, {})
+    assert exc_info.value.code is ErrorCode.INVALID_PARAMS
+
+
+def test_device_disconnect_spec_remember_defaults_to_true():
+    """Omitting 'remember' in disconnect must also default to True."""
+    from zcu_tools.gui.app.main.services.remote.method_specs import METHOD_SPECS
+    from zcu_tools.gui.remote.param_spec import validate_params
+
+    spec = METHOD_SPECS["device.disconnect"]
+    result = validate_params(spec.params, {"name": "flux"})
+    assert result["remember"] is True

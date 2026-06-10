@@ -115,3 +115,39 @@ class ProjectInfo:
             self.database_path = default_database_root(
                 self.chip_name, self.qub_name, self.root_dir
             )
+
+
+# ---------------------------------------------------------------------------
+# Shared wire helpers used by read-only remote bridges (fluxdep, dispersive).
+# ---------------------------------------------------------------------------
+
+
+def project_info_payload(project: ProjectInfo) -> dict:
+    """Build the 4-field wire payload for ``project.info`` handlers.
+
+    Both fluxdep-gui and dispersive-gui expose an identical ``project.info``
+    RPC that returns these four fields.  Centralising the mapping here ensures
+    the two apps can never drift from each other.
+    """
+    return {
+        "chip_name": project.chip_name,
+        "qub_name": project.qub_name,
+        "result_dir": project.result_dir,
+        "database_path": project.database_path,
+    }
+
+
+def is_real_project(project: ProjectInfo) -> bool:
+    """Return ``True`` when the project has been set to real chip/qubit names.
+
+    The ``unknown_chip`` / ``unknown_qubit`` placeholders are the defaults a
+    fresh ``ProjectInfo`` starts with; the user has not yet picked a project
+    until both names are non-empty *and* neither matches the placeholder pair.
+    This check is shared by both fluxdep-gui and dispersive-gui ``state.check``
+    handlers so the definition of "has a real project" stays in one place.
+    """
+    return bool(
+        project.chip_name
+        and project.qub_name
+        and (project.chip_name, project.qub_name) != (DEFAULT_CHIP, DEFAULT_QUBIT)
+    )

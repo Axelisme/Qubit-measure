@@ -145,6 +145,18 @@ _DEVICE_DEFAULT_UNITS: dict[str, str] = {
 }
 
 
+def _mode_dependent_unit(dev: "DeviceState") -> Optional[str]:
+    """Return "V" or "A" for a YOKOGS200 whose mode is cached in ``dev.info``.
+
+    Returns ``None`` for any other device type or when ``dev.info`` is ``None``
+    (device not yet connected / info not cached), signalling the caller to fall
+    back to :data:`_DEVICE_DEFAULT_UNITS`.
+    """
+    if dev.type_name == "YOKOGS200" and dev.info is not None:
+        return "V" if getattr(dev.info, "mode", None) == "voltage" else "A"
+    return None
+
+
 def list_supported_device_types() -> list[str]:
     return list(_DEVICE_TYPE_REGISTRY.keys())
 
@@ -417,8 +429,9 @@ class DeviceService(QObject):
         dev = self._state.get_device(name)
         if dev is None:
             return "none"
-        if dev.type_name == "YOKOGS200" and dev.info is not None:
-            return "V" if getattr(dev.info, "mode", None) == "voltage" else "A"
+        mode_unit = _mode_dependent_unit(dev)
+        if mode_unit is not None:
+            return mode_unit
         return _DEVICE_DEFAULT_UNITS.get(dev.type_name, "none")
 
     def get_device_unit_strict(self, name: str) -> str:
@@ -438,8 +451,9 @@ class DeviceService(QObject):
                 f"Device {name!r} of type {dev.type_name!r} cannot bind a "
                 f"flux context (supported: {sorted(_DEVICE_DEFAULT_UNITS)})"
             )
-        if dev.type_name == "YOKOGS200" and dev.info is not None:
-            return "V" if getattr(dev.info, "mode", None) == "voltage" else "A"
+        mode_unit = _mode_dependent_unit(dev)
+        if mode_unit is not None:
+            return mode_unit
         return _DEVICE_DEFAULT_UNITS[dev.type_name]
 
     def get_device_info(self, name: str) -> BaseDeviceInfo | None:

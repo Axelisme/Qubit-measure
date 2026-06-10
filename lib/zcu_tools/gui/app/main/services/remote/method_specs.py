@@ -85,6 +85,12 @@ def _int_opt(name: str, desc: str = "") -> ParamSpec:
     return ParamSpec(name, JsonType.INTEGER, required=False, description=desc)
 
 
+def _bool_default(name: str, default: bool, desc: str = "") -> ParamSpec:
+    return ParamSpec(
+        name, JsonType.BOOLEAN, required=False, default=default, description=desc
+    )
+
+
 def _comment() -> ParamSpec:
     return ParamSpec(
         "comment", JsonType.STRING, required=False, default="", description="Comment"
@@ -289,8 +295,36 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         ),
     ),
     # Device
-    "device.connect": MethodSpec(30.0, "Connect device"),
-    "device.disconnect": MethodSpec(30.0, "Disconnect device"),
+    "device.connect": MethodSpec(
+        30.0,
+        "Connect a hardware device by driver type, friendly name, and address. "
+        "Returns an operation_id; the connection runs asynchronously. "
+        "'remember' persists the device across sessions (default true).",
+        (
+            _str("type_name", "Driver class name, e.g. 'YOKOGS200' or 'FakeDevice'"),
+            _str("name", "Friendly name for this device"),
+            _str("address", "VISA, GPIB, or IP address"),
+            _bool_default(
+                "remember",
+                True,
+                "Persist device across sessions (default true)",
+            ),
+        ),
+    ),
+    "device.disconnect": MethodSpec(
+        30.0,
+        "Disconnect a registered device by name. Returns an operation_id; the "
+        "disconnection runs asynchronously. 'remember' keeps the device in "
+        "persistent storage so it can be reconnected next session (default true).",
+        (
+            _str("name", "Device name"),
+            _bool_default(
+                "remember",
+                True,
+                "Keep device in persistent storage (default true)",
+            ),
+        ),
+    ),
     "device.reconnect": MethodSpec(
         30.0, "Reconnect device", (_str("name", "Device name"),)
     ),

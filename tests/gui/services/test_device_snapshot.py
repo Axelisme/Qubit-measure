@@ -69,6 +69,36 @@ def test_get_device_unit_for_cached_yoko_info(qapp):
     assert svc.get_device_value_for_new_context("flux") == 0.003
 
 
+def test_get_device_unit_yoko_current_mode_returns_a(qapp):
+    """YOKOGS200 in current mode → "A" (default / non-voltage path)."""
+    yoko_info = YOKOGS200Info(address="GPIB::1", mode="current", value=0.001)
+    fake_yoko = MagicMock()
+    fake_yoko.get_info.return_value = yoko_info
+    svc = _make_svc(driver=fake_yoko)
+    _connect(svc, type_name="YOKOGS200")
+    assert svc.get_device_unit("flux") == "A"
+
+
+def test_get_device_unit_yoko_voltage_mode_returns_v_strict(qapp):
+    """YOKOGS200 voltage mode → "V" through the strict path too."""
+    yoko_info = YOKOGS200Info(address="GPIB::1", mode="voltage", value=0.003)
+    fake_yoko = MagicMock()
+    fake_yoko.get_info.return_value = yoko_info
+    svc = _make_svc(driver=fake_yoko)
+    _connect(svc, type_name="YOKOGS200")
+    assert svc.get_device_unit_strict("flux") == "V"
+
+
+def test_get_device_unit_yoko_current_mode_returns_a_strict(qapp):
+    """YOKOGS200 current mode → "A" through the strict path."""
+    yoko_info = YOKOGS200Info(address="GPIB::1", mode="current", value=0.001)
+    fake_yoko = MagicMock()
+    fake_yoko.get_info.return_value = yoko_info
+    svc = _make_svc(driver=fake_yoko)
+    _connect(svc, type_name="YOKOGS200")
+    assert svc.get_device_unit_strict("flux") == "A"
+
+
 def test_list_snapshots_does_not_read_hardware(qapp):
     fake = MagicMock()
     fake.get_info.return_value = YOKOGS200Info(

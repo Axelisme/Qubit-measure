@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Callable, Mapping
 if TYPE_CHECKING:
     from .service import RemoteControlAdapter
 
+from zcu_tools.gui.project import is_real_project, project_info_payload
 from zcu_tools.gui.remote.method_spec import BoundMethod, build_method_registry
 
 from .method_specs import METHOD_SPECS
@@ -38,13 +39,7 @@ def _h_project_info(
     adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    project = adapter.ctrl.state.project
-    return {
-        "chip_name": project.chip_name,
-        "qub_name": project.qub_name,
-        "result_dir": project.result_dir,
-        "database_path": project.database_path,
-    }
+    return project_info_payload(adapter.ctrl.state.project)
 
 
 def _h_fit_inputs_info(
@@ -111,19 +106,9 @@ def _h_state_check(
     adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    from zcu_tools.gui.project import DEFAULT_CHIP, DEFAULT_QUBIT
-
     state = adapter.ctrl.state
-    project = state.project
-    # "has_project" means the user set a real chip/qubit — not the unknown_*
-    # placeholders the project defaults to.
-    has_project = bool(
-        project.chip_name
-        and project.qub_name
-        and (project.chip_name, project.qub_name) != (DEFAULT_CHIP, DEFAULT_QUBIT)
-    )
     return {
-        "has_project": has_project,
+        "has_project": is_real_project(state.project),
         "has_fit_inputs": state.fit_inputs is not None,
         "has_onetone": state.onetone is not None,
         "has_preprocess": state.preprocess is not None,

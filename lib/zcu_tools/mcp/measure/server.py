@@ -1675,7 +1675,8 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
             "live info params); otherwise {status:'pending'} — await it with "
             "gui_device_wait_operation or gui_device_poll. type_name is the "
             "driver class (e.g. 'YOKOGS200', 'SGS100A'); address is the VISA/GPIB/IP "
-            "address. Set remember=true to persist the device across sessions."
+            "address. remember defaults to true (device persists across "
+            "sessions); set remember=false for a memory-only device."
         ),
         "inputSchema": {
             "type": "object",
@@ -1691,7 +1692,7 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
                 "address": {"type": "string", "description": "VISA or IP address"},
                 "remember": {
                     "type": "boolean",
-                    "description": "Persist device across sessions (default false)",
+                    "description": "Persist device across sessions (default true)",
                 },
                 "wait_seconds": {
                     "type": "number",

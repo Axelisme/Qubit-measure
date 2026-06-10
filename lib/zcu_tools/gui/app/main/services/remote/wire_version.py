@@ -196,4 +196,9 @@ WIRE_VERSION = 21
 #      uninformative; two-tone False) in setup_interactive_analysis. Observable as
 #      an empty analyze_spec for those two adapters. WIRE unchanged (analyze_spec
 #      content is per-adapter domain, not a wire-method contract).
-GUI_VERSION = 26
+# v27: device.connect / device.disconnect ParamSpec declared (type_name, name,
+#      address, remember for connect; name, remember for disconnect). Semantics for
+#      correct callers are unchanged — validate_params now enforces the contract
+#      that the handlers already assumed. WIRE_VERSION unchanged (no new RPC method
+#      or wire-shape change).
+GUI_VERSION = 27

@@ -21,14 +21,21 @@ def encode_line(obj: Mapping[str, object]) -> bytes:
 
     `obj` must already be a JSON-friendly mapping (caller responsibility);
     embedded newlines inside string values are escaped by `json.dumps`.
+
+    The byte-length check is performed on the *encoded* bytes (not the str
+    character count) so that the outbound limit is symmetric with
+    :func:`decode_line`, which measures ``len(line)`` in bytes.  A payload
+    containing multi-byte characters (e.g. Chinese text or exception messages)
+    can have fewer characters than bytes and must be measured after encoding.
     """
     payload = json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
-    if len(payload) > MAX_LINE_BYTES:
+    data = payload.encode("utf-8")
+    if len(data) > MAX_LINE_BYTES:
         raise RemoteError(
             ErrorCode.INTERNAL,
-            f"outgoing line exceeds {MAX_LINE_BYTES} bytes ({len(payload)})",
+            f"outgoing line exceeds {MAX_LINE_BYTES} bytes ({len(data)})",
         )
-    return payload.encode("utf-8") + LINE_TERMINATOR
+    return data + LINE_TERMINATOR
 
 
 def decode_line(line: bytes) -> dict[str, object]:
