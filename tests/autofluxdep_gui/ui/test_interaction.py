@@ -72,6 +72,19 @@ def test_devices_button_opens_shared_device_dialog(app):
     dlg.deleteLater()
 
 
+def test_flux_source_picker_records_selection(app):
+    # the flux-source combo records which connected device the sweep is applied
+    # through (its unit labels the flux axis); with no devices it is just "(none)".
+    ctrl, win = app
+    assert hasattr(win._list, "_flux_source")
+    assert win._list._flux_source.count() == 1  # only "(none)"
+    assert ctrl.get_flux_device() is None
+    ctrl.set_flux_device("flux_dev")
+    assert ctrl.get_flux_device() == "flux_dev"
+    ctrl.set_flux_device(None)  # clearing → bare flux numbers
+    assert ctrl.get_flux_device() is None
+
+
 def test_predictor_button_opens_shared_predictor_dialog(app):
     # the Predictor… button opens the shared session PredictorDialog (load a
     # FluxoniumPredictor into the context) — runtime port conformance check.

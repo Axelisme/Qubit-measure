@@ -12,6 +12,7 @@ from typing import Optional
 
 from qtpy.QtCore import Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+    QComboBox,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -85,12 +86,24 @@ class NodeListPane(QWidget):
             flux_row.addWidget(w)
         root.addLayout(flux_row)
 
+        # flux source: which connected device the sweep is applied through (its
+        # unit labels the flux axis). Populated from the connected device list.
+        src_row = QHBoxLayout()
+        src_row.addWidget(QLabel("flux source"))
+        self._flux_source = QComboBox()
+        self._flux_source.currentIndexChanged.connect(self._on_flux_source_changed)
+        src_row.addWidget(self._flux_source, 1)
+        self._flux_unit = QLabel("")
+        src_row.addWidget(self._flux_unit)
+        root.addLayout(src_row)
+
         # run/stop toggle (single button)
         self._run_btn = _btn("▶ Run", self._on_run_stop)
         root.addWidget(self._run_btn)
 
         self.refresh_list()
         self._refresh_buttons()
+        self._refresh_flux_sources()
 
     # --- list / selection ---
 
@@ -170,6 +183,7 @@ class NodeListPane(QWidget):
         dlg = DeviceDialog(self._ctrl, self)
         dlg.exec()
         self._refresh_buttons()
+        self._refresh_flux_sources()  # a flux source may have (dis)connected
 
     def _on_predictor(self) -> None:
         from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
@@ -178,6 +192,33 @@ class NodeListPane(QWidget):
         # context; the run reads exp_context.predictor (synthetic + real paths).
         dlg = PredictorDialog(self._ctrl, self)
         dlg.exec()
+
+    # --- flux source ---
+
+    def _refresh_flux_sources(self) -> None:
+        """Repopulate the flux-source combo from the connected devices, keeping
+        the current selection if its device is still connected."""
+        current = self._ctrl.get_flux_device()
+        names = [d.name for d in self._ctrl.list_devices()]
+        self._flux_source.blockSignals(True)
+        self._flux_source.clear()
+        self._flux_source.addItem("(none)", None)
+        for n in names:
+            self._flux_source.addItem(n, n)
+        idx = self._flux_source.findData(current) if current in names else 0
+        self._flux_source.setCurrentIndex(max(0, idx))
+        self._flux_source.blockSignals(False)
+        self._sync_flux_device()
+
+    def _on_flux_source_changed(self, _idx: int) -> None:
+        self._sync_flux_device()
+
+    def _sync_flux_device(self) -> None:
+        """Push the selected flux source into State + label the axis with its unit."""
+        name = self._flux_source.currentData()
+        self._ctrl.set_flux_device(name)
+        unit = self._ctrl.get_device_unit(name) if name else ""
+        self._flux_unit.setText(f"[{unit}]" if unit and unit != "none" else "")
 
     # --- run / stop ---
 

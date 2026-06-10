@@ -468,6 +468,19 @@ class Controller:
             logger.debug("set_flux_values: cleared")
         self._bus.emit(FluxChangedPayload(count=len(values)))
 
+    def set_flux_device(self, name: Optional[str]) -> None:
+        """Designate which connected device the flux sweep is applied through.
+
+        Its unit labels the flux axis (and the value is recorded into the run
+        cfg's flux ``dev`` entry when a real acquire is wired). ``None`` clears the
+        selection — the flux values are then bare numbers.
+        """
+        self._state.flux_device_name = name or None
+        logger.debug("set_flux_device: %r", self._state.flux_device_name)
+
+    def get_flux_device(self) -> Optional[str]:
+        return self._state.flux_device_name
+
     # --- run control (cancellable) ---
 
     def stop_run(self) -> None:

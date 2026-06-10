@@ -70,6 +70,10 @@ class AutoFluxDepState(SessionState):
         self.project: Optional[ProjectInfo] = project
         self.nodes: list[PlacedNode] = []
         self.flux_values: list[float] = []
+        # Which connected device the flux sweep is applied through (its unit
+        # labels the flux axis; recorded for the run cfg's flux ``dev`` entry).
+        # None = unset (the flux values are then bare numbers).
+        self.flux_device_name: Optional[str] = None
         self.run_results: dict[str, Any] = {}
         # The adaptive predictor the current/last run was built with (made per-run
         # from ``exp_context.predictor`` in ``Controller._build_tools``). Run-lived
