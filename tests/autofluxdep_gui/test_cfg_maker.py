@@ -596,3 +596,94 @@ def test_t2echo_produce_builds_cfg_when_context_configured():
     patch = node.produce(snap)
     assert "t2e" in patch.values()  # simulated acquire + fit succeeded
     assert not np.isnan(result.fit_value[1])  # fitted scalar present
+
+
+# --- mist (1D gain sweep, no fit; cfg drives the disturbance onset gain) ---
+
+# a concrete pi_pulse module (PulseCfg shape): excited-state preparation pulse
+_PI_PULSE = {
+    "type": "pulse",
+    "ch": 3,
+    "nqz": 2,
+    "freq": 5135.0,
+    "gain": 0.4,
+    "waveform": {"style": "const", "length": 0.05},
+}
+
+
+def _mist_ml() -> ModuleLibrary:
+    ml = ModuleLibrary()
+    ml.register_waveform(
+        mist_flat={
+            "style": "flat_top",
+            "length": 2.0,
+            "raise_waveform": {"style": "cosine", "length": 0.02},
+        }
+    )
+    return ml
+
+
+def _mist_env(ml: ModuleLibrary, **result_tools) -> RunEnv:
+    return RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        params={
+            "mist_waveform": "mist_flat",
+            "mist_ch": 4,
+            "mist_nqz": 2,
+            "mist_freq": 5135.0,
+            "mist_gain": 0.5,
+            "reps": 100,
+            "rounds": 2,
+            "acquire_delay": 0,
+        },
+        ml=ml,
+        **result_tools,
+    )
+
+
+def test_mist_make_cfg_lowers_context():
+    from zcu_tools.gui.app.autofluxdep.nodes.mist import MistBuilder, MistCfgTemplate
+
+    snap = Snapshot(
+        {"success": 1.0},
+        modules={"pi_pulse": _PI_PULSE, "opt_readout": _READOUT},
+    )
+    cfg = MistBuilder().make_cfg(_mist_env(_mist_ml()), snap)
+    assert isinstance(cfg, MistCfgTemplate)
+    # the disturbance pulse channel / gain / freq come from the node params
+    assert int(cfg.modules.mist_pulse.ch) == 4
+    assert float(cfg.modules.mist_pulse.gain) == 0.5
+    assert float(cfg.modules.mist_pulse.freq) == 5135.0
+    # pi_pulse + readout were lowered from the snapshot modules
+    assert int(cfg.modules.pi_pulse.ch) == 3
+    assert cfg.modules.readout is not None
+    assert cfg.reps == 100 and cfg.rounds == 2
+
+
+def test_mist_produce_builds_cfg_when_context_configured():
+    # with a populated ml + the mist-drive params + a pi_pulse/readout, produce goes
+    # through the cfg pipeline (make_cfg) to source the disturbance onset gain, then
+    # SIMULATES the acquire (no hardware). The pure-synthetic fallback (empty ml) is
+    # covered by the run / workflow tests.
+    import numpy as np
+    from zcu_tools.gui.app.autofluxdep.nodes.mist import MistBuilder, MistNode
+    from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
+    from zcu_tools.gui.app.autofluxdep.nodes.synth import parse_linear_axis
+
+    ml = _mist_ml()
+    gains = parse_linear_axis("0,1,21", (0.0, 1.0, 21))
+    result = Sweep1DResult.allocate(np.array([0.0]), gains, x_label="gain")
+    env = _mist_env(ml, result=result)
+    snap = Snapshot(
+        {"success": 1.0},
+        modules={"pi_pulse": _PI_PULSE, "opt_readout": _READOUT},
+    )
+    node = MistBuilder().build_node(env)
+    assert isinstance(node, MistNode)
+    assert node._maybe_make_cfg(snap) is not None  # cfg-driven path is taken
+    patch = node.produce(snap)
+    assert patch.values().get("success") == 1.0  # simulated acquire completed
+    # the row was filled (no fit — fit_value stays nan, signal is populated)
+    assert not np.any(np.isnan(result.signal[0]))
+    assert np.isnan(result.fit_value[0])
