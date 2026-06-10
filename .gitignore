@@ -20,17 +20,6 @@ Database
 result
 test.py
 test.ipynb
-CLAUDE.md
-GEMINI.md
-AGENTS.md
-AI_NOTE.md
-plan.md
-findings.md
-progress.md
-task_plan.md
-task_plans/
-docs/adr/
-CONTEXT.md
 scratch/
 
 notebook_md/plot/*
