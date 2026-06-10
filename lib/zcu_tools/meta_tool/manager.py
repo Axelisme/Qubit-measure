@@ -128,7 +128,7 @@ class ExperimentManager:
         united_value = None
         if value is not None:
             for unit_suffix, max_value, scale in UNIT_RANGES[unit]:
-                if value <= max_value:
+                if abs(value) <= max_value:
                     united_value = f"{value * scale:.3f}{unit_suffix}"
                     break
 
