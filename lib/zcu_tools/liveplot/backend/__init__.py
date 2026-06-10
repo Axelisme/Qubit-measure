@@ -55,7 +55,8 @@ def set_default_liveplot_backend(backend: LivePlotBackend | None) -> None:
 
 def _select_by_mpl_name() -> LivePlotBackend:
     backend = mpl.get_backend().lower()
-    if "nbagg" in backend:
+    # if "nbagg" in backend:
+    if "nbagg" in backend or "widget" in backend:
         return JupyterBackend()
     if not any(name in backend for name in ["inline", "agg", "qtagg", "module://"]):
         warnings.warn(
