@@ -1,0 +1,247 @@
+"""Unit tests for CfgSchema.validate — static value-tree validation.
+
+Validates the *static* contract (structure complete, LiteralSpec == spec.value,
+DirectValue scalar type/choices, None only on optional refs). The *dynamic*
+contract (required has a value, EvalValue resolves) is enforced by lowering.
+"""
+
+from __future__ import annotations
+
+from unittest.mock import MagicMock
+
+import pytest
+from zcu_tools.gui.app.main.adapter import (
+    CfgSchema,
+    CfgSectionSpec,
+    CfgSectionValue,
+    DirectValue,
+    EvalValue,
+    LiteralSpec,
+    ModuleRefSpec,
+    ModuleRefValue,
+    ScalarSpec,
+    SweepSpec,
+    SweepValue,
+)
+
+
+def _ml() -> MagicMock:
+    ml = MagicMock()
+    ml.modules = {}
+    ml.waveforms = {}
+    return ml
+
+
+def _inner_spec() -> CfgSectionSpec:
+    return CfgSectionSpec(
+        label="Pulse",
+        fields={"type": LiteralSpec("pulse"), "gain": ScalarSpec("Gain", float)},
+    )
+
+
+# --- structure completeness -------------------------------------------------
+
+
+def test_complete_value_passes():
+    spec = CfgSectionSpec(fields={"reps": ScalarSpec("Reps", int)})
+    schema = CfgSchema(
+        spec=spec, value=CfgSectionValue(fields={"reps": DirectValue(5)})
+    )
+    schema.validate(_ml())  # no raise
+
+
+def test_missing_key_raises():
+    spec = CfgSectionSpec(
+        fields={"reps": ScalarSpec("Reps", int), "rounds": ScalarSpec("Rounds", int)}
+    )
+    schema = CfgSchema(
+        spec=spec, value=CfgSectionValue(fields={"reps": DirectValue(5)})
+    )
+    with pytest.raises(RuntimeError, match="'rounds' is missing"):
+        schema.validate(_ml())
+
+
+def test_missing_nested_key_raises():
+    spec = CfgSectionSpec(
+        fields={"sub": CfgSectionSpec(fields={"x": ScalarSpec("X", int)})}
+    )
+    schema = CfgSchema(
+        spec=spec, value=CfgSectionValue(fields={"sub": CfgSectionValue(fields={})})
+    )
+    with pytest.raises(RuntimeError, match="'sub.x' is missing"):
+        schema.validate(_ml())
+
+
+def test_unknown_field_raises():
+    spec = CfgSectionSpec(fields={"reps": ScalarSpec("Reps", int)})
+    schema = CfgSchema(
+        spec=spec,
+        value=CfgSectionValue(fields={"reps": DirectValue(5), "extra": DirectValue(1)}),
+    )
+    with pytest.raises(RuntimeError, match="unknown fields"):
+        schema.validate(_ml())
+
+
+# --- LiteralSpec ------------------------------------------------------------
+
+
+def test_literal_equal_passes():
+    spec = CfgSectionSpec(fields={"t": LiteralSpec(value=1)})
+    schema = CfgSchema(spec=spec, value=CfgSectionValue(fields={"t": DirectValue(1)}))
+    schema.validate(_ml())
+
+
+def test_literal_mismatch_raises():
+    spec = CfgSectionSpec(fields={"t": LiteralSpec(value=1)})
+    schema = CfgSchema(spec=spec, value=CfgSectionValue(fields={"t": DirectValue(2)}))
+    with pytest.raises(RuntimeError, match="locked literal"):
+        schema.validate(_ml())
+
+
+# --- scalar type (widen-only: int->float OK, float->int reject) -------------
+
+
+def test_int_widens_to_float_field():
+    spec = CfgSectionSpec(fields={"x": ScalarSpec("X", float)})
+    schema = CfgSchema(spec=spec, value=CfgSectionValue(fields={"x": DirectValue(5)}))
+    schema.validate(_ml())  # int 5 acceptable for a float field
+
+
+def test_float_does_not_narrow_to_int_field():
+    spec = CfgSectionSpec(fields={"x": ScalarSpec("X", int)})
+    schema = CfgSchema(spec=spec, value=CfgSectionValue(fields={"x": DirectValue(5.0)}))
+    with pytest.raises(RuntimeError, match="not compatible with spec type int"):
+        schema.validate(_ml())
+
+
+def test_bool_not_accepted_as_int():
+    spec = CfgSectionSpec(fields={"x": ScalarSpec("X", int)})
+    schema = CfgSchema(
+        spec=spec, value=CfgSectionValue(fields={"x": DirectValue(True)})
+    )
+    with pytest.raises(RuntimeError, match="not compatible"):
+        schema.validate(_ml())
+
+
+def test_str_type_mismatch_raises():
+    spec = CfgSectionSpec(fields={"x": ScalarSpec("X", str)})
+    schema = CfgSchema(spec=spec, value=CfgSectionValue(fields={"x": DirectValue(1)}))
+    with pytest.raises(RuntimeError, match="not compatible"):
+        schema.validate(_ml())
+
+
+def test_unset_scalar_none_passes():
+    # A None DirectValue is "unset" — legal static state (required-has-value is
+    # a dynamic check, enforced by lowering, not validate).
+    spec = CfgSectionSpec(fields={"x": ScalarSpec("X", int, required=True)})
+    schema = CfgSchema(
+        spec=spec, value=CfgSectionValue(fields={"x": DirectValue(None)})
+    )
+    schema.validate(_ml())
+
+
+def test_eval_value_skips_type_check():
+    spec = CfgSectionSpec(fields={"x": ScalarSpec("X", int)})
+    schema = CfgSchema(
+        spec=spec, value=CfgSectionValue(fields={"x": EvalValue(expr="q_f")})
+    )
+    schema.validate(_ml())  # EvalValue type fixed at resolve time, skipped
+
+
+# --- choices ----------------------------------------------------------------
+
+
+def test_choices_in_passes():
+    spec = CfgSectionSpec(fields={"nqz": ScalarSpec("Nqz", int, choices=[1, 2])})
+    schema = CfgSchema(spec=spec, value=CfgSectionValue(fields={"nqz": DirectValue(2)}))
+    schema.validate(_ml())
+
+
+def test_choices_out_raises():
+    spec = CfgSectionSpec(fields={"nqz": ScalarSpec("Nqz", int, choices=[1, 2])})
+    schema = CfgSchema(spec=spec, value=CfgSectionValue(fields={"nqz": DirectValue(3)}))
+    with pytest.raises(RuntimeError, match="not in allowed choices"):
+        schema.validate(_ml())
+
+
+# --- None on refs -----------------------------------------------------------
+
+
+def test_none_on_optional_ref_passes():
+    spec = CfgSectionSpec(
+        fields={"m": ModuleRefSpec(allowed=[_inner_spec()], optional=True)}
+    )
+    schema = CfgSchema(spec=spec, value=CfgSectionValue(fields={"m": None}))
+    schema.validate(_ml())
+
+
+def test_none_on_required_ref_raises():
+    spec = CfgSectionSpec(
+        fields={"m": ModuleRefSpec(allowed=[_inner_spec()], optional=False)}
+    )
+    schema = CfgSchema(spec=spec, value=CfgSectionValue(fields={"m": None}))
+    with pytest.raises(RuntimeError, match="not a disabled optional ref"):
+        schema.validate(_ml())
+
+
+def test_none_on_scalar_raises():
+    spec = CfgSectionSpec(fields={"x": ScalarSpec("X", int)})
+    schema = CfgSchema(spec=spec, value=CfgSectionValue(fields={"x": None}))
+    with pytest.raises(RuntimeError, match="not a disabled optional ref"):
+        schema.validate(_ml())
+
+
+# --- ref recursion ----------------------------------------------------------
+
+
+def test_enabled_ref_recurses_into_sub_value():
+    inner = _inner_spec()
+    spec = CfgSectionSpec(fields={"m": ModuleRefSpec(allowed=[inner], label="M")})
+    # the ref's sub-value omits 'gain' → incomplete → raises at m.gain
+    schema = CfgSchema(
+        spec=spec,
+        value=CfgSectionValue(
+            fields={
+                "m": ModuleRefValue(
+                    "<Custom:Pulse>",
+                    CfgSectionValue(fields={"type": DirectValue("pulse")}),
+                )
+            }
+        ),
+    )
+    with pytest.raises(RuntimeError, match="'m.gain' is missing"):
+        schema.validate(_ml())
+
+
+def test_enabled_ref_complete_sub_value_passes():
+    inner = _inner_spec()
+    spec = CfgSectionSpec(fields={"m": ModuleRefSpec(allowed=[inner], label="M")})
+    schema = CfgSchema(
+        spec=spec,
+        value=CfgSectionValue(
+            fields={
+                "m": ModuleRefValue(
+                    "<Custom:Pulse>",
+                    CfgSectionValue(
+                        fields={
+                            "type": DirectValue("pulse"),
+                            "gain": DirectValue(0.5),
+                        }
+                    ),
+                )
+            }
+        ),
+    )
+    schema.validate(_ml())
+
+
+# --- sweep ------------------------------------------------------------------
+
+
+def test_sweep_value_passes():
+    spec = CfgSectionSpec(fields={"s": SweepSpec(label="S")})
+    schema = CfgSchema(
+        spec=spec,
+        value=CfgSectionValue(fields={"s": SweepValue(0.0, 1.0, 11)}),
+    )
+    schema.validate(_ml())

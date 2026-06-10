@@ -85,7 +85,9 @@ class BaseSegmentLivePlot(AbsLivePlot):
             for ax, segment in zip(ax_row, seg_row):
                 segment.init_ax(ax)
 
-        self.refresh()
+        # Externally hosted (fig is None): the host owns refresh — see __enter__.
+        if self.fig is not None:
+            self.refresh()
 
     def refresh(self) -> None:
         if self.disable:
@@ -106,7 +108,12 @@ class BaseSegmentLivePlot(AbsLivePlot):
             for ax, segment in zip(ax_row, seg_row):
                 segment.init_ax(ax)
 
-        self.refresh()
+        # When the figure is hosted externally (existed_axes provided, e.g. a
+        # sub-plotter inside a MultiLivePlot), this plotter owns no figure to
+        # refresh — the host refreshes the shared figure. Only self-refresh when
+        # we own the figure.
+        if self.fig is not None:
+            self.refresh()
 
         return self
 

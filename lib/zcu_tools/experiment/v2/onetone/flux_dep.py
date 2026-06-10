@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Callable, Mapping, Optional, TypeAlias, cast
+from typing_extensions import Callable, Mapping, Optional, cast
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo
@@ -32,9 +33,13 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-FluxDepResult: TypeAlias = tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+
+@dataclass(frozen=True)
+class FluxDepResult:
+    values: NDArray[np.float64]
+    freqs: NDArray[np.float64]
+    signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[FluxDepCfg] = None
 
 
 def fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -59,7 +64,7 @@ class FluxDepCfg(ProgramV2Cfg, ExpCfgModel):
 
 class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
     def run(self, soc, soccfg, cfg: FluxDepCfg) -> FluxDepResult:
-        original_cfg = deepcopy(cfg)
+        orig_cfg = deepcopy(cfg)
         modules = cfg.modules
         freq_sweep = cfg.sweep.freq
         flux_sweep = cfg.sweep.flux
@@ -97,7 +102,12 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
                     PulseReadout("readout", modules.readout),
                 ],
                 sweep=[("freq", freq_sweep)],
-            ).acquire(soc, progress=False, round_hook=update_hook)
+            ).acquire(
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
+            )
 
         with LivePlot2DwithLine(
             "Flux device value", "Frequency (MHz)", line_axis=1, num_lines=10
@@ -121,11 +131,12 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
             )
             signals = np.asarray(signals)
 
-        # record last cfg and result
-        self.last_cfg = original_cfg
-        self.last_result = (dev_values, freqs, signals)
+        # record result
+        self.last_result = FluxDepResult(
+            values=dev_values, freqs=freqs, signals=signals, cfg_snapshot=orig_cfg
+        )
 
-        return dev_values, freqs, signals
+        return self.last_result
 
     def analyze(
         self,
@@ -137,7 +148,9 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        values, freqs, signals2D = result
+        values = result.values
+        freqs = result.freqs
+        signals2D = result.signals
 
         actline = InteractiveLines(
             signals2D,
@@ -161,10 +174,13 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        values, freqs, signals2D = result
+        values = result.values
+        freqs = result.freqs
+        signals2D = result.signals
 
-        cfg = self.last_cfg
-        assert cfg is not None
+        cfg = result.cfg_snapshot
+        if cfg is None:
+            raise ValueError("cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -191,11 +207,14 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         freqs = freqs.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-                self.last_cfg = FluxDepCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (values, freqs, signals2D)
+                cfg_snapshot = FluxDepCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = FluxDepResult(
+            values=values, freqs=freqs, signals=signals2D, cfg_snapshot=cfg_snapshot
+        )
 
-        return values, freqs, signals2D
+        return self.last_result

@@ -1,0 +1,52 @@
+{
+  "mcpServers": {
+    "measure-gui": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "--extra",
+        "gui",
+        "python",
+        "lib/zcu_tools/mcp/measure/server.py"
+      ],
+      "env": {}
+    },
+    "fluxdep-gui": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "--extra",
+        "gui",
+        "python",
+        "lib/zcu_tools/mcp/fluxdep/server.py"
+      ],
+      "env": {}
+    },
+    "dispersive-gui": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "--extra",
+        "gui",
+        "python",
+        "lib/zcu_tools/mcp/dispersive/server.py"
+      ],
+      "env": {}
+    },
+    "agent-memory": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "--extra",
+        "client",
+        "python",
+        "lib/zcu_tools/mcp/agent_memory/server.py"
+      ],
+      "env": {}
+    }
+  }
+}

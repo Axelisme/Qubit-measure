@@ -6,7 +6,7 @@ from copy import deepcopy
 from pathlib import Path
 from pprint import pformat
 
-from typing_extensions import Any, Optional, Self, Union
+from typing_extensions import Any, ItemsView, Optional, Self, Union
 
 from zcu_tools.utils import format_obj
 
@@ -28,7 +28,16 @@ def _restore_complex(obj: Any) -> Any:
 
 
 class MetaDict(SyncFile):
-    _PROTECTED_KEYS = ["dump", "load", "sync", "update_modify_time", "clone"]
+    _PROTECTED_KEYS = [
+        "dump",
+        "load",
+        "sync",
+        "update_modify_time",
+        "clone",
+        "items",
+        "keys",
+        "get",
+    ]
 
     def __init__(
         self, json_path: Optional[Union[str, Path]] = None, readonly: bool = False
@@ -118,6 +127,18 @@ class MetaDict(SyncFile):
 
     def __repr__(self) -> str:
         return self.__str__()
+
+    @auto_sync("read")
+    def keys(self):
+        return self._data.keys()
+
+    @auto_sync("read")
+    def items(self) -> ItemsView[str, Any]:
+        return self._data.items()
+
+    @auto_sync("read")
+    def get(self, name: str, default: Any = None) -> Any:
+        return self._data.get(name, default)
 
     def __dir__(self) -> list[str]:
         self.sync()

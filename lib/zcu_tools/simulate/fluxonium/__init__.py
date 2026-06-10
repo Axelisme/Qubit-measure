@@ -1,16 +1,22 @@
 from .coherence import (
+    UnsupportedNoiseChannelError,
+    UnsupportedNoiseOptionError,
     calculate_eff_t1,
+    calculate_eff_t1_fast,
     calculate_eff_t1_vs_flux,
+    calculate_eff_t1_vs_flux_fast,
     calculate_eff_t1_vs_flux_with,
     calculate_eff_t1_with,
     calculate_percell_t1_vs_flux,
 )
 from .dispersive import (
+    DressedLabelingError,
     calculate_chi_sweep,
     calculate_chi_vs_flux,
     calculate_dispersive,
     calculate_dispersive_sweep,
     calculate_dispersive_vs_flux,
+    calculate_dispersive_vs_flux_fast,
 )
 from .energies import calculate_energy, calculate_energy_vs_flux
 from .matrix_element import (
@@ -30,13 +36,19 @@ __all__ = [
     "calculate_eff_t1_vs_flux",
     "calculate_eff_t1_vs_flux_with",
     "calculate_eff_t1_with",
+    "calculate_eff_t1_vs_flux_fast",
+    "calculate_eff_t1_fast",
+    "UnsupportedNoiseChannelError",
+    "UnsupportedNoiseOptionError",
     "calculate_percell_t1_vs_flux",
     # dispersive
+    "DressedLabelingError",
     "calculate_chi_sweep",
     "calculate_chi_vs_flux",
     "calculate_dispersive",
     "calculate_dispersive_sweep",
     "calculate_dispersive_vs_flux",
+    "calculate_dispersive_vs_flux_fast",
     # energies
     "calculate_energy",
     "calculate_energy_vs_flux",

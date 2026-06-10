@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Optional, TypeAlias
+from typing_extensions import Any, Callable, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
-from zcu_tools.experiment.v2.runner import Task, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
@@ -26,8 +27,12 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_rabi
 from zcu_tools.utils.process import rotate2real
 
-# (amps, signals)
-AmpRabiResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
+
+@dataclass(frozen=True)
+class AmpRabiResult:
+    amps: NDArray[np.float64]
+    signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[AmpRabiCfg] = None
 
 
 def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -51,6 +56,8 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> AmpRabiResult:
+        orig_cfg = deepcopy(cfg)
+
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -60,23 +67,28 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
             {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
 
-        gain_param = sweep2param("gain", cfg.sweep.gain)
-        modules.qub_pulse.set_param("gain", gain_param)
+        def measure_fn(ctx: TaskState, update_hook: Optional[Callable]):
+            cfg = ctx.cfg
+            gain_param = sweep2param("gain", cfg.sweep.gain)
+            cfg.modules.qub_pulse.set_param("gain", gain_param)
+
+            return TwoToneProgram(
+                soccfg,
+                cfg,
+                sweep=[("gain", cfg.sweep.gain)],
+            ).acquire(
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
+                **(acquire_kwargs or {}),
+            )
 
         with LivePlot1D("Pulse gain", "Amplitude") as viewer:
             signals = run_task(
                 task=Task(
                     pbar_n=cfg.rounds,
-                    measure_fn=lambda ctx, update_hook: TwoToneProgram(
-                        soccfg,
-                        ctx.cfg,
-                        sweep=[("gain", ctx.cfg.sweep.gain)],
-                    ).acquire(
-                        soc,
-                        progress=False,
-                        round_hook=update_hook,
-                        **(acquire_kwargs or {}),
-                    ),
+                    measure_fn=measure_fn,
                     result_shape=(len(gains),),
                 ),
                 init_cfg=cfg,
@@ -85,10 +97,12 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
                 ),
             )
 
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (gains, signals)
+        # record result
+        self.last_result = AmpRabiResult(
+            amps=gains, signals=signals, cfg_snapshot=orig_cfg
+        )
 
-        return gains, signals
+        return self.last_result
 
     def analyze(
         self, result: Optional[AmpRabiResult] = None, skip: int = 0
@@ -97,7 +111,7 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains, signals = result
+        gains, signals = result.amps, result.signals
         gains = gains[skip:]
         signals = signals[skip:]
 
@@ -150,9 +164,10 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains, signals = result
-        cfg = self.last_cfg
-        assert cfg is not None
+        gains, signals = result.amps, result.signals
+        cfg = result.cfg_snapshot
+        if cfg is None:
+            raise ValueError("cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -173,11 +188,14 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
         gains = gains.astype(np.float64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-                self.last_cfg = AmpRabiCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (gains, signals)
+                cfg_snapshot = AmpRabiCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = AmpRabiResult(
+            amps=gains, signals=signals, cfg_snapshot=cfg_snapshot
+        )
 
-        return gains, signals
+        return self.last_result

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Optional, TypeAlias
+from typing_extensions import Any, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -21,8 +22,12 @@ from zcu_tools.utils.datasaver import load_data, save_data
 
 from .util import calc_populations
 
-# (lens, signals)
-LenRabiResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
+
+@dataclass(frozen=True)
+class LenRabiResult:
+    lengths: NDArray[np.float64]
+    signals: NDArray[np.float64]
+    cfg_snapshot: Optional[LenRabiCfg] = None
 
 
 class LenRabiSweepCfg(ConfigBase):
@@ -44,6 +49,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         e_center: complex,
         radius: float,
     ) -> LenRabiResult:
+        cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -85,6 +91,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
                     soc,
                     progress=False,
                     round_hook=update_hook,
+                    stop_checkers=[ctx.is_stop],
                     g_center=g_center,
                     e_center=e_center,
                     ge_radius=radius,
@@ -105,10 +112,11 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
             )
 
         # record last cfg and result
-        self.last_cfg = cfg
-        self.last_result = (lengths, populations)
+        self.last_result = LenRabiResult(
+            lengths=lengths, signals=populations, cfg_snapshot=cfg
+        )
 
-        return lengths, populations
+        return self.last_result
 
     def analyze(
         self,
@@ -120,7 +128,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        lens, populations = result
+        lens, populations = result.lengths, result.signals
 
         populations = calc_populations(populations)  # (len, geo)
 
@@ -163,9 +171,10 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        lens, populations = result
-        cfg = self.last_cfg
-        assert cfg is not None
+        lens, populations = result.lengths, result.signals
+        cfg = result.cfg_snapshot
+        if cfg is None:
+            raise ValueError("result.cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -189,11 +198,13 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
 
         lens = lens * 1e6  # s -> us
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
-
             if cfg is not None:
-                self.last_cfg = LenRabiCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (lens, populations)
+                cfg_snapshot = LenRabiCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = LenRabiResult(
+            lengths=lens, signals=populations, cfg_snapshot=cfg_snapshot
+        )
 
-        return lens, populations
+        return self.last_result

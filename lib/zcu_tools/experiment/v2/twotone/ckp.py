@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -11,7 +12,6 @@ from typing_extensions import (
     Any,
     Callable,
     Optional,
-    TypeAlias,
 )
 
 from zcu_tools.cfg_model import ConfigBase
@@ -39,10 +39,13 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import batch_fit_func, fitlor, lorfunc
 from zcu_tools.utils.process import rotate2real
 
-# (res_freqs, qub_freqs, signals2D)
-CKP_Result: TypeAlias = tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+
+@dataclass(frozen=True)
+class CKP_Result:
+    res_freqs: NDArray[np.float64]
+    qub_freqs: NDArray[np.float64]
+    signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[CKP_Cfg] = None
 
 
 def ckp_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -104,6 +107,8 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> CKP_Result:
+        orig_cfg = deepcopy(cfg)
+
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -156,6 +161,7 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
                 soc,
                 progress=False,
                 round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
                 **(acquire_kwargs or {}),
             )
 
@@ -203,11 +209,15 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
             )
         plt.close(fig)
 
-        # Cache results
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (res_freqs, qub_freqs, signals)
+        # record result
+        self.last_result = CKP_Result(
+            res_freqs=res_freqs,
+            qub_freqs=qub_freqs,
+            signals=signals,
+            cfg_snapshot=orig_cfg,
+        )
 
-        return res_freqs, qub_freqs, signals
+        return self.last_result
 
     def analyze(
         self, result: Optional[CKP_Result] = None
@@ -216,7 +226,9 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
             result = self.last_result
         assert result is not None, "No result found"
 
-        res_freqs, qub_freqs, signals = result
+        res_freqs = result.res_freqs
+        qub_freqs = result.qub_freqs
+        signals = result.signals
         amps = ckp_signal2real(signals)
 
         g_res_freqs, g_qub_freqs = get_resonance_freq(res_freqs, qub_freqs, amps[0])
@@ -324,13 +336,16 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
             result = self.last_result
         assert result is not None, "No result found"
 
-        res_freqs, qub_freqs, signals = result
+        cfg = result.cfg_snapshot
+        if cfg is None:
+            raise ValueError("cfg_snapshot is None")
+
+        res_freqs = result.res_freqs
+        qub_freqs = result.qub_freqs
+        signals = result.signals
 
         _filepath = Path(filepath)
 
-        # ground
-        cfg = self.last_cfg
-        assert cfg is not None
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -382,11 +397,17 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         qub_freqs = qub_freqs.astype(np.float64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-                self.last_cfg = CKP_Cfg.validate_or_warn(cfg, source=g_filepath)
-        self.last_result = (res_freqs, qub_freqs, signals)
+                cfg_snapshot = CKP_Cfg.validate_or_warn(cfg, source=g_filepath)
+        self.last_result = CKP_Result(
+            res_freqs=res_freqs,
+            qub_freqs=qub_freqs,
+            signals=signals,
+            cfg_snapshot=cfg_snapshot,
+        )
 
-        return res_freqs, qub_freqs, signals
+        return self.last_result

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -30,10 +31,13 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-# (freqs, gains, signals)
-DriveFreqResult: TypeAlias = tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+
+@dataclass(frozen=True)
+class DriveFreqResult:
+    gains: NDArray[np.float64]
+    freqs: NDArray[np.float64]
+    signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[DriveFreqCfg] = None
 
 
 def drivefreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -70,6 +74,7 @@ class DriveFreqExp(AbsExperiment[DriveFreqResult, DriveFreqCfg]):
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> DriveFreqResult:
+        cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -109,7 +114,11 @@ class DriveFreqExp(AbsExperiment[DriveFreqResult, DriveFreqCfg]):
                 ],
                 sweep=[("freq", freq_sweep), ("gain", gain_sweep)],
             ).acquire(
-                soc, progress=False, round_hook=update_hook, **(acquire_kwargs or {})
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
+                **(acquire_kwargs or {}),
             )
 
         with LivePlot2D("Pulse frequency (MHz)", "Pulse gain (a.u.)") as viewer:
@@ -126,17 +135,18 @@ class DriveFreqExp(AbsExperiment[DriveFreqResult, DriveFreqCfg]):
             )
 
         # record the last result
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (freqs, gains, signals)
+        self.last_result = DriveFreqResult(
+            gains=gains, freqs=freqs, signals=signals, cfg_snapshot=cfg
+        )
 
-        return freqs, gains, signals
+        return self.last_result
 
     def analyze(self, result: Optional[DriveFreqResult] = None) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
-        freqs, gains, signals = result
+        freqs, gains, signals = result.freqs, result.gains, result.signals
 
         real_signals = drivefreq_signal2real(signals)
 
@@ -168,10 +178,11 @@ class DriveFreqExp(AbsExperiment[DriveFreqResult, DriveFreqCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        freqs, gains, signals = result
+        freqs, gains, signals = result.freqs, result.gains, result.signals
 
-        cfg = self.last_cfg
-        assert cfg is not None
+        cfg = result.cfg_snapshot
+        if cfg is None:
+            raise ValueError("cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -196,11 +207,13 @@ class DriveFreqExp(AbsExperiment[DriveFreqResult, DriveFreqCfg]):
         gains = gains.astype(np.float64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
-
             if cfg is not None:
-                self.last_cfg = DriveFreqCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (freqs, gains, signals)
+                cfg_snapshot = DriveFreqCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = DriveFreqResult(
+            gains=gains, freqs=freqs, signals=signals, cfg_snapshot=cfg_snapshot
+        )
 
-        return freqs, gains, signals
+        return self.last_result

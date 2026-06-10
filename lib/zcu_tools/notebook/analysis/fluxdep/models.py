@@ -62,10 +62,8 @@ def energy2linearform(
     r_f = transitions.get("r_f", 0.0)
 
     if any("mirror" in name for name in transitions.keys()):
-        if "r_f" not in transitions:
-            raise ValueError(
-                "r_f is required for blue side, red side, mirror blue, and mirror red transitions"
-            )
+        if "r_f" not in transitions and "sample_f" not in transitions:
+            raise ValueError("sample_f is required for mirror transitions")
     sample_f = transitions.get("sample_f", 0.0)
 
     idx = 0
@@ -187,7 +185,7 @@ def energy2transition(
     fs: numpy 陣列, 形狀 (N, K), 其中 N 是通量數量, K 是過渡數量
     names: list, 過渡名稱
     """
-    N, M = energies.shape
+    _, M = energies.shape
 
     B, C = energy2linearform(energies, transitions)
     fs = np.abs(B + C)

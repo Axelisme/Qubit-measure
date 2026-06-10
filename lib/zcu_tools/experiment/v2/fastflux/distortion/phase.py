@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -32,10 +33,13 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
-# (lengths, phases, signals2D)
-PhaseResult: TypeAlias = tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+
+@dataclass(frozen=True)
+class PhaseResult:
+    lengths: NDArray[np.float64]
+    phases: NDArray[np.float64]
+    signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[PhaseCfg] = None
 
 
 def phase_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -117,7 +121,12 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
                     ("length", length_sweep),
                     ("phase", phase_sweep),
                 ],
-            ).acquire(soc, progress=False, round_hook=update_hook)
+            ).acquire(
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
+            )
 
         with LivePlot2D("Time (us)", "Phase (deg)") as viewer:
             signals = run_task(
@@ -133,27 +142,27 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
             )
 
         # Cache results
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (lengths, phases, signals)
+        self.last_result = PhaseResult(lengths, phases, signals, cfg_snapshot=cfg)
 
-        return lengths, phases, signals
+        return self.last_result
 
     def analyze(
-        self, cfg: Optional[PhaseCfg] = None, result: Optional[PhaseResult] = None
+        self,
+        result: Optional[PhaseResult] = None,
     ) -> Figure:
+        if result is None:
+            result = self.last_result
+        assert result is not None, "No result found"
+
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None, "No config found"
+            raise ValueError("cfg_snapshot is None")
         modules = cfg.modules
 
         flux_pulse = modules.flux_pulse
         pi2_len = float(modules.pi2_pulse.waveform.length)
 
-        if result is None:
-            result = self.last_result
-        assert result is not None, "No result found"
-
-        lengths, phases, signals2D = result
+        lengths, phases, signals2D = result.lengths, result.phases, result.signals
 
         # align to middle of two pi/2 pulses
         lengths = lengths + pi2_len
@@ -221,10 +230,11 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
             result = self.last_result
         assert result is not None, "No result found"
 
-        lengths, phases, signals2D = result
+        lengths, phases, signals2D = result.lengths, result.phases, result.signals
 
-        cfg = self.last_cfg
-        assert cfg is not None
+        if result.cfg_snapshot is None:
+            raise ValueError("cfg_snapshot is None")
+        cfg = result.cfg_snapshot
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -252,10 +262,13 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
         lengths = lengths.astype(np.float64)
         signals2D = signals2D.T.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
             if cfg is not None:
-                self.last_cfg = PhaseCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (lengths, phases, signals2D)
+                cfg_snapshot = PhaseCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = PhaseResult(
+            lengths, phases, signals2D, cfg_snapshot=cfg_snapshot
+        )
 
-        return lengths, phases, signals2D
+        return self.last_result

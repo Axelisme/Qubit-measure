@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -31,10 +32,13 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
-# (gains, freqs, signals2D)
-TwoToneResult: TypeAlias = tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+
+@dataclass(frozen=True)
+class TwoToneResult:
+    gains: NDArray[np.float64]
+    freqs: NDArray[np.float64]
+    signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[TwotoneCfg] = None
 
 
 def twotone_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -113,7 +117,11 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
                     ("freq", freq_sweep),
                 ],
             ).acquire(
-                soc, progress=False, round_hook=update_hook, **(acquire_kwargs or {})
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
+                **(acquire_kwargs or {}),
             )
 
         with LivePlot2D("Flux Pulse Gain (a.u.)", "Frequency (MHz)") as viewer:
@@ -130,17 +138,16 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
             )
 
         # Cache results
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (gains, freqs, signals)
+        self.last_result = TwoToneResult(gains, freqs, signals, cfg_snapshot=cfg)
 
-        return gains, freqs, signals
+        return self.last_result
 
     def analyze(self, result: Optional[TwoToneResult] = None) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "No result found"
 
-        gains, freqs, signals2D = result
+        gains, freqs, signals2D = result.gains, result.freqs, result.signals
 
         real_signals = twotone_signal2real(signals2D)
 
@@ -173,10 +180,11 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
             result = self.last_result
         assert result is not None, "No result found"
 
-        gains, freqs, signals2D = result
+        gains, freqs, signals2D = result.gains, result.freqs, result.signals
 
-        cfg = self.last_cfg
-        assert cfg is not None
+        if result.cfg_snapshot is None:
+            raise ValueError("cfg_snapshot is None")
+        cfg = result.cfg_snapshot
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -203,10 +211,13 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
         freqs = freqs.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
             if cfg is not None:
-                self.last_cfg = TwotoneCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (gains, freqs, signals2D)
+                cfg_snapshot = TwotoneCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = TwoToneResult(
+            gains, freqs, signals2D, cfg_snapshot=cfg_snapshot
+        )
 
-        return gains, freqs, signals2D
+        return self.last_result

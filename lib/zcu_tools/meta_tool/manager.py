@@ -29,7 +29,7 @@ class ExperimentManager:
         value: Optional[float] = None,
         clone_from: Optional[Union[tuple[ModuleLibrary, MetaDict], str]] = None,
         label: Optional[str] = None,
-        unit: Literal["A", "V", "K"] = "A",
+        unit: Literal["A", "V", "K", "none"] = "none",
     ) -> tuple[ModuleLibrary, MetaDict]:
         if label is None:
             label = self._auto_label(value, unit)
@@ -88,11 +88,17 @@ class ExperimentManager:
         return self._label
 
     @property
+    def current_label(self) -> str | None:
+        return self._label
+
+    @property
     def flux_dir(self) -> Path:
         return self.exp_dir / self.label
 
     def _auto_label(
-        self, value: Optional[float] = None, unit: Literal["A", "V", "K"] = "A"
+        self,
+        value: Optional[float] = None,
+        unit: Literal["A", "V", "K", "none"] = "none",
     ) -> str:
 
         UNIT_RANGES = {
@@ -108,19 +114,28 @@ class ExperimentManager:
                 ("mK", 1000e-3, 1e3),  # 1000 mK
                 ("K", float("inf"), 1),
             ],
+            "none": [
+                ("u", 1e-3, 1e6),
+                ("m", 1e-1, 1e3),
+                ("", 1e3, 1),
+                ("k", 1e6, 1e-3),
+                ("M", 1e9, 1e-6),
+                ("G", 1e12, 1e-9),
+                ("T", float("inf"), 1e-12),
+            ],
         }
 
+        united_value = None
         if value is not None:
             for unit_suffix, max_value, scale in UNIT_RANGES[unit]:
                 if value <= max_value:
                     united_value = f"{value * scale:.3f}{unit_suffix}"
                     break
-            else:  # fallback for extremely large values
-                united_value = f"{value:.3e}{unit}"
-        else:
-            united_value = "NoValue"
 
-        base_name = f"{datetime.now().strftime('%m%d%H')}_{united_value}"
+        base_name = datetime.now().strftime("%m%d%H")
+        if united_value is not None:
+            base_name += f"_{united_value}"
+
         existing = set(self.list_contexts())
         if base_name not in existing:
             return base_name

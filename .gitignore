@@ -6,11 +6,14 @@ wheels/
 *.egg-info
 .ipynb_checkpoints
 .env
-.cursor
-.claude
 .vscode
 .github
 .coverage
+.cursor
+.claude/*
+!.claude/skills/
+!.claude/settings.json
+agent_memory/
 
 Database/
 Database
@@ -25,7 +28,10 @@ plan.md
 findings.md
 progress.md
 task_plan.md
-architecture.md
+task_plans/
+docs/adr/
+CONTEXT.md
+scratch/
 
 notebook_md/plot/*
 
@@ -41,6 +47,9 @@ qiskit-metal/
 *.csv
 *.log
 *.json
+!.mcp.json
+!.claude/settings.json
+!.gemini/settings.json
 *.npz
 
 # Jupytext generated files

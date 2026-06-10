@@ -105,126 +105,6 @@ def candidate_breakpoint_search(
 
 
 @njit(
-    "Tuple((float64, float64))(float64[:], float64[:,:], float64[:,:], float64, float64)",
-    nogil=True,
-)
-def smart_fuzzy_search(
-    A: NDArray[np.float64],
-    B: NDArray[np.float64],
-    C: NDArray[np.float64],
-    a_min: float,
-    a_max: float,
-) -> tuple[float, float]:
-    """
-    結合密度估計和有限評估的方法尋找最佳的 a 值
-    先通過密度估計找到可能的高密度區域，然後在這些區域中進行有限的評估
-    """
-    N = A.shape[0]
-    K = B.shape[1]
-
-    DOWNSAMPLE_THRESHOLD = 1000
-    COVERAGE_TARGET = 0.6  # 挑選的 bin 至少覆蓋總 candidate 數的 60%
-    MAX_BIN_USED = 10
-    MAX_EVAL_BUDGET = 200  # 在 top regions 內最多評估的 candidate 數
-
-    # 收集所有可能的 a 值
-    cand_as = []
-
-    for i in range(N):
-        for j in range(K):
-            if B[i, j] == 0:
-                continue
-
-            a1 = (A[i] - C[i, j]) / B[i, j]
-            a2 = (-A[i] - C[i, j]) / B[i, j]
-
-            if a_min <= a1 <= a_max:
-                cand_as.append(a1)
-            if a_min <= a2 <= a_max:
-                cand_as.append(a2)
-
-    # 如果候選值太多，降採樣
-    if len(cand_as) >= DOWNSAMPLE_THRESHOLD:
-        cand_as.sort()
-
-        # 排序後相鄰去重（numba 不支援 set）
-        dedup = [cand_as[0]]
-        for k in range(1, len(cand_as)):
-            if cand_as[k] != dedup[-1]:
-                dedup.append(cand_as[k])
-        sorted_cands = np.asarray(dedup)
-
-        # 直方圖分析密度
-        num_bins = min(100, max(10, len(sorted_cands) // 10))
-        bin_width = (a_max - a_min) / num_bins
-
-        bin_counts = np.zeros(num_bins, dtype=np.int32)
-        for i in range(len(sorted_cands)):
-            bin_idx = min(int((sorted_cands[i] - a_min) / bin_width), num_bins - 1)
-            bin_counts[bin_idx] += 1
-
-        total_count = len(sorted_cands)
-        sorted_bin_idx = np.argsort(-bin_counts)
-
-        # 挑選 bins：累積到覆蓋率目標或 MAX_BIN_USED
-        selected = np.zeros(num_bins, dtype=np.bool_)
-        cum = 0
-        picked = 0
-        for k in range(num_bins):
-            bi = sorted_bin_idx[k]
-            if bin_counts[bi] == 0:
-                break
-            selected[bi] = True
-            cum += bin_counts[bi]
-            picked += 1
-            if picked >= MAX_BIN_USED:
-                break
-            if cum >= COVERAGE_TARGET * total_count:
-                break
-
-        # 合併相鄰 bins 成連通區間，每區間在全部 candidate 中做均勻降採樣
-        sample_as = []
-        b = 0
-        while b < num_bins:
-            if not selected[b]:
-                b += 1
-                continue
-            start_b = b
-            while b < num_bins and selected[b]:
-                b += 1
-            end_b = b  # exclusive
-
-            region_start = a_min + start_b * bin_width
-            region_end = a_min + end_b * bin_width
-            lo = np.searchsorted(sorted_cands, region_start, side="left")
-            hi = np.searchsorted(sorted_cands, region_end, side="left")
-            region = sorted_cands[lo:hi]
-            if len(region) == 0:
-                continue
-
-            # 區間中位數是該 peak 的強 candidate
-            sample_as.append(np.median(region))
-            # 每個區間預算 = 總預算 × 覆蓋比例
-            region_budget = max(2, int(MAX_EVAL_BUDGET * len(region) / max(cum, 1)))
-            step = max(1, len(region) // region_budget)
-            for kk in range(0, len(region), step):
-                sample_as.append(region[kk])
-        cand_as = sample_as
-
-    # 評估所有選出的點，找到最佳的
-    best_dist = np.inf
-    best_a = (a_min + a_max) / 2.0
-
-    for a in cand_as:
-        dist = eval_dist_bounded(A, a, B, C, best_dist)
-        if dist < best_dist:
-            best_dist = dist
-            best_a = a
-
-    return best_dist, best_a
-
-
-@njit(
     "Tuple((int64[:], float64[:]))(float64[:], float64[:])",
     nogil=True,
 )
@@ -293,15 +173,77 @@ def _apply_interp(
 
 
 @njit(
+    "float64(float64[:], float64[:,:], float64[:,:], float64, float64)",
+    nogil=True,
+)
+def entry_lower_bound(
+    A: NDArray[np.float64],
+    B: NDArray[np.float64],
+    C: NDArray[np.float64],
+    a_min: float,
+    a_max: float,
+) -> float:
+    """A valid lower bound on ``candidate_breakpoint_search``'s mean distance.
+
+    The objective is F(a) = mean_i min_j |A_i - |a*B_ij + C_ij|| over a single shared
+    scale ``a``. Relaxing the shared-``a`` constraint — letting *each point* pick its
+    own best ``a`` in [a_min, a_max] — can only lower the sum, so
+
+        LB = mean_i  min_{a in [a_min,a_max]}  min_j |A_i - |a*B_ij + C_ij||
+
+    is a true lower bound: LB <= min_a F(a). For each point, the inner objective is a
+    min of "W"-shapes whose only kinks are at the term's zero crossing
+    (a = -C_ij/B_ij) and its ±A_i breakpoints (a = (±A_i - C_ij)/B_ij); the minimum
+    over the range is at one of those (clipped into range) or a range endpoint. O(N*K²).
+
+    Used to prune entries that cannot beat the running incumbent in the exact search
+    (an entry with LB > incumbent provably cannot win), so the prune is exact.
+    """
+    N = A.shape[0]
+    K = B.shape[1]
+    total = 0.0
+    for i in range(N):
+        gmin = np.inf
+        # candidate a's where this point's per-term distance can be minimal
+        for j in range(K):
+            if B[i, j] != 0.0:
+                inv = 1.0 / B[i, j]
+                for a in (
+                    -C[i, j] * inv,
+                    (A[i] - C[i, j]) * inv,
+                    (-A[i] - C[i, j]) * inv,
+                ):
+                    aa = a_min if a < a_min else (a_max if a > a_max else a)
+                    g = np.inf
+                    for jj in range(K):
+                        d = np.abs(A[i] - np.abs(aa * B[i, jj] + C[i, jj]))
+                        if d < g:
+                            g = d
+                    if g < gmin:
+                        gmin = g
+        # the range endpoints (cover the case where no breakpoint lies inside)
+        for aa in (a_min, a_max):
+            g = np.inf
+            for jj in range(K):
+                d = np.abs(A[i] - np.abs(aa * B[i, jj] + C[i, jj]))
+                if d < g:
+                    g = d
+            if g < gmin:
+                gmin = g
+        total += gmin
+    return total / N
+
+
+@njit(
     (
-        "float64[:,:]("
+        "float64[:]("
         "float64[:,:,:], float64[:,:], int32[:,:], float64[:], float64[:], float64[:],"
-        " float64, float64, float64, float64, float64, float64, boolean)"
+        " float64, float64, float64, float64, float64, float64)"
     ),
     nogil=True,
     parallel=True,
 )
-def _search_kernel(
+def _lower_bound_kernel(
     sf_energies: NDArray[np.float64],
     f_params: NDArray[np.float64],
     pairs: NDArray[np.int32],
@@ -314,10 +256,14 @@ def _search_kernel(
     EC_hi: float,
     EL_lo: float,
     EL_hi: float,
-    fuzzy: bool,
 ) -> NDArray[np.float64]:
+    """Per-entry ``entry_lower_bound`` over all database entries (parallel).
+
+    Returns ``inf`` for entries whose parameter bounds make the scale range empty
+    (``a_min > a_max``), so they are pruned before any search.
+    """
     N = f_params.shape[0]
-    results = np.empty((N, 2), dtype=np.float64)
+    out = np.empty(N, dtype=np.float64)
     for i in prange(N):
         p0 = f_params[i, 0]
         p1 = f_params[i, 1]
@@ -325,14 +271,31 @@ def _search_kernel(
         a_min = max(EJ_lo / p0, EC_lo / p1, EL_lo / p2)
         a_max = min(EJ_hi / p0, EC_hi / p1, EL_hi / p2)
         if a_min > a_max:
-            results[i, 0] = np.inf
-            results[i, 1] = 1.0
+            out[i] = np.inf
             continue
         Bs, Cs = energy2linearform_nb(sf_energies[i], pairs, coeffs, offsets)
-        if fuzzy:
-            d, a = smart_fuzzy_search(freqs, Bs, Cs, a_min, a_max)
-        else:
-            d, a = candidate_breakpoint_search(freqs, Bs, Cs, a_min, a_max)
-        results[i, 0] = d
-        results[i, 1] = a
-    return results
+        out[i] = entry_lower_bound(freqs, Bs, Cs, a_min, a_max)
+    return out
+
+
+@njit(
+    "Tuple((float64, float64))(float64[:,:], int32[:,:], float64[:], float64[:], "
+    "float64[:], float64, float64)",
+    nogil=True,
+)
+def search_one_entry(
+    sf_energies_i: NDArray[np.float64],
+    pairs: NDArray[np.int32],
+    coeffs: NDArray[np.float64],
+    offsets: NDArray[np.float64],
+    freqs: NDArray[np.float64],
+    a_min: float,
+    a_max: float,
+) -> tuple[float, float]:
+    """Exact (best_dist, best_a) for one entry — the linear form + breakpoint search.
+
+    The per-entry core of the LB-pruned exact search: builds B/C from the entry's
+    interpolated energies, then runs the exact ``candidate_breakpoint_search``.
+    """
+    Bs, Cs = energy2linearform_nb(sf_energies_i, pairs, coeffs, offsets)
+    return candidate_breakpoint_search(freqs, Bs, Cs, a_min, a_max)

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional, TypeAlias
+from typing_extensions import Any, Callable, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -26,9 +27,13 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import minus_background, rescale
 
-PowerDepResult: TypeAlias = tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+
+@dataclass(frozen=True)
+class PowerDepResult:
+    gains: NDArray[np.float64]
+    freqs: NDArray[np.float64]
+    signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[PowerDepCfg] = None
 
 
 def gaindep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -54,6 +59,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
     def run(
         self, soc, soccfg, cfg: PowerDepCfg, *, earlystop_snr: Optional[float] = None
     ) -> PowerDepResult:
+        orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -142,11 +148,12 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
             )
             signals = np.asarray(signals)
 
-        # record last cfg and result
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (gains, freqs, signals)
+        # record result
+        self.last_result = PowerDepResult(
+            gains=gains, freqs=freqs, signals=signals, cfg_snapshot=orig_cfg
+        )
 
-        return gains, freqs, signals
+        return self.last_result
 
     def analyze(
         self,
@@ -166,10 +173,13 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains, freqs, signals2D = result
+        gains = result.gains
+        freqs = result.freqs
+        signals2D = result.signals
 
-        cfg = self.last_cfg
-        assert cfg is not None
+        cfg = result.cfg_snapshot
+        if cfg is None:
+            raise ValueError("cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -196,10 +206,13 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
         freqs = freqs.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
             if cfg is not None:
-                self.last_cfg = PowerDepCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (gains, freqs, signals2D)
+                cfg_snapshot = PowerDepCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = PowerDepResult(
+            gains=gains, freqs=freqs, signals=signals2D, cfg_snapshot=cfg_snapshot
+        )
 
-        return gains, freqs, signals2D
+        return self.last_result

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import numpy as np
 import plotly.graph_objects as go
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Mapping, Optional, TypeAlias
+from typing_extensions import Any, Callable, Mapping, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo
@@ -36,9 +37,13 @@ from zcu_tools.program.v2 import (
 from zcu_tools.simulate import value2flux
 from zcu_tools.utils.datasaver import load_data, save_data
 
-FluxDepResult: TypeAlias = tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+
+@dataclass(frozen=True)
+class FluxDepResult:
+    values: NDArray[np.float64]
+    gains: NDArray[np.float64]
+    signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[FluxDepCfg] = None
 
 
 def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -83,6 +88,7 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> FluxDepResult:
+        cfg = deepcopy(cfg)
         modules = cfg.modules
 
         # predict sweep points
@@ -118,7 +124,11 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
                 ],
                 sweep=[("gain", gain_sweep)],
             ).acquire(
-                soc, progress=False, round_hook=update_hook, **(acquire_kwargs or {})
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
+                **(acquire_kwargs or {}),
             )
 
         with LivePlot2DwithLine(
@@ -148,10 +158,11 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
             signals = np.asarray(signals)
 
         # Cache results
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (values, gains, signals)
+        self.last_result = FluxDepResult(
+            values=values, gains=gains, signals=signals, cfg_snapshot=cfg
+        )
 
-        return values, gains, signals
+        return self.last_result
 
     def analyze(
         self,
@@ -169,7 +180,9 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        dev_values, gains, signals = result
+        dev_values = result.values
+        gains = result.gains
+        signals = result.signals
 
         if flux_half is not None and flux_period is not None:
             xs = value2flux(dev_values, flux_half, flux_period)
@@ -222,10 +235,11 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        values, gains, signals = result
+        values, gains, signals = result.values, result.gains, result.signals
 
-        cfg = self.last_cfg
-        assert cfg is not None
+        cfg = result.cfg_snapshot
+        if cfg is None:
+            raise ValueError("No cfg_snapshot found in result")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -250,11 +264,14 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         gains = gains.astype(np.float64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-                self.last_cfg = FluxDepCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (values, gains, signals)
+                cfg_snapshot = FluxDepCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = FluxDepResult(
+            values=values, gains=gains, signals=signals, cfg_snapshot=cfg_snapshot
+        )
 
-        return values, gains, signals
+        return self.last_result

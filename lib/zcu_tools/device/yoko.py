@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import threading
 import time
 import warnings
 
 import numpy as np
-from tqdm.auto import tqdm
 from typing_extensions import Literal, Optional
+
+from zcu_tools.progress_bar import make_pbar
 
 from .base import BaseDevice, BaseDeviceInfo
 
@@ -72,7 +74,12 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
         self.write(f":SOURce:LEVel:AUTO {voltage:.8f}")
         time.sleep(self._rampinterval)
 
-    def _set_voltage_smart(self, voltage: float, progress: bool = False) -> None:
+    def _set_voltage_smart(
+        self,
+        voltage: float,
+        progress: bool = False,
+        stop_event: Optional[threading.Event] = None,
+    ) -> None:
         # sweep to the target value step by step
         current_voltage = self.get_voltage()
         if current_voltage == voltage:
@@ -81,12 +88,20 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
         self._check_voltage(voltage)
 
         dist = abs(current_voltage - voltage)
-        pbar = tqdm(total=round(dist, 2), unit="V", leave=False, disable=not progress)
+        pbar = make_pbar(
+            total=round(dist, 2),
+            desc="Ramp voltage",
+            unit="V",
+            leave=False,
+            disable=not progress,
+        )
 
         step = 10 * self._rampstep
         steps = max(1, round(abs(voltage - current_voltage) / step))
         voltages = np.linspace(current_voltage, voltage, num=steps + 1, endpoint=True)
         for tempvolt in voltages:
+            if stop_event is not None and stop_event.is_set():
+                break
             self._set_voltage_direct(tempvolt)
 
             cur_dist = abs(tempvolt - voltage)
@@ -94,7 +109,12 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
 
         pbar.close()
 
-    def set_voltage(self, voltage: float, progress: bool = True) -> float:
+    def set_voltage(
+        self,
+        voltage: float,
+        progress: bool = True,
+        stop_event: Optional[threading.Event] = None,
+    ) -> float:
         mode = self.get_mode()
         if mode != "voltage":
             raise RuntimeError(
@@ -102,7 +122,7 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
             )
 
         self.output_on()
-        self._set_voltage_smart(voltage, progress=progress)
+        self._set_voltage_smart(voltage, progress=progress, stop_event=stop_event)
 
         return self.get_voltage()
 
@@ -118,7 +138,12 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
         self.write(f":SOURce:LEVel:AUTO {current:.8f}")
         time.sleep(self._rampinterval)
 
-    def _set_current_smart(self, current: float, progress: bool = False) -> None:
+    def _set_current_smart(
+        self,
+        current: float,
+        progress: bool = False,
+        stop_event: Optional[threading.Event] = None,
+    ) -> None:
         # sweep to the target value step by step
         current_current = self.get_current()
         if current_current == current:
@@ -127,12 +152,20 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
         self._check_current(current)
 
         dist = 1e3 * abs(current_current - current)
-        pbar = tqdm(total=round(dist, 2), unit="mA", leave=False, disable=not progress)
+        pbar = make_pbar(
+            total=round(dist, 2),
+            desc="Ramp current",
+            unit="mA",
+            leave=False,
+            disable=not progress,
+        )
 
         step = 10 * self._rampstep
         steps = max(1, round(abs(current - current_current) / step))
         currents = np.linspace(current_current, current, num=steps + 1, endpoint=True)
         for tempcurrent in currents:
+            if stop_event is not None and stop_event.is_set():
+                break
             self._set_current_direct(tempcurrent)
 
             cur_dist = 1e3 * abs(tempcurrent - current)
@@ -142,7 +175,12 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
 
     # Ramp up the current (amps) in increments of _rampstep, waiting _rampinterval
     # between each increment.
-    def set_current(self, current: float, progress: bool = True) -> float:
+    def set_current(
+        self,
+        current: float,
+        progress: bool = True,
+        stop_event: Optional[threading.Event] = None,
+    ) -> float:
         mode = self.get_mode()
         if mode != "current":
             raise RuntimeError(
@@ -150,7 +188,7 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
             )
 
         self.output_on()
-        self._set_current_smart(current, progress=progress)
+        self._set_current_smart(current, progress=progress, stop_event=stop_event)
 
         return self.get_current()
 
@@ -212,7 +250,13 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
 
     # ==========================================================================#
 
-    def _setup(self, cfg, *, progress: bool = True) -> None:
+    def _setup(
+        self,
+        cfg,
+        *,
+        progress: bool = True,
+        stop_event: Optional[threading.Event] = None,
+    ) -> None:
         if self.get_output() != "on" and cfg.output == "on":
             warnings.warn("YOKOGS200 output is off, did you forget to turn it on?")
 
@@ -226,15 +270,15 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
                 "Remember to turn value to zero before changing mode"
             )
 
+        self._rampstep = cfg.rampstep
+
         value = cfg.value
         if cur_mode == "current":
-            self.set_current(value, progress=progress)
+            self.set_current(value, progress=progress, stop_event=stop_event)
         elif cur_mode == "voltage":
-            self.set_voltage(value, progress=progress)
+            self.set_voltage(value, progress=progress, stop_event=stop_event)
         else:
             raise ValueError(f"Unknown mode {cur_mode} in device {self.address}")
-
-        self._rampstep = cfg.rampstep
 
     def get_info(self) -> YOKOGS200Info:
         return YOKOGS200Info(

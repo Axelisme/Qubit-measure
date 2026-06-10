@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Mapping, Optional, TypeAlias
+from typing_extensions import Any, Callable, Mapping, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo
@@ -31,9 +32,13 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-OneToneFluxResult: TypeAlias = tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+
+@dataclass(frozen=True)
+class OneToneFluxResult:
+    fluxes: NDArray[np.float64]
+    freqs: NDArray[np.float64]
+    signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[OneToneFluxCfg] = None
 
 
 class OneToneFluxModuleCfg(ConfigBase):
@@ -54,6 +59,7 @@ class OneToneFluxCfg(ProgramV2Cfg, ExpCfgModel):
 
 class OneToneFluxExp(AbsExperiment[OneToneFluxResult, OneToneFluxCfg]):
     def run(self, soc, soccfg, cfg: OneToneFluxCfg) -> OneToneFluxResult:
+        cfg = deepcopy(cfg)
         modules = cfg.modules
         jpa_flux_sweep = cfg.sweep.jpa_flux
 
@@ -85,7 +91,12 @@ class OneToneFluxExp(AbsExperiment[OneToneFluxResult, OneToneFluxCfg]):
                     PulseReadout("readout", modules.readout),
                 ],
                 sweep=[("freq", freq_sweep)],
-            ).acquire(soc, progress=False, round_hook=update_hook)
+            ).acquire(
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
+            )
 
         with LivePlot2DwithLine(
             "JPA Flux value (a.u.)",
@@ -113,9 +124,10 @@ class OneToneFluxExp(AbsExperiment[OneToneFluxResult, OneToneFluxCfg]):
             )
             signals = np.asarray(signals)
 
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (jpa_fluxs, freqs, signals)
-        return jpa_fluxs, freqs, signals
+        self.last_result = OneToneFluxResult(
+            fluxes=jpa_fluxs, freqs=freqs, signals=signals, cfg_snapshot=cfg
+        )
+        return self.last_result
 
     def analyze(self, result: Optional[OneToneFluxResult] = None) -> None:
         if result is None:
@@ -135,10 +147,13 @@ class OneToneFluxExp(AbsExperiment[OneToneFluxResult, OneToneFluxCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        jpa_fluxs, freqs, signals = result
+        jpa_fluxs = result.fluxes
+        freqs = result.freqs
+        signals = result.signals
 
-        cfg = self.last_cfg
-        assert cfg is not None
+        cfg = result.cfg_snapshot
+        if cfg is None:
+            raise ValueError("cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -166,10 +181,12 @@ class OneToneFluxExp(AbsExperiment[OneToneFluxResult, OneToneFluxCfg]):
         freqs = freqs.astype(np.float64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
-            cfg, _, _ = parse_comment(comment)
-
-            if cfg is not None:
-                self.last_cfg = OneToneFluxCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (jpa_fluxs, freqs, signals)
-        return jpa_fluxs, freqs, signals
+            _cfg, _, _ = parse_comment(comment)
+            if _cfg is not None:
+                cfg_snapshot = OneToneFluxCfg.validate_or_warn(_cfg, source=filepath)
+        self.last_result = OneToneFluxResult(
+            fluxes=jpa_fluxs, freqs=freqs, signals=signals, cfg_snapshot=cfg_snapshot
+        )
+        return self.last_result

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,7 +9,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
-from typing_extensions import Any, Callable, Optional, TypeAlias, Union
+from typing_extensions import Any, Callable, Optional, Union
 
 import zcu_tools.utils.fitting as ft
 from zcu_tools.cfg_model import ConfigBase
@@ -37,8 +38,12 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_decay, fit_dual_decay
 from zcu_tools.utils.process import rotate2real
 
-# (times, signals)
-T1Result: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
+
+@dataclass(frozen=True)
+class T1Result:
+    times: NDArray[np.float64]
+    signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[Union[T1Cfg, T1WithToneCfg]] = None
 
 
 def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -120,7 +125,11 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                 ],
                 sweep=[("length_idx", len(length_cycles))],
             ).acquire(
-                soc, progress=False, round_hook=update_hook, **(acquire_kwargs or {})
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
+                **(acquire_kwargs or {}),
             )
 
         with LivePlot1D("Time (us)", "Amplitude") as viewer:
@@ -136,11 +145,12 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                 ),
             )
 
-        # record last cfg and result
-        self.last_cfg = original_cfg
-        self.last_result = (lengths, signals)
+        # record last result
+        self.last_result = T1Result(
+            times=lengths, signals=signals, cfg_snapshot=original_cfg
+        )
 
-        return lengths, signals
+        return self.last_result
 
     def _run_uniform(
         self,
@@ -182,6 +192,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                     soc,
                     progress=False,
                     round_hook=update_hook,
+                    stop_checkers=[ctx.is_stop],
                     **(acquire_kwargs or {}),
                 )
 
@@ -197,11 +208,12 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                 ),
             )
 
-        # record last cfg and result
-        self.last_cfg = original_cfg
-        self.last_result = (lengths, signals)
+        # record last result
+        self.last_result = T1Result(
+            times=lengths, signals=signals, cfg_snapshot=original_cfg
+        )
 
-        return lengths, signals
+        return self.last_result
 
     def run(
         self,
@@ -230,7 +242,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        xs, signals = result
+        xs, signals = result.times, result.signals
 
         xs = xs[skip:]
         signals = signals[skip:]
@@ -279,9 +291,10 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        Ts, signals = result
-        cfg = self.last_cfg
-        assert cfg is not None
+        Ts, signals = result.times, result.signals
+        cfg = result.cfg_snapshot
+        if cfg is None:
+            raise ValueError("cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -304,14 +317,16 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         Ts = Ts.astype(np.float64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
-            cfg, _, _ = parse_comment(comment)
+            _cfg, _, _ = parse_comment(comment)
+            if _cfg is not None:
+                cfg_snapshot = T1Cfg.validate_or_warn(_cfg, source=filepath)
+        self.last_result = T1Result(
+            times=Ts, signals=signals, cfg_snapshot=cfg_snapshot
+        )
 
-            if cfg is not None:
-                self.last_cfg = T1Cfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (Ts, signals)
-
-        return Ts, signals
+        return self.last_result
 
 
 class T1WithToneModuleCfg(ConfigBase):
@@ -348,30 +363,41 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
             {"soccfg": soccfg, "gen_ch": modules.test_pulse.ch},
         )
 
-        length_param = sweep2param("length", cfg.sweep.length)
-        modules.test_pulse.set_param("length", length_param)
+        def measure_fn(
+            ctx: TaskState[NDArray[np.complex128], Any, T1WithToneCfg],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg = ctx.cfg
+            modules = cfg.modules
+
+            length_sweep = cfg.sweep.length
+            length_param = sweep2param("length", length_sweep)
+            modules.test_pulse.set_param("length", length_param)
+
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", modules.reset),
+                    Pulse(name="pi_pulse", cfg=modules.pi_pulse),
+                    Pulse(name="test_pulse", cfg=modules.test_pulse),
+                    Readout("readout", modules.readout),
+                ],
+                sweep=[("length", length_sweep)],
+            ).acquire(
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
+                **(acquire_kwargs or {}),
+            )
 
         with LivePlot1D(
             "Time (us)", "Amplitude", segment_kwargs={"title": "T1 relaxation"}
         ) as viewer:
             signals = run_task(
                 task=Task(
-                    measure_fn=lambda ctx, update_hook: ModularProgramV2(
-                        soccfg,
-                        ctx.cfg,
-                        modules=[
-                            Reset("reset", modules.reset),
-                            Pulse(name="pi_pulse", cfg=modules.pi_pulse),
-                            Pulse(name="test_pulse", cfg=modules.test_pulse),
-                            Readout("readout", modules.readout),
-                        ],
-                        sweep=[("length", ctx.cfg.sweep.length)],
-                    ).acquire(
-                        soc,
-                        progress=False,
-                        round_hook=update_hook,
-                        **(acquire_kwargs or {}),
-                    ),
+                    measure_fn=measure_fn,
                     result_shape=(len(lengths),),
                     pbar_n=cfg.rounds,
                 ),
@@ -381,11 +407,12 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
                 ),
             )
 
-        # record last cfg and result
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (lengths, signals)
+        # record last result
+        self.last_result = T1Result(
+            times=lengths, signals=signals, cfg_snapshot=deepcopy(cfg)
+        )
 
-        return lengths, signals
+        return self.last_result
 
     def analyze(
         self, result: Optional[T1Result] = None, *, dual_exp: bool = False
@@ -394,7 +421,7 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        xs, signals = result
+        xs, signals = result.times, result.signals
 
         real_signals = t1_signal2real(signals)
 
@@ -442,9 +469,10 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        Ts, signals = result
-        cfg = self.last_cfg
-        assert cfg is not None
+        Ts, signals = result.times, result.signals
+        cfg = result.cfg_snapshot
+        if cfg is None:
+            raise ValueError("cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -467,20 +495,24 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
         Ts = Ts.astype(np.float64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
-            cfg, _, _ = parse_comment(comment)
+            _cfg, _, _ = parse_comment(comment)
+            if _cfg is not None:
+                cfg_snapshot = T1WithToneCfg.validate_or_warn(_cfg, source=filepath)
+        self.last_result = T1Result(
+            times=Ts, signals=signals, cfg_snapshot=cfg_snapshot
+        )
 
-            if cfg is not None:
-                self.last_cfg = T1WithToneCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (Ts, signals)
-
-        return Ts, signals
+        return self.last_result
 
 
-# (values, times, signals)
-ScanT1WithToneResult: TypeAlias = tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+@dataclass(frozen=True)
+class ScanT1WithToneResult:
+    values: NDArray[np.float64]
+    times: NDArray[np.float64]
+    signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[ScanT1WithToneCfg] = None
 
 
 def t1_with_tone_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -543,7 +575,11 @@ class ScanT1WithToneExp(AbsExperiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
                 ],
                 sweep=[("length", length_sweep)],
             ).acquire(
-                soc, progress=False, round_hook=update_hook, **(acquire_kwargs or {})
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
+                **(acquire_kwargs or {}),
             )
 
         with LivePlot2DwithLine(
@@ -568,11 +604,12 @@ class ScanT1WithToneExp(AbsExperiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
             )
             signals = np.asarray(signals)
 
-        # record last cfg and result
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (gains, lengths, signals)
+        # record last result
+        self.last_result = ScanT1WithToneResult(
+            values=gains, times=lengths, signals=signals, cfg_snapshot=deepcopy(cfg)
+        )
 
-        return gains, lengths, signals
+        return self.last_result
 
     def analyze(
         self, result: Optional[ScanT1WithToneResult] = None
@@ -581,7 +618,7 @@ class ScanT1WithToneExp(AbsExperiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains, ts, signals = result
+        gains, ts, signals = result.values, result.times, result.signals
 
         signals: NDArray[np.complex128] = gaussian_filter(signals, sigma=1)  # type: ignore
         real_signals = t1_with_tone_signal2real(signals)
@@ -649,9 +686,10 @@ class ScanT1WithToneExp(AbsExperiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains, Ts, signals = result
-        cfg = self.last_cfg
-        assert cfg is not None
+        gains, Ts, signals = result.values, result.times, result.signals
+        cfg = result.cfg_snapshot
+        if cfg is None:
+            raise ValueError("cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -677,11 +715,13 @@ class ScanT1WithToneExp(AbsExperiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
         Ts = Ts.astype(np.float64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
-            cfg, _, _ = parse_comment(comment)
+            _cfg, _, _ = parse_comment(comment)
+            if _cfg is not None:
+                cfg_snapshot = ScanT1WithToneCfg.validate_or_warn(_cfg, source=filepath)
+        self.last_result = ScanT1WithToneResult(
+            values=gains, times=Ts, signals=signals, cfg_snapshot=cfg_snapshot
+        )
 
-            if cfg is not None:
-                self.last_cfg = ScanT1WithToneCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (gains, Ts, signals)
-
-        return gains, Ts, signals
+        return self.last_result

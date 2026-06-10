@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 from enum import IntEnum
 
 import matplotlib.pyplot as plt
@@ -33,10 +34,14 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_decay
 from zcu_tools.utils.process import rotate2real
 
-# (sub_seeds, depths, signals2D[n_seeds x n_depths])
-RB_Result: TypeAlias = tuple[
-    NDArray[np.int64], NDArray[np.int64], NDArray[np.complex128]
-]
+
+@dataclass(frozen=True)
+class RB_Result:
+    sub_seeds: NDArray[np.int64]
+    depths: NDArray[np.int64]
+    signals2D: NDArray[np.complex128]
+    cfg_snapshot: Optional["RBCfg"] = None
+
 
 # ==============================================================================
 # Single-qubit Clifford group (24 elements)
@@ -329,6 +334,7 @@ class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
                 soc,
                 progress=False,
                 round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
                 **(acquire_kwargs or {}),
             )
 
@@ -371,10 +377,14 @@ class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
             )
             signals2D = np.asarray(signals, dtype=np.complex128)  # (n_seeds, n_depths)
 
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (entropys, depths, signals2D)
+        self.last_result = RB_Result(
+            sub_seeds=entropys,
+            depths=depths,
+            signals2D=signals2D,
+            cfg_snapshot=cfg,
+        )
 
-        return entropys, depths, signals2D
+        return self.last_result
 
     def analyze(
         self,
@@ -386,7 +396,8 @@ class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
             "No measurement data available. Run experiment first."
         )
 
-        entropys, depths, signals2D = result
+        depths = result.depths
+        signals2D = result.signals2D
 
         real_signals_avg = rb_signal2real(signals2D)
         depths_f = depths.astype(np.float64)
@@ -453,9 +464,13 @@ class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
             "No measurement data available. Run experiment first."
         )
 
-        entropys, depths, signals2D = result
-        cfg = self.last_cfg
-        assert cfg is not None
+        cfg = result.cfg_snapshot
+        if cfg is None:
+            raise ValueError("No config snapshot available in result.")
+
+        sub_seeds = result.sub_seeds
+        depths = result.depths
+        signals2D = result.signals2D
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -463,7 +478,7 @@ class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
             x_info={
                 "name": "Entropy",
                 "unit": "a.u.",
-                "values": entropys.astype(np.float64),
+                "values": sub_seeds.astype(np.float64),
             },
             y_info={
                 "name": "Depth",
@@ -490,11 +505,17 @@ class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
         depths = depths.astype(np.int64)
         signals2D = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-                self.last_cfg = RBCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (sub_seeds, depths, signals2D)
+                cfg_snapshot = RBCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = RB_Result(
+            sub_seeds=sub_seeds,
+            depths=depths,
+            signals2D=signals2D,
+            cfg_snapshot=cfg_snapshot,
+        )
 
-        return sub_seeds, depths, signals2D
+        return self.last_result

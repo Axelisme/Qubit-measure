@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -33,10 +34,13 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fitlor
 from zcu_tools.utils.process import rotate2real
 
-# (lengths, freqs, signals2D)
-FreqResult: TypeAlias = tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+
+@dataclass(frozen=True)
+class FreqResult:
+    lengths: NDArray[np.float64]
+    freqs: NDArray[np.float64]
+    signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[FreqCfg] = None
 
 
 def freq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -136,7 +140,11 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                     ("freq", freq_sweep),
                 ],
             ).acquire(
-                soc, progress=False, round_hook=update_hook, **(acquire_kwargs or {})
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
+                **(acquire_kwargs or {}),
             )
 
         with LivePlot2D("Time (us)", "Frequency (MHz)") as viewer:
@@ -153,27 +161,27 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             )
 
         # Cache results
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (lengths, freqs, signals)
+        self.last_result = FreqResult(lengths, freqs, signals, cfg_snapshot=cfg)
 
-        return lengths, freqs, signals
+        return self.last_result
 
     def analyze(
-        self, cfg: Optional[FreqCfg] = None, result: Optional[FreqResult] = None
+        self,
+        result: Optional[FreqResult] = None,
     ) -> Figure:
+        if result is None:
+            result = self.last_result
+        assert result is not None, "No result found"
+
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None, "No config found"
+            raise ValueError("cfg_snapshot is None")
         modules = cfg.modules
 
         flux_pulse = modules.flux_pulse
         qub_len = float(modules.qub_pulse.waveform.length)
 
-        if result is None:
-            result = self.last_result
-        assert result is not None, "No result found"
-
-        lengths, freqs, signals = result
+        lengths, freqs, signals = result.lengths, result.freqs, result.signals
 
         # align to center of qubit pulse
         lengths = lengths + qub_len / 2
@@ -234,10 +242,11 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             result = self.last_result
         assert result is not None, "No result found"
 
-        lengths, freqs, signals2D = result
+        lengths, freqs, signals2D = result.lengths, result.freqs, result.signals
 
-        cfg = self.last_cfg
-        assert cfg is not None
+        if result.cfg_snapshot is None:
+            raise ValueError("cfg_snapshot is None")
+        cfg = result.cfg_snapshot
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -266,10 +275,13 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         lengths = lengths.astype(np.float64)
         signals2D = signals2D.T.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
             if cfg is not None:
-                self.last_cfg = FreqCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (lengths, freqs, signals2D)
+                cfg_snapshot = FreqCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = FreqResult(
+            lengths, freqs, signals2D, cfg_snapshot=cfg_snapshot
+        )
 
-        return lengths, freqs, signals2D
+        return self.last_result

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing_extensions import Literal
+import threading
+
+from typing_extensions import Literal, Optional
 
 from .base import BaseDevice, BaseDeviceInfo
 
@@ -77,7 +79,13 @@ class RohdeSchwarzSGS100A(BaseDevice[RohdeSchwarzSGS100AInfo]):
 
     # ==========================================================================#
 
-    def _setup(self, cfg, *, progress: bool = True) -> None:
+    def _setup(
+        self,
+        cfg,
+        *,
+        progress: bool = True,
+        stop_event: Optional[threading.Event] = None,
+    ) -> None:
         self.set_output(cfg.output)
         self.set_IQ_state(cfg.IQ)
         self.set_frequency(cfg.freq_Hz)

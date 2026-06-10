@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -43,10 +44,21 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fitlor
 from zcu_tools.utils.process import rotate2real
 
-# (amps, freqs, signals2D)
-AcStarkResult: TypeAlias = tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+
+@dataclass(frozen=True)
+class AcStarkResult:
+    gains: NDArray[np.float64]
+    freqs: NDArray[np.float64]
+    signals: NDArray[np.complex128]
+    cfg_snapshot: Optional["AcStarkCfg"] = None
+
+
+@dataclass(frozen=True)
+class AcStarkRamseyResult:
+    gains: NDArray[np.float64]
+    lengths: NDArray[np.float64]
+    signals: NDArray[np.complex128]
+    cfg_snapshot: Optional["AcStarkRamseyCfg"] = None
 
 
 def acstark_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -210,10 +222,9 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
             signals = np.asarray(signals)
 
         # Cache results
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (gains, freqs, signals)
+        self.last_result = AcStarkResult(gains, freqs, signals, cfg_snapshot=cfg)
 
-        return gains, freqs, signals
+        return self.last_result
 
     def analyze(
         self,
@@ -228,7 +239,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
             result = self.last_result
         assert result is not None, "No result found"
 
-        gains, freqs, signals = result
+        gains, freqs, signals = result.gains, result.freqs, result.signals
 
         # apply cutoff if provided
         if cutoff is not None:
@@ -319,10 +330,11 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
             result = self.last_result
         assert result is not None, "No result found"
 
-        gains, freqs, signals2D = result
+        gains, freqs, signals2D = result.gains, result.freqs, result.signals
 
-        cfg = self.last_cfg
-        assert cfg is not None
+        if result.cfg_snapshot is None:
+            raise ValueError("Cannot save result without configuration snapshot")
+        cfg = result.cfg_snapshot
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -349,14 +361,16 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         freqs = freqs.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
-
             if cfg is not None:
-                self.last_cfg = AcStarkCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (gains, freqs, signals2D)
+                cfg_snapshot = AcStarkCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = AcStarkResult(
+            gains, freqs, signals2D, cfg_snapshot=cfg_snapshot
+        )
 
-        return gains, freqs, signals2D
+        return self.last_result
 
 
 def acstark_ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -381,7 +395,7 @@ class AcStarkRamseyCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: AcStarkRamseySweepCfg
 
 
-class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
+class AcStarkRamseyExp(AbsExperiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
     def run(
         self,
         soc,
@@ -390,7 +404,7 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
         *,
         detune: float = 0.0,
         acquire_kwargs: Optional[dict[str, Any]] = None,
-    ) -> AcStarkResult:
+    ) -> AcStarkRamseyResult:
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -443,6 +457,7 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
                 soc,
                 progress=False,
                 round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
                 **(acquire_kwargs or {}),
             )
 
@@ -475,14 +490,15 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
             signals = np.asarray(signals)
 
         # Cache results
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (gains, lengths, signals)
+        self.last_result = AcStarkRamseyResult(
+            gains, lengths, signals, cfg_snapshot=cfg
+        )
 
-        return gains, lengths, signals
+        return self.last_result
 
     def analyze(
         self,
-        result: Optional[AcStarkResult] = None,
+        result: Optional[AcStarkRamseyResult] = None,
         *,
         detune: float = 0.0,
         cutoff: Optional[float] = None,
@@ -491,7 +507,7 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
             result = self.last_result
         assert result is not None, "No result found"
 
-        gains, lens, signals = result
+        gains, lens, signals = result.gains, result.lengths, result.signals
 
         # apply cutoff if provided
         if cutoff is not None:
@@ -544,7 +560,7 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[AcStarkResult] = None,
+        result: Optional[AcStarkRamseyResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/ac_stark_ramsey",
         **kwargs,
@@ -554,10 +570,11 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
             result = self.last_result
         assert result is not None, "No result found"
 
-        gains, lens, signals2D = result
+        gains, lens, signals2D = result.gains, result.lengths, result.signals
 
-        cfg = self.last_cfg
-        assert cfg is not None
+        if result.cfg_snapshot is None:
+            raise ValueError("Cannot save result without configuration snapshot")
+        cfg = result.cfg_snapshot
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -570,7 +587,7 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> AcStarkResult:
+    def load(self, filepath: str, **kwargs) -> AcStarkRamseyResult:
         signals2D, gains, lens, comment = load_data(
             filepath, return_comment=True, **kwargs
         )
@@ -585,11 +602,13 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
         lens = lens.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
-
             if cfg is not None:
-                self.last_cfg = AcStarkRamseyCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (gains, lens, signals2D)
+                cfg_snapshot = AcStarkRamseyCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = AcStarkRamseyResult(
+            gains, lens, signals2D, cfg_snapshot=cfg_snapshot
+        )
 
-        return gains, lens, signals2D
+        return self.last_result

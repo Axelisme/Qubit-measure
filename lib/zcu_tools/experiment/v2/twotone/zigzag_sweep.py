@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,7 +13,6 @@ from typing_extensions import (
     Callable,
     Literal,
     Optional,
-    TypeAlias,
 )
 
 from zcu_tools.cfg_model import ConfigBase
@@ -39,10 +39,13 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
-# (times, values, signals)
-ZigZagScanResult: TypeAlias = tuple[
-    NDArray[np.int64], NDArray[np.float64], NDArray[np.complex128]
-]
+
+@dataclass(frozen=True)
+class ZigZagScanResult:
+    times: NDArray[np.int64]
+    values: NDArray[np.float64]
+    signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[ZigZagScanCfg] = None
 
 
 def zigzag_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -82,7 +85,7 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
         repeat_on: Literal["X90_pulse", "X180_pulse"] = "X180_pulse",
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> ZigZagScanResult:
-        original_cfg = deepcopy(cfg)
+        orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -148,7 +151,11 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
                 ],
                 sweep=[("times", len(times)), (x_key, x_sweep)],
             ).acquire(
-                soc, progress=False, round_hook=update_hook, **(acquire_kwargs or {})
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
+                **(acquire_kwargs or {}),
             )
 
         with LivePlot2D("Times", x_info["name"]) as viewer:
@@ -167,11 +174,12 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
             )
             signals = np.asarray(signals, dtype=np.complex128)
 
-        # record last cfg and result
-        self.last_cfg = original_cfg
-        self.last_result = (times, values, signals)
+        # record result
+        self.last_result = ZigZagScanResult(
+            times=times, values=values, signals=signals, cfg_snapshot=orig_cfg
+        )
 
-        return times, values, signals
+        return self.last_result
 
     def analyze(
         self,
@@ -182,7 +190,9 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        times, values, signals = result
+        times = result.times
+        values = result.values
+        signals = result.signals
 
         real_signals = zigzag_signal2real(signals)  # (times , values)
         valid_cutoff = np.min(np.sum(~np.isnan(real_signals), axis=0))
@@ -237,12 +247,13 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        times, values, signals = result
+        cfg = result.cfg_snapshot
+        if cfg is None:
+            raise ValueError("cfg_snapshot is None")
 
-        times = times.astype(np.float64)
-
-        cfg = self.last_cfg
-        assert cfg is not None
+        times = result.times.astype(np.float64)
+        values = result.values
+        signals = result.signals
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -269,11 +280,14 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
         values = values.astype(np.float64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-                self.last_cfg = ZigZagScanCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (times, values, signals)
+                cfg_snapshot = ZigZagScanCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = ZigZagScanResult(
+            times=times, values=values, signals=signals, cfg_snapshot=cfg_snapshot
+        )
 
-        return times, values, signals
+        return self.last_result

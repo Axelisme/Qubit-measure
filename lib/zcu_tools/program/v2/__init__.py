@@ -4,6 +4,7 @@ from .mocksoc import MockQickSoc, make_mock_soc, make_mock_soccfg
 from .modular import ModularProgramV2
 from .modules import (
     AbsModuleCfg,
+    AbsReadoutCfg,
     AbsWaveformCfg,
     BathReset,
     BathResetCfg,

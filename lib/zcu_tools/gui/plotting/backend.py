@@ -1,0 +1,95 @@
+"""GUI matplotlib backend — the client that intercepts pyplot figure creation.
+
+The ``module://`` target matplotlib loads (see ``setup.BACKEND_NAME``). It is the
+*client*: it intercepts ``plt.figure()`` / ``plt.subplots()`` / ``plt.show()`` /
+``draw_idle`` and forwards each to the ``host`` (the single main-thread bridge),
+which embeds the figure into the current ``FigureContainer`` instead of opening a
+detached window. The client is stateless — routing/registry/marshalling all live
+in ``host``.
+
+This is a **process-wide** backend selection; incompatible with a Jupyter-notebook
+backend in the same process. The GUI selects this backend before any ``pyplot``
+import (the "configure backend before pyplot" invariant — see ``setup``).
+"""
+
+from __future__ import annotations
+
+from typing import cast
+
+from matplotlib.backend_bases import FigureCanvasBase, FigureManagerBase, _Backend
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from matplotlib.figure import Figure
+from qtpy.QtWidgets import QWidget  # type: ignore[attr-defined]
+
+from .host import (
+    activate_figure,
+    attach_figure_to_current_container,
+    get_figure_container,
+    is_main_thread,
+    refresh_figure_in_main_thread,
+    remove_canvas,
+)
+
+
+class GuiFigureManager(FigureManagerBase):
+    @classmethod
+    def create_with_canvas(
+        cls,
+        canvas_class: type[FigureCanvasBase],
+        figure: Figure,
+        num: int | str,
+    ) -> "GuiFigureManager":
+        canvas = cast(
+            GuiFigureCanvas,
+            attach_figure_to_current_container(
+                figure, cast(type[FigureCanvasQTAgg], canvas_class)
+            ),
+        )
+        return cls(canvas, num)
+
+    @classmethod
+    def start_main_loop(cls) -> None:
+        return None
+
+    def show(self) -> None:
+        if get_figure_container(self.canvas.figure) is None:
+            raise RuntimeError("Figure is not attached to any FigureContainer")
+        activate_figure(self.canvas.figure)
+
+    def destroy(self) -> None:
+        remove_canvas(cast(QWidget, self.canvas))
+
+
+class GuiFigureCanvas(FigureCanvasQTAgg):
+    required_interactive_framework = None
+    manager_class = GuiFigureManager
+
+    def draw_idle(self, *args: object, **kwargs: object) -> None:
+        """Thread-safe ``draw_idle``: absorb the worker→main-thread marshalling.
+
+        ``draw_idle`` is the non-blocking "please repaint" request — liveplot's
+        per-update refresh calls it, and that refresh runs on a worker thread.
+        Painting a Qt canvas off the main thread is undefined, so a worker call
+        is marshalled to the main thread fire-and-forget (preserving the
+        non-blocking contract). A main-thread call (e.g. matplotlib internals,
+        analysis) draws inline. The liveplot backend stays Qt/gui-unaware: it
+        just calls ``draw_idle`` as if single-threaded; this canvas hides where
+        the painting actually happens.
+        """
+        if is_main_thread():
+            super().draw_idle(*args, **kwargs)
+        else:
+            refresh_figure_in_main_thread(self.figure)
+
+
+FigureCanvas = GuiFigureCanvas
+FigureManager = GuiFigureManager
+
+
+# Registered into matplotlib's backend registry by @_Backend.export; the class
+# name itself is never referenced (matplotlib convention).
+@_Backend.export
+class _BackendGui(_Backend):  # noqa: F811  # pyright: ignore[reportUnusedClass]
+    FigureCanvas = GuiFigureCanvas
+    FigureManager = GuiFigureManager
+    backend_version = "zcu-gui-embedded"

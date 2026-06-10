@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Literal, Optional, TypeAlias
+from typing_extensions import Any, Callable, Literal, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -27,8 +28,12 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
-# (times, signals)
-ZigZagResult: TypeAlias = tuple[NDArray[np.int64], NDArray[np.complex128]]
+
+@dataclass(frozen=True)
+class ZigZagResult:
+    times: NDArray[np.int64]
+    signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[ZigZagCfg] = None
 
 
 def zigzag_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -57,6 +62,8 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
         repeat_on: Literal["X90_pulse", "X180_pulse"] = "X180_pulse",
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> ZigZagResult:
+        orig_cfg = deepcopy(cfg)
+
         setup_devices(cfg, progress=True)
 
         times = np.arange(0, cfg.n_times + 1)
@@ -95,7 +102,11 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
                 ],
                 sweep=[("times", len(times))],
             ).acquire(
-                soc, progress=False, round_hook=update_hook, **(acquire_kwargs or {})
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
+                **(acquire_kwargs or {}),
             )
 
         with LivePlot1D(
@@ -115,11 +126,12 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
             )
             signals = np.asarray(signals, dtype=np.complex128)
 
-        # record last cfg and result
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (times, signals)
+        # record result
+        self.last_result = ZigZagResult(
+            times=times, signals=signals, cfg_snapshot=orig_cfg
+        )
 
-        return times, signals
+        return self.last_result
 
     def analyze(self, _result: Optional[ZigZagResult] = None) -> tuple[float, float]:
         raise NotImplementedError("Not implemented")
@@ -136,12 +148,12 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        times, signals = result
+        cfg = result.cfg_snapshot
+        if cfg is None:
+            raise ValueError("cfg_snapshot is None")
 
-        times = times.astype(np.float64)
-
-        cfg = self.last_cfg
-        assert cfg is not None
+        times = result.times.astype(np.float64)
+        signals = result.signals
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -162,11 +174,14 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
         times = times.astype(np.int64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-                self.last_cfg = ZigZagCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (times, signals)
+                cfg_snapshot = ZigZagCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = ZigZagResult(
+            times=times, signals=signals, cfg_snapshot=cfg_snapshot
+        )
 
-        return times, signals
+        return self.last_result

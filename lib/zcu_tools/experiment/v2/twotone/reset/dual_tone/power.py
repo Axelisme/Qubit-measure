@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -32,10 +33,13 @@ from zcu_tools.program.v2 import (
 from zcu_tools.program.v2.modules import TwoPulseResetCfg
 from zcu_tools.utils.datasaver import load_data, save_data
 
-# (gains1, gains2, signals_2d)
-PowerResult: TypeAlias = tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+
+@dataclass(frozen=True)
+class PowerResult:
+    gains1: NDArray[np.float64]
+    gains2: NDArray[np.float64]
+    signals: NDArray[np.complex128]
+    cfg_snapshot: Optional["PowerCfg"] = None
 
 
 class PowerModuleCfg(ConfigBase):
@@ -81,11 +85,6 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             {"soccfg": soccfg, "gen_ch": reset_cfg.pulse2_cfg.ch},
         )
 
-        gain1_param = sweep2param("gain1", cfg.sweep.gain1)
-        gain2_param = sweep2param("gain2", cfg.sweep.gain2)
-        modules.tested_reset.set_param("gain1", gain1_param)
-        modules.tested_reset.set_param("gain2", gain2_param)
-
         def dual_reset_gain_signal2real(signals: NDArray) -> np.ndarray:
             # Choose reference point based on sweep direction (use minimum power point)
             ref_i = 0 if gains1[0] < gains1[-1] else -1
@@ -98,6 +97,12 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules
+
+            gain1_param = sweep2param("gain1", cfg.sweep.gain1)
+            gain2_param = sweep2param("gain2", cfg.sweep.gain2)
+            modules.tested_reset.set_param("gain1", gain1_param)
+            modules.tested_reset.set_param("gain2", gain2_param)
+
             return ModularProgramV2(
                 soccfg,
                 cfg,
@@ -112,6 +117,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                 soc,
                 progress=False,
                 round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
                 **(acquire_kwargs or {}),
             )
 
@@ -129,10 +135,9 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             )
 
         # Cache results
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (gains1, gains2, signals)
+        self.last_result = PowerResult(gains1, gains2, signals, cfg_snapshot=cfg)
 
-        return gains1, gains2, signals
+        return self.last_result
 
     def analyze(
         self,
@@ -146,7 +151,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains1, gains2, signals = result
+        gains1, gains2, signals = result.gains1, result.gains2, result.signals
 
         # Apply smoothing for peak finding
         signals_smooth = gaussian_filter(signals, smooth)
@@ -199,10 +204,11 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains1, gains2, signals = result
+        gains1, gains2, signals = result.gains1, result.gains2, result.signals
 
-        cfg = self.last_cfg
-        assert cfg is not None
+        if result.cfg_snapshot is None:
+            raise ValueError("Cannot save result without configuration snapshot")
+        cfg = result.cfg_snapshot
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -229,11 +235,13 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         gains2 = gains2.astype(np.float64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
-
             if cfg is not None:
-                self.last_cfg = PowerCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (gains1, gains2, signals)
+                cfg_snapshot = PowerCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = PowerResult(
+            gains1, gains2, signals, cfg_snapshot=cfg_snapshot
+        )
 
-        return gains1, gains2, signals
+        return self.last_result

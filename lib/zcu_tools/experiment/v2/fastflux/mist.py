@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -32,10 +33,13 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
-# (flux_gains, mist_gains, signals2D)
-MistResult: TypeAlias = tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+
+@dataclass(frozen=True)
+class MistResult:
+    flux_gains: NDArray[np.float64]
+    mist_gains: NDArray[np.float64]
+    signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[MistCfg] = None
 
 
 def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -118,7 +122,11 @@ class MistExp(AbsExperiment[MistResult, MistCfg]):
                     ("mist_gain", mist_gain_sweep),
                 ],
             ).acquire(
-                soc, progress=False, round_hook=update_hook, **(acquire_kwargs or {})
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
+                **(acquire_kwargs or {}),
             )
 
         with LivePlot2D("Flux Pulse Gain (a.u.)", "Mist Pulse Gain (a.u.)") as viewer:
@@ -135,10 +143,9 @@ class MistExp(AbsExperiment[MistResult, MistCfg]):
             )
 
         # Cache results
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (flux_gains, mist_gains, signals)
+        self.last_result = MistResult(flux_gains, mist_gains, signals, cfg_snapshot=cfg)
 
-        return flux_gains, mist_gains, signals
+        return self.last_result
 
     def analyze(
         self, result: Optional[MistResult] = None, ac_coeff: Optional[float] = None
@@ -147,7 +154,11 @@ class MistExp(AbsExperiment[MistResult, MistCfg]):
             result = self.last_result
         assert result is not None, "No result found"
 
-        flux_gains, mist_gains, signals2D = result
+        flux_gains, mist_gains, signals2D = (
+            result.flux_gains,
+            result.mist_gains,
+            result.signals,
+        )
 
         real_signals = mist_signal2real(signals2D)
 
@@ -185,10 +196,15 @@ class MistExp(AbsExperiment[MistResult, MistCfg]):
             result = self.last_result
         assert result is not None, "No result found"
 
-        flux_gains, mist_gains, signals2D = result
+        flux_gains, mist_gains, signals2D = (
+            result.flux_gains,
+            result.mist_gains,
+            result.signals,
+        )
 
-        cfg = self.last_cfg
-        assert cfg is not None
+        if result.cfg_snapshot is None:
+            raise ValueError("cfg_snapshot is None")
+        cfg = result.cfg_snapshot
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -213,10 +229,13 @@ class MistExp(AbsExperiment[MistResult, MistCfg]):
         mist_gains = mist_gains.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
             if cfg is not None:
-                self.last_cfg = MistCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (flux_gains, mist_gains, signals2D)
+                cfg_snapshot = MistCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = MistResult(
+            flux_gains, mist_gains, signals2D, cfg_snapshot=cfg_snapshot
+        )
 
-        return flux_gains, mist_gains, signals2D
+        return self.last_result

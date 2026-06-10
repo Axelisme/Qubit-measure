@@ -1,0 +1,246 @@
+"""MainWindow — the autofluxdep-gui shell.
+
+A QMainWindow holding a left/right split (``NodeListPane`` + ``NodeDetailPane``)
+with a global flux progress bar in the status bar. It wires the edit↔run state
+switch and owns the liveplot integration:
+
+- At **Run start** it allocates each provider's sweep Result (``Controller
+  .prepare_run_results``) and, for every Result, builds a bare matplotlib
+  ``Figure`` + the provider's ``Plotter`` + a ``FigureCanvasQTAgg`` — all
+  sweep-lived, so auto-follow can show any provider's plot at any time.
+- It starts a ``_RunWorker`` thread that calls ``Controller.start_run``, passing
+  a ``notify(name, idx)`` callback. The worker fills the Result rows in place and
+  fires ``notify``; ``notify`` and the EventBus run events are marshalled to the
+  Qt main thread by ``_RunBridge``. A main-thread slot then calls
+  ``plotter.update(result, idx)`` — all drawing stays on the main thread
+  (ADR-0017: the worker never touches matplotlib).
+
+Prototype: the run uses synthetic signals (no hardware); Setup builds a MockSoc +
+FakeDevice + a SimplePredictor.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Optional
+
+from qtpy.QtCore import QObject, QThread, Signal  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+    QMainWindow,
+    QProgressBar,
+    QSplitter,
+    QWidget,
+)
+
+from zcu_tools.gui.app.autofluxdep.controller import Controller
+from zcu_tools.gui.app.autofluxdep.events.run import (
+    NodeEnteredPayload,
+    PointDonePayload,
+    RunFinishedPayload,
+    RunStartedPayload,
+    RunStoppedPayload,
+)
+from zcu_tools.gui.session.events import SocChangedPayload
+
+from .node_detail import NodeDetailPane
+from .node_list import NodeListPane
+
+
+class _RunWorker(QThread):
+    """Runs the sweep off the main thread so Stop stays responsive.
+
+    The worker fills numpy Result rows + fires the notify callback (which emits a
+    Qt queued signal); it never touches matplotlib.
+    """
+
+    def __init__(self, ctrl: Controller, notify) -> None:
+        super().__init__()
+        self._ctrl = ctrl
+        self._notify = notify
+
+    def run(self) -> None:  # noqa: D401 - QThread entry point
+        self._ctrl.start_run(notify=self._notify)
+
+
+class _RunBridge(QObject):
+    """Marshals worker-thread run events + row notifications onto the main thread.
+
+    The controller emits EventBus events on the worker thread; this bridge
+    subscribes and re-emits as Qt signals (delivered on the main thread because
+    they are connected there). ``row_updated`` is the row-updated notification
+    the worker's round_hook fires (a provider name + flux index — no figure);
+    ``node_entered`` is the auto-follow notification (a provider started running).
+    """
+
+    run_started = Signal()
+    node_entered = Signal(str, int)
+    point_done = Signal(int)
+    run_finished = Signal()
+    run_stopped = Signal()
+    row_updated = Signal(str, int)
+
+    def __init__(self, ctrl: Controller) -> None:
+        super().__init__()
+        bus = ctrl.bus
+        bus.subscribe(RunStartedPayload, lambda p: self.run_started.emit())
+        bus.subscribe(NodeEnteredPayload, self._on_node_entered)
+        bus.subscribe(PointDonePayload, lambda p: self.point_done.emit(p.idx))
+        bus.subscribe(RunFinishedPayload, lambda p: self.run_finished.emit())
+        bus.subscribe(RunStoppedPayload, lambda p: self.run_stopped.emit())
+
+    def _on_node_entered(self, p: NodeEnteredPayload) -> None:
+        self.node_entered.emit(p.name, p.idx)
+
+    def notify(self, name: str, idx: int) -> None:
+        """The worker-thread notify callback — re-emits as a queued Qt signal."""
+        self.row_updated.emit(name, idx)
+
+
+class MainWindow(QMainWindow):
+    """autofluxdep-gui main window: node list + node detail + flux progress."""
+
+    def __init__(self, ctrl: Controller, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._ctrl = ctrl
+        self._worker: Optional[_RunWorker] = None
+        # per-provider sweep-lived liveplot state: name -> (canvas, plotter)
+        self._plots: dict[str, tuple[QWidget, Any]] = {}
+        self.setWindowTitle("autofluxdep-gui")
+        self.resize(1100, 800)
+
+        # Hidden park for canvases not currently shown. Every Node's Plotter
+        # redraws each run point (even the off-screen ones); a parentless canvas
+        # becomes a top-level window the moment it draws, so it would flash as a
+        # stray window. Parenting every canvas here (hidden) keeps it off-screen
+        # but never a window. Parented to the MainWindow (shares its lifetime),
+        # never shown.
+        self._canvas_park = QWidget(self)
+        self._canvas_park.hide()
+
+        split = QSplitter()
+        self._list = NodeListPane(ctrl)
+        self._detail = NodeDetailPane()
+        self._detail.set_canvas_park(self._canvas_park)
+        split.addWidget(self._list)
+        split.addWidget(self._detail)
+        split.setStretchFactor(1, 1)
+        self.setCentralWidget(split)
+
+        # global flux progress in the status bar
+        self._progress = QProgressBar()
+        self._progress.setFormat("flux %v/%m")
+        self.statusBar().addPermanentWidget(self._progress)  # type: ignore[union-attr]
+
+        # selection → right pane follows
+        self._list.selection_changed.connect(self._on_select)
+        self._list.run_requested.connect(self._start)
+        self._list.stop_requested.connect(self._stop)
+
+        # run bridge (worker thread → main thread)
+        self._bridge = _RunBridge(ctrl)
+        self._bridge.run_started.connect(self._on_run_started)
+        self._bridge.node_entered.connect(self._on_node_entered)
+        self._bridge.point_done.connect(self._on_point_done)
+        self._bridge.row_updated.connect(self._on_row_updated)
+        self._bridge.run_finished.connect(self._on_run_done)
+        self._bridge.run_stopped.connect(self._on_run_done)
+
+        # a SoC connect (via the shared setup dialog) flips the setup light /
+        # run-enabled state — the run prerequisite is now "a SoC is connected".
+        ctrl.bus.subscribe(SocChangedPayload, lambda p: self._list._refresh_buttons())
+
+        self._on_select(self._list.selected_index)
+
+    # --- selection ---
+
+    def _on_select(self, row: int) -> None:
+        nodes = self._ctrl.state.nodes
+        node = nodes[row] if 0 <= row < len(nodes) else None
+        self._detail.show_node(node)
+        # show this Node's live canvas (if a run built one)
+        canvas = None
+        if node is not None and node.name in self._plots:
+            canvas = self._plots[node.name][0]
+        self._detail.show_run_canvas(canvas)
+
+    # --- run lifecycle ---
+
+    def _start(self) -> None:
+        self._build_plots()
+        self._progress.setMaximum(max(1, len(self._ctrl.state.flux_values)))
+        self._progress.setValue(0)
+        self._worker = _RunWorker(self._ctrl, self._bridge.notify)
+        self._worker.start()
+
+    def _build_plots(self) -> None:
+        """Allocate Results + build each provider's Figure / Plotter / canvas.
+
+        Main-thread, Run start. Mirrors CONTEXT.md's Ownership: the main thread
+        builds the empty Result containers (via the controller) and the
+        UI-owned Plotters/canvases bound to them; the worker then fills rows.
+        """
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+        from matplotlib.figure import Figure
+
+        # tear down any previous run's canvases (detach the shown one first, then
+        # destroy every canvas — they are discarded, never drawn again)
+        self._detail.show_run_canvas(None)
+        for canvas, _ in self._plots.values():
+            canvas.setParent(None)
+            canvas.deleteLater()
+        self._plots = {}
+
+        results = self._ctrl.prepare_run_results()
+        for node in self._ctrl.state.nodes:
+            result = results.get(node.name)
+            if result is None:
+                continue  # a provider without a Result (none in the prototype)
+            figure = Figure(figsize=(5, 4), tight_layout=True)
+            # parent the canvas to the hidden park so it is never a top-level
+            # window — only the selected one is re-parented into the run tab.
+            canvas = FigureCanvasQTAgg(figure)
+            canvas.setParent(self._canvas_park)
+            plotter = node.builder.make_plotter(figure)
+            self._plots[node.name] = (canvas, plotter)
+        # show the currently selected Node's fresh canvas
+        self._on_select(self._list.selected_index)
+
+    def _stop(self) -> None:
+        self._ctrl.stop_run()
+
+    def _on_run_started(self) -> None:
+        self._list.set_running(True)
+        self._detail.set_running(True)
+        self._detail.focus_run()
+
+    def _on_node_entered(self, name: str, idx: int) -> None:
+        """Auto-follow: a provider started → select it + show its run tab/plot.
+
+        The predictor Service (not in the user's list) and any name absent from
+        the list are skipped — there is nothing to navigate to.
+        """
+        del idx
+        names = self._ctrl.state.node_names()
+        if name not in names:
+            return  # a Service (predictor) or unknown name → no navigation
+        self._list.select_index(names.index(name))  # → _on_select shows its canvas
+        self._detail.focus_run()
+
+    def _on_row_updated(self, name: str, idx: int) -> None:
+        """Main-thread: a Result row was filled → redraw that provider's Plotter."""
+        entry = self._plots.get(name)
+        if entry is None:
+            return
+        plotter = entry[1]
+        result = self._ctrl.state.run_results.get(name)
+        if result is not None and plotter is not None:
+            plotter.update(result, idx)
+
+    def _on_point_done(self, idx: int) -> None:
+        self._progress.setValue(idx + 1)
+
+    def _on_run_done(self) -> None:
+        self._list.set_running(False)
+        self._detail.set_running(False)
+        if self._worker is not None:
+            self._worker.wait()
+            self._worker = None

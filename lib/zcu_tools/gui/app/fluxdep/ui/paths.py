@@ -1,0 +1,78 @@
+"""Sensible default starting directories for the file dialogs.
+
+Derived from the project (chip / qubit / result_dir / database_path) so the user
+doesn't have to navigate from scratch each time. The *intended* directory is
+computed from the project layout (e.g. ``result/<chip>/<qubit>/data/fluxdep`` for
+processed spectra) even when it doesn't exist yet (before the first export); the
+helper then returns the nearest existing ancestor, so the dialog opens close to
+the right place instead of at the root.
+"""
+
+from __future__ import annotations
+
+import os
+
+from zcu_tools.gui.project import ProjectInfo, nearest_existing
+
+# The repo's bundled simulation databases — the home of the precomputed *search*
+# database (fluxonium*.h5), a shared resource unrelated to a chip/qubit, so it is
+# NOT derived from the project (cf. the project's database_path, the *raw
+# spectrum* root). A repo-relative fragment: callers join it under the injected
+# repo root (``_sim_db_dir(root)``) so a .bat launcher that cd's into script/
+# still finds it under the repo, not under script/Database/simulation.
+_SIM_DB_REL = os.path.join("Database", "simulation")
+
+
+def _sim_db_dir(root: str = "") -> str:
+    """The bundled simulation-database dir, anchored at the repo ``root`` when
+    given (empty keeps the legacy cwd-relative fragment)."""
+    return os.path.join(root, _SIM_DB_REL) if root else _SIM_DB_REL
+
+
+def raw_spectrum_dir(project: ProjectInfo) -> str:
+    """Where raw spectrum hdf5 files live — the project's database_path root."""
+    return nearest_existing(project.database_path)
+
+
+def processed_spectrum_dir(project: ProjectInfo) -> str:
+    """Where exported spectrums.hdf5 lives — ``<result_dir>/data/fluxdep``."""
+    target = os.path.join(project.result_dir, "data", "fluxdep")
+    return nearest_existing(target)
+
+
+def database_dir(project: ProjectInfo, root: str = "") -> str:
+    """Where the precomputed *search* database lives — the bundled simulation dir.
+
+    The search database (fluxonium*.h5) is a shared resource unrelated to the
+    chip/qubit, so it is the repo's bundled ``Database/simulation`` — NOT derived
+    from the project (whose ``database_path`` is the raw spectrum root). ``root``
+    (the injected repo root) anchors it there instead of relative to cwd.
+    """
+    del project  # search db location is project-independent
+    return nearest_existing(_sim_db_dir(root))
+
+
+def params_dir(project: ProjectInfo) -> str:
+    """Where params.json is written — the project's result_dir."""
+    return nearest_existing(project.result_dir)
+
+
+def default_database_file(project: ProjectInfo, root: str = "") -> str:
+    """A pre-fillable default *search* database FILE, so the user often need not browse.
+
+    Picks the first ``fluxonium*.h5`` in the bundled ``Database/simulation`` dir.
+    Returns "" when none is found. (Project-independent — the search database is a
+    shared resource, not a per-chip/qubit file; cf. ``database_dir``.) ``root``
+    (the injected repo root) anchors the lookup there instead of relative to cwd.
+    """
+    del project  # search db location is project-independent
+    sim_dir = _sim_db_dir(root)
+    if os.path.isdir(sim_dir):
+        candidates = sorted(
+            f
+            for f in os.listdir(sim_dir)
+            if f.startswith("fluxonium") and f.endswith((".h5", ".hdf5"))
+        )
+        if candidates:
+            return os.path.join(sim_dir, candidates[0])
+    return ""

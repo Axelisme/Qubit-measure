@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -34,9 +35,13 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-FreqGainResult: TypeAlias = tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+
+@dataclass(frozen=True)
+class FreqGainResult:
+    gains: NDArray[np.float64]
+    freqs: NDArray[np.float64]
+    signals: NDArray[np.complex128]
+    cfg_snapshot: Optional["FreqGainCfg"] = None
 
 
 class FreqGainModuleCfg(ConfigBase):
@@ -123,6 +128,7 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
                 soc,
                 progress=False,
                 round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
                 **(acquire_kwargs or {}),
             )
 
@@ -140,10 +146,9 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
             )
 
         # Cache results
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (gains, freqs, signals)
+        self.last_result = FreqGainResult(gains, freqs, signals, cfg_snapshot=cfg)
 
-        return gains, freqs, signals
+        return self.last_result
 
     def analyze(
         self, result: Optional[FreqGainResult] = None, smooth: float = 1.0
@@ -152,7 +157,7 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains, freqs, signals = result
+        gains, freqs, signals = result.gains, result.freqs, result.signals
 
         # Find peak in amplitude
         smooth_signals: NDArray[np.complex128] = gaussian_filter(
@@ -196,15 +201,16 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains, freqs, signals = result
+        gains, freqs, signals = result.gains, result.freqs, result.signals
 
         _filepath = Path(filepath)
 
-        # 0 signals
-        cfg = self.last_cfg
-        assert cfg is not None
+        if result.cfg_snapshot is None:
+            raise ValueError("Cannot save result without configuration snapshot")
+        cfg = result.cfg_snapshot
         comment = make_comment(cfg, comment)
 
+        # 0 signals
         save_data(
             filepath=str(_filepath.with_name(_filepath.name + "_0deg")),
             x_info={"name": "Cavity drive Gain", "unit": "a.u.", "values": gains},
@@ -288,13 +294,15 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
             [deg0_signals, deg90_signals, deg180_signals, deg270_signals], axis=0
         ).astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
-
             if cfg is not None:
-                self.last_cfg = FreqGainCfg.validate_or_warn(
+                cfg_snapshot = FreqGainCfg.validate_or_warn(
                     cfg, source=str(deg0_filepath)
                 )
-        self.last_result = (gains, freqs, signals)
+        self.last_result = FreqGainResult(
+            gains, freqs, signals, cfg_snapshot=cfg_snapshot
+        )
 
-        return gains, freqs, signals
+        return self.last_result

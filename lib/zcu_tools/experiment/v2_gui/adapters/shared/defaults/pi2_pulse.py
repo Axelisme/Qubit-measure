@@ -1,0 +1,62 @@
+"""Default factories for the ``pi2_pulse`` role (calibrated qubit π/2 pulse).
+
+Blank is a blank qubit pulse; the ref prefers pi2 library entries, degrading to
+the pi entries before falling back to blank.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Optional
+
+from typing_extensions import Literal, overload
+
+from zcu_tools.gui.app.main.adapter import ModuleRefValue
+from zcu_tools.program.v2.modules.pulse import PulseCfg
+
+from .helpers import select_named_module_value
+from .qub_probe import make_qub_probe_default
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.app.main.adapter import ExpContext
+
+PI2_PULSE_NAMES = ["pi2_amp", "pi2_len", "pi_amp", "pi_len"]
+
+
+def make_pi2_pulse_default(ctx: ExpContext) -> ModuleRefValue:
+    """Blank π/2 pulse — a blank qubit pulse (no library lookup)."""
+    return make_qub_probe_default(ctx)
+
+
+@overload
+def make_pi2_pulse_ref_default(
+    ctx: ExpContext,
+    preferred_names: list[str] = ...,
+    *,
+    optional: Literal[False] = ...,
+) -> ModuleRefValue: ...
+
+
+@overload
+def make_pi2_pulse_ref_default(
+    ctx: ExpContext,
+    preferred_names: list[str] = ...,
+    *,
+    optional: Literal[True],
+) -> Optional[ModuleRefValue]: ...
+
+
+def make_pi2_pulse_ref_default(
+    ctx: ExpContext,
+    preferred_names: list[str] = PI2_PULSE_NAMES,
+    *,
+    optional: bool = False,
+) -> Optional[ModuleRefValue]:
+    """Reference a library π/2 pulse (pi2_* → pi_*), else the blank one."""
+    selected = select_named_module_value(
+        ml=ctx.ml, module_type=PulseCfg, preferred_names=preferred_names
+    )
+    if selected is not None:
+        return ModuleRefValue(chosen_key=selected.name, value=selected.value)
+    if optional:
+        return None  # optional ref disabled (ADR-0010)
+    return make_pi2_pulse_default(ctx)

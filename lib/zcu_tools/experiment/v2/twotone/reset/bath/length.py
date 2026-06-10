@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -31,8 +32,12 @@ from zcu_tools.program.v2 import (
 from zcu_tools.program.v2.modules import BathResetCfg
 from zcu_tools.utils.datasaver import load_data, save_data
 
-# (lens, signals)
-LengthResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
+
+@dataclass(frozen=True)
+class LengthResult:
+    lengths: NDArray[np.float64]
+    signals: NDArray[np.complex128]
+    cfg_snapshot: Optional["LengthCfg"] = None
 
 
 def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -70,8 +75,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
-        rounds = cfg.rounds
-        cfg.rounds = 1  # implemented round loop by scan
+        rounds = cfg.rounds  # implemented round loop by scan, see measure_fn
 
         length_sweep = cfg.sweep.length
         tested_reset = modules.tested_reset
@@ -94,6 +98,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
             update_hook: Optional[Callable],
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
+            cfg.rounds = 1  # round loop is driven by the scan's .repeat("rounds", ...)
             modules = cfg.modules
 
             tested_reset = modules.tested_reset
@@ -121,6 +126,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
                 soc,
                 progress=False,
                 round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
                 **(acquire_kwargs or {}),
             )
 
@@ -150,20 +156,17 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
             )
             signals = average_signals(signals)
 
-        cfg.rounds = rounds
-
         # Cache results
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (lengths, signals)
+        self.last_result = LengthResult(lengths, signals, cfg_snapshot=cfg)
 
-        return lengths, signals
+        return self.last_result
 
     def analyze(self, result: Optional[LengthResult] = None) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
-        lens, signals = result
+        lens, signals = result.lengths, result.signals
 
         real_signals = bathreset_signal2real(signals)
 
@@ -189,10 +192,11 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        lens, signals = result
+        lens, signals = result.lengths, result.signals
 
-        cfg = self.last_cfg
-        assert cfg is not None
+        if result.cfg_snapshot is None:
+            raise ValueError("Cannot save result without configuration snapshot")
+        cfg = result.cfg_snapshot
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -216,11 +220,11 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         lens = lens.astype(np.float64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
-
             if cfg is not None:
-                self.last_cfg = LengthCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (lens, signals)
+                cfg_snapshot = LengthCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = LengthResult(lens, signals, cfg_snapshot=cfg_snapshot)
 
-        return lens, signals
+        return self.last_result

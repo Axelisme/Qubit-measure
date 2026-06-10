@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__measure-gui",
+      "mcp__fluxdep-gui",
+      "mcp__agent-memory",
+      "mcp__dispersive-gui"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "measure-gui",
+    "fluxdep-gui"
+  ]
+}

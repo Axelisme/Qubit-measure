@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 from abc import ABC, abstractmethod
 
 from typing_extensions import TYPE_CHECKING, Generic, Optional, Self, TypeVar
@@ -82,9 +83,21 @@ class BaseDevice(ABC, Generic[T_DeviceInfo]):
     # ----- abstract methods -----
 
     @abstractmethod
-    def _setup(self, cfg: T_DeviceInfo, *, progress: bool = True) -> None: ...
+    def _setup(
+        self,
+        cfg: T_DeviceInfo,
+        *,
+        progress: bool = True,
+        stop_event: Optional[threading.Event] = None,
+    ) -> None: ...
 
-    def setup(self, cfg: T_DeviceInfo, *, progress: bool = True) -> None:
+    def setup(
+        self,
+        cfg: T_DeviceInfo,
+        *,
+        progress: bool = True,
+        stop_event: Optional[threading.Event] = None,
+    ) -> None:
         """
         Setup the device with the given configuration.
         """
@@ -99,8 +112,7 @@ class BaseDevice(ABC, Generic[T_DeviceInfo]):
                 f"Trying to setup device of type {self.__class__.__name__} with cfg of type {type(cfg)}"
             )
 
-        # private method to setup
-        self._setup(cfg, progress=progress)
+        self._setup(cfg, progress=progress, stop_event=stop_event)
 
     @abstractmethod
     def get_info(self) -> T_DeviceInfo:

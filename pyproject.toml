@@ -14,8 +14,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+development = ["pytest", "pytest-cov", "pytest-xdist"]
 server = ["numpy==1.23.5"]
-fit = [
+client = [
   "h5py",
   "ipykernel",
   "ipywidgets",
@@ -28,13 +29,11 @@ fit = [
   "nbformat>=4.2.0",
   "scikit-learn",
   "joblib",
+  "threadpoolctl",
   "numba",
   "requests",
   "flask",
   "scikit-optimize",
-]
-client = [
-  "zcu-tools[fit]",
   "qick @ git+https://github.com/openquantumhardware/qick.git",
   "labber @ git+https://github.com/Axelisme/labber_api.git",
   "numpy==1.23.5",
@@ -50,7 +49,8 @@ gdrive = [
   "google-auth-oauthlib",
   "python-dotenv",
 ]
-all = ["zcu_tools[client,design,gdrive]"]
+gui = ["zcu-tools[client]", "qtpy", "PyQt6"]
+all = ["zcu_tools[development,client,design,gdrive,gui]"]
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
@@ -71,6 +71,10 @@ reportMissingImports = "none"
 reportIncompatibleVariableOverride = "none"
 
 [tool.pytest.ini_options]
+# Tests live under tests/ (project convention). Scoping collection here keeps
+# pytest from walking into scratch/ helper scripts (named test_*.py with plain
+# helper functions like test(label, ...) that pytest would mis-collect as cases).
+testpaths = ["tests"]
 filterwarnings = ["ignore::DeprecationWarning:matplotlib.*"]
 
 [tool.jupytext]

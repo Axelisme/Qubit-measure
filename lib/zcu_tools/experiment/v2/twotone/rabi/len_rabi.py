@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional, TypeAlias
+from typing_extensions import Any, Callable, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -26,8 +27,12 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_rabi
 from zcu_tools.utils.process import rotate2real
 
-# (lens, signals)
-LenRabiResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
+
+@dataclass(frozen=True)
+class LenRabiResult:
+    lengths: NDArray[np.float64]
+    signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[LenRabiCfg] = None
 
 
 def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -50,6 +55,8 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         cfg: LenRabiCfg,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> LenRabiResult:
+        orig_cfg = deepcopy(cfg)
+
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -81,6 +88,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
                 soc,
                 progress=False,
                 round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
                 **(acquire_kwargs or {}),
             )
 
@@ -97,11 +105,12 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
                 ),
             )
 
-        # record last cfg and result
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (lengths, signals)
+        # record result
+        self.last_result = LenRabiResult(
+            lengths=lengths, signals=signals, cfg_snapshot=orig_cfg
+        )
 
-        return lengths, signals
+        return self.last_result
 
     def _run_for_arb(
         self,
@@ -110,6 +119,8 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         cfg: LenRabiCfg,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> LenRabiResult:
+        orig_cfg = deepcopy(cfg)
+
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -140,7 +151,11 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
                 prog_cache[length] = TwoToneProgram(soccfg, cfg)
 
             return prog_cache[length].acquire(
-                soc, progress=False, round_hook=update_hook, **(acquire_kwargs or {})
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
+                **(acquire_kwargs or {}),
             )
 
         def average_round(
@@ -170,11 +185,12 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
             )
             signals = average_round(signals)
 
-        # record last cfg and result
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (lengths, signals)
+        # record result
+        self.last_result = LenRabiResult(
+            lengths=lengths, signals=signals, cfg_snapshot=orig_cfg
+        )
 
-        return lengths, signals
+        return self.last_result
 
     def run(
         self,
@@ -201,7 +217,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        lens, signals = result
+        lens, signals = result.lengths, result.signals
 
         real_signals = rabi_signal2real(signals)
 
@@ -257,9 +273,10 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        lens, signals = result
-        cfg = self.last_cfg
-        assert cfg is not None
+        lens, signals = result.lengths, result.signals
+        cfg = result.cfg_snapshot
+        if cfg is None:
+            raise ValueError("cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -282,11 +299,14 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         lens = lens.astype(np.float64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
-            cfg, _, _ = parse_comment(comment)
+            _cfg, _, _ = parse_comment(comment)
 
-            if cfg is not None:
-                self.last_cfg = LenRabiCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (lens, signals)
+            if _cfg is not None:
+                cfg_snapshot = LenRabiCfg.validate_or_warn(_cfg, source=filepath)
+        self.last_result = LenRabiResult(
+            lengths=lens, signals=signals, cfg_snapshot=cfg_snapshot
+        )
 
-        return lens, signals
+        return self.last_result

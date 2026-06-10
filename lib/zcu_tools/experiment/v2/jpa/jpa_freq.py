@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional, TypeAlias
+from typing_extensions import Any, Callable, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -35,7 +36,12 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-FreqResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
+
+@dataclass(frozen=True)
+class FreqResult:
+    freqs: NDArray[np.float64]
+    signals: NDArray[np.float64]
+    cfg_snapshot: Optional[FreqCfg] = None
 
 
 class FreqModuleCfg(ConfigBase):
@@ -55,6 +61,7 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):
 
 class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
     def run(self, soc, soccfg, cfg: FreqCfg) -> FreqResult:
+        cfg = deepcopy(cfg)
         jpa_freqs = sweep2array(cfg.sweep.jpa_freq, allow_array=True)
         np.random.shuffle(jpa_freqs[1:-1])  # randomize permutation
 
@@ -84,6 +91,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                 progress=False,
                 round_hook=lambda i, _avg_d: update_hook(i, [tracker]),
                 trackers=[tracker],
+                stop_checkers=[ctx.is_stop],
             )
             return [tracker]
 
@@ -107,16 +115,18 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             )
             signals = np.asarray(signals)
 
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (jpa_freqs, signals)
-        return jpa_freqs, signals
+        self.last_result = FreqResult(
+            freqs=jpa_freqs, signals=signals, cfg_snapshot=cfg
+        )
+        return self.last_result
 
     def analyze(self, result: Optional[FreqResult] = None) -> tuple[float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
-        jpa_freqs, signals = result
+        jpa_freqs = result.freqs
+        signals = result.signals
 
         real_signals = np.abs(signals)
 
@@ -151,10 +161,12 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        jpa_freqs, signals = result
+        jpa_freqs = result.freqs
+        signals = result.signals
 
-        cfg = self.last_cfg
-        assert cfg is not None
+        cfg = result.cfg_snapshot
+        if cfg is None:
+            raise ValueError("cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -179,11 +191,13 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         jpa_freqs = jpa_freqs.astype(np.float64)
         signals = signals.astype(np.float64)
 
+        cfg_snapshot = None
         if comment is not None:
-            cfg, _, _ = parse_comment(comment)
+            _cfg, _, _ = parse_comment(comment)
+            if _cfg is not None:
+                cfg_snapshot = FreqCfg.validate_or_warn(_cfg, source=filepath)
+        self.last_result = FreqResult(
+            freqs=jpa_freqs, signals=signals, cfg_snapshot=cfg_snapshot
+        )
 
-            if cfg is not None:
-                self.last_cfg = FreqCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (jpa_freqs, signals)
-
-        return jpa_freqs, signals
+        return self.last_result

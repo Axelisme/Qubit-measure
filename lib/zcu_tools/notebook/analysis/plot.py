@@ -7,7 +7,7 @@ from typing_extensions import TYPE_CHECKING, Any, Optional
 
 from zcu_tools.notebook.analysis.fluxdep.utils import add_secondary_xaxis
 from zcu_tools.simulate.fluxonium import (
-    calculate_eff_t1_vs_flux,
+    calculate_eff_t1_vs_flux_fast,
     calculate_energy_vs_flux,
     calculate_n_oper_vs_flux,
 )
@@ -110,13 +110,13 @@ def plot_t1s(
 ) -> tuple[go.Figure, NDArray[np.float64]]:
     fig = go.Figure()
 
-    t1s = calculate_eff_t1_vs_flux(
+    t1s = calculate_eff_t1_vs_flux_fast(
+        params,
         fluxs,
         noise_channels=noise_channels,
         Temp=Temp,
-        params=params,
         cutoff=PLOT_CUTOFF,
-        evals_count=PLOT_EVALS_COUNT,
+        qub_dim=PLOT_EVALS_COUNT,
     )
 
     fig.add_trace(go.Scatter(x=fluxs, y=t1s, mode="lines", name="t1"))

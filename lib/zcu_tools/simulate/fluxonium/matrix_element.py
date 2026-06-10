@@ -50,12 +50,20 @@ def calculate_n_oper_vs_flux(
         fluxonium = Fluxonium(
             *params, flux=0.5, cutoff=cutoff, truncated_dim=return_dim
         )
-        spectrum_data = fluxonium.get_matelements_vs_paramvals(
-            operator="n_operator",
-            param_name="flux",
-            param_vals=fluxs,
-            evals_count=return_dim,
-        )
+        # Pin BLAS to one thread for the sweep: on these tiny matrices OpenBLAS
+        # multithreading is a net loss (thread overhead >> work), ~150x slower
+        # — a benchmarked finding, same as calculate_energy_vs_flux. The context
+        # manager limits only this call and restores on exit (no global side
+        # effect). threadpoolctl ships with joblib (a project dependency).
+        from threadpoolctl import threadpool_limits
+
+        with threadpool_limits(limits=1, user_api="blas"):
+            spectrum_data = fluxonium.get_matelements_vs_paramvals(
+                operator="n_operator",
+                param_name="flux",
+                param_vals=fluxs,
+                evals_count=return_dim,
+            )
     matrix_elements = spectrum_data.matrixelem_table
 
     return spectrum_data, matrix_elements[:, :return_dim, :return_dim]
@@ -180,12 +188,17 @@ def calculate_phi_oper_vs_flux(
     phi_oper = fluxonium.phi_operator(energy_esys=False)
 
     if spectrum_data is None or spectrum_data.matrixelem_table is None:
-        spectrum_data = fluxonium.get_matelements_vs_paramvals(
-            operator=phi_oper,
-            param_name="flux",
-            param_vals=fluxs,
-            evals_count=return_dim,
-        )
+        # See calculate_n_oper_vs_flux: pin BLAS to one thread for the sweep
+        # (OpenBLAS multithreading is a ~150x net loss on these tiny matrices).
+        from threadpoolctl import threadpool_limits
+
+        with threadpool_limits(limits=1, user_api="blas"):
+            spectrum_data = fluxonium.get_matelements_vs_paramvals(
+                operator=phi_oper,
+                param_name="flux",
+                param_vals=fluxs,
+                evals_count=return_dim,
+            )
     matrix_elements = spectrum_data.matrixelem_table
 
     return spectrum_data, matrix_elements[:, :return_dim, :return_dim]
@@ -238,12 +251,17 @@ def calculate_sin_phi_oper_vs_flux(
     sin_phi_oper = fluxonium.sin_phi_operator(alpha=alpha, beta=beta, energy_esys=False)
 
     if spectrum_data is None or spectrum_data.matrixelem_table is None:
-        spectrum_data = fluxonium.get_matelements_vs_paramvals(
-            operator=sin_phi_oper,
-            param_name="flux",
-            param_vals=fluxs,
-            evals_count=return_dim,
-        )
+        # See calculate_n_oper_vs_flux: pin BLAS to one thread for the sweep
+        # (OpenBLAS multithreading is a ~150x net loss on these tiny matrices).
+        from threadpoolctl import threadpool_limits
+
+        with threadpool_limits(limits=1, user_api="blas"):
+            spectrum_data = fluxonium.get_matelements_vs_paramvals(
+                operator=sin_phi_oper,
+                param_name="flux",
+                param_vals=fluxs,
+                evals_count=return_dim,
+            )
     matrix_elements = spectrum_data.matrixelem_table
 
     return spectrum_data, matrix_elements[:, :return_dim, :return_dim]

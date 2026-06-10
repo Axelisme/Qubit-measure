@@ -1,5 +1,5 @@
 from . import backend
-from .backend import make_plot_frame
+from .backend import instant_plot, make_plot_frame
 from .base import AbsLivePlot, DummyPlot
 from .multi import MultiLivePlot
 from .plot1d import LivePlot1D
@@ -11,6 +11,7 @@ __all__ = [
     "backend",
     # backend
     "make_plot_frame",
+    "instant_plot",
     # base
     "AbsLivePlot",
     "DummyPlot",

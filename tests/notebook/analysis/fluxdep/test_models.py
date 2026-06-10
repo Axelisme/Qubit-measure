@@ -1,5 +1,7 @@
 import numpy as np
+import pytest
 from zcu_tools.notebook.analysis.fluxdep.models import (
+    TransitionDict,
     compile_transitions,
     energy2linearform,
 )
@@ -60,6 +62,30 @@ def test_nb_matches_python_higher_order():
         "sample_f": 10.0,
     }
     _check_matches(transitions, energies)
+
+
+def test_energy2linearform_mirror_accepts_sample_f_without_r_f():
+    # Regression: a `mirror` transition needs sample_f (E = sample_f - E_ji), not
+    # r_f. The validation previously copy-pasted the side-band check and wrongly
+    # demanded r_f, so a mirror with only sample_f raised. It must now succeed and
+    # agree with the compiled / njit paths.
+    rng = np.random.default_rng(4)
+    energies = rng.standard_normal((6, 4))
+    transitions = {
+        "transitions": [(0, 1)],
+        "mirror": [(0, 1)],
+        "sample_f": 9.0,
+    }
+    _check_matches(transitions, energies)
+
+
+def test_mirror_without_sample_f_or_r_f_raises_consistently():
+    energies = np.zeros((4, 4), dtype=np.float64)
+    transitions: TransitionDict = {"mirror": [(0, 1)]}
+    with pytest.raises(ValueError, match="sample_f"):
+        energy2linearform(energies, transitions)
+    with pytest.raises(ValueError, match="sample_f"):
+        compile_transitions(transitions, energies.shape[1])
 
 
 def test_nb_empty_transitions_k_zero():

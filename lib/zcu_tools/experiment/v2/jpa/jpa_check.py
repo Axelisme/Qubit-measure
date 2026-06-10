@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Mapping, Optional, TypeAlias
+from typing_extensions import Any, Callable, Mapping, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo
@@ -33,9 +34,13 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-CheckResult: TypeAlias = tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+
+@dataclass(frozen=True)
+class CheckResult:
+    outputs: NDArray[np.float64]
+    freqs: NDArray[np.float64]
+    signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[CheckCfg] = None
 
 
 def check_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -61,6 +66,7 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
     OUTPUT_MAP = {0: "off", 1: "on"}
 
     def run(self, soc, soccfg, cfg: CheckCfg) -> CheckResult:
+        cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -91,7 +97,12 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
                     PulseReadout("readout", modules.readout),
                 ],
                 sweep=[("freq", freq_sweep)],
-            ).acquire(soc, progress=False, round_hook=update_hook)
+            ).acquire(
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
+            )
 
         with LivePlot1D(
             "Frequency (MHz)", "Magnitude", segment_kwargs=dict(num_lines=2)
@@ -120,16 +131,19 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
             )
             signals = np.asarray(signals)
 
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (outputs, freqs, signals)
-        return outputs, freqs, signals
+        self.last_result = CheckResult(
+            outputs=outputs, freqs=freqs, signals=signals, cfg_snapshot=cfg
+        )
+        return self.last_result
 
     def analyze(self, result: Optional[CheckResult] = None) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
-        outputs, freqs, signals2D = result
+        outputs = result.outputs
+        freqs = result.freqs
+        signals2D = result.signals
         real_signals = check_signal2real(signals2D)
 
         fig, ax = plt.subplots(figsize=config.figsize)
@@ -161,10 +175,13 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        cfg = self.last_cfg
-        assert cfg is not None
+        outputs = result.outputs
+        freqs = result.freqs
+        signals2D = result.signals
 
-        outputs, freqs, signals2D = result
+        cfg = result.cfg_snapshot
+        if cfg is None:
+            raise ValueError("cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -190,10 +207,13 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
         freqs = freqs.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
-            cfg, _, _ = parse_comment(comment)
-            if cfg is not None:
-                self.last_cfg = CheckCfg.validate_or_warn(cfg, source=filepath)
+            _cfg, _, _ = parse_comment(comment)
+            if _cfg is not None:
+                cfg_snapshot = CheckCfg.validate_or_warn(_cfg, source=filepath)
 
-        self.last_result = (outputs, freqs, signals2D)
-        return outputs, freqs, signals2D
+        self.last_result = CheckResult(
+            outputs=outputs, freqs=freqs, signals=signals2D, cfg_snapshot=cfg_snapshot
+        )
+        return self.last_result

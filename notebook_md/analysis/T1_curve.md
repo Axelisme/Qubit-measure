@@ -127,15 +127,8 @@ plt.close(fig)
 # Simulation
 
 ```python
-from scqubits.core.fluxonium import Fluxonium
-
 t_flxs = np.linspace(0.0, 1.0, 100)
 
-fluxonium = Fluxonium(*params, flux=0.5, cutoff=40, truncated_dim=6)
-
-t_spectrum_data = fluxonium.get_spectrum_vs_paramvals(
-    "flux", t_flxs, evals_count=20, get_eigenstates=True
-)
 s_n_spectrum_data = None
 s_phi_spectrum_data = None
 ```
@@ -151,8 +144,7 @@ plot_args = (
     s_T1errs,
     flx_half,
     flx_period,
-    fluxonium,
-    t_spectrum_data,
+    params,
     t_flxs,
 )
 ```
@@ -431,9 +423,7 @@ noise_label = "\n".join(
 ```
 
 ```python
-t1_effs = zt1.calculate_eff_t1_vs_flx_with(
-    t_flxs, noise_channels, Temp, fluxonium=fluxonium, spectrum_data=t_spectrum_data
-)
+t1_effs = zf.calculate_eff_t1_vs_flux_fast(params, t_flxs, noise_channels, Temp)
 ```
 
 ## Percell Effect
@@ -485,12 +475,12 @@ plt.close(fig)
 ```
 
 ```python
-t1 = zf.calculate_eff_t1_with(
+t1 = zf.calculate_eff_t1_fast(
     flux=0.5,
+    params=params,
     noise_channels=noise_channels,
     Temp=Temp,
     # Temp=20e-3,
-    fluxonium=fluxonium,
 )
 
 print(f"T1 = {1e-3 * t1:.2f} us")
