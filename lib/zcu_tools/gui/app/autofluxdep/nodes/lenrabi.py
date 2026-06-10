@@ -11,6 +11,15 @@ and pi2 lengths plus the Rabi frequency.
   default).
 - provides the ``pi_pulse`` and ``pi2_pulse`` modules (placeholder dicts in the
   prototype; the real impl would fill proper PulseReadoutCfg objects).
+
+Phase B (cfg-builder): when the context is configured (a populated ml + an
+``opt_readout`` module + the drive "設定頭" params), ``produce`` lowers it into a
+real ``LenRabiCfgTemplate`` via ``Builder.make_cfg`` → ``ml.make_cfg`` — mirroring
+the notebook's ``cfg_maker`` and the lower-layer ``experiment/v2/autofluxdep``
+LenRabiCfgTemplate — exercising the real cfg pipeline. The acquire stays SIMULATED
+either way (no hardware): with the demo / empty-ml context the cfg is None and
+produce keeps the pure snapshot-driven simulation unchanged. Compare
+``notebook_md/autofluxdep.md`` (the LenRabiTask block).
 """
 
 from __future__ import annotations
@@ -21,6 +30,8 @@ import numpy as np
 from numpy.typing import NDArray
 from typing_extensions import Any, Mapping, Optional
 
+from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.plotters import ColormapLinePlotter
@@ -37,9 +48,36 @@ from zcu_tools.gui.app.autofluxdep.nodes.synth import (
     resolve_rounds,
     signal_to_real,
 )
+from zcu_tools.program.v2 import ProgramV2Cfg, PulseCfg, ReadoutCfg, ResetCfg
 from zcu_tools.utils.fitting import fit_rabi
 
 logger = logging.getLogger(__name__)
+
+
+class LenRabiModuleCfg(ConfigBase):
+    """The module bundle lenrabi lowers a context into (mirrors the lower-layer
+    ``experiment/v2/autofluxdep`` LenRabiModuleCfg): an optional reset, the
+    on-resonance ``rabi_pulse`` (the swept drive), and the ``readout``."""
+
+    reset: Optional[ResetCfg] = None
+    rabi_pulse: PulseCfg
+    readout: ReadoutCfg
+
+
+class LenRabiCfgTemplate(ProgramV2Cfg, ExpCfgModel):
+    """The base length-Rabi cfg lenrabi lowers a context into.
+
+    ``ProgramV2Cfg`` (reps/rounds/relax) + the ``ExpCfgModel`` device/save fields
+    + the ``rabi_pulse``/``readout`` modules + the ``sweep_range`` (the pulse-length
+    extent as a ``(start, stop)`` pair) — mirroring the lower-layer
+    ``experiment/v2/autofluxdep`` LenRabiCfgTemplate. The flux ``dev`` entry and the
+    concrete ``length`` sweep are merged in by the lower-layer's ``run`` (and, in
+    the GUI prototype, the sweep is simulated from ``sweep_range`` directly); they
+    are NOT part of the template, exactly like qubit_freq's detune sweep.
+    """
+
+    modules: LenRabiModuleCfg
+    sweep_range: tuple[float, float]
 
 
 def _last_fit(result: Any) -> float:
@@ -58,13 +96,44 @@ def _default_readout() -> Optional[Any]:
 class LenRabiNode(Node):
     """One flux point's lenrabi: synth Rabi oscillation → fit_rabi → fill row → Patch."""
 
-    def __init__(self, env: RunEnv) -> None:
+    def __init__(self, env: RunEnv, builder: "LenRabiBuilder") -> None:
         self._env = env
+        self._builder = builder
+
+    def _maybe_make_cfg(self, snapshot: Snapshot) -> Optional[LenRabiCfgTemplate]:
+        """Build the run cfg when the context is configured for it, else None.
+
+        ``make_cfg`` needs a readout module (``opt_readout``) + the drive params;
+        the default / demo context (empty ml) has neither, so produce keeps the
+        pure snapshot-driven simulation there. No hardware is touched either way —
+        Phase B simulates the acquire uniformly; routing through ``make_cfg`` (when
+        configured) exercises the real cfg pipeline and makes the cfg the source of
+        the drive on-resonance frequency. Mirrors qubit_freq's guard.
+        """
+        env = self._env
+        if (
+            env.ml is None
+            or snapshot.module("opt_readout") is None
+            or not env.params.get("qub_waveform")
+            or env.params.get("qub_ch") is None
+        ):
+            return None
+        return self._builder.make_cfg(env, snapshot)
 
     def produce(self, snapshot: Snapshot) -> Patch:
         env = self._env
-        _ = snapshot["qubit_freq"]  # required — drives on resonance
-        _ = snapshot.module("opt_readout")  # optional — prototype does not use
+        _ = snapshot["qubit_freq"]  # required — the on-resonance drive frequency
+        _ = snapshot.module("opt_readout")  # optional — readout for the cfg path
+
+        # Build the run cfg from the active context (when configured); the acquire
+        # is SIMULATED below. The cfg's rabi_pulse is the on-resonance drive — its
+        # freq is the (required) qubit frequency — so going through make_cfg
+        # exercises the real cfg pipeline without changing the simulated physics
+        # (the Rabi oscillation is a function of pulse LENGTH, not the drive freq,
+        # so the centre value the cfg carries is the length extent, applied to the
+        # Result axis already). With the demo / empty-ml context the cfg is None
+        # and produce stays purely synthetic. Mirrors qubit_freq's wiring.
+        _ = self._maybe_make_cfg(snapshot)
 
         result: Sweep1DResult = env.result
         lengths = result.x
@@ -145,8 +214,16 @@ class LenRabiBuilder(Builder):
         "num_expts",
         "reps",
         "rounds",
+        "relax_delay",
         "earlystop_snr",
         "acquire_delay",
+        # the drive pulse "設定頭" — what the cfg builder lowers into rabi_pulse
+        # (freq comes from the required qubit_freq, readout from the snapshot)
+        "qub_waveform",
+        "qub_ch",
+        "qub_nqz",
+        "qub_gain",
+        "qub_length",
     )
 
     def make_init_result(self, params: Mapping[str, Any], flux: Any) -> Sweep1DResult:
@@ -163,4 +240,73 @@ class LenRabiBuilder(Builder):
         )
 
     def build_node(self, env: RunEnv) -> LenRabiNode:
-        return LenRabiNode(env)
+        return LenRabiNode(env, self)
+
+    def make_cfg(self, env: RunEnv, snapshot: Snapshot) -> LenRabiCfgTemplate:
+        """Lower the active context + this point's snapshot into the base run cfg.
+
+        Mirrors the notebook's lenrabi ``cfg_maker`` (runs in ``produce``, where
+        the snapshot is available): the ``rabi_pulse`` drives the qubit on
+        resonance — its frequency is the required ``qubit_freq`` from the snapshot —
+        the readout is the latest-available ``opt_readout`` module, and the pulse
+        waveform / channel / gain / nqz come from the node's params (the "設定頭").
+        The pulse-length ``sweep_range`` is taken from the already-allocated Result
+        trailing axis so the cfg's swept extent matches the simulated length axis
+        (the notebook computes ``(0.05, max(5*prev_pi_len, 0.5))``; the GUI
+        prototype's extent is the user-tuned ``sweep_range`` param). The flux ``dev``
+        entry and the concrete ``length`` sweep are NOT here — the lower-layer's
+        ``run`` merges them, exactly like qubit_freq's detune.
+
+        Raises if the readout module is unavailable or the drive params are unset —
+        a real run needs a concrete drive pulse (Fast Fail), unlike the synthetic
+        path which fabricates a signal.
+        """
+        params = env.params
+        ml = env.ml
+        if ml is None:
+            raise RuntimeError("lenrabi.make_cfg needs an active ModuleLibrary")
+        readout = snapshot.module("opt_readout")
+        if readout is None:
+            raise RuntimeError(
+                "lenrabi.make_cfg needs a readout module (none produced or preset)"
+            )
+        waveform_name = params.get("qub_waveform")
+        ch = params.get("qub_ch")
+        if not waveform_name or ch is None:
+            raise RuntimeError(
+                "lenrabi.make_cfg needs qub_waveform + qub_ch params set"
+            )
+        qubit_freq = float(snapshot["qubit_freq"])
+
+        # the pulse-length extent (start, stop): the simulated trailing axis when a
+        # Result is allocated, else the parsed sweep_range param (so make_cfg works
+        # standalone, e.g. in tests, without a Result curried in).
+        if env.result is not None:
+            xs = np.asarray(env.result.x, dtype=np.float64)
+        else:
+            xs = parse_linear_axis(params.get("sweep_range"), _DEFAULT_SWEEP)
+        sweep_range = (float(xs[0]), float(xs[-1]))
+
+        return ml.make_cfg(
+            {
+                "modules": {
+                    "rabi_pulse": {
+                        "type": "pulse",
+                        "waveform": ml.get_waveform(
+                            waveform_name,
+                            {"length": float(params.get("qub_length", 0.1))},
+                        ),
+                        "ch": int(ch),
+                        "nqz": int(params.get("qub_nqz", 2)),
+                        "gain": float(params.get("qub_gain", 0.05)),
+                        "freq": qubit_freq,
+                    },
+                    "readout": readout,
+                },
+                "relax_delay": float(params.get("relax_delay", 0.5)),
+                "reps": int(params.get("reps", 1000)),
+                "rounds": int(params.get("rounds", 10)),
+                "sweep_range": sweep_range,
+            },
+            LenRabiCfgTemplate,
+        )

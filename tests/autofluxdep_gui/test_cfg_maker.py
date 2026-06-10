@@ -108,3 +108,77 @@ def test_qubit_freq_produce_builds_cfg_when_context_configured():
     assert node._maybe_make_cfg(snap) is not None  # cfg-driven path is taken
     patch = node.produce(snap)
     assert "qubit_freq" in patch.values()  # simulated acquire + fit succeeded
+
+
+def test_lenrabi_make_cfg_lowers_context():
+    from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import (
+        LenRabiBuilder,
+        LenRabiCfgTemplate,
+    )
+
+    ml = _ml()
+    params = {
+        "qub_waveform": "qub_flat",
+        "qub_ch": 4,
+        "qub_nqz": 2,
+        "qub_gain": 0.3,
+        "qub_length": 0.5,
+        "sweep_range": "0.05,2.5,61",
+        "reps": 1000,
+        "rounds": 10,
+        "relax_delay": 1.0,
+    }
+    env = RunEnv(flux=0.0, flux_idx=0, params=params, ml=ml)
+    snap = Snapshot({"qubit_freq": 5135.0}, modules={"opt_readout": _READOUT})
+    cfg = LenRabiBuilder().make_cfg(env, snap)
+    assert isinstance(cfg, LenRabiCfgTemplate)
+    # the rabi drive pulse is on resonance: its freq is the required qubit_freq
+    assert float(cfg.modules.rabi_pulse.freq) == 5135.0
+    assert int(cfg.modules.rabi_pulse.ch) == 4
+    assert cfg.reps == 1000 and cfg.rounds == 10
+    # sweep_range is the (start, stop) extent parsed from the param axis
+    assert cfg.sweep_range == (0.05, 2.5)
+
+
+def test_lenrabi_produce_builds_cfg_when_context_configured():
+    # with a populated ml + the drive params + a readout, produce goes through the
+    # cfg pipeline (make_cfg), then SIMULATES the acquire (no hardware). The
+    # pure-synthetic fallback (empty ml) is covered by test_builders.
+    import numpy as np
+    from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import (
+        LenRabiBuilder,
+        LenRabiNode,
+    )
+    from zcu_tools.gui.app.autofluxdep.nodes.synth import parse_linear_axis
+
+    ml = _ml()
+    params = {
+        "qub_waveform": "qub_flat",
+        "qub_ch": 4,
+        "qub_nqz": 2,
+        "qub_gain": 0.3,
+        "qub_length": 0.5,
+        "sweep_range": "0.05,2.5,61",
+        "rounds": 2,
+        "acquire_delay": 0,
+    }
+    flux_arr = np.linspace(0.0, 1.0, 11)  # idx=1 → flux=0.1 (high SNR, fittable)
+    builder = LenRabiBuilder()
+    result = builder.make_init_result(params, flux_arr)
+    env = RunEnv(
+        flux=float(flux_arr[1]),
+        flux_idx=1,
+        params=params,
+        ml=ml,
+        result=result,
+    )
+    snap = Snapshot({"qubit_freq": 5135.0}, modules={"opt_readout": _READOUT})
+    node = builder.build_node(env)
+    assert isinstance(node, LenRabiNode)
+    # cfg-driven path is taken, and its sweep extent matches the Result axis
+    cfg = node._maybe_make_cfg(snap)
+    assert cfg is not None
+    xs = parse_linear_axis(params["sweep_range"], (0.0, 6.0, 121))
+    assert cfg.sweep_range == (float(xs[0]), float(xs[-1]))
+    patch = node.produce(snap)
+    assert "pi_length" in patch.values()  # simulated acquire + fit succeeded
