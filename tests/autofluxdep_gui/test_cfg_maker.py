@@ -490,3 +490,109 @@ def test_t2ramsey_produce_builds_cfg_when_context_configured():
     # planted-t2 baseline comes from the cfg's sweep_range (= 2.5 * t2r = 20 → /2.5
     # = 8 us), drifted at flux=0.1: flux_drift(0.1, 8.0, 15.0) = 10.4 us
     assert abs(patch.values()["t2r"] - 10.4) < 2.5
+
+
+# --- t2echo -----------------------------------------------------------------
+
+
+def _t2echo_pulses(ml: ModuleLibrary):
+    """Real PulseCfg dicts for the pi / pi2 drive pulses (lenrabi-shaped output).
+
+    The lower-layer T2EchoModuleCfg requires concrete PulseCfg modules (type /
+    waveform / ch / nqz / freq / gain), unlike the synthetic-path sentinels used
+    in the run tests; build them off the fixture's registered waveform.
+    """
+    pi_pulse = {
+        "type": "pulse",
+        "waveform": ml.get_waveform("qub_flat", {"length": 0.1}),
+        "ch": 3,
+        "nqz": 2,
+        "gain": 0.5,
+        "freq": 5135.0,
+    }
+    pi2_pulse = {
+        "type": "pulse",
+        "waveform": ml.get_waveform("qub_flat", {"length": 0.05}),
+        "ch": 3,
+        "nqz": 2,
+        "gain": 0.25,
+        "freq": 5135.0,
+    }
+    return pi_pulse, pi2_pulse
+
+
+def _t2echo_env(ml: ModuleLibrary) -> RunEnv:
+    return RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        params={"reps": 1000, "rounds": 10},
+        ml=ml,
+    )
+
+
+def test_t2echo_make_cfg_lowers_context():
+    from zcu_tools.gui.app.autofluxdep.nodes.t2echo import (
+        T2EchoBuilder,
+        T2EchoCfgTemplate,
+    )
+
+    ml = _ml()
+    pi_pulse, pi2_pulse = _t2echo_pulses(ml)
+    snap = Snapshot(
+        {"t1": 12.0, "t2e": 8.0},
+        modules={
+            "pi_pulse": pi_pulse,
+            "pi2_pulse": pi2_pulse,
+            "opt_readout": _READOUT,
+        },
+    )
+    cfg = T2EchoBuilder().make_cfg(_t2echo_env(ml), snap)
+    assert isinstance(cfg, T2EchoCfgTemplate)
+    # the delay window is (0, 2.5 * smoothed_t2e) from the snapshot
+    assert cfg.sweep_range == (0.0, 2.5 * 8.0)
+    # relax_delay = max(1.0, 3 * smoothed_t1)
+    assert float(cfg.relax_delay) == 3.0 * 12.0
+    # the drive pulses come from the snapshot modules
+    assert int(cfg.modules.pi_pulse.ch) == 3
+    assert float(cfg.modules.pi_pulse.gain) == 0.5
+    assert float(cfg.modules.pi2_pulse.gain) == 0.25
+    assert cfg.modules.readout.type == "readout/pulse"
+    assert cfg.reps == 1000 and cfg.rounds == 10
+
+
+def test_t2echo_produce_builds_cfg_when_context_configured():
+    # with a populated ml + the upstream pi/pi2 pulses + a readout, produce goes
+    # through the cfg pipeline (make_cfg) to source the delay window, then
+    # SIMULATES the acquire (no hardware). The pure-synthetic fallback (empty ml,
+    # sentinel modules) is covered by the run tests in test_builders.
+    import numpy as np
+    from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
+    from zcu_tools.gui.app.autofluxdep.nodes.t2echo import T2EchoBuilder, T2EchoNode
+
+    ml = _ml()
+    pi_pulse, pi2_pulse = _t2echo_pulses(ml)
+    flux_arr = np.linspace(0.0, 1.0, 11)  # idx=1 → flux=0.1 (SNR≈0.97), good point
+    result = Sweep1DResult.allocate(
+        flux_arr, np.linspace(0.0, 25.0, 121), x_label="delay time (us)"
+    )
+    env = RunEnv(
+        flux=float(flux_arr[1]),
+        flux_idx=1,
+        params={"reps": 1000, "rounds": 1, "acquire_delay": 0},
+        ml=ml,
+        result=result,
+    )
+    snap = Snapshot(
+        {"t1": 10.0, "t2e": 8.0},
+        modules={
+            "pi_pulse": pi_pulse,
+            "pi2_pulse": pi2_pulse,
+            "opt_readout": _READOUT,
+        },
+    )
+    node = T2EchoBuilder().build_node(env)
+    assert isinstance(node, T2EchoNode)
+    assert node._maybe_make_cfg(snap) is not None  # cfg-driven path is taken
+    patch = node.produce(snap)
+    assert "t2e" in patch.values()  # simulated acquire + fit succeeded
+    assert not np.isnan(result.fit_value[1])  # fitted scalar present
