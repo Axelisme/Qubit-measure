@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing_extensions import ClassVar, Sequence, TypeAlias
+from collections.abc import Sequence
+from typing import ClassVar, TypeAlias
 
 from zcu_tools.experiment.v2.twotone.fluxdep import (
     FreqFluxCfg,

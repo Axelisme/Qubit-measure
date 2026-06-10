@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import Literal, Union, overload
 
 import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import root_scalar
-from typing_extensions import Literal, Union, overload
 
 
 class FluxoniumPredictor:
@@ -151,9 +151,9 @@ class FluxoniumPredictor:
 
     def predict_freq(
         self,
-        cur_value: Union[float, NDArray[np.float64]],
+        cur_value: float | NDArray[np.float64],
         transition: tuple[int, int] = (0, 1),
-    ) -> Union[float, NDArray[np.float64]]:
+    ) -> float | NDArray[np.float64]:
         """
         Predict the transition frequency of a fluxonium qubit.
         Args:
@@ -200,10 +200,10 @@ class FluxoniumPredictor:
 
     def predict_matrix_element(
         self,
-        cur_value: Union[float, NDArray[np.float64]],
+        cur_value: float | NDArray[np.float64],
         transition: tuple[int, int] = (0, 1),
         operator: Literal["phi", "n"] = "n",
-    ) -> Union[float, NDArray[np.float64]]:
+    ) -> float | NDArray[np.float64]:
         """
         Predict the matrix element of operator between two levels of a fluxonium qubit.
         Args:

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from typing import Any, Optional, Self
+
 import numpy as np
 from pydantic import BaseModel, ConfigDict, ValidationError
-from typing_extensions import Any, Optional, Self
 
 from zcu_tools.utils import deepupdate
 
@@ -20,7 +21,7 @@ class ConfigBase(BaseModel):
         extra="forbid", arbitrary_types_allowed=True, validate_assignment=True
     )
 
-    def with_updates(self, *, context: Optional[dict] = None, **kwargs) -> Self:
+    def with_updates(self, *, context: dict | None = None, **kwargs) -> Self:
         cfg_dict = self.to_dict()
         deepupdate(cfg_dict, kwargs, behavior="force")
 

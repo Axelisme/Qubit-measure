@@ -66,9 +66,9 @@ class InspectDialogBase(QDialog):
 
     def __init__(
         self,
-        ctrl: "SessionControllerPort",
-        bus: "BaseEventBus",
-        parent: Optional[QWidget] = None,
+        ctrl: SessionControllerPort,
+        bus: BaseEventBus,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._ctrl = ctrl
@@ -270,7 +270,7 @@ class InspectDialogBase(QDialog):
         bold = QFont()
         bold.setBold(True)
 
-        restore_item: Optional[QTreeWidgetItem] = None
+        restore_item: QTreeWidgetItem | None = None
         for group_label, store in [
             ("modules", ml.modules),
             ("waveforms", ml.waveforms),
@@ -339,7 +339,7 @@ class InspectDialogBase(QDialog):
         self._status_label.setText(f"Last updated: {now}")
 
     def _on_ml_item_changed(
-        self, current: Optional[QTreeWidgetItem], _previous: Any
+        self, current: QTreeWidgetItem | None, _previous: Any
     ) -> None:
         self._rename_ml_btn.setEnabled(False)
         self._del_ml_btn.setEnabled(False)
@@ -367,7 +367,7 @@ class InspectDialogBase(QDialog):
         text = yaml.dump(cfg.to_dict(), allow_unicode=True, sort_keys=False)
         self._ml_text.setPlainText(text)
 
-    def _current_ml_item_data(self) -> Optional[tuple[str, str]]:
+    def _current_ml_item_data(self) -> tuple[str, str] | None:
         current = self._ml_tree.currentItem()
         if current is None:
             return None

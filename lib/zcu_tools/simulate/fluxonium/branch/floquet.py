@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+from typing import Optional, cast
+
 import numpy as np
 import qutip as qt
 from joblib import Parallel, delayed
 from numpy.typing import NDArray
 from tqdm.auto import tqdm
-from typing_extensions import Optional, Sequence, cast
 
 
 class FloquetBranchAnalysis:
@@ -17,7 +19,7 @@ class FloquetBranchAnalysis:
         flux: float = 0.5,
         qub_dim: int = 40,
         qub_cutoff: int = 60,
-        esys: Optional[tuple[NDArray[np.float64], NDArray[np.complex128]]] = None,
+        esys: tuple[NDArray[np.float64], NDArray[np.complex128]] | None = None,
     ) -> None:
         self.r_f = r_f
         self.g = g
@@ -34,7 +36,7 @@ class FloquetBranchAnalysis:
         self.H_with_drive = [H, [n_op, lambda t, amp: amp * np.cos(r_f * t)]]
 
     def make_floquet_basis(
-        self, photon: float, precompute: Optional[NDArray[np.float64]] = None
+        self, photon: float, precompute: NDArray[np.float64] | None = None
     ) -> qt.FloquetBasis:
         return qt.FloquetBasis(
             self.H_with_drive,
@@ -132,9 +134,9 @@ def calc_branch_infos(
     qub_dim: int,
     qub_cutoff: int,
     photons: NDArray[np.float64],
-    avg_times: Optional[NDArray[np.float64]] = None,
+    avg_times: NDArray[np.float64] | None = None,
     progress: bool = True,
-    esys: Optional[tuple[NDArray[np.float64], NDArray[np.complex128]]] = None,
+    esys: tuple[NDArray[np.float64], NDArray[np.complex128]] | None = None,
 ) -> tuple[dict[int, list[int]], list[qt.FloquetBasis]]:
     fb_analysis = FloquetBranchAnalysis(
         params, r_f, g, flux=flux, qub_dim=qub_dim, qub_cutoff=qub_cutoff, esys=esys
@@ -162,7 +164,7 @@ def calc_ge_snr(
     qub_dim: int,
     qub_cutoff: int,
     max_photon: int,
-    esys: Optional[tuple[NDArray[np.float64], NDArray[np.complex128]]] = None,
+    esys: tuple[NDArray[np.float64], NDArray[np.complex128]] | None = None,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     branchs = [0, 1]
 
@@ -211,7 +213,7 @@ class FloquetWithTLSBranchAnalysis:
         flux: float = 0.5,
         qub_dim: int = 40,
         qub_cutoff: int = 60,
-        esys: Optional[tuple[NDArray[np.float64], NDArray[np.complex128]]] = None,
+        esys: tuple[NDArray[np.float64], NDArray[np.complex128]] | None = None,
     ) -> None:
         self.r_f = r_f
         self.g = g
@@ -236,7 +238,7 @@ class FloquetWithTLSBranchAnalysis:
         self.H_with_drive = [H, [n_op, lambda t, amp: amp * np.cos(r_f * t)]]
 
     def make_floquet_basis(
-        self, photon: float, precompute: Optional[NDArray[np.float64]] = None
+        self, photon: float, precompute: NDArray[np.float64] | None = None
     ) -> qt.FloquetBasis:
         return qt.FloquetBasis(
             self.H_with_drive,
@@ -271,7 +273,7 @@ class FloquetWithTLSBranchAnalysis:
         self,
         fbasis_n: list[qt.FloquetBasis],
         branch_infos: dict[int, list[int]],
-        avg_times: Optional[NDArray[np.float64]] = None,
+        avg_times: NDArray[np.float64] | None = None,
         progress: bool = True,
     ) -> dict[int, list[float]]:
         if avg_times is None:
@@ -334,9 +336,9 @@ def calc_branch_infos_with_tls(
     qub_dim: int,
     qub_cutoff: int,
     photons: NDArray[np.float64],
-    avg_times: Optional[NDArray[np.float64]] = None,
+    avg_times: NDArray[np.float64] | None = None,
     progress: bool = True,
-    esys: Optional[tuple[NDArray[np.float64], NDArray[np.complex128]]] = None,
+    esys: tuple[NDArray[np.float64], NDArray[np.complex128]] | None = None,
 ) -> tuple[dict[int, list[int]], list[qt.FloquetBasis]]:
     fb_analysis = FloquetWithTLSBranchAnalysis(
         params,
@@ -373,7 +375,7 @@ class FloquetDualCouplingBranchAnalysis:
         flux: float = 0.5,
         qub_dim: int = 40,
         qub_cutoff: int = 60,
-        esys: Optional[tuple[NDArray[np.float64], NDArray[np.complex128]]] = None,
+        esys: tuple[NDArray[np.float64], NDArray[np.complex128]] | None = None,
     ) -> None:
         self.r_f = r_f
         self.g1 = g1
@@ -396,7 +398,7 @@ class FloquetDualCouplingBranchAnalysis:
         ]
 
     def make_floquet_basis(
-        self, photon: float, precompute: Optional[NDArray[np.float64]] = None
+        self, photon: float, precompute: NDArray[np.float64] | None = None
     ) -> qt.FloquetBasis:
         return qt.FloquetBasis(
             self.H_with_drive,

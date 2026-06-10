@@ -46,9 +46,9 @@ logic); the GUI user only tunes the provider's params and wiring.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-
-from typing_extensions import Any, Callable, Literal, Mapping, Optional
+from typing import Any, Literal, Optional
 
 SmoothMode = Literal["ewma", "step_weighted"]
 
@@ -71,8 +71,8 @@ class Dependency:
     """
 
     key: str
-    smooth: Optional[SmoothMode] = None
-    default: Optional[Callable[[], Any]] = None
+    smooth: SmoothMode | None = None
+    default: Callable[[], Any] | None = None
 
     @property
     def is_optional(self) -> bool:
@@ -95,7 +95,7 @@ class ModuleDep:
     """
 
     name: str
-    default: Optional[Callable[[], Any]] = None
+    default: Callable[[], Any] | None = None
 
     @property
     def is_optional(self) -> bool:

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional
 
 import numpy as np
 import plotly.graph_objects as go
 from numpy.typing import NDArray
 from pydantic import Field
-from typing_extensions import Any, Callable, Mapping, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo
@@ -44,7 +45,7 @@ class FluxDepResult:
     values: NDArray[np.float64]
     gains: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[FluxDepCfg] = None
+    cfg_snapshot: FluxDepCfg | None = None
 
 
 def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -63,8 +64,8 @@ def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class FluxDepModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
-    init_pulse: Optional[PulseCfg] = None
+    reset: ResetCfg | None = None
+    init_pulse: PulseCfg | None = None
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
@@ -89,7 +90,7 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         soccfg,
         cfg: FluxDepCfg,
         *,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> FluxDepResult:
         cfg = deepcopy(cfg)
         modules = cfg.modules
@@ -104,7 +105,7 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, FluxDepCfg],
-            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             setup_devices(cfg, progress=False)
@@ -169,12 +170,12 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
 
     def analyze(
         self,
-        result: Optional[FluxDepResult] = None,
+        result: FluxDepResult | None = None,
         *,
-        flux_half: Optional[float] = None,
-        flux_period: Optional[float] = None,
-        ac_coeff: Optional[float] = None,
-        fig: Optional[go.Figure] = None,
+        flux_half: float | None = None,
+        flux_period: float | None = None,
+        ac_coeff: float | None = None,
+        fig: go.Figure | None = None,
         secondary_xaxis: bool = True,
         auto_range: bool = True,
         **fig_kwargs,
@@ -229,8 +230,8 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[FluxDepResult] = None,
-        comment: Optional[str] = None,
+        result: FluxDepResult | None = None,
+        comment: str | None = None,
         tag: str = "mist/flux_dep",
         **kwargs,
     ) -> None:

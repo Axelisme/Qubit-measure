@@ -1,17 +1,9 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
-
-from typing_extensions import (
-    Callable,
-    ClassVar,
-    Generator,
-    Generic,
-    Optional,
-    ParamSpec,
-    overload,
-)
+from typing import ClassVar, Generic, Optional, ParamSpec, overload
 
 P = ParamSpec("P")
 
@@ -52,18 +44,18 @@ class MinIntervalFunc(Generic[P]):
 
 
 @overload
-def min_interval(func: None, min_interval: Optional[float] = None) -> None: ...
+def min_interval(func: None, min_interval: float | None = None) -> None: ...
 
 
 @overload
 def min_interval(
-    func: Callable[P, None], min_interval: Optional[float] = None
+    func: Callable[P, None], min_interval: float | None = None
 ) -> Callable[P, None]: ...
 
 
 def min_interval(
-    func: Optional[Callable[P, None]], min_interval: Optional[float] = None
-) -> Optional[Callable[P, None]]:
+    func: Callable[P, None] | None, min_interval: float | None = None
+) -> Callable[P, None] | None:
     """ensures min_interval time ratio between function calls"""
     if func is None or min_interval is None or min_interval == 1.0:
         return func

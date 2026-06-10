@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional, TypeAlias
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from qick.asm_v2 import QickSweep1D
-from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -37,7 +38,7 @@ from zcu_tools.utils.datasaver import load_data, save_data
 class LengthResult:
     lengths: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional["LengthCfg"] = None
+    cfg_snapshot: LengthCfg | None = None
 
 
 def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -48,8 +49,8 @@ def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
 
 
 class LengthModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
-    init_pulse: Optional[PulseCfg] = None
+    reset: ResetCfg | None = None
+    init_pulse: PulseCfg | None = None
     tested_reset: BathResetCfg
     readout: ReadoutCfg
 
@@ -70,7 +71,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         soccfg,
         cfg: LengthCfg,
         *,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> LengthResult:
         setup_devices(cfg, progress=True)
         modules = cfg.modules
@@ -95,7 +96,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, LengthCfg],
-            update_hook: Optional[Callable],
+            update_hook: Callable | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             cfg.rounds = 1  # round loop is driven by the scan's .repeat("rounds", ...)
@@ -161,7 +162,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
 
         return self.last_result
 
-    def analyze(self, result: Optional[LengthResult] = None) -> Figure:
+    def analyze(self, result: LengthResult | None = None) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -183,8 +184,8 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[LengthResult] = None,
-        comment: Optional[str] = None,
+        result: LengthResult | None = None,
+        comment: str | None = None,
         tag: str = "twotone/reset/bath/length",
         **kwargs,
     ) -> None:

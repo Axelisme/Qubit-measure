@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import threading
 import time
+from typing import Literal, Optional
 
 import numpy as np
-from typing_extensions import Literal, Optional
 
 from zcu_tools.progress_bar import make_pbar
 
@@ -59,7 +59,7 @@ class FakeDevice(BaseDevice[FakeDeviceInfo]):
         self,
         value: float,
         progress: bool = False,
-        stop_event: Optional[threading.Event] = None,
+        stop_event: threading.Event | None = None,
     ) -> None:
         if self.value == value:
             return
@@ -92,7 +92,7 @@ class FakeDevice(BaseDevice[FakeDeviceInfo]):
         cfg,
         *,
         progress: bool = True,
-        stop_event: Optional[threading.Event] = None,
+        stop_event: threading.Event | None = None,
     ) -> None:
         self.set_output(cfg.output)
         self._rampstep = cfg.rampstep

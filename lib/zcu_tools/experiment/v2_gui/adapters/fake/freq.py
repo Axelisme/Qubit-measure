@@ -9,22 +9,13 @@ CfgSchema into the FakeFreqCfg that FakeFreqExp expects.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import Annotated, Any, ClassVar, Literal, Optional, TypeAlias, cast
 
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import (
-    Annotated,
-    Any,
-    Callable,
-    ClassVar,
-    Literal,
-    Optional,
-    Sequence,
-    TypeAlias,
-    cast,
-)
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.base import AbsExperiment
@@ -189,7 +180,7 @@ class FakeFreqExp(AbsExperiment[FreqResult, FakeFreqCfg]):
 
         def measure_fn(
             ctx: TaskState,
-            update_hook: Optional[Callable[[int, NDArray[np.complex128]], None]],
+            update_hook: Callable[[int, NDArray[np.complex128]], None] | None,
         ) -> NDArray[np.complex128]:
             accumulated = np.zeros(len(freqs), dtype=np.complex128)
             rounds_done = 0
@@ -223,7 +214,7 @@ class FakeFreqExp(AbsExperiment[FreqResult, FakeFreqCfg]):
 
     @staticmethod
     def analyze(
-        result: Optional[FreqResult] = None,
+        result: FreqResult | None = None,
         *,
         model_type: Literal["hm", "t", "auto"] = "auto",
         fit_bg_slope: bool = False,
@@ -298,7 +289,7 @@ class FakeFreqAdapter(
     def __init__(
         self,
         model_type: Literal["t", "hm"] = "hm",
-        params: Optional[Param] = None,
+        params: Param | None = None,
         fast_mode: bool = False,
         persist_data: bool = True,
     ) -> None:
@@ -344,7 +335,7 @@ class FakeFreqAdapter(
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         r_f = md_get_float(ctx, "r_f", 6000.0)
         rf_w_raw = ctx.md.get("rf_w")
-        rf_w: Optional[float] = (
+        rf_w: float | None = (
             float(rf_w_raw) if isinstance(rf_w_raw, (int, float)) else None
         )
 

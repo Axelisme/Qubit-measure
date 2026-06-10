@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import ClassVar, Sequence
+from typing import ClassVar
 
 import pytest
 from zcu_tools.gui.app.main.adapter import (

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Hashable
+from typing import Generic, TypeVar
+
 from matplotlib.figure import Figure
-from typing_extensions import Generic, Hashable, TypeVar
 
 from .backend import refresh_figure
 from .base import AbsLivePlot

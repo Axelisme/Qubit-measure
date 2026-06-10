@@ -10,9 +10,7 @@ but the domain content is the Node graph, not spectra.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
-
-from typing_extensions import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from zcu_tools.gui.app.autofluxdep.nodes.builder import PlacedNode
 from zcu_tools.gui.session.state import SessionState
@@ -65,21 +63,21 @@ class AutoFluxDepState(SessionState):
     ``run_predictor`` holds the adaptive predictor the current run was built with.
     """
 
-    def __init__(self, ctx: ExpContext, project: Optional[ProjectInfo] = None) -> None:
+    def __init__(self, ctx: ExpContext, project: ProjectInfo | None = None) -> None:
         super().__init__(ctx)
-        self.project: Optional[ProjectInfo] = project
+        self.project: ProjectInfo | None = project
         self.nodes: list[PlacedNode] = []
         self.flux_values: list[float] = []
         # Which connected device the flux sweep is applied through (its unit
         # labels the flux axis; recorded for the run cfg's flux ``dev`` entry).
         # None = unset (the flux values are then bare numbers).
-        self.flux_device_name: Optional[str] = None
+        self.flux_device_name: str | None = None
         self.run_results: dict[str, Any] = {}
         # The adaptive predictor the current/last run was built with (made per-run
         # from ``exp_context.predictor`` in ``Controller._build_tools``). Run-lived
         # and non-serialisable — like ``run_results`` — so an Info dialog / a test
         # can inspect the predictor the run calibrated.
-        self.run_predictor: Optional["Predictor"] = None
+        self.run_predictor: Predictor | None = None
 
     @property
     def has_setup(self) -> bool:

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Callable, Optional, TypedDict
+from typing_extensions import (
+    TypedDict,  # closed/extra_items (PEP 728) not in stdlib 3.13
+)
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -53,7 +57,7 @@ def mist_fluxdep_signal2real(
 
 
 class MistModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     pi_pulse: PulseCfg
     mist_pulse: PulseCfg
     readout: ReadoutCfg
@@ -87,7 +91,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
         gain_sweep: SweepCfg,
         cfg_maker: Callable[
             [TaskState[MistResult, T_RootResult, FluxDepCfg], ModuleLibrary],
-            Optional[MistCfgTemplate],
+            MistCfgTemplate | None,
         ],
     ) -> None:
         self.gain_sweep = gain_sweep
@@ -98,7 +102,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], T_RootResult, MistCfg],
-            update_hook: Optional[Callable],
+            update_hook: Callable | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules

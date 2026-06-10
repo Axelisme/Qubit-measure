@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing_extensions import Optional
+from typing import Optional
 
 from .hw_semantics import needs_big_jump
 from .instructions import BaseInst, JumpInst, LabelInst, RegWriteInst
@@ -9,13 +9,13 @@ from .node import BasicBlockNode
 from .operands import AluExpr, AluOp, Register, SrcKeyword
 
 
-def dispatch_entry_words(pmem_size: Optional[int]) -> int:
+def dispatch_entry_words(pmem_size: int | None) -> int:
     """Program-memory words per dispatch-table entry stub."""
     return 2 if needs_big_jump(pmem_size) else 1
 
 
 def emit_dispatch_address_setup(
-    *, index_reg: str, table_base: Label, pmem_size: Optional[int] = None
+    *, index_reg: str, table_base: Label, pmem_size: int | None = None
 ) -> list[BaseInst]:
     """Compute ``s15 = &table_base + index_reg * entry_words``.
 
@@ -40,7 +40,7 @@ def build_dispatch_table_island(
     *,
     table_labels: list[Label],
     target_labels: list[Label],
-    pmem_size: Optional[int] = None,
+    pmem_size: int | None = None,
 ) -> list[BasicBlockNode]:
     """Build fixed-width dispatch-table entry stubs.
 

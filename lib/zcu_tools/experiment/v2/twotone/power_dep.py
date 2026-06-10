@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -30,7 +31,7 @@ class PowerResult:
     gains: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[PowerCfg] = None
+    cfg_snapshot: PowerCfg | None = None
 
 
 def gain_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -53,7 +54,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         soccfg,
         cfg: PowerCfg,
         *,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> PowerResult:
         orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
@@ -76,7 +77,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, PowerCfg],
-            update_hook: Optional[Callable],
+            update_hook: Callable | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules
@@ -124,7 +125,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
 
     def analyze(
         self,
-        result: Optional[PowerResult] = None,
+        result: PowerResult | None = None,
     ) -> None:
         raise NotImplementedError(
             "Analysis not implemented for two-tone power dependence"
@@ -133,8 +134,8 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[PowerResult] = None,
-        comment: Optional[str] = None,
+        result: PowerResult | None = None,
+        comment: str | None = None,
         tag: str = "twotone/power_dep",
         **kwargs,
     ) -> None:

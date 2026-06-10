@@ -26,9 +26,9 @@ the fields it does not use).
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-
-from typing_extensions import Any, Callable, Mapping, Optional, Protocol
+from typing import Any, Optional, Protocol
 
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
@@ -60,7 +60,7 @@ class RunEnv:
     md: Any = None
     tools: Any = None
     result: Any = None
-    round_hook: Optional[RoundHook] = None
+    round_hook: RoundHook | None = None
 
 
 class Node(ABC):

@@ -25,7 +25,7 @@ class ProgressStack(QWidget):
 
     MAX_LAYERS = 4
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
@@ -71,7 +71,7 @@ class ProgressStack(QWidget):
         self._pool.extend(self._active)
         self._active.clear()
 
-    def render_models(self, models: tuple["ProgressBarModel", ...]) -> None:
+    def render_models(self, models: tuple[ProgressBarModel, ...]) -> None:
         """Replace visible bars with the service-owned live bar models (the View
         calls this from its ProgressService progress listener). Derived values
         are read live off each model (the SSOT) — the widget computes nothing.
@@ -93,7 +93,7 @@ class ProgressStack(QWidget):
             self._apply_model(bar, model)
 
     @staticmethod
-    def _apply_model(bar: QProgressBar, model: "ProgressBarModel") -> None:
+    def _apply_model(bar: QProgressBar, model: ProgressBarModel) -> None:
         bar.setMaximum(model.qt_maximum())
         bar.setFormat(model.format())
         bar.setValue(model.qt_value())

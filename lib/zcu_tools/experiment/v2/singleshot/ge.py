@@ -3,12 +3,12 @@ from __future__ import annotations
 import warnings
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Literal, Optional, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Literal, Optional, cast
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -164,12 +164,12 @@ def optimize_ge_radius(
 @dataclass(frozen=True)
 class GE_Result:
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[GE_Cfg] = None
+    cfg_snapshot: GE_Cfg | None = None
 
 
 class GEModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
-    init_pulse: Optional[PulseCfg] = None
+    reset: ResetCfg | None = None
+    init_pulse: PulseCfg | None = None
     probe_pulse: PulseCfg
     readout: PulseReadoutCfg
 
@@ -249,7 +249,7 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
 
     def analyze(
         self,
-        result: Optional[GE_Result] = None,
+        result: GE_Result | None = None,
         backend: Literal["center", "regression", "pca"] = "pca",
         **kwargs,
     ) -> tuple[float, NDArray[np.float64], GE_FitResult, Figure]:
@@ -266,8 +266,8 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
         init_pops: NDArray[np.float64],
         g_center: complex,
         e_center: complex,
-        radius: Optional[float] = None,
-        result: Optional[GE_Result] = None,
+        radius: float | None = None,
+        result: GE_Result | None = None,
         consider_other: bool = True,
     ) -> tuple[NDArray[np.float64], float, Figure]:
         if result is None:
@@ -377,8 +377,8 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[GE_Result] = None,
-        comment: Optional[str] = None,
+        result: GE_Result | None = None,
+        comment: str | None = None,
         tag: str = "singleshot/ge",
         **kwargs,
     ) -> None:

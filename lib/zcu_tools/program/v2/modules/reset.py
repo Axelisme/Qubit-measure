@@ -2,17 +2,10 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from copy import deepcopy
+from typing import TYPE_CHECKING, Annotated, Literal, Optional, TypeAlias, Union
 
 from pydantic import BeforeValidator, Field
 from qick.asm_v2 import QickParam
-from typing_extensions import (
-    TYPE_CHECKING,
-    Annotated,
-    Literal,
-    Optional,
-    TypeAlias,
-    Union,
-)
 
 from .base import AbsModuleCfg, Module, resolve_module_ref
 from .pulse import Pulse, PulseCfg
@@ -36,7 +29,7 @@ class NoneResetCfg(AbsResetCfg):
     def build(self, name: str) -> NoneReset:
         return NoneReset(name, self)
 
-    def set_param(self, name: str, value: Union[float, QickParam]) -> None:
+    def set_param(self, name: str, value: float | QickParam) -> None:
         raise ValueError("NoneReset does not support set_param")
 
 
@@ -47,7 +40,7 @@ class PulseResetCfg(AbsResetCfg):
     def build(self, name: str) -> PulseReset:
         return PulseReset(name, self)
 
-    def set_param(self, name: str, value: Union[float, QickParam]) -> None:
+    def set_param(self, name: str, value: float | QickParam) -> None:
         self.pulse_cfg.set_param(name, value)
 
 
@@ -59,7 +52,7 @@ class TwoPulseResetCfg(AbsResetCfg):
     def build(self, name: str) -> TwoPulseReset:
         return TwoPulseReset(name, self)
 
-    def set_param(self, name: str, value: Union[float, QickParam]) -> None:
+    def set_param(self, name: str, value: float | QickParam) -> None:
         if name in ["gain1", "freq1"]:
             self.pulse1_cfg.set_param(name.replace("1", ""), value)
         elif name in ["gain2", "freq2"]:
@@ -80,7 +73,7 @@ class BathResetCfg(AbsResetCfg):
     def build(self, name: str) -> BathReset:
         return BathReset(name, self)
 
-    def set_param(self, name: str, value: Union[float, QickParam]) -> None:
+    def set_param(self, name: str, value: float | QickParam) -> None:
         if name in ["qub_gain", "qub_freq"]:
             self.qubit_tone_cfg.set_param(name.replace("qub_", ""), value)
         elif name in ["res_gain", "res_freq"]:
@@ -96,20 +89,20 @@ class BathResetCfg(AbsResetCfg):
 
 
 ResetCfg: TypeAlias = Annotated[
-    Union[NoneResetCfg, PulseResetCfg, TwoPulseResetCfg, BathResetCfg],
+    NoneResetCfg | PulseResetCfg | TwoPulseResetCfg | BathResetCfg,
     Field(discriminator="type"),
 ]
 
 
 class AbsReset(Module):
     @abstractmethod
-    def total_length(self, prog: ModularProgramV2) -> Union[float, QickParam]: ...
+    def total_length(self, prog: ModularProgramV2) -> float | QickParam: ...
 
     def allow_rerun(self) -> bool:
         return True
 
 
-def Reset(name: str, cfg: Optional[AbsResetCfg]) -> AbsReset:
+def Reset(name: str, cfg: AbsResetCfg | None) -> AbsReset:
     """Factory: dispatch a reset cfg to its concrete impl. None → NoneReset."""
     if cfg is None:
         cfg = NoneResetCfg(desc="Auto derived from None")
@@ -123,12 +116,12 @@ class NoneReset(AbsReset):
 
     def init(self, prog: ModularProgramV2) -> None: ...
 
-    def total_length(self, prog: ModularProgramV2) -> Union[float, QickParam]:
+    def total_length(self, prog: ModularProgramV2) -> float | QickParam:
         return 0.0
 
     def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
+        self, prog: ModularProgramV2, t: float | QickParam = 0.0
+    ) -> float | QickParam:
         return t
 
 
@@ -141,12 +134,12 @@ class PulseReset(AbsReset):
     def init(self, prog: ModularProgramV2) -> None:
         self.reset_pulse.init(prog)
 
-    def total_length(self, prog: ModularProgramV2) -> Union[float, QickParam]:
+    def total_length(self, prog: ModularProgramV2) -> float | QickParam:
         return self.reset_pulse.total_length(prog)
 
     def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
+        self, prog: ModularProgramV2, t: float | QickParam = 0.0
+    ) -> float | QickParam:
         return self.reset_pulse.run(prog, t)
 
 
@@ -161,14 +154,14 @@ class TwoPulseReset(AbsReset):
         self.reset_pulse1.init(prog)
         self.reset_pulse2.init(prog)
 
-    def total_length(self, prog: ModularProgramV2) -> Union[float, QickParam]:
+    def total_length(self, prog: ModularProgramV2) -> float | QickParam:
         return calc_max_length(
             self.reset_pulse1.total_length(prog), self.reset_pulse2.total_length(prog)
         )
 
     def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
+        self, prog: ModularProgramV2, t: float | QickParam = 0.0
+    ) -> float | QickParam:
         pulse1_t = self.reset_pulse1.run(prog, t)
         pulse2_t = self.reset_pulse2.run(prog, t)
         return calc_max_length(pulse1_t, pulse2_t)
@@ -187,12 +180,12 @@ class BathReset(AbsReset):
         self.qub_pulse.init(prog)
         self.pi2_pulse.init(prog)
 
-    def total_length(self, prog: ModularProgramV2) -> Union[float, QickParam]:
+    def total_length(self, prog: ModularProgramV2) -> float | QickParam:
         return self.res_pulse.total_length(prog) + self.pi2_pulse.total_length(prog)
 
     def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
+        self, prog: ModularProgramV2, t: float | QickParam = 0.0
+    ) -> float | QickParam:
         res_t = self.res_pulse.run(prog, t)
         self.qub_pulse.run(prog, t)
         end_t = self.pi2_pulse.run(prog, res_t)

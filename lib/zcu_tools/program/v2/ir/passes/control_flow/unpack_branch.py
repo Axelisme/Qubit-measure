@@ -42,7 +42,7 @@ back into an ``IRBranch``, which would cause the pipeline to expand it again.
 
 from __future__ import annotations
 
-from typing_extensions import Optional
+from typing import Optional
 
 from ...hw_semantics import needs_big_jump
 from ...instructions import JumpInst, LabelInst, RegWriteInst
@@ -59,7 +59,7 @@ from ...operands import Register, SrcKeyword
 from ...pipeline import AbsIRTreePass, PipeLineContext
 
 
-def _first_basic_block(node: IRNode) -> Optional[BasicBlockNode]:
+def _first_basic_block(node: IRNode) -> BasicBlockNode | None:
     """Return the first BasicBlockNode reachable as the head of `node`, if any."""
     if isinstance(node, BasicBlockNode):
         return node
@@ -101,7 +101,7 @@ class UnpackIRBranchPass(AbsIRTreePass):
         self,
         node: IRNode,
         ctx: PipeLineContext,
-    ) -> Optional[IRNode]:
+    ) -> IRNode | None:
         if not isinstance(node, IRBranch):
             return None
 

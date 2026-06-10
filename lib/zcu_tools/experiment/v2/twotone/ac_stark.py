@@ -1,19 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional, TypeAlias
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
-from typing_extensions import (
-    Any,
-    Callable,
-    Optional,
-    TypeAlias,
-)
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -50,7 +46,7 @@ class AcStarkResult:
     gains: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional["AcStarkCfg"] = None
+    cfg_snapshot: AcStarkCfg | None = None
 
 
 @dataclass(frozen=True)
@@ -58,7 +54,7 @@ class AcStarkRamseyResult:
     gains: NDArray[np.float64]
     lengths: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional["AcStarkRamseyCfg"] = None
+    cfg_snapshot: AcStarkRamseyCfg | None = None
 
 
 def acstark_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -106,7 +102,7 @@ def get_resonance_freq(
 
 
 class AcStarkModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     stark_pulse1: PulseCfg
     stark_pulse2: PulseCfg
     readout: ReadoutCfg
@@ -129,8 +125,8 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         soccfg,
         cfg: AcStarkCfg,
         *,
-        earlystop_snr: Optional[float] = None,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        earlystop_snr: float | None = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> AcStarkResult:
         setup_devices(cfg, progress=True)
         modules = cfg.modules
@@ -228,12 +224,12 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
 
     def analyze(
         self,
-        result: Optional[AcStarkResult] = None,
+        result: AcStarkResult | None = None,
         *,
         chi: float,
         kappa: float,
         deg: int = 1,
-        cutoff: Optional[float] = None,
+        cutoff: float | None = None,
     ) -> tuple[float, Figure]:
         if result is None:
             result = self.last_result
@@ -320,8 +316,8 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[AcStarkResult] = None,
-        comment: Optional[str] = None,
+        result: AcStarkResult | None = None,
+        comment: str | None = None,
         tag: str = "twotone/ge/ac_stark",
         **kwargs,
     ) -> None:
@@ -378,7 +374,7 @@ def acstark_ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.fl
 
 
 class AcStarkRamseyModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     pi2_pulse: PulseCfg
     stark_pulse: PulseCfg
     readout: ReadoutCfg
@@ -403,7 +399,7 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
         cfg: AcStarkRamseyCfg,
         *,
         detune: float = 0.0,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> AcStarkRamseyResult:
         setup_devices(cfg, progress=True)
         modules = cfg.modules
@@ -422,7 +418,7 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, AcStarkRamseyCfg],
-            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules
@@ -498,10 +494,10 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
 
     def analyze(
         self,
-        result: Optional[AcStarkRamseyResult] = None,
+        result: AcStarkRamseyResult | None = None,
         *,
         detune: float = 0.0,
-        cutoff: Optional[float] = None,
+        cutoff: float | None = None,
     ) -> Figure:
         if result is None:
             result = self.last_result
@@ -560,8 +556,8 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[AcStarkRamseyResult] = None,
-        comment: Optional[str] = None,
+        result: AcStarkRamseyResult | None = None,
+        comment: str | None = None,
         tag: str = "twotone/ge/ac_stark_ramsey",
         **kwargs,
     ) -> None:

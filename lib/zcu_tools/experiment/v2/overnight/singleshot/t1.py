@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import Generic, Optional, TypeVar, cast
 
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Callable, Generic, Optional, TypedDict, TypeVar, cast
+from typing_extensions import (
+    TypedDict,  # closed/extra_items (PEP 728) not in stdlib 3.13
+)
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -206,7 +210,7 @@ class T1PlotAndSaveMixin(Generic[T_Cfg]):
         iters,
         result,
         fig: Figure,
-        confusion_matrix: Optional[NDArray[np.float64]] = None,
+        confusion_matrix: NDArray[np.float64] | None = None,
     ) -> None:
         Ts = result["lengths"][0]  # (Ts, )
         populations = result["populations"]  # (iters, 2, Ts, 2)
@@ -243,7 +247,7 @@ class T1PlotAndSaveMixin(Generic[T_Cfg]):
 
 
 class T1ModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
@@ -272,7 +276,7 @@ class T1Task(
 
         def measure_t1_fn(
             ctx: TaskState[NDArray[np.float64], T_RootResult, T1Cfg],
-            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules
@@ -345,7 +349,7 @@ class T1Task(
 
 
 class T1WithToneModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     pi_pulse: PulseCfg
     probe_pulse: PulseCfg
     readout: ReadoutCfg
@@ -374,7 +378,7 @@ class T1WithToneTask(
 
         def measure_t1_fn(
             ctx: TaskState[NDArray[np.float64], T_RootResult, T1WithToneCfg],
-            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules

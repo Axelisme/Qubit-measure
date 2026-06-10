@@ -19,8 +19,9 @@ seeds a fresh entry, it never references an existing library entry).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Optional, Union
+from typing import TYPE_CHECKING, Optional, Union
 
 from .pi2_pulse import make_pi2_pulse_default, make_pi2_pulse_ref_default
 from .pi_pulse import make_pi_pulse_default, make_pi_pulse_ref_default
@@ -55,7 +56,7 @@ if TYPE_CHECKING:
 # path may return None (the disabled-optional ref, ADR-0010).
 _RefNode = Union["ModuleRefValue", "WaveformRefValue"]
 BlankFactory = Callable[["ExpContext"], _RefNode]
-RefFactory = Callable[..., Optional[_RefNode]]
+RefFactory = Callable[..., _RefNode | None]
 
 
 @dataclass(frozen=True)
@@ -68,7 +69,7 @@ class RoleFactorySpec:
     """
 
     blank: BlankFactory
-    ref: Optional[RefFactory] = None
+    ref: RefFactory | None = None
 
 
 # role_id -> factory pair. Order is informational only (RoleCatalog defines its

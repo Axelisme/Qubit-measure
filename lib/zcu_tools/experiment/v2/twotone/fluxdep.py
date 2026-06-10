@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Any, Mapping, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo
@@ -34,7 +35,7 @@ class FreqFluxResult:
     values: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[FreqFluxCfg] = None
+    cfg_snapshot: FreqFluxCfg | None = None
 
 
 def freqflux_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -59,7 +60,7 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
         cfg: FreqFluxCfg,
         *,
         fail_retry: int = 0,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> FreqFluxResult:
         orig_cfg = deepcopy(cfg)
         modules = cfg.modules
@@ -123,9 +124,9 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
 
     def analyze(
         self,
-        result: Optional[FreqFluxResult] = None,
-        flux_half: Optional[float] = None,
-        flux_int: Optional[float] = None,
+        result: FreqFluxResult | None = None,
+        flux_half: float | None = None,
+        flux_int: float | None = None,
     ) -> InteractiveLines:
         if result is None:
             result = self.last_result
@@ -145,7 +146,7 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
 
     def extract_points(
         self,
-        result: Optional[FreqFluxResult] = None,
+        result: FreqFluxResult | None = None,
     ) -> InteractiveFindPoints:
         if result is None:
             result = self.last_result
@@ -162,8 +163,8 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[FreqFluxResult] = None,
-        comment: Optional[str] = None,
+        result: FreqFluxResult | None = None,
+        comment: str | None = None,
         tag: str = "twotone/flux_dep/freq",
         **kwargs,
     ) -> None:

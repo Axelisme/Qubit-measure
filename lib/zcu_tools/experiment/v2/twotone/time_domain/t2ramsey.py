@@ -3,12 +3,12 @@ from __future__ import annotations
 import warnings as warn
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -43,11 +43,11 @@ def t2ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]
 class T2RamseyResult:
     times: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[T2RamseyCfg] = None
+    cfg_snapshot: T2RamseyCfg | None = None
 
 
 class T2RamseyModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     pi2_pulse: PulseCfg
     readout: ReadoutCfg
 
@@ -69,7 +69,7 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
         cfg: T2RamseyCfg,
         *,
         detune: float = 0.0,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> tuple[T2RamseyResult, float]:
         orig_cfg = deepcopy(cfg)
 
@@ -154,7 +154,7 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
         return self.last_result, true_detune
 
     def analyze(
-        self, result: Optional[T2RamseyResult] = None, *, fit_fringe: bool = True
+        self, result: T2RamseyResult | None = None, *, fit_fringe: bool = True
     ) -> tuple[float, float, float, float, Figure]:
         if result is None:
             result = self.last_result
@@ -202,8 +202,8 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[T2RamseyResult] = None,
-        comment: Optional[str] = None,
+        result: T2RamseyResult | None = None,
+        comment: str | None = None,
         tag: str = "twotone/ge/t2ramsey",
         **kwargs,
     ) -> None:

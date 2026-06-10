@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional, TypeAlias
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
-from typing_extensions import Any, Optional, TypeAlias
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -37,11 +37,11 @@ from zcu_tools.utils.datasaver import load_data, save_data
 class LengthResult:
     lengths: NDArray[np.float64]
     signals: NDArray[np.float64]
-    cfg_snapshot: Optional["LengthCfg"] = None
+    cfg_snapshot: LengthCfg | None = None
 
 
 class LengthModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     qub_pulse: PulseCfg
     readout: PulseReadoutCfg
 
@@ -62,7 +62,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         soccfg,
         cfg: LengthCfg,
         *,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> LengthResult:
         original_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
@@ -128,7 +128,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         return self.last_result
 
     def analyze(
-        self, result: Optional[LengthResult] = None, *, t0: Optional[float] = None
+        self, result: LengthResult | None = None, *, t0: float | None = None
     ) -> tuple[float, Figure]:
         if result is None:
             result = self.last_result
@@ -165,8 +165,8 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[LengthResult] = None,
-        comment: Optional[str] = None,
+        result: LengthResult | None = None,
+        comment: str | None = None,
         tag: str = "twotone/ge/ro_optimize/length",
         **kwargs,
     ) -> None:

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+from typing import Optional, cast
+
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Optional, Sequence, cast
 
 from .base import assign_init_p, fit_func
 
@@ -17,8 +19,8 @@ def expfunc(x: NDArray[np.float64], *p: float) -> NDArray[np.float64]:
 def fitexp(
     xdata: NDArray[np.float64],
     ydata: NDArray[np.float64],
-    fitparams: Optional[Sequence[Optional[float]]] = None,
-    fixedparams: Optional[Sequence[Optional[float]]] = None,
+    fitparams: Sequence[float | None] | None = None,
+    fixedparams: Sequence[float | None] | None = None,
 ) -> tuple[tuple[float, float, float], NDArray[np.float64]]:
     """return (y0, yscale, decay_time), (pOpt, pCov)"""
     if fitparams is None:
@@ -59,8 +61,8 @@ def dual_expfunc(x: NDArray[np.float64], *p: float) -> NDArray[np.float64]:
 def fit_dualexp(
     xdata: NDArray[np.float64],
     ydata: NDArray[np.float64],
-    fitparams: Optional[Sequence[Optional[float]]] = None,
-    fixedparams: Optional[Sequence[Optional[float]]] = None,
+    fitparams: Sequence[float | None] | None = None,
+    fixedparams: Sequence[float | None] | None = None,
 ) -> tuple[tuple[float, float, float, float, float], NDArray[np.float64]]:
     """return (y0, yscale1, decay_time1, yscale2, decay_time2), (pOpt, pCov)"""
     if fitparams is None:

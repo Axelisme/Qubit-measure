@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from typing import Literal, Optional
+
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Literal, Optional
 
 from .base import GE_FitResult, fidelity_func
 from .center import fit_ge_by_center
@@ -85,7 +86,7 @@ def singleshot_visualize(
 
 def singleshot_ge_analysis(
     signals: NDArray[np.complex128],
-    angle: Optional[float] = None,
+    angle: float | None = None,
     backend: Literal["center", "regression", "pca"] = "pca",
     **kwargs,
 ) -> tuple[float, NDArray[np.float64], GE_FitResult, Figure]:

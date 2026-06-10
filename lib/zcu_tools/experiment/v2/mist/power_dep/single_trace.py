@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional, TypeAlias
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -35,7 +36,7 @@ from zcu_tools.utils.datasaver import load_data, save_data
 class PowerDepResult:
     gains: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[PowerDepCfg] = None
+    cfg_snapshot: PowerDepCfg | None = None
 
 
 def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -47,8 +48,8 @@ def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class PowerDepModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
-    init_pulse: Optional[PulseCfg] = None
+    reset: ResetCfg | None = None
+    init_pulse: PulseCfg | None = None
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
@@ -69,7 +70,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
         soccfg,
         cfg: PowerDepCfg,
         *,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> PowerDepResult:
         cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
@@ -83,7 +84,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, PowerDepCfg],
-            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules
@@ -132,7 +133,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
 
     def analyze(
         self,
-        result: Optional[PowerDepResult] = None,
+        result: PowerDepResult | None = None,
         *,
         g0=None,
         e0=None,
@@ -170,8 +171,8 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[PowerDepResult] = None,
-        comment: Optional[str] = None,
+        result: PowerDepResult | None = None,
+        comment: str | None = None,
         tag: str = "mist/gain",
         **kwargs,
     ) -> None:

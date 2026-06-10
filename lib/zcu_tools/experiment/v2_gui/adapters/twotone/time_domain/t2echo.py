@@ -1,17 +1,11 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
 from matplotlib.figure import Figure
-from typing_extensions import (
-    Annotated,
-    Any,
-    ClassVar,
-    Literal,
-    Sequence,
-    TypeAlias,
-)
 
 from zcu_tools.experiment.v2.twotone.time_domain.t2echo import (
     T2EchoCfg,

@@ -22,8 +22,8 @@ def freq2omega(freqs: NDArray[np.float64]) -> NDArray[np.float64]: ...
 
 
 def freq2omega(
-    freqs: Union[float, NDArray[np.float64]],
-) -> Union[float, NDArray[np.float64]]:
+    freqs: float | NDArray[np.float64],
+) -> float | NDArray[np.float64]:
     """GHz -> rad/ns"""
     return 2 * np.pi * freqs  # type: ignore
 
@@ -37,8 +37,8 @@ def convert_eV_to_Hz(val: NDArray[np.float64]) -> NDArray[np.float64]: ...
 
 
 def convert_eV_to_Hz(
-    val: Union[float, NDArray[np.float64]],
-) -> Union[float, NDArray[np.float64]]:
+    val: float | NDArray[np.float64],
+) -> float | NDArray[np.float64]:
     """Convert a value in electron volts to Hz."""
     return val * sp.e / sp.h
 
@@ -52,8 +52,8 @@ def calc_therm_ratio(omega: NDArray[np.float64], T: float) -> NDArray[np.float64
 
 
 def calc_therm_ratio(
-    omega: Union[float, NDArray[np.float64]],
+    omega: float | NDArray[np.float64],
     T: float,
-) -> Union[float, NDArray[np.float64]]:
+) -> float | NDArray[np.float64]:
     """omega: rad/ns, T: K"""
     return (sp.hbar * omega * 1e9) / (sp.k * T)  # type: ignore

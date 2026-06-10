@@ -74,8 +74,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass
-
-from typing_extensions import Optional, cast
+from typing import Optional, cast
 
 from ...analysis import (
     estimate_body_cost,
@@ -208,7 +207,7 @@ class UnrollLoopPass(AbsIRTreePass):
         self,
         node: IRNode,
         ctx: PipeLineContext,
-    ) -> Optional[IRNode]:
+    ) -> IRNode | None:
         if not isinstance(node, IRLoop):
             return None
 
@@ -238,7 +237,7 @@ class UnrollLoopPass(AbsIRTreePass):
         cfg = ctx.config
         loop_overhead = cfg.cost_default + cfg.cost_jump_flush
 
-        n: Optional[int] = None
+        n: int | None = None
         is_runtime_exact = False
         if isinstance(node.n, int):
             n = node.n
@@ -265,7 +264,7 @@ class UnrollLoopPass(AbsIRTreePass):
         is_runtime_exact: bool,
         loop_overhead: int,
         ctx: PipeLineContext,
-    ) -> Optional[IRNode]:
+    ) -> IRNode | None:
         """Handle loops with a known (compile-time or exact-hint) iteration count."""
         analysis = _analyze_unroll(cast(BlockNode, node.body).insts, loop_overhead, ctx)
         logger.debug(
@@ -426,7 +425,7 @@ class UnrollLoopPass(AbsIRTreePass):
 
     def _maybe_build_jump_table(
         self, node: IRLoop, loop_overhead: int, ctx: PipeLineContext
-    ) -> Optional[BlockNode]:
+    ) -> BlockNode | None:
         """Try to build a jump-table BlockNode for a register-driven loop.
 
         Returns a BlockNode containing:

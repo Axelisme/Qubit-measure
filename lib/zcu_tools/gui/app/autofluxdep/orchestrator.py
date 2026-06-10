@@ -37,9 +37,9 @@ SmoothingService's own internal state, not dependencies.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-
-from typing_extensions import Any, Callable, Mapping, Optional, Protocol
+from typing import Any, Optional, Protocol
 
 from zcu_tools.gui.app.autofluxdep.derivation import (
     DerivationService,
@@ -150,7 +150,7 @@ class InfoStore:
 _MISSING = object()
 
 
-def _resolve_module(name: str, info: InfoStore, ml: Optional[ModuleSource]) -> Any:
+def _resolve_module(name: str, info: InfoStore, ml: ModuleSource | None) -> Any:
     """Latest-available module: Node-produced (this/prev point), else ml preset.
 
     Returns ``_MISSING`` if neither a Node nor the ml library provides it.
@@ -166,8 +166,8 @@ def _resolve_module(name: str, info: InfoStore, ml: Optional[ModuleSource]) -> A
 
 
 def project_snapshot(
-    provider: DepDeclaring, info: InfoStore, ml: Optional[ModuleSource] = None
-) -> Optional[Snapshot]:
+    provider: DepDeclaring, info: InfoStore, ml: ModuleSource | None = None
+) -> Snapshot | None:
     """Project the master container into a Snapshot for ``provider``, or None to skip.
 
     Info values: each declared key resolved latest-available (this point, else
@@ -238,18 +238,18 @@ class Orchestrator:
 
     providers: list[PlacedNode]
     tools: Tools = field(default_factory=Tools)
-    ml: Optional[ModuleSource] = None
+    ml: ModuleSource | None = None
     soc: Any = None
     soccfg: Any = None
     md: Any = None
     results: Mapping[str, Any] = field(default_factory=dict)
-    notify: Optional[Notify] = None
+    notify: Notify | None = None
     derivations: list[DerivationService] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         # auto-collect consumer-declared smoothing into one service
         specs = [s for p in self.providers for s in p.smooth_specs()]
-        self._smoothing: Optional[SmoothingService] = (
+        self._smoothing: SmoothingService | None = (
             SmoothingService.from_specs(specs) if specs else None
         )
 
@@ -260,7 +260,7 @@ class Orchestrator:
         ``round_hook=None`` — nothing to fill or notify; the Node ignores them.
         """
         result = self.results.get(provider.name)
-        round_hook: Optional[Callable[[Any], None]] = None
+        round_hook: Callable[[Any], None] | None = None
         if result is not None and self.notify is not None:
             name = provider.name
             notify = self.notify
@@ -287,9 +287,9 @@ class Orchestrator:
     def run(
         self,
         flux_values: list[float],
-        on_point: Optional[OnPoint] = None,
-        on_node: Optional[OnNode] = None,
-        should_stop: Optional[Callable[[], bool]] = None,
+        on_point: OnPoint | None = None,
+        on_node: OnNode | None = None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> InfoStore:
         """Sweep flux × providers in order.
 

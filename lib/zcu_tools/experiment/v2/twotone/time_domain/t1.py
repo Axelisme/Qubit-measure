@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,7 +11,6 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
-from typing_extensions import Any, Callable, Optional, Union
 
 import zcu_tools.utils.fitting as ft
 from zcu_tools.cfg_model import ConfigBase
@@ -43,7 +44,7 @@ from zcu_tools.utils.process import rotate2real
 class T1Result:
     times: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[Union[T1Cfg, T1WithToneCfg]] = None
+    cfg_snapshot: T1Cfg | T1WithToneCfg | None = None
 
 
 def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -51,13 +52,13 @@ def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class T1ModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
 class T1SweepCfg(ConfigBase):
-    length: Union[SweepCfg, list[float]]
+    length: SweepCfg | list[float]
 
 
 class T1Cfg(ProgramV2Cfg, ExpCfgModel):
@@ -77,7 +78,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         soc,
         soccfg,
         cfg: T1Cfg,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> T1Result:
         original_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
@@ -102,7 +103,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, T1Cfg],
-            update_hook: Optional[Callable],
+            update_hook: Callable | None,
         ):
             cfg = ctx.cfg
             modules = cfg.modules
@@ -157,7 +158,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         soc,
         soccfg,
         cfg: T1Cfg,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> T1Result:
         original_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
@@ -170,7 +171,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
 
             def measure_fn(
                 ctx: TaskState[NDArray[np.complex128], Any, T1Cfg],
-                update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+                update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
             ) -> list[NDArray[np.float64]]:
                 modules = ctx.cfg.modules
                 length_sweep = ctx.cfg.sweep.length
@@ -222,7 +223,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         cfg: T1Cfg,
         *,
         uniform: bool = True,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> T1Result:
         if uniform:
             return self._run_uniform(soc, soccfg, cfg, acquire_kwargs=acquire_kwargs)
@@ -233,7 +234,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
 
     def analyze(
         self,
-        result: Optional[T1Result] = None,
+        result: T1Result | None = None,
         *,
         dual_exp: bool = False,
         skip: int = 0,
@@ -282,8 +283,8 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[T1Result] = None,
-        comment: Optional[str] = None,
+        result: T1Result | None = None,
+        comment: str | None = None,
         tag: str = "twotone/ge/t1",
         **kwargs,
     ) -> None:
@@ -330,7 +331,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
 
 
 class T1WithToneModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     pi_pulse: PulseCfg
     test_pulse: PulseCfg
     readout: ReadoutCfg
@@ -352,7 +353,7 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
         soccfg,
         cfg: T1WithToneCfg,
         *,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> T1Result:
         setup_devices(cfg, progress=True)
         modules = cfg.modules
@@ -365,7 +366,7 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, T1WithToneCfg],
-            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules
@@ -415,7 +416,7 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
         return self.last_result
 
     def analyze(
-        self, result: Optional[T1Result] = None, *, dual_exp: bool = False
+        self, result: T1Result | None = None, *, dual_exp: bool = False
     ) -> tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
@@ -460,8 +461,8 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[T1Result] = None,
-        comment: Optional[str] = None,
+        result: T1Result | None = None,
+        comment: str | None = None,
         tag: str = "twotone/ge/t1_with_tone",
         **kwargs,
     ) -> None:
@@ -512,7 +513,7 @@ class ScanT1WithToneResult:
     values: NDArray[np.float64]
     times: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[ScanT1WithToneCfg] = None
+    cfg_snapshot: ScanT1WithToneCfg | None = None
 
 
 def t1_with_tone_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -520,7 +521,7 @@ def t1_with_tone_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.floa
 
 
 class ScanT1WithToneSweepCfg(ConfigBase):
-    gain: Union[SweepCfg, list[float]]
+    gain: SweepCfg | list[float]
     length: SweepCfg
 
 
@@ -536,7 +537,7 @@ class ScanT1WithToneExp(AbsExperiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
         soccfg,
         cfg: ScanT1WithToneCfg,
         *,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> ScanT1WithToneResult:
         setup_devices(cfg, progress=True)
         modules = cfg.modules
@@ -555,7 +556,7 @@ class ScanT1WithToneExp(AbsExperiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, ScanT1WithToneCfg],
-            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules
@@ -612,7 +613,7 @@ class ScanT1WithToneExp(AbsExperiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
         return self.last_result
 
     def analyze(
-        self, result: Optional[ScanT1WithToneResult] = None
+        self, result: ScanT1WithToneResult | None = None
     ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], Figure]:
         if result is None:
             result = self.last_result
@@ -677,8 +678,8 @@ class ScanT1WithToneExp(AbsExperiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[ScanT1WithToneResult] = None,
-        comment: Optional[str] = None,
+        result: ScanT1WithToneResult | None = None,
+        comment: str | None = None,
         tag: str = "twotone/ge/t1_with_tone_sweep",
         **kwargs,
     ) -> None:

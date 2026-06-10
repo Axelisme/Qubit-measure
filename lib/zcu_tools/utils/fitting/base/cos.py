@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+from typing import Optional, cast
+
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Optional, Sequence, cast
 
 from .base import assign_init_p, fit_func
 
@@ -17,8 +19,8 @@ def cosfunc(x: NDArray[np.float64], *p: float) -> NDArray[np.float64]:
 def fitcos(
     xdata: NDArray[np.float64],
     ydata: NDArray[np.float64],
-    fitparams: Optional[Sequence[Optional[float]]] = None,
-    fixedparams: Optional[Sequence[Optional[float]]] = None,
+    fitparams: Sequence[float | None] | None = None,
+    fixedparams: Sequence[float | None] | None = None,
 ) -> tuple[list[float], NDArray[np.float64]]:
     """fitparams = [y0, yscale, freq (1/x), phase (deg)]"""
     if fitparams is None:
@@ -74,8 +76,8 @@ def decaycos(x: NDArray[np.float64], *p: float) -> NDArray[np.float64]:
 def fitdecaycos(
     xdata: NDArray[np.float64],
     ydata: NDArray[np.float64],
-    fitparams: Optional[Sequence[Optional[float]]] = None,
-    fixedparams: Optional[Sequence[Optional[float]]] = None,
+    fitparams: Sequence[float | None] | None = None,
+    fixedparams: Sequence[float | None] | None = None,
 ) -> tuple[list[float], NDArray[np.float64]]:
     """return (y0, yscale, freq, phase, decay_time), (pOpt, pCov)"""
     if fitparams is None:

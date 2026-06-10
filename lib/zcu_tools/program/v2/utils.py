@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import logging
+from typing import Union
 
 from qick.asm_v2 import QickParam, QickSweep1D
-from typing_extensions import Union
 
 from .sweep import SweepCfg
 
@@ -29,7 +29,7 @@ def sweep2param(name: str, sweep: SweepCfg) -> QickParam:
     return QickSweep1D(name, sweep.start, sweep.stop)
 
 
-def param2str(param: Union[float, QickParam]) -> str:
+def param2str(param: float | QickParam) -> str:
     """Convert a parameter to a string."""
     if isinstance(param, QickParam):
         if param.is_sweep():

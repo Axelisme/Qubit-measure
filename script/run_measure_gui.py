@@ -20,7 +20,7 @@ LOG_FORMAT = "%(asctime)s.%(msecs)03d [%(levelname)-7s] %(name)s: %(message)s"
 LOG_DATE = "%H:%M:%S"
 
 
-def _setup_logging(to_file: bool = True, log_file: "Path | None" = None) -> None:
+def _setup_logging(to_file: bool = True, log_file: Path | None = None) -> None:
     """Configure root logger: DEBUG to file, WARNING to stderr.
 
     ``log_file`` overrides the default ``LOG_FILE`` location (e.g. an automated

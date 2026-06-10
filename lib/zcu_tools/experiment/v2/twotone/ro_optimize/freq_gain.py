@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional, TypeAlias
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
-from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -39,11 +40,11 @@ class FreqGainResult:
     freqs: NDArray[np.float64]
     gains: NDArray[np.float64]
     signals: NDArray[np.float64]
-    cfg_snapshot: Optional["FreqGainCfg"] = None
+    cfg_snapshot: FreqGainCfg | None = None
 
 
 class FreqGainModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     qub_pulse: PulseCfg
     readout: PulseReadoutCfg
 
@@ -68,7 +69,7 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
         soccfg,
         cfg: FreqGainCfg,
         *,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> FreqGainResult:
         original_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
@@ -87,7 +88,7 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.float64], Any, FreqGainCfg],
-            update_hook: Optional[Callable[[int, RawResult], None]],
+            update_hook: Callable[[int, RawResult], None] | None,
         ) -> RawResult:
             cfg = ctx.cfg
             modules = cfg.modules
@@ -146,7 +147,7 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
         return self.last_result
 
     def analyze(
-        self, result: Optional[FreqGainResult] = None, *, smooth: float = 1.0
+        self, result: FreqGainResult | None = None, *, smooth: float = 1.0
     ) -> tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
@@ -185,8 +186,8 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[FreqGainResult] = None,
-        comment: Optional[str] = None,
+        result: FreqGainResult | None = None,
+        comment: str | None = None,
         tag: str = "twotone/ge/ro_optimize/freq",
         **kwargs,
     ) -> None:

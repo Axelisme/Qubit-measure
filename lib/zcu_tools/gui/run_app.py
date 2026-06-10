@@ -19,7 +19,8 @@ do them.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Optional, TypeVar
+from collections.abc import Callable
+from typing import Any, Optional, TypeVar
 
 Ctrl = TypeVar("Ctrl")
 Window = TypeVar("Window")
@@ -29,8 +30,8 @@ def run_qt_app(
     *,
     controller_factory: Callable[[], Ctrl],
     window_factory: Callable[[Ctrl], Window],
-    control: Optional[Any] = None,
-    adapter_factory: Optional[Callable[[Ctrl, Any], Any]] = None,
+    control: Any | None = None,
+    adapter_factory: Callable[[Ctrl, Any], Any] | None = None,
 ) -> int:
     """Build and run a GUI app on the Qt event loop. Returns the exit code.
 

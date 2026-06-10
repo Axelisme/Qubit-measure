@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
@@ -7,7 +9,6 @@ from IPython.display import clear_output, display
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
-from typing_extensions import Any
 
 
 class InteractiveOneTone:

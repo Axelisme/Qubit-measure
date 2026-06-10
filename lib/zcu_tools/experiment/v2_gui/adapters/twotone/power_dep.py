@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import time
-
-from typing_extensions import Any, ClassVar, TypeAlias
+from typing import Any, ClassVar, TypeAlias
 
 from zcu_tools.experiment.v2.twotone.power_dep import PowerCfg, PowerExp, PowerResult
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter

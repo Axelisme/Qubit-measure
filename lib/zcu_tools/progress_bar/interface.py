@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Any, Callable, Generator, Optional
+from typing import Any, Optional
 
 from .base import BaseProgressBar
 
-_pbar_factory: ContextVar[Optional[Callable[..., BaseProgressBar]]] = ContextVar(
+_pbar_factory: ContextVar[Callable[..., BaseProgressBar] | None] = ContextVar(
     "pbar_factory", default=None
 )
 

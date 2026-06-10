@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -32,7 +33,7 @@ from zcu_tools.utils.process import rotate2real
 class LenRabiResult:
     lengths: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[LenRabiCfg] = None
+    cfg_snapshot: LenRabiCfg | None = None
 
 
 def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -53,7 +54,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         soc,
         soccfg,
         cfg: LenRabiCfg,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> LenRabiResult:
         orig_cfg = deepcopy(cfg)
 
@@ -73,7 +74,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, LenRabiCfg],
-            update_hook: Optional[Callable],
+            update_hook: Callable | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules
@@ -117,7 +118,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         soc,
         soccfg,
         cfg: LenRabiCfg,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> LenRabiResult:
         orig_cfg = deepcopy(cfg)
 
@@ -198,7 +199,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         soccfg,
         cfg: LenRabiCfg,
         *,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> LenRabiResult:
         modules = cfg.modules
         qub_waveform = modules.qub_pulse.waveform
@@ -211,7 +212,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
             return self._run_for_arb(soc, soccfg, cfg, acquire_kwargs=acquire_kwargs)
 
     def analyze(
-        self, result: Optional[LenRabiResult] = None, *, decay: bool = True
+        self, result: LenRabiResult | None = None, *, decay: bool = True
     ) -> tuple[float, float, float, Figure]:
         if result is None:
             result = self.last_result
@@ -264,8 +265,8 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[LenRabiResult] = None,
-        comment: Optional[str] = None,
+        result: LenRabiResult | None = None,
+        comment: str | None = None,
         tag: str = "twotone/ge/rabi_length",
         **kwargs,
     ) -> None:

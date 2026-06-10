@@ -27,12 +27,12 @@ if TYPE_CHECKING:
 
 def _resolve_eval(
     value: EvalValue,
-    md: "Optional[MetaDict]",
+    md: MetaDict | None,
     *,
     path: str,
     label: str,
     type_: type = float,
-) -> Union[int, float]:
+) -> int | float:
     """Resolve an EvalValue to a number, coerced to ``type_``.
 
     Prefers the snapshot ``value.resolved``; when absent (adapters may build an
@@ -96,7 +96,7 @@ def _resolve_eval(
 
 
 def _resolve_sweep_edge(
-    value: object, md: "Optional[MetaDict]", *, path: str, label: str
+    value: object, md: MetaDict | None, *, path: str, label: str
 ) -> float:
     if isinstance(value, (int, float)):
         return float(value)
@@ -109,9 +109,9 @@ def _resolve_sweep_edge(
 def _section_to_dict_inner(
     spec: CfgSectionSpec,
     value: CfgSectionValue,
-    ml: "Optional[ModuleLibrary]",
+    ml: ModuleLibrary | None,
     path: list[str],
-    md: "Optional[MetaDict]" = None,
+    md: MetaDict | None = None,
 ) -> dict:
     result: dict[str, Any] = {}
     extra_keys = set(value.fields.keys()) - set(spec.fields.keys())
@@ -213,9 +213,9 @@ def _section_to_dict_inner(
 
 
 def find_allowed_spec(
-    ref_spec: Union[ModuleRefSpec, WaveformRefSpec],
-    ref_val: Union[ModuleRefValue, WaveformRefValue],
-    ml: "Optional[ModuleLibrary]",
+    ref_spec: ModuleRefSpec | WaveformRefSpec,
+    ref_val: ModuleRefValue | WaveformRefValue,
+    ml: ModuleLibrary | None,
 ) -> CfgSectionSpec:
     """Return the CfgSectionSpec from allowed[] that matches chosen_key's label."""
     chosen = ref_val.chosen_key
@@ -275,8 +275,8 @@ def find_allowed_spec(
 def validate_section(
     spec: CfgSectionSpec,
     value: CfgSectionValue,
-    ml: "Optional[ModuleLibrary]",
-    path: "list[str]",
+    ml: ModuleLibrary | None,
+    path: list[str],
 ) -> None:
     """Fast-fail if ``value`` is structurally incomplete or violates ``spec``.
 
@@ -301,7 +301,7 @@ def validate_section(
 def _validate_node(
     spec: object,
     node_val: object,
-    ml: "Optional[ModuleLibrary]",
+    ml: ModuleLibrary | None,
     full_path: str,
 ) -> None:
     # A ``None`` entry is a disabled optional ref (ADR-0010); legal only there.
@@ -419,9 +419,9 @@ def _validate_scalar(spec: ScalarSpec, node_val: DirectValue, full_path: str) ->
 def validate_dynamic_section(
     spec: CfgSectionSpec,
     value: CfgSectionValue,
-    md: "MetaDict",
-    ml: "Optional[ModuleLibrary]",
-    path: "list[str]",
+    md: MetaDict,
+    ml: ModuleLibrary | None,
+    path: list[str],
 ) -> None:
     """Fast-fail if ``value`` cannot be lowered with the given ``md``.
 
@@ -436,8 +436,8 @@ def validate_dynamic_section(
 def _validate_dynamic_node(
     spec: object,
     node_val: object,
-    md: "MetaDict",
-    ml: "Optional[ModuleLibrary]",
+    md: MetaDict,
+    ml: ModuleLibrary | None,
     full_path: str,
 ) -> None:
     if node_val is None:
@@ -506,7 +506,7 @@ def _validate_dynamic_node(
 
 def _validate_eval(
     value: EvalValue,
-    md: "MetaDict",
+    md: MetaDict,
     type_: type,
     full_path: str,
     label: str,

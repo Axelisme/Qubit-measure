@@ -51,10 +51,12 @@ import os
 for _blas_var in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
     os.environ.setdefault(_blas_var, "1")
 
+from collections.abc import Callable
+from typing import Optional
+
 import h5py as h5
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Callable, Optional
 
 # Preset (EJb, ECb, ELb) bounding boxes — the notebook's named ranges (GHz).
 PRESETS: dict[
@@ -345,7 +347,7 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     EJb, ECb, ELb = _resolve_bounds(args)
 

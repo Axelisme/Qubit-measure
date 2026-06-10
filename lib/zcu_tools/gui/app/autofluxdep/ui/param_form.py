@@ -27,7 +27,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.builder import PlacedNode
 class ParamForm(QWidget):
     """Settings form for one PlacedNode, plus a read-only dep/provides summary."""
 
-    def __init__(self, node: PlacedNode, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, node: PlacedNode, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._node = node
         self._edits: dict[str, QLineEdit] = {}

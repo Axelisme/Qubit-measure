@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+from typing import Any, Optional, TypeVar, Union, cast
 
 import yaml
-from typing_extensions import Any, Optional, TypeVar, Union, cast
 from yaml.nodes import MappingNode
 
 from zcu_tools.device import GlobalDeviceManager
@@ -68,7 +68,7 @@ T_WaveformCfg = TypeVar("T_WaveformCfg", bound=AbsWaveformCfg)
 
 class ModuleLibrary(SyncFile):
     def __init__(
-        self, cfg_path: Optional[Union[str, Path]] = None, readonly: bool = False
+        self, cfg_path: str | Path | None = None, readonly: bool = False
     ) -> None:
         self.waveforms: dict[str, WaveformCfg] = {}
         self.modules: dict[str, ModuleCfg] = {}
@@ -76,7 +76,7 @@ class ModuleLibrary(SyncFile):
         super().__init__(cfg_path, readonly=readonly)
 
     @auto_sync("read")
-    def clone(self, dst_path: Optional[Union[str, Path]] = None) -> ModuleLibrary:
+    def clone(self, dst_path: str | Path | None = None) -> ModuleLibrary:
         if dst_path is not None and Path(dst_path).exists():
             raise FileExistsError(f"Destination path {dst_path} already exists")
 
@@ -167,9 +167,7 @@ class ModuleLibrary(SyncFile):
             ) from e
 
     @auto_sync("write")
-    def register_waveform(
-        self, **wav_kwargs: Union[dict[str, Any], WaveformCfg]
-    ) -> None:
+    def register_waveform(self, **wav_kwargs: dict[str, Any] | WaveformCfg) -> None:
         self._check_can_write()
         wav_kwargs = deepcopy(wav_kwargs)
 
@@ -181,7 +179,7 @@ class ModuleLibrary(SyncFile):
         self._dirty = True
 
     @auto_sync("write")
-    def register_module(self, **mod_kwargs: Union[dict[str, Any], ModuleCfg]) -> None:
+    def register_module(self, **mod_kwargs: dict[str, Any] | ModuleCfg) -> None:
         self._check_can_write()
         mod_kwargs = deepcopy(mod_kwargs)
 
@@ -210,7 +208,7 @@ class ModuleLibrary(SyncFile):
     def get_waveform(
         self,
         name: str,
-        override_cfg: Optional[dict[str, Any]] = None,
+        override_cfg: dict[str, Any] | None = None,
         type: type[T_WaveformCfg] = AbsWaveformCfg,
     ) -> T_WaveformCfg:
         if name not in self.waveforms:
@@ -231,7 +229,7 @@ class ModuleLibrary(SyncFile):
     def get_module(
         self,
         name: str,
-        override_cfg: Optional[dict[str, Any]] = None,
+        override_cfg: dict[str, Any] | None = None,
         type: type[T_ModuleCfg] = AbsModuleCfg,
     ) -> T_ModuleCfg:
         if name not in self.modules:

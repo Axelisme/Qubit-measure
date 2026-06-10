@@ -16,11 +16,10 @@ from here.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Mapping, Optional, Protocol
-
-from typing_extensions import TypeAlias
+from typing import TYPE_CHECKING, Any, Optional, Protocol, TypeAlias
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary
@@ -74,15 +73,15 @@ class ContextReadiness(Enum):
 class ExpContext:
     md: MetaDict
     ml: ModuleLibrary
-    soc: Optional[SocHandle]
-    soccfg: Optional[SocCfgHandle]
+    soc: SocHandle | None
+    soccfg: SocCfgHandle | None
     chip_name: str = "unknown_chip"
     qub_name: str = "unknown_qubit"
     res_name: str = "unknown_resonator"
     result_dir: str = ""
     database_path: str = ""
     active_label: str = ""
-    predictor: Optional[FluxoniumPredictor] = None
+    predictor: FluxoniumPredictor | None = None
     readiness: ContextReadiness = ContextReadiness.EMPTY
 
     # -- readiness predicates (the context answers about itself) -----------

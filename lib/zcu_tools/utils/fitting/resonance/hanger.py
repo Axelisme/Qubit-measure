@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from typing import Optional, TypedDict
+
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle
 from numpy.typing import NDArray
-from typing_extensions import Optional, TypedDict
 
 from .base import (
     calc_phase,
@@ -79,7 +80,7 @@ class HangerModel:
         cls,
         freqs: NDArray[np.float64],
         signals: NDArray[np.complex128],
-        edelay: Optional[float] = None,
+        edelay: float | None = None,
         fit_bg_slope: bool = False,
     ) -> HangerParams:
         """dict[freq, fwhm, Ql, Qc, Qi, phi, a0, edelay, circle_params]"""

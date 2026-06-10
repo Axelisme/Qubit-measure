@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Optional, Union
 
 from pydantic import BeforeValidator
 from qick.asm_v2 import QickParam
-from typing_extensions import TYPE_CHECKING, Annotated, Any, Literal, Optional, Union
 
 from .base import AbsModuleCfg, Module
 from .util import round_timestamp
@@ -19,24 +19,24 @@ class PulseCfg(AbsModuleCfg):
     waveform: Annotated[WaveformCfg, BeforeValidator(resolve_waveform_ref)]
     ch: int
     nqz: Literal[1, 2]
-    freq: Union[float, QickParam]
-    phase: Union[float, QickParam] = 0.0
-    gain: Union[float, QickParam]
-    pre_delay: Union[float, QickParam] = 0.0
-    post_delay: Union[float, QickParam] = 0.0
+    freq: float | QickParam
+    phase: float | QickParam = 0.0
+    gain: float | QickParam
+    pre_delay: float | QickParam = 0.0
+    post_delay: float | QickParam = 0.0
 
-    mixer_freq: Optional[float] = None
-    mux_freqs: Optional[list[float]] = None
-    mux_gains: Optional[list[float]] = None
-    mux_phases: Optional[list[float]] = None
-    mask: Optional[list[int]] = None
-    outsel: Optional[int] = None
-    ro_ch: Optional[int] = None
+    mixer_freq: float | None = None
+    mux_freqs: list[float] | None = None
+    mux_gains: list[float] | None = None
+    mux_phases: list[float] | None = None
+    mask: list[int] | None = None
+    outsel: int | None = None
+    ro_ch: int | None = None
 
     def build(self, name: str) -> Pulse:
         return Pulse(name, self)
 
-    def set_param(self, name: str, value: Union[float, QickParam]) -> None:
+    def set_param(self, name: str, value: float | QickParam) -> None:
         if name == "length":
             self.waveform.set_param(name, value)
         elif name in {"gain", "freq", "phase"}:
@@ -49,10 +49,10 @@ class Pulse(Module):
     def __init__(
         self,
         name: str,
-        cfg: Optional[PulseCfg],
-        tag: Optional[str] = None,
+        cfg: PulseCfg | None,
+        tag: str | None = None,
         block_mode: bool = True,
-        pulse_id: Optional[str] = None,
+        pulse_id: str | None = None,
     ) -> None:
         self.name = name
         self.cfg = deepcopy(cfg) if cfg is not None else None
@@ -104,7 +104,7 @@ class Pulse(Module):
             **self.waveform.to_wav_kwargs(),
         )
 
-    def total_length(self, prog: ModularProgramV2) -> Union[float, QickParam]:
+    def total_length(self, prog: ModularProgramV2) -> float | QickParam:
         if self.cfg is None:
             return 0.0
         return round_timestamp(
@@ -117,8 +117,8 @@ class Pulse(Module):
         )
 
     def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
+        self, prog: ModularProgramV2, t: float | QickParam = 0.0
+    ) -> float | QickParam:
         cfg = self.cfg
         if cfg is None:
             return t

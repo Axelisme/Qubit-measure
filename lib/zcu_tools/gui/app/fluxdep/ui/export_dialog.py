@@ -31,7 +31,7 @@ class ExportSpectrumsDialog(QDialog):
     def __init__(
         self,
         result_dir: str,
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Export spectrums.hdf5")
@@ -73,7 +73,7 @@ class ExportSpectrumsDialog(QDialog):
         if filepath:
             self._path_edit.setText(filepath)
 
-    def export_path(self) -> Optional[str]:
+    def export_path(self) -> str | None:
         """The chosen export path, or None if empty."""
         path = self._path_edit.text().strip()
         return path or None

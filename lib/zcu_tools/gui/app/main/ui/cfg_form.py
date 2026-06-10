@@ -53,10 +53,10 @@ class CfgFormWidget(QWidget):
     # mode). Payload is a freshly built CfgSchema snapshot of the LiveModel.
     schema_changed: Signal = Signal(object)
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._model: Optional[SectionLiveField] = None
-        self._root_widget: Optional[SectionWidget] = None
+        self._model: SectionLiveField | None = None
+        self._root_widget: SectionWidget | None = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -130,7 +130,7 @@ class CfgFormWidget(QWidget):
             raise RuntimeError("attach() must be called before read_schema()")
         return CfgSchema(spec=self._model.spec, value=self.read_values())
 
-    def get_live_root(self) -> Optional[SectionLiveField]:
+    def get_live_root(self) -> SectionLiveField | None:
         """Return the live ``SectionLiveField`` root, or ``None`` if unpopulated.
 
         Exposed so the remote-control path resolver (Phase 81b) can mutate
@@ -142,7 +142,7 @@ class CfgFormWidget(QWidget):
     def is_valid(self) -> bool:
         return self._model.is_valid() if self._model else True
 
-    def first_invalid_reason(self) -> Optional[str]:
+    def first_invalid_reason(self) -> str | None:
         if self._model is None:
             return None
         return self._find_first_invalid(self._model, path="")
@@ -152,7 +152,7 @@ class CfgFormWidget(QWidget):
             return
         self.schema_changed.emit(self.read_schema())
 
-    def _find_first_invalid(self, field: LiveField, *, path: str) -> Optional[str]:
+    def _find_first_invalid(self, field: LiveField, *, path: str) -> str | None:
         if isinstance(field, ScalarLiveField):
             if field.is_valid():
                 return None

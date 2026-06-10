@@ -1,8 +1,9 @@
+from collections.abc import Callable, Sequence
 from copy import deepcopy
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Sequence
 
 from zcu_tools.experiment.v2.runner import TaskState
 from zcu_tools.program.v2 import MyProgramV2

@@ -34,7 +34,7 @@ class BaseController(Generic[StateT, BusT]):
         self,
         state: StateT,
         bus: BusT,
-        project_root: Optional[str] = None,
+        project_root: str | None = None,
     ) -> None:
         self._state = state
         self._bus = bus

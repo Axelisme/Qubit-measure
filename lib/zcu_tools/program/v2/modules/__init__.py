@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Annotated, Any, Optional, TypeAlias, Union
+
 import qick.asm_v2 as qick_asm_v2
 from pydantic import BeforeValidator, Field, TypeAdapter
-from typing_extensions import TYPE_CHECKING, Annotated, Any, Optional, TypeAlias, Union
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary
@@ -56,7 +57,7 @@ from .waveform import (
 
 
 ModuleCfg: TypeAlias = Annotated[
-    Union[ResetCfg, ReadoutCfg, PulseCfg],
+    ResetCfg | ReadoutCfg | PulseCfg,
     BeforeValidator(resolve_module_ref),
     Field(discriminator="type"),
 ]
@@ -66,9 +67,9 @@ class ModuleCfgFactory:
     @classmethod
     def from_raw(
         cls,
-        raw: Union[str, dict[str, Any], AbsModuleCfg],
+        raw: str | dict[str, Any] | AbsModuleCfg,
         *,
-        ml: Optional[ModuleLibrary] = None,
+        ml: ModuleLibrary | None = None,
     ) -> ModuleCfg:
         if isinstance(raw, str):
             if ml is None:

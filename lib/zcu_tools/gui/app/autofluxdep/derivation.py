@@ -18,9 +18,9 @@ consumer of ``t1`` still reads the raw value.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-
-from typing_extensions import Any, Iterable, Mapping, Protocol
+from typing import Any, Protocol
 
 from zcu_tools.gui.app.autofluxdep.nodes.spec import SmoothMode
 from zcu_tools.gui.app.autofluxdep.tools import Smoother
@@ -61,7 +61,7 @@ class SmoothingService:
     smoother: Smoother = field(default_factory=Smoother)
 
     @classmethod
-    def from_specs(cls, specs: Iterable[tuple[str, SmoothMode]]) -> "SmoothingService":
+    def from_specs(cls, specs: Iterable[tuple[str, SmoothMode]]) -> SmoothingService:
         """Build from (key, mode) pairs, deduping by key.
 
         Same key+mode declared twice collapses to one rule; same key with a

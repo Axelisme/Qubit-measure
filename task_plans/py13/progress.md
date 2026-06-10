@@ -9,7 +9,7 @@
 | 2 | 依賴 pin 解鎖（3.9 上）＝numpy 2 遷移 | ✅ complete（2026-06-11） |
 | 3 | 切換直譯器到 3.13 | ✅ complete（2026-06-11） |
 | 4 | 全量驗證與修復 | ✅ complete（2026-06-11） |
-| 5 | typing 現代化 | ⬜ pending（排後期，D4 已定） |
+| 5 | typing 現代化 | ✅ complete（2026-06-11，D8=方案 A） |
 
 **Phase 4 終值：pytest 2594 passed（0 fail/0 xfail）、pyright 0 errors 0 warnings、ruff clean、三 GUI（measure/fluxdep/dispersive）3.13 下 MCP launch+state_check smoke 全過。**
 
@@ -56,3 +56,24 @@
 - 文件：CLAUDE.md Python 版本描述更新（client 3.13 / 板端 3.8）；program AI_NOTE venv 路徑 3.9→3.13。
 - 終值見上表。**剩餘：Phase 5 typing 現代化（用戶排後期）；commit/merge main 由用戶決定。**
 - 註：用戶於本日 commit `dc74c1e0` 把整套文件（CLAUDE.md/AI_NOTE/docs/adr/task_plans）納入 git 追蹤——文件變更現在會進 diff/commit。
+
+### 2026-06-11 — 升級 commit + Phase 5 細部規劃
+
+- **commit `03d72f3e`**（py13 branch）：Phase 1–4 全部變更入庫（54 檔，+1024/−2838）。
+- Phase 5 規劃完成（impl-detail-planner/opus 調查 + orchestrator 定稿，見 task_plan.md）：Step 0 修 Union introspection guards 是硬性前置；ruff 採常駐 extend-select UP006/007/035/037/045 + 板端檔 per-file-ignores（start_server.py、remote/pyro.py 維持 3.8 相容）；PEP 695 規則與 `from __future__ import annotations` 移除皆不在範圍。
+- **待用戶定（D7）**：typing_extensions→typing 遷移（256 行）做不做。
+
+### 2026-06-11 — Phase 5 Steps 0–3 完成（D7=遷回 typing + 移除依賴）
+
+- **Step 0**（implementer/sonnet）：Union introspection guards 修復——`analyze_params.py` 加 `_UNION_ORIGINS={typing.Union, types.UnionType}`、`dispatch.py` 雙比對；先紅後綠補 8 個 PEP 604 測試（7 紅證明失配→修後全綠）；`sweep.py:17` 的 `unwrap_model_annotation` 經查不受影響。全套件 2602 passed。
+- **Steps 1–3**（implementer/sonnet）：ruff 常駐 `extend-select UP006/007/035/037/045` + 板端兩檔 per-file-ignores；自動修 3056 處 + unsafe fixes + 手工 35 處（28 檔）；typing_extensions→typing/collections.abc 遷移；pyproject 移除 typing-extensions、uv lock/sync。改動 426 檔。
+- **發現技術阻礙（D8 待用戶定）**：13 個檔案的 TypedDict 用 PEP 728 `closed=True`/`extra_items=`，3.13 stdlib 不支援，仍須 import typing_extensions——但依賴宣告已移除，形成「import 未宣告的 transitive dep」的脆弱狀態，必須二選一：(A) 恢復宣告 typing-extensions 為直接依賴；(B) 移除 13 檔的 PEP 728 參數（放寬 extra-key 靜態檢查）換取真正零依賴。
+- orchestrator 終態查核：pyright 0/0、ruff 全清、pytest 2602 passed；板端兩檔零變動。
+- 註：IDE language server 仍以舊 3.9 直譯器分析（誤報「`|` 需 3.10+」等），CLI pyright 為準；建議用戶重啟 IDE 的 Python language server。
+
+### 2026-06-11 — Phase 5 收尾（D8=方案 A，用戶定）
+
+- `typing-extensions` 恢復為直接依賴（pyproject 附註解：僅供 PEP 728 TypedDict `closed=True`/`extra_items=`）；uv lock/sync。
+- 順手修 `remote/pyro.py`：`Any/Literal` 改自 stdlib `typing` import（3.8 即有，板端反而更乾淨）——typing_extensions 殘留現在嚴格限於 13 個 PEP 728 檔。
+- ruff 常駐 UP 規則保留（用戶確認過理由：守住改寫成果 + per-file-ignores 護板端檔）。
+- 終值：pyright 0/0、pytest 2602 passed、ruff 全清。**Phase 5 完成，py13 計劃全部閉合（Phase 1–5）；剩 merge main 由用戶執行。**

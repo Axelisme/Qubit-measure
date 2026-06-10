@@ -3,18 +3,9 @@ from __future__ import annotations
 import logging
 import threading
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-
-from typing_extensions import (
-    TYPE_CHECKING,
-    Any,
-    Callable,
-    Generic,
-    Mapping,
-    Optional,
-    Sequence,
-    TypeVar,
-)
+from typing import TYPE_CHECKING, Any, Generic, Optional, TypeVar
 
 from zcu_tools.utils.debug import print_traceback
 from zcu_tools.utils.func_tools import min_interval
@@ -30,7 +21,7 @@ logger = logging.getLogger(__name__)
 T_Result = TypeVar("T_Result", bound=Result)
 T_RootResult = TypeVar("T_RootResult", bound=Result)
 
-_current_stop_flag: Optional[threading.Event] = None
+_current_stop_flag: threading.Event | None = None
 
 
 class AbsTask(ABC, Generic[T_Result, T_RootResult, T_Cfg]):
@@ -128,10 +119,10 @@ class ActiveTask:
 def run_task(
     task: AbsTask[T_Result, T_Result, T_Cfg],
     init_cfg: T_Cfg,
-    env_dict: Optional[dict[str, Any]] = None,
-    on_update: Optional[Callable[[TaskState[Any, T_Result, T_Cfg]], Any]] = None,
-    update_interval: Optional[float] = 0.1,
-    stop_flag: Optional[threading.Event] = None,
+    env_dict: dict[str, Any] | None = None,
+    on_update: Callable[[TaskState[Any, T_Result, T_Cfg]], Any] | None = None,
+    update_interval: float | None = 0.1,
+    stop_flag: threading.Event | None = None,
 ) -> T_Result:
     """Run a task with a fresh TaskState.
 

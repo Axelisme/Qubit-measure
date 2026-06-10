@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Literal, Optional
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Literal, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -33,7 +34,7 @@ from zcu_tools.utils.process import rotate2real
 class ZigZagResult:
     times: NDArray[np.int64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[ZigZagCfg] = None
+    cfg_snapshot: ZigZagCfg | None = None
 
 
 def zigzag_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -41,9 +42,9 @@ def zigzag_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class ZigZagModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     X90_pulse: PulseCfg
-    X180_pulse: Optional[PulseCfg] = None
+    X180_pulse: PulseCfg | None = None
     readout: ReadoutCfg
 
 
@@ -60,7 +61,7 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
         cfg: ZigZagCfg,
         *,
         repeat_on: Literal["X90_pulse", "X180_pulse"] = "X180_pulse",
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> ZigZagResult:
         orig_cfg = deepcopy(cfg)
 
@@ -75,7 +76,7 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, ZigZagCfg],
-            update_hook: Optional[Callable],
+            update_hook: Callable | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules
@@ -138,14 +139,14 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
 
         return self.last_result
 
-    def analyze(self, _result: Optional[ZigZagResult] = None) -> tuple[float, float]:
+    def analyze(self, _result: ZigZagResult | None = None) -> tuple[float, float]:
         raise NotImplementedError("Not implemented")
 
     def save(
         self,
         filepath: str,
-        result: Optional[ZigZagResult] = None,
-        comment: Optional[str] = None,
+        result: ZigZagResult | None = None,
+        comment: str | None = None,
         tag: str = "twotone/ge/zigzag",
         **kwargs,
     ) -> None:

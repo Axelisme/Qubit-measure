@@ -72,9 +72,9 @@ class OneToneWidget(InteractiveMplWidget):
         dev_values: NDArray[np.float64],
         freqs: NDArray[np.float64],
         threshold: float = 1.0,
-        flux_half: Optional[float] = None,
-        flux_int: Optional[float] = None,
-        parent: Optional[QWidget] = None,
+        flux_half: float | None = None,
+        flux_int: float | None = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._signals = signals

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from typing import Optional
+
 import numpy as np
 from matplotlib.image import AxesImage, NonUniformImage
 from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
-from typing_extensions import Optional
 
 from .base import AbsSegment, Axes
 
@@ -14,10 +15,10 @@ class Plot2DSegment(AbsSegment):
         self,
         xlabel: str,
         ylabel: str,
-        title: Optional[str] = None,
+        title: str | None = None,
         flip: bool = False,
-        vmin: Optional[float] = None,
-        vmax: Optional[float] = None,
+        vmin: float | None = None,
+        vmax: float | None = None,
     ) -> None:
         self.xlabel = xlabel
         self.ylabel = ylabel
@@ -26,7 +27,7 @@ class Plot2DSegment(AbsSegment):
         self.vmin = vmin
         self.vmax = vmax
 
-        self.im: Optional[AxesImage] = None
+        self.im: AxesImage | None = None
 
     def init_ax(self, ax: Axes) -> None:
         if self.flip:
@@ -61,7 +62,7 @@ class Plot2DSegment(AbsSegment):
         xs: NDArray[np.float64],
         ys: NDArray[np.float64],
         signals: NDArray[np.float64],
-        title: Optional[str] = None,
+        title: str | None = None,
     ) -> None:
         if self.im is None:
             raise RuntimeError("Image not initialized.")
@@ -93,10 +94,10 @@ class PlotNonUniform2DSegment(AbsSegment):
         self,
         xlabel: str,
         ylabel: str,
-        title: Optional[str] = None,
+        title: str | None = None,
         flip: bool = False,
-        vmin: Optional[float] = None,
-        vmax: Optional[float] = None,
+        vmin: float | None = None,
+        vmax: float | None = None,
     ) -> None:
         self.xlabel = xlabel
         self.ylabel = ylabel
@@ -105,7 +106,7 @@ class PlotNonUniform2DSegment(AbsSegment):
         self.vmin = vmin
         self.vmax = vmax
 
-        self.im: Optional[NonUniformImage] = None
+        self.im: NonUniformImage | None = None
 
     def init_ax(self, ax: Axes) -> None:
         if self.flip:
@@ -130,7 +131,7 @@ class PlotNonUniform2DSegment(AbsSegment):
         xs: NDArray[np.float64],
         ys: NDArray[np.float64],
         signals: NDArray[np.float64],
-        title: Optional[str] = None,
+        title: str | None = None,
     ) -> None:
         if self.im is None:
             raise RuntimeError("Image not initialized.")

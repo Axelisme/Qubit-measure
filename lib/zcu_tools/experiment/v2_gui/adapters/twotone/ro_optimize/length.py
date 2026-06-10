@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Annotated, Any, ClassVar, Optional, TypeAlias
 
 from matplotlib.figure import Figure
-from typing_extensions import Annotated, Any, ClassVar, Optional, Sequence, TypeAlias
 
 from zcu_tools.experiment.v2.twotone.ro_optimize.length import (
     LengthCfg,
@@ -41,7 +42,7 @@ class RoOptLengthAnalyzeParams:
     # 't0' is the length-penalty knob of the underlying analyze(): t0=None → raw
     # SNR max; t0>0 → max snr/sqrt(length+t0), favouring shorter readout. Optional
     # float — left blank (the "(none)" field) it stays None.
-    t0: Annotated[Optional[float], ParamMeta(label="t0 length penalty (us)")] = None
+    t0: Annotated[float | None, ParamMeta(label="t0 length penalty (us)")] = None
 
 
 @dataclass

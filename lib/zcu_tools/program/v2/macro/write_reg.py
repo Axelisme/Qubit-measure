@@ -9,7 +9,7 @@ from qick.asm_v2 import AsmInst, Macro
 logger = logging.getLogger(__name__)
 
 
-def format_alu_op(prog, lhs_reg: str, op: str, rhs: Union[int, str, None]) -> str:
+def format_alu_op(prog, lhs_reg: str, op: str, rhs: int | str | None) -> str:
     """Format an ALU `-op()` expression, resolving register names at expand time.
 
     rhs may be an int literal (`#N`), a register name (resolved via _get_reg),

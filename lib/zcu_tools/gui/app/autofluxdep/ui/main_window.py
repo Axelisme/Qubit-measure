@@ -98,10 +98,10 @@ class _RunBridge(QObject):
 class MainWindow(QMainWindow):
     """autofluxdep-gui main window: node list + node detail + flux progress."""
 
-    def __init__(self, ctrl: Controller, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, ctrl: Controller, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._ctrl = ctrl
-        self._worker: Optional[_RunWorker] = None
+        self._worker: _RunWorker | None = None
         # per-provider sweep-lived liveplot state: name -> (canvas, plotter)
         self._plots: dict[str, tuple[QWidget, Any]] = {}
         self.setWindowTitle("autofluxdep-gui")

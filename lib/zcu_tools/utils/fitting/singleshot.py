@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+from typing import Optional, cast
+
 import numpy as np
 import scipy.stats as stats
 from numpy.typing import NDArray
 from scipy.special import iv
-from typing_extensions import Optional, Sequence, cast
 
 from .base import assign_init_p, fit_func
 
@@ -80,8 +82,8 @@ def fit_singleshot(
     xs: NDArray[np.float64],
     g_pdfs: NDArray[np.float64],
     e_pdfs: NDArray[np.float64],
-    fitparams: Optional[Sequence[Optional[float]]] = None,
-    fixedparams: Optional[Sequence[Optional[float]]] = None,
+    fitparams: Sequence[float | None] | None = None,
+    fixedparams: Sequence[float | None] | None = None,
 ) -> tuple[tuple[float, float, float, float, float, float, float], NDArray[np.float64]]:
     """fitparams: [sg, se, s, p0_g, p0_e, p_avg, length_ratio]"""
     if fixedparams is not None:
@@ -215,7 +217,7 @@ def fit_singleshot_p0(
     ) -> NDArray[np.float64]:
         return calc_population_pdf(xs, sg, se, s, p0_g, p0_e, p_avg, length_ratio)
 
-    fixedparams: list[Optional[float]] = [None, None, None]
+    fixedparams: list[float | None] = [None, None, None]
     if not fit_length_ratio:
         fixedparams[2] = length_ratio
 

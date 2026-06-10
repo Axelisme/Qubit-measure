@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Optional
+
 import numpy as np
 from joblib import Parallel, delayed
 from numpy.typing import NDArray
 from tqdm.auto import tqdm, trange
-from typing_extensions import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from scqubits.core.hilbert_space import HilbertSpace
@@ -18,7 +19,7 @@ def make_hilbertspace(
     res_dim: int,
     g: float,
     flux: float = 0.5,
-) -> "HilbertSpace":
+) -> HilbertSpace:
     # lazy import
     from scqubits.core.fluxonium import Fluxonium
     from scqubits.core.hilbert_space import HilbertSpace
@@ -101,7 +102,7 @@ def calc_branch_population_over_flux(
     res_dim: int,
     g: float,
     upto: int = -1,
-    branchs: Optional[list[int]] = None,
+    branchs: list[int] | None = None,
     batch_size: int = 10,
 ) -> NDArray[np.float64]:
     from scqubits.core.param_sweep import ParameterSweep  # lazy import

@@ -106,10 +106,10 @@ def declare_dev_spec(
 def build_exp_spec(
     *,
     modules: dict[str, CfgNodeSpec],
-    sweep: Optional[dict[str, CfgNodeSpec]] = None,
+    sweep: dict[str, CfgNodeSpec] | None = None,
     sweep_label: str = "Sweep",
-    dev: Optional[dict[str, CfgNodeSpec]] = None,
-    extra: Optional[dict[str, CfgNodeSpec]] = None,
+    dev: dict[str, CfgNodeSpec] | None = None,
+    extra: dict[str, CfgNodeSpec] | None = None,
     relax_delay: bool = True,
     reps: CfgNodeSpec = DEFAULT_REPS_SPEC,
     rounds: CfgNodeSpec = DEFAULT_ROUNDS_SPEC,
@@ -147,7 +147,7 @@ def build_exp_spec(
     return CfgSectionSpec(fields=fields)
 
 
-def schema_from_module(proposed: object | None) -> Optional[CfgSchema]:
+def schema_from_module(proposed: object | None) -> CfgSchema | None:
     """Edit CfgSchema from a proposed module/waveform cfg (module-agnostic).
 
     Delegates to ``module_cfg_to_value``, which auto-routes waveform cfgs to

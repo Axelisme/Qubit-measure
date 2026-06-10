@@ -8,7 +8,7 @@ from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.utils import format_obj
 
 
-def make_comment(cfg: ConfigBase, comment: Optional[str] = None) -> str:
+def make_comment(cfg: ConfigBase, comment: str | None = None) -> str:
     """
     Generate a formatted comment string from a configuration dictionary.
 
@@ -32,7 +32,7 @@ def make_comment(cfg: ConfigBase, comment: Optional[str] = None) -> str:
 
 def parse_comment(
     comment: str,
-) -> tuple[Optional[dict[str, Any]], Optional[str], Optional[str]]:
+) -> tuple[dict[str, Any] | None, str | None, str | None]:
     try:
         dump_dict = json.loads(comment)
     except json.JSONDecodeError:

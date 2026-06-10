@@ -77,7 +77,7 @@ class FindPointsWidget(InteractiveMplWidget):
         freqs: NDArray[np.float64],
         threshold: float = 1.0,
         brush_width: float = 0.05,
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._signals = signals

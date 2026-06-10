@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing_extensions import ClassVar, Sequence, TypeAlias, Union
+from collections.abc import Sequence
+from typing import ClassVar, TypeAlias, Union
 
 from zcu_tools.experiment.v2.onetone.flux_dep import (
     FluxDepCfg,
@@ -125,7 +126,7 @@ class OneToneFluxDepAdapter(
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         probe_len = md_get_float(ctx, "res_probe_len", 1.0)
-        ro_length: Union[float, EvalValue] = (
+        ro_length: float | EvalValue = (
             EvalValue(expr="res_probe_len - 0.1")
             if md_has_key(ctx, "res_probe_len")
             else probe_len - 0.1

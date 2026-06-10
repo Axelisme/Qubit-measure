@@ -60,7 +60,7 @@ def md_scalar_int(ctx: ExpContext, key: str, default: int) -> ScalarValue:
 
 def md_eval_scaled(
     ctx: ExpContext, key: str, factor: float, fallback: float
-) -> Union[float, EvalValue]:
+) -> float | EvalValue:
     """A ``factor * <key>`` sweep edge that stays md-linked.
 
     When md has ``key`` the edge is an ``EvalValue(f"{factor} * {key}")`` so the
@@ -111,7 +111,7 @@ def _freq_range(
     # ``1 * width`` reads as just ``width``; keep the coefficient otherwise.
     width_term = width_key if span_factor == 1.0 else f"{span_factor} * {width_key}"
 
-    def _edge(sign: int) -> Union[float, EvalValue]:
+    def _edge(sign: int) -> float | EvalValue:
         op = "-" if sign < 0 else "+"
         if have_md:
             return EvalValue(expr=f"{center_key} {op} {width_term}")
@@ -142,10 +142,8 @@ def proper_flux_range(ctx: ExpContext, expts: int) -> SweepValue:
     When the md keys are absent, falls back to a fixed ``[-4e-3, 4e-3]`` scan.
     """
     if md_has_key(ctx, "flx_half") and md_has_key(ctx, "flx_int"):
-        start: Union[float, EvalValue] = EvalValue(
-            expr="1.1 * flx_int - 0.1 * flx_half"
-        )
-        stop: Union[float, EvalValue] = EvalValue(expr="1.1 * flx_half - 0.1 * flx_int")
+        start: float | EvalValue = EvalValue(expr="1.1 * flx_int - 0.1 * flx_half")
+        stop: float | EvalValue = EvalValue(expr="1.1 * flx_half - 0.1 * flx_int")
     else:
         start = -4e-3
         stop = 4e-3

@@ -11,12 +11,12 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass, field
 from math import ceil
+from typing import Optional
 
 import numpy as np
 from numpy.typing import NDArray
 from scipy.stats import qmc
 from skopt import Optimizer
-from typing_extensions import Optional
 
 from zcu_tools.program.v2 import SweepCfg
 
@@ -71,16 +71,16 @@ class RefinementState:
 
     flux_list: list[float] = field(default_factory=list)
     flux_idx: int = 0
-    current_flux: Optional[float] = None
+    current_flux: float | None = None
     slice_iter: int = 0
     budget_per_flux: int = 0
     lhs_budget: int = 0
     lhs_points: list[list[float]] = field(default_factory=list)
     lhs_idx: int = 0
-    neighbor_guess: Optional[list[float]] = None
+    neighbor_guess: list[float] | None = None
     neighbor_guess_used: bool = False
-    current_freq_bounds: Optional[Bounds] = None
-    current_power_bounds: Optional[Bounds] = None
+    current_freq_bounds: Bounds | None = None
+    current_power_bounds: Bounds | None = None
 
 
 @dataclass
@@ -97,7 +97,7 @@ class DataStorage:
     history_X: list[list[float]] = field(default_factory=list)  # [flux, freq, power]
     history_y: list[float] = field(default_factory=list)  # SNR values
     # Last measured flux value
-    last_flux: Optional[float] = None
+    last_flux: float | None = None
 
 
 class JPAOptimizer:
@@ -182,7 +182,7 @@ class JPAOptimizer:
         self._lhs_sampler = qmc.LatinHypercube(d=2)
 
         # 2D Bayesian optimizer (initialized when needed)
-        self._optimizer_2d: Optional[Optimizer] = None
+        self._optimizer_2d: Optimizer | None = None
 
         # Generate initial LHS points for first flux slice
         self._generate_lhs_samples()
@@ -217,9 +217,9 @@ class JPAOptimizer:
 
     def _generate_lhs_samples(
         self,
-        n_samples: Optional[int] = None,
-        freq_bounds: Optional[Bounds] = None,
-        power_bounds: Optional[Bounds] = None,
+        n_samples: int | None = None,
+        freq_bounds: Bounds | None = None,
+        power_bounds: Bounds | None = None,
     ) -> list[list[float]]:
         """
         Generate 2D LHS samples for the (freq, power) space.
@@ -263,14 +263,14 @@ class JPAOptimizer:
     # Flux Value Helpers
     # =========================================================================
 
-    def _find_nearest_measured_flux(self, target_flux: float) -> Optional[float]:
+    def _find_nearest_measured_flux(self, target_flux: float) -> float | None:
         """Find the nearest flux value that has been measured."""
         if not self.data.flux_best:
             return None
         measured_flux_list = list(self.data.flux_best.keys())
         return min(measured_flux_list, key=lambda x: abs(x - target_flux))
 
-    def _get_best_flux(self) -> Optional[float]:
+    def _get_best_flux(self) -> float | None:
         """Get the flux value with the highest SNR from all measured points."""
         if not self.data.flux_best:
             return None
@@ -585,7 +585,7 @@ class JPAOptimizer:
     # Point Generation
     # =========================================================================
 
-    def _get_phase1_point(self) -> Optional[Point3D]:
+    def _get_phase1_point(self) -> Point3D | None:
         """
         Get next point for phase 1 optimization.
 
@@ -606,7 +606,7 @@ class JPAOptimizer:
         # All LHS points exhausted for this slice
         return None
 
-    def _get_phaseN_point(self) -> Optional[Point3D]:
+    def _get_phaseN_point(self) -> Point3D | None:
         """
         Get next point for phase 2+ optimization.
 
@@ -737,7 +737,7 @@ class JPAOptimizer:
     def history_y(self) -> list[float]:
         return self.data.history_y
 
-    def next_params(self, i: int, last_snr: Optional[float]) -> Optional[Point3D]:
+    def next_params(self, i: int, last_snr: float | None) -> Point3D | None:
         """
         Get the next parameter set to evaluate.
 
@@ -798,7 +798,7 @@ class JPAOptimizer:
                 ):
                     self._optimizer_2d.tell([freq, power], -last_snr)
 
-    def _get_next_phase1_point(self, i: int) -> Optional[Point3D]:
+    def _get_next_phase1_point(self, i: int) -> Point3D | None:
         """Get the next point during Phase 1."""
         point = self._get_phase1_point()
 
@@ -824,7 +824,7 @@ class JPAOptimizer:
         self._iter_count += 1
         return point
 
-    def _get_next_phaseN_point(self, i: int) -> Optional[Point3D]:
+    def _get_next_phaseN_point(self, i: int) -> Point3D | None:
         """Get the next point during Phase 2+."""
         point = self._get_phaseN_point()
 

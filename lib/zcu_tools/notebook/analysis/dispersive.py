@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import lru_cache
+from typing import Optional
 
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
@@ -10,7 +12,6 @@ from IPython.display import clear_output, display
 from numpy.typing import NDArray
 from scipy.optimize import minimize
 from tqdm.auto import tqdm
-from typing_extensions import Callable, Optional
 
 from zcu_tools.simulate.fluxonium import calculate_dispersive_vs_flux
 
@@ -22,7 +23,7 @@ def search_proper_g(
     sp_freqs: NDArray[np.float64],
     sp_signals: NDArray,
     g_bound: tuple[float, float],
-    g_init: Optional[float] = None,
+    g_init: float | None = None,
 ) -> Callable[[], tuple[float, float]]:
     """
     Search the proper coupling strength g and resonator frequency r_f by plotting the dispersive shift
@@ -204,9 +205,9 @@ def auto_fit_dispersive(
     sp_freqs: NDArray[np.float64],
     sp_signals: NDArray,
     g_bound: tuple[float, float] = (0.01, 0.2),
-    g_init: Optional[float] = None,
+    g_init: float | None = None,
     fit_bare_rf: bool = False,
-) -> tuple[float, Optional[float]]:
+) -> tuple[float, float | None]:
     """
     Auto fit the coupling strength g by maximizing the overlap of predicted ground state frequency with onetone spectrum
     """

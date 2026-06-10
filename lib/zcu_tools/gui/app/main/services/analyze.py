@@ -30,10 +30,10 @@ class AnalyzeService(QObject):
 
     def __init__(
         self,
-        state: "State",
+        state: State,
         bg: BackgroundExecutor,
-        bus: "EventBus",
-        writeback: "WritebackLifecyclePort",
+        bus: EventBus,
+        writeback: WritebackLifecyclePort,
         handles: OperationHandles,
     ) -> None:
         super().__init__()
@@ -48,7 +48,7 @@ class AnalyzeService(QObject):
         # The handle is settled exactly once on the terminal slot (_on_analyze_
         # finished / _failed).
         self._handles = handles
-        self._active_token: Optional[int] = None
+        self._active_token: int | None = None
 
     def _release(self, outcome: OperationOutcome) -> None:
         token = self._active_token
@@ -60,7 +60,7 @@ class AnalyzeService(QObject):
         self,
         permit: AnalyzePermit,
         analyze_params_instance: object,
-        figure_container: Optional[FigureContainer] = None,
+        figure_container: FigureContainer | None = None,
     ) -> int:
         # Context + run-result preconditions are proven by the AnalyzePermit;
         # tab-busy is the dynamic check that stays at the operation boundary.
@@ -124,7 +124,7 @@ class AnalyzeService(QObject):
         )
         return token
 
-    def finish_interactive(self, tab_id: str, session: "InteractiveSession") -> None:
+    def finish_interactive(self, tab_id: str, session: InteractiveSession) -> None:
         """The user finished the interactive pick (Done): build the result and run
         the SAME terminal path as a FIT analyze (writeback compute + State update +
         lease release + events), so the agent's analyze-result poll resolves."""

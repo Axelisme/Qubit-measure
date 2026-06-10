@@ -25,10 +25,11 @@ produce keeps the pure snapshot-driven simulation unchanged. Compare
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
+from typing import Any, Optional
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Any, Mapping, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -59,7 +60,7 @@ class LenRabiModuleCfg(ConfigBase):
     ``experiment/v2/autofluxdep`` LenRabiModuleCfg): an optional reset, the
     on-resonance ``rabi_pulse`` (the swept drive), and the ``readout``."""
 
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     rabi_pulse: PulseCfg
     readout: ReadoutCfg
 
@@ -89,18 +90,18 @@ def _last_fit(result: Any) -> float:
 _DEFAULT_SWEEP = (0.0, 6.0, 121)  # pulse-length axis (us): start, stop, npts
 
 
-def _default_readout() -> Optional[Any]:
+def _default_readout() -> Any | None:
     return None
 
 
 class LenRabiNode(Node):
     """One flux point's lenrabi: synth Rabi oscillation → fit_rabi → fill row → Patch."""
 
-    def __init__(self, env: RunEnv, builder: "LenRabiBuilder") -> None:
+    def __init__(self, env: RunEnv, builder: LenRabiBuilder) -> None:
         self._env = env
         self._builder = builder
 
-    def _maybe_make_cfg(self, snapshot: Snapshot) -> Optional[LenRabiCfgTemplate]:
+    def _maybe_make_cfg(self, snapshot: Snapshot) -> LenRabiCfgTemplate | None:
         """Build the run cfg when the context is configured for it, else None.
 
         ``make_cfg`` needs a readout module (``opt_readout``) + the drive params;

@@ -61,21 +61,21 @@ class TabSnapshot:
     """
 
     adapter_name: str
-    cfg_schema: "CfgSchema"
+    cfg_schema: CfgSchema
     # The user's explicit override only (None = follow the adapter suggestion).
     # This is the serializable save-path state — persist/restore round-trip it so
     # a reload never pins an adapter-derived path.
-    save_paths_override: Optional["SavePaths"]
+    save_paths_override: SavePaths | None
     # Live render-only fields; None / empty on the persist + restore paths.
-    tab_id: Optional[str] = None
-    interaction: Optional["TabInteractionState"] = None
-    capabilities: Optional["AdapterCapabilities"] = None
+    tab_id: str | None = None
+    interaction: TabInteractionState | None = None
+    capabilities: AdapterCapabilities | None = None
     analyze_params: object | None = None
-    writeback_items: "tuple[WritebackItem, ...]" = ()
-    figure: Optional["Figure"] = None
+    writeback_items: tuple[WritebackItem, ...] = ()
+    figure: Figure | None = None
     # Render-computed effective paths (override, else adapter suggestion from
     # ctx). The View shows this; it is *not* persisted (derivable on restore).
-    save_paths: Optional["SavePaths"] = None
+    save_paths: SavePaths | None = None
 
 
 @dataclass(frozen=True)
@@ -105,10 +105,8 @@ class PersistOriginatorPort(Protocol):
     methods keep the Caretaker decoupled from the whole Controller interface.
     """
 
-    def capture_persisted_state(self) -> "AppPersistedState": ...
-    def restore_persisted_state(
-        self, state: "AppPersistedState"
-    ) -> "RestoreReport": ...
+    def capture_persisted_state(self) -> AppPersistedState: ...
+    def restore_persisted_state(self, state: AppPersistedState) -> RestoreReport: ...
 
 
 @runtime_checkable
@@ -127,10 +125,10 @@ class ContextWritePort(Protocol):
     own; batching avoids N redundant full-refreshes).
     """
 
-    def set_ml_module_from_schema(self, name: str, schema: "CfgSchema") -> None: ...
-    def set_ml_waveform_from_schema(self, name: str, schema: "CfgSchema") -> None: ...
+    def set_ml_module_from_schema(self, name: str, schema: CfgSchema) -> None: ...
+    def set_ml_waveform_from_schema(self, name: str, schema: CfgSchema) -> None: ...
     def set_md_attr(self, key: str, value: Any) -> None: ...
-    def apply_writes(self, writes: "ContextWrites") -> None: ...
+    def apply_writes(self, writes: ContextWrites) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -139,9 +137,9 @@ class ContextWrites:
     per kind). ``md`` maps attr name → value; ``ml_modules`` / ``ml_waveforms``
     map entry name → its un-lowered ``CfgSchema``. Insertion order preserved."""
 
-    md: "dict[str, Any]"
-    ml_modules: "dict[str, CfgSchema]"
-    ml_waveforms: "dict[str, CfgSchema]"
+    md: dict[str, Any]
+    ml_modules: dict[str, CfgSchema]
+    ml_waveforms: dict[str, CfgSchema]
 
 
 @runtime_checkable
@@ -155,7 +153,7 @@ class WritebackQueryPort(Protocol):
     back-edge from ever forming. ``WritebackService`` implements it.
     """
 
-    def get_tab_writeback_items(self, tab_id: str) -> list["WritebackItem"]: ...
+    def get_tab_writeback_items(self, tab_id: str) -> list[WritebackItem]: ...
 
 
 @runtime_checkable
@@ -167,10 +165,10 @@ class TabLifecyclePort(Protocol):
     """
 
     def new_tab(
-        self, adapter_name: str, from_dict: Optional["TabSnapshot"] = None
+        self, adapter_name: str, from_dict: TabSnapshot | None = None
     ) -> str: ...
     def close_tab(self, tab_id: str) -> None: ...
-    def make_default_cfg(self, adapter_name: str) -> "CfgSchema": ...
+    def make_default_cfg(self, adapter_name: str) -> CfgSchema: ...
 
 
 @runtime_checkable
@@ -188,7 +186,7 @@ class WritebackLifecyclePort(Protocol):
 
     def compute_items_for_tab(
         self, tab_id: str, analyze_result: Any
-    ) -> "list[WritebackItem]": ...
+    ) -> list[WritebackItem]: ...
 
 
 @runtime_checkable
@@ -204,12 +202,12 @@ class CfgEditorPort(Protocol):
 
     def open_seeded(
         self,
-        seed: "CfgSchema",
+        seed: CfgSchema,
         *,
         gc: bool = False,
-        owner_key: Optional[str] = None,
-    ) -> "tuple[str, list[dict[str, object]]]": ...
+        owner_key: str | None = None,
+    ) -> tuple[str, list[dict[str, object]]]: ...
 
     def teardown(self, editor_id: str, *, reason: str = ...) -> None: ...
 
-    def get_root(self, editor_id: str) -> "SectionLiveField": ...
+    def get_root(self, editor_id: str) -> SectionLiveField: ...

@@ -28,9 +28,10 @@ import threading
 import time
 import traceback
 from collections import deque
+from collections.abc import Callable
 from pathlib import Path
 from tempfile import gettempdir
-from typing import Any, Callable, Deque, Dict, List, Optional
+from typing import Any, Optional
 
 # This bridge is launched standalone (``python .../mcp_server.py``), so the repo
 # ``lib`` dir is not on sys.path by default. Add it so the wire-contract modules
@@ -287,7 +288,7 @@ Call contract — read before issuing defensive/duplicate calls:
 # events are dropped in _deliver_event (Phase 120c-2). Diagnostics piggyback on
 # the next tool reply; _DIAGNOSTIC_COND guards the queue (notified on append).
 _DIAGNOSTIC_QUEUE_MAX = 1024
-_DIAGNOSTIC_QUEUE: Deque[Dict[str, Any]] = deque(maxlen=_DIAGNOSTIC_QUEUE_MAX)
+_DIAGNOSTIC_QUEUE: deque[dict[str, Any]] = deque(maxlen=_DIAGNOSTIC_QUEUE_MAX)
 _DIAGNOSTIC_COND = threading.Condition()
 
 # --- Optimistic-concurrency bookkeeping (policy lives here, mcp side) --------
@@ -299,7 +300,7 @@ _DIAGNOSTIC_COND = threading.Condition()
 # atomically and rejects with PRECONDITION_FAILED if any moved (a concurrent —
 # possibly human — edit). On rejection we re-read the table so the next attempt
 # carries fresh baselines.
-_LAST_SEEN: Dict[str, int] = {}
+_LAST_SEEN: dict[str, int] = {}
 
 # Dependency map (the single place that knows what each guarded op depends on).
 # Patterns use {tab_id}/{editor_id} placeholders and a literal ``device:*`` that
@@ -309,7 +310,7 @@ _LAST_SEEN: Dict[str, int] = {}
 # md/ml). Note: md/ml content edits bump the ``context`` version, so any op
 # depending on ``context`` (run.start / editor.commit / writeback.apply) detects
 # a concurrent md/ml change.
-_GUARD_DEPS: Dict[str, tuple[str, ...]] = {
+_GUARD_DEPS: dict[str, tuple[str, ...]] = {
     # ``device:*`` guards mutations of *existing* devices; ``devices:__set__``
     # guards *set membership* (a device added/removed since the agent last read
     # versions) which the per-member glob cannot reveal.
@@ -340,12 +341,12 @@ _GUARD_DEPS: Dict[str, tuple[str, ...]] = {
 # semantic key to the latest operation_id for it. ``operation.await`` then
 # blocks on that id. "Latest wins": starting overwrites the key, since the agent
 # semantically means "the current operation for this resource".
-_OP_BY_KEY: Dict[str, int] = {}
+_OP_BY_KEY: dict[str, int] = {}
 
 # Which semantic key a start RPC's operation_id belongs to (param -> key).
 # Device connect/disconnect/setup all key on the device name: "latest wins" means
 # the most recent operation for that device is the one a wait tool awaits.
-_OP_KEY_OF: Dict[str, "Callable[[Dict[str, Any]], str]"] = {
+_OP_KEY_OF: dict[str, Callable[[dict[str, Any]], str]] = {
     "device.connect": lambda p: f"device:{p.get('name', '')}",
     "device.disconnect": lambda p: f"device:{p.get('name', '')}",
     "device.setup": lambda p: f"device:{p.get('name', '')}",
@@ -355,7 +356,7 @@ _OP_KEY_OF: Dict[str, "Callable[[Dict[str, Any]], str]"] = {
 }
 
 
-def _deliver_event(msg: Dict[str, Any]) -> None:
+def _deliver_event(msg: dict[str, Any]) -> None:
     # The GUI still emits its full EventBus stream over the wire (RPC-side
     # registration unchanged), but the agent is NOT exposed to resource-change
     # events: stale detection is the version-guard's job, and async completion is
@@ -369,7 +370,7 @@ def _deliver_event(msg: Dict[str, Any]) -> None:
         _DIAGNOSTIC_COND.notify_all()
 
 
-def _drain_pending() -> Dict[str, list]:
+def _drain_pending() -> dict[str, list]:
     """Take the diagnostics buffered since the last drain — for piggyback on any
     tool result. The agent gets GUI error/info feedback without a dedicated poll
     call (resource-change events are not exposed; see _deliver_event)."""
@@ -420,7 +421,7 @@ def _refresh_versions() -> None:
         _LAST_SEEN.update(versions)
 
 
-def _build_expected_versions(method: str, params: Dict[str, Any]) -> Dict[str, int]:
+def _build_expected_versions(method: str, params: dict[str, Any]) -> dict[str, int]:
     """Resolve a guarded method's dependency patterns into expected versions.
 
     Policy lives here: expand {tab_id}/{editor_id} placeholders and the literal
@@ -430,7 +431,7 @@ def _build_expected_versions(method: str, params: Dict[str, Any]) -> Dict[str, i
     deps = _GUARD_DEPS.get(method)
     if not deps:
         return {}
-    expected: Dict[str, int] = {}
+    expected: dict[str, int] = {}
     for pattern in deps:
         if pattern == "device:*":
             for key in _LAST_SEEN:
@@ -445,7 +446,7 @@ def _build_expected_versions(method: str, params: Dict[str, Any]) -> Dict[str, i
     return expected
 
 
-def _describe_stale_keys(keys: "list") -> "list[str]":
+def _describe_stale_keys(keys: list) -> list[str]:
     """Translate stale resource keys into agent language (no version numbers).
 
     The server names which resource identities moved (e.g. 'tab:<uuid>:cfg',
@@ -489,7 +490,7 @@ class GuiRpcError(RuntimeError):
     distinguishing cancelled vs failed) read ``.reason`` instead of the text."""
 
     def __init__(
-        self, message: str, *, reason: Optional[str] = None, code: Optional[str] = None
+        self, message: str, *, reason: str | None = None, code: str | None = None
     ) -> None:
         super().__init__(message)
         self.reason = reason
@@ -498,9 +499,9 @@ class GuiRpcError(RuntimeError):
 
 def send_gui_rpc(
     method: str,
-    params: Dict[str, Any],
+    params: dict[str, Any],
     timeout_seconds: float = 30.0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Issue one RPC against the GUI; raises on error or timeout.
 
     For guarded methods (run/save/commit) attaches ``expected_versions`` from
@@ -550,7 +551,7 @@ def send_gui_rpc(
 # ---------------------------------------------------------------------------
 
 
-def tool_gui_connect(arguments: Dict[str, Any]) -> str:
+def tool_gui_connect(arguments: dict[str, Any]) -> str:
     # Default port 8765, symmetric with gui_launch — but opposite expectation:
     # connect attaches to a GUI that is ALREADY running there (launch starts a
     # new one on a free port). So a missing GUI is the error case here.
@@ -560,7 +561,7 @@ def tool_gui_connect(arguments: Dict[str, Any]) -> str:
     return _BRIDGE.connect(port, arguments.get("token"))
 
 
-def tool_gui_disconnect(arguments: Dict[str, Any]) -> str:
+def tool_gui_disconnect(arguments: dict[str, Any]) -> str:
     del arguments
     note = _BRIDGE.disconnect()
     # App-specific housekeeping: drop any buffered diagnostics — they belong to
@@ -570,9 +571,9 @@ def tool_gui_disconnect(arguments: Dict[str, Any]) -> str:
     return note
 
 
-def tool_gui_launch(arguments: Dict[str, Any]) -> str:
+def tool_gui_launch(arguments: dict[str, Any]) -> str:
     port = int(arguments.get("port", _CONFIG.default_port))
-    token: Optional[str] = arguments.get("token")
+    token: str | None = arguments.get("token")
     auto_connect = bool(arguments.get("auto_connect", True))
     clean = bool(arguments.get("clean", False))
     # lib/zcu_tools/mcp/measure -> repo root
@@ -582,7 +583,7 @@ def tool_gui_launch(arguments: Dict[str, Any]) -> str:
     return _BRIDGE.launch(repo_root, port, token, auto_connect, extra_args=extra_args)
 
 
-def tool_gui_stop(arguments: Dict[str, Any]) -> str:
+def tool_gui_stop(arguments: dict[str, Any]) -> str:
     # Graceful close over the existing RPC channel (app.shutdown runs the GUI's
     # normal window-close path on its main thread, no OS signal), then await /
     # optionally force-kill. timeout_kill defaults False here (measure-gui prefers
@@ -604,7 +605,7 @@ def tool_gui_stop(arguments: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def tool_gui_state_check(arguments: Dict[str, Any]) -> Dict[str, Any]:
+def tool_gui_state_check(arguments: dict[str, Any]) -> dict[str, Any]:
     del arguments
     has_proj = send_gui_rpc("state.has_project", {}).get("value", False)
     has_ctx = send_gui_rpc("state.has_context", {}).get("value", False)
@@ -624,8 +625,8 @@ def tool_gui_state_check(arguments: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _coerce_pairs(
-    value: object, *, field: str, keys: "tuple[str, str]"
-) -> List[Dict[str, Any]]:
+    value: object, *, field: str, keys: tuple[str, str]
+) -> list[dict[str, Any]]:
     """Validate a batch list of {k0, k1} dicts, fail-fast on shape errors.
 
     Validation happens up front (before any RPC) so a malformed item never lets
@@ -635,7 +636,7 @@ def _coerce_pairs(
     k0, k1 = keys
     if not isinstance(value, list) or not value:
         raise ValueError(f"{field!r} must be a non-empty list")
-    out: List[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     for i, item in enumerate(value):
         if not isinstance(item, dict) or k0 not in item or k1 not in item:
             raise ValueError(f"{field}[{i}] must be an object with {k0!r} and {k1!r}")
@@ -643,7 +644,7 @@ def _coerce_pairs(
     return out
 
 
-def tool_gui_editor_set_fields(arguments: Dict[str, Any]) -> Dict[str, Any]:
+def tool_gui_editor_set_fields(arguments: dict[str, Any]) -> dict[str, Any]:
     """Apply several editor.set_field edits to ONE editor, fail-fast in order.
 
     Convenience fan-out (a for-loop over the single-field RPC) — there is no
@@ -676,7 +677,7 @@ def tool_gui_editor_set_fields(arguments: Dict[str, Any]) -> Dict[str, Any]:
     return {"applied": len(edits), "valid": valid}
 
 
-def tool_gui_context_set_md_attrs(arguments: Dict[str, Any]) -> Dict[str, Any]:
+def tool_gui_context_set_md_attrs(arguments: dict[str, Any]) -> dict[str, Any]:
     """Set several MetaDict attributes, fail-fast in order.
 
     Convenience fan-out over context.set_md_attr (no atomicity: attrs before the
@@ -698,7 +699,7 @@ def tool_gui_context_set_md_attrs(arguments: Dict[str, Any]) -> Dict[str, Any]:
     return {"applied": len(attrs)}
 
 
-def _await_operation_by_key(key: str, what: str, timeout: float) -> Dict[str, Any]:
+def _await_operation_by_key(key: str, what: str, timeout: float) -> dict[str, Any]:
     """Block until the latest operation for ``key`` settles, or ``timeout`` s
     elapse; semantic result.
 
@@ -748,7 +749,7 @@ def _await_operation_by_key(key: str, what: str, timeout: float) -> Dict[str, An
     }
 
 
-def _poll_operation_by_key(key: str, what: str) -> Dict[str, Any]:
+def _poll_operation_by_key(key: str, what: str) -> dict[str, Any]:
     """Non-blocking status of the latest operation for ``key`` (no event needed).
 
     Maps a zero-timeout await onto a plain status: 'finished' (settled OK),
@@ -800,9 +801,9 @@ def _start_op_with_short_wait(
     key: str,
     what: str,
     wait_seconds: float,
-    product: "Callable[[], Dict[str, Any]]",
+    product: Callable[[], dict[str, Any]],
     pending_hint: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Wait briefly for a just-started async op, degrading to a handle on timeout.
 
     The start RPC must already have run (its operation_id captured into _OP_BY_KEY
@@ -840,7 +841,7 @@ def _device_snapshot(name: str) -> Any:
     return send_gui_rpc("device.snapshot", {"name": name}).get("snapshot")
 
 
-def _figure_path_if_any(tab_id: str) -> "Optional[str]":
+def _figure_path_if_any(tab_id: str) -> str | None:
     """If the tab has a figure, render it to a temp PNG and return its path.
 
     Saves to the cross-platform temp dir (tempfile.gettempdir(), keyed by
@@ -864,7 +865,7 @@ def _figure_path_if_any(tab_id: str) -> "Optional[str]":
     return out_path
 
 
-def _run_tab_summary(tab_id: str) -> Dict[str, Any]:
+def _run_tab_summary(tab_id: str) -> dict[str, Any]:
     """A run-finished tab summary: only {tab_id, interaction}. The full
     tab.snapshot also carries adapter_name / editor_id / save_paths, none of
     which change across a run — re-sending them every run is wasted tokens
@@ -875,7 +876,7 @@ def _run_tab_summary(tab_id: str) -> Dict[str, Any]:
     return {"tab_id": tab_id, "interaction": interaction}
 
 
-def _with_figure(tab_id: str, result: Dict[str, Any]) -> Dict[str, Any]:
+def _with_figure(tab_id: str, result: dict[str, Any]) -> dict[str, Any]:
     """Attach figure_path to a finished run/analyze reply when a figure exists."""
     if result.get("status") == "finished":
         path = _figure_path_if_any(tab_id)
@@ -884,7 +885,7 @@ def _with_figure(tab_id: str, result: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
-def tool_gui_device_wait_operation(arguments: Dict[str, Any]) -> Dict[str, Any]:
+def tool_gui_device_wait_operation(arguments: dict[str, Any]) -> dict[str, Any]:
     """Block until the named device's current operation completes (semantic).
 
     Covers connect / disconnect / setup — whichever is the latest operation for
@@ -898,14 +899,14 @@ def tool_gui_device_wait_operation(arguments: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
-def tool_gui_device_poll(arguments: Dict[str, Any]) -> Dict[str, Any]:
+def tool_gui_device_poll(arguments: dict[str, Any]) -> dict[str, Any]:
     """Non-blocking status of the named device's latest operation (connect /
     disconnect / setup): finished / running / failed / no_operation."""
     name = str(arguments["name"])
     return _poll_operation_by_key(f"device:{name}", f"Device {name!r} operation")
 
 
-def tool_gui_connect_poll(arguments: Dict[str, Any]) -> Dict[str, Any]:
+def tool_gui_connect_poll(arguments: dict[str, Any]) -> dict[str, Any]:
     """Non-blocking status of the SoC connect: finished / running / failed /
     no_operation. On finished, also returns the SoC hardware summary."""
     del arguments
@@ -915,7 +916,7 @@ def tool_gui_connect_poll(arguments: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
-def tool_gui_run_start(arguments: Dict[str, Any]) -> Dict[str, Any]:
+def tool_gui_run_start(arguments: dict[str, Any]) -> dict[str, Any]:
     """Start a run, waiting briefly for a fast (small reps/rounds) run to finish.
 
     A run has both modes — a tiny sweep finishes in well under a second, a big
@@ -940,7 +941,7 @@ def tool_gui_run_start(arguments: Dict[str, Any]) -> Dict[str, Any]:
     return _with_figure(tab_id, result)
 
 
-def tool_gui_run_wait(arguments: Dict[str, Any]) -> Dict[str, Any]:
+def tool_gui_run_wait(arguments: dict[str, Any]) -> dict[str, Any]:
     """Block until the run on ``tab_id`` completes (semantic wait, mirrors
     gui_device_wait_operation). Raises on failure/cancellation. On a finished
     run that produced a figure, the reply includes figure_path (a temp PNG)."""
@@ -950,7 +951,7 @@ def tool_gui_run_wait(arguments: Dict[str, Any]) -> Dict[str, Any]:
     return _with_figure(tab_id, result)
 
 
-def tool_gui_run_poll(arguments: Dict[str, Any]) -> Dict[str, Any]:
+def tool_gui_run_poll(arguments: dict[str, Any]) -> dict[str, Any]:
     """Non-blocking status of the run on ``tab_id``: finished / running / failed
     / no_operation. Lets the agent start a slow run, do other work, then check
     back without blocking (replaces watching the run_finished event). On a
@@ -960,7 +961,7 @@ def tool_gui_run_poll(arguments: Dict[str, Any]) -> Dict[str, Any]:
     return _with_figure(tab_id, result)
 
 
-def tool_gui_analyze(arguments: Dict[str, Any]) -> Dict[str, Any]:
+def tool_gui_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
     """Start analyze, waiting briefly (degrades like a run).
 
     Analyze has both modes — a FIT computes on a worker (usually finishes in well
@@ -974,7 +975,7 @@ def tool_gui_analyze(arguments: Dict[str, Any]) -> Dict[str, Any]:
     """
     tab_id = str(arguments["tab_id"])
     wait_seconds = float(arguments.get("wait_seconds", 1.0))
-    params: Dict[str, Any] = {"tab_id": tab_id}
+    params: dict[str, Any] = {"tab_id": tab_id}
     if "updates" in arguments and arguments["updates"] is not None:
         params["updates"] = arguments["updates"]
     # Start (captures operation_id under analyze:<tab_id>, strips it from reply),
@@ -992,7 +993,7 @@ def tool_gui_analyze(arguments: Dict[str, Any]) -> Dict[str, Any]:
     return _with_figure(tab_id, result)
 
 
-def tool_gui_analyze_wait(arguments: Dict[str, Any]) -> Dict[str, Any]:
+def tool_gui_analyze_wait(arguments: dict[str, Any]) -> dict[str, Any]:
     """Block until the analyze on ``tab_id`` completes (mirrors gui_run_wait).
     Returns {status, waited_seconds}: 'finished' (figure_path folded in if any) /
     'timed_out' (re-wait or gui_analyze_poll) / 'no_operation'. Raises only on a
@@ -1008,7 +1009,7 @@ def tool_gui_analyze_wait(arguments: Dict[str, Any]) -> Dict[str, Any]:
     return _with_figure(tab_id, result)
 
 
-def tool_gui_analyze_poll(arguments: Dict[str, Any]) -> Dict[str, Any]:
+def tool_gui_analyze_poll(arguments: dict[str, Any]) -> dict[str, Any]:
     """Non-blocking status of the analyze on ``tab_id``: finished / running /
     failed / no_operation. For an INTERACTIVE pick, 'running' means the user has
     not clicked Done yet — keep checking back. On a finished analyze with a figure
@@ -1019,7 +1020,7 @@ def tool_gui_analyze_poll(arguments: Dict[str, Any]) -> Dict[str, Any]:
     return _with_figure(tab_id, result)
 
 
-def _connect_soc_summary() -> Dict[str, Any]:
+def _connect_soc_summary() -> dict[str, Any]:
     """The SoC summary folded into a settled connect reply: only the human-
     readable ``description`` (the compact describe_soc per-channel table) +
     ``is_mock``. The structured ``cfg`` (full per-channel detail incl. DDS / freq
@@ -1032,7 +1033,7 @@ def _connect_soc_summary() -> Dict[str, Any]:
     }
 
 
-def tool_gui_connect_start(arguments: Dict[str, Any]) -> Dict[str, Any]:
+def tool_gui_connect_start(arguments: dict[str, Any]) -> dict[str, Any]:
     """Connect the SoC, waiting briefly for the (usually fast) connect to land.
 
     Degrades like device ops: settles -> {status:'finished', view:<view.snapshot>};
@@ -1040,7 +1041,7 @@ def tool_gui_connect_start(arguments: Dict[str, Any]) -> Dict[str, Any]:
     or kind='remote' with ip+port. The settled reply folds in only the SoC
     *description* + is_mock; call gui_soc_info for the structured cfg.
     """
-    params: Dict[str, Any] = {"kind": str(arguments["kind"])}
+    params: dict[str, Any] = {"kind": str(arguments["kind"])}
     if "ip" in arguments:
         params["ip"] = str(arguments["ip"])
     if "port" in arguments:
@@ -1062,7 +1063,7 @@ def tool_gui_connect_start(arguments: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
-def tool_gui_connect_wait(arguments: Dict[str, Any]) -> Dict[str, Any]:
+def tool_gui_connect_wait(arguments: dict[str, Any]) -> dict[str, Any]:
     """Block until the SoC connect completes (semantic wait). Raises on failure.
 
     On success also returns the SoC hardware summary (same as gui_soc_info)."""
@@ -1073,9 +1074,9 @@ def tool_gui_connect_wait(arguments: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
-def tool_gui_view_screenshot(arguments: Dict[str, Any]) -> Dict[str, Any]:
+def tool_gui_view_screenshot(arguments: dict[str, Any]) -> dict[str, Any]:
     """Capture window/tab as PNG; optionally write to ``out_path`` and strip b64."""
-    params: Dict[str, Any] = {}
+    params: dict[str, Any] = {}
     if "tab_id" in arguments and arguments["tab_id"] is not None:
         params["tab_id"] = str(arguments["tab_id"])
     res = send_gui_rpc("view.screenshot", params)
@@ -1092,9 +1093,9 @@ def tool_gui_view_screenshot(arguments: Dict[str, Any]) -> Dict[str, Any]:
     return res
 
 
-def tool_gui_dialog_screenshot(arguments: Dict[str, Any]) -> Dict[str, Any]:
+def tool_gui_dialog_screenshot(arguments: dict[str, Any]) -> dict[str, Any]:
     """Capture a currently-open dialog as PNG; optionally write to out_path."""
-    params: Dict[str, Any] = {"dialog_name": str(arguments["dialog_name"])}
+    params: dict[str, Any] = {"dialog_name": str(arguments["dialog_name"])}
     res = send_gui_rpc("dialog.screenshot", params)
     out_path = arguments.get("out_path")
     if out_path:
@@ -1114,9 +1115,9 @@ def tool_gui_dialog_screenshot(arguments: Dict[str, Any]) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def tool_gui_device_connect(arguments: Dict[str, Any]) -> Dict[str, Any]:
+def tool_gui_device_connect(arguments: dict[str, Any]) -> dict[str, Any]:
     name = str(arguments["name"])
-    params: Dict[str, Any] = {
+    params: dict[str, Any] = {
         "type_name": str(arguments["type_name"]),
         "name": name,
         "address": str(arguments["address"]),
@@ -1134,9 +1135,9 @@ def tool_gui_device_connect(arguments: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
-def tool_gui_device_disconnect(arguments: Dict[str, Any]) -> Dict[str, Any]:
+def tool_gui_device_disconnect(arguments: dict[str, Any]) -> dict[str, Any]:
     name = str(arguments["name"])
-    params: Dict[str, Any] = {"name": name}
+    params: dict[str, Any] = {"name": name}
     if "remember" in arguments:
         params["remember"] = bool(arguments["remember"])
     wait_seconds = float(arguments.get("wait_seconds", 1.0))
@@ -1150,7 +1151,7 @@ def tool_gui_device_disconnect(arguments: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
-def tool_gui_device_setup(arguments: Dict[str, Any]) -> Dict[str, Any]:
+def tool_gui_device_setup(arguments: dict[str, Any]) -> dict[str, Any]:
     name = str(arguments["name"])
     updates = arguments.get("updates", {})
     if not isinstance(updates, dict):
@@ -1222,7 +1223,7 @@ _NON_GENERATED_METHODS = frozenset(
 # ---------------------------------------------------------------------------
 
 
-_OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
+_OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
     "gui_connect": {
         "handler": tool_gui_connect,
         "description": (
@@ -1817,7 +1818,7 @@ _OVERRIDE_NAMES = frozenset(
 # Generated tools (schema from the ParamSpec SSOT, forwarding through the guarded
 # send_gui_rpc) overlaid with the hand-written override subset (lifecycle /
 # fan-out / file-write / coercion). assemble_tools fails fast on a name collision.
-TOOLS: Dict[str, Dict[str, Any]] = assemble_tools(
+TOOLS: dict[str, dict[str, Any]] = assemble_tools(
     generate_tools(_CONFIG, METHOD_SPECS, _NON_GENERATED_METHODS, send_gui_rpc),
     _OVERRIDE_TOOLS,
     _OVERRIDE_NAMES,
@@ -1909,7 +1910,7 @@ def main() -> None:
                     }
                 else:
                     try:
-                        handler: Callable[[Dict[str, Any]], Any] = tool["handler"]
+                        handler: Callable[[dict[str, Any]], Any] = tool["handler"]
                         res = handler(arguments)
                         text = (
                             res if isinstance(res, str) else json.dumps(res, indent=2)

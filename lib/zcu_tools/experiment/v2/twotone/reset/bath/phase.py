@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional, TypeAlias
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -39,7 +40,7 @@ from zcu_tools.utils.process import rotate2real
 class PhaseResult:
     phases: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional["PhaseCfg"] = None
+    cfg_snapshot: PhaseCfg | None = None
 
 
 def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -47,8 +48,8 @@ def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
 
 
 class PhaseModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
-    init_pulse: Optional[PulseCfg] = None
+    reset: ResetCfg | None = None
+    init_pulse: PulseCfg | None = None
     tested_reset: BathResetCfg
     readout: ReadoutCfg
 
@@ -69,7 +70,7 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
         soccfg,
         cfg: PhaseCfg,
         *,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> PhaseResult:
         setup_devices(cfg, progress=True)
         modules = cfg.modules
@@ -85,7 +86,7 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, PhaseCfg],
-            update_hook: Optional[Callable],
+            update_hook: Callable | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules
@@ -127,9 +128,7 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
 
         return self.last_result
 
-    def analyze(
-        self, result: Optional[PhaseResult] = None
-    ) -> tuple[float, float, Figure]:
+    def analyze(self, result: PhaseResult | None = None) -> tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -178,8 +177,8 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[PhaseResult] = None,
-        comment: Optional[str] = None,
+        result: PhaseResult | None = None,
+        comment: str | None = None,
         tag: str = "twotone/reset/bath/phase",
         **kwargs,
     ) -> None:

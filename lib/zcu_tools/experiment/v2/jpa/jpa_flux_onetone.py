@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
-from typing_extensions import Any, Callable, Mapping, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo
@@ -39,11 +40,11 @@ class OneToneFluxResult:
     fluxes: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[OneToneFluxCfg] = None
+    cfg_snapshot: OneToneFluxCfg | None = None
 
 
 class OneToneFluxModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     readout: PulseReadoutCfg
 
 
@@ -76,7 +77,7 @@ class OneToneFluxExp(AbsExperiment[OneToneFluxResult, OneToneFluxCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, OneToneFluxCfg],
-            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             setup_devices(cfg, progress=False)
@@ -132,7 +133,7 @@ class OneToneFluxExp(AbsExperiment[OneToneFluxResult, OneToneFluxCfg]):
         )
         return self.last_result
 
-    def analyze(self, result: Optional[OneToneFluxResult] = None) -> None:
+    def analyze(self, result: OneToneFluxResult | None = None) -> None:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -141,8 +142,8 @@ class OneToneFluxExp(AbsExperiment[OneToneFluxResult, OneToneFluxCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[OneToneFluxResult] = None,
-        comment: Optional[str] = None,
+        result: OneToneFluxResult | None = None,
+        comment: str | None = None,
         tag: str = "jpa/flux_onetone",
         **kwargs,
     ) -> None:

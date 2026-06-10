@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,7 +11,6 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -44,7 +45,7 @@ from zcu_tools.utils.fitting.resonance import (
 class DispersiveResult:
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[DispersiveCfg] = None
+    cfg_snapshot: DispersiveCfg | None = None
 
 
 def dispersive_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -52,8 +53,8 @@ def dispersive_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float6
 
 
 class DispersiveModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
-    init_pulse: Optional[PulseCfg] = None
+    reset: ResetCfg | None = None
+    init_pulse: PulseCfg | None = None
     qub_pulse: PulseCfg
     readout: PulseReadoutCfg
 
@@ -74,7 +75,7 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
         soccfg,
         cfg: DispersiveCfg,
         *,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> DispersiveResult:
         orig_cfg = deepcopy(cfg)
 
@@ -89,7 +90,7 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
             {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
 
-        def measure_fn(ctx: TaskState, update_hook: Optional[Callable]):
+        def measure_fn(ctx: TaskState, update_hook: Callable | None):
             cfg = ctx.cfg
             freq_param = sweep2param("freq", cfg.sweep.freq)
             cfg.modules.readout.set_param("freq", freq_param)
@@ -142,7 +143,7 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
         return self.last_result
 
     def analyze(
-        self, result: Optional[DispersiveResult] = None, fit_bg_slope: bool = False
+        self, result: DispersiveResult | None = None, fit_bg_slope: bool = False
     ) -> tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
@@ -241,8 +242,8 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[DispersiveResult] = None,
-        comment: Optional[str] = None,
+        result: DispersiveResult | None = None,
+        comment: str | None = None,
         tag: str = "twotone/ge/dispersive",
         **kwargs,
     ) -> None:

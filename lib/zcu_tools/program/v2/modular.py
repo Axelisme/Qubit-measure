@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
+from typing import Optional, Union
 
 import numpy as np
 from numpy.typing import NDArray
 from qick import QickConfig
-from typing_extensions import Optional, Sequence, Union
 
 from .base import MyProgramV2, ProgramV2Cfg
 from .modules import Module
@@ -24,7 +25,7 @@ class ModularProgramV2(MyProgramV2):
         soccfg: QickConfig,
         cfg: ProgramV2Cfg,
         modules: Sequence[Module],
-        sweep: Optional[list[tuple[str, Union[SweepCfg, int]]]] = None,
+        sweep: list[tuple[str, SweepCfg | int]] | None = None,
         **kwargs,
     ) -> None:
         self.modules = modules
@@ -69,7 +70,7 @@ class ModularProgramV2(MyProgramV2):
         self._dmem_buffer.extend(values)
         return offset
 
-    def compile_datamem(self) -> Optional[NDArray[np.int32]]:  # type: ignore
+    def compile_datamem(self) -> NDArray[np.int32] | None:  # type: ignore
         if len(self._dmem_buffer) == 0:
             return None
 
@@ -85,7 +86,7 @@ class BaseCustomProgramV2(ModularProgramV2):
         self,
         soccfg: QickConfig,
         cfg: ProgramV2Cfg,
-        sweep: Optional[list[tuple[str, Union[SweepCfg, int]]]] = None,
+        sweep: list[tuple[str, SweepCfg | int]] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(

@@ -3,12 +3,12 @@ from __future__ import annotations
 import warnings
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Optional, cast
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -33,12 +33,12 @@ from .util import classify_result, plot_with_classified
 @dataclass(frozen=True)
 class CheckResult:
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[CheckCfg] = None
+    cfg_snapshot: CheckCfg | None = None
 
 
 class CheckModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
-    init_pulse: Optional[PulseCfg] = None
+    reset: ResetCfg | None = None
+    init_pulse: PulseCfg | None = None
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
@@ -110,7 +110,7 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
         g_center: complex,
         e_center: complex,
         radius: float,
-        result: Optional[CheckResult] = None,
+        result: CheckResult | None = None,
         max_point: int = 5000,
     ) -> Figure:
         if result is None:
@@ -139,8 +139,8 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[CheckResult] = None,
-        comment: Optional[str] = None,
+        result: CheckResult | None = None,
+        comment: str | None = None,
         tag: str = "singleshot/check",
         **kwargs,
     ) -> None:

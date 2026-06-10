@@ -46,16 +46,16 @@ class RestoreOutcome:
     error (corrupt / wrong-version → defaults were used, error set so the
     Controller can surface it)."""
 
-    report: "RestoreReport"
-    load_error: Optional[PersistenceError]
+    report: RestoreReport
+    load_error: PersistenceError | None
 
 
 class PersistenceCaretaker:
     def __init__(
         self,
-        originator: "PersistOriginatorPort",
+        originator: PersistOriginatorPort,
         *,
-        cache_dir: Optional[Path] = None,
+        cache_dir: Path | None = None,
     ) -> None:
         self._originator = originator
         base_dir = cache_dir if cache_dir is not None else _safe_cache_root()
@@ -89,7 +89,7 @@ class PersistenceCaretaker:
 
     # ------------------------------------------------------------------
 
-    def _load(self) -> tuple[AppPersistedState, Optional[PersistenceError]]:
+    def _load(self) -> tuple[AppPersistedState, PersistenceError | None]:
         if not self._path.exists():
             return AppPersistedState(), None
         try:
@@ -108,7 +108,7 @@ class PersistenceCaretaker:
 
     def _write(self, state: AppPersistedState) -> None:
         payload = state.model_dump(mode="json")
-        temp_path: Optional[Path] = None
+        temp_path: Path | None = None
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             with NamedTemporaryFile(

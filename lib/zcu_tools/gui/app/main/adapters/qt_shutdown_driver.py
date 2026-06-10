@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 from qtpy.QtCore import QObject, QTimer  # type: ignore[attr-defined]
 
@@ -36,7 +37,7 @@ class QtShutdownDriver(QObject):
         handles: OperationHandles,
         *,
         timeout: float = DEFAULT_SHUTDOWN_TIMEOUT,
-        parent: Optional[QObject] = None,
+        parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._coordinator = ShutdownCoordinator(
@@ -45,7 +46,7 @@ class QtShutdownDriver(QObject):
         self._timer = QTimer(self)
         self._timer.setInterval(_POLL_INTERVAL_MS)
         self._timer.timeout.connect(self._on_tick)
-        self._on_closed: Optional[Callable[[], None]] = None
+        self._on_closed: Callable[[], None] | None = None
 
     def begin(self, on_closed: Callable[[], None]) -> None:
         """Cancel every live operation and begin polling for them to settle.

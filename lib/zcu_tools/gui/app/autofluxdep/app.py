@@ -12,8 +12,7 @@ active context and simulating the acquire (no hardware in this phase).
 from __future__ import annotations
 
 import sys
-
-from typing_extensions import Optional
+from typing import Optional
 
 from zcu_tools.gui.app.autofluxdep.controller import Controller
 from zcu_tools.gui.app.autofluxdep.state import AutoFluxDepState, ProjectInfo
@@ -29,8 +28,8 @@ def _make_empty_ctx():
 
 
 def build_core(
-    project: Optional[ProjectInfo] = None,
-    project_root: Optional[str] = None,
+    project: ProjectInfo | None = None,
+    project_root: str | None = None,
 ) -> Controller:
     """Wire State + EventBus + Controller — the testable domain core.
 
@@ -43,7 +42,7 @@ def build_core(
     return Controller(state, EventBus(), project_root=project_root)
 
 
-def run_app(project: Optional[ProjectInfo] = None) -> None:
+def run_app(project: ProjectInfo | None = None) -> None:
     """Build and launch the autofluxdep-gui. Blocks until the window closes."""
     from pathlib import Path
 

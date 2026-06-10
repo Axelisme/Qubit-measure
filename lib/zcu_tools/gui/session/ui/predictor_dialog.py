@@ -36,7 +36,7 @@ class PredictorDialog(QDialog):
     """
 
     def __init__(
-        self, controller: "SessionControllerPort", parent: Optional[QWidget] = None
+        self, controller: SessionControllerPort, parent: QWidget | None = None
     ) -> None:
         super().__init__(parent)
         self._ctrl = controller

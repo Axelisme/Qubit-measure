@@ -1,24 +1,25 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from functools import wraps
+from typing import Optional, TypeVar, cast
 
 import numpy as np
 import scipy as sp
 from numpy.typing import NDArray
-from typing_extensions import Callable, Optional, Sequence, TypeVar, cast
 
 Y_DataType = TypeVar("Y_DataType", bound=np.generic)
 
 
 def with_fixed_params(
     fitfunc: Callable[..., NDArray[Y_DataType]],
-    init_p: Sequence[Optional[float]],
-    bounds: Optional[tuple[Sequence[float], Sequence[float]]],
-    fixedparams: Sequence[Optional[float]],
+    init_p: Sequence[float | None],
+    bounds: tuple[Sequence[float], Sequence[float]] | None,
+    fixedparams: Sequence[float | None],
 ) -> tuple[
     Callable[..., NDArray[Y_DataType]],
-    Sequence[Optional[float]],
-    Optional[tuple[Sequence[float], Sequence[float]]],
+    Sequence[float | None],
+    tuple[Sequence[float], Sequence[float]] | None,
 ]:
     fixedparams_array = np.asarray(fixedparams, dtype=np.float64)  # convert None to nan
     non_fixed_idxs = np.isnan(fixedparams_array)
@@ -48,7 +49,7 @@ def with_fixed_params(
 
 
 def add_fixed_params_back(
-    pOpt: list[float], pCov: NDArray[np.float64], fixedparams: Sequence[Optional[float]]
+    pOpt: list[float], pCov: NDArray[np.float64], fixedparams: Sequence[float | None]
 ) -> tuple[list[float], NDArray[np.float64]]:
     _fixedparams = np.asarray(fixedparams, dtype=float)
     non_fixed_idxs = np.isnan(_fixedparams)
@@ -69,9 +70,9 @@ def fit_func(
     xdata: NDArray,
     ydata: NDArray[Y_DataType],
     fitfunc: Callable[..., NDArray[Y_DataType]],
-    init_p: Optional[Sequence[Optional[float]]] = None,
-    bounds: Optional[tuple[Sequence[float], Sequence[float]]] = None,
-    fixedparams: Optional[Sequence[Optional[float]]] = None,
+    init_p: Sequence[float | None] | None = None,
+    bounds: tuple[Sequence[float], Sequence[float]] | None = None,
+    fixedparams: Sequence[float | None] | None = None,
     **kwargs,
 ) -> tuple[list[float], NDArray[np.float64]]:
     if fixedparams is not None and any([p is not None for p in fixedparams]):
@@ -109,8 +110,8 @@ def batch_fit_func(
     fitfunc: Callable[..., NDArray[Y_DataType]],
     list_init_p: list[Sequence[float]],
     shared_idxs: list[int],
-    list_bounds: Optional[list[tuple[list[float], list[float]]]] = None,
-    fixedparams: Optional[list[Optional[float]]] = None,
+    list_bounds: list[tuple[list[float], list[float]]] | None = None,
+    fixedparams: list[float | None] | None = None,
     **kwargs,
 ) -> tuple[list[list[float]], list[NDArray[np.float64]]]:
     n_groups = len(list_xdata)
@@ -127,12 +128,12 @@ def batch_fit_func(
 
     def build_batch_params(
         list_p0: Sequence[Sequence[float]],
-        list_bounds: Optional[Sequence[tuple[Sequence[float], Sequence[float]]]],
-        fixedparams: Optional[Sequence[Optional[float]]],
+        list_bounds: Sequence[tuple[Sequence[float], Sequence[float]]] | None,
+        fixedparams: Sequence[float | None] | None,
     ) -> tuple[
         list[float],
-        Optional[tuple[Sequence[float], Sequence[float]]],
-        Optional[Sequence[Optional[float]]],
+        tuple[Sequence[float], Sequence[float]] | None,
+        Sequence[float | None] | None,
     ]:
         nonlocal _shared_idxs, local_idxs
 
@@ -174,7 +175,7 @@ def batch_fit_func(
         total_indices = []
         total_params = []
         for i in range(n_groups):
-            group_indices: list[Optional[int]] = [None] * n_params_total
+            group_indices: list[int | None] = [None] * n_params_total
             for j, share_idx in enumerate(_shared_idxs):
                 group_indices[share_idx] = j
             for j, local_idx in enumerate(local_idxs):
@@ -230,8 +231,8 @@ def batch_fit_func(
 
 
 def assign_init_p(
-    fitparams: list[Optional[float]], init_p: Sequence[float]
-) -> list[Optional[float]]:
+    fitparams: list[float | None], init_p: Sequence[float]
+) -> list[float | None]:
     for i, p in enumerate(init_p):
         if fitparams[i] is None:
             fitparams[i] = p

@@ -1,18 +1,10 @@
 from __future__ import annotations
 
+from typing import Any, Generic, Literal, Optional, TypeVar, Union, cast, overload
+
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
-from typing_extensions import (
-    Any,
-    Generic,
-    Literal,
-    Optional,
-    TypeVar,
-    Union,
-    cast,
-    overload,
-)
 
 from .segments import (
     BaseSegmentLivePlot,
@@ -32,8 +24,8 @@ class LivePlot2D(BaseSegmentLivePlot, Generic[Seg2D_T]):
         ylabel: str,
         *,
         uniform: Literal[True] = ...,
-        segment_kwargs: Optional[dict[str, Any]] = ...,
-        existed_axes: Optional[list[list[Axes]]] = ...,
+        segment_kwargs: dict[str, Any] | None = ...,
+        existed_axes: list[list[Axes]] | None = ...,
         auto_close: bool = ...,
         disable: bool = ...,
     ) -> None: ...
@@ -45,8 +37,8 @@ class LivePlot2D(BaseSegmentLivePlot, Generic[Seg2D_T]):
         ylabel: str,
         *,
         uniform: Literal[False],
-        segment_kwargs: Optional[dict[str, Any]] = ...,
-        existed_axes: Optional[list[list[Axes]]] = ...,
+        segment_kwargs: dict[str, Any] | None = ...,
+        existed_axes: list[list[Axes]] | None = ...,
         auto_close: bool = ...,
         disable: bool = ...,
     ) -> None: ...
@@ -57,8 +49,8 @@ class LivePlot2D(BaseSegmentLivePlot, Generic[Seg2D_T]):
         ylabel: str,
         *,
         uniform: bool = True,
-        segment_kwargs: Optional[dict[str, Any]] = None,
-        existed_axes: Optional[list[list[Axes]]] = None,
+        segment_kwargs: dict[str, Any] | None = None,
+        existed_axes: list[list[Axes]] | None = None,
         auto_close: bool = True,
         disable: bool = False,
     ) -> None:
@@ -82,7 +74,7 @@ class LivePlot2D(BaseSegmentLivePlot, Generic[Seg2D_T]):
         xs: NDArray[np.float64],
         ys: NDArray[np.float64],
         signals: NDArray[np.float64],
-        title: Optional[str] = None,
+        title: str | None = None,
         refresh: bool = True,
     ) -> None:
         if self.disable:
@@ -110,10 +102,10 @@ class LivePlot2DwithLine(BaseSegmentLivePlot, Generic[Seg2D_T]):
         ylabel: str,
         line_axis: Literal[0, 1],
         num_lines: int = ...,
-        title: Optional[str] = ...,
+        title: str | None = ...,
         uniform: Literal[True] = ...,
-        segment2d_kwargs: Optional[dict[str, Any]] = ...,
-        segment1d_line_kwargs: Optional[list[dict[str, Any]]] = ...,
+        segment2d_kwargs: dict[str, Any] | None = ...,
+        segment1d_line_kwargs: list[dict[str, Any]] | None = ...,
         **kwargs,
     ) -> None: ...
 
@@ -124,10 +116,10 @@ class LivePlot2DwithLine(BaseSegmentLivePlot, Generic[Seg2D_T]):
         ylabel: str,
         line_axis: Literal[0, 1],
         num_lines: int = ...,
-        title: Optional[str] = ...,
+        title: str | None = ...,
         uniform: Literal[False] = ...,
-        segment2d_kwargs: Optional[dict[str, Any]] = ...,
-        segment1d_line_kwargs: Optional[list[dict[str, Any]]] = ...,
+        segment2d_kwargs: dict[str, Any] | None = ...,
+        segment1d_line_kwargs: list[dict[str, Any]] | None = ...,
         **kwargs,
     ) -> None: ...
 
@@ -137,10 +129,10 @@ class LivePlot2DwithLine(BaseSegmentLivePlot, Generic[Seg2D_T]):
         ylabel: str,
         line_axis: Literal[0, 1],
         num_lines: int = 1,
-        title: Optional[str] = None,
+        title: str | None = None,
         uniform: bool = True,
-        segment2d_kwargs: Optional[dict[str, Any]] = None,
-        segment1d_line_kwargs: Optional[list[dict[str, Any]]] = None,
+        segment2d_kwargs: dict[str, Any] | None = None,
+        segment1d_line_kwargs: list[dict[str, Any]] | None = None,
         **kwargs,
     ) -> None:
         if segment2d_kwargs is None:
@@ -177,7 +169,7 @@ class LivePlot2DwithLine(BaseSegmentLivePlot, Generic[Seg2D_T]):
         xs: NDArray[np.float64],
         ys: NDArray[np.float64],
         signals: NDArray[np.float64],
-        title: Optional[str] = None,
+        title: str | None = None,
         refresh: bool = True,
     ) -> None:
         if self.disable:
@@ -219,8 +211,6 @@ class LivePlot2DwithLine(BaseSegmentLivePlot, Generic[Seg2D_T]):
     @overload
     def get_segment(self, name: Literal["1d"]) -> Plot1DSegment: ...
 
-    def get_segment(self, name: Literal["2d", "1d"]) -> Union[Plot1DSegment, Seg2D_T]:
+    def get_segment(self, name: Literal["2d", "1d"]) -> Plot1DSegment | Seg2D_T:
         segment_map = ["2d", "1d"]
-        return cast(
-            Union[Plot1DSegment, Seg2D_T], self.segments[0][segment_map.index(name)]
-        )
+        return cast(Plot1DSegment | Seg2D_T, self.segments[0][segment_map.index(name)])

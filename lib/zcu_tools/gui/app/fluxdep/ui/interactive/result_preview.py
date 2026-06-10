@@ -8,7 +8,8 @@ display — no controls, no interaction. The user returns to editing via the
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
@@ -31,9 +32,9 @@ class ResultPreviewWidget(QWidget):
     def __init__(
         self,
         entry: SpectrumEntry,
-        on_repick_lines: Optional[Callable[[], None]] = None,
-        on_reselect_points: Optional[Callable[[], None]] = None,
-        parent: Optional[QWidget] = None,
+        on_repick_lines: Callable[[], None] | None = None,
+        on_reselect_points: Callable[[], None] | None = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._figure = Figure(figsize=(6, 4))

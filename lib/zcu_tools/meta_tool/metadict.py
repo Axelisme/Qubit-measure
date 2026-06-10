@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 import warnings
+from collections.abc import ItemsView
 from copy import deepcopy
 from pathlib import Path
 from pprint import pformat
-
-from typing_extensions import Any, ItemsView, Optional, Self, Union
+from typing import Any, Optional, Self, Union
 
 from zcu_tools.utils import format_obj
 
@@ -40,16 +40,14 @@ class MetaDict(SyncFile):
     ]
 
     def __init__(
-        self, json_path: Optional[Union[str, Path]] = None, readonly: bool = False
+        self, json_path: str | Path | None = None, readonly: bool = False
     ) -> None:
         self._data = {}
 
         super().__init__(json_path, readonly=readonly)
 
     @auto_sync("read")
-    def clone(
-        self, dst_path: Optional[Union[str, Path]] = None, readonly: bool = False
-    ) -> Self:
+    def clone(self, dst_path: str | Path | None = None, readonly: bool = False) -> Self:
         if dst_path is not None and Path(dst_path).exists():
             raise FileExistsError(f"Destination path {dst_path} already exists")
 

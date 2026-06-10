@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Optional, Sequence
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any, Optional
 
 from qtpy.QtCore import Qt, Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
@@ -38,8 +39,8 @@ class WritebackWidget(QWidget):
 
     def __init__(
         self,
-        ctrl: "Controller",
-        parent: Optional[QWidget] = None,
+        ctrl: Controller,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._ctrl = ctrl

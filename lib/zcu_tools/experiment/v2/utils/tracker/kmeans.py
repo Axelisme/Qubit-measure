@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from typing import Optional
+
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Optional
 
 from zcu_tools.program import TrackerProtocol
 
@@ -40,7 +41,7 @@ class KMeansTracker(TrackerProtocol):
     def __init__(
         self,
         max_cluster_num: int = 3,
-        share_axis: Optional[int | tuple[int, ...]] = None,
+        share_axis: int | tuple[int, ...] | None = None,
     ) -> None:
         if max_cluster_num < 1:
             raise ValueError("max_cluster_num must be >= 1")
@@ -48,16 +49,16 @@ class KMeansTracker(TrackerProtocol):
         self.share_axis = share_axis
 
         self.n = 0
-        self._leading_shape: Optional[tuple[int, ...]] = None
+        self._leading_shape: tuple[int, ...] | None = None
         self._share_axis_norm: tuple[int, ...] = ()
         self._group_shape: tuple[int, ...] = ()
         self._group_axes: tuple[int, ...] = ()
         self._group_count = 0
 
-        self._cluster_counts: Optional[NDArray[np.int32]] = None
-        self._cluster_sizes: Optional[NDArray[np.float64]] = None
-        self._cluster_means: Optional[NDArray[np.float64]] = None
-        self._cluster_M2: Optional[NDArray[np.float64]] = None
+        self._cluster_counts: NDArray[np.int32] | None = None
+        self._cluster_sizes: NDArray[np.float64] | None = None
+        self._cluster_means: NDArray[np.float64] | None = None
+        self._cluster_M2: NDArray[np.float64] | None = None
 
     def _normalize_share_axis(self, leading_ndim: int) -> tuple[int, ...]:
         if self.share_axis is None:

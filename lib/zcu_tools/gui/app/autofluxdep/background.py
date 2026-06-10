@@ -19,8 +19,9 @@ state — the State main-thread invariant.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
-from typing import Any, Callable, Iterator, Optional
+from typing import Any, Optional
 
 from qtpy.QtCore import QObject  # type: ignore[attr-defined]
 
@@ -61,14 +62,14 @@ class BackgroundService(QObject):
     ``_entered`` context manager passed as the runner's ``enter``.
     """
 
-    def __init__(self, parent: Optional[QObject] = None) -> None:
+    def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._runner = BackgroundRunner(self)
 
     def submit(
         self,
         work: Callable[[], Any],
-        scopes: Optional[OffMainScopes] = None,
+        scopes: OffMainScopes | None = None,
         *,
         run_in_pool: bool,
         on_done: Callable[[Any], None],

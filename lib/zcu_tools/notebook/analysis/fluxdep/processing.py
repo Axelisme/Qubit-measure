@@ -4,11 +4,12 @@ This module provides functions for processing flux-dependent spectroscopy data,
 including removing close points, preprocessing data, and analyzing spectra.
 """
 
+from typing import Optional
+
 import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
-from typing_extensions import Optional
 
 
 def cast2real_and_norm(
@@ -33,7 +34,7 @@ def spectrum2d_findpoint(
     freqs: NDArray[np.float64],
     real_signals: NDArray[np.float64],
     threshold: float,
-    weight: Optional[np.ndarray] = None,
+    weight: np.ndarray | None = None,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """
     Find points in a 2D spectrum.

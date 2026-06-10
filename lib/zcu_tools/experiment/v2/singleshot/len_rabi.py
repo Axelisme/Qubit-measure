@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -27,7 +27,7 @@ from .util import calc_populations
 class LenRabiResult:
     lengths: NDArray[np.float64]
     signals: NDArray[np.float64]
-    cfg_snapshot: Optional[LenRabiCfg] = None
+    cfg_snapshot: LenRabiCfg | None = None
 
 
 class LenRabiSweepCfg(ConfigBase):
@@ -120,9 +120,9 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
 
     def analyze(
         self,
-        result: Optional[LenRabiResult] = None,
+        result: LenRabiResult | None = None,
         *,
-        confusion_matrix: Optional[NDArray[np.float64]] = None,
+        confusion_matrix: NDArray[np.float64] | None = None,
     ) -> Figure:
         if result is None:
             result = self.last_result
@@ -162,8 +162,8 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[LenRabiResult] = None,
-        comment: Optional[str] = None,
+        result: LenRabiResult | None = None,
+        comment: str | None = None,
         tag: str = "singleshot/ge/rabi_length",
         **kwargs,
     ) -> None:

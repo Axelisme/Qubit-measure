@@ -24,9 +24,9 @@ from zcu_tools.gui.run_app import run_qt_app
 
 
 def run_app(
-    project: Optional[ProjectInfo] = None,
-    control: Optional[ControlOptions] = None,
-    project_root: Optional[str] = None,
+    project: ProjectInfo | None = None,
+    control: ControlOptions | None = None,
+    project_root: str | None = None,
 ) -> None:
     """Build and launch the fluxdep-gui. Blocks until the window is closed.
 

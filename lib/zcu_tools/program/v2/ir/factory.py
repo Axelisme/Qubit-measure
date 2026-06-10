@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from typing import cast
-
-from typing_extensions import Optional, Union
+from typing import Optional, Union, cast
 
 from .dispatch import (
     build_dispatch_table_island,
@@ -30,11 +28,11 @@ class IRLexer:
     flatten() : list[BasicBlockNode | MetaInst] -> list[Instruction]
     """
 
-    def lex(self, insts: list[Instruction]) -> list[Union[BasicBlockNode, MetaInst]]:
-        result: list[Union[BasicBlockNode, MetaInst]] = []
+    def lex(self, insts: list[Instruction]) -> list[BasicBlockNode | MetaInst]:
+        result: list[BasicBlockNode | MetaInst] = []
         pending_labels: list[LabelInst] = []
         pending_insts: list[BaseInst] = []
-        pending_branch: Optional[JumpInst] = None
+        pending_branch: JumpInst | None = None
         in_disable_opt = False
 
         def flush() -> None:
@@ -75,9 +73,7 @@ class IRLexer:
         flush()
         return result
 
-    def flatten(
-        self, items: list[Union[BasicBlockNode, MetaInst]]
-    ) -> list[Instruction]:
+    def flatten(self, items: list[BasicBlockNode | MetaInst]) -> list[Instruction]:
         result: list[Instruction] = []
         for item in items:
             if isinstance(item, MetaInst):
@@ -99,19 +95,19 @@ class IRParser:
 
     def __init__(
         self,
-        pmem_size: Optional[int] = None,
+        pmem_size: int | None = None,
     ) -> None:
         self.pmem_size = pmem_size
         self.allocated: set[str] = set()
 
-    def parse(self, items: list[Union[BasicBlockNode, MetaInst]]) -> BlockNode:
+    def parse(self, items: list[BasicBlockNode | MetaInst]) -> BlockNode:
         self._check_sese(items)
         root = BlockNode()
         pos = [0]
         self._parse_block(items, pos, root, end_markers=frozenset())
         return root
 
-    def _check_sese(self, items: list[Union[BasicBlockNode, MetaInst]]) -> None:
+    def _check_sese(self, items: list[BasicBlockNode | MetaInst]) -> None:
         control_labels: set[str] = set()
         skip_indices: set[int] = set()
 
@@ -169,7 +165,7 @@ class IRParser:
 
     def _parse_block(
         self,
-        items: list[Union[BasicBlockNode, MetaInst]],
+        items: list[BasicBlockNode | MetaInst],
         pos: list[int],
         block: BlockNode,
         end_markers: frozenset[str],
@@ -193,7 +189,7 @@ class IRParser:
 
     def _consume_meta(
         self,
-        items: list[Union[BasicBlockNode, MetaInst]],
+        items: list[BasicBlockNode | MetaInst],
         pos: list[int],
         expected_type: str,
     ) -> MetaInst:
@@ -209,7 +205,7 @@ class IRParser:
 
     def _parse_loop(
         self,
-        items: list[Union[BasicBlockNode, MetaInst]],
+        items: list[BasicBlockNode | MetaInst],
         pos: list[int],
     ) -> IRLoop:
         start_meta = self._consume_meta(items, pos, "LOOP_START")
@@ -253,7 +249,7 @@ class IRParser:
 
     def _parse_branch(
         self,
-        items: list[Union[BasicBlockNode, MetaInst]],
+        items: list[BasicBlockNode | MetaInst],
         pos: list[int],
     ) -> IRBranch:
         start_meta = self._consume_meta(items, pos, "BRANCH_START")
@@ -296,7 +292,7 @@ class IRParser:
 
     def _parse_branch_case(
         self,
-        items: list[Union[BasicBlockNode, MetaInst]],
+        items: list[BasicBlockNode | MetaInst],
         pos: list[int],
     ) -> tuple[str, BlockNode]:
         start_meta = self._consume_meta(items, pos, "BRANCH_CASE_START")
@@ -317,9 +313,9 @@ class IRParser:
 
     def _consume_branch_end_label(
         self,
-        items: list[Union[BasicBlockNode, MetaInst]],
+        items: list[BasicBlockNode | MetaInst],
         pos: list[int],
-    ) -> Optional[Label]:
+    ) -> Label | None:
         if pos[0] >= len(items):
             return None
         item = items[pos[0]]
@@ -336,7 +332,7 @@ class IRParser:
     def _strip_synthetic_branch_jump(
         self,
         case: BlockNode,
-        end_label: Optional[Label],
+        end_label: Label | None,
     ) -> BlockNode:
         if end_label is None or not case.insts:
             return case
@@ -377,7 +373,7 @@ class IRParser:
             and branch.addr == Register("s15")
         )
 
-    def unparse(self, root: BlockNode) -> list[Union[BasicBlockNode, MetaInst]]:
+    def unparse(self, root: BlockNode) -> list[BasicBlockNode | MetaInst]:
         """Lower an IR tree to a chunk list with structural MetaInst markers.
 
         This is the single lowering entry point. ``parse(unparse(tree))``
@@ -386,12 +382,12 @@ class IRParser:
         """
         return self._unparse_block_node(root)
 
-    def _unparse_node(self, node: IRNode) -> list[Union[BasicBlockNode, MetaInst]]:
+    def _unparse_node(self, node: IRNode) -> list[BasicBlockNode | MetaInst]:
         """Recursively lower a single IRNode to a chunk list (with MetaInst markers)."""
         if isinstance(node, BasicBlockNode):
             return [node]
         if isinstance(node, BlockNode):
-            result: list[Union[BasicBlockNode, MetaInst]] = []
+            result: list[BasicBlockNode | MetaInst] = []
             for child in node.insts:
                 result.extend(self._unparse_node(child))
             return result
@@ -433,7 +429,7 @@ class IRParser:
                 value_reg=node.compare_reg,
                 target_labels=case_entry_labels,
             )
-            result_branch: list[Union[BasicBlockNode, MetaInst]] = [
+            result_branch: list[BasicBlockNode | MetaInst] = [
                 MetaInst(
                     type="BRANCH_START",
                     name=node.name,
@@ -499,10 +495,8 @@ class IRParser:
             f"IRParser._unparse_node: unexpected node type {type(node).__name__}"
         )
 
-    def _unparse_block_node(
-        self, block: BlockNode
-    ) -> list[Union[BasicBlockNode, MetaInst]]:
-        result: list[Union[BasicBlockNode, MetaInst]] = []
+    def _unparse_block_node(self, block: BlockNode) -> list[BasicBlockNode | MetaInst]:
+        result: list[BasicBlockNode | MetaInst] = []
         for child in block.insts:
             result.extend(self._unparse_node(child))
         return result
@@ -568,7 +562,7 @@ class IRParser:
         ``_loop_prologue`` so the back-edge targets the prologue's start label.
         """
         counter = node.counter_reg
-        n_val: Union[Immediate, Register] = (
+        n_val: Immediate | Register = (
             Immediate(node.n) if isinstance(node.n, int) else node.n
         )
         op_str = AluExpr(counter, AluOp.SUB, n_val)

@@ -65,7 +65,7 @@ class OpenInnerLoop(Macro):
         self,
         name: str,
         counter_reg: str,
-        n: Union[int, str],
+        n: int | str,
         *,
         range_hint: tuple[int, int] | None = None,
     ) -> None:
@@ -127,7 +127,7 @@ class CloseInnerLoop(Macro):
     """
 
     # fields: name (str), counter_reg (str), n (str | int)
-    def __init__(self, name: str, counter_reg: str, n: Union[int, str]) -> None:
+    def __init__(self, name: str, counter_reg: str, n: int | str) -> None:
         super().__init__(name=name, counter_reg=counter_reg, n=n)
 
     def expand(self, prog):  # type: ignore[override]

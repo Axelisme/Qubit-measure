@@ -20,9 +20,10 @@ this module as the session services move in.
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Optional, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from zcu_tools.gui.plotting import FigureContainer
@@ -71,7 +72,7 @@ class ExclusionGate(Protocol):
         kind: str,
         *,
         owner_id: str,
-        resource_id: Optional[str] = None,
+        resource_id: str | None = None,
     ) -> None:
         """Add an active exclusion lease under ``token`` (after ensure_can_start)."""
         ...
@@ -107,9 +108,9 @@ class OffMainScopes:
     liveplot backend) stays in the app's concrete ``BackgroundService``.
     """
 
-    figure_container: Optional["FigureContainer"] = None
-    pbar_factory: Optional[Callable[..., Any]] = None
-    stop_event: Optional[threading.Event] = None
+    figure_container: FigureContainer | None = None
+    pbar_factory: Callable[..., Any] | None = None
+    stop_event: threading.Event | None = None
 
 
 class BackgroundExecutor(Protocol):
@@ -124,7 +125,7 @@ class BackgroundExecutor(Protocol):
     def submit(
         self,
         work: Callable[[], Any],
-        scopes: Optional[OffMainScopes] = None,
+        scopes: OffMainScopes | None = None,
         *,
         run_in_pool: bool,
         on_done: Callable[[Any], None],
@@ -167,8 +168,8 @@ class ProgressEvent:
     handle_id: int
     kind: ProgressEventKind
     label: str = ""
-    total: "ProgressTotal" = None  # carried on CREATE and UPDATE (total may change)
-    n: "ProgressValue" = 0  # meaningful on UPDATE
+    total: ProgressTotal = None  # carried on CREATE and UPDATE (total may change)
+    n: ProgressValue = 0  # meaningful on UPDATE
 
 
 @runtime_checkable
@@ -202,7 +203,7 @@ class DriverFactoryPort(Protocol):
     real hardware.
     """
 
-    def __call__(self, type_name: str, address: str) -> "DeviceProtocol": ...
+    def __call__(self, type_name: str, address: str) -> DeviceProtocol: ...
 
 
 @dataclass(frozen=True)
@@ -225,9 +226,7 @@ class RememberedDevicePort(Protocol):
     ``DeviceService``.
     """
 
-    def register_remembered_devices(
-        self, entries: "list[DeviceMemoryInfo]"
-    ) -> None: ...
+    def register_remembered_devices(self, entries: list[DeviceMemoryInfo]) -> None: ...
 
 
 @runtime_checkable
@@ -243,15 +242,15 @@ class ProjectIOPort(Protocol):
     def has_project(self) -> bool: ...
     def setup(self, result_dir: str) -> None: ...
     def list_contexts(self) -> list[str]: ...
-    def get_active_label(self) -> Optional[str]: ...
-    def use_context(self, label: str, base_ctx: "ExpContext") -> "ExpContext": ...
+    def get_active_label(self) -> str | None: ...
+    def use_context(self, label: str, base_ctx: ExpContext) -> ExpContext: ...
     def new_context(
         self,
-        base_ctx: "ExpContext",
-        value: Optional[float] = None,
+        base_ctx: ExpContext,
+        value: float | None = None,
         unit: str = "none",
-        clone_from: Optional[str] = None,
-    ) -> "ExpContext": ...
+        clone_from: str | None = None,
+    ) -> ExpContext: ...
 
 
 @runtime_checkable
@@ -265,7 +264,7 @@ class ContextReadPort(Protocol):
     ``ContextWritePort``.
     """
 
-    def get_current_ml(self) -> "ModuleLibrary": ...
+    def get_current_ml(self) -> ModuleLibrary: ...
 
 
 @runtime_checkable

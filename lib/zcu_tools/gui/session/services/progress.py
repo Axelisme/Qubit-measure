@@ -23,7 +23,8 @@ from __future__ import annotations
 
 import itertools
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from zcu_tools.gui.session.pbar_host import ProgressBar, ProgressBarModel
 from zcu_tools.gui.session.ports import (

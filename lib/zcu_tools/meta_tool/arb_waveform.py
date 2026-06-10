@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import ClassVar, Optional, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import ClassVar, Optional, Union
 
 
 class ArbWaveformDatabase:
@@ -26,10 +26,10 @@ class ArbWaveformDatabase:
     The database path must be initialized via `init()` before any access.
     """
 
-    _database_path: ClassVar[Optional[Path]] = None
+    _database_path: ClassVar[Path | None] = None
 
     @classmethod
-    def init(cls, path: Union[str, Path]) -> None:
+    def init(cls, path: str | Path) -> None:
         """Set and create the database directory for arbitrary waveforms."""
         cls._database_path = Path(path)
         cls._database_path.mkdir(parents=True, exist_ok=True)
@@ -44,7 +44,7 @@ class ArbWaveformDatabase:
         return cls._database_path
 
     @classmethod
-    def get(cls, name: str) -> tuple[NDArray, Optional[NDArray], NDArray]:
+    def get(cls, name: str) -> tuple[NDArray, NDArray | None, NDArray]:
         """Load a waveform by name.
 
         Returns
@@ -71,7 +71,7 @@ class ArbWaveformDatabase:
         qdata: NDArray = data["qdata"]
         time: NDArray = data["time"]
 
-        qdata_out: Optional[NDArray] = None if np.all(qdata == 0) else qdata
+        qdata_out: NDArray | None = None if np.all(qdata == 0) else qdata
 
         return idata, qdata_out, time
 
@@ -81,7 +81,7 @@ class ArbWaveformDatabase:
         name: str,
         idata: NDArray,
         time: NDArray,
-        qdata: Optional[NDArray] = None,
+        qdata: NDArray | None = None,
     ) -> None:
         """Save a waveform to the database.
 
@@ -134,7 +134,7 @@ class ArbWaveformDatabase:
         path: Path,
         name: str,
         idata: NDArray,
-        qdata: Optional[NDArray],
+        qdata: NDArray | None,
         time: NDArray,
     ) -> None:
         fig, ax = plt.subplots(figsize=(8, 2.5))

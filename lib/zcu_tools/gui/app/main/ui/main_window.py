@@ -6,7 +6,8 @@ Implements ViewProtocol; all state lives in Controller/State, never here.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Optional
 
 from zcu_tools.gui.app.main.adapter import AnalysisMode, CfgSchema
 from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
@@ -87,7 +88,7 @@ if TYPE_CHECKING:
 class _PanelEdgeHandle(QToolButton):
     """Boundary handle for collapsing/expanding the left panel."""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setFixedSize(16, 42)
         self.setCursor(Qt.PointingHandCursor)  # type: ignore[attr-defined]
@@ -140,7 +141,7 @@ class ExpTabWidget(QWidget):
     """A single experiment tab: Config | Plot | Result areas."""
 
     def __init__(
-        self, tab_id: str, ctrl: "Controller", parent: Optional[QWidget] = None
+        self, tab_id: str, ctrl: Controller, parent: QWidget | None = None
     ) -> None:
         super().__init__(parent)
         self.tab_id = tab_id
@@ -148,7 +149,7 @@ class ExpTabWidget(QWidget):
         self._writeback_count: int = 0
         # editor_id of this tab's shared cfg-editor session (set on bind, when
         # the cfg_form's live model exists). Exposed to agents via tab.snapshot.
-        self._cfg_editor_id: Optional[str] = None
+        self._cfg_editor_id: str | None = None
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(4, 4, 4, 4)
@@ -301,7 +302,7 @@ class ExpTabWidget(QWidget):
             self._plot_stack, self._plot_placeholder
         )
 
-        self._canvas_widget: Optional[QWidget] = None
+        self._canvas_widget: QWidget | None = None
 
         plot_layout.addWidget(self._plot_stack, stretch=1)
         splitter.addWidget(plot_panel)
@@ -415,7 +416,7 @@ class ExpTabWidget(QWidget):
 
     # ── attach / detach (whole-tab, snapshot-driven) ──────────────────────
 
-    def attach(self, snapshot: "TabSnapshot", main_window: "MainWindow") -> None:
+    def attach(self, snapshot: TabSnapshot, main_window: MainWindow) -> None:
         """Bring this tab widget to life from one snapshot (mirrors
         ``CfgFormWidget.attach`` at the whole-tab scale): seed every sub-view
         from the snapshot's live fields, then wire the controller signals.
@@ -431,7 +432,7 @@ class ExpTabWidget(QWidget):
         self.update_interaction_state(snapshot)
         self._bind_to_controller(main_window)
 
-    def _populate_cfg(self, schema: "CfgSchema", ctrl: "Controller") -> None:
+    def _populate_cfg(self, schema: CfgSchema, ctrl: Controller) -> None:
         # The cfg LiveModel is owned by the CfgEditorService (ADR-0008): open a
         # gc=False session seeded from the committed schema, then attach the
         # widget to the service-owned model. tab_id is the owner key so the
@@ -442,7 +443,7 @@ class ExpTabWidget(QWidget):
         self._cfg_editor_id = editor_id
         self.cfg_form.attach(ctrl.get_cfg_editor_root(editor_id))
 
-    def read_schema(self) -> "CfgSchema":
+    def read_schema(self) -> CfgSchema:
         return self.cfg_form.read_schema()
 
     # ── populate / refresh helpers ────────────────────────────────────────
@@ -456,7 +457,7 @@ class ExpTabWidget(QWidget):
     def has_analyze_params(self) -> bool:
         return self.analyze_form.has_params()
 
-    def update_writeback_items(self, items: list["WritebackItem"]) -> None:
+    def update_writeback_items(self, items: list[WritebackItem]) -> None:
         self._writeback_count = sum(1 for item in items if item.selected)
         self.writeback_widget.populate(items)
         self.writeback_section.setVisible(len(items) > 0)
@@ -502,7 +503,7 @@ class ExpTabWidget(QWidget):
         self._figure_container.clear_dynamic_canvases()
         self._canvas_widget = None
 
-    def show_analysis_figure(self, fig: "Figure") -> None:
+    def show_analysis_figure(self, fig: Figure) -> None:
         """Embed a matplotlib Figure in the plot area (replaces prior analysis canvas)."""
         canvas = attach_existing_figure_to_container(fig, self._figure_container)
         if self._canvas_widget is not None and self._canvas_widget is not canvas:
@@ -596,7 +597,7 @@ class ExpTabWidget(QWidget):
             idle and state.has_context and state.has_analyze_result
         )
 
-    def _bind_to_controller(self, main_window: "MainWindow") -> None:
+    def _bind_to_controller(self, main_window: MainWindow) -> None:
         tab_id = self.tab_id
 
         def validity_cb(_valid: bool) -> None:
@@ -677,14 +678,14 @@ class ExpTabWidget(QWidget):
 class MainWindow(QMainWindow):
     """Top-level window; implements ViewProtocol for Controller callbacks."""
 
-    def __init__(self, controller: "Controller") -> None:
+    def __init__(self, controller: Controller) -> None:
         super().__init__()
         self._ctrl = controller
         self._tab_widgets: dict[str, ExpTabWidget] = {}
         # ``DialogName -> live QDialog`` registry. ``InspectDialog`` is also
         # tracked through this dict (the legacy ``_inspect_dialog`` attribute
         # is gone — there is now exactly one entry point).
-        self._open_dialogs: dict[DialogName, "QDialog"] = {}
+        self._open_dialogs: dict[DialogName, QDialog] = {}
         # True once _perform_close has begun the actual teardown, so the second
         # closeEvent (triggered by _perform_close's self.close()) passes straight
         # through instead of re-entering the cancel-and-wait coordination.
@@ -894,13 +895,13 @@ class MainWindow(QMainWindow):
 
     def _set_tab_running(
         self,
-        tab_w: "ExpTabWidget",
-        snapshot: "TabSnapshot",
+        tab_w: ExpTabWidget,
+        snapshot: TabSnapshot,
     ) -> None:
         tab_w.update_interaction_state(snapshot)
 
     def refresh_tab_analyze_form(
-        self, tab_id: str, snapshot: Optional["TabSnapshot"] = None
+        self, tab_id: str, snapshot: TabSnapshot | None = None
     ) -> None:
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
@@ -922,7 +923,7 @@ class MainWindow(QMainWindow):
         tab_w.analyze_form.populate_values(current.analyze_params)
 
     def refresh_tab_writeback(
-        self, tab_id: str, snapshot: Optional["TabSnapshot"] = None
+        self, tab_id: str, snapshot: TabSnapshot | None = None
     ) -> None:
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
@@ -931,7 +932,7 @@ class MainWindow(QMainWindow):
         tab_w.update_writeback_items(list(current.writeback_items))
 
     def refresh_tab_save_paths(
-        self, tab_id: str, snapshot: Optional["TabSnapshot"] = None
+        self, tab_id: str, snapshot: TabSnapshot | None = None
     ) -> None:
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
@@ -942,7 +943,7 @@ class MainWindow(QMainWindow):
             tab_w.set_save_paths(save_paths.data_path, save_paths.image_path)
 
     def refresh_tab_figure(
-        self, tab_id: str, snapshot: Optional["TabSnapshot"] = None
+        self, tab_id: str, snapshot: TabSnapshot | None = None
     ) -> None:
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
@@ -952,7 +953,7 @@ class MainWindow(QMainWindow):
         if figure is not None:
             self.show_analysis_image(tab_id, figure)
 
-    def refresh_run_lock(self, running_tab_id: Optional[str]) -> None:
+    def refresh_run_lock(self, running_tab_id: str | None) -> None:
         logger.debug("refresh_run_lock: running_tab_id=%r", running_tab_id)
         self._new_tab_btn.setEnabled(running_tab_id is None)
         for tab_id, tab_w in self._tab_widgets.items():
@@ -963,7 +964,7 @@ class MainWindow(QMainWindow):
         # listener, which re-renders to empty.
 
     def refresh_tab_interaction(
-        self, tab_id: str, snapshot: Optional["TabSnapshot"] = None
+        self, tab_id: str, snapshot: TabSnapshot | None = None
     ) -> None:
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None or not self._ctrl.has_tab(tab_id):
@@ -1150,7 +1151,7 @@ class MainWindow(QMainWindow):
             return
         self._ctrl.set_active_tab(widget.tab_id)
 
-    def _resolve_tab_widget(self, tab_id: str, action: str) -> Optional[ExpTabWidget]:
+    def _resolve_tab_widget(self, tab_id: str, action: str) -> ExpTabWidget | None:
         """Look up the widget; log + bail if tab_id is unknown to the controller."""
         if not self._ctrl.has_tab(tab_id):
             logger.warning("%s: unknown tab_id=%r — ignoring", action, tab_id)
@@ -1246,7 +1247,7 @@ class MainWindow(QMainWindow):
     # Dialog API — single entry point shared by UI clicks and remote control
     # ------------------------------------------------------------------
 
-    def _build_dialog(self, name: DialogName) -> "QDialog":
+    def _build_dialog(self, name: DialogName) -> QDialog:
         """Construct a fresh QDialog for ``name``.
 
         Per-name imports are deferred to avoid heavy front-loading and to
@@ -1320,7 +1321,7 @@ class MainWindow(QMainWindow):
     def list_open_dialogs(self) -> list[DialogName]:
         return list(self._open_dialogs.keys())
 
-    def register_dialog(self, name: DialogName, dialog: "QDialog") -> None:
+    def register_dialog(self, name: DialogName, dialog: QDialog) -> None:
         """Register a dialog that was constructed outside ``open_dialog``.
 
         ``app.py`` uses this for the bootstrap startup dialog so the remote
@@ -1338,7 +1339,7 @@ class MainWindow(QMainWindow):
 
     def get_view_snapshot(self) -> dict[str, object]:
         """Capture the visible window state as a JSON-friendly dict."""
-        active_id: Optional[str] = None
+        active_id: str | None = None
         if self._tabs.count() > 0:
             current = self._tabs.currentWidget()
             for tid, tab_w in self._tab_widgets.items():
@@ -1356,7 +1357,7 @@ class MainWindow(QMainWindow):
             "open_dialogs": [n.value for n in self._open_dialogs.keys()],
         }
 
-    def take_screenshot(self, tab_id: Optional[str] = None) -> bytes:
+    def take_screenshot(self, tab_id: str | None = None) -> bytes:
         """Grab the window (or a single tab) and return raw PNG bytes.
 
         ``tab_id`` must be the active tab; off-screen tabs grab as blank,
@@ -1410,7 +1411,7 @@ class MainWindow(QMainWindow):
             raise RuntimeError(f"tab {tab_id!r} canvas has no matplotlib figure")
         return render_figure_png(figure)
 
-    def take_dialog_screenshot(self, dialog_name: "DialogName") -> bytes:
+    def take_dialog_screenshot(self, dialog_name: DialogName) -> bytes:
         """Grab a currently-open dialog and return raw PNG bytes."""
         from qtpy.QtCore import QBuffer, QIODevice  # type: ignore[attr-defined]
 
@@ -1440,7 +1441,7 @@ class MainWindow(QMainWindow):
 
         QTimer.singleShot(0, lambda: self._ctrl.begin_shutdown(self._perform_close))
 
-    def _perform_close(self, a0: Optional[QCloseEvent] = None) -> None:
+    def _perform_close(self, a0: QCloseEvent | None = None) -> None:
         """The actual teardown: persist session, stop remote, accept the close.
         Runs once every cancelled operation has settled (or timed out), driven by
         the Controller's shutdown coordinator. Shared by closeEvent (user) and
@@ -1459,7 +1460,7 @@ class MainWindow(QMainWindow):
         else:
             self.close()
 
-    def closeEvent(self, a0: Optional[QCloseEvent]) -> None:
+    def closeEvent(self, a0: QCloseEvent | None) -> None:
         # Second pass: _perform_close → self.close() re-enters here once teardown
         # has begun; accept it straight through.
         if self._closing:

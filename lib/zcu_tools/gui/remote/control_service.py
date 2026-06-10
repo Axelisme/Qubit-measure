@@ -37,7 +37,8 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Any, Callable, Mapping, Optional
+from collections.abc import Callable, Mapping
+from typing import Any, Optional
 
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.framing import encode_line
@@ -54,7 +55,7 @@ from zcu_tools.gui.remote.wire import Request
 logger = logging.getLogger(__name__)
 
 # An event serializer maps a domain payload to a wire payload (or None to drop).
-Serializer = Callable[[Any], Optional[Mapping[str, object]]]
+Serializer = Callable[[Any], Mapping[str, object] | None]
 
 
 class SubscriptionCtx:

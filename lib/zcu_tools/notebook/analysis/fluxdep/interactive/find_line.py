@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from typing import Optional
 
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
@@ -9,7 +10,6 @@ from IPython.display import clear_output, display
 from matplotlib.animation import FuncAnimation
 from numpy.typing import NDArray
 from tqdm.auto import tqdm
-from typing_extensions import Optional
 
 from ..processing import cast2real_and_norm, diff_mirror
 
@@ -36,8 +36,8 @@ class InteractiveLines:
         signals: NDArray,
         dev_values: NDArray[np.float64],
         freqs: NDArray[np.float64],
-        flux_half: Optional[float] = None,
-        flux_int: Optional[float] = None,
+        flux_half: float | None = None,
+        flux_int: float | None = None,
     ) -> None:
         plt.ioff()  # 避免立即顯示圖表
         self.fig_main, self.ax_main = plt.subplots(figsize=(4, 3))

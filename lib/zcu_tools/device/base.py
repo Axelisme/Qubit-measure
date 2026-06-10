@@ -3,8 +3,7 @@ from __future__ import annotations
 import sys
 import threading
 from abc import ABC, abstractmethod
-
-from typing_extensions import TYPE_CHECKING, Generic, Optional, Self, TypeVar
+from typing import TYPE_CHECKING, Generic, Optional, Self, TypeVar
 
 from zcu_tools.cfg_model import ConfigBase
 
@@ -15,7 +14,7 @@ if TYPE_CHECKING:
 class BaseDeviceInfo(ConfigBase):
     address: str
     type: str
-    label: Optional[str] = None
+    label: str | None = None
 
     def with_updates(self, **kwargs) -> Self:
         protected_fields = {"type", "address"}
@@ -88,7 +87,7 @@ class BaseDevice(ABC, Generic[T_DeviceInfo]):
         cfg: T_DeviceInfo,
         *,
         progress: bool = True,
-        stop_event: Optional[threading.Event] = None,
+        stop_event: threading.Event | None = None,
     ) -> None: ...
 
     def setup(
@@ -96,7 +95,7 @@ class BaseDevice(ABC, Generic[T_DeviceInfo]):
         cfg: T_DeviceInfo,
         *,
         progress: bool = True,
-        stop_event: Optional[threading.Event] = None,
+        stop_event: threading.Event | None = None,
     ) -> None:
         """
         Setup the device with the given configuration.

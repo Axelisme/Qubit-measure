@@ -29,6 +29,6 @@ GENERAL_REGS = frozenset({f"r{i}" for i in range(32)})  # r0~r31
 BIG_JUMP_PMEM_THRESHOLD = 2**11
 
 
-def needs_big_jump(pmem_size: Optional[int]) -> bool:
+def needs_big_jump(pmem_size: int | None) -> bool:
     """Return True when pmem_size exceeds the direct-jump address range."""
     return pmem_size is not None and pmem_size > BIG_JUMP_PMEM_THRESHOLD

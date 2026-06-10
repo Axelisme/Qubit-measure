@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import os
 from abc import ABC, abstractmethod
-
-from typing_extensions import Any, ClassVar, Generic, Sequence
+from collections.abc import Sequence
+from typing import Any, ClassVar, Generic
 
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
@@ -136,8 +136,8 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     def setup_interactive_analysis(
         self,
         req: AnalyzeRequest[T_Result, T_AnalyzeParams],
-        host: "InteractiveHost",
-    ) -> "InteractiveSession":
+        host: InteractiveHost,
+    ) -> InteractiveSession:
         """Set up an interactive analysis on the host's figure and return the
         in-progress session (used only by ``analysis=AnalysisMode.INTERACTIVE``).
 

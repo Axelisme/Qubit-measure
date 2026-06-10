@@ -95,7 +95,7 @@ _FIT_RULES: list[FriendlyRule] = [
 ]
 
 
-def friendly_fit_message(action: str, exc: Union[Exception, str]) -> str:
+def friendly_fit_message(action: str, exc: Exception | str) -> str:
     """Message for a database-search / params-export failure.
 
     ``action`` is "Search" or "Export". ``exc`` may be the exception (export,

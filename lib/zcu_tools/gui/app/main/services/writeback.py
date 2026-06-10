@@ -48,10 +48,10 @@ class WritebackService:
 
     def __init__(
         self,
-        state: "State",
-        bus: "EventBus",
+        state: State,
+        bus: EventBus,
         cfg_editor: CfgEditorPort,
-        write_port: "ContextWritePort",
+        write_port: ContextWritePort,
     ) -> None:
         self._state = state
         self._bus = bus
@@ -128,8 +128,8 @@ class WritebackService:
         tab_id: str,
         session_id: str,
         *,
-        selected: Optional[bool] = None,
-        target_name: Optional[str] = None,
+        selected: bool | None = None,
+        target_name: str | None = None,
         proposed_value: Any = _UNSET,
     ) -> None:
         item = self._find_item(tab_id, session_id)
@@ -191,7 +191,7 @@ class WritebackService:
         self._bus.emit(TabContentChangedPayload(tab_id=tab_id))
         return applied_ids
 
-    def _item_schema(self, item: "ModuleWriteback | WaveformWriteback") -> CfgSchema:
+    def _item_schema(self, item: ModuleWriteback | WaveformWriteback) -> CfgSchema:
         """The live draft to apply: snapshot the item's editor model if present.
 
         The persistent draft lives in the service-owned model (``editor_id``); a

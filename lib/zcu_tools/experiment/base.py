@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing_extensions import Generic, Optional, TypeVar
+from typing import Generic, Optional, TypeVar
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 
@@ -14,4 +14,4 @@ class AbsExperiment(Generic[T_Result, T_Config]):
     """
 
     def __init__(self) -> None:
-        self.last_result: Optional[T_Result] = None
+        self.last_result: T_Result | None = None

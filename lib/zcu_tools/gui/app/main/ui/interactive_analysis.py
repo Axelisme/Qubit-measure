@@ -15,7 +15,8 @@ port (ADR-0019), which marshals the result back to the main thread.
 
 from __future__ import annotations
 
-from typing import Callable, Optional, Protocol
+from collections.abc import Callable
+from typing import Optional, Protocol
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
@@ -46,15 +47,13 @@ class InteractiveHostEnv(Protocol):
 class InteractiveAnalysisWidget(QWidget):
     """Qt host for an interactive analysis session (implements InteractiveHost)."""
 
-    def __init__(
-        self, env: InteractiveHostEnv, parent: Optional[QWidget] = None
-    ) -> None:
+    def __init__(self, env: InteractiveHostEnv, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._env = env
         self._figure = Figure(figsize=(8, 5))
         self._canvas = FigureCanvasQTAgg(self._figure)
-        self._session: Optional[InteractiveSession] = None
-        self._on_done: Optional[Callable[[], None]] = None
+        self._session: InteractiveSession | None = None
+        self._on_done: Callable[[], None] | None = None
 
         controls = QWidget()
         self._controls_layout = QVBoxLayout(controls)

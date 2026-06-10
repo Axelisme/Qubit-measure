@@ -36,19 +36,19 @@ _RUN_TAB = 1
 class NodeDetailPane(QWidget):
     """Right pane: edit/run sub-tabs for the currently selected Node."""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._node: Optional[PlacedNode] = None
-        self._form: Optional[ParamForm] = None
+        self._node: PlacedNode | None = None
+        self._form: ParamForm | None = None
         self._running = False
-        self._canvas: Optional[QWidget] = None
+        self._canvas: QWidget | None = None
         # Where a de-selected canvas is parked instead of being left parentless.
         # A parentless QWidget becomes a top-level window the moment it draws —
         # and every Node's Plotter redraws each run point, even off-screen ones —
         # so a de-selected canvas would flash as a stray window. Parking it under
         # a hidden widget keeps it parented (never a window) while it keeps
         # drawing into its Result. Set by the MainWindow that owns the canvases.
-        self._canvas_park: Optional[QWidget] = None
+        self._canvas_park: QWidget | None = None
 
         root = QVBoxLayout(self)
         self._title = QLabel("(no node selected)")
@@ -72,7 +72,7 @@ class NodeDetailPane(QWidget):
 
     # --- selection ---
 
-    def show_node(self, node: Optional[PlacedNode]) -> None:
+    def show_node(self, node: PlacedNode | None) -> None:
         self._node = node
         # clear old form
         if self._form is not None:
@@ -94,7 +94,7 @@ class NodeDetailPane(QWidget):
         """
         self._canvas_park = park
 
-    def show_run_canvas(self, canvas: Optional[QWidget]) -> None:
+    def show_run_canvas(self, canvas: QWidget | None) -> None:
         """Swap the run tab's content to ``canvas`` (or the placeholder if None).
 
         The MainWindow owns the canvases; this pane only displays the selected
@@ -133,7 +133,7 @@ class NodeDetailPane(QWidget):
     # --- testing accessors ---
 
     @property
-    def current_form(self) -> Optional[ParamForm]:
+    def current_form(self) -> ParamForm | None:
         return self._form
 
     @property

@@ -2,16 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Literal, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import (
-    Any,
-    Literal,
-    Optional,
-)
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -42,7 +38,7 @@ from zcu_tools.utils.process import rotate2real
 class T2EchoResult:
     times: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[T2EchoCfg] = None
+    cfg_snapshot: T2EchoCfg | None = None
 
 
 def t2echo_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -50,7 +46,7 @@ def t2echo_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class T2EchoModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     pi2_pulse: PulseCfg
     pi_pulse: PulseCfg
     readout: ReadoutCfg
@@ -73,7 +69,7 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
         cfg: T2EchoCfg,
         *,
         detune: float = 0.0,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> tuple[T2EchoResult, float]:
         orig_cfg = deepcopy(cfg)
 
@@ -162,7 +158,7 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
 
     def analyze(
         self,
-        result: Optional[T2EchoResult] = None,
+        result: T2EchoResult | None = None,
         *,
         fit_method: Literal["fringe", "decay"] = "decay",
     ) -> tuple[float, float, float, float, Figure]:
@@ -219,8 +215,8 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[T2EchoResult] = None,
-        comment: Optional[str] = None,
+        result: T2EchoResult | None = None,
+        comment: str | None = None,
         tag: str = "twotone/ge/t2echo",
         **kwargs,
     ) -> None:

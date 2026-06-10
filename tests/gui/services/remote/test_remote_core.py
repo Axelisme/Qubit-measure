@@ -60,7 +60,7 @@ def _make_view() -> MagicMock:
 class _Fixture:
     """Hold strong refs to Controller + service to survive GC mid-test."""
 
-    def __init__(self, opts: Optional[ControlOptions] = None) -> None:
+    def __init__(self, opts: ControlOptions | None = None) -> None:
         self.state = State(_make_ctx())
         self.registry = Registry()
         register_all(self.registry)

@@ -24,7 +24,7 @@ import importlib.util
 import sys
 from pathlib import Path
 from tempfile import gettempdir
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 # This bridge is launched standalone (``python .../mcp_server.py``), so the repo
 # ``lib`` dir is not on sys.path by default. Add it so the wire-contract modules
@@ -112,8 +112,8 @@ _BRIDGE = McpBridge(_CONFIG)
 
 
 def send_gui_rpc(
-    method: str, params: Dict[str, Any], timeout_seconds: float = 30.0
-) -> Dict[str, Any]:
+    method: str, params: dict[str, Any], timeout_seconds: float = 30.0
+) -> dict[str, Any]:
     """Issue one RPC against the GUI; raises on error or timeout."""
     resp = _BRIDGE.send_rpc_raw(method, params, timeout_seconds)
     if not resp.get("ok", False):
@@ -131,21 +131,21 @@ def send_gui_rpc(
 # ---------------------------------------------------------------------------
 
 
-def tool_fluxdep_connect(arguments: Dict[str, Any]) -> str:
+def tool_fluxdep_connect(arguments: dict[str, Any]) -> str:
     port = arguments.get("port", _CONFIG.default_port)
     if not isinstance(port, int):
         raise ValueError("Invalid 'port' argument (must be integer)")
     return _BRIDGE.connect(port, arguments.get("token"))
 
 
-def tool_fluxdep_disconnect(arguments: Dict[str, Any]) -> str:
+def tool_fluxdep_disconnect(arguments: dict[str, Any]) -> str:
     del arguments
     return _BRIDGE.disconnect()
 
 
-def tool_fluxdep_launch(arguments: Dict[str, Any]) -> str:
+def tool_fluxdep_launch(arguments: dict[str, Any]) -> str:
     port = int(arguments.get("port", _CONFIG.default_port))
-    token: Optional[str] = arguments.get("token")
+    token: str | None = arguments.get("token")
     auto_connect = bool(arguments.get("auto_connect", True))
     # lib/zcu_tools/mcp/fluxdep -> repo root
     repo_root = Path(__file__).parents[4]
@@ -162,7 +162,7 @@ _NON_GENERATED_METHODS = frozenset(
     }
 )
 
-_OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
+_OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
     "fluxdep_connect": {
         "handler": tool_fluxdep_connect,
         "description": (
@@ -225,7 +225,7 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
 _OVERRIDE_NAMES = frozenset({"fluxdep_connect", "fluxdep_disconnect", "fluxdep_launch"})
 
 
-TOOLS: Dict[str, Dict[str, Any]] = assemble_tools(
+TOOLS: dict[str, dict[str, Any]] = assemble_tools(
     generate_tools(_CONFIG, METHOD_SPECS, _NON_GENERATED_METHODS, send_gui_rpc),
     _OVERRIDE_TOOLS,
     _OVERRIDE_NAMES,

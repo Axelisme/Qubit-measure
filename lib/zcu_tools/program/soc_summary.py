@@ -8,7 +8,7 @@ the physical converter port, the sample rate and the maximum pulse / buffer leng
 
 from __future__ import annotations
 
-from typing import Any, List, Protocol
+from typing import Any, Protocol
 
 
 class SocCfgLike(Protocol):
@@ -107,7 +107,7 @@ def _readout_buf_len(ro: dict) -> str:
     return f"{maxlen} smp ({us:.3f} us)"
 
 
-def _format_table(headers: List[str], rows: List[List[str]], aligns: str) -> str:
+def _format_table(headers: list[str], rows: list[list[str]], aligns: str) -> str:
     """Render rows of pre-stringified cells as an aligned, indented table.
 
     ``aligns`` is one char per column: "r" right-justified, anything else left.
@@ -117,7 +117,7 @@ def _format_table(headers: List[str], rows: List[List[str]], aligns: str) -> str
         for i, cell in enumerate(row):
             widths[i] = max(widths[i], len(cell))
 
-    def fmt(cells: List[str]) -> str:
+    def fmt(cells: list[str]) -> str:
         padded = [
             cell.rjust(w) if a == "r" else cell.ljust(w)
             for cell, w, a in zip(cells, widths, aligns)

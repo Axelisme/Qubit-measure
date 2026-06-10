@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Self, TypeAlias, Union
 
 from qick.asm_v2 import QickParam
-from typing_extensions import TYPE_CHECKING, Self, Sequence, TypeAlias, Union
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
@@ -26,7 +27,7 @@ _COMPRESS_MIN_VALUES = 30
 # recovers the correct value in either arithmetic or logical shift mode.
 _INT32_MAX = (1 << 31) - 1
 
-SubModule: TypeAlias = Union[Module, list[Module]]
+SubModule: TypeAlias = Module | list[Module]
 
 
 class LoadValue(Module):
@@ -90,8 +91,8 @@ class LoadValue(Module):
         )
 
     def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
+        self, prog: ModularProgramV2, t: float | QickParam = 0.0
+    ) -> float | QickParam:
         if self._is_empty:
             return t
 
@@ -219,6 +220,6 @@ class ScanWith(Module):
         self.repeat_mod.init(prog)
 
     def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
+        self, prog: ModularProgramV2, t: float | QickParam = 0.0
+    ) -> float | QickParam:
         return self.repeat_mod.run(prog, t)

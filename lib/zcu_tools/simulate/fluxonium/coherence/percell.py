@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 import scipy.constants as sc
 from numpy.typing import NDArray
-from typing_extensions import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from scqubits.core.fluxonium import Fluxonium

@@ -5,9 +5,9 @@ import json
 import logging
 from collections import OrderedDict
 from copy import deepcopy
+from typing import TYPE_CHECKING
 
 from qick.asm_v2 import QickParam
-from typing_extensions import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .pulse import PulseCfg

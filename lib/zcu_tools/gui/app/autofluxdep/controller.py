@@ -14,9 +14,8 @@ dependency model.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Callable
-
-from typing_extensions import Any, Optional
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Optional
 
 from zcu_tools.gui.app.autofluxdep.background import BackgroundService
 from zcu_tools.gui.app.autofluxdep.derivation import DerivationService
@@ -102,7 +101,7 @@ class _MlModuleSource:
     None-on-absent, and forwards every other attribute to the wrapped library.
     """
 
-    def __init__(self, ml: "ModuleLibrary") -> None:
+    def __init__(self, ml: ModuleLibrary) -> None:
         self._ml = ml
 
     def get_module(self, name: str) -> Any:
@@ -122,9 +121,9 @@ class Controller:
         state: AutoFluxDepState,
         bus: EventBus,
         *,
-        io_manager: Optional[IOManager] = None,
-        progress_transport: Optional["ProgressTransport"] = None,
-        project_root: Optional[str] = None,
+        io_manager: IOManager | None = None,
+        progress_transport: ProgressTransport | None = None,
+        project_root: str | None = None,
     ) -> None:
         self._state = state
         self._bus = bus
@@ -149,7 +148,7 @@ class Controller:
         # agent process works without the entry point wiring it; tests inject a
         # synchronous fake.
         self._io_manager = io_manager if io_manager is not None else IOManager()
-        transport: "ProgressTransport"
+        transport: ProgressTransport
         if progress_transport is not None:
             transport = progress_transport
         else:
@@ -218,8 +217,8 @@ class Controller:
 
     def new_context(
         self,
-        bind_device: Optional[str] = None,
-        clone_from: Optional[str] = None,
+        bind_device: str | None = None,
+        clone_from: str | None = None,
     ) -> None:
         """Create a new flux context, optionally bound to a flux device.
 
@@ -239,7 +238,7 @@ class Controller:
     def get_context_labels(self) -> list[str]:
         return self._ctx_svc.get_context_labels()
 
-    def get_active_context_label(self) -> Optional[str]:
+    def get_active_context_label(self) -> str | None:
         return self._ctx_svc.get_active_context_label()
 
     # -- setup dialog: connection --
@@ -269,7 +268,7 @@ class Controller:
     def remember_startup_connection(self, req: StartupConnectionRequest) -> None:
         self._startup_svc.remember_connection(req)
 
-    def get_soccfg(self) -> Optional[SocCfgHandle]:
+    def get_soccfg(self) -> SocCfgHandle | None:
         return self._conn_svc.get_soccfg()
 
     def get_device_unit(self, name: str) -> str:
@@ -285,7 +284,7 @@ class Controller:
     def predict_freq(self, req: PredictFreqRequest) -> float:
         return self._conn_svc.predict_freq(req)
 
-    def get_predictor_info(self) -> Optional[dict]:
+    def get_predictor_info(self) -> dict | None:
         return self._conn_svc.get_predictor_info()
 
     # -- device dialog: lifecycle --
@@ -311,16 +310,16 @@ class Controller:
     def list_devices(self) -> list[DeviceEntry]:
         return self._dev_svc.list_devices()
 
-    def get_device_snapshot(self, name: str) -> Optional[DeviceSnapshot]:
+    def get_device_snapshot(self, name: str) -> DeviceSnapshot | None:
         return self._dev_svc.get_device_snapshot(name)
 
-    def get_device_info(self, name: str) -> Optional[BaseDeviceInfo]:
+    def get_device_info(self, name: str) -> BaseDeviceInfo | None:
         return self._dev_svc.get_device_info(name)
 
     def is_memory_device(self, name: str) -> bool:
         return self._dev_svc.is_memory_device(name)
 
-    def get_active_device_setup(self) -> Optional[DeviceSetupSnapshot]:
+    def get_active_device_setup(self) -> DeviceSetupSnapshot | None:
         return self._dev_svc.get_active_setup()
 
     # -- device dialog: progress --
@@ -362,7 +361,7 @@ class Controller:
 
     # --- workflow definition (the only writes the user makes) ---
 
-    def _unique_name(self, base: str, *, exclude: Optional[PlacedNode] = None) -> str:
+    def _unique_name(self, base: str, *, exclude: PlacedNode | None = None) -> str:
         """A workflow-unique instance name from ``base`` (append _2, _3, … if taken).
 
         ``exclude`` is a placement allowed to keep its own name (for rename — a
@@ -470,7 +469,7 @@ class Controller:
             logger.debug("set_flux_values: cleared")
         self._bus.emit(FluxChangedPayload(count=len(values)))
 
-    def set_flux_device(self, name: Optional[str]) -> None:
+    def set_flux_device(self, name: str | None) -> None:
         """Designate which connected device the flux sweep is applied through.
 
         Its unit labels the flux axis (and the value is recorded into the run
@@ -480,7 +479,7 @@ class Controller:
         self._state.flux_device_name = name or None
         logger.debug("set_flux_device: %r", self._state.flux_device_name)
 
-    def get_flux_device(self) -> Optional[str]:
+    def get_flux_device(self) -> str | None:
         return self._state.flux_device_name
 
     # --- run control (cancellable) ---
@@ -515,7 +514,7 @@ class Controller:
         )
         return Tools(predictor=predictor)
 
-    def _allocate_results(self, flux: "Any") -> dict[str, Any]:
+    def _allocate_results(self, flux: Any) -> dict[str, Any]:
         """Pre-allocate each user provider's sweep Result on the main thread.
 
         ``flux`` is the full flux axis (filled into each Result up front for the
@@ -530,7 +529,7 @@ class Controller:
                 results[node.name] = result
         return results
 
-    def start_run(self, notify: Optional[Notify] = None) -> InfoStore:
+    def start_run(self, notify: Notify | None = None) -> InfoStore:
         """Run flux × providers, emitting run events. Each provider's Node
         ``produce`` synthesises a signal, fits it, fills its sweep Result in
         place, and fires ``notify(name, idx)`` so the main thread redraws.
@@ -625,9 +624,9 @@ class Controller:
 
     def dry_run(
         self,
-        tools: Optional[Tools] = None,
-        ml: Optional[ModuleSource] = None,
-        derivations: Optional[list[DerivationService]] = None,
+        tools: Tools | None = None,
+        ml: ModuleSource | None = None,
+        derivations: list[DerivationService] | None = None,
     ) -> InfoStore:
         """Exercise the dependency model headless: the same orchestrator over the
         same providers (predictor Service prepended), but with no Results and no

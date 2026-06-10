@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import warnings
+from typing import Literal, Optional, TypeVar, cast
 
 import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
-from typing_extensions import Literal, Optional, TypeVar, cast
 
 T_dtype = TypeVar("T_dtype", bound=np.number)
 
@@ -179,7 +179,7 @@ def minus_mean(signals: NDArray[T_dtype], axis=None) -> NDArray[T_dtype]:
     return signals
 
 
-def rescale(signals: NDArray[T_dtype], axis: Optional[int] = None) -> NDArray[T_dtype]:
+def rescale(signals: NDArray[T_dtype], axis: int | None = None) -> NDArray[T_dtype]:
     """
     Rescale signals by dividing by the standard deviation
 

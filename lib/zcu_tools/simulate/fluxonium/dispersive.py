@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import lru_cache
+from typing import TYPE_CHECKING, Any, Union
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import TYPE_CHECKING, Any, Callable, Union
 
 if TYPE_CHECKING:
     from scqubits.core.fluxonium import Fluxonium
@@ -173,7 +174,7 @@ def calculate_dispersive_vs_flux(
 
 
 def calculate_chi_sweep(
-    sweep_list: Union[NDArray, list],
+    sweep_list: NDArray | list,
     update_fn: Callable[[Fluxonium, Any], None],
     g: float,
     bare_rf: float,

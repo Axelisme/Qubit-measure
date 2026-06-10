@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import logging
+from typing import Any, Optional
 
 from qick.asm_v2 import QickProgramV2
-from typing_extensions import Any, Optional
 
 from .linker import IRLinker
 from .pipeline import make_default_pipeline
@@ -21,7 +21,7 @@ class IRCompileMixin(QickProgramV2):
         super()._add_label(label)  # type: ignore
 
     def _add_meta(
-        self, type: str, name: str, info: Optional[dict[str, Any]] = None
+        self, type: str, name: str, info: dict[str, Any] | None = None
     ) -> None:
         self.meta_infos.append(
             dict(kind="meta", type=type, name=name, info=info or {}, p_addr=self.p_addr)

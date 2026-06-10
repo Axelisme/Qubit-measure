@@ -47,7 +47,7 @@ class RemoteError(Exception):
         message: str,
         *,
         reason: str = "",
-        data: "Optional[dict]" = None,
+        data: dict | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
@@ -61,10 +61,10 @@ class ErrorEnvelope:
     code: str
     message: str
     reason: str = ""
-    data: "Optional[dict]" = None
+    data: dict | None = None
 
     @classmethod
-    def from_remote_error(cls, exc: RemoteError) -> "ErrorEnvelope":
+    def from_remote_error(cls, exc: RemoteError) -> ErrorEnvelope:
         return cls(
             code=exc.code.value,
             message=exc.message,

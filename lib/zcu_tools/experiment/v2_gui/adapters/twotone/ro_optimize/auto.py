@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TypeAlias
 
 from matplotlib.figure import Figure
-from typing_extensions import Sequence, TypeAlias
 
 from zcu_tools.experiment.v2.twotone.ro_optimize.auto_optimize import (
     AutoOptCfg,

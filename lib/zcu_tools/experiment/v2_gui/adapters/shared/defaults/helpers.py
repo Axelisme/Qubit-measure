@@ -44,8 +44,8 @@ __all__ = [
 def patch_pulse_fields(
     value: CfgSectionValue,
     *,
-    freq: Union[float, ScalarValue],
-    ch: Union[int, ScalarValue],
+    freq: float | ScalarValue,
+    ch: int | ScalarValue,
     gain: float,
     length: float,
 ) -> None:
@@ -67,10 +67,10 @@ def patch_pulse_fields(
 def patch_ro_cfg_fields(
     value: CfgSectionValue,
     *,
-    ro_freq: Union[float, ScalarValue],
-    ro_ch: Union[int, ScalarValue],
-    trig_offset: Union[float, ScalarValue],
-    ro_length: Union[float, ScalarValue] = 0.9,
+    ro_freq: float | ScalarValue,
+    ro_ch: int | ScalarValue,
+    trig_offset: float | ScalarValue,
+    ro_length: float | ScalarValue = 0.9,
 ) -> None:
     """Patch a DirectReadout CfgSectionValue in-place with sensible values."""
     value.fields["ro_freq"] = (

@@ -3,8 +3,10 @@ from __future__ import annotations
 import shutil
 from abc import abstractmethod
 from collections import OrderedDict, UserDict, defaultdict
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from pathlib import Path
+from typing import Any, Generic, Optional, Self, TypeVar
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -14,7 +16,6 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from pydantic import Field
-from typing_extensions import Any, Callable, Generic, Mapping, Optional, Self, TypeVar
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -66,13 +67,13 @@ class MeasurementTask(
         filepath: str,
         flux_values: NDArray[np.float64],
         result: T_Result,
-        comment: Optional[str],
+        comment: str | None,
         prefix_tag: str,
     ) -> None: ...
 
 
 class FluxDepInfoDict(UserDict):
-    def __init__(self, initialdata: Optional[Mapping[str, Any]] = None) -> None:
+    def __init__(self, initialdata: Mapping[str, Any] | None = None) -> None:
         self.first_info: dict[str, Any] = {}
         self.last_info: dict[str, Any] = {}
         super().__init__(initialdata)
@@ -188,7 +189,7 @@ class FluxDepExecutor:
         Figure,
         MultiLivePlot[tuple[str, str]],
         Callable[[TaskState], None],
-        Optional[FFMpegWriter],
+        FFMpegWriter | None,
     ]:
         fig, axs_map = self.make_ax_layout()
 
@@ -246,7 +247,7 @@ class FluxDepExecutor:
         self,
         dev_cfg: dict[str, DeviceInfo],
         predictor: FluxoniumPredictor,
-        env_dict: Optional[dict[str, Any]] = None,
+        env_dict: dict[str, Any] | None = None,
         retry_time: int = 3,
     ) -> Mapping[str, Result]:
         if len(self.measurements) == 0:
@@ -314,8 +315,8 @@ class FluxDepExecutor:
     def save(
         self,
         filepath: str,
-        result: Optional[Mapping[str, Result]] = None,
-        comment: Optional[str] = None,
+        result: Mapping[str, Result] | None = None,
+        comment: str | None = None,
         prefix_tag: str = "autoflux_dep",
     ) -> None:
         if result is None:

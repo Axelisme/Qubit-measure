@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any, Optional
+
 from qick.asm_v2 import Macro
-from typing_extensions import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from ..ir.base import IRCompileMixin
@@ -21,8 +22,8 @@ class MetaMacro(Macro):
         self,
         type: str,
         name: str,
-        info: Optional[dict[str, Any]] = None,
-        regs: Optional[dict[str, str]] = None,
+        info: dict[str, Any] | None = None,
+        regs: dict[str, str] | None = None,
     ) -> None:
         super().__init__(type=type, name=name, info=info or {}, regs=regs or {})
 

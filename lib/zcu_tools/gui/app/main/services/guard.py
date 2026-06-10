@@ -87,7 +87,7 @@ class GuardService:
     service via OperationGate — see CONTEXT.md and docs/adr/0001.
     """
 
-    def __init__(self, state: "State") -> None:
+    def __init__(self, state: State) -> None:
         self._state = state
 
     def _require_tab(self, tab_id: str) -> Any:

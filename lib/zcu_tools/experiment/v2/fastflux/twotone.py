@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional, TypeAlias
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -38,7 +39,7 @@ class TwoToneResult:
     gains: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[TwotoneCfg] = None
+    cfg_snapshot: TwotoneCfg | None = None
 
 
 def twotone_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -46,7 +47,7 @@ def twotone_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class TwoToneModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     flux_pulse: PulseCfg
     qub_pulse: PulseCfg
     readout: ReadoutCfg
@@ -69,7 +70,7 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
         soccfg,
         cfg: TwotoneCfg,
         *,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> TwoToneResult:
         setup_devices(cfg, progress=True)
         modules = cfg.modules
@@ -88,7 +89,7 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, TwotoneCfg],
-            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules
@@ -142,7 +143,7 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
 
         return self.last_result
 
-    def analyze(self, result: Optional[TwoToneResult] = None) -> Figure:
+    def analyze(self, result: TwoToneResult | None = None) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "No result found"
@@ -176,8 +177,8 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[TwoToneResult] = None,
-        comment: Optional[str] = None,
+        result: TwoToneResult | None = None,
+        comment: str | None = None,
         tag: str = "fastflux/twotone",
         **kwargs,
     ) -> None:

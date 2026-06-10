@@ -3,11 +3,12 @@ from __future__ import annotations
 import gc
 import json
 import os
+from collections.abc import Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING, Optional, Union
 
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
-from typing_extensions import TYPE_CHECKING, Mapping, Optional, Union
 
 from zcu_tools.device import DeviceInfo, GlobalDeviceManager
 from zcu_tools.device.sgs100a import RohdeSchwarzSGS100A
@@ -19,7 +20,7 @@ if TYPE_CHECKING:
         # in case pyvisa is not installed, use Any as ResourceManager to pass type checking
         from pyvisa import ResourceManager
     except ImportError:
-        from typing_extensions import Any as ResourceManager
+        from typing import Any as ResourceManager
 
 
 def gc_collect(verbose: bool = True) -> None:
@@ -31,10 +32,10 @@ def gc_collect(verbose: bool = True) -> None:
 
 
 def make_sweep(
-    start: Union[int, float],
-    stop: Optional[Union[int, float]] = None,
-    expts: Optional[int] = None,
-    step: Optional[Union[int, float]] = None,
+    start: int | float,
+    stop: int | float | None = None,
+    expts: int | None = None,
+    step: int | float | None = None,
     force_int: bool = False,
 ) -> SweepCfg:
     """
@@ -147,7 +148,7 @@ def savefig(fig: Figure, filepath: str, close_after: bool = True, **kwargs) -> N
         plt.close(fig)
 
 
-def dump_device_info(path: Union[str, Path]) -> None:
+def dump_device_info(path: str | Path) -> None:
     info_snapshot = {
         name: info.to_dict()
         for name, info in GlobalDeviceManager.get_all_info().items()

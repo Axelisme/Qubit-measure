@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.optimize import curve_fit
-from typing_extensions import Any, Callable, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -34,7 +35,7 @@ from zcu_tools.utils.process import rotate2real
 @dataclass(frozen=True)
 class AllXY_Result:
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[AllXYCfg] = None
+    cfg_snapshot: AllXYCfg | None = None
 
 
 # Standard AllXY sequence of 21 gate pairs
@@ -116,8 +117,8 @@ def allxy_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class AllXYModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
-    I_pulse: Optional[PulseCfg] = None
+    reset: ResetCfg | None = None
+    I_pulse: PulseCfg | None = None
     X180_pulse: PulseCfg
     X90_pulse: PulseCfg
     readout: ReadoutCfg
@@ -134,7 +135,7 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXYCfg]):
         soccfg,
         cfg: AllXYCfg,
         *,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> AllXY_Result:
         orig_cfg = deepcopy(cfg)
 
@@ -142,7 +143,7 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXYCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, AllXYCfg],
-            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules
@@ -232,7 +233,7 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXYCfg]):
         return self.last_result
 
     def analyze(
-        self, result: Optional[AllXY_Result] = None, fit_ge: bool = False
+        self, result: AllXY_Result | None = None, fit_ge: bool = False
     ) -> Figure:
         if result is None:
             result = self.last_result
@@ -354,8 +355,8 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXYCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[AllXY_Result] = None,
-        comment: Optional[str] = None,
+        result: AllXY_Result | None = None,
+        comment: str | None = None,
         tag: str = "twotone/ge/allxy",
         **kwargs,
     ) -> None:

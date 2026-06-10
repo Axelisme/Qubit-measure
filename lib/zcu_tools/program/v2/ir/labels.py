@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-
-from typing_extensions import Literal, Union
+from typing import Literal, Union
 
 PSEUDO_LABELS: frozenset[str] = frozenset({"PREV", "HERE", "NEXT", "SKIP"})
 
@@ -34,7 +33,7 @@ class LabelRef:
     (hardware-reserved: HERE / NEXT / SKIP / PREV).
     """
 
-    target: Union[Label, PseudoLabel]
+    target: Label | PseudoLabel
 
     def is_pseudo(self) -> bool:
         return isinstance(self.target, str)

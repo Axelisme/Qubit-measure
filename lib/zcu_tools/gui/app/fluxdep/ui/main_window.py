@@ -128,12 +128,12 @@ class MainWindow(QMainWindow):
         self._placeholder = QLabel("Select or load a spectrum to begin.")
         self._placeholder.setEnabled(False)
         self._editor_stack.addWidget(self._placeholder)
-        self._current_editor: Optional[QWidget] = None
+        self._current_editor: QWidget | None = None
         # The analyze panel is a SINGLETON kept alive in the stack: built once on
         # first use and only shown/hidden after, so its tabs / form / paths /
         # figures survive switching away and back (it is not a _current_editor
         # that _clear_editor would destroy).
-        self._analyze_panel: Optional[QWidget] = None
+        self._analyze_panel: QWidget | None = None
 
         # A draggable splitter lets the user resize the spectrum list vs editor.
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -189,7 +189,7 @@ class MainWindow(QMainWindow):
     # --- actions ---------------------------------------------------------
 
     def _on_list_selection(
-        self, current: Optional[QListWidgetItem], _previous: Optional[QListWidgetItem]
+        self, current: QListWidgetItem | None, _previous: QListWidgetItem | None
     ) -> None:
         if current is None:
             return
@@ -453,7 +453,7 @@ class MainWindow(QMainWindow):
 
     # --- close path --------------------------------------------------------
 
-    def closeEvent(self, a0: Optional[QCloseEvent]) -> None:  # noqa: N802
+    def closeEvent(self, a0: QCloseEvent | None) -> None:  # noqa: N802
         """Quiesce all background workers before the C++ widget tree is torn down.
 
         ``_current_editor`` (FindPointsWidget) is handled by ``_clear_editor`` when

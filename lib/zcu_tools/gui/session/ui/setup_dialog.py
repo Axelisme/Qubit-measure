@@ -52,8 +52,8 @@ class SetupDialog(QDialog):
 
     def __init__(
         self,
-        controller: "SessionControllerPort",
-        parent: Optional[QWidget] = None,
+        controller: SessionControllerPort,
+        parent: QWidget | None = None,
         startup_mode: bool = False,
     ) -> None:
         super().__init__(parent)
@@ -258,7 +258,7 @@ class SetupDialog(QDialog):
         bus.unsubscribe(DeviceChangedPayload, self._on_bus_device_changed)
         self._bus_subs_active = False
 
-    def showEvent(self, a0: Optional[QShowEvent]) -> None:  # noqa: N802
+    def showEvent(self, a0: QShowEvent | None) -> None:  # noqa: N802
         """Re-seed the project form from State on every programmatic show.
 
         Reopening the dialog after a close (``show()`` on the kept instance)
@@ -423,10 +423,10 @@ class SetupDialog(QDialog):
         logger.info("SetupDialog: switched to context=%r", label)
 
     def _on_new_ctx_clicked(self) -> None:
-        device_name: Optional[str] = self._device_combo.currentData()
+        device_name: str | None = self._device_combo.currentData()
         # Clone source picked from the dropdown ("(none)" -> None). The
         # Controller resolves unit/value from bind_device internally.
-        clone_from: Optional[str] = self._clone_combo.currentData()
+        clone_from: str | None = self._clone_combo.currentData()
         self._ctrl.new_context(bind_device=device_name, clone_from=clone_from)
         self._refresh_context_list()
         self._set_project_status(
@@ -463,7 +463,7 @@ class SetupDialog(QDialog):
     def _refresh_clone_combo(self, labels: list[str]) -> None:
         # Clone source = any existing context under the active project; default
         # "(none)" -> clone_from=None. Same label set as the context list above.
-        prev: Optional[str] = self._clone_combo.currentData()
+        prev: str | None = self._clone_combo.currentData()
         self._clone_combo.blockSignals(True)
         self._clone_combo.clear()
         self._clone_combo.addItem("(none)", userData=None)

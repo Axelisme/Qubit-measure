@@ -38,7 +38,7 @@ class GuiFigureManager(FigureManagerBase):
         canvas_class: type[FigureCanvasBase],
         figure: Figure,
         num: int | str,
-    ) -> "GuiFigureManager":
+    ) -> GuiFigureManager:
         canvas = cast(
             GuiFigureCanvas,
             attach_figure_to_current_container(

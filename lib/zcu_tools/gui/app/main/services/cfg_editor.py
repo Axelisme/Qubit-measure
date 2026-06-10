@@ -41,8 +41,9 @@ from __future__ import annotations
 import itertools
 import logging
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Callable, Optional, Protocol
+from typing import TYPE_CHECKING, Optional, Protocol
 
 from zcu_tools.gui.app.main.adapter import (
     CfgSchema,
@@ -140,15 +141,15 @@ class CfgEditorSession:
     gc: bool
     # the ml entry kind being built ("module"/"waveform"); commit uses it. None
     # for a seeded session (tab cfg / writeback draft) that is teardown-only.
-    item_kind: Optional[str] = None
+    item_kind: str | None = None
     # the owner's key (a tab uses its tab_id; an inspect/writeback widget uses its
     # own key), so the owner can look its editor_id back up.
-    owner_key: Optional[str] = None
+    owner_key: str | None = None
     # Monotonic open order; used for gc-LRU eviction.
     seq: int = field(default=0)
     # on_change callback bound to root for the per-session change stream; held
     # so it can be disconnected when the session ends.
-    change_cb: Optional[Callable[..., None]] = None
+    change_cb: Callable[..., None] | None = None
 
     # -- behaviour (the aggregate operates its own draft) ------------------
 
@@ -157,8 +158,8 @@ class CfgEditorSession:
         return list_settable_paths_full(self.root)
 
     def paths_view(
-        self, under: "str | None" = None, verbosity: str = "full"
-    ) -> "list[dict[str, object]] | list[str]":
+        self, under: str | None = None, verbosity: str = "full"
+    ) -> list[dict[str, object]] | list[str]:
         """Settable-path list scoped by ``under`` and shaped by ``verbosity``.
 
         Mechanism layer: defaults to full fidelity over the whole draft. The
@@ -188,7 +189,7 @@ class CfgEditorSession:
             "added": sorted(after - before),
         }
 
-    def commit_schema(self) -> "CfgSchema":
+    def commit_schema(self) -> CfgSchema:
         """Snapshot the draft as an **un-lowered** CfgSchema for the writer.
 
         ADR-0006: the session's job ends at the CfgSchema snapshot; lowering
@@ -225,12 +226,12 @@ class CfgEditorService:
 
     def __init__(
         self,
-        env_ctrl: "_EditorCtrl",
+        env_ctrl: _EditorCtrl,
         read_port: ContextReadPort,
         write_port: ContextWritePort,
         version_bump: Callable[[str], None],
         version_drop: Callable[[str], None],
-        bus: "EventBus",
+        bus: EventBus,
     ) -> None:
         self._env = LiveModelEnv(ctrl=env_ctrl)
         self._read = read_port
@@ -239,7 +240,7 @@ class CfgEditorService:
         self._version_drop = version_drop
         self._editors: dict[str, CfgEditorSession] = {}
         self._seq = itertools.count()
-        self._listener: Optional[ChangeListener] = None
+        self._listener: ChangeListener | None = None
         # ADR-0008/0004 Reaction: the service owns every cfg model, so it (not the
         # widget) refreshes their EvalValue snapshots when md/ml/context/device
         # change. Subscribe once; refresh_all fans out to every owned model.
@@ -261,7 +262,7 @@ class CfgEditorService:
                 lambda payload: self.refresh_all(payload.EVENT),
             )
 
-    def set_change_listener(self, listener: Optional[ChangeListener]) -> None:
+    def set_change_listener(self, listener: ChangeListener | None) -> None:
         """Inject the per-session push listener (remote layer wires this).
 
         The listener receives ``(editor_id, event_name, payload)`` on the Qt
@@ -277,10 +278,10 @@ class CfgEditorService:
         self,
         item_kind: str,
         *,
-        discriminator: Optional[str] = None,
-        from_name: Optional[str] = None,
+        discriminator: str | None = None,
+        from_name: str | None = None,
         gc: bool = True,
-        owner_key: Optional[str] = None,
+        owner_key: str | None = None,
     ) -> tuple[str, list[dict[str, object]]]:
         """Open an ml-entry editing session (module / waveform).
 
@@ -305,7 +306,7 @@ class CfgEditorService:
         seed: CfgSchema,
         *,
         gc: bool = False,
-        owner_key: Optional[str] = None,
+        owner_key: str | None = None,
     ) -> tuple[str, list[dict[str, object]]]:
         """Open a session seeded from an existing ``CfgSchema`` (no item_kind).
 
@@ -326,9 +327,9 @@ class CfgEditorService:
         spec,
         value,
         *,
-        item_kind: Optional[str],
+        item_kind: str | None,
         gc: bool,
-        owner_key: Optional[str],
+        owner_key: str | None,
     ) -> tuple[str, list[dict[str, object]]]:
         root = SectionLiveField(spec, self._env, value)
         editor_id = self._new_id(owner_key)
@@ -346,13 +347,13 @@ class CfgEditorService:
             self._evict_excess_gc()
         return editor_id, session.current_paths()
 
-    def editor_id_for_owner(self, owner_key: str) -> Optional[str]:
+    def editor_id_for_owner(self, owner_key: str) -> str | None:
         for editor_id, session in self._editors.items():
             if session.owner_key == owner_key:
                 return editor_id
         return None
 
-    def owner_of_editor(self, editor_id: str) -> Optional[str]:
+    def owner_of_editor(self, editor_id: str) -> str | None:
         """The owner_key a session is keyed to (tab_id for a tab cfg draft).
 
         ``None`` for unknown sessions or owner-less (gc) sessions. Lets a caller
@@ -377,9 +378,9 @@ class CfgEditorService:
     def get(
         self,
         editor_id: str,
-        under: "str | None" = None,
+        under: str | None = None,
         verbosity: str = "full",
-    ) -> "list[dict[str, object]] | list[str]":
+    ) -> list[dict[str, object]] | list[str]:
         return self._require(editor_id).paths_view(under=under, verbosity=verbosity)
 
     def commit(self, editor_id: str, name: str) -> None:
@@ -439,7 +440,7 @@ class CfgEditorService:
     # Internals
     # ------------------------------------------------------------------
 
-    def _new_id(self, owner_key: Optional[str]) -> str:
+    def _new_id(self, owner_key: str | None) -> str:
         # Owner-keyed sessions (a tab cfg draft / writeback item) read as
         # '<owner>-ed' so the agent sees which tab/item an editor_id belongs to
         # without a lookup; the owner_key is already unique. Owner-less sessions
@@ -534,8 +535,8 @@ class CfgEditorService:
     def _initial_schema(
         self,
         item_kind: str,
-        discriminator: Optional[str],
-        from_name: Optional[str],
+        discriminator: str | None,
+        from_name: str | None,
     ):
         if from_name is not None:
             ml = self._read.get_current_ml()

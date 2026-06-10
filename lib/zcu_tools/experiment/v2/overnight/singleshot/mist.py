@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -8,7 +10,9 @@ from matplotlib.figure import Figure
 from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
-from typing_extensions import Callable, Optional, TypedDict
+from typing_extensions import (
+    TypedDict,  # closed/extra_items (PEP 728) not in stdlib 3.13
+)
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -48,8 +52,8 @@ class MistPlotDict(TypedDict, closed=True):
 
 
 class MistModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
-    init_pulse: Optional[PulseCfg] = None
+    reset: ResetCfg | None = None
+    init_pulse: PulseCfg | None = None
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
@@ -65,17 +69,17 @@ class MistCfg(ProgramV2Cfg, ExpCfgModel):
 
 class MistOvernightAnalyzer:
     def __init__(self) -> None:
-        self.cfg: Optional[MistCfg] = None
-        self.result: Optional[MistResult] = None
+        self.cfg: MistCfg | None = None
+        self.result: MistResult | None = None
 
     def analyze(
         self,
         fig: Figure,
-        result: Optional[MistResult] = None,
-        ac_coeff: Optional[float] = None,
-        confusion_matrix: Optional[NDArray[np.float64]] = None,
+        result: MistResult | None = None,
+        ac_coeff: float | None = None,
+        confusion_matrix: NDArray[np.float64] | None = None,
         drop_extreme_num: int = 0,
-        cutoff: Optional[float] = None,
+        cutoff: float | None = None,
     ) -> None:
         if result is None:
             result = self.result
@@ -172,10 +176,10 @@ class MistOvernightAnalyzer:
     def plot(
         self,
         fig: Figure,
-        result: Optional[MistResult] = None,
-        ac_coeff: Optional[float] = None,
-        confusion_matrix: Optional[NDArray[np.float64]] = None,
-        cutoff: Optional[float] = None,
+        result: MistResult | None = None,
+        ac_coeff: float | None = None,
+        confusion_matrix: NDArray[np.float64] | None = None,
+        cutoff: float | None = None,
     ) -> None:
         if result is None:
             result = self.result
@@ -247,7 +251,7 @@ class MistOvernightAnalyzer:
         iters,
         result,
         cfg: MistCfg,
-        comment: Optional[str],
+        comment: str | None,
         prefix_tag: str,
     ) -> None:
         _filepath = Path(filepath)
@@ -332,7 +336,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
 
         def measure_mist_fn(
             ctx: TaskState[NDArray[np.float64], T_RootResult, MistCfg],
-            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules

@@ -113,7 +113,7 @@ class _AutoTuneResult:
 class PipelinePanelWidget(QWidget):
     """The dispersive single-flow analysis panel."""
 
-    def __init__(self, ctrl: Controller, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, ctrl: Controller, parent: QWidget | None = None) -> None:
         from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
 
         super().__init__(parent)
@@ -122,7 +122,7 @@ class PipelinePanelWidget(QWidget):
         self._tune_artists = None
         # Points at whichever step's busy bar is currently active (preprocess /
         # predict). Both run a black-box compute, so the bars are indeterminate.
-        self._active_progress: Optional[QProgressBar] = None
+        self._active_progress: QProgressBar | None = None
 
         # Debounce the sample-dot recompute while a g / r_f slider is being dragged:
         # the line moves live on every tick, but the (heavier) per-flux prediction
@@ -254,7 +254,7 @@ class PipelinePanelWidget(QWidget):
         outer.addWidget(self._tune_progress)
         return self._tune_box
 
-    def _slider_row(self, name: str, slider: "QWidget", value_label: QLabel):
+    def _slider_row(self, name: str, slider: QWidget, value_label: QLabel):
         """A horizontal row: a fixed-width name label, the slider, and its value."""
         row = QHBoxLayout()
         label = QLabel(name)
@@ -611,7 +611,7 @@ class PipelinePanelWidget(QWidget):
         self._begin_progress(self._tune_progress)
         ctrl = self._ctrl
 
-        def _predict() -> "_TuneData":
+        def _predict() -> _TuneData:
             # The LRU-cached predictor reads State but does not write it, so it is
             # safe off-main; no routing/pbar scope, so enter=None.
             rf_0, rf_1 = ctrl.predict_dispersive(params.g, params.bare_rf, return_dim=2)
@@ -679,7 +679,7 @@ class PipelinePanelWidget(QWidget):
         self._begin_progress(self._tune_progress)
         ctrl = self._ctrl
 
-        def _optimise() -> "_AutoTuneResult":
+        def _optimise() -> _AutoTuneResult:
             # The slow iterative scipy search reads State but does not write it, so
             # it is safe off-main; no routing/pbar scope, so enter=None.
             g, bare_rf = ctrl.auto_tune(

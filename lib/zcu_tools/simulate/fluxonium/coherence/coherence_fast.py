@@ -25,11 +25,13 @@ are the five Fluxonium T1 channels; an unsupported channel name fast-fails.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
+from typing import Any
+
 import numpy as np
 import scipy.constants as const
 import scipy.special as special
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Sequence, Union
 
 # Physical constants (mirrors scqubits NOISE_PARAMS / CONSTANTS / units).
 _HBAR = const.hbar
@@ -211,7 +213,7 @@ _CHANNELS: dict[
     ),
 }
 
-NoiseChannel = Union[str, tuple[str, dict[str, Any]]]
+NoiseChannel = str | tuple[str, dict[str, Any]]
 
 
 def _resolve_channels(

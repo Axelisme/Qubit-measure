@@ -65,12 +65,12 @@ class AppServices:
 
 def build_app_services(
     *,
-    state: "State",
-    bus: "EventBus",
-    registry: "Registry",
-    io_manager: "IOManager",
-    cfg_editor_ctrl: "CfgEditorHost",
-    progress_transport: "ProgressTransport",
+    state: State,
+    bus: EventBus,
+    registry: Registry,
+    io_manager: IOManager,
+    cfg_editor_ctrl: CfgEditorHost,
+    progress_transport: ProgressTransport,
 ) -> AppServices:
     """Construct and wire every domain service into a frozen bundle.
 

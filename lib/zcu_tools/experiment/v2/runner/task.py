@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Sequence
+from typing import Any, Generic, Optional, TypeVar
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Generic, Optional, Sequence, Type, TypeVar
 
 from zcu_tools.progress_bar import BaseProgressBar, make_pbar
 
@@ -37,8 +38,8 @@ class Task(
         ],
         raw2signal_fn: Callable[[T_Raw], NDArray[T_DType]] = default_raw2signal_fn,
         result_shape: tuple[int, ...] = (),
-        dtype: Type[T_DType] = np.complex128,
-        pbar_n: Optional[int] = None,
+        dtype: type[T_DType] = np.complex128,
+        pbar_n: int | None = None,
     ) -> None:
         self.measure_fn = measure_fn
         self.raw2signal_fn = raw2signal_fn
@@ -46,10 +47,10 @@ class Task(
         self.dtype = dtype
         self.pbar_n = pbar_n
 
-        self.avg_pbar: Optional[BaseProgressBar] = None
+        self.avg_pbar: BaseProgressBar | None = None
         self.dynamic_pbar: bool = False
 
-    def set_pbar_n(self, pbar_n: Optional[int]) -> None:
+    def set_pbar_n(self, pbar_n: int | None) -> None:
         self.pbar_n = pbar_n
         if self.avg_pbar is not None:
             self.avg_pbar.total = pbar_n

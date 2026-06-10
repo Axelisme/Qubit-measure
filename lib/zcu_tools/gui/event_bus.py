@@ -17,9 +17,10 @@ build on this base, each supplying its own event enum + payloads and aliasing
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, ClassVar, TypeVar
+from typing import ClassVar, TypeVar
 
 logger = logging.getLogger(__name__)
 

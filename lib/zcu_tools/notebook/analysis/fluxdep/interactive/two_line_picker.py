@@ -45,8 +45,8 @@ _LOSS_REFRESH_MS = 120
 
 def fold_initial_lines(
     dev_values: NDArray[np.float64],
-    flux_half: Optional[float],
-    flux_int: Optional[float],
+    flux_half: float | None,
+    flux_int: float | None,
 ) -> tuple[float, float]:
     """Initial (flux_half, flux_int) positions, folded near the spectrum center.
 
@@ -133,8 +133,8 @@ class TwoLinePicker:
         dev_values: NDArray[np.float64],
         freqs: NDArray[np.float64],
         *,
-        flux_half: Optional[float] = None,
-        flux_int: Optional[float] = None,
+        flux_half: float | None = None,
+        flux_int: float | None = None,
         force_magnitude: bool = False,
     ) -> None:
         self._figure = figure
@@ -155,7 +155,7 @@ class TwoLinePicker:
         # Minimum allowed gap between the two lines, and the pick threshold.
         self._min_flux_dist = 0.01 * abs(dev_values[-1] - dev_values[0])
         # Which line is currently being dragged: None / the half or int Line2D.
-        self._picked: Optional[Line2D] = None
+        self._picked: Line2D | None = None
 
         self._init_plots()
 
@@ -310,7 +310,7 @@ class TwoLinePicker:
 
     # --- mouse interaction (caller feeds coordinates from its canvas) -----
 
-    def on_press(self, xdata: Optional[float]) -> None:
+    def on_press(self, xdata: float | None) -> None:
         if xdata is None:
             return
         # Already dragging -> drop the line.
@@ -326,7 +326,7 @@ class TwoLinePicker:
         elif int_dist <= half_dist and int_dist < thresh:
             self._picked = self._int_line
 
-    def on_move(self, xdata: Optional[float]) -> None:
+    def on_move(self, xdata: float | None) -> None:
         if self._picked is None or xdata is None:
             return
         x = float(xdata)
@@ -353,7 +353,7 @@ class TwoLinePicker:
         # Keep the mirror-loss view following the dragged line (throttled).
         self._schedule_loss_refresh()
 
-    def on_release(self, xdata: Optional[float], ydata: Optional[float]) -> None:
+    def on_release(self, xdata: float | None, ydata: float | None) -> None:
         if self._picked is None or xdata is None or ydata is None:
             return
         x = self.flux_half if self._picked is self._half_line else self.flux_int

@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Optional, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional, Union
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -41,19 +42,19 @@ from .util import measure_with_sweep
 class T1WithToneResult:
     lengths: NDArray[np.float64]
     signals: NDArray[np.float64]
-    cfg_snapshot: Optional[T1WithToneCfg] = None
+    cfg_snapshot: T1WithToneCfg | None = None
 
 
 class T1WithToneModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
-    init_pulse: Optional[PulseCfg] = None
+    reset: ResetCfg | None = None
+    init_pulse: PulseCfg | None = None
     pi_pulse: PulseCfg
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
 class T1WithToneSweepCfg(ConfigBase):
-    length: Union[SweepCfg, list[float]]
+    length: SweepCfg | list[float]
 
 
 class T1WithToneCfg(ProgramV2Cfg, ExpCfgModel):
@@ -118,7 +119,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
 
             def measure_fn(
                 ctx: TaskState[NDArray[np.float64], Any, T1WithToneCfg],
-                update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+                update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
             ) -> list[NDArray[np.float64]]:
                 modules = ctx.cfg.modules
                 inner_length_sweep = ctx.cfg.sweep.length
@@ -215,7 +216,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
 
             def measure_fn(
                 ctx: TaskState[NDArray[np.float64], Any, T1WithToneCfg],
-                update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+                update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
             ) -> list[NDArray[np.float64]]:
                 def prog_maker(cfg: T1WithToneCfg, length_param) -> ModularProgramV2:
                     _cfg = deepcopy(cfg)
@@ -295,9 +296,9 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
 
     def analyze(
         self,
-        result: Optional[T1WithToneResult] = None,
+        result: T1WithToneResult | None = None,
         *,
-        confusion_matrix: Optional[NDArray[np.float64]] = None,
+        confusion_matrix: NDArray[np.float64] | None = None,
         skip: int = 0,
     ) -> tuple[float, float, Figure]:
         if result is None:
@@ -361,8 +362,8 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[T1WithToneResult] = None,
-        comment: Optional[str] = None,
+        result: T1WithToneResult | None = None,
+        comment: str | None = None,
         tag: str = "twotone/t1/t1_with_tone",
         **kwargs,
     ) -> None:

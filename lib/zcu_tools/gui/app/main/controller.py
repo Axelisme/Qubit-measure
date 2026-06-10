@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Callable, Literal, Optional, Protocol
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Literal, Optional, Protocol
 
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
@@ -95,13 +96,13 @@ class RenderHost(Protocol):
     artefacts (the live figure container). Progress bars no longer come from the
     View — they are minted by ProgressService, bound to the operation."""
 
-    def make_live_container(self, tab_id: str) -> Optional[FigureContainer]: ...
+    def make_live_container(self, tab_id: str) -> FigureContainer | None: ...
 
     def mount_interactive_analysis(
         self,
         tab_id: str,
-        session_factory: Callable[["InteractiveHost"], "InteractiveSession"],
-        on_finish: Callable[["InteractiveSession"], None],
+        session_factory: Callable[[InteractiveHost], InteractiveSession],
+        on_finish: Callable[[InteractiveSession], None],
     ) -> None:
         """Mount an interactive analysis on a tab's analysis area (INTERACTIVE
         adapters). The View builds an ``InteractiveHost`` (its canvas + worker
@@ -120,7 +121,7 @@ class RenderView(Protocol):
     screenshot / dialog management). Held by the adapter, not the Controller."""
 
     def get_view_snapshot(self) -> dict[str, object]: ...
-    def take_screenshot(self, tab_id: Optional[str] = None) -> bytes: ...
+    def take_screenshot(self, tab_id: str | None = None) -> bytes: ...
     def take_figure_screenshot(self, tab_id: str) -> bytes: ...
     def take_dialog_screenshot(self, dialog_name: Any) -> bytes: ...
     def open_dialog(self, name: DialogName) -> None: ...
@@ -142,11 +143,11 @@ class Controller:
         state: State,
         registry: Registry,
         io_manager: IOManager,
-        view: Optional[ViewProtocol],
+        view: ViewProtocol | None,
         bus: EventBus,
-        role_catalog: Optional["RoleCatalog"] = None,
-        progress_transport: Optional["ProgressTransport"] = None,
-        project_root: Optional[str] = None,
+        role_catalog: RoleCatalog | None = None,
+        progress_transport: ProgressTransport | None = None,
+        project_root: str | None = None,
     ) -> None:
         self._state = state
         # Base directory the default per-qubit result/database paths are anchored
@@ -161,7 +162,7 @@ class Controller:
         # also the single RenderHost (run/analyze Qt artefacts). The remote
         # adapter is a diagnostic-only View — it holds its own RenderView.
         self._diag_sinks: list[DiagnosticSink] = []
-        self._render_host: Optional[RenderHost] = None
+        self._render_host: RenderHost | None = None
         if view is not None:
             self.add_view(view)
         self._bus = bus
@@ -179,7 +180,7 @@ class Controller:
         # The progress transport is the Qt marshal (a driven adapter). Default to
         # the Qt one so GUI/agent processes (which run a Qt event loop) work
         # without the entry point wiring it; tests inject a synchronous fake.
-        transport: "ProgressTransport"
+        transport: ProgressTransport
         if progress_transport is not None:
             transport = progress_transport
         else:
@@ -215,11 +216,11 @@ class Controller:
         self._cfg_editor_svc = services.cfg_editor
         # App-level PersistenceCaretaker, injected by run_app via attach_caretaker
         # (None in bare-Controller tests that don't exercise persistence).
-        self._caretaker: Optional[PersistenceCaretaker] = None
+        self._caretaker: PersistenceCaretaker | None = None
         # Lazily built on first begin_shutdown so the Controller stays importable
         # without a Qt event loop (tests construct a bare Controller). The driver
         # is a Qt adapter owning the QTimer that pumps the Qt-free coordinator.
-        self._shutdown_driver: Optional["QtShutdownDriver"] = None
+        self._shutdown_driver: QtShutdownDriver | None = None
 
         self._run_svc.run_finished.connect(self._on_run_finished)
         self._run_svc.run_failed.connect(self._on_run_failed)
@@ -443,7 +444,7 @@ class Controller:
     def has_active_context(self) -> bool:
         return self._ctx_svc.is_active_context()
 
-    def get_running_tab_id(self) -> Optional[str]:
+    def get_running_tab_id(self) -> str | None:
         return self._state.running_tab_id
 
     def has_soc(self) -> bool:
@@ -554,7 +555,7 @@ class Controller:
         )
 
     def _start_interactive_analyze(
-        self, tab_id: str, permit: "AnalyzePermit", analyze_params_instance: object
+        self, tab_id: str, permit: AnalyzePermit, analyze_params_instance: object
     ) -> int:
         tab = self._state.get_tab(tab_id)
         ctx = self._state.exp_context
@@ -621,7 +622,7 @@ class Controller:
     # Save (TabService)
     # ------------------------------------------------------------------
 
-    def _resolve_save_paths(self, tab_id: str) -> "SavePaths":
+    def _resolve_save_paths(self, tab_id: str) -> SavePaths:
         paths = self._tab_svc.get_tab_save_paths(tab_id)
         if paths is None:
             raise RuntimeError(
@@ -631,7 +632,7 @@ class Controller:
         return paths
 
     def save_data(
-        self, tab_id: str, data_path: Optional[str] = None, comment: str = ""
+        self, tab_id: str, data_path: str | None = None, comment: str = ""
     ) -> str:
         """Start the (async) data save; returns the path the saver will write
         (``.hdf5`` + uniqueness suffix already applied), known synchronously."""
@@ -639,7 +640,7 @@ class Controller:
         resolved = data_path or self._resolve_save_paths(tab_id).data_path
         return self._save_svc.start_save_data(permit, resolved, comment=comment)
 
-    def save_image(self, tab_id: str, image_path: Optional[str] = None) -> str:
+    def save_image(self, tab_id: str, image_path: str | None = None) -> str:
         """Save the image synchronously; returns the written image path."""
         permit = self._guard_svc.acquire_save_permit(tab_id)
         resolved = image_path or self._resolve_save_paths(tab_id).image_path
@@ -650,10 +651,10 @@ class Controller:
     def save_result(
         self,
         tab_id: str,
-        data_path: Optional[str] = None,
-        image_path: Optional[str] = None,
+        data_path: str | None = None,
+        image_path: str | None = None,
         comment: str = "",
-    ) -> "tuple[str, str]":
+    ) -> tuple[str, str]:
         """Save image (sync) + data (async); returns ``(data_path, image_path)``
         the saver will write — the data path with its ``.hdf5``/suffix applied."""
         permit = self._guard_svc.acquire_save_permit(tab_id)
@@ -680,8 +681,8 @@ class Controller:
 
     def new_context(
         self,
-        bind_device: Optional[str] = None,
-        clone_from: Optional[str] = None,
+        bind_device: str | None = None,
+        clone_from: str | None = None,
     ) -> None:
         """Create a new flux context, optionally bound to a flux device.
 
@@ -701,10 +702,10 @@ class Controller:
             unit, value = "none", None
         self._ctx_svc.new_context(value=value, unit=unit, clone_from=clone_from)
 
-    def get_active_context_label(self) -> Optional[str]:
+    def get_active_context_label(self) -> str | None:
         return self._ctx_svc.get_active_context_label()
 
-    def get_flux_dir(self) -> Optional[str]:
+    def get_flux_dir(self) -> str | None:
         return self._ctx_svc.get_flux_dir()
 
     def get_context_labels(self) -> list[str]:
@@ -745,7 +746,7 @@ class Controller:
             dump=False,
         )
 
-    def apply_writes(self, writes: "ContextWrites") -> None:
+    def apply_writes(self, writes: ContextWrites) -> None:
         self._ctx_svc.apply_ml_writes(
             writes.md,
             writes.ml_modules,
@@ -778,7 +779,7 @@ class Controller:
             raise RuntimeError("No role catalog is wired up.")
         return self._role_catalog
 
-    def get_exp_context(self) -> "ExpContext":
+    def get_exp_context(self) -> ExpContext:
         return self._ctx_svc.get_exp_context()
 
     def create_from_role(self, item_kind: str, role_id: str, name: str) -> None:
@@ -854,10 +855,10 @@ class Controller:
         self,
         item_kind: str,
         *,
-        discriminator: Optional[str] = None,
-        from_name: Optional[str] = None,
+        discriminator: str | None = None,
+        from_name: str | None = None,
         gc: bool = True,
-        owner_key: Optional[str] = None,
+        owner_key: str | None = None,
     ) -> tuple[str, list[dict[str, object]]]:
         """Open a CfgEditor session. The ``editor.open`` RPC only uses
         ``from_name`` (edit an existing entry); ``discriminator`` (blank seed)
@@ -873,7 +874,7 @@ class Controller:
         )
 
     def open_seeded_cfg_editor(
-        self, seed: Any, *, gc: bool = False, owner_key: Optional[str] = None
+        self, seed: Any, *, gc: bool = False, owner_key: str | None = None
     ) -> tuple[str, list[dict[str, object]]]:
         """Open a service-owned cfg model seeded from an existing CfgSchema.
 
@@ -890,7 +891,7 @@ class Controller:
         """Tear down a UI-owned (gc=False) cfg-editor session + its LiveModel."""
         self._cfg_editor_svc.teardown(editor_id)
 
-    def editor_id_for_owner(self, owner_key: str) -> Optional[str]:
+    def editor_id_for_owner(self, owner_key: str) -> str | None:
         return self._cfg_editor_svc.editor_id_for_owner(owner_key)
 
     def set_cfg_editor_change_listener(self, listener: Any) -> None:
@@ -917,16 +918,16 @@ class Controller:
     ) -> dict[str, object]:
         return self._cfg_editor_svc.set_field(editor_id, path, value)
 
-    def owner_of_editor(self, editor_id: str) -> Optional[str]:
+    def owner_of_editor(self, editor_id: str) -> str | None:
         """The owner_key a cfg-editor session is keyed to (tab_id for tab cfg)."""
         return self._cfg_editor_svc.owner_of_editor(editor_id)
 
     def cfg_editor_get(
         self,
         editor_id: str,
-        under: "str | None" = None,
+        under: str | None = None,
         verbosity: str = "full",
-    ) -> "list[dict[str, object]] | list[str]":
+    ) -> list[dict[str, object]] | list[str]:
         return self._cfg_editor_svc.get(editor_id, under=under, verbosity=verbosity)
 
     def commit_cfg_editor(self, editor_id: str, name: str) -> None:
@@ -957,7 +958,7 @@ class Controller:
     def get_device_unit(self, name: str) -> str:
         return self._dev_svc.get_device_unit(name)
 
-    def get_device_value_for_new_context(self, name: str) -> Optional[float]:
+    def get_device_value_for_new_context(self, name: str) -> float | None:
         return self._dev_svc.get_device_value_for_new_context(name)
 
     def get_device_info(self, name: str) -> BaseDeviceInfo | None:
@@ -966,7 +967,7 @@ class Controller:
     def start_setup_device(self, req: SetupDeviceRequest) -> int:
         return self._dev_svc.start_setup_device(req)
 
-    def get_active_device_setup(self) -> Optional[DeviceSetupSnapshot]:
+    def get_active_device_setup(self) -> DeviceSetupSnapshot | None:
         return self._dev_svc.get_active_setup()
 
     def cancel_device_operation(self, name: str) -> None:
@@ -983,7 +984,7 @@ class Controller:
     def is_memory_device(self, name: str) -> bool:
         return self._dev_svc.is_memory_device(name)
 
-    def get_memory_device_address(self, name: str) -> Optional[str]:
+    def get_memory_device_address(self, name: str) -> str | None:
         """Return the persisted address for a memory-only device, or None."""
         return self._dev_svc.get_memory_device_address(name)
 
@@ -1002,9 +1003,7 @@ class Controller:
         and re-reads via ``progress_bars``."""
         return self._progress_svc.attach_by_owner(owner_id, listener)
 
-    def progress_bars(
-        self, owner_id: str
-    ) -> tuple[tuple[int, "ProgressBarModel"], ...]:
+    def progress_bars(self, owner_id: str) -> tuple[tuple[int, ProgressBarModel], ...]:
         """Live (handle_id, ProgressBarModel) pairs for the owner's current
         operation (empty if none live)."""
         return self._progress_svc.bars_for_owner(owner_id)
@@ -1079,13 +1078,13 @@ class Controller:
     def predict_freq(self, req: PredictFreqRequest) -> float:
         return self._conn_svc.predict_freq(req)
 
-    def get_soccfg(self) -> Optional[SocCfgHandle]:
+    def get_soccfg(self) -> SocCfgHandle | None:
         return self._conn_svc.get_soccfg()
 
-    def get_predictor(self) -> Optional[FluxoniumPredictor]:
+    def get_predictor(self) -> FluxoniumPredictor | None:
         return self._conn_svc.get_predictor()
 
-    def get_predictor_info(self) -> Optional[dict]:
+    def get_predictor_info(self) -> dict | None:
         return self._conn_svc.get_predictor_info()
 
     # ------------------------------------------------------------------
@@ -1106,7 +1105,7 @@ class Controller:
     def get_tab_cfg_schema(self, tab_id: str) -> CfgSchema:
         return self._state.get_tab(tab_id).cfg_schema
 
-    def get_tab_result(self, tab_id: str) -> Optional[object]:
+    def get_tab_result(self, tab_id: str) -> object | None:
         return self._tab_svc.get_tab_result(tab_id)
 
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot:

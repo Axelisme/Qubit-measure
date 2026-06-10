@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Callable, Optional, TypedDict
+from typing_extensions import (
+    TypedDict,  # closed/extra_items (PEP 728) not in stdlib 3.13
+)
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -55,7 +59,7 @@ def t2echo_fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.fl
 
 
 class T2EchoModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     pi_pulse: PulseCfg
     pi2_pulse: PulseCfg
     readout: ReadoutCfg
@@ -96,9 +100,9 @@ class T2EchoTask(MeasurementTask[T2EchoResult, T_RootResult, T2EchoPlotDict]):
         detune_ratio: float,
         cfg_maker: Callable[
             [TaskState[T2EchoResult, T_RootResult, FluxDepCfg], ModuleLibrary],
-            Optional[T2EchoCfgTemplate],
+            T2EchoCfgTemplate | None,
         ],
-        earlystop_snr: Optional[float] = None,
+        earlystop_snr: float | None = None,
     ) -> None:
         self.num_expts = num_expts
         self.detune_ratio = detune_ratio
@@ -108,7 +112,7 @@ class T2EchoTask(MeasurementTask[T2EchoResult, T_RootResult, T2EchoPlotDict]):
 
         def measure_t2echo_fn(
             ctx: TaskState[NDArray[np.complex128], T_RootResult, T2EchoCfg],
-            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules

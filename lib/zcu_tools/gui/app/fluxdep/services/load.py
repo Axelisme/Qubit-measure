@@ -65,7 +65,7 @@ class LoadService:
         self,
         filepath: str,
         spec_type: SpecType,
-        inherit_from: Optional[str] = None,
+        inherit_from: str | None = None,
         transpose_axes: bool = False,
     ) -> str:
         """Load ``filepath`` as a new spectrum and write it into State.
@@ -123,7 +123,7 @@ class LoadService:
         return name
 
     def _initial_alignment(
-        self, inherit_from: Optional[str]
+        self, inherit_from: str | None
     ) -> tuple[float, float, float]:
         """Seed alignment from an existing spectrum, or the identity default."""
         if inherit_from is None:

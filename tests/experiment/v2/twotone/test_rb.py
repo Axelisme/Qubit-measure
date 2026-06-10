@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import numpy as np
 import pytest
-from typing_extensions import Sequence
 from zcu_tools.experiment.v2.twotone import rb
 
 

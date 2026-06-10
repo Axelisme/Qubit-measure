@@ -25,7 +25,8 @@ different kinds of thing:
 
 from __future__ import annotations
 
-from typing_extensions import Any, Iterator, Mapping, Optional
+from collections.abc import Iterator, Mapping
+from typing import Any, Optional
 
 
 class PatchContractError(ValueError):
@@ -44,7 +45,7 @@ class Snapshot(Mapping[str, Any]):
     def __init__(
         self,
         data: Mapping[str, Any],
-        modules: Optional[Mapping[str, Any]] = None,
+        modules: Mapping[str, Any] | None = None,
     ) -> None:
         self._data = dict(data)
         self._modules = dict(modules) if modules is not None else {}
@@ -95,8 +96,8 @@ class Patch:
 
     def __init__(
         self,
-        data: Optional[Mapping[str, Any]] = None,
-        modules: Optional[Mapping[str, Any]] = None,
+        data: Mapping[str, Any] | None = None,
+        modules: Mapping[str, Any] | None = None,
     ) -> None:
         self._data: dict[str, Any] = dict(data) if data is not None else {}
         self._modules: dict[str, Any] = dict(modules) if modules is not None else {}

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Optional, cast
+
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import TYPE_CHECKING, Optional, cast
 
 if TYPE_CHECKING:
     from scqubits.core.param_sweep import ParameterSweep
@@ -13,7 +14,7 @@ def calculate_n_oper(
     params: tuple[float, float, float],
     flux: float,
     return_dim: int = 4,
-    esys: Optional[tuple[NDArray[np.float64], NDArray[np.complex128]]] = None,
+    esys: tuple[NDArray[np.float64], NDArray[np.complex128]] | None = None,
 ) -> NDArray[np.float64]:
     """
     Calculate the matrix elements of the fluxonium
@@ -36,7 +37,7 @@ def calculate_n_oper_vs_flux(
     params: tuple[float, float, float],
     fluxs: NDArray[np.float64],
     return_dim: int = 4,
-    spectrum_data: Optional[SpectrumData] = None,
+    spectrum_data: SpectrumData | None = None,
 ) -> tuple[SpectrumData, NDArray[np.complex128]]:
     """
     Calculate the matrix elements of the fluxonium vs. a parameter
@@ -76,7 +77,7 @@ def calculate_system_n_oper_vs_flux(
     g: float,
     return_dim: int = 4,
     progress: bool = True,
-    sweep: Optional[ParameterSweep] = None,
+    sweep: ParameterSweep | None = None,
 ) -> tuple[ParameterSweep, NDArray[np.complex128]]:
     """
     Calculate the matrix elements of the system over a parameter sweep
@@ -151,7 +152,7 @@ def calculate_phi_oper(
     params: tuple[float, float, float],
     flux: float,
     return_dim: int = 4,
-    esys: Optional[tuple[NDArray[np.float64], NDArray[np.complex128]]] = None,
+    esys: tuple[NDArray[np.float64], NDArray[np.complex128]] | None = None,
 ) -> NDArray[np.complex128]:
     """
     Calculate the matrix elements of the phi operator
@@ -174,7 +175,7 @@ def calculate_phi_oper_vs_flux(
     params: tuple[float, float, float],
     fluxs: NDArray[np.float64],
     return_dim: int = 4,
-    spectrum_data: Optional[SpectrumData] = None,
+    spectrum_data: SpectrumData | None = None,
 ) -> tuple[SpectrumData, NDArray[np.complex128]]:
     """
     Calculate the matrix elements of the phi operator vs. a parameter
@@ -208,7 +209,7 @@ def calculate_sin_phi_oper(
     params: tuple[float, float, float],
     flux: float,
     return_dim: int = 4,
-    esys: Optional[tuple[NDArray[np.float64], NDArray[np.complex128]]] = None,
+    esys: tuple[NDArray[np.float64], NDArray[np.complex128]] | None = None,
     alpha: float = 1.0,
     beta: float = 0.0,
 ) -> NDArray[np.complex128]:
@@ -235,7 +236,7 @@ def calculate_sin_phi_oper_vs_flux(
     params: tuple[float, float, float],
     fluxs: NDArray[np.float64],
     return_dim: int = 4,
-    spectrum_data: Optional[SpectrumData] = None,
+    spectrum_data: SpectrumData | None = None,
     alpha: float = 1.0,
     beta: float = 0.0,
 ) -> tuple[SpectrumData, NDArray[np.complex128]]:

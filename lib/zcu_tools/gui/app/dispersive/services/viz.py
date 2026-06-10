@@ -45,8 +45,8 @@ class SampleArtists:
 
     flux: float
     line: Line2D
-    dot_ground: Optional[Line2D] = None
-    dot_excited: Optional[Line2D] = None
+    dot_ground: Line2D | None = None
+    dot_excited: Line2D | None = None
 
 
 @dataclass
@@ -63,9 +63,9 @@ class TuneArtists:
     ax: Axes
     line_bare: Line2D
     image: AxesImage
-    line_ground: Optional[Line2D] = None
-    line_excited: Optional[Line2D] = None
-    g: Optional[float] = None  # GHz, the g of the last prediction (None = not yet)
+    line_ground: Line2D | None = None
+    line_excited: Line2D | None = None
+    g: float | None = None  # GHz, the g of the last prediction (None = not yet)
     samples: list[SampleArtists] = field(default_factory=list)
 
 

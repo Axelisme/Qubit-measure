@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import warnings
+from collections.abc import Mapping
 from copy import deepcopy
-
-from typing_extensions import Any, Mapping, Optional, TypeVar
+from typing import Any, Optional, TypeVar
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo
@@ -12,7 +12,7 @@ T_CfgModel = TypeVar("T_CfgModel", bound="ExpCfgModel")
 
 
 class ExpCfgModel(ConfigBase):
-    dev: Optional[Mapping[str, DeviceInfo]] = None
+    dev: Mapping[str, DeviceInfo] | None = None
 
     @classmethod
     def validate_or_warn(
@@ -20,7 +20,7 @@ class ExpCfgModel(ConfigBase):
         cfg: dict[str, Any],
         *,
         source: str,
-    ) -> Optional[Any]:
+    ) -> Any | None:
         try:
             return cls.model_validate(deepcopy(cfg))
         except Exception as exc:

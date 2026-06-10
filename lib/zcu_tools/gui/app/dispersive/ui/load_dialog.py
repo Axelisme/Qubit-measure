@@ -28,7 +28,7 @@ class LoadOnetoneRequest(NamedTuple):
 class LoadOnetoneDialog(LoadDataDialog):
     """Modal dialog returning a LoadOnetoneRequest (or None on cancel)."""
 
-    def __init__(self, parent: Optional[QWidget] = None, start_dir: str = "") -> None:
+    def __init__(self, parent: QWidget | None = None, start_dir: str = "") -> None:
         super().__init__(
             window_title="Load one-tone spectrum",
             file_placeholder="Choose a one-tone hdf5…",
@@ -50,7 +50,7 @@ class LoadOnetoneDialog(LoadDataDialog):
 
     # --- result ----------------------------------------------------------
 
-    def result_request(self) -> Optional[LoadOnetoneRequest]:
+    def result_request(self) -> LoadOnetoneRequest | None:
         """The chosen LoadOnetoneRequest, or None if no file was selected."""
         if not self._filepath:
             return None

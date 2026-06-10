@@ -36,9 +36,9 @@ class RemoteControlAdapter(RemoteControlServiceBase):
     (``ctrl.bus``) and its serializers are keyed by payload ``type``.
     """
 
-    ctrl: "Controller"
+    ctrl: Controller
 
-    def __init__(self, controller: "Controller", opts: ControlOptions) -> None:
+    def __init__(self, controller: Controller, opts: ControlOptions) -> None:
         super().__init__(
             controller,
             opts,

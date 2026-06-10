@@ -1,8 +1,8 @@
 import warnings
+from typing import Optional, Union, overload
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Optional, Union, overload
 
 from zcu_tools.meta_tool import ModuleLibrary
 from zcu_tools.program.v2 import PulseCfg
@@ -17,8 +17,8 @@ def check_gains(gains: float, name: str) -> float: ...
 
 
 def check_gains(
-    gains: Union[float, NDArray[np.float64]], name: str
-) -> Union[float, NDArray[np.float64]]:
+    gains: float | NDArray[np.float64], name: str
+) -> float | NDArray[np.float64]:
     if np.any(gains > 1.0):
         warnings.warn(
             f"Some {name} gains are larger than 1.0, force clip to 1.0, which may cause distortion."
@@ -30,9 +30,9 @@ def check_gains(
 def make_pulse(
     ml: ModuleLibrary,
     pulse_name: str,
-    freq: Optional[float] = None,
-    gain: Optional[float] = None,
-    length: Optional[float] = None,
+    freq: float | None = None,
+    gain: float | None = None,
+    length: float | None = None,
 ) -> PulseCfg:
     pulse_cfg = ml.get_module(pulse_name)
     if not isinstance(pulse_cfg, PulseCfg):

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any, Optional
+
 import numpy as np
 import plotly.graph_objects as go
 from numpy.typing import NDArray
-from typing_extensions import TYPE_CHECKING, Any, Optional
 
 from zcu_tools.notebook.analysis.fluxdep.utils import add_secondary_xaxis
 from zcu_tools.simulate.fluxonium import (
@@ -24,8 +25,8 @@ def plot_matrix_elements(
     params: tuple[float, float, float],
     fluxs: NDArray[np.float64],
     show_idxs: list[tuple[int, int]],
-    dev_values: Optional[NDArray[np.float64]] = None,
-    spectrum_data: Optional[SpectrumData] = None,
+    dev_values: NDArray[np.float64] | None = None,
+    spectrum_data: SpectrumData | None = None,
 ) -> tuple[go.Figure, SpectrumData]:
     need_dim = max(max(i, j) for i, j in show_idxs) + 1
 
@@ -63,7 +64,7 @@ def plot_dispersive_shift(
     fluxs: NDArray[np.float64],
     bare_rf: float,
     g: float,
-    dev_values: Optional[NDArray[np.float64]] = None,
+    dev_values: NDArray[np.float64] | None = None,
     upto: int = 2,
 ) -> go.Figure:
     fig = go.Figure()
@@ -106,7 +107,7 @@ def plot_t1s(
     fluxs: NDArray[np.float64],
     noise_channels,
     Temp: float,
-    dev_values: Optional[NDArray[np.float64]] = None,
+    dev_values: NDArray[np.float64] | None = None,
 ) -> tuple[go.Figure, NDArray[np.float64]]:
     fig = go.Figure()
 
@@ -141,7 +142,7 @@ def plot_transitions(
     params: tuple[float, float, float],
     fluxs: NDArray[np.float64],
     show_idxs: list[tuple[int, int]],
-    ref_freqs: Optional[list[float]] = None,
+    ref_freqs: list[float] | None = None,
 ) -> go.Figure:
     fig = go.Figure()
 
@@ -173,7 +174,7 @@ def plot_mist_condition(
     fluxs: NDArray[np.float64],
     energies: NDArray[np.float64],
     r_f: float,
-    max_level: Optional[int] = None,
+    max_level: int | None = None,
 ) -> go.Figure:
     def calc_mod_transition(transition: NDArray[np.float64]) -> NDArray[np.float64]:
         return np.mod(transition + r_f / 2, r_f) - r_f / 2

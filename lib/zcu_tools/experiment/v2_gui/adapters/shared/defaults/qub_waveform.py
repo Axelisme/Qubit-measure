@@ -6,9 +6,7 @@ library waveforms (qub_flat / qub_cos); the blank is a plain cosine.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
-
-from typing_extensions import Literal, overload
+from typing import TYPE_CHECKING, Literal, Optional, overload
 
 from zcu_tools.gui.app.main.adapter import (
     DirectValue,
@@ -49,7 +47,7 @@ def make_qub_waveform_ref_default(
     preferred_names: list[str] = ...,
     *,
     optional: Literal[True],
-) -> Optional[WaveformRefValue]: ...
+) -> WaveformRefValue | None: ...
 
 
 def make_qub_waveform_ref_default(
@@ -57,7 +55,7 @@ def make_qub_waveform_ref_default(
     preferred_names: list[str] = QUB_WAVEFORM_NAMES,
     *,
     optional: bool = False,
-) -> Optional[WaveformRefValue]:
+) -> WaveformRefValue | None:
     """Reference a library qubit waveform (qub_flat / qub_cos), else blank cosine."""
     selected = select_named_waveform_value(ctx.ml, preferred_names)
     if selected is not None:

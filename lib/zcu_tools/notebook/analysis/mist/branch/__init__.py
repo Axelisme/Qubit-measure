@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Optional
+
 import matplotlib.pyplot as plt
 import numpy as np
 import plotly.graph_objects as go
@@ -7,7 +10,6 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from plotly.subplots import make_subplots
-from typing_extensions import Mapping, Optional
 
 
 def round_to_nearest(
@@ -87,7 +89,7 @@ def plot_populations_over_photon(
 
 def calc_transitions(
     branch_energies: Mapping[int, NDArray[np.float64]],
-    transitions: Optional[list[tuple[int, int]]] = None,
+    transitions: list[tuple[int, int]] | None = None,
     threshold: float = 50e-3,  # GHz
 ) -> dict[tuple[int, int], NDArray[np.float64]]:
     E_01 = branch_energies[1] - branch_energies[0]

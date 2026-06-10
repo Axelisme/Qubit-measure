@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from typing import Literal, cast
+
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Literal, cast
 
 from .base import fitlor, fitsinc, lorfunc, sincfunc
 

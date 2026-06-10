@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from collections import OrderedDict, defaultdict
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
+from typing import Any, Generic, Optional, Self, TypeVar
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -10,16 +12,6 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import (
-    Any,
-    Callable,
-    Generic,
-    Mapping,
-    Optional,
-    Self,
-    Sequence,
-    TypeVar,
-)
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2.runner import (
@@ -68,7 +60,7 @@ class MeasurementTask(
         filepath: str,
         iters: NDArray[np.int64],
         result: T_Result,
-        comment: Optional[str],
+        comment: str | None,
         prefix_tag: str,
     ) -> None: ...
 
@@ -211,7 +203,7 @@ class OvernightExecutor:
         {"font.size": 6, "xtick.major.size": 6, "ytick.major.size": 6}
     )
     def run(
-        self, fail_retry: int = 3, env_dict: Optional[dict[str, Any]] = None
+        self, fail_retry: int = 3, env_dict: dict[str, Any] | None = None
     ) -> Mapping[str, Result]:
         if len(self.measurements) == 0:
             raise ValueError("No measurements added")
@@ -247,8 +239,8 @@ class OvernightExecutor:
     def save(
         self,
         filepath: str,
-        results: Optional[Mapping[str, Result]] = None,
-        comment: Optional[str] = None,
+        results: Mapping[str, Result] | None = None,
+        comment: str | None = None,
         prefix_tag: str = "overnight",
     ) -> None:
         if results is None:

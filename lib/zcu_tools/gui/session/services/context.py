@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional
+from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING, Any, Optional
 
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
@@ -83,9 +84,9 @@ class ContextService:
 
     def __init__(
         self,
-        state: "SessionState",
-        io_manager: "ProjectIOPort",
-        bus: "BaseEventBus",
+        state: SessionState,
+        io_manager: ProjectIOPort,
+        bus: BaseEventBus,
     ) -> None:
         self._state = state
         self._io = io_manager
@@ -105,7 +106,7 @@ class ContextService:
         """True only for a file-backed context eligible for run and save."""
         return self._state.exp_context.is_active()
 
-    def get_active_context_label(self) -> Optional[str]:
+    def get_active_context_label(self) -> str | None:
         return self._io.get_active_label()
 
     def get_context_labels(self) -> list[str]:
@@ -117,11 +118,11 @@ class ContextService:
     def get_current_ml(self) -> ModuleLibrary:
         return self._state.exp_context.ml
 
-    def get_exp_context(self) -> "ExpContext":
+    def get_exp_context(self) -> ExpContext:
         """The live ExpContext (md + ml + …) — used to seed role templates."""
         return self._state.exp_context
 
-    def get_flux_dir(self) -> Optional[str]:
+    def get_flux_dir(self) -> str | None:
         import os
 
         ctx = self._state.exp_context
@@ -187,9 +188,9 @@ class ContextService:
 
     def new_context(
         self,
-        value: Optional[float] = None,
+        value: float | None = None,
         unit: str = "none",
-        clone_from: Optional[str] = None,
+        clone_from: str | None = None,
     ) -> None:
         logger.info(
             "new_context: value=%r unit=%r clone_from=%r", value, unit, clone_from

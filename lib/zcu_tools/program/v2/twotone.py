@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+from typing import Optional
+
 from pydantic import BaseModel
-from typing_extensions import Optional, Sequence
 
 from .modular import BaseCustomProgramV2, ProgramV2Cfg
 from .modules import Module, Pulse, PulseCfg, Readout, ReadoutCfg, Reset, ResetCfg
 
 
 class TwoToneModuleCfg(BaseModel):
-    reset: Optional[ResetCfg] = None
-    init_pulse: Optional[PulseCfg] = None
+    reset: ResetCfg | None = None
+    init_pulse: PulseCfg | None = None
     qub_pulse: PulseCfg
     readout: ReadoutCfg
 

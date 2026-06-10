@@ -16,10 +16,11 @@ existence, not just substrings) but shares the ``details_tail`` formatting.
 
 from __future__ import annotations
 
-from typing import Callable, List, Optional, Tuple, Union
+from collections.abc import Callable
+from typing import Optional, Union
 
 # An ordered domain rule: (matches the lowercased raw error?) → the friendly head.
-FriendlyRule = Tuple[Callable[[str], bool], str]
+FriendlyRule = tuple[Callable[[str], bool], str]
 
 
 def details_tail(raw: str, fallback: str) -> str:
@@ -27,7 +28,7 @@ def details_tail(raw: str, fallback: str) -> str:
     return f"\n\nDetails: {raw if raw else fallback}"
 
 
-def normalize_raw(exc: Union[Exception, str]) -> str:
+def normalize_raw(exc: Exception | str) -> str:
     """The error text to match/show — works for an exception or a marshalled string.
 
     Worker failures cross a Qt signal as a plain string; locally-caught ones are the
@@ -37,7 +38,7 @@ def normalize_raw(exc: Union[Exception, str]) -> str:
 
 
 def friendly_from_rules(
-    action: str, raw: str, rules: List[FriendlyRule], fallback: str
+    action: str, raw: str, rules: list[FriendlyRule], fallback: str
 ) -> str:
     """Match ``raw`` (lowercased) against the ordered ``rules`` and format a message.
 
@@ -54,10 +55,10 @@ def friendly_from_rules(
 
 
 def fit_io_redirect(
-    exc: Union[Exception, str],
+    exc: Exception | str,
     raw: str,
     io_message: Callable[[str, str, Exception], str],
-) -> Optional[str]:
+) -> str | None:
     """Redirect a params.json *write* failure to the app's ``friendly_io_message``.
 
     A fit/export action that fails to open the params.json is really a file-IO

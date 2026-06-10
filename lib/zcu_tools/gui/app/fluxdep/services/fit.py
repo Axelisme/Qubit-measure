@@ -19,8 +19,9 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Optional
 
 import numpy as np
 from matplotlib.figure import Figure
@@ -50,7 +51,7 @@ class SearchResult:
     """
 
     params: tuple[float, float, float]  # (EJ, EC, EL)
-    figure: Optional[Figure] = None
+    figure: Figure | None = None
 
 
 def default_params_path(result_dir: str) -> str:
@@ -78,8 +79,8 @@ class FitService:
         ECb: tuple[float, float],
         ELb: tuple[float, float],
         transitions: TransitionDict,
-        r_f: Optional[float],
-        sample_f: Optional[float],
+        r_f: float | None,
+        sample_f: float | None,
     ) -> None:
         """Record the search inputs (clears any stale result)."""
         self._state.set_fit_params(
@@ -122,7 +123,7 @@ class FitService:
     def compute_search(
         self,
         *,
-        pbar_factory: Optional[PbarFactory] = None,
+        pbar_factory: PbarFactory | None = None,
         plot: bool = False,
     ) -> SearchResult:
         """Run the database search and return its result — WITHOUT touching State.
@@ -153,7 +154,7 @@ class FitService:
         transitions = transitions_with_freqs(fit.transitions, fit.r_f, fit.sample_f)
         EJb, ECb, ELb = fit.EJb, fit.ECb, fit.ELb
 
-        def _run() -> tuple[tuple[float, float, float], Optional[Figure]]:
+        def _run() -> tuple[tuple[float, float, float], Figure | None]:
             return search_in_database(
                 s_fluxs,
                 s_freqs,
@@ -188,7 +189,7 @@ class FitService:
 
     # --- export ----------------------------------------------------------
 
-    def export_params(self, savepath: Optional[str] = None) -> str:
+    def export_params(self, savepath: str | None = None) -> str:
         """Write the fit result to ``params.json`` and return the path.
 
         Fast-fails without a search result. The flux alignment written is taken

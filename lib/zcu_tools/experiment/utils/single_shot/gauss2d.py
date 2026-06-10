@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from sklearn.mixture import BayesianGaussianMixture, GaussianMixture

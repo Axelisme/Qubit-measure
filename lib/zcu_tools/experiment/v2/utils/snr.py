@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
+from typing import Any, Optional
+
 import numpy as np
 from numpy.typing import NDArray
 from scipy.signal import savgol_filter
 from scipy.special import erf
-from typing_extensions import Any, Callable, Optional, Sequence
 
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 
@@ -103,10 +105,10 @@ def snr_as_signal(
 
 def snr_checker(
     ctx: Any,
-    snr_threshold: Optional[float],
+    snr_threshold: float | None,
     signal2real_fn: Callable[[np.ndarray], np.ndarray],
-    after_check: Optional[Callable[[float], Any]] = None,
-    check_interval: Optional[float] = 0.1,
+    after_check: Callable[[float], Any] | None = None,
+    check_interval: float | None = 0.1,
 ) -> Callable[[], bool]:
     if snr_threshold is None:
         return lambda: False

@@ -35,7 +35,7 @@ class GuiProgressBarChannel(QObject):
     def factory(self):
         """Return a ``make_pbar``-compatible factory bound to this channel."""
 
-        def _make(*_args, **kwargs) -> "GuiProgressBar":
+        def _make(*_args, **kwargs) -> GuiProgressBar:
             return GuiProgressBar(
                 self,
                 total=kwargs.get("total"),

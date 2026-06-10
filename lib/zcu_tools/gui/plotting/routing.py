@@ -16,15 +16,16 @@ Behaviour guarantee this module provides:
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Iterator, Optional
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from .container import FigureContainer
 
-_current_container: ContextVar[Optional["FigureContainer"]] = ContextVar(
+_current_container: ContextVar[FigureContainer | None] = ContextVar(
     "zcu_tools_gui_current_figure_container",
     default=None,
 )
@@ -35,10 +36,10 @@ RoutingToken = Token[Optional["FigureContainer"]]
 @dataclass(frozen=True)
 class RoutingStateSnapshot:
     has_current_container: bool
-    current_container_id: Optional[int]
+    current_container_id: int | None
 
 
-def set_current_container(container: "FigureContainer") -> RoutingToken:
+def set_current_container(container: FigureContainer) -> RoutingToken:
     return _current_container.set(container)
 
 
@@ -46,11 +47,11 @@ def reset_current_container(token: RoutingToken) -> None:
     _current_container.reset(token)
 
 
-def get_current_container() -> Optional["FigureContainer"]:
+def get_current_container() -> FigureContainer | None:
     return _current_container.get()
 
 
-def require_current_container() -> "FigureContainer":
+def require_current_container() -> FigureContainer:
     container = get_current_container()
     if container is None:
         raise RuntimeError("No active FigureContainer")
@@ -62,7 +63,7 @@ def has_current_container() -> bool:
 
 
 @contextmanager
-def routing_scope(container: Optional["FigureContainer"]) -> Iterator[None]:
+def routing_scope(container: FigureContainer | None) -> Iterator[None]:
     if container is None:
         yield
         return

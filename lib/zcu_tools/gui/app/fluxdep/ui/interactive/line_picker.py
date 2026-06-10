@@ -49,16 +49,16 @@ class LinePickerWidget(InteractiveMplWidget):
         signals: NDArray[np.complex128],
         dev_values: NDArray[np.float64],
         freqs: NDArray[np.float64],
-        flux_half: Optional[float] = None,
-        flux_int: Optional[float] = None,
+        flux_half: float | None = None,
+        flux_int: float | None = None,
         force_magnitude: bool = False,
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         # The magnitude-only projection is fixed by the spectrum type (OneTone
         # True — phase uninformative; TwoTone False) via force_magnitude, applied
         # to the core at construction — there is no runtime toggle.
-        self._info: Optional[QLabel] = None
+        self._info: QLabel | None = None
 
         # The core owns the data, plots, line state and interaction; this widget
         # is only the Qt shell. The core is passive — it never repaints — so the

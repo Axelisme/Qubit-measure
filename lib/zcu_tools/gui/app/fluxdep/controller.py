@@ -47,8 +47,8 @@ class Controller(BaseController[FluxDepState, EventBus]):
     def __init__(
         self,
         state: FluxDepState,
-        bus: Optional[EventBus] = None,
-        project_root: Optional[str] = None,
+        bus: EventBus | None = None,
+        project_root: str | None = None,
     ) -> None:
         super().__init__(state, bus if bus is not None else EventBus(), project_root)
         self._load = LoadService(state)
@@ -71,7 +71,7 @@ class Controller(BaseController[FluxDepState, EventBus]):
         self,
         filepath: str,
         spec_type: SpecType,
-        inherit_from: Optional[str] = None,
+        inherit_from: str | None = None,
         transpose_axes: bool = False,
     ) -> str:
         name = self._load.load_spectrum(
@@ -91,7 +91,7 @@ class Controller(BaseController[FluxDepState, EventBus]):
         self._store.remove_spectrum(name)
         self._emit(SpectrumRemovedPayload(name=name))
 
-    def set_active_spectrum(self, name: Optional[str]) -> None:
+    def set_active_spectrum(self, name: str | None) -> None:
         self._store.set_active(name)
         self._emit(ActiveSpectrumChangedPayload(name=name))
 
@@ -123,7 +123,7 @@ class Controller(BaseController[FluxDepState, EventBus]):
 
     # --- export ----------------------------------------------------------
 
-    def export_spectrums(self, filepath: Optional[str] = None, mode: str = "x") -> str:
+    def export_spectrums(self, filepath: str | None = None, mode: str = "x") -> str:
         return self._export.export_spectrums(filepath, mode)
 
     # --- database-search fit (v2) ---------------------------------------
@@ -135,8 +135,8 @@ class Controller(BaseController[FluxDepState, EventBus]):
         ECb: tuple[float, float],
         ELb: tuple[float, float],
         transitions: TransitionDict,
-        r_f: Optional[float],
-        sample_f: Optional[float],
+        r_f: float | None,
+        sample_f: float | None,
     ) -> None:
         self._fit.set_params(database_path, EJb, ECb, ELb, transitions, r_f, sample_f)
         self._emit(FitChangedPayload(has_result=self._state.fit.has_result))
@@ -149,7 +149,7 @@ class Controller(BaseController[FluxDepState, EventBus]):
     def compute_search(
         self,
         *,
-        pbar_factory: Optional[PbarFactory] = None,
+        pbar_factory: PbarFactory | None = None,
         plot: bool = False,
     ) -> SearchResult:
         """Run the search WITHOUT touching State (safe on a worker thread).
@@ -169,7 +169,7 @@ class Controller(BaseController[FluxDepState, EventBus]):
     def search_database(
         self,
         *,
-        pbar_factory: Optional[PbarFactory] = None,
+        pbar_factory: PbarFactory | None = None,
         plot: bool = False,
     ) -> SearchResult:
         """Main-thread convenience: compute the search then record it (RPC path).
@@ -183,5 +183,5 @@ class Controller(BaseController[FluxDepState, EventBus]):
         self.record_search_result(result)
         return result
 
-    def export_params(self, savepath: Optional[str] = None) -> str:
+    def export_params(self, savepath: str | None = None) -> str:
         return self._fit.export_params(savepath)

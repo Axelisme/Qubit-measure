@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Callable, Optional, TypedDict
+from typing_extensions import (
+    TypedDict,  # closed/extra_items (PEP 728) not in stdlib 3.13
+)
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -55,7 +59,7 @@ def t1_fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float6
 
 
 class T1ModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
@@ -93,9 +97,9 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
         num_expts: int,
         cfg_maker: Callable[
             [TaskState[T1Result, T_RootResult, FluxDepCfg], ModuleLibrary],
-            Optional[T1CfgTemplate],
+            T1CfgTemplate | None,
         ],
-        earlystop_snr: Optional[float] = None,
+        earlystop_snr: float | None = None,
     ) -> None:
         self.num_expts = num_expts
         self.cfg_maker = cfg_maker
@@ -104,7 +108,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
 
         def measure_t1_fn(
             ctx: TaskState[NDArray[np.complex128], T_RootResult, T1Cfg],
-            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules

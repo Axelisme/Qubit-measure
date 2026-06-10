@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Optional, Sequence, Union, cast
+from typing import Optional, Union, cast
 
 from .factory import IRLexer, IRParser
 from .instructions import BaseInst, Instruction, MetaInst, RegWriteInst
@@ -25,7 +26,7 @@ __all__ = [
     "DEFAULT_PIPELINE_CONFIG",
 ]
 
-ChunkList = list[Union[BasicBlockNode, MetaInst]]
+ChunkList = list[BasicBlockNode | MetaInst]
 
 
 @dataclass
@@ -64,7 +65,7 @@ class PipeLineContext:
     # `dmem_base_offset`. The caller resolves the labels to program addresses
     # after linking and appends them to dmem.
     dmem_base_offset: int = 0
-    dmem_tables: list[list["Label"]] = field(default_factory=list)
+    dmem_tables: list[list[Label]] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +128,7 @@ class AbsIRTreePass(ABC):
         self,
         node: IRNode,
         ctx: PipeLineContext,
-    ) -> Optional[IRNode]: ...
+    ) -> IRNode | None: ...
 
 
 # ---------------------------------------------------------------------------
@@ -147,7 +148,7 @@ def _validate_fixed_block_words(
 
 
 def _run_passes(
-    passes: Sequence[Union[AbsChunkPass, AbsChunkListPass]],
+    passes: Sequence[AbsChunkPass | AbsChunkListPass],
     chunks: ChunkList,
     ctx: PipeLineContext,
 ) -> tuple[ChunkList, bool]:
@@ -477,7 +478,7 @@ class IRPipeLine:
 
 
 def make_default_pipeline(
-    pmem_capacity: int, max_unroll_factor: Optional[int] = None
+    pmem_capacity: int, max_unroll_factor: int | None = None
 ) -> IRPipeLine:
     from .passes import (
         BlockMergePass,

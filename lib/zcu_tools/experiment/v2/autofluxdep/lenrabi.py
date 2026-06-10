@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from pathlib import Path
+from typing import Any, Optional
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional, TypedDict
+from typing_extensions import (
+    TypedDict,  # closed/extra_items (PEP 728) not in stdlib 3.13
+)
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -85,7 +89,7 @@ def auto_fit_lenrabi(
 
 
 class LenRabiModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     rabi_pulse: PulseCfg
     readout: ReadoutCfg
 
@@ -123,9 +127,9 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
         num_expts: int,
         cfg_maker: Callable[
             [TaskState[LenRabiResult, Any, FluxDepCfg], ModuleLibrary],
-            Optional[LenRabiCfgTemplate],
+            LenRabiCfgTemplate | None,
         ],
-        earlystop_snr: Optional[float] = None,
+        earlystop_snr: float | None = None,
     ) -> None:
         self.num_expts = num_expts
         self.cfg_maker = cfg_maker
@@ -134,7 +138,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, LenRabiCfg],
-            update_hook: Optional[Callable],
+            update_hook: Callable | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules

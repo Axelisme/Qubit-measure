@@ -122,9 +122,9 @@ class StartupService:
 
     def __init__(
         self,
-        context: "StartupContextPort",
-        devices: "RememberedDevicePort",
-        state: "SessionState",
+        context: StartupContextPort,
+        devices: RememberedDevicePort,
+        state: SessionState,
     ) -> None:
         self._context = context
         self._devices = devices

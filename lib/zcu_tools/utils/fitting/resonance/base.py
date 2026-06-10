@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from typing import Union, cast
+
 import numpy as np
 import scipy as sp
 from numpy.typing import NDArray
-from typing_extensions import Union, cast
 
 from ..base import fit_func
 
@@ -140,7 +141,7 @@ def fit_resonant_params(
 
     bg_slope_est = abs((phases[-1] - phases[0]) / (freqs[-1] - freqs[0]))
 
-    fixedparams: list[Union[float, None]] = [None] * 4
+    fixedparams: list[float | None] = [None] * 4
     if not fit_theta0:
         init_theta0 = np.angle(circle_params[0] + 1j * circle_params[1]).item()
         while init_theta0 < np.min(phases):

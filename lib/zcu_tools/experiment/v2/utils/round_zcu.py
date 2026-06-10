@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from numbers import Number
+from typing import Any, Literal, Optional, TypeVar, Union
 
 import numpy as np
 from numpy.typing import NDArray
 from qick import QickConfig
-from typing_extensions import Any, Callable, Literal, Optional, Sequence, TypeVar, Union
 
 from zcu_tools.program.v2 import SweepCfg
 
@@ -15,8 +16,8 @@ T_Value = TypeVar("T_Value", NDArray[np.float64], float)
 def round_zcu_time(
     us: T_Value,
     soccfg: QickConfig,
-    gen_ch: Optional[int] = None,
-    ro_ch: Optional[int] = None,
+    gen_ch: int | None = None,
+    ro_ch: int | None = None,
     scaler: float = 1.0,
 ) -> T_Value:
     one_cycle = soccfg.cycles2us(1, gen_ch=gen_ch, ro_ch=ro_ch)
@@ -47,7 +48,7 @@ def round_zcu_freq(
     freq: T_Value,
     soccfg: QickConfig,
     gen_ch: int,
-    ro_ch: Optional[int] = None,
+    ro_ch: int | None = None,
     scaler: float = 1.0,
 ) -> T_Value:
     one_reg = soccfg.reg2freq(1, gen_ch=gen_ch) - soccfg.reg2freq(0, gen_ch=gen_ch)
@@ -71,7 +72,7 @@ def round_zcu_phase(
     phase: T_Value,
     soccfg: QickConfig,
     gen_ch: int,
-    ro_ch: Optional[int] = None,
+    ro_ch: int | None = None,
     scaler: float = 1.0,
 ) -> T_Value:
     one_gain = soccfg.reg2deg(1, gen_ch=gen_ch, ro_ch=ro_ch) - soccfg.reg2deg(
@@ -142,9 +143,9 @@ def round_sweep_dict(sweep: SweepCfg, *args, **kwargs) -> SweepCfg:
 
 
 def sweep2array(
-    sweep: Union[SweepCfg, list, NDArray],
+    sweep: SweepCfg | list | NDArray,
     round_type: Literal["none", "time", "freq", "phase", "gain"] = "none",
-    round_info: Optional[dict[str, Any]] = None,
+    round_info: dict[str, Any] | None = None,
     allow_array: bool = False,
 ) -> NDArray[np.float64]:
     if round_info is None:

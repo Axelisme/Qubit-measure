@@ -7,9 +7,7 @@ each has its own blank builder. ``make_reset_default`` is the role's blank
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
-
-from typing_extensions import Literal, overload
+from typing import TYPE_CHECKING, Literal, Optional, overload
 
 from zcu_tools.gui.app.main.adapter import (
     CfgSectionValue,
@@ -100,7 +98,7 @@ def make_reset_ref_default(
     preferred_names: list[str] = ...,
     *,
     optional: Literal[True],
-) -> Optional[ModuleRefValue]: ...
+) -> ModuleRefValue | None: ...
 
 
 def make_reset_ref_default(
@@ -108,7 +106,7 @@ def make_reset_ref_default(
     preferred_names: list[str] = RESET_NAMES,
     *,
     optional: bool = False,
-) -> Optional[ModuleRefValue]:
+) -> ModuleRefValue | None:
     """Reference a calibrated library reset, else fall back to a blank pulse reset.
 
     ADR-0010: when ``optional`` and no library reset is found, return ``None``

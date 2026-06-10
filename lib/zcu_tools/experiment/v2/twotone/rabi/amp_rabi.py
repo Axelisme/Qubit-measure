@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -32,7 +33,7 @@ from zcu_tools.utils.process import rotate2real
 class AmpRabiResult:
     amps: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[AmpRabiCfg] = None
+    cfg_snapshot: AmpRabiCfg | None = None
 
 
 def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -54,7 +55,7 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
         soccfg,
         cfg: AmpRabiCfg,
         *,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> AmpRabiResult:
         orig_cfg = deepcopy(cfg)
 
@@ -67,7 +68,7 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
             {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
 
-        def measure_fn(ctx: TaskState, update_hook: Optional[Callable]):
+        def measure_fn(ctx: TaskState, update_hook: Callable | None):
             cfg = ctx.cfg
             gain_param = sweep2param("gain", cfg.sweep.gain)
             cfg.modules.qub_pulse.set_param("gain", gain_param)
@@ -105,7 +106,7 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
         return self.last_result
 
     def analyze(
-        self, result: Optional[AmpRabiResult] = None, skip: int = 0
+        self, result: AmpRabiResult | None = None, skip: int = 0
     ) -> tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
@@ -155,8 +156,8 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[AmpRabiResult] = None,
-        comment: Optional[str] = None,
+        result: AmpRabiResult | None = None,
+        comment: str | None = None,
         tag: str = "twotone/ge/rabi_gain",
         **kwargs,
     ) -> None:

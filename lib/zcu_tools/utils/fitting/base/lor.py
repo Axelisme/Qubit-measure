@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+from typing import Optional, cast
+
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Optional, Sequence, cast
 
 from .base import assign_init_p, fit_func
 
@@ -17,8 +19,8 @@ def lorfunc(x: NDArray[np.float64], *p: float) -> NDArray[np.float64]:
 def fitlor(
     xdata: NDArray[np.float64],
     ydata: NDArray[np.float64],
-    fitparams: Optional[Sequence[Optional[float]]] = None,
-    fixedparams: Optional[Sequence[Optional[float]]] = None,
+    fitparams: Sequence[float | None] | None = None,
+    fixedparams: Sequence[float | None] | None = None,
 ) -> tuple[list[float], NDArray[np.float64]]:
     if fitparams is None:
         fitparams = [None] * 5
@@ -65,8 +67,8 @@ def asym_lorfunc(x: NDArray[np.float64], *p: float) -> NDArray[np.float64]:
 def fit_asym_lor(
     xdata: NDArray[np.float64],
     ydata: NDArray[np.float64],
-    fitparams: Optional[Sequence[Optional[float]]] = None,
-    fixedparams: Optional[Sequence[Optional[float]]] = None,
+    fitparams: Sequence[float | None] | None = None,
+    fixedparams: Sequence[float | None] | None = None,
 ) -> tuple[list[float], NDArray[np.float64]]:
     if fitparams is None:
         fitparams = [None] * 6

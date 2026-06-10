@@ -11,9 +11,7 @@ library readouts (readout_dpm / readout_rf).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
-
-from typing_extensions import Literal, overload
+from typing import TYPE_CHECKING, Literal, Optional, overload
 
 from zcu_tools.gui.app.main.adapter import (
     CfgSectionValue,
@@ -163,7 +161,7 @@ def make_readout_ref_default(
     preferred_names: list[str] = ...,
     *,
     optional: Literal[True],
-) -> Optional[ModuleRefValue]: ...
+) -> ModuleRefValue | None: ...
 
 
 def make_readout_ref_default(
@@ -171,7 +169,7 @@ def make_readout_ref_default(
     preferred_names: list[str] = READOUT_NAMES,
     *,
     optional: bool = False,
-) -> Optional[ModuleRefValue]:
+) -> ModuleRefValue | None:
     """Reference a calibrated library readout (readout_dpm / readout_rf), else
     fall back to the blank inline pulse-readout."""
     selected = select_named_module_value(

@@ -20,8 +20,9 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
-from typing import TYPE_CHECKING, Iterator, Optional
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
@@ -90,7 +91,7 @@ def _freq_edit() -> QLineEdit:
     return edit
 
 
-def _parse_freq(edit: QLineEdit) -> "float | None":
+def _parse_freq(edit: QLineEdit) -> float | None:
     """The field's value as float, or None when blank / unparseable."""
     text = edit.text().strip()
     if not text:
@@ -101,7 +102,7 @@ def _parse_freq(edit: QLineEdit) -> "float | None":
         return None
 
 
-def _set_freq(edit: QLineEdit, value: "float | None") -> None:
+def _set_freq(edit: QLineEdit, value: float | None) -> None:
     """Show ``value`` in the field (blank when None)."""
     edit.setText("" if value is None else f"{value:g}")
 
@@ -124,13 +125,13 @@ def _search_scopes(container, pbar_factory) -> Iterator[None]:
 class AnalyzePanelWidget(QWidget):
     """Filter / Search / Show tabs over the selected joint point cloud."""
 
-    def __init__(self, ctrl: Controller, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, ctrl: Controller, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._ctrl = ctrl
         self._runner = BackgroundRunner(self)
         self._channel = GuiProgressBarChannel()
         self._channel.progress.connect(self._on_progress)
-        self._filter_widget: Optional[SelectorWidget] = None
+        self._filter_widget: SelectorWidget | None = None
 
         self._build_ui()
         self._load_from_state()

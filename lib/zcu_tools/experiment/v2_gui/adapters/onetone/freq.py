@@ -1,18 +1,11 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Annotated, Any, ClassVar, Literal, TypeAlias, Union
 
 from matplotlib.figure import Figure
-from typing_extensions import (
-    Annotated,
-    Any,
-    ClassVar,
-    Literal,
-    Sequence,
-    TypeAlias,
-    Union,
-)
 
 from zcu_tools.experiment.v2.onetone.freq import FreqCfg, FreqExp, FreqResult
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
@@ -116,7 +109,7 @@ class OneToneFreqAdapter(
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         probe_len = md_get_float(ctx, "res_probe_len", 1.0)
-        ro_length: Union[float, EvalValue] = (
+        ro_length: float | EvalValue = (
             EvalValue(expr="res_probe_len - 0.1")
             if md_has_key(ctx, "res_probe_len")
             else probe_len - 0.1

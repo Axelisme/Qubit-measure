@@ -68,7 +68,7 @@ class ProgressBarModel:
     def elapsed(self) -> float:
         return max(0.0, time.monotonic() - self.start_time)
 
-    def remaining(self) -> Optional[float]:
+    def remaining(self) -> float | None:
         total, n, elapsed = self.total, self.n, self.elapsed()
         if total is None or total <= 0 or n <= 0 or elapsed <= 0:
             return None
@@ -90,7 +90,7 @@ class ProgressBarModel:
             return int(round(float(self.n) / total * _FLOAT_SCALE))
         return 0
 
-    def percent(self) -> Optional[float]:
+    def percent(self) -> float | None:
         maximum = self.qt_maximum()
         if maximum == 0:
             return None

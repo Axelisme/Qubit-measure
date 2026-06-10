@@ -78,7 +78,7 @@ _FIT_RULES: list[FriendlyRule] = [
 ]
 
 
-def friendly_fit_message(action: str, exc: Union[Exception, str]) -> str:
+def friendly_fit_message(action: str, exc: Exception | str) -> str:
     """Message for a preprocess / auto-fit / export failure.
 
     ``action`` is "Preprocess" / "Auto-fit" / "Export". ``exc`` may be the exception

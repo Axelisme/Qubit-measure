@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Optional, Union
 
-ProgressValue = Union[int, float]
-ProgressTotal = Optional[ProgressValue]
+ProgressValue = int | float
+ProgressTotal = ProgressValue | None
 
 
 class BaseProgressBar(ABC):

@@ -48,7 +48,7 @@ class ElidedLabel(QLabel):
     complete field name on hover.
     """
 
-    def __init__(self, text: str, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, text: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._full_text = text
         self.setMaximumWidth(FIELD_LABEL_MAX_WIDTH)
@@ -72,9 +72,9 @@ class ElidedLabel(QLabel):
 def make_value_widget(
     type_: type,
     default: Any,
-    choices: Optional[list],
+    choices: list | None,
     editable: bool = True,
-    decimals: Optional[int] = None,
+    decimals: int | None = None,
     optional: bool = False,
 ) -> QWidget:
     """Build an input widget from raw field attributes."""
@@ -148,14 +148,14 @@ def read_value_widget(w: QWidget, type_: type, fallback: Any = None) -> Any:
     return fallback
 
 
-def make_scalar_widget(spec: "ScalarSpec", value: Any) -> QWidget:
+def make_scalar_widget(spec: ScalarSpec, value: Any) -> QWidget:
     """Build an input widget from a ScalarSpec and initial value."""
     return make_value_widget(
         spec.type, value, spec.choices, spec.editable, spec.decimals, spec.optional
     )
 
 
-def read_scalar_widget(w: QWidget, spec: "ScalarSpec") -> Any:
+def read_scalar_widget(w: QWidget, spec: ScalarSpec) -> Any:
     """Read the current value from a widget created by make_scalar_widget."""
     if spec.optional and isinstance(w, QLineEdit):
         # Empty optional field = None; a partial/invalid entry also reads as None.
@@ -169,7 +169,7 @@ def read_scalar_widget(w: QWidget, spec: "ScalarSpec") -> Any:
     return read_value_widget(w, spec.type, fallback=None)
 
 
-def _widget_default_for_direct_value(value: DirectValue, spec: "ScalarSpec") -> Any:
+def _widget_default_for_direct_value(value: DirectValue, spec: ScalarSpec) -> Any:
     if value.value is None:
         # An optional unset scalar shows as an empty field (the "(none)" state),
         # not the type's zero default.
@@ -183,7 +183,7 @@ def _widget_default_for_direct_value(value: DirectValue, spec: "ScalarSpec") -> 
 class BaseLiveWidget(QWidget):
     """Base class implementing FieldWidgetProtocol."""
 
-    def __init__(self, field: LiveField, parent: Optional[QWidget] = None):
+    def __init__(self, field: LiveField, parent: QWidget | None = None):
         super().__init__(parent)
         self._field = field
 
@@ -199,7 +199,7 @@ class BaseLiveWidget(QWidget):
 class LiteralWidget(QLabel):
     """Hidden widget for Literal values."""
 
-    def __init__(self, field: LiteralLiveField, parent: Optional[QWidget] = None):
+    def __init__(self, field: LiteralLiveField, parent: QWidget | None = None):
         super().__init__(parent)
         self._field = field
         self.setVisible(False)
@@ -216,11 +216,11 @@ class LiteralWidget(QLabel):
 class ScalarWidget(BaseLiveWidget):
     """Generic input widget for ScalarLiveField."""
 
-    def __init__(self, field: ScalarLiveField, parent: Optional[QWidget] = None):
+    def __init__(self, field: ScalarLiveField, parent: QWidget | None = None):
         super().__init__(field, parent)
         self._updating = False
-        self._input: Optional[QWidget] = None
-        self._ghost: Optional[QLabel] = None
+        self._input: QWidget | None = None
+        self._ghost: QLabel | None = None
         self._mode = ""
         self._layout = QHBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
@@ -373,7 +373,7 @@ class ScalarWidget(BaseLiveWidget):
         self._ghost.setToolTip("")
         self._ghost.setStyleSheet("color: gray; font-style: italic;")
 
-    def _install_context_menu(self, widget: Optional[QWidget]) -> None:
+    def _install_context_menu(self, widget: QWidget | None) -> None:
         if widget is None:
             return
         if not isinstance(widget, (QAbstractSpinBox, QLineEdit)):
@@ -384,7 +384,7 @@ class ScalarWidget(BaseLiveWidget):
         )
 
     def _show_context_menu(
-        self, widget: "QAbstractSpinBox | QLineEdit", global_pos: Any
+        self, widget: QAbstractSpinBox | QLineEdit, global_pos: Any
     ) -> None:
         if isinstance(widget, QAbstractSpinBox):
             line_edit = widget.lineEdit()
@@ -433,7 +433,7 @@ class ScalarWidget(BaseLiveWidget):
 class SweepWidget(BaseLiveWidget):
     """Inline 2x2 input for start/stop/expts/step with synchronized updates."""
 
-    def __init__(self, field: SweepLiveField, parent: Optional[QWidget] = None):
+    def __init__(self, field: SweepLiveField, parent: QWidget | None = None):
         super().__init__(field, parent)
         self._updating = False
 

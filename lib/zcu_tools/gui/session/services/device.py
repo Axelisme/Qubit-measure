@@ -3,11 +3,11 @@ from __future__ import annotations
 import importlib
 import logging
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
     Optional,
     Protocol,
     cast,
@@ -70,7 +70,7 @@ class DeviceProtocol(Protocol):
         cfg: Any,
         *,
         progress: bool = True,
-        stop_event: Optional[threading.Event] = None,
+        stop_event: threading.Event | None = None,
     ) -> None: ...
     def get_info(self) -> BaseDeviceInfo: ...
     def close(self) -> None: ...
@@ -145,7 +145,7 @@ _DEVICE_DEFAULT_UNITS: dict[str, str] = {
 }
 
 
-def _mode_dependent_unit(dev: "DeviceState") -> Optional[str]:
+def _mode_dependent_unit(dev: DeviceState) -> str | None:
     """Return "V" or "A" for a YOKOGS200 whose mode is cached in ``dev.info``.
 
     Returns ``None`` for any other device type or when ``dev.info`` is ``None``
@@ -186,15 +186,15 @@ class DeviceService(QObject):
 
     def __init__(
         self,
-        bus: "BaseEventBus",
-        state: "SessionState",
+        bus: BaseEventBus,
+        state: SessionState,
         gate: ExclusionGate,
         bg: BackgroundExecutor,
         progress: ProgressHub,
         *,
-        handles: Optional[OperationHandles] = None,
-        driver_factory: Optional[DriverFactoryPort] = None,
-        parent: Optional[QObject] = None,
+        handles: OperationHandles | None = None,
+        driver_factory: DriverFactoryPort | None = None,
+        parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._bus = bus
@@ -387,7 +387,7 @@ class DeviceService(QObject):
         dev = self._state.get_device(self._active_name)
         return None if dev is None else self._project(dev)
 
-    def get_active_setup(self) -> Optional[DeviceSetupSnapshot]:
+    def get_active_setup(self) -> DeviceSetupSnapshot | None:
         snapshot = self.get_active_device_operation()
         if snapshot is None or snapshot.status is not DeviceStatus.SETTING_UP:
             return None
@@ -419,7 +419,7 @@ class DeviceService(QObject):
         dev = self._state.get_device(name)
         return dev is not None and dev.is_memory_only()
 
-    def get_memory_device_address(self, name: str) -> Optional[str]:
+    def get_memory_device_address(self, name: str) -> str | None:
         dev = self._state.get_device(name)
         if dev is None or not dev.is_memory_only():
             return None
@@ -474,7 +474,7 @@ class DeviceService(QObject):
             self._emit_device_changed(name)
         return info
 
-    def get_device_value_for_new_context(self, name: str) -> Optional[float]:
+    def get_device_value_for_new_context(self, name: str) -> float | None:
         info = self.get_device_info(name)
         if info is None:
             return None
@@ -532,7 +532,7 @@ class DeviceService(QObject):
         kind: OperationKind,
         name: str,
         pending: DeviceState,
-        stop_event: Optional[threading.Event] = None,
+        stop_event: threading.Event | None = None,
     ) -> None:
         # Symmetric release: this lease + _active_name/_active_prior are cleared
         # exactly-once on the terminal path via _finish_operation, called from

@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Optional, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional, Union
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -43,17 +44,17 @@ from ..util import calc_populations
 class T1Result:
     lengths: NDArray[np.float64]
     signals: NDArray[np.float64]
-    cfg_snapshot: Optional[T1Cfg] = None
+    cfg_snapshot: T1Cfg | None = None
 
 
 class T1ModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
 class T1SweepCfg(ConfigBase):
-    length: Union[SweepCfg, list[float]]
+    length: SweepCfg | list[float]
 
 
 class T1Cfg(ProgramV2Cfg, ExpCfgModel):
@@ -119,7 +120,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
 
             def measure_fn(
                 ctx: TaskState[NDArray[np.float64], Any, T1Cfg],
-                update_hook: Optional[Callable],
+                update_hook: Callable | None,
             ):
                 modules = ctx.cfg.modules
                 inner_length_sweep = ctx.cfg.sweep.length
@@ -209,7 +210,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
 
             def measure_fn(
                 ctx: TaskState[NDArray[np.float64], Any, T1Cfg],
-                update_hook: Optional[Callable],
+                update_hook: Callable | None,
             ):
                 modules = ctx.cfg.modules
                 return ModularProgramV2(
@@ -285,9 +286,9 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
 
     def analyze(
         self,
-        result: Optional[T1Result] = None,
+        result: T1Result | None = None,
         *,
-        confusion_matrix: Optional[NDArray[np.float64]] = None,
+        confusion_matrix: NDArray[np.float64] | None = None,
         skip: int = 0,
     ) -> Figure:
         if result is None:
@@ -350,8 +351,8 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[T1Result] = None,
-        comment: Optional[str] = None,
+        result: T1Result | None = None,
+        comment: str | None = None,
         tag: str = "twotone/t1",
         **kwargs,
     ) -> None:

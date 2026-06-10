@@ -10,7 +10,7 @@ timeout -> pending handle).
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 import pytest
 from zcu_tools.mcp.measure import server as mcp_server
@@ -31,13 +31,13 @@ def wired(monkeypatch):
     mcp_server._BRIDGE.set_transport(fake)
     monkeypatch.setattr(mcp_server, "_LAST_SEEN", {}, raising=False)
     monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {}, raising=False)
-    replies: Dict[str, Dict[str, Any]] = fake.replies
+    replies: dict[str, dict[str, Any]] = fake.replies
     replies["sent"] = fake.sent  # type: ignore[assignment]
     yield replies
     mcp_server._BRIDGE.set_transport(None)
 
 
-def _versions(table: Dict[str, int]) -> Dict[str, Any]:
+def _versions(table: dict[str, int]) -> dict[str, Any]:
     return {"ok": True, "result": {"versions": table}}
 
 

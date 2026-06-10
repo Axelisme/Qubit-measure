@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ class ConnectRemoteRequest:
     port: int
 
 
-ConnectRequest = Union[ConnectMockRequest, ConnectRemoteRequest]
+ConnectRequest = ConnectMockRequest | ConnectRemoteRequest
 
 
 @dataclass(frozen=True)
@@ -53,7 +54,7 @@ class LoadPredictorRequest:
 @dataclass(frozen=True)
 class PredictFreqRequest:
     value: float
-    transition: Tuple[int, int]
+    transition: tuple[int, int]
 
 
 # ---------------------------------------------------------------------------
@@ -86,13 +87,13 @@ class _ConnectWorker(QThread):
 
     def __init__(
         self,
-        connect_callable: Callable[[], Tuple[SocHandle, SocCfgHandle]],
-        parent: Optional[QObject] = None,
+        connect_callable: Callable[[], tuple[SocHandle, SocCfgHandle]],
+        parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._connect_callable = connect_callable
-        self._result: Optional[Tuple[SocHandle, SocCfgHandle]] = None
-        self._error: Optional[str] = None
+        self._result: tuple[SocHandle, SocCfgHandle] | None = None
+        self._error: str | None = None
         self.finished.connect(self._emit_outcome)
 
     def run(self) -> None:
@@ -135,11 +136,11 @@ class ConnectionService(QObject):
 
     def __init__(
         self,
-        state: "SessionState",
-        bus: "BaseEventBus",
+        state: SessionState,
+        bus: BaseEventBus,
         gate: ExclusionGate,
         handles: OperationHandles,
-        parent: Optional[QObject] = None,
+        parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._state = state
@@ -149,9 +150,9 @@ class ConnectionService(QObject):
         # cancellation point, so the handle carries no stop_event.
         self._gate = gate
         self._handles = handles
-        self._predictor_path: Optional[str] = None
-        self._active_worker: Optional[_ConnectWorker] = None
-        self._active_token: Optional[int] = None
+        self._predictor_path: str | None = None
+        self._active_worker: _ConnectWorker | None = None
+        self._active_token: int | None = None
         self._pending_is_mock: bool = False
 
     # ------------------------------------------------------------------
@@ -161,7 +162,7 @@ class ConnectionService(QObject):
     def has_soc(self) -> bool:
         return self._state.exp_context.soc is not None
 
-    def get_soccfg(self) -> Optional[SocCfgHandle]:
+    def get_soccfg(self) -> SocCfgHandle | None:
         return self._state.exp_context.soccfg
 
     def is_mock_soc(self) -> bool:
@@ -175,10 +176,10 @@ class ConnectionService(QObject):
     def is_connect_active(self) -> bool:
         return self._active_token is not None
 
-    def get_predictor(self) -> Optional[FluxoniumPredictor]:
+    def get_predictor(self) -> FluxoniumPredictor | None:
         return self._state.exp_context.predictor
 
-    def get_predictor_info(self) -> Optional[dict]:
+    def get_predictor_info(self) -> dict | None:
         predictor = self._state.exp_context.predictor
         if predictor is None:
             return None
@@ -232,7 +233,7 @@ class ConnectionService(QObject):
         port = req.port
         logger.info("start_connect: remote %s:%d", ip, port)
 
-        def connect_callable() -> Tuple[SocHandle, SocCfgHandle]:
+        def connect_callable() -> tuple[SocHandle, SocCfgHandle]:
             try:
                 from zcu_tools.remote import make_soc_proxy
             except ImportError as exc:

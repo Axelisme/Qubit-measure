@@ -24,7 +24,9 @@ liveplot, ActiveTask, pbar) live with the callers that need them.
 
 from __future__ import annotations
 
-from typing import Any, Callable, ContextManager, Optional
+from collections.abc import Callable
+from contextlib import AbstractContextManager
+from typing import Any, Optional
 
 from qtpy.QtCore import (  # type: ignore[attr-defined]
     QCoreApplication,
@@ -78,7 +80,7 @@ class _OpWorker(QThread):
         super().__init__(parent)
         self._thunk = thunk
         self._result: Any = NO_RESULT
-        self._error: Optional[Exception] = None
+        self._error: Exception | None = None
         self.finished.connect(self._emit)
 
     def run(self) -> None:
@@ -99,7 +101,7 @@ class _OpWorker(QThread):
 class BackgroundRunner(QObject):
     """Run thunks off the main thread, optionally inside a caller ``enter`` scope."""
 
-    def __init__(self, parent: Optional[QObject] = None) -> None:
+    def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._pool = QThreadPool(self)
         # Hold dedicated workers until they settle so the Python wrapper is not
@@ -118,7 +120,7 @@ class BackgroundRunner(QObject):
         on_done: Callable[[Any], None],
         on_error: Callable[[Exception], None],
         run_in_pool: bool = True,
-        enter: Optional[ContextManager[Any]] = None,
+        enter: AbstractContextManager[Any] | None = None,
     ) -> None:
         """Run ``work`` off-main inside ``enter``; deliver its result to
         ``on_done`` or its exception to ``on_error``, both on the main thread.

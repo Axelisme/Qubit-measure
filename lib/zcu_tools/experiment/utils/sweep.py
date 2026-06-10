@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any, Optional, TypeVar, Union, cast, get_args
+
 import numpy as np
 from pydantic import BaseModel
-from typing_extensions import Any, Mapping, Optional, TypeVar, Union, cast, get_args
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.program.v2 import SweepCfg
 
-T = TypeVar("T", bound=Union[SweepCfg, list])
+T = TypeVar("T", bound=SweepCfg | list)
 
 
-def unwrap_model_annotation(annotation: Any) -> Optional[type[BaseModel]]:
+def unwrap_model_annotation(annotation: Any) -> type[BaseModel] | None:
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
         return annotation
 
@@ -21,7 +23,7 @@ def unwrap_model_annotation(annotation: Any) -> Optional[type[BaseModel]]:
     return None
 
 
-def get_single_sweep_name(cfg_model: type[ExpCfgModel]) -> Optional[str]:
+def get_single_sweep_name(cfg_model: type[ExpCfgModel]) -> str | None:
     sweep_field = cfg_model.model_fields.get("sweep")
     if sweep_field is None:
         return None
@@ -37,7 +39,7 @@ def get_single_sweep_name(cfg_model: type[ExpCfgModel]) -> Optional[str]:
     return sweep_names[0]
 
 
-def format_sweep1D(sweep: Union[Mapping[str, T], T], name: str) -> dict[str, T]:
+def format_sweep1D(sweep: Mapping[str, T] | T, name: str) -> dict[str, T]:
     """
     Convert abbreviated single sweep to regular format.
 

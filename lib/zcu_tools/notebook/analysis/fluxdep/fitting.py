@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
+from typing import Literal, Optional, overload
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -17,7 +18,6 @@ from numba import set_num_threads
 from numpy.typing import NDArray
 from scipy.optimize import least_squares
 from tqdm.auto import tqdm
-from typing_extensions import Literal, Optional, overload
 
 from zcu_tools.notebook.persistance import TransitionDict
 from zcu_tools.progress_bar import make_pbar
@@ -112,7 +112,7 @@ def search_in_database(
     *,
     n_jobs: int = 1,
     plot: bool = True,
-) -> tuple[tuple[float, float, float], Optional[Figure]]:
+) -> tuple[tuple[float, float, float], Figure | None]:
     """Search a precomputed fluxonium database for (EJ, EC, EL) best matching
     the observed (fluxs, freqs).
 

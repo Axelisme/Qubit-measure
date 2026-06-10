@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import partial
+from typing import Optional, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,7 +10,6 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.optimize import minimize
-from typing_extensions import Callable, Optional, Union
 
 from zcu_tools.notebook.analysis.t1_curve.utils import format_exponent
 from zcu_tools.simulate import flux2value, value2flux
@@ -54,7 +55,7 @@ def add_Q_fit(
     ax: Axes,
     omegas: NDArray[np.float64],
     Q_vs_omega: NDArray[np.float64],
-    omega_range: Optional[tuple[Optional[float], Optional[float]]] = None,
+    omega_range: tuple[float | None, float | None] | None = None,
     fit_constant: bool = False,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """omegas: rad/ns, Q_vs_omega: ns/rad, omega_range: (rad/ns, rad/ns)"""
@@ -95,7 +96,7 @@ def add_Q_fit(
 def plot_t1_vs_elements(
     dipoles: NDArray[np.float64],
     T1s: NDArray[np.float64],
-    T1errs: Optional[NDArray[np.float64]] = None,
+    T1errs: NDArray[np.float64] | None = None,
     dipole_name: str = "d_{01}",
     Q_name: str = r"$Q_{cap}$",
     product2val: Callable[[float], float] = lambda x: x,
@@ -195,7 +196,7 @@ def plot_t1_with_sample(
     name: str,
     noise_name: str,
     noise_values: list[
-        Union[float, Callable[[NDArray[np.float64], float], NDArray[np.float64]]]
+        float | Callable[[NDArray[np.float64], float], NDArray[np.float64]]
     ],
     Temp: float,
     xlabel: str = "Current (mA)",
@@ -262,7 +263,7 @@ def plot_eff_t1_with_sample(
     t_fluxs: NDArray[np.float64],
     *,
     label: str = r"$t_1^{eff}$",
-    title: Optional[str] = None,
+    title: str | None = None,
     xlabel: str = "Current (mA)",
 ) -> tuple[Figure, Axes]:
     """T1s: ns"""

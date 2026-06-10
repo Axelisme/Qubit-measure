@@ -14,7 +14,7 @@ class SweepCfg(ConfigBase):
     step: float
 
     @model_validator(mode="after")
-    def _validate_sweep_consistency(self) -> "SweepCfg":
+    def _validate_sweep_consistency(self) -> SweepCfg:
         if self.expts <= 0:
             raise ValueError(f"expts must be greater than 0, got {self.expts}")
 

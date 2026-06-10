@@ -42,9 +42,9 @@ class TabService:
 
     def __init__(
         self,
-        state: "State",
-        registry: "Registry",
-        writeback: "WritebackQueryPort",
+        state: State,
+        registry: Registry,
+        writeback: WritebackQueryPort,
     ) -> None:
         self._state = state
         self._registry = registry
@@ -52,7 +52,7 @@ class TabService:
         # concrete sibling app-service dependency (ADR-0005 violation 2).
         self._writeback = writeback
 
-    def get_snapshot(self, tab_id: str) -> "TabSnapshot":
+    def get_snapshot(self, tab_id: str) -> TabSnapshot:
         """Build the immutable full render model for one tab (all live fields
         populated). The persist/restore form of ``TabSnapshot`` is produced
         elsewhere (codec / restore) with the live fields left empty."""
@@ -86,9 +86,7 @@ class TabService:
             save_paths=tab.effective_save_paths(ctx),
         )
 
-    def new_tab(
-        self, adapter_name: str, from_dict: Optional["TabSnapshot"] = None
-    ) -> str:
+    def new_tab(self, adapter_name: str, from_dict: TabSnapshot | None = None) -> str:
         """Single tab-creation entry.
 
         ``from_dict is None`` → a fresh tab with the adapter's default cfg.
@@ -134,7 +132,7 @@ class TabService:
     def list_adapter_names(self) -> list[str]:
         return self._registry.list_names()
 
-    def adapter_cfg_spec(self, adapter_name: str) -> "CfgSectionSpec":
+    def adapter_cfg_spec(self, adapter_name: str) -> CfgSectionSpec:
         """Static cfg spec of an adapter — no tab/context needed."""
         return self._registry.create(adapter_name).cfg_spec()
 
@@ -187,7 +185,7 @@ class TabService:
     def update_tab_analyze_param_instance(self, tab_id: str, instance: object) -> None:
         self._state.update_tab_analyze_param_instance(tab_id, instance)
 
-    def get_tab_save_paths(self, tab_id: str) -> Optional[SavePaths]:
+    def get_tab_save_paths(self, tab_id: str) -> SavePaths | None:
         tab = self._state.get_tab(tab_id)
         return tab.effective_save_paths(self._state.exp_context)
 

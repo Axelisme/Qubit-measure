@@ -52,7 +52,7 @@ class SelectorWidget(InteractiveMplWidget):
         spectrums: dict[str, SpectrumResult],
         min_distance: float = 0.0,
         brush_width: float = 0.05,
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
     ) -> None:
         # Controls on the LEFT to match the Search / Show tabs (the cross-spectrum
         # filter lives in the same Analyze panel).
@@ -70,8 +70,8 @@ class SelectorWidget(InteractiveMplWidget):
         self._selected = np.ones_like(self._s_fluxs, dtype=bool)
         self._init_min_distance = min_distance
         self._filter_mask = np.ones_like(self._selected, dtype=bool)
-        self._temp_circle: Optional[Ellipse] = None
-        self._temp_timer: Optional[QTimer] = None
+        self._temp_circle: Ellipse | None = None
+        self._temp_timer: QTimer | None = None
 
         # Off-main-thread downsample with instant-cancel by generation (O(N²)).
         self._runner = BackgroundRunner(self)

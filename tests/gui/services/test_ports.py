@@ -22,7 +22,7 @@ class _FakeProjectIO:
 
     def __init__(self) -> None:
         self._project = False
-        self._label: Optional[str] = None
+        self._label: str | None = None
 
     @property
     def has_project(self) -> bool:
@@ -34,7 +34,7 @@ class _FakeProjectIO:
     def list_contexts(self) -> list[str]:
         return [] if self._label is None else [self._label]
 
-    def get_active_label(self) -> Optional[str]:
+    def get_active_label(self) -> str | None:
         return self._label
 
     def use_context(self, label: str, base_ctx: ExpContext) -> ExpContext:

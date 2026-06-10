@@ -9,9 +9,7 @@ the field is optional and nothing matches. See ADR-0009.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
-
-from typing_extensions import Literal, overload
+from typing import TYPE_CHECKING, Literal, Optional, overload
 
 from zcu_tools.gui.app.main.adapter import ModuleRefValue
 from zcu_tools.gui.app.main.specs.pulse import make_pulse_spec
@@ -56,7 +54,7 @@ def make_qub_probe_ref_default(
     preferred_names: list[str] = ...,
     *,
     optional: Literal[True],
-) -> Optional[ModuleRefValue]: ...
+) -> ModuleRefValue | None: ...
 
 
 def make_qub_probe_ref_default(
@@ -64,7 +62,7 @@ def make_qub_probe_ref_default(
     preferred_names: list[str] = QUB_PROBE_NAMES,
     *,
     optional: bool = False,
-) -> Optional[ModuleRefValue]:
+) -> ModuleRefValue | None:
     """Reference a library qubit probe pulse, else fall back to the blank one."""
     selected = select_named_module_value(
         ml=ctx.ml, module_type=PulseCfg, preferred_names=preferred_names

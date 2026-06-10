@@ -22,7 +22,7 @@ Adding a new event:
 
 from __future__ import annotations
 
-from typing import Callable, Mapping, Optional
+from collections.abc import Callable, Mapping
 
 from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.main.events.tab import (
@@ -44,7 +44,7 @@ from zcu_tools.gui.session.events import (
 )
 
 # Wire payload type: a JSON-friendly mapping or ``None`` to drop the event.
-WirePayload = Optional[Mapping[str, object]]
+WirePayload = Mapping[str, object] | None
 Serializer = Callable[[BasePayload], WirePayload]
 
 

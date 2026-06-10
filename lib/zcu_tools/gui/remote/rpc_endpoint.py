@@ -44,8 +44,9 @@ import queue
 import selectors
 import socket
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Optional, Protocol
+from typing import Optional, Protocol
 
 from qtpy.QtCore import QObject, Qt, Signal  # type: ignore[attr-defined]
 
@@ -81,7 +82,7 @@ class ControlOptions:
     """
 
     port: int
-    token: Optional[str] = None
+    token: str | None = None
     allow_external: bool = False
 
     def host(self) -> str:
@@ -135,7 +136,7 @@ class ClientLink:
         self.authed = not token_required
         self.buffer = bytearray()
         self.outbound: queue.Queue[bytes] = queue.Queue(maxsize=_OUTBOUND_QUEUE_MAX)
-        self.writer_thread: Optional[threading.Thread] = None
+        self.writer_thread: threading.Thread | None = None
         self.consecutive_drops: int = 0
         self.closing: bool = False
         # The router attaches its per-connection semantic state here in
@@ -209,11 +210,11 @@ class NdjsonRpcEndpoint:
         self._server_name = server_name
         self._router = router
         self._stopping = threading.Event()
-        self._server_sock: Optional[socket.socket] = None
-        self._wake_r: Optional[socket.socket] = None
-        self._wake_w: Optional[socket.socket] = None
-        self._thread: Optional[threading.Thread] = None
-        self._actual_port: Optional[int] = None
+        self._server_sock: socket.socket | None = None
+        self._wake_r: socket.socket | None = None
+        self._wake_w: socket.socket | None = None
+        self._thread: threading.Thread | None = None
+        self._actual_port: int | None = None
         self._clients: dict[socket.socket, ClientLink] = {}
         self._clients_lock = threading.Lock()
 
@@ -351,7 +352,7 @@ class NdjsonRpcEndpoint:
         code: ErrorCode,
         message: str,
         reason: str = "",
-        data: "Optional[dict]" = None,
+        data: dict | None = None,
     ) -> None:
         env = ErrorEnvelope(code=code.value, message=message, reason=reason, data=data)
         resp = Response(id=rid, ok=False, error=env)

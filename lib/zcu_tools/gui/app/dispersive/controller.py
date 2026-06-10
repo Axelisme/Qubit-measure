@@ -50,8 +50,8 @@ class Controller(BaseController[DispersiveState, EventBus]):
     def __init__(
         self,
         state: DispersiveState,
-        bus: Optional[EventBus] = None,
-        project_root: Optional[str] = None,
+        bus: EventBus | None = None,
+        project_root: str | None = None,
     ) -> None:
         super().__init__(state, bus if bus is not None else EventBus(), project_root)
         self._project = ProjectService(state)
@@ -60,8 +60,8 @@ class Controller(BaseController[DispersiveState, EventBus]):
         self._export = ExportService(state)
         # PredictService is bound to one (params, flux-axis); rebuilt lazily when
         # the preprocessing result or fit inputs change (see _predictor).
-        self._predict: Optional[PredictService] = None
-        self._predict_key: Optional[tuple] = None
+        self._predict: PredictService | None = None
+        self._predict_key: tuple | None = None
 
     # --- project ---------------------------------------------------------
 
@@ -69,7 +69,7 @@ class Controller(BaseController[DispersiveState, EventBus]):
         self._state.set_project(project)
         self._emit(ProjectChangedPayload())
 
-    def load_fit_inputs(self, params_path: Optional[str] = None) -> None:
+    def load_fit_inputs(self, params_path: str | None = None) -> None:
         self._project.load_fit_inputs(params_path)
         self._invalidate_predictor()
         self._emit(FitInputsLoadedPayload(has_inputs=True))
@@ -180,7 +180,7 @@ class Controller(BaseController[DispersiveState, EventBus]):
 
     # --- export ----------------------------------------------------------
 
-    def export_params(self, savepath: Optional[str] = None) -> str:
+    def export_params(self, savepath: str | None = None) -> str:
         return self._export.export_params(savepath)
 
     # --- predictor lifecycle (cache bound to params + flux axis) ---------

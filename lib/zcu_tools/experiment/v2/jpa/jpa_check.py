@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from pydantic import Field
-from typing_extensions import Any, Callable, Mapping, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo
@@ -41,7 +42,7 @@ class CheckResult:
     outputs: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[CheckCfg] = None
+    cfg_snapshot: CheckCfg | None = None
 
 
 def check_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -49,7 +50,7 @@ def check_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class CheckModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     readout: PulseReadoutCfg
 
 
@@ -82,7 +83,7 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, CheckCfg],
-            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             setup_devices(cfg, progress=False)
@@ -139,7 +140,7 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
         )
         return self.last_result
 
-    def analyze(self, result: Optional[CheckResult] = None) -> Figure:
+    def analyze(self, result: CheckResult | None = None) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -169,8 +170,8 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[CheckResult] = None,
-        comment: Optional[str] = None,
+        result: CheckResult | None = None,
+        comment: str | None = None,
         tag: str = "jpa/check",
         **kwargs,
     ) -> None:

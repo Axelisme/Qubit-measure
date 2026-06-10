@@ -56,7 +56,7 @@ class BasicBlockNode(IRNode):
 
     labels: list[LabelInst] = field(default_factory=list)
     insts: list[BaseInst] = field(default_factory=list)
-    branch: Optional[JumpInst] = None
+    branch: JumpInst | None = None
     disable_opt: bool = False
 
     def __post_init__(self) -> None:
@@ -138,9 +138,9 @@ class IRLoop(IRNode):
 
     name: str
     counter_reg: Register
-    n: Union[int, Register]
+    n: int | Register
     body: IRNode
-    range_hint: Optional[tuple[int, int]] = None
+    range_hint: tuple[int, int] | None = None
 
     def children(self) -> list[IRNode]:
         return [self.body]

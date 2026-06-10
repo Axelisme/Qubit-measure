@@ -51,7 +51,7 @@ class FluxPickResult(AnalyzeResultBase):
     flx_half: float
     flx_int: float
     flx_period: float
-    figure: Optional[Figure] = None
+    figure: Figure | None = None
 
 
 class FluxPickSession:
@@ -62,19 +62,19 @@ class FluxPickSession:
         self._host = host
 
     # pointer events: mutate the (passive) picker, then repaint
-    def on_press(self, x: Optional[float]) -> None:
+    def on_press(self, x: float | None) -> None:
         self._picker.on_press(x)
         self._host.redraw()
 
-    def on_move(self, x: Optional[float]) -> None:
+    def on_move(self, x: float | None) -> None:
         self._picker.on_move(x)
         self._host.redraw()
 
-    def on_release(self, x: Optional[float], y: Optional[float]) -> None:
+    def on_release(self, x: float | None, y: float | None) -> None:
         self._picker.on_release(x, y)
         self._host.redraw()
 
-    def actions(self) -> "list[tuple[str, str]]":
+    def actions(self) -> list[tuple[str, str]]:
         return [("auto_align", "Auto Align"), ("swap", "Swap Lines")]
 
     def invoke_action(self, action_id: str) -> None:

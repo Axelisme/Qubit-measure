@@ -44,14 +44,14 @@ class PersistedTab(BaseModel):
     # Opaque lowered cfg (raw dict) — WorkspaceService owns the raw↔live codec;
     # the memento and Caretaker never look inside.
     cfg_raw: dict[str, Any]
-    save_paths_override: Optional[SavePaths] = None
+    save_paths_override: SavePaths | None = None
 
 
 class PersistedSession(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     tabs: tuple[PersistedTab, ...] = ()
-    active_tab_index: Optional[int] = None
+    active_tab_index: int | None = None
 
 
 class AppPersistedState(BaseModel):

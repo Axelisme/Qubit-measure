@@ -11,7 +11,7 @@ class _FakeLivePlot1D:
     def __init__(self, *_: object, **__: object) -> None:
         pass
 
-    def __enter__(self) -> "_FakeLivePlot1D":
+    def __enter__(self) -> _FakeLivePlot1D:
         return self
 
     def __exit__(self, *_: object) -> None:

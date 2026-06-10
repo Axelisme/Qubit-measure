@@ -16,8 +16,8 @@ own handlers, which is assignable to this one.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Callable, Mapping
 
 from .param_spec import ParamSpec
 

@@ -13,7 +13,7 @@ the RPC method(s) the client may call to obtain current state.
 
 from __future__ import annotations
 
-from typing import Callable, Mapping, Optional
+from collections.abc import Callable, Mapping
 
 from zcu_tools.gui.app.fluxdep.event_bus import (
     ActiveSpectrumChangedPayload,
@@ -28,7 +28,7 @@ from zcu_tools.gui.app.fluxdep.event_bus import (
 
 # Wire payload type: a JSON-friendly mapping (never None for fluxdep — every
 # event carries something useful, but the type stays Optional for parity).
-WirePayload = Optional[Mapping[str, object]]
+WirePayload = Mapping[str, object] | None
 Serializer = Callable[[Payload], WirePayload]
 
 

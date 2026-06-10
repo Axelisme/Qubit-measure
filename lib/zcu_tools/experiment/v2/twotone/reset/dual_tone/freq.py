@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Literal, Optional, TypeAlias
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
-from typing_extensions import Any, Callable, Literal, Optional, TypeAlias
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -44,12 +45,12 @@ class FreqResult:
     freqs1: NDArray[np.float64]
     freqs2: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional["FreqCfg"] = None
+    cfg_snapshot: FreqCfg | None = None
 
 
 class FreqModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
-    init_pulse: Optional[PulseCfg] = None
+    reset: ResetCfg | None = None
+    init_pulse: PulseCfg | None = None
     tested_reset: TwoPulseResetCfg
     readout: ReadoutCfg
 
@@ -71,7 +72,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         soccfg,
         cfg: FreqCfg,
         *,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> FreqResult:
         setup_devices(cfg, progress=True)
         modules = cfg.modules
@@ -94,7 +95,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, FreqCfg],
-            update_hook: Optional[Callable],
+            update_hook: Callable | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules
@@ -153,7 +154,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         soccfg,
         cfg: FreqCfg,
         *,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> FreqResult:
         setup_devices(cfg, progress=True)
         modules = cfg.modules
@@ -172,7 +173,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, FreqCfg],
-            update_hook: Optional[Callable],
+            update_hook: Callable | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules
@@ -226,7 +227,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         cfg: FreqCfg,
         *,
         method: Literal["soft", "hard"] = "soft",
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> FreqResult:
         if method == "soft":
             return self.run_soft(soc, soccfg, cfg, acquire_kwargs=acquire_kwargs)
@@ -235,11 +236,11 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
     def analyze(
         self,
-        result: Optional[FreqResult] = None,
+        result: FreqResult | None = None,
         *,
         smooth: float = 1.0,
-        xname: Optional[str] = None,
-        yname: Optional[str] = None,
+        xname: str | None = None,
+        yname: str | None = None,
         corner_as_background: bool = False,
     ) -> tuple[float, float, Figure]:
         if result is None:
@@ -286,8 +287,8 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[FreqResult] = None,
-        comment: Optional[str] = None,
+        result: FreqResult | None = None,
+        comment: str | None = None,
         tag: str = "twotone/reset/dual_tone/freq",
         **kwargs,
     ) -> None:

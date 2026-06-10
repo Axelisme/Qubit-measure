@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -33,7 +34,7 @@ class PowerDepResult:
     gains: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[PowerDepCfg] = None
+    cfg_snapshot: PowerDepCfg | None = None
 
 
 def gaindep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -41,7 +42,7 @@ def gaindep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class PowerDepModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     readout: PulseReadoutCfg
 
 
@@ -57,7 +58,7 @@ class PowerDepCfg(ProgramV2Cfg, ExpCfgModel):
 
 class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
     def run(
-        self, soc, soccfg, cfg: PowerDepCfg, *, earlystop_snr: Optional[float] = None
+        self, soc, soccfg, cfg: PowerDepCfg, *, earlystop_snr: float | None = None
     ) -> PowerDepResult:
         orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
@@ -85,7 +86,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
         current_snr = 0.0
 
         def measure_fn(
-            ctx: TaskState[Any, Any, PowerDepCfg], update_hook: Optional[Callable]
+            ctx: TaskState[Any, Any, PowerDepCfg], update_hook: Callable | None
         ) -> list[NDArray[np.float64]]:
             nonlocal current_snr
 
@@ -157,15 +158,15 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
 
     def analyze(
         self,
-        result: Optional[PowerDepResult] = None,
+        result: PowerDepResult | None = None,
     ) -> None:
         raise NotImplementedError("Not implemented")
 
     def save(
         self,
         filepath: str,
-        result: Optional[PowerDepResult] = None,
-        comment: Optional[str] = None,
+        result: PowerDepResult | None = None,
+        comment: str | None = None,
         tag: str = "onetone/power_dep",
         **kwargs,
     ) -> None:

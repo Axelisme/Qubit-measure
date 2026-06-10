@@ -4,9 +4,7 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING
-
-from typing_extensions import Optional, TypeAlias, Union
+from typing import TYPE_CHECKING, Optional, TypeAlias, Union
 
 from .hw_semantics import GENERAL_REGS, VOLATILE_REGS, WAVE_REGS
 
@@ -222,7 +220,7 @@ class DmemAddr(Operand):
     serialization. If it does, the resolve step was skipped — a pipeline bug.
     """
 
-    table_labels: tuple["Label", ...]
+    table_labels: tuple[Label, ...]
 
     def regs(self) -> frozenset[str]:
         return frozenset()
@@ -235,10 +233,10 @@ class DmemAddr(Operand):
 
 
 # Type aliases
-ValueType: TypeAlias = Union[Register, Immediate, ImmValue]
-AddrType: TypeAlias = Union[Register, MemAddr]
-TimeType: TypeAlias = Union[Register, TimeOffset]
-SrcType: TypeAlias = Union[SrcKeyword, Register]
+ValueType: TypeAlias = Register | Immediate | ImmValue
+AddrType: TypeAlias = Register | MemAddr
+TimeType: TypeAlias = Register | TimeOffset
+SrcType: TypeAlias = SrcKeyword | Register
 
 
 @dataclass(frozen=True)
@@ -252,7 +250,7 @@ class AluExpr(Operand):
 
     lhs: Register
     op: AluOp
-    rhs: Optional[Union[Register, Immediate, DmemAddr]] = None
+    rhs: Register | Immediate | DmemAddr | None = None
 
     def regs(self) -> frozenset[str]:
         result = self.lhs.regs()
@@ -290,7 +288,7 @@ class SideWrite(Operand):
 # ---------------------------------------------------------------------------
 
 
-def parse_register(val: Union[Register, str, None]) -> Optional[Register]:
+def parse_register(val: Register | str | None) -> Register | None:
     if isinstance(val, Register):
         return val
     if not isinstance(val, str):
@@ -310,7 +308,7 @@ def parse_register(val: Union[Register, str, None]) -> Optional[Register]:
     return None
 
 
-def parse_immediate(val: Union[Immediate, str, int, None]) -> Optional[Immediate]:
+def parse_immediate(val: Immediate | str | int | None) -> Immediate | None:
     if isinstance(val, Immediate):
         return val
     if isinstance(val, int):
@@ -330,7 +328,7 @@ def parse_immediate(val: Union[Immediate, str, int, None]) -> Optional[Immediate
         return None
 
 
-def parse_time_offset(val: Union[TimeOffset, str, int, None]) -> Optional[TimeOffset]:
+def parse_time_offset(val: TimeOffset | str | int | None) -> TimeOffset | None:
     if isinstance(val, TimeOffset):
         return val
     if isinstance(val, int):
@@ -346,7 +344,7 @@ def parse_time_offset(val: Union[TimeOffset, str, int, None]) -> Optional[TimeOf
         return None
 
 
-def parse_mem_addr(val: Union[MemAddr, str, int, None]) -> Optional[MemAddr]:
+def parse_mem_addr(val: MemAddr | str | int | None) -> MemAddr | None:
     if isinstance(val, MemAddr):
         return val
     if isinstance(val, int):
@@ -364,7 +362,7 @@ def parse_mem_addr(val: Union[MemAddr, str, int, None]) -> Optional[MemAddr]:
         return None
 
 
-def parse_imm_value(val: Union[ImmValue, str, int, None]) -> Optional[ImmValue]:
+def parse_imm_value(val: ImmValue | str | int | None) -> ImmValue | None:
     """Parse a bare integer (no prefix)."""
     if isinstance(val, ImmValue):
         return val
@@ -385,7 +383,7 @@ def parse_imm_value(val: Union[ImmValue, str, int, None]) -> Optional[ImmValue]:
     return None
 
 
-def parse_label(val: Union[Label, LabelRef, str, None]) -> Optional[LabelRef]:
+def parse_label(val: Label | LabelRef | str | None) -> LabelRef | None:
     from .labels import PSEUDO_LABELS, Label, LabelRef
 
     if isinstance(val, LabelRef):
@@ -402,7 +400,7 @@ def parse_label(val: Union[Label, LabelRef, str, None]) -> Optional[LabelRef]:
     return LabelRef(Label(name))
 
 
-def parse_alu_expr(val: Union[AluExpr, str, None]) -> Optional[AluExpr]:
+def parse_alu_expr(val: AluExpr | str | None) -> AluExpr | None:
     if isinstance(val, AluExpr):
         return val
     if not isinstance(val, str):
@@ -444,7 +442,7 @@ def parse_alu_expr(val: Union[AluExpr, str, None]) -> Optional[AluExpr]:
     raise ValueError(f"Cannot parse ALU expression: {val!r}")
 
 
-def _parse_alu_rhs(token: str) -> Optional[Union[Register, Immediate]]:
+def _parse_alu_rhs(token: str) -> Register | Immediate | None:
     imm = parse_immediate(token)
     if imm is not None:
         return imm
@@ -452,7 +450,7 @@ def _parse_alu_rhs(token: str) -> Optional[Union[Register, Immediate]]:
     return reg
 
 
-def parse_side_write(val: Union[SideWrite, str, None]) -> Optional[SideWrite]:
+def parse_side_write(val: SideWrite | str | None) -> SideWrite | None:
     if isinstance(val, SideWrite):
         return val
     if not isinstance(val, str):
@@ -469,8 +467,8 @@ def parse_side_write(val: Union[SideWrite, str, None]) -> Optional[SideWrite]:
 
 
 def parse_value(
-    val: Union[Register, Immediate, ImmValue, str, int, None],
-) -> Optional[ValueType]:
+    val: Register | Immediate | ImmValue | str | int | None,
+) -> ValueType | None:
     """Parse into ValueType: Register | Immediate | ImmValue.
 
     Priority: Immediate (#N) > Register > ImmValue (bare int).
@@ -496,7 +494,7 @@ def parse_value(
     return Register(name=val_s)
 
 
-def parse_addr(val: Union[Register, MemAddr, str, None]) -> Optional[AddrType]:
+def parse_addr(val: Register | MemAddr | str | None) -> AddrType | None:
     """Parse into AddrType: Register | MemAddr."""
     if val is None:
         return None
@@ -516,7 +514,7 @@ def parse_addr(val: Union[Register, MemAddr, str, None]) -> Optional[AddrType]:
     return None
 
 
-def parse_time(val: Union[Register, TimeOffset, str, int, None]) -> Optional[TimeType]:
+def parse_time(val: Register | TimeOffset | str | int | None) -> TimeType | None:
     """Parse into TimeType: Register | TimeOffset."""
     if val is None:
         return None
@@ -538,7 +536,7 @@ def parse_time(val: Union[Register, TimeOffset, str, int, None]) -> Optional[Tim
     return None
 
 
-def parse_src(val: Union[SrcKeyword, Register, str, None]) -> Optional[SrcType]:
+def parse_src(val: SrcKeyword | Register | str | None) -> SrcType | None:
     if val is None:
         return None
     if isinstance(val, SrcKeyword):

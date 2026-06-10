@@ -157,3 +157,42 @@ def test_device_disconnect_spec_remember_defaults_to_true():
     spec = METHOD_SPECS["device.disconnect"]
     result = validate_params(spec.params, {"name": "flux"})
     assert result["remember"] is True
+
+
+# ---------------------------------------------------------------------------
+# _field_type_and_choices — PEP 604 (X | None) union compatibility
+# ---------------------------------------------------------------------------
+# These tests verify that _field_type_and_choices handles PEP 604 Optional
+# (types.UnionType) the same way it handles typing.Optional/typing.Union.
+# See Item 1 of Phase 5 Step 0: `origin is typing.Union` misses UnionType.
+
+
+def test_field_type_choices_typing_optional_unwraps():
+    """Baseline: typing.Optional[float] is unwrapped to ('float', None)."""
+    from typing import Optional
+
+    from zcu_tools.gui.app.main.services.remote.dispatch import _field_type_and_choices
+
+    result = _field_type_and_choices(Optional[float])  # noqa: UP045 — runtime arg not annotation
+    assert result == ("float", None)
+
+
+def test_field_type_choices_pep604_optional_unwraps():
+    """PEP 604: float | None must also be unwrapped to ('float', None)."""
+    import types  # noqa: F401 — ensure types.UnionType is available
+
+    from zcu_tools.gui.app.main.services.remote.dispatch import _field_type_and_choices
+
+    # Construct the PEP 604 union at runtime (not via annotation string eval).
+    annotation = float | None  # type: ignore[operator]
+    result = _field_type_and_choices(annotation)
+    assert result == ("float", None)
+
+
+def test_field_type_choices_pep604_optional_int_unwraps():
+    """PEP 604: int | None must also be unwrapped to ('int', None)."""
+    from zcu_tools.gui.app.main.services.remote.dispatch import _field_type_and_choices
+
+    annotation = int | None  # type: ignore[operator]
+    result = _field_type_and_choices(annotation)
+    assert result == ("int", None)

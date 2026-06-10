@@ -58,7 +58,7 @@ def test_branch_power_of_two_has_no_nop_padding(mock_prog):
 
 def test_branch_rejects_qickparam_duration(mock_prog):
     class _QickParamDurationModule(_FixedDurationModule):
-        def run(self, prog: Any, t: Union[float, QickParam] = 0.0) -> Any:
+        def run(self, prog: Any, t: float | QickParam = 0.0) -> Any:
             # We want to return a QickParam to trigger the Branch error,
             # but we cast to float to satisfy Pyright's override check.
             return QickParam(start=0.1)

@@ -19,8 +19,8 @@ def inductive_spectral_density(
 
 
 def inductive_spectral_density(
-    omega: Union[float, NDArray[np.float64]], Temp: float, EL: float
-) -> Union[float, NDArray[np.float64]]:
+    omega: float | NDArray[np.float64], Temp: float, EL: float
+) -> float | NDArray[np.float64]:
     """omega: rad/ns, EL: GHz, T: K -> GHz"""
     therm_ratio = calc_therm_ratio(omega, Temp)
     return (
@@ -73,9 +73,9 @@ def calc_Qind_vs_omega(
     omegas: NDArray[np.float64],
     T1s: NDArray[np.float64],
     phi_elements: NDArray[np.complex128],
-    T1errs: Optional[NDArray[np.float64]] = None,
+    T1errs: NDArray[np.float64] | None = None,
     Temp: float = 20e-3,
-) -> Union[NDArray[np.float64], tuple[NDArray[np.float64], NDArray[np.float64]]]:
+) -> NDArray[np.float64] | tuple[NDArray[np.float64], NDArray[np.float64]]:
     """params: GHz, omegas: rad/ns, T1s: ns, guess_Temp: K -> 1"""
     EJ, EC, EL = params
 

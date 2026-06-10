@@ -154,7 +154,7 @@ def _node_value_to_raw(spec: CfgNodeSpec, value: CfgNodeValue) -> object:
     return _to_json_compatible(value)
 
 
-def _sweep_edge_to_raw(value: Union[float, EvalValue]) -> object:
+def _sweep_edge_to_raw(value: float | EvalValue) -> object:
     if isinstance(value, EvalValue):
         return {"__kind": "eval", "expr": value.expr}
     return float(value)
@@ -230,7 +230,7 @@ def _node_value_from_raw(
     raise RuntimeError(f"Unsupported spec node for restore: {type(spec).__name__}")
 
 
-def _parse_sweep_edge(raw: object) -> Union[float, EvalValue]:
+def _parse_sweep_edge(raw: object) -> float | EvalValue:
     if (
         isinstance(raw, dict)
         and raw.get("__kind") == "eval"
@@ -311,7 +311,7 @@ def _raw_discriminator(raw_value: object, key: str) -> object:
 
 
 def _select_allowed_spec(
-    spec: Union[ModuleRefSpec, WaveformRefSpec],
+    spec: ModuleRefSpec | WaveformRefSpec,
     chosen_key: str,
     discriminator: object,
 ) -> CfgSectionSpec:

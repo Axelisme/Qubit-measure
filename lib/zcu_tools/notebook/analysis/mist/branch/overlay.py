@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any, Optional
+
 import numpy as np
 import plotly.graph_objects as go
 import qutip as qt
 from numpy.typing import NDArray
-from typing_extensions import TYPE_CHECKING, Any, Optional
 from zcu_tools.simulate.fluxonium.branch.floquet import FloquetBranchAnalysis
 
 
@@ -45,7 +46,7 @@ def plot_overlay(
     threshold: float,
     row: int = 1,
     col: int = 1,
-    line_kwargs: Optional[dict[str, Any]] = None,
+    line_kwargs: dict[str, Any] | None = None,
 ) -> None:
     crit_idxs = np.argmax(overlay < threshold, axis=1)
     crit_idxs[crit_idxs == 0] = len(sim_photons) - 1

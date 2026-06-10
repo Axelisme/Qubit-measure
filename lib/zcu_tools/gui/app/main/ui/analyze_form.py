@@ -23,9 +23,9 @@ from .fields import make_value_widget, read_value_widget
 class AnalyzeFormWidget(QWidget):
     params_changed: Signal = Signal(object)
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._params_cls: Optional[type[Any]] = None
+        self._params_cls: type[Any] | None = None
         self._widgets: dict[str, QWidget] = {}
         self._hydrating = False
 
@@ -145,7 +145,7 @@ class AnalyzeFormWidget(QWidget):
         self,
         widget: QWidget,
         bare_type: type,
-        choices: Optional[list[Any]],
+        choices: list[Any] | None,
         optional: bool = False,
     ) -> Any:
         if choices is not None and isinstance(widget, QComboBox):

@@ -46,7 +46,7 @@ class OperationOutcome:
     """
 
     status: OperationStatus
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class OperationHandles:
@@ -64,14 +64,14 @@ class OperationHandles:
         self._events: dict[int, threading.Event] = {}
         # Live operations' worker stop_event (None when the operation has no
         # cancellation point, e.g. a blocking connect — cancel is a no-op there).
-        self._stop_events: dict[int, Optional[threading.Event]] = {}
+        self._stop_events: dict[int, threading.Event | None] = {}
         # Settled operations, retained briefly (LRU) so a caller awaiting after
         # settle still returns the outcome immediately. The Event stays set.
         self._done: OrderedDict[int, tuple[threading.Event, OperationOutcome]] = (
             OrderedDict()
         )
 
-    def create(self, stop_event: Optional[threading.Event] = None) -> int:
+    def create(self, stop_event: threading.Event | None = None) -> int:
         """Mint an operation token and open its handle (pending). ``stop_event``
         is the worker's own cancellation flag (None when the op has no
         cancellation point); ``cancel`` sets it. Returns the token (operation_id).
@@ -112,7 +112,7 @@ class OperationHandles:
             self.cancel(token)
         return tokens
 
-    def await_outcome(self, token: int, timeout: float) -> Optional[OperationOutcome]:
+    def await_outcome(self, token: int, timeout: float) -> OperationOutcome | None:
         """Block until the token settles; return its outcome.
 
         Thread-safe; for off-main blocking handlers. A token with no live or
@@ -133,7 +133,7 @@ class OperationHandles:
         # Unknown / evicted: treat as already finished.
         return OperationOutcome("finished")
 
-    def poll(self, token: int) -> Optional[OperationOutcome]:
+    def poll(self, token: int) -> OperationOutcome | None:
         """Non-blocking: outcome if settled (or unknown), None if still pending."""
         if token in self._events:
             return None

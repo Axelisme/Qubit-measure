@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Optional, Type
+from typing import TYPE_CHECKING, Any, Optional
 
 from zcu_tools.meta_tool import ModuleLibrary
 
@@ -18,9 +18,9 @@ class NamedModuleValue:
 def select_named_module_value(
     *,
     ml: ModuleLibrary,
-    module_type: Type[Any],
+    module_type: type[Any],
     preferred_names: list[str],
-) -> Optional[NamedModuleValue]:
+) -> NamedModuleValue | None:
     from zcu_tools.gui.app.main.cfg_schemas import (
         module_cfg_to_value,  # lazy: avoids circular import
     )
@@ -33,7 +33,7 @@ def select_named_module_value(
     if not candidates:
         return None
 
-    chosen_name: Optional[str] = None
+    chosen_name: str | None = None
     for preferred_name in preferred_names:
         if preferred_name in candidates:
             chosen_name = preferred_name
@@ -47,7 +47,7 @@ def select_named_module_value(
 
 def select_named_waveform_value(
     ml: ModuleLibrary, preferred_names: list[str]
-) -> Optional[WaveformRefValue]:
+) -> WaveformRefValue | None:
     """Waveform twin of ``select_named_module_value``: first preferred-named
     library waveform → a LINKED ``WaveformRefValue``, else None."""
     from zcu_tools.gui.app.main.adapter import WaveformRefValue

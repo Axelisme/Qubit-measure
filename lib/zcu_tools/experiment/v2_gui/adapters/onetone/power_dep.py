@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import time
-
-from typing_extensions import ClassVar, Optional, TypeAlias
+from typing import ClassVar, Optional, TypeAlias
 
 from zcu_tools.experiment.v2.onetone.power_dep import (
     PowerDepCfg,
@@ -116,7 +115,7 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
         cfg_raw.pop("earlystop_snr", None)
         return req.ml.make_cfg(cfg_raw, PowerDepCfg)
 
-    def _earlystop_snr(self, raw_cfg: dict[str, object]) -> Optional[float]:
+    def _earlystop_snr(self, raw_cfg: dict[str, object]) -> float | None:
         value = raw_cfg.get("earlystop_snr")
         if not isinstance(value, (int, float)):
             return None

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+from typing import Any, Optional, Union, cast
+
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
-from typing_extensions import Any, Optional, Sequence, Union, cast
 
 from .segments import BaseSegmentLivePlot, ScatterSegment
 
@@ -14,8 +16,8 @@ class LivePlotScatter(BaseSegmentLivePlot):
         xlabel: str,
         ylabel: str,
         *,
-        segment_kwargs: Optional[dict[str, Any]] = None,
-        existed_axes: Optional[list[list[Axes]]] = None,
+        segment_kwargs: dict[str, Any] | None = None,
+        existed_axes: list[list[Axes]] | None = None,
         auto_close: bool = True,
         disable: bool = False,
     ) -> None:
@@ -33,14 +35,12 @@ class LivePlotScatter(BaseSegmentLivePlot):
         self,
         xs: NDArray[np.float64],
         ys: NDArray[np.float64],
-        colors: Union[
-            Sequence[str],
-            Sequence[tuple[float, float, float]],
-            Sequence[tuple[float, float, float, float]],
-            NDArray[np.float64],
-            None,
-        ] = None,
-        title: Optional[str] = None,
+        colors: Sequence[str]
+        | Sequence[tuple[float, float, float]]
+        | Sequence[tuple[float, float, float, float]]
+        | NDArray[np.float64]
+        | None = None,
+        title: str | None = None,
         refresh: bool = True,
     ) -> None:
         if self.disable:

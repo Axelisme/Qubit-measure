@@ -5,16 +5,16 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 import jupytext
-from typing_extensions import Optional
 
 # ------------------------------
 # Helper utilities
 # ------------------------------
 
 
-def get_jupytext_version() -> Optional[str]:
+def get_jupytext_version() -> str | None:
     """Checks for jupytext and returns its version."""
     try:
         result = subprocess.run(
@@ -98,7 +98,7 @@ def sync_files(
         processed_count += 1
         relative_path = source_file.relative_to(source_path)
         dest_file = dest_path / relative_path.with_suffix(dest_ext)
-        markdown_file: Optional[Path] = None
+        markdown_file: Path | None = None
 
         if source_file.suffix == ".md":
             markdown_file = source_file
@@ -110,7 +110,7 @@ def sync_files(
             continue
 
         # Pre-convert source to destination format for comparison/writing
-        source_notebook: Optional[dict] = None
+        source_notebook: dict | None = None
 
         # -------------------------------------------------------------
         # Fast-path: unconditional overwrite requested (e.g. nb2md mode)

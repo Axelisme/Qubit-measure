@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+from typing import Any, Optional
+
 import numpy as np
 from matplotlib.lines import Line2D
 from numpy.typing import NDArray
-from typing_extensions import Any, Mapping, Optional, Sequence
 
 from .base import AbsSegment, Axes
 
@@ -13,10 +15,10 @@ class Plot1DSegment(AbsSegment):
         self,
         xlabel: str,
         ylabel: str,
-        title: Optional[str] = None,
+        title: str | None = None,
         num_lines: int = 1,
         show_grid: bool = True,
-        line_kwargs: Optional[Sequence[Optional[Mapping[str, Any]]]] = None,
+        line_kwargs: Sequence[Mapping[str, Any] | None] | None = None,
     ) -> None:
         self.xlabel = xlabel
         self.ylabel = ylabel
@@ -42,7 +44,7 @@ class Plot1DSegment(AbsSegment):
                 kwargs_i.setdefault(k, v)
             self.line_kwargs.append(kwargs_i)
 
-        self.lines: Optional[list[Line2D]] = None
+        self.lines: list[Line2D] | None = None
 
     def init_ax(self, ax: Axes) -> None:
         ax.set_xlabel(self.xlabel)
@@ -67,7 +69,7 @@ class Plot1DSegment(AbsSegment):
         ax: Axes,
         xs: NDArray[np.float64],
         signals: NDArray[np.float64],
-        title: Optional[str] = None,
+        title: str | None = None,
     ) -> None:
         if self.lines is None:
             raise RuntimeError("Lines not initialized.")

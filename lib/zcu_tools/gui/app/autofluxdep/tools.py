@@ -24,8 +24,7 @@ mechanism it builds on.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-
-from typing_extensions import Any, Optional, Protocol
+from typing import Any, Optional, Protocol
 
 # SmoothMode is owned by nodes.spec (a dependency's ``smooth`` flag is one);
 # re-used here so Smoother and the SmoothingService speak the same modes.
@@ -77,7 +76,7 @@ class SimplePredictor:
     base: float = 5000.0
     slope: float = 50.0
     matrix_element: float = 0.1
-    _idw: "IDWInterpolation" = field(default_factory=lambda: _make_idw())
+    _idw: IDWInterpolation = field(default_factory=lambda: _make_idw())
 
     def _physical(self, flux: float) -> float:
         return self.base + self.slope * flux
@@ -177,7 +176,7 @@ class Smoother:
         self._last_idx[name] = idx
         return smoothed
 
-    def peek(self, name: str) -> Optional[float]:
+    def peek(self, name: str) -> float | None:
         """The current smoothed estimate, or None if never updated."""
         return self._prev.get(name)
 
@@ -193,6 +192,6 @@ class Tools:
     DerivationService that runs after Nodes, not a tool Nodes call.
     """
 
-    predictor: Optional[Predictor] = None
+    predictor: Predictor | None = None
     # an IDW error-corrector / freq-error model joins here in Phase B, alongside
     # the real FluxoniumPredictor.

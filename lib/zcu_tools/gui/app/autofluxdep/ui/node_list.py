@@ -34,7 +34,7 @@ class NodeListPane(QWidget):
     run_requested = Signal()
     stop_requested = Signal()
 
-    def __init__(self, ctrl: Controller, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, ctrl: Controller, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._ctrl = ctrl
         self._running = False

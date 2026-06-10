@@ -6,9 +6,7 @@ the pi entries before falling back to blank.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
-
-from typing_extensions import Literal, overload
+from typing import TYPE_CHECKING, Literal, Optional, overload
 
 from zcu_tools.gui.app.main.adapter import ModuleRefValue
 from zcu_tools.program.v2.modules.pulse import PulseCfg
@@ -42,7 +40,7 @@ def make_pi2_pulse_ref_default(
     preferred_names: list[str] = ...,
     *,
     optional: Literal[True],
-) -> Optional[ModuleRefValue]: ...
+) -> ModuleRefValue | None: ...
 
 
 def make_pi2_pulse_ref_default(
@@ -50,7 +48,7 @@ def make_pi2_pulse_ref_default(
     preferred_names: list[str] = PI2_PULSE_NAMES,
     *,
     optional: bool = False,
-) -> Optional[ModuleRefValue]:
+) -> ModuleRefValue | None:
     """Reference a library π/2 pulse (pi2_* → pi_*), else the blank one."""
     selected = select_named_module_value(
         ml=ctx.ml, module_type=PulseCfg, preferred_names=preferred_names

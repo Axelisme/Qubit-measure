@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Optional, Union
 
 from qick.asm_v2 import QickParam
-from typing_extensions import TYPE_CHECKING, Optional, Sequence, Union
 
 from .base import Module
 from .util import merge_max_length, round_timestamp
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 class Delay(Module):
     def __init__(
-        self, name: str, delay: Union[float, QickParam], tag: Optional[str] = None
+        self, name: str, delay: float | QickParam, tag: str | None = None
     ) -> None:
         self.name = name
         self.delay = delay
@@ -25,8 +26,8 @@ class Delay(Module):
     def init(self, prog: ModularProgramV2) -> None: ...
 
     def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
+        self, prog: ModularProgramV2, t: float | QickParam = 0.0
+    ) -> float | QickParam:
         prog.delay(t=round_timestamp(prog, t + self.delay), tag=self.tag)
 
         return 0.0  # reset reference time
@@ -36,7 +37,7 @@ class Delay(Module):
 
 
 class SoftDelay(Module):
-    def __init__(self, name: str, delay: Union[float, QickParam]) -> None:
+    def __init__(self, name: str, delay: float | QickParam) -> None:
         self.name = name
         self.delay = delay
 
@@ -44,8 +45,8 @@ class SoftDelay(Module):
         pass
 
     def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
+        self, prog: ModularProgramV2, t: float | QickParam = 0.0
+    ) -> float | QickParam:
         return round_timestamp(prog, t + self.delay)
 
     def allow_rerun(self) -> bool:
@@ -56,10 +57,10 @@ class DelayAuto(Module):
     def __init__(
         self,
         name: str,
-        t: Union[float, QickParam, str] = 0.0,
+        t: float | QickParam | str = 0.0,
         gens: bool = True,
         ros: bool = True,
-        tag: Optional[str] = None,
+        tag: str | None = None,
     ) -> None:
         self.name = name
         self.t = t
@@ -73,8 +74,8 @@ class DelayAuto(Module):
     def init(self, prog: ModularProgramV2) -> None: ...
 
     def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
+        self, prog: ModularProgramV2, t: float | QickParam = 0.0
+    ) -> float | QickParam:
         if isinstance(self.t, str):
             prog.delay_reg_auto(time_reg=self.t, gens=self.gens, ros=self.ros)
         else:
@@ -86,7 +87,7 @@ class DelayAuto(Module):
 
 
 class Join(Module):
-    def __init__(self, *args: Union[Module, Sequence[Module]]) -> None:
+    def __init__(self, *args: Module | Sequence[Module]) -> None:
         self.name = ""
 
         if len(args) == 0:
@@ -106,8 +107,8 @@ class Join(Module):
                 m.init(prog)
 
     def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
+        self, prog: ModularProgramV2, t: float | QickParam = 0.0
+    ) -> float | QickParam:
         logger.debug(
             "Join.run: %d parallel branches, t=%s",
             len(self.join_modules),
@@ -115,9 +116,9 @@ class Join(Module):
         )
 
         list_modules = list(list(list_mod) for list_mod in self.join_modules)
-        cur_t_list: list[Union[float, QickParam]] = [t for _ in list_modules]
+        cur_t_list: list[float | QickParam] = [t for _ in list_modules]
 
-        def find_next_branch() -> Optional[int]:
+        def find_next_branch() -> int | None:
             min_i = None
             min_t = 0.0
             for i, (t, mod_list) in enumerate(zip(cur_t_list, list_modules)):

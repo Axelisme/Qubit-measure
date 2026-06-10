@@ -101,7 +101,8 @@ from __future__ import annotations
 import os
 import time
 from collections import namedtuple
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple, Union
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 import h5py
 import numpy as np
@@ -168,7 +169,7 @@ def _str_array(values: Sequence[str]) -> np.ndarray:
 # ----------------------------------------------------------------------------
 
 
-def _enum_i2(mapping: Dict[str, int]) -> np.dtype:
+def _enum_i2(mapping: dict[str, int]) -> np.dtype:
     return h5py.special_dtype(enum=(np.int16, mapping))
 
 
@@ -352,18 +353,18 @@ class LabberData:
 
     def __init__(
         self,
-        data: "Union[Channel, Tuple[str, str, Any]]",
-        axes: "Sequence[Union[Channel, Tuple[str, str, Any]]]",
+        data: Channel | tuple[str, str, Any],
+        axes: Sequence[Channel | tuple[str, str, Any]],
         *,
         comment: str = "",
-        tags: Optional[Union[str, Sequence[str]]] = None,
+        tags: str | Sequence[str] | None = None,
         project: str = "",
         user: str = "",
         timestamps: Any = None,
-        creation_time: Optional[float] = None,
+        creation_time: float | None = None,
     ) -> None:
         self.data: Channel = _as_channel(data, "data")
-        self.axes: List[Channel] = [
+        self.axes: list[Channel] = [
             _as_channel(a, f"axes[{i}]") for i, a in enumerate(axes)
         ]
         self.comment = comment
@@ -398,7 +399,7 @@ class LabberData:
         """Unpack as ``z, x, y`` (matches the old ``load_local_data`` API)."""
         return iter((self.z, self.x, self.y))
 
-    def get_log_channels(self) -> List[Dict[str, Any]]:
+    def get_log_channels(self) -> list[dict[str, Any]]:
         """Labber-style list of log-channel dicts (``name``/``unit``/...)."""
         vals = self.data.values
         complex_ = bool(
@@ -413,7 +414,7 @@ class LabberData:
             }
         ]
 
-    def get_step_channels(self) -> List[Dict[str, Any]]:
+    def get_step_channels(self) -> list[dict[str, Any]]:
         """Labber-style list of step-channel dicts, inner axis first."""
         return [
             {
@@ -452,7 +453,7 @@ class LabberData:
         return _save_labber_data(path, self)
 
     @classmethod
-    def load(cls, path: str) -> "LabberData":
+    def load(cls, path: str) -> LabberData:
         """Load a :class:`LabberData` from a Labber HDF5 file.
 
         Accepts a path with or without the ``.hdf5`` extension.  Reads every log
@@ -483,14 +484,14 @@ class LabberData:
 
 def save_labber_data(
     path: str,
-    z: "Tuple[str, str, ArrayLike]",
-    axes: "Sequence[Tuple[str, str, ArrayLike]]",
+    z: tuple[str, str, ArrayLike],
+    axes: Sequence[tuple[str, str, ArrayLike]],
     *,
     comment: str = "",
-    tags: Optional[Union[str, Sequence[str]]] = None,
+    tags: str | Sequence[str] | None = None,
     project: str = "",
     user: str = "",
-    timestamps: "Optional[ArrayLike]" = None,
+    timestamps: ArrayLike | None = None,
 ) -> str:
     """Save complex measurement data to a Labber-compatible HDF5 log file.
 
@@ -544,7 +545,7 @@ def save_labber_data(
     ).save(path)
 
 
-def _save_labber_data(path: str, ld: "LabberData") -> str:
+def _save_labber_data(path: str, ld: LabberData) -> str:
     """Core writer for uniform-grid data (the ``Data/Data`` scalar layout)."""
     z_name, z_unit, z_values = ld.data
     z_arr = np.asarray(z_values, dtype=complex)
@@ -597,7 +598,7 @@ def _as_tag_list(tags):
     return list(tags)
 
 
-def _unpack_triple(triple, what: str) -> Tuple[str, str, Any]:
+def _unpack_triple(triple, what: str) -> tuple[str, str, Any]:
     """Validate and unpack a ``(name, unit, values)`` triple."""
     try:
         name, unit, values = triple
@@ -608,7 +609,7 @@ def _unpack_triple(triple, what: str) -> Tuple[str, str, Any]:
     return str(name), str(unit), values
 
 
-def _as_channel(triple, what: str) -> "Channel":
+def _as_channel(triple, what: str) -> Channel:
     """Coerce a ``(name, unit, values)`` tuple (or Channel) into a Channel."""
     if isinstance(triple, Channel):
         return Channel(str(triple.name), str(triple.unit), triple.values)
@@ -638,15 +639,15 @@ def _resolve_timestamps(timestamps, n_entry):
 
 def save_labber_trace_data(
     path: str,
-    z: "Tuple[str, str, Sequence]",
-    x: "Tuple[str, str, Union[ArrayLike, Sequence[ArrayLike]]]",
-    y: "Optional[Tuple[str, str, ArrayLike]]" = None,
+    z: tuple[str, str, Sequence],
+    x: tuple[str, str, ArrayLike | Sequence[ArrayLike]],
+    y: tuple[str, str, ArrayLike] | None = None,
     *,
     comment: str = "",
-    tags: Optional[Union[str, Sequence[str]]] = None,
+    tags: str | Sequence[str] | None = None,
     project: str = "",
     user: str = "",
-    timestamps: "Optional[ArrayLike]" = None,
+    timestamps: ArrayLike | None = None,
 ) -> str:
     """Save **variable-length** complex traces (Labber ``vector=True`` mode).
 
@@ -701,7 +702,7 @@ def save_labber_trace_data(
     ).save(path)
 
 
-def _save_labber_trace_data(path: str, ld: "LabberData") -> str:
+def _save_labber_trace_data(path: str, ld: LabberData) -> str:
     """Core writer for variable-length traces (the ``Traces/`` layout)."""
     z_name, z_unit, traces = ld.data
     x_name, x_unit, x_values = ld.axes[0]
@@ -1001,7 +1002,7 @@ def _write_data_group(f, axis_list, log_channels, step_dims, z, n_entry, n_x, ts
     g = f.create_group("Data")
 
     # column layout: step channels (1 col each), then log channels (2 cols)
-    names_info: List[Tuple[str, str]] = [(name, "") for name, _u, _v in axis_list]
+    names_info: list[tuple[str, str]] = [(name, "") for name, _u, _v in axis_list]
     for name, _u in log_channels:
         names_info.append((name, "Real"))
         names_info.append((name, "Imaginary"))
@@ -1177,9 +1178,9 @@ def _resolve_path(path: str) -> str:
     return cand if os.path.exists(cand) else path
 
 
-def _all_log_refs(f: h5py.File) -> List[Any]:
+def _all_log_refs(f: h5py.File) -> list[Any]:
     """Root (if it holds Data) plus Log_2, Log_3 ... in sorted order."""
-    refs: List[Any] = []
+    refs: list[Any] = []
     if "Data" in f:
         refs.append(f)
     log_ns = sorted(
@@ -1227,7 +1228,7 @@ def _read_single_log(f, log):
 
     # axis values + labels/units
     units = _channel_units(f, log)
-    axes: List[Tuple[str, str, np.ndarray]] = []
+    axes: list[tuple[str, str, np.ndarray]] = []
     for k in range(n_axes):
         name = col_names[k][0]
         if k == 0:
@@ -1304,7 +1305,7 @@ def _read_trace_log(f, log, z_name):
         x = _x_for(0, n)
 
     # outer axes from Data/Data step columns (skip the dummy Step index API)
-    axes: List[Tuple[str, str, np.ndarray]] = [(x_name, x_unit, np.asarray(x))]
+    axes: list[tuple[str, str, np.ndarray]] = [(x_name, x_unit, np.asarray(x))]
     outer_axes = _read_outer_step_axes(f, log)
     axes.extend(outer_axes)
 
@@ -1375,8 +1376,8 @@ def _data_step_dims(log, n_x, n_entry, n_axes):
     return [n_x, n_entry] + [1] * (n_axes - 2)
 
 
-def _read_tags(f) -> Tuple[List[str], str, str]:
-    tags: List[str] = []
+def _read_tags(f) -> tuple[list[str], str, str]:
+    tags: list[str] = []
     project = user = ""
     if "Tags" in f:
         a = f["Tags"].attrs
@@ -1392,9 +1393,9 @@ def _read_tags(f) -> Tuple[List[str], str, str]:
     return tags, project or "", user or ""
 
 
-def _channel_units(f, log) -> Dict[str, str]:
+def _channel_units(f, log) -> dict[str, str]:
     """Map channel name -> physical unit, from the root/log ``Channels`` table."""
-    units: Dict[str, str] = {}
+    units: dict[str, str] = {}
     src = log if "Channels" in log else f
     if "Channels" in src:
         for row in src["Channels"][()]:
@@ -1402,7 +1403,7 @@ def _channel_units(f, log) -> Dict[str, str]:
     return units
 
 
-def _read_log_label(f, log) -> Tuple[str, str]:
+def _read_log_label(f, log) -> tuple[str, str]:
     """Return (z_name, z_unit) of the first log channel."""
     z_name = ""
     src = log if "Log list" in log else f

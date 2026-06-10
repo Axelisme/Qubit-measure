@@ -65,7 +65,7 @@ class _ActiveLease:
 
     kind: str  # wire string of the OperationKind
     owner_id: str
-    resource_id: Optional[str] = None
+    resource_id: str | None = None
 
 
 class OperationGate(ExclusionGate):
@@ -106,7 +106,7 @@ class OperationGate(ExclusionGate):
         kind: str,
         *,
         owner_id: str,
-        resource_id: Optional[str] = None,
+        resource_id: str | None = None,
     ) -> None:
         """Add an active exclusion lease under ``token``. Precondition:
         ``ensure_can_start(kind)`` has passed (single-threaded, so no race

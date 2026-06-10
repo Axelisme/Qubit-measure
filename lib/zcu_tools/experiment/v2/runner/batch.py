@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import logging
-
-from typing_extensions import Hashable, Mapping, Optional, TypeVar
+from collections.abc import Hashable, Mapping
+from typing import Optional, TypeVar
 
 from zcu_tools.progress_bar import BaseProgressBar, make_pbar
 
@@ -20,7 +20,7 @@ class BatchTask(AbsTask[dict[T_Key, T_ChildResult], T_RootResult, T_Cfg]):
     ) -> None:
         self.tasks = dict(tasks)
 
-        self.task_pbar: Optional[BaseProgressBar] = None
+        self.task_pbar: BaseProgressBar | None = None
         self.dynamic_pbar: bool = False
 
     def _build_pbar(self, leave: bool) -> BaseProgressBar:

@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
-from typing_extensions import Any, Callable, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -42,11 +43,11 @@ from zcu_tools.utils.datasaver import load_data, save_data
 class FluxResult:
     fluxes: NDArray[np.float64]
     signals: NDArray[np.float64]
-    cfg_snapshot: Optional[FluxCfg] = None
+    cfg_snapshot: FluxCfg | None = None
 
 
 class FluxModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
@@ -67,7 +68,7 @@ class FluxExp(AbsExperiment[FluxResult, FluxCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.float64], Any, FluxCfg],
-            update_hook: Optional[Callable[[int, list[MomentTracker]], None]],
+            update_hook: Callable[[int, list[MomentTracker]], None] | None,
         ) -> list[MomentTracker]:
             cfg = ctx.cfg
             setup_devices(cfg, progress=False)
@@ -120,7 +121,7 @@ class FluxExp(AbsExperiment[FluxResult, FluxCfg]):
         )
         return self.last_result
 
-    def analyze(self, result: Optional[FluxResult] = None) -> tuple[float, Figure]:
+    def analyze(self, result: FluxResult | None = None) -> tuple[float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -152,8 +153,8 @@ class FluxExp(AbsExperiment[FluxResult, FluxCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[FluxResult] = None,
-        comment: Optional[str] = None,
+        result: FluxResult | None = None,
+        comment: str | None = None,
         tag: str = "jpa/flux",
         **kwargs,
     ) -> None:

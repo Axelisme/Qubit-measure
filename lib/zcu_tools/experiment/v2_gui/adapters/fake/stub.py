@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Annotated, ClassVar, Optional, TypeAlias, cast
 
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
-from typing_extensions import Annotated, ClassVar, Optional, Sequence, TypeAlias, cast
 
 from zcu_tools.experiment.base import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -33,7 +34,7 @@ from zcu_tools.gui.app.main.adapter import (
 @dataclass(frozen=True)
 class FakeResult:
     data: np.ndarray
-    cfg_snapshot: Optional[FakeExpCfg] = None
+    cfg_snapshot: FakeExpCfg | None = None
 
 
 class FakeExpCfg(ExpCfgModel):
@@ -50,7 +51,7 @@ class FakeExp(AbsExperiment[FakeResult, FakeExpCfg]):
         signals = rng.normal(0.0, cfg.noise_scale, size=11)
         return FakeResult(data=signals)
 
-    def save(self, filepath: str, result: Optional[FakeResult] = None) -> None:
+    def save(self, filepath: str, result: FakeResult | None = None) -> None:
         pass
 
 

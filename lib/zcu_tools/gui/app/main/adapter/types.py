@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 from abc import ABC
+from collections.abc import Callable
 from dataclasses import InitVar, dataclass, field, replace
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol, Union
-
-from typing_extensions import Generic, Self, TypeAlias, TypeVar
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Generic,
+    Optional,
+    Protocol,
+    Self,
+    TypeAlias,
+    TypeVar,
+)
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
@@ -111,7 +119,7 @@ class AnalyzeResultBase:
 
 class AnalyzeResultWithFigure(Protocol):
     @property
-    def figure(self) -> Optional["Figure"]: ...
+    def figure(self) -> Figure | None: ...
 
     def to_summary_dict(self) -> dict[str, object]: ...
 
@@ -125,7 +133,7 @@ class NoAnalyzeParams:
 class NoAnalysisResult(AnalyzeResultBase):
     """Default analyze-result type for adapters without analysis."""
 
-    figure: Optional["Figure"] = None
+    figure: Figure | None = None
 
 
 # PEP 696 defaults: adapters without analysis omit the last two generic args
@@ -140,8 +148,8 @@ T_AnalyzeParams = TypeVar("T_AnalyzeParams", default=NoAnalyzeParams)
 class RunRequest:
     md: MetaDict
     ml: ModuleLibrary
-    soc: Optional[SocHandle]
-    soccfg: Optional[SocCfgHandle]
+    soc: SocHandle | None
+    soccfg: SocCfgHandle | None
 
 
 @dataclass(frozen=True)
@@ -150,7 +158,7 @@ class AnalyzeRequest(Generic[T_Result, T_AnalyzeParams]):
     analyze_params: T_AnalyzeParams
     md: MetaDict
     ml: ModuleLibrary
-    predictor: Optional[FluxoniumPredictor]
+    predictor: FluxoniumPredictor | None
 
 
 # ---------------------------------------------------------------------------
@@ -169,7 +177,7 @@ class InteractiveHost(Protocol):
     ``setup_interactive_analysis``'s signature."""
 
     @property
-    def figure(self) -> "Figure":
+    def figure(self) -> Figure:
         """The matplotlib Figure the session draws its interactive plot on."""
         ...
 
@@ -193,11 +201,11 @@ class InteractiveSession(Protocol):
     pointer events + action-button clicks to it and, on Done, calls ``finish()``.
     Qt-free: it deals in matplotlib coordinates + a host port, never Qt widgets."""
 
-    def on_press(self, x: Optional[float]) -> None: ...
-    def on_move(self, x: Optional[float]) -> None: ...
-    def on_release(self, x: Optional[float], y: Optional[float]) -> None: ...
+    def on_press(self, x: float | None) -> None: ...
+    def on_move(self, x: float | None) -> None: ...
+    def on_release(self, x: float | None, y: float | None) -> None: ...
 
-    def actions(self) -> "list[tuple[str, str]]":
+    def actions(self) -> list[tuple[str, str]]:
         """``[(action_id, label)]`` — generic toolbar buttons the host renders; on
         click the host calls ``invoke_action(action_id)``. The host never learns
         what an action does."""
@@ -219,8 +227,8 @@ class InteractiveSession(Protocol):
 class SaveDataRequest(Generic[T_Result]):
     run_result: T_Result
     data_path: str
-    md: "MetaDict"
-    ml: "ModuleLibrary"
+    md: MetaDict
+    ml: ModuleLibrary
     chip_name: str
     qub_name: str
     res_name: str
@@ -257,18 +265,18 @@ class MetaDictWriteback(WritebackItem):
 
 @dataclass
 class ModuleWriteback(WritebackItem):
-    edit_schema: Optional["CfgSchema"] = None
+    edit_schema: CfgSchema | None = None
     # editor_id of the service-owned (gc=False) cfg model that holds this item's
     # live draft (ADR-0008). Stamped by WritebackService at compute time; the
     # agent edits via editor.set_field(editor_id, …), the user's Edit dialog
     # attaches to the same model.
-    editor_id: Optional[str] = field(default=None, init=False)
+    editor_id: str | None = field(default=None, init=False)
 
 
 @dataclass
 class WaveformWriteback(WritebackItem):
-    edit_schema: Optional["CfgSchema"] = None
-    editor_id: Optional[str] = field(default=None, init=False)
+    edit_schema: CfgSchema | None = None
+    editor_id: str | None = field(default=None, init=False)
 
 
 @dataclass
@@ -298,7 +306,7 @@ def _split_spec_path(path: str) -> list[str]:
     return parts
 
 
-def _path_exists(spec: "CfgSectionSpec", parts: list[str]) -> bool:
+def _path_exists(spec: CfgSectionSpec, parts: list[str]) -> bool:
     """True if the dotted ``parts`` resolve to a leaf within ``spec`` (descending
     CfgSectionSpec.fields and ModuleRefSpec/WaveformRefSpec.allowed). Used by the
     duck-type descent to decide which allowed shapes contain a path."""
@@ -320,8 +328,8 @@ class ScalarSpec:
     label: str
     type: type
     editable: bool = True
-    choices: Optional[list] = None
-    decimals: Optional[int] = None
+    choices: list | None = None
+    decimals: int | None = None
     required: bool = False
     # ``optional``: the field may be left empty (value ``None``) and is *valid*
     # while empty — at lowering an unset optional scalar is omitted so the model
@@ -346,7 +354,7 @@ def IntSpec(
     label: str,
     *,
     editable: bool = True,
-    choices: Optional[list] = None,
+    choices: list | None = None,
     required: bool = False,
     optional: bool = False,
     group: str = "",
@@ -371,9 +379,9 @@ def IntSpec(
 def FloatSpec(
     label: str,
     *,
-    decimals: Optional[int] = None,
+    decimals: int | None = None,
     editable: bool = True,
-    choices: Optional[list] = None,
+    choices: list | None = None,
     required: bool = False,
     optional: bool = False,
     group: str = "",
@@ -406,12 +414,12 @@ class LiteralSpec:
 class SweepSpec:
     label: str = "Sweep"
     editable: bool = True
-    decimals: Optional[int] = None
+    decimals: int | None = None
 
 
 @dataclass(frozen=True)
 class ModuleRefSpec:
-    allowed: list["CfgSectionSpec"]
+    allowed: list[CfgSectionSpec]
     label: str = "Module"
     optional: bool = False
 
@@ -428,7 +436,7 @@ class ModuleRefSpec:
             _split_spec_path(path), lambda leaf: LiteralSpec(value=value)
         )
 
-    def _with_override(self, parts: list[str], fn: "_LeafTransform") -> Self:
+    def _with_override(self, parts: list[str], fn: _LeafTransform) -> Self:
         # Duck-type descent: apply to every allowed shape that contains the path,
         # skip those that don't. Fail only if no allowed shape matches (real typo).
         new_allowed: list[CfgSectionSpec] = []
@@ -450,7 +458,7 @@ class ModuleRefSpec:
 
 @dataclass(frozen=True)
 class WaveformRefSpec:
-    allowed: list["CfgSectionSpec"]
+    allowed: list[CfgSectionSpec]
     label: str = "Waveform"
     optional: bool = False
 
@@ -467,7 +475,7 @@ class WaveformRefSpec:
             _split_spec_path(path), lambda leaf: LiteralSpec(value=value)
         )
 
-    def _with_override(self, parts: list[str], fn: "_LeafTransform") -> Self:
+    def _with_override(self, parts: list[str], fn: _LeafTransform) -> Self:
         # Duck-type descent: apply to every allowed shape that contains the path,
         # skip those that don't. Fail only if no allowed shape matches (real typo).
         new_allowed: list[CfgSectionSpec] = []
@@ -489,11 +497,11 @@ class WaveformRefSpec:
 
 @dataclass(frozen=True)
 class CfgSectionSpec:
-    fields: dict[str, "CfgNodeSpec"] = field(default_factory=dict)
+    fields: dict[str, CfgNodeSpec] = field(default_factory=dict)
     label: str = ""
-    inherit_hook: Optional[
-        Callable[["CfgSectionValue", "CfgSectionSpec"], Optional["CfgSectionValue"]]
-    ] = None
+    inherit_hook: (
+        Callable[[CfgSectionValue, CfgSectionSpec], CfgSectionValue | None] | None
+    ) = None
 
     # -- fluent spec overrides (return a new frozen spec; never mutate) -------
     #
@@ -513,7 +521,7 @@ class CfgSectionSpec:
             _split_spec_path(path), lambda leaf: LiteralSpec(value=value)
         )
 
-    def _with_override(self, parts: list[str], fn: "_LeafTransform") -> Self:
+    def _with_override(self, parts: list[str], fn: _LeafTransform) -> Self:
         head, rest = parts[0], parts[1:]
         if head not in self.fields:
             raise RuntimeError(
@@ -540,15 +548,15 @@ class DeviceRefSpec:
     label: str = "Device"
 
 
-CfgNodeSpec = Union[
-    ScalarSpec,
-    LiteralSpec,
-    SweepSpec,
-    ModuleRefSpec,
-    WaveformRefSpec,
-    CfgSectionSpec,
-    DeviceRefSpec,
-]
+CfgNodeSpec = (
+    ScalarSpec
+    | LiteralSpec
+    | SweepSpec
+    | ModuleRefSpec
+    | WaveformRefSpec
+    | CfgSectionSpec
+    | DeviceRefSpec
+)
 
 
 # ---------------------------------------------------------------------------
@@ -565,27 +573,27 @@ class DirectValue:
     unambiguously means unset. The ``DirectValue`` wrapper is kept even when
     unset so the scalar's *mode* (direct vs ``EvalValue``) survives."""
 
-    value: Optional[Any] = None
+    value: Any | None = None
 
 
 @dataclass(frozen=True)
 class EvalValue:
     expr: str
-    resolved: Optional[Any] = None
-    error: Optional[str] = None
+    resolved: Any | None = None
+    error: str | None = None
 
 
-ScalarValue: TypeAlias = Union[DirectValue, EvalValue]
+ScalarValue: TypeAlias = DirectValue | EvalValue
 
 # Accepted input for the value-tree fluent ``with_field``: a raw scalar (wrapped
 # in DirectValue) or an already-built scalar value.
-ScalarLeafInput: TypeAlias = Union[int, float, str, bool, DirectValue, EvalValue]
+ScalarLeafInput: TypeAlias = int | float | str | bool | DirectValue | EvalValue
 
 
 @dataclass
 class SweepValue:
-    start: Union[float, EvalValue]
-    stop: Union[float, EvalValue]
+    start: float | EvalValue
+    stop: float | EvalValue
     expts: int
     step: float = 0.1
     # ``auto_norm`` (init-only) derives ``step`` from start/stop/expts at
@@ -617,7 +625,7 @@ class SweepValue:
 @dataclass
 class ModuleRefValue:
     chosen_key: str
-    value: "CfgSectionValue"
+    value: CfgSectionValue
     # True when chosen_key names a library entry but the user has edited value
     # away from the library snapshot (LibraryBindingState.MODIFIED). Persisted so
     # the override survives reload; False for pure library refs and <Custom:> refs.
@@ -638,7 +646,7 @@ class ModuleRefValue:
 @dataclass
 class WaveformRefValue:
     chosen_key: str
-    value: "CfgSectionValue"
+    value: CfgSectionValue
     is_overridden: bool = False
 
     def with_field(self, path: str, value: ScalarLeafInput) -> Self:
@@ -653,7 +661,7 @@ class CfgSectionValue:
     # is represented by ``None`` (the entry is present, its value is None) — never
     # by omitting the key. "None" here means "this optional ref is not enabled",
     # distinct from a "None Reset" library entry (a real, enabled reset choice).
-    fields: dict[str, "Optional[CfgNodeValue]"] = field(default_factory=dict)
+    fields: dict[str, CfgNodeValue | None] = field(default_factory=dict)
 
     def with_field(self, path: str, value: ScalarLeafInput) -> Self:
         """Set the scalar leaf at dotted ``path`` (in-place, returns self).
@@ -684,13 +692,9 @@ class CfgSectionValue:
         return self
 
 
-CfgNodeValue = Union[
-    ScalarValue,
-    SweepValue,
-    ModuleRefValue,
-    WaveformRefValue,
-    CfgSectionValue,
-]
+CfgNodeValue = (
+    ScalarValue | SweepValue | ModuleRefValue | WaveformRefValue | CfgSectionValue
+)
 
 
 # ---------------------------------------------------------------------------
@@ -703,7 +707,7 @@ class CfgSchema:
     spec: CfgSectionSpec
     value: CfgSectionValue
 
-    def validate(self, ml: "Optional[ModuleLibrary]") -> None:
+    def validate(self, ml: ModuleLibrary | None) -> None:
         """Fast-fail if the value tree is structurally incomplete or violates the
         spec — the *static* contract (structure complete, every spec field has an
         entry, LiteralSpec == spec.value, DirectValue scalar type/choices).
@@ -714,7 +718,7 @@ class CfgSchema:
 
         validate_section(self.spec, self.value, ml, [])
 
-    def validate_dynamic(self, md: "MetaDict", ml: "Optional[ModuleLibrary]") -> None:
+    def validate_dynamic(self, md: MetaDict, ml: ModuleLibrary | None) -> None:
         """Fast-fail if the value tree cannot be lowered with the given md.
 
         The *dynamic* contract: every scalar must have a value (no
@@ -727,7 +731,7 @@ class CfgSchema:
         validate_dynamic_section(self.spec, self.value, md, ml, [])
 
     def to_raw_dict(
-        self, md: "Optional[MetaDict]", ml: "Optional[ModuleLibrary]"
+        self, md: MetaDict | None, ml: ModuleLibrary | None
     ) -> dict[str, object]:
         """Lower the current schema into a raw experiment config dictionary.
 

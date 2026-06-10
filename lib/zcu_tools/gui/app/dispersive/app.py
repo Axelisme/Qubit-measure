@@ -30,9 +30,9 @@ if TYPE_CHECKING:
 
 
 def run_app(
-    project: Optional[ProjectInfo] = None,
-    control: Optional["ControlOptions"] = None,
-    project_root: Optional[str] = None,
+    project: ProjectInfo | None = None,
+    control: ControlOptions | None = None,
+    project_root: str | None = None,
 ) -> None:
     """Build and launch the dispersive-fit-gui. Blocks until the window is closed.
 
@@ -47,9 +47,7 @@ def run_app(
             DispersiveState(project), EventBus(), project_root=project_root
         )
 
-    def adapter_factory(
-        ctrl: Controller, opts: "ControlOptions"
-    ) -> "RemoteControlAdapter":
+    def adapter_factory(ctrl: Controller, opts: ControlOptions) -> RemoteControlAdapter:
         # Lazily import the remote layer so it is pulled in only when a control
         # socket is requested (the read-only bridge / MCP path), not on a plain
         # GUI launch.

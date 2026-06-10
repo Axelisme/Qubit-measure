@@ -75,7 +75,7 @@ def _pulse_cfg(
     ch=GEN_CH,
     freq=GEN_FREQ,
     gain=GEN_GAIN,
-    nqz: "Literal[1, 2]" = GEN_NQZ,
+    nqz: Literal[1, 2] = GEN_NQZ,
     length=WAVEFORM_LEN,
     pre_delay=0.0,
     post_delay=0.0,

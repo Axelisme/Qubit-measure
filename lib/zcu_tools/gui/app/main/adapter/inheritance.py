@@ -35,7 +35,7 @@ def make_default_value(spec: CfgSectionSpec) -> CfgSectionValue:
     (disabled) — the safest, least-surprising default for "this field is
     optional"; an adapter that wants it enabled supplies a ref factory value.
     """
-    fields: dict[str, Optional[CfgNodeValue]] = {}
+    fields: dict[str, CfgNodeValue | None] = {}
     for key, node_spec in spec.fields.items():
         if isinstance(node_spec, LiteralSpec):
             fields[key] = DirectValue(node_spec.value)
@@ -79,7 +79,7 @@ def inherit_from(
         if result is not None:
             return result
 
-    new_fields: dict[str, Optional[CfgNodeValue]] = {}
+    new_fields: dict[str, CfgNodeValue | None] = {}
 
     for key, new_node_spec in new_spec.fields.items():
         old_node_spec = old_spec.fields.get(key)

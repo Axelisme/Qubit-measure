@@ -12,7 +12,7 @@ Validation 3: disable_opt=True blocks are conservatively skipped by passes.
 
 from __future__ import annotations
 
-from typing import Iterator
+from collections.abc import Iterator
 
 import pytest
 from zcu_tools.program.v2.ir.factory import IRLexer, IRParser

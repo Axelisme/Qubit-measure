@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Optional
+
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from scqubits.core.storage import SpectrumData
@@ -46,7 +47,7 @@ def calculate_energy_vs_flux(
     fluxs: NDArray[np.float64],
     cutoff: int = 40,
     evals_count: int = 20,
-    spectrum_data: Optional[SpectrumData] = None,
+    spectrum_data: SpectrumData | None = None,
 ) -> tuple[SpectrumData, NDArray[np.float64]]:
     """Fluxonium energy levels vs external flux — ~100x faster than scqubits.
 

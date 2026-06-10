@@ -3,9 +3,9 @@ from __future__ import annotations
 import threading
 import time
 import warnings
+from typing import Literal, Optional
 
 import numpy as np
-from typing_extensions import Literal, Optional
 
 from zcu_tools.progress_bar import make_pbar
 
@@ -78,7 +78,7 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
         self,
         voltage: float,
         progress: bool = False,
-        stop_event: Optional[threading.Event] = None,
+        stop_event: threading.Event | None = None,
     ) -> None:
         # sweep to the target value step by step
         current_voltage = self.get_voltage()
@@ -113,7 +113,7 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
         self,
         voltage: float,
         progress: bool = True,
-        stop_event: Optional[threading.Event] = None,
+        stop_event: threading.Event | None = None,
     ) -> float:
         mode = self.get_mode()
         if mode != "voltage":
@@ -142,7 +142,7 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
         self,
         current: float,
         progress: bool = False,
-        stop_event: Optional[threading.Event] = None,
+        stop_event: threading.Event | None = None,
     ) -> None:
         # sweep to the target value step by step
         current_current = self.get_current()
@@ -179,7 +179,7 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
         self,
         current: float,
         progress: bool = True,
-        stop_event: Optional[threading.Event] = None,
+        stop_event: threading.Event | None = None,
     ) -> float:
         mode = self.get_mode()
         if mode != "current":
@@ -197,7 +197,7 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
         self,
         mode: Literal["voltage", "current"],
         force: bool = False,
-        rampstep: Optional[float] = None,
+        rampstep: float | None = None,
     ) -> None:
         cur_mode = self.get_mode()
 
@@ -255,7 +255,7 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
         cfg,
         *,
         progress: bool = True,
-        stop_event: Optional[threading.Event] = None,
+        stop_event: threading.Event | None = None,
     ) -> None:
         if self.get_output() != "on" and cfg.output == "on":
             warnings.warn("YOKOGS200 output is off, did you forget to turn it on?")

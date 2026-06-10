@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.services.io_manager import IOManager
 
 
-def _make_empty_ctx() -> "ExpContext":
+def _make_empty_ctx() -> ExpContext:
     """Minimal startup context: real empty MetaDict/ModuleLibrary, no file sync."""
     from zcu_tools.gui.app.main.adapter import ExpContext
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary
@@ -42,11 +42,11 @@ def _make_empty_ctx() -> "ExpContext":
 
 
 def run_app(
-    registry: "Registry",
-    role_catalog: "RoleCatalog",
-    control_opts: Optional["ControlOptions"] = None,
+    registry: Registry,
+    role_catalog: RoleCatalog,
+    control_opts: ControlOptions | None = None,
     clean: bool = False,
-    project_root: Optional[str] = None,
+    project_root: str | None = None,
 ) -> None:
     """Build and launch the GUI. Blocks until the window is closed.
 
@@ -112,7 +112,7 @@ def run_app(
     sys.exit(app.exec())
 
 
-def _show_startup_dialog(ctrl: "Controller", parent: "MainWindow") -> None:
+def _show_startup_dialog(ctrl: Controller, parent: MainWindow) -> None:
     """Show the bootstrap startup dialog non-modally.
 
     Non-modal is required so the Qt event loop keeps pumping while the
@@ -133,12 +133,12 @@ def _show_startup_dialog(ctrl: "Controller", parent: "MainWindow") -> None:
 
 
 def _build_window(
-    state: "State",
-    registry: "Registry",
-    role_catalog: "RoleCatalog",
-    io_manager: "IOManager",
-    project_root: Optional[str] = None,
-) -> tuple["Controller", "MainWindow"]:
+    state: State,
+    registry: Registry,
+    role_catalog: RoleCatalog,
+    io_manager: IOManager,
+    project_root: str | None = None,
+) -> tuple[Controller, MainWindow]:
     """Create Controller + MainWindow in the correct order."""
 
     from zcu_tools.gui.app.main.controller import Controller

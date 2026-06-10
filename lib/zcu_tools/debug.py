@@ -2,19 +2,19 @@ from __future__ import annotations
 
 import logging
 import sys
+from collections.abc import Iterator
 from contextlib import contextmanager
 from types import ModuleType
-
-from typing_extensions import IO, Iterator, Optional, Union
+from typing import IO, Optional, Union
 
 import zcu_tools
 
 
 @contextmanager
 def debug_scope(
-    module: Union[ModuleType, str, None] = None,
+    module: ModuleType | str | None = None,
     level: int = logging.DEBUG,
-    stream: Optional[IO[str]] = None,
+    stream: IO[str] | None = None,
 ) -> Iterator[None]:
     enable_debug(module, level, stream)
     try:
@@ -24,9 +24,9 @@ def debug_scope(
 
 
 def enable_debug(
-    module: Union[ModuleType, str, None] = None,
+    module: ModuleType | str | None = None,
     level: int = logging.DEBUG,
-    stream: Optional[IO[str]] = None,
+    stream: IO[str] | None = None,
 ) -> None:
     """Enable debug logging for all loggers under the target module namespace."""
     if module is None:
@@ -51,7 +51,7 @@ def enable_debug(
     logger.addHandler(handler)
 
 
-def disable_debug(module: Union[ModuleType, str, None] = None) -> None:
+def disable_debug(module: ModuleType | str | None = None) -> None:
     """Disable debug logging and remove handlers added by :func:`enable_debug`."""
     if module is None:
         module = zcu_tools

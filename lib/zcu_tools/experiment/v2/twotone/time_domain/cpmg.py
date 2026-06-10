@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Optional, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,7 +12,6 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
-from typing_extensions import Any, Callable, Optional, Union
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -52,25 +53,25 @@ class CPMG_Result:
     ns: NDArray[np.int64]
     delays: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[CPMG_Cfg] = None
+    cfg_snapshot: CPMG_Cfg | None = None
 
 
 class CPMG_ModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     pi2_pulse: PulseCfg
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
 class CPMG_SweepCfg(ConfigBase):
-    times: Union[SweepCfg, list[int]]
-    length: Optional[SweepCfg] = None
+    times: SweepCfg | list[int]
+    length: SweepCfg | None = None
 
 
 class CPMG_Cfg(ProgramV2Cfg, ExpCfgModel):
     modules: CPMG_ModuleCfg
     sweep: CPMG_SweepCfg
-    length_range: Union[list[tuple[float, float]], tuple[float, float]]
+    length_range: list[tuple[float, float]] | tuple[float, float]
     length_expts: int
 
 
@@ -82,8 +83,8 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         cfg: CPMG_Cfg,
         *,
         detune_ratio: float = 0.0,
-        earlystop_snr: Optional[float] = None,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        earlystop_snr: float | None = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> CPMG_Result:
         orig_cfg = deepcopy(cfg)
 
@@ -142,7 +143,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, CPMG_Cfg],
-            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
         ) -> list[NDArray[np.float64]]:
             nonlocal current_snr
 
@@ -253,10 +254,10 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
 
     def analyze(
         self,
-        result: Optional[CPMG_Result] = None,
+        result: CPMG_Result | None = None,
         fit_fringe: bool = True,
-        t2r: Optional[float] = None,
-        t1: Optional[float] = None,
+        t2r: float | None = None,
+        t1: float | None = None,
     ) -> Figure:
         if result is None:
             result = self.last_result
@@ -323,8 +324,8 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[CPMG_Result] = None,
-        comment: Optional[str] = None,
+        result: CPMG_Result | None = None,
+        comment: str | None = None,
         tag: str = "twotone/ge/cpmg",
         **kwargs,
     ) -> None:

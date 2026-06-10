@@ -16,7 +16,8 @@ fluxdep's InteractiveMplWidget (which carries a Finish button + controls column)
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable, Optional, cast
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Optional, cast
 
 from matplotlib.backend_bases import Event, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
@@ -40,7 +41,7 @@ class TuneCanvasWidget(QWidget):
     def __init__(
         self,
         figsize: tuple[float, float] = (6.0, 4.0),
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.figure = Figure(figsize=figsize)
@@ -49,10 +50,10 @@ class TuneCanvasWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.canvas)
 
-        self._artists: Optional["TuneArtists"] = None
-        self._on_drag: Optional[Callable[["SampleArtists", float], None]] = None
-        self._on_drop: Optional[Callable[["SampleArtists"], None]] = None
-        self._dragging: Optional["SampleArtists"] = None
+        self._artists: TuneArtists | None = None
+        self._on_drag: Callable[[SampleArtists, float], None] | None = None
+        self._on_drop: Callable[[SampleArtists], None] | None = None
+        self._dragging: SampleArtists | None = None
         self._dragged: bool = False  # whether the grabbed line actually moved
 
         self.canvas.mpl_connect("button_press_event", self._on_press)
@@ -64,9 +65,9 @@ class TuneCanvasWidget(QWidget):
 
     def bind_drag(
         self,
-        artists: "TuneArtists",
-        on_drag: Callable[["SampleArtists", float], None],
-        on_drop: Callable[["SampleArtists"], None],
+        artists: TuneArtists,
+        on_drag: Callable[[SampleArtists, float], None],
+        on_drop: Callable[[SampleArtists], None],
     ) -> None:
         """Register the live artists + sample-line drag callbacks.
 
@@ -83,14 +84,14 @@ class TuneCanvasWidget(QWidget):
 
     # --- drag interaction ------------------------------------------------
 
-    def _pick_sample(self, x_data: float) -> Optional["SampleArtists"]:
+    def _pick_sample(self, x_data: float) -> SampleArtists | None:
         """The sample line nearest ``x_data`` within the pick tolerance, else None."""
         if self._artists is None or not self._artists.samples:
             return None
         ax = self._artists.ax
         x_lo, x_hi = ax.get_xlim()
         tol = abs(x_hi - x_lo) * _PICK_TOL_FRAC
-        best: Optional["SampleArtists"] = None
+        best: SampleArtists | None = None
         best_d = tol
         for sample in self._artists.samples:
             d = abs(sample.flux - x_data)

@@ -13,7 +13,8 @@ Adding a method:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Callable, Mapping
+from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     # Type-only: a runtime import of the adapter would cycle (service.py imports
@@ -44,14 +45,14 @@ Handler = Callable[["RemoteControlAdapter", Mapping[str, object]], Mapping[str, 
 
 
 def _h_project_info(
-    adapter: "RemoteControlAdapter", params: Mapping[str, object]
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
     return project_info_payload(adapter.ctrl.state.project)
 
 
 def _h_spectrum_list(
-    adapter: "RemoteControlAdapter", params: Mapping[str, object]
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
     spectrums = adapter.ctrl.state.spectrums
@@ -69,7 +70,7 @@ def _h_spectrum_list(
 
 
 def _h_selection_pointcloud(
-    adapter: "RemoteControlAdapter", params: Mapping[str, object]
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
     fluxs, freqs = adapter.ctrl.derive_pointcloud()
@@ -77,7 +78,7 @@ def _h_selection_pointcloud(
 
 
 def _h_fit_result(
-    adapter: "RemoteControlAdapter", params: Mapping[str, object]
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
     fit = adapter.ctrl.state.fit
@@ -110,14 +111,14 @@ def _h_fit_result(
 
 
 def _h_resources_versions(
-    adapter: "RemoteControlAdapter", params: Mapping[str, object]
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
     return {"versions": adapter.ctrl.state.version.snapshot()}
 
 
 def _h_state_check(
-    adapter: "RemoteControlAdapter", params: Mapping[str, object]
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
     state = adapter.ctrl.state

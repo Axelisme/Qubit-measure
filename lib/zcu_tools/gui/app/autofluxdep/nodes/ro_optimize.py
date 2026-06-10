@@ -33,10 +33,11 @@ directly — the existing pure snapshot-driven simulation, unchanged.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
+from typing import Any, Optional
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Any, Mapping, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -80,7 +81,7 @@ class RoOptimizeModuleCfg(ConfigBase):
     ``freq`` / ``gain`` the sweep optimises over.
     """
 
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     pi_pulse: PulseCfg
     readout: PulseReadoutCfg
 
@@ -119,7 +120,7 @@ def _placeholder_pi_pulse() -> Any:
     return {"type": "pi", "length": 0.1}
 
 
-def _default_readout() -> Optional[Any]:
+def _default_readout() -> Any | None:
     return None
 
 
@@ -151,11 +152,11 @@ class RoOptimizeNode(Node):
     midpoints; the acquire is SIMULATED either way (no hardware).
     """
 
-    def __init__(self, env: RunEnv, builder: "RoOptimizeBuilder") -> None:
+    def __init__(self, env: RunEnv, builder: RoOptimizeBuilder) -> None:
         self._env = env
         self._builder = builder
 
-    def _maybe_make_cfg(self, snapshot: Snapshot) -> Optional[RoOptimizeCfgTemplate]:
+    def _maybe_make_cfg(self, snapshot: Snapshot) -> RoOptimizeCfgTemplate | None:
         """Build the run cfg when the context is configured for it, else None.
 
         ``make_cfg`` needs a populated ml + the ``pi_pulse`` (required) and

@@ -47,14 +47,14 @@ class SessionServices:
 
 def build_session_services(
     *,
-    state: "SessionState",
-    bus: "BaseEventBus",
-    gate: "ExclusionGate",
-    handles: "OperationHandles",
-    background: "BackgroundExecutor",
-    progress: "ProgressHub",
-    io_manager: "ProjectIOPort",
-    driver_factory: "Optional[DriverFactoryPort]" = None,
+    state: SessionState,
+    bus: BaseEventBus,
+    gate: ExclusionGate,
+    handles: OperationHandles,
+    background: BackgroundExecutor,
+    progress: ProgressHub,
+    io_manager: ProjectIOPort,
+    driver_factory: DriverFactoryPort | None = None,
 ) -> SessionServices:
     """Construct the session services from the app-provided infrastructure.
 

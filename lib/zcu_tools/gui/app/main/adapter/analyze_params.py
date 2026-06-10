@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import dataclasses
+import types
 import typing
 from dataclasses import dataclass
 from typing import (
+    Annotated,
     Any,
     Optional,
     TypeVar,
@@ -12,22 +14,25 @@ from typing import (
     get_type_hints,
 )
 
-import typing_extensions
-from typing_extensions import Annotated
-
-_LITERAL_ORIGINS = {typing.Literal, typing_extensions.Literal}
+# typing_extensions.Literal is an alias of typing.Literal on Python 3.11+;
+# a single-element set suffices.
+_LITERAL_ORIGINS = {typing.Literal}
+# Accept both typing.Union (Optional[T] / Union[A,B]) and types.UnionType (PEP
+# 604, A | B).  get_origin returns the *class* types.UnionType for the latter,
+# not typing.Union, so a plain `is typing.Union` guard misses PEP 604 unions.
+_UNION_ORIGINS = {typing.Union, types.UnionType}
 
 
 @dataclass(frozen=True)
 class ParamMeta:
     label: str = ""
-    decimals: Optional[int] = None
+    decimals: int | None = None
 
 
 def _resolve_field_info(
     field: dataclasses.Field,
     hints: dict[str, Any],
-) -> tuple[type, Optional[list[Any]], str, Optional[int], bool]:
+) -> tuple[type, list[Any] | None, str, int | None, bool]:
     """Return (bare_type, choices, label, decimals, optional)."""
     hint = hints[field.name]
     origin = get_origin(hint)
@@ -43,7 +48,7 @@ def _resolve_field_info(
     # the None to resolve T, and flag it so the form renders the "(none)" empty
     # state and the agent may pass null. Only single-type Optional is supported.
     optional = False
-    if get_origin(bare) is typing.Union:
+    if get_origin(bare) in _UNION_ORIGINS:
         union_args = get_args(bare)
         non_none = [a for a in union_args if a is not type(None)]
         if type(None) not in union_args or len(non_none) != 1:

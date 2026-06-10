@@ -21,9 +21,9 @@ Validation semantics intentionally mirror the legacy ``wire._require_*`` /
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
-from typing import Mapping
 
 from .errors import ErrorCode, RemoteError
 

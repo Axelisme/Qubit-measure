@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from typing import Optional
+
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Optional
 
 from zcu_tools.program import TrackerProtocol
 
@@ -62,9 +63,9 @@ class MomentTracker(TrackerProtocol):
 
     def __init__(self) -> None:
         self.n = 0
-        self._mean: Optional[NDArray[np.float64]] = None
-        self.M2: Optional[NDArray[np.float64]] = None
-        self.M3: Optional[NDArray[np.float64]] = None
+        self._mean: NDArray[np.float64] | None = None
+        self.M2: NDArray[np.float64] | None = None
+        self.M3: NDArray[np.float64] | None = None
         self._leading_shape: tuple[int, ...] = ()
 
     def _chunk_moments(

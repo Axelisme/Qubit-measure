@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,7 +12,6 @@ from matplotlib.figure import Figure
 from matplotlib.image import NonUniformImage
 from numpy import float64
 from numpy.typing import NDArray
-from typing_extensions import Any, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -43,7 +43,7 @@ class AcStarkResult:
     gains: NDArray[np.float64]
     freqs: NDArray[np.float64]
     populations: NDArray[np.float64]
-    cfg_snapshot: Optional[AcStarkCfg] = None
+    cfg_snapshot: AcStarkCfg | None = None
 
 
 def get_resonance_freq(
@@ -74,8 +74,8 @@ def get_resonance_freq(
 
 
 class AcStarkModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
-    init_pulse: Optional[PulseCfg] = None
+    reset: ResetCfg | None = None
+    init_pulse: PulseCfg | None = None
     stark_pulse1: PulseCfg
     stark_pulse2: PulseCfg
     readout: ReadoutCfg
@@ -237,11 +237,11 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
     def analyze(
         self,
         chi: float,
-        result: Optional[AcStarkResult] = None,
+        result: AcStarkResult | None = None,
         *,
         eta: float = 1.0,
-        confusion_matrix: Optional[NDArray[np.float64]] = None,
-        cutoff: Optional[float] = None,
+        confusion_matrix: NDArray[np.float64] | None = None,
+        cutoff: float | None = None,
     ) -> tuple[float, Figure]:
         if result is None:
             result = self.last_result
@@ -331,11 +331,11 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
 
     def plot(
         self,
-        result: Optional[AcStarkResult] = None,
+        result: AcStarkResult | None = None,
         *,
         ac_coeff: float,
-        confusion_matrix: Optional[NDArray[np.float64]] = None,
-        cutoff: Optional[float] = None,
+        confusion_matrix: NDArray[np.float64] | None = None,
+        cutoff: float | None = None,
     ) -> Figure:
         if result is None:
             result = self.last_result
@@ -407,8 +407,8 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[AcStarkResult] = None,
-        comment: Optional[str] = None,
+        result: AcStarkResult | None = None,
+        comment: str | None = None,
         tag: str = "singleshot/ac_stark",
         **kwargs,
     ) -> None:

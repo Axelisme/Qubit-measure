@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import logging
-
-from typing_extensions import Any, Callable, Optional, Sequence, TypeVar, Union
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, TypeVar, Union
 
 from zcu_tools.progress_bar import BaseProgressBar, make_pbar
 
@@ -11,7 +11,7 @@ from .state import T_Cfg, T_ChildResult, T_RootResult, TaskState
 
 logger = logging.getLogger(__name__)
 
-T_Value = TypeVar("T_Value", bound=Union[int, float, complex])
+T_Value = TypeVar("T_Value", bound=int | float | complex)
 
 
 class Scan(AbsTask[list[T_ChildResult], T_RootResult, T_Cfg]):
@@ -29,7 +29,7 @@ class Scan(AbsTask[list[T_ChildResult], T_RootResult, T_Cfg]):
         self.before_each_fn = before_each
         self.sub_task = task
 
-        self.sweep_pbar: Optional[BaseProgressBar] = None
+        self.sweep_pbar: BaseProgressBar | None = None
         self.dynamic_pbar: bool = False
 
     def _build_pbar(self, leave: bool) -> BaseProgressBar:

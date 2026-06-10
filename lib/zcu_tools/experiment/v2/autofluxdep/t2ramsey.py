@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Callable, Optional, TypedDict
+from typing_extensions import (
+    TypedDict,  # closed/extra_items (PEP 728) not in stdlib 3.13
+)
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -57,7 +61,7 @@ def t2ramsey_fluxdep_signal2real(
 
 
 class T2RamseyModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     pi2_pulse: PulseCfg
     readout: ReadoutCfg
 
@@ -99,9 +103,9 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotDic
         detune_ratio: float,
         cfg_maker: Callable[
             [TaskState[T2RamseyResult, T_RootResult, FluxDepCfg], ModuleLibrary],
-            Optional[T2RamseyCfgTemplate],
+            T2RamseyCfgTemplate | None,
         ],
-        earlystop_snr: Optional[float] = None,
+        earlystop_snr: float | None = None,
     ) -> None:
         self.num_expts = num_expts
         self.detune_ratio = detune_ratio
@@ -111,7 +115,7 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotDic
 
         def measure_ramsey_fn(
             ctx: TaskState[NDArray[np.complex128], T_RootResult, T2RamseyCfg],
-            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules

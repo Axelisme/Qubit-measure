@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, MutableMapping
+from typing import Any, Literal
+
 from qick.asm_v2 import QickParam
-from typing_extensions import Any, Literal, Mapping, MutableMapping
 
 from . import datasaver, fitting, math, process, tomography
 

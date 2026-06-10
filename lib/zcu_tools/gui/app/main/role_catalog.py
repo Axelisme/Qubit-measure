@@ -15,18 +15,15 @@ modify path (inspect modify / ``editor.open(from_name=...)``).
 from __future__ import annotations
 
 import logging
-from typing import Callable, Literal, Union
-
-from typing_extensions import TypeAlias
+from collections.abc import Callable
+from typing import Literal, TypeAlias, Union
 
 from .adapter import ExpContext, ModuleRefValue, WaveformRefValue
 
 logger = logging.getLogger(__name__)
 
 RoleItemKind: TypeAlias = Literal["module", "waveform"]
-RoleValueFactory: TypeAlias = Callable[
-    [ExpContext], Union[ModuleRefValue, WaveformRefValue]
-]
+RoleValueFactory: TypeAlias = Callable[[ExpContext], ModuleRefValue | WaveformRefValue]
 
 
 class RoleEntry:

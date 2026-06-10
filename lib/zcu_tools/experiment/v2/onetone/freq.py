@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Literal, Optional, cast
 
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Literal, Optional, cast
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -33,11 +34,11 @@ from zcu_tools.utils.fitting import HangerModel, TransmissionModel, get_proper_m
 class FreqResult:
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[FreqCfg] = None
+    cfg_snapshot: FreqCfg | None = None
 
 
 class FreqModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     readout: PulseReadoutCfg
 
 
@@ -72,7 +73,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         )
 
         def measure_fn(
-            ctx: TaskState, update_hook: Optional[Callable]
+            ctx: TaskState, update_hook: Callable | None
         ) -> list[NDArray[np.float64]]:
             cfg = cast(FreqCfg, ctx.cfg)
             modules = cfg.modules
@@ -119,10 +120,10 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
     def analyze(
         self,
-        result: Optional[FreqResult] = None,
+        result: FreqResult | None = None,
         *,
         model_type: Literal["hm", "t", "auto"] = "auto",
-        edelay: Optional[float] = None,
+        edelay: float | None = None,
         fit_bg_slope: bool = False,
     ) -> tuple[float, float, dict[str, Any], Figure]:
         if result is None:
@@ -158,8 +159,8 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[FreqResult] = None,
-        comment: Optional[str] = None,
+        result: FreqResult | None = None,
+        comment: str | None = None,
         tag: str = "onetone/freq",
         **kwargs,
     ) -> None:

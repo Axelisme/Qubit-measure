@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import logging
+from typing import Optional, Union
 
 from qick.asm_v2 import AsmInst, Macro, QickParam
-from typing_extensions import Optional, Union
 
 from ..utils import param2str
 
@@ -16,10 +16,10 @@ class PrintTimeStamp(Macro):
     def __init__(
         self,
         name: str,
-        t: Union[float, QickParam] = 0.0,
+        t: float | QickParam = 0.0,
         prefix: str = "",
-        gen_chs: Optional[list[int]] = None,
-        ro_chs: Optional[list[int]] = None,
+        gen_chs: list[int] | None = None,
+        ro_chs: list[int] | None = None,
     ) -> None:
         super().__init__(name=name, t=t, prefix=prefix, gen_chs=gen_chs, ro_chs=ro_chs)
 

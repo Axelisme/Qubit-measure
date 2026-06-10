@@ -8,14 +8,15 @@ consumer thread" contract is trivially met.
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 from zcu_tools.gui.session.ports import ProgressEvent
 
 
 class DirectProgressTransport:
     def __init__(self) -> None:
-        self._receiver: Optional[Callable[[ProgressEvent], None]] = None
+        self._receiver: Callable[[ProgressEvent], None] | None = None
 
     def emit(self, event: ProgressEvent) -> None:
         if self._receiver is not None:

@@ -9,7 +9,9 @@ params. Together they replace the old ``NodeSpec`` + injected ``run_node``.
 
 from __future__ import annotations
 
-from typing_extensions import TYPE_CHECKING, Any, Callable, Optional
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Optional
+
 from zcu_tools.gui.app.autofluxdep.nodes.builder import (
     Builder,
     Node,
@@ -25,7 +27,7 @@ if TYPE_CHECKING:
 ProduceFn = Callable[[RunEnv, Snapshot], Patch]
 
 
-def connect_mock(ctrl: "Controller") -> None:
+def connect_mock(ctrl: Controller) -> None:
     """Establish a mock SoC synchronously-enough for a headless test.
 
     The session ``ConnectionService`` settles a mock connect via
@@ -47,7 +49,7 @@ def connect_mock(ctrl: "Controller") -> None:
 
 
 class _FnNode(Node):
-    def __init__(self, env: RunEnv, fn: Optional[ProduceFn]) -> None:
+    def __init__(self, env: RunEnv, fn: ProduceFn | None) -> None:
         self._env = env
         self._fn = fn
 
@@ -67,7 +69,7 @@ def make_builder(
     optional_modules: tuple[ModuleDep, ...] = (),
     provides_modules: tuple[str, ...] = (),
     base_params: tuple[str, ...] = (),
-    produce_fn: Optional[ProduceFn] = None,
+    produce_fn: ProduceFn | None = None,
 ) -> Builder:
     """A Builder whose declarations are the given tuples and whose Node's
     ``produce`` calls ``produce_fn(env, snapshot)`` (or returns an empty Patch).

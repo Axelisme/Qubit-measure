@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Optional
-
-from typing_extensions import Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, Optional, TypeVar
 
 from zcu_tools.gui.session.state import (
     DEFAULT_LEFT_PANEL_WIDTH as DEFAULT_LEFT_PANEL_WIDTH,  # noqa: F401  (re-export)
@@ -62,16 +60,16 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     # every change. Run / Save / Session persistence read this field, never
     # the live form.
     cfg_schema: CfgSchema
-    run_result: Optional[T_Result] = None
-    analyze_result: Optional[T_AnalyzeResult] = None
-    figure: Optional["Figure"] = None
-    analyze_param_instance: Optional[T_AnalyzeParams] = None
-    save_path_overrides: Optional[SavePaths] = None
+    run_result: T_Result | None = None
+    analyze_result: T_AnalyzeResult | None = None
+    figure: Figure | None = None
+    analyze_param_instance: T_AnalyzeParams | None = None
+    save_path_overrides: SavePaths | None = None
     # Persistent writeback draft (ADR-0008): computed once when analyze finishes,
     # read/edited in place by UI + agent, applied as-is. Module/waveform items
     # carry a gc=False CfgEditorService model (editor_id); cleared + torn down on
     # rerun / reanalyze.
-    writeback_items: list["WritebackItem"] = field(default_factory=list)
+    writeback_items: list[WritebackItem] = field(default_factory=list)
     applied_session_ids: set[str] = field(default_factory=set)
     is_running: bool = False
     is_analyzing: bool = False
@@ -92,7 +90,7 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     def has_figure(self) -> bool:
         return self.figure is not None
 
-    def effective_save_paths(self, ctx: "ExpContext") -> Optional[SavePaths]:
+    def effective_save_paths(self, ctx: ExpContext) -> SavePaths | None:
         """Resolve the tab's save paths: user override, else adapter suggestion
         derived from ``ctx`` (None until the context can suggest a path). Pure —
         a tab answering about its own save destination."""
@@ -129,8 +127,8 @@ class State(SessionState):
     def __init__(self, ctx: ExpContext) -> None:
         super().__init__(ctx)
         self.tabs: dict[str, Session[Any, Any, Any, Any]] = {}
-        self.active_tab_id: Optional[str] = None
-        self.running_tab_id: Optional[str] = None
+        self.active_tab_id: str | None = None
+        self.running_tab_id: str | None = None
 
     def add_tab(
         self,
@@ -218,8 +216,8 @@ class State(SessionState):
         self,
         tab_id: str,
         analyze_result: object,
-        figure: Optional["Figure"],
-        writeback_items: Optional[list["WritebackItem"]] = None,
+        figure: Figure | None,
+        writeback_items: list[WritebackItem] | None = None,
     ) -> None:
         logger.debug(
             "update_tab_analyze: tab_id=%r figure=%s",
@@ -254,7 +252,7 @@ class State(SessionState):
     def update_tab_save_path_overrides(
         self,
         tab_id: str,
-        paths: Optional[SavePaths],
+        paths: SavePaths | None,
     ) -> None:
         logger.debug("update_tab_save_path_overrides: tab_id=%r", tab_id)
         self.tabs[tab_id].save_path_overrides = paths
@@ -268,7 +266,7 @@ class State(SessionState):
         self.tabs[tab_id].save_path_overrides = None
         self.version.bump(f"tab:{tab_id}:save_path")
 
-    def get_effective_save_paths(self, tab_id: str) -> Optional[SavePaths]:
+    def get_effective_save_paths(self, tab_id: str) -> SavePaths | None:
         return self.tabs[tab_id].save_path_overrides
 
     def set_tab_running(self, tab_id: str, running: bool) -> None:

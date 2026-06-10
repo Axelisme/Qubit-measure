@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing_extensions import Literal, Mapping
+from collections.abc import Mapping
+from typing import Literal
 
 from zcu_tools.device import DeviceInfo, GlobalDeviceManager
 from zcu_tools.experiment.cfg_model import ExpCfgModel

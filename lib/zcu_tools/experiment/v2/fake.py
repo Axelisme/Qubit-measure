@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Callable, Optional
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -20,7 +21,7 @@ from zcu_tools.liveplot import LivePlot1D, make_plot_frame
 class FakeResult:
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[FakeCfg] = None
+    cfg_snapshot: FakeCfg | None = None
 
 
 class FakeCfg(ExpCfgModel): ...
@@ -40,7 +41,7 @@ class FakeExp(AbsExperiment[FakeResult, FakeCfg]):
         round_n = 100
 
         def measure_fn(
-            ctx: TaskState, update_hook: Optional[Callable]
+            ctx: TaskState, update_hook: Callable | None
         ) -> NDArray[np.complex128]:
             signal_buffer = []
             for i in range(round_n):
@@ -81,7 +82,7 @@ class FakeExp(AbsExperiment[FakeResult, FakeCfg]):
 
         return self.last_result
 
-    def analyze(self, result: Optional[FakeResult] = None) -> Figure:
+    def analyze(self, result: FakeResult | None = None) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -102,8 +103,8 @@ class FakeExp(AbsExperiment[FakeResult, FakeCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[FakeResult] = None,
-        comment: Optional[str] = None,
+        result: FakeResult | None = None,
+        comment: str | None = None,
         **kwargs,
     ) -> None:
         if result is None:

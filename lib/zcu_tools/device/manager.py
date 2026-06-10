@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import threading
 import warnings
-
-from typing_extensions import TYPE_CHECKING, Any, ClassVar, Mapping
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from .base import BaseDevice
 

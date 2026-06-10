@@ -1,19 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Literal, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
-from typing_extensions import (
-    Any,
-    Callable,
-    Literal,
-    Optional,
-)
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -45,7 +41,7 @@ class ZigZagScanResult:
     times: NDArray[np.int64]
     values: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[ZigZagScanCfg] = None
+    cfg_snapshot: ZigZagScanCfg | None = None
 
 
 def zigzag_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -53,15 +49,15 @@ def zigzag_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class ZigZagScanModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     X90_pulse: PulseCfg
-    X180_pulse: Optional[PulseCfg] = None
+    X180_pulse: PulseCfg | None = None
     readout: ReadoutCfg
 
 
 class ZigZagScanSweepCfg(ConfigBase):
-    gain: Optional[SweepCfg] = None
-    freq: Optional[SweepCfg] = None
+    gain: SweepCfg | None = None
+    freq: SweepCfg | None = None
 
 
 class ZigZagScanCfg(ProgramV2Cfg, ExpCfgModel):
@@ -83,7 +79,7 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
         cfg: ZigZagScanCfg,
         *,
         repeat_on: Literal["X90_pulse", "X180_pulse"] = "X180_pulse",
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> ZigZagScanResult:
         orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
@@ -113,7 +109,7 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, ZigZagScanCfg],
-            update_hook: Optional[Callable],
+            update_hook: Callable | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules
@@ -188,8 +184,8 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
 
     def analyze(
         self,
-        result: Optional[ZigZagScanResult] = None,
-        find_range: tuple[Optional[float], Optional[float]] = (None, None),
+        result: ZigZagScanResult | None = None,
+        find_range: tuple[float | None, float | None] = (None, None),
     ) -> tuple[float, Figure]:
         if result is None:
             result = self.last_result
@@ -243,8 +239,8 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[ZigZagScanResult] = None,
-        comment: Optional[str] = None,
+        result: ZigZagScanResult | None = None,
+        comment: str | None = None,
         tag: str = "twotone/ge/zigzag_scan",
         **kwargs,
     ) -> None:

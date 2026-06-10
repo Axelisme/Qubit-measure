@@ -177,7 +177,7 @@ class SessionState:
             self.version.bump(DEVICE_SET_VERSION_KEY)
 
     def set_device_status(
-        self, name: str, status: DeviceStatus, *, error: Optional[str] = None
+        self, name: str, status: DeviceStatus, *, error: str | None = None
     ) -> None:
         logger.debug("set_device_status: name=%r status=%s", name, status.value)
         self.devices[name] = replace(self.devices[name], status=status, error=error)
@@ -224,7 +224,7 @@ class SessionState:
         # the grow case in put_device) so a whole-set dependant detects it.
         self.version.bump(DEVICE_SET_VERSION_KEY)
 
-    def get_device(self, name: str) -> Optional[DeviceState]:
+    def get_device(self, name: str) -> DeviceState | None:
         return self.devices.get(name)
 
     def has_device(self, name: str) -> bool:

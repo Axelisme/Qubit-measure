@@ -64,7 +64,7 @@ class QubitFreqResult:
     @classmethod
     def allocate(
         cls, flux: NDArray[np.float64], detune: NDArray[np.float64]
-    ) -> "QubitFreqResult":
+    ) -> QubitFreqResult:
         """Pre-allocate a Result over the full ``flux`` axis × ``detune``.
 
         The flux axis is filled up front (known at Run start, used as the
@@ -121,7 +121,7 @@ class Sweep1DResult:
     @classmethod
     def allocate(
         cls, flux: NDArray[np.float64], x: NDArray[np.float64], x_label: str = "x"
-    ) -> "Sweep1DResult":
+    ) -> Sweep1DResult:
         fx = np.asarray(flux, dtype=np.float64)
         xs = np.asarray(x, dtype=np.float64)
         n_flux, n_x = fx.shape[0], xs.shape[0]
@@ -170,7 +170,7 @@ class Sweep2DResult:
         flux: NDArray[np.float64],
         freq: NDArray[np.float64],
         gain: NDArray[np.float64],
-    ) -> "Sweep2DResult":
+    ) -> Sweep2DResult:
         fx = np.asarray(flux, dtype=np.float64)
         f = np.asarray(freq, dtype=np.float64)
         g = np.asarray(gain, dtype=np.float64)

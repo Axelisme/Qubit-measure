@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from threading import Timer
+from typing import Optional
 
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
@@ -8,7 +9,6 @@ import numpy as np
 from IPython.display import clear_output, display
 from matplotlib.patches import Ellipse
 from numpy.typing import NDArray
-from typing_extensions import Optional
 
 from zcu_tools.notebook.analysis.fluxdep.processing import (
     cast2real_and_norm,
@@ -21,7 +21,7 @@ class InteractiveSelector:
     def __init__(
         self,
         spectrums: dict[str, SpectrumResult],
-        selected: Optional[NDArray[np.bool_]] = None,
+        selected: NDArray[np.bool_] | None = None,
         brush_width: float = 0.05,
     ) -> None:
         self.spectrums = spectrums

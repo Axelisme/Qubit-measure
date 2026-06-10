@@ -25,7 +25,7 @@ class WorkspaceService:
     def __init__(
         self,
         state: State,
-        tabs: "TabLifecyclePort",
+        tabs: TabLifecyclePort,
         bus: EventBus,
     ) -> None:
         self._state = state

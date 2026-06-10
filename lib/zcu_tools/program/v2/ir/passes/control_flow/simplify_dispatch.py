@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing_extensions import Optional
+from typing import Optional
 
 from ...hw_semantics import needs_big_jump
 from ...instructions import JumpInst, RegWriteInst, TestInst
@@ -40,7 +40,7 @@ class SimplifyDispatchPass(AbsIRTreePass):
         self,
         node: IRNode,
         ctx: PipeLineContext,
-    ) -> Optional[IRNode]:
+    ) -> IRNode | None:
         if not isinstance(node, IRDispatch) or len(node.target_labels) != 2:
             return None
 

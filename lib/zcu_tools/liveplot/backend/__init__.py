@@ -14,9 +14,10 @@ import and the dependency direction stays gui → liveplot.
 from __future__ import annotations
 
 import warnings
+from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Generator, Optional
+from typing import Optional
 
 import matplotlib as mpl
 from matplotlib.axes import Axes
@@ -26,8 +27,8 @@ from .base import LivePlotBackend
 from .fallback import FallbackBackend
 from .jupyter import JupyterBackend
 
-_default_backend: Optional[LivePlotBackend] = None
-_backend: ContextVar[Optional[LivePlotBackend]] = ContextVar(
+_default_backend: LivePlotBackend | None = None
+_backend: ContextVar[LivePlotBackend | None] = ContextVar(
     "liveplot_backend", default=None
 )
 
@@ -46,7 +47,7 @@ def set_liveplot_backend(backend: LivePlotBackend) -> Generator[None, None, None
         _backend.reset(token)
 
 
-def set_default_liveplot_backend(backend: Optional[LivePlotBackend]) -> None:
+def set_default_liveplot_backend(backend: LivePlotBackend | None) -> None:
     """Set the process-wide default backend (notebook/setup sets once)."""
     global _default_backend
     _default_backend = backend

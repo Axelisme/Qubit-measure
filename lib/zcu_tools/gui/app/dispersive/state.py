@@ -110,8 +110,8 @@ class DispFitState:
     the prediction always covers the full flux axis (there is no down-sampling).
     """
 
-    g: Optional[float] = None  # GHz
-    bare_rf: Optional[float] = None  # GHz
+    g: float | None = None  # GHz
+    bare_rf: float | None = None  # GHz
     res_dim: int = 4
 
     @property
@@ -122,11 +122,11 @@ class DispFitState:
 class DispersiveState:
     """Passive GUI state container for the dispersive analysis pipeline."""
 
-    def __init__(self, project: Optional[ProjectInfo] = None) -> None:
+    def __init__(self, project: ProjectInfo | None = None) -> None:
         self.project: ProjectInfo = project if project is not None else ProjectInfo()
-        self.fit_inputs: Optional[FluxoniumInputs] = None
-        self.onetone: Optional[OnetoneEntry] = None
-        self.preprocess: Optional[PreprocessResult] = None
+        self.fit_inputs: FluxoniumInputs | None = None
+        self.onetone: OnetoneEntry | None = None
+        self.preprocess: PreprocessResult | None = None
         self.disp_fit: DispFitState = DispFitState()
         self.version = VersionTable()
 

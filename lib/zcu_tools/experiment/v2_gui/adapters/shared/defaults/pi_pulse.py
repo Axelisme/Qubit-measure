@@ -6,9 +6,7 @@ ref prefers the library ``pi_amp`` / ``pi_len`` entries.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
-
-from typing_extensions import Literal, overload
+from typing import TYPE_CHECKING, Literal, Optional, overload
 
 from zcu_tools.gui.app.main.adapter import ModuleRefValue
 from zcu_tools.program.v2.modules.pulse import PulseCfg
@@ -42,7 +40,7 @@ def make_pi_pulse_ref_default(
     preferred_names: list[str] = ...,
     *,
     optional: Literal[True],
-) -> Optional[ModuleRefValue]: ...
+) -> ModuleRefValue | None: ...
 
 
 def make_pi_pulse_ref_default(
@@ -50,7 +48,7 @@ def make_pi_pulse_ref_default(
     preferred_names: list[str] = PI_PULSE_NAMES,
     *,
     optional: bool = False,
-) -> Optional[ModuleRefValue]:
+) -> ModuleRefValue | None:
     """Reference a library π pulse (pi_amp → pi_len), else the blank one."""
     selected = select_named_module_value(
         ml=ctx.ml, module_type=PulseCfg, preferred_names=preferred_names

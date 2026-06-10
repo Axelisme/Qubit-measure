@@ -28,11 +28,11 @@ def qp_spectral_density(
 
 
 def qp_spectral_density(
-    omega: Union[float, NDArray[np.float64]],
+    omega: float | NDArray[np.float64],
     Temp: float,
     EJ: float,
     Delta_eV: float = DELTA_ALUMINUM,
-) -> Union[float, NDArray[np.float64]]:
+) -> float | NDArray[np.float64]:
     """Quasiparticle tunneling spectral density factor (without x_qp).
 
     Based on Smith et al (2020), Eq. S23 and Eq. 19.
@@ -74,7 +74,7 @@ def calc_qp_oper(
     params: tuple[float, float, float],
     flux: float,
     return_dim: int = 4,
-    esys: Optional[tuple[NDArray[np.float64], NDArray[np.complex128]]] = None,
+    esys: tuple[NDArray[np.float64], NDArray[np.complex128]] | None = None,
 ) -> NDArray[np.complex128]:
     """Calculate the sin(phi/2) operator matrix elements."""
     # In some literature the operator sin(phi/2) is used, which assumes
@@ -135,10 +135,10 @@ def calc_Qqp_vs_omega(
     omegas: NDArray[np.float64],
     T1s: NDArray[np.float64],
     sin2_elements: NDArray[np.complex128],
-    T1errs: Optional[NDArray[np.float64]] = None,
+    T1errs: NDArray[np.float64] | None = None,
     Temp: float = 20e-3,
     Delta_eV: float = DELTA_ALUMINUM,
-) -> Union[NDArray[np.float64], tuple[NDArray[np.float64], NDArray[np.float64]]]:
+) -> NDArray[np.float64] | tuple[NDArray[np.float64], NDArray[np.float64]]:
     """Extract Q_qp = 1/x_qp from T1 data via quasiparticle spectral density.
 
     omegas: rad/ns, T1s: ns, Temp: K, Delta: GHz (superconducting gap)

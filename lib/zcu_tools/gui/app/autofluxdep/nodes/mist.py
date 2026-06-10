@@ -33,10 +33,11 @@ value. There is no fit either way — mist reads the variance directly.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
+from typing import Any, Optional
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Any, Mapping, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -71,7 +72,7 @@ class MistModuleCfg(ConfigBase):
     ``experiment/v2/autofluxdep`` ``MistCfgTemplate`` carries the strict types.
     """
 
-    reset: Optional[Any] = None
+    reset: Any | None = None
     pi_pulse: Any
     mist_pulse: Any
     readout: Any
@@ -96,7 +97,7 @@ def _placeholder_pi_pulse() -> Any:
     return {"type": "pi", "length": 0.1}
 
 
-def _default_opt_readout() -> Optional[Any]:
+def _default_opt_readout() -> Any | None:
     # last-resort readout if neither a Node produced one nor ml has a preset.
     return None
 
@@ -116,11 +117,11 @@ class MistNode(Node):
     acquire is SIMULATED either way — no hardware is touched.
     """
 
-    def __init__(self, env: RunEnv, builder: "MistBuilder") -> None:
+    def __init__(self, env: RunEnv, builder: MistBuilder) -> None:
         self._env = env
         self._builder = builder
 
-    def _maybe_make_cfg(self, snapshot: Snapshot) -> Optional[MistCfgTemplate]:
+    def _maybe_make_cfg(self, snapshot: Snapshot) -> MistCfgTemplate | None:
         """Build the run cfg when the context is configured for it, else None.
 
         ``make_cfg`` needs a ``pi_pulse`` module + the mist-drive params; the

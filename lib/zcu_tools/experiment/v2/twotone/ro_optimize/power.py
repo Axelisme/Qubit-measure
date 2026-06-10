@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional, TypeAlias
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
-from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -38,11 +39,11 @@ from zcu_tools.utils.datasaver import load_data, save_data
 class PowerResult:
     gains: NDArray[np.float64]
     signals: NDArray[np.float64]
-    cfg_snapshot: Optional["PowerCfg"] = None
+    cfg_snapshot: PowerCfg | None = None
 
 
 class PowerModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     qub_pulse: PulseCfg
     readout: PulseReadoutCfg
 
@@ -66,7 +67,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         soccfg,
         cfg: PowerCfg,
         *,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> PowerResult:
         original_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
@@ -80,7 +81,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.float64], Any, PowerCfg],
-            update_hook: Optional[Callable[[int, RawResult], None]],
+            update_hook: Callable[[int, RawResult], None] | None,
         ) -> RawResult:
             cfg = ctx.cfg
             modules = cfg.modules
@@ -131,7 +132,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         return self.last_result
 
     def analyze(
-        self, result: Optional[PowerResult] = None, penalty_ratio: float = 0.0
+        self, result: PowerResult | None = None, penalty_ratio: float = 0.0
     ) -> tuple[float, Figure]:
         if result is None:
             result = self.last_result
@@ -164,8 +165,8 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[PowerResult] = None,
-        comment: Optional[str] = None,
+        result: PowerResult | None = None,
+        comment: str | None = None,
         tag: str = "twotone/ge/ro_optimize/gain",
         **kwargs,
     ) -> None:

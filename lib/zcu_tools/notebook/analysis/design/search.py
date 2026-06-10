@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import os
 from itertools import product
+from typing import Any, Union
 
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from tqdm.auto import tqdm
-from typing_extensions import Any, Union
 
 from zcu_tools.notebook.persistance import load_result
 from zcu_tools.simulate.fluxonium import calculate_chi_sweep
@@ -19,9 +19,9 @@ DESIGN_EVALS_COUNT = 15
 
 
 def generate_params_table(
-    EJ: Union[float, np.ndarray, tuple[float, float]],
-    EC: Union[float, np.ndarray, tuple[float, float]],
-    EL: Union[float, np.ndarray, tuple[float, float]],
+    EJ: float | np.ndarray | tuple[float, float],
+    EC: float | np.ndarray | tuple[float, float],
+    EL: float | np.ndarray | tuple[float, float],
     flux: float = 0.5,
     precision: float = 0.1,
 ) -> pd.DataFrame:

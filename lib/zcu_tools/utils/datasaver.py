@@ -3,16 +3,16 @@ from __future__ import annotations
 import os
 import warnings
 from datetime import datetime
+from typing import Any, Literal, Optional, overload
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Any, Literal, Optional, overload
 
 
 def get_datafolder_path(
     database_dir: str,
     name: str = "",
-    now: Optional[datetime] = None,
+    now: datetime | None = None,
 ) -> str:
     """Return today's data-folder path without creating it."""
     database_dir = os.path.abspath(database_dir)
@@ -98,9 +98,9 @@ def save_local_data(
     filepath: str,
     x_info: dict[str, Any],
     z_info: dict[str, Any],
-    y_info: Optional[dict[str, Any]] = None,
-    comment: Optional[str] = None,
-    tag: Optional[str] = None,
+    y_info: dict[str, Any] | None = None,
+    comment: str | None = None,
+    tag: str | None = None,
 ) -> None:
     """
     Save data locally in a Labber-compatible format.
@@ -141,7 +141,7 @@ def save_local_data(
 
 def load_local_data(
     filepath: str,
-) -> tuple[NDArray[np.complex128], NDArray[np.float64], Optional[NDArray[np.float64]]]:
+) -> tuple[NDArray[np.complex128], NDArray[np.float64], NDArray[np.float64] | None]:
     """
     Load data from a local HDF5 file.
 
@@ -181,7 +181,7 @@ def load_local_data(
     return z_data, x_data, y_data
 
 
-def load_comment(filepath: str) -> Optional[str]:
+def load_comment(filepath: str) -> str | None:
     """Return the file's comment string, or None if it cannot be read.
 
     Backed by ``labber_io.load_labber_data`` (the comment is also available as
@@ -249,10 +249,10 @@ def save_data(
     filepath: str,
     x_info: dict[str, Any],
     z_info: dict[str, Any],
-    y_info: Optional[dict[str, Any]] = None,
-    comment: Optional[str] = None,
-    tag: Optional[str] = None,
-    server_ip: Optional[str] = None,
+    y_info: dict[str, Any] | None = None,
+    comment: str | None = None,
+    tag: str | None = None,
+    server_ip: str | None = None,
     port: int = 4999,
 ) -> None:
     """
@@ -287,14 +287,14 @@ def save_data(
 def load_data(
     filepath: str,
     *,
-    server_ip: Optional[str] = None,
+    server_ip: str | None = None,
     port: int = 4999,
     return_comment: Literal[True],
 ) -> tuple[
     NDArray[np.complex128],
     NDArray[np.float64],
-    Optional[NDArray[np.float64]],
-    Optional[str],
+    NDArray[np.float64] | None,
+    str | None,
 ]: ...
 
 
@@ -302,18 +302,16 @@ def load_data(
 def load_data(
     filepath: str,
     *,
-    server_ip: Optional[str] = None,
+    server_ip: str | None = None,
     port: int = 4999,
     return_comment: Literal[False],
-) -> tuple[
-    NDArray[np.complex128], NDArray[np.float64], Optional[NDArray[np.float64]]
-]: ...
+) -> tuple[NDArray[np.complex128], NDArray[np.float64], NDArray[np.float64] | None]: ...
 
 
 def load_data(
     filepath: str,
     *,
-    server_ip: Optional[str] = None,
+    server_ip: str | None = None,
     port: int = 4999,
     return_comment: bool = False,
 ):

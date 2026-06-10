@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+from typing import TypeVar
+
 import numpy as np
-from typing_extensions import Sequence, TypeVar
 
 from zcu_tools.experiment.v2.runner import Result
 

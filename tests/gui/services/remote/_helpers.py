@@ -10,7 +10,8 @@ from __future__ import annotations
 import json
 import socket
 import time
-from typing import Any, Callable, Mapping, Optional
+from collections.abc import Callable, Mapping
+from typing import Any, Optional
 from unittest.mock import MagicMock
 
 from qtpy.QtCore import QCoreApplication
@@ -85,7 +86,7 @@ class Fixture:
     """Holds strong refs to Controller + service to survive GC mid-test."""
 
     def __init__(
-        self, opts: Optional[ControlOptions] = None, project_root: Optional[str] = None
+        self, opts: ControlOptions | None = None, project_root: str | None = None
     ) -> None:
         self.state = State(make_ctx())
         self.registry = Registry()
@@ -131,7 +132,7 @@ class FakeTransport:
     def __init__(self) -> None:
         self.replies: dict[str, dict] = {}
         self.sent: list[tuple[str, dict]] = []
-        self._deliver_reply: Optional[Callable[[dict], None]] = None
+        self._deliver_reply: Callable[[dict], None] | None = None
 
     def attach(self, deliver_reply, deliver_event, on_closed) -> None:
         # Reply-only fake: the event / on_closed callbacks are unused.
@@ -269,7 +270,7 @@ def open_client(port: int) -> socket.socket:
 def call(
     sock: socket.socket,
     method: str,
-    params: Optional[dict] = None,
+    params: dict | None = None,
     *,
     rid: str = "1",
     timeout_s: float = 3.0,

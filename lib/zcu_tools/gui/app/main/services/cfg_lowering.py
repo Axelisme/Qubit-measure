@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 
-def lower_module(schema: "CfgSchema", ml: "ModuleLibrary", md: "MetaDict") -> object:
+def lower_module(schema: CfgSchema, ml: ModuleLibrary, md: MetaDict) -> object:
     """Lower a Module ``CfgSchema`` (against live md/ml) into a module cfg.
 
     Raises MlEntryValidationError on validation / construction failure.
@@ -37,7 +37,7 @@ def lower_module(schema: "CfgSchema", ml: "ModuleLibrary", md: "MetaDict") -> ob
         raise MlEntryValidationError(f"Invalid module configuration: {exc}") from exc
 
 
-def lower_waveform(schema: "CfgSchema", ml: "ModuleLibrary", md: "MetaDict") -> object:
+def lower_waveform(schema: CfgSchema, ml: ModuleLibrary, md: MetaDict) -> object:
     """Lower a Waveform ``CfgSchema`` (against live md/ml) into a waveform cfg.
 
     Raises MlEntryValidationError on validation / construction failure.

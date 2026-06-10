@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from pydantic import Field
-from typing_extensions import Any, Callable, Mapping, Optional, cast
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo
@@ -43,11 +44,11 @@ from zcu_tools.utils.datasaver import load_data, save_data
 class PowerResult:
     powers: NDArray[np.float64]
     signals: NDArray[np.float64]
-    cfg_snapshot: Optional[PowerCfg] = None
+    cfg_snapshot: PowerCfg | None = None
 
 
 class PowerModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
@@ -72,7 +73,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.float64], Any, PowerCfg],
-            update_hook: Optional[Callable[[int, list[MomentTracker]], None]],
+            update_hook: Callable[[int, list[MomentTracker]], None] | None,
         ) -> list[MomentTracker]:
             cfg = ctx.cfg
             setup_devices(cfg, progress=False)
@@ -125,7 +126,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         )
         return self.last_result
 
-    def analyze(self, result: Optional[PowerResult] = None) -> tuple[float, Figure]:
+    def analyze(self, result: PowerResult | None = None) -> tuple[float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -156,8 +157,8 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[PowerResult] = None,
-        comment: Optional[str] = None,
+        result: PowerResult | None = None,
+        comment: str | None = None,
         tag: str = "jpa/power",
         **kwargs,
     ) -> None:

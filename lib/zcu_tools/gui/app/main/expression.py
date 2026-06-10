@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 import logging
 import operator
-from typing import Callable
+from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 

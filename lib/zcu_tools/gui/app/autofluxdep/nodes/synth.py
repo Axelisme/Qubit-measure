@@ -23,10 +23,11 @@ reproducible without using process-global RNG state.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable
 
 from zcu_tools.utils.fitting.base import cosfunc, decaycos, expfunc, lorfunc
 from zcu_tools.utils.process import rotate2real

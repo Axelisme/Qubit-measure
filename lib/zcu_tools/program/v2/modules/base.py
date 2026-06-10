@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Any, Optional, Union, cast
 
 from pydantic import ValidationInfo
 from qick.asm_v2 import QickParam
-from typing_extensions import TYPE_CHECKING, Any, Optional, Union, cast
 
 from zcu_tools.cfg_model import ConfigBase
 
@@ -23,12 +23,12 @@ def resolve_module_ref(value: Any, info: ValidationInfo) -> Any:
 
 class AbsModuleCfg(ConfigBase):
     type: str
-    desc: Optional[str] = None
+    desc: str | None = None
 
     def build(self, name: str) -> Module:
         raise NotImplementedError(f"{type(self).__name__}.build is not implemented")
 
-    def set_param(self, name: str, value: Union[float, QickParam]) -> None:
+    def set_param(self, name: str, value: float | QickParam) -> None:
         raise NotImplementedError(f"{type(self).__name__} does not support set_param")
 
 
@@ -40,8 +40,8 @@ class Module(ABC):
 
     @abstractmethod
     def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]: ...
+        self, prog: ModularProgramV2, t: float | QickParam = 0.0
+    ) -> float | QickParam: ...
 
     def allow_rerun(self) -> bool:
         return False

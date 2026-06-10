@@ -95,7 +95,7 @@ class TransitionsForm(QWidget):
     the fit panel.
     """
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         layout = QFormLayout(self)
 

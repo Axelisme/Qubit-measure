@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import time
+from typing import TYPE_CHECKING, Any, Optional
 
 import numpy as np
 from numpy.typing import NDArray
 from tqdm.auto import tqdm
-from typing_extensions import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from scqubits.core.fluxonium import Fluxonium
@@ -17,7 +17,7 @@ def calculate_eff_t1_with(
     noise_channels: list[tuple[str, dict[str, Any]]],
     Temp: float,
     fluxonium: Fluxonium,
-    esys: Optional[tuple[NDArray[np.float64], NDArray[np.complex128]]] = None,
+    esys: tuple[NDArray[np.float64], NDArray[np.complex128]] | None = None,
     **other_noise_options,
 ) -> float:
     import scqubits.settings as scq_settings
@@ -60,7 +60,7 @@ def calculate_eff_t1_vs_flux_with(
     noise_channels: list[tuple[str, dict[str, Any]]],
     Temp: float,
     fluxonium: Fluxonium,
-    spectrum_data: Optional[SpectrumData] = None,
+    spectrum_data: SpectrumData | None = None,
     **other_noise_options,
 ) -> NDArray[np.float64]:
     import scqubits.settings as scq_settings

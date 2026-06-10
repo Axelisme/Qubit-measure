@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import logging
+from typing import Optional, Self, TypeAlias, Union
 
 from qick.asm_v2 import AsmInst, QickParam, WriteLabel
-from typing_extensions import Optional, Self, TypeAlias, Union
 
 from zcu_tools.program.v2.modular import ModularProgramV2
 
@@ -12,7 +12,7 @@ from .base import Module
 
 logger = logging.getLogger(__name__)
 
-SubModule: TypeAlias = Union[Module, list[Module]]
+SubModule: TypeAlias = Module | list[Module]
 
 
 def _emit_jump_s15(prog) -> None:
@@ -35,9 +35,9 @@ class Repeat(Module):
     def __init__(
         self,
         name: str,
-        n: Union[int, str],
+        n: int | str,
         *,
-        range_hint: Optional[tuple[int, int]] = None,
+        range_hint: tuple[int, int] | None = None,
     ) -> None:
         self.name = name
         self.n = n
@@ -75,8 +75,8 @@ class Repeat(Module):
             mod.init(prog)
 
     def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
+        self, prog: ModularProgramV2, t: float | QickParam = 0.0
+    ) -> float | QickParam:
         logger.debug(
             "Repeat.run: name='%s', counter_reg='%s', n='%s', t=%s",
             self.name,
@@ -130,7 +130,7 @@ class Branch(Module):
     """
 
     def __init__(
-        self, name: str, *branches: SubModule, compare_by: Optional[str] = None
+        self, name: str, *branches: SubModule, compare_by: str | None = None
     ) -> None:
         self.name = name
         self.compare_reg = compare_by if compare_by is not None else name
@@ -148,8 +148,8 @@ class Branch(Module):
                 mod.init(prog)
 
     def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
+        self, prog: ModularProgramV2, t: float | QickParam = 0.0
+    ) -> float | QickParam:
         logger.debug(
             "Branch.run: name='%s', compare_reg='%s', n_branches=%d, t=%s",
             self.name,
@@ -162,7 +162,7 @@ class Branch(Module):
             prog.meta_macro(type="BRANCH_CASE_START", name=str(i))
             prog.label(f"{self.name}_case_entry_{i}")
 
-            cur_t: Union[float, QickParam] = 0.0
+            cur_t: float | QickParam = 0.0
             for mod in self.branches[i]:
                 if logger.isEnabledFor(logging.DEBUG):
                     prog.debug_macro(

@@ -3,18 +3,10 @@ from __future__ import annotations
 import warnings
 from abc import abstractmethod
 from copy import deepcopy
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Optional, TypeAlias, Union
 
 from pydantic import BeforeValidator, Field, model_validator
 from qick.asm_v2 import QickParam
-from typing_extensions import (
-    TYPE_CHECKING,
-    Annotated,
-    Any,
-    Literal,
-    Optional,
-    TypeAlias,
-    Union,
-)
 
 from .base import AbsModuleCfg, Module, resolve_module_ref
 from .pulse import Pulse, PulseCfg
@@ -32,15 +24,15 @@ class AbsReadoutCfg(AbsModuleCfg):
 class DirectReadoutCfg(AbsReadoutCfg):
     type: Literal["readout/direct"] = "readout/direct"
     ro_ch: int
-    ro_length: Union[float, QickParam]
-    ro_freq: Union[float, QickParam]
-    trig_offset: Union[float, QickParam] = 0.0
-    gen_ch: Optional[int] = None
+    ro_length: float | QickParam
+    ro_freq: float | QickParam
+    trig_offset: float | QickParam = 0.0
+    gen_ch: int | None = None
 
     def build(self, name: str) -> DirectReadout:
         return DirectReadout(name, self)
 
-    def set_param(self, name: str, value: Union[float, QickParam]) -> None:
+    def set_param(self, name: str, value: float | QickParam) -> None:
         if name == "ro_freq":
             self.ro_freq = value
         elif name == "ro_length":
@@ -71,7 +63,7 @@ class PulseReadoutCfg(AbsReadoutCfg):
     def build(self, name: str) -> PulseReadout:
         return PulseReadout(name, self)
 
-    def set_param(self, name: str, value: Union[float, QickParam]) -> None:
+    def set_param(self, name: str, value: float | QickParam) -> None:
         if name == "gain":
             self.pulse_cfg.set_param("gain", value)
         elif name == "freq":
@@ -88,14 +80,14 @@ class PulseReadoutCfg(AbsReadoutCfg):
 
 
 ReadoutCfg: TypeAlias = Annotated[
-    Union[DirectReadoutCfg, PulseReadoutCfg],
+    DirectReadoutCfg | PulseReadoutCfg,
     Field(discriminator="type"),
 ]
 
 
 class AbsReadout(Module):
     @abstractmethod
-    def total_length(self, prog: ModularProgramV2) -> Union[float, QickParam]: ...
+    def total_length(self, prog: ModularProgramV2) -> float | QickParam: ...
 
     def allow_rerun(self) -> bool:
         return True
@@ -124,7 +116,7 @@ class DirectReadout(AbsReadout):
             **readout_kwargs,
         )
 
-    def total_length(self, prog: ModularProgramV2) -> Union[float, QickParam]:
+    def total_length(self, prog: ModularProgramV2) -> float | QickParam:
         return round_timestamp(
             prog,
             round_timestamp(prog, self.cfg.trig_offset)
@@ -132,8 +124,8 @@ class DirectReadout(AbsReadout):
         )
 
     def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
+        self, prog: ModularProgramV2, t: float | QickParam = 0.0
+    ) -> float | QickParam:
         ro_ch = self.cfg.ro_ch
         trig_offset = self.cfg.trig_offset
         prog.send_readoutconfig(ro_ch, self.name, t=t)  # type: ignore
@@ -160,14 +152,14 @@ class PulseReadout(AbsReadout):
         self.pulse.init(prog)
         self.ro_window.init(prog)
 
-    def total_length(self, prog: ModularProgramV2) -> Union[float, QickParam]:
+    def total_length(self, prog: ModularProgramV2) -> float | QickParam:
         return calc_max_length(
             self.ro_window.total_length(prog), self.pulse.total_length(prog)
         )
 
     def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
+        self, prog: ModularProgramV2, t: float | QickParam = 0.0
+    ) -> float | QickParam:
         self.ro_window.run(prog, t)
         self.pulse.run(prog, t)
         return t + self.total_length(prog)

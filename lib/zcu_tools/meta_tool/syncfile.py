@@ -2,18 +2,10 @@ from __future__ import annotations
 
 import warnings
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from functools import wraps
 from pathlib import Path
-
-from typing_extensions import (
-    Callable,
-    Literal,
-    Optional,
-    ParamSpec,
-    TypeVar,
-    Union,
-    cast,
-)
+from typing import Literal, Optional, ParamSpec, TypeVar, Union, cast
 
 P = ParamSpec("P")
 T = TypeVar("T")
@@ -48,7 +40,7 @@ def auto_sync(
 
 
 class SyncFile(ABC):
-    def __init__(self, path: Optional[Union[str, Path]] = None, readonly=False) -> None:
+    def __init__(self, path: str | Path | None = None, readonly=False) -> None:
         self._path = Path(path) if path is not None else None
         self._modify_time = 0
         self._dirty = False

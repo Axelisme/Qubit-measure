@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 import os
 import re
+from typing import Any, NotRequired, Optional, cast
 
 import h5py as h5
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Any, NotRequired, Optional, TypedDict, cast
+from typing_extensions import TypedDict  # extra_items (PEP 728) not in stdlib 3.13
 
 
 def format_rawdata(
@@ -54,8 +55,8 @@ class ResultData(TypedDict):
 def dump_result(
     path: str,
     name: str,
-    fluxdep_fit: Optional[FluxDepFitResult] = None,
-    dispersive: Optional[DispersiveResult] = None,
+    fluxdep_fit: FluxDepFitResult | None = None,
+    dispersive: DispersiveResult | None = None,
 ) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
 

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Optional, Self, Union
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from numpy.typing import NDArray
-from typing_extensions import Callable, Optional, Self, Union
 
 from zcu_tools.notebook.persistance import SpectrumResult, TransitionDict
 
@@ -67,7 +69,7 @@ def add_secondary_xaxis(
 
 
 class FluxDependVisualizer:
-    def __init__(self, fig: Optional[go.Figure] = None) -> None:
+    def __init__(self, fig: go.Figure | None = None) -> None:
         if fig is None:
             fig = go.Figure()
         self.fig = fig
@@ -83,7 +85,7 @@ class FluxDependVisualizer:
 
 
 class FreqFluxDependVisualizer(FluxDependVisualizer):
-    def __init__(self, fig: Optional[go.Figure] = None) -> None:
+    def __init__(self, fig: go.Figure | None = None) -> None:
         super().__init__(fig)
 
         self.xlimits = [np.inf, -np.inf]
@@ -91,8 +93,8 @@ class FreqFluxDependVisualizer(FluxDependVisualizer):
 
     def update_limits(
         self,
-        xrange: tuple[Union[float, None], Union[float, None]],
-        yrange: tuple[Union[float, None], Union[float, None]],
+        xrange: tuple[float | None, float | None],
+        yrange: tuple[float | None, float | None],
     ) -> None:
         self.xlimits = [
             self.xlimits[0] if xrange[0] is None else min(self.xlimits[0], xrange[0]),

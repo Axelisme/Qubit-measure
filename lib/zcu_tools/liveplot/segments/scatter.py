@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+from typing import Any, Optional, Union
+
 import numpy as np
 from matplotlib.collections import PathCollection
 from numpy.typing import NDArray
-from typing_extensions import Any, Mapping, Optional, Sequence, Union
 
 from .base import AbsSegment, Axes
 
@@ -13,9 +15,9 @@ class ScatterSegment(AbsSegment):
         self,
         xlabel: str,
         ylabel: str,
-        title: Optional[str] = None,
+        title: str | None = None,
         show_grid: bool = True,
-        scatter_kwargs: Optional[Mapping[str, Any]] = None,
+        scatter_kwargs: Mapping[str, Any] | None = None,
     ) -> None:
         self.xlabel = xlabel
         self.ylabel = ylabel
@@ -31,7 +33,7 @@ class ScatterSegment(AbsSegment):
             scatter_kwargs.setdefault(k, v)
 
         self.scatter_kwargs = scatter_kwargs
-        self.scatter: Optional[PathCollection] = None
+        self.scatter: PathCollection | None = None
 
     def init_ax(self, ax: Axes) -> None:
         ax.set_xlabel(self.xlabel)
@@ -50,14 +52,12 @@ class ScatterSegment(AbsSegment):
         ax: Axes,
         xs: NDArray[np.float64],
         ys: NDArray[np.float64],
-        colors: Union[
-            Sequence[str],
-            Sequence[tuple[float, float, float]],
-            Sequence[tuple[float, float, float, float]],
-            NDArray[np.float64],
-            None,
-        ] = None,
-        title: Optional[str] = None,
+        colors: Sequence[str]
+        | Sequence[tuple[float, float, float]]
+        | Sequence[tuple[float, float, float, float]]
+        | NDArray[np.float64]
+        | None = None,
+        title: str | None = None,
     ) -> None:
         if self.scatter is None:
             raise RuntimeError("Scatter not initialized.")

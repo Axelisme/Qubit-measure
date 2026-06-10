@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-
-from typing_extensions import Optional
+from typing import Optional
 
 from zcu_tools.progress_bar import BaseProgressBar, make_pbar
 from zcu_tools.utils.func_tools import MinIntervalFunc
@@ -82,8 +81,8 @@ class RepeatOverTime(AbsTask[list[T_ChildResult], T_RootResult, T_Cfg]):
         self.interval = interval
         self.task = task
 
-        self.iter_pbar: Optional[BaseProgressBar] = None
-        self.time_pbar: Optional[BaseProgressBar] = None
+        self.iter_pbar: BaseProgressBar | None = None
+        self.time_pbar: BaseProgressBar | None = None
         self.dynamic_pbar: bool = False
 
     def _build_pbar(self, leave: bool) -> tuple[BaseProgressBar, BaseProgressBar]:

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
-from typing_extensions import Callable, Optional, TypedDict
+from typing_extensions import (
+    TypedDict,  # closed/extra_items (PEP 728) not in stdlib 3.13
+)
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -45,7 +49,7 @@ def ro_opt_fluxdep_signal2real(signals: NDArray[np.float64]) -> NDArray[np.float
 
 
 class RO_OptModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     pi_pulse: PulseCfg
     readout: PulseReadoutCfg
 
@@ -85,7 +89,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
         gain_expts: int,
         cfg_maker: Callable[
             [TaskState[RO_OptResult, T_RootResult, FluxDepCfg], ModuleLibrary],
-            Optional[RO_OptCfgTemplate],
+            RO_OptCfgTemplate | None,
         ],
     ) -> None:
         self.freq_expts = freq_expts
@@ -95,7 +99,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
 
         def measure_ro_fn(
             ctx: TaskState[NDArray[np.float64], T_RootResult, RO_OptCfg],
-            update_hook: Optional[Callable],
+            update_hook: Callable | None,
         ) -> list[MomentTracker]:
             cfg = ctx.cfg
             modules = cfg.modules

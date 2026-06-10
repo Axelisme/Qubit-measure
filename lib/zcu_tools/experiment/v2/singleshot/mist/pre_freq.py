@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -37,13 +38,13 @@ from ..util import calc_populations
 class PreFreqResult:
     freqs: NDArray[np.float64]
     signals: NDArray[np.float64]
-    cfg_snapshot: Optional[PreFreqCfg] = None
+    cfg_snapshot: PreFreqCfg | None = None
 
 
 class PreFreqModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     init_pulse: PulseCfg
-    pi_pulse: Optional[PulseCfg] = None
+    pi_pulse: PulseCfg | None = None
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
@@ -79,7 +80,7 @@ class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.float64], Any, PreFreqCfg],
-            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules
@@ -144,9 +145,9 @@ class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
 
     def analyze(
         self,
-        result: Optional[PreFreqResult] = None,
+        result: PreFreqResult | None = None,
         *,
-        confusion_matrix: Optional[NDArray[np.float64]] = None,
+        confusion_matrix: NDArray[np.float64] | None = None,
     ) -> Figure:
         if result is None:
             result = self.last_result
@@ -177,8 +178,8 @@ class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[PreFreqResult] = None,
-        comment: Optional[str] = None,
+        result: PreFreqResult | None = None,
+        comment: str | None = None,
         tag: str = "singleshot/mist/gain",
         **kwargs,
     ) -> None:

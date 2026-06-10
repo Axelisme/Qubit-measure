@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional, TypeAlias, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional, TypeAlias, cast
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -40,7 +41,7 @@ class FreqResult:
     lengths: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[FreqCfg] = None
+    cfg_snapshot: FreqCfg | None = None
 
 
 def freq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -67,7 +68,7 @@ def get_resonance_freq(
 
 
 class FreqModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     flux_pulse: PulseCfg
     qub_pulse: PulseCfg
     readout: ReadoutCfg
@@ -91,7 +92,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         soccfg,
         cfg: FreqCfg,
         *,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> FreqResult:
         setup_devices(cfg, progress=True)
         modules = cfg.modules
@@ -108,7 +109,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, FreqCfg],
-            update_hook: Optional[Callable],
+            update_hook: Callable | None,
         ) -> list[NDArray[np.float64]]:
             cfg: FreqCfg = cast(FreqCfg, ctx.cfg)
             modules = cfg.modules
@@ -167,7 +168,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
     def analyze(
         self,
-        result: Optional[FreqResult] = None,
+        result: FreqResult | None = None,
     ) -> Figure:
         if result is None:
             result = self.last_result
@@ -233,8 +234,8 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[FreqResult] = None,
-        comment: Optional[str] = None,
+        result: FreqResult | None = None,
+        comment: str | None = None,
         tag: str = "fastflux/distortion/freq",
         **kwargs,
     ) -> None:

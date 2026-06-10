@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional, TypeAlias
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -37,7 +38,7 @@ class DriveFreqResult:
     gains: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[DriveFreqCfg] = None
+    cfg_snapshot: DriveFreqCfg | None = None
 
 
 def drivefreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -49,8 +50,8 @@ def drivefreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
 
 
 class DriveFreqModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
-    init_pulse: Optional[PulseCfg] = None
+    reset: ResetCfg | None = None
+    init_pulse: PulseCfg | None = None
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
@@ -72,7 +73,7 @@ class DriveFreqExp(AbsExperiment[DriveFreqResult, DriveFreqCfg]):
         soccfg,
         cfg: DriveFreqCfg,
         *,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> DriveFreqResult:
         cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
@@ -91,7 +92,7 @@ class DriveFreqExp(AbsExperiment[DriveFreqResult, DriveFreqCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, DriveFreqCfg],
-            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules
@@ -141,7 +142,7 @@ class DriveFreqExp(AbsExperiment[DriveFreqResult, DriveFreqCfg]):
 
         return self.last_result
 
-    def analyze(self, result: Optional[DriveFreqResult] = None) -> Figure:
+    def analyze(self, result: DriveFreqResult | None = None) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -169,8 +170,8 @@ class DriveFreqExp(AbsExperiment[DriveFreqResult, DriveFreqCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[DriveFreqResult] = None,
-        comment: Optional[str] = None,
+        result: DriveFreqResult | None = None,
+        comment: str | None = None,
         tag: str = "mist/",
         **kwargs,
     ) -> None:

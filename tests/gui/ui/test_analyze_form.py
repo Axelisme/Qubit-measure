@@ -16,7 +16,7 @@ class _TestParams:
 
 @dataclass
 class _OptionalParams:
-    t0: Annotated[Optional[float], ParamMeta(label="T0")] = None
+    t0: Annotated[float | None, ParamMeta(label="T0")] = None
 
 
 def test_analyze_form_round_trips_values(qapp):  # noqa: ARG001

@@ -2,7 +2,8 @@ import logging
 import sys
 import threading
 import traceback
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]
 

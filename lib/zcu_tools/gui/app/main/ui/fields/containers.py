@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional, cast
+from typing import Any, Optional, cast
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ class _CollapsibleSection(QWidget):
         collapsible: bool = True,
         collapsed: bool = False,
         no_header: bool = False,
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         outer = QVBoxLayout(self)
@@ -47,7 +47,7 @@ class _CollapsibleSection(QWidget):
         outer.setSpacing(0)
 
         self._toggle_btn = None
-        self._header_label: Optional[QLabel] = None
+        self._header_label: QLabel | None = None
 
         if not no_header:
             if collapsible:
@@ -107,7 +107,7 @@ class SectionWidget(BaseLiveWidget):
         field: SectionLiveField,
         top_level: bool = False,
         no_header: bool = False,
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
     ):
         super().__init__(field, parent)
 
@@ -122,7 +122,7 @@ class SectionWidget(BaseLiveWidget):
         )
         layout.addWidget(self._container)
 
-        self._child_widgets: Dict[str, FieldWidgetProtocol] = {}
+        self._child_widgets: dict[str, FieldWidgetProtocol] = {}
         self._build_children()
         field.on_validity_changed.connect(self._on_validity_changed)
         self._on_validity_changed(field.is_valid())
@@ -186,7 +186,7 @@ class SectionWidget(BaseLiveWidget):
 
 @register_widget(ModuleRefLiveField)
 class ModuleRefWidget(BaseLiveWidget):
-    def __init__(self, field: ModuleRefLiveField, parent: Optional[QWidget] = None):
+    def __init__(self, field: ModuleRefLiveField, parent: QWidget | None = None):
         super().__init__(field, parent)
 
         layout = QVBoxLayout(self)
@@ -199,7 +199,7 @@ class ModuleRefWidget(BaseLiveWidget):
         header.setSpacing(4)
 
         # Declare before _refresh_combo_items so _sync_expand_btn can read them
-        self._sub_widget: Optional[FieldWidgetProtocol] = None
+        self._sub_widget: FieldWidgetProtocol | None = None
         self._sub_container = QWidget()
         self._sub_layout = QVBoxLayout(self._sub_container)
         self._sub_layout.setContentsMargins(0, 0, 0, 0)
@@ -423,7 +423,7 @@ class DeviceRefWidget(BaseLiveWidget):
     """Combo box listing registered device names for DeviceRefLiveField."""
 
     def __init__(
-        self, field: DeviceRefLiveField, parent: Optional[QWidget] = None
+        self, field: DeviceRefLiveField, parent: QWidget | None = None
     ) -> None:
         super().__init__(field, parent)
         layout = QHBoxLayout(self)

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Literal, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Literal, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -26,7 +26,7 @@ from zcu_tools.utils.process import minus_background
 class FreqResult:
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[FreqCfg] = None
+    cfg_snapshot: FreqCfg | None = None
 
 
 def qubfreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -48,7 +48,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         soccfg,
         cfg: FreqCfg,
         *,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> FreqResult:
         orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
@@ -99,7 +99,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
     def analyze(
         self,
-        result: Optional[FreqResult] = None,
+        result: FreqResult | None = None,
         *,
         model_type: Literal["lor", "sinc"] = "lor",
         plot_fit: bool = True,
@@ -142,8 +142,8 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[FreqResult] = None,
-        comment: Optional[str] = None,
+        result: FreqResult | None = None,
+        comment: str | None = None,
         tag: str = "twotone/freq",
         **kwargs,
     ) -> None:

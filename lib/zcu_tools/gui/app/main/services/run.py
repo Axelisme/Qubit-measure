@@ -34,12 +34,12 @@ class RunService(QObject):
 
     def __init__(
         self,
-        state: "State",
+        state: State,
         bg: BackgroundExecutor,
-        bus: "EventBus",
+        bus: EventBus,
         gate: ExclusionGate,
         handles: OperationHandles,
-        writeback: "WritebackLifecyclePort",
+        writeback: WritebackLifecyclePort,
         progress: ProgressHub,
     ) -> None:
         super().__init__()
@@ -53,12 +53,12 @@ class RunService(QObject):
         self._handles = handles
         self._writeback = writeback
         self._progress = progress
-        self._active_token: Optional[int] = None
+        self._active_token: int | None = None
 
     def start_run(
         self,
         permit: RunPermit,
-        live_container: Optional[FigureContainer] = None,
+        live_container: FigureContainer | None = None,
     ) -> int:
         # Static preconditions (context readiness, committed-cfg validity, soc
         # capability) are proven by the RunPermit. Dynamic resource availability

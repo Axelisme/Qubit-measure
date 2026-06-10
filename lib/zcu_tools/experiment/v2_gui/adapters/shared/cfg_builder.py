@@ -43,9 +43,7 @@ offending call rather than surfacing as a later lowering error.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional, Union
-
-from typing_extensions import Self
+from typing import TYPE_CHECKING, Optional, Self
 
 from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,
@@ -71,7 +69,7 @@ if TYPE_CHECKING:
 # A node the builder mounts at a path: a whole ref node, a sweep, or None (a
 # disabled optional ref). Scalars never go through _mount_node — they are set
 # via CfgSectionValue.with_field (scalar-leaf only).
-_MountNode = Union[ModuleRefValue, WaveformRefValue, SweepValue, None]
+_MountNode = ModuleRefValue | WaveformRefValue | SweepValue | None
 
 
 class CfgBuilder:
@@ -298,7 +296,7 @@ class CfgBuilder:
 
     def _resolve_ref_spec(
         self, parts: list[str], path: str
-    ) -> Union[ModuleRefSpec, WaveformRefSpec]:
+    ) -> ModuleRefSpec | WaveformRefSpec:
         leaf_spec = self._resolve_leaf_spec(parts, path)
         if not isinstance(leaf_spec, (ModuleRefSpec, WaveformRefSpec)):
             raise RuntimeError(
@@ -309,7 +307,7 @@ class CfgBuilder:
 
     @staticmethod
     def _check_ref_kind(
-        ref_spec: Union[ModuleRefSpec, WaveformRefSpec],
+        ref_spec: ModuleRefSpec | WaveformRefSpec,
         node: _MountNode,
         path: str,
         role_id: str,
@@ -341,7 +339,7 @@ def _spec_path_exists(spec: CfgSectionSpec, parts: list[str]) -> bool:
     """True if ``parts`` resolve to a leaf within ``spec`` (duck-typing across
     ModuleRefSpec.allowed shapes, mirroring the spec-layer descent)."""
     head, rest = parts[0], parts[1:]
-    child: Optional[CfgNodeSpec] = spec.fields.get(head)
+    child: CfgNodeSpec | None = spec.fields.get(head)
     if child is None:
         return False
     if not rest:
@@ -359,7 +357,7 @@ def _is_locked_path(spec: CfgSectionSpec, parts: list[str]) -> bool:
     if *any* allowed shape locks the path, the field is treated as locked
     (lock_literal applies the lock to every shape that contains the path)."""
     head, rest = parts[0], parts[1:]
-    child: Optional[CfgNodeSpec] = spec.fields.get(head)
+    child: CfgNodeSpec | None = spec.fields.get(head)
     if child is None:
         return False
     if not rest:

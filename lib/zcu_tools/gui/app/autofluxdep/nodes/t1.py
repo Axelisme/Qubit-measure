@@ -51,10 +51,11 @@ simulation); with the demo / empty-ml context the cfg is None and the axis is th
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
+from typing import Any, Optional
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Any, Mapping, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -97,7 +98,7 @@ class T1ModuleCfg(ConfigBase):
     them), not built from params.
     """
 
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
@@ -125,7 +126,7 @@ def _placeholder_pi_pulse() -> Any:
     return {"type": "pi", "length": 0.1}
 
 
-def _default_readout() -> Optional[Any]:
+def _default_readout() -> Any | None:
     return None
 
 
@@ -151,11 +152,11 @@ def _resolve_relax_delay(smoothed_t1: float) -> float:
 class T1Node(Node):
     """One flux point's t1: synth exp decay → fit_decay → fill row → Patch."""
 
-    def __init__(self, env: RunEnv, builder: "T1Builder") -> None:
+    def __init__(self, env: RunEnv, builder: T1Builder) -> None:
         self._env = env
         self._builder = builder
 
-    def _maybe_make_cfg(self, snapshot: Snapshot) -> Optional[T1CfgTemplate]:
+    def _maybe_make_cfg(self, snapshot: Snapshot) -> T1CfgTemplate | None:
         """Build the run cfg when the context is configured for it, else None.
 
         ``make_cfg`` needs a real ``pi_pulse`` + ``readout`` module (validatable

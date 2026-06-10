@@ -20,7 +20,8 @@ seeds a fresh entry, it does not reference an existing library entry.)
 
 from __future__ import annotations
 
-from typing import Callable, Union
+from collections.abc import Callable
+from typing import Union
 
 from zcu_tools.gui.app.main.adapter import (
     ExpContext,
@@ -121,7 +122,7 @@ def _blank_waveform_factory(
 
 def _blank_entries() -> list[RoleEntry]:
     entries: list[RoleEntry] = []
-    factory: Callable[[ExpContext], Union[ModuleRefValue, WaveformRefValue]]
+    factory: Callable[[ExpContext], ModuleRefValue | WaveformRefValue]
     for disc in _BLANK_MODULE_DISCRIMINATORS:
         factory = _blank_module_factory(disc)
         entries.append(RoleEntry(f"{disc}:blank", f"Blank: {disc}", "module", factory))

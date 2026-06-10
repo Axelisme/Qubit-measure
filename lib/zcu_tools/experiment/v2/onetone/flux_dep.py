@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Optional, cast
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
-from typing_extensions import Callable, Mapping, Optional, cast
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo
@@ -40,7 +41,7 @@ class FluxDepResult:
     values: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[FluxDepCfg] = None
+    cfg_snapshot: FluxDepCfg | None = None
 
 
 def fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -48,7 +49,7 @@ def fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class FluxDepModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     readout: PulseReadoutCfg
 
 
@@ -87,7 +88,7 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         setup_devices(cfg, progress=True)
 
         def measure_fn(
-            ctx: TaskState, update_hook: Optional[Callable]
+            ctx: TaskState, update_hook: Callable | None
         ) -> list[NDArray[np.float64]]:
             cfg = cast(FluxDepCfg, ctx.cfg)
             setup_devices(cfg, progress=False)
@@ -143,9 +144,9 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
 
     def analyze(
         self,
-        result: Optional[FluxDepResult] = None,
-        flux_half: Optional[float] = None,
-        flux_int: Optional[float] = None,
+        result: FluxDepResult | None = None,
+        flux_half: float | None = None,
+        flux_int: float | None = None,
     ) -> InteractiveLines:
         if result is None:
             result = self.last_result
@@ -168,8 +169,8 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[FluxDepResult] = None,
-        comment: Optional[str] = None,
+        result: FluxDepResult | None = None,
+        comment: str | None = None,
         tag: str = "onetone/flux_dep",
         **kwargs,
     ) -> None:

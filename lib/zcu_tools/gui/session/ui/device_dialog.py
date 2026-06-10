@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol, runtime_checkable
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Optional, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ class DevicePanelProtocol(Protocol):
 class _FakeDevicePanel(QWidget):
     """Info + control panel for FakeDevice."""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         form = QFormLayout(self)
 
@@ -110,7 +111,7 @@ class _FakeDevicePanel(QWidget):
 class _YOKOGS200Panel(QWidget):
     """Info + control panel for YOKOGS200."""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         form = QFormLayout(self)
 
@@ -153,7 +154,7 @@ class _YOKOGS200Panel(QWidget):
 class _SGS100APanel(QWidget):
     """Info + control panel for SGS100A."""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         form = QFormLayout(self)
 
@@ -200,7 +201,7 @@ class _SGS100APanel(QWidget):
 class _MemoryDevicePanel(QWidget):
     """Read-only info panel for a remembered-but-not-connected device."""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         form = QFormLayout(self)
 
@@ -232,7 +233,7 @@ class DeviceDialog(QDialog):
     """Resizable dialog combining device listing (left) and detail control (right)."""
 
     def __init__(
-        self, controller: "SessionControllerPort", parent: Optional[QWidget] = None
+        self, controller: SessionControllerPort, parent: QWidget | None = None
     ) -> None:
         super().__init__(parent)
         self._ctrl = controller
@@ -315,7 +316,7 @@ class DeviceDialog(QDialog):
         btn_row.addWidget(close_btn)
         right_layout.addLayout(btn_row)
 
-        self._active_setup: Optional[DeviceSetupSnapshot] = None
+        self._active_setup: DeviceSetupSnapshot | None = None
 
         splitter.addWidget(right_widget)
         splitter.setSizes([300, 500])
@@ -332,8 +333,8 @@ class DeviceDialog(QDialog):
         # Progress subscription for the currently-active setup's device (managed
         # in _render_setup as the active setup comes and goes). None when no
         # setup is active or the dialog has detached.
-        self._progress_unsub: Optional[Callable[[], None]] = None
-        self._progress_owner: Optional[str] = None
+        self._progress_unsub: Callable[[], None] | None = None
+        self._progress_owner: str | None = None
         self.finished.connect(self._cleanup_bus_subscriptions)
         self.destroyed.connect(self._cleanup_bus_subscriptions)
 
@@ -353,7 +354,7 @@ class DeviceDialog(QDialog):
         self._detach_progress()
         self._bus_subs_active = False
 
-    def _refresh_list(self, select_name: Optional[str] = None) -> None:
+    def _refresh_list(self, select_name: str | None = None) -> None:
         self._list.clear()
         entries = self._ctrl.list_devices()
         for entry in entries:
@@ -534,7 +535,7 @@ class DeviceDialog(QDialog):
         # Terminal — re-read active setup (now None) to hide the panel.
         self._render_setup(self._ctrl.get_active_device_setup())
 
-    def _render_setup(self, setup: Optional[DeviceSetupSnapshot]) -> None:
+    def _render_setup(self, setup: DeviceSetupSnapshot | None) -> None:
         self._active_setup = setup
         if setup is not None:
             for row in range(self._list.count()):

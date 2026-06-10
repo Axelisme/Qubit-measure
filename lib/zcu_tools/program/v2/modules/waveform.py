@@ -1,12 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-
-import numpy as np
-from numpy.typing import NDArray
-from pydantic import BeforeValidator, Field, TypeAdapter, ValidationInfo
-from qick.asm_v2 import QickParam
-from typing_extensions import (
+from typing import (
     TYPE_CHECKING,
     Annotated,
     Any,
@@ -19,6 +14,11 @@ from typing_extensions import (
     cast,
 )
 
+import numpy as np
+from numpy.typing import NDArray
+from pydantic import BeforeValidator, Field, TypeAdapter, ValidationInfo
+from qick.asm_v2 import QickParam
+
 from zcu_tools.cfg_model import ConfigBase
 
 if TYPE_CHECKING:
@@ -28,23 +28,23 @@ if TYPE_CHECKING:
 
 class AbsWaveformCfg(ConfigBase):
     style: str
-    length: Union[float, QickParam]
+    length: float | QickParam
 
     def build(self, name: str) -> AbsWaveform:
         raise NotImplementedError(f"{type(self).__name__}.build is not implemented")
 
-    def set_param(self, name: str, value: Union[float, QickParam]) -> None:
+    def set_param(self, name: str, value: float | QickParam) -> None:
         raise NotImplementedError(f"{type(self).__name__} does not support set_param")
 
 
 class ConstWaveformCfg(AbsWaveformCfg):
     style: Literal["const"] = "const"
-    length: Union[float, QickParam]
+    length: float | QickParam
 
     def build(self, name: str) -> ConstWaveform:
         return ConstWaveform(name, self)
 
-    def set_param(self, name: str, value: Union[float, QickParam]) -> None:
+    def set_param(self, name: str, value: float | QickParam) -> None:
         if name == "length":
             self.length = value
         else:
@@ -58,7 +58,7 @@ class CosineWaveformCfg(AbsWaveformCfg):
     def build(self, name: str) -> CosineWaveform:
         return CosineWaveform(name, self)
 
-    def set_param(self, name: str, value: Union[float, QickParam]) -> None:
+    def set_param(self, name: str, value: float | QickParam) -> None:
         if name != "length":
             raise ValueError(f"Unknown parameter: {name}")
         if isinstance(value, QickParam):
@@ -74,7 +74,7 @@ class GaussWaveformCfg(AbsWaveformCfg):
     def build(self, name: str) -> GaussWaveform:
         return GaussWaveform(name, self)
 
-    def set_param(self, name: str, value: Union[float, QickParam]) -> None:
+    def set_param(self, name: str, value: float | QickParam) -> None:
         if isinstance(value, QickParam):
             raise ValueError(f"Gauss waveform {name} must not be a QickParam")
 
@@ -100,7 +100,7 @@ class DragWaveformCfg(AbsWaveformCfg):
     def build(self, name: str) -> DragWaveform:
         return DragWaveform(name, self)
 
-    def set_param(self, name: str, value: Union[float, QickParam]) -> None:
+    def set_param(self, name: str, value: float | QickParam) -> None:
         if isinstance(value, QickParam):
             raise ValueError(f"Drag waveform {name} must not be a QickParam")
 
@@ -128,7 +128,7 @@ class ArbWaveformCfg(AbsWaveformCfg):
     def build(self, name: str) -> ArbWaveform:
         return ArbWaveform(name, self)
 
-    def set_param(self, name: str, value: Union[float, QickParam]) -> None:
+    def set_param(self, name: str, value: float | QickParam) -> None:
         raise ValueError("Arb waveform length and data cannot be changed")
 
 
@@ -141,7 +141,7 @@ def resolve_waveform_ref(value: Any, info: ValidationInfo) -> Any:
 
 
 RaiseWaveformCfg: TypeAlias = Annotated[
-    Union[CosineWaveformCfg, GaussWaveformCfg, DragWaveformCfg, ArbWaveformCfg],
+    CosineWaveformCfg | GaussWaveformCfg | DragWaveformCfg | ArbWaveformCfg,
     BeforeValidator(resolve_waveform_ref),
     Field(discriminator="style"),
 ]
@@ -149,13 +149,13 @@ RaiseWaveformCfg: TypeAlias = Annotated[
 
 class FlatTopWaveformCfg(AbsWaveformCfg):
     style: Literal["flat_top"] = "flat_top"
-    length: Union[float, QickParam]
+    length: float | QickParam
     raise_waveform: RaiseWaveformCfg
 
     def build(self, name: str) -> FlatTopWaveform:
         return FlatTopWaveform(name, self)
 
-    def set_param(self, name: str, value: Union[float, QickParam]) -> None:
+    def set_param(self, name: str, value: float | QickParam) -> None:
         if name == "length":
             self.length = value
         else:
@@ -163,14 +163,12 @@ class FlatTopWaveformCfg(AbsWaveformCfg):
 
 
 WaveformCfg: TypeAlias = Annotated[
-    Union[
-        ConstWaveformCfg,
-        CosineWaveformCfg,
-        GaussWaveformCfg,
-        DragWaveformCfg,
-        ArbWaveformCfg,
-        FlatTopWaveformCfg,
-    ],
+    ConstWaveformCfg
+    | CosineWaveformCfg
+    | GaussWaveformCfg
+    | DragWaveformCfg
+    | ArbWaveformCfg
+    | FlatTopWaveformCfg,
     BeforeValidator(resolve_waveform_ref),
     Field(discriminator="style"),
 ]
@@ -179,9 +177,9 @@ WaveformCfg: TypeAlias = Annotated[
 class WaveformCfgFactory:
     @staticmethod
     def from_raw(
-        raw: Union[str, dict[str, Any], AbsWaveformCfg],
+        raw: str | dict[str, Any] | AbsWaveformCfg,
         *,
-        ml: Optional[ModuleLibrary] = None,
+        ml: ModuleLibrary | None = None,
     ) -> WaveformCfg:
         if isinstance(raw, str):
             if ml is None:
@@ -195,7 +193,7 @@ class WaveformCfgFactory:
 class QickWaveformKwargs(TypedDict):
     style: Literal["const", "arb", "flat_top"]
 
-    length: NotRequired[Union[float, QickParam]]
+    length: NotRequired[float | QickParam]
     envelope: NotRequired[str]
 
 
@@ -204,7 +202,7 @@ class AbsWaveform(ABC):
     waveform_cfg: AbsWaveformCfg
 
     @property
-    def length(self) -> Union[float, QickParam]:
+    def length(self) -> float | QickParam:
         return self.waveform_cfg.length  # type: ignore[attr-defined]
 
     @abstractmethod
@@ -306,7 +304,7 @@ class ArbWaveform(AbsWaveform):
 
     def make_iqdata(
         self, ch: int, prog: ModularProgramV2, even_length: bool = False
-    ) -> tuple[NDArray, Optional[NDArray]]:
+    ) -> tuple[NDArray, NDArray | None]:
         # lazy import to avoid circular import
         from zcu_tools.meta_tool.arb_waveform import ArbWaveformDatabase
 

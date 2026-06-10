@@ -68,9 +68,21 @@
 4. GUI smoke：三個 GUI app（measure/fluxdep/dispersive）launch + MCP `state_check` 各跑一輪。
 5. 更新 CLAUDE.md 的「Python 版本鎖定 3.9」描述、相關 `AI_NOTE.md`、本三件套收尾。
 
-### Phase 5（optional，依 D4）：typing 現代化 ⬜
+### Phase 5：typing 現代化（已細部規劃 2026-06-11）⬜
 
-ruff `UP006/UP007` 批次修 + 人工複核 runtime `get_origin` 判斷點（`dispatch.py:826`、`analyze_params.py:46`）。
+**盤點**（ruff `--select UP` dry-run，3.13 target）：核心現代化規則命中 UP045(`Optional[X]`→`X|None`) 1656、UP037(引號 annotation 去除) 461、UP035(過時 import) 340、UP007(`Union`→`|`) 287、UP006(`List`→`list`) 172。typing_extensions import 共 256 行，且 repo 慣例連 `Optional/Any/Callable/cast` 都從 typing_extensions 進（173/123/77/37 次）。
+
+**範圍排除**：PEP 695 規則（UP040 type alias / UP046/UP047 generics）與 UP042（str enum）不做——屬語言新特性採用，非「清舊」，且部分無自動 fix。`from __future__ import annotations`（686 處）**保留不動**（pydantic/get_type_hints 相容、PEP 649 於 3.13 未生效，移除無收益有風險）。
+
+**步驟（依序，Step 0 是硬性前置）**：
+
+1. **Step 0 — 修 runtime Union introspection guards（必須先做）**：`X|Y` 在 runtime 求值是 `types.UnionType` 而非 `typing.Union`（3.13 的 `get_type_hints`/pydantic 不會正規化回去），現有 `get_origin(x) is typing.Union` 判斷在 annotation 改寫後會**靜默失配**。已知兩處：`gui/app/main/adapter/analyze_params.py:46`、`gui/app/main/services/remote/dispatch.py:826`；需 grep 全 repo `get_origin`/`get_args` 清出其餘。修法：`origin in (typing.Union, types.UnionType)`（或等價 helper），**先補測試**鎖 `X|None` 形式的 dispatch/analyze 路徑再改。
+2. **Step 1 — ruff 配置**：pyproject `[tool.ruff.lint]` 常駐 `extend-select = ["UP006","UP007","UP035","UP037","UP045"]`（方案 b，讓未來程式碼持續被守）；同時加 `per-file-ignores`：板端 Python 3.8 檔案 `script/start_server.py` 與 `lib/zcu_tools/remote/pyro.py`（被 start_server 在板上 import）排除 UP——ruff target-version 由 `requires-python>=3.13` 推得，會誤修板端檔。
+3. **Step 2 — 批次自動修**：`ruff check --fix`（部分 UP007/UP045 fix 標記 unsafe，需 `--unsafe-fixes` 並靠測試把關）；殘餘無 fix 命中人工掃尾。機械步驟，委派 implementer。
+4. **Step 3 —（依 D7）typing_extensions→typing 遷移**：256 行 import 改源；3.13 stdlib `typing` 已覆蓋 Optional/Any/Callable/cast/Literal/Mapping/ClassVar/TypeVar/TypedDict/Annotated/TYPE_CHECKING/Self/override 等；UP035 會自動處理一部分。**範圍叉待用戶定**：做（慣例統一到 stdlib）或不做（保留 typing_extensions 為統一 import 源也是合法慣例）。
+5. **Step 4 — 收尾驗證**：pyright 0 / pytest 全綠 / `ruff check --select I --fix && ruff format`；人工複核 Step 0 清單外是否還有 annotation introspection 行為差異；更新 AI_NOTE/本三件套。
+
+**風險控制**：Step 0 不做完不准跑 Step 2（靜默行為差異）；Step 2 的 unsafe fixes 逐塊跑、每塊跑完整測試套件。
 
 ## 遇到的錯誤
 

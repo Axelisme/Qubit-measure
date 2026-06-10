@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Optional, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,7 +13,6 @@ from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d import Axes3D
 from numpy.typing import NDArray
 from pydantic import Field
-from typing_extensions import Any, Callable, Mapping, Optional, cast
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo
@@ -52,11 +53,11 @@ class JPAOptimizeResult:
     params: NDArray[np.float64]
     phases: NDArray[np.int32]
     signals: NDArray[np.float64]
-    cfg_snapshot: Optional[JPAOptCfg] = None
+    cfg_snapshot: JPAOptCfg | None = None
 
 
 class JPAOptModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
@@ -220,7 +221,7 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
         return self.last_result
 
     def analyze(
-        self, result: Optional[JPAOptimizeResult] = None
+        self, result: JPAOptimizeResult | None = None
     ) -> tuple[float, float, float, Figure]:
         if result is None:
             result = self.last_result
@@ -272,7 +273,7 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
 
         return float(best_params[0]), float(best_params[1]), float(best_params[2]), fig
 
-    def plot_sample_params(self, result: Optional[JPAOptimizeResult] = None) -> Figure:
+    def plot_sample_params(self, result: JPAOptimizeResult | None = None) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -305,8 +306,8 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[JPAOptimizeResult] = None,
-        comment: Optional[str] = None,
+        result: JPAOptimizeResult | None = None,
+        comment: str | None = None,
         tag: str = "jpa/auto_optimize",
         **kwargs,
     ) -> None:

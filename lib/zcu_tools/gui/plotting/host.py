@@ -49,7 +49,7 @@ if TYPE_CHECKING:
 
     from .container import FigureContainer
 
-_fig_container_registry: dict[int, "FigureContainer"] = {}
+_fig_container_registry: dict[int, FigureContainer] = {}
 _host: Any = None
 _shutting_down: bool = False
 
@@ -71,7 +71,7 @@ class PlotStateSnapshot:
 
 
 def attach_existing_figure_to_container(
-    fig: Figure, container: "FigureContainer"
+    fig: Figure, container: FigureContainer
 ) -> QWidget:
     done = threading.Event()
     result: list[Any] = []
@@ -95,8 +95,8 @@ def attach_existing_figure_to_container(
 
 def attach_figure_to_current_container(
     fig: Figure,
-    canvas_class: Optional[type["FigureCanvasQTAgg"]] = None,
-) -> "FigureCanvasQTAgg":
+    canvas_class: type[FigureCanvasQTAgg] | None = None,
+) -> FigureCanvasQTAgg:
     container = require_current_container()
     done = threading.Event()
     result: list[Any] = []
@@ -179,7 +179,7 @@ def refresh_figure_in_main_thread(fig: Figure) -> None:
     _get_host().refresh_requested.emit(fig)
 
 
-def get_figure_container(fig: Figure) -> Optional["FigureContainer"]:
+def get_figure_container(fig: Figure) -> FigureContainer | None:
     return _fig_container_registry.get(id(fig))
 
 
@@ -221,10 +221,10 @@ def assert_plot_invariants() -> None:
 
 
 def _attach_figure_canvas(
-    container: "FigureContainer",
+    container: FigureContainer,
     fig: Figure,
-    canvas_class: Optional[type["FigureCanvasQTAgg"]] = None,
-) -> "FigureCanvasQTAgg":
+    canvas_class: type[FigureCanvasQTAgg] | None = None,
+) -> FigureCanvasQTAgg:
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 
     canvas = fig.canvas

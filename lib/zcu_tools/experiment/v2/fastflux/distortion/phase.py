@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional, TypeAlias
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -39,7 +40,7 @@ class PhaseResult:
     lengths: NDArray[np.float64]
     phases: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[PhaseCfg] = None
+    cfg_snapshot: PhaseCfg | None = None
 
 
 def phase_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -47,7 +48,7 @@ def phase_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class PhaseModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     flux_pulse: PulseCfg
     pi2_pulse: PulseCfg
     readout: ReadoutCfg
@@ -71,7 +72,7 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
         soccfg,
         cfg: PhaseCfg,
         *,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> PhaseResult:
         setup_devices(cfg, progress=True)
         modules = cfg.modules
@@ -88,7 +89,7 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, PhaseCfg],
-            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules
@@ -148,7 +149,7 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
 
     def analyze(
         self,
-        result: Optional[PhaseResult] = None,
+        result: PhaseResult | None = None,
     ) -> Figure:
         if result is None:
             result = self.last_result
@@ -221,8 +222,8 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[PhaseResult] = None,
-        comment: Optional[str] = None,
+        result: PhaseResult | None = None,
+        comment: str | None = None,
         tag: str = "fastflux/distortion/phase",
         **kwargs,
     ) -> None:

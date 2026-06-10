@@ -67,7 +67,7 @@ def resolve_and_set(root: SectionLiveField, path: str, value: object) -> None:
 
 
 def _set_recursive(
-    field: "LiveField", segments: list[str], full_path: str, value: object
+    field: LiveField, segments: list[str], full_path: str, value: object
 ) -> None:
     head = segments[0]
     rest = segments[1:]
@@ -104,7 +104,7 @@ def _set_recursive(
     )
 
 
-def _set_leaf(field: "LiveField", full_path: str, value: object) -> None:
+def _set_leaf(field: LiveField, full_path: str, value: object) -> None:
     if isinstance(field, LiteralLiveField):
         raise RemoteError(
             ErrorCode.INVALID_PARAMS,
@@ -320,7 +320,7 @@ def _sweep_entries(path: str, field: SweepLiveField) -> list[dict[str, object]]:
     return out
 
 
-def _list_field(path: str, field: "LiveField") -> list[dict[str, object]]:
+def _list_field(path: str, field: LiveField) -> list[dict[str, object]]:
     """Recurse one LiveField, returning the settable leaves beneath it."""
     if isinstance(field, LiteralLiveField):
         return []  # immutable — resolve_and_set rejects it
@@ -370,7 +370,7 @@ _VERBOSITY_DROP = {"compact": ("value", "type")}
 
 def _project(
     entries: list[dict[str, object]], verbosity: str
-) -> "list[dict[str, object]] | list[str]":
+) -> list[dict[str, object]] | list[str]:
     """Project full path entries down to the requested verbosity."""
     if verbosity == "full":
         return entries
@@ -387,9 +387,9 @@ def _project(
 
 def list_settable_paths(
     root: SectionLiveField,
-    under: "str | None" = None,
+    under: str | None = None,
     verbosity: str = "full",
-) -> "list[dict[str, object]] | list[str]":
+) -> list[dict[str, object]] | list[str]:
     """Enumerate the dotted paths that ``resolve_and_set`` can mutate.
 
     The path grammar is identical to resolve_and_set's, so every listed path
@@ -413,7 +413,7 @@ def list_settable_paths(
 
 
 def list_settable_paths_full(
-    root: SectionLiveField, under: "str | None" = None
+    root: SectionLiveField, under: str | None = None
 ) -> list[dict[str, object]]:
     """``list_settable_paths`` at full verbosity, typed as the dict-entry list.
 
@@ -440,7 +440,7 @@ def _sweep_spec_entries(path: str) -> list[dict[str, object]]:
     ]
 
 
-def _list_spec_field(path: str, node: "CfgNodeSpec") -> list[dict[str, object]]:
+def _list_spec_field(path: str, node: CfgNodeSpec) -> list[dict[str, object]]:
     """Recurse one spec node, returning settable leaves (no current value).
 
     The static analogue of ``_list_field``: it walks the spec tree instead of a
@@ -507,7 +507,7 @@ def list_spec_paths(spec: CfgSectionSpec) -> list[dict[str, object]]:
 # ---------------------------------------------------------------------------
 
 
-def _navigate(root: SectionLiveField, segments: list[str]) -> tuple["LiveField", str]:
+def _navigate(root: SectionLiveField, segments: list[str]) -> tuple[LiveField, str]:
     """Walk ``segments`` from ``root`` to the addressed field and its root path.
 
     Returns ``(field, base_path)`` where ``base_path`` is the dotted path that
@@ -517,7 +517,7 @@ def _navigate(root: SectionLiveField, segments: list[str]) -> tuple["LiveField",
     key rebuilds the whole ref sub-tree — that is what callers want re-listed.
     Other segments descend into the bound sub-section directly (no ``value``).
     """
-    field: "LiveField" = root
+    field: LiveField = root
     consumed: list[str] = []
     i = 0
     while i < len(segments):

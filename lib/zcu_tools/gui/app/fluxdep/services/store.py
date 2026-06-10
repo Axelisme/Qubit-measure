@@ -34,7 +34,7 @@ class SpectrumStore:
     def remove_spectrum(self, name: str) -> None:
         self._state.remove_spectrum(name)
 
-    def set_active(self, name: Optional[str]) -> None:
+    def set_active(self, name: str | None) -> None:
         self._state.set_active(name)
 
 

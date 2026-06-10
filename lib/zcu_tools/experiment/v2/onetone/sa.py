@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -33,11 +34,11 @@ from zcu_tools.utils.datasaver import load_data, save_data
 class SA_FreqResult:
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[SA_FreqCfg] = None
+    cfg_snapshot: SA_FreqCfg | None = None
 
 
 class SA_FreqModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     readout: PulseReadoutCfg
 
 
@@ -73,7 +74,7 @@ class SA_FreqExp(AbsExperiment[SA_FreqResult, SA_FreqCfg]):
 
         def measure_fn(
             ctx: TaskState[Any, Any, SA_FreqCfg],
-            update_hook: Optional[Callable],
+            update_hook: Callable | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules
@@ -118,7 +119,7 @@ class SA_FreqExp(AbsExperiment[SA_FreqResult, SA_FreqCfg]):
 
         return self.last_result
 
-    def analyze(self, result: Optional[SA_FreqResult] = None) -> Figure:
+    def analyze(self, result: SA_FreqResult | None = None) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -143,8 +144,8 @@ class SA_FreqExp(AbsExperiment[SA_FreqResult, SA_FreqCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[SA_FreqResult] = None,
-        comment: Optional[str] = None,
+        result: SA_FreqResult | None = None,
+        comment: str | None = None,
         tag: str = "onetone/sa_freq",
         **kwargs,
     ) -> None:

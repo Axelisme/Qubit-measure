@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing_extensions import Any, ClassVar, Protocol, Sequence, runtime_checkable
+from collections.abc import Sequence
+from typing import Any, ClassVar, Protocol, runtime_checkable
 
 from .types import (
     AdapterCapabilities,

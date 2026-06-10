@@ -16,8 +16,8 @@ if TYPE_CHECKING:
 def _spec_value_for_chosen(
     chosen_key: str,
     allowed: list[CfgSectionSpec],
-    ml: Optional[ModuleLibrary],
-) -> tuple[Optional[CfgSectionSpec], Optional[Any]]:
+    ml: ModuleLibrary | None,
+) -> tuple[CfgSectionSpec | None, Any | None]:
     """Find both Spec and initial Value for a chosen key (Custom or Named)."""
     from ...cfg_schemas import module_cfg_to_value, waveform_cfg_to_value
 

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, Generic, Optional, TypeVar, cast
 
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Generic, Optional, TypedDict, TypeVar, cast
+from typing_extensions import (
+    TypedDict,  # closed/extra_items (PEP 728) not in stdlib 3.13
+)
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -163,7 +167,7 @@ class T1PlotAndSaveMixin(Generic[T_Cfg]):
 
 
 class T1ModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
@@ -181,7 +185,7 @@ class T1Task(
     T1PlotAndSaveMixin[T1Cfg], MeasurementTask[T1Result, T_RootResult, T1PlotDict]
 ):
     def __init__(
-        self, cfg: T1Cfg, *, acquire_kwargs: Optional[dict[str, Any]] = None
+        self, cfg: T1Cfg, *, acquire_kwargs: dict[str, Any] | None = None
     ) -> None:
         super().__init__(cfg, T1Cfg)
 
@@ -192,7 +196,7 @@ class T1Task(
 
         def measure_t1_fn(
             ctx: TaskState[NDArray[np.complex128], T_RootResult, T1Cfg],
-            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules
@@ -255,7 +259,7 @@ class T1Task(
 
 
 class T1WithToneModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     pi_pulse: PulseCfg
     probe_pulse: PulseCfg
     readout: ReadoutCfg
@@ -275,7 +279,7 @@ class T1WithToneTask(
     MeasurementTask[T1Result, T_RootResult, T1PlotDict],
 ):
     def __init__(
-        self, cfg: T1WithToneCfg, *, acquire_kwargs: Optional[dict[str, Any]] = None
+        self, cfg: T1WithToneCfg, *, acquire_kwargs: dict[str, Any] | None = None
     ) -> None:
         super().__init__(cfg, T1WithToneCfg)
 
@@ -284,7 +288,7 @@ class T1WithToneTask(
 
         def measure_t1_fn(
             ctx: TaskState[NDArray[np.complex128], T_RootResult, T1WithToneCfg],
-            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules

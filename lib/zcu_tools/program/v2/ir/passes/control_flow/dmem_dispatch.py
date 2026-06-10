@@ -47,7 +47,7 @@ structural ``MetaInst``: a dmem jump table is lowered code, not a structure.
 
 from __future__ import annotations
 
-from typing_extensions import Optional
+from typing import Optional
 
 from ...hw_semantics import needs_big_jump
 from ...instructions import DmemReadInst, JumpInst, RegWriteInst, TestInst
@@ -64,7 +64,7 @@ class DmemDispatchPass(AbsIRTreePass):
         self,
         node: IRNode,
         ctx: PipeLineContext,
-    ) -> Optional[IRNode]:
+    ) -> IRNode | None:
         if not isinstance(node, IRDispatch):
             return None
         # k == 1 is not a meaningful dispatch (nothing to choose between).

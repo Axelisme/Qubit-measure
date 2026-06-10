@@ -13,8 +13,9 @@ shared module carries only the envelope + field-primitive mechanism.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping, Optional
+from typing import Optional
 
 from .errors import ErrorCode, ErrorEnvelope, RemoteError
 
@@ -34,8 +35,8 @@ class Request:
 class Response:
     id: str
     ok: bool
-    result: Optional[Mapping[str, object]] = None
-    error: Optional[ErrorEnvelope] = None
+    result: Mapping[str, object] | None = None
+    error: ErrorEnvelope | None = None
 
     def to_wire(self) -> dict[str, object]:
         if self.ok:

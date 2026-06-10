@@ -14,12 +14,11 @@ GUI-owned); the existing save/screenshot entry points already do.
 from __future__ import annotations
 
 import io
-from typing import Tuple
 
 from matplotlib.figure import Figure
 
 # Fixed export geometry — independent of the GUI window size.
-SAVE_FIGSIZE: Tuple[float, float] = (8.0, 5.0)  # inches
+SAVE_FIGSIZE: tuple[float, float] = (8.0, 5.0)  # inches
 SAVE_DPI: int = 150
 
 

@@ -9,7 +9,8 @@ service main-thread-only and lock-free.
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 from qtpy.QtCore import QObject, Qt, Signal  # type: ignore[attr-defined]
 
@@ -20,9 +21,9 @@ class QtProgressTransport(QObject):
     # object payload = ProgressEvent; queued so it hops to this QObject's thread.
     _event: Signal = Signal(object)
 
-    def __init__(self, parent: Optional[QObject] = None) -> None:
+    def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self._receiver: Optional[Callable[[ProgressEvent], None]] = None
+        self._receiver: Callable[[ProgressEvent], None] | None = None
         # Queued so the slot runs on this QObject's owning thread (main thread),
         # marshalling worker-thread emits across the boundary.
         self._event.connect(self._on_event, type=Qt.ConnectionType.QueuedConnection)  # type: ignore[call-arg]

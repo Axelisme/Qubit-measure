@@ -1,22 +1,14 @@
 from __future__ import annotations
 
 import warnings
+from collections.abc import Callable
+from typing import Optional, Protocol, TypeAlias, Union, cast, final
 
 import numpy as np
 from numpy.typing import NDArray
 from qick.qick_asm import AcquireMixin
-from typing_extensions import (
-    Callable,
-    List,
-    Optional,
-    Protocol,
-    TypeAlias,
-    Union,
-    cast,
-    final,
-)
 
-RoundHookType: TypeAlias = Callable[[int, List[NDArray[np.float64]]], None]
+RoundHookType: TypeAlias = Callable[[int, list[NDArray[np.float64]]], None]
 
 
 class TypedAcquireMixin(AcquireMixin):
@@ -24,30 +16,30 @@ class TypedAcquireMixin(AcquireMixin):
     Add type checking to the AcquireMixin class
     """
 
-    def get_raw(self) -> Optional[List[NDArray[np.int64]]]:
+    def get_raw(self) -> list[NDArray[np.int64]] | None:
         return super().get_raw()  # type: ignore
 
     def get_time_axis(
         self, ro_index: int, length_only: bool = False
-    ) -> Union[NDArray[np.float64], int]:
+    ) -> NDArray[np.float64] | int:
         return super().get_time_axis(ro_index, length_only)
 
     def _summarize_accumulated(
-        self, rounds_buf: List[NDArray[np.float64]]
-    ) -> List[NDArray[np.float64]]:
+        self, rounds_buf: list[NDArray[np.float64]]
+    ) -> list[NDArray[np.float64]]:
         return super()._summarize_accumulated(rounds_buf)
 
     def _summarize_decimated(
-        self, rounds_buf: List[NDArray[np.float64]]
-    ) -> List[NDArray[np.float64]]:
+        self, rounds_buf: list[NDArray[np.float64]]
+    ) -> list[NDArray[np.float64]]:
         return super()._summarize_decimated(rounds_buf)
 
     def _average_buf(  # type: ignore
         self,
-        d_reps: List[NDArray[np.float64]],
+        d_reps: list[NDArray[np.float64]],
         length_norm: bool = True,
         remove_offset: bool = True,
-    ) -> List[NDArray[np.float64]]:
+    ) -> list[NDArray[np.float64]]:
         return super()._average_buf(
             d_reps,  # type: ignore
             length_norm=length_norm,
@@ -55,27 +47,27 @@ class TypedAcquireMixin(AcquireMixin):
         )
 
     def _process_accumulated(  # type: ignore
-        self, acc_buf: List[NDArray[np.float64]]
-    ) -> List[NDArray[np.float64]]:
+        self, acc_buf: list[NDArray[np.float64]]
+    ) -> list[NDArray[np.float64]]:
         return super()._process_accumulated(acc_buf)  # type: ignore
 
-    def acquire(self, *args, **kwargs) -> List[NDArray[np.float64]]:
+    def acquire(self, *args, **kwargs) -> list[NDArray[np.float64]]:
         return super().acquire(*args, **kwargs)  # type: ignore
 
-    def acquire_decimated(self, *args, **kwargs) -> List[NDArray[np.float64]]:
+    def acquire_decimated(self, *args, **kwargs) -> list[NDArray[np.float64]]:
         return super().acquire_decimated(*args, **kwargs)  # type: ignore
 
 
 class EarlyStopMixin(TypedAcquireMixin):
     def acquire(
-        self, *args, stop_checkers: Optional[List[Callable[[], bool]]] = None, **kwargs
+        self, *args, stop_checkers: list[Callable[[], bool]] | None = None, **kwargs
     ):
         extra_args = kwargs.pop("extra_args", dict())
         extra_args.update(stop_checkers=stop_checkers)
         return super().acquire(*args, extra_args=extra_args, **kwargs)  # type: ignore
 
     def acquire_decimated(
-        self, *args, stop_checkers: Optional[List[Callable[[], bool]]] = None, **kwargs
+        self, *args, stop_checkers: list[Callable[[], bool]] | None = None, **kwargs
     ):
         extra_args = kwargs.pop("extra_args", dict())
         extra_args.update(stop_checkers=stop_checkers)
@@ -97,9 +89,9 @@ class SingleShotMixin(TypedAcquireMixin):
     def acquire(
         self,
         *args,
-        g_center: Optional[complex] = None,
-        e_center: Optional[complex] = None,
-        ge_radius: Optional[float] = None,
+        g_center: complex | None = None,
+        e_center: complex | None = None,
+        ge_radius: float | None = None,
         **kwargs,
     ):
         extra_args = kwargs.pop("extra_args", dict())
@@ -110,9 +102,9 @@ class SingleShotMixin(TypedAcquireMixin):
     def acquire_decimated(
         self,
         *args,
-        g_center: Optional[complex] = None,
-        e_center: Optional[complex] = None,
-        ge_radius: Optional[float] = None,
+        g_center: complex | None = None,
+        e_center: complex | None = None,
+        ge_radius: float | None = None,
         **kwargs,
     ):
         extra_args = kwargs.pop("extra_args", dict())
@@ -121,15 +113,15 @@ class SingleShotMixin(TypedAcquireMixin):
         return super().acquire_decimated(*args, extra_args=extra_args, **kwargs)
 
     @final
-    def _process_accumulated(self, acc_buf) -> List[NDArray[np.float64]]:
+    def _process_accumulated(self, acc_buf) -> list[NDArray[np.float64]]:
         assert self.acquire_params is not None
 
-        threshold: Optional[float] = self.acquire_params.get("threshold")
-        angle: Optional[float] = self.acquire_params.get("angle")
+        threshold: float | None = self.acquire_params.get("threshold")
+        angle: float | None = self.acquire_params.get("angle")
 
-        g_center: Optional[complex] = self.acquire_params.get("g_center")
-        e_center: Optional[complex] = self.acquire_params.get("e_center")
-        ge_radius: Optional[float] = self.acquire_params.get("ge_radius")
+        g_center: complex | None = self.acquire_params.get("g_center")
+        e_center: complex | None = self.acquire_params.get("e_center")
+        ge_radius: float | None = self.acquire_params.get("ge_radius")
 
         remove_offset: bool = self.acquire_params["remove_offset"]
 
@@ -165,12 +157,12 @@ class SingleShotMixin(TypedAcquireMixin):
 
     def _apply_classification(
         self,
-        acc_buf: List[NDArray[np.float64]],
+        acc_buf: list[NDArray[np.float64]],
         g_center: complex,
         e_center: complex,
         ge_radius: float,
         remove_offset: bool,
-    ) -> List[NDArray[np.float64]]:
+    ) -> list[NDArray[np.float64]]:
         shots = []
         for i_ch, (ro_ch, ro) in enumerate(self.ro_chs.items()):  # type: ignore
             avg = acc_buf[i_ch] / ro["length"]
@@ -202,7 +194,7 @@ class TrackerMixin(TypedAcquireMixin):
         assert self.acquire_params is not None
 
         trackers = cast(
-            Optional[List[TrackerProtocol]], self.acquire_params.get("trackers")
+            list[TrackerProtocol] | None, self.acquire_params.get("trackers")
         )
         if trackers is not None:
             if self.acquire_params["type"] != "accumulated":
@@ -239,7 +231,7 @@ class TrackerMixin(TypedAcquireMixin):
     def acquire(
         self,
         *args,
-        trackers: Optional[List[TrackerProtocol]] = None,
+        trackers: list[TrackerProtocol] | None = None,
         **kwargs,
     ):
         extra_args = kwargs.pop("extra_args", dict())
@@ -254,11 +246,11 @@ class RoundHookMixin(TypedAcquireMixin):
 
     def _reset_inc_summarize(self) -> None:
         self._inc_sum_count: int = 0
-        self._inc_sum_state: Optional[List[NDArray[np.float64]]] = None
+        self._inc_sum_state: list[NDArray[np.float64]] | None = None
 
     def _inc_summarize_accumulated(
-        self, rounds_buf: List[NDArray[np.float64]]
-    ) -> List[NDArray[np.float64]]:
+        self, rounds_buf: list[NDArray[np.float64]]
+    ) -> list[NDArray[np.float64]]:
         self._inc_sum_count += 1
         if len(rounds_buf) != self._inc_sum_count:
             warnings.warn(
@@ -272,7 +264,7 @@ class RoundHookMixin(TypedAcquireMixin):
         assert self.rounds_buf is not None
         if self._inc_sum_state is None:  # first round
             self._inc_sum_state = cast(
-                List[NDArray[np.float64]],
+                list[NDArray[np.float64]],
                 [
                     np.zeros_like(self.rounds_buf[0][i], dtype=np.float64)
                     for i in range(n_ro_chs)
@@ -284,19 +276,19 @@ class RoundHookMixin(TypedAcquireMixin):
             self._inc_sum_state[i] += rounds_buf[-1][i]
 
         mean_data = cast(
-            List[NDArray[np.float64]],
+            list[NDArray[np.float64]],
             [d / self._inc_sum_count for d in self._inc_sum_state],
         )
 
         return mean_data
 
     def _inc_summarize_decimated(
-        self, rounds_buf: List[NDArray[np.float64]]
-    ) -> List[NDArray[np.float64]]:
+        self, rounds_buf: list[NDArray[np.float64]]
+    ) -> list[NDArray[np.float64]]:
         # NOTE: currently, summarize decimated is identical to summarize accumulated
         return self._inc_summarize_accumulated(rounds_buf)
 
-    def acquire(self, *args, round_hook: Optional[RoundHookType] = None, **kwargs):
+    def acquire(self, *args, round_hook: RoundHookType | None = None, **kwargs):
         extra_args = kwargs.pop("extra_args", dict())
         extra_args.update(round_hook=round_hook)
 
@@ -305,7 +297,7 @@ class RoundHookMixin(TypedAcquireMixin):
         return super().acquire(*args, extra_args=extra_args, **kwargs)
 
     def acquire_decimated(
-        self, *args, round_hook: Optional[RoundHookType] = None, **kwargs
+        self, *args, round_hook: RoundHookType | None = None, **kwargs
     ):
         extra_args = kwargs.pop("extra_args", dict())
         extra_args.update(round_hook=round_hook)
@@ -321,7 +313,7 @@ class RoundHookMixin(TypedAcquireMixin):
         assert acquire_params is not None
 
         # trigger the hook function after each round
-        round_hook = cast(Optional[RoundHookType], acquire_params.get("round_hook"))
+        round_hook = cast(RoundHookType | None, acquire_params.get("round_hook"))
         if round_hook is not None:
             assert callable(round_hook), "round_hook must be a callable function"
             assert self.rounds_buf is not None

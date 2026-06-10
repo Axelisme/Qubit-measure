@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any, Optional, Union
+
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.special import erfc
-from typing_extensions import Any, Callable, Optional, TypedDict, Union
+from typing_extensions import (
+    TypedDict,  # closed/extra_items (PEP 728) not in stdlib 3.13
+)
 
 from zcu_tools.utils.fitting.singleshot import (
     calc_population_pdf,
@@ -28,7 +33,7 @@ def scatter_ge_plot(
     ax: Axes,
     Ige: tuple[NDArray[np.float64], NDArray[np.float64]],
     Qge: tuple[NDArray[np.float64], NDArray[np.float64]],
-    title: Optional[str] = None,
+    title: str | None = None,
     max_points: int = 10000,
 ) -> None:
     Ig, Ie = Ige
@@ -82,9 +87,9 @@ def scatter_ge_plot(
 def hist(
     Ig: NDArray[np.float64],
     Ie: NDArray[np.float64],
-    numbins: Union[int, str] = "auto",
-    ax: Optional[Axes] = None,
-    title: Optional[str] = None,
+    numbins: int | str = "auto",
+    ax: Axes | None = None,
+    title: str | None = None,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
     I_tot = np.concatenate((Ie, Ig))
     xlims = (np.min(I_tot).item(), np.max(I_tot).item())
@@ -173,12 +178,12 @@ def fitting_ge_and_plot(
         ],
         dict[str, Any],
     ],
-    numbins: Union[int, str] = "auto",
+    numbins: int | str = "auto",
     logscale: bool = False,
-    length_ratio: Optional[float] = None,
-    init_p0_g: Optional[float] = None,
-    init_p0_e: Optional[float] = None,
-    avg_p: Optional[float] = None,
+    length_ratio: float | None = None,
+    init_p0_g: float | None = None,
+    init_p0_e: float | None = None,
+    avg_p: float | None = None,
     align_t1: bool = True,
 ) -> tuple[float, NDArray[np.float64], GE_FitResult, Figure]:
     Ig, Ie = signals.real

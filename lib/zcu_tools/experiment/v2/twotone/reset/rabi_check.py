@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional, TypeAlias
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -37,7 +38,7 @@ from zcu_tools.utils.process import rotate2real
 class RabiCheckResult:
     gains: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional["RabiCheckCfg"] = None
+    cfg_snapshot: RabiCheckCfg | None = None
 
 
 def reset_rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -45,7 +46,7 @@ def reset_rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float6
 
 
 class RabiCheckModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     rabi_pulse: PulseCfg
     tested_reset: ResetCfg
     pi_pulse: PulseCfg
@@ -68,7 +69,7 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
         soccfg,
         cfg: RabiCheckCfg,
         *,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> RabiCheckResult:
         setup_devices(cfg, progress=True)
         modules = cfg.modules
@@ -81,7 +82,7 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, RabiCheckCfg],
-            update_hook: Optional[Callable],
+            update_hook: Callable | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules
@@ -139,7 +140,7 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
 
         return self.last_result
 
-    def analyze(self, result: Optional[RabiCheckResult] = None) -> Figure:
+    def analyze(self, result: RabiCheckResult | None = None) -> Figure:
         """Analyze reset rabi check results. (No specific analysis implemented)"""
         if result is None:
             result = self.last_result
@@ -163,8 +164,8 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[RabiCheckResult] = None,
-        comment: Optional[str] = None,
+        result: RabiCheckResult | None = None,
+        comment: str | None = None,
         tag: str = "twotone/reset/rabi_check",
         **kwargs,
     ) -> None:

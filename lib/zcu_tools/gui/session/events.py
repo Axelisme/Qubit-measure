@@ -51,7 +51,7 @@ class MdChangedPayload(SessionPayload):
     """Payload for MD_CHANGED: a MetaDict attribute was set or deleted."""
 
     EVENT: ClassVar[SessionEvent] = SessionEvent.MD_CHANGED
-    md: "MetaDict"
+    md: MetaDict
 
 
 @dataclass(frozen=True)
@@ -59,8 +59,8 @@ class ContextSwitchedPayload(SessionPayload):
     """Payload for CONTEXT_SWITCHED: active md/ml context switched."""
 
     EVENT: ClassVar[SessionEvent] = SessionEvent.CONTEXT_SWITCHED
-    md: "MetaDict"
-    ml: "ModuleLibrary"
+    md: MetaDict
+    ml: ModuleLibrary
 
 
 @dataclass(frozen=True)
@@ -68,7 +68,7 @@ class MlChangedPayload(SessionPayload):
     """Payload for ML_CHANGED: ModuleLibrary contents changed."""
 
     EVENT: ClassVar[SessionEvent] = SessionEvent.ML_CHANGED
-    ml: "ModuleLibrary"
+    ml: ModuleLibrary
 
 
 @dataclass(frozen=True)
@@ -76,8 +76,8 @@ class SocChangedPayload(SessionPayload):
     """Payload for SOC_CHANGED: soc/soccfg connection changed."""
 
     EVENT: ClassVar[SessionEvent] = SessionEvent.SOC_CHANGED
-    soc: "SocHandle | None"
-    soccfg: "SocCfgHandle | None"
+    soc: SocHandle | None
+    soccfg: SocCfgHandle | None
     is_mock: bool = False
 
 

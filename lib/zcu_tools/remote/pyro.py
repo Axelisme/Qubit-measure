@@ -3,12 +3,15 @@ from __future__ import annotations
 import socket
 import sys
 
+# board-side file (Python 3.8): typing.Any/Literal exist since 3.8, so the
+# stdlib import keeps the board free of a typing_extensions requirement.
+from typing import Any, Literal
+
 import IPython
 import psutil
 import Pyro4
 import Pyro4.naming
 from qick import QickConfig
-from typing_extensions import Any, Literal
 
 from zcu_tools.bitfiles import get_bitfile
 

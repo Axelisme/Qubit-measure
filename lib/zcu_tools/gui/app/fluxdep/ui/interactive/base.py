@@ -40,7 +40,7 @@ class InteractiveMplWidget(QWidget):
     finished = Signal()
 
     def __init__(
-        self, parent: Optional[QWidget] = None, controls_side: str = "right"
+        self, parent: QWidget | None = None, controls_side: str = "right"
     ) -> None:
         super().__init__(parent)
         self.figure = Figure(figsize=(8, 5))

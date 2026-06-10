@@ -40,10 +40,11 @@ hardware. Phase B swaps the synthesis for ``soc.acquire``.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
+from typing import Any, Optional
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Any, Mapping, Optional
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
@@ -86,7 +87,7 @@ def _default_kappa() -> float:
     return 0.05
 
 
-def _default_readout() -> Optional[Any]:
+def _default_readout() -> Any | None:
     # last-resort readout if neither a Node produced one nor ml has a preset.
     return None
 
@@ -131,11 +132,11 @@ class QubitFreqNode(Node):
     signal is synthesised because MockSoc gives only noise.
     """
 
-    def __init__(self, env: RunEnv, builder: "QubitFreqBuilder") -> None:
+    def __init__(self, env: RunEnv, builder: QubitFreqBuilder) -> None:
         self._env = env
         self._builder = builder
 
-    def _maybe_make_cfg(self, snapshot: Snapshot) -> Optional[QubitFreqCfgTemplate]:
+    def _maybe_make_cfg(self, snapshot: Snapshot) -> QubitFreqCfgTemplate | None:
         """Build the run cfg when the context is configured for it, else None.
 
         ``make_cfg`` needs a readout module + the drive params; the default /

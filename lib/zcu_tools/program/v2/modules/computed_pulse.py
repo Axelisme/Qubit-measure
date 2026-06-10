@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Union
 
 from qick.asm_v2 import QickParam
-from typing_extensions import TYPE_CHECKING, Sequence, Union
 
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
@@ -94,8 +95,8 @@ class ComputedPulse(Module):
         )
 
     def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
+        self, prog: ModularProgramV2, t: float | QickParam = 0.0
+    ) -> float | QickParam:
         ref_cfg = self.ref_cfg
         with prog.acquire_temp_reg(2) as (addr_reg, wmem_reg):
             # addr_reg = val_reg + dmem_offset  →  address of table[val_reg]

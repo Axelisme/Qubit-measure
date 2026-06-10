@@ -16,7 +16,7 @@ class IOManager:
     """Wraps ExperimentManager; returns new ExpContext objects to Controller."""
 
     def __init__(self) -> None:
-        self._em: Optional["ExperimentManager"] = None
+        self._em: ExperimentManager | None = None
 
     def setup(self, result_dir: str) -> None:
         from zcu_tools.meta_tool import ExperimentManager
@@ -40,9 +40,9 @@ class IOManager:
     def new_context(
         self,
         base_ctx: ExpContext,
-        value: Optional[float] = None,
+        value: float | None = None,
         unit: str = "none",
-        clone_from: Optional[str] = None,
+        clone_from: str | None = None,
     ) -> ExpContext:
         """Create a new context; return updated ExpContext to Controller.
 
@@ -67,7 +67,7 @@ class IOManager:
         """True only when a flux context (md/ml) has been selected."""
         return self._em is not None and self._em.current_label is not None
 
-    def get_active_label(self) -> Optional[str]:
+    def get_active_label(self) -> str | None:
         if self._em is None:
             return None
         return self._em.current_label

@@ -32,7 +32,7 @@ class WorkflowChangedPayload(_WorkflowPayload):
     """Payload for WORKFLOW_CHANGED: nodes added/removed/reordered/renamed."""
 
     EVENT: ClassVar[WorkflowEvent] = WorkflowEvent.WORKFLOW_CHANGED
-    name: Optional[str] = None  # the affected node, or None for whole-list edits
+    name: str | None = None  # the affected node, or None for whole-list edits
 
 
 @dataclass(frozen=True)

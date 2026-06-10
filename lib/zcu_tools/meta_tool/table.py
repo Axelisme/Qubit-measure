@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
 import pandas as pd
-from typing_extensions import Optional
 
 from .syncfile import SyncFile, auto_sync
 
 
 class SampleTable(SyncFile):
-    def __init__(self, csv_path: Optional[str] = None) -> None:
+    def __init__(self, csv_path: str | None = None) -> None:
         self.samples = pd.DataFrame()
         super().__init__(csv_path)
 

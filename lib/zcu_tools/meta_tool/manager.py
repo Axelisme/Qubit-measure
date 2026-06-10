@@ -2,17 +2,16 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-
-from typing_extensions import Literal, Optional, Union
+from typing import Literal, Optional, Union
 
 from .library import ModuleLibrary
 from .metadict import MetaDict
 
 
 class ExperimentManager:
-    def __init__(self, exp_dir: Union[str, Path]) -> None:
+    def __init__(self, exp_dir: str | Path) -> None:
         self.exp_dir = Path(exp_dir).resolve()
-        self._label: Optional[str] = None
+        self._label: str | None = None
 
     def list_contexts(self) -> list[str]:
         """Return sorted labels of all existing experiment contexts."""
@@ -26,9 +25,9 @@ class ExperimentManager:
 
     def new_flux(
         self,
-        value: Optional[float] = None,
-        clone_from: Optional[Union[tuple[ModuleLibrary, MetaDict], str]] = None,
-        label: Optional[str] = None,
+        value: float | None = None,
+        clone_from: tuple[ModuleLibrary, MetaDict] | str | None = None,
+        label: str | None = None,
         unit: Literal["A", "V", "K", "none"] = "none",
     ) -> tuple[ModuleLibrary, MetaDict]:
         if label is None:
@@ -97,7 +96,7 @@ class ExperimentManager:
 
     def _auto_label(
         self,
-        value: Optional[float] = None,
+        value: float | None = None,
         unit: Literal["A", "V", "K", "none"] = "none",
     ) -> str:
 

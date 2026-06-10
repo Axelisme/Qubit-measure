@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Generator
 from contextlib import contextmanager
+from typing import Optional, Union
 
 from qick.asm_v2 import AsmV2, QickParam
-from typing_extensions import Generator, Optional, Union
 
 from .debug import PrintTimeStamp
 from .delay import DelayRegAuto
@@ -32,7 +33,7 @@ class AdditionalMacroMixin(AsmV2):
         super()._make_asm()  # type: ignore[misc]
 
     def write_reg_op(
-        self, dst: str, lhs: str, op: str, rhs: Union[int, str, None] = None
+        self, dst: str, lhs: str, op: str, rhs: int | str | None = None
     ) -> None:
         """REG_WR dst = lhs op rhs, resolving register names at expand time."""
         self.append_macro(WriteRegOp(dst=dst, lhs=lhs, op=op, rhs=rhs))
@@ -41,9 +42,9 @@ class AdditionalMacroMixin(AsmV2):
         self,
         name: str,
         counter_reg: str,
-        n: Union[str, int],
+        n: str | int,
         *,
-        range_hint: Optional[tuple[int, int]] = None,
+        range_hint: tuple[int, int] | None = None,
     ) -> None:
         self.append_macro(
             OpenInnerLoop(
@@ -51,7 +52,7 @@ class AdditionalMacroMixin(AsmV2):
             )
         )
 
-    def close_inner_loop(self, name: str, counter_reg: str, n: Union[str, int]) -> None:
+    def close_inner_loop(self, name: str, counter_reg: str, n: str | int) -> None:
         self.append_macro(CloseInnerLoop(name=name, counter_reg=counter_reg, n=n))
 
     # ---- delay macro ----
@@ -66,16 +67,16 @@ class AdditionalMacroMixin(AsmV2):
 
     def delay_auto(
         self,
-        t: Union[float, QickParam] = 0.0,
+        t: float | QickParam = 0.0,
         gens=True,
         ros=True,
-        tag: Optional[str] = None,
+        tag: str | None = None,
     ):
         if self._delay_disabled:
             raise RuntimeError("Delay macros are currently disabled.")
         return super().delay_auto(t, gens, ros, tag)  # type: ignore
 
-    def delay(self, t: Union[float, QickParam], tag: Optional[str] = None):
+    def delay(self, t: float | QickParam, tag: str | None = None):
         if self._delay_disabled:
             raise RuntimeError("Delay macros are currently disabled.")
         return super().delay(t, tag)  # type: ignore
@@ -90,7 +91,7 @@ class AdditionalMacroMixin(AsmV2):
         self,
         ch: int,
         addr_reg: str,
-        t: Union[float, QickParam] = 0.0,
+        t: float | QickParam = 0.0,
         flat_top_pulse: bool = False,
     ) -> None:
         """Play a pulse from wmem using a runtime-computed base address register.
@@ -120,9 +121,7 @@ class AdditionalMacroMixin(AsmV2):
         else:
             self.append_macro(PulseByReg(ch=ch, t=t, addr_regs=[addr_reg]))
 
-    def debug_macro(
-        self, name: str, t: Union[float, QickParam], prefix: str = ""
-    ) -> None:
+    def debug_macro(self, name: str, t: float | QickParam, prefix: str = "") -> None:
         """Insert a debug macro that prints the current time (cycle count) with a name."""
         self.append_macro(PrintTimeStamp(name, t, prefix=prefix))
 
@@ -130,8 +129,8 @@ class AdditionalMacroMixin(AsmV2):
         self,
         type: str,
         name: str,
-        info: Optional[dict] = None,
-        regs: Optional[dict[str, str]] = None,
+        info: dict | None = None,
+        regs: dict[str, str] | None = None,
     ) -> None:
         """Insert a meta macro that emits a meta instruction for the IR builder.
 
@@ -185,17 +184,17 @@ class AdditionalMacroMixin(AsmV2):
                 raise RuntimeError("temp register scope stack is already empty")
             self._reg_num_stack.pop()
 
-    def wait(self, t: Union[float, QickParam], tag: Optional[str] = None) -> None:
+    def wait(self, t: float | QickParam, tag: str | None = None) -> None:
         self.meta_macro("DISABLE_OPT_START", "")
         super().wait(t=t, tag=tag)  # type: ignore
         self.meta_macro("DISABLE_OPT_END", "")
 
     def wait_auto(
         self,
-        t: Union[float, QickParam] = 0,
+        t: float | QickParam = 0,
         gens: bool = False,
         ros: bool = True,
-        tag: Optional[str] = None,
+        tag: str | None = None,
         no_warn: bool = False,
     ) -> None:
         self.meta_macro("DISABLE_OPT_START", "")

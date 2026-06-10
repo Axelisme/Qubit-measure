@@ -60,7 +60,7 @@ class LoadDataDialog(QDialog):
         file_placeholder: str,
         browse_caption: str,
         no_preview_text: str,
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
         start_dir: str = "",
     ) -> None:
         super().__init__(parent)
@@ -73,7 +73,7 @@ class LoadDataDialog(QDialog):
         self._transpose = False
         self._start_dir = start_dir
         # best-effort cache of the raw (signals, x, y) for preview
-        self._raw: Optional[tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]] = None
+        self._raw: tuple[np.ndarray, np.ndarray, np.ndarray | None] | None = None
 
         self._build_ui()
 
@@ -152,7 +152,7 @@ class LoadDataDialog(QDialog):
     @staticmethod
     def _read_best_effort(
         filepath: str,
-    ) -> Optional[tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None] | None:
         try:
             signals, x, y = load_data(filepath, return_comment=False)
             return signals, x, y

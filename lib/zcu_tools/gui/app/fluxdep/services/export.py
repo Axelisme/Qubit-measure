@@ -43,7 +43,7 @@ class ExportService:
         """Default export path under the project's result dir."""
         return default_export_path(self._state.project.result_dir)
 
-    def export_spectrums(self, filepath: Optional[str] = None, mode: str = "x") -> str:
+    def export_spectrums(self, filepath: str | None = None, mode: str = "x") -> str:
         """Write every loaded spectrum to ``filepath`` (or the default path).
 
         Fast-fails if the collection is empty. ``mode`` is the h5py file mode

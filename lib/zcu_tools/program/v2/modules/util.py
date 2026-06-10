@@ -1,17 +1,15 @@
 from __future__ import annotations
 
 import warnings
+from typing import Optional, Union
 
 import numpy as np
 from qick.asm_v2 import QickParam, QickProgramV2
-from typing_extensions import Optional, Union
 
 from ..utils import param2str
 
 
-def get_fclk(
-    prog: QickProgramV2, gen_ch: Optional[int] = None, ro_ch: Optional[int] = None
-):
+def get_fclk(prog: QickProgramV2, gen_ch: int | None = None, ro_ch: int | None = None):
     # TODO: a better way to get fclk for tproc?
     if gen_ch is not None and ro_ch is not None:
         raise RuntimeError("can't specify both gen_ch and ro_ch!")
@@ -25,11 +23,11 @@ def get_fclk(
 
 def round_timestamp(
     prog: QickProgramV2,
-    t: Union[float, QickParam],
-    gen_ch: Optional[int] = None,
-    ro_ch: Optional[int] = None,
+    t: float | QickParam,
+    gen_ch: int | None = None,
+    ro_ch: int | None = None,
     take_ceil: bool = True,
-) -> Union[float, QickParam]:
+) -> float | QickParam:
     fclk = get_fclk(prog, gen_ch=gen_ch, ro_ch=ro_ch)
 
     round_fn = np.ceil if take_ceil else np.floor
@@ -46,8 +44,8 @@ def round_timestamp(
 
 
 def calc_max_length(
-    length1: Union[float, QickParam], length2: Union[float, QickParam]
-) -> Union[float, QickParam]:
+    length1: float | QickParam, length2: float | QickParam
+) -> float | QickParam:
     if length1 > length2:
         return length1
     elif length1 < length2:
@@ -67,15 +65,15 @@ def calc_max_length(
     return max(length1, length2)
 
 
-def merge_max_length(*args: Union[float, QickParam]) -> Union[float, QickParam]:
+def merge_max_length(*args: float | QickParam) -> float | QickParam:
     merge_list = list(args)
 
     if len(merge_list) == 0:
         raise ValueError("at least one length must be provided")
 
     def try_reduce(
-        length1: Union[float, QickParam], length2: Union[float, QickParam]
-    ) -> Optional[Union[float, QickParam]]:
+        length1: float | QickParam, length2: float | QickParam
+    ) -> float | QickParam | None:
         if length1 > length2:
             return length1
         elif length1 < length2:

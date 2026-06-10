@@ -3,9 +3,7 @@ from __future__ import annotations
 import dataclasses
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Literal
-
-from typing_extensions import Any, Optional, Union
+from typing import Any, Literal, Optional, Union
 
 from .hw_semantics import STATUS_REG, TIMED_BASE_REG, USR_TIME_REG
 from .labels import Label, LabelRef
@@ -107,7 +105,7 @@ def _require_literal(val: str, field: str, valid: frozenset[str]) -> str:
     return val
 
 
-def _parse_cond_code(val: Optional[str]) -> Optional[CondCode]:
+def _parse_cond_code(val: str | None) -> CondCode | None:
     if val is None:
         return None
     if val not in _VALID_COND_CODES:
@@ -131,7 +129,7 @@ def _require_alu_expr(val: str, field: str) -> AluExpr:
     return expr
 
 
-def _parse_port_dst(val: str) -> Union[Register, ImmValue]:
+def _parse_port_dst(val: str) -> Register | ImmValue:
     """Parse a port DST: either a register or a bare integer (port number)."""
     reg = parse_register(val)
     if reg is not None:
@@ -142,7 +140,7 @@ def _parse_port_dst(val: str) -> Union[Register, ImmValue]:
     raise ValueError(f"DST: {val!r} is not a register or port number")
 
 
-def _parse_mem_addr_field(val: str, field: str) -> Union[Register, MemAddr]:
+def _parse_mem_addr_field(val: str, field: str) -> Register | MemAddr:
     """Parse an address field: register or &N numeric address."""
     reg = parse_register(val)
     if reg is not None:
@@ -153,7 +151,7 @@ def _parse_mem_addr_field(val: str, field: str) -> Union[Register, MemAddr]:
     raise ValueError(f"{field}: {val!r} is not a register or memory address")
 
 
-def _parse_dport_data_field(val: str) -> Union[Register, Immediate, ImmValue]:
+def _parse_dport_data_field(val: str) -> Register | Immediate | ImmValue:
     """Parse DPORT_WR.DATA without the permissive parse_value() fallback."""
     reg = parse_register(val)
     if reg is not None:
@@ -247,7 +245,7 @@ class BaseInst(Instruction):
         return frozenset()
 
     @property
-    def need_label(self) -> Optional[Label]:
+    def need_label(self) -> Label | None:
         """Non-pseudo Label this instruction references (for dead-label analysis)."""
         return None
 
@@ -272,9 +270,7 @@ class BaseInst(Instruction):
         return self
 
 
-def _remap_label_ref(
-    ref: Optional[LabelRef], remap: dict[str, Label]
-) -> Optional[LabelRef]:
+def _remap_label_ref(ref: LabelRef | None, remap: dict[str, Label]) -> LabelRef | None:
     """Return a remapped copy of ``ref``, or the original if unchanged."""
     if ref is None or ref.is_pseudo():
         return ref
@@ -282,9 +278,7 @@ def _remap_label_ref(
     return LabelRef(new) if new is not None else ref
 
 
-def _remap_op_labels(
-    op: Optional[ExprType], remap: dict[str, Label]
-) -> Optional[ExprType]:
+def _remap_op_labels(op: ExprType | None, remap: dict[str, Label]) -> ExprType | None:
     """Remap DmemAddr entry labels inside an AluExpr, or return op unchanged."""
     if isinstance(op, AluExpr) and isinstance(op.rhs, DmemAddr):
         new_table = tuple(remap.get(str(lbl), lbl) for lbl in op.rhs.table_labels)
@@ -348,8 +342,8 @@ class TimeInst(BaseInst):
     """TIME instruction: advance timing counter."""
 
     c_op: TimeCOp
-    lit: Optional[Immediate] = None
-    r1: Optional[Register] = None
+    lit: Immediate | None = None
+    r1: Register | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> TimeInst:
@@ -412,11 +406,11 @@ class TestInst(BaseInst):
 class JumpInst(BaseInst):
     """JUMP instruction: unconditional or conditional jump."""
 
-    label: Optional[LabelRef] = None
-    if_cond: Optional[CondCode] = None
-    addr: Optional[AddrType] = None
-    wr: Optional[SideWrite] = None
-    op: Optional[ExprType] = None
+    label: LabelRef | None = None
+    if_cond: CondCode | None = None
+    addr: AddrType | None = None
+    wr: SideWrite | None = None
+    op: ExprType | None = None
     uf: bool = False
 
     @classmethod
@@ -448,7 +442,7 @@ class JumpInst(BaseInst):
         return self.wr.regs() if self.wr else frozenset()
 
     @property
-    def need_label(self) -> Optional[Label]:
+    def need_label(self) -> Label | None:
         if self.label is not None and not self.label.is_pseudo():
             return self.label.as_label()
         return None
@@ -477,16 +471,16 @@ class RegWriteInst(BaseInst):
     """REG_WR instruction: write to register."""
 
     dst: Register
-    src: Optional[SrcType] = None
-    op: Optional[ExprType] = None
-    lit: Optional[Immediate] = None
-    addr: Optional[AddrType] = None
+    src: SrcType | None = None
+    op: ExprType | None = None
+    lit: Immediate | None = None
+    addr: AddrType | None = None
     uf: bool = False
-    wr: Optional[SideWrite] = None
-    if_cond: Optional[CondCode] = None
-    label: Optional[LabelRef] = None
-    ww: Optional[str] = None
-    wp: Optional[str] = None
+    wr: SideWrite | None = None
+    if_cond: CondCode | None = None
+    label: LabelRef | None = None
+    ww: str | None = None
+    wp: str | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> RegWriteInst:
@@ -522,7 +516,7 @@ class RegWriteInst(BaseInst):
         return self.dst.regs() if self.dst else frozenset()
 
     @property
-    def need_label(self) -> Optional[Label]:
+    def need_label(self) -> Label | None:
         if self.label is not None and not self.label.is_pseudo():
             return self.label.as_label()
         return None
@@ -572,15 +566,15 @@ class RegWriteInst(BaseInst):
 class PortWriteInst(BaseInst):
     """WPORT_WR instruction: write to output port."""
 
-    dst: Union[Register, ImmValue]
-    src: Optional[SrcType] = None
-    addr: Optional[Union[Register, MemAddr]] = None
-    time: Optional[TimeType] = None
-    wr: Optional[SideWrite] = None
-    op: Optional[ExprType] = None
+    dst: Register | ImmValue
+    src: SrcType | None = None
+    addr: Register | MemAddr | None = None
+    time: TimeType | None = None
+    wr: SideWrite | None = None
+    op: ExprType | None = None
     uf: bool = False
-    if_cond: Optional[CondCode] = None
-    ww: Optional[str] = None
+    if_cond: CondCode | None = None
+    ww: str | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> PortWriteInst:
@@ -653,13 +647,13 @@ class DmemReadInst(BaseInst):
 
     dst: Register
     src: SrcKeyword = SrcKeyword.DMEM
-    addr: Optional[AddrType] = None
-    wr: Optional[SideWrite] = None
-    op: Optional[ExprType] = None
-    lit: Optional[Immediate] = None
+    addr: AddrType | None = None
+    wr: SideWrite | None = None
+    op: ExprType | None = None
+    lit: Immediate | None = None
     uf: bool = False
-    if_cond: Optional[CondCode] = None
-    label: Optional[LabelRef] = None
+    if_cond: CondCode | None = None
+    label: LabelRef | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> DmemReadInst:
@@ -689,7 +683,7 @@ class DmemReadInst(BaseInst):
         return self.dst.regs() if self.dst else frozenset()
 
     @property
-    def need_label(self) -> Optional[Label]:
+    def need_label(self) -> Label | None:
         if self.label is not None and not self.label.is_pseudo():
             return self.label.as_label()
         return None
@@ -729,13 +723,13 @@ def _parse_dmem_src_keyword(val: str) -> DmemSrc:
 class DmemWriteInst(BaseInst):
     """DMEM_WR instruction: write to data memory."""
 
-    dst: Union[Register, MemAddr]
+    dst: Register | MemAddr
     src: DmemSrc = "imm"
-    op: Optional[ExprType] = None
-    lit: Optional[Immediate] = None
-    wr: Optional[SideWrite] = None
+    op: ExprType | None = None
+    lit: Immediate | None = None
+    wr: SideWrite | None = None
     uf: bool = False
-    if_cond: Optional[CondCode] = None
+    if_cond: CondCode | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> DmemWriteInst:
@@ -782,13 +776,13 @@ class DmemWriteInst(BaseInst):
 class WmemWriteInst(BaseInst):
     """WMEM_WR instruction: write wave registers into wave memory."""
 
-    addr: Optional[Union[Register, MemAddr]] = None
-    time: Optional[TimeType] = None
-    wr: Optional[SideWrite] = None
-    op: Optional[ExprType] = None
+    addr: Register | MemAddr | None = None
+    time: TimeType | None = None
+    wr: SideWrite | None = None
+    op: ExprType | None = None
     uf: bool = False
-    if_cond: Optional[CondCode] = None
-    wp: Optional[str] = None
+    if_cond: CondCode | None = None
+    wp: str | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> WmemWriteInst:
@@ -831,14 +825,14 @@ class WmemWriteInst(BaseInst):
 class DportWriteInst(BaseInst):
     """DPORT_WR instruction: write to data port."""
 
-    dst: Union[Register, ImmValue]
-    src: Optional[SrcType] = None
-    data: Union[Register, Immediate, ImmValue] = ImmValue(0)
-    time: Optional[TimeType] = None
-    wr: Optional[SideWrite] = None
-    op: Optional[ExprType] = None
+    dst: Register | ImmValue
+    src: SrcType | None = None
+    data: Register | Immediate | ImmValue = ImmValue(0)
+    time: TimeType | None = None
+    wr: SideWrite | None = None
+    op: ExprType | None = None
     uf: bool = False
-    if_cond: Optional[CondCode] = None
+    if_cond: CondCode | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> DportWriteInst:
@@ -898,7 +892,7 @@ class DportWriteInst(BaseInst):
 class DportReadInst(BaseInst):
     """DPORT_RD instruction: read I/Q result from a data port."""
 
-    dst: Union[Register, ImmValue]
+    dst: Register | ImmValue
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> DportReadInst:
@@ -927,9 +921,9 @@ class DportReadInst(BaseInst):
 class TrigInst(BaseInst):
     """TRIG instruction: set or clear a trigger port."""
 
-    dst: Union[Register, ImmValue]
+    dst: Register | ImmValue
     src: TrigSrc
-    time: Optional[TimeType] = None
+    time: TimeType | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> TrigInst:
@@ -962,8 +956,8 @@ class TrigInst(BaseInst):
 class CallInst(BaseInst):
     """CALL instruction: call a subroutine (stores return address before jumping)."""
 
-    label: Optional[LabelRef] = None
-    addr: Optional[AddrType] = None
+    label: LabelRef | None = None
+    addr: AddrType | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> CallInst:
@@ -983,7 +977,7 @@ class CallInst(BaseInst):
         return frozenset()
 
     @property
-    def need_label(self) -> Optional[Label]:
+    def need_label(self) -> Label | None:
         if self.label is not None and not self.label.is_pseudo():
             return self.label.as_label()
         return None
@@ -1040,10 +1034,10 @@ class ArithInst(BaseInst):
     """ARITH instruction: high-precision multiply-accumulate operation."""
 
     c_op: ArithCOp
-    r1: Optional[Register] = None
-    r2: Optional[Register] = None
-    r3: Optional[Register] = None
-    r4: Optional[Register] = None
+    r1: Register | None = None
+    r2: Register | None = None
+    r3: Register | None = None
+    r4: Register | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> ArithInst:
@@ -1084,7 +1078,7 @@ class DivInst(BaseInst):
     """DIV instruction: integer division (async, result in s4/s5)."""
 
     num: Register
-    den: Union[Register, Immediate]
+    den: Register | Immediate
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> DivInst:
@@ -1126,9 +1120,9 @@ class NetInst(BaseInst):
     """NET instruction: QNET network peripheral control."""
 
     c_op: NetCOp
-    r1: Optional[Register] = None
-    r2: Optional[Register] = None
-    r3: Optional[Register] = None
+    r1: Register | None = None
+    r2: Register | None = None
+    r3: Register | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> NetInst:
@@ -1163,15 +1157,15 @@ class ComInst(BaseInst):
     """COM instruction: QCOM communication peripheral control."""
 
     c_op: ComCOp
-    r1: Optional[Register] = None
-    flag_val: Optional[ComFlagVal] = None  # '0' or '1' for COM set_flag
-    lit: Optional[Immediate] = None
-    if_cond: Optional[CondCode] = None
+    r1: Register | None = None
+    flag_val: ComFlagVal | None = None  # '0' or '1' for COM set_flag
+    lit: Immediate | None = None
+    if_cond: CondCode | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> ComInst:
         r1_raw = d.get("R1")
-        flag_val: Optional[ComFlagVal] = None
+        flag_val: ComFlagVal | None = None
         r1 = None
         if r1_raw is not None and isinstance(r1_raw, str):
             if r1_raw in _VALID_COM_FLAG_VALS:
@@ -1219,10 +1213,10 @@ class CustomPeripheralInst(BaseInst):
 
     cmd: PACOp
     c_op: int
-    r1: Optional[Register] = None
-    r2: Optional[Register] = None
-    r3: Optional[Register] = None
-    r4: Optional[Register] = None
+    r1: Register | None = None
+    r2: Register | None = None
+    r3: Register | None = None
+    r4: Register | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> CustomPeripheralInst:
@@ -1288,8 +1282,8 @@ class WaitInst(BaseInst):
     """WAIT instruction: wait for sync/trigger."""
 
     c_op: WaitCOp
-    time: Optional[TimeType] = None
-    addr: Optional[AddrType] = None
+    time: TimeType | None = None
+    addr: AddrType | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> WaitInst:

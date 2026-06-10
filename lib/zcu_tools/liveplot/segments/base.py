@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from itertools import chain
+from typing import Optional, Self
 
 import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
-from typing_extensions import Optional, Self
 
 from ..backend import close_figure, make_plot_frame, refresh_figure
 from ..base import AbsLivePlot
@@ -32,7 +32,7 @@ class BaseSegmentLivePlot(AbsLivePlot):
     def __init__(
         self,
         segments: list[list[AbsSegment]],
-        existed_axes: Optional[list[list[Axes]]] = None,
+        existed_axes: list[list[Axes]] | None = None,
         auto_close: bool = True,
         disable: bool = False,
     ) -> None:

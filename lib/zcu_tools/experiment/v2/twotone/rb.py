@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import IntEnum
+from typing import Any, Literal, Optional, TypeAlias, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Literal, Optional, TypeAlias, Union
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -40,7 +41,7 @@ class RB_Result:
     sub_seeds: NDArray[np.int64]
     depths: NDArray[np.int64]
     signals2D: NDArray[np.complex128]
-    cfg_snapshot: Optional["RBCfg"] = None
+    cfg_snapshot: RBCfg | None = None
 
 
 # ==============================================================================
@@ -145,7 +146,7 @@ def build_seed_program_tables(
 
     phase_axis: int = 0
 
-    def convert_gate(gate: GateName) -> Optional[BasicGate]:
+    def convert_gate(gate: GateName) -> BasicGate | None:
         nonlocal phase_axis
 
         # fmt: off
@@ -209,15 +210,15 @@ def build_seed_program_tables(
 
 
 class RBModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
-    I_pulse: Optional[PulseCfg] = None
+    reset: ResetCfg | None = None
+    I_pulse: PulseCfg | None = None
     X90_pulse: PulseCfg
     X180_pulse: PulseCfg
     readout: ReadoutCfg
 
 
 class RBSweepCfg(ConfigBase):
-    depth: Union[SweepCfg, list[int]]
+    depth: SweepCfg | list[int]
 
 
 class RBCfg(ProgramV2Cfg, ExpCfgModel):
@@ -234,7 +235,7 @@ class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
         soccfg,
         cfg: RBCfg,
         *,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> RB_Result:
         cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
@@ -252,7 +253,7 @@ class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, RBCfg],
-            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules
@@ -388,7 +389,7 @@ class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
 
     def analyze(
         self,
-        result: Optional[RB_Result] = None,
+        result: RB_Result | None = None,
     ) -> tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
@@ -453,8 +454,8 @@ class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[RB_Result] = None,
-        comment: Optional[str] = None,
+        result: RB_Result | None = None,
+        comment: str | None = None,
         tag: str = "twotone/ge/rb",
         **kwargs,
     ) -> None:

@@ -27,7 +27,8 @@ from __future__ import annotations
 
 import base64
 import logging
-from typing import TYPE_CHECKING, Mapping, Optional
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Optional
 
 from zcu_tools.gui.remote.control_service import (
     ControlOptions,
@@ -85,13 +86,13 @@ class RemoteControlAdapter(RemoteControlServiceBase):
     process; render handlers fail-fast then.
     """
 
-    ctrl: "Controller"
+    ctrl: Controller
 
     def __init__(
         self,
-        controller: "Controller",
+        controller: Controller,
         opts: ControlOptions,
-        render_view: Optional["RenderView"] = None,
+        render_view: RenderView | None = None,
     ) -> None:
         super().__init__(
             controller,
@@ -294,7 +295,7 @@ class RemoteControlAdapter(RemoteControlServiceBase):
     # Diagnostic channel (DiagnosticSink impl) — independent of EventBus
     # ------------------------------------------------------------------
 
-    def notify_diagnostic(self, severity: "Severity", title: str, message: str) -> None:
+    def notify_diagnostic(self, severity: Severity, title: str, message: str) -> None:
         """Push a Controller diagnostic to every client. Runs on the Qt main
         thread (ctrl fans out there). Deliberately *not* gated by event
         subscription and *not* routed through EventBus — diagnostics must reach

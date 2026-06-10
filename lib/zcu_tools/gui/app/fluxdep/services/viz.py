@@ -39,8 +39,8 @@ def derive_auto_limits(
     spectrums: dict[str, SpectrumEntry],
     s_fluxs: NDArray[np.float64],
     s_freqs: NDArray[np.float64],
-    r_f: Optional[float] = None,
-    sample_f: Optional[float] = None,
+    r_f: float | None = None,
+    sample_f: float | None = None,
 ) -> tuple[tuple[float, float], tuple[float, float]]:
     """Auto (x, y) limits matching the notebook visualiser's ``auto_derive_limits``.
 
@@ -89,7 +89,7 @@ def derive_auto_limits(
 
 
 def _constant_freqs(
-    r_f: Optional[float], sample_f: Optional[float]
+    r_f: float | None, sample_f: float | None
 ) -> list[tuple[float, str]]:
     """The (freq, label) constant-frequency reference lines that are set (non-None)."""
     lines: list[tuple[float, str]] = []
@@ -137,7 +137,7 @@ def _plot_simulation_lines(
         ax.plot(t_fluxs, freqs[:, i], label=label, linewidth=1.0, zorder=1)
 
 
-def _plot_constant_freqs(ax, r_f: Optional[float], sample_f: Optional[float]) -> None:
+def _plot_constant_freqs(ax, r_f: float | None, sample_f: float | None) -> None:
     """Draw the r_f / half·sample_f / mirror-r_f horizontal reference lines."""
     for freq, name in _constant_freqs(r_f, sample_f):
         ax.axhline(freq, linestyle="--", linewidth=1.0, color="gray", zorder=1)
@@ -176,16 +176,16 @@ def render_fit_figure(
     transitions: TransitionDict,
     s_fluxs: NDArray[np.float64],
     s_freqs: NDArray[np.float64],
-    r_f: Optional[float] = None,
-    sample_f: Optional[float] = None,
+    r_f: float | None = None,
+    sample_f: float | None = None,
     *,
-    flux_half: Optional[float] = None,
-    flux_period: Optional[float] = None,
+    flux_half: float | None = None,
+    flux_period: float | None = None,
     title: str = "",
-    xlim: Optional[tuple[float, float]] = None,
-    ylim: Optional[tuple[float, float]] = None,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
     show_const_freq: bool = True,
-    plot_transitions: Optional[TransitionDict] = None,
+    plot_transitions: TransitionDict | None = None,
 ) -> None:
     """Render the full fit visualisation onto ``figure`` (cleared first).
 

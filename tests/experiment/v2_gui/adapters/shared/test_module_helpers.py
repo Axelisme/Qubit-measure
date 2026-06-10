@@ -5,7 +5,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.adapter import ExpContext
 
-from typing_extensions import cast
+from typing import cast
+
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_readout_ref_default,
     schema_from_module,
@@ -144,7 +145,7 @@ def test_select_named_module_value_returns_none_when_preferred_missing():
     assert selected is None
 
 
-def _make_ctx(ml: ModuleLibrary) -> "ExpContext":
+def _make_ctx(ml: ModuleLibrary) -> ExpContext:
     from zcu_tools.gui.app.main.adapter import ExpContext
 
     return ExpContext(

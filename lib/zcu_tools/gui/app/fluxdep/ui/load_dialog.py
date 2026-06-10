@@ -26,7 +26,7 @@ from zcu_tools.gui.widgets.load_dialog import LoadDataDialog
 class LoadRequest(NamedTuple):
     filepath: str
     spec_type: SpecType
-    inherit_from: Optional[str]
+    inherit_from: str | None
     transpose_axes: bool
 
 
@@ -36,7 +36,7 @@ class LoadSpectrumDialog(LoadDataDialog):
     def __init__(
         self,
         loaded_names: list[str],
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
         start_dir: str = "",
     ) -> None:
         self._loaded_names = loaded_names
@@ -69,7 +69,7 @@ class LoadSpectrumDialog(LoadDataDialog):
 
     # --- result ----------------------------------------------------------
 
-    def result_request(self) -> Optional[LoadRequest]:
+    def result_request(self) -> LoadRequest | None:
         """The chosen LoadRequest, or None if no file was selected."""
         if not self._filepath:
             return None

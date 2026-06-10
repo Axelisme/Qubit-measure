@@ -78,8 +78,8 @@ def transitions_need_sample_f(transitions: TransitionDict) -> bool:
 
 def transitions_with_freqs(
     transitions: TransitionDict,
-    r_f: Optional[float],
-    sample_f: Optional[float],
+    r_f: float | None,
+    sample_f: float | None,
 ) -> TransitionDict:
     """A copy of ``transitions`` with r_f / sample_f keys added when provided.
 
@@ -137,7 +137,7 @@ class SelectionState:
     bring back by re-opening with everything selected).
     """
 
-    selected: Optional[NDArray[np.bool_]] = None
+    selected: NDArray[np.bool_] | None = None
     min_distance: float = 0.0
 
 
@@ -161,9 +161,9 @@ class FitState:
     transitions: TransitionDict = field(default_factory=default_transitions)
     # None means "not provided" (distinct from 0.0); a transition category that
     # needs one (blue/red side → r_f, mirror → sample_f) must have it set.
-    r_f: Optional[float] = None
-    sample_f: Optional[float] = None
-    params: Optional[tuple[float, float, float]] = None  # (EJ, EC, EL)
+    r_f: float | None = None
+    sample_f: float | None = None
+    params: tuple[float, float, float] | None = None  # (EJ, EC, EL)
 
     @property
     def has_result(self) -> bool:
@@ -173,10 +173,10 @@ class FitState:
 class FluxDepState:
     """Passive GUI state container for the fluxdep analysis pipeline."""
 
-    def __init__(self, project: Optional[ProjectInfo] = None) -> None:
+    def __init__(self, project: ProjectInfo | None = None) -> None:
         self.project: ProjectInfo = project if project is not None else ProjectInfo()
         self.spectrums: dict[str, SpectrumEntry] = {}
-        self.active_spectrum: Optional[str] = None
+        self.active_spectrum: str | None = None
         self.selection: SelectionState = SelectionState()
         self.fit: FitState = FitState()
         self.version = VersionTable()
@@ -209,7 +209,7 @@ class FluxDepState:
             self.active_spectrum = None
         logger.debug("remove_spectrum: name=%r", name)
 
-    def set_active(self, name: Optional[str]) -> None:
+    def set_active(self, name: str | None) -> None:
         if name is not None and name not in self.spectrums:
             raise KeyError(f"no spectrum named {name!r}")
         self.active_spectrum = name
@@ -275,8 +275,8 @@ class FluxDepState:
         ECb: tuple[float, float],
         ELb: tuple[float, float],
         transitions: TransitionDict,
-        r_f: Optional[float],
-        sample_f: Optional[float],
+        r_f: float | None,
+        sample_f: float | None,
     ) -> None:
         """Record the search inputs; clears any stale result.
 

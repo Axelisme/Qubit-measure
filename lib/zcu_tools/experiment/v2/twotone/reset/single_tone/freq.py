@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Optional, TypeAlias
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -39,7 +40,7 @@ from zcu_tools.utils.process import rotate2real
 class FreqResult:
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional["FreqCfg"] = None
+    cfg_snapshot: FreqCfg | None = None
 
 
 def reset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -47,8 +48,8 @@ def reset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class FreqModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
-    init_pulse: Optional[PulseCfg] = None
+    reset: ResetCfg | None = None
+    init_pulse: PulseCfg | None = None
     tested_reset: PulseResetCfg
     readout: ReadoutCfg
 
@@ -69,7 +70,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         soccfg,
         cfg: FreqCfg,
         *,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> FreqResult:
         setup_devices(cfg, progress=True)
         modules = cfg.modules
@@ -82,7 +83,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         )
 
         def measure_fn(
-            ctx: TaskState, update_hook: Optional[Callable]
+            ctx: TaskState, update_hook: Callable | None
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules
@@ -126,9 +127,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
         return self.last_result
 
-    def analyze(
-        self, result: Optional[FreqResult] = None
-    ) -> tuple[float, float, Figure]:
+    def analyze(self, result: FreqResult | None = None) -> tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -165,8 +164,8 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[FreqResult] = None,
-        comment: Optional[str] = None,
+        result: FreqResult | None = None,
+        comment: str | None = None,
         tag: str = "twotone/reset/single_tone/freq",
         **kwargs,
     ) -> None:

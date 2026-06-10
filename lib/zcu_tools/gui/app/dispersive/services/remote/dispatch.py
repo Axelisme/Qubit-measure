@@ -13,7 +13,8 @@ Adding a method:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Callable, Mapping
+from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .service import RemoteControlAdapter
@@ -36,14 +37,14 @@ Handler = Callable[["RemoteControlAdapter", Mapping[str, object]], Mapping[str, 
 
 
 def _h_project_info(
-    adapter: "RemoteControlAdapter", params: Mapping[str, object]
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
     return project_info_payload(adapter.ctrl.state.project)
 
 
 def _h_fit_inputs_info(
-    adapter: "RemoteControlAdapter", params: Mapping[str, object]
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
     inputs = adapter.ctrl.state.fit_inputs
@@ -68,7 +69,7 @@ def _h_fit_inputs_info(
 
 
 def _h_preprocess_status(
-    adapter: "RemoteControlAdapter", params: Mapping[str, object]
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
     pp = adapter.ctrl.state.preprocess
@@ -83,7 +84,7 @@ def _h_preprocess_status(
 
 
 def _h_fit_result(
-    adapter: "RemoteControlAdapter", params: Mapping[str, object]
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
     fit = adapter.ctrl.state.disp_fit
@@ -96,14 +97,14 @@ def _h_fit_result(
 
 
 def _h_resources_versions(
-    adapter: "RemoteControlAdapter", params: Mapping[str, object]
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
     return {"versions": adapter.ctrl.state.version.snapshot()}
 
 
 def _h_state_check(
-    adapter: "RemoteControlAdapter", params: Mapping[str, object]
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
     state = adapter.ctrl.state

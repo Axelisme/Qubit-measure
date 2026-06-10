@@ -52,11 +52,11 @@ class _MlModifyDialog(QDialog):
 
     def __init__(
         self,
-        ctrl: "Controller",
+        ctrl: Controller,
         item_kind: _MlItemKind,
         name: str,
         cfg: Any,
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         if not name or cfg is None:
@@ -176,7 +176,7 @@ class _MlCreateDialog(QDialog):
     entry afterwards, use Modify.
     """
 
-    def __init__(self, ctrl: "Controller", parent: Optional[QWidget] = None) -> None:
+    def __init__(self, ctrl: Controller, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._ctrl = ctrl
         self.setWindowTitle("Create ModuleLibrary entry")
@@ -236,7 +236,7 @@ class InspectDialog(InspectDialogBase):
 
     # Narrow the base's SessionControllerPort to the concrete Controller, whose
     # CfgEditor methods (open/commit/teardown) the edit dialogs below call.
-    _ctrl: "Controller"
+    _ctrl: Controller
 
     def _build_extra_ml_buttons(self, btn_layout: QHBoxLayout) -> None:
         self._create_btn = QPushButton("Create...")

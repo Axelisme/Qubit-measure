@@ -46,7 +46,7 @@ class ProjectDialog(QDialog):
     def __init__(
         self,
         project: ProjectInfo,
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
         *,
         db_label: str = DEFAULT_DB_LABEL,
     ) -> None:

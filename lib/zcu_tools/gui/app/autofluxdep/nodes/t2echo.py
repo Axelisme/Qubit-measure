@@ -37,10 +37,11 @@ produce keeps the pure snapshot/params simulation unchanged.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
+from typing import Any, Optional
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Any, Mapping, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -91,7 +92,7 @@ def _placeholder_pi2_pulse() -> Any:
     return {"type": "pi2", "length": 0.05}
 
 
-def _default_readout() -> Optional[Any]:
+def _default_readout() -> Any | None:
     return None
 
 
@@ -122,7 +123,7 @@ class T2EchoModuleCfg(ConfigBase):
     readout module.
     """
 
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     pi_pulse: PulseCfg
     pi2_pulse: PulseCfg
     readout: ReadoutCfg
@@ -147,11 +148,11 @@ class T2EchoCfgTemplate(ProgramV2Cfg, ExpCfgModel):
 class T2EchoNode(Node):
     """One flux point's t2echo: synth decay-cos fringe → fit_decay_fringe → fill row → Patch."""
 
-    def __init__(self, env: RunEnv, builder: "T2EchoBuilder") -> None:
+    def __init__(self, env: RunEnv, builder: T2EchoBuilder) -> None:
         self._env = env
         self._builder = builder
 
-    def _maybe_make_cfg(self, snapshot: Snapshot) -> Optional[T2EchoCfgTemplate]:
+    def _maybe_make_cfg(self, snapshot: Snapshot) -> T2EchoCfgTemplate | None:
         """Build the run cfg when the context is configured for it, else None.
 
         ``make_cfg`` needs a populated ml + the upstream drive pulses

@@ -11,7 +11,7 @@ state.
 
 from __future__ import annotations
 
-from typing import Callable, Mapping, Optional
+from collections.abc import Callable, Mapping
 
 from zcu_tools.gui.app.dispersive.event_bus import (
     DispFitChangedPayload,
@@ -22,7 +22,7 @@ from zcu_tools.gui.app.dispersive.event_bus import (
     ProjectChangedPayload,
 )
 
-WirePayload = Optional[Mapping[str, object]]
+WirePayload = Mapping[str, object] | None
 Serializer = Callable[[Payload], WirePayload]
 
 

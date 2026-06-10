@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import Optional, cast
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Callable, Optional, TypedDict, cast
+from typing_extensions import (
+    TypedDict,  # closed/extra_items (PEP 728) not in stdlib 3.13
+)
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -78,9 +82,9 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
         detune_sweep: SweepCfg,
         cfg_maker: Callable[
             [TaskState[QubitFreqResult, T_RootResult, FluxDepCfg], ModuleLibrary],
-            Optional[QubitFreqCfgTemplate],
+            QubitFreqCfgTemplate | None,
         ],
-        earlystop_snr: Optional[float] = None,
+        earlystop_snr: float | None = None,
     ) -> None:
         self.detune_sweep = detune_sweep
         self.cfg_maker = cfg_maker
@@ -92,7 +96,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], T_RootResult, QubitFreqCfg],
-            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules

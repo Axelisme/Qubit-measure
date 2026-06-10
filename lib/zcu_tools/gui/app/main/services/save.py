@@ -28,8 +28,8 @@ class SaveResultOutcome:
 
     data_path: str
     image_path: str
-    data_error: Optional[str] = None
-    image_error: Optional[str] = None
+    data_error: str | None = None
+    image_error: str | None = None
 
 
 class SaveService(QObject):
@@ -39,9 +39,9 @@ class SaveService(QObject):
 
     def __init__(
         self,
-        state: "State",
+        state: State,
         bg: BackgroundExecutor,
-        bus: "EventBus",
+        bus: EventBus,
     ) -> None:
         super().__init__()
         self._state = state
@@ -49,7 +49,7 @@ class SaveService(QObject):
         self._bus = bus
         self._active_paths: dict[str, str] = {}
         # image_path and pre-captured image_error for pending save_both operations
-        self._pending_image: dict[str, tuple[str, Optional[str]]] = {}
+        self._pending_image: dict[str, tuple[str, str | None]] = {}
 
     def _start_save(self, tab_id: str, req: SaveDataRequest) -> None:
         """Save the data file off-main (OffMain fire-forget strategy, no scopes,
@@ -104,7 +104,7 @@ class SaveService(QObject):
         data_path = safe_labber_filepath(data_path)
 
         # savefig runs on the main thread — no cross-thread canvas repaint.
-        image_error: Optional[str] = None
+        image_error: str | None = None
         try:
             logger.info(
                 "start_save_result: savefig tab_id=%r image_path=%r", tab_id, image_path

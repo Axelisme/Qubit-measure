@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Optional, TypeAlias, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -7,7 +8,6 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from skopt import Optimizer
 from skopt.space import Real
-from typing_extensions import Any, Optional, TypeAlias, cast
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -79,8 +79,8 @@ class ReadoutOptimizer:
         self.last_param = None
 
     def next_params(
-        self, i: int, last_snr: Optional[float]
-    ) -> Optional[tuple[float, float, float]]:
+        self, i: int, last_snr: float | None
+    ) -> tuple[float, float, float] | None:
         if i >= self.num_points:
             return None
 
@@ -88,14 +88,14 @@ class ReadoutOptimizer:
             self.optimizer.tell(self.last_param, -last_snr)
 
         param = self.optimizer.ask()
-        param = cast(Optional[tuple[float, float, float]], param)
+        param = cast(tuple[float, float, float] | None, param)
 
         self.last_param = param
         return param
 
 
 class AutoOptModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
+    reset: ResetCfg | None = None
     qub_pulse: PulseCfg
     readout: ReadoutCfg
 
@@ -119,7 +119,7 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
         cfg: AutoOptCfg,
         *,
         num_points: int,
-        acquire_kwargs: Optional[dict[str, Any]] = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> AutoOptResult:
         setup_devices(cfg, progress=True)
 
@@ -255,7 +255,7 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
         return self.last_result
 
     def analyze(
-        self, result: Optional[AutoOptResult] = None
+        self, result: AutoOptResult | None = None
     ) -> tuple[float, float, float, Figure]:
         if result is None:
             result = self.last_result
@@ -306,8 +306,8 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[AutoOptResult] = None,
-        comment: Optional[str] = None,
+        result: AutoOptResult | None = None,
+        comment: str | None = None,
         tag: str = "twotone/ge/ro_optimize/auto",
         **kwargs,
     ) -> None:

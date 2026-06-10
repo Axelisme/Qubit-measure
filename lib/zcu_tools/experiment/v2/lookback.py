@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import warnings
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
-from typing_extensions import Callable, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -35,12 +36,12 @@ from zcu_tools.utils.datasaver import load_data, save_data
 class LookbackResult:
     times: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: Optional[LookbackCfg] = None
+    cfg_snapshot: LookbackCfg | None = None
 
 
 class LookbackModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
-    init_pulse: Optional[PulseCfg] = None
+    reset: ResetCfg | None = None
+    init_pulse: PulseCfg | None = None
     readout: PulseReadoutCfg
 
 
@@ -76,7 +77,7 @@ class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
         Ts = prog.get_time_axis(ro_index=0) + cfg.modules.readout.ro_cfg.trig_offset
         assert isinstance(Ts, np.ndarray)
 
-        def measure_fn(ctx: TaskState, update_hook: Optional[Callable]):
+        def measure_fn(ctx: TaskState, update_hook: Callable | None):
             return prog.acquire_decimated(
                 soc,
                 progress=False,
@@ -107,10 +108,10 @@ class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
 
     def analyze(
         self,
-        result: Optional[LookbackResult] = None,
+        result: LookbackResult | None = None,
         *,
         ratio: float = 0.3,
-        smooth: Optional[float] = None,
+        smooth: float | None = None,
         plot_fit: bool = True,
     ) -> tuple[float, Figure]:
         if result is None:
@@ -163,8 +164,8 @@ class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[LookbackResult] = None,
-        comment: Optional[str] = None,
+        result: LookbackResult | None = None,
+        comment: str | None = None,
         tag: str = "lookback",
         **kwargs,
     ) -> None:

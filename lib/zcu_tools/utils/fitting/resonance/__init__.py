@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from typing import Union
+
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Union
 
 from .base import (
     calc_phase,
@@ -20,7 +21,7 @@ from .transmission import TransmissionModel
 
 def get_proper_model(
     freqs: NDArray[np.float64], signals: NDArray[np.complex128]
-) -> Union[HangerModel, TransmissionModel]:
+) -> HangerModel | TransmissionModel:
     background = 0.5 * (np.abs(signals[0]) + np.abs(signals[-1]))
     magnitudes = np.abs(signals)
 

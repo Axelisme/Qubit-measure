@@ -46,19 +46,20 @@ import sys
 import threading
 import time
 import traceback
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Protocol, Tuple
+from typing import Any, Optional, Protocol
 
 from zcu_tools.gui.remote.param_spec import JsonType, build_input_schema
 
 # The type of a generated/override MCP tool entry.
-Tool = Dict[str, Any]
-ToolTable = Dict[str, Tool]
+Tool = dict[str, Any]
+ToolTable = dict[str, Tool]
 # A function issuing one GUI RPC and returning the result dict (raises on error).
 # Read-only apps pass a thin wrapper over McpBridge.send_rpc_raw; measure-gui
 # passes its guarded send_gui_rpc.
-SendFn = Callable[..., Dict[str, Any]]
+SendFn = Callable[..., dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -129,7 +130,7 @@ def _pid_alive(pid: int) -> bool:
 
 
 # A line arrived from the GUI: route it (reply keyed by id / event push).
-DeliverFn = Callable[[Dict[str, Any]], None]
+DeliverFn = Callable[[dict[str, Any]], None]
 # The transport closed (real socket dropped): wake any pending RPC waiters.
 OnClosedFn = Callable[[], None]
 
@@ -153,7 +154,7 @@ class Transport(Protocol):
     @property
     def is_open(self) -> bool: ...
 
-    def send_line(self, payload: Dict[str, Any]) -> None:
+    def send_line(self, payload: dict[str, Any]) -> None:
         """Serialise + send one NDJSON line toward the GUI."""
         ...
 
@@ -174,12 +175,12 @@ class SocketTransport:
     def __init__(self, app_name: str) -> None:
         self._app_name = app_name
         self._sock_lock = threading.Lock()
-        self._sock: Optional[socket.socket] = None
-        self._reader_thread: Optional[threading.Thread] = None
+        self._sock: socket.socket | None = None
+        self._reader_thread: threading.Thread | None = None
         self._reader_stop = threading.Event()
-        self._deliver_reply: Optional[DeliverFn] = None
-        self._deliver_event: Optional[DeliverFn] = None
-        self._on_closed: Optional[OnClosedFn] = None
+        self._deliver_reply: DeliverFn | None = None
+        self._deliver_event: DeliverFn | None = None
+        self._on_closed: OnClosedFn | None = None
 
     def attach(
         self, deliver_reply: DeliverFn, deliver_event: DeliverFn, on_closed: OnClosedFn
@@ -214,7 +215,7 @@ class SocketTransport:
         )
         self._reader_thread.start()
 
-    def send_line(self, payload: Dict[str, Any]) -> None:
+    def send_line(self, payload: dict[str, Any]) -> None:
         sock = self._sock
         if sock is None:
             raise RuntimeError("transport not open")
@@ -293,22 +294,22 @@ class McpBridge:
     def __init__(
         self,
         config: MCPBridgeConfig,
-        on_event: Optional[Callable[[Dict[str, Any]], None]] = None,
-        transport: Optional[Transport] = None,
+        on_event: Callable[[dict[str, Any]], None] | None = None,
+        transport: Transport | None = None,
     ) -> None:
         self.config = config
         self._on_event = on_event
         self._rid_cond = threading.Condition()
         self._rid_counter = 0
-        self._pending: Dict[str, Dict[str, Any]] = {}
-        self._proc: Optional[subprocess.Popen] = None
+        self._pending: dict[str, dict[str, Any]] = {}
+        self._proc: subprocess.Popen | None = None
         # The wire transport. None until connect()/launch() builds a real
         # SocketTransport, or a test injects a fake via set_transport / the ctor.
-        self._transport: Optional[Transport] = None
+        self._transport: Transport | None = None
         if transport is not None:
             self.set_transport(transport)
 
-    def set_transport(self, transport: Optional[Transport]) -> None:
+    def set_transport(self, transport: Transport | None) -> None:
         """Swap the wire transport (the seam for tests + connect()).
 
         Attaching wires the bridge's routing callbacks into the transport; the
@@ -320,7 +321,7 @@ class McpBridge:
                 self._deliver_reply, self._deliver_event, self._on_socket_closed
             )
 
-    def _deliver_event(self, msg: Dict[str, Any]) -> None:
+    def _deliver_event(self, msg: dict[str, Any]) -> None:
         # Preserve the drop-if-None semantics: read-only apps wire no on_event.
         if self._on_event is not None:
             self._on_event(msg)
@@ -348,7 +349,7 @@ class McpBridge:
         except OSError:
             pass
 
-    def _read_pid_file(self) -> Optional[int]:
+    def _read_pid_file(self) -> int | None:
         try:
             return int(self.config.pid_file.read_text().strip())
         except (OSError, ValueError):
@@ -366,7 +367,7 @@ class McpBridge:
             self._rid_counter += 1
             return f"mcp-{self._rid_counter}"
 
-    def _deliver_reply(self, msg: Dict[str, Any]) -> None:
+    def _deliver_reply(self, msg: dict[str, Any]) -> None:
         rid = msg.get("id")
         if not isinstance(rid, str):
             return
@@ -379,8 +380,8 @@ class McpBridge:
             self._rid_cond.notify_all()
 
     def send_rpc_raw(
-        self, method: str, params: Dict[str, Any], timeout_seconds: float
-    ) -> Dict[str, Any]:
+        self, method: str, params: dict[str, Any], timeout_seconds: float
+    ) -> dict[str, Any]:
         """Issue one RPC and wait for its reply (no policy). Raises on timeout.
 
         Returns the raw wire response dict (``{ok, result}`` or ``{ok:False,
@@ -392,7 +393,7 @@ class McpBridge:
                 f"GUI not connected. Call {self.config.tool_prefix}connect first."
             )
         rid = self._next_rid()
-        holder: Dict[str, Any] = {"done": False}
+        holder: dict[str, Any] = {"done": False}
         with self._rid_cond:
             self._pending[rid] = holder
         try:
@@ -444,7 +445,7 @@ class McpBridge:
     # Connection lifecycle
     # ------------------------------------------------------------------
 
-    def connect(self, port: int, token: Optional[str] = None) -> str:
+    def connect(self, port: int, token: str | None = None) -> str:
         """Attach to an already-running GUI's control port. Returns a note.
 
         Tears down any existing connection first. With a token, authenticates
@@ -495,9 +496,9 @@ class McpBridge:
         self,
         repo_root: Path,
         port: int,
-        token: Optional[str] = None,
+        token: str | None = None,
         auto_connect: bool = True,
-        extra_args: Optional[list] = None,
+        extra_args: list | None = None,
     ) -> str:
         """Fork the GUI subprocess on ``port``, wait until ready, maybe connect.
 
@@ -587,14 +588,14 @@ class McpBridge:
             )
         return f"GUI launched (pid={pid}) and listening on port {port}." + log_note
 
-    def _pid_for_stop(self) -> Tuple[Optional[int], Optional[subprocess.Popen]]:
+    def _pid_for_stop(self) -> tuple[int | None, subprocess.Popen | None]:
         proc = self._proc
         if proc is not None and proc.poll() is None:
             return proc.pid, proc
         return self._read_pid_file(), None
 
     def _await_exit(
-        self, pid: int, proc: Optional[subprocess.Popen], timeout: float
+        self, pid: int, proc: subprocess.Popen | None, timeout: float
     ) -> bool:
         if proc is not None:
             try:
@@ -613,7 +614,7 @@ class McpBridge:
         self,
         timeout: float = 10.0,
         timeout_kill: bool = True,
-        shutdown_rpc: Optional[str] = None,
+        shutdown_rpc: str | None = None,
     ) -> str:
         """Stop the GUI subprocess this bridge launched (own-cleanup use).
 
@@ -681,7 +682,7 @@ class McpBridge:
 # ---------------------------------------------------------------------------
 
 
-def coerce_arg(value: object, json_type: "JsonType") -> object:
+def coerce_arg(value: object, json_type: JsonType) -> object:
     if value is None:
         return None
     if json_type is JsonType.STRING:
@@ -706,8 +707,8 @@ def make_forwarder(method: str, spec, send_fn: SendFn):
     """
     rpc_timeout = max(float(spec.timeout_seconds), 30.0)
 
-    def _forwarder(arguments: Dict[str, Any]) -> Dict[str, Any]:
-        rpc_params: Dict[str, Any] = {}
+    def _forwarder(arguments: dict[str, Any]) -> dict[str, Any]:
+        rpc_params: dict[str, Any] = {}
         for p in spec.params:
             if p.required:
                 if p.name not in arguments or arguments[p.name] is None:
@@ -722,8 +723,8 @@ def make_forwarder(method: str, spec, send_fn: SendFn):
 
 def generate_tools(
     config: McpServerConfig,
-    method_specs: Dict[str, Any],
-    non_generated: "frozenset[str]",
+    method_specs: dict[str, Any],
+    non_generated: frozenset[str],
     send_fn: SendFn,
 ) -> ToolTable:
     """Generate one MCP tool per method spec (skipping ``non_generated``)."""
@@ -741,7 +742,7 @@ def generate_tools(
 
 
 def assemble_tools(
-    generated: ToolTable, overrides: ToolTable, override_names: "frozenset[str]"
+    generated: ToolTable, overrides: ToolTable, override_names: frozenset[str]
 ) -> ToolTable:
     """Merge generated + selected override tools; fail-fast on name collision."""
     selected = {
@@ -758,7 +759,7 @@ def assemble_tools(
 # ---------------------------------------------------------------------------
 
 
-def build_initialize_result(config: McpServerConfig) -> Dict[str, Any]:
+def build_initialize_result(config: McpServerConfig) -> dict[str, Any]:
     return {
         "protocolVersion": "2024-11-05",
         "capabilities": {"tools": {}},
@@ -771,8 +772,8 @@ def run_stdio_loop(
     config: McpServerConfig,
     tools: ToolTable,
     *,
-    on_cleanup: Optional[Callable[[], None]] = None,
-    on_each_reply: Optional[Callable[[], Dict[str, Any]]] = None,
+    on_cleanup: Callable[[], None] | None = None,
+    on_each_reply: Callable[[], dict[str, Any]] | None = None,
 ) -> None:
     """Run the MCP stdio JSON-RPC loop until stdin closes.
 
@@ -841,7 +842,7 @@ def run_stdio_loop(
                     }
                 else:
                     try:
-                        handler: Callable[[Dict[str, Any]], Any] = tool["handler"]
+                        handler: Callable[[dict[str, Any]], Any] = tool["handler"]
                         res = handler(arguments)
                         text = (
                             res if isinstance(res, str) else json.dumps(res, indent=2)

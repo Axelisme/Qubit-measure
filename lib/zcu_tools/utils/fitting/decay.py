@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+from typing import Optional
+
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Optional, Sequence
 
 from .base import (
     batch_fit_func,
@@ -20,8 +22,8 @@ from .base import (
 def fit_decay(
     xs: NDArray[np.float64],
     real_signals: NDArray[np.float64],
-    fit_params: Optional[tuple[float, float, float]] = None,
-    fixedparams: Optional[Sequence[Optional[float]]] = None,
+    fit_params: tuple[float, float, float] | None = None,
+    fixedparams: Sequence[float | None] | None = None,
 ) -> tuple[
     float,
     float,
@@ -41,8 +43,8 @@ def fit_decay(
 def fit_dual_decay(
     xs: NDArray[np.float64],
     real_signals: NDArray[np.float64],
-    fit_params: Optional[Sequence[Optional[float]]] = None,
-    fixedparams: Optional[Sequence[Optional[float]]] = None,
+    fit_params: Sequence[float | None] | None = None,
+    fixedparams: Sequence[float | None] | None = None,
 ) -> tuple[
     float,
     float,
@@ -80,8 +82,8 @@ def fit_ge_decay(
     times: NDArray[np.float64],
     g_populations: NDArray[np.float64],
     e_populations: NDArray[np.float64],
-    fit_params: Optional[Sequence[Optional[float]]] = None,
-    fixedparams: Optional[Sequence[Optional[float]]] = None,
+    fit_params: Sequence[float | None] | None = None,
+    fixedparams: Sequence[float | None] | None = None,
     share_t1: bool = True,
 ) -> tuple[
     tuple[float, float, NDArray[np.float64], tuple[float, float, float]],
@@ -144,8 +146,8 @@ def fit_ge_decay(
 def fit_decay_fringe(
     xs: NDArray[np.float64],
     real_signals: NDArray[np.float64],
-    fit_params: Optional[Sequence[Optional[float]]] = None,
-    fixedparams: Optional[Sequence[Optional[float]]] = None,
+    fit_params: Sequence[float | None] | None = None,
+    fixedparams: Sequence[float | None] | None = None,
 ) -> tuple[
     float,
     float,
@@ -174,8 +176,8 @@ def fit_decay_fringe(
 def fit_gauss_decay(
     xs: NDArray[np.float64],
     real_signals: NDArray[np.float64],
-    fit_params: Optional[Sequence[Optional[float]]] = None,
-    fixedparams: Optional[Sequence[Optional[float]]] = None,
+    fit_params: Sequence[float | None] | None = None,
+    fixedparams: Sequence[float | None] | None = None,
 ) -> tuple[
     float,
     float,

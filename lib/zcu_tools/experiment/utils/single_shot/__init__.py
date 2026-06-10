@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from typing import Literal
+
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import TABLEAU_COLORS
 from numpy.typing import NDArray
-from typing_extensions import Literal
 
 from .gauss2d import fit_gauss_2d, fit_gauss_2d_bayesian
 from .ge import (

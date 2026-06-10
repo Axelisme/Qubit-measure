@@ -26,8 +26,9 @@ Three shapes cover the experiments (qubit_freq keeps its own two-panel Plotter):
 
 from __future__ import annotations
 
+from typing import Any, Optional
+
 import numpy as np
-from typing_extensions import Any, Optional
 
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult, Sweep2DResult
 
@@ -92,7 +93,7 @@ class ColormapLinePlotter:
         title: str,
         y_label: str,
         num_lines: int = 3,
-        marker_of: Optional[Any] = None,
+        marker_of: Any | None = None,
     ) -> None:
         from zcu_tools.liveplot import LivePlot2DwithLine
 

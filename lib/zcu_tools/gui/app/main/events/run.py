@@ -46,4 +46,4 @@ class RunFinishedPayload(_RunPayload):
     EVENT: ClassVar[RunEvent] = RunEvent.RUN_FINISHED
     tab_id: str
     outcome: str  # 'finished' | 'failed' | 'cancelled'
-    error_message: Optional[str] = None
+    error_message: str | None = None

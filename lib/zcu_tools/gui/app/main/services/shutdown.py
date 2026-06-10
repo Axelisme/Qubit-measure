@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from enum import Enum
-from typing import Callable, Optional
+from typing import Optional
 
 from zcu_tools.gui.session.operation_handles import OperationHandles
 
@@ -49,7 +50,7 @@ class ShutdownCoordinator:
         self._timeout = timeout
         self._now = now
         self._tokens: list[int] = []
-        self._deadline: Optional[float] = None
+        self._deadline: float | None = None
         self._active = False
 
     @property

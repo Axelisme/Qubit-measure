@@ -27,9 +27,10 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Callable, Optional, Protocol, Union, cast
+from typing import TYPE_CHECKING, Optional, Protocol, Union, cast
 
 from .adapter import (
     CfgNodeSpec,
@@ -340,7 +341,7 @@ class SweepLiveField(LiveField):
             f"Sweep edge expects float or EvalValue, got {type(value).__name__}"
         )
 
-    def _edge_value(self, value: ScalarValue) -> Union[float, EvalValue]:
+    def _edge_value(self, value: ScalarValue) -> float | EvalValue:
         if isinstance(value, EvalValue):
             return value
         if value.value is None:
@@ -372,7 +373,7 @@ class SectionLiveField(LiveField):
         self,
         spec: CfgSectionSpec,
         env: LiveModelEnv,
-        initial_val: Optional[CfgSectionValue] = None,
+        initial_val: CfgSectionValue | None = None,
     ) -> None:
         super().__init__(spec, env)
         self.fields: dict[str, LiveField] = {}
@@ -418,8 +419,8 @@ class SectionLiveField(LiveField):
         # disabled optional ModuleRef/WaveformRef self-reports ``None`` from its
         # own ``get_value`` — the parent does not reach into child ``is_enabled``
         # nor omit keys.
-        fields: dict[str, Optional[CfgNodeValue]] = {
-            k: cast("Optional[CfgNodeValue]", f.get_value())
+        fields: dict[str, CfgNodeValue | None] = {
+            k: cast("CfgNodeValue | None", f.get_value())
             for k, f in self.fields.items()
         }
         return CfgSectionValue(fields=fields)
@@ -512,11 +513,11 @@ def _binding_state_for_key(chosen_key: str) -> LibraryBindingState:
 class ModuleRefLiveField(LiveField):
     """Reactive field for Module/Waveform references with dynamic sub-sections."""
 
-    spec: Union[ModuleRefSpec, WaveformRefSpec]
+    spec: ModuleRefSpec | WaveformRefSpec
 
     def __init__(
         self,
-        spec: Union[ModuleRefSpec, WaveformRefSpec],
+        spec: ModuleRefSpec | WaveformRefSpec,
         env: LiveModelEnv,
         initial_val: object = None,
     ) -> None:
@@ -528,7 +529,7 @@ class ModuleRefLiveField(LiveField):
         init_overridden = False
         if isinstance(initial_val, (ModuleRefValue, WaveformRefValue)):
             self._chosen_key = initial_val.chosen_key
-            init_sub: Optional[CfgSectionValue] = initial_val.value
+            init_sub: CfgSectionValue | None = initial_val.value
             init_overridden = initial_val.is_overridden
         else:
             # Default to first allowed
@@ -543,7 +544,7 @@ class ModuleRefLiveField(LiveField):
         # CUSTOM; is_overridden is meaningless there.)
         if init_overridden and self._binding_state is LibraryBindingState.LINKED:
             self._binding_state = LibraryBindingState.MODIFIED
-        self.sub_field: Optional[SectionLiveField] = None
+        self.sub_field: SectionLiveField | None = None
         # True when a LINKED ref's chosen_key names a library entry that does not
         # exist (deleted/renamed). Kept LINKED so re-adding the name re-links it;
         # surfaced as invalid + a red "missing library reference" badge.
@@ -558,7 +559,7 @@ class ModuleRefLiveField(LiveField):
     def has_missing_library_ref(self) -> bool:
         return self._missing_library_ref
 
-    def _rebuild_sub_field(self, hint: Optional[CfgSectionValue] = None) -> None:
+    def _rebuild_sub_field(self, hint: CfgSectionValue | None = None) -> None:
         """Rebuild the sub-field for the current chosen_key.
 
         hint: explicit initial CfgSectionValue to seed the sub-field (takes
@@ -621,7 +622,7 @@ class ModuleRefLiveField(LiveField):
                 raise
         if chosen_spec:
             if hint is not None:
-                val: Optional[CfgSectionValue] = hint
+                val: CfgSectionValue | None = hint
             elif lib_val is not None:
                 val = lib_val
             elif isinstance(old_spec, CfgSectionSpec) and isinstance(
@@ -642,8 +643,8 @@ class ModuleRefLiveField(LiveField):
 
     def _custom_label_for_value(
         self,
-        old_spec: Optional[CfgNodeSpec],
-        value: Optional[CfgSectionValue],
+        old_spec: CfgNodeSpec | None,
+        value: CfgSectionValue | None,
     ) -> str:
         """Pick the allowed <Custom:label> shape for a dangling ref's heal.
 
@@ -742,7 +743,7 @@ class ModuleRefLiveField(LiveField):
             self._rebuild_sub_field(hint=None)
             self.on_change.emit(self.get_value())
 
-    def get_value(self) -> Optional[Union[ModuleRefValue, WaveformRefValue]]:
+    def get_value(self) -> ModuleRefValue | WaveformRefValue | None:
         # A disabled optional ref self-reports ``None`` (ADR-0010): the disabled
         # state is in-band in the value, not a parent-side omission.
         if self.spec.optional and not self.is_enabled:
