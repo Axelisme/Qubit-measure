@@ -9,6 +9,7 @@ from zcu_tools.gui.session.services.connection import (
     ConnectRemoteRequest,
 )
 from zcu_tools.gui.session.services.startup import (
+    PersistedStartup,
     StartupConnectionRequest,
     StartupProjectRequest,
 )
@@ -23,6 +24,7 @@ def _make_ctrl(**overrides: object) -> MagicMock:
     ctrl.get_active_context_label.return_value = None
     ctrl.get_soccfg.return_value = None
     ctrl.apply_startup_project.return_value = True
+    ctrl.get_project_root.return_value = "/tmp"
     for k, v in overrides.items():
         getattr(ctrl, k).return_value = v
     return ctrl
@@ -158,3 +160,30 @@ def test_setup_dialog_connect_failure_signal_updates_status(qapp):
 
     assert "network bad" in dialog._conn_status.text()
     assert dialog._connect_btn.isEnabled()
+
+
+def test_setup_dialog_reseed_on_reshow_clears_stale_draft(qapp):
+    """Regression: re-raising a dialog with an un-applied draft must reset to
+    the current State (startup_prefs), not retain the typed-but-not-applied value.
+
+    Scenario: open dialog (shows chip="Q5_2D") → user types "DRAFT" without
+    applying → dialog is re-shown (simulated by calling showEvent directly, as
+    open_dialog does raise_()+show()) → chip field reverts to "Q5_2D".
+    """
+    prefs = PersistedStartup(chip_name="Q5_2D", qub_name="Q1", res_name="R1")
+    ctrl = _make_ctrl(get_persisted_startup=prefs)
+
+    dialog = SetupDialog(ctrl)
+    # after init: chip_edit should reflect the persisted prefs
+    assert dialog._chip_edit.text() == "Q5_2D"
+
+    # user types a draft — no apply
+    dialog._chip_edit.setText("DRAFT_NAME")
+    assert dialog._chip_edit.text() == "DRAFT_NAME"
+
+    # simulate the dialog being re-raised (open_dialog calls raise_()/show();
+    # showEvent fires on every show call)
+    dialog.showEvent(None)
+
+    # the re-seed must revert to the State value, not the stale draft
+    assert dialog._chip_edit.text() == "Q5_2D"

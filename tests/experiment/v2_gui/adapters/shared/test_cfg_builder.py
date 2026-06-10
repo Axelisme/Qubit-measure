@@ -205,9 +205,9 @@ def test_sweep_rejects_eval_edge():
     with pytest.raises(RuntimeError, match="EvalValue edge requires set_sweep"):
         CfgBuilder(_empty_ctx(), _spec()).sweep(
             "sweep.freq",
-            EvalValue(expr="q_f"),
+            EvalValue(expr="q_f"),  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
             10.0,
-            11,  # type: ignore[arg-type]
+            11,
         )
 
 

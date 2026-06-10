@@ -56,10 +56,10 @@ def test_record_requires_nonempty_list_exp_type(tmp_path):
             chip="Q1",
             qub="Q1",
             date="2026-06-08",
-            exp_type="t1",
+            exp_type="t1",  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
             outcome="success",
             body="x",
-        )  # type: ignore[arg-type]
+        )
     with pytest.raises(RuntimeError):
         s.record(
             chip="Q1",

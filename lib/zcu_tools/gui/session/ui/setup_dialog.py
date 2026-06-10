@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
 logger = logging.getLogger(__name__)
 
 from qtpy.QtCore import Qt  # type: ignore[attr-defined]
-from qtpy.QtGui import QFont  # type: ignore[attr-defined]
+from qtpy.QtGui import QFont, QShowEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QCheckBox,
     QComboBox,
@@ -257,6 +257,27 @@ class SetupDialog(QDialog):
         bus.unsubscribe(SocChangedPayload, self._on_bus_soc_changed)
         bus.unsubscribe(DeviceChangedPayload, self._on_bus_device_changed)
         self._bus_subs_active = False
+
+    def showEvent(self, a0: Optional[QShowEvent]) -> None:  # noqa: N802
+        """Re-seed the project form from State on every programmatic show.
+
+        Reopening the dialog after a close (``show()`` on the kept instance)
+        replaces any previously-typed-but-never-applied draft with the
+        currently-active project's values from ``startup_prefs``.  The initial
+        show during bootstrap is harmless because ``_prefill_from_persistence``
+        already ran in ``__init__``.
+
+        Spontaneous show events (window-system restore after minimise) keep the
+        draft — the user never closed the dialog, so wiping mid-typing input
+        would be hostile.  ``a0`` may be ``None`` in unit tests that call
+        ``showEvent`` directly to simulate a reopen without a real Qt event loop.
+        """
+        if a0 is not None:
+            super().showEvent(a0)
+            if a0.spontaneous():
+                return
+        self._prefill_from_persistence()
+        self._refresh_context_list()
 
     def _on_bus_context_switched(self, payload: object) -> None:
         del payload
