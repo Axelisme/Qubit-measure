@@ -301,3 +301,99 @@ def test_ro_optimize_produce_builds_cfg_when_context_configured():
     assert "opt_readout" in patch.modules()
     assert not np.isnan(result.signal[1]).any()  # row filled
     assert not np.isnan(result.best_freq[1])
+
+
+# --- t1 (Phase B B-1/B-2) ----------------------------------------------------
+# t1's drive pi_pulse + readout are MODULES taken from the snapshot (lenrabi /
+# ro_optimize produce them), not built from "設定頭" params; relax_delay +
+# sweep_range derive from the snapshot's smoothed t1. The configured fixture
+# supplies real PulseCfg / PulseReadoutCfg module dicts so make_cfg exercises the
+# real ml.make_cfg lowering path without hardware. (Reuses the module-level
+# _READOUT fixture already defined at the top of test_cfg_maker.py.)
+
+_T1_PI_PULSE = {
+    "type": "pulse",
+    "waveform": {
+        "style": "flat_top",
+        "length": 0.1,
+        "raise_waveform": {"style": "cosine", "length": 0.02},
+    },
+    "ch": 3,
+    "nqz": 2,
+    "freq": 5135.0,
+    "gain": 0.3,
+}
+
+
+def test_t1_make_cfg_lowers_context():
+    from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
+    from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
+    from zcu_tools.gui.app.autofluxdep.nodes.t1 import T1Builder, T1CfgTemplate
+    from zcu_tools.meta_tool import ModuleLibrary
+
+    env = RunEnv(
+        flux=0.0, flux_idx=0, params={"reps": 100, "rounds": 2}, ml=ModuleLibrary()
+    )
+    snap = Snapshot(
+        {"t1": 12.0}, modules={"pi_pulse": _T1_PI_PULSE, "opt_readout": _READOUT}
+    )
+    cfg = T1Builder().make_cfg(env, snap)
+    assert isinstance(cfg, T1CfgTemplate)
+    # the drive pi_pulse + readout are the snapshot modules, lowered to real cfgs
+    assert int(cfg.modules.pi_pulse.ch) == 3
+    assert float(cfg.modules.pi_pulse.freq) == 5135.0
+    assert cfg.modules.readout.type == "readout/pulse"
+    # relax_delay + sweep_range derive from the smoothed t1 (the notebook formula)
+    assert cfg.relax_delay == 36.0  # max(1.0, 3 * 12)
+    assert cfg.sweep_range == (0.5, 60.0)  # (0.5, max(1.0, 5 * 12))
+    # reps / rounds come from the node params
+    assert cfg.reps == 100 and cfg.rounds == 2
+
+
+def test_t1_produce_builds_cfg_when_context_configured():
+    # with a populated ml + a real pi_pulse + readout, produce goes through the cfg
+    # pipeline (make_cfg) to source the relax-time axis (sweep_range from the
+    # smoothed t1), then SIMULATES the acquire (no hardware). The pure-synthetic
+    # fallback (placeholder / empty-ml modules) is covered by test_workflow's t1.
+    import numpy as np
+    from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
+    from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
+    from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
+    from zcu_tools.gui.app.autofluxdep.nodes.synth import parse_linear_axis
+    from zcu_tools.gui.app.autofluxdep.nodes.t1 import T1Builder, T1Node
+    from zcu_tools.meta_tool import ModuleLibrary
+
+    ml = ModuleLibrary()
+    times = parse_linear_axis("0.5,60,101", (0.5, 60.0, 101))
+    result = Sweep1DResult.allocate(np.array([0.5]), times, x_label="relax time (us)")
+    env = RunEnv(
+        flux=0.5,
+        flux_idx=0,
+        params={
+            "sweep_range": "0.5,60,101",
+            "reps": 100,
+            "rounds": 2,
+            "acquire_delay": 0,
+        },
+        ml=ml,
+        result=result,
+    )
+    snap = Snapshot(
+        {"t1": 12.0}, modules={"pi_pulse": _T1_PI_PULSE, "opt_readout": _READOUT}
+    )
+    node = T1Builder().build_node(env)
+    assert isinstance(node, T1Node)
+    assert node._maybe_make_cfg(snap) is not None  # cfg-driven path is taken
+    patch = node.produce(snap)
+    assert "t1" in patch.values()  # simulated acquire + fit succeeded
+    # the relax-time axis was sourced from the cfg's sweep_range (smoothed-t1)
+    assert float(result.x[0]) == 0.5 and float(result.x[-1]) == 60.0
+    # the placeholder modules the workflow flows do NOT lower → synthetic fallback
+    ph = Snapshot(
+        {"t1": 12.0},
+        modules={
+            "pi_pulse": {"type": "pi", "length": 0.1},
+            "opt_readout": {"type": "readout", "freq": 7444.6, "gain": 1.0},
+        },
+    )
+    assert node._maybe_make_cfg(ph) is None
