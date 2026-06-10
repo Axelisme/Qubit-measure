@@ -397,3 +397,96 @@ def test_t1_produce_builds_cfg_when_context_configured():
         },
     )
     assert node._maybe_make_cfg(ph) is None
+
+
+def _t2ramsey_ml() -> ModuleLibrary:
+    ml = ModuleLibrary()
+    ml.register_waveform(
+        pi2_flat={
+            "style": "flat_top",
+            "length": 0.05,
+            "raise_waveform": {"style": "cosine", "length": 0.01},
+        }
+    )
+    return ml
+
+
+def _t2ramsey_pi2_pulse(ml: ModuleLibrary):
+    # the fully-built pi/2 drive module lenrabi would produce (here built off the
+    # registered waveform), passed straight into make_cfg's pi2_pulse slot.
+    return {
+        "type": "pulse",
+        "waveform": ml.get_waveform("pi2_flat"),
+        "ch": 3,
+        "nqz": 2,
+        "gain": 0.3,
+        "freq": 5135.0,
+    }
+
+
+def test_t2ramsey_make_cfg_lowers_context():
+    from zcu_tools.gui.app.autofluxdep.nodes.t2ramsey import (
+        T2RamseyBuilder,
+        T2RamseyCfgTemplate,
+    )
+
+    ml = _t2ramsey_ml()
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        params={"reps": 1000, "rounds": 10},
+        ml=ml,
+    )
+    snap = Snapshot(
+        {"t1": 12.0, "t2r": 8.0},
+        modules={"pi2_pulse": _t2ramsey_pi2_pulse(ml), "opt_readout": _READOUT},
+    )
+    cfg = T2RamseyBuilder().make_cfg(env, snap)
+    assert isinstance(cfg, T2RamseyCfgTemplate)
+    # the pi/2 drive module is taken from the snapshot
+    assert int(cfg.modules.pi2_pulse.ch) == 3
+    assert float(cfg.modules.pi2_pulse.freq) == 5135.0
+    # sweep_range spans 2.5 * smoothed t2r; relax_delay is 3 * smoothed t1
+    assert cfg.sweep_range == (0.0, 2.5 * 8.0)
+    assert cfg.relax_delay == max(1.0, 3.0 * 12.0)
+    assert cfg.reps == 1000 and cfg.rounds == 10
+    # the readout module (snapshot's opt_readout) lowered into the cfg's readout
+    assert cfg.modules.readout.type == "readout/pulse"
+
+
+def test_t2ramsey_produce_builds_cfg_when_context_configured():
+    # with a populated ml + the pi2_pulse drive module + a readout, produce goes
+    # through the cfg pipeline (make_cfg) to source the planted-t2 baseline (the
+    # cfg's sweep_range), then SIMULATES the acquire (no hardware). The
+    # pure-synthetic fallback (empty ml) is covered by the run/builder tests.
+    import numpy as np
+    from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
+    from zcu_tools.gui.app.autofluxdep.nodes.synth import parse_linear_axis
+    from zcu_tools.gui.app.autofluxdep.nodes.t2ramsey import (
+        T2RamseyBuilder,
+        T2RamseyNode,
+    )
+
+    ml = _t2ramsey_ml()
+    flux = np.linspace(0.0, 1.0, 11)
+    times = parse_linear_axis("0,25,121", (0.0, 25.0, 121))
+    result = Sweep1DResult.allocate(flux, times, x_label="delay time (us)")
+    env = RunEnv(
+        flux=float(flux[1]),  # flux=0.1 → high-SNR point
+        flux_idx=1,
+        params={"reps": 1000, "rounds": 2, "acquire_delay": 0},
+        ml=ml,
+        result=result,
+    )
+    snap = Snapshot(
+        {"t1": 12.0, "t2r": 8.0},
+        modules={"pi2_pulse": _t2ramsey_pi2_pulse(ml), "opt_readout": _READOUT},
+    )
+    node = T2RamseyBuilder().build_node(env)
+    assert isinstance(node, T2RamseyNode)
+    assert node._maybe_make_cfg(snap) is not None  # cfg-driven path is taken
+    patch = node.produce(snap)
+    assert "t2r" in patch.values()  # simulated acquire + fit succeeded
+    # planted-t2 baseline comes from the cfg's sweep_range (= 2.5 * t2r = 20 → /2.5
+    # = 8 us), drifted at flux=0.1: flux_drift(0.1, 8.0, 15.0) = 10.4 us
+    assert abs(patch.values()["t2r"] - 10.4) < 2.5
