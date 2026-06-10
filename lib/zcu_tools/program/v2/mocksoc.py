@@ -224,6 +224,9 @@ class MockQickSoc(QickConfig):
         return np.random.randint(-(2**15), 2**15, size=(length, 2), dtype=np.int64)
 
 
-def make_mock_soc(n_gens: int = 2, n_readouts: int = 1) -> MockQickSoc:
+def make_mock_soc(
+    n_gens: int = 2, n_readouts: int = 1
+) -> tuple[MockQickSoc, QickConfig]:
     """Build a MockQickSoc supporting end-to-end acquire() with random fake data."""
-    return MockQickSoc(_build_mock_cfg(n_gens, n_readouts))
+    mock_cfg = _build_mock_cfg(n_gens, n_readouts)
+    return MockQickSoc(mock_cfg), QickConfig(mock_cfg)

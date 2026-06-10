@@ -16,7 +16,7 @@ def test_make_mock_soccfg():
 
 
 def test_mock_soc_methods():
-    soc = make_mock_soc(n_gens=1, n_readouts=1)
+    soc, _ = make_mock_soc(n_gens=1, n_readouts=1)
 
     # Test getting tproc counter returns huge number
     assert soc.get_tproc_counter(0) == soc._BIG_COUNT
@@ -40,7 +40,7 @@ def test_mock_soc_methods():
 
 
 def test_mock_soc_decimated_accumulated():
-    soc = make_mock_soc()
+    soc, _ = make_mock_soc()
 
     dec = soc.get_decimated(0, 0, 50)
     assert dec.shape == (50, 2)

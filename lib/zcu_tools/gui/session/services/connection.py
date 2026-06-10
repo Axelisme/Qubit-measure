@@ -214,13 +214,9 @@ class ConnectionService(QObject):
         if isinstance(req, ConnectMockRequest):
             logger.info("start_connect: mock")
             try:
-                from zcu_tools.program.v2.mocksoc import (
-                    make_mock_soc,
-                    make_mock_soccfg,
-                )
+                from zcu_tools.program.v2.mocksoc import make_mock_soc
 
-                soc = make_mock_soc()
-                soccfg = make_mock_soccfg()
+                soc, soccfg = make_mock_soc()
             except Exception as exc:
                 error = f"Mock SoC initialisation failed: {exc}"
                 QTimer.singleShot(0, lambda err=error: self._finish_failure(err))
