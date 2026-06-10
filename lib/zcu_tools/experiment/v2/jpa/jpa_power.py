@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from pydantic import Field
 from typing_extensions import Any, Callable, Mapping, Optional, cast
 
 from zcu_tools.cfg_model import ConfigBase
@@ -57,7 +58,9 @@ class PowerSweepCfg(ConfigBase):
 
 class PowerCfg(ProgramV2Cfg, ExpCfgModel):
     modules: PowerModuleCfg
-    dev: Mapping[str, DeviceInfo] = ...
+    # Field(...) makes dev required in this subclass, overriding the Optional
+    # default from ExpCfgModel — intentional Pydantic pattern (type: ignore[override]).
+    dev: Mapping[str, DeviceInfo] = Field(...)  # type: ignore[override]
     sweep: PowerSweepCfg
 
 

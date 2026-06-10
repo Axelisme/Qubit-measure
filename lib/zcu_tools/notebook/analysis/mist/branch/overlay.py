@@ -27,7 +27,7 @@ def calc_overlay(
     overlays = np.zeros((len(photons), 2), dtype=np.float64)
     for i, n in enumerate(photons):
         # calculate time average of states
-        states_n = f_analysis.make_floquet_basis(photon=n).state(t=0)
+        states_n = f_analysis.make_floquet_basis(photon=n).state(t=0)  # type: ignore[call-overload]
 
         # calculate critical photon number for ground and excited state
         overlays[i, 0] = calc_max_overlay(states_n, qt.basis(qub_dim, 0))

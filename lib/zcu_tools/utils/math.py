@@ -14,7 +14,9 @@ def van_der_corput(n: int, base: int = 2) -> NDArray[np.float64]:
     denom = 1.0
 
     while np.any(k > 0):
-        k, remainder = divmod(k, base)
+        # np.divmod instead of builtin divmod: numpy-2 stubs do not expose the
+        # ndarray overload of builtins.divmod.
+        k, remainder = np.divmod(k, base)
         denom *= base
         vdc += remainder / denom
 

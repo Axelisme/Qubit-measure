@@ -13,7 +13,7 @@ def test_child_extends_path_and_deepcopies_cfg():
     s: TaskState[dict[str, Result], dict[str, Result], DictCfg] = TaskState(
         root_data=root, cfg=cfg
     )
-    c = s.child("x", child_type=Result)
+    c = s.child("x")
     assert c.path == ("x",)
     # Mutating child cfg does not affect parent (deepcopy check via model identity)
     assert c.cfg is not cfg
@@ -25,7 +25,7 @@ def test_set_value_ndarray_copies_in_place():
     s: TaskState[dict[str, Result], dict[str, Result], DictCfg] = TaskState(
         root_data=root, cfg=DictCfg()
     )
-    c = s.child("x", child_type=Result)
+    c = s.child("x")
     c.set_value(np.array([1.0, 2.0, 3.0]))
     assert np.array_equal(arr, [1.0, 2.0, 3.0])
 
@@ -36,7 +36,7 @@ def test_set_value_dict_updates_in_place():
     s: TaskState[dict[str, Result], dict[str, Result], DictCfg] = TaskState(
         root_data=root, cfg=DictCfg()
     )
-    c = s.child("d", child_type=Result)
+    c = s.child("d")
     c.set_value({"b": np.zeros(2)})
     assert "a" in d and "b" in d
 
@@ -47,7 +47,7 @@ def test_set_value_list_replaces_contents():
     s: TaskState[dict[str, Result], dict[str, Result], DictCfg] = TaskState(
         root_data=root, cfg=DictCfg()
     )
-    c = s.child("l", child_type=Result)
+    c = s.child("l")
     c.set_value([np.array(9), np.array(8)])
     assert len(lst) == 2
 
@@ -57,7 +57,7 @@ def test_set_value_type_mismatch_rejected():
     s: TaskState[dict[str, Result], dict[str, Result], DictCfg] = TaskState(
         root_data=d, cfg=DictCfg()
     )
-    c = s.child("d", child_type=Result)
+    c = s.child("d")
     with pytest.raises(ValueError):
         c.set_value([1, 2])  # type: ignore[arg-type]
 
@@ -68,7 +68,7 @@ def test_trigger_update_calls_hook():
     s: TaskState[dict[str, Result], dict[str, Result], DictCfg] = TaskState(
         root_data=root, cfg=DictCfg(), on_update=lambda snap: calls.append(snap.path)
     )
-    s.child("x", child_type=Result).set_value(np.array([1.0, 2.0]))
+    s.child("x").set_value(np.array([1.0, 2.0]))
     assert calls == [("x",)]
 
 
@@ -112,7 +112,7 @@ def test_stop_flag_shared_across_child():
     s: TaskState[dict[str, Result], dict[str, Result], DictCfg] = TaskState(
         root_data=root, cfg=DictCfg(), _stop_flag=flag
     )
-    c = s.child("x", child_type=Result)
+    c = s.child("x")
     flag.set()
     assert c.is_stop() is True
 
@@ -124,7 +124,7 @@ def test_child_with_cfg_replaces_cfg_and_shares_stop_flag():
         root_data=root, cfg=DictCfg(), _stop_flag=flag
     )
     new_cfg = DictCfg.model_validate({"k": 99})
-    c = s.child_with_cfg("x", new_cfg, child_type=Result)
+    c = s.child_with_cfg("x", new_cfg)
     assert c.cfg is not new_cfg  # deepcopy
     flag.set()
     assert c.is_stop() is True
@@ -136,7 +136,7 @@ def test_value_property_returns_current_node_data():
     s: TaskState[dict[str, Result], dict[str, Result], DictCfg] = TaskState(
         root_data=root, cfg=DictCfg()
     )
-    c = s.child("x", child_type=Result)
+    c = s.child("x")
     assert np.array_equal(c.value, arr)  # type: ignore[arg-type]
 
 

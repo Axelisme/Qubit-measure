@@ -136,7 +136,18 @@ def fit_singleshot(
         p_avg = min(e_tran_pop / (g_tran_pop + e_tran_pop), 0.5)
         length_ratio = 0.01
 
-        assign_init_p(fitparams, [sg, se, s, p0_g, p0_e, p_avg, length_ratio])
+        assign_init_p(
+            fitparams,
+            [
+                float(sg),
+                float(se),
+                float(s),
+                float(p0_g),
+                float(p0_e),
+                float(p_avg),
+                length_ratio,
+            ],
+        )
     fitparams = cast(list[float], fitparams)
 
     sg, se, s, p0_g, p0_e, p_avg, length_ratio = fitparams

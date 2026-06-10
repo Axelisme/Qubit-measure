@@ -381,8 +381,8 @@ def fit_with_vadality(
 
     fig, ax5 = plt.subplots(figsize=(8, 8))
 
-    max_pcov = np.max(pCov)
-    min_pcov = np.min(pCov)
+    max_pcov = float(np.max(pCov))
+    min_pcov = float(np.min(pCov))
     im = ax5.imshow(pCov, cmap="Blues", vmin=min_pcov, vmax=max_pcov)
     fig.colorbar(im, ax=ax5)
 

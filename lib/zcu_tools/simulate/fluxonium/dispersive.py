@@ -76,8 +76,8 @@ def calculate_dispersive(
     max_idx = max(idx_00, idx_10, idx_01, idx_11)
 
     evals = hilbertspace.eigenvals(evals_count=max_idx + 1)
-    rf_0 = evals[idx_10] - evals[idx_00]
-    rf_1 = evals[idx_11] - evals[idx_01]
+    rf_0 = float(evals[idx_10] - evals[idx_00])
+    rf_1 = float(evals[idx_11] - evals[idx_01])
 
     return rf_0, rf_1
 

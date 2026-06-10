@@ -92,7 +92,7 @@ def analyze_xy_sweep(
         dist.T,
         aspect="auto",
         interpolation="none",
-        extent=[xs[0], xs[-1], ys[0], ys[-1]],
+        extent=(float(xs[0]), float(xs[-1]), float(ys[0]), float(ys[-1])),
         origin="lower",
     )
     ax.plot(peak_points[:, 0], peak_points[:, 1], "r", marker="o")

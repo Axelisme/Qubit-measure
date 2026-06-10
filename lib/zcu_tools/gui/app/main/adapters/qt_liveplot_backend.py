@@ -34,7 +34,13 @@ class QtLivePlotBackend(LivePlotBackend):
         del plot_instant  # figure is attached at creation; nothing to show
         kwargs.setdefault("squeeze", False)
         kwargs.setdefault("figsize", (6 * n_col, 4 * n_row))
-        return plt.subplots(n_row, n_col, **kwargs)
+        import numpy as np
+
+        fig, axs_nd = plt.subplots(n_row, n_col, **kwargs)
+        # plt.subplots(squeeze=False) returns ndarray; convert to list[list[Axes]]
+        # to satisfy the LivePlotBackend contract.
+        axs: list[list[Axes]] = np.asarray(axs_nd).tolist()
+        return fig, axs
 
     def instant_plot(self, fig: Figure) -> None:
         del fig  # already attached to the FigureContainer at creation time

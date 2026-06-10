@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import Field
 from typing_extensions import Callable, Mapping, Optional, cast
 
 from zcu_tools.cfg_model import ConfigBase
@@ -58,7 +59,9 @@ class FluxDepSweepCfg(ConfigBase):
 
 class FluxDepCfg(ProgramV2Cfg, ExpCfgModel):
     modules: FluxDepModuleCfg
-    dev: Mapping[str, DeviceInfo] = ...
+    # Field(...) makes dev required in this subclass, overriding the Optional
+    # default from ExpCfgModel — intentional Pydantic pattern (type: ignore[override]).
+    dev: Mapping[str, DeviceInfo] = Field(...)  # type: ignore[override]
     sweep: FluxDepSweepCfg
 
 

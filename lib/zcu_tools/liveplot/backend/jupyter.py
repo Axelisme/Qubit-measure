@@ -88,9 +88,14 @@ class JupyterBackend(LivePlotBackend):
     def make_plot_frame(
         self, n_row: int, n_col: int, plot_instant: bool = False, **kwargs: Any
     ) -> tuple[Figure, list[list[Axes]]]:
+        import numpy as np
+
         kwargs.setdefault("squeeze", False)
         kwargs.setdefault("figsize", (6 * n_col, 4 * n_row))
-        fig, axs = plt.subplots(n_row, n_col, **kwargs)
+        fig, axs_nd = plt.subplots(n_row, n_col, **kwargs)
+        # plt.subplots(squeeze=False) returns ndarray; convert to list[list[Axes]]
+        # to satisfy the LivePlotBackend contract.
+        axs: list[list[Axes]] = np.asarray(axs_nd).tolist()
         if plot_instant:
             instant_plot(fig)
         return fig, axs

@@ -3,7 +3,7 @@ name = "zcu-tools"
 version = "0.1.0"
 description = "Tools for Qubit Measurement on ZCU216"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.13"
 dependencies = [
   "numpy",
   "tqdm",
@@ -15,7 +15,6 @@ dependencies = [
 
 [project.optional-dependencies]
 development = ["pytest", "pytest-cov", "pytest-xdist"]
-server = ["numpy==1.23.5"]
 client = [
   "h5py",
   "ipykernel",
@@ -35,14 +34,10 @@ client = [
   "flask",
   "scikit-optimize",
   "qick @ git+https://github.com/openquantumhardware/qick.git",
-  "labber @ git+https://github.com/Axelisme/labber_api.git",
-  "numpy==1.23.5",
-  "matplotlib==3.9",
   "pyyaml",
   "pyvisa",
   "pyro4",
 ]
-design = ["qiskit_metal"]
 gdrive = [
   "google-api-python-client",
   "google-auth-httplib2",
@@ -50,7 +45,7 @@ gdrive = [
   "python-dotenv",
 ]
 gui = ["zcu-tools[client]", "qtpy", "PyQt6"]
-all = ["zcu_tools[development,client,design,gdrive,gui]"]
+all = ["zcu_tools[development,client,gdrive,gui]"]
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
@@ -88,5 +83,3 @@ environments = [
   # "sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
 
-[tool.uv.extra-build-dependencies]
-pyaedt = ["pip"]

@@ -92,7 +92,7 @@ class OvernightBatchTask(BatchTask[str, Result, list[dict[str, Result]], Overnig
 
             run_with_retries(
                 task,
-                state.child(name, child_type=Result),
+                state.child(name),
                 self.retry_time,
                 dynamic_pbar=True,
                 # raise_error=False,

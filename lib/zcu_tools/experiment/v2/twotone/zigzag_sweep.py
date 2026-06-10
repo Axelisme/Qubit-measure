@@ -128,7 +128,11 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
             x_param = sweep2param(x_info["param_key"], x_sweep)
             repeat_pulse.set_param(x_info["param_key"], x_param)
 
-            loop_n = 2 * times if repeat_on == "X90_pulse" else times
+            # Convert to plain int list: LoadValue.values expects Sequence[int],
+            # and numpy 2.x scalar types (int_) are not considered int by pyright.
+            loop_n: list[int] = [
+                int(x) for x in (2 * times if repeat_on == "X90_pulse" else times)
+            ]
 
             return ModularProgramV2(
                 soccfg,
@@ -136,7 +140,7 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
                 modules=[
                     LoadValue(
                         "load_repeat_count",
-                        values=list(loop_n),
+                        values=loop_n,
                         idx_reg="times",
                         val_reg="repeat_count",
                     ),
@@ -145,7 +149,8 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
                     Repeat(
                         "zigzag_loop",
                         n="repeat_count",
-                        range_hint=(min(times), max(times)),
+                        # int() cast: numpy scalar types are not plain int to pyright.
+                        range_hint=(int(min(times)), int(max(times))),
                     ).add_content(Pulse(f"loop_{repeat_on}", repeat_pulse)),
                     Readout("readout", modules.readout),
                 ],

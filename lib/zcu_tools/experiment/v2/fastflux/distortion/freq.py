@@ -218,7 +218,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         ax.plot(s_lengths, s_freqs, ".", c="k")
         ax.plot(ideal_lengths, ideal_curve, "g-", label="Ideal")
 
-        plot_kwargs = dict(color="gray", alpha=0.3)
+        plot_kwargs: dict[str, Any] = dict(color="gray", alpha=0.3)
         ax.axvspan(start_t - qub_len / 2, start_t + qub_len / 2, **plot_kwargs)
         ax.axvspan(end_t - qub_len / 2, end_t + qub_len / 2, **plot_kwargs)
 

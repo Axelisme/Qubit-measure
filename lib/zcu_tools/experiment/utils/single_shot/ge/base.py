@@ -127,7 +127,7 @@ def calc_fidelity(
     tn, fn = ng[:tind].sum(), ne[:tind].sum()
     fid = fidelity_func(tp, tn, fp, fn)
 
-    return fid, 0.5 * (bins[tind] + bins[tind + 1])
+    return fid, float(0.5 * (bins[tind] + bins[tind + 1]))
 
 
 def calc_ideal_fidelity(sg: float, se: float, s: float) -> float:

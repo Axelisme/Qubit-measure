@@ -323,9 +323,19 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXYCfg]):
             color="red",
             label="Predicted Signals",
         )
-        ax.axhline(y=center, color="green", linestyle="--", alpha=0.2)
-        ax.axhline(y=center + 0.5 * contrast, color="blue", linestyle="--", alpha=0.2)
-        ax.axhline(y=center - 0.5 * contrast, color="blue", linestyle="--", alpha=0.2)
+        ax.axhline(y=float(center), color="green", linestyle="--", alpha=0.2)
+        ax.axhline(
+            y=float(center) + 0.5 * float(contrast),
+            color="blue",
+            linestyle="--",
+            alpha=0.2,
+        )
+        ax.axhline(
+            y=float(center) - 0.5 * float(contrast),
+            color="blue",
+            linestyle="--",
+            alpha=0.2,
+        )
 
         ax.set_xlabel("Gate")
         ax.set_xticks(np.arange(len(sequence)))

@@ -1315,8 +1315,12 @@ def _read_trace_log(f, log, z_name):
         outer_dims = [len(a[2]) for a in outer_axes][::-1]  # outermost-first
         if outer_dims:
             z = z_arr.reshape(tuple(outer_dims) + (n_inner,))
+        elif z_arr.shape[0] == 1:
+            # single entry, no outer axis -> canonical 1-D (n,)
+            z = z_arr.reshape(n_inner)
         else:
-            z = z_arr.reshape(n_inner)  # 1-D single trace
+            # multiple equal-length entries, no outer axis -> stacked (Nentries, n)
+            z = z_arr  # already (Nentries, n), no reshape needed
 
     ts_rel = _read_timestamps(g)
     return z, axes, ts_rel

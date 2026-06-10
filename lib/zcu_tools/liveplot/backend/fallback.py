@@ -24,7 +24,12 @@ class FallbackBackend(LivePlotBackend):
     ) -> tuple[Figure, list[list[Axes]]]:
         kwargs.setdefault("squeeze", False)
         kwargs.setdefault("figsize", (6 * n_col, 4 * n_row))
-        fig, axs = plt.subplots(n_row, n_col, **kwargs)
+        fig, axs_nd = plt.subplots(n_row, n_col, **kwargs)
+        # plt.subplots(squeeze=False) returns ndarray; convert to list[list[Axes]]
+        # to satisfy the LivePlotBackend contract.
+        import numpy as np
+
+        axs: list[list[Axes]] = np.asarray(axs_nd).tolist()
         if plot_instant:
             fig.show(warn=False)
         return fig, axs

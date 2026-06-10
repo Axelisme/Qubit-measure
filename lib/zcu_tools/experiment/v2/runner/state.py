@@ -78,11 +78,18 @@ class TaskState(Generic[T_Result, T_RootResult, T_Cfg]):
         child_type: type[T_ChildResult],
     ) -> "TaskState[T_ChildResult, T_RootResult, T_Cfg]": ...
 
+    @overload
+    def child(
+        self: "TaskState[T_MappingResult, T_RootResult, T_Cfg]",
+        addr: Hashable,
+        child_type: None = None,
+    ) -> "TaskState[Any, T_RootResult, T_Cfg]": ...
+
     def child(
         self,
         addr: Union[int, Hashable],
         child_type: Optional[type[T_ChildResult]] = None,
-    ) -> TaskState[T_ChildResult, T_RootResult, T_Cfg]:
+    ) -> "TaskState[Any, T_RootResult, T_Cfg]":
         return TaskState(
             root_data=self.root_data,
             cfg=deepcopy(self.cfg),
@@ -108,12 +115,20 @@ class TaskState(Generic[T_Result, T_RootResult, T_Cfg]):
         child_type: type[T_ChildResult],
     ) -> "TaskState[T_ChildResult, T_RootResult, T_ChildCfg]": ...
 
+    @overload
+    def child_with_cfg(
+        self: "TaskState[T_MappingResult, T_RootResult, T_Cfg]",
+        addr: Hashable,
+        new_cfg: T_ChildCfg,
+        child_type: None = None,
+    ) -> "TaskState[Any, T_RootResult, T_ChildCfg]": ...
+
     def child_with_cfg(
         self,
         addr: Union[int, Hashable],
         new_cfg: T_ChildCfg,
         child_type: Optional[type[T_ChildResult]] = None,
-    ) -> TaskState[T_ChildResult, T_RootResult, T_ChildCfg]:
+    ) -> "TaskState[Any, T_RootResult, T_ChildCfg]":
         return TaskState(
             root_data=self.root_data,
             cfg=deepcopy(new_cfg),

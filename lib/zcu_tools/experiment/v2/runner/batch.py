@@ -56,7 +56,7 @@ class BatchTask(AbsTask[dict[T_Key, T_ChildResult], T_RootResult, T_Cfg]):
             task.run(
                 cast(
                     "TaskState[T_ChildResult, T_RootResult, T_Cfg]",
-                    state.child(name, child_type=Result),
+                    state.child(name),
                 )
             )
 

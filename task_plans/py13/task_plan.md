@@ -1,6 +1,8 @@
 # 任務計畫：Python 3.9 → 3.13 升級
 
-**最後更新：** 2026-06-11（計劃建立，現狀偵查完成，待用戶定奪 D1–D4 後進入實作）
+**最後更新：** 2026-06-11（Phase 1–4 全部完成：repo 已在 Python 3.13.11 上 pytest 2594 全綠 / pyright 0 / 三 GUI smoke 過；剩 Phase 5 typing 現代化排後期，merge main 由用戶定）
+
+**Branch 策略（用戶定）**：全部工作在 `py13` branch 上進行，端到端測試通過後才 merge 進 `main`。可修改 repo 中所有 tracked 檔案（不限 gui scope）。
 
 ## 目標
 
@@ -8,7 +10,7 @@
 
 **升級成立的前提（用戶已給）**：原先鎖 3.9 的唯一原因是存讀檔依賴外部套件 Labber（最高支援 3.9）；現已有等效自寫工具 `lib/zcu_tools/utils/labber_io.py`（只依賴 h5py+numpy，支援 3.9–3.14+，與 Labber 1.8.6 byte-compatible），因此可移除 Labber 依賴並升級整個 repo。
 
-**範圍界定**：升級對象是 **client 端（工作站）**。ZCU216 板上 server 跑 PYNQ 自帶的 Python 環境，不受本 repo `.python-version` 控制，`server` extra（`numpy==1.23.5`）保留給板端、不在升級範圍。
+**範圍界定**：升級對象是 **client 端（工作站）**。ZCU216 板端實際跑 Python 3.8（PYNQ），只用 `script/start_server.py` + bitfiles，且以 `sys.path` 注入 `zcu_tools`（不經 pip 安裝）——因此 `server` extra 是死宣告，**直接移除**（用戶定）。
 
 ## 現狀總結（偵查結論，細節見 findings.md）
 
@@ -24,12 +26,14 @@
 - Fast Fail、責任明確、最小驚訝、強型別、無 legacy/相容性邏輯。
 - 不臆測架構；決策點交用戶定奪。
 
-## 待用戶定奪（D1–D4）
+## 決策定錨（2026-06-11，用戶定）
 
-- **D1 `design` extra 處置**：qiskit_metal（依賴 PySide2，cp310 為止）在 3.11+ 完全裝不起來且 upstream 停更。選項：(a) 從 pyproject 移除（含 `all` extra 的引用）；(b) 保留宣告但文件註明只能在舊環境裝。傾向 (a)（無 legacy 原則）。
-- **D2 `requires-python` 目標**：`.python-version` 改 `3.13` 沒有爭議；但 `requires-python` 要改 `>=3.13`（單一支援版本，最乾淨）還是放寬如 `>=3.10`（lock 檔需多版本 resolve）？傾向 `>=3.13`。
-- **D3 Pyro4 處置**：預設本次只「驗證 Pyro4 在 3.13 可用」（主路徑 Daemon/Proxy/naming 不碰 cgi）；遷移 Pyro5 是獨立工作不在本計劃。若驗證失敗再回報升級方案。
-- **D4 舊式 typing 現代化**：~149 個 import 行用 `List/Dict/Optional/Union`（3.13 下合法、僅 deprecated）。選項：(a) 本次不動（最小變更）；(b) 升級完成後加一個 Phase 用 ruff `UP006/UP007` 自動修。傾向 (a) 先完成升級，(b) 另開收尾 Phase 由用戶決定。
+- **D1 ✅**：`design` extra（qiskit_metal/PySide2）從 pyproject 移除（含 `all` extra 引用）。
+- **D2 ✅**：`requires-python = ">=3.13"`、`.python-version = 3.13`。
+- **D3 ✅**：本次只驗證 Pyro4 在 3.13 可用；Pyro5 遷移另案。
+- **D4 ✅**：typing 現代化排在後期 Phase 5（升級完成後做）。
+- **D5 numpy/matplotlib ✅**：不設 pin，統一升到最新（原 `numpy==1.23.5`/`matplotlib==3.9` pin 也是 Labber 時代限制）。
+- **D6 `server` extra ✅**：整個移除——板端 Python 3.8 只用 `script/start_server.py` + bitfiles，以 `sys.path` 注入 `zcu_tools`，不經 pip，extra 根本用不到。`script/start_server.py` 本身保留（板端仍需要），其程式碼需維持 3.8 相容。
 
 ## 階段規劃
 
@@ -45,8 +49,8 @@
 
 ### Phase 2：依賴 pin 解鎖（仍在 3.9 上做）⬜
 
-1. client extra：`numpy==1.23.5` → `numpy>=1.26`（或視 qick 相容性定上界）；`matplotlib==3.9` → 有 cp313 wheel 的版本（3.10+）。`server` extra 的 numpy pin 不動。
-2. 依 D1 處置 `design` extra。
+1. client extra：移除 `numpy==1.23.5` 與 `matplotlib==3.9` pin（改無 pin，resolver 取最新）；整個移除 `server` extra（D6）。
+2. 移除 `design` extra（D1）。
 3. 委派驗證：qick git 版對新 numpy 的相容性（讀其 setup 宣告與已知 issue）；matplotlib 3.10 對 gui/liveplot 的 API 影響面。
 4. `uv lock` + 在 3.9 下 `uv sync` + pytest 全綠（確認 pin 解鎖本身不破壞 3.9 行為，分離變因）。
 

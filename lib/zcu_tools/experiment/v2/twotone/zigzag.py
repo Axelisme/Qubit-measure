@@ -67,7 +67,11 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
         setup_devices(cfg, progress=True)
 
         times = np.arange(0, cfg.n_times + 1)
-        loop_n = list(2 * times if repeat_on == "X90_pulse" else times)
+        # Convert to plain int list: LoadValue.values expects Sequence[int], and
+        # numpy 2.x scalar types (int_) are not considered int by pyright.
+        loop_n: list[int] = [
+            int(x) for x in (2 * times if repeat_on == "X90_pulse" else times)
+        ]
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, ZigZagCfg],
@@ -96,7 +100,8 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
                     Repeat(
                         "zigzag_loop",
                         n="repeat_count",
-                        range_hint=(min(times), max(times)),
+                        # int() cast: numpy scalar types are not plain int to pyright.
+                        range_hint=(int(min(times)), int(max(times))),
                     ).add_content(Pulse(f"loop_{repeat_on}", repeat_pulse)),
                     Readout("readout", modules.readout),
                 ],

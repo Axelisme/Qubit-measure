@@ -23,7 +23,6 @@ from zcu_tools.gui.session.services.device import (
 )
 from zcu_tools.gui.session.services.progress import ProgressService
 
-
 # See tests/gui/services/test_device.py for why test-created BackgroundServices must
 # be quiesced before GC: a queued main-thread delivery to a GC'd runner segfaults.
 _LIVE_BG: list[BackgroundService] = []

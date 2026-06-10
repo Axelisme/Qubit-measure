@@ -187,7 +187,7 @@ def load_comment(filepath: str) -> Optional[str]:
     Backed by ``labber_io.load_labber_data`` (the comment is also available as
     the ``.comment`` attribute of a loaded ``LabberData``).
     """
-    from labber_io import load_labber_data
+    from .labber_io import load_labber_data
 
     try:
         return load_labber_data(format_ext(filepath)).comment

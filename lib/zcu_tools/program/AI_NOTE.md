@@ -64,11 +64,11 @@
 
 ### QICK upstream（.venv 來源）
 
-- `/.venv/lib/python3.9/site-packages/qick/qick_asm.py`
+- `/.venv/lib/python3.13/site-packages/qick/qick_asm.py`
   - `class AcquireMixin`
   - `acquire()`, `acquire_decimated()`, `prepare_round()`, `finish_round()`, `finish_acquire()`
   - `_average_buf()`, `_apply_threshold()`, `get_raw()`, `get_time_axis()`
-- `/.venv/lib/python3.9/site-packages/qick/__init__.py`
+- `/.venv/lib/python3.13/site-packages/qick/__init__.py`
   - `QickConfig`, `AveragerProgram`/`RAveragerProgram`/`NDAveragerProgram` 匯出入口
 
 ## 維護建議（給未來自己）

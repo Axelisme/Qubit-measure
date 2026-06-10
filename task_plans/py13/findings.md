@@ -55,7 +55,30 @@
 - `from __future__ import annotations`：686 處，3.13 下行為不變，非 blocker（技術債記錄）。
 - 舊式 `typing.List/Dict/Optional/Union` import：~149 行；runtime `typing.Union` + `get_origin` 判斷在 `gui/app/main/services/remote/dispatch.py:826`、`gui/app/main/adapter/analyze_params.py:46`（D4 若做現代化需人工複核這兩處）。
 
+## Phase 1 發現
+
+- **labber_io 既有 bug**（測試定錨時發現）：`_read_trace_log` 對「無外軸、等長、Nentries>1」的 trace 檔 reshape 邏輯有誤會 raise ValueError；已以 `xfail(strict=True)` 鎖在 `tests/utils/test_labber_io.py`，待後續修復（屬 labber_io 本身，與升級無關，可在 Phase 4 順手修或另案）。
+- 移除 labber 宣告連帶清掉 attrdict/future/msgpack/PyQt5(5.15) 等 transitive deps。
+
+## Phase 2 發現
+
+- numpy 1.23→2.0.2 在 **runtime 層零破壞**（repo 沒用任何被移除的 np 別名，全套件測試直接綠），破壞全在 **typing 層**：numpy 2 stubs 變嚴格掀出 83 個 pyright 錯（`get_xdata()` 回傳 ArrayLike 不可 index、`np.floating` 不再可直接餵 mpl 的 float 參數、builtin `divmod` 無 ndarray overload 等）。已全修。
+- pandas 需配套升（2.1.0 wheel 是 numpy 1.x ABI 編譯，import 即炸）→ 2.3.3。
+- **agent 驗證方法教訓**：用 git stash 驗「錯誤是否既有」對依賴升級無效（stash 不還原 venv 套件）；正確做法是直接比對升級前基準數字（Phase 1 收尾 pyright=0）。
+
+## Phase 3/4 發現
+
+- **PyQt6 6.11「回歸」是誤判**（investigator 用 6.10.2 對照實驗排除）：兩個 GUI 測試的 Aborted 真因是 **PyQt 對「C++ 呼入的 slot/virtual 內未捕捉 Python 例外」一律 qFatal()/abort**（v5.5 起一貫行為），而例外來自兩個早於升級的測試 fixture 契約瑕疵：
+  - `test_device_dialog.py`：`info_mock=MagicMock()` 冒充 `FakeDeviceInfo` → `device_dialog.py:95` isinstance assert 在 slot 內炸。
+  - `test_main_window_ui.py`：mock 了已不存在的 `ctrl.get_persisted_left_panel_width`（真實 API 自 c766ae0e 起是 `get_persisted_startup().left_panel_width`）→ `min(MagicMock,int)` TypeError 在 showEvent 內炸。
+  - 處置：**不 pin PyQt6**，修測試 fixture。診斷技巧：abort 的真 traceback 要 faulthandler standalone 重現才看得到（pytest 輸出被截）。
+- `tests/gui/services/test_background.py` teardown 崩潰：測試建 `BackgroundService` 未按 conftest 約定 quiesce，3.13 GC 更積極時 queued signal use-after-free。
+- 3.13 切換掀出 pyright 36 errors（runner 的 `A | B` alias 當 type[T] 傳、EllipsisType sentinel、numpy 2.4 收窄、qutip overload）；agent 兩度聲稱「既有」皆不實（基準明確為 0）。
+- qick parser.py 在 3.13 下大量 SyntaxWarning（上游 regex 未加 r""），無功能影響。
+
 ## 決策記錄
 
-- （2026-06-11）計劃建立；D1–D4 開放待用戶定奪，見 task_plan.md。
+- （2026-06-11）計劃建立。
+- （2026-06-11）用戶定錨 D1–D6（見 task_plan.md）：design extra 移除、`>=3.13`、Pyro4 只驗證、typing 留 Phase 5、numpy/matplotlib 無 pin 升最新、**server extra 整個移除**（板端 Python 3.8 用 sys.path 注入 zcu_tools + script/start_server.py + bitfiles，不經 pip；start_server.py 程式碼需維持 3.8 相容）。
+- （2026-06-11）Branch 策略：全在 `py13` branch 做，端到端測過再 merge main；可動所有 tracked 檔案。
 - 階段順序刻意「先測試定錨、再解 pin（仍在 3.9）、最後切直譯器」——分離變因：任何 pytest 紅燈都能歸因到單一變更（pin 解鎖 vs 直譯器切換）。

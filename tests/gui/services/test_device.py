@@ -25,7 +25,6 @@ from zcu_tools.gui.session.services.device import (
 )
 from zcu_tools.gui.session.services.progress import ProgressService
 
-
 # Every BackgroundService created in a test is registered here so the autouse
 # teardown can quiesce it: a DeviceService runs its commands on a dedicated worker
 # thread whose done/failed outcome is delivered via a queued main-thread signal.

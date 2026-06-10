@@ -155,7 +155,12 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
 
         ax.imshow(
             real_signals.T,
-            extent=[gains[0], gains[-1], freqs[0], freqs[-1]],
+            extent=(
+                float(gains[0]),
+                float(gains[-1]),
+                float(freqs[0]),
+                float(freqs[-1]),
+            ),
             aspect="auto",
             origin="lower",
             interpolation="none",

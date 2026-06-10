@@ -13,6 +13,7 @@ from matplotlib.animation import FFMpegWriter
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from pydantic import Field
 from typing_extensions import Any, Callable, Generic, Mapping, Optional, Self, TypeVar
 
 from zcu_tools.device import DeviceInfo
@@ -39,7 +40,9 @@ T_RootResult = TypeVar("T_RootResult", bound=Result)
 
 
 class FluxDepCfg(ExpCfgModel):
-    dev: dict[str, DeviceInfo] = ...
+    # Field(...) makes dev required in this subclass, overriding the Optional
+    # default from ExpCfgModel — intentional Pydantic pattern (type: ignore[override]).
+    dev: dict[str, DeviceInfo] = Field(...)  # type: ignore[override]
 
 
 class MeasurementTask(
@@ -107,7 +110,7 @@ class FluxDepBatchTask(BatchTask[str, Result, T_RootResult, FluxDepCfg]):
 
             run_with_retries(
                 task,
-                state.child(name, child_type=Result),
+                state.child(name),
                 self.retry_time,
                 dynamic_pbar=True,
                 # raise_error=False,

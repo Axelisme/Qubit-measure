@@ -10,11 +10,33 @@ from __future__ import annotations
 
 import time
 
+import pytest
 from zcu_tools.gui.app.main.services.background import (
     BackgroundService,
     OffMainScopes,
 )
 from zcu_tools.gui.plotting.routing import get_current_container
+
+# Every BackgroundService created by a test is registered here so that the
+# autouse quiesce fixture can drain it before its QObjects are GC'd.  A queued
+# cross-thread delivery dispatched onto a freed C++ object segfaults (same
+# pattern as tests/gui/services/test_device.py).
+_LIVE_BG: list[BackgroundService] = []
+
+
+def _bg() -> BackgroundService:
+    bg = BackgroundService()
+    _LIVE_BG.append(bg)
+    return bg
+
+
+@pytest.fixture(autouse=True)
+def _quiesce_bg():
+    """Join all worker threads and flush their queued deliveries before GC."""
+    yield
+    for bg in _LIVE_BG:
+        bg.quiesce()
+    _LIVE_BG.clear()
 
 
 def _pump_until(qapp, predicate, timeout: float = 2.0) -> None:
@@ -28,7 +50,7 @@ def _pump_until(qapp, predicate, timeout: float = 2.0) -> None:
 
 
 def test_dedicated_runs_work_and_delivers_done(qapp):
-    bg = BackgroundService()
+    bg = _bg()
     got: list[object] = []
     bg.submit(
         lambda: 7,
@@ -41,7 +63,7 @@ def test_dedicated_runs_work_and_delivers_done(qapp):
 
 
 def test_pool_runs_work_and_delivers_done(qapp):
-    bg = BackgroundService()
+    bg = _bg()
     got: list[object] = []
     bg.submit(
         lambda: 9,
@@ -56,7 +78,7 @@ def test_pool_runs_work_and_delivers_done(qapp):
 def test_none_result_is_delivered_not_swallowed(qapp):
     # save's work returns None; on_done must still fire (NO_RESULT sentinel only
     # guards "never produced a value", which a normal None return is not).
-    bg = BackgroundService()
+    bg = _bg()
     got: list[object] = []
     bg.submit(
         lambda: None,
@@ -69,7 +91,7 @@ def test_none_result_is_delivered_not_swallowed(qapp):
 
 
 def test_dedicated_delivers_error(qapp):
-    bg = BackgroundService()
+    bg = _bg()
     boom = RuntimeError("boom")
     errs: list[Exception] = []
 
@@ -82,7 +104,7 @@ def test_dedicated_delivers_error(qapp):
 
 
 def test_pool_delivers_error(qapp):
-    bg = BackgroundService()
+    bg = _bg()
     boom = ValueError("pool boom")
     errs: list[Exception] = []
 
@@ -98,7 +120,7 @@ def test_figure_container_scope_active_during_work(qapp):
     # The figure_container scope sets the routing ContextVar on the worker thread
     # for the duration of work (routing + liveplot are one facet, driven by this
     # single field). A plain object suffices — routing just stores it.
-    bg = BackgroundService()
+    bg = _bg()
     container = object()
     seen: list[object] = []
 
@@ -119,7 +141,7 @@ def test_figure_container_scope_active_during_work(qapp):
 
 def test_no_scopes_leaves_routing_unset(qapp):
     # Opt-out: with no figure_container, work runs with no routing container.
-    bg = BackgroundService()
+    bg = _bg()
     seen: list[object] = []
 
     def work() -> object:

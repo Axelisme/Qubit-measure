@@ -130,20 +130,23 @@ class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
         max_idx = np.argmax(y)
         candidate_mask = y[:max_idx] < ratio * y[max_idx]
         if not np.any(candidate_mask):
-            offset = Ts[0]
+            offset = float(Ts[0])
         else:
-            offset = Ts[np.nonzero(candidate_mask)[0][-1]]
+            offset = float(Ts[np.nonzero(candidate_mask)[0][-1]])
 
         fig, ax = plt.subplots(figsize=config.figsize)
 
-        ax.plot(Ts, signals.real, label="I value")
-        ax.plot(Ts, signals.imag, label="Q value")
+        # np.real/np.imag are used instead of .real/.imag because numpy 2.4
+        # stubs narrow the overloaded descriptor in a way that confuses pyright
+        # when the array dtype was widened by gaussian_filter1d.
+        ax.plot(Ts, np.real(signals), label="I value")
+        ax.plot(Ts, np.imag(signals), label="Q value")
         ax.plot(Ts, y, label="mag")
         if plot_fit:
             ax.axvline(offset, color="r", linestyle="--", label="predict_offset")
         if ro_cfg is not None:
-            trig_offset = ro_cfg.trig_offset
-            ro_length = ro_cfg.ro_length
+            trig_offset = float(ro_cfg.trig_offset)
+            ro_length = float(ro_cfg.ro_length)
             ax.axvline(trig_offset, color="g", linestyle="--", label="ro start")
             ax.axvline(
                 trig_offset + ro_length, color="g", linestyle="--", label="ro end"

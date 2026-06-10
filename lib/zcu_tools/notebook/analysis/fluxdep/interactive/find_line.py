@@ -14,6 +14,16 @@ from typing_extensions import Optional
 from ..processing import cast2real_and_norm, diff_mirror
 
 
+def _line_xdata0(line) -> float:
+    """Extract the first x-coordinate from a Line2D.
+
+    Line2D.get_xdata() returns ArrayLike in numpy-2 stubs, which does not
+    expose __getitem__.  Wrapping with np.asarray(...)[0] gives a concrete
+    ndarray that is safely indexable and then convertible to plain float.
+    """
+    return float(np.asarray(line.get_xdata())[0])
+
+
 class InteractiveLines:
     TRACK_INFO = {
         "half flux": "<span style='color:red'>正在移動half flux(紅線)</span>",
@@ -404,8 +414,8 @@ class InteractiveLines:
         if self.is_finished or event.inaxes != self.ax_main:
             return
 
-        flux_half_dist = abs(event.xdata - self.half_line.get_xdata()[0])
-        flux_int_dist = abs(event.xdata - self.int_line.get_xdata()[0])
+        flux_half_dist = abs(event.xdata - _line_xdata0(self.half_line))
+        flux_int_dist = abs(event.xdata - _line_xdata0(self.int_line))
 
         # 如果已經有活動的線條, 點擊任何位置都停止追蹤
         if self.active_line is not None:
@@ -441,7 +451,7 @@ class InteractiveLines:
             return []
 
         other_line = self.int_line if self.picked is self.half_line else self.half_line
-        other_x = other_line.get_xdata()[0]
+        other_x = _line_xdata0(other_line)
 
         # 確保線之間保持最小距離
         if x > other_x and x - other_x < self.min_flux_dist:
@@ -452,17 +462,17 @@ class InteractiveLines:
         # 更新線的位置
         if self.conjugate_checkbox.value:
             # 同步移動
-            dx = x - self.picked.get_xdata()[0]
+            dx = x - _line_xdata0(self.picked)
             # 更新兩條線的位置
-            self.half_line.set_xdata([self.half_line.get_xdata()[0] + dx])
-            self.int_line.set_xdata([self.int_line.get_xdata()[0] + dx])
+            self.half_line.set_xdata([_line_xdata0(self.half_line) + dx])
+            self.int_line.set_xdata([_line_xdata0(self.int_line) + dx])
         else:
             # 單獨移動
             self.picked.set_xdata([x])
 
         # 更新位置文字
-        self.flux_half = self.half_line.get_xdata()[0]
-        self.flux_int = self.int_line.get_xdata()[0]
+        self.flux_half = _line_xdata0(self.half_line)
+        self.flux_int = _line_xdata0(self.int_line)
         self.position_text.value = self.get_info()
 
         return [self.half_line, self.int_line]

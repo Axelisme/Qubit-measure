@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 from qtpy.QtCore import Qt
 from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
-from zcu_tools.gui.app.main.services import TabSnapshot
+from zcu_tools.gui.app.main.services import PersistedStartup, TabSnapshot
 from zcu_tools.gui.app.main.state import TabInteractionState
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.events import SocChangedPayload
@@ -14,7 +14,7 @@ from zcu_tools.gui.session.events import SocChangedPayload
 
 def _mock_ctrl() -> MagicMock:
     ctrl = MagicMock()
-    ctrl.get_persisted_left_panel_width.return_value = 500
+    ctrl.get_persisted_startup.return_value = PersistedStartup(left_panel_width=500)
     return ctrl
 
 
@@ -493,7 +493,7 @@ def test_refresh_analyze_form_skips_non_analysis_adapter_without_raising(qapp):
 def _editor_wiring_ctrl() -> MagicMock:
     """Mock ctrl that also satisfies LiveModelEnv for a real populate()."""
     ctrl = MagicMock()
-    ctrl.get_persisted_left_panel_width.return_value = 500
+    ctrl.get_persisted_startup.return_value = PersistedStartup(left_panel_width=500)
     ctrl.get_bus.return_value = EventBus()
     ctrl.get_current_md.return_value = MagicMock()
     ctrl.get_current_ml.return_value = MagicMock()

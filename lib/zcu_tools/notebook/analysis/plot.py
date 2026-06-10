@@ -190,8 +190,8 @@ def plot_mist_condition(
         kwargs.setdefault("mode", "lines")
         fig.add_trace(go.Scatter(x=x_new, y=y_new, **kwargs))
 
-    if max_level is None:
-        max_level = energies.shape[1] - 1
+    # Resolve once to int so pyright doesn't see Optional[int] past this point.
+    n_levels: int = energies.shape[1] - 1 if max_level is None else max_level
 
     fig = go.Figure()
     fig.add_trace(
@@ -209,7 +209,7 @@ def plot_mist_condition(
         name="1",
         line=dict(width=4, color="red"),
     )
-    for j in range(2, max_level + 1):
+    for j in range(2, n_levels + 1):
         transition = energies[:, j] - energies[:, 0]
         plot_without_discontinuities(
             fig,

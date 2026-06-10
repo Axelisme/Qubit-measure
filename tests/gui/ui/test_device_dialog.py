@@ -51,10 +51,10 @@ def test_device_dialog_init(qapp):
     ctrl = _make_ctrl()
     ctrl.list_devices.return_value = [_entry("fakedevice")]
 
-    # Mock get_device_info to return a simple mock with type
-    info_mock = MagicMock()
-    info_mock.type = "FakeDevice"
-    ctrl.get_device_snapshot.return_value = _connected_snapshot("fakedevice", info_mock)
+    from zcu_tools.device.fake import FakeDeviceInfo
+
+    info = FakeDeviceInfo(address="none")
+    ctrl.get_device_snapshot.return_value = _connected_snapshot("fakedevice", info)
 
     dialog = DeviceDialog(ctrl)
 
@@ -106,12 +106,13 @@ def test_device_dialog_add_device_propagates_unexpected_errors(qapp):
 
 
 def test_device_dialog_drop_device(qapp):
+    from zcu_tools.device.yoko import YOKOGS200Info
+
     ctrl = _make_ctrl()
     ctrl.list_devices.return_value = [_entry("yoko", "YOKOGS200")]
 
-    info_mock = MagicMock()
-    info_mock.type = "YOKOGS200"
-    ctrl.get_device_snapshot.return_value = _connected_snapshot("yoko", info_mock)
+    info = YOKOGS200Info(address="GPIB::1")
+    ctrl.get_device_snapshot.return_value = _connected_snapshot("yoko", info)
 
     dialog = DeviceDialog(ctrl)
 

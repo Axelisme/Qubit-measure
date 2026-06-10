@@ -171,7 +171,9 @@ def plot_sample_t1(
 
     ax2 = ax.secondary_xaxis(
         "top",
-        functions=(
+        functions=(  # type: ignore[arg-type]
+            # mpl stubs require Callable[[ArrayLike], ArrayLike] but partial[float]
+            # is inferred from the float overload; runtime is correct (vectorises).
             partial(flux2value, flux_half=flux_half, flux_period=flux_period),
             partial(value2flux, flux_half=flux_half, flux_period=flux_period),
         ),
@@ -238,7 +240,9 @@ def plot_t1_with_sample(
 
     ax2 = ax.secondary_xaxis(
         "top",
-        functions=(
+        functions=(  # type: ignore[arg-type]
+            # mpl stubs require Callable[[ArrayLike], ArrayLike] but partial[float]
+            # is inferred from the float overload; runtime is correct (vectorises).
             partial(flux2value, flux_half=flux_half, flux_period=flux_period),
             partial(value2flux, flux_half=flux_half, flux_period=flux_period),
         ),
@@ -282,7 +286,9 @@ def plot_eff_t1_with_sample(
 
     ax2 = ax.secondary_xaxis(
         "top",
-        functions=(
+        functions=(  # type: ignore[arg-type]
+            # mpl stubs require Callable[[ArrayLike], ArrayLike] but partial[float]
+            # is inferred from the float overload; runtime is correct (vectorises).
             partial(flux2value, flux_half=flux_half, flux_period=flux_period),
             partial(value2flux, flux_half=flux_half, flux_period=flux_period),
         ),

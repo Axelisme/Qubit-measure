@@ -66,7 +66,9 @@ def percell(
     ad_1n0n = np.zeros((len(ns), len(ns)), dtype=complex)
     for ng in ns:
         for ne in ns:
-            ad_1n0n[ng, ne] = Vec_gn[ng].dag() * ad_op * Vec_en[ne]
+            ad_1n0n[ng, ne] = Vec_gn[ng].dag() * ad_op * Vec_en[ne]  # type: ignore[attr-defined]
+            # Vec_gn entries are QuTiP Qobj (not plain ndarray); .dag() is valid
+            # at runtime but scqubits/qutip lack typed stubs.
 
     Percell_up = np.nansum(P_res_ns[None, :] * kappa * n_ths * np.abs(ad_1n0n) ** 2)
 
@@ -83,7 +85,8 @@ def percell(
     a_1n0n = np.zeros((len(ns), len(ns)), dtype=complex)
     for ng in ns:
         for ne in ns:
-            a_1n0n[ng, ne] = Vec_gn[ng].dag() * a_op * Vec_en[ne]
+            a_1n0n[ng, ne] = Vec_gn[ng].dag() * a_op * Vec_en[ne]  # type: ignore[attr-defined]
+            # Vec_gn entries are QuTiP Qobj; .dag() is valid at runtime.
 
     Percell_down = np.nansum(P_res_ns[None, :] * kappa * n_ths * np.abs(a_1n0n) ** 2)
 

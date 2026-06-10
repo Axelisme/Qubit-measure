@@ -331,7 +331,9 @@ def calculate_eff_t1_vs_flux_fast(
         evals = evals[:qub_dim]
         evecs = evecs[:, :qub_dim]
 
-        ops: dict[str, NDArray[np.complex128]] = {}
+        # Operator matrices are complex or real depending on the channel; NDArray[Any]
+        # is the honest type here since some ops (phi, dHdflux, sinhalf) are float64.
+        ops: dict[str, NDArray[Any]] = {}
         if "n" in need:
             ops["n"] = evecs.conj().T @ n_op @ evecs
         if "phi" in need:

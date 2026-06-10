@@ -167,9 +167,10 @@ class InteractiveSelector:
             max(np.nanmax(sp_freqs), self.s_freqs.max()),
         )
 
-        # Set x and y axis range
-        self.ax.set_xlim(self.flux_bound[0], self.flux_bound[1])
-        self.ax.set_ylim(self.freq_bound[0], self.freq_bound[1])
+        # Set x and y axis range — explicit float() to satisfy mpl stubs which
+        # do not accept np.float64 for set_xlim/set_ylim parameters.
+        self.ax.set_xlim(float(self.flux_bound[0]), float(self.flux_bound[1]))
+        self.ax.set_ylim(float(self.freq_bound[0]), float(self.freq_bound[1]))
 
     def get_cur_selected(self) -> NDArray[np.bool_]:
         cur_selected = np.zeros_like(self.selected, dtype=bool)

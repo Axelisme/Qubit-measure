@@ -40,7 +40,7 @@ class FloquetBranchAnalysis:
             self.H_with_drive,
             2 * np.pi / self.r_f,
             args=dict(amp=2 * self.g * np.sqrt(photon)),
-            precompute=precompute,
+            precompute=precompute,  # type: ignore[arg-type]  # qutip stubs declare ArrayLike but accept None
         )
 
     def calc_branch_infos(
@@ -50,7 +50,9 @@ class FloquetBranchAnalysis:
         progress: bool = True,
     ) -> dict[int, list[int]]:
         branch_infos = {b: [] for b in branchs}
-        fstate_n = [fbasis.state(t=0) for fbasis in fbasis_n]
+        # qutip stubs have an overloaded `state` that doesn't accept int `t`;
+        # the actual API accepts t=0 for the initial-time state (type: ignore[call-overload]).
+        fstate_n = [fbasis.state(t=0) for fbasis in fbasis_n]  # type: ignore[call-overload]
         qub_dim = len(fstate_n[0])
 
         for n in tqdm(
@@ -240,14 +242,14 @@ class FloquetWithTLSBranchAnalysis:
             self.H_with_drive,
             2 * np.pi / self.r_f,
             args=dict(amp=2 * self.g * np.sqrt(photon)),
-            precompute=precompute,
+            precompute=precompute,  # type: ignore[arg-type]  # qutip stubs declare ArrayLike but accept None
         )
 
     def calc_branch_infos(
         self, fbasis_n: list[qt.FloquetBasis], branchs: list[int], progress: bool = True
     ) -> dict[int, list[int]]:
         branch_infos = {b: [] for b in branchs}
-        fstate_n = [fbasis.state(t=0) for fbasis in fbasis_n]
+        fstate_n = [fbasis.state(t=0) for fbasis in fbasis_n]  # type: ignore[call-overload]
         qub_dim = len(fstate_n[0]) // 2
 
         for n in tqdm(
@@ -403,7 +405,7 @@ class FloquetDualCouplingBranchAnalysis:
                 amp1=2 * self.g1 * np.sqrt(photon),
                 amp2=2 * self.g2 * np.sqrt(photon),
             ),
-            precompute=precompute,
+            precompute=precompute,  # type: ignore[arg-type]  # qutip stubs declare ArrayLike but accept None
         )
 
     def calc_branch_infos(
@@ -413,7 +415,9 @@ class FloquetDualCouplingBranchAnalysis:
         progress: bool = True,
     ) -> dict[int, list[int]]:
         branch_infos = {b: [] for b in branchs}
-        fstate_n = [fbasis.state(t=0) for fbasis in fbasis_n]
+        # qutip stubs have an overloaded `state` that doesn't accept int `t`;
+        # the actual API accepts t=0 for the initial-time state (type: ignore[call-overload]).
+        fstate_n = [fbasis.state(t=0) for fbasis in fbasis_n]  # type: ignore[call-overload]
         qub_dim = len(fstate_n[0])
 
         for n in tqdm(
