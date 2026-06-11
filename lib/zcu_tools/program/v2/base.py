@@ -90,14 +90,16 @@ class MyProgramV2(ImproveAcquireMixin, ImproveAsmV2, AveragerProgramV2, IRCompil
             self.cfg_model.rounds,
         )
 
-        # Time-domain (decimated) simulation is out of scope for Phase 1 (D2);
-        # fail fast rather than fall through to white-noise decimated data, which
-        # would be silently wrong on a sim soc.
-        if getattr(soc, "_sim_params", None) is not None:
-            raise NotImplementedError(
-                "SimEngine does not support acquire_decimated (decimated/time-"
-                "domain readout) yet; only accumulated acquire() is simulated"
-            )
+        # Sim dispatch (mocksim D2): a MockQickSoc carrying SimParams routes the
+        # decimated (time-domain / lookback) path through the SimEngine too.  We
+        # inject the engine onto the soc (no eager compute); the real decimated
+        # round loop then runs unchanged and the soc's get_decimated renders each
+        # round's trace lazily off the engine (model A, timeFly-shifted readout
+        # envelope × steady mixed S21).  With no SimParams this branch is skipped
+        # and behaviour is identical to the prior real path (D1).
+        sim = getattr(soc, "_sim_params", None)
+        if sim is not None:
+            self._attach_sim_engine(soc, sim)
 
         return super().acquire_decimated(
             soc, *args, rounds=self.cfg_model.rounds, **kwargs

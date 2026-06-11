@@ -48,12 +48,17 @@ import numpy as np
 from numpy.polynomial.legendre import leggauss
 from numpy.typing import NDArray
 
+from zcu_tools.program.v2.modules.readout import (
+    AbsReadout,
+    DirectReadout,
+    PulseReadout,
+)
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 from . import bloch
-from .lowering import LoweredPoint, lower_point
+from .lowering import LoweredPoint, _resolve_scalar, lower_point
 from .params import SimParams
-from .readout import mixed_signal, resonator_freqs
+from .readout import decimated_trace, mixed_signal, resonator_freqs
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +145,10 @@ class SimEngine:
         # Deterministic raw-IQ grid (reps-broadcast, no noise), built lazily on
         # the first compute_round and reused across rounds; None until then.
         self._det_full: NDArray[np.float64] | None = None
+
+        # Flux-constant operating point (f_qubit, rf_g, rf_e), computed once and
+        # shared by the accumulated and decimated paths; None until first use.
+        self._operating: tuple[float, float, float] | None = None
 
         # One predictor instance reused across all sweep points; building it is
         # expensive (lazy scqubits import + Fluxonium construction).
@@ -326,6 +335,37 @@ class SimEngine:
         (ro,) = ro_chs.values()
         return int(ro["trigs"])
 
+    # ------------------------------------------------------- operating point
+    def _operating_signal(self) -> tuple[float, float, float]:
+        """Return (cached) ``(f_qubit_ghz, rf_g, rf_e)`` at the fixed operating flux.
+
+        Operating point is fixed at reduced flux = 1.0 (R-3).  ``predict_freq``
+        consumes a *device value*, so map the fixed reduced flux back through the
+        predictor's affine alignment (``flux_to_value``) rather than rewriting it.
+        The dressed resonator frequencies are flux-constant (R-3 pins the flux), so
+        the fluxonium eigensolve behind ``resonator_freqs`` runs ONCE here and is
+        reused by every sweep point (accumulated) and by the decimated trace.
+        """
+
+        if self._operating is not None:
+            return self._operating
+
+        device_value = self._predictor.flux_to_value(_SIM_OPERATING_FLUX)
+        f_qubit_mhz = float(self._predictor.predict_freq(device_value))
+        f_qubit_ghz = f_qubit_mhz * _MHZ_TO_GHZ
+        rf_g, rf_e = resonator_freqs(self.sim, _SIM_OPERATING_FLUX)
+
+        logger.debug(
+            "SimEngine: flux=%.4f, f_qubit=%.4f GHz, rf_g=%.4f GHz, rf_e=%.4f GHz",
+            _SIM_OPERATING_FLUX,
+            f_qubit_ghz,
+            rf_g,
+            rf_e,
+        )
+
+        self._operating = (f_qubit_ghz, rf_g, rf_e)
+        return self._operating
+
     # ----------------------------------------------------------- raw assembly
     def _ensure_signal(self) -> NDArray[np.float64]:
         """Build (once, cached) the deterministic raw I/Q broadcast over reps.
@@ -344,29 +384,7 @@ class SimEngine:
         if self._det_full is not None:
             return self._det_full
 
-        # Operating point is fixed at reduced flux = 1.0 (R-3).  predict_freq
-        # consumes a *device value*, so map the fixed reduced flux back through the
-        # predictor's affine alignment (flux_to_value) rather than rewriting it.
-        flux = _SIM_OPERATING_FLUX
-        device_value = self._predictor.flux_to_value(_SIM_OPERATING_FLUX)
-        f_qubit_mhz = float(self._predictor.predict_freq(device_value))
-        f_qubit_ghz = f_qubit_mhz * _MHZ_TO_GHZ
-
-        # Dressed resonator frequencies are flux-constant (R-3 pins the operating
-        # flux), so the fluxonium eigensolve behind ``resonator_freqs`` runs ONCE
-        # here instead of once per sweep point inside the old ``mixed_signal``.
-        # CACHE DEPENDENCY: this is valid only because ``_SIM_OPERATING_FLUX`` is a
-        # single fixed flux for the whole sweep; if the operating flux ever became
-        # per-point, rf_g/rf_e would have to move back into the per-point loop.
-        rf_g, rf_e = resonator_freqs(self.sim, flux)
-
-        logger.debug(
-            "SimEngine: flux=%.4f, f_qubit=%.4f GHz, rf_g=%.4f GHz, rf_e=%.4f GHz",
-            flux,
-            f_qubit_ghz,
-            rf_g,
-            rf_e,
-        )
+        f_qubit_ghz, rf_g, rf_e = self._operating_signal()
 
         signal_grid = self._signal_grid(  # (*sweep, nreads) complex
             f_qubit_ghz, rf_g, rf_e
@@ -409,3 +427,95 @@ class SimEngine:
         noise = self._rng.normal(0.0, noise_std, size=det_full.shape)
         acc = np.rint(det_full + noise).astype(np.int64)
         return [acc]
+
+    # ------------------------------------------------------ decimated assembly
+    def _readout_module(self) -> AbsReadout:
+        """The single readout module in the program (the decimated source).
+
+        Decimated/lookback timelines have exactly one readout; more than one (or
+        none) is unsupported, matching the accumulated single-channel invariant.
+        """
+
+        readouts = [m for m in self.program.modules if isinstance(m, AbsReadout)]
+        if len(readouts) != 1:
+            raise NotImplementedError(
+                f"SimEngine decimated path requires exactly one readout module; "
+                f"the program has {len(readouts)}"
+            )
+        return readouts[0]
+
+    def compute_decimated(self) -> list[NDArray[np.int64]]:
+        """Compute one round's decimated time-domain trace (model A, lookback).
+
+        The lookback timeline (reset + optional init pulse + readout) has no sweep
+        (or a single point), so the engine lowers that one point, evolves the Bloch
+        vector to the excited population ``P_e`` *before* readout, and renders the
+        time-domain readout trace via :func:`decimated_trace` (model A: the readout
+        envelope scaled by the steady mixed S21, shifted by ``sim.timeFly``).
+
+        The trace is laid out as QICK's ``get_decimated`` expects for a single-rep
+        single-trigger readout: a real/imag stacked array of shape ``(n_samples,
+        2)``.  Fresh per-round Gaussian noise (same scale as the accumulated path)
+        is added so software-averaging the rounds improves SNR; ``_summarize_decimated``
+        means them.
+        """
+
+        f_qubit_ghz, rf_g, rf_e = self._operating_signal()
+
+        # Single-point lowering: lookback declares no sweep, so the sweep
+        # multi-index is empty and the Bloch timeline / readout plan are resolved
+        # once.  (delta=0: decimated is not a coherence experiment, so the
+        # quasi-static detune ensemble does not apply here.)
+        point: dict[str, int] = {}
+        lowered = self._lower(point, f_qubit_ghz, 0.0)
+        v_final = bloch.evolve(
+            bloch.ground_state(self.sim.thermal_pop), lowered.segments
+        )
+        p_e = float(np.clip(bloch.excited_population(v_final), 0.0, 1.0))
+
+        # Readout window geometry from the single readout module + compiled ro_chs.
+        readout = self._readout_module()
+        if isinstance(readout, PulseReadout):
+            ro_pulse_cfg = readout.cfg.pulse_cfg
+            ro_cfg = readout.cfg.ro_cfg
+        elif isinstance(readout, DirectReadout):
+            raise NotImplementedError(
+                "SimEngine decimated path requires a PulseReadout (its pulse_cfg "
+                "defines the readout envelope shape); a DirectReadout has no pulse "
+                "envelope to render in the time domain"
+            )
+        else:
+            raise NotImplementedError(
+                f"unsupported readout module {type(readout).__name__} for decimated"
+            )
+
+        ro_length = _resolve_scalar(ro_cfg.ro_length, {}, point)
+        trig_offset = _resolve_scalar(ro_cfg.trig_offset, {}, point)
+
+        # Program-time axis: cycles2us(get_time_axis) + trig_offset.  The decimated
+        # sample count is the compiled readout window length (ro['length']); the
+        # channel is the single readout channel.  This mirrors qick's
+        # get_time_axis (cycles2us(ro_ch, arange(n))) so the engine's trace lands
+        # on exactly the axis lookback plots.
+        ((ro_ch, ro),) = self.program.ro_chs.items()
+        n_samples = int(ro["length"])
+        ts = (
+            self.program.soccfg.cycles2us(np.arange(n_samples), ro_ch=ro_ch)
+            + trig_offset
+        )
+
+        trace = decimated_trace(
+            self.sim,
+            ts,
+            ro_pulse_cfg,
+            ro_length,
+            lowered.readout.f_ro_ghz,
+            rf_g,
+            rf_e,
+            p_e,
+        )
+
+        det = _FULL_SCALE * np.stack([trace.real, trace.imag], axis=-1)  # (n, 2)
+        noise_std = _FULL_SCALE / self.sim.snr
+        noise = self._rng.normal(0.0, noise_std, size=det.shape)
+        return [np.rint(det + noise).astype(np.int64)]

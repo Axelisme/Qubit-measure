@@ -101,8 +101,18 @@ a per-point operating flux would have to move that call back into the loop.
   sequence — a Ramsey free evolution accumulates the un-refocused ensemble phase
   (extra `exp(−Γt)` → T2\*), while an echo π flip refocuses every static detune (→
   the homogeneous T2), purely from the π pulse plus the ensemble average.
-- **D2 — decimated / lookback are Phase-1 fast-fail.** `acquire_decimated` on a
-  sim soc raises; only the accumulated path is modelled.
+- **D2 — decimated / lookback supported (model A).** `acquire_decimated` on a sim
+  soc routes through the engine just like `acquire`: the engine lowers the single
+  lookback point, evolves the Bloch vector to `P_e`, and renders the time-domain
+  trace via `decimated_trace` — the readout envelope scaled by the steady mixed
+  S21, **shifted by `sim.timeFly`** (the readout time of flight). So the trace is
+  ~0 for program-time `< timeFly` and the readout pulse appears at
+  `[timeFly, timeFly + ro_length)`, giving lookback a physical rising edge whose
+  position `analyze` recovers as the trig_offset (`≈ timeFly`). Model A has no
+  resonator ring-up transient (the steady S21 applied per sample); the accumulated
+  companion `acc_buf` stays white noise (lookback never reads it). Decimated needs
+  a `PulseReadout` (its `pulse_cfg` defines the envelope); a `DirectReadout` or
+  more than one readout fast-fails.
 - **Deterministic Branch supported.** A `Branch` selected by a registered
   sweep-loop counter (e.g. g/e prep) lowers its chosen sub-sequence; the frame
   detuning recurses into the selected branch. Measurement-conditional branches,
@@ -144,7 +154,7 @@ a per-point operating flux would have to move that call back into the loop.
   analytic limits (Rabi, Ramsey, echo refocus at the decoupled-detuning layer).
 - `test_params.py`, `test_readout.py`, `test_lowering.py` — per-layer unit tests.
 - `test_engine.py` — engine assembly + acquire dispatch (feature *shape*: D1
-  regression, peak/dip, oscillation, decay, fringes, round hook, decimated D2),
+  regression, peak/dip, oscillation, decay, fringes, round hook, decimated trace),
   the Lorentzian dephasing gates (quadrature reproduces the analytic FID, echo
   refocuses to T2, Ramsey decays faster, Γ=0 zero-regression), and a deterministic
   Branch smoke.

@@ -35,6 +35,7 @@ import warnings
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.simulate.fluxonium.dispersive import (
     DressedLabelingError,
     calculate_dispersive_vs_flux_fast,
@@ -43,6 +44,7 @@ from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 from zcu_tools.utils.fitting.resonance.hanger import HangerModel
 
 from .params import SimParams
+from .waveforms import envelope_at
 
 # Decorative hanger parameters with no physical counterpart in SimParams. A flat
 # unit response keeps the model focused on the resonance line shape itself:
@@ -161,3 +163,84 @@ def mixed_signal(
     s_g = s21(sim, freqs, rf_g)
     s_e = s21(sim, freqs, rf_e)
     return s_g + p_e * (s_e - s_g)
+
+
+def decimated_trace(
+    sim: SimParams,
+    ts: NDArray[np.float64],
+    readout_cfg: PulseCfg,
+    ro_length: float,
+    f_ro_ghz: float,
+    rf_g: float,
+    rf_e: float,
+    p_e: float,
+) -> NDArray[np.complex128]:
+    """Time-domain down-converted readout trace (model A) at ADC samples ``ts``.
+
+    Model A (task_plans/mocksim/findings.md, "decimated 支援評估"):
+
+        trace(t) = readout_envelope(t - timeFly) * steady_mixed_S21(f_ro; rf_g, rf_e, p_e)
+
+    i.e. the down-converted readout pulse envelope scaled by the *steady-state*
+    population-weighted resonator response at the single probe frequency
+    ``f_ro``.  There is no resonator ring-up transient (that is model B); the
+    response is the same complex IQ point :func:`mixed_signal` produces for an
+    accumulated readout, applied per sample.
+
+    Time of flight.  The readout module plays its pulse from program ``t = 0``,
+    but the signal only reaches the ADC ``sim.timeFly`` later (the propagation
+    delay), so the envelope is sampled at ``ts - sim.timeFly``: the trace is ~0
+    for ``ts < sim.timeFly`` and the readout pulse appears in
+    ``[timeFly, timeFly + ro_length)``.  This is the rising edge lookback's
+    ``analyze`` recovers as the trig_offset.  ``ts`` is the program-time axis
+    (``cycles2us(get_time_axis) + trig_offset``); the trig_offset is already
+    baked into ``ts`` by the engine, so this layer applies no trig_offset shift of
+    its own — only the physical ``timeFly`` delay.
+
+    Parameters
+    ----------
+    sim
+        Physical parameters: the hanger Ql/Qi (via :func:`s21`) and ``timeFly``
+        (the readout propagation delay that positions the envelope).
+    ts
+        Program-time axis in µs (``cycles2us(get_time_axis) + trig_offset``),
+        same axis lookback plots.
+    readout_cfg
+        The readout pulse cfg whose waveform defines the envelope shape (for a
+        PulseReadout this is ``ro_module.cfg.pulse_cfg``).
+    ro_length
+        The resolved readout pulse length (µs) at this sweep point; the envelope
+        is zero outside ``[0, ro_length)``.  Passed in (not read off the cfg)
+        because a swept length is resolved by the caller, mirroring how lowering
+        threads resolved scalars.
+    f_ro_ghz
+        The readout probe frequency (GHz); the steady S21 is evaluated here.
+    rf_g, rf_e
+        State-conditioned dressed resonator frequencies (GHz), computed ONCE by
+        the engine (no dispersive eigh is done in this layer — same boundary as
+        :func:`mixed_signal`).
+    p_e
+        Excited-state population in ``[0, 1]`` (Fast-Fail via ``mixed_signal``).
+
+    Returns
+    -------
+    NDArray[np.complex128]
+        One complex IQ value per entry of ``ts`` (same length).
+
+    Responsibility boundary: physical -> time-domain IQ only.  No sweep / acc_buf
+    / noise assembly (noise is added by the engine) and no dispersive computation
+    (rf_g/rf_e arrive pre-computed).
+    """
+
+    ts = np.asarray(ts, dtype=np.float64)
+    if ts.ndim != 1:
+        raise ValueError(f"ts must be a 1-D array, got shape {ts.shape}")
+
+    # Steady-state mixed S21 at the single probe frequency: reuse the accumulated
+    # blend on a length-1 freq array and take the scalar.
+    steady = mixed_signal(sim, np.array([f_ro_ghz], dtype=np.float64), rf_g, rf_e, p_e)[
+        0
+    ]
+
+    amp = envelope_at(readout_cfg, ts - sim.timeFly, ro_length)
+    return (amp * steady).astype(np.complex128)

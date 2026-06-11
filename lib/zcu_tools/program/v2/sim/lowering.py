@@ -102,6 +102,7 @@ from zcu_tools.program.v2.sweep import SweepCfg
 
 from .bloch import Segment
 from .params import SimParams
+from .waveforms import cosine_shape, gauss_shape
 
 # Number of piecewise-constant sub-segments used to sample a smoothly shaped
 # pulse envelope (gauss / drag / cosine ramp).  ~32 keeps the area / chevron
@@ -179,27 +180,33 @@ def _resolve_scalar(
     return float(np.asarray(array)[index])
 
 
-def _gauss_amplitudes(length: float, sigma: float, n: int) -> np.ndarray:
-    """Sample a peak-normalized Gaussian on the segment midpoints.
+def _segment_midpoints(length: float, n: int) -> np.ndarray:
+    """The ``n`` piecewise-constant sub-segment midpoints over ``[0, length]``.
 
-    Mirrors QICK's ``gauss`` shape ``exp(-(t-mu)^2 / (2 sigma^2))`` with the peak
-    at the pulse center; midpoint sampling keeps the discretized area close to
-    the continuous integral.
+    Midpoint sampling keeps a discretized shape's area close to the continuous
+    integral (preserving the Rabi / chevron angle).  This is the sampling *grid*
+    lowering owns; the shape *values* come from :mod:`waveforms`.
     """
 
-    mu = length / 2.0
     edges = np.linspace(0.0, length, n + 1)
-    mids = 0.5 * (edges[:-1] + edges[1:])
-    return np.exp(-((mids - mu) ** 2) / (2.0 * sigma**2))
+    return 0.5 * (edges[:-1] + edges[1:])
+
+
+def _gauss_amplitudes(length: float, sigma: float, n: int) -> np.ndarray:
+    """Peak-normalized Gaussian sampled on the ``n`` segment midpoints.
+
+    Reuses the shared :func:`waveforms.gauss_shape` so the readout time-domain
+    model and lowering evaluate the identical bell; only the sampling grid (here,
+    midpoints) is lowering-specific.
+    """
+
+    return gauss_shape(_segment_midpoints(length, n), length, sigma)
 
 
 def _cosine_amplitudes(length: float, n: int) -> np.ndarray:
-    """Sample a peak-normalized raised-cosine ramp ``(1 - cos)/2`` over [0, length]."""
+    """Peak-normalized raised-cosine ramp sampled on the ``n`` segment midpoints."""
 
-    edges = np.linspace(0.0, length, n + 1)
-    mids = 0.5 * (edges[:-1] + edges[1:])
-    x = 2.0 * math.pi * mids / length
-    return (1.0 - np.cos(x)) / 2.0
+    return cosine_shape(_segment_midpoints(length, n), length)
 
 
 def _drive_amp_segments(

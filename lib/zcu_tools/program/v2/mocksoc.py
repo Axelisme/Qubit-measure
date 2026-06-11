@@ -269,9 +269,21 @@ class MockQickSoc(QickConfig):
         return [(total_shots, (data, {}))]
 
     def get_decimated(self, ch, address, length):
+        # Sim path: render this round's time-domain trace off the engine (model A,
+        # timeFly-shifted readout envelope × steady mixed S21) and slice to the
+        # requested length; each call redraws fresh noise so software-averaging the
+        # rounds improves SNR (mirrors poll_data's accumulated path).  With no
+        # engine attached (D1) keep the white-noise stub unchanged.
+        if self._sim_engine is not None:
+            (trace,) = self._sim_engine.compute_decimated()
+            return trace[:length].astype(float)
         return np.random.randn(length, 2).astype(float)
 
     def get_accumulated(self, ch, address, length):
+        # acc_buf is built alongside dec_buf by the decimated finish_round, but
+        # lookback never consumes it (it reads only get_decimated), so even on the
+        # sim path the accumulated companion stays white noise (D1) — it is safe
+        # because nothing downstream reads it for a decimated acquire.
         return np.random.randint(-(2**15), 2**15, size=(length, 2), dtype=np.int64)
 
 

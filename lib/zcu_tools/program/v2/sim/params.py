@@ -84,6 +84,14 @@ class SimParams(ConfigBase):
         snr : float
             Signal-to-noise ratio per single repetition.  Determines the
             additive Gaussian noise scale applied to each shot.
+        timeFly : float, optional
+            Time of flight in µs: the readout-signal propagation delay.  The
+            readout pulse program plays from program ``t = 0``, but the signal is
+            only received by the ADC ``timeFly`` later — so a decimated/lookback
+            trace is ~0 for the first ``timeFly`` and the readout envelope appears
+            shifted by it.  This gives the simulated lookback trace a physical
+            rising edge whose position a lookback ``analyze`` recovers as the
+            trig_offset.  Defaults to 0.5.
         pi_gain_len : float
             Gain × length product required for a π rotation (ground truth for
             both amp_rabi and len_rabi experiments).  SimEngine derives Ω via
@@ -126,6 +134,10 @@ class SimParams(ConfigBase):
     # pi_gain_len: the gain×length invariant shared by amp_rabi (sweeps gain)
     # and len_rabi (sweeps length).  SimEngine uses Ω = π/pi_gain_len · gain.
     pi_gain_len: float
+    # timeFly: readout time-of-flight (µs). The decimated/lookback trace places
+    # the readout envelope at program-time == timeFly (the trace is ~0 before it),
+    # giving the simulated lookback a physical rising edge to recover as trig_offset.
+    timeFly: float = 0.5
     seed: int | None = None
 
     @model_validator(mode="after")

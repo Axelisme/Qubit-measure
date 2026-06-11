@@ -9,7 +9,8 @@ Covers:
   decay, and Ramsey fringes.
 - Singleshot get_raw shape ``(reps, 1, 2)`` is usable on the sim path.
 - round_hook is invoked once per round.
-- acquire_decimated fast-fails on a sim soc (decimated is out of scope, D2).
+- acquire_decimated on a sim soc returns a physically-structured time-domain
+  trace (model A): a timeFly-shifted readout envelope, ~0 before timeFly.
 
 The engine drives the qubit at its *own* predicted f_qubit (queried through a
 FluxoniumPredictor built from the same SimParams) and reads out near rf_g — i.e.
@@ -28,7 +29,7 @@ from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.control import Branch
 from zcu_tools.program.v2.modules.delay import Delay
 from zcu_tools.program.v2.modules.pulse import PulseCfg
-from zcu_tools.program.v2.modules.readout import DirectReadoutCfg
+from zcu_tools.program.v2.modules.readout import DirectReadoutCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.sim import SimParams
 from zcu_tools.program.v2.sim.readout import resonator_freqs
@@ -557,28 +558,59 @@ def test_engine_lazy_compute_respects_early_stop(monkeypatch):
 # ---------------------------------------------------------------- decimated D2
 
 
-def test_engine_acquire_decimated_fast_fails():
-    """acquire_decimated on a sim soc raises (decimated is out of scope, D2)."""
+def _pulse_readout(ro_freq_mhz: float, ro_length: float = 2.0) -> Module:
+    """A PulseReadout (const envelope) for the decimated/lookback path.
 
-    soc, soccfg = make_mock_soc(sim=_SIM)
-    f_qubit = _f_qubit_mhz()
+    Decimated needs a PulseReadout because its ``pulse_cfg`` defines the readout
+    envelope shape rendered in the time domain.
+    """
 
-    pulse = PulseCfg(
+    pulse_cfg = PulseCfg(
         ch=0,
         nqz=1,
         gain=0.1,
-        freq=f_qubit,
+        freq=ro_freq_mhz,
         phase=0.0,
-        waveform=ConstWaveformCfg(length=1.0),
-    ).build("qub")
+        waveform=ConstWaveformCfg(length=ro_length),
+    )
+    ro_cfg = DirectReadoutCfg(ro_ch=0, ro_length=ro_length, ro_freq=ro_freq_mhz)
+    return PulseReadoutCfg(pulse_cfg=pulse_cfg, ro_cfg=ro_cfg).build("ro")
+
+
+def test_engine_acquire_decimated_returns_timefly_shifted_trace():
+    """acquire_decimated on a sim soc renders a model-A time-domain trace.
+
+    The trace must be a real/imag stacked array over the readout window with the
+    readout envelope shifted by ``sim.timeFly``: ~0 before timeFly, finite after.
+    """
+
+    soc, soccfg = make_mock_soc(sim=_SIM)
+
+    # reps=1, single trigger -> qick returns the simple (length, 2) decimated shape.
     prog = ModularProgramV2(
         soccfg,
-        ProgramV2Cfg(reps=10, rounds=1),
-        modules=[pulse, _readout(_rf_g_mhz())],
+        ProgramV2Cfg(reps=1, rounds=2),
+        modules=[_pulse_readout(_rf_g_mhz(), ro_length=2.0)],
     )
 
-    with pytest.raises(NotImplementedError, match="decimated"):
-        prog.acquire_decimated(soc, progress=False)
+    result = prog.acquire_decimated(soc, progress=False)
+
+    # Single channel, (length, 2) float trace (averaged over rounds).
+    assert len(result) == 1
+    trace = result[0]
+    assert trace.ndim == 2 and trace.shape[1] == 2
+
+    ts = prog.get_time_axis(ro_index=0)  # program-time axis (trig_offset == 0 here)
+    mag = np.abs(trace[:, 0] + 1j * trace[:, 1])
+
+    tof = _SIM.timeFly
+    # The signal floor is set by the per-sample noise (full_scale / snr); the in-
+    # window amplitude is ~full_scale * |steady S21|, far above it.  Compare the
+    # pre-timeFly region (noise only) to the in-window region (envelope present).
+    before = mag[ts < tof - 0.1]
+    inside = mag[(ts > tof + 0.1) & (ts < tof + 1.9)]
+    assert before.size > 0 and inside.size > 0
+    assert inside.mean() > 10.0 * (before.mean() + 1.0)
 
 
 # ---------------------------------------------- Phase 2c: Lorentzian dephasing

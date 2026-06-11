@@ -7,18 +7,30 @@ Covers:
   resolves them once); p_e endpoints match S21(rf_g)/S21(rf_e), midpoint is the
   mean, and an onetone sweep shows a resonance dip near rf_g.
 - Fast-fail: p_e outside [0, 1] raises.
+- envelope_at: const window 1/0, gauss peak-at-center, flat_top flat region, zero
+  before the pulse start.
+- decimated_trace (model A): const readout -> trig_offset-delayed square of the
+  steady mixed S21; p_e endpoints/midpoint; output length == ts length; 1-D guard.
 """
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
+from zcu_tools.program.v2.modules.pulse import PulseCfg
+from zcu_tools.program.v2.modules.waveform import (
+    ConstWaveformCfg,
+    FlatTopWaveformCfg,
+    GaussWaveformCfg,
+)
 from zcu_tools.program.v2.sim import readout
 from zcu_tools.program.v2.sim.readout import (
+    decimated_trace,
     mixed_signal,
     resonator_freqs,
     s21,
 )
+from zcu_tools.program.v2.sim.waveforms import envelope_at
 from zcu_tools.simulate.fluxonium.dispersive import DressedLabelingError
 
 from zcu_tools.program.v2.sim import SimParams  # isort: skip
@@ -165,3 +177,148 @@ class TestFastFail:
         rf_g, rf_e = resonator_freqs(_SIM, flux=0.3)
         with pytest.raises(ValueError, match=r"p_e must be in \[0, 1\]"):
             mixed_signal(_SIM, freqs, rf_g, rf_e, p_e=bad_p_e)
+
+
+def _const_readout_cfg(length: float = 1.0) -> PulseCfg:
+    """A const-waveform readout pulse cfg (peak envelope 1 over its length)."""
+    return PulseCfg(
+        waveform=ConstWaveformCfg(length=length),
+        ch=0,
+        nqz=1,
+        freq=7200.0,
+        gain=1.0,
+    )
+
+
+def _gauss_readout_cfg(length: float = 1.0, sigma: float = 0.25) -> PulseCfg:
+    return PulseCfg(
+        waveform=GaussWaveformCfg(length=length, sigma=sigma),
+        ch=0,
+        nqz=1,
+        freq=7200.0,
+        gain=1.0,
+    )
+
+
+def _flat_top_readout_cfg(length: float = 1.0, ramp: float = 0.2) -> PulseCfg:
+    return PulseCfg(
+        waveform=FlatTopWaveformCfg(
+            length=length,
+            raise_waveform=GaussWaveformCfg(length=ramp, sigma=ramp / 4.0),
+        ),
+        ch=0,
+        nqz=1,
+        freq=7200.0,
+        gain=1.0,
+    )
+
+
+class TestEnvelopeAt:
+    """envelope_at: peak-normalized shape, zero outside the pulse window."""
+
+    def test_const_is_one_in_window_zero_outside(self) -> None:
+        cfg = _const_readout_cfg(length=1.0)
+        t = np.array([-0.5, 0.0, 0.5, 0.999, 1.0, 1.5], dtype=np.float64)
+        amp = envelope_at(cfg, t, length=1.0)
+        # In window [0, 1): exactly 1; outside: 0.
+        np.testing.assert_array_equal(amp, [0.0, 1.0, 1.0, 1.0, 0.0, 0.0])
+
+    def test_gauss_peaks_at_center(self) -> None:
+        cfg = _gauss_readout_cfg(length=1.0, sigma=0.25)
+        t = np.linspace(0.0, 1.0, 101, dtype=np.float64)
+        amp = envelope_at(cfg, t, length=1.0)
+        # Peak (≈1) sits at the pulse center.
+        peak_idx = int(np.argmax(amp))
+        assert abs(t[peak_idx] - 0.5) < 0.02
+        assert abs(amp[peak_idx] - 1.0) < 1e-6
+        # Outside the window the envelope is 0.
+        assert envelope_at(cfg, np.array([-0.1, 1.1]), length=1.0).tolist() == [
+            0.0,
+            0.0,
+        ]
+
+    def test_flat_top_flat_region_is_one(self) -> None:
+        cfg = _flat_top_readout_cfg(length=1.0, ramp=0.2)
+        # Flat top spans [ramp/2, length - ramp/2) = [0.1, 0.9).
+        t_flat = np.array([0.1, 0.3, 0.5, 0.7, 0.89], dtype=np.float64)
+        amp_flat = envelope_at(cfg, t_flat, length=1.0)
+        np.testing.assert_allclose(amp_flat, 1.0)
+        # Mid-rise (t = ramp/4 = 0.05) is strictly between 0 and 1.
+        amp_rise = envelope_at(cfg, np.array([0.05]), length=1.0)[0]
+        assert 0.0 < amp_rise < 1.0
+        # Symmetric falling ramp matches the rising ramp by mirror.
+        amp_fall = envelope_at(cfg, np.array([1.0 - 0.05]), length=1.0)[0]
+        assert abs(amp_fall - amp_rise) < 1e-9
+
+    def test_unknown_window_is_zero_before_start(self) -> None:
+        cfg = _const_readout_cfg(length=1.0)
+        # Everything before the pulse start is 0 (trig_offset region in the trace).
+        amp = envelope_at(cfg, np.array([-1.0, -0.01]), length=1.0)
+        np.testing.assert_array_equal(amp, [0.0, 0.0])
+
+
+class TestDecimatedTrace:
+    """decimated_trace: const readout square pulse × steady mixed S21.
+
+    The envelope is shifted by ``_SIM.timeFly`` (the readout time of flight, 0.5 µs
+    here): the trace is ~0 for program-time ``ts < timeFly`` and the readout pulse
+    appears in ``[timeFly, timeFly + ro_length)``.
+    """
+
+    def _rf(self) -> tuple[float, float]:
+        return resonator_freqs(_SIM, flux=0.3)
+
+    def test_const_trace_is_timefly_shifted_square_of_steady_s21(self) -> None:
+        rf_g, rf_e = self._rf()
+        f_ro = rf_g  # probe on the ground resonance
+        tof = _SIM.timeFly
+        ro_len = 1.0
+        cfg = _const_readout_cfg(length=ro_len)
+        # Program-time axis: 0 .. timeFly + ro_len (envelope sits at [timeFly, ...)).
+        ts = np.linspace(0.0, tof + ro_len, 200, dtype=np.float64)
+        trace = decimated_trace(_SIM, ts, cfg, ro_len, f_ro, rf_g, rf_e, p_e=0.0)
+        assert trace.shape == ts.shape
+        assert trace.dtype == np.complex128
+
+        steady = s21(_SIM, np.array([f_ro]), rf_g)[0]
+        before = ts < tof
+        inside = (ts >= tof) & (ts < tof + ro_len)
+        # Before timeFly: ~0 (signal not yet received); inside: steady S21 point.
+        np.testing.assert_allclose(trace[before], 0.0)
+        np.testing.assert_allclose(trace[inside], steady)
+
+    def test_p_e_endpoints_and_midpoint(self) -> None:
+        rf_g, rf_e = self._rf()
+        f_ro = rf_g
+        tof = _SIM.timeFly
+        ro_len = 1.0
+        cfg = _const_readout_cfg(length=ro_len)
+        # Sample strictly inside the (timeFly-shifted) window so every point is in
+        # the flat steady region.
+        ts = np.linspace(tof, tof + ro_len, 50, endpoint=False, dtype=np.float64)
+
+        s_g = s21(_SIM, np.array([f_ro]), rf_g)[0]
+        s_e = s21(_SIM, np.array([f_ro]), rf_e)[0]
+
+        tr_g = decimated_trace(_SIM, ts, cfg, ro_len, f_ro, rf_g, rf_e, p_e=0.0)
+        tr_e = decimated_trace(_SIM, ts, cfg, ro_len, f_ro, rf_g, rf_e, p_e=1.0)
+        tr_h = decimated_trace(_SIM, ts, cfg, ro_len, f_ro, rf_g, rf_e, p_e=0.5)
+        # p_e=0 -> S21(rf_g), p_e=1 -> S21(rf_e), p_e=0.5 -> linear midpoint.
+        np.testing.assert_allclose(tr_g, s_g)
+        np.testing.assert_allclose(tr_e, s_e)
+        np.testing.assert_allclose(tr_h, 0.5 * (s_g + s_e))
+
+    def test_length_matches_ts(self) -> None:
+        rf_g, rf_e = self._rf()
+        cfg = _const_readout_cfg(length=1.0)
+        for n in (1, 7, 64):
+            ts = np.linspace(0.0, _SIM.timeFly + 1.0, n, dtype=np.float64)
+            trace = decimated_trace(_SIM, ts, cfg, 1.0, rf_g, rf_g, rf_e, p_e=0.0)
+            assert trace.shape == (n,)
+
+    def test_non_1d_ts_raises(self) -> None:
+        rf_g, rf_e = self._rf()
+        cfg = _const_readout_cfg(length=1.0)
+        ts = np.zeros((2, 3), dtype=np.float64)
+        with pytest.raises(ValueError, match="ts must be a 1-D array"):
+            decimated_trace(_SIM, ts, cfg, 1.0, rf_g, rf_g, rf_e, p_e=0.0)

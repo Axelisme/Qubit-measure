@@ -57,6 +57,11 @@ matplotlib.use("Agg")
 
 import numpy as np
 import pytest
+from zcu_tools.experiment.v2.lookback import (
+    LookbackCfg,
+    LookbackExp,
+    LookbackModuleCfg,
+)
 from zcu_tools.experiment.v2.twotone.freq import FreqCfg, FreqExp, FreqSweepCfg
 from zcu_tools.experiment.v2.twotone.rabi.amp_rabi import (
     AmpRabiCfg,
@@ -89,7 +94,7 @@ from zcu_tools.experiment.v2.twotone.time_domain.t2ramsey import (
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.program.v2.modules.pulse import PulseCfg
-from zcu_tools.program.v2.modules.readout import DirectReadoutCfg
+from zcu_tools.program.v2.modules.readout import DirectReadoutCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg, GaussWaveformCfg
 from zcu_tools.program.v2.sim import SimParams
 from zcu_tools.program.v2.sim.readout import resonator_freqs
@@ -504,3 +509,49 @@ def test_ramsey_decays_faster_than_echo() -> None:
     t2e = _run_echo(sim)
 
     assert t2r < t2e
+
+
+# --------------------------------------------------------------- lookback (D2)
+
+
+def test_lookback_recovers_timefly_as_trig_offset() -> None:
+    """Lookback run + analyze recover the injected timeFly as the trig_offset.
+
+    Injected: ``sim.timeFly`` (the readout time of flight).  The decimated model A
+    places the readout envelope at program-time ``timeFly``, so the trace is ~0
+    before it and rises into the readout window after — exactly the rising edge
+    ``LookbackExp.analyze`` locates.  The recovered offset must therefore land on
+    ``timeFly`` (here 0.5 µs) within a tolerance set by the decimated sample
+    spacing (~3.3 ns) plus the analyze ratio threshold.
+    """
+
+    soc, soccfg = make_mock_soc(sim=_SIM)
+
+    ro_length = 2.0
+    ro_pulse = PulseCfg(
+        ch=0,
+        nqz=1,
+        gain=0.1,
+        freq=_rf_g_mhz(),
+        phase=0.0,
+        waveform=ConstWaveformCfg(length=ro_length),
+    )
+    readout = PulseReadoutCfg(
+        pulse_cfg=ro_pulse,
+        ro_cfg=DirectReadoutCfg(
+            ro_ch=0, ro_length=ro_length, ro_freq=_rf_g_mhz(), trig_offset=0.0
+        ),
+    )
+    cfg = LookbackCfg(
+        reps=1,
+        rounds=2,
+        modules=LookbackModuleCfg(reset=None, init_pulse=None, readout=readout),
+    )
+
+    exp = LookbackExp()
+    result = exp.run(soc, soccfg, cfg)
+    offset, _fig = exp.analyze(result, plot_fit=True)
+
+    # The rising edge sits at program-time == timeFly; analyze returns the last
+    # sub-threshold time before the magnitude peak, i.e. just before timeFly.
+    assert offset == pytest.approx(_SIM.timeFly, abs=0.1)
