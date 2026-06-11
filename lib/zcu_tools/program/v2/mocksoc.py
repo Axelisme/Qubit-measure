@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import time
+from typing import TYPE_CHECKING
 
 import numpy as np
 from qick import QickConfig
 from qick.asm_v2 import QickProgramV2
 from qick.qick_asm import get_version
+
+if TYPE_CHECKING:
+    from .sim import SimParams
 
 
 def _build_mock_cfg(n_gens: int = 2, n_readouts: int = 1) -> dict:
@@ -160,11 +164,23 @@ class MockQickSoc(QickConfig):
 
     _BIG_COUNT = 2**31 - 1
 
-    def __init__(self, cfg_dict: dict) -> None:
+    def __init__(self, cfg_dict: dict, sim: SimParams | None = None) -> None:
         super().__init__(cfg_dict)
         self._cfg_dict = cfg_dict
         self._readout_state = None
         self._poll_done = False
+
+        # When set (via make_mock_soc(sim=...)), MyProgramV2.acquire detects this
+        # and routes through the SimEngine instead of the white-noise path (D1).
+        self._sim_params = sim
+
+        # Per-round simulated raw acc_buf budget, stashed by MyProgramV2.acquire
+        # before the real round loop runs.  Each entry is the one-channel
+        # [acc_buf] for one round; start_readout/poll_data pop and serve them in
+        # order so the genuine finish_round / round_hook / stop_checkers /
+        # _process_accumulated machinery is fully reused (hybrid design).
+        self._sim_rounds: list[list[np.ndarray]] | None = None
+        self._sim_round_idx: int = 0
 
     # --- no-op hardware control ---
     # Accept *args/**kwargs so signature drift across QICK versions doesn't
@@ -196,6 +212,16 @@ class MockQickSoc(QickConfig):
         # this — it relies on poll_data() filling total_count.
         return self._BIG_COUNT
 
+    def set_sim_rounds(self, rounds_buf: list[list[np.ndarray]]) -> None:
+        """Stash the SimEngine's per-round raw acc_buf budget for this acquire().
+
+        Called by MyProgramV2.acquire on the sim path before the real round loop
+        runs; poll_data then serves one entry per round in order.
+        """
+
+        self._sim_rounds = rounds_buf
+        self._sim_round_idx = 0
+
     def start_readout(self, total_shots, counter_addr, ch_list, reads_per_shot) -> None:
         self._readout_state = (int(total_shots), list(ch_list), list(reads_per_shot))
         self._poll_done = False
@@ -205,12 +231,26 @@ class MockQickSoc(QickConfig):
             return []
         total_shots, _ch_list, reads_per_shot = self._readout_state
 
-        data = [
-            np.random.randint(
-                -(2**15), 2**15, size=(total_shots * n, 2), dtype=np.int64
-            )
-            for n in reads_per_shot
-        ]
+        if self._sim_rounds is not None:
+            # Sim path: serve this round's pre-computed raw buffer (flattened to
+            # the (total_shots*nreads, 2) per-channel shape the accumulated loop
+            # writes into acc_buf via a flat reshape).
+            if self._sim_round_idx >= len(self._sim_rounds):
+                raise RuntimeError(
+                    "SimEngine round budget exhausted: poll_data called for round "
+                    f"{self._sim_round_idx} but only {len(self._sim_rounds)} were "
+                    "stashed"
+                )
+            round_buf = self._sim_rounds[self._sim_round_idx]
+            self._sim_round_idx += 1
+            data = [ch.reshape(-1, 2) for ch in round_buf]
+        else:
+            data = [
+                np.random.randint(
+                    -(2**15), 2**15, size=(total_shots * n, 2), dtype=np.int64
+                )
+                for n in reads_per_shot
+            ]
 
         time.sleep(0.00001 * np.asarray(data).size)
 
@@ -225,8 +265,16 @@ class MockQickSoc(QickConfig):
 
 
 def make_mock_soc(
-    n_gens: int = 2, n_readouts: int = 1
+    n_gens: int = 2,
+    n_readouts: int = 1,
+    sim: SimParams | None = None,
 ) -> tuple[MockQickSoc, QickConfig]:
-    """Build a MockQickSoc supporting end-to-end acquire() with random fake data."""
+    """Build a MockQickSoc supporting end-to-end acquire().
+
+    With ``sim=None`` (D1) the soc returns white-noise fake data and acquire
+    follows the unchanged real path.  With a ``SimParams``, MyProgramV2.acquire
+    detects ``soc._sim_params`` and routes through the SimEngine to produce
+    physically-realistic data.
+    """
     mock_cfg = _build_mock_cfg(n_gens, n_readouts)
-    return MockQickSoc(mock_cfg), QickConfig(mock_cfg)
+    return MockQickSoc(mock_cfg, sim=sim), QickConfig(mock_cfg)

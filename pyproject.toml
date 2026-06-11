@@ -78,6 +78,9 @@ reportIncompatibleVariableOverride = "none"
 # helper functions like test(label, ...) that pytest would mis-collect as cases).
 testpaths = ["tests"]
 filterwarnings = ["ignore::DeprecationWarning:matplotlib.*"]
+markers = [
+  "slow: slow tests (e.g. qutip cross-validation)",
+]
 
 [tool.jupytext]
 notebook_metadata_filter = "-all"

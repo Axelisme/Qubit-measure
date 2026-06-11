@@ -1,0 +1,493 @@
+"""Cross-experiment inject -> recover integration tests for the SimEngine.
+
+This is the value proof of mocksim: inject physical parameters via
+:class:`SimParams`, run a *real* experiment class (its ``run`` + ``analyze``,
+not a hand-built program) on a sim mock soc, and assert the analyze fit recovers
+the injected physics within tolerance.  Unlike ``test_engine.py`` (which builds
+``ModularProgramV2`` directly and only checks feature *shape*), every test here
+drives the full ``experiment/v2`` path end to end and checks recovered *values*.
+
+Phase-1 covers freq / amp_rabi / len_rabi / T1 / T2-Ramsey / T2-echo recovery;
+Phase 2 adds the dephasing-model proof: with ``T2 != T2_star`` the echo recovers
+the homogeneous ``T2`` (and is insensitive to the inhomogeneous rate Gamma) while
+Ramsey recovers ``T2_star``, and Ramsey decays faster than echo — exactly the
+Lorentzian quasi-static detune model the engine averages over.
+
+Operating point (the single most load-bearing choice)
+-----------------------------------------------------
+``f_qubit`` is kept **below Nyquist** (fs/2 = 3072 MHz for the mock soccfg's
+6144 MHz DAC).  At EJ/EC/EL = 3.0/0.9/0.5 with flux_bias 0.1 the fluxonium
+0->1 frequency is ~2893 MHz, so ``sweep2array`` does not alias the drive tone
+and a frequency fit recovers the predictor value directly.  Above Nyquist the
+played tone folds (e.g. 7277 -> 1133 MHz) and the fit would recover the aliased
+image instead — real hardware behaviour, not a sim artifact.
+
+The engine drives the qubit at the f_qubit it computes from the same SimParams
+(via FluxoniumPredictor), and the readout sits near ``rf_g`` to maximise |g>/|e>
+contrast — i.e. each test plays an experimenter who has already located the
+qubit and resonator, exactly as the real path requires.
+
+len_rabi note: the mock soccfg's const/flat_top pulse-length *register* grid is
+too coarse for a hard length sweep to compile, so len_rabi is driven with a
+gauss pulse (the soft-sweep path that recompiles per length).  A gauss envelope's
+rotation angle is area-weighted, so the absolute const formula
+``pi_len == pi_gain_len/gain`` does not hold; instead the gain *scaling* law is
+asserted (Rabi freq proportional to gain), which is the injection-faithful
+invariant for any envelope.
+
+dephasing note: the engine averages the deterministic per-point signal over a
+Lorentzian quasi-static detune ensemble (HWHM Gamma = ``1/T2_star - 1/T2``).  A
+Ramsey free evolution accumulates the un-refocused ensemble phase -> an extra
+``exp(-Gamma*t)`` decay, so a Ramsey fit recovers ``T2_star``; an echo pi pulse
+refocuses every static detune, so an echo fit recovers the homogeneous ``T2`` and
+is insensitive to Gamma.  This is sequence-agnostic: the engine never identifies
+the pulse sequence, the refocusing emerges from the pi flip plus the ensemble
+average alone.
+"""
+
+from __future__ import annotations
+
+import matplotlib
+
+# Headless backend: these tests build figures via the experiments' analyze() but
+# never display them (the autouse _close_matplotlib_figures fixture cleans up).
+matplotlib.use("Agg")
+
+import numpy as np
+import pytest
+from zcu_tools.experiment.v2.twotone.freq import FreqCfg, FreqExp, FreqSweepCfg
+from zcu_tools.experiment.v2.twotone.rabi.amp_rabi import (
+    AmpRabiCfg,
+    AmpRabiExp,
+    AmpRabiSweepCfg,
+)
+from zcu_tools.experiment.v2.twotone.rabi.len_rabi import (
+    LenRabiCfg,
+    LenRabiExp,
+    LenRabiSweepCfg,
+)
+from zcu_tools.experiment.v2.twotone.time_domain.t1 import (
+    T1Cfg,
+    T1Exp,
+    T1ModuleCfg,
+    T1SweepCfg,
+)
+from zcu_tools.experiment.v2.twotone.time_domain.t2echo import (
+    T2EchoCfg,
+    T2EchoExp,
+    T2EchoModuleCfg,
+    T2EchoSweepCfg,
+)
+from zcu_tools.experiment.v2.twotone.time_domain.t2ramsey import (
+    T2RamseyCfg,
+    T2RamseyExp,
+    T2RamseyModuleCfg,
+    T2RamseySweepCfg,
+)
+from zcu_tools.program.v2 import SweepCfg
+from zcu_tools.program.v2.mocksoc import make_mock_soc
+from zcu_tools.program.v2.modules.pulse import PulseCfg
+from zcu_tools.program.v2.modules.readout import DirectReadoutCfg
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg, GaussWaveformCfg
+from zcu_tools.program.v2.sim import SimParams
+from zcu_tools.program.v2.sim.readout import resonator_freqs, value_to_flux
+from zcu_tools.program.v2.twotone import TwoToneModuleCfg
+from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
+
+# Sub-Nyquist operating point (f_qubit ~ 2893 MHz < fs/2 = 3072 MHz) so the
+# frequency fit recovers the predictor value without DAC aliasing.  T1/T2 are a
+# few µs so decay/dephasing are resolvable over modest sweeps; snr is generous
+# and the seed is fixed so the fits are reproducible.
+_SIM = SimParams(
+    EJ=3.0,
+    EC=0.9,
+    EL=0.5,
+    flux_period=1.0,
+    flux_half=0.0,
+    flux_bias=0.1,
+    T1=20.0,
+    T2=10.0,
+    T2_star=10.0,  # T2_star == T2 => gamma=0 (pure homogeneous; preserves existing physics)
+    bare_rf=7.2,
+    g=0.08,
+    Ql=5000.0,
+    Qi=50000.0,
+    snr=300.0,
+    pi_gain_len=0.4,
+    seed=12345,
+)
+
+
+def _predictor() -> FluxoniumPredictor:
+    return FluxoniumPredictor(
+        params=(_SIM.EJ, _SIM.EC, _SIM.EL),
+        flux_half=_SIM.flux_half,
+        flux_period=_SIM.flux_period,
+        flux_bias=_SIM.flux_bias,
+    )
+
+
+def _f_qubit_mhz() -> float:
+    """The qubit 0->1 frequency (MHz) the engine sees at the no-device flux."""
+
+    return float(_predictor().predict_freq(_SIM.flux_bias))
+
+
+def _rf_g_mhz() -> float:
+    """Ground-state dressed resonator frequency (MHz) at the operating flux.
+
+    Reading out near rf_g maximises |g>/|e> contrast so the time-domain decays
+    and the Rabi oscillation are visible in the readout magnitude.
+    """
+
+    flux = value_to_flux(_SIM, _SIM.flux_bias)
+    rf_g, _rf_e = resonator_freqs(_SIM, flux)
+    return rf_g * 1e3
+
+
+def _readout() -> DirectReadoutCfg:
+    return DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=_rf_g_mhz())
+
+
+def _twotone_modules(qub_pulse: PulseCfg) -> TwoToneModuleCfg:
+    return TwoToneModuleCfg(
+        reset=None, init_pulse=None, qub_pulse=qub_pulse, readout=_readout()
+    )
+
+
+def _sim_dephasing(*, T2: float, T2_star: float) -> SimParams:
+    """``_SIM`` clone with a chosen homogeneous/inhomogeneous coherence split.
+
+    ``T2 != T2_star`` makes the inhomogeneous rate Gamma = ``1/T2_star - 1/T2``
+    nonzero, which is what separates the echo (recovers ``T2``) from the Ramsey
+    (recovers ``T2_star``) recovery.  All other physics (operating point, readout,
+    snr, seed) is inherited so the only difference vs the Phase-1 tests is the
+    dephasing split.  ``0 < T2_star <= T2 <= 2*T1`` is enforced by SimParams.
+    """
+
+    return _SIM.model_copy(update={"T2": T2, "T2_star": T2_star})
+
+
+# --------------------------------------------------------------- twotone freq
+
+
+def test_freq_recovers_f_qubit() -> None:
+    """twotone freq fit recovers the predictor's f_qubit at the operating flux.
+
+    Injected: EJ/EC/EL + flux_bias -> a definite f_qubit via FluxoniumPredictor.
+    Recovered: the qubit peak frequency from FreqExp.analyze.  They must agree to
+    within a few MHz (the sweep step is 5 MHz over a +-200 MHz window).
+    """
+
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    f_qubit = _f_qubit_mhz()
+
+    qub_pulse = PulseCfg(
+        ch=0,
+        nqz=1,
+        gain=0.03,  # weak drive -> a narrow, well-localised qubit peak
+        freq=f_qubit,
+        phase=0.0,
+        waveform=ConstWaveformCfg(length=2.0),
+    )
+    cfg = FreqCfg(
+        reps=200,
+        rounds=2,
+        modules=_twotone_modules(qub_pulse),
+        sweep=FreqSweepCfg(
+            freq=SweepCfg(
+                start=f_qubit - 200.0, stop=f_qubit + 200.0, expts=81, step=400.0 / 80
+            )
+        ),
+    )
+
+    exp = FreqExp()
+    result = exp.run(soc, soccfg, cfg)
+    fit_freq, _fwhm, _fig = exp.analyze(result, model_type="lor")
+
+    # Recovered peak == injected/predicted f_qubit within a few sweep steps.
+    assert fit_freq == pytest.approx(f_qubit, abs=10.0)
+
+
+# --------------------------------------------------------------- amp_rabi
+
+
+def test_amp_rabi_recovers_pi_gain() -> None:
+    """amp_rabi fit recovers the pi gain set by pi_gain_len at fixed length L.
+
+    Injected: pi_gain_len (the gain*length product for a pi rotation).  With a
+    fixed const length L, an exact pi rotation needs gain == pi_gain_len / L, so
+    the fitted pi gain must equal that ratio.
+    """
+
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    f_qubit = _f_qubit_mhz()
+
+    length = 0.5
+    expected_pi_gain = _SIM.pi_gain_len / length  # 0.4 / 0.5 == 0.8
+
+    qub_pulse = PulseCfg(
+        ch=0,
+        nqz=1,
+        gain=0.0,  # swept below
+        freq=f_qubit,
+        phase=0.0,
+        waveform=ConstWaveformCfg(length=length),
+    )
+    cfg = AmpRabiCfg(
+        reps=120,
+        rounds=2,
+        modules=_twotone_modules(qub_pulse),
+        sweep=AmpRabiSweepCfg(
+            gain=SweepCfg(start=0.0, stop=1.6, expts=60, step=1.6 / 59)
+        ),
+    )
+
+    exp = AmpRabiExp()
+    result = exp.run(soc, soccfg, cfg)
+    pi_gain, _pi2_gain, _fig = exp.analyze(result)
+
+    # Recovered pi gain == pi_gain_len / length.
+    assert pi_gain == pytest.approx(expected_pi_gain, rel=0.05)
+
+
+# --------------------------------------------------------------- len_rabi
+
+
+def test_len_rabi_recovers_gain_scaling() -> None:
+    """len_rabi Rabi frequency scales linearly with the drive gain.
+
+    The mock soccfg's const length register is too coarse for a hard length
+    sweep to compile, so this uses a gauss pulse (soft-sweep path).  A gauss
+    envelope is area-weighted, so the absolute const formula pi_len ==
+    pi_gain_len/gain does not apply; the injection-faithful invariant that *does*
+    hold for any envelope is that the Rabi frequency is proportional to gain
+    (Omega ∝ gain).  Doubling the gain must double the fitted Rabi frequency and
+    halve the fitted pi length.
+    """
+
+    f_qubit = _f_qubit_mhz()
+
+    def _run(gain: float) -> tuple[float, float]:
+        soc, soccfg = make_mock_soc(sim=_SIM)
+        qub_pulse = PulseCfg(
+            ch=0,
+            nqz=1,
+            gain=gain,
+            freq=f_qubit,
+            phase=0.0,
+            waveform=GaussWaveformCfg(length=0.2, sigma=0.05),
+        )
+        cfg = LenRabiCfg(
+            reps=150,
+            rounds=2,
+            modules=_twotone_modules(qub_pulse),
+            sweep=LenRabiSweepCfg(
+                length=SweepCfg(start=0.05, stop=3.0, expts=25, step=(3.0 - 0.05) / 24)
+            ),
+        )
+        exp = LenRabiExp()
+        result = exp.run(soc, soccfg, cfg)
+        pi_len, _pi2_len, rabi_freq, _fig = exp.analyze(result, decay=False)
+        return pi_len, rabi_freq
+
+    pi_len_lo, freq_lo = _run(0.4)
+    pi_len_hi, freq_hi = _run(0.8)
+
+    # Doubling gain doubles the Rabi frequency (Omega ∝ gain) ...
+    assert freq_hi / freq_lo == pytest.approx(2.0, rel=0.05)
+    # ... and halves the pi length (pi_len ∝ 1/gain).
+    assert pi_len_hi / pi_len_lo == pytest.approx(0.5, rel=0.05)
+
+
+# --------------------------------------------------------------- T1
+
+
+def test_t1_recovers_t1() -> None:
+    """T1 fit recovers the injected SimParams.T1.
+
+    Injected: sim.T1 = 20 µs.  A pi pulse excites the qubit, a swept delay lets
+    it relax, and T1Exp.analyze fits the exponential decay; the fitted T1 must
+    equal the injected value.
+    """
+
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    f_qubit = _f_qubit_mhz()
+
+    # gain * length == pi_gain_len (1.0 * 0.4) is an exact pi rotation.
+    pi_pulse = PulseCfg(
+        ch=0,
+        nqz=1,
+        gain=1.0,
+        freq=f_qubit,
+        phase=0.0,
+        waveform=ConstWaveformCfg(length=0.4),
+    )
+    cfg = T1Cfg(
+        reps=120,
+        rounds=2,
+        modules=T1ModuleCfg(reset=None, pi_pulse=pi_pulse, readout=_readout()),
+        sweep=T1SweepCfg(
+            length=SweepCfg(start=0.0, stop=80.0, expts=30, step=80.0 / 29)
+        ),
+    )
+
+    exp = T1Exp()
+    result = exp.run(soc, soccfg, cfg)
+    t1, _t1err, _fig = exp.analyze(result)
+
+    # Recovered T1 == injected sim.T1 (20 µs).
+    assert t1 == pytest.approx(_SIM.T1, rel=0.05)
+
+
+# --------------------------------------------------------------- T2 Ramsey / echo runners
+#
+# Phase 2 injects an asymmetric coherence split (T2 != T2_star) so the two
+# experiments recover *different* times: Ramsey -> T2_star, echo -> T2.  The run
+# logic is factored into helpers so the value-recover tests and the cross-checks
+# (Gamma-insensitivity, Ramsey-faster-than-echo) share one definition.
+
+# Asymmetric split: 0 < T2_star (8) <= T2 (15) <= 2*T1 (40).  Gamma = 1/8 - 1/15
+# = 0.0583 /µs, large enough to separate Ramsey from echo at this snr/seed.
+_T2_INJECT = 15.0
+_T2_STAR_INJECT = 8.0
+
+
+def _run_ramsey(sim: SimParams, detune: float = 2.0) -> tuple[float, float, float]:
+    """Run T2 Ramsey end to end; return (fitted_decay, fitted_detune, true_detune)."""
+
+    soc, soccfg = make_mock_soc(sim=sim)
+    f_qubit = _f_qubit_mhz()
+    pi2_pulse = PulseCfg(
+        ch=0,
+        nqz=1,
+        gain=1.0,
+        freq=f_qubit,
+        phase=0.0,
+        # gain * length == pi_gain_len / 2 (1.0 * 0.2) is a pi/2 rotation.
+        waveform=ConstWaveformCfg(length=0.2),
+    )
+    cfg = T2RamseyCfg(
+        reps=120,
+        rounds=2,
+        modules=T2RamseyModuleCfg(reset=None, pi2_pulse=pi2_pulse, readout=_readout()),
+        sweep=T2RamseySweepCfg(
+            length=SweepCfg(start=0.0, stop=12.0, expts=100, step=12.0 / 99)
+        ),
+    )
+    exp = T2RamseyExp()
+    # true_detune is the detune after length rounding; the fringe fit recovers it.
+    result, true_detune = exp.run(soc, soccfg, cfg, detune=detune)
+    t2r, _t2rerr, fit_detune, _detune_err, _fig = exp.analyze(result)
+    return t2r, fit_detune, true_detune
+
+
+def _run_echo(sim: SimParams) -> float:
+    """Run T2 echo (on resonance) end to end; return the fitted homogeneous T2."""
+
+    soc, soccfg = make_mock_soc(sim=sim)
+    f_qubit = _f_qubit_mhz()
+    pi2_pulse = PulseCfg(
+        ch=0,
+        nqz=1,
+        gain=1.0,
+        freq=f_qubit,
+        phase=0.0,
+        waveform=ConstWaveformCfg(length=0.2),  # pi/2
+    )
+    pi_pulse = PulseCfg(
+        ch=0,
+        nqz=1,
+        gain=1.0,
+        freq=f_qubit,
+        phase=0.0,
+        waveform=ConstWaveformCfg(length=0.4),  # pi
+    )
+    cfg = T2EchoCfg(
+        reps=120,
+        rounds=2,
+        modules=T2EchoModuleCfg(
+            reset=None, pi2_pulse=pi2_pulse, pi_pulse=pi_pulse, readout=_readout()
+        ),
+        sweep=T2EchoSweepCfg(
+            length=SweepCfg(start=0.0, stop=30.0, expts=40, step=30.0 / 39)
+        ),
+    )
+    exp = T2EchoExp()
+    # Echo runs on resonance (detune=0); the pi pulse refocuses the static detune
+    # regardless, so the engine's ensemble average leaves only the homogeneous T2.
+    result, _true_detune = exp.run(soc, soccfg, cfg, detune=0.0)
+    t2e, _t2eerr, _detune, _detune_err, _fig = exp.analyze(result, fit_method="decay")
+    return t2e
+
+
+def test_t2ramsey_recovers_t2_star_and_detuning() -> None:
+    """T2 Ramsey fit recovers the injected T2_star (not T2) and the detuning.
+
+    Injected: T2 = 15 µs, T2_star = 8 µs (Gamma > 0).  Ramsey does not refocus the
+    Lorentzian static detune, so its envelope decays at the *inhomogeneous* rate
+    -> the fitted decay must equal sim.T2_star (the Lorentzian FID is a pure
+    exponential, so the analyzer's exp fit lands on it).  The fringe frequency
+    must equal the configured (rounding-corrected) detuning.
+    """
+
+    sim = _sim_dephasing(T2=_T2_INJECT, T2_star=_T2_STAR_INJECT)
+    t2r, fit_detune, true_detune = _run_ramsey(sim, detune=2.0)
+
+    # Recovered decay == injected sim.T2_star (8 µs), NOT T2 (15 µs).
+    assert t2r == pytest.approx(sim.T2_star, rel=0.15)
+    # Recovered fringe frequency == the configured (rounding-corrected) detuning.
+    assert fit_detune == pytest.approx(true_detune, rel=0.05)
+
+
+# --------------------------------------------------------------- T2 Echo
+
+
+def test_t2echo_recovers_homogeneous_t2() -> None:
+    """T2 echo recovers the injected homogeneous T2 (not T2_star).
+
+    Injected: T2 = 15 µs, T2_star = 8 µs.  The echo pi pulse refocuses every
+    static detune in the Lorentzian ensemble, so the surviving decay is the
+    homogeneous T2; the fit must land on sim.T2, well above sim.T2_star.  End to
+    end this proves the echo recovery through the genuine run->analyze pipeline.
+    """
+
+    sim = _sim_dephasing(T2=_T2_INJECT, T2_star=_T2_STAR_INJECT)
+    t2e = _run_echo(sim)
+
+    # Recovered decay == injected sim.T2 (15 µs), NOT T2_star (8 µs).
+    assert t2e == pytest.approx(sim.T2, rel=0.1)
+
+
+def test_t2echo_recovery_insensitive_to_gamma() -> None:
+    """Echo recovers the same T2 across two different T2_star (= two Gamma).
+
+    Fixing the homogeneous T2 and sweeping T2_star changes only the inhomogeneous
+    rate Gamma, which the echo pi pulse refocuses away.  The end-to-end echo
+    recovery must therefore barely move between the two splits — the load-bearing
+    proof that the model's refocusing is real and not an artifact of one Gamma.
+    """
+
+    t2e_a = _run_echo(_sim_dephasing(T2=_T2_INJECT, T2_star=8.0))
+    t2e_b = _run_echo(_sim_dephasing(T2=_T2_INJECT, T2_star=5.0))
+
+    # Both recover T2 = 15 µs ...
+    assert t2e_a == pytest.approx(_T2_INJECT, rel=0.1)
+    assert t2e_b == pytest.approx(_T2_INJECT, rel=0.1)
+    # ... and the two recoveries agree with each other despite different Gamma.
+    assert t2e_a == pytest.approx(t2e_b, rel=0.05)
+
+
+def test_ramsey_decays_faster_than_echo() -> None:
+    """Same params: Ramsey recovers a shorter coherence time than echo.
+
+    With T2 > T2_star the un-refocused Ramsey decay (-> T2_star) is faster than the
+    refocused echo decay (-> T2), so the recovered Ramsey time must be strictly
+    below the recovered echo time on the identical operating point.
+    """
+
+    sim = _sim_dephasing(T2=_T2_INJECT, T2_star=_T2_STAR_INJECT)
+    t2r, _fit_detune, _true_detune = _run_ramsey(sim, detune=2.0)
+    t2e = _run_echo(sim)
+
+    assert t2r < t2e

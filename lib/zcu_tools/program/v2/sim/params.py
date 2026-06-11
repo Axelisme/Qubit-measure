@@ -1,0 +1,166 @@
+"""SimParams — physical parameter container for the SimEngine mock simulator.
+
+This module defines only the data container; no simulation logic lives here.
+SimEngine (P1-5) consumes SimParams to drive TLS density-matrix simulation in
+place of real hardware acquisition.
+
+Alignment with params.json (see zcu_tools.notebook.persistance):
+    fluxdep_fit.params["EJ"]  -> SimParams.EJ
+    fluxdep_fit.params["EC"]  -> SimParams.EC
+    fluxdep_fit.params["EL"]  -> SimParams.EL
+    fluxdep_fit.flux_half     -> SimParams.flux_half
+    fluxdep_fit.flux_period   -> SimParams.flux_period
+    fluxdep_fit.flux_int      -> (not used by SimEngine directly; omitted)
+    dispersive.bare_rf        -> SimParams.bare_rf
+    dispersive.g              -> SimParams.g
+
+Alignment with FluxoniumPredictor.__init__ (simulate/fluxonium/predict.py):
+    params  -> (EJ, EC, EL)  passed as a tuple
+    flux_half   -> SimParams.flux_half
+    flux_period -> SimParams.flux_period
+    flux_bias   -> SimParams.flux_bias  (optional, default 0.0)
+"""
+
+from __future__ import annotations
+
+from pydantic import model_validator
+
+from zcu_tools.cfg_model import ConfigBase
+
+
+class SimParams(ConfigBase):
+    """Physical parameters for the TLS Bloch-equation mock simulator.
+
+    All frequency fields are in GHz.  All time fields (T1, T2, T2_star) are in µs.
+    The choice of µs follows the experiment-layer convention used throughout
+    experiment/v2/autofluxdep/{t1,t2echo,t2ramsey}.py.
+
+    Fields
+    ------
+    Qubit physics (fluxonium Hamiltonian):
+        EJ, EC, EL : float
+            Josephson, charging, and inductive energies in GHz.
+
+    Flux alignment:
+        flux_period : float
+            Device-value span corresponding to one full flux quantum.
+        flux_half : float
+            Device value at the half-flux point (Φ = 0.5 Φ₀).
+        flux_bias : float, optional
+            Additional bias added to device value when converting to reduced
+            flux via FluxoniumPredictor.value_to_flux.  Defaults to 0.0.
+
+    Coherence:
+        T1 : float
+            Longitudinal relaxation time in µs.
+        T2 : float
+            Homogeneous (echo) T2 in µs.  This is the T2 an echo experiment
+            recovers.  It captures pure dephasing (homogeneous broadening) via
+            ``1/T2 = 1/(2·T1) + 1/Tφ``.  Upper bound: ``T2 ≤ 2·T1`` (T1 limit).
+        T2_star : float
+            Ramsey T2* in µs.  This is the T2 a Ramsey experiment recovers.
+            Inhomogeneous broadening (quasi-static Lorentzian detuning, refocusable
+            by echo) adds an extra decay rate γ = ``1/T2_star − 1/T2``, so
+            ``T2_star ≤ T2``.  When ``T2_star == T2`` the inhomogeneous rate γ = 0
+            (pure homogeneous limit).
+        thermal_pop : float, optional
+            Thermal excited-state population at equilibrium, in [0, 1].
+            Defaults to 0.0 (zero temperature).
+
+    Readout resonator:
+        bare_rf : float
+            Bare resonator frequency in GHz.
+        g : float
+            Dispersive coupling strength in GHz.
+        Ql : float
+            Loaded quality factor (dimensionless).
+        Qi : float
+            Internal quality factor (dimensionless).  The coupling Q follows
+            from the hanger relation ``1/Qc = 1/Ql - 1/Qi``; dip depth =
+            ``1 - Ql/Qi``.  Must satisfy ``Qi > Ql`` (otherwise Qc ≤ 0,
+            which is unphysical).
+
+    Noise and calibration:
+        snr : float
+            Signal-to-noise ratio per single repetition.  Determines the
+            additive Gaussian noise scale applied to each shot.
+        pi_gain_len : float
+            Gain × length product required for a π rotation (ground truth for
+            both amp_rabi and len_rabi experiments).  SimEngine derives Ω via
+            ``Ω = (π / pi_gain_len) · gain``, so that
+            ``θ = Ω · length = π · gain · length / pi_gain_len``.  The length
+            unit must be consistent with the pulse length unit used in the
+            timeline.
+        seed : int or None, optional
+            RNG seed for reproducible noise.  None means non-deterministic.
+            Defaults to None.
+    """
+
+    # --- qubit Hamiltonian (GHz) ---
+    EJ: float
+    EC: float
+    EL: float
+
+    # --- flux alignment ---
+    flux_period: float
+    flux_half: float
+    flux_bias: float = 0.0
+
+    # --- coherence (µs) ---
+    T1: float
+    # T2: homogeneous (echo) T2; enforced T2 <= 2*T1 by _validate_coherence.
+    T2: float
+    # T2_star: Ramsey T2*; enforced T2_star <= T2 by _validate_coherence.
+    T2_star: float
+    thermal_pop: float = 0.0
+
+    # --- readout resonator (GHz) ---
+    bare_rf: float
+    g: float
+    Ql: float
+    # Qi > Ql enforced by _validate_qi_gt_ql; Qc is derived, not stored.
+    Qi: float
+
+    # --- noise and calibration ---
+    snr: float
+    # pi_gain_len: the gain×length invariant shared by amp_rabi (sweeps gain)
+    # and len_rabi (sweeps length).  SimEngine uses Ω = π/pi_gain_len · gain.
+    pi_gain_len: float
+    seed: int | None = None
+
+    @model_validator(mode="after")
+    def _validate_qi_gt_ql(self) -> SimParams:
+        # Qi > Ql is required so that 1/Qc = 1/Ql - 1/Qi > 0 (physical Qc).
+        if self.Qi <= self.Ql:
+            raise ValueError(
+                f"Qi must be greater than Ql (got Qi={self.Qi}, Ql={self.Ql}); "
+                f"Qi ≤ Ql implies Qc ≤ 0, which is unphysical."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_coherence(self) -> SimParams:
+        # T2 <= 2*T1: the T1-limit sets the ceiling on homogeneous T2.
+        if self.T2 > 2.0 * self.T1:
+            raise ValueError(
+                f"T2 must be <= 2*T1 (got T2={self.T2} µs, T1={self.T1} µs, "
+                f"2*T1={2.0 * self.T1} µs); the T1-limit caps homogeneous T2."
+            )
+        # T2_star <= T2: inhomogeneous broadening can only add decay, never remove it.
+        if self.T2_star > self.T2:
+            raise ValueError(
+                f"T2_star must be <= T2 (got T2_star={self.T2_star} µs, "
+                f"T2={self.T2} µs); inhomogeneous broadening only accelerates decay."
+            )
+        return self
+
+    @property
+    def inhomogeneous_rate(self) -> float:
+        """Inhomogeneous (quasi-static) dephasing rate γ in 1/µs.
+
+        Defined as γ = 1/T2_star − 1/T2.  This is the extra decay rate that
+        echo refocuses but Ramsey cannot: a Lorentzian quasi-static detuning
+        distribution with this half-width at half-maximum.  γ = 0 when
+        T2_star == T2 (pure homogeneous limit).
+        """
+        return 1.0 / self.T2_star - 1.0 / self.T2
