@@ -1,25 +1,28 @@
 """Dispersive readout model — physical quantities to complex IQ signal.
 
-This module converts a qubit's excited-state population ``P_e`` (plus flux and
-readout probe frequency) into a complex IQ readout signal, the way an
-accumulated (averaged) measurement reads out a fluxonium dispersively coupled
+This module converts physical quantities (flux + readout probe frequency, plus
+either an excited-state population ``P_e`` or a chosen state) into a complex IQ
+readout signal, the way a measurement reads out a fluxonium dispersively coupled
 to a hanger resonator.
 
-The accumulated signal is the population-weighted mixture of the two
-state-conditioned resonator responses (see task_plans/mocksim/task_plan.md, P1-4):
+The two state-conditioned responses are the per-shot Bernoulli outcomes the
+engine selects between: ``s21(f_ro; rf_g)`` when the qubit is in |g> and
+``s21(f_ro; rf_e)`` when in |e>.  Their population-weighted mixture (see
+task_plans/mocksim/task_plan.md, P1-4) is the *averaged* readout
 
     signal = S21(f_ro; rf_g) + P_e * [S21(f_ro; rf_e) - S21(f_ro; rf_g)]
 
-This is the physically correct form for an *averaged* readout: the resonator
-sits at ``rf_g`` when the qubit is in |g> and at ``rf_e`` when in |e>, and the
-average over many shots with excited-state probability ``P_e`` is the linear
-blend above. (Per-shot Bernoulli sampling is a Phase 2 concern; this module is
-purely the deterministic physics layer.)
+which :func:`mixed_signal` provides for the accumulated (reps-averaged) path.
+The per-shot Bernoulli sampling itself lives in the engine (it draws state ~
+Bernoulli(P_e) per shot and picks ``s21`` of the chosen state); this module is
+purely the deterministic physics layer — it returns the per-state ``s21`` blobs
+and their blend, never the random draw.
 
 Responsibility boundary: this file only maps *physical quantities -> IQ signal*.
-It does not touch sweeps, timelines, acc_buf assembly, or noise — those belong
-to the lowering / engine layers. All resonator / dispersive / hanger physics is
-delegated to the existing building blocks; no physics is re-implemented here.
+It does not touch sweeps, timelines, acc_buf assembly, noise, or the per-shot
+Bernoulli draw — those belong to the lowering / engine layers. All resonator /
+dispersive / hanger physics is delegated to the existing building blocks; no
+physics is re-implemented here.
 
 The only deviation from the repo-wide Fast-Fail principle is the
 ``DressedLabelingError`` fallback in :func:`resonator_freqs` — see Q3 in

@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-06-11 (mock gen f_dds raised to 12288 MHz; folding is `f mod f_dds`, working set un-folded)
+**Last updated:** 2026-06-11 (reps axis is per-shot Bernoulli two-blob; singleshot get_raw supported, accumulated reps-mean unchanged)
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -12,7 +12,8 @@ Upgrade the mock soc from a white-noise stub into a **physically-realistic**
 data source, so the whole stack (experiment run -> analyze -> recover) can be
 validated end to end offline. A `SimParams` injected into `make_mock_soc(sim=...)`
 makes the mock soc return I/Q that, when fitted by the real experiment analyze
-code, recovers the injected physics (f_qubit, pi gain, T1, T2, detuning).
+code, recovers the injected physics (f_qubit, pi gain, T1, T2, detuning) — and,
+via the per-shot two-blob model, the singleshot |g>/|e> discrimination fidelity.
 
 ## Injection architecture (layer A, hybrid)
 
@@ -34,9 +35,21 @@ For each sweep point the engine drives this chain:
    list of piecewise-constant `bloch.Segment` plus a readout plan,
 2. **evolve** the Bloch vector through those segments (4x4 augmented affine
    propagator via `expm`) to an excited population `P_e`,
-3. **read out** dispersively: the accumulated signal is the population-weighted
-   mixture `S21(rf_g) + P_e * [S21(rf_e) - S21(rf_g)]`, where `rf_g` / `rf_e`
-   are the dressed resonator frequencies at the operating flux.
+3. **read out** dispersively as two state-conditioned blobs — `s_g = S21(rf_g)`
+   (qubit in |g>) and `s_e = S21(rf_e)` (qubit in |e>) — where `rf_g` / `rf_e`
+   are the dressed resonator frequencies at the operating flux; the reps axis
+   then draws a per-shot `Bernoulli(P_e)` to pick `s_e` (excited) else `s_g`.
+
+**One unified path serves accumulated and singleshot.** The per-shot Bernoulli
+is not gated on any "singleshot mode": its reps-mean is
+`(1−P_e)·s_g + P_e·s_e == S21(rf_g) + P_e·[S21(rf_e) − S21(rf_g)]` (the
+`mixed_signal` blend), so the accumulated (reps-averaged) readout is **unchanged**
+(zero regression), while `get_raw` exposes the two Gaussian blobs a singleshot
+experiment classifies (`GE_Exp` → PCA + histogram on the host). The accumulated
+path now carries genuine shot noise `~ sqrt(P_e(1−P_e)/reps)`, so a slow
+low-contrast fit (e.g. echo T2) needs enough reps to average it down — only reps
+(not snr, which scales the Gaussian readout noise) suppresses the Bernoulli shot
+noise.
 
 The qubit frequency `f_qubit` and the dressed resonator frequencies come from the
 existing fluxonium physics (`FluxoniumPredictor`, `calculate_dispersive_vs_flux_fast`,
@@ -63,16 +76,21 @@ a per-point operating flux would have to move that call back into the loop.
   selection, and the dmem (non-uniform T1) register indirection. Does NOT compute
   f_qubit, acc_buf, noise, S21, or the detune ensemble (the engine owns that).
 - `readout.py` — dispersive readout: physical quantities -> complex IQ.
-  `resonator_freqs` is the eigensolve (flux -> `rf_g` / `rf_e`); `mixed_signal`
-  is the pure, eigh-free S21 blend that *takes* `rf_g` / `rf_e` (so the engine can
-  call it per point after computing the dressed freqs once). Also `value_to_flux`,
-  `s21`. No sweeps / timelines / acc_buf / noise.
+  `resonator_freqs` is the eigensolve (flux -> `rf_g` / `rf_e`); `s21` is the pure,
+  eigh-free per-state hanger response (the engine calls it twice per point for the
+  `s_g` / `s_e` blobs), and `mixed_signal` is the population-weighted blend (the
+  accumulated reps-mean) — both *take* `rf_g` / `rf_e` (so the engine computes the
+  dressed freqs once). Also `value_to_flux`. No sweeps / timelines / acc_buf /
+  noise / the per-shot Bernoulli draw (the engine owns that).
 - `engine.py` — `SimEngine`: glue. Pins the operating point at reduced flux
   `Phi/Phi0 = 1.0` (R-3; no longer derived from the cfg `dev` map), computes
   f_qubit AND `rf_g` / `rf_e` there ONCE (flux-constant), drives lowering -> bloch
-  -> readout, lays the per-point IQ into the QICK `(*loop_dims, nreads, 2)` int64
-  buffer, and adds per-shot Gaussian noise (snr / reps / rounds / seed; fresh noise
-  per round so software-averaging works). Owns the Lorentzian quasi-static detune
+  -> readout, caches the deterministic `(s_g, s_e, p_e)` blob grids, and per round
+  draws a per-shot `Bernoulli(p_e)` to select a blob and adds per-shot Gaussian
+  noise into the QICK `(*loop_dims, nreads, 2)` int64 buffer (snr / reps / rounds /
+  seed; fresh Bernoulli + noise per round so software-averaging works). The
+  reps-mean is the accumulated `mixed_signal` blend (zero regression); `get_raw`
+  sees the two blobs. Owns the Lorentzian quasi-static detune
   ensemble: it averages `P_e` over a deterministic Gauss-Legendre quadrature in `δ`
   (lowering applies each node as a frame shift via `detune_offset`), so T2\* emerges
   without identifying sequences. A *driveless* timeline (no qubit pulse, e.g. pure
@@ -122,9 +140,19 @@ a per-point operating flux would have to move that call back into the loop.
   ambiguous, `resonator_freqs` degrades deterministically to "no dispersive
   shift" (`rf_g = rf_e = bare_rf`) and warns, rather than crashing — a real
   measurement never raises at that physics edge.
-- **Q1 — noise model.** `snr` is per single repetition; fresh noise is drawn each
-  round so averaging over reps*rounds improves the effective SNR by
+- **Q1 — noise model.** `snr` is per single repetition; fresh Gaussian noise is
+  drawn each round so averaging over reps*rounds improves the effective SNR by
   `sqrt(reps*rounds)`, as on hardware.
+- **Per-shot Bernoulli (singleshot) — one unified path.** The reps axis draws a
+  per-shot `Bernoulli(P_e)` selecting the `s_g` / `s_e` blob, not a broadcast
+  mean; this is *not* gated on a singleshot mode. Its reps-mean is the
+  `mixed_signal` blend, so the accumulated readout is unchanged, while `get_raw`
+  exposes two Gaussian blobs (`GE_Exp` classifies them host-side via PCA +
+  histogram). Two consequences: (1) the accumulated path now carries genuine shot
+  noise `~ sqrt(P_e(1−P_e)/reps)`, so slow low-contrast fits (echo T2) need enough
+  reps to average it down — only reps, not snr, suppresses it; (2) a DEFAULT
+  snr=300 fully separates the blobs (fidelity ~ 1), so a *meaningful* singleshot
+  fidelity test must lower snr (~5–10) to overlap the blobs.
 
 ## Mock soccfg gotchas (when driving real experiments)
 
@@ -155,10 +183,14 @@ a per-point operating flux would have to move that call back into the loop.
 - `test_params.py`, `test_readout.py`, `test_lowering.py` — per-layer unit tests.
 - `test_engine.py` — engine assembly + acquire dispatch (feature *shape*: D1
   regression, peak/dip, oscillation, decay, fringes, round hook, decimated trace),
-  the Lorentzian dephasing gates (quadrature reproduces the analytic FID, echo
-  refocuses to T2, Ramsey decays faster, Γ=0 zero-regression), and a deterministic
-  Branch smoke.
+  the singleshot per-shot blobs (get_raw clusters on the |g>/|e> centres, pi/2 puts
+  ~half on the excited blob, reps-mean == accumulated readout), the Lorentzian
+  dephasing gates (quadrature reproduces the analytic FID, echo refocuses to T2,
+  Ramsey decays faster, Γ=0 zero-regression), and a deterministic Branch smoke. The
+  coherence-envelope helpers run at `reps=2000` to average the per-shot shot noise.
 - `test_integration.py` — cross-experiment inject -> recover: real experiment
   `run` + `analyze` recover the injected f_qubit / pi gain / gain scaling / T1 /
-  T2 + detuning, plus the dephasing proof (echo -> T2 and Γ-insensitive, Ramsey ->
-  T2\*, Ramsey faster than echo).
+  T2 + detuning, the dephasing proof (echo -> T2 and Γ-insensitive, Ramsey -> T2\*,
+  Ramsey faster than echo), and the singleshot `GE_Exp` recover (low snr -> blob
+  centres / preparation populations / a real discrimination fidelity that improves
+  with snr). The echo recovery runs at `reps=2000` to average the shot noise.

@@ -62,6 +62,7 @@ from zcu_tools.experiment.v2.lookback import (
     LookbackExp,
     LookbackModuleCfg,
 )
+from zcu_tools.experiment.v2.singleshot.ge import GE_Cfg, GE_Exp, GEModuleCfg
 from zcu_tools.experiment.v2.twotone.freq import FreqCfg, FreqExp, FreqSweepCfg
 from zcu_tools.experiment.v2.twotone.rabi.amp_rabi import (
     AmpRabiCfg,
@@ -97,7 +98,8 @@ from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import DirectReadoutCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg, GaussWaveformCfg
 from zcu_tools.program.v2.sim import SimParams
-from zcu_tools.program.v2.sim.readout import resonator_freqs
+from zcu_tools.program.v2.sim.engine import _FULL_SCALE
+from zcu_tools.program.v2.sim.readout import resonator_freqs, s21
 from zcu_tools.program.v2.twotone import TwoToneModuleCfg
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
@@ -421,8 +423,14 @@ def _run_echo(sim: SimParams) -> float:
         phase=0.0,
         waveform=ConstWaveformCfg(length=0.4),  # pi
     )
+    # reps is high (2000) because the engine now draws a per-shot Bernoulli(P_e)
+    # so the accumulated readout carries genuine shot noise ~ sqrt(P_e(1-P_e)/reps).
+    # The echo decay is slow (T2 ~ 15 µs) with little contrast in its tail, so the
+    # exp fit is sensitive to that shot noise; reps=2000 averages it down enough to
+    # recover T2 (snr — the Gaussian readout noise — does not help here, only reps
+    # suppresses the Bernoulli shot noise).
     cfg = T2EchoCfg(
-        reps=120,
+        reps=2000,
         rounds=2,
         modules=T2EchoModuleCfg(
             reset=None, pi2_pulse=pi2_pulse, pi_pulse=pi_pulse, readout=_readout()
@@ -555,3 +563,119 @@ def test_lookback_recovers_timefly_as_trig_offset() -> None:
     # The rising edge sits at program-time == timeFly; analyze returns the last
     # sub-threshold time before the magnitude peak, i.e. just before timeFly.
     assert offset == pytest.approx(_SIM.timeFly, abs=0.1)
+
+
+# --------------------------------------------------------------- singleshot GE
+
+
+def _ge_readout() -> PulseReadoutCfg:
+    """A PulseReadout at rf_g (GE_Exp needs a PulseReadout, not a DirectReadout)."""
+
+    ro = _rf_g_mhz()
+    return PulseReadoutCfg(
+        pulse_cfg=PulseCfg(
+            ch=0,
+            nqz=1,
+            gain=0.1,
+            freq=ro,
+            phase=0.0,
+            waveform=ConstWaveformCfg(length=1.0),
+        ),
+        ro_cfg=DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=ro, trig_offset=0.0),
+    )
+
+
+def _run_ge(
+    snr: float, shots: int = 5000
+) -> tuple[float, np.ndarray, complex, complex]:
+    """Run GE_Exp end to end on a low-snr sim soc; return the recovered analysis.
+
+    Returns ``(fidelity, populations, g_center, e_center)`` from
+    ``GE_Exp.analyze(backend='pca')``.  ``snr`` is lowered (the DEFAULT snr=300
+    fully separates the blobs so the fidelity is trivially ~1); a small snr makes
+    the |g>/|e> blobs overlap so the discrimination fidelity is meaningful.
+    """
+
+    sim = _SIM.model_copy(update={"snr": snr})
+    soc, soccfg = make_mock_soc(sim=sim)
+    f_qubit = _f_qubit_mhz()
+
+    # pi probe (gain*length == pi_gain_len) prepares |e> on the with-probe scan.
+    probe = PulseCfg(
+        ch=0,
+        nqz=1,
+        gain=1.0,
+        freq=f_qubit,
+        phase=0.0,
+        waveform=ConstWaveformCfg(length=_SIM.pi_gain_len),
+    )
+    cfg = GE_Cfg(
+        reps=1,
+        rounds=1,
+        shots=shots,
+        modules=GEModuleCfg(
+            reset=None, init_pulse=None, probe_pulse=probe, readout=_ge_readout()
+        ),
+    )
+    exp = GE_Exp()
+    result = exp.run(soc, soccfg, cfg)
+    fid, pops, fit, _fig = exp.analyze(result, backend="pca")
+    return fid, pops, fit["g_center"], fit["e_center"]
+
+
+def _expected_ge_centers() -> tuple[complex, complex]:
+    """The |g>/|e> blob centres in GE analyze (avgiq) units.
+
+    GE_Exp divides the raw per-shot acc_buf by the readout window length, so a
+    fully-polarised cluster sits at ``_FULL_SCALE * S21(rf_g; rf_X) / length``.
+    The mock readout window length at ro_length=1.0 is 307 samples.
+    """
+
+    rf_g, rf_e = resonator_freqs(_SIM, _OPERATING_FLUX)
+    freqs = np.array([_rf_g_mhz() * 1e-3], dtype=np.float64)  # probe at rf_g
+    length = 307  # compiled mock readout window at ro_length=1.0
+    g = _FULL_SCALE * complex(s21(_SIM, freqs, rf_g)[0]) / length
+    e = _FULL_SCALE * complex(s21(_SIM, freqs, rf_e)[0]) / length
+    return g, e
+
+
+def test_ge_recovers_centers_population_and_fidelity() -> None:
+    """GE_Exp run + analyze recover the injected blob centres, populations, fidelity.
+
+    A low snr (the blobs overlap) drives a genuine PCA + histogram discrimination
+    through the real GE_Exp.run -> analyze path:
+
+      - the recovered g_center / e_center land on the deterministic blob centres
+        ``_FULL_SCALE * S21(rf_g / rf_e) / length`` (the two per-shot Bernoulli
+        outcomes the engine produces),
+      - the populations track the preparation: the no-probe scan is mostly |g>,
+        the pi-probe scan is mostly |e>,
+      - the fidelity is a real (non-trivial) discrimination value in (0.5, 1.0)
+        and improves with snr (less blob overlap).
+    """
+
+    g_expected, e_expected = _expected_ge_centers()
+    blob_dist = abs(g_expected - e_expected)
+
+    fid_lo, pops_lo, g_lo, e_lo = _run_ge(snr=5.0)
+    fid_hi, pops_hi, g_hi, e_hi = _run_ge(snr=10.0)
+
+    # Recovered centres land on the deterministic blob centres (assignment of the
+    # fit's g/e to the physical g/e may flip, so match as an unordered pair).
+    def _matches(g_fit: complex, e_fit: complex) -> bool:
+        direct = abs(g_fit - g_expected) + abs(e_fit - e_expected)
+        flipped = abs(g_fit - e_expected) + abs(e_fit - g_expected)
+        return min(direct, flipped) < 0.3 * blob_dist
+
+    assert _matches(g_hi, e_hi)
+
+    # Populations track the preparation: pops[0] is the no-probe (ground) scan,
+    # pops[1] the pi-probe (excited) scan; each row is [P(measured g), P(measured e)].
+    # The no-probe row is mostly ground, the pi-probe row mostly excited.
+    assert pops_hi[0, 0] > pops_hi[0, 1]  # no-probe: more ground than excited
+    assert pops_hi[1, 1] > pops_hi[1, 0]  # pi-probe: more excited than ground
+
+    # Fidelity is a real discrimination value in (0.5, 1.0) and improves with snr.
+    assert 0.5 < fid_lo < 1.0
+    assert 0.5 < fid_hi <= 1.0
+    assert fid_hi > fid_lo

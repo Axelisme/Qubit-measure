@@ -7,7 +7,10 @@ Covers:
   (twotone freq, amp_rabi, T1, T2 ramsey) produces physically-structured data,
   not white noise — a peak/dip at f_qubit, gain-driven Rabi oscillation, a T1
   decay, and Ramsey fringes.
-- Singleshot get_raw shape ``(reps, 1, 2)`` is usable on the sim path.
+- Singleshot get_raw shape ``(reps, 1, 2)`` is usable on the sim path, and the
+  per-shot Bernoulli blobs are correct: the shots cluster on the |g>/|e> blob
+  centres set by the init pulse, a pi/2 pulse puts ~half on the excited blob, and
+  the reps-mean of the blobs equals the accumulated readout (zero-regression).
 - round_hook is invoked once per round.
 - acquire_decimated on a sim soc returns a physically-structured time-domain
   trace (model A): a timeFly-shifted readout envelope, ~0 before timeFly.
@@ -22,6 +25,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.program.v2.modular import ModularProgramV2
@@ -32,7 +36,8 @@ from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import DirectReadoutCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.sim import SimParams
-from zcu_tools.program.v2.sim.readout import resonator_freqs
+from zcu_tools.program.v2.sim.engine import _FULL_SCALE
+from zcu_tools.program.v2.sim.readout import mixed_signal, resonator_freqs, s21
 from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.program.v2.utils import sweep2param
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
@@ -468,6 +473,161 @@ def test_engine_singleshot_get_raw_shape():
     assert raw[0].dtype == np.int64
 
 
+def _expected_blob_centers(ro_freq_mhz: float) -> tuple[complex, complex]:
+    """The two per-shot blob centres ``(g_center, e_center)`` in raw ADC units.
+
+    The engine reads out at probe frequency ``ro_freq_mhz`` and lays out a shot
+    on either the |g>-conditioned blob ``_FULL_SCALE * S21(f_ro; rf_g)`` or the
+    |e>-conditioned blob ``_FULL_SCALE * S21(f_ro; rf_e)``.  These are the exact
+    deterministic centres a noiseless, fully-polarised population would produce,
+    so the singleshot get_raw clusters must land on them.
+    """
+
+    rf_g, rf_e = resonator_freqs(_SIM, _OPERATING_FLUX)
+    freqs = np.array([ro_freq_mhz * 1e-3], dtype=np.float64)  # MHz -> GHz
+    s_g = complex(s21(_SIM, freqs, rf_g)[0])
+    s_e = complex(s21(_SIM, freqs, rf_e)[0])
+    return _FULL_SCALE * s_g, _FULL_SCALE * s_e
+
+
+def _singleshot_raw(
+    *, gain: float, length: float, reps: int = 4000
+) -> NDArray[np.complex128]:
+    """Run a no-sweep init-pulse + readout and return the per-shot signals.
+
+    A const pulse of (gain, length) sets the excited population P_e, then a single
+    readout at rf_g is taken; the returned complex array has one entry per rep
+    (the singleshot get_raw IQ at integration full scale).
+    """
+
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    f_qubit = _f_qubit_mhz()
+    ro_freq = _rf_g_mhz()
+
+    modules: list[Module] = [_readout(ro_freq)]
+    if gain > 0.0:
+        pulse = PulseCfg(
+            ch=0,
+            nqz=1,
+            gain=gain,
+            freq=f_qubit,
+            phase=0.0,
+            waveform=ConstWaveformCfg(length=length),
+        ).build("init")
+        modules = [pulse, *modules]
+
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=reps, rounds=1),
+        modules=modules,
+    )
+    prog.acquire(soc, progress=False)
+
+    raw = prog.get_raw()
+    assert raw is not None
+    iq = raw[0]  # (reps, 1, 2)
+    return iq[:, 0, 0] + 1j * iq[:, 0, 1]  # (reps,)
+
+
+def test_engine_singleshot_two_blobs_centers():
+    """get_raw shots cluster on the |g> / |e> blob centres set by the init pulse.
+
+    A pi pulse (gain*length == pi_gain_len) drives P_e ~ 1, so essentially every
+    shot lands on the |e> blob ``_FULL_SCALE * S21(rf_g; rf_e)``; with no pulse
+    P_e ~ thermal ~ 0, so the shots land on the |g> blob ``_FULL_SCALE *
+    S21(rf_g; rf_g)``.  The cluster medians (robust to the few mis-prepared shots
+    and the Gaussian readout noise) must match the deterministic blob centres.
+    """
+
+    g_center, e_center = _expected_blob_centers(_rf_g_mhz())
+
+    # pi pulse: gain * length == pi_gain_len (0.4) => a full pi rotation => P_e ~ 1.
+    excited = _singleshot_raw(gain=1.0, length=_SIM.pi_gain_len)
+    excited_med = np.median(excited.real) + 1j * np.median(excited.imag)
+
+    # No pulse: P_e ~ thermal_pop ~ 0 => the |g> blob.
+    ground = _singleshot_raw(gain=0.0, length=0.0)
+    ground_med = np.median(ground.real) + 1j * np.median(ground.imag)
+
+    blob_dist = abs(g_center - e_center)
+    # Each cluster median lands on its blob centre, within a small fraction of the
+    # inter-blob distance (median is robust to noise + the few mis-prepared shots).
+    assert abs(excited_med - e_center) < 0.15 * blob_dist
+    assert abs(ground_med - g_center) < 0.15 * blob_dist
+
+
+def test_engine_singleshot_population_ratio():
+    """A pi/2 pulse puts ~half the shots on the |e> blob (P_e ~ 0.5).
+
+    gain * length == pi_gain_len / 2 is a pi/2 rotation, so P_e ~ 0.5: classifying
+    each shot by which blob centre it is nearer must give ~50% on the excited
+    blob.  This is the per-shot Bernoulli population coming through get_raw.
+    """
+
+    g_center, e_center = _expected_blob_centers(_rf_g_mhz())
+
+    # pi/2: gain * length == pi_gain_len / 2 (1.0 * 0.2).
+    signals = _singleshot_raw(gain=1.0, length=_SIM.pi_gain_len / 2.0)
+
+    # Classify each shot by the nearer blob centre.
+    d_g = np.abs(signals - g_center)
+    d_e = np.abs(signals - e_center)
+    frac_excited = float(np.mean(d_e < d_g))
+
+    assert frac_excited == pytest.approx(0.5, abs=0.05)
+
+
+def test_engine_singleshot_accumulated_mean_invariant():
+    """The reps-mean of the per-shot blobs equals the accumulated readout.
+
+    This is the load-bearing zero-regression invariant: averaging the two per-shot
+    Bernoulli blobs over reps must reproduce the deterministic accumulated readout
+    the old path broadcast directly.  Run the *same* pi/2 program twice on the same
+    sim soc — once read shot-by-shot via get_raw, once read averaged via acquire —
+    and check the get_raw reps-mean lands on the acquire value.  Deriving the
+    reference from acquire (rather than an assumed P_e) makes this test the pure
+    blob-averaging invariant, independent of the exact pi/2 calibration.
+    """
+
+    reps = 20000
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    f_qubit = _f_qubit_mhz()
+    ro_freq = _rf_g_mhz()
+
+    pulse = PulseCfg(
+        ch=0,
+        nqz=1,
+        gain=1.0,
+        freq=f_qubit,
+        phase=0.0,
+        waveform=ConstWaveformCfg(length=_SIM.pi_gain_len / 2.0),  # pi/2
+    ).build("init")
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=reps, rounds=1),
+        modules=[pulse, _readout(ro_freq)],
+    )
+
+    # acquire averages over reps then divides the per-shot acc by the readout
+    # window length, so ``acquire_value * length`` is the per-shot reps-mean.
+    acc = prog.acquire(soc, progress=False)[0]  # (nreads, 2)
+    length = list(prog.ro_chs.values())[0]["length"]
+    acc_reps_mean = (acc[0, 0] + 1j * acc[0, 1]) * length
+
+    # get_raw exposes the same run's per-shot blobs; their reps-mean must match.
+    raw = prog.get_raw()
+    assert raw is not None
+    signals = raw[0][:, 0, 0] + 1j * raw[0][:, 0, 1]  # (reps,)
+    reps_mean = np.mean(signals.real) + 1j * np.mean(signals.imag)
+
+    g_center, e_center = _expected_blob_centers(ro_freq)
+    blob_dist = abs(g_center - e_center)
+    # The acquire value (rescaled to raw ADC units) and the get_raw reps-mean are
+    # the same quantity computed two ways; they agree to within the shot-noise
+    # floor (~ blob_dist * sqrt(0.25 / reps) ~ 0.0035 * blob_dist at reps=20000).
+    assert abs(reps_mean - acc_reps_mean) < 0.02 * blob_dist
+
+
 # -------------------------------------------------------------------- round hook
 
 
@@ -625,6 +785,15 @@ def test_engine_acquire_decimated_returns_timefly_shifted_trace():
 # to the Phase-1 single-eval path bit-for-bit.
 
 
+# reps for the coherence-envelope helpers.  The engine now draws a per-shot
+# Bernoulli(P_e), so the accumulated readout carries shot noise ~
+# sqrt(P_e(1-P_e)/reps) even at snr=1e9 (snr only scales the Gaussian readout
+# noise, not the Bernoulli shot noise).  reps=1 (the old single-eval path) would
+# return a raw 0/1 blob, not the mean; 2000 reps averages the shot noise down so
+# the reps-mean is the deterministic coherence envelope these gates read.
+_ENVELOPE_REPS = 2000
+
+
 def _sim_with_dephasing(*, T2: float, T2_star: float, snr: float = 1.0e9) -> SimParams:
     """A _SIM clone with a chosen homogeneous/inhomogeneous split.
 
@@ -673,7 +842,7 @@ def _echo_envelope(sim: SimParams, stop: float, expts: int) -> np.ndarray:
 
     prog = ModularProgramV2(
         soccfg,
-        ProgramV2Cfg(reps=1, rounds=1),
+        ProgramV2Cfg(reps=_ENVELOPE_REPS, rounds=1),
         modules=[
             pi_half("p1"),
             Delay("w1", delay=half),
@@ -714,7 +883,7 @@ def _ramsey_envelope(sim: SimParams, stop: float, expts: int) -> np.ndarray:
 
     prog = ModularProgramV2(
         soccfg,
-        ProgramV2Cfg(reps=1, rounds=1),
+        ProgramV2Cfg(reps=_ENVELOPE_REPS, rounds=1),
         modules=[
             pi_half("p1"),
             Delay("wait", delay=delay),

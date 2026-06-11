@@ -21,10 +21,14 @@ acc_buf layout (the load-bearing invariant)
 A compiled ``AveragerProgramV2`` has ``loop_dims = [reps, sweep0, sweep1, ...]``
 (reps outermost, ``avg_level == 0``).  The accumulated path fills, for each
 readout channel, an array of shape ``(*loop_dims, nreads, 2)`` of int64, in flat
-C-order time sequence.  The engine computes one *deterministic* complex IQ value
-per (sweep-point, read) — identical across reps for an averaged readout (per-shot
-Bernoulli sampling is a Phase-2 concern) — then broadcasts across the reps axis
-and adds independent per-shot noise.
+C-order time sequence.  The engine computes two *deterministic* complex blobs per
+(sweep-point, read) — the |g>- and |e>-conditioned readout ``s_g`` / ``s_e`` —
+plus the excited population ``p_e``, then draws a per-shot Bernoulli(``p_e``)
+across the reps axis to select between the blobs and adds independent per-shot
+noise.  This single unified path serves both the accumulated readout (its
+reps-mean is ``(1−p_e)·s_g + p_e·s_e``, the averaged dispersive signal) and
+singleshot ``get_raw`` (which sees the two Gaussian blobs) — no singleshot-mode
+detection.
 
 Noise model
 -----------
@@ -58,7 +62,7 @@ from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 from . import bloch
 from .lowering import LoweredPoint, _resolve_scalar, lower_point
 from .params import SimParams
-from .readout import decimated_trace, mixed_signal, resonator_freqs
+from .readout import decimated_trace, resonator_freqs, s21
 
 logger = logging.getLogger(__name__)
 
@@ -142,9 +146,15 @@ class SimEngine:
         self.program = program
         self.sim = sim
 
-        # Deterministic raw-IQ grid (reps-broadcast, no noise), built lazily on
-        # the first compute_round and reused across rounds; None until then.
-        self._det_full: NDArray[np.float64] | None = None
+        # Deterministic per-(sweep-point, read) blob grids ``(s_g, s_e, p_e)``,
+        # each of shape ``(*sweep, nreads)``, built lazily on the first
+        # compute_round and reused across rounds; None until then.  Bernoulli
+        # sampling and noise are NOT cached here — they are redrawn per round
+        # (the docstring's "deterministic grid" invariant).
+        self._det_grids: (
+            tuple[NDArray[np.complex128], NDArray[np.complex128], NDArray[np.float64]]
+            | None
+        ) = None
 
         # Flux-constant operating point (f_qubit, rf_g, rf_e), computed once and
         # shared by the accumulated and decimated paths; None until first use.
@@ -193,13 +203,25 @@ class SimEngine:
 
     def _signal_grid(
         self, f_qubit_ghz: float, rf_g: float, rf_e: float
-    ) -> NDArray[np.complex128]:
-        """Compute the deterministic per-(sweep-point, read) complex IQ grid.
+    ) -> tuple[NDArray[np.complex128], NDArray[np.complex128], NDArray[np.float64]]:
+        """Compute the deterministic per-(sweep-point, read) blob grids.
 
-        Returns an array of shape ``(*sweep_dims, nreads)`` of complex IQ values
-        (one readout channel; multi-channel sim is out of scope — the engine
-        asserts a single readout channel).  Each entry is the population-weighted
-        dispersive readout signal at that sweep point.
+        Returns ``(s_g_grid, s_e_grid, p_e_grid)``, each of shape
+        ``(*sweep_dims, nreads)`` (one readout channel; multi-channel sim is out
+        of scope — the engine asserts a single readout channel):
+
+          - ``s_g_grid`` / ``s_e_grid`` are the |g>- / |e>-conditioned complex
+            readout blobs (``S21(f_ro; rf_g)`` / ``S21(f_ro; rf_e)``) — the two
+            per-shot Bernoulli outcomes,
+          - ``p_e_grid`` is the (ensemble-averaged) excited population at each
+            point, the Bernoulli probability that a shot lands on the ``s_e``
+            blob.
+
+        ``compute_round`` draws per-shot Bernoulli(``p_e``) and selects between
+        ``s_g`` / ``s_e``; the reps-mean is ``(1−p_e)·s_g + p_e·s_e ==
+        mixed_signal``, so the accumulated readout is unchanged while singleshot
+        ``get_raw`` sees two distinct Gaussian blobs (single unified path, no
+        singleshot-mode detection).
 
         ``rf_g`` / ``rf_e`` are the dressed resonator frequencies at the (fixed)
         operating flux; the caller computes them once and passes them in, so the
@@ -211,20 +233,34 @@ class SimEngine:
         sweep_dims = tuple(count for _, count in axes)
         nreads = self._nreads()
 
-        grid = np.empty((*sweep_dims, nreads), dtype=np.complex128)
+        s_g_grid = np.empty((*sweep_dims, nreads), dtype=np.complex128)
+        s_e_grid = np.empty((*sweep_dims, nreads), dtype=np.complex128)
+        p_e_grid = np.empty((*sweep_dims, nreads), dtype=np.float64)
 
         index_ranges = [range(count) for _, count in axes]
         for multi_index in itertools.product(*index_ranges):
             point = {name: idx for (name, _), idx in zip(axes, multi_index)}
-            iq = self._point_signal(point, f_qubit_ghz, rf_g, rf_e)
-            grid[(*multi_index, slice(None))] = iq
+            s_g, s_e, p_e = self._point_signal(point, f_qubit_ghz, rf_g, rf_e)
+            idx = (*multi_index, slice(None))
+            s_g_grid[idx] = s_g
+            s_e_grid[idx] = s_e
+            p_e_grid[idx] = p_e
 
-        return grid
+        return s_g_grid, s_e_grid, p_e_grid
 
     def _point_signal(
         self, point: dict[str, int], f_qubit_ghz: float, rf_g: float, rf_e: float
-    ) -> complex:
-        """Deterministic complex IQ at one sweep point (single unified path).
+    ) -> tuple[NDArray[np.complex128], NDArray[np.complex128], float]:
+        """Deterministic readout blobs at one sweep point (single unified path).
+
+        Returns ``(s_g, s_e, p_e)`` where ``s_g`` / ``s_e`` are the |g>- / |e>-
+        conditioned complex readout blobs at this point's probe frequency
+        (``S21(f_ro; rf_g)`` / ``S21(f_ro; rf_e)``, length-``nreads`` arrays) and
+        ``p_e`` is the (ensemble-averaged) excited population (a scalar).  These
+        are the two per-shot Bernoulli outcomes plus its probability; the engine
+        selects between them per shot in :meth:`compute_round`, and the reps-mean
+        ``(1−p_e)·s_g + p_e·s_e`` equals the accumulated ``mixed_signal`` blend
+        exactly (the invariant that keeps the averaged readout unchanged).
 
         Every sweep point follows the *same* physics: lower the module tree,
         evolve the Bloch timeline to an excited population ``P_e``, and read out
@@ -246,19 +282,19 @@ class SimEngine:
         sweep index — so a swept readout frequency flows through naturally
         without the engine branching on it.
 
-        Under the Lorentzian quasi-static detune model the observed signal is the
-        *ensemble average* over the static detune δ.  The dispersive readout
-        ``signal = S21(rf_g) + P_e·[S21(rf_e) − S21(rf_g)]`` is linear in
-        ``P_e``, so averaging ``P_e`` over the ensemble and feeding the mean into
-        ``mixed_signal`` once is exactly equal to (and cheaper than) averaging the
-        complex signal — we average ``P_e``.  An echo π flip refocuses each δ; a
-        Ramsey free evolution does not, so the extra ``exp(−Γt)`` decay (→ T2*)
-        emerges from this average without the engine identifying the sequence.
-        The ``f_ro`` is δ-independent, so it is read once from the δ=0 lowering.
+        Under the Lorentzian quasi-static detune model the observed population is
+        the *ensemble average* over the static detune δ.  Because the readout is
+        linear in ``P_e``, averaging ``P_e`` over the ensemble (then drawing the
+        per-shot Bernoulli with that mean ``p_e``) is exactly equal to averaging
+        the dispersive signal — so the engine averages ``P_e``.  An echo π flip
+        refocuses each δ; a Ramsey free evolution does not, so the extra
+        ``exp(−Γt)`` decay (→ T2*) emerges from this average without the engine
+        identifying the sequence.  The ``f_ro`` is δ-independent, so it is read
+        once from the δ=0 lowering.
 
         ``rf_g`` / ``rf_e`` are the flux-constant dressed resonator frequencies
-        the caller computed once; they are fed straight into ``mixed_signal``, so
-        no fluxonium eigensolve runs per point.
+        the caller computed once; they are fed straight into ``s21``, so no
+        fluxonium eigensolve runs per point.
         """
 
         # δ=0 lowering supplies this point's f_ro (δ never affects readout) and
@@ -294,15 +330,19 @@ class SimEngine:
                 p_e = bloch.excited_population(v_final)
                 # Bloch keeps z in [-1, 1] (CPTP), but matrix-exponential round-off
                 # can nudge p_e a hair outside [0, 1]; clamp each node before
-                # averaging (mixed_signal Fast-fails on out-of-range p_e).
+                # averaging (the Bernoulli probability must stay in [0, 1]).
                 p_e_mean += float(weight) * float(np.clip(p_e, 0.0, 1.0))
         else:
             v_final = bloch.evolve(v0, zero_lowered.segments)
             p_e_mean = float(np.clip(bloch.excited_population(v_final), 0.0, 1.0))
 
+        # The two per-shot blobs: the |g>- and |e>-conditioned dispersive readout
+        # at this point's probe frequency.  ``s21`` is the pure (eigh-free) hanger
+        # response; rf_g / rf_e arrive pre-computed so no fluxonium solve runs here.
         freqs = np.array([zero_lowered.readout.f_ro_ghz], dtype=np.float64)
-        signal = mixed_signal(self.sim, freqs, rf_g, rf_e, p_e_mean)
-        return complex(signal[0])
+        s_g = s21(self.sim, freqs, rf_g)
+        s_e = s21(self.sim, freqs, rf_e)
+        return s_g, s_e, p_e_mean
 
     def _lower(
         self, point: dict[str, int], f_qubit_ghz: float, detune_offset: float
@@ -367,65 +407,77 @@ class SimEngine:
         return self._operating
 
     # ----------------------------------------------------------- raw assembly
-    def _ensure_signal(self) -> NDArray[np.float64]:
-        """Build (once, cached) the deterministic raw I/Q broadcast over reps.
+    def _ensure_signal(
+        self,
+    ) -> tuple[NDArray[np.complex128], NDArray[np.complex128], NDArray[np.float64]]:
+        """Build (once, cached) the deterministic ``(s_g, s_e, p_e)`` blob grids.
 
-        The flux, f_qubit and per-point dispersive signal grid are independent of
-        the round index — only the additive per-shot noise differs round to round.
-        So the expensive part (lowering + Bloch + readout for every sweep point)
-        is computed on the *first* round poll and cached; later rounds reuse it
-        and only redraw noise.  This is what makes ``compute_round`` lazy: a run
-        that early-stops never computes a round it does not poll.
+        The flux, f_qubit and per-point blob grids are independent of the round
+        index — only the per-shot Bernoulli draw and the additive noise differ
+        round to round.  So the expensive part (lowering + Bloch + readout for
+        every sweep point) is computed on the *first* round poll and cached;
+        later rounds reuse it and only redraw the Bernoulli state + noise.  This
+        is what makes ``compute_round`` lazy: a run that early-stops never
+        computes a round it does not poll.
 
-        Returns the deterministic ``(reps, *sweep, nreads, 2)`` float array
-        (no noise yet), at the integration full scale.
+        Returns ``(s_g_grid, s_e_grid, p_e_grid)``, each of shape
+        ``(*sweep, nreads)`` — the order-unity complex |g>/|e> blobs and the
+        excited population.  Bernoulli sampling and the full-scale / noise are
+        applied in :meth:`compute_round`, not cached here.
         """
 
-        if self._det_full is not None:
-            return self._det_full
+        if self._det_grids is not None:
+            return self._det_grids
 
         f_qubit_ghz, rf_g, rf_e = self._operating_signal()
-
-        signal_grid = self._signal_grid(  # (*sweep, nreads) complex
-            f_qubit_ghz, rf_g, rf_e
-        )
-
-        loop_dims = self.program.loop_dims
-        assert loop_dims is not None  # guaranteed by __init__; reasserted for typing
-        reps = loop_dims[0]
-        sweep_dims = signal_grid.shape[:-1]
-        nreads = signal_grid.shape[-1]
-
-        # Deterministic raw I/Q (no reps axis yet): scale the order-unity IQ to
-        # the integration full scale.
-        det = _FULL_SCALE * signal_grid  # (*sweep, nreads) complex
-        det_iq = np.stack([det.real, det.imag], axis=-1)  # (*sweep, nreads, 2)
-
-        # Broadcast over reps -> (reps, *sweep, nreads, 2).  np.array materializes
-        # the broadcast so each round can add a fresh independent noise draw.
-        self._det_full = np.array(
-            np.broadcast_to(det_iq, (reps, *sweep_dims, nreads, 2))
-        )
-        return self._det_full
+        self._det_grids = self._signal_grid(f_qubit_ghz, rf_g, rf_e)
+        return self._det_grids
 
     def compute_round(self, round_idx: int) -> list[NDArray[np.int64]]:
         """Compute one round's raw acc_buf lazily (called by the mock soc's poll).
 
-        ``round_idx`` is informational (rounds redraw independent noise from the
-        engine's RNG, in poll order); the deterministic signal grid is built once
-        on the first call and cached (:meth:`_ensure_signal`), so each round only
-        adds a fresh per-shot Gaussian noise draw.  Returns the one-channel list
-        ``[acc_buf]`` with ``acc_buf`` of shape ``(*loop_dims, nreads, 2)`` int64
-        — exactly what the mock soc serves through ``poll_data`` for that round.
-        Software-averaging the rounds improves SNR because each draw is independent.
+        ``round_idx`` is informational (rounds redraw an independent Bernoulli
+        state + noise from the engine's RNG, in poll order); the deterministic
+        ``(s_g, s_e, p_e)`` grids are built once on the first call and cached
+        (:meth:`_ensure_signal`).
+
+        Per-shot Bernoulli (the unified singleshot path).  For each element of
+        the ``(reps, *sweep, nreads)`` buffer a shot is drawn ``state ~
+        Bernoulli(p_e)`` and its complex blob is ``s_e`` where ``state == 1`` else
+        ``s_g``.  Averaging over reps recovers ``(1−p_e)·s_g + p_e·s_e ==
+        mixed_signal`` in expectation, so the accumulated readout is unchanged
+        (zero regression); a singleshot ``get_raw`` instead sees two Gaussian
+        blobs centred on ``_FULL_SCALE·s_g`` / ``_FULL_SCALE·s_e``.  A fresh
+        Bernoulli state is drawn each round (matching the fresh-noise-per-round
+        model), so software-averaging the rounds is statistically meaningful.
+
+        Returns the one-channel list ``[acc_buf]`` with ``acc_buf`` of shape
+        ``(*loop_dims, nreads, 2)`` int64 — exactly what the mock soc serves
+        through ``poll_data`` for that round.
         """
 
         logger.debug("SimEngine.compute_round: round_idx=%d", round_idx)
 
-        det_full = self._ensure_signal()
+        s_g_grid, s_e_grid, p_e_grid = self._ensure_signal()
+
+        loop_dims = self.program.loop_dims
+        assert loop_dims is not None  # guaranteed by __init__; reasserted for typing
+        reps = loop_dims[0]
+        full_shape = (reps, *s_g_grid.shape)  # (reps, *sweep, nreads)
+
+        # Per-shot Bernoulli: 1 -> excited blob (s_e), 0 -> ground blob (s_g).
+        # ``binomial(1, p_e_grid)`` broadcasts p_e over the reps axis, so each
+        # shot at a point draws independently with that point's excited
+        # probability.
+        state = self._rng.binomial(1, p_e_grid, size=full_shape).astype(bool)
+        blob = np.where(state, s_e_grid, s_g_grid)  # (reps, *sweep, nreads) complex
+
+        det = _FULL_SCALE * blob
+        det_iq = np.stack([det.real, det.imag], axis=-1)  # (..., 2)
+
         noise_std = _FULL_SCALE / self.sim.snr
-        noise = self._rng.normal(0.0, noise_std, size=det_full.shape)
-        acc = np.rint(det_full + noise).astype(np.int64)
+        noise = self._rng.normal(0.0, noise_std, size=det_iq.shape)
+        acc = np.rint(det_iq + noise).astype(np.int64)
         return [acc]
 
     # ------------------------------------------------------ decimated assembly
