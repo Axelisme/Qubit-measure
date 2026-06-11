@@ -46,5 +46,10 @@ def test_list_meta_shape():
     cat.register(_entry("res_probe", "module"))
     meta = cat.list_meta()
     assert meta == [
-        {"role_id": "res_probe", "label": "Res_Probe", "item_kind": "module"}
+        {
+            "role_id": "res_probe",
+            "label": "Res_Probe",
+            "item_kind": "module",
+            "default_name": "",
+        }
     ]

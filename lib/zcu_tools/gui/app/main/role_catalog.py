@@ -33,9 +33,13 @@ class RoleEntry:
     live ``ExpContext`` it returns a ``ModuleRefValue`` (modules) or
     ``WaveformRefValue`` (waveforms) whose inner value carries md-linked
     ``EvalValue`` defaults.
+
+    ``default_name`` is a naming-convention suggestion for the create dialog's
+    name field (e.g. ``"readout_rf"``); empty means "no suggestion" (blank roles
+    leave the user to name the entry).
     """
 
-    __slots__ = ("role_id", "label", "item_kind", "make_value")
+    __slots__ = ("role_id", "label", "item_kind", "make_value", "default_name")
 
     def __init__(
         self,
@@ -43,11 +47,13 @@ class RoleEntry:
         label: str,
         item_kind: RoleItemKind,
         make_value: RoleValueFactory,
+        default_name: str = "",
     ) -> None:
         self.role_id = role_id
         self.label = label
         self.item_kind = item_kind
         self.make_value = make_value
+        self.default_name = default_name
 
 
 class RoleCatalog:
@@ -78,6 +84,11 @@ class RoleCatalog:
     def list_meta(self) -> list[dict[str, str]]:
         """Wire-friendly metadata for every role (agent discovery)."""
         return [
-            {"role_id": e.role_id, "label": e.label, "item_kind": e.item_kind}
+            {
+                "role_id": e.role_id,
+                "label": e.label,
+                "item_kind": e.item_kind,
+                "default_name": e.default_name,
+            }
             for e in self._entries.values()
         ]

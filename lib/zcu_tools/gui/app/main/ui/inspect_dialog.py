@@ -181,6 +181,15 @@ class _MlCreateDialog(QDialog):
         self._ctrl = ctrl
         self.setWindowTitle("Create ModuleLibrary entry")
 
+        # The (item_kind, name) of a successful create, read by the parent after
+        # the dialog closes to chain straight into Modify. None until create wins.
+        self.created: tuple[_MlItemKind, str] | None = None
+        # True once the user has typed into the name field by hand: from then on
+        # switching role must not clobber their name (least surprise). Qt only
+        # fires textEdited on user keystrokes, never on programmatic setText, so
+        # seeding the suggestion below does not set this flag.
+        self._name_edited = False
+
         layout = QVBoxLayout(self)
         hint = QLabel(
             "Pick a role and a name. Named roles seed md-linked defaults; "
@@ -201,6 +210,14 @@ class _MlCreateDialog(QDialog):
         form.addRow("Name:", self._name_edit)
         layout.addLayout(form)
 
+        # Seed the name with the initial role's convention-based suggestion.
+        initial = self._role_combo.currentData()
+        if initial is not None:
+            self._name_edit.setText(self._suggest_name(initial))
+
+        self._name_edit.textEdited.connect(self._on_name_edited)
+        self._role_combo.currentIndexChanged.connect(self._on_role_changed)
+
         btn_row = QHBoxLayout()
         create_btn = QPushButton("Create")
         cancel_btn = QPushButton("Cancel")
@@ -209,6 +226,34 @@ class _MlCreateDialog(QDialog):
         layout.addLayout(btn_row)
         create_btn.clicked.connect(self._on_create)
         cancel_btn.clicked.connect(self.reject)
+
+    def _suggest_name(self, entry: Any) -> str:
+        """Convention-based name suggestion for ``entry``, de-duplicated.
+
+        Blank roles carry no ``default_name`` -> empty (the user must name it).
+        Otherwise append ``_2``/``_3``/… until the name is free in the live ml.
+        """
+        base = entry.default_name
+        if not base:
+            return ""
+        name = base
+        suffix = 2
+        while self._ctrl.has_ml_entry(entry.item_kind, name):
+            name = f"{base}_{suffix}"
+            suffix += 1
+        return name
+
+    def _on_name_edited(self, _text: str) -> None:
+        self._name_edited = True
+
+    def _on_role_changed(self, _index: int) -> None:
+        # Only re-suggest while the name is still the auto-filled one; once the
+        # user has typed their own, leave it alone (least surprise).
+        if self._name_edited:
+            return
+        entry = self._role_combo.currentData()
+        if entry is not None:
+            self._name_edit.setText(self._suggest_name(entry))
 
     def _on_create(self) -> None:
         entry = self._role_combo.currentData()
@@ -223,6 +268,7 @@ class _MlCreateDialog(QDialog):
         except Exception as exc:  # noqa: BLE001 — surface any failure to the user
             QMessageBox.critical(self, "Create failed", str(exc))
             return
+        self.created = (entry.item_kind, name)
         self.accept()
 
 
@@ -253,13 +299,31 @@ class InspectDialog(InspectDialogBase):
     def _on_create_clicked(self) -> None:
         dlg = _MlCreateDialog(self._ctrl, parent=self)
         dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        # On a successful create, chain straight into Modify so the user can
+        # immediately tweak the freshly-seeded entry. Open Modify only after the
+        # create dialog has closed (non-modal, no stacked modals).
+        dlg.finished.connect(lambda _: self._after_create(dlg))
         dlg.open()
+
+    def _after_create(self, dlg: _MlCreateDialog) -> None:
+        created = dlg.created
+        if created is None:
+            return
+        item_kind, name = created
+        group = "modules" if item_kind == "module" else "waveforms"
+        self._open_ml_modify(group, name)
 
     def _on_modify_ml_clicked(self) -> None:
         data = self._current_ml_item_data()
         if data is None:
             return
         group, name = data
+        self._open_ml_modify(group, name)
+
+    def _open_ml_modify(self, group: str, name: str) -> None:
+        # Shared by selection-driven Modify and the auto-open after Create. Re-read
+        # the live ml so a just-created entry's cfg is present (create -> ML_CHANGED
+        # already refreshed the store).
         ml = self._ctrl.get_current_ml()
         if ml is None:
             return

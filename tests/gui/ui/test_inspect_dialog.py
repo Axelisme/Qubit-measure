@@ -316,6 +316,7 @@ def _catalog():
 def test_create_dialog_populates_roles_and_creates(qapp):
     ctrl = MagicMock()
     ctrl.get_role_catalog.return_value = _catalog()
+    ctrl.has_ml_entry.side_effect = lambda kind, name: False
 
     dlg = _MlCreateDialog(ctrl)
     # Combo lists role labels (md-aware + blank), not raw type strings.
@@ -335,12 +336,155 @@ def test_create_dialog_populates_roles_and_creates(qapp):
     )
 
 
+def _ctrl_with_catalog(existing: set[tuple[str, str]] | None = None) -> MagicMock:
+    """Mock controller exposing the real role catalog + a controllable ml."""
+    have = existing or set()
+    ctrl = MagicMock()
+    ctrl.get_role_catalog.return_value = _catalog()
+    ctrl.has_ml_entry.side_effect = lambda kind, name: (kind, name) in have
+    return ctrl
+
+
+def _suggested_for(dlg: _MlCreateDialog, role_id: str) -> str:
+    """Drive the combo to ``role_id`` and read back the suggested name."""
+    for i in range(dlg._role_combo.count()):
+        entry = dlg._role_combo.itemData(i)
+        if entry is not None and entry.role_id == role_id:
+            dlg._role_combo.setCurrentIndex(i)
+            return dlg._name_edit.text()
+    raise AssertionError(f"role {role_id!r} not in combo")
+
+
+def test_create_dialog_prefills_default_name(qapp):
+    ctrl = _ctrl_with_catalog()
+    dlg = _MlCreateDialog(ctrl)
+    # The first dropdown entry is res_probe -> readout_rf (see registry).
+    first = dlg._role_combo.itemData(0)
+    assert first.role_id == "res_probe"
+    assert dlg._name_edit.text() == "readout_rf"
+
+
+def test_create_dialog_blank_role_suggests_empty(qapp):
+    ctrl = _ctrl_with_catalog()
+    dlg = _MlCreateDialog(ctrl)
+    # Blank roles carry no default_name -> the field stays empty.
+    assert _suggested_for(dlg, "pulse:blank") == ""
+
+
+def test_create_dialog_dedups_existing_name(qapp):
+    # readout_rf already taken -> suggestion bumps to readout_rf_2.
+    ctrl = _ctrl_with_catalog(existing={("module", "readout_rf")})
+    dlg = _MlCreateDialog(ctrl)
+    assert dlg._name_edit.text() == "readout_rf_2"
+
+
+def test_create_dialog_role_switch_updates_suggestion(qapp):
+    ctrl = _ctrl_with_catalog()
+    dlg = _MlCreateDialog(ctrl)
+    assert _suggested_for(dlg, "bath_reset") == "reset_bath"
+    assert _suggested_for(dlg, "pi_pulse") == "pi_amp"
+
+
+def test_create_dialog_role_switch_keeps_user_typed_name(qapp):
+    ctrl = _ctrl_with_catalog()
+    dlg = _MlCreateDialog(ctrl)
+    # Simulate a user keystroke: textEdited carries the edited-by-hand semantics.
+    dlg._name_edit.setText("my_custom")
+    dlg._name_edit.textEdited.emit("my_custom")
+    # Switching role must not clobber the hand-typed name.
+    assert _suggested_for(dlg, "bath_reset") == "my_custom"
+
+
+def test_create_dialog_records_created_on_success(qapp):
+    ctrl = _ctrl_with_catalog()
+    dlg = _MlCreateDialog(ctrl)
+    dlg._role_combo.setCurrentIndex(0)
+    dlg._name_edit.setText("my_entry")
+    dlg._on_create()
+    assert dlg.created == ("module", "my_entry")
+
+
+def test_inspect_create_auto_opens_modify(qapp, monkeypatch):
+    ml = _make_ml()
+    ctrl = _make_ctrl_with_ml(ml)
+    ctrl.get_role_catalog.return_value = _catalog()
+    ctrl.has_ml_entry.side_effect = lambda kind, name: False
+    bus = MagicMock()
+    dialog = InspectDialog(ctrl, bus)
+
+    opened: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        dialog, "_open_ml_modify", lambda group, name: opened.append((group, name))
+    )
+
+    class FakeCreateDialog:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            class DummySignal:
+                def connect(self, cb: Any) -> None:
+                    self.cb = cb
+
+                def emit(self) -> None:
+                    if hasattr(self, "cb"):
+                        self.cb(None)
+
+            self.finished = DummySignal()
+            self.created: tuple[str, str] | None = ("module", "readout_rf")
+
+        def setAttribute(self, *args: Any) -> None:
+            pass
+
+        def open(self) -> None:
+            self.finished.emit()
+
+    monkeypatch.setattr(inspect_dialog, "_MlCreateDialog", FakeCreateDialog)
+    dialog._on_create_clicked()
+
+    assert opened == [("modules", "readout_rf")]
+
+
+def test_inspect_create_cancelled_does_not_open_modify(qapp, monkeypatch):
+    ml = _make_ml()
+    ctrl = _make_ctrl_with_ml(ml)
+    bus = MagicMock()
+    dialog = InspectDialog(ctrl, bus)
+
+    opened: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        dialog, "_open_ml_modify", lambda group, name: opened.append((group, name))
+    )
+
+    class FakeCreateDialog:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            class DummySignal:
+                def connect(self, cb: Any) -> None:
+                    self.cb = cb
+
+                def emit(self) -> None:
+                    if hasattr(self, "cb"):
+                        self.cb(None)
+
+            self.finished = DummySignal()
+            self.created: tuple[str, str] | None = None  # cancelled
+
+        def setAttribute(self, *args: Any) -> None:
+            pass
+
+        def open(self) -> None:
+            self.finished.emit()
+
+    monkeypatch.setattr(inspect_dialog, "_MlCreateDialog", FakeCreateDialog)
+    dialog._on_create_clicked()
+
+    assert opened == []
+
+
 def test_create_dialog_rejects_empty_name(qapp, monkeypatch):
     from qtpy.QtWidgets import QMessageBox
 
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
     ctrl = MagicMock()
     ctrl.get_role_catalog.return_value = _catalog()
+    ctrl.has_ml_entry.side_effect = lambda kind, name: False
 
     dlg = _MlCreateDialog(ctrl)
     dlg._name_edit.setText("   ")
