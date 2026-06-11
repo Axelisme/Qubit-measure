@@ -23,58 +23,73 @@ class RohdeSchwarzSGS100A(BaseDevice[RohdeSchwarzSGS100AInfo]):
     info_model = RohdeSchwarzSGS100AInfo
 
     def get_output(self) -> Literal["on", "off"]:
-        return STATUS_MAP_INV[self.query(":OUTPut?")]  # type: ignore
+        with self._lock:
+            return STATUS_MAP_INV[self.query(":OUTPut?")]  # type: ignore
 
     def set_output(self, status: Literal["on", "off"]) -> None:
-        self.write(f":OUTPut {STATUS_MAP[status]}")
+        with self._lock:
+            self.write(f":OUTPut {STATUS_MAP[status]}")
 
     # Turn on output
     def output_on(self) -> None:
-        self.set_output("on")
+        with self._lock:
+            self.set_output("on")
 
     # Turn off output
     def output_off(self) -> None:
-        self.set_output("off")
+        with self._lock:
+            self.set_output("off")
 
     # ==========================================================================#
 
     def get_IQ_state(self) -> Literal["on", "off"]:
-        return STATUS_MAP_INV[self.query(":IQ:STAT?")]  # type: ignore
+        with self._lock:
+            return STATUS_MAP_INV[self.query(":IQ:STAT?")]  # type: ignore
 
     def set_IQ_state(self, state: Literal["on", "off"]) -> None:
-        self.write(f":IQ:STAT {STATUS_MAP[state]}")
+        with self._lock:
+            self.write(f":IQ:STAT {STATUS_MAP[state]}")
 
     def IQ_on(self) -> None:
-        self.set_IQ_state("on")
+        with self._lock:
+            self.set_IQ_state("on")
 
     def IQ_off(self) -> None:
-        self.set_IQ_state("off")
+        with self._lock:
+            self.set_IQ_state("off")
 
     # ==========================================================================#
 
     def get_frequency(self) -> float:
-        return float(self.query("SOUR:FREQ?"))
+        with self._lock:
+            return float(self.query("SOUR:FREQ?"))
 
     def set_frequency(self, freq_Hz: float) -> float:
         if not (1e6 <= freq_Hz <= 20e9):
             raise ValueError(
                 f"Frequency {freq_Hz} Hz is outside expected range (1e6, 20e9)"
             )
-        self.write(f":SOUR:FREQ {freq_Hz:.2f}")
-        return self.get_frequency()
+        # write+read must stay in one critical section so a concurrent setter can
+        # not change the level between the write and the confirming read-back.
+        with self._lock:
+            self.write(f":SOUR:FREQ {freq_Hz:.2f}")
+            return self.get_frequency()
 
     # ==========================================================================#
 
     def get_power(self) -> float:
-        return float(self.query("SOUR:POW:POW?"))
+        with self._lock:
+            return float(self.query("SOUR:POW:POW?"))
 
     def set_power(self, power_dBm: float) -> float:
         if not (-120 <= power_dBm <= 25):
             raise ValueError(
                 f"Power {power_dBm} dBm is outside expected range (-120, 25)"
             )
-        self.write(f":SOUR:POW:POW {power_dBm:.2f}")
-        return self.get_power()
+        # write+read must stay in one critical section (see set_frequency).
+        with self._lock:
+            self.write(f":SOUR:POW:POW {power_dBm:.2f}")
+            return self.get_power()
 
     # ==========================================================================#
 
@@ -91,10 +106,11 @@ class RohdeSchwarzSGS100A(BaseDevice[RohdeSchwarzSGS100AInfo]):
         self.set_power(cfg.power_dBm)
 
     def get_info(self) -> RohdeSchwarzSGS100AInfo:
-        return RohdeSchwarzSGS100AInfo(
-            address=self.address,
-            output=self.get_output(),
-            IQ=self.get_IQ_state(),
-            freq_Hz=self.get_frequency(),
-            power_dBm=self.get_power(),
-        )
+        with self._lock:
+            return RohdeSchwarzSGS100AInfo(
+                address=self.address,
+                output=self.get_output(),
+                IQ=self.get_IQ_state(),
+                freq_Hz=self.get_frequency(),
+                power_dBm=self.get_power(),
+            )

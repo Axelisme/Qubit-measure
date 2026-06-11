@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TypeAlias, Union
 
-from .base import BaseDevice, BaseDeviceInfo
+from .base import BaseDevice, BaseDeviceInfo, DeviceBusyError
 from .fake import FakeDevice, FakeDeviceInfo
 from .manager import GlobalDeviceManager
 from .sgs100a import RohdeSchwarzSGS100A, RohdeSchwarzSGS100AInfo
@@ -15,6 +15,7 @@ __all__ = [
     # base
     "BaseDevice",
     "BaseDeviceInfo",
+    "DeviceBusyError",
     # manager
     "GlobalDeviceManager",
     # devices

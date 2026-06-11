@@ -1,6 +1,6 @@
 # Device Note for `zcu_tools/device`
 
-**Last updated:** 2026-06-08
+**Last updated:** 2026-06-11（manager 鎖縮小至 registry dict；I/O 由 per-instance 鎖序列化）
 
 這份筆記整理 `lib/zcu_tools/device` 的設計：以 VISA（pyvisa）為底層，抽出 `BaseDevice` + `BaseDeviceInfo` 的通用契約，再由 `GlobalDeviceManager` 做 process-wide 單例管理。目前已實作 `YOKOGS200`（電流/電壓源）、`RohdeSchwarzSGS100A`（微波訊號源）與 `FakeDevice`（mock 測試）。
 
@@ -50,17 +50,48 @@ Pydantic model，繼承 `ConfigBase`，所有子類型共用的基底欄位：
 職責：
 
 - `info_model: type[BaseDeviceInfo] = BaseDeviceInfo`：class-level 屬性，子類覆寫為對應 Info 型別（用於 `setup()` 的 model_validate）。
-- `__init__(address, rm)`：用 pyvisa `ResourceManager` 開 session；強制 `read/write_termination = "\n"`；立即呼叫 `connect_message()`（發 `*IDN?` 並印出）。連線失敗 `pyvisa.Error` 直接 re-raise。
+- `__init__(address, rm)`：建立 per-instance `_lock`（`threading.RLock`，見「並發與鎖」）；用 pyvisa `ResourceManager` 開 session；強制 `read/write_termination = "\n"`；立即呼叫 `connect_message()`（發 `*IDN?` 並印出）。連線失敗 `pyvisa.Error` 直接 re-raise。
 - Helper：`write(cmd)`、`query(cmd)`（已 `strip()`）、`close()`、`connect_message()`。
 - Abstract：`_setup(cfg: BaseDeviceInfo, *, progress, stop_event)`、`get_info() -> BaseDeviceInfo`。
-- `setup(cfg: BaseDeviceInfo, *, progress, stop_event)`：非抽象 wrapper，流程：
+- `setup(cfg: BaseDeviceInfo, *, progress, stop_event)`：非抽象 wrapper，fail-fast 流程：
   1. 檢查 `cfg.address == self.address`（否則 `RuntimeError`）。
   2. 檢查 `isinstance(cfg, self.info_model)`（否則 `RuntimeError`）。
-  3. 呼叫 `self._setup(cfg, progress=progress, stop_event=stop_event)`。
+  3. Non-blocking acquire `self._lock`；若鎖已被另一執行緒持有 → 立即 `raise DeviceBusyError`（含 class 名與 address）。
+  4. 成功取鎖 → try/finally 包住 `self._setup(...)` → release。
 
 **協作式取消（stop_event）**：`setup()` 接受 `Optional[threading.Event]`，透傳給 `_setup`。子類 ramp loop 每步前 check `stop_event.is_set()`，若已設置則 `break`（設備停在中途值，這是預期行為）。SGS100A 無 ramp，簽名對齊但不使用。
 
 **契約重點**：`setup()` 的地址/型別檢查由 base 保證（address 先、`isinstance` 後）；子類 `_setup` 收到的 `cfg` 已是 `self.info_model` 的實例，不需再做 `typeguard.check_type`。
+
+---
+
+## 並發與鎖（per-instance 執行鎖）
+
+每個 device 實例持有一把 **per-instance `threading.RLock`**（`BaseDevice.__init__` 建立；`FakeDevice` 因覆寫 `__init__` 不走 `super().__init__()`，自行於建構時建立同一把鎖）。所有**公開操作**都在這把鎖內執行，確保同一實例的操作彼此**序列化**。
+
+**不變式**：對同一 device 實例的任兩個公開操作不會交錯——一個操作（含整段序列）要嘛完整跑完，要嘛還沒開始；其他 thread 看不到操作的中間狀態。所有公開入口（包括 `output_on` 這類 thin wrapper 的重入）**一律持鎖**，是刻意的統一不變式，避免逐案判斷漏鎖。
+
+**短操作（`get_info`/`query`/`write`/`set_*`/`output_*` 等）**：阻塞等待鎖（blocking acquire），排隊後安全執行。
+
+**`setup()` — fail-fast 語義**：`setup()` 使用 **non-blocking acquire**。若另一執行緒正持鎖操作（例如 ramp 進行中），`setup()` 立即拋出 `DeviceBusyError`（`RuntimeError` 子類），**不排隊、不等待**。這是刻意設計：setup 是長時間操作，靜默排隊難以察覺，快速失敗讓呼叫端有機會向用戶回報衝突。RLock 語義保證**同一執行緒**的嵌套呼叫（`_setup → set_current → output_on`）重入成功，不受影響。
+
+**`is_busy() -> bool`**：non-blocking try-acquire/立即 release 的狀態探測，回傳 True 表示另一執行緒正持鎖。注意兩點：(a) 這是 TOCTOU 快照，僅供顯示/診斷，**不可**用於「先查再做」控制流（控制流靠捕捉 `DeviceBusyError`）；(b) 持鎖執行緒自己呼叫 `is_busy()` 會回 False（RLock 重入成功）。
+
+**鎖粒度**：鎖蓋的是**整個操作序列**，不是單次 I/O——
+
+- YOKOGS200 的 smart ramp 迴圈（逐點 `np.linspace` 下發）整段在鎖內：`set_voltage`/`set_current` 從持鎖到 ramp 完成，期間 `get_info()`/另一個 `setup()` 不會插入而讀到 ramp 中途值。
+- `set_frequency`/`set_power`（write 後 read-back 確認）的 write+read 兩步在同一臨界區，避免並發 setter 在兩步之間改值。
+- base `setup()` 在呼叫 `_setup` 前取鎖，覆蓋子類整段 `_setup`。
+
+**為何用 RLock（不可用 plain Lock）**：公開入口在同一 thread 上**巢狀**呼叫彼此——`setup() → _setup() → set_current()/set_voltage() → output_on() → set_output() → write()`、以及 `get_voltage()/get_info() → get_mode() → query()`。plain Lock 會在第二層自我死鎖；RLock 允許同 thread 重入。
+
+**鎖覆蓋範圍**：覆蓋每個子類的全部公開出口（不只 `setup`/`get_info`）。私有 helper（`_set_voltage_smart`、`_set_value_smart`、`_get_level` 等）**不自包鎖**，因為它們只從已持鎖的公開方法呼叫，再包一層只是無謂重入。
+
+**呼叫端行為**：GUI `gui/session/services/device.py` 的 worker 呼叫 `driver.setup()`；若拋出 `DeviceBusyError`，錯誤訊息（含 device 名與 address）直接透過 `_on_setup_failed` 呈現給用戶，不做 retry/swallow。`device/manager.py` 的 `setup_devices` 呼叫路徑同理，`DeviceBusyError` 會直接炸掉實驗（預期行為）。
+
+**manager 鎖的職責邊界**：`GlobalDeviceManager._lock` 只守 **registry dict**（哪個名字對應哪個實例）。I/O 操作（`setup()`、`get_info()`）在鎖外執行——即使 `setup_devices` 在鎖外對 A 跑 ramp，對 B 的 `get_info("B")` 可同時進行而不阻塞。兩條 thread 用同一名字 `get_device("flux")` 取得**同一個**實例後，各自呼叫 `setup`/`get_info` 的序列化由 per-instance 鎖負責，manager 鎖不介入。
+
+**持鎖期間禁止 GUI 回呼**：持鎖區段內不得 emit Qt signal 或觸發 GUI 回呼（現狀本來就沒有，維持），以免鎖內等待主執行緒造成跨鎖等待。
 
 ---
 
@@ -80,9 +111,15 @@ Process-wide registry（class-level `_devices` dict）：
 
 **使用慣例**：在 notebook / 實驗腳本啟動時一次 `register_device`，之後以名稱（如 `"flux"`, `"qubit_lo"`）在任何地方取用。`setup_devices` 通常接受從 YAML / JSON 讀出的 config block。
 
-**Thread safety**：class 內含 `_lock: threading.RLock`，所有 classmethod（`register_device` / `drop_device` / `get_device` / `get_all_devices` / `setup_devices` / `get_info` / `get_all_info`）都在鎖內操作。使用 RLock 以允許同一 thread 在 `setup_devices` 執行期間安全地 re-entry 到 `get_device` 等 API。`get_all_devices` / `get_all_info` 回傳 shallow copy，外部迭代時不會 race 於並發的 register/drop。
+**Thread safety（鎖分層）**：class 內含 `_lock: threading.RLock`，職責是保護 **registry dict**（`_devices`）的讀寫——僅此而已。I/O 操作（`device.setup()` / `device.get_info()`）全部在 manager 鎖**外**執行，由各 device 的 per-instance `_lock` 序列化。這樣，A 裝置正在跑長時間 ramp 時，對 B 裝置的 `get_info()` 調用不會被 A 的操作阻塞。
 
-**注意**：`setup_devices` 假設每個 name 都已註冊；若 cfg 內有未註冊的 name 會 `ValueError` ——呼叫端要先 register 再 setup。
+**`setup_devices` 的兩段式流程**：
+1. **鎖內驗證**：先在 manager 鎖內一次性驗完 `dev_cfg` 裡所有 name 是否已註冊，並取出 instance 引用快照。任一 name 不存在立即 `ValueError`，整批都不執行（fast-fail）。
+2. **鎖外執行**：對快照逐一呼叫 `device.setup(cfg, progress=progress)`。期間 manager 鎖已釋放；busy device 會 raise `DeviceBusyError`（fail-fast，不吞）。
+
+**`get_info` / `get_all_info`**：在 manager 鎖內僅做 instance 解析（複用 `get_device` / `get_all_devices`），鎖外才呼叫各裝置的 `get_info()`。`get_all_devices` 回傳 dict shallow copy，外部迭代不 race 於並發的 register/drop。
+
+**注意**：`setup_devices` 假設每個 name 都已註冊；若 cfg 內有未註冊的 name 會 `ValueError`——呼叫端要先 register 再 setup。
 
 ---
 

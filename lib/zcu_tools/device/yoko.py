@@ -47,18 +47,22 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
     # ==========================================================================#
 
     def get_output(self) -> Literal["on", "off"]:
-        return STATUS_MAP_INV[self.query(":OUTPut?")]  # type: ignore
+        with self._lock:
+            return STATUS_MAP_INV[self.query(":OUTPut?")]  # type: ignore
 
     def set_output(self, status: Literal["on", "off"]) -> None:
-        self.write(f":OUTPut {STATUS_MAP[status]}")
+        with self._lock:
+            self.write(f":OUTPut {STATUS_MAP[status]}")
 
     # Turn on output
     def output_on(self) -> None:
-        self.set_output("on")
+        with self._lock:
+            self.set_output("on")
 
     # Turn off output
     def output_off(self) -> None:
-        self.set_output("off")
+        with self._lock:
+            self.set_output("off")
 
     # ==========================================================================#
 
@@ -115,16 +119,17 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
         progress: bool = True,
         stop_event: threading.Event | None = None,
     ) -> float:
-        mode = self.get_mode()
-        if mode != "voltage":
-            raise RuntimeError(
-                f"One can only set voltage when the device is in voltage mode. but it is in {mode} mode."
-            )
+        with self._lock:
+            mode = self.get_mode()
+            if mode != "voltage":
+                raise RuntimeError(
+                    f"One can only set voltage when the device is in voltage mode. but it is in {mode} mode."
+                )
 
-        self.output_on()
-        self._set_voltage_smart(voltage, progress=progress, stop_event=stop_event)
+            self.output_on()
+            self._set_voltage_smart(voltage, progress=progress, stop_event=stop_event)
 
-        return self.get_voltage()
+            return self.get_voltage()
 
     def _check_current(self, current: float) -> None:
         CHECK_CURRENT_LIMIT = 7e-3
@@ -181,16 +186,17 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
         progress: bool = True,
         stop_event: threading.Event | None = None,
     ) -> float:
-        mode = self.get_mode()
-        if mode != "current":
-            raise RuntimeError(
-                f"One can only set current when the device is in current mode. but it is in {mode} mode."
-            )
+        with self._lock:
+            mode = self.get_mode()
+            if mode != "current":
+                raise RuntimeError(
+                    f"One can only set current when the device is in current mode. but it is in {mode} mode."
+                )
 
-        self.output_on()
-        self._set_current_smart(current, progress=progress, stop_event=stop_event)
+            self.output_on()
+            self._set_current_smart(current, progress=progress, stop_event=stop_event)
 
-        return self.get_current()
+            return self.get_current()
 
     # Set to either current or voltage mode.
     def set_mode(
@@ -199,29 +205,31 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
         force: bool = False,
         rampstep: float | None = None,
     ) -> None:
-        cur_mode = self.get_mode()
+        with self._lock:
+            cur_mode = self.get_mode()
 
-        if cur_mode != mode:
-            if cur_mode == "voltage":
-                value = self.get_voltage()
-            else:
-                value = self.get_current()
-            if value != 0.0 and not force:
-                raise RuntimeError(
-                    "Try to change mode while value is not zero. Please set value to zero before changing mode, "
-                    "Or set force=True to override, make sure you know what you are doing"
-                )
+            if cur_mode != mode:
+                if cur_mode == "voltage":
+                    value = self.get_voltage()
+                else:
+                    value = self.get_current()
+                if value != 0.0 and not force:
+                    raise RuntimeError(
+                        "Try to change mode while value is not zero. Please set value to zero before changing mode, "
+                        "Or set force=True to override, make sure you know what you are doing"
+                    )
 
-        self.write(f":SOURce:FUNCtion {MODE_MAPS[mode]}")
+            self.write(f":SOURce:FUNCtion {MODE_MAPS[mode]}")
 
-        # update rampstep
-        if rampstep is None:
-            rampstep = DEFAULT_RAMPSTEP[mode]
-        self._rampstep = rampstep
+            # update rampstep
+            if rampstep is None:
+                rampstep = DEFAULT_RAMPSTEP[mode]
+            self._rampstep = rampstep
 
     # Returns the mode (voltage or current)
     def get_mode(self) -> Literal["voltage", "current"]:
-        return MODE_MAPS_INV[self.query(":SOURce:FUNCtion?")]  # type: ignore
+        with self._lock:
+            return MODE_MAPS_INV[self.query(":SOURce:FUNCtion?")]  # type: ignore
 
     # ==========================================================================#
 
@@ -230,23 +238,25 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
 
     # Returns the voltage in volts as a float
     def get_voltage(self) -> float:
-        mode = self.get_mode()
-        if mode != "voltage":
-            raise RuntimeError(
-                f"One can only get voltage when the device is in voltage mode. but it is in {mode} mode."
-            )
+        with self._lock:
+            mode = self.get_mode()
+            if mode != "voltage":
+                raise RuntimeError(
+                    f"One can only get voltage when the device is in voltage mode. but it is in {mode} mode."
+                )
 
-        return self._get_level()
+            return self._get_level()
 
     # Returns the current in amps as a float
     def get_current(self) -> float:
-        mode = self.get_mode()
-        if mode != "current":
-            raise RuntimeError(
-                f"One can only get current when the device is in current mode. but it is in {mode} mode."
-            )
+        with self._lock:
+            mode = self.get_mode()
+            if mode != "current":
+                raise RuntimeError(
+                    f"One can only get current when the device is in current mode. but it is in {mode} mode."
+                )
 
-        return self._get_level()
+            return self._get_level()
 
     # ==========================================================================#
 
@@ -281,10 +291,11 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
             raise ValueError(f"Unknown mode {cur_mode} in device {self.address}")
 
     def get_info(self) -> YOKOGS200Info:
-        return YOKOGS200Info(
-            address=self.address,
-            output=self.get_output(),
-            mode=self.get_mode(),
-            value=self._get_level(),
-            rampstep=self._rampstep,
-        )
+        with self._lock:
+            return YOKOGS200Info(
+                address=self.address,
+                output=self.get_output(),
+                mode=self.get_mode(),
+                value=self._get_level(),
+                rampstep=self._rampstep,
+            )

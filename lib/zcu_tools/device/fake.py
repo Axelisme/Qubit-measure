@@ -31,26 +31,37 @@ class FakeDevice(BaseDevice[FakeDeviceInfo]):
         self._rampstep = DEFAULT_RAMPSTEP
         self._fast_mode = fast_mode
 
+        # FakeDevice bypasses BaseDevice.__init__ (no pyvisa session), so it must
+        # create the per-instance lock itself to honor the same serialization
+        # invariant as the real devices.
+        self._lock = threading.RLock()
+
     def get_output(self) -> Literal["on", "off"]:
-        return self.output
+        with self._lock:
+            return self.output
 
     def set_output(self, status: Literal["on", "off"]) -> None:
-        self.output = status
+        with self._lock:
+            self.output = status
 
     def output_on(self) -> None:
-        self.set_output("on")
+        with self._lock:
+            self.set_output("on")
 
     def output_off(self) -> None:
-        self.set_output("off")
+        with self._lock:
+            self.set_output("off")
 
     # ==========================================================================#
 
     def get_value(self) -> float:
-        return self.value
+        with self._lock:
+            return self.value
 
     def set_value(self, value: float) -> float:
-        self.value = value
-        return self.value
+        with self._lock:
+            self.value = value
+            return self.value
 
     def close(self) -> None:
         """Fake devices own no external session."""
@@ -99,9 +110,10 @@ class FakeDevice(BaseDevice[FakeDeviceInfo]):
         self._set_value_smart(cfg.value, progress=progress, stop_event=stop_event)
 
     def get_info(self) -> FakeDeviceInfo:
-        return FakeDeviceInfo(
-            address=self.address,
-            output=self.output,
-            value=self.value,
-            rampstep=self._rampstep,
-        )
+        with self._lock:
+            return FakeDeviceInfo(
+                address=self.address,
+                output=self.output,
+                value=self.value,
+                rampstep=self._rampstep,
+            )
