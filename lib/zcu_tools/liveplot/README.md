@@ -1,6 +1,6 @@
 # liveplot 模組重點筆記
 
-**Last updated:** 2026-06-08 | **Commit:** `0bbf0c79`
+**Last updated:** 2026-06-08
 
 Jupyter 中即時更新的 matplotlib 繪圖工具，在資料擷取過程中邊跑邊畫。
 

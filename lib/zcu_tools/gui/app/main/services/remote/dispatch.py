@@ -9,7 +9,7 @@ Adding a method:
      dict). Reach the façade via ``adapter.ctrl.<m>``; View surfaces (render /
      snapshot) via the adapter's own methods.
   2. Register it in ``METHOD_REGISTRY`` below.
-  3. Document the wire shape in ``AI_NOTE.md``.
+  3. Document the wire shape in ``services/remote/README.md``.
 """
 
 from __future__ import annotations

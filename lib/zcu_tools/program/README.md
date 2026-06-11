@@ -1,6 +1,6 @@
 # QICK Note for `program`
 
-**Last updated:** 2026-06-08 | **Commit:** `0bbf0c79`
+**Last updated:** 2026-06-08
 
 這份筆記整理 `lib/zcu_tools/program` 對 QICK 的實際依賴，目的是讓後續開發能快速定位「應該看哪個 QICK 類別/方法」，而不用每次從頭追。
 

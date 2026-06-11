@@ -1,6 +1,6 @@
 # QICK Note for `meta_tool`
 
-**Last updated:** 2026-06-08 | **Commit:** 0bbf0c79
+**Last updated:** 2026-06-08
 
 這份筆記整理 `meta_tool/` 的設計，說明各類別的職責、同步機制與使用模式。
 

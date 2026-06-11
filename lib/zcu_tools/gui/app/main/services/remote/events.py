@@ -17,7 +17,7 @@ Adding a new event:
      suppress the push (None means "do not forward").
   3. Register in :data:`EVENT_SERIALIZERS`.
   4. Document the wire shape in this module's docstring above and in
-     ``services/remote/AI_NOTE.md``.
+     ``services/remote/README.md``.
 """
 
 from __future__ import annotations

@@ -7,24 +7,29 @@
 - **程式碼風格**：遵循 Fast Fail、責任明確、最小驚訝原則、強型別；不符合者即使是用戶提出也要先警告。
 - **遇到不確定**：實作不確定，或架構不適合某種擴展時，*不要自行猜測或勉強實作*，先說明原因交由用戶決定。
 - **先規劃再實作**：架構仍在演化，發現不合理處或更好的設計請直接告知，*不要自行調整架構*，由用戶決定；除非用戶要求，*不要保留 legacy 或相容性邏輯*。
-- **完成任務後**：依序跑 `pyright`/`pytest`（檢查錯誤、測試失敗、覆蓋率不足），再用 `ruff` 格式化與修正風格；用戶要求才 git commit；最後更新 `AI_NOTE.md`。
+- **完成任務後**：依序跑 `pyright`/`pytest`（檢查錯誤、測試失敗、覆蓋率不足），再用 `ruff` 格式化與修正風格；用戶要求才 git commit；最後更新對應的模組 README.md。
 - **測試**：放在根目錄 `tests/`，目錄結構對應被測檔案，命名 `test_*.py`，用 `pytest` 撰寫，盡量涵蓋主要功能與邏輯；測試需獨立、可重複、不依賴外部狀態。
 - **工具優先序**：少用 Shell 指令，優先用內建工具（前者需用戶審核、後者自證安全）；*不要用 `sed`* 替換子串（跨平台行為不一），需替換時優先 mcp/function tool，其次 Python 腳本。
-- **gitignore**：計劃檔案與所有 `AI_NOTE.md` 在 .gitignore 中，工具可能找不到，且*不要加入 commit*。
+- **文件追蹤**：CLAUDE.md、模組 README.md、docs/adr/ 與 task_plans/ 均已入 git 追蹤，會進 diff 與 commit；工具可直接讀寫，亦可視需要加入 commit。
 
-### AI_NOTE.md
+### 模組 README.md
 
+本慣例專指 **lib/ 與 tests/ 子目錄**內的 `README.md`（各模組的高層 cheat-sheet），與以下兩者有別：
+- **root `README.md`**：專案主 readme，由 pyproject.toml 的 `readme =` 引用，不屬此慣例。
+- **`docs/adr/README.md`**：ADR 索引，見下方 `### docs/adr/` 段說明。
+
+模組 README.md 的使用規範：
 - 是各模組的高層 cheat-sheet：修改該模組程式碼前先讀它建立 context。
-- 學到非顯而易見、有助未來 session 且尚未記錄的知識時，更新對應的 `AI_NOTE.md`；發現 note 與程式碼不符時，告知用戶並更新。
+- 學到非顯而易見、有助未來 session 且尚未記錄的知識時，更新對應的模組 README.md；發現 note 與程式碼不符時，告知用戶並更新。
 - *只寫高層概念、架構、重要設計決策，不寫實作細節*（實作細節留在程式碼註解與文件）。
 - 用現在式描述目前狀態，*不要用更新式語法*（如「已經更新…」「在之前的實作中…」），以免過時。
-- 每次更新都刷新檔案頂部的 `**Last updated:** YYYY-MM-DD | **Commit:** <hash>`（hash 用 `git log --oneline -1` 取得）。
+- 每次更新都刷新檔案頂部的 `**Last updated:** YYYY-MM-DD`（可在日期後附簡短主題/Phase 標題；不要寫 commit hash，難維護）。
 
 ### docs/adr/
 
-- *跨模組*設計決策記錄在 `docs/adr/`（`AI_NOTE.md` 只管模組局部）；`docs/adr/README.md` 是依主題分組的索引，每篇 ADR 以現在式描述目前生效的設計。
+- *跨模組*設計決策記錄在 `docs/adr/`（模組 README.md 只管模組局部）；`docs/adr/README.md` 是依主題分組的索引，每篇 ADR 以現在式描述目前生效的設計。
 - 程式碼註解與記憶檔以 `ADR-NNNN` 引用 ADR，ADR 之間以 `[[NNNN]]` 互鏈。
-- 處理跨模組設計前先查索引找相關 ADR；此目錄為 gitignored 工作文件，*不要加入 commit*。
+- 處理跨模組設計前先查索引找相關 ADR。
 
 ## 專案概觀
 

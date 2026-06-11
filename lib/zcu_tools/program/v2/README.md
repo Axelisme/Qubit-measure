@@ -1,6 +1,6 @@
-# AI_NOTE.md - program/v2
+# README - program/v2
 
-**Last updated:** 2026-06-08 | **Commit:** 0bbf0c79
+**Last updated:** 2026-06-08
 
 ## Testing & Type Checking Conventions
 
@@ -27,13 +27,13 @@ The IR is divided into three layers to decouple high-level program structure fro
 
 ### IR Pipeline & Linking
 
-- **`IRPipeLine`**: A U-shape single-pass optimizer (see `ir/AI_NOTE.md` for the full flow): lex → ChunkList opt → parse → IR-tree opt → unparse → strip structural meta → ChunkList opt → flatten. IR optimization is **optional** — the macro/module layer already emits runnable ASM, and `disable_all_opt` is a clean bypass.
+- **`IRPipeLine`**: A U-shape single-pass optimizer (see `ir/README.md` for the full flow): lex → ChunkList opt → parse → IR-tree opt → unparse → strip structural meta → ChunkList opt → flatten. IR optimization is **optional** — the macro/module layer already emits runnable ASM, and `disable_all_opt` is a clean bypass.
 - **`IRLinker.link()`**: Takes a flattened instruction stream, assigns physical addresses (`P_ADDR`) to each instruction based on `addr_inc`, and resolves label addresses. **Note: `ADDR_INC` is used only during linking and is NOT emitted in the final dictionary to maintain QICK compatibility.**
 - **`IRLinker.unlink()`**: Reconstructs the logical instruction stream (including label markers and meta structural markers) from QICK's flattened `prog_list`.
 
 ## Architecture
 
-- `IRCompileMixin.optimize_asm()` runs the default IR pipeline (`make_default_pipeline`); the concrete pass set lives in `ir/passes/` and is documented in `ir/AI_NOTE.md`.
+- `IRCompileMixin.optimize_asm()` runs the default IR pipeline (`make_default_pipeline`); the concrete pass set lives in `ir/passes/` and is documented in `ir/README.md`.
 - `Nop` is preserved as an explicit instruction and is not treated as dead-code noise.
 - `ir/passes/` is split by concern into sub-packages: `loop/`, `dataflow/`, `control_flow/`, `timeline/`, with a shared `base.py`.
 

@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-10 | **Commit:** 2e7846f0
+**Last updated:** 2026-06-10
 
 # gui/app/autofluxdep/ — autofluxdep-gui app shell
 
@@ -17,7 +17,7 @@ autofluxdep/
 ├── ui/              — main_window / node_list（Setup/Devices/Predictor button + flux-source picker）/ node_detail / param_form
 ├── nodes/           — **domain core（別動）**：builder（Builder/Node/RunEnv）/ qubit_freq/lenrabi/ro_optimize/t1/t2ramsey/t2echo/mist/predictor / synth / result / plotters / io / spec
 ├── orchestrator.py / derivation.py / tools.py / registry.py — **domain core（別動）**
-└── CONTEXT.md / AI_NOTE.md
+└── CONTEXT.md / README.md
 ```
 
 ## 關鍵設計

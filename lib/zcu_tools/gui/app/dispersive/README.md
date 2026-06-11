@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-10 | **Commit:** 2e7846f0
+**Last updated:** 2026-06-10
 
 # `zcu_tools/gui/app/dispersive/` — Fluxonium Dispersive-Shift Analysis GUI AI Note
 

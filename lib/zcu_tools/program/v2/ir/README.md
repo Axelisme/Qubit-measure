@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-08 | **Commit:** 0bbf0c79
+**Last updated:** 2026-06-08
 
 # IR Architecture Guide
 

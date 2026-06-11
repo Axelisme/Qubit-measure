@@ -6,7 +6,7 @@ it on State, and export it as ``params.json``.
 
 Pure, Qt-free, synchronous — like every fluxdep service. The slow ``search`` is
 wrapped in a worker thread by the GUI (``ui/analyze_panel``); the RPC path runs it on
-the main thread under a wider timeout (see the gui AI_NOTE for that trade-off).
+the main thread under a wider timeout (see gui/app/fluxdep/README.md for that trade-off).
 ``search`` accepts an optional progress-bar factory so the GUI worker can inject
 a Qt-signalling ``BaseProgressBar`` via ``use_pbar_factory``; without one,
 ``search_in_database`` falls back to its tqdm default.

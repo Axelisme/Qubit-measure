@@ -1,7 +1,7 @@
 """RemoteControlAdapter — local socket interface for automation agents.
 
 Bind defaults to ``127.0.0.1``. Newline-delimited JSON request/response.
-See ``AI_NOTE.md`` for wire schema and threading model.
+See ``services/remote/README.md`` for wire schema and threading model.
 
 ``RemoteControlAdapter`` / ``ControlOptions`` are imported lazily so that
 lightweight, Qt-free consumers (e.g. the standalone ``mcp_server`` bridge) can

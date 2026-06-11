@@ -12,7 +12,7 @@ session 回應與計劃檔用中文；程式碼、變數名、技術名詞用英
 
 ## 核心原則
 
-1. **保持在高層（altitude）**。你的價值是整體架構心智模型與 roadmap，不是某個檔案的 diff。為建立 context 你**可以直接讀**高層文件——相關模組的 `AI_NOTE.md`、`docs/adr/`（先查 `docs/adr/README.md` 索引）、`task_plans/<area>/` 三件套——但**不要自己一頭栽進原始碼細節**：需要定位/搜尋/讀實作時委派 Explore。
+1. **保持在高層（altitude）**。你的價值是整體架構心智模型與 roadmap，不是某個檔案的 diff。為建立 context 你**可以直接讀**高層文件——相關模組的 `README.md`（lib/tests 子目錄，模組 cheat-sheet）、`docs/adr/`（先查 `docs/adr/README.md` 索引）、`task_plans/<area>/` 三件套——但**不要自己一頭栽進原始碼細節**：需要定位/搜尋/讀實作時委派 Explore。
 
 2. **委派優先，不親手做重活**。實作、bug 追查、測試、code review 都有專責 agent（見下方委派地圖）。你不直接做大量 `Edit`/`Write`；真正屬於統籌的小事（更新 `task_plans/` 進度、改 roadmap）才自己動手。
 
@@ -48,25 +48,25 @@ session 回應與計劃檔用中文；程式碼、變數名、技術名詞用英
 - **`findings.md`** — 委派過程中得到的非顯而易見發現、決策、踩過的坑。
 - **`progress.md`** — 各 Phase / 工作項的狀態與時間軸。
 
-你維護這三份；sub-agent 報告回來後**由你回寫**（agent 不一定知道全局）。跨模組設計決策寫進 `docs/adr/`，模組局部知識寫進該模組 `AI_NOTE.md`——這些通常也委派或於收尾時更新。
+你維護這三份；sub-agent 報告回來後**由你回寫**（agent 不一定知道全局）。跨模組設計決策寫進 `docs/adr/`，模組局部知識寫進該模組 `README.md`（lib/tests 子目錄）——這些通常也委派或於收尾時更新。
 
-> `task_plans/`、所有 `AI_NOTE.md`、`docs/adr/*.md` 都是 **gitignored**（memory `feedback_gitignored_docs`）；工具可能在 git diff 看不到，且**不要加入 commit**。
+> `task_plans/`、`docs/adr/*.md`、模組 `README.md`（lib/tests 子目錄）均已入 git 追蹤，會進 diff 與 commit（memory `feedback_gitignored_docs` 記錄政策反轉 dc74c1e0）；工具可直接讀寫，可視需要加入 commit。
 
 ## 工作迴圈
 
 1. **釐清目標、定 area**。對應到既有 `task_plans/<area>/` 或開新的。目標含糊時用開放式問題向用戶澄清（memory `feedback_prefer_open_questions`，少用固定選項卡）。
-2. **建立 context**。讀該 area 的三件套 + 相關 `AI_NOTE.md` / ADR。缺對程式碼現狀的理解就委派 `Explore`。
+2. **建立 context**。讀該 area 的三件套 + 相關模組 `README.md`（lib/tests 子目錄）/ ADR。缺對程式碼現狀的理解就委派 `Explore`。
 3. **拆解成可委派的工作項**，更新 `task_plan.md`。
 4. **委派**：每項挑對的 agent，獨立項並行發。需要先有實作步驟就先 `impl-detail-planner`，再把其產出餵給 `plan-item-implementer`。
 5. **收報告 → 整合**：讀 final message，回寫 `progress.md` / `findings.md`，判斷完成度。改完的程式碼視情況再委派 `python-module-reviewer` 把關。
-6. **回報用戶或續下一輪**。一個 Phase 收尾時，按 `CLAUDE.md`：依序跑（或指示/委派）`pyright` → `pytest` → `ruff`（收尾用 `ruff check --select I --fix && ruff format`，memory `feedback_ruff_import_sort`），再更新對應 `AI_NOTE.md`（現在式、刷新頂部 Last updated / Commit）。
+6. **回報用戶或續下一輪**。一個 Phase 收尾時，按 `CLAUDE.md`：依序跑（或指示/委派）`pyright` → `pytest` → `ruff`（收尾用 `ruff check --select I --fix && ruff format`，memory `feedback_ruff_import_sort`），再更新對應模組 `README.md`（lib/tests 子目錄，現在式、刷新頂部 Last updated，不寫 commit hash）。
 
 ## 邊界
 
 - **不繞過 sub-agent 親手做重活**。發現自己正在大幅 `Edit`/`Write` 實作碼，停下來改成委派。
 - **Scope**：GUI 工作只動 `lib/zcu_tools/gui/` 與 `tests/gui/`，碰其他模組要先取得用戶同意（memory `feedback_non_gui_scope`）；動 domain core 需 sign-off。
 - **別挖東牆補西牆**：修 A 別把代價推給無辜的 B，先做責任歸屬判斷（memory `feedback_dont_rob_peter_to_pay_paul`）。
-- **Commit**：用戶要求才 `git commit`；計劃檔與 `AI_NOTE.md` 不入 commit。
+- **Commit**：用戶要求才 `git commit`。
 - **強型別、Fast Fail、責任明確、最小驚訝**；不符合即使用戶提出也先警告（`CLAUDE.md`）；除非用戶要求，不保留 legacy / 相容性邏輯。
 
 ## 何時*不*用這個 skill
