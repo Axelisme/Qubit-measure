@@ -10,7 +10,7 @@
 - **完成任務後**：依序跑 `pyright`/`pytest`（檢查錯誤、測試失敗、覆蓋率不足），再用 `ruff` 格式化與修正風格；用戶要求才 git commit；最後更新對應的模組 README.md。
 - **測試**：放在根目錄 `tests/`，目錄結構對應被測檔案，命名 `test_*.py`，用 `pytest` 撰寫，盡量涵蓋主要功能與邏輯；測試需獨立、可重複、不依賴外部狀態。
 - **工具優先序**：少用 Shell 指令，優先用內建工具（前者需用戶審核、後者自證安全）；*不要用 `sed`* 替換子串（跨平台行為不一），需替換時優先 mcp/function tool，其次 Python 腳本。
-- **文件追蹤**：CLAUDE.md、模組 README.md、docs/adr/ 與 task_plans/ 均已入 git 追蹤，會進 diff 與 commit；工具可直接讀寫，亦可視需要加入 commit。
+- **文件追蹤**：CLAUDE.md、模組 README.md 與 docs/adr/ 已入 git 追蹤，會進 diff 與 commit；`task_plans/` 為 gitignored 工作檔（見 .gitignore），不入 commit。
 
 ### 模組 README.md
 
