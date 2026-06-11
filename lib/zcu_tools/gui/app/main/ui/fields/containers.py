@@ -19,6 +19,8 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.gui.session.events import MlChangedPayload
+
 from ...adapter import LiteralSpec
 from ...live_model import (
     DeviceRefLiveField,
@@ -238,6 +240,11 @@ class ModuleRefWidget(BaseLiveWidget):
             if not field.is_enabled:
                 self._sub_container.setEnabled(False)
 
+        # Subscribe to library-set changes so the combo refreshes when a new
+        # module/waveform is added — model.on_change only fires when *this
+        # field's referenced entry* changes, not when the library grows.
+        field.env.bus.subscribe(MlChangedPayload, self._on_ml_changed)
+
     _NONE_KEY = "<None>"
 
     def _refresh_combo_items(self) -> None:
@@ -304,6 +311,13 @@ class ModuleRefWidget(BaseLiveWidget):
                 self._combo.setCurrentIndex(idx)
         self._combo.blockSignals(False)
         self._sync_expand_btn()
+
+    def _on_ml_changed(self, _payload: MlChangedPayload) -> None:
+        # Library set changed (entry added / removed / renamed): rebuild the combo
+        # list so newly added modules appear without requiring a re-open.
+        # _refresh_combo_items already blocks combo signals internally, so this
+        # cannot accidentally re-enter _on_combo_changed.
+        self._refresh_combo_items()
 
     def _on_combo_changed(self, index: int) -> None:
         key = self._combo.itemData(index)
@@ -402,6 +416,9 @@ class ModuleRefWidget(BaseLiveWidget):
         field.on_validity_changed.disconnect(self._on_validity_changed)
         if field.spec.optional:
             field.on_enabled_changed.disconnect(self._on_model_enabled_changed)
+        # Mirror the subscribe in __init__; prevents stale callbacks when the
+        # widget is detached or the section is re-built (e.g. discriminator switch).
+        field.env.bus.unsubscribe(MlChangedPayload, self._on_ml_changed)
         if self._sub_widget:
             self._sub_widget.teardown()
 
