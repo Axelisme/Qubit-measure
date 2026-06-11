@@ -380,14 +380,13 @@ class TestResetSegments:
 
 
 class TestReadoutPlan:
-    """Readout modules produce a ReadoutPlan with f_ro (GHz) + swept flag."""
+    """Readout modules produce a ReadoutPlan with the per-point f_ro (GHz)."""
 
     def test_direct_readout_fixed_freq(self) -> None:
         lp = lower_point(
             [_readout()], None, _SIM, _F_QUBIT_GHZ, {}, _identity_cycles2us
         )
         assert lp.readout.f_ro_ghz == pytest.approx(7.2)
-        assert lp.readout.sweeps_ro_freq is False
 
     def test_pulse_readout_reads_nested_ro_freq(self) -> None:
         pulse_cfg = PulseCfg(
@@ -402,20 +401,23 @@ class TestReadoutPlan:
         lp = lower_point([ro], None, _SIM, _F_QUBIT_GHZ, {}, _identity_cycles2us)
         assert lp.readout.f_ro_ghz == pytest.approx(7.2)
 
-    def test_swept_readout_freq_sets_flag(self) -> None:
-        # onetone resonator spectroscopy: ro_freq is a sweep.
+    def test_swept_readout_freq_resolves_per_point(self) -> None:
+        # onetone resonator spectroscopy: ro_freq is a sweep.  Lowering resolves
+        # it to *this* sweep point's value, so the engine reads back the swept
+        # probe frequency point-by-point without a swept/fixed branch.
         ro_sweep = SweepCfg(start=7100.0, stop=7300.0, expts=3, step=100.0)
         ro_param = sweep2param("ro_freq", ro_sweep)
         ro = DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=ro_param).build("ro")
-        lp = lower_point(
-            [ro],
-            [("ro_freq", ro_sweep)],
-            _SIM,
-            _F_QUBIT_GHZ,
-            {"ro_freq": 0},
-            _identity_cycles2us,
-        )
-        assert lp.readout.sweeps_ro_freq is True
+        for idx, expected_mhz in ((0, 7100.0), (1, 7200.0), (2, 7300.0)):
+            lp = lower_point(
+                [ro],
+                [("ro_freq", ro_sweep)],
+                _SIM,
+                _F_QUBIT_GHZ,
+                {"ro_freq": idx},
+                _identity_cycles2us,
+            )
+            assert lp.readout.f_ro_ghz == pytest.approx(expected_mhz / 1e3)
 
 
 class TestEndToEndRotation:

@@ -31,8 +31,8 @@ generator ``[[M, b], [0, 0]]``; then ``[v_out, 1] = P @ [v_in, 1]``.
 
 from __future__ import annotations
 
-from typing import NamedTuple
 from collections.abc import Sequence
+from typing import NamedTuple
 
 import numpy as np
 from numpy.typing import NDArray

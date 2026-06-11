@@ -122,10 +122,10 @@ tests/
 
 **Gen 規格**（`axis_signal_gen_v6`，HAS_MIXER=False）：
 
-- `fs=6144.0 MHz`（245.76 × 25），`f_dds=6144.0`，`b_dds=32`，`b_phase=32`
-- `fs_mult=25`，`fs_div=1`，`fdds_div=1`，`samps_per_clk=16`
+- `fs=12288.0 MHz`（245.76 × 50），`f_dds=12288.0`，`b_dds=32`，`b_phase=32`
+- `fs_mult=50`，`fs_div=1`，`fdds_div=1`，`samps_per_clk=16`
 - `has_mixer=False`，`maxv=32766`，`maxv_scale=1.0`
-- nqz=1 有效頻率範圍：0–3072 MHz
+- nqz=1 有效頻率範圍：0–6144 MHz（f_dds 拉高到 12288 給 6 GHz 級 readout 充足 headroom，免折疊）
 
 **Readout 規格**（`axis_readout_v2`）：
 

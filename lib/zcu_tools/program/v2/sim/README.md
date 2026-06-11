@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-06-11 (mocksim Phase 2 dephasing)
+**Last updated:** 2026-06-11 (mock gen f_dds raised to 12288 MHz; folding is `f mod f_dds`, working set un-folded)
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -42,6 +42,13 @@ The qubit frequency `f_qubit` and the dressed resonator frequencies come from th
 existing fluxonium physics (`FluxoniumPredictor`, `calculate_dispersive_vs_flux_fast`,
 `HangerModel`); the sim package re-implements none of it.
 
+**Flux-constant work is computed once.** With the operating flux pinned (R-3),
+`f_qubit` and `rf_g` / `rf_e` are the same for every sweep point, so the engine
+computes them once per run and feeds `rf_g` / `rf_e` into each point's S21 blend —
+the fluxonium eigensolve behind `resonator_freqs` (the dominant cost, ~58% of a
+sweep) never runs per point.  The cache is valid only because the flux is fixed;
+a per-point operating flux would have to move that call back into the loop.
+
 ## Module map
 
 - `params.py` — `SimParams`: the physical parameter container (EJ/EC/EL, flux
@@ -55,16 +62,23 @@ existing fluxonium physics (`FluxoniumPredictor`, `calculate_dispersive_vs_flux_
   `detune_offset` frame shift), shaped-pulse discretisation, deterministic Branch
   selection, and the dmem (non-uniform T1) register indirection. Does NOT compute
   f_qubit, acc_buf, noise, S21, or the detune ensemble (the engine owns that).
-- `readout.py` — dispersive readout: physical quantities -> complex IQ
-  (`value_to_flux`, `resonator_freqs`, `s21`, `mixed_signal`). No sweeps /
-  timelines / acc_buf / noise.
-- `engine.py` — `SimEngine`: glue. Walks every sweep point, computes flux ->
-  f_qubit, drives lowering -> bloch -> readout, lays the per-point IQ into the
-  QICK `(*loop_dims, nreads, 2)` int64 buffer, and adds per-shot Gaussian noise
-  (snr / reps / rounds / seed; fresh noise per round so software-averaging works).
-  Owns the Lorentzian quasi-static detune ensemble: it averages `P_e` over a
-  deterministic Gauss-Legendre quadrature in `δ` (lowering applies each node as a
-  frame shift via `detune_offset`), so T2\* emerges without identifying sequences.
+- `readout.py` — dispersive readout: physical quantities -> complex IQ.
+  `resonator_freqs` is the eigensolve (flux -> `rf_g` / `rf_e`); `mixed_signal`
+  is the pure, eigh-free S21 blend that *takes* `rf_g` / `rf_e` (so the engine can
+  call it per point after computing the dressed freqs once). Also `value_to_flux`,
+  `s21`. No sweeps / timelines / acc_buf / noise.
+- `engine.py` — `SimEngine`: glue. Pins the operating point at reduced flux
+  `Phi/Phi0 = 1.0` (R-3; no longer derived from the cfg `dev` map), computes
+  f_qubit AND `rf_g` / `rf_e` there ONCE (flux-constant), drives lowering -> bloch
+  -> readout, lays the per-point IQ into the QICK `(*loop_dims, nreads, 2)` int64
+  buffer, and adds per-shot Gaussian noise (snr / reps / rounds / seed; fresh noise
+  per round so software-averaging works). Owns the Lorentzian quasi-static detune
+  ensemble: it averages `P_e` over a deterministic Gauss-Legendre quadrature in `δ`
+  (lowering applies each node as a frame shift via `detune_offset`), so T2\* emerges
+  without identifying sequences. A *driveless* timeline (no qubit pulse, e.g. pure
+  onetone) skips the quadrature: with every `omega == 0` the Bloch z-row decouples
+  from `δ`, so `P_e` is `δ`-independent and the ensemble mean equals one eval
+  exactly — a mathematical identity, not a per-experiment split (R-1 intact).
 
 ## Design boundaries and known limits
 
@@ -107,9 +121,22 @@ existing fluxonium physics (`FluxoniumPredictor`, `calculate_dispersive_vs_flux_
 - The mock soccfg's const / flat_top pulse-length *register* grid is too coarse
   for a hard length sweep to compile (`len_rabi` const/flat_top raises a
   resolution error); drive length-Rabi with a gauss pulse (soft-sweep path).
-- f_qubit above Nyquist (fs/2 = 3072 MHz) aliases through `sweep2array`, so a
-  frequency fit recovers the folded image. Pick a sub-Nyquist operating point for
-  a direct frequency inject->recover.
+- **Folding is a `f mod f_dds` analyzer-axis effect only, not a physics
+  constraint.** `SimEngine` works in *true (absolute) frequencies* throughout —
+  `f_qubit` (from `predict_freq`) and the drive / readout tones are never folded
+  inside the Bloch dynamics, so the simulated TLS evolution is correct regardless
+  of where the tones sit. Folding happens *downstream*, when the analyzer labels
+  its absolute frequency axis (`sweep2array` -> QICK `freq2reg`/`reg2freq`): with
+  the gen `interpolation==1` QICK applies no Nyquist check, so a tone is reported
+  at `f mod f_dds` (it is *not* an fs/2 reflection). The mock gen f_dds is
+  12288 MHz, so the whole fluxonium working set — f01 (~4 GHz), the dressed
+  resonator (~7 GHz), and 6 GHz-class readouts with several-hundred-MHz sweeps —
+  stays below f_dds and is reported *un-folded*. A tone above f_dds (e.g.
+  12588 -> 300 MHz) would alias by `f mod f_dds`. Folding only affects *absolute*
+  frequency-axis labels; *relative* quantities (detuning, decay times, gain
+  scaling, fringe frequency) are folding-invariant regardless. So a direct
+  absolute frequency inject->recover is clean as long as the tone stays below
+  f_dds (the integration tests' f01 and readout both do).
 
 ## Tests
 

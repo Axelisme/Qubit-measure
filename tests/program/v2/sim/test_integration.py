@@ -13,19 +13,21 @@ the homogeneous ``T2`` (and is insensitive to the inhomogeneous rate Gamma) whil
 Ramsey recovers ``T2_star``, and Ramsey decays faster than echo — exactly the
 Lorentzian quasi-static detune model the engine averages over.
 
-Operating point (the single most load-bearing choice)
------------------------------------------------------
-``f_qubit`` is kept **below Nyquist** (fs/2 = 3072 MHz for the mock soccfg's
-6144 MHz DAC).  At EJ/EC/EL = 3.0/0.9/0.5 with flux_bias 0.1 the fluxonium
-0->1 frequency is ~2893 MHz, so ``sweep2array`` does not alias the drive tone
-and a frequency fit recovers the predictor value directly.  Above Nyquist the
-played tone folds (e.g. 7277 -> 1133 MHz) and the fit would recover the aliased
-image instead — real hardware behaviour, not a sim artifact.
+Operating point (R-3: fixed reduced flux = 1.0)
+-----------------------------------------------
+The engine pins the operating point at reduced flux ``Phi/Phi0 = 1.0`` (R-3); it
+no longer derives flux from the cfg ``dev`` map.  At EJ/EC/EL = 3.0/0.9/0.5 the
+fluxonium 0->1 frequency there is ~4086 MHz.  The mock soccfg's gen f_dds is
+12288 MHz, so this f01 sits well below f_dds and the analyzer's absolute frequency
+axis reports it *un-folded* (folding is a ``f mod f_dds`` effect; see sim/README).
+So ``test_freq_recovers_f_qubit`` asserts the *absolute* recovered f_qubit
+directly; the other tests still rely only on *relative* structure (detuning, decay
+times, gain scaling, fringe frequency) which is folding-invariant regardless.
 
 The engine drives the qubit at the f_qubit it computes from the same SimParams
-(via FluxoniumPredictor), and the readout sits near ``rf_g`` to maximise |g>/|e>
-contrast — i.e. each test plays an experimenter who has already located the
-qubit and resonator, exactly as the real path requires.
+(via FluxoniumPredictor at flux 1.0), and the readout sits near ``rf_g`` to
+maximise |g>/|e> contrast — i.e. each test plays an experimenter who has already
+located the qubit and resonator, exactly as the real path requires.
 
 len_rabi note: the mock soccfg's const/flat_top pulse-length *register* grid is
 too coarse for a hard length sweep to compile, so len_rabi is driven with a
@@ -90,14 +92,15 @@ from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import DirectReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg, GaussWaveformCfg
 from zcu_tools.program.v2.sim import SimParams
-from zcu_tools.program.v2.sim.readout import resonator_freqs, value_to_flux
+from zcu_tools.program.v2.sim.readout import resonator_freqs
 from zcu_tools.program.v2.twotone import TwoToneModuleCfg
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
-# Sub-Nyquist operating point (f_qubit ~ 2893 MHz < fs/2 = 3072 MHz) so the
-# frequency fit recovers the predictor value without DAC aliasing.  T1/T2 are a
-# few µs so decay/dephasing are resolvable over modest sweeps; snr is generous
-# and the seed is fixed so the fits are reproducible.
+# Fixed operating point: reduced flux = 1.0 (R-3, matches the engine constant).
+# T1/T2 are a few µs so decay/dephasing are resolvable over modest sweeps; snr is
+# generous and the seed is fixed so the fits are reproducible.
+_OPERATING_FLUX = 1.0
+
 _SIM = SimParams(
     EJ=3.0,
     EC=0.9,
@@ -128,20 +131,27 @@ def _predictor() -> FluxoniumPredictor:
 
 
 def _f_qubit_mhz() -> float:
-    """The qubit 0->1 frequency (MHz) the engine sees at the no-device flux."""
+    """The qubit 0->1 frequency (MHz) the engine sees at the fixed operating flux.
 
-    return float(_predictor().predict_freq(_SIM.flux_bias))
+    The engine pins reduced flux = 1.0 (R-3) and feeds ``predict_freq`` a *device
+    value*, so map the fixed flux back through the predictor's affine alignment
+    (``flux_to_value``) exactly as the engine does — this is the true f_qubit the
+    engine drives at, ~4086 MHz, which sits below f_dds (12288 MHz) so the analyzer
+    reports it un-folded.
+    """
+
+    predictor = _predictor()
+    return float(predictor.predict_freq(predictor.flux_to_value(_OPERATING_FLUX)))
 
 
 def _rf_g_mhz() -> float:
-    """Ground-state dressed resonator frequency (MHz) at the operating flux.
+    """Ground-state dressed resonator frequency (MHz) at the fixed operating flux.
 
     Reading out near rf_g maximises |g>/|e> contrast so the time-domain decays
     and the Rabi oscillation are visible in the readout magnitude.
     """
 
-    flux = value_to_flux(_SIM, _SIM.flux_bias)
-    rf_g, _rf_e = resonator_freqs(_SIM, flux)
+    rf_g, _rf_e = resonator_freqs(_SIM, _OPERATING_FLUX)
     return rf_g * 1e3
 
 
@@ -172,11 +182,13 @@ def _sim_dephasing(*, T2: float, T2_star: float) -> SimParams:
 
 
 def test_freq_recovers_f_qubit() -> None:
-    """twotone freq fit recovers the predictor's f_qubit at the operating flux.
+    """twotone freq fit recovers the injected absolute f_qubit.
 
-    Injected: EJ/EC/EL + flux_bias -> a definite f_qubit via FluxoniumPredictor.
-    Recovered: the qubit peak frequency from FreqExp.analyze.  They must agree to
-    within a few MHz (the sweep step is 5 MHz over a +-200 MHz window).
+    Injected: EJ/EC/EL + flux 1.0 -> a definite (true) f_qubit ~4086 MHz via
+    FluxoniumPredictor.  The engine drives at that true frequency, which sits below
+    the mock gen f_dds (12288 MHz), so the analyzer's ``sweep2array`` frequency axis
+    reports it *un-folded*.  The Lorentzian fit must therefore land on the true
+    absolute f_qubit to within a few sweep steps (step = 5 MHz).
     """
 
     soc, soccfg = make_mock_soc(sim=_SIM)
@@ -205,7 +217,8 @@ def test_freq_recovers_f_qubit() -> None:
     result = exp.run(soc, soccfg, cfg)
     fit_freq, _fwhm, _fig = exp.analyze(result, model_type="lor")
 
-    # Recovered peak == injected/predicted f_qubit within a few sweep steps.
+    # f_qubit < f_dds so the analyzer axis is un-folded: the recovered peak must
+    # land on the true injected f_qubit to within a few sweep steps (step = 5 MHz).
     assert fit_freq == pytest.approx(f_qubit, abs=10.0)
 
 

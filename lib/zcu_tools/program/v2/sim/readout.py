@@ -134,13 +134,21 @@ def s21(
 def mixed_signal(
     sim: SimParams,
     freqs: NDArray[np.float64],
-    flux: float,
+    rf_g: float,
+    rf_e: float,
     p_e: float,
 ) -> NDArray[np.complex128]:
     """Population-weighted accumulated readout signal at ``freqs`` (GHz).
 
-    Assembles ``S21(rf_g) + p_e * [S21(rf_e) - S21(rf_g)]`` where ``rf_g`` /
-    ``rf_e`` come from :func:`resonator_freqs` at the given ``flux``.
+    Assembles ``S21(rf_g) + p_e * [S21(rf_e) - S21(rf_g)]`` from the
+    state-conditioned dressed resonator frequencies ``rf_g`` / ``rf_e``.
+
+    The dressed frequencies are passed in (not computed here): they depend only
+    on flux + EJ/EC/EL/g/bare_rf — all fixed across a sweep once the operating
+    flux is pinned (R-3) — so the engine computes them ONCE via
+    :func:`resonator_freqs` and feeds them to every sweep point's blend.  This
+    function is therefore the pure, eigh-free S21 mixing layer (no fluxonium
+    diagonalisation), which is what keeps the per-point hot path cheap.
 
     ``freqs`` are the readout probe frequencies — an array swept by onetone, or
     a length-1 array holding the single fixed ``f_ro`` for twotone / time-domain
@@ -150,7 +158,6 @@ def mixed_signal(
     if not 0.0 <= p_e <= 1.0:
         raise ValueError(f"p_e must be in [0, 1], got {p_e}")
 
-    rf_g, rf_e = resonator_freqs(sim, flux)
     s_g = s21(sim, freqs, rf_g)
     s_e = s21(sim, freqs, rf_e)
     return s_g + p_e * (s_e - s_g)

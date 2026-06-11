@@ -31,15 +31,20 @@ from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import DirectReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.sim import SimParams
-from zcu_tools.program.v2.sim.readout import resonator_freqs, value_to_flux
+from zcu_tools.program.v2.sim.readout import resonator_freqs
 from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.program.v2.utils import sweep2param
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
-# Operating point: flux_bias=0.2 (the engine's no-device flux value) places the
-# qubit a few GHz above the sweet spot, giving a finite gap and a clear
-# dispersive shift.  T1/T2 are short so decay/dephasing are visible over modest
-# sweeps; snr is generous so the physical structure dominates the noise.
+# Operating point: the engine pins reduced flux = 1.0 (R-3).  At EJ/EC/EL =
+# 8.5/1.0/0.5 the qubit sits a few GHz above the sweet spot there, giving a finite
+# gap and a clear dispersive shift.  T1/T2 are short so decay/dephasing are visible
+# over modest sweeps; snr is generous so the physical structure dominates the noise.
+# These tests drive ModularProgramV2 directly with a *raw* (un-folded) sweep axis,
+# so the engine's true f_qubit (~7391 MHz) is the same axis the peak is read on —
+# Nyquist folding only affects the analyzer's axis, which this layer does not use.
+_OPERATING_FLUX = 1.0
+
 _SIM = SimParams(
     EJ=8.5,
     EC=1.0,
@@ -61,7 +66,12 @@ _SIM = SimParams(
 
 
 def _f_qubit_mhz() -> float:
-    """The qubit 0->1 frequency (MHz) the engine sees at the no-device flux."""
+    """The qubit 0->1 frequency (MHz) the engine sees at the fixed operating flux.
+
+    The engine pins reduced flux = 1.0 (R-3) and feeds ``predict_freq`` a *device
+    value*, so map the fixed flux back through ``flux_to_value`` exactly as the
+    engine does — this is the true (un-folded) f_qubit the engine drives at.
+    """
 
     predictor = FluxoniumPredictor(
         params=(_SIM.EJ, _SIM.EC, _SIM.EL),
@@ -69,18 +79,17 @@ def _f_qubit_mhz() -> float:
         flux_period=_SIM.flux_period,
         flux_bias=_SIM.flux_bias,
     )
-    return float(predictor.predict_freq(_SIM.flux_bias))
+    return float(predictor.predict_freq(predictor.flux_to_value(_OPERATING_FLUX)))
 
 
 def _rf_g_mhz() -> float:
-    """The ground-state dressed resonator frequency (MHz) at the operating flux.
+    """The ground-state dressed resonator frequency (MHz) at the fixed operating flux.
 
     Reading out near rf_g maximizes the |g>/|e> contrast, which is what makes
     the T1 decay and Rabi oscillation visible in the readout magnitude.
     """
 
-    flux = value_to_flux(_SIM, _SIM.flux_bias)
-    rf_g, _rf_e = resonator_freqs(_SIM, flux)
+    rf_g, _rf_e = resonator_freqs(_SIM, _OPERATING_FLUX)
     return rf_g * 1e3
 
 
@@ -373,6 +382,58 @@ def test_engine_onetone_dip():
     assert abs(dip_freq - rf_g) < 30.0
 
 
+def test_engine_qub_pulse_with_swept_ro_freq_dip_tracks_pe():
+    """R-1 unified path: a qubit pulse + swept readout frequency in one program.
+
+    The pre-readout π pulse excites P_e≈1, so the dispersive dip rides rf_e; with
+    no pulse the qubit stays at ~thermal and the dip rides rf_g.  This is the new
+    case the unified _point_signal path supports — pre-R-1 the swept-ro_freq branch
+    ignored the qubit pulse entirely and always probed rf_g.
+    """
+
+    f_qubit = _f_qubit_mhz()
+    rf_g_mhz, rf_e_mhz = (f * 1e3 for f in resonator_freqs(_SIM, _OPERATING_FLUX))
+
+    # Sweep wide enough to bracket both rf_g and rf_e.
+    lo = min(rf_g_mhz, rf_e_mhz) - 50.0
+    hi = max(rf_g_mhz, rf_e_mhz) + 50.0
+    sw = SweepCfg(start=lo, stop=hi, expts=121, step=(hi - lo) / 120)
+    freqs = np.linspace(sw.start, sw.stop, sw.expts)
+
+    def _dip_freq(pi_gain: float) -> float:
+        soc, soccfg = make_mock_soc(sim=_SIM)
+        # gain*length == pi_gain_len (0.4) is an exact π; gain=0 is no excitation.
+        qub_pulse = PulseCfg(
+            ch=0,
+            nqz=1,
+            gain=pi_gain,
+            freq=f_qubit,
+            phase=0.0,
+            waveform=ConstWaveformCfg(length=0.4),
+        ).build("qub")
+        ro_param = sweep2param("ro_freq", sw)
+        ro = DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=ro_param).build("ro")
+        prog = ModularProgramV2(
+            soccfg,
+            ProgramV2Cfg(reps=80, rounds=2),
+            modules=[qub_pulse, ro],
+            sweep=[("ro_freq", sw)],
+        )
+        amp = _amp(prog.acquire(soc, progress=False))
+        return float(freqs[int(np.argmin(amp))])
+
+    # π pulse (gain=1.0, length=0.4 => θ=π): dip rides rf_e.
+    dip_pi = _dip_freq(1.0)
+    assert abs(dip_pi - rf_e_mhz) < abs(dip_pi - rf_g_mhz)
+
+    # no pulse (gain=0): qubit at ~thermal => dip rides rf_g.
+    dip_zero = _dip_freq(0.0)
+    assert abs(dip_zero - rf_g_mhz) < abs(dip_zero - rf_e_mhz)
+
+    # The two dips are distinct (the pulse genuinely moved the readout response).
+    assert abs(dip_pi - dip_zero) > 10.0
+
+
 # ------------------------------------------------------------------- singleshot
 
 
@@ -443,6 +504,54 @@ def test_engine_round_hook_called_per_round():
     assert len(calls) == rounds
     # round_count is the running number of completed rounds (1..rounds).
     assert calls == [1, 2, 3]
+
+
+# ----------------------------------------------------------------- R-2 lazy poll
+
+
+def test_engine_lazy_compute_respects_early_stop(monkeypatch):
+    """R-2: an early-stopping run never computes the rounds it does not poll.
+
+    With lazy poll-time compute the soc asks the engine for round N only when it
+    polls round N.  A stop_checker that fires after the first round halts the
+    round loop, so compute_round is called exactly once even though 5 rounds were
+    configured — proving the unpolled rounds' physics is never computed.
+    """
+
+    from zcu_tools.program.v2.sim.engine import SimEngine
+
+    calls: list[int] = []
+    real_compute_round = SimEngine.compute_round
+
+    def spy_compute_round(self, round_idx: int):
+        calls.append(round_idx)
+        return real_compute_round(self, round_idx)
+
+    monkeypatch.setattr(SimEngine, "compute_round", spy_compute_round)
+
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    f_qubit = _f_qubit_mhz()
+
+    pulse = PulseCfg(
+        ch=0,
+        nqz=1,
+        gain=0.1,
+        freq=f_qubit,
+        phase=0.0,
+        waveform=ConstWaveformCfg(length=1.0),
+    ).build("qub")
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=20, rounds=5),
+        modules=[pulse, _readout(_rf_g_mhz())],
+    )
+
+    # A stop_checker that always returns True halts after the first round.
+    prog.acquire(soc, progress=False, stop_checkers=[lambda: True])
+
+    assert calls == [0], (
+        f"expected exactly one round computed (early stop), got rounds {calls}"
+    )
 
 
 # ---------------------------------------------------------------- decimated D2

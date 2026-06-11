@@ -6,7 +6,7 @@ sweep point of the program, and produces the integer I/Q "raw" buffer that the
 real QICK accumulated-readout path expects.  The engine deliberately owns only
 the *glue* responsibilities:
 
-  - flux operating point (cfg device value -> reduced flux, with a fallback),
+  - flux operating point (fixed at reduced flux Phi/Phi0 = 1.0; R-3),
   - qubit transition frequency ``f_qubit`` (fluxonium prediction at that flux),
   - driving lowering -> bloch -> excited population -> dispersive IQ per point,
   - laying the per-point IQ out into the ``(*loop_dims, nreads, 2)`` int64 buffer
@@ -48,19 +48,24 @@ import numpy as np
 from numpy.polynomial.legendre import leggauss
 from numpy.typing import NDArray
 
-from zcu_tools.experiment.utils.device import get_labeled_device_cfg
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 from . import bloch
 from .lowering import LoweredPoint, lower_point
 from .params import SimParams
-from .readout import mixed_signal, value_to_flux
+from .readout import mixed_signal, resonator_freqs
 
 logger = logging.getLogger(__name__)
 
-# Label of the flux device in an experiment cfg's ``dev`` map (see
-# experiment.utils.device.set_flux_in_dev_cfg, whose default label is the same).
-_FLUX_DEV_LABEL = "flux_dev"
+# Operating flux is fixed at reduced flux Phi/Phi0 = 1.0 (R-3): the simulation is a
+# device-pipeline validator, so it pins one operating point instead of deriving it
+# from the experiment cfg's ``dev`` map.  The engine works in true (absolute,
+# non-folded) frequencies throughout; the mock gen f_dds is high enough (12288 MHz)
+# that the f01 the prediction lands on at this operating flux sits well below f_dds,
+# so the analyzer reports it un-folded.  Folding is a ``f mod f_dds`` analyzer-axis
+# effect only and is physically harmless to the Bloch dynamics; see sim/README
+# Nyquist note.  Changing the operating point is a one-line edit here.
+_SIM_OPERATING_FLUX = 1.0
 
 # MHz -> GHz for the predictor output (predict_freq returns MHz; lowering and the
 # readout model both work in GHz).
@@ -132,6 +137,10 @@ class SimEngine:
         self.program = program
         self.sim = sim
 
+        # Deterministic raw-IQ grid (reps-broadcast, no noise), built lazily on
+        # the first compute_round and reused across rounds; None until then.
+        self._det_full: NDArray[np.float64] | None = None
+
         # One predictor instance reused across all sweep points; building it is
         # expensive (lazy scqubits import + Fluxonium construction).
         self._predictor = FluxoniumPredictor(
@@ -157,34 +166,6 @@ class SimEngine:
             self._detune_nodes = np.zeros(1, dtype=np.float64)
             self._detune_weights = np.ones(1, dtype=np.float64)
 
-    # ------------------------------------------------------------------ flux
-    def _flux_value(self) -> float:
-        """Resolve the flux *device value* for this program.
-
-        The flux operating point lives in the experiment cfg's ``dev`` map
-        (label ``flux_dev``); a bare program cfg has no ``dev``.  When no flux
-        device is present we fall back to ``sim.flux_bias`` as the device value
-        (so ``value_to_flux`` maps it through the standard affine alignment).
-        """
-
-        dev = getattr(self.program.cfg_model, "dev", None)
-        if dev is None:
-            return self.sim.flux_bias
-        try:
-            flux_cfg = get_labeled_device_cfg(dev, _FLUX_DEV_LABEL)
-        except ValueError:
-            # No (or ambiguous) flux device labelled flux_dev -> use the bias.
-            return self.sim.flux_bias
-        # Only value-carrying device infos (FakeDevice / YOKOGS200) are valid flux
-        # setpoints; an RF source labelled flux_dev is a config error -> Fast-fail.
-        value = getattr(flux_cfg, "value", None)
-        if value is None:
-            raise TypeError(
-                f"flux device {flux_cfg.type!r} has no 'value' field; cannot use it "
-                "as a flux setpoint"
-            )
-        return float(value)
-
     # ----------------------------------------------------------- sweep points
     def _sweep_axes(self) -> list[tuple[str, int]]:
         """Return the sweep axes as ``[(name, count), ...]`` (program order).
@@ -201,13 +182,20 @@ class SimEngine:
             for name, spec in sweep
         ]
 
-    def _signal_grid(self, flux: float, f_qubit_ghz: float) -> NDArray[np.complex128]:
+    def _signal_grid(
+        self, f_qubit_ghz: float, rf_g: float, rf_e: float
+    ) -> NDArray[np.complex128]:
         """Compute the deterministic per-(sweep-point, read) complex IQ grid.
 
         Returns an array of shape ``(*sweep_dims, nreads)`` of complex IQ values
         (one readout channel; multi-channel sim is out of scope — the engine
         asserts a single readout channel).  Each entry is the population-weighted
         dispersive readout signal at that sweep point.
+
+        ``rf_g`` / ``rf_e`` are the dressed resonator frequencies at the (fixed)
+        operating flux; the caller computes them once and passes them in, so the
+        per-point loop never re-runs the fluxonium eigensolve (see
+        :meth:`_ensure_signal`).
         """
 
         axes = self._sweep_axes()
@@ -219,62 +207,92 @@ class SimEngine:
         index_ranges = [range(count) for _, count in axes]
         for multi_index in itertools.product(*index_ranges):
             point = {name: idx for (name, _), idx in zip(axes, multi_index)}
-            iq = self._point_signal(point, flux, f_qubit_ghz)
+            iq = self._point_signal(point, f_qubit_ghz, rf_g, rf_e)
             grid[(*multi_index, slice(None))] = iq
 
         return grid
 
     def _point_signal(
-        self, point: dict[str, int], flux: float, f_qubit_ghz: float
+        self, point: dict[str, int], f_qubit_ghz: float, rf_g: float, rf_e: float
     ) -> complex:
-        """Deterministic complex IQ at one sweep point.
+        """Deterministic complex IQ at one sweep point (single unified path).
 
-        Onetone (``sweeps_ro_freq``) is resonator-only: no Bloch evolution, the
-        qubit sits at its thermal population and the probe frequency is the
-        per-point swept ``f_ro``.  The detune ensemble has no effect there (δ only
-        enters via Bloch segments), so that branch lowers once at ``δ = 0`` and
-        returns the thermal-population signal verbatim.
+        Every sweep point follows the *same* physics: lower the module tree,
+        evolve the Bloch timeline to an excited population ``P_e``, and read out
+        the dispersive signal at this point's readout probe frequency
+        ``f_ro``.  No experiment type (onetone / twotone / qubit-pulse + swept
+        ``f_ro``) is special-cased — they differ only in what the timeline and
+        the per-point ``f_ro`` happen to be:
 
-        Every other experiment evolves the Bloch timeline to an excited
-        population.  Under the Lorentzian quasi-static detune model the observed
-        signal is the *ensemble average* over the static detune δ.  The dispersive
-        readout ``signal = S21(rf_g) + P_e·[S21(rf_e) − S21(rf_g)]`` is linear in
+          - onetone has no qubit pulse, so the Bloch vector relaxes to ~thermal
+            and ``P_e ≈ thermal_pop`` while the swept ``f_ro`` traces the S21
+            dip near ``rf_g``;
+          - twotone / time-domain drive the qubit (``P_e`` set by the pulse) and
+            read out at a fixed ``f_ro``;
+          - a qubit pulse *with* a swept ``f_ro`` excites ``P_e`` AND sweeps the
+            probe, so the dip rides ``rf_e`` (π pulse) or ``rf_g`` (no pulse).
+
+        ``f_ro`` is taken per point from ``ReadoutPlan.f_ro_ghz``, which
+        ``lower_point`` already resolves to the swept-or-fixed value at this
+        sweep index — so a swept readout frequency flows through naturally
+        without the engine branching on it.
+
+        Under the Lorentzian quasi-static detune model the observed signal is the
+        *ensemble average* over the static detune δ.  The dispersive readout
+        ``signal = S21(rf_g) + P_e·[S21(rf_e) − S21(rf_g)]`` is linear in
         ``P_e``, so averaging ``P_e`` over the ensemble and feeding the mean into
         ``mixed_signal`` once is exactly equal to (and cheaper than) averaging the
         complex signal — we average ``P_e``.  An echo π flip refocuses each δ; a
         Ramsey free evolution does not, so the extra ``exp(−Γt)`` decay (→ T2*)
         emerges from this average without the engine identifying the sequence.
+        The ``f_ro`` is δ-independent, so it is read once from the δ=0 lowering.
+
+        ``rf_g`` / ``rf_e`` are the flux-constant dressed resonator frequencies
+        the caller computed once; they are fed straight into ``mixed_signal``, so
+        no fluxonium eigensolve runs per point.
         """
 
-        # Onetone: resonator-only; δ does not evolve, so a single δ=0 lowering
-        # suffices (also guarantees the onetone path is untouched by the ensemble).
+        # δ=0 lowering supplies this point's f_ro (δ never affects readout) and
+        # serves as the single-node ensemble when Gamma == 0.
         zero_lowered = self._lower(point, f_qubit_ghz, 0.0)
-        if zero_lowered.readout.sweeps_ro_freq:
-            p_e = self.sim.thermal_pop
-            freqs = np.array([zero_lowered.readout.f_ro_ghz], dtype=np.float64)
-            signal = mixed_signal(self.sim, freqs, flux, p_e)
-            return complex(signal[0])
 
-        # Bloch path: ensemble-average P_e over the Lorentzian detune nodes.  The
-        # Gamma == 0 ensemble is a single node at δ = 0, so this reduces to the
-        # Phase-1 single Bloch eval (zero regression).
+        # No-drive short-circuit: the quasi-static detune δ enters the Bloch
+        # generator only through the x/y rotation (gen[0,1] / gen[1,0]).  With no
+        # drive segment (every omega == 0) the z-row decouples entirely from δ
+        # (gen[2, :] is just [0, 0, -gamma1, z_eq*gamma1]), so the excited
+        # population P_e = (1+z)/2 is δ-independent — every ensemble node yields
+        # the identical P_e.  The ensemble average then equals a single eval
+        # exactly (this is the *value* of the average, not an approximation), so a
+        # driveless timeline (e.g. a pure onetone readout sweep) skips the 41-node
+        # quadrature.  This does NOT special-case experiment type or restore a
+        # per-experiment split (R-1): it is the mathematical identity "mean of
+        # identical values == the value", gated only on whether any drive exists.
+        has_drive = any(seg.omega != 0.0 for seg in zero_lowered.segments)
+
         v0 = bloch.ground_state(self.sim.thermal_pop)
-        p_e_mean = 0.0
-        for delta, weight in zip(self._detune_nodes, self._detune_weights):
-            lowered = (
-                zero_lowered
-                if delta == 0.0
-                else self._lower(point, f_qubit_ghz, float(delta))
-            )
-            v_final = bloch.evolve(v0, lowered.segments)
-            p_e = bloch.excited_population(v_final)
-            # Bloch keeps z in [-1, 1] (CPTP), but matrix-exponential round-off
-            # can nudge p_e a hair outside [0, 1]; clamp each node before
-            # averaging (mixed_signal Fast-fails on out-of-range p_e).
-            p_e_mean += float(weight) * float(np.clip(p_e, 0.0, 1.0))
+        if has_drive:
+            # Ensemble-average P_e over the Lorentzian detune nodes.  The Gamma == 0
+            # ensemble is a single node at δ = 0, so this reduces to one Bloch eval
+            # (zero regression vs the pre-ensemble single-eval path).
+            p_e_mean = 0.0
+            for delta, weight in zip(self._detune_nodes, self._detune_weights):
+                lowered = (
+                    zero_lowered
+                    if delta == 0.0
+                    else self._lower(point, f_qubit_ghz, float(delta))
+                )
+                v_final = bloch.evolve(v0, lowered.segments)
+                p_e = bloch.excited_population(v_final)
+                # Bloch keeps z in [-1, 1] (CPTP), but matrix-exponential round-off
+                # can nudge p_e a hair outside [0, 1]; clamp each node before
+                # averaging (mixed_signal Fast-fails on out-of-range p_e).
+                p_e_mean += float(weight) * float(np.clip(p_e, 0.0, 1.0))
+        else:
+            v_final = bloch.evolve(v0, zero_lowered.segments)
+            p_e_mean = float(np.clip(bloch.excited_population(v_final), 0.0, 1.0))
 
         freqs = np.array([zero_lowered.readout.f_ro_ghz], dtype=np.float64)
-        signal = mixed_signal(self.sim, freqs, flux, p_e_mean)
+        signal = mixed_signal(self.sim, freqs, rf_g, rf_e, p_e_mean)
         return complex(signal[0])
 
     def _lower(
@@ -309,28 +327,50 @@ class SimEngine:
         return int(ro["trigs"])
 
     # ----------------------------------------------------------- raw assembly
-    def compute_rounds(self, rounds: int) -> list[list[NDArray[np.int64]]]:
-        """Compute the per-round raw acc_buf for every round.
+    def _ensure_signal(self) -> NDArray[np.float64]:
+        """Build (once, cached) the deterministic raw I/Q broadcast over reps.
 
-        Returns ``rounds`` entries, each a one-channel list ``[acc_buf]`` with
-        ``acc_buf`` of shape ``(*loop_dims, nreads, 2)`` int64 — i.e. exactly
-        what the mock soc serves through ``start_readout`` / ``poll_data`` in one
-        round.  The deterministic signal is shared across rounds; only the noise
-        is redrawn per round, so software-averaging the rounds improves SNR.
+        The flux, f_qubit and per-point dispersive signal grid are independent of
+        the round index — only the additive per-shot noise differs round to round.
+        So the expensive part (lowering + Bloch + readout for every sweep point)
+        is computed on the *first* round poll and cached; later rounds reuse it
+        and only redraw noise.  This is what makes ``compute_round`` lazy: a run
+        that early-stops never computes a round it does not poll.
+
+        Returns the deterministic ``(reps, *sweep, nreads, 2)`` float array
+        (no noise yet), at the integration full scale.
         """
 
-        flux = value_to_flux(self.sim, self._flux_value())
-        f_qubit_mhz = float(self._predictor.predict_freq(self._flux_value()))
+        if self._det_full is not None:
+            return self._det_full
+
+        # Operating point is fixed at reduced flux = 1.0 (R-3).  predict_freq
+        # consumes a *device value*, so map the fixed reduced flux back through the
+        # predictor's affine alignment (flux_to_value) rather than rewriting it.
+        flux = _SIM_OPERATING_FLUX
+        device_value = self._predictor.flux_to_value(_SIM_OPERATING_FLUX)
+        f_qubit_mhz = float(self._predictor.predict_freq(device_value))
         f_qubit_ghz = f_qubit_mhz * _MHZ_TO_GHZ
 
+        # Dressed resonator frequencies are flux-constant (R-3 pins the operating
+        # flux), so the fluxonium eigensolve behind ``resonator_freqs`` runs ONCE
+        # here instead of once per sweep point inside the old ``mixed_signal``.
+        # CACHE DEPENDENCY: this is valid only because ``_SIM_OPERATING_FLUX`` is a
+        # single fixed flux for the whole sweep; if the operating flux ever became
+        # per-point, rf_g/rf_e would have to move back into the per-point loop.
+        rf_g, rf_e = resonator_freqs(self.sim, flux)
+
         logger.debug(
-            "SimEngine.compute_rounds: flux=%.4f, f_qubit=%.4f GHz, rounds=%d",
+            "SimEngine: flux=%.4f, f_qubit=%.4f GHz, rf_g=%.4f GHz, rf_e=%.4f GHz",
             flux,
             f_qubit_ghz,
-            rounds,
+            rf_g,
+            rf_e,
         )
 
-        signal_grid = self._signal_grid(flux, f_qubit_ghz)  # (*sweep, nreads) complex
+        signal_grid = self._signal_grid(  # (*sweep, nreads) complex
+            f_qubit_ghz, rf_g, rf_e
+        )
 
         loop_dims = self.program.loop_dims
         assert loop_dims is not None  # guaranteed by __init__; reasserted for typing
@@ -343,13 +383,29 @@ class SimEngine:
         det = _FULL_SCALE * signal_grid  # (*sweep, nreads) complex
         det_iq = np.stack([det.real, det.imag], axis=-1)  # (*sweep, nreads, 2)
 
-        # Broadcast over reps -> (reps, *sweep, nreads, 2).
-        det_full = np.broadcast_to(det_iq, (reps, *sweep_dims, nreads, 2))
+        # Broadcast over reps -> (reps, *sweep, nreads, 2).  np.array materializes
+        # the broadcast so each round can add a fresh independent noise draw.
+        self._det_full = np.array(
+            np.broadcast_to(det_iq, (reps, *sweep_dims, nreads, 2))
+        )
+        return self._det_full
 
+    def compute_round(self, round_idx: int) -> list[NDArray[np.int64]]:
+        """Compute one round's raw acc_buf lazily (called by the mock soc's poll).
+
+        ``round_idx`` is informational (rounds redraw independent noise from the
+        engine's RNG, in poll order); the deterministic signal grid is built once
+        on the first call and cached (:meth:`_ensure_signal`), so each round only
+        adds a fresh per-shot Gaussian noise draw.  Returns the one-channel list
+        ``[acc_buf]`` with ``acc_buf`` of shape ``(*loop_dims, nreads, 2)`` int64
+        — exactly what the mock soc serves through ``poll_data`` for that round.
+        Software-averaging the rounds improves SNR because each draw is independent.
+        """
+
+        logger.debug("SimEngine.compute_round: round_idx=%d", round_idx)
+
+        det_full = self._ensure_signal()
         noise_std = _FULL_SCALE / self.sim.snr
-        rounds_buf: list[list[NDArray[np.int64]]] = []
-        for _ in range(rounds):
-            noise = self._rng.normal(0.0, noise_std, size=det_full.shape)
-            acc = np.rint(det_full + noise).astype(np.int64)
-            rounds_buf.append([acc])
-        return rounds_buf
+        noise = self._rng.normal(0.0, noise_std, size=det_full.shape)
+        acc = np.rint(det_full + noise).astype(np.int64)
+        return [acc]

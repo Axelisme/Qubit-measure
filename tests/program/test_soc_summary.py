@@ -29,7 +29,7 @@ def test_describe_soc_columns_present() -> None:
     assert "0_224" in text
 
     # sample rates (Msps) from rf.dacs / rf.adcs
-    assert "6144.000" in text  # generator fs
+    assert "12288.000" in text  # generator fs
     assert "2457.600" in text  # readout fs
 
     # max lengths in samples + us

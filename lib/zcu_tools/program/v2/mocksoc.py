@@ -10,6 +10,7 @@ from qick.qick_asm import get_version
 
 if TYPE_CHECKING:
     from .sim import SimParams
+    from .sim.engine import SimEngine
 
 
 def _build_mock_cfg(n_gens: int = 2, n_readouts: int = 1) -> dict:
@@ -22,16 +23,26 @@ def _build_mock_cfg(n_gens: int = 2, n_readouts: int = 1) -> dict:
 
     Clock arithmetic:
       refclk = 245.76 MHz
-      gen:     fs=6144.0, fs_mult=25, fs_div=1, interpolation=1, fdds_div=1
-               f_dds = fs = refclk*25/1 = 6144.0 MHz
+      gen:     fs=12288.0, fs_mult=50, fs_div=1, interpolation=1, fdds_div=1
+               f_dds = fs = refclk*50/1 = 12288.0 MHz
       readout: fs=2457.6, fs_mult=10, fs_div=1, decimation=1, fdds_div=1
                f_dds = fs / decimation = 2457.6 MHz, b_dds=32
+
+    The gen f_dds is deliberately high (12288 MHz, a clean 50*refclk).  With
+    interpolation==1 QICK applies no Nyquist check, so a played tone folds by
+    ``f mod f_dds`` on the analyzer's absolute frequency axis (not an fs/2
+    reflection).  Pushing f_dds to 12288 keeps the whole fluxonium working set —
+    f01 (~4 GHz), the dressed resonator (~7 GHz), and 6 GHz-class readouts with
+    several-hundred-MHz sweeps — comfortably below f_dds, so absolute frequencies
+    are reported un-folded.  f_dds is NOT a free parameter: it must stay
+    self-consistent with ``refclk * fs_mult / (fs_div * interpolation)`` or
+    QICK's freq2reg/reg2freq quantisation desyncs from f_dds.
     """
 
     _REFCLK = 245.76
 
-    _GEN_FS = _REFCLK * 25
-    _GEN_FS_MULT = 25
+    _GEN_FS = _REFCLK * 50
+    _GEN_FS_MULT = 50
     _GEN_FS_DIV = 1
     _GEN_INTERPOLATION = 1
     _GEN_FDDS_DIV = _GEN_FS_DIV * _GEN_INTERPOLATION
@@ -174,12 +185,13 @@ class MockQickSoc(QickConfig):
         # and routes through the SimEngine instead of the white-noise path (D1).
         self._sim_params = sim
 
-        # Per-round simulated raw acc_buf budget, stashed by MyProgramV2.acquire
-        # before the real round loop runs.  Each entry is the one-channel
-        # [acc_buf] for one round; start_readout/poll_data pop and serve them in
-        # order so the genuine finish_round / round_hook / stop_checkers /
-        # _process_accumulated machinery is fully reused (hybrid design).
-        self._sim_rounds: list[list[np.ndarray]] | None = None
+        # The SimEngine compute handle, injected by MyProgramV2.acquire on the sim
+        # path (set_sim_engine).  poll_data computes one round *lazily* off it —
+        # nothing is pre-computed, so an early-stopping run never computes a round
+        # it does not poll.  The round counter tracks which round to ask for next;
+        # the engine redraws independent noise per round (deterministic grid is
+        # cached inside the engine on first call).
+        self._sim_engine: SimEngine | None = None
         self._sim_round_idx: int = 0
 
     # --- no-op hardware control ---
@@ -212,14 +224,16 @@ class MockQickSoc(QickConfig):
         # this — it relies on poll_data() filling total_count.
         return self._BIG_COUNT
 
-    def set_sim_rounds(self, rounds_buf: list[list[np.ndarray]]) -> None:
-        """Stash the SimEngine's per-round raw acc_buf budget for this acquire().
+    def set_sim_engine(self, engine: SimEngine) -> None:
+        """Attach the SimEngine compute handle for this acquire() (sim path).
 
-        Called by MyProgramV2.acquire on the sim path before the real round loop
-        runs; poll_data then serves one entry per round in order.
+        Called by MyProgramV2.acquire on the sim path *before* the real round
+        loop runs.  Nothing is computed here — poll_data computes each round
+        lazily off this engine in poll order, so early-stop saves the unpolled
+        rounds' compute.
         """
 
-        self._sim_rounds = rounds_buf
+        self._sim_engine = engine
         self._sim_round_idx = 0
 
     def start_readout(self, total_shots, counter_addr, ch_list, reads_per_shot) -> None:
@@ -231,17 +245,14 @@ class MockQickSoc(QickConfig):
             return []
         total_shots, _ch_list, reads_per_shot = self._readout_state
 
-        if self._sim_rounds is not None:
-            # Sim path: serve this round's pre-computed raw buffer (flattened to
-            # the (total_shots*nreads, 2) per-channel shape the accumulated loop
-            # writes into acc_buf via a flat reshape).
-            if self._sim_round_idx >= len(self._sim_rounds):
-                raise RuntimeError(
-                    "SimEngine round budget exhausted: poll_data called for round "
-                    f"{self._sim_round_idx} but only {len(self._sim_rounds)} were "
-                    "stashed"
-                )
-            round_buf = self._sim_rounds[self._sim_round_idx]
+        if self._sim_engine is not None:
+            # Sim path: compute *this* round's raw buffer lazily off the engine
+            # (deterministic grid cached inside the engine; only noise is fresh),
+            # then flatten to the (total_shots*nreads, 2) per-channel shape the
+            # accumulated loop writes into acc_buf via a flat reshape.  No budget
+            # ceiling: the engine computes any round on demand, so a run that
+            # early-stops simply never asks for the rounds it skips.
+            round_buf = self._sim_engine.compute_round(self._sim_round_idx)
             self._sim_round_idx += 1
             data = [ch.reshape(-1, 2) for ch in round_buf]
         else:

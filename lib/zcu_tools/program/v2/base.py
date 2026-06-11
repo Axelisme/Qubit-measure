@@ -70,15 +70,16 @@ class MyProgramV2(ImproveAcquireMixin, ImproveAsmV2, AveragerProgramV2, IRCompil
         )
 
         # Sim dispatch (mocksim P1-5): a MockQickSoc carrying SimParams routes
-        # through the SimEngine.  The engine pre-computes the per-round raw
-        # acc_buf budget and stashes it on the soc; the real round loop then runs
-        # unchanged (start_readout/poll_data serve the budget), so round_hook /
+        # through the SimEngine.  We *inject* the engine onto the soc (no eager
+        # compute); the real round loop then runs unchanged and the soc's
+        # poll_data computes each round lazily off the engine, so round_hook /
         # stop_checkers / _process_accumulated / _summarize_accumulated / get_raw
-        # are all reused.  With no SimParams this branch is skipped entirely and
-        # behaviour is identical to the prior real path (D1).
+        # are all reused AND an early-stopping run never computes the rounds it
+        # skips.  With no SimParams this branch is skipped entirely and behaviour
+        # is identical to the prior real path (D1).
         sim = getattr(soc, "_sim_params", None)
         if sim is not None:
-            self._stash_sim_budget(soc, sim)
+            self._attach_sim_engine(soc, sim)
 
         return super().acquire(soc, *args, rounds=self.cfg_model.rounds, **kwargs)
 
@@ -102,14 +103,15 @@ class MyProgramV2(ImproveAcquireMixin, ImproveAsmV2, AveragerProgramV2, IRCompil
             soc, *args, rounds=self.cfg_model.rounds, **kwargs
         )
 
-    def _stash_sim_budget(self, soc, sim) -> None:
-        """Compute and stash the SimEngine raw budget for the upcoming acquire.
+    def _attach_sim_engine(self, soc, sim) -> None:
+        """Build the SimEngine and inject it onto the mock soc for poll-time compute.
 
         Ensures the program is compiled (the engine reads loop_dims / ro_chs /
-        the module tree), builds the engine, and hands the per-round raw acc_buf
-        to the mock soc.  Lives here (not in acquire) to keep the dispatch branch
-        readable; raises (does not swallow) so unsupported experiment structures
-        fail fast instead of degrading to noise.
+        the module tree), constructs the engine, and hands it to the mock soc;
+        no rounds are computed here — poll_data drives compute lazily.  Lives
+        here (not in acquire) to keep the dispatch branch readable; engine
+        construction raises (does not swallow) so unsupported experiment
+        structures fail fast instead of degrading to noise.
         """
 
         from .sim.engine import SimEngine
@@ -117,5 +119,4 @@ class MyProgramV2(ImproveAcquireMixin, ImproveAsmV2, AveragerProgramV2, IRCompil
         if self.loop_dims is None or self.avg_level is None:
             self.compile()
 
-        rounds_buf = SimEngine(self, sim).compute_rounds(self.cfg_model.rounds)
-        soc.set_sim_rounds(rounds_buf)
+        soc.set_sim_engine(SimEngine(self, sim))

@@ -38,13 +38,13 @@ from .conftest import make_mock_soccfg
 
 # ---------------------------------------------------------------------------
 # Constants — valid for the mock soccfg
-# GEN: axis_sg_int4_v1, f_dds=6553.6 MHz → nqz=1 max ~3276 MHz
-# RO:  axis_readout_v2, f_dds=1000.0 MHz → max ~500 MHz
+# GEN: axis_signal_gen_v6, f_dds=12288.0 MHz → nqz=1 range 0–6144 MHz
+# RO:  axis_readout_v2,    f_dds=2457.6 MHz → range 0–1228.8 MHz
 # ---------------------------------------------------------------------------
 
 GEN_CH = 0
 GEN_CH2 = 1
-# axis_signal_gen_v6: f_dds=6144 MHz, nqz=1 range 0–3072 MHz
+# axis_signal_gen_v6: f_dds=12288 MHz, nqz=1 range 0–6144 MHz
 GEN_FREQ = 1000.0
 GEN_GAIN = 0.5
 GEN_NQZ = 1
@@ -184,7 +184,7 @@ class TestPulseIntegration:
         assert prog.binprog is not None
 
     def test_pulse_nqz2_compiles(self):
-        # nqz=2 uses the upper Nyquist zone; freq > f_dds/2 is allowed
+        # nqz=2 selects the upper Nyquist zone; the cfg still compiles there
         prog = _make_prog(modules=[Pulse("p", _pulse_cfg(nqz=2, freq=4000.0))])
         assert prog.binprog is not None
 

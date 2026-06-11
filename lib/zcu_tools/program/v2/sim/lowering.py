@@ -119,19 +119,14 @@ class ReadoutPlan:
     Fields
     ------
     f_ro_ghz : float
-        Fixed readout probe frequency in GHz (the cfg ``ro_freq`` in MHz scaled
-        down).  When ``sweeps_ro_freq`` is True this is the sweep *start* value
-        and the engine drives the actual swept grid instead.
-    sweeps_ro_freq : bool
-        True when the experiment sweeps the readout frequency (onetone
-        resonator spectroscopy).  Detected here because the swept-vs-fixed
-        distinction is a property of the readout module's ``ro_freq`` field,
-        which lowering already has in hand; the engine consumes the flag to pick
-        its resonator-only branch.
+        Readout probe frequency in GHz at *this* sweep point (the cfg
+        ``ro_freq`` in MHz, resolved per point and scaled down).  A swept
+        ``ro_freq`` is resolved here to its value at the current sweep index, so
+        the engine reads it back point-by-point without needing to know whether
+        it is swept or fixed — every experiment goes through one unified path.
     """
 
     f_ro_ghz: float
-    sweeps_ro_freq: bool
 
 
 @dataclass(frozen=True)
@@ -594,9 +589,8 @@ def _readout_plan(
             f"unsupported readout module {type(module).__name__} for lowering"
         )
 
-    sweeps = isinstance(ro_freq, QickParam) and ro_freq.is_sweep()
     f_ro_mhz = _resolve_scalar(ro_freq, loop_counts, point)
-    return ReadoutPlan(f_ro_ghz=f_ro_mhz / _GHZ_TO_MHZ, sweeps_ro_freq=sweeps)
+    return ReadoutPlan(f_ro_ghz=f_ro_mhz / _GHZ_TO_MHZ)
 
 
 def _select_branch(branch: Branch, point: dict[str, int]) -> list[Module]:
