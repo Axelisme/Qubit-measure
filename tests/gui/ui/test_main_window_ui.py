@@ -567,12 +567,20 @@ def _make_pulse_model(ctrl):
     return SectionLiveField(spec, LiveModelEnv(ctrl=ctrl), make_default_value(spec))
 
 
-def test_exp_tab_reset_reseeds_cfg_editor_session(qapp):
+def test_exp_tab_reset_reseeds_cfg_editor_session(qapp, monkeypatch):
     """Reset tears down the old cfg-editor session and re-seeds a fresh one over
-    the controller's regenerated default schema."""
+    the controller's regenerated default schema (user confirms the dialog)."""
     import dataclasses
 
+    from qtpy.QtWidgets import QMessageBox
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget, MainWindow
+
+    # Simulate the user clicking Yes in the confirmation dialog.
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+    )
 
     ctrl = _editor_wiring_ctrl()
     first_model = ctrl.get_cfg_editor_root.return_value
@@ -603,12 +611,68 @@ def test_exp_tab_reset_reseeds_cfg_editor_session(qapp):
     assert tab.cfg_form.get_live_root() is not first_model
 
 
-def test_exp_tab_reset_does_not_double_connect_schema_changed(qapp):
+def test_exp_tab_reset_confirm_no_does_not_reset(qapp, monkeypatch):
+    """Clicking No in the confirmation dialog must not reset the cfg."""
+    import dataclasses
+
+    from qtpy.QtWidgets import QMessageBox
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget, MainWindow
+
+    # Simulate the user clicking No.
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.No,
+    )
+
+    ctrl = _editor_wiring_ctrl()
+    tab = ExpTabWidget("tab-1", ctrl)
+    snapshot = dataclasses.replace(_snapshot("tab-1"), cfg_schema=_pulse_schema())
+    tab.attach(snapshot, MainWindow(ctrl))
+
+    ctrl.reset_tab_cfg.reset_mock()
+    ctrl.open_seeded_cfg_editor.reset_mock()
+
+    tab._on_reset_cfg_clicked()
+
+    # Controller must not be touched when the user cancels.
+    ctrl.reset_tab_cfg.assert_not_called()
+    ctrl.open_seeded_cfg_editor.assert_not_called()
+
+
+def test_exp_tab_reset_btn_idle_only_enable(qapp):
+    """reset_btn must be enabled when idle and disabled while the tab is busy."""
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
+
+    tab = ExpTabWidget("tab-1", _mock_ctrl())
+
+    # Idle: reset_btn should be enabled.
+    tab.update_interaction_state(_snapshot("tab-1", is_running=False))
+    assert tab.reset_btn.isEnabled() is True
+
+    # Busy (running): reset_btn must be disabled.
+    tab.update_interaction_state(_snapshot("tab-1", is_running=True))
+    assert tab.reset_btn.isEnabled() is False
+
+    # Back to idle: reset_btn re-enabled.
+    tab.update_interaction_state(_snapshot("tab-1", is_running=False))
+    assert tab.reset_btn.isEnabled() is True
+
+
+def test_exp_tab_reset_does_not_double_connect_schema_changed(qapp, monkeypatch):
     """After reset, editing a field commits exactly once — re-seeding must not
     duplicate the widget→controller schema_changed binding."""
     import dataclasses
 
+    from qtpy.QtWidgets import QMessageBox
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget, MainWindow
+
+    # Simulate the user clicking Yes in the confirmation dialog.
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+    )
 
     ctrl = _editor_wiring_ctrl()
     tab = ExpTabWidget("tab-1", ctrl)

@@ -48,6 +48,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QLineEdit,
     QMainWindow,
     QMenu,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSplitter,
@@ -198,15 +199,25 @@ class ExpTabWidget(QWidget):
         config_layout.setContentsMargins(4, 4, 4, 4)
         config_layout.setSpacing(2)
 
+        # Thin top strip: Reset sits right-aligned at the top of the cfg area,
+        # visually de-emphasised (flat, small font) to reduce accidental clicks.
+        # A spacer pushes it to the right; the strip adds only minimal height.
+        cfg_top_strip = QHBoxLayout()
+        cfg_top_strip.setContentsMargins(0, 0, 0, 0)
+        cfg_top_strip.addStretch()
+        self.reset_btn = QPushButton("Reset")
+        self.reset_btn.setFlat(True)
+        self.reset_btn.setToolTip("Discard current config and restore adapter defaults")
+        # Smaller font signals secondary action (Run is the primary action below).
+        reset_font = self.reset_btn.font()
+        reset_font.setPointSize(max(reset_font.pointSize() - 1, 7))
+        self.reset_btn.setFont(reset_font)
+        cfg_top_strip.addWidget(self.reset_btn)
+        config_layout.addLayout(cfg_top_strip)
+
         self.cfg_form = CfgFormWidget()
         self.cfg_form.validity_changed.connect(self._on_cfg_validity_changed)
         config_layout.addWidget(self.cfg_form, stretch=1)
-
-        # Reset belongs to the cfg-editing area (above Run): it discards the
-        # current cfg and regenerates the adapter default. Idle-only.
-        self.reset_btn = QPushButton("Reset")
-        self.reset_btn.setToolTip("Discard current config and restore adapter defaults")
-        config_layout.addWidget(self.reset_btn)
 
         self.run_btn = QPushButton("Run")
         self.run_btn.setFixedHeight(30)
@@ -528,6 +539,16 @@ class ExpTabWidget(QWidget):
         del valid
 
     def _on_reset_cfg_clicked(self) -> None:
+        # Guard: ask before discarding — Reset is destructive (drops entire cfg).
+        reply = QMessageBox.question(
+            self,
+            "Reset config",
+            "Reset config to defaults? This discards the current configuration.",
+            QMessageBox.Yes | QMessageBox.No,  # type: ignore[attr-defined]
+            QMessageBox.No,  # type: ignore[attr-defined]
+        )
+        if reply != QMessageBox.Yes:  # type: ignore[attr-defined]
+            return
         # Controller regenerates + commits the adapter-default cfg (and gates a
         # running tab); we just re-seed the form over the new committed schema.
         assert self._main_window is not None, "reset clicked before bind"
