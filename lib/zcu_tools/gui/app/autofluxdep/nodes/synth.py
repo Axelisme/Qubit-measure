@@ -1,6 +1,7 @@
 """Synthetic signal generators for the dry-run Node bodies.
 
-MockSoc.acquire returns white noise — not fittable. So the dry-run Node bodies
+A default MockSoc (sim=None) returns white noise — not fittable; the dry-run
+Node bodies do not wire a SimParams-backed mock. So they instead
 synthesise a physically-plausible *complex* IQ signal (the real fitting pipeline
 does ``rotate2real`` first), shaped by the same base functions the fitters fit:
 
