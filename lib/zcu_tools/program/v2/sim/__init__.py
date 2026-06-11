@@ -14,6 +14,6 @@ analytic-limit / lowering tests do).
 """
 
 from .engine import SimEngine
-from .params import SimParams
+from .params import DEFAULT_SIMPARAM, SimParams
 
-__all__ = ["SimParams", "SimEngine"]
+__all__ = ["SimParams", "SimEngine", "DEFAULT_SIMPARAM"]

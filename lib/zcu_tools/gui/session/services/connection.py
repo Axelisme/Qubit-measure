@@ -215,8 +215,13 @@ class ConnectionService(QObject):
             logger.info("start_connect: mock")
             try:
                 from zcu_tools.program.v2.mocksoc import make_mock_soc
+                from zcu_tools.program.v2.sim import DEFAULT_SIMPARAM
 
-                soc, soccfg = make_mock_soc()
+                # Inject the dev-only default SimParams so mock-connect yields
+                # physically-realistic data (not white noise).  The make_mock_soc
+                # signature default stays sim=None so all direct test callers are
+                # unaffected (D1 guarantee).
+                soc, soccfg = make_mock_soc(sim=DEFAULT_SIMPARAM)
             except Exception as exc:
                 error = f"Mock SoC initialisation failed: {exc}"
                 QTimer.singleShot(0, lambda err=error: self._finish_failure(err))

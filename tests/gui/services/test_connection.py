@@ -26,6 +26,7 @@ from zcu_tools.gui.session.services.connection import (
     PredictorLoadError,
     PredictorNotLoaded,
 )
+from zcu_tools.program.v2.sim import DEFAULT_SIMPARAM
 
 
 def _make_svc(gate: OperationGate | None = None) -> ConnectionService:
@@ -48,6 +49,32 @@ def test_start_connect_mock_emits_finished_and_updates_context(qapp):
 
     assert svc.has_soc()
     assert svc._state.exp_context.soccfg is not None
+
+
+def test_start_connect_mock_soc_carries_default_simparam(qapp):
+    """Mock-connect injects DEFAULT_SIMPARAM so the soc yields physical sim data.
+
+    The connection.py mock branch wires DEFAULT_SIMPARAM into make_mock_soc so
+    that both "Use MockSoc" and gui_connect_start(kind='mock') return a
+    SimEngine-backed soc rather than white noise.  This test verifies the
+    injection by checking that the resulting soc's _sim_params is the same
+    object as DEFAULT_SIMPARAM (identity, not just equality).
+    """
+    svc = _make_svc()
+    loop = QEventLoop()
+    svc.connection_finished.connect(loop.quit)
+    svc.connection_failed.connect(lambda msg: loop.quit())
+
+    svc.start_connect(ConnectMockRequest())
+    loop.exec()
+
+    soc = svc._state.exp_context.soc
+    assert soc is not None, "soc must be set after mock connect"
+    # Identity check: the exact DEFAULT_SIMPARAM instance must be carried through.
+    # _sim_params is not on SocProtocol (it is MockQickSoc-specific), so we use
+    # getattr to satisfy pyright while still asserting the injected instance.
+    assert hasattr(soc, "_sim_params"), "mock soc must expose _sim_params"
+    assert getattr(soc, "_sim_params") is DEFAULT_SIMPARAM
 
 
 def test_connect_bumps_soc_not_context_version(qapp):

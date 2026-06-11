@@ -164,3 +164,37 @@ class SimParams(ConfigBase):
         T2_star == T2 (pure homogeneous limit).
         """
         return 1.0 / self.T2_star - 1.0 / self.T2
+
+
+# ---------------------------------------------------------------------------
+# Dev-only default operating point
+# ---------------------------------------------------------------------------
+
+# Frozen at the validated integration-test operating point (tests/program/v2/sim/
+# test_integration.py).  Sub-Nyquist: EJ/EC/EL=3.0/0.9/0.5 + flux_bias=0.1
+# gives f_qubit ≈ 2893 MHz < fs/2 = 3072 MHz, so DAC aliasing does not fold the
+# drive tone.  T2_star < T2 exercises the inhomogeneous dephasing split so both
+# Ramsey (→ T2_star) and echo (→ T2) paths produce meaningful data.
+#
+# THIS IS DEV-ONLY.  It is wired into the GUI mock-connect path (connection.py)
+# so that "Use MockSoc" / gui_connect_start(kind='mock') returns physically-
+# realistic data.  Do NOT change the make_mock_soc() default signature — it stays
+# sim=None (white noise) so all direct callers in tests remain unaffected.
+DEFAULT_SIMPARAM: SimParams = SimParams(
+    EJ=3.0,
+    EC=0.9,
+    EL=0.5,
+    flux_period=1.0,
+    flux_half=0.0,
+    flux_bias=0.1,
+    T1=20.0,
+    T2=15.0,  # homogeneous (echo) T2; 15 <= 2*T1=40 ✓
+    T2_star=8.0,  # Ramsey T2*; 8 <= T2=15 ✓ — non-zero inhomogeneous rate
+    bare_rf=7.2,
+    g=0.08,
+    Ql=5000.0,
+    Qi=50000.0,
+    snr=300.0,
+    pi_gain_len=0.4,
+    seed=12345,
+)
