@@ -150,6 +150,9 @@ class ExpTabWidget(QWidget):
         # editor_id of this tab's shared cfg-editor session (set on bind, when
         # the cfg_form's live model exists). Exposed to agents via tab.snapshot.
         self._cfg_editor_id: str | None = None
+        # The owning MainWindow, captured in _bind_to_controller (button slots
+        # otherwise close over it; the Reset handler needs it off-slot).
+        self._main_window: MainWindow | None = None
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(4, 4, 4, 4)
@@ -198,6 +201,12 @@ class ExpTabWidget(QWidget):
         self.cfg_form = CfgFormWidget()
         self.cfg_form.validity_changed.connect(self._on_cfg_validity_changed)
         config_layout.addWidget(self.cfg_form, stretch=1)
+
+        # Reset belongs to the cfg-editing area (above Run): it discards the
+        # current cfg and regenerates the adapter default. Idle-only.
+        self.reset_btn = QPushButton("Reset")
+        self.reset_btn.setToolTip("Discard current config and restore adapter defaults")
+        config_layout.addWidget(self.reset_btn)
 
         self.run_btn = QPushButton("Run")
         self.run_btn.setFixedHeight(30)
@@ -518,6 +527,37 @@ class ExpTabWidget(QWidget):
     def _on_cfg_validity_changed(self, valid: bool) -> None:
         del valid
 
+    def _on_reset_cfg_clicked(self) -> None:
+        # Controller regenerates + commits the adapter-default cfg (and gates a
+        # running tab); we just re-seed the form over the new committed schema.
+        assert self._main_window is not None, "reset clicked before bind"
+        schema = self._ctrl.reset_tab_cfg(self.tab_id)
+        self._reseed_cfg(schema)
+        self._main_window.refresh_tab_interaction(self.tab_id)
+
+    def _reseed_cfg(self, schema: CfgSchema) -> None:
+        """Swap the cfg form onto a fresh service-owned session for ``schema``.
+
+        The cfg_form widget itself is unchanged — only the LiveModel it views is
+        replaced — so the widget→controller bindings (``schema_changed`` →
+        ``_schema_cb``, ``validity_changed`` → ``_validity_cb`` set in
+        ``_bind_to_controller``) stay connected exactly once and must NOT be
+        re-connected here (that would double-fire ``update_tab_cfg``). Only the
+        model↔widget binding is rebuilt: ``detach`` drops the old one, ``attach``
+        wires the new model. ``attach`` re-emits only ``validity_changed`` (not
+        ``schema_changed``), so re-seeding does not write the default cfg back —
+        ``reset_tab_cfg`` already committed it.
+        """
+        self.cfg_form.detach()
+        if self._cfg_editor_id is not None:
+            self._ctrl.teardown_cfg_editor(self._cfg_editor_id)
+            self._cfg_editor_id = None
+        editor_id, _ = self._ctrl.open_seeded_cfg_editor(
+            schema, gc=False, owner_key=self.tab_id
+        )
+        self._cfg_editor_id = editor_id
+        self.cfg_form.attach(self._ctrl.get_cfg_editor_root(editor_id))
+
     def update_interaction_state(self, snapshot: TabSnapshot) -> None:
         # A render snapshot (get_tab_snapshot) always fills the live fields; only
         # the persist/restore form leaves them None, and that never reaches here.
@@ -565,6 +605,7 @@ class ExpTabWidget(QWidget):
 
         idle = not local_busy
         self.cfg_form.setEnabled(idle)
+        self.reset_btn.setEnabled(idle)
 
         # Non-analysis adapters (flux_dep / power_dep) hide only the analysis
         # widgets, NOT the whole tab — the Save section lives in this same tab and
@@ -599,6 +640,9 @@ class ExpTabWidget(QWidget):
 
     def _bind_to_controller(self, main_window: MainWindow) -> None:
         tab_id = self.tab_id
+        # Held so the Reset handler can refresh interaction state after re-seeding
+        # (the only post-bind path that needs the MainWindow off a button slot).
+        self._main_window = main_window
 
         def validity_cb(_valid: bool) -> None:
             main_window.refresh_tab_interaction(tab_id)
@@ -626,6 +670,7 @@ class ExpTabWidget(QWidget):
         )
         self._data_path_edit.textChanged.connect(save_paths_cb)
         self._image_path_edit.textChanged.connect(save_paths_cb)
+        self.reset_btn.clicked.connect(self._on_reset_cfg_clicked)
         self.run_btn.clicked.connect(lambda: main_window._on_run_stop_clicked(tab_id))
         self.analyze_btn.clicked.connect(
             lambda: main_window._on_analyze_clicked(tab_id)

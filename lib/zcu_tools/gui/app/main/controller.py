@@ -1127,6 +1127,27 @@ class Controller:
         """
         self._tab_svc.update_tab_cfg(tab_id, schema)
 
+    def reset_tab_cfg(self, tab_id: str) -> CfgSchema:
+        """Regenerate the tab's cfg to the adapter's default and commit it.
+
+        Discards the whole current cfg: builds a fresh default CfgSchema from the
+        adapter (under the live context) and writes it back as the committed
+        truth, returning it so the caller can re-seed its cfg form.
+
+        Running gate: editing/replacing a running tab's cfg is forbidden (the
+        worker captured the cfg at launch) — fail fast, mirroring the
+        ``tab.update_cfg`` RPC guard.
+        """
+        if self._state.running_tab_id == tab_id:
+            raise RuntimeError(
+                f"tab {tab_id!r} is currently running; cancel the run before "
+                "resetting cfg"
+            )
+        adapter_name = self._tab_svc.get_tab_adapter_name(tab_id)
+        schema = self._tab_svc.make_default_cfg(adapter_name)
+        self._tab_svc.update_tab_cfg(tab_id, schema)
+        return schema
+
     def update_tab_analyze_param_instance(self, tab_id: str, instance: object) -> None:
         self._tab_svc.update_tab_analyze_param_instance(tab_id, instance)
         self._bus.emit(

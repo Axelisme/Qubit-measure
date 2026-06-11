@@ -473,6 +473,46 @@ def test_update_tab_cfg_does_not_emit_interaction_changed(cf):
         )
 
 
+def test_reset_tab_cfg_restores_adapter_default(cf):
+    """reset_tab_cfg commits the adapter default and returns that same schema."""
+    tab_id = cf.ctrl.new_tab("fake")
+
+    # Mutate the committed cfg away from the default.
+    base = cf.state.get_tab(tab_id).cfg_schema
+    mutated_value = dataclasses.replace(
+        base.value,
+        fields={**base.value.fields, "reps": DirectValue(123)},
+    )
+    cf.ctrl.update_tab_cfg(tab_id, dataclasses.replace(base, value=mutated_value))
+
+    returned = cf.ctrl.reset_tab_cfg(tab_id)
+
+    default = _default_fake_schema(cf.state.exp_context)
+    assert returned.value.fields["reps"] == default.value.fields["reps"]
+    # State now holds the returned default, not the mutated draft.
+    committed = cf.ctrl.get_tab_cfg_schema(tab_id)
+    assert committed is returned
+    assert committed.value.fields["reps"] == default.value.fields["reps"]
+
+
+def test_reset_tab_cfg_while_running_raises(cf):
+    slow = MagicMock(spec=FakeAdapter)
+    ev = threading.Event()
+    slow.run.side_effect = lambda *a, **kw: ev.wait()
+
+    tab_id = cf.ctrl.new_tab("fake")
+    cf.state.get_tab(tab_id).adapter = slow
+    cf.ctrl.start_run(tab_id)
+    assert cf.state.is_tab_running(tab_id)
+
+    with pytest.raises(RuntimeError, match="currently running"):
+        cf.ctrl.reset_tab_cfg(tab_id)
+
+    # cleanup
+    ev.set()
+    _wait_for(lambda: not cf.state.is_tab_running(tab_id), timeout_ms=2000)
+
+
 def test_get_adapter_names_includes_fake(cf):
     assert "fake" in cf.ctrl.get_adapter_names()
 

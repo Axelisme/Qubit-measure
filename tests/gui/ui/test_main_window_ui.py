@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
 from qtpy.QtCore import Qt
 from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.main.services import PersistedStartup, TabSnapshot
@@ -555,6 +556,81 @@ def test_exp_tab_tears_down_cfg_editor_on_detach(qapp):
 
     ctrl.teardown_cfg_editor.assert_called_once_with("editor-tab1")
     assert tab._cfg_editor_id is None
+
+
+def _make_pulse_model(ctrl):
+    from zcu_tools.gui.app.main.adapter import make_default_value
+    from zcu_tools.gui.app.main.cfg_schemas import _MODULE_SPEC_FACTORIES
+    from zcu_tools.gui.app.main.live_model import LiveModelEnv, SectionLiveField
+
+    spec = _MODULE_SPEC_FACTORIES["pulse"]()
+    return SectionLiveField(spec, LiveModelEnv(ctrl=ctrl), make_default_value(spec))
+
+
+def test_exp_tab_reset_reseeds_cfg_editor_session(qapp):
+    """Reset tears down the old cfg-editor session and re-seeds a fresh one over
+    the controller's regenerated default schema."""
+    import dataclasses
+
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget, MainWindow
+
+    ctrl = _editor_wiring_ctrl()
+    first_model = ctrl.get_cfg_editor_root.return_value
+    tab = ExpTabWidget("tab-1", ctrl)
+    snapshot = dataclasses.replace(_snapshot("tab-1"), cfg_schema=_pulse_schema())
+    tab.attach(snapshot, MainWindow(ctrl))
+
+    # After attach: a second session for the reset, returning a NEW model.
+    reset_schema = _pulse_schema()
+    second_model = _make_pulse_model(ctrl)
+    ctrl.reset_tab_cfg.return_value = reset_schema
+    ctrl.open_seeded_cfg_editor.reset_mock()
+    ctrl.open_seeded_cfg_editor.return_value = ("editor-tab1-v2", [])
+    ctrl.get_cfg_editor_root.return_value = second_model
+
+    tab._on_reset_cfg_clicked()
+
+    ctrl.reset_tab_cfg.assert_called_once_with("tab-1")
+    # Old session torn down, new one opened keyed by the same tab.
+    ctrl.teardown_cfg_editor.assert_called_once_with("editor-tab1")
+    ctrl.open_seeded_cfg_editor.assert_called_once()
+    kwargs = ctrl.open_seeded_cfg_editor.call_args.kwargs
+    assert kwargs["owner_key"] == "tab-1"
+    assert kwargs["gc"] is False
+    assert tab._cfg_editor_id == "editor-tab1-v2"
+    # The form now views the new model (root widget rebuilt).
+    assert tab.cfg_form.get_live_root() is second_model
+    assert tab.cfg_form.get_live_root() is not first_model
+
+
+def test_exp_tab_reset_does_not_double_connect_schema_changed(qapp):
+    """After reset, editing a field commits exactly once — re-seeding must not
+    duplicate the widget→controller schema_changed binding."""
+    import dataclasses
+
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget, MainWindow
+
+    ctrl = _editor_wiring_ctrl()
+    tab = ExpTabWidget("tab-1", ctrl)
+    snapshot = dataclasses.replace(_snapshot("tab-1"), cfg_schema=_pulse_schema())
+    tab.attach(snapshot, MainWindow(ctrl))
+
+    reset_schema = _pulse_schema()
+    second_model = _make_pulse_model(ctrl)
+    ctrl.reset_tab_cfg.return_value = reset_schema
+    ctrl.get_cfg_editor_root.return_value = second_model
+    tab._on_reset_cfg_clicked()
+
+    # Drive a single field edit on the re-seeded model and count commits.
+    ctrl.update_tab_cfg.reset_mock()
+    root = tab.cfg_form.get_live_root()
+    assert root is not None
+    scalar = root.fields["gain"]
+    scalar.set_value(0.42)
+
+    assert ctrl.update_tab_cfg.call_count == 1
+    committed = ctrl.update_tab_cfg.call_args.args[1]
+    assert committed.value.fields["gain"].value == pytest.approx(0.42)
 
 
 def test_main_window_confirms_and_begins_shutdown_when_operations_active(
