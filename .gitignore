@@ -21,6 +21,7 @@ result
 test.py
 test.ipynb
 scratch/
+task_plans/
 
 notebook_md/plot/*
 
