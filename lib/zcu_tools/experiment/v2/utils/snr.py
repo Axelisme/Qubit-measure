@@ -19,8 +19,13 @@ def estimate_snr(real_signals: NDArray[np.float64]) -> float:
     n = real_signals.shape[-1]
     window_length = min(7, n if n % 2 else n - 1)
     if window_length >= 3:
-        smooth_signals = savgol_filter(
-            real_signals, window_length=window_length, polyorder=2, axis=-1
+        # scipy 1.17 stubs type savgol_filter as a union of array types;
+        # collapse it back to the concrete float64 ndarray it returns here.
+        smooth_signals = np.asarray(
+            savgol_filter(
+                real_signals, window_length=window_length, polyorder=2, axis=-1
+            ),
+            dtype=np.float64,
         )
     else:
         smooth_signals = real_signals
