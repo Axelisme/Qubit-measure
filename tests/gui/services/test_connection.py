@@ -56,9 +56,10 @@ def test_start_connect_mock_soc_carries_default_simparam(qapp):
 
     The connection.py mock branch wires DEFAULT_SIMPARAM into make_mock_soc so
     that both "Use MockSoc" and gui_connect_start(kind='mock') return a
-    SimEngine-backed soc rather than white noise.  This test verifies the
-    injection by checking that the resulting soc's _sim_params is the same
-    object as DEFAULT_SIMPARAM (identity, not just equality).
+    SimEngine-backed soc rather than white noise.  FLUX-AWARE-MOCK copy-on-input:
+    the soc keeps an *internal copy* of the injected SimParams (so a later
+    set_flux_device never mutates the shared DEFAULT_SIMPARAM singleton), so the
+    contract is value-equality, NOT object identity.
     """
     svc = _make_svc()
     loop = QEventLoop()
@@ -70,11 +71,14 @@ def test_start_connect_mock_soc_carries_default_simparam(qapp):
 
     soc = svc._state.exp_context.soc
     assert soc is not None, "soc must be set after mock connect"
-    # Identity check: the exact DEFAULT_SIMPARAM instance must be carried through.
+    # Value-equality (not identity): copy-on-input means the soc holds an
+    # equivalent copy of DEFAULT_SIMPARAM, not the singleton instance itself.
     # _sim_params is not on SocProtocol (it is MockQickSoc-specific), so we use
-    # getattr to satisfy pyright while still asserting the injected instance.
+    # getattr to satisfy pyright while still asserting the injected params.
     assert hasattr(soc, "_sim_params"), "mock soc must expose _sim_params"
-    assert getattr(soc, "_sim_params") is DEFAULT_SIMPARAM
+    sim_params = getattr(soc, "_sim_params")
+    assert sim_params is not DEFAULT_SIMPARAM  # copy-on-input, not aliased
+    assert sim_params == DEFAULT_SIMPARAM
 
 
 def test_connect_bumps_soc_not_context_version(qapp):

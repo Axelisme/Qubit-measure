@@ -102,6 +102,16 @@ class SimParams(ConfigBase):
         seed : int or None, optional
             RNG seed for reproducible noise.  None means non-deterministic.
             Defaults to None.
+
+    Runtime flux binding (FLUX-AWARE-MOCK):
+        flux_device : str or None, optional
+            Name of a connected device in ``GlobalDeviceManager`` whose live value
+            sets the operating flux.  When set, the engine reads that device's
+            value at acquire time and maps it through ``value_to_flux`` (using this
+            SimParams' flux_half / flux_period / flux_bias) to the reduced flux for
+            f_qubit / dispersive prediction; only a ``FakeDevice`` is supported.
+            When None (default), the operating flux is fixed at reduced flux = 1.0
+            (zero regression).  Defaults to None.
     """
 
     # --- qubit Hamiltonian (GHz) ---
@@ -128,6 +138,17 @@ class SimParams(ConfigBase):
     Ql: float
     # Qi > Ql enforced by _validate_qi_gt_ql; Qc is derived, not stored.
     Qi: float
+
+    # --- runtime flux binding (FLUX-AWARE-MOCK) ---
+    # flux_device: name of a connected device in GlobalDeviceManager whose live
+    # value drives the operating flux of the simulation.  When None (the default,
+    # zero-regression), the engine pins the operating point at reduced flux = 1.0
+    # (R-3); when set, the engine reads that device's value at acquire time and
+    # maps it through this SimParams' affine (value_to_flux) to the reduced flux
+    # used for f_qubit / dispersive prediction.  Only a FakeDevice is supported as
+    # the source (see engine._operating_signal).  This is a *runtime* binding, not
+    # physics: the field carries no validation and DEFAULT_SIMPARAM leaves it None.
+    flux_device: str | None = None
 
     # --- noise and calibration ---
     snr: float

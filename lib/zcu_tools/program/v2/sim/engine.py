@@ -66,14 +66,16 @@ from .readout import decimated_trace, resonator_freqs, s21
 
 logger = logging.getLogger(__name__)
 
-# Operating flux is fixed at reduced flux Phi/Phi0 = 1.0 (R-3): the simulation is a
-# device-pipeline validator, so it pins one operating point instead of deriving it
-# from the experiment cfg's ``dev`` map.  The engine works in true (absolute,
-# non-folded) frequencies throughout; the mock gen f_dds is high enough (12288 MHz)
-# that the f01 the prediction lands on at this operating flux sits well below f_dds,
-# so the analyzer reports it un-folded.  Folding is a ``f mod f_dds`` analyzer-axis
-# effect only and is physically harmless to the Bloch dynamics; see sim/README
-# Nyquist note.  Changing the operating point is a one-line edit here.
+# Default operating flux: reduced flux Phi/Phi0 = 1.0 (R-3).  This is the operating
+# point when no device is bound; the FLUX-AWARE-MOCK path (SimParams.flux_device,
+# see _reduced_operating_flux) overrides it by reading a live FakeDevice value.  The
+# simulation is a device-pipeline validator, so by default it pins one operating
+# point instead of deriving it from the experiment cfg's ``dev`` map.  The engine
+# works in true (absolute, non-folded) frequencies throughout; the mock gen f_dds is
+# high enough (12288 MHz) that the f01 the prediction lands on at this operating flux
+# sits well below f_dds, so the analyzer reports it un-folded.  Folding is a
+# ``f mod f_dds`` analyzer-axis effect only and is physically harmless to the Bloch
+# dynamics; see sim/README Nyquist note.
 _SIM_OPERATING_FLUX = 1.0
 
 # MHz -> GHz for the predictor output (predict_freq returns MHz; lowering and the
@@ -376,28 +378,86 @@ class SimEngine:
         return int(ro["trigs"])
 
     # ------------------------------------------------------- operating point
-    def _operating_signal(self) -> tuple[float, float, float]:
-        """Return (cached) ``(f_qubit_ghz, rf_g, rf_e)`` at the fixed operating flux.
+    def _reduced_operating_flux(self) -> float:
+        """Resolve the reduced operating flux Phi/Phi0 for this acquire.
 
-        Operating point is fixed at reduced flux = 1.0 (R-3).  ``predict_freq``
-        consumes a *device value*, so map the fixed reduced flux back through the
-        predictor's affine alignment (``flux_to_value``) rather than rewriting it.
-        The dressed resonator frequencies are flux-constant (R-3 pins the flux), so
-        the fluxonium eigensolve behind ``resonator_freqs`` runs ONCE here and is
-        reused by every sweep point (accumulated) and by the decimated trace.
+        FLUX-AWARE-MOCK: the operating flux is normally pinned at reduced flux =
+        1.0 (R-3), but ``SimParams.flux_device`` opts into reading it live from a
+        connected device.  This is a deliberate cross-layer reach: the engine
+        lives in ``program/v2/sim/`` yet, when bound, peers into the
+        ``GlobalDeviceManager`` registry (``device/``) to read the *current*
+        device value, because the mock soc must mirror the real rig where the
+        software flux sweep sets a YOKO/FakeDevice value per acquire and the qubit
+        frequency follows it.  The read is intentionally lazy and happens once per
+        acquire: a fresh SimEngine is built on every ``MyProgramV2.acquire`` (see
+        base._attach_sim_engine), so reading here is equivalent to "read the live
+        flux just before each acquisition".  Within a single acquire the flux is
+        constant (the runner does software-per-acquire: set device value, then run
+        one acquire), which is exactly the assumption the flux-constant caches in
+        :meth:`_operating_signal` rely on.
+
+        Only a ``FakeDevice`` is supported as the source: the simulation models a
+        dev-only mock rig, and a FakeDevice exposes a plain in-memory ``value`` the
+        engine can read without any instrument I/O.  A missing device or a
+        non-FakeDevice is a wiring mistake, so fail-fast here (the binding itself,
+        via ``set_flux_device``, is permitted before the device is registered;
+        the resolution is what enforces the contract).
+        """
+
+        flux_device = self.sim.flux_device
+        if flux_device is None:
+            # Zero-regression path: no binding -> the historical fixed operating
+            # point (reduced flux = 1.0, R-3).
+            return _SIM_OPERATING_FLUX
+
+        # Lazy local import (FLUX-AWARE-MOCK): keep the device dependency off the
+        # sim package's import graph.  ``device/`` never imports ``program/v2/sim``,
+        # so there is no import cycle; importing inside the function also avoids
+        # paying the device import cost on the (default) fixed-flux path.
+        from zcu_tools.device import FakeDevice, GlobalDeviceManager
+
+        dev = GlobalDeviceManager.get_device(flux_device)
+        if not isinstance(dev, FakeDevice):
+            raise TypeError(
+                f"SimEngine flux_device {flux_device!r} must be a FakeDevice "
+                f"(the mock simulation only reads a FakeDevice's in-memory value); "
+                f"got {type(dev).__name__}"
+            )
+
+        # Map the live device value to reduced flux through THIS SimParams' affine
+        # (flux_half / flux_period / flux_bias), the same alignment predict_freq
+        # uses internally, so the operating point stays self-consistent.
+        device_value = dev.get_value()
+        return self._predictor.value_to_flux(device_value)
+
+    def _operating_signal(self) -> tuple[float, float, float]:
+        """Return (cached) ``(f_qubit_ghz, rf_g, rf_e)`` at the operating flux.
+
+        The operating flux comes from :meth:`_reduced_operating_flux`
+        (FLUX-AWARE-MOCK: fixed reduced flux = 1.0 by default, or read live from a
+        bound FakeDevice).  ``predict_freq`` consumes a *device value*, so map the
+        resolved reduced flux back through the predictor's affine alignment
+        (``flux_to_value``) rather than rewriting it.  The dressed resonator
+        frequencies are flux-constant *within one acquire* (the flux is read once
+        here and held for the whole sweep), so the fluxonium eigensolve behind
+        ``resonator_freqs`` runs ONCE here and is reused by every sweep point
+        (accumulated) and by the decimated trace.  The cache is per-engine and an
+        engine is rebuilt every acquire, so a changed device value between acquires
+        is picked up by the next engine (no stale cross-acquire flux).
         """
 
         if self._operating is not None:
             return self._operating
 
-        device_value = self._predictor.flux_to_value(_SIM_OPERATING_FLUX)
+        reduced_flux = self._reduced_operating_flux()
+        device_value = self._predictor.flux_to_value(reduced_flux)
         f_qubit_mhz = float(self._predictor.predict_freq(device_value))
         f_qubit_ghz = f_qubit_mhz * _MHZ_TO_GHZ
-        rf_g, rf_e = resonator_freqs(self.sim, _SIM_OPERATING_FLUX)
+        rf_g, rf_e = resonator_freqs(self.sim, reduced_flux)
 
         logger.debug(
             "SimEngine: flux=%.4f, f_qubit=%.4f GHz, rf_g=%.4f GHz, rf_e=%.4f GHz",
-            _SIM_OPERATING_FLUX,
+            reduced_flux,
             f_qubit_ghz,
             rf_g,
             rf_e,

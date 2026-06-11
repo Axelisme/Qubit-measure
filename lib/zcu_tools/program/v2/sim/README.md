@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-06-11 (reps axis is per-shot Bernoulli two-blob; singleshot get_raw supported, accumulated reps-mean unchanged)
+**Last updated:** 2026-06-12 (FLUX-AWARE-MOCK: operating flux can read a live FakeDevice value)
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -55,12 +55,32 @@ The qubit frequency `f_qubit` and the dressed resonator frequencies come from th
 existing fluxonium physics (`FluxoniumPredictor`, `calculate_dispersive_vs_flux_fast`,
 `HangerModel`); the sim package re-implements none of it.
 
-**Flux-constant work is computed once.** With the operating flux pinned (R-3),
-`f_qubit` and `rf_g` / `rf_e` are the same for every sweep point, so the engine
-computes them once per run and feeds `rf_g` / `rf_e` into each point's S21 blend —
-the fluxonium eigensolve behind `resonator_freqs` (the dominant cost, ~58% of a
-sweep) never runs per point.  The cache is valid only because the flux is fixed;
-a per-point operating flux would have to move that call back into the loop.
+**Flux-constant work is computed once.** With the operating flux constant *within
+one acquire*, `f_qubit` and `rf_g` / `rf_e` are the same for every sweep point, so
+the engine computes them once per run and feeds `rf_g` / `rf_e` into each point's
+S21 blend — the fluxonium eigensolve behind `resonator_freqs` (the dominant cost,
+~58% of a sweep) never runs per point.  The cache is valid only because the flux is
+fixed *for that acquire*; a per-point operating flux would have to move that call
+back into the loop.
+
+**FLUX-AWARE-MOCK — operating flux from a live device.** By default the operating
+flux is pinned at reduced flux = 1.0 (R-3).  `SimParams.flux_device` opts into
+reading it live: when set, `engine._operating_signal` resolves the named device
+from `GlobalDeviceManager` (a deliberate cross-layer reach from `program/v2/sim`
+into `device/`; no import cycle since `device/` never imports the sim package — the
+import is lazy inside the function), requires it to be a `FakeDevice`, and maps its
+current `value` through `value_to_flux` to the reduced operating flux.  This mirrors
+the real rig's software flux sweep: the runner does **software-per-acquire** (set
+the device value, then run one acquire), so the flux is constant within an acquire
+(the cache invariant above holds) and a fresh `SimEngine` is built every acquire
+(base `_attach_sim_engine`), so the device read is effectively "read the live flux
+just before each acquisition" with no stale cross-acquire value.  The binding lives
+on the soc's *internal* SimParams copy (copy-on-input in `MockQickSoc.__init__`):
+`set_flux_device` mutates that copy via `with_updates`, never the caller's instance
+— critical because the GUI mock-connect passes the shared `DEFAULT_SIMPARAM`
+singleton.  Resolution is fail-fast (missing device / non-FakeDevice raises) but the
+*binding* is permitted before the device is registered.  Grep `FLUX-AWARE-MOCK` for
+every coupling point.
 
 ## Module map
 

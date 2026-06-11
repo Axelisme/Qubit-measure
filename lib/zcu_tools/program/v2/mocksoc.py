@@ -183,7 +183,15 @@ class MockQickSoc(QickConfig):
 
         # When set (via make_mock_soc(sim=...)), MyProgramV2.acquire detects this
         # and routes through the SimEngine instead of the white-noise path (D1).
-        self._sim_params = sim
+        #
+        # FLUX-AWARE-MOCK copy-on-input: keep an *internal* copy of the SimParams
+        # so that set_flux_device (and any future per-soc mutation) never writes
+        # through to the caller's instance.  The GUI mock-connect path passes the
+        # shared singleton DEFAULT_SIMPARAM (params.py), so mutating it in place
+        # would alias across every mock soc; the copy makes each soc own its params.
+        self._sim_params: SimParams | None = (
+            sim.model_copy() if sim is not None else None
+        )
 
         # The SimEngine compute handle, injected by MyProgramV2.acquire on the sim
         # path (set_sim_engine).  poll_data computes one round *lazily* off it —
@@ -223,6 +231,32 @@ class MockQickSoc(QickConfig):
         # for decimated/run_rounds paths. Accumulated path doesn't compare
         # this — it relies on poll_data() filling total_count.
         return self._BIG_COUNT
+
+    def set_flux_device(self, name: str | None) -> None:
+        """Bind (or unbind) the operating-flux source device (FLUX-AWARE-MOCK).
+
+        Sets ``flux_device`` on this soc's *internal* SimParams copy, so the next
+        acquire's SimEngine reads the named ``FakeDevice``'s live value (mapped
+        through ``value_to_flux``) instead of the fixed reduced flux = 1.0.  The
+        device need not be registered yet — binding only records the name;
+        resolution and the FakeDevice check happen lazily at acquire time
+        (engine._operating_signal), so this can be called before the device is
+        connected.  Pass ``name=None`` to fall back to the fixed operating point.
+
+        Raises if this soc carries no SimParams: a flux_device binding is
+        meaningless on the white-noise mock (no SimEngine reads it), so silently
+        accepting it would hide a wiring mistake (fast-fail).  ``with_updates``
+        re-validates and returns a fresh instance, preserving the copy-on-input
+        isolation.
+        """
+
+        if self._sim_params is None:
+            raise RuntimeError(
+                "set_flux_device requires a SimParams-backed mock soc; this soc "
+                "was built without sim (white-noise path), so a flux_device "
+                "binding has no SimEngine to read it"
+            )
+        self._sim_params = self._sim_params.with_updates(flux_device=name)
 
     def set_sim_engine(self, engine: SimEngine) -> None:
         """Attach the SimEngine compute handle for this acquire() (sim path).
