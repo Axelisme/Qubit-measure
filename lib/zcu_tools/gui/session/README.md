@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-10
+**Last updated:** 2026-06-12 — MockFluxProvisioner installs a SimParams-matched predictor
 
 # gui/session/ — 量測 session core（measure + autofluxdep 共用）
 
@@ -24,6 +24,8 @@ session/
 │   ├── startup.py      — StartupService + PersistedStartup/PersistedDeviceEntry memento + requests + derive_project_paths
 │   ├── progress.py     — ProgressService（per-operation pbar 容器 + bound factory，吃 ProgressTransport；**共用**，非 app-held）
 │   ├── io_manager.py   — IOManager（ExperimentManager 包裝，實作 ProjectIOPort；**共用**）
+│   ├── mock_flux.py    — MockFluxProvisioner（FLUX-AWARE-MOCK：訂閱 SOC_CHANGED，mock connect 時 ① 綁定/provision fake_flux 源 ② 從 mock soc 自身 SimParams 建 FluxoniumPredictor 經 connection seam 安裝——不蓋使用者已載入的 predictor）
+│   ├── predictor_from_sim.py — build_predictor_from_simparams(SimParams)→FluxoniumPredictor（純函式；橋接兩個彼此獨立的 lib leaf，放 session 層避免在 program/simulate 間造新跨依賴；測試共用）
 │   └── build.py        — SessionServices bundle + build_session_services(state,bus,gate,handles,background,progress,io_manager,driver_factory?)
 └── ui/                 — 共用 dialog（吃 SessionControllerPort）
     ├── progress_stack.py — ProgressStack widget（唯一拉 Qt 的 progress 件）

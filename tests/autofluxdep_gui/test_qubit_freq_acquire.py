@@ -15,12 +15,9 @@ dip is recoverable.
 
 from __future__ import annotations
 
-import dataclasses
-
 import numpy as np
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.session.services.mock_flux import FAKE_FLUX_DEVICE_NAME
-from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 from ._helpers import connect_mock
 
@@ -39,20 +36,18 @@ _READOUT = {
 
 
 def _configure_context(ctrl) -> None:
-    """Populate the active context's ml + a matching predictor so qubit_freq's
-    make_cfg has a readout + drive waveform and the predicted centre tracks f01."""
+    """Populate the active context's ml so qubit_freq's make_cfg has a readout +
+    drive waveform.
+
+    The predicted-centre predictor is NOT built here: connect_mock has already run
+    the MockFluxProvisioner, which installs a FluxoniumPredictor derived from the
+    mock soc's SimParams (matching the SimEngine's f01). Relying on that provisioned
+    predictor exercises the real mock-connect path rather than a hand-built copy."""
     ml = ctrl.state.exp_context.ml
     ml.register_waveform(
         qub_drive={"style": "const", "length": 1.0},
     )
     ml.register_module(readout=_READOUT)
-    # A predictor matching DEFAULT_SIMPARAM so predict_freq ~ the SimEngine's f01.
-    predictor = FluxoniumPredictor(
-        params=(4.0, 1.0, 1.0), flux_half=0.0, flux_period=1.0, flux_bias=0.0
-    )
-    ctrl.state.exp_context = dataclasses.replace(
-        ctrl.state.exp_context, predictor=predictor
-    )
 
 
 def test_qubit_freq_acquire_fit_varies_with_flux():

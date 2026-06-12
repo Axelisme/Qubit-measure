@@ -250,6 +250,51 @@ def test_mock_connect_skips_reconnect_when_already_connected(fx):
 
 
 # ---------------------------------------------------------------------------
+# FLUX-AWARE-MOCK: mock connect also installs a SimParams-matched predictor.
+# ---------------------------------------------------------------------------
+
+
+def test_mock_connect_installs_sim_predictor(fx):
+    """Mock connect installs a FluxoniumPredictor derived from the mock soc's
+    SimParams, so predict_freq matches the SimEngine's physics out of the box."""
+    from zcu_tools.gui.session.services.predictor_from_sim import (
+        build_predictor_from_simparams,
+    )
+
+    _connect_mock(fx)
+
+    predictor = fx.ctrl._conn_svc.get_predictor()
+    assert predictor is not None
+
+    # The installed predictor predicts the same f01 as one built directly from the
+    # mock soc's own SimParams (the production builder, reused here).
+    soc = fx.state.exp_context.soc
+    sim_params = soc.sim_params  # type: ignore[union-attr]
+    assert sim_params is not None
+    reference = build_predictor_from_simparams(sim_params)
+    # Compare at the provisioned operating value (reduced flux = 1.0).
+    value = _FAKE_FLUX_INITIAL_VALUE
+    assert abs(predictor.predict_freq(value) - reference.predict_freq(value)) < 1e-6
+
+
+def test_mock_connect_does_not_overwrite_user_predictor(fx):
+    """A predictor the user already loaded must survive a subsequent mock connect:
+    the provisioner installs its sim predictor only when none is present."""
+    from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
+
+    # User loads their own predictor (distinct params) before connecting.
+    user_predictor = FluxoniumPredictor(
+        params=(5.0, 1.2, 0.9), flux_half=0.1, flux_period=2.0, flux_bias=0.05
+    )
+    fx.ctrl._conn_svc.install_predictor(user_predictor)
+
+    _connect_mock(fx)
+
+    # The user's predictor is untouched (identity preserved).
+    assert fx.ctrl._conn_svc.get_predictor() is user_predictor
+
+
+# ---------------------------------------------------------------------------
 # Remote connect must NOT provision fake_flux.
 # ---------------------------------------------------------------------------
 

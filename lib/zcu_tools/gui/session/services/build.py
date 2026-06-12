@@ -84,7 +84,7 @@ def build_session_services(
     startup = StartupService(context, device, state)
     # FLUX-AWARE-MOCK: self-subscribes to SOC_CHANGED + chains the one-shot ramp
     # off device.device_connected — both apps get mock flux provisioning for free.
-    mock_flux = MockFluxProvisioner(bus, device)
+    mock_flux = MockFluxProvisioner(bus, device, connection)
     return SessionServices(
         connection=connection,
         context=context,

@@ -13,9 +13,16 @@ This lives in the session layer (not an app controller) because every
 measurement-session app (measure / autofluxdep) builds on ``DeviceService`` +
 the session ``EventBus`` and wants the exact same behaviour; promoting it here
 makes the provisioning a single shared implementation both apps reuse via
-``build_session_services`` (the apps subscribe nothing extra). It depends only on
-the session ``DeviceService`` (for register / reconnect / setup + state queries)
-and ``SocChangedPayload`` on the bus — both session-layer concepts.
+``build_session_services`` (the apps subscribe nothing extra). It depends on the
+session ``DeviceService`` (for register / reconnect / setup + state queries), the
+``ConnectionService`` (for installing the sim predictor through the existing
+predictor seam), and ``SocChangedPayload`` on the bus — all session-layer concepts.
+
+Two Use-Mock effects share one owner and one ``SOC_CHANGED`` handler:
+  1. the ``fake_flux`` source binding/provisioning (so a sweep responds to flux);
+  2. a ``FluxoniumPredictor`` derived from the mock soc's *own* SimParams, installed
+     through the predictor seam so the predicted f01 matches the simulated physics
+     out of the box — but never stomping a predictor the user already loaded.
 """
 
 from __future__ import annotations
@@ -32,6 +39,7 @@ from zcu_tools.gui.session.state import DeviceStatus
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus
+    from zcu_tools.gui.session.services.connection import ConnectionService
     from zcu_tools.gui.session.services.device import DeviceService
 
 logger = logging.getLogger(__name__)
@@ -55,9 +63,19 @@ class MockFluxProvisioner:
     need no flux-provisioning code of their own.
     """
 
-    def __init__(self, bus: BaseEventBus, device: DeviceService) -> None:
+    def __init__(
+        self,
+        bus: BaseEventBus,
+        device: DeviceService,
+        connection: ConnectionService,
+    ) -> None:
         self._bus = bus
         self._dev_svc = device
+        # ConnectionService owns the predictor seam (exp_context.predictor +
+        # PredictorChangedPayload). The provisioner installs the sim predictor
+        # through it rather than poking exp_context directly, so the one write path
+        # (set_context + event emit) stays unduplicated.
+        self._conn_svc = connection
         # FLUX-AWARE-MOCK: set while our auto-provisioned fake_flux connect is in
         # flight, so the connect-success handler ramps it to the default operating
         # point exactly once (and never touches a user's own FakeDevice).
@@ -113,6 +131,10 @@ class MockFluxProvisioner:
             )
         soc.set_flux_device(FAKE_FLUX_DEVICE_NAME)
 
+        # FLUX-AWARE-MOCK: install a predictor matching this soc's simulated physics
+        # so a fresh mock session predicts f01 consistently out of the box.
+        self._provision_sim_predictor(soc)
+
         existing = self._dev_svc.get_device_snapshot(FAKE_FLUX_DEVICE_NAME)
 
         if existing is not None and existing.status is not DeviceStatus.MEMORY_ONLY:
@@ -147,6 +169,47 @@ class MockFluxProvisioner:
             # operating point until a flux device is bound.
             self._fake_flux_pending_setup = False
             raise
+
+    def _provision_sim_predictor(self, soc: object) -> None:
+        """Install a FluxoniumPredictor matching the mock soc's SimParams.
+
+        FLUX-AWARE-MOCK. Read the *actual* params off the connected soc (not the
+        DEFAULT_SIMPARAM constant) so a future parameterised mock stays consistent.
+        Overwrite policy: never stomp a predictor the user already loaded — if
+        ``exp_context.predictor`` is already set, leave it. Either way, log INFO so
+        the choice is visible. A white-noise mock (no SimParams) has no physics to
+        derive from, so it is skipped (the fake_flux binding above already raised if
+        the soc was somehow not a real mock).
+        """
+        from zcu_tools.gui.session.services.predictor_from_sim import (
+            build_predictor_from_simparams,
+        )
+
+        sim_params = getattr(soc, "sim_params", None)
+        if sim_params is None:
+            # White-noise mock: no SimParams to derive a predictor from.
+            logger.info(
+                "MockFluxProvisioner: mock soc carries no SimParams; "
+                "no sim predictor installed"
+            )
+            return
+
+        if self._conn_svc.get_predictor() is not None:
+            logger.info(
+                "MockFluxProvisioner: predictor already present; "
+                "leaving the user's predictor untouched"
+            )
+            return
+
+        predictor = build_predictor_from_simparams(sim_params)
+        self._conn_svc.install_predictor(predictor)
+        logger.info(
+            "MockFluxProvisioner: installed sim predictor from mock SimParams "
+            "(EJ=%r EC=%r EL=%r)",
+            sim_params.EJ,
+            sim_params.EC,
+            sim_params.EL,
+        )
 
     def _on_device_connected(self, req: ConnectDeviceRequest) -> None:
         """Ramp the just-connected fake_flux to the default operating point.

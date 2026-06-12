@@ -232,6 +232,18 @@ class MockQickSoc(QickConfig):
         # this — it relies on poll_data() filling total_count.
         return self._BIG_COUNT
 
+    @property
+    def sim_params(self) -> SimParams | None:
+        """This soc's internal SimParams copy (None on the white-noise path).
+
+        FLUX-AWARE-MOCK: read-only accessor so the GUI mock-connect path can derive
+        a matching FluxoniumPredictor from the *actual* simulated physics (EJ/EC/EL
+        + flux affine) rather than re-reading the DEFAULT_SIMPARAM constant — keeping
+        the predictor consistent if a future connect parameterises the sim.
+        Returns the soc-owned copy (copy-on-input); callers must not mutate it.
+        """
+        return self._sim_params
+
     def set_flux_device(self, name: str | None) -> None:
         """Bind (or unbind) the operating-flux source device (FLUX-AWARE-MOCK).
 

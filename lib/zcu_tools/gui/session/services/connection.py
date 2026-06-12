@@ -314,6 +314,20 @@ class ConnectionService(QObject):
         self._state.set_context(new_ctx)
         self._bus.emit(PredictorChangedPayload())
 
+    def install_predictor(self, predictor: FluxoniumPredictor) -> None:
+        """Install a ready-made predictor object (no file load).
+
+        Used by the FLUX-AWARE-MOCK provisioner to install a predictor derived from
+        the mock soc's SimParams. Shares the same write seam as ``load_predictor``
+        (set_context + PredictorChangedPayload) so the View / MCP see it identically;
+        the predictor path is cleared because this predictor has no backing file.
+        """
+        logger.info("install_predictor: %s", type(predictor).__name__)
+        self._predictor_path = None
+        new_ctx = dataclasses.replace(self._state.exp_context, predictor=predictor)
+        self._state.set_context(new_ctx)
+        self._bus.emit(PredictorChangedPayload())
+
     def clear_predictor(self) -> None:
         logger.info("clear_predictor")
         self._predictor_path = None
