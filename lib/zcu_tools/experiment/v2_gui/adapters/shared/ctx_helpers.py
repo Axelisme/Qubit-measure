@@ -134,6 +134,31 @@ def proper_qub_freq_range(
     return _freq_range(ctx, "q_f", "qf_w", expts, span_factor, 4000.0, 20.0)
 
 
+def proper_reset_freq_range(
+    ctx: ExpContext, expts: int, *, half_span_default: float = 50.0
+) -> SweepValue:
+    """Sideband-reset frequency sweep range: ``reset_f ± span``.
+
+    ``reset_f`` (= r_f - q_f) is the sweep centre. When md also has ``resetf_w``
+    the half-span is ``1.5*resetf_w`` and each edge stays an EvalValue (the GUI
+    re-derives if md changes); otherwise a fixed ``reset_f ± half_span_default``
+    (notebook single-tone reset: ``reset_f - 50`` .. ``reset_f + 50``). When
+    ``reset_f`` is absent the scan centres on 0.0.
+    """
+    center = md_get_float(ctx, "reset_f", 0.0)
+    have_center = md_has_key(ctx, "reset_f")
+    if have_center and md_has_key(ctx, "resetf_w"):
+        start: float | EvalValue = EvalValue(expr="reset_f - 1.5 * resetf_w")
+        stop: float | EvalValue = EvalValue(expr="reset_f + 1.5 * resetf_w")
+    elif have_center:
+        start = EvalValue(expr=f"reset_f - {half_span_default}")
+        stop = EvalValue(expr=f"reset_f + {half_span_default}")
+    else:
+        start = center - half_span_default
+        stop = center + half_span_default
+    return SweepValue(start=start, stop=stop, expts=expts)
+
+
 def proper_flux_range(ctx: ExpContext, expts: int) -> SweepValue:
     """Flux sweep range spanning one period around the calibrated flux points.
 

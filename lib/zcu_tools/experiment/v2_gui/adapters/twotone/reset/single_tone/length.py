@@ -1,0 +1,151 @@
+from __future__ import annotations
+
+import time
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Any, ClassVar, TypeAlias
+
+from matplotlib.figure import Figure
+
+from zcu_tools.experiment.v2.twotone.reset.single_tone.length import (
+    LengthCfg,
+    LengthExp,
+    LengthResult,
+)
+from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
+from zcu_tools.experiment.v2_gui.adapters.shared import (
+    CfgBuilder,
+    build_exp_spec,
+    make_pulse_module_spec,
+    make_pulse_reset_module_spec,
+    make_readout_module_spec,
+    make_reset_module_spec,
+    md_scalar_float,
+)
+from zcu_tools.gui.app.main.adapter import (
+    AdapterGuide,
+    AnalyzeRequest,
+    AnalyzeResultBase,
+    CfgSectionSpec,
+    CfgSectionValue,
+    ExpContext,
+    NoAnalyzeParams,
+    SweepSpec,
+    SweepValue,
+    WritebackItem,
+    WritebackRequest,
+)
+
+SingleToneLengthRunResult: TypeAlias = LengthResult
+
+
+@dataclass
+class SingleToneLengthAnalyzeResult(AnalyzeResultBase):
+    # D5: the length sweep is a look-at-the-curve fit — analysis renders the
+    # decay trace for the Analyze tab but extracts no scalar, so there is no
+    # writeback. Only the figure is carried.
+    figure: Figure
+
+
+class SingleToneLengthAdapter(
+    BaseAdapter[
+        LengthCfg,
+        SingleToneLengthRunResult,
+        SingleToneLengthAnalyzeResult,
+        NoAnalyzeParams,
+    ]
+):
+    exp_cls = LengthExp
+    ExpCfg_cls: ClassVar[Any] = LengthCfg
+
+    @classmethod
+    def guide(cls) -> AdapterGuide:
+        return AdapterGuide(
+            behavior=(
+                "Single-tone sideband-reset length sweep: holds the tested "
+                "pulse-reset at its calibrated sideband frequency and sweeps its "
+                "duration, showing how the residual excitation decays with reset "
+                "length. Runs on real hardware. Run after the reset frequency is "
+                "found, to pick the shortest length that fully resets the qubit."
+            ),
+            expects_md=(
+                "Reads from the MetaDict (all optional): 'reset_f' — the sideband "
+                "reset frequency (= r_f - q_f) driving the tested reset (fallback "
+                "0 MHz); 'q_f' / 'qub_ch' seed the tested-reset and init-pulse "
+                "drive defaults."
+            ),
+            expects_ml=(
+                "Needs a pulse-reset module (the tested reset) and a readout "
+                "module. Optionally references a calibrated upstream reset and an "
+                "init pulse (a library pi pulse when present) — both disabled when "
+                "no library entry exists."
+            ),
+            typical_writeback=(
+                "No writeback — the chosen reset length is read off the decay "
+                "curve by eye, and registering the calibrated reset module is "
+                "left to the user."
+            ),
+            recommended=(
+                "A length sweep from ~0.1 us to a few times the expected reset "
+                "time captures the full decay; shorten the span once the plateau "
+                "is clear. Allow a long relax delay between shots so the qubit "
+                "fully relaxes before each reset."
+            ),
+        )
+
+    @classmethod
+    def cfg_spec(cls) -> CfgSectionSpec:
+        return build_exp_spec(
+            modules={
+                "reset": make_reset_module_spec(optional=True),
+                "init_pulse": make_pulse_module_spec(optional=True),
+                # The sweep axis owns the tested-reset length
+                # (set_param("length") at run, which drives waveform.length);
+                # the form still shows the waveform's starting length as the
+                # editable shape, mirroring the length-Rabi convention.
+                "tested_reset": make_pulse_reset_module_spec(),
+                "readout": make_readout_module_spec(),
+            },
+            sweep={"length": SweepSpec(label="Length (us)")},
+        )
+
+    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+        return (
+            CfgBuilder(ctx, self.cfg_spec())
+            .scalars(reps=100, rounds=100, relax_delay=30.5)
+            .role("modules.tested_reset", "pulse_reset")
+            # The tested reset drives at the fixed sideband frequency while the
+            # length is swept (notebook: freq = md.reset_f).
+            .set(
+                "modules.tested_reset.pulse_cfg.freq",
+                md_scalar_float(ctx, "reset_f", 0.0),
+            )
+            .role("modules.readout", "readout", prefer_blank=True)
+            # optional → None (disabled) when no library entry (ADR-0010)
+            .role("modules.reset", "reset", optional=True)
+            .role("modules.init_pulse", "pi_pulse", optional=True)
+            .set_sweep("sweep.length", SweepValue(start=0.1, stop=20.0, expts=50))
+            .build()
+        )
+
+    def get_analyze_params(
+        self, result: SingleToneLengthRunResult, ctx: ExpContext
+    ) -> NoAnalyzeParams:
+        return NoAnalyzeParams()
+
+    def analyze(
+        self, req: AnalyzeRequest[SingleToneLengthRunResult, NoAnalyzeParams]
+    ) -> SingleToneLengthAnalyzeResult:
+        fig = LengthExp().analyze(req.run_result)
+        return SingleToneLengthAnalyzeResult(figure=fig)
+
+    def get_writeback_items(
+        self,
+        req: WritebackRequest[SingleToneLengthRunResult, SingleToneLengthAnalyzeResult],
+    ) -> Sequence[WritebackItem]:
+        # D5: no scalar is fitted, so nothing is proposed back to the MetaDict.
+        del req
+        return []
+
+    def make_filename_stem(self, ctx: ExpContext) -> str:
+        return f"{ctx.qub_name}_sidereset_length_{time.strftime('%m%d')}"

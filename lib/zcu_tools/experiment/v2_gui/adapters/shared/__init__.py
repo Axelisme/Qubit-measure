@@ -10,6 +10,7 @@ from .ctx_helpers import (
     proper_qub_freq_range,
     proper_relax,
     proper_res_freq_range,
+    proper_reset_freq_range,
 )
 from .defaults import (
     ROLE_FACTORIES,
@@ -52,10 +53,13 @@ from .spec_helpers import (
     declare_dev_spec,
     declare_modules_spec,
     declare_sweep_spec,
+    make_bath_reset_module_spec,
     make_pulse_module_spec,
     make_pulse_readout_module_spec,
+    make_pulse_reset_module_spec,
     make_readout_module_spec,
     make_reset_module_spec,
+    make_two_pulse_reset_module_spec,
     schema_from_module,
 )
 
@@ -77,6 +81,7 @@ __all__ = [
     "proper_relax",
     "proper_res_freq_range",
     "proper_qub_freq_range",
+    "proper_reset_freq_range",
     "proper_flux_range",
     # Role factory table (single source for RoleCatalog + CfgBuilder)
     "ROLE_FACTORIES",
@@ -114,6 +119,9 @@ __all__ = [
     "make_pulse_module_spec",
     "make_readout_module_spec",
     "make_reset_module_spec",
+    "make_pulse_reset_module_spec",
+    "make_two_pulse_reset_module_spec",
+    "make_bath_reset_module_spec",
     "schema_from_module",
     # Root cfg-spec assembly (canonical field order owned here)
     "build_exp_spec",
