@@ -10,6 +10,7 @@ from .ctx_helpers import (
     proper_qub_freq_range,
     proper_relax,
     proper_res_freq_range,
+    proper_reset_freq_axis,
     proper_reset_freq_range,
 )
 from .defaults import (
@@ -82,6 +83,7 @@ __all__ = [
     "proper_res_freq_range",
     "proper_qub_freq_range",
     "proper_reset_freq_range",
+    "proper_reset_freq_axis",
     "proper_flux_range",
     # Role factory table (single source for RoleCatalog + CfgBuilder)
     "ROLE_FACTORIES",

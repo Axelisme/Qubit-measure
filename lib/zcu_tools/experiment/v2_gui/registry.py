@@ -45,6 +45,11 @@ from .adapters.twotone.freq import FreqAdapter
 from .adapters.twotone.power_dep import PowerDepAdapter
 from .adapters.twotone.rabi.amp_rabi import AmpRabiAdapter
 from .adapters.twotone.rabi.len_rabi import LenRabiAdapter
+from .adapters.twotone.reset.dual_tone import (
+    DualToneFreqAdapter,
+    DualToneLengthAdapter,
+    DualTonePowerAdapter,
+)
 from .adapters.twotone.reset.single_tone import (
     SingleToneFreqAdapter,
     SingleToneLengthAdapter,
@@ -75,6 +80,9 @@ ADAPTERS = {
     "twotone/rabi/len_rabi": LenRabiAdapter,
     "twotone/reset/single_tone/freq": SingleToneFreqAdapter,
     "twotone/reset/single_tone/length": SingleToneLengthAdapter,
+    "twotone/reset/dual_tone/freq": DualToneFreqAdapter,
+    "twotone/reset/dual_tone/power": DualTonePowerAdapter,
+    "twotone/reset/dual_tone/length": DualToneLengthAdapter,
     "twotone/ro_optimize/freq": RoOptFreqAdapter,
     "twotone/ro_optimize/power": RoOptPowerAdapter,
     "twotone/ro_optimize/length": RoOptLengthAdapter,

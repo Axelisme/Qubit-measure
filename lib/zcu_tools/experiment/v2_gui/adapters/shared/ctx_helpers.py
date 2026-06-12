@@ -159,6 +159,37 @@ def proper_reset_freq_range(
     return SweepValue(start=start, stop=stop, expts=expts)
 
 
+def proper_reset_freq_axis(
+    ctx: ExpContext,
+    center_key: str,
+    expts: int,
+    *,
+    half_span_default: float = 50.0,
+) -> SweepValue:
+    """One axis of a dual-tone reset frequency map: ``<center_key> ± span``.
+
+    Mirrors ``proper_reset_freq_range`` but parameterised on the centre md key so
+    each of the two sweep axes (``reset_f1`` / ``reset_f2``) seeds from its own
+    centre. When the matching width key (``<center_key>_w``, e.g. ``reset_f1_w``)
+    is present the half-span is ``1.5*width`` and each edge stays an EvalValue (the
+    GUI re-derives if md changes); otherwise a fixed ``center ± half_span_default``.
+    When the centre key is absent the scan centres on 0.0.
+    """
+    width_key = f"{center_key}_w"
+    center = md_get_float(ctx, center_key, 0.0)
+    have_center = md_has_key(ctx, center_key)
+    if have_center and md_has_key(ctx, width_key):
+        start: float | EvalValue = EvalValue(expr=f"{center_key} - 1.5 * {width_key}")
+        stop: float | EvalValue = EvalValue(expr=f"{center_key} + 1.5 * {width_key}")
+    elif have_center:
+        start = EvalValue(expr=f"{center_key} - {half_span_default}")
+        stop = EvalValue(expr=f"{center_key} + {half_span_default}")
+    else:
+        start = center - half_span_default
+        stop = center + half_span_default
+    return SweepValue(start=start, stop=stop, expts=expts)
+
+
 def proper_flux_range(ctx: ExpContext, expts: int) -> SweepValue:
     """Flux sweep range spanning one period around the calibrated flux points.
 

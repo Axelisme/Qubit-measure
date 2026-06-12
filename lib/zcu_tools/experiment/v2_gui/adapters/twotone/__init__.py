@@ -2,7 +2,13 @@ from .flux_dep import FluxDepAdapter
 from .freq import FreqAdapter
 from .power_dep import PowerDepAdapter
 from .rabi import AmpRabiAdapter, LenRabiAdapter
-from .reset import SingleToneFreqAdapter, SingleToneLengthAdapter
+from .reset import (
+    DualToneFreqAdapter,
+    DualToneLengthAdapter,
+    DualTonePowerAdapter,
+    SingleToneFreqAdapter,
+    SingleToneLengthAdapter,
+)
 from .time_domain import T1Adapter, T2EchoAdapter, T2RamseyAdapter
 
 __all__ = [
@@ -11,6 +17,9 @@ __all__ = [
     "FluxDepAdapter",
     "AmpRabiAdapter",
     "LenRabiAdapter",
+    "DualToneFreqAdapter",
+    "DualToneLengthAdapter",
+    "DualTonePowerAdapter",
     "SingleToneFreqAdapter",
     "SingleToneLengthAdapter",
     "T1Adapter",
