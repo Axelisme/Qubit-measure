@@ -58,13 +58,20 @@ import numpy as np
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.gui.app.autofluxdep.cfg import (
+    FloatSpec,
+    IntSpec,
+    SweepSpec,
+    SweepValue,
+    flat_node_schema,
+)
+from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     SnrProbe,
     acquire_to_complex,
     axis_to_sweep,
     build_stop_checkers,
     is_good_fit,
-    parse_linear_axis,
     require_flux_device,
     set_flux_by_name,
     signal2real_flip,
@@ -91,7 +98,6 @@ from zcu_tools.utils.fitting import fit_decay
 logger = logging.getLogger(__name__)
 
 _DEFAULT_T1 = 10.0  # us — md.t1 stand-in (the smoothed-t1 fallback)
-_DEFAULT_SWEEP = (0.5, 60.0, 101)  # relax-time axis (us): start, stop, npts
 
 
 class T1ModuleCfg(ConfigBase):
@@ -255,14 +261,42 @@ class T1Builder(Builder):
     optional_modules = (ModuleDep("opt_readout", default=_default_readout),)
     base_params = (
         "sweep_range",
-        "num_expts",
         "reps",
         "rounds",
         "earlystop_snr",
     )
 
+    def make_default_schema(self) -> NodeCfgSchema:
+        """The typed node-knob schema (defaults + types) — the param SSOT.
+
+        ``sweep_range`` (a ``SweepSpec``, expts-defined) seeds the initial Result
+        relax-time axis; the *cfg's* sweep_range is derived from the smoothed t1 in
+        ``make_cfg`` (``_resolve_sweep_range``), not from this knob. Its default
+        ``(0.5, 60, expts=101)`` reproduces the prototype axis; the dead
+        ``num_expts`` knob (never read) is dropped.
+        """
+        return NodeCfgSchema(
+            flat_node_schema(
+                (
+                    (
+                        "sweep_range",
+                        SweepSpec(label="Relax time sweep (us)"),
+                        SweepValue(start=0.5, stop=60.0, expts=101),
+                    ),
+                    ("reps", IntSpec(label="Reps"), 1000),
+                    ("rounds", IntSpec(label="Rounds"), 10),
+                    (
+                        "earlystop_snr",
+                        FloatSpec(label="Early-stop SNR", optional=True),
+                        None,
+                    ),
+                )
+            )
+        )
+
     def make_init_result(self, params: Mapping[str, Any], flux: Any) -> Sweep1DResult:
-        times = parse_linear_axis(params.get("sweep_range"), _DEFAULT_SWEEP)
+        knobs = self.make_default_schema().with_overrides(params).lower(None)
+        times = sweepcfg_to_axis(knobs["sweep_range"])
         return Sweep1DResult.allocate(flux, times, x_label="relax time (us)")
 
     def make_plotter(self, figure: Any) -> Decay1DPlotter:
@@ -288,7 +322,6 @@ class T1Builder(Builder):
         run needs concrete drive + readout modules (Fast Fail).
         """
         ml = env.ml
-        params = env.params
         if ml is None:
             raise RuntimeError("t1.make_cfg needs an active ModuleLibrary")
         pi_pulse = snapshot.module("pi_pulse")
@@ -299,6 +332,7 @@ class T1Builder(Builder):
             raise RuntimeError(
                 "t1.make_cfg needs a readout module (none produced or preset)"
             )
+        knobs = self.make_default_schema().with_overrides(env.params).lower(ml)
         smoothed_t1 = float(snapshot["t1"])
         return ml.make_cfg(
             {
@@ -307,8 +341,8 @@ class T1Builder(Builder):
                     "readout": readout,
                 },
                 "relax_delay": _resolve_relax_delay(smoothed_t1),
-                "reps": int(params.get("reps", 1000)),
-                "rounds": int(params.get("rounds", 10)),
+                "reps": knobs["reps"],
+                "rounds": knobs["rounds"],
                 "sweep_range": _resolve_sweep_range(smoothed_t1),
             },
             T1CfgTemplate,

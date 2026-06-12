@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import numpy as np
 from zcu_tools.gui.app.autofluxdep.app import build_core
+from zcu_tools.gui.app.autofluxdep.cfg import SweepValue
 from zcu_tools.gui.session.services.mock_flux import FAKE_FLUX_DEVICE_NAME
 
 from ._helpers import connect_mock
@@ -68,7 +69,7 @@ def test_qubit_freq_acquire_fit_varies_with_flux():
             "rounds": 1,
             "relax_delay": 0.0,
             # wide detune window around the predicted centre so the dip is caught.
-            "detune_sweep": "-60,60,1.0",
+            "detune_sweep": SweepValue(start=-60.0, stop=60.0, expts=121),
         }
     )
 
@@ -114,7 +115,7 @@ def test_plotter_update_runs_after_a_real_produce():
         "reps": 100,
         "rounds": 1,
         "relax_delay": 0.0,
-        "detune_sweep": "-60,60,1.0",
+        "detune_sweep": SweepValue(start=-60.0, stop=60.0, expts=121),
     }
     result = builder.make_init_result(params, flux)
     figure = Figure()
@@ -161,7 +162,7 @@ def test_good_fit_calibrates_the_predictor():
         "reps": 100,
         "rounds": 1,
         "relax_delay": 0.0,
-        "detune_sweep": "-60,60,1.0",
+        "detune_sweep": SweepValue(start=-60.0, stop=60.0, expts=121),
     }
     result = builder.make_init_result(params, np.array([0.0]))
     predictor = SimplePredictor(base=600.0, slope=50.0)

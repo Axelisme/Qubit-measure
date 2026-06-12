@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 from zcu_tools.gui.app.autofluxdep.app import build_core
+from zcu_tools.gui.app.autofluxdep.cfg import SweepValue
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.t2echo import T2EchoBuilder
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
@@ -18,9 +19,14 @@ from ._helpers import ACQUIRE_READOUT, connect_mock, make_acquire_env
 
 # reps=2000 x rounds=2 averages the mock per-shot noise enough that the echo
 # fringe clears the fit-quality gate (the echo contrast is lower than T1's).
-# sweep_range overrides _DEFAULT_SWEEP's 121 pts → 61 pts for test speed;
-# the production default stays at 121 in the node module.
-_PARAMS = {"reps": 2000, "rounds": 2, "detune_ratio": 0.2, "sweep_range": "0.0,25.0,61"}
+# sweep_range overrides the schema default's 121 pts → 61 pts for test speed;
+# the production default stays at 121 in the node schema.
+_PARAMS = {
+    "reps": 2000,
+    "rounds": 2,
+    "detune_ratio": 0.2,
+    "sweep_range": SweepValue(start=0.0, stop=25.0, expts=61),
+}
 
 
 def _pulses(ml, freq: float):

@@ -33,13 +33,21 @@ import numpy as np
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.gui.app.autofluxdep.cfg import (
+    FloatSpec,
+    IntSpec,
+    SweepSpec,
+    SweepValue,
+    flat_node_schema,
+    str_scalar_spec,
+)
+from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     SnrProbe,
     acquire_to_complex,
     axis_to_sweep,
     build_stop_checkers,
     is_good_fit,
-    parse_linear_axis,
     require_flux_device,
     set_flux_by_name,
     signal2real_flip,
@@ -95,9 +103,6 @@ def _last_fit(result: Any) -> float:
     """Return the last non-nan fit_value (the most recent pi_length)."""
     valid = result.fit_value[~np.isnan(result.fit_value)]
     return float(valid[-1]) if valid.size else float("nan")
-
-
-_DEFAULT_SWEEP = (0.0, 6.0, 121)  # pulse-length axis (us): start, stop, npts
 
 
 def _default_readout() -> Any | None:
@@ -216,7 +221,6 @@ class LenRabiBuilder(Builder):
     optional_modules = (ModuleDep("opt_readout", default=_default_readout),)
     base_params = (
         "sweep_range",
-        "num_expts",
         "reps",
         "rounds",
         "relax_delay",
@@ -230,8 +234,46 @@ class LenRabiBuilder(Builder):
         "qub_length",
     )
 
+    def make_default_schema(self) -> NodeCfgSchema:
+        """The typed node-knob schema (defaults + types) — the param SSOT.
+
+        ``sweep_range`` is the pulse-length axis as a ``SweepSpec`` (expts-defined,
+        like qubit_freq's detune): its default ``(0, 6, expts=121)`` reproduces the
+        prototype's ``parse_linear_axis`` axis. The prototype's dead ``num_expts``
+        knob (never read — the point count came from the axis itself) is dropped.
+        """
+        return NodeCfgSchema(
+            flat_node_schema(
+                (
+                    (
+                        "sweep_range",
+                        SweepSpec(label="Pulse length sweep (us)"),
+                        SweepValue(start=0.0, stop=6.0, expts=121),
+                    ),
+                    ("reps", IntSpec(label="Reps"), 1000),
+                    ("rounds", IntSpec(label="Rounds"), 10),
+                    ("relax_delay", FloatSpec(label="Relax delay (us)"), 0.5),
+                    (
+                        "earlystop_snr",
+                        FloatSpec(label="Early-stop SNR", optional=True),
+                        None,
+                    ),
+                    (
+                        "qub_waveform",
+                        str_scalar_spec("Drive waveform", optional=True),
+                        None,
+                    ),
+                    ("qub_ch", IntSpec(label="Drive ch", optional=True), None),
+                    ("qub_nqz", IntSpec(label="Drive nqz"), 2),
+                    ("qub_gain", FloatSpec(label="Drive gain"), 0.05),
+                    ("qub_length", FloatSpec(label="Drive length (us)"), 0.1),
+                )
+            )
+        )
+
     def make_init_result(self, params: Mapping[str, Any], flux: Any) -> Sweep1DResult:
-        lengths = parse_linear_axis(params.get("sweep_range"), _DEFAULT_SWEEP)
+        knobs = self.make_default_schema().with_overrides(params).lower(None)
+        lengths = sweepcfg_to_axis(knobs["sweep_range"])
         return Sweep1DResult.allocate(flux, lengths, x_label="pulse length (us)")
 
     def make_plotter(self, figure: Any) -> ColormapLinePlotter:
@@ -264,7 +306,6 @@ class LenRabiBuilder(Builder):
         Raises if the readout module is unavailable or the drive params are unset —
         a real run needs a concrete drive pulse (Fast Fail).
         """
-        params = env.params
         ml = env.ml
         if ml is None:
             raise RuntimeError("lenrabi.make_cfg needs an active ModuleLibrary")
@@ -273,8 +314,9 @@ class LenRabiBuilder(Builder):
             raise RuntimeError(
                 "lenrabi.make_cfg needs a readout module (none produced or preset)"
             )
-        waveform_name = params.get("qub_waveform")
-        ch = params.get("qub_ch")
+        knobs = self.make_default_schema().with_overrides(env.params).lower(ml)
+        waveform_name = knobs.get("qub_waveform")
+        ch = knobs.get("qub_ch")
         if not waveform_name or ch is None:
             raise RuntimeError(
                 "lenrabi.make_cfg needs qub_waveform + qub_ch params set"
@@ -282,12 +324,12 @@ class LenRabiBuilder(Builder):
         qubit_freq = float(snapshot["qubit_freq"])
 
         # the pulse-length extent (start, stop): the Result's trailing axis when a
-        # Result is allocated, else the parsed sweep_range param (so make_cfg works
+        # Result is allocated, else the lowered sweep_range axis (so make_cfg works
         # standalone, e.g. in tests, without a Result curried in).
         if env.result is not None:
             xs = np.asarray(env.result.x, dtype=np.float64)
         else:
-            xs = parse_linear_axis(params.get("sweep_range"), _DEFAULT_SWEEP)
+            xs = sweepcfg_to_axis(knobs["sweep_range"])
         sweep_range = (float(xs[0]), float(xs[-1]))
 
         return ml.make_cfg(
@@ -297,18 +339,18 @@ class LenRabiBuilder(Builder):
                         "type": "pulse",
                         "waveform": ml.get_waveform(
                             waveform_name,
-                            {"length": float(params.get("qub_length", 0.1))},
+                            {"length": knobs["qub_length"]},
                         ),
-                        "ch": int(ch),
-                        "nqz": int(params.get("qub_nqz", 2)),
-                        "gain": float(params.get("qub_gain", 0.05)),
+                        "ch": ch,
+                        "nqz": knobs["qub_nqz"],
+                        "gain": knobs["qub_gain"],
                         "freq": qubit_freq,
                     },
                     "readout": readout,
                 },
-                "relax_delay": float(params.get("relax_delay", 0.5)),
-                "reps": int(params.get("reps", 1000)),
-                "rounds": int(params.get("rounds", 10)),
+                "relax_delay": knobs["relax_delay"],
+                "reps": knobs["reps"],
+                "rounds": knobs["rounds"],
                 "sweep_range": sweep_range,
             },
             LenRabiCfgTemplate,

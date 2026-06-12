@@ -30,6 +30,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol
 
+from zcu_tools.gui.app.autofluxdep.cfg import NodeCfgSchema, flat_node_schema
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 
@@ -133,6 +134,17 @@ class Builder(ABC):
         return tuple(
             (d.key, d.smooth) for d in self.all_dependencies() if d.smooth is not None
         )
+
+    # --- typed param schema (the node-knob SSOT; ADR-0011 spec/value) ---
+
+    def make_default_schema(self) -> NodeCfgSchema:
+        """The node's typed knob schema (defaults + types) — the param SSOT.
+
+        Measurement Builders override this to declare their knobs (the old
+        ``base_params``, now typed). A Service (the predictor) has no user knobs,
+        so the base returns an empty schema.
+        """
+        return NodeCfgSchema(flat_node_schema(()))
 
     # --- sweep-lived factories (Run start; no-op for pure-compute Services) ---
 

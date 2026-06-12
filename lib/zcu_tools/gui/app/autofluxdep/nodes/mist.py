@@ -40,10 +40,18 @@ from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.gui.app.autofluxdep.cfg import (
+    FloatSpec,
+    IntSpec,
+    SweepSpec,
+    SweepValue,
+    flat_node_schema,
+    str_scalar_spec,
+)
+from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     acquire_to_complex,
     axis_to_sweep,
-    parse_linear_axis,
     require_flux_device,
     set_flux_by_name,
 )
@@ -62,8 +70,6 @@ from zcu_tools.program.v2 import (
 )
 
 logger = logging.getLogger(__name__)
-
-_DEFAULT_GAIN_SWEEP: tuple[float, float, int] = (0.0, 1.0, 51)
 
 
 def _mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -239,8 +245,43 @@ class MistBuilder(Builder):
         "mist_length",
     )
 
+    def make_default_schema(self) -> NodeCfgSchema:
+        """The typed node-knob schema (defaults + types) — the param SSOT.
+
+        ``gain_sweep`` is the disturbance-gain axis as a ``SweepSpec`` (expts-
+        defined): its default ``(0, 1, expts=51)`` reproduces the prototype axis.
+        The disturbance ``mist_waveform`` / ``mist_ch`` are optional (unset →
+        ``make_cfg`` Fast-Fails, mirroring the prototype guard); the rest of the
+        "設定頭" default to the prototype's hardcoded values.
+        """
+        return NodeCfgSchema(
+            flat_node_schema(
+                (
+                    (
+                        "gain_sweep",
+                        SweepSpec(label="Gain sweep"),
+                        SweepValue(start=0.0, stop=1.0, expts=51),
+                    ),
+                    ("reps", IntSpec(label="Reps"), 1000),
+                    ("rounds", IntSpec(label="Rounds"), 100),
+                    ("relax_delay", FloatSpec(label="Relax delay (us)"), 0.5),
+                    (
+                        "mist_waveform",
+                        str_scalar_spec("Disturbance waveform", optional=True),
+                        None,
+                    ),
+                    ("mist_ch", IntSpec(label="Disturbance ch", optional=True), None),
+                    ("mist_nqz", IntSpec(label="Disturbance nqz"), 2),
+                    ("mist_freq", FloatSpec(label="Disturbance freq (MHz)"), 0.0),
+                    ("mist_gain", FloatSpec(label="Disturbance gain"), 0.5),
+                    ("mist_length", FloatSpec(label="Disturbance length (us)"), 0.1),
+                )
+            )
+        )
+
     def make_init_result(self, params: Mapping[str, Any], flux: Any) -> Sweep1DResult:
-        gains = parse_linear_axis(params.get("gain_sweep"), _DEFAULT_GAIN_SWEEP)
+        knobs = self.make_default_schema().with_overrides(params).lower(None)
+        gains = sweepcfg_to_axis(knobs["gain_sweep"])
         return Sweep1DResult.allocate(flux, gains, x_label="gain")
 
     def make_plotter(self, figure: Any) -> ColormapLinePlotter:
@@ -267,7 +308,6 @@ class MistBuilder(Builder):
         are unset — a real run needs a concrete disturbance pulse + an excited-state
         preparation pulse (Fast Fail).
         """
-        params = env.params
         ml = env.ml
         if ml is None:
             raise RuntimeError("mist.make_cfg needs an active ModuleLibrary")
@@ -286,8 +326,9 @@ class MistBuilder(Builder):
             raise RuntimeError(
                 "mist.make_cfg needs a readout module (none produced or preset)"
             )
-        waveform_name = params.get("mist_waveform")
-        ch = params.get("mist_ch")
+        knobs = self.make_default_schema().with_overrides(env.params).lower(ml)
+        waveform_name = knobs.get("mist_waveform")
+        ch = knobs.get("mist_ch")
         if not waveform_name or ch is None:
             raise RuntimeError("mist.make_cfg needs mist_waveform + mist_ch params set")
         return ml.make_cfg(
@@ -298,18 +339,18 @@ class MistBuilder(Builder):
                         "type": "pulse",
                         "waveform": ml.get_waveform(
                             waveform_name,
-                            {"length": float(params.get("mist_length", 0.1))},
+                            {"length": knobs["mist_length"]},
                         ),
-                        "ch": int(ch),
-                        "nqz": int(params.get("mist_nqz", 2)),
-                        "gain": float(params.get("mist_gain", 0.5)),
-                        "freq": float(params.get("mist_freq", 0.0)),
+                        "ch": ch,
+                        "nqz": knobs["mist_nqz"],
+                        "gain": knobs["mist_gain"],
+                        "freq": knobs["mist_freq"],
                     },
                     "readout": readout,
                 },
-                "relax_delay": float(params.get("relax_delay", 0.5)),
-                "reps": int(params.get("reps", 1000)),
-                "rounds": int(params.get("rounds", 100)),
+                "relax_delay": knobs["relax_delay"],
+                "reps": knobs["reps"],
+                "rounds": knobs["rounds"],
             },
             MistCfgTemplate,
         )

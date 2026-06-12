@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import numpy as np
 from zcu_tools.gui.app.autofluxdep.app import build_core
+from zcu_tools.gui.app.autofluxdep.cfg import SweepValue
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import LenRabiBuilder
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
@@ -27,7 +28,7 @@ _PARAMS = {
     "qub_gain": 0.5,
     "qub_length": 1.0,
     # start above zero: a const waveform length-sweep needs >= a few FPGA cycles
-    "sweep_range": "0.05,2.0,41",
+    "sweep_range": SweepValue(start=0.05, stop=2.0, expts=41),
     "reps": 100,
     "rounds": 1,
     "relax_delay": 0.0,

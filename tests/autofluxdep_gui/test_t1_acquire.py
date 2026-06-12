@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import numpy as np
 from zcu_tools.gui.app.autofluxdep.app import build_core
+from zcu_tools.gui.app.autofluxdep.cfg import SweepValue
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.t1 import T1Builder
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
@@ -21,7 +22,11 @@ from ._helpers import ACQUIRE_READOUT, connect_mock, make_acquire_env
 
 # reps=1000 averages the mock per-shot noise enough that the decay clears the
 # fit-quality gate (200 reps leaves residual > the gate at this T1 contrast).
-_PARAMS = {"sweep_range": "0.5,60,41", "reps": 1000, "rounds": 1}
+_PARAMS = {
+    "sweep_range": SweepValue(start=0.5, stop=60.0, expts=41),
+    "reps": 1000,
+    "rounds": 1,
+}
 
 
 def _pi_pulse(ml, freq: float):

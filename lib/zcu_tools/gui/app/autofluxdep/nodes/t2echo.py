@@ -41,13 +41,20 @@ import numpy as np
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.gui.app.autofluxdep.cfg import (
+    FloatSpec,
+    IntSpec,
+    SweepSpec,
+    SweepValue,
+    flat_node_schema,
+)
+from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     SnrProbe,
     acquire_to_complex,
     axis_to_sweep,
     build_stop_checkers,
     is_good_fit,
-    parse_linear_axis,
     require_flux_device,
     set_flux_by_name,
     signal2real_flip,
@@ -73,26 +80,8 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_T1 = 10.0  # us — smoothed t1 fallback
 _DEFAULT_T2E = 5.0  # us — smoothed t2e fallback
-_DEFAULT_SWEEP = (0.0, 25.0, 121)  # delay-time axis (us): start, stop, npts
 _T2E_WINDOW_FACTOR = 2.5  # notebook: sweep_range = (0, 2.5 * prev_t2e)
 _DEFAULT_DETUNE_RATIO = 0.2  # activate-detune fraction (one fringe per sweep)
-
-
-def _resolve_detune_ratio(params: Any) -> float:
-    """The activate-detune ratio from a node's param, or the default if unset/bad.
-
-    Mirrors the lower-layer ``T2EchoTask.detune_ratio``. Free-text field, so a
-    malformed value degrades to the default rather than failing the acquire."""
-    try:
-        value = params.get("detune_ratio")
-    except AttributeError:
-        return _DEFAULT_DETUNE_RATIO
-    if value is None or value == "":
-        return _DEFAULT_DETUNE_RATIO
-    try:
-        return float(value)
-    except (ValueError, TypeError):
-        return _DEFAULT_DETUNE_RATIO
 
 
 def _default_t1() -> float:
@@ -207,7 +196,8 @@ class T2EchoNode(Node):
         # activate_detune = detune_ratio / len_sweep.step).
         length_sweep = axis_to_sweep(times)
         length_param = sweep2param("length", length_sweep)
-        activate_detune = _resolve_detune_ratio(env.params) / length_sweep.step
+        detune_ratio = self._builder.detune_ratio(env.params)
+        activate_detune = detune_ratio / length_sweep.step
         pi2_pulse = cfg.modules.pi2_pulse
 
         result.flux[idx] = env.flux
@@ -287,15 +277,52 @@ class T2EchoBuilder(Builder):
     optional_modules = (ModuleDep("opt_readout", default=_default_readout),)
     base_params = (
         "sweep_range",
-        "num_expts",
         "detune_ratio",
         "reps",
         "rounds",
         "earlystop_snr",
     )
 
+    def make_default_schema(self) -> NodeCfgSchema:
+        """The typed node-knob schema (defaults + types) — the param SSOT.
+
+        Same shape as t2ramsey: ``sweep_range`` (``SweepSpec``) seeds the initial
+        Result delay axis (the cfg's window is derived from the smoothed t2e in
+        ``make_cfg``); ``detune_ratio`` defaults to the prototype's 0.2. The dead
+        ``num_expts`` knob (never read) is dropped.
+        """
+        return NodeCfgSchema(
+            flat_node_schema(
+                (
+                    (
+                        "sweep_range",
+                        SweepSpec(label="Delay time sweep (us)"),
+                        SweepValue(start=0.0, stop=25.0, expts=121),
+                    ),
+                    (
+                        "detune_ratio",
+                        FloatSpec(label="Detune ratio"),
+                        _DEFAULT_DETUNE_RATIO,
+                    ),
+                    ("reps", IntSpec(label="Reps"), 1000),
+                    ("rounds", IntSpec(label="Rounds"), 10),
+                    (
+                        "earlystop_snr",
+                        FloatSpec(label="Early-stop SNR", optional=True),
+                        None,
+                    ),
+                )
+            )
+        )
+
+    def detune_ratio(self, params: Mapping[str, Any]) -> float:
+        """The activate-detune ratio for this placement (typed knob, default 0.2)."""
+        knobs = self.make_default_schema().with_overrides(params).lower(None)
+        return float(knobs["detune_ratio"])
+
     def make_init_result(self, params: Mapping[str, Any], flux: Any) -> Sweep1DResult:
-        times = parse_linear_axis(params.get("sweep_range"), _DEFAULT_SWEEP)
+        knobs = self.make_default_schema().with_overrides(params).lower(None)
+        times = sweepcfg_to_axis(knobs["sweep_range"])
         return Sweep1DResult.allocate(flux, times, x_label="delay time (us)")
 
     def make_plotter(self, figure: Any) -> Decay1DPlotter:
@@ -320,7 +347,6 @@ class T2EchoBuilder(Builder):
         Raises if the ml / drive pulses / readout are unavailable — a real run
         needs concrete drive pulses (Fast Fail).
         """
-        params = env.params
         ml = env.ml
         if ml is None:
             raise RuntimeError("t2echo.make_cfg needs an active ModuleLibrary")
@@ -336,6 +362,7 @@ class T2EchoBuilder(Builder):
             raise RuntimeError(
                 "t2echo.make_cfg needs a readout module (none produced or preset)"
             )
+        knobs = self.make_default_schema().with_overrides(env.params).lower(ml)
         cur_t1 = float(snapshot["t1"])  # smoothed t1
         prev_t2e = float(snapshot["t2e"])  # smoothed t2e
         return ml.make_cfg(
@@ -346,8 +373,8 @@ class T2EchoBuilder(Builder):
                     "readout": readout,
                 },
                 "relax_delay": max(1.0, 3.0 * cur_t1),
-                "reps": int(params.get("reps", 1000)),
-                "rounds": int(params.get("rounds", 10)),
+                "reps": knobs["reps"],
+                "rounds": knobs["rounds"],
                 "sweep_range": (0.0, _T2E_WINDOW_FACTOR * prev_t2e),
             },
             T2EchoCfgTemplate,

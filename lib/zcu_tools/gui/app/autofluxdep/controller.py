@@ -19,6 +19,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Optional
 
 from zcu_tools.gui.app.autofluxdep.background import BackgroundService
+from zcu_tools.gui.app.autofluxdep.cfg import DirectValue, SweepSpec
 from zcu_tools.gui.app.autofluxdep.derivation import DerivationService
 from zcu_tools.gui.app.autofluxdep.events.run import (
     NodeEnteredPayload,
@@ -443,12 +444,45 @@ class Controller:
         return new_index
 
     def set_node_params(self, index: int, params: dict[str, Any]) -> None:
-        """Replace the tuned params of the Node at ``index``."""
-        self._state.nodes[index].params = dict(params)
+        """Replace the tuned params of the Node at ``index``, typed through its schema.
+
+        The bridge into the typed param SSOT (Phase 160a): each incoming key is
+        written into the Builder's CfgSchema leaf, which coerces a (text) value to
+        the field's declared type and fast-fails an unknown key (a real typo —
+        the form only renders declared knobs). The lowered scalar overrides are
+        stored back as ``node.params`` (the dict the UI / orchestrator / Result
+        allocation still read until the 160b form swap). Sweep-typed knobs
+        (qubit_freq detune, mist gain, the 1-D delay/length axes) are not editable
+        from the prototype's text form — they keep their schema defaults here and
+        gain a typed widget in 160b — so a text value for one is ignored rather
+        than mis-coerced.
+        """
+        node = self._state.nodes[index]
+        schema = node.builder.make_default_schema()
+        scalar_keys = {
+            key
+            for key in schema.keys
+            if not isinstance(schema.schema.spec.fields[key], SweepSpec)
+        }
+        typed: dict[str, Any] = {}
+        for key, value in params.items():
+            if key not in schema.keys:
+                raise KeyError(
+                    f"Unknown node param {key!r} for {node.builder.name!r}; "
+                    f"declared: {', '.join(schema.keys)}"
+                )
+            if key not in scalar_keys:
+                continue  # sweep knob: not text-editable until the 160b typed form
+            schema.set_field(key, value)
+            lowered = schema.schema.value.fields[key]
+            # an unset (blank) scalar lowers to None → drop it so the schema default
+            # (or the node's Fast-Fail guard) applies, matching the old form's
+            # "leave blank to use the default" behaviour.
+            if isinstance(lowered, DirectValue) and lowered.value is not None:
+                typed[key] = lowered.value
+        node.params = typed
         self._state.version.bump(WORKFLOW_VERSION_KEY)
-        logger.debug(
-            "set_node_params[%d] (%r): %s", index, self._state.nodes[index].name, params
-        )
+        logger.debug("set_node_params[%d] (%r): %s", index, node.name, typed)
         self._bus.emit(WorkflowChangedPayload(name=None))
 
     def set_flux_values(self, values: list[float]) -> None:

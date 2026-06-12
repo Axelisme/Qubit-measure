@@ -46,9 +46,14 @@ from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
+from zcu_tools.gui.app.autofluxdep.cfg import (
+    FloatSpec,
+    IntSpec,
+    flat_node_schema,
+)
+from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     axis_to_sweep,
-    parse_linear_axis,
     require_flux_device,
     set_flux_by_name,
 )
@@ -157,19 +162,6 @@ def _placeholder_pi_pulse() -> Any:
 
 def _default_readout() -> Any | None:
     return None
-
-
-def _resolve_window(value: Any, default: float) -> float:
-    """The half-width of a cfg sweep window from a param, or ``default`` if unset.
-
-    The prototype's param fields are free text, so a missing / unparseable value
-    degrades to the default rather than failing make_cfg."""
-    if value is None or value == "":
-        return default
-    try:
-        return abs(float(value))
-    except (ValueError, TypeError):
-        return default
 
 
 class RoOptimizeNode(Node):
@@ -313,18 +305,47 @@ class RoOptimizeBuilder(Builder):
         "gain_window",
     )
 
-    def make_init_result(self, params: Mapping[str, Any], flux: Any) -> Sweep2DResult:
-        freq_expts: int = int(params.get("freq_expts") or _DEFAULT_FREQ[2])
-        gain_expts: int = int(params.get("gain_expts") or _DEFAULT_GAIN[2])
+    def make_default_schema(self) -> NodeCfgSchema:
+        """The typed node-knob schema (defaults + types) — the param SSOT.
 
-        freqs = parse_linear_axis(
-            params.get("freq_range"),
-            (_DEFAULT_FREQ[0], _DEFAULT_FREQ[1], freq_expts),
+        ro_optimize sweeps a 2D freq × gain grid: ``freq_expts`` / ``gain_expts``
+        are the grid point counts (IntSpec), and ``freq_window`` / ``gain_window``
+        are the cfg sweep-window half-widths (FloatSpec) centred on the previous
+        best — per the decision these stay flat scalar knobs, NOT SweepSpec (the
+        sweep grid is 2D and the centres are derived per flux point, not user-set).
+        Defaults are the prototype's hardcoded values.
+        """
+        return NodeCfgSchema(
+            flat_node_schema(
+                (
+                    ("freq_expts", IntSpec(label="Freq points"), _DEFAULT_FREQ[2]),
+                    ("gain_expts", IntSpec(label="Gain points"), _DEFAULT_GAIN[2]),
+                    ("reps", IntSpec(label="Reps"), 1000),
+                    ("rounds", IntSpec(label="Rounds"), 10),
+                    (
+                        "freq_window",
+                        FloatSpec(label="Freq window half-width (MHz)"),
+                        _DEFAULT_FREQ_WINDOW,
+                    ),
+                    (
+                        "gain_window",
+                        FloatSpec(label="Gain window half-width"),
+                        _DEFAULT_GAIN_WINDOW,
+                    ),
+                )
+            )
         )
-        gains = parse_linear_axis(
-            params.get("gain_range"),
-            (_DEFAULT_GAIN[0], _DEFAULT_GAIN[1], gain_expts),
-        )
+
+    def make_init_result(self, params: Mapping[str, Any], flux: Any) -> Sweep2DResult:
+        knobs = self.make_default_schema().with_overrides(params).lower(None)
+        freq_expts = int(knobs["freq_expts"])
+        gain_expts = int(knobs["gain_expts"])
+
+        # freq_range / gain_range are not user knobs (the centres are derived per
+        # flux point); make_init_result allocates the Result grid over the default
+        # endpoints at the chosen point counts.
+        freqs = np.linspace(_DEFAULT_FREQ[0], _DEFAULT_FREQ[1], freq_expts)
+        gains = np.linspace(_DEFAULT_GAIN[0], _DEFAULT_GAIN[1], gain_expts)
         return Sweep2DResult.allocate(flux, freqs, gains)
 
     def make_plotter(self, figure: Any) -> Landscape2DPlotter:
@@ -349,7 +370,6 @@ class RoOptimizeBuilder(Builder):
         unset — a real run needs both concrete modules (Fast Fail), unlike the
         synthetic path which fabricates a landscape.
         """
-        params = env.params
         ml = env.ml
         if ml is None:
             raise RuntimeError("ro_optimize.make_cfg needs an active ModuleLibrary")
@@ -360,11 +380,12 @@ class RoOptimizeBuilder(Builder):
                 "ro_optimize.make_cfg needs the pi_pulse + readout modules "
                 "(none produced or preset)"
             )
+        knobs = self.make_default_schema().with_overrides(env.params).lower(ml)
         prev_best_freq = float(snapshot["best_ro_freq"])
         prev_best_gain = float(snapshot["best_ro_gain"])
         t1 = float(snapshot["t1"])
-        freq_window = _resolve_window(params.get("freq_window"), _DEFAULT_FREQ_WINDOW)
-        gain_window = _resolve_window(params.get("gain_window"), _DEFAULT_GAIN_WINDOW)
+        freq_window = abs(float(knobs["freq_window"]))
+        gain_window = abs(float(knobs["gain_window"]))
         return ml.make_cfg(
             {
                 "modules": {
@@ -372,8 +393,8 @@ class RoOptimizeBuilder(Builder):
                     "readout": readout,
                 },
                 "relax_delay": 3.0 * t1,
-                "reps": int(params.get("reps", 1000)),
-                "rounds": int(params.get("rounds", 10)),
+                "reps": knobs["reps"],
+                "rounds": knobs["rounds"],
                 "freq_range": (
                     prev_best_freq - freq_window,
                     prev_best_freq + freq_window,

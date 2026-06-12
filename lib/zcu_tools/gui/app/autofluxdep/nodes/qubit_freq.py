@@ -40,6 +40,15 @@ from numpy.typing import NDArray
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.gui.app.autofluxdep.cfg import (
+    FloatSpec,
+    IntSpec,
+    SweepSpec,
+    SweepValue,
+    flat_node_schema,
+    str_scalar_spec,
+)
+from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     SnrProbe,
     acquire_to_complex,
@@ -57,8 +66,6 @@ from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import rotate2real
 
 logger = logging.getLogger(__name__)
-
-_DEFAULT_DETUNE = (-20.0, 50.0, 0.5)  # MHz: start, stop, step
 
 
 class QubitFreqCfgTemplate(TwoToneCfg, ExpCfgModel):
@@ -84,25 +91,6 @@ def _default_readout() -> Any | None:
     return None
 
 
-def parse_detune_sweep(spec: Any) -> NDArray[np.float64]:
-    """Parse the detune sweep (text "start,stop,step" or a tuple) into an axis.
-
-    Falls back to (-20, 50, 0.5) MHz if unset/unparseable — the prototype's
-    field is free text, so a malformed value degrades to the default rather than
-    failing the sweep."""
-    try:
-        if isinstance(spec, str) and spec.strip():
-            start, stop, step = (float(x) for x in spec.split(","))
-        elif isinstance(spec, (tuple, list)) and len(spec) == 3:
-            start, stop, step = (float(x) for x in spec)
-        else:
-            start, stop, step = _DEFAULT_DETUNE
-    except (ValueError, TypeError):
-        start, stop, step = _DEFAULT_DETUNE
-    n = max(2, int(round((stop - start) / step)) + 1)
-    return np.linspace(start, stop, n)
-
-
 def _signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     """PCA-rotate to the real axis and normalise to [0, 1] (a dip near 0)."""
     real = rotate2real(signals.astype(np.complex128)).real
@@ -117,10 +105,10 @@ def _signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 def detune_axis_to_sweep(detune: NDArray[np.float64]) -> SweepCfg:
     """Turn the Result's detune axis into the ``SweepCfg`` ``sweep2param`` needs.
 
-    The Result stores the detune axis as an explicit array (from
-    ``parse_detune_sweep``); the program-side sweep is a ``SweepCfg``
-    (start/stop/expts/step). Reconstructs it from the axis endpoints + length so
-    the FPGA sweep matches the Result's columns exactly."""
+    The Result stores the detune axis as an explicit array (from the lowered
+    ``detune_sweep`` SweepCfg via ``sweepcfg_to_axis``); the program-side sweep is
+    a ``SweepCfg`` (start/stop/expts/step). Reconstructs it from the axis endpoints
+    + length so the FPGA sweep matches the Result's columns exactly."""
     det = np.asarray(detune, dtype=np.float64)
     expts = int(det.shape[0])
     start = float(det[0])
@@ -339,8 +327,48 @@ class QubitFreqBuilder(Builder):
         "qub_length",
     )
 
+    def make_default_schema(self) -> NodeCfgSchema:
+        """The typed node-knob schema (defaults + types) — the param SSOT.
+
+        The hardcoded defaults the prototype carried in ``make_cfg`` now live here.
+        ``detune_sweep`` is a ``SweepSpec`` (expts-defined, aligning with the cfg
+        editor): its default ``(-20, 50, expts=141)`` reproduces the prototype's
+        ``step=0.5`` axis point-for-point. The drive ``qub_waveform`` / ``qub_ch``
+        are optional (unset → ``make_cfg`` Fast-Fails), mirroring the prototype's
+        guard; ``qub_length`` defaults to the prototype's 0.1 us.
+        """
+        return NodeCfgSchema(
+            flat_node_schema(
+                (
+                    (
+                        "detune_sweep",
+                        SweepSpec(label="Detune sweep (MHz)"),
+                        SweepValue(start=-20.0, stop=50.0, expts=141),
+                    ),
+                    ("reps", IntSpec(label="Reps"), 1000),
+                    ("rounds", IntSpec(label="Rounds"), 100),
+                    ("relax_delay", FloatSpec(label="Relax delay (us)"), 0.5),
+                    (
+                        "earlystop_snr",
+                        FloatSpec(label="Early-stop SNR", optional=True),
+                        None,
+                    ),
+                    (
+                        "qub_waveform",
+                        str_scalar_spec("Drive waveform", optional=True),
+                        None,
+                    ),
+                    ("qub_ch", IntSpec(label="Drive ch", optional=True), None),
+                    ("qub_nqz", IntSpec(label="Drive nqz"), 2),
+                    ("qub_gain", FloatSpec(label="Drive gain"), 0.05),
+                    ("qub_length", FloatSpec(label="Drive length (us)"), 0.1),
+                )
+            )
+        )
+
     def make_init_result(self, params: Mapping[str, Any], flux: Any) -> QubitFreqResult:
-        detune = parse_detune_sweep(params.get("detune_sweep"))
+        knobs = self.make_default_schema().with_overrides(params).lower(None)
+        detune = sweepcfg_to_axis(knobs["detune_sweep"])
         return QubitFreqResult.allocate(flux, detune)
 
     def make_plotter(self, figure: Any) -> QubitFreqPlotter:
@@ -363,7 +391,6 @@ class QubitFreqBuilder(Builder):
         Raises if the readout module is unavailable or the drive params are unset
         — a real run needs a concrete drive pulse (Fast Fail).
         """
-        params = env.params
         ml = env.ml
         if ml is None:
             raise RuntimeError("qubit_freq.make_cfg needs an active ModuleLibrary")
@@ -372,8 +399,11 @@ class QubitFreqBuilder(Builder):
             raise RuntimeError(
                 "qubit_freq.make_cfg needs a readout module (none produced or preset)"
             )
-        waveform_name = params.get("qub_waveform")
-        ch = params.get("qub_ch")
+        # the typed knobs (defaults + types owned by the schema); reps/rounds/relax
+        # come pre-typed, the optional drive waveform/ch are omitted when unset.
+        knobs = self.make_default_schema().with_overrides(env.params).lower(ml)
+        waveform_name = knobs.get("qub_waveform")
+        ch = knobs.get("qub_ch")
         if not waveform_name or ch is None:
             raise RuntimeError(
                 "qubit_freq.make_cfg needs qub_waveform + qub_ch params set"
@@ -386,18 +416,18 @@ class QubitFreqBuilder(Builder):
                         "type": "pulse",
                         "waveform": ml.get_waveform(
                             waveform_name,
-                            {"length": float(params.get("qub_length", 0.1))},
+                            {"length": knobs["qub_length"]},
                         ),
-                        "ch": int(ch),
-                        "nqz": int(params.get("qub_nqz", 2)),
-                        "gain": float(params.get("qub_gain", 0.05)),
+                        "ch": ch,
+                        "nqz": knobs["qub_nqz"],
+                        "gain": knobs["qub_gain"],
                         "freq": predict_freq,
                     },
                     "readout": readout,
                 },
-                "relax_delay": float(params.get("relax_delay", 0.5)),
-                "reps": int(params.get("reps", 1000)),
-                "rounds": int(params.get("rounds", 100)),
+                "relax_delay": knobs["relax_delay"],
+                "reps": knobs["reps"],
+                "rounds": knobs["rounds"],
             },
             QubitFreqCfgTemplate,
         )

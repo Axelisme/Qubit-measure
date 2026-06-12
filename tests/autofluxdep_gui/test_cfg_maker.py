@@ -8,6 +8,7 @@ the real ``ml.make_cfg`` lowering path without hardware.
 
 from __future__ import annotations
 
+from zcu_tools.gui.app.autofluxdep.cfg import SweepValue
 from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import (
@@ -77,7 +78,10 @@ def test_qubit_freq_produce_fast_fails_when_context_unconfigured():
     import pytest
 
     builder = QubitFreqBuilder()
-    result = builder.make_init_result({"detune_sweep": "-20,50,0.5"}, np.array([0.0]))
+    result = builder.make_init_result(
+        {"detune_sweep": SweepValue(start=-20.0, stop=50.0, expts=141)},
+        np.array([0.0]),
+    )
     env = RunEnv(
         flux=0.0,
         flux_idx=0,
@@ -105,7 +109,7 @@ def test_lenrabi_make_cfg_lowers_context():
         "qub_nqz": 2,
         "qub_gain": 0.3,
         "qub_length": 0.5,
-        "sweep_range": "0.05,2.5,61",
+        "sweep_range": SweepValue(start=0.05, stop=2.5, expts=61),
         "reps": 1000,
         "rounds": 10,
         "relax_delay": 1.0,
@@ -130,7 +134,11 @@ def test_lenrabi_produce_fast_fails_when_context_unconfigured():
     from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import LenRabiBuilder
 
     builder = LenRabiBuilder()
-    params = {"qub_waveform": "qub_flat", "qub_ch": 4, "sweep_range": "0.05,2.5,61"}
+    params = {
+        "qub_waveform": "qub_flat",
+        "qub_ch": 4,
+        "sweep_range": SweepValue(start=0.05, stop=2.5, expts=61),
+    }
     result = builder.make_init_result(params, np.linspace(0.0, 1.0, 11))
     env = RunEnv(flux=0.1, flux_idx=1, params=params, ml=None, result=result)
     snap = Snapshot({"qubit_freq": 5135.0}, modules={"opt_readout": _READOUT})
@@ -201,8 +209,8 @@ def test_ro_optimize_produce_fast_fails_when_context_unconfigured():
 
     builder = RoOptimizeBuilder()
     params = {
-        "freq_range": (7443.0, 7446.0, 21),
-        "gain_range": (0.4, 0.6, 21),
+        "freq_expts": 21,
+        "gain_expts": 21,
         "freq_window": 1.0,
         "gain_window": 0.05,
     }
@@ -277,7 +285,11 @@ def test_t1_produce_fast_fails_when_context_unconfigured():
     env = RunEnv(
         flux=0.5,
         flux_idx=0,
-        params={"sweep_range": "0.5,60,101", "reps": 100, "rounds": 2},
+        params={
+            "sweep_range": SweepValue(start=0.5, stop=60.0, expts=101),
+            "reps": 100,
+            "rounds": 2,
+        },
         ml=None,
         result=result,
     )
