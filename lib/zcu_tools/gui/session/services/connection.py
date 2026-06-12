@@ -266,6 +266,7 @@ class ConnectionService(QObject):
         self._finish_failure(error)
 
     def _finish_success(self, soc: SocHandle, soccfg: SocCfgHandle) -> None:
+        logger.info("connect succeeded: mock=%s", self._pending_is_mock)
         try:
             self._apply_connection(soc, soccfg)
         finally:
@@ -273,6 +274,7 @@ class ConnectionService(QObject):
         self.connection_finished.emit()
 
     def _finish_failure(self, error: str) -> None:
+        logger.warning("connect failed: %s", error)
         self._release_lease(OperationOutcome("failed", error))
         self.connection_failed.emit(error)
 

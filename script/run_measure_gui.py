@@ -11,44 +11,13 @@ Examples:
 from __future__ import annotations
 
 import argparse
-import logging
 import sys
 from pathlib import Path
 
-LOG_FILE = Path(__file__).parent.parent / "gui_debug.log"
-LOG_FORMAT = "%(asctime)s.%(msecs)03d [%(levelname)-7s] %(name)s: %(message)s"
-LOG_DATE = "%H:%M:%S"
+from zcu_tools.gui.logging_setup import setup_gui_logging
 
-
-def _setup_logging(to_file: bool = True, log_file: Path | None = None) -> None:
-    """Configure root logger: DEBUG to file, WARNING to stderr.
-
-    ``log_file`` overrides the default ``LOG_FILE`` location (e.g. an automated
-    launcher pointing it at the OS temp dir).
-    """
-    root = logging.getLogger()
-    root.setLevel(logging.DEBUG)
-
-    stderr_handler = logging.StreamHandler(sys.stderr)
-    stderr_handler.setLevel(logging.WARNING)
-    stderr_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE))
-    root.addHandler(stderr_handler)
-
-    if to_file:
-        target = log_file or LOG_FILE
-        file_handler = logging.FileHandler(target, mode="w", encoding="utf-8")
-        file_handler.setLevel(logging.DEBUG)
-        file_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE))
-        # Attach at the whole ``zcu_tools.gui`` namespace (not just
-        # ``...gui.app.main``) so cross-cutting subpackages — event_bus,
-        # plotting, session — also reach the file. Otherwise their ERRORs
-        # (e.g. event_bus swallowing a handler exception) never hit the log.
-        for name in ("zcu_tools.gui", "zcu_tools.experiment.v2_gui"):
-            log = logging.getLogger(name)
-            log.addHandler(file_handler)
-            log.setLevel(logging.DEBUG)
-
-        print(f"[run_measure_gui] Logging DEBUG output to: {target}", file=sys.stderr)
+# Repo root: this script lives in script/, so its parent is the root.
+PROJECT_ROOT = Path(__file__).parent.parent
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -65,7 +34,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--log-file",
         type=str,
         default=None,
-        help="Override the DEBUG log file path (default: gui_debug.log beside run_measure_gui.py).",
+        help="Override the DEBUG log file path (default: a per-session file under logs/gui/measure/).",
     )
     parser.add_argument(
         "--control-port",
@@ -101,9 +70,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = _parse_args(sys.argv[1:])
-    _setup_logging(
+    setup_gui_logging(
+        app_name="measure",
+        log_root=PROJECT_ROOT,
         to_file=not args.no_log,
         log_file=Path(args.log_file) if args.log_file else None,
+        extra_namespaces=("zcu_tools.experiment.v2_gui",),
     )
 
     # Configure the matplotlib backend before importing anything that uses
@@ -142,7 +114,7 @@ if __name__ == "__main__":
     # script/, so its parent is the repo root) rather than cwd — a .bat launcher
     # does `cd /d "%~dp0"` into script/, which would otherwise scope defaults
     # under script/.
-    project_root = str(Path(__file__).parent.parent)
+    project_root = str(PROJECT_ROOT)
 
     run_app(
         registry,

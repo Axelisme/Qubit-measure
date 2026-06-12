@@ -24,9 +24,12 @@ liveplot, ActiveTask, pbar) live with the callers that need them.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 from qtpy.QtCore import (  # type: ignore[attr-defined]
     QCoreApplication,
@@ -63,6 +66,10 @@ class _PoolRunnable(QRunnable):
         try:
             result = self._thunk()
         except Exception as exc:  # noqa: BLE001 - forwarded to on_error on main
+            # Log here (worker thread) where the real traceback is live: the
+            # exception is otherwise only carried as a value to on_error, so the
+            # stack would evaporate. ERROR with exc_info captures it.
+            logger.error("background pool worker failed", exc_info=exc)
             self._signals.failed.emit(exc)
         else:
             self._signals.done.emit(result)
@@ -87,6 +94,9 @@ class _OpWorker(QThread):
         try:
             self._result = self._thunk()
         except Exception as exc:  # noqa: BLE001 - forwarded to on_error on main
+            # Log here (worker thread) where the real traceback is live: _emit
+            # only re-emits the stored exception as a value, losing the stack.
+            logger.error("background dedicated worker failed", exc_info=exc)
             self._error = exc
 
     def _emit(self) -> None:
@@ -129,6 +139,8 @@ class BackgroundRunner(QObject):
         a dedicated thread (long operation). ``enter`` (if given) is entered on the
         worker thread when the thunk is invoked, never here at build time.
         """
+
+        logger.debug("background submit: run_in_pool=%s", run_in_pool)
 
         def thunk() -> Any:
             if enter is None:

@@ -8,32 +8,13 @@ Examples:
 from __future__ import annotations
 
 import argparse
-import logging
 import sys
 from pathlib import Path
 
-LOG_FILE = Path(__file__).parent.parent / "fluxdep_gui_debug.log"
-LOG_FORMAT = "%(asctime)s.%(msecs)03d [%(levelname)-7s] %(name)s: %(message)s"
-LOG_DATE = "%H:%M:%S"
+from zcu_tools.gui.logging_setup import setup_gui_logging
 
-
-def _setup_logging(to_file: bool = True, log_file: Path = LOG_FILE) -> None:
-    root = logging.getLogger()
-    root.setLevel(logging.DEBUG)
-
-    stderr_handler = logging.StreamHandler(sys.stderr)
-    stderr_handler.setLevel(logging.WARNING)
-    stderr_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE))
-    root.addHandler(stderr_handler)
-
-    if to_file:
-        file_handler = logging.FileHandler(log_file, mode="w", encoding="utf-8")
-        file_handler.setLevel(logging.DEBUG)
-        file_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE))
-        log = logging.getLogger("zcu_tools.gui.app.fluxdep")
-        log.addHandler(file_handler)
-        log.setLevel(logging.DEBUG)
-        print(f"[run_fluxdep_gui] Logging DEBUG output to: {log_file}", file=sys.stderr)
+# Repo root: this script lives in script/, so its parent is the root.
+PROJECT_ROOT = Path(__file__).parent.parent
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -69,8 +50,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = _parse_args(sys.argv[1:])
-    log_file = Path(args.log_file) if args.log_file else LOG_FILE
-    _setup_logging(to_file=not args.no_log, log_file=log_file)
+    setup_gui_logging(
+        app_name="fluxdep",
+        log_root=PROJECT_ROOT,
+        to_file=not args.no_log,
+        log_file=Path(args.log_file) if args.log_file else None,
+    )
 
     # Select the embedded matplotlib backend BEFORE importing anything that uses
     # matplotlib (the "configure backend before pyplot" invariant) — this routes
@@ -94,7 +79,7 @@ if __name__ == "__main__":
     # script/, so its parent is the repo root) rather than cwd — a .bat launcher
     # does `cd /d "%~dp0"` into script/, which would otherwise scope defaults
     # under script/.
-    project_root = str(Path(__file__).parent.parent)
+    project_root = str(PROJECT_ROOT)
 
     # Only override a ProjectInfo field when the arg was actually given, so an
     # omitted --chip / --qub keeps the unknown_* defaults instead of becoming "".

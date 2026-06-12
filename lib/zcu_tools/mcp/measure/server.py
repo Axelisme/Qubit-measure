@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import logging
 import sys
 import threading
 import time
@@ -32,6 +33,8 @@ from collections.abc import Callable
 from pathlib import Path
 from tempfile import gettempdir
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 # This bridge is launched standalone (``python .../mcp_server.py``), so the repo
 # ``lib`` dir is not on sys.path by default. Add it so the wire-contract modules
@@ -1920,6 +1923,20 @@ def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
     sys.stdin.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
 
+    # Per-session file logging for the MCP server process (Phase 157). stdout is
+    # the JSON-RPC transport, so logging must never touch it — the shared helper
+    # only adds a stderr (WARNING) handler plus a DEBUG file handler. Attach at
+    # ``zcu_tools.mcp`` so this module + tool error logs reach the file.
+    # parents[4]: server.py -> measure -> mcp -> zcu_tools -> lib -> repo root.
+    from zcu_tools.gui.logging_setup import setup_gui_logging
+
+    setup_gui_logging(
+        app_name="measure",
+        log_root=Path(__file__).resolve().parents[4],
+        group="mcp",
+        extra_namespaces=("zcu_tools.mcp",),
+    )
+
     while True:
         try:
             line = sys.stdin.readline()
@@ -2012,6 +2029,7 @@ def main() -> None:
                             "result": {"content": content},
                         }
                     except Exception as e:
+                        logger.exception("MCP tool %r dispatch failed", name)
                         # GUI-side business errors (send_gui_rpc raises
                         # RuntimeError with an already-clear "GUI Error (code):
                         # message") carry no useful Python stack for the agent —
@@ -2057,6 +2075,7 @@ def main() -> None:
                     sys.stdout.write(json.dumps(resp) + "\n")
                     sys.stdout.flush()
         except Exception as e:
+            logger.exception("MCP loop exception")
             sys.stderr.write(f"MCP Loop Exception: {e}\n{traceback.format_exc()}\n")
             sys.stderr.flush()
 

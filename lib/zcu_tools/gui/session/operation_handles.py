@@ -20,10 +20,13 @@ its own ``OperationGate`` exclusion policy.
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Literal, Optional
+
+logger = logging.getLogger(__name__)
 
 # Upper bound on how many settled operations are retained so that
 # ``await_outcome`` can return immediately for an operation that finished before
@@ -80,6 +83,9 @@ class OperationHandles:
         self._next_token += 1
         self._events[token] = threading.Event()
         self._stop_events[token] = stop_event
+        # DEBUG: high-frequency bookkeeping — every async op (run/device/connect/
+        # analyze) mints a token here, so this is the canonical "op opened" marker.
+        logger.debug("operation create: token=%d", token)
         return token
 
     def settle(self, token: int, outcome: OperationOutcome) -> None:
@@ -88,6 +94,18 @@ class OperationHandles:
         self._stop_events.pop(token, None)
         if evt is None:
             return  # never created, or already settled
+        # INFO: terminal lifecycle marker. A non-finished outcome carries the
+        # error, so log it at WARNING with the message to make failures visible
+        # without trawling DEBUG.
+        if outcome.status == "finished":
+            logger.info("operation settle: token=%d status=%s", token, outcome.status)
+        else:
+            logger.warning(
+                "operation settle: token=%d status=%s error=%s",
+                token,
+                outcome.status,
+                outcome.error,
+            )
         evt.set()
         self._done[token] = (evt, outcome)
         while len(self._done) > _DONE_EVENT_LIMIT:
@@ -103,11 +121,13 @@ class OperationHandles:
         """
         stop_event = self._stop_events.get(token)
         if stop_event is not None:
+            logger.info("operation cancel: token=%d", token)
             stop_event.set()
 
     def cancel_all(self) -> list[int]:
         """Cancel every live operation; return their tokens (for poll/await)."""
         tokens = list(self._events.keys())
+        logger.info("operation cancel_all: %d live ops", len(tokens))
         for token in tokens:
             self.cancel(token)
         return tokens

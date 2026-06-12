@@ -162,6 +162,7 @@ class WritebackService:
         # + bumps "context" once + emits at most one MD/ML_CHANGED. Writeback only
         # owns the per-tab bookkeeping (applied ids + TAB_CONTENT_CHANGED).
         tab_id = permit.tab_id
+        logger.info("writeback apply: tab_id=%r", tab_id)
         tab = self._state.get_tab(tab_id)
         applied_ids: list[str] = []
         md: dict[str, Any] = {}
@@ -189,6 +190,13 @@ class WritebackService:
         )
         tab.applied_session_ids.update(applied_ids)
         self._bus.emit(TabContentChangedPayload(tab_id=tab_id))
+        logger.info(
+            "writeback applied: tab_id=%r md=%d ml_modules=%d ml_waveforms=%d",
+            tab_id,
+            len(md),
+            len(ml_modules),
+            len(ml_waveforms),
+        )
         return applied_ids
 
     def _item_schema(self, item: ModuleWriteback | WaveformWriteback) -> CfgSchema:

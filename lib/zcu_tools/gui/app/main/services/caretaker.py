@@ -74,6 +74,7 @@ class PersistenceCaretaker:
         default snapshot instead — the originator still gets a snapshot so every
         service initialises to its default state. The on-disk file is untouched
         here; a later ``flush`` at close still overwrites it as usual."""
+        logger.info("persistence restore: load=%s path=%s", load, self._path)
         if load:
             state, load_error = self._load()
         else:
@@ -84,6 +85,7 @@ class PersistenceCaretaker:
     def flush(self) -> None:
         """Capture the current app state from the originator and write it.
         Trigger-agnostic — every call re-captures from scratch."""
+        logger.info("persistence flush: %s", self._path)
         state = self._originator.capture_persisted_state()
         self._write(state)
 
@@ -96,10 +98,18 @@ class PersistenceCaretaker:
             raw = json.loads(self._path.read_text(encoding="utf-8"))
             state = AppPersistedState.model_validate(raw)
         except Exception as exc:  # JSONDecodeError / OSError / ValidationError
+            logger.warning(
+                "persistence load failed (%s); using defaults", self._path, exc_info=exc
+            )
             return AppPersistedState(), PersistenceError(
                 f"Failed to read GUI state ({exc}); using defaults"
             )
         if state.version != APP_STATE_VERSION:
+            logger.warning(
+                "persistence version mismatch: got %r expected %r; using defaults",
+                state.version,
+                APP_STATE_VERSION,
+            )
             return AppPersistedState(), PersistenceError(
                 f"Unsupported GUI state version {state.version!r} "
                 f"(expected {APP_STATE_VERSION}); using defaults"
@@ -123,6 +133,7 @@ class PersistenceCaretaker:
         except (OSError, TypeError, ValueError) as exc:
             if temp_path is not None:
                 temp_path.unlink(missing_ok=True)
+            logger.exception("persistence write failed: %s", self._path)
             raise PersistenceError(f"Failed to save GUI state: {exc}") from exc
 
 

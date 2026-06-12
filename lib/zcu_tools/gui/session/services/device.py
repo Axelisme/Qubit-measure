@@ -618,6 +618,9 @@ class DeviceService(QObject):
                 info=cast(BaseDeviceInfo, info),
             )
         )
+        logger.info(
+            "device connect succeeded: name=%r type=%r", req.name, req.type_name
+        )
         self._finish_operation(req.name, OperationOutcome("finished"))
         self._emit_device_changed(req.name)
         self.device_connected.emit(req)
@@ -636,6 +639,7 @@ class DeviceService(QObject):
             )
         else:
             self._state.remove_device(req.name)
+        logger.info("device disconnect succeeded: name=%r", req.name)
         self._finish_operation(req.name, OperationOutcome("finished"))
         self._emit_device_changed(req.name)
         self.device_disconnected.emit(req)
@@ -653,6 +657,7 @@ class DeviceService(QObject):
             self._on_setup_finished(name, result)
 
     def _on_setup_finished(self, name: str, info: object) -> None:
+        logger.info("device setup finished: name=%r", name)
         current = self._require_device(name)
         self._state.put_device(
             replace(
@@ -672,6 +677,9 @@ class DeviceService(QObject):
         self.setup_finished.emit(name)
 
     def _on_setup_failed(self, name: str, error: str) -> None:
+        # ``error`` is a pre-formatted message (the exception was already consumed
+        # into a string by the worker), so no exc_info is available here.
+        logger.warning("device setup failed: name=%r error=%s", name, error)
         self._restore_prior_device(name, error)
         self._finish_operation(name, OperationOutcome("failed", error))
         self._emit_device_changed(name)
@@ -695,6 +703,9 @@ class DeviceService(QObject):
 
     def _on_operation_failed(self, name: str, error: object) -> None:
         message = str(error)
+        # The real traceback is logged at the worker (background.py); ``error`` is
+        # the marshalled value, so log the message at WARNING here.
+        logger.warning("device operation failed: name=%r error=%s", name, message)
         if (
             self._active_kind is OperationKind.DEVICE_CONNECT
             and self._active_prior is None
