@@ -51,6 +51,14 @@ def calc_max_length(
     elif length1 < length2:
         return length2
 
+    # Equal lengths. For two plain floats this is genuinely unambiguous -- both
+    # operands are the same constant, so returning either is exactly correct and
+    # no warning is warranted. The "may not always be correct" caveat only applies
+    # when at least one operand is a sweepable QickParam: equality at this single
+    # evaluation does not imply equality across every loop iteration.
+    if not isinstance(length1, QickParam) and not isinstance(length2, QickParam):
+        return length1
+
     warnings.warn(
         f"Detected overlap between {param2str(length1)} and {param2str(length2)}; "
         "using the maximum length for calculation. "
@@ -78,6 +86,11 @@ def merge_max_length(*args: float | QickParam) -> float | QickParam:
             return length1
         elif length1 < length2:
             return length2
+        # Equal: collapse two equal plain floats unambiguously (see
+        # calc_max_length); keep both only when a QickParam makes the
+        # cross-iteration relationship ambiguous.
+        elif not isinstance(length1, QickParam) and not isinstance(length2, QickParam):
+            return length1
         else:
             return None
 

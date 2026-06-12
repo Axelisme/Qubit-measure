@@ -80,20 +80,27 @@ class FakeDevice(BaseDevice[FakeDeviceInfo]):
         steps = max(1, round(dist / step))
         targets = np.linspace(self.value, value, num=steps + 1, endpoint=True)
 
+        total = round(dist, 6)
         pbar = make_pbar(
-            total=round(dist, 6),
+            total=total,
             desc="Ramp value",
             leave=False,
             disable=not progress,
         )
+        start = self.value
         for target in targets[1:]:  # skip first (current value)
             if stop_event is not None and stop_event.is_set():
                 break
-            prev = self.value
             self.value = float(target)
             if not self._fast_mode:
                 time.sleep(RAMP_INTERVAL)
-            pbar.update(round(abs(self.value - prev), 6))
+            # Anchor the bar to absolute distance covered (set n directly via a
+            # delta) instead of summing per-step increments: independent rounding
+            # of each step's |Δ| does not telescope back to `total`, so summing
+            # could push the cumulative past `total` and trip tqdm's "clamping
+            # frac" warning. min() guards the final fp residue.
+            covered = min(round(abs(self.value - start), 6), total)
+            pbar.update(covered - pbar.n)
         pbar.close()
 
     # ==========================================================================#

@@ -21,7 +21,13 @@ def cast2real_and_norm(
         signals = signals - np.ma.mean(signals, axis=1, keepdims=True)
         signals = gaussian_filter1d(signals, sigma=sigma, axis=1)
         real_signals = np.abs(signals)
-        real_signals /= np.ma.std(real_signals, axis=1, keepdims=True)
+        std = np.ma.std(real_signals, axis=1, keepdims=True)
+        # A constant (or fully masked) row has zero/undefined std and carries no
+        # spectral feature. Normalising it by 1 keeps it finite and flat so the
+        # downstream find_peaks sees no peak, instead of emitting inf/nan from a
+        # divide-by-zero that would later poison peak detection.
+        std = np.where(np.ma.getdata(std) > 0, std, 1.0)
+        real_signals /= std
     else:
         real_signals = np.abs(signals)
         real_signals = gaussian_filter1d(real_signals, sigma=sigma, axis=1)
@@ -120,11 +126,11 @@ def diff_mirror(
     # 預先建立輸出陣列，以零填充無效位置
     diff_data = np.zeros_like(data, dtype=np.float64)
 
-    # 只在有效位置計算差值
-    if data.ndim == 1:
-        diff_data[valid] = np.abs(data[valid] - data[mirror_idxs[valid]])
-    else:
-        # 利用 broadcasting，一次處理剩餘維度
+    # 只在有效位置計算差值。data 可能含 NaN（未量測/遮罩點）；此處刻意讓 NaN
+    # 透過 subtract/abs 傳播成 NaN，由下游 loss 計算以 isnan/非零過濾掉，因此
+    # 抑制 numpy 對 NaN 運算的 invalid-value 警告（這是預期且已被處理的行為）。
+    with np.errstate(invalid="ignore"):
+        # 1D 與多維皆靠 broadcasting，一次處理剩餘維度
         diff_data[valid] = np.abs(data[valid] - data[mirror_idxs[valid]])
 
     return diff_data

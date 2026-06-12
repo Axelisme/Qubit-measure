@@ -8,6 +8,7 @@ relative import fix is exercised here via load_comment.
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from zcu_tools.utils.datasaver import load_comment, load_local_data, save_local_data
 
 # ---------------------------------------------------------------------------
@@ -88,6 +89,11 @@ def test_load_comment(tmp_path):
 
 
 def test_load_comment_missing_file(tmp_path):
-    """load_comment returns None and does not raise on a missing file."""
-    result = load_comment(str(tmp_path / "nonexistent"))
+    """load_comment warns and returns None (does not raise) on a missing file.
+
+    The UserWarning is the documented contract under failure, so assert it
+    explicitly rather than letting it leak into the suite's warning summary.
+    """
+    with pytest.warns(UserWarning, match="Failed to load comment"):
+        result = load_comment(str(tmp_path / "nonexistent"))
     assert result is None
