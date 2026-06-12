@@ -22,6 +22,7 @@ from zcu_tools.gui.session.services.device import (
     DeviceSetupSnapshot,
 )
 from zcu_tools.gui.session.services.io_manager import IOManager
+from zcu_tools.gui.session.state import DeviceStatus
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 from .adapter import (
@@ -462,11 +463,24 @@ class Controller:
             )
         soc.set_flux_device(_FAKE_FLUX_DEVICE_NAME)
 
-        # Idempotent: skip provisioning if fake_flux already exists (re-connect, or
-        # a user-owned device of that name). The binding above is harmless to repeat.
-        if self._dev_svc.get_device_snapshot(_FAKE_FLUX_DEVICE_NAME) is not None:
+        existing = self._dev_svc.get_device_snapshot(_FAKE_FLUX_DEVICE_NAME)
+
+        if existing is not None and existing.status is not DeviceStatus.MEMORY_ONLY:
+            # FLUX-AWARE-MOCK: already live (connected or in a transient operation) —
+            # nothing to do; the binding above is the only needed effect.
             return
 
+        if existing is not None and existing.status is DeviceStatus.MEMORY_ONLY:
+            # FLUX-AWARE-MOCK: remembered but disconnected (e.g. restored from
+            # persistence in disconnected state). Auto-reconnect via the same path as
+            # gui_device_reconnect so the device becomes live again. No initial-value
+            # setup: the user's last-known value is already persisted in State/info and
+            # will be loaded by the driver on connect; we never stomp a pre-existing
+            # value. Fire-and-forget (async via BackgroundService) — no blocking wait.
+            self._dev_svc.start_reconnect_device(_FAKE_FLUX_DEVICE_NAME)
+            return
+
+        # Not recorded at all — provision a brand-new FakeDevice (first-time connect).
         self._fake_flux_pending_setup = True
         try:
             self._dev_svc.start_connect_device(

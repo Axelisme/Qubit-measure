@@ -32,6 +32,7 @@ from zcu_tools.gui.session.services.connection import (
     ConnectMockRequest,
     ConnectRemoteRequest,
 )
+from zcu_tools.gui.session.services.device import DisconnectDeviceRequest
 from zcu_tools.gui.session.services.io_manager import IOManager
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
@@ -177,6 +178,73 @@ def test_reconnect_does_not_double_register_fake_flux(fx):
     # Exactly one fake_flux entry, value untouched (no re-ramp), binding intact.
     assert fx.state.get_device(_FAKE_FLUX_DEVICE_NAME) is not None
     assert _fake_device(_FAKE_FLUX_DEVICE_NAME).get_value() == 0.123
+    soc = fx.state.exp_context.soc
+    assert getattr(soc, "_sim_params").flux_device == _FAKE_FLUX_DEVICE_NAME
+
+
+# ---------------------------------------------------------------------------
+# FLUX-AWARE-MOCK auto-reconnect: when fake_flux is MEMORY_ONLY (disconnected)
+# on mock-connect, the controller should reconnect it rather than skip.
+# ---------------------------------------------------------------------------
+
+
+def _disconnect_fake_flux(fx: _Fixture) -> None:
+    """Disconnect fake_flux so it lands in MEMORY_ONLY state, then quiesce."""
+    fx.ctrl._dev_svc.start_disconnect_device(
+        DisconnectDeviceRequest(name=_FAKE_FLUX_DEVICE_NAME, remember=True)
+    )
+    assert _pump_until(
+        lambda: (
+            (dev := fx.state.get_device(_FAKE_FLUX_DEVICE_NAME)) is not None
+            and dev.status is DeviceStatus.MEMORY_ONLY
+        )
+    ), "fake_flux did not reach MEMORY_ONLY after disconnect"
+
+
+def test_mock_connect_reconnects_disconnected_fake_flux(fx):
+    """FLUX-AWARE-MOCK: if fake_flux is MEMORY_ONLY (e.g. restored from persistence
+    in disconnected state), Use MockSoc must auto-reconnect it so the device becomes
+    live again without a manual user action."""
+    # First connect: provisions and ramps fake_flux.
+    _connect_mock(fx)
+
+    # Simulate the 'disconnected at startup' scenario: disconnect the device.
+    _disconnect_fake_flux(fx)
+    assert fx.state.get_device(_FAKE_FLUX_DEVICE_NAME) is not None
+    assert (
+        fx.state.get_device(_FAKE_FLUX_DEVICE_NAME).status is DeviceStatus.MEMORY_ONLY
+    )  # type: ignore[union-attr]
+
+    # Use MockSoc again — the controller must fire the reconnect path.
+    fx.ctrl.start_connect(ConnectMockRequest())
+    # Wait for fake_flux to come back CONNECTED (reconnect is async).
+    assert _pump_until(
+        lambda: (
+            (dev := fx.state.get_device(_FAKE_FLUX_DEVICE_NAME)) is not None
+            and dev.status is DeviceStatus.CONNECTED
+        )
+    ), "fake_flux was not reconnected after Use MockSoc with MEMORY_ONLY device"
+
+    # Binding must still be in place on the new soc.
+    soc = fx.state.exp_context.soc
+    assert getattr(soc, "_sim_params").flux_device == _FAKE_FLUX_DEVICE_NAME
+
+
+def test_mock_connect_skips_reconnect_when_already_connected(fx):
+    """FLUX-AWARE-MOCK: if fake_flux is already CONNECTED, Use MockSoc must NOT
+    trigger a redundant reconnect — only the set_flux_device binding is repeated."""
+    _connect_mock(fx)
+    # Record a sentinel value; a spurious reconnect would reset it to 0.0.
+    _fake_device(_FAKE_FLUX_DEVICE_NAME).set_value(0.777)
+
+    # Use MockSoc a second time while fake_flux is still CONNECTED.
+    fx.ctrl.start_connect(ConnectMockRequest())
+    assert _pump_until(lambda: not fx.ctrl._conn_svc.is_connect_active())
+    fx.quiesce()
+    _process_events()
+
+    # Value must be untouched — no reconnect / re-setup fired.
+    assert _fake_device(_FAKE_FLUX_DEVICE_NAME).get_value() == 0.777
     soc = fx.state.exp_context.soc
     assert getattr(soc, "_sim_params").flux_device == _FAKE_FLUX_DEVICE_NAME
 
