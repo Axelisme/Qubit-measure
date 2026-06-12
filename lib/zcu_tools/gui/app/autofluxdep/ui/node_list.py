@@ -1,9 +1,11 @@
 """NodeListPane — the left side: node list + flux + Setup + Run/Stop.
 
 Owns workflow editing (select / add / remove / reorder Nodes), the flux sweep
-fields, the Setup button (+ status light), and the single Run/Stop toggle button
-(▶ Run in edit state, ■ Stop while running). Drives the Controller; emits a Qt
-signal when the selection changes so the right pane follows.
+fields, the Setup button (+ status light), the Inspect button (a non-modal
+context inspector the MainWindow owns the lifetime of — this pane only requests
+it), and the single Run/Stop toggle button (▶ Run in edit state, ■ Stop while
+running). Drives the Controller; emits a Qt signal when the selection changes so
+the right pane follows.
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ class NodeListPane(QWidget):
     selection_changed = Signal(int)  # selected node index, or -1
     run_requested = Signal()
     stop_requested = Signal()
+    inspect_requested = Signal()  # open the (non-modal) context inspector
 
     def __init__(self, ctrl: Controller, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -69,10 +72,15 @@ class NodeListPane(QWidget):
         self._setup_btn = _btn("Setup…", self._on_setup)
         self._devices_btn = _btn("Devices…", self._on_devices)
         self._predictor_btn = _btn("Predictor…", self._on_predictor)
+        # Inspect stays enabled during a run: the inspector reflects the live
+        # context (the run reads it; the user may want to peek mid-sweep), and it
+        # is non-modal so it never blocks the event loop the worker needs.
+        self._inspect_btn = _btn("Inspect…", self.inspect_requested.emit)
         self._setup_light = QLabel("● not set")
         setup_row.addWidget(self._setup_btn)
         setup_row.addWidget(self._devices_btn)
         setup_row.addWidget(self._predictor_btn)
+        setup_row.addWidget(self._inspect_btn)
         setup_row.addWidget(self._setup_light)
         root.addLayout(setup_row)
 

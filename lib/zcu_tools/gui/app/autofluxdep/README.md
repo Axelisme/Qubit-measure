@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-13（Phase 160b：node 參數 SSOT 物理化進 NodeCfgSchema + typed cfg form）
+**Last updated:** 2026-06-13（Phase 160c：集成共用 InspectDialogBase——context inspector）
 
 # gui/app/autofluxdep/ — autofluxdep-gui app shell
 
@@ -15,7 +15,7 @@ autofluxdep/
 ├── operation_gate.py— app-local OperationGate（str-keyed 衝突矩陣 over session kinds + 自己 RUN kind）
 ├── background.py    — 瘦 BackgroundService（組合共用 BackgroundRunner；_entered 只 pbar+ActiveTask，無 figure routing，ADR-0018）
 ├── cfg/             — 唯一 import measure spec/value 模型的 seam：`__init__`（純資料：CfgSchema/*Spec/*Value re-export）+ `schema`（NodeCfgSchema：node 旋鈕 SSOT，lower/set_field/with_overrides）+ `form`（CfgFormWidget/SectionLiveField/LiveModelEnv re-export，UI seam）
-├── ui/              — main_window / node_list（Setup/Devices/Predictor button + flux-source picker）/ node_detail / node_cfg_form（typed cfg form：SectionLiveField over PlacedNode.schema + CfgFormWidget，編輯經 controller.set_node_params 寫回 schema SSOT）
+├── ui/              — main_window（持單一 non-modal InspectDialogBase 生命週期）/ node_list（Setup/Devices/Predictor/Inspect button + flux-source picker，inspect_requested signal）/ node_detail / node_cfg_form（typed cfg form：SectionLiveField over PlacedNode.schema + CfgFormWidget，編輯經 controller.set_node_params 寫回 schema SSOT）
 ├── nodes/           — **domain core（別動）**：builder（Builder/Node/RunEnv）/ qubit_freq/lenrabi/ro_optimize/t1/t2ramsey/t2echo/mist/predictor / acquire（共用 real-acquire helpers：set_flux_by_name/require_flux_device/build_stop_checkers/is_good_fit/parse_linear_axis）/ result / plotters / io / spec
 ├── orchestrator.py / derivation.py / tools.py / registry.py — **domain core（別動）**
 └── CONTEXT.md / README.md
@@ -23,7 +23,8 @@ autofluxdep/
 
 ## 關鍵設計
 
-- **複用 session core**：Controller `__init__` 組 `build_session_services`，注入 app-local `OperationGate` + 瘦 `BackgroundService` + 共用 `OperationHandles`/`ProgressService`(default `QtProgressTransport`)/`IOManager`。實作 `SessionControllerPort`（pyright 在 dialog call site 驗 conformance），開共用 `gui/session/ui` 的 setup/device/predictor dialog。run 讀 `exp_context`（soc/soccfg/ml/md/predictor），無自己的 SetupResources/setup()（早退）。
+- **複用 session core**：Controller `__init__` 組 `build_session_services`，注入 app-local `OperationGate` + 瘦 `BackgroundService` + 共用 `OperationHandles`/`ProgressService`(default `QtProgressTransport`)/`IOManager`。實作 `SessionControllerPort`（pyright 在 dialog call site 驗 conformance），開共用 `gui/session/ui` 的 setup/device/predictor/inspect dialog。run 讀 `exp_context`（soc/soccfg/ml/md/predictor），無自己的 SetupResources/setup()（早退）。
+- **inspect（Phase 160c）**：Inspect button → `MainWindow._on_inspect` 開共用 `InspectDialogBase`（**直接用，不 subclass**——measure 才有的 ml create/modify 綁 CfgEditor，刻意排除）。non-modal `open()`（event loop 持續 pump，run worker 不阻塞）+ `WA_DeleteOnClose`，MainWindow 持單一 instance（重開只 raise）。md 讀/改/刪 + ml view/rename/delete 全委派 controller 的 inspect port，落到共用 `ContextService`——它 mutate 後 emit `Md/Ml/ContextSwitched` 到**同一條** `BaseEventBus`，dialog 訂閱故自動刷新（**無需 emit 缺口補丁**：controller 純委派，emit 已在 session core）。Inspect button **run 中不鎖**（inspector 反映 live context，可中途窺看）。
 - **State main-thread 不變式 + Qt 需求**：`build_core()` 建 session-service QObject，**需 QApplication 先存在**（測試 conftest `qapp` autouse）；headless 測試經 `connect_mock`（async ConnectionService + QEventLoop）建 mock soc，不用真 setup。
 - **Run path（real acquire）**：每 node `produce` 用 `Builder.make_cfg`（決策 A，D1：在 produce 跑）lower context→真 cfg，把這點 flux 值寫進 `cfg.dev[flux_device]`（`set_flux_by_name`，by device **name**＝picker 存的，非下層 `flux_dev` label）→ `setup_devices` 推送 → 建 program（TwoToneProgram/ModularProgramV2…）`.acquire`（`round_hook`+`stop_checkers`：cooperative stop＋SNR early-stop）→ fit（qubit_freq 並 `predictor.calibrate`；mist/ro_optimize 無 fit）。**無 synthetic fallback**：context 未配置時 `make_cfg` **Fast Fail**（→ orchestrator 轉 `RunFailedPayload`，不讓 worker QThread abort）。offline 測試走 flux-aware MockSoc（`connect_mock` 起 `fake_flux`），資料隨 flux 變化。詳見 `CONTEXT.md` 的 "Run path"。
 - **produce 例外保護**：`orchestrator.run` catch `produce` 例外 → 記 `self.run_error`＋停 sweep；`controller.start_run` 檢查後 emit `RunFailedPayload(message)`，UI `MainWindow._on_run_failed` 解鎖＋彈 warning。真 GUI run 的 node 例外不會 crash app。

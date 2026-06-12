@@ -104,6 +104,40 @@ def test_predictor_button_opens_shared_predictor_dialog(app):
     dlg.deleteLater()
 
 
+# --- Inspect… mounts the shared (non-modal) context inspector ---
+
+
+def test_inspect_button_opens_single_non_modal_inspector(app):
+    from zcu_tools.gui.session.ui.inspect_base import InspectDialogBase
+
+    ctrl, win = app
+    assert hasattr(win._list, "_inspect_btn")
+    assert win._inspect_dialog is None
+
+    win._list.inspect_requested.emit()  # the button's slot
+    dlg = win._inspect_dialog
+    assert isinstance(dlg, InspectDialogBase)
+    # Opened via ``open()`` (non-blocking, so the run worker's event loop keeps
+    # pumping) rather than ``exec()``.
+    assert dlg.isVisible()
+
+    # A second request raises the same instance, never a second dialog.
+    win._list.inspect_requested.emit()
+    assert win._inspect_dialog is dlg
+
+    dlg.reject()  # closing drops the reference so the next request rebuilds
+    assert win._inspect_dialog is None
+
+
+def test_inspect_button_stays_enabled_during_run(app):
+    # The inspector reflects the live context; it must remain reachable mid-run
+    # (unlike the workflow-editing buttons, which lock while running).
+    ctrl, win = app
+    win._list.set_running(True)
+    assert win._list._inspect_btn.isEnabled()
+    win._list.set_running(False)
+
+
 # --- selection drives the right pane ---
 
 

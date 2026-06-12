@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-12 — MockFluxProvisioner installs a SimParams-matched predictor
+**Last updated:** 2026-06-13 — InspectDialogBase 第二 consumer：autofluxdep 直接複用（Phase 160c）
 
 # gui/session/ — 量測 session core（measure + autofluxdep 共用）
 
@@ -32,7 +32,7 @@ session/
     ├── setup_dialog.py   — Project + Context + Connection 合併（QSplitter）
     ├── device_dialog.py  — 設備管理；per-device panel lazy-import zcu_tools.device.*
     ├── predictor_dialog.py — FluxoniumPredictor 載入 + 頻率預測（load/clear/predict + PREDICTOR_CHANGED 訂閱）
-    └── inspect_base.py   — InspectDialogBase：md tab + ml view/rename/del；hook _build_extra_ml_buttons/_on_ml_selection_changed 讓子類加 ml create/modify
+    └── inspect_base.py   — InspectDialogBase：md tab + ml view/rename/del；hook _build_extra_ml_buttons/_on_ml_selection_changed 讓子類加 ml create/modify。**consumers**：measure subclass（InspectDialog，加 CfgEditor create/modify）；autofluxdep **直接用不 subclass**（不要 create/modify）
 ```
 
 ## 關鍵設計

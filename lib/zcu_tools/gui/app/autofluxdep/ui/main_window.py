@@ -23,8 +23,9 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from qtpy.QtCore import QObject, QThread, Signal  # type: ignore[attr-defined]
+from qtpy.QtCore import QObject, Qt, QThread, Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+    QDialog,
     QMainWindow,
     QProgressBar,
     QSplitter,
@@ -107,6 +108,10 @@ class MainWindow(QMainWindow):
         self._worker: _RunWorker | None = None
         # per-provider sweep-lived liveplot state: name -> (canvas, plotter)
         self._plots: dict[str, tuple[QWidget, Any]] = {}
+        # The single live (non-modal) context inspector, or None when closed. The
+        # base auto-refreshes off the shared session event bus, so the open dialog
+        # tracks md/ml edits live without this window pushing to it.
+        self._inspect_dialog: QDialog | None = None
         self.setWindowTitle("autofluxdep-gui")
         self.resize(1100, 800)
 
@@ -137,6 +142,7 @@ class MainWindow(QMainWindow):
         self._list.selection_changed.connect(self._on_select)
         self._list.run_requested.connect(self._start)
         self._list.stop_requested.connect(self._stop)
+        self._list.inspect_requested.connect(self._on_inspect)
 
         # run bridge (worker thread → main thread)
         self._bridge = _RunBridge(ctrl)
@@ -165,6 +171,36 @@ class MainWindow(QMainWindow):
         if node is not None and node.name in self._plots:
             canvas = self._plots[node.name][0]
         self._detail.show_run_canvas(canvas)
+
+    # --- inspect (non-modal context inspector) ---
+
+    def _on_inspect(self) -> None:
+        """Open the shared context inspector, or raise it if already open.
+
+        autofluxdep reuses ``InspectDialogBase`` as-is (the measure-only ml
+        create/modify path drags the CfgEditor and is deliberately excluded —
+        Phase 160c). The dialog subscribes to the shared session event bus, so it
+        auto-refreshes on every md/ml edit without this window pushing to it.
+        A single instance is kept alive (non-modal, WA_DeleteOnClose); a second
+        request just raises the existing one.
+        """
+        existing = self._inspect_dialog
+        if existing is not None:
+            existing.raise_()
+            existing.activateWindow()
+            if not existing.isVisible():
+                existing.show()
+            return
+
+        from zcu_tools.gui.session.ui.inspect_base import InspectDialogBase
+
+        dlg = InspectDialogBase(self._ctrl, self._ctrl.get_bus(), parent=self)
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        # ``finished`` fires for both accept and reject; drop the reference so the
+        # next request rebuilds a fresh dialog (the C++ object is deleted on close).
+        dlg.finished.connect(lambda _status: setattr(self, "_inspect_dialog", None))
+        self._inspect_dialog = dlg
+        dlg.open()
 
     # --- run lifecycle ---
 
