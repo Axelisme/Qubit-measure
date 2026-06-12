@@ -197,7 +197,7 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
             title = r"$T_{2echo}$ fringe = " + f"{t2e_str}, detune = {detune_str}"
 
         elif fit_method == "decay":
-            title = r"$T_{2echo}$ decay = {t2e_str}"
+            title = r"$T_{2echo}$ decay = " + f"{t2e_str}"
 
         else:
             raise ValueError(f"Unknown fit_method: {fit_method}")

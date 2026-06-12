@@ -82,19 +82,22 @@ def test_twotone_build_exp_cfg_delegates_to_ml_make_cfg(
 
 
 @pytest.mark.parametrize(
-    ("adapter", "cfg_model"),
+    ("adapter", "expected_default"),
     [
-        (T2RamseyAdapter(), T2RamseyCfg),
-        (T2EchoAdapter(), T2EchoCfg),
+        (T2RamseyAdapter(), 0.05),
+        (T2EchoAdapter(), 0.1),
     ],
 )
-def test_t2_detune_in_cfg_spec_default_zero(adapter: Any, cfg_model: type) -> None:
-    # detune is a run-only knob carried in the cfg spec (ADR-0011: the lowered
-    # value tree is complete and validates) and defaults to 0.0.
+def test_t2_detune_ratio_in_cfg_spec_default(
+    adapter: Any, expected_default: float
+) -> None:
+    # detune_ratio is a run-only knob carried in the cfg spec (ADR-0011: the
+    # lowered value tree is complete and validates); ramsey defaults 0.05, echo
+    # 0.1 (fringes per sweep step, mirroring the notebook).
     ml = _make_ml()
     schema = adapter.make_default_cfg(_make_ctx(ml))  # validate() runs here
     raw = _lower(schema, _make_req(ml))
-    assert raw["detune"] == 0.0
+    assert raw["detune_ratio"] == expected_default
 
 
 @pytest.mark.parametrize(
@@ -104,16 +107,16 @@ def test_t2_detune_in_cfg_spec_default_zero(adapter: Any, cfg_model: type) -> No
         (T2EchoAdapter(), T2EchoCfg),
     ],
 )
-def test_t2_build_exp_cfg_strips_detune(adapter: Any, cfg_model: type) -> None:
-    # detune is not part of the lowered ExpCfg, so build_exp_cfg must pop it
-    # before ml.make_cfg (mirrors ro_optimize/auto's num_points).
+def test_t2_build_exp_cfg_strips_detune_ratio(adapter: Any, cfg_model: type) -> None:
+    # detune_ratio is not part of the lowered ExpCfg, so build_exp_cfg must pop
+    # it before ml.make_cfg (mirrors ro_optimize/auto's num_points).
     ml = _make_ml()
     raw = _lower(adapter.make_default_cfg(_make_ctx(ml)), _make_req(ml))
-    assert "detune" in raw  # present in the lowered cfg
+    assert "detune_ratio" in raw  # present in the lowered cfg
 
     adapter.build_exp_cfg(raw, _make_req(ml))
     passed_raw = ml.make_cfg.call_args.args[0]
-    assert "detune" not in passed_raw  # stripped before make_cfg
+    assert "detune_ratio" not in passed_raw  # stripped before make_cfg
     assert ml.make_cfg.call_args.args[1] is cfg_model
 
 
@@ -188,13 +191,21 @@ def test_twotone_run_without_soc_fast_fails(adapter: Any) -> None:
         adapter.run(_make_req(ml), schema)
 
 
+def _make_cfg_with_step(step: float) -> MagicMock:
+    # A fake lowered cfg whose length sweep step the run override divides into.
+    cfg = MagicMock()
+    cfg.sweep.length.step = step
+    return cfg
+
+
 @pytest.mark.parametrize(
     "adapter_cls",
     [T2RamseyAdapter, T2EchoAdapter],
 )
-def test_t2_run_unpacks_tuple_and_forwards_detune(adapter_cls: type) -> None:
+def test_t2_run_converts_detune_ratio_to_mhz(adapter_cls: type) -> None:
     # Domain T2*/T2echo run returns (result, true_detune); the GUI run override
-    # must forward the cfg detune knob as a kwarg and return only the bare result.
+    # converts detune_ratio (fringes/step) to absolute detune (MHz) as
+    # ratio / sweep step, forwards it as a kwarg, and returns only the result.
     sentinel_result = object()
     captured: dict[str, Any] = {}
 
@@ -207,15 +218,108 @@ def test_t2_run_unpacks_tuple_and_forwards_detune(adapter_cls: type) -> None:
     adapter.exp_cls = FakeExp  # type: ignore[assignment]
 
     ml = _make_ml()
+    # step 0.1 us, ratio 0.05 → detune 0.5 MHz reaches the domain kwarg
+    ml.make_cfg.return_value = _make_cfg_with_step(0.1)
     schema = adapter.make_default_cfg(_make_ctx(ml))
-    # set a non-zero detune in the draft to prove it reaches the kwarg
-    schema.value.fields["detune"] = DirectValue(1.5)
+    schema.value.fields["detune_ratio"] = DirectValue(0.05)
 
     req = RunRequest(md=MagicMock(), ml=ml, soc=MagicMock(), soccfg=MagicMock())
     result = adapter.run(req, schema)
 
     assert result is sentinel_result  # tuple unpacked, only result returned
-    assert captured["detune"] == 1.5  # cfg detune forwarded to domain kwarg
+    assert captured["detune"] == pytest.approx(0.5)  # 0.05 / 0.1 MHz
+
+
+@pytest.mark.parametrize(
+    "adapter_cls",
+    [T2RamseyAdapter, T2EchoAdapter],
+)
+def test_t2_run_zero_ratio_passes_zero_detune(adapter_cls: type) -> None:
+    # detune_ratio == 0 → detune 0.0 (no fringe), skipping the step divide so a
+    # degenerate sweep cannot trip the Fast-Fail guard.
+    captured: dict[str, Any] = {}
+
+    class FakeExp:
+        def run(self, soc, soccfg, cfg, *, detune: float):
+            captured["detune"] = detune
+            return object(), 0.0
+
+    adapter = adapter_cls()
+    adapter.exp_cls = FakeExp  # type: ignore[assignment]
+
+    ml = _make_ml()
+    ml.make_cfg.return_value = _make_cfg_with_step(0.0)  # degenerate, must be unused
+    schema = adapter.make_default_cfg(_make_ctx(ml))
+    schema.value.fields["detune_ratio"] = DirectValue(0.0)
+
+    req = RunRequest(md=MagicMock(), ml=ml, soc=MagicMock(), soccfg=MagicMock())
+    adapter.run(req, schema)
+
+    assert captured["detune"] == 0.0
+
+
+def _ramsey_run_result(pi2_freq: float) -> Any:
+    # Minimal run result whose cfg_snapshot exposes pi2_pulse.freq, the only
+    # field the q_f writeback reads.
+    import numpy as np
+    from zcu_tools.experiment.v2.twotone.time_domain.t2ramsey import T2RamseyResult
+
+    snapshot = MagicMock()
+    snapshot.modules.pi2_pulse.freq = pi2_freq
+    return T2RamseyResult(
+        times=np.zeros(1, dtype=np.float64),
+        signals=np.zeros(1, dtype=np.complex128),
+        cfg_snapshot=snapshot,
+    )
+
+
+def test_t2ramsey_fringe_writeback_proposes_q_f() -> None:
+    # Mirrors the notebook: q_f = pi2_pulse.freq + true_detune - fitted_detune.
+    from zcu_tools.experiment.v2_gui.adapters.twotone.time_domain.t2ramsey import (
+        T2RamseyAnalyzeResult,
+    )
+    from zcu_tools.gui.app.main.adapter import MetaDictWriteback, WritebackRequest
+
+    adapter = T2RamseyAdapter()
+    adapter._last_true_detune = 0.5  # stashed by run()
+    analyze_result = T2RamseyAnalyzeResult(
+        t2r=12.0, t2r_err=0.5, detune=0.42, fit_fringe=True, figure=MagicMock()
+    )
+    req = WritebackRequest(
+        run_result=_ramsey_run_result(pi2_freq=4000.0),
+        analyze_result=analyze_result,
+        ctx=MagicMock(),
+    )
+
+    items = adapter.get_writeback_items(req)
+    by_name = {it.target_name: it for it in items}
+    assert set(by_name) == {"t2r", "q_f"}
+    q_f_item = by_name["q_f"]
+    assert isinstance(q_f_item, MetaDictWriteback)
+    # 4000.0 + 0.5 - 0.42
+    assert q_f_item.proposed_value == pytest.approx(4000.08)
+
+
+def test_t2ramsey_decay_writeback_omits_q_f() -> None:
+    # A pure decay fit (fit_fringe False) proposes only t2r, no q_f.
+    from zcu_tools.experiment.v2_gui.adapters.twotone.time_domain.t2ramsey import (
+        T2RamseyAnalyzeResult,
+    )
+    from zcu_tools.gui.app.main.adapter import WritebackRequest
+
+    adapter = T2RamseyAdapter()
+    adapter._last_true_detune = 0.0
+    analyze_result = T2RamseyAnalyzeResult(
+        t2r=12.0, t2r_err=0.5, detune=0.0, fit_fringe=False, figure=MagicMock()
+    )
+    req = WritebackRequest(
+        run_result=_ramsey_run_result(pi2_freq=4000.0),
+        analyze_result=analyze_result,
+        ctx=MagicMock(),
+    )
+
+    items = adapter.get_writeback_items(req)
+    assert [it.target_name for it in items] == ["t2r"]
 
 
 def test_t2echo_modules_contain_both_pulses() -> None:

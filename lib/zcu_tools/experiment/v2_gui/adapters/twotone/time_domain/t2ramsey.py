@@ -56,7 +56,10 @@ class T2RamseyAnalyzeParams:
 class T2RamseyAnalyzeResult(AnalyzeResultBase):
     t2r: float
     t2r_err: float
+    # ``detune`` is the fitted fringe frequency (MHz); meaningful only when the
+    # fringe fit ran (``fit_fringe`` True). Decay-only fits report 0.0.
     detune: float
+    fit_fringe: bool
     figure: Figure
 
 
@@ -70,6 +73,12 @@ class T2RamseyAdapter(
 ):
     exp_cls = T2RamseyExp
     ExpCfg_cls: ClassVar[Any] = T2RamseyCfg
+
+    # Realized applied detune (MHz, after length quantization) carried from run()
+    # to get_writeback_items() so q_f writeback can subtract the fitted fringe
+    # detune from it. Each tab owns a fresh adapter instance (Registry.create),
+    # so this per-instance state is not shared across tabs. None until a run.
+    _last_true_detune: float | None = None
 
     @classmethod
     def guide(cls) -> AdapterGuide:
@@ -100,27 +109,33 @@ class T2RamseyAdapter(
                 "reset ('reset_bath' / 'reset_10' / 'reset_120') when present."
             ),
             typical_writeback=(
-                "Proposes the fitted T2-Ramsey time into MetaDict 't2r' (us). The "
-                "fitted detuning is computed and shown but is NOT written back. No "
-                "ModuleLibrary writeback."
+                "Proposes the fitted T2-Ramsey time into MetaDict 't2r' (us). When "
+                "the fringe fit ran (the default), also proposes the corrected "
+                "qubit frequency into MetaDict 'q_f' (MHz), computed as the pi/2 "
+                "pulse frequency + the realized applied detune − the fitted fringe "
+                "detune (mirrors the notebook). A pure decay fit proposes only "
+                "'t2r'. No ModuleLibrary writeback."
             ),
             recommended=(
-                "Set the 'Detune (MHz)' cfg knob to a small deliberate offset "
-                "(default 0) — it advances the second pi/2 pulse phase so the "
-                "Ramsey signal oscillates at that detuning, and the analysis "
-                "'Fit fringe' option fits the fringe frequency to read back the "
-                "true qubit-frequency offset. Keep 'Fit fringe' on whenever detune "
-                "is non-zero so the oscillation is fit (returning both T2* and the "
-                "detuning); set detune=0 and turn 'Fit fringe' off for a pure decay "
-                "fit (detune reported 0) when driving on resonance. A delay sweep "
+                "Set the 'Detune ratio (fringes/step)' cfg knob to a small "
+                "deliberate offset (default 0.05) — it is the number of fringe "
+                "periods per delay-sweep step; the absolute detune (MHz) applied to "
+                "the second pi/2 pulse phase is detune_ratio / sweep step, so the "
+                "Ramsey signal oscillates at that detuning. The analysis 'Fit "
+                "fringe' option (on by default, matching the nonzero default ratio) "
+                "fits the fringe frequency to read back the true qubit-frequency "
+                "offset and write 'q_f'. Set the ratio to 0 and turn 'Fit fringe' "
+                "off for a pure decay fit when driving on resonance. A delay sweep "
                 "reaching a few T2* captures enough fringe periods and decay."
             ),
         )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:
-        # detune is a run-only kwarg of T2RamseyExp.run (not part of T2RamseyCfg),
-        # so it lives in build_exp_spec's `extra` slot and is stripped before
+        # detune_ratio is a run-only knob (not part of T2RamseyCfg): it is the
+        # number of fringe periods per delay-sweep step, converted to the
+        # absolute detune (MHz) kwarg of T2RamseyExp.run as detune_ratio / step.
+        # It lives in build_exp_spec's `extra` slot and is stripped before
         # ml.make_cfg in build_exp_cfg (mirrors ro_optimize/auto's num_points).
         return build_exp_spec(
             modules={
@@ -129,7 +144,11 @@ class T2RamseyAdapter(
                 "readout": make_readout_module_spec(),
             },
             sweep={"length": SweepSpec(label="Delay (us)")},
-            extra={"detune": FloatSpec(label="Detune (MHz)", decimals=3)},
+            extra={
+                "detune_ratio": FloatSpec(
+                    label="Detune ratio (fringes/step)", decimals=3
+                )
+            },
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
@@ -137,7 +156,7 @@ class T2RamseyAdapter(
         relax_delay = proper_relax(ctx)
         return (
             CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=100, rounds=100, relax_delay=relax_delay, detune=0.0)
+            .scalars(reps=100, rounds=100, relax_delay=relax_delay, detune_ratio=0.05)
             .role("modules.pi2_pulse", "pi2_pulse")
             .role("modules.readout", "readout")
             # optional → None (disabled) when no library reset (ADR-0010)
@@ -149,26 +168,42 @@ class T2RamseyAdapter(
         )
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> T2RamseyCfg:
-        # Strip the run-only detune knob before lowering to T2RamseyCfg, which
-        # would reject the unknown key.
+        # Strip the run-only detune_ratio knob before lowering to T2RamseyCfg,
+        # which would reject the unknown key.
         cfg_raw = dict(raw_cfg)
-        cfg_raw.pop("detune", None)
+        cfg_raw.pop("detune_ratio", None)
         return req.ml.make_cfg(cfg_raw, T2RamseyCfg)
 
-    def _detune(self, raw_cfg: dict[str, object]) -> float:
-        value = raw_cfg.get("detune")
+    def _detune_ratio(self, raw_cfg: dict[str, object]) -> float:
+        value = raw_cfg.get("detune_ratio")
         if not isinstance(value, (int, float)):
-            raise ValueError("detune must be a number")
+            raise ValueError("detune_ratio must be a number")
         return float(value)
 
     def run(self, req: RunRequest, schema: CfgSchema) -> T2RamseyRunResult:
         soc, soccfg = require_soc_handles(req)
         raw_cfg = schema.to_raw_dict(req.md, req.ml)
         cfg = self.build_exp_cfg(raw_cfg, req)
-        detune = self._detune(raw_cfg)
+        detune_ratio = self._detune_ratio(raw_cfg)
+        # detune_ratio is fringes-per-step; the absolute applied detune (MHz) is
+        # detune_ratio / step, where step is the lowered length sweep step (us).
+        # Mirrors the notebook's `activate_detune = ratio / cfg.sweep.length.step`.
+        # detune_ratio == 0 → no fringe (detune 0), skipping the divide.
+        if detune_ratio == 0.0:
+            detune = 0.0
+        else:
+            step = cfg.sweep.length.step  # SweepCfg guarantees step != 0 for expts>1
+            if step == 0.0:
+                raise ValueError(
+                    "cannot apply a nonzero detune_ratio on a degenerate "
+                    "length sweep (expts < 2, step == 0)"
+                )
+            detune = detune_ratio / step
         # T2RamseyExp.run returns (result, true_detune); the GUI run contract
-        # returns only the Result, so log the realized detune and drop it.
+        # returns only the Result. Stash true_detune for the q_f writeback and
+        # log the realized detune.
         result, true_detune = self.exp_cls().run(soc, soccfg, cfg, detune=detune)
+        self._last_true_detune = true_detune
         logger.info("T2 Ramsey true detune: %.3f MHz", true_detune)
         return result
 
@@ -186,20 +221,48 @@ class T2RamseyAdapter(
             fit_fringe=params.fit_fringe,
         )
         return T2RamseyAnalyzeResult(
-            t2r=t2r, t2r_err=t2r_err, detune=detune, figure=fig
+            t2r=t2r,
+            t2r_err=t2r_err,
+            detune=detune,
+            fit_fringe=params.fit_fringe,
+            figure=fig,
         )
 
     def get_writeback_items(
         self, req: WritebackRequest[T2RamseyRunResult, T2RamseyAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
-        return [
+        items: list[WritebackItem] = [
             MetaDictWriteback(
                 target_name="t2r",
                 description="T2 Ramsey time (us)",
                 proposed_value=result.t2r,
             ),
         ]
+
+        # q_f writeback mirrors the notebook:
+        #   q_f = pi2_pulse.freq + true_detune - fitted_fringe_detune.
+        # Only emit it when the fringe fit ran (a fitted detune exists), the run
+        # captured the cfg_snapshot (pi2 freq source), and the realized
+        # true_detune from this run is known — never propose a NaN q_f.
+        snapshot = req.run_result.cfg_snapshot
+        if (
+            result.fit_fringe
+            and snapshot is not None
+            and self._last_true_detune is not None
+        ):
+            q_f = (
+                snapshot.modules.pi2_pulse.freq + self._last_true_detune - result.detune
+            )
+            items.append(
+                MetaDictWriteback(
+                    target_name="q_f",
+                    description="Qubit frequency (MHz)",
+                    proposed_value=q_f,
+                )
+            )
+
+        return items
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.qub_name}_t2ramsey_{time.strftime('%m%d')}"

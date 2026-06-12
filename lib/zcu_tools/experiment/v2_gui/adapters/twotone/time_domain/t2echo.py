@@ -101,24 +101,29 @@ class T2EchoAdapter(
             ),
             typical_writeback=(
                 "Proposes the fitted T2-echo time into MetaDict 't2e' (us). No "
-                "ModuleLibrary writeback."
+                "qubit-frequency writeback (unlike T2 Ramsey, echo does not update "
+                "'q_f'). No ModuleLibrary writeback."
             ),
             recommended=(
-                "Leave the 'Detune (MHz)' cfg knob at 0 for a standard echo "
-                "(default) — analysis 'Fit method' then defaults to 'decay' (pure "
-                "exponential decay → T2E). Set a small detune to advance the final "
-                "pi/2 pulse phase and leave a residual oscillation, then switch "
-                "'Fit method' to 'fringe' so the fringe frequency is fit (detune is "
-                "computed but not written back). A total-delay sweep reaching a few "
-                "T2E lets the echo decay; the first sweep point is dropped in the "
-                "fit."
+                "Set the 'Detune ratio (fringes/step)' cfg knob (default 0.1) — it "
+                "is the number of fringe periods per delay-sweep step; the absolute "
+                "detune (MHz) applied to the final pi/2 pulse phase is detune_ratio "
+                "/ sweep step, leaving a residual oscillation on the echo decay. "
+                "Analysis 'Fit method' defaults to 'fringe' (matching the nonzero "
+                "default ratio) so the fringe frequency is fit; the detune is "
+                "computed but NOT written back. Set the ratio to 0 and switch 'Fit "
+                "method' to 'decay' for a standard echo (pure exponential decay → "
+                "T2E). A total-delay sweep reaching a few T2E lets the echo decay; "
+                "the first sweep point is dropped in the fit."
             ),
         )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:
-        # detune is a run-only kwarg of T2EchoExp.run (not part of T2EchoCfg),
-        # so it lives in build_exp_spec's `extra` slot and is stripped before
+        # detune_ratio is a run-only knob (not part of T2EchoCfg): it is the
+        # number of fringe periods per delay-sweep step, converted to the
+        # absolute detune (MHz) kwarg of T2EchoExp.run as detune_ratio / step.
+        # It lives in build_exp_spec's `extra` slot and is stripped before
         # ml.make_cfg in build_exp_cfg (mirrors ro_optimize/auto's num_points).
         return build_exp_spec(
             modules={
@@ -128,7 +133,11 @@ class T2EchoAdapter(
                 "readout": make_readout_module_spec(),
             },
             sweep={"length": SweepSpec(label="Total delay (us)")},
-            extra={"detune": FloatSpec(label="Detune (MHz)", decimals=3)},
+            extra={
+                "detune_ratio": FloatSpec(
+                    label="Detune ratio (fringes/step)", decimals=3
+                )
+            },
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
@@ -136,7 +145,7 @@ class T2EchoAdapter(
         relax_delay = proper_relax(ctx)
         return (
             CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=100, rounds=100, relax_delay=relax_delay, detune=0.0)
+            .scalars(reps=100, rounds=100, relax_delay=relax_delay, detune_ratio=0.1)
             .role("modules.pi2_pulse", "pi2_pulse")
             .role("modules.pi_pulse", "pi_pulse")
             .role("modules.readout", "readout")
@@ -149,23 +158,37 @@ class T2EchoAdapter(
         )
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> T2EchoCfg:
-        # Strip the run-only detune knob before lowering to T2EchoCfg, which
-        # would reject the unknown key.
+        # Strip the run-only detune_ratio knob before lowering to T2EchoCfg,
+        # which would reject the unknown key.
         cfg_raw = dict(raw_cfg)
-        cfg_raw.pop("detune", None)
+        cfg_raw.pop("detune_ratio", None)
         return req.ml.make_cfg(cfg_raw, T2EchoCfg)
 
-    def _detune(self, raw_cfg: dict[str, object]) -> float:
-        value = raw_cfg.get("detune")
+    def _detune_ratio(self, raw_cfg: dict[str, object]) -> float:
+        value = raw_cfg.get("detune_ratio")
         if not isinstance(value, (int, float)):
-            raise ValueError("detune must be a number")
+            raise ValueError("detune_ratio must be a number")
         return float(value)
 
     def run(self, req: RunRequest, schema: CfgSchema) -> T2EchoRunResult:
         soc, soccfg = require_soc_handles(req)
         raw_cfg = schema.to_raw_dict(req.md, req.ml)
         cfg = self.build_exp_cfg(raw_cfg, req)
-        detune = self._detune(raw_cfg)
+        detune_ratio = self._detune_ratio(raw_cfg)
+        # detune_ratio is fringes-per-step; the absolute applied detune (MHz) is
+        # detune_ratio / step, where step is the lowered length sweep step (us).
+        # Mirrors the notebook's `activate_detune = ratio / cfg.sweep.length.step`.
+        # detune_ratio == 0 → no fringe (detune 0), skipping the divide.
+        if detune_ratio == 0.0:
+            detune = 0.0
+        else:
+            step = cfg.sweep.length.step  # SweepCfg guarantees step != 0 for expts>1
+            if step == 0.0:
+                raise ValueError(
+                    "cannot apply a nonzero detune_ratio on a degenerate "
+                    "length sweep (expts < 2, step == 0)"
+                )
+            detune = detune_ratio / step
         # T2EchoExp.run returns (result, true_detune); the GUI run contract
         # returns only the Result, so log the realized detune and drop it.
         result, true_detune = self.exp_cls().run(soc, soccfg, cfg, detune=detune)
@@ -175,7 +198,7 @@ class T2EchoAdapter(
     def get_analyze_params(
         self, result: T2EchoRunResult, ctx: ExpContext
     ) -> T2EchoAnalyzeParams:
-        return T2EchoAnalyzeParams(fit_method="decay")
+        return T2EchoAnalyzeParams(fit_method="fringe")
 
     def analyze(
         self, req: AnalyzeRequest[T2EchoRunResult, T2EchoAnalyzeParams]
