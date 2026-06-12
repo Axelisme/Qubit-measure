@@ -161,6 +161,17 @@ METHOD_SPECS: dict[str, MethodSpec] = {
             _expected_versions(),
         ),
     ),
+    "save.post_image": MethodSpec(
+        30.0,
+        "Save the post-analysis figure image file (the post sub-tab's own Save "
+        "Image). Mirrors save.image but targets the tab's post-analysis figure; "
+        "requires a post-analysis result.",
+        (
+            _str("tab_id"),
+            _str_opt("image_path", "Override image path"),
+            _expected_versions(),
+        ),
+    ),
     "save.result": MethodSpec(
         30.0,
         "Save the result's data and image",
@@ -426,14 +437,11 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         (_str("dialog_name", "Dialog name"),),
     ),
     "view.snapshot": MethodSpec(5.0, "Capture view state summary"),
-    "view.screenshot": MethodSpec(
-        10.0,
-        "Capture window or tab as base64 PNG",
-        (_str_opt("tab_id", "Tab to capture; omit for whole window"),),
-    ),
     "tab.get_current_figure": MethodSpec(
         10.0,
-        "Get the tab's current figure (run 2D map, or analysis fit) as PNG",
+        "Get the tab's current figure (run 2D map, or analysis fit) as PNG. The "
+        "PNG is rendered at a fixed small geometry (token-light), independent of "
+        "the GUI window size; the live figure is never permanently resized.",
         (
             _str("tab_id"),
             _str_opt("out_path", "Write PNG here instead of returning base64"),

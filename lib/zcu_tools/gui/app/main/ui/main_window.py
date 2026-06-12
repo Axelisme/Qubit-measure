@@ -1596,38 +1596,6 @@ class MainWindow(QMainWindow):
             "open_dialogs": [n.value for n in self._open_dialogs.keys()],
         }
 
-    def take_screenshot(self, tab_id: str | None = None) -> bytes:
-        """Grab the window (or a single tab) and return raw PNG bytes.
-
-        ``tab_id`` must be the active tab; off-screen tabs grab as blank,
-        so we refuse them explicitly. Returning bytes (not base64) keeps
-        this helper Qt-only; the dispatcher base64-encodes for the wire.
-        """
-        from qtpy.QtCore import QBuffer, QIODevice  # type: ignore[attr-defined]
-
-        target: QWidget
-        if tab_id is None:
-            target = self
-        else:
-            tab_w = self._tab_widgets.get(tab_id)
-            if tab_w is None:
-                raise RuntimeError(f"unknown tab_id: {tab_id!r}")
-            if self._tabs.currentWidget() is not tab_w:
-                raise RuntimeError(
-                    f"tab {tab_id!r} is not the active tab; "
-                    "remote screenshot requires it to be active first"
-                )
-            target = tab_w
-        pixmap = target.grab()
-        buf = QBuffer()
-        buf.open(QIODevice.OpenModeFlag.WriteOnly)
-        if not pixmap.save(buf, "PNG"):
-            raise RuntimeError("Qt failed to encode the grabbed pixmap as PNG")
-        # ``QBuffer.data()`` returns ``QByteArray``; its ``.data()`` method
-        # produces native ``bytes``.
-        ba = buf.data()
-        return bytes(ba.data())  # type: ignore[arg-type]
-
     def take_figure_screenshot(self, tab_id: str) -> bytes:
         """Render a tab's figure to PNG bytes at the fixed export size.
 

@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 17
+skill_version: 18
 ---
 
 # run-measure-gui
@@ -104,16 +104,17 @@ gui_tab_get_cfg_summary(tab_id)                   # current values/expressions, 
 gui_editor_set_field(editor_id, "rounds", 30)     # WYSIWYG edit of the form's draft
 gui_run_start(tab_id)                             # waits ~1s; finished -> {status:finished,...}, slow -> {status:pending}
 gui_run_wait(tab_id)                              # block until done (only after pending; blocks your turn — for a long run background it, see "Detecting completion")
-gui_tab_get_current_figure(tab_id)                # PNG of the CURRENT plot — the run's 2D map, or the analysis fit
-                                                  # once analyzed. THIS is how you look at any plot, including
+gui_tab_get_current_figure(tab_id)                # small fixed-size PNG of the CURRENT plot — the run's 2D map, the
+                                                  # analysis fit, or a post-analysis figure (whatever is on the tab's
+                                                  # plot stack). THIS is the ONLY way to look at any plot, including
                                                   # non-analysis 2D scans (flux_dep / power_dep). (Read the PNG.)
-gui_analyze(tab_id)                               # degrades like a run: a FIT settles -> {finished} (figure_path folded);
+gui_analyze(tab_id)                               # degrades like a run: a FIT settles -> {finished};
                                                   # an INTERACTIVE pick (flux_dep) -> {pending} → see "Interactive analysis" below
 gui_post_analyze(tab_id)                          # second analysis layer on top of the primary fit (e.g. single-shot ge);
                                                   # FIT-only, degrades like gui_analyze; needs a primary analyze result first
 gui_tab_get_post_analyze_result(tab_id)           # the post-analysis summary (params: gui_tab_get_post_analyze_params)
 gui_save_data(tab_id) / gui_save_image / gui_save_result   # each returns the resolved written path ({data_path[, image_path]})
-gui_view_screenshot(tab_id)                       # base64 PNG of the WHOLE window/tab (config + progress + plot)
+gui_save_post_image(tab_id)                       # save the post-analysis figure (mirrors gui_save_image)
 ```
 
 Detecting completion — completion is observed synchronously or by waiting/polling
@@ -149,8 +150,9 @@ degrades exactly like `gui_analyze` (settles → `{status:finished}`, slow →
 `{status:pending}` then `gui_post_analyze_wait` / `gui_post_analyze_poll`). It
 fast-fails with `precondition_failed` until a primary analyze result exists, so
 run `gui_analyze` first. Read its summary with `gui_tab_get_post_analyze_result`
-(its params come from `gui_tab_get_post_analyze_params`). The post figure lives
-in the tab's separate post container, so the reply folds no `figure_path`.
+(its params come from `gui_tab_get_post_analyze_params`). The post figure shares
+the tab's plot container — view it with `gui_tab_get_current_figure` and persist
+it with `gui_save_post_image`.
 
 **`gui_run_wait` blocks your whole turn until the run ends** (a big sweep is
 minutes), and nothing pushes a completion event — the MCP server cannot wake

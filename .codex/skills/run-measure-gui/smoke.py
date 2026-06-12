@@ -184,15 +184,15 @@ def main() -> int:
         rpc.call("save.data", {"tab_id": tab_id})
         log("analyzed + saved data")
 
-        # 8b. Screenshot the window (base64 PNG over the socket) to the OS temp
-        # dir (transient proof the GUI rendered; not committed).
+        # 8b. Screenshot the tab's current figure (base64 PNG over the socket) to
+        # the OS temp dir (transient proof the GUI rendered; not committed).
         import base64
         import tempfile
 
-        shot = rpc.call("view.screenshot", {"tab_id": tab_id})
+        shot = rpc.call("tab.get_current_figure", {"tab_id": tab_id})
         out = Path(tempfile.gettempdir()) / "measure_gui_smoke.png"
         out.write_bytes(base64.b64decode(shot["png_b64"]))
-        log(f"screenshot -> {out} ({shot['bytes']} bytes)")
+        log(f"figure screenshot -> {out} ({shot['bytes']} bytes)")
 
         # 9. Close the tab (exercises the View detach path).
         rpc.call("tab.close", {"tab_id": tab_id})

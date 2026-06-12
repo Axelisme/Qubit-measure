@@ -25,7 +25,6 @@ exist; inert until ``start()``.
 
 from __future__ import annotations
 
-import base64
 import logging
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Optional
@@ -360,5 +359,4 @@ class RemoteControlAdapter(RemoteControlServiceBase):
         self._endpoint.broadcast(line, predicate=_predicate)
 
 
-# Re-export base64 helpers used by view.screenshot.
-__all__ = ["ControlOptions", "RemoteControlAdapter", "base64"]
+__all__ = ["ControlOptions", "RemoteControlAdapter"]

@@ -330,6 +330,24 @@ def test_context_ml_delete_delegates(fx):
         sock.close()
 
 
+def test_save_post_image_delegates_to_controller(fx):
+    """save.post_image mirrors save.image but targets the post-analysis figure;
+    it delegates to Controller.save_post_image and returns the written path."""
+    fx.ctrl.save_post_image = MagicMock(  # type: ignore[method-assign]
+        return_value="/tmp/post.png"
+    )
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(
+            sock, "save.post_image", {"tab_id": "tab1", "image_path": "/tmp/post.png"}
+        )
+        assert resp["ok"] is True
+        assert resp["result"] == {"image_path": "/tmp/post.png"}
+        fx.ctrl.save_post_image.assert_called_once_with("tab1", "/tmp/post.png")
+    finally:
+        sock.close()
+
+
 def test_mcp_tool_schemas_include_required_discovery_tools():
     expected = {
         "gui_adapter_list",
@@ -799,12 +817,12 @@ def test_every_registered_adapter_has_a_written_guide():
 
 
 # ---------------------------------------------------------------------------
-# Phase 120c-⑧ — run/analyze replies fold in figure_path (no extra screenshot
-# call), saved to the cross-platform temp dir, base64-free.
+# Figure/screenshot consolidation (WIRE 24) — run/analyze replies NO LONGER fold
+# figure_path; looking at a plot is a separate gui_tab_get_current_figure call.
 # ---------------------------------------------------------------------------
 
 
-def test_analyze_reply_includes_figure_path_when_figure_exists(monkeypatch):
+def test_analyze_settles_without_folding_figure_path(monkeypatch):
     from zcu_tools.mcp.measure import server as mcp_server
 
     calls: list[tuple[str, dict]] = []
@@ -812,10 +830,6 @@ def test_analyze_reply_includes_figure_path_when_figure_exists(monkeypatch):
     def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
         del timeout_seconds
         calls.append((method, params))
-        if method == "tab.snapshot":
-            return {"interaction": {"has_figure": True}}
-        if method == "tab.get_current_figure":
-            return {"saved_to": params["out_path"]}
         return {}
 
     # analyze is async — gui_analyze starts it then awaits. Stub the await as a
@@ -829,12 +843,10 @@ def test_analyze_reply_includes_figure_path_when_figure_exists(monkeypatch):
     out = mcp_server.TOOLS["gui_analyze"]["handler"]({"tab_id": "fake-freq-1"})
 
     assert out["status"] == "finished"
-    # figure_path points at a temp PNG keyed by tab_id (cross-platform tempdir).
-    assert out["figure_path"].endswith("zcu_tools_figure_fake-freq-1.png")
-    # analyze.start was issued, and the figure was rendered to that exact path.
+    # No figure_path folded; the reply does not pull the figure on its own.
+    assert "figure_path" not in out
     assert ("analyze.start", {"tab_id": "fake-freq-1"}) in calls
-    shot = next(c for c in calls if c[0] == "tab.get_current_figure")
-    assert shot[1]["out_path"] == out["figure_path"]
+    assert not any(c[0] == "tab.get_current_figure" for c in calls)
 
 
 def test_analyze_degrades_to_pending_when_not_settled(monkeypatch):
@@ -854,7 +866,7 @@ def test_analyze_degrades_to_pending_when_not_settled(monkeypatch):
     assert out["status"] == "pending"
 
 
-def test_analyze_poll_running_then_finished_with_figure(monkeypatch):
+def test_analyze_poll_running_then_finished(monkeypatch):
     from zcu_tools.mcp.measure import server as mcp_server
 
     monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {"analyze:t1": 9})
@@ -872,40 +884,15 @@ def test_analyze_poll_running_then_finished_with_figure(monkeypatch):
         == "running"
     )
 
-    # User clicked Done -> finished, figure folded.
+    # User clicked Done -> finished. No figure_path folded (consolidation WIRE 24).
     def done(method, params, timeout_seconds=30.0):
-        del timeout_seconds
+        del timeout_seconds, params
         if method == "operation.await":
             return {"status": "finished"}
-        if method == "tab.snapshot":
-            return {"interaction": {"has_figure": True}}
-        if method == "tab.get_current_figure":
-            return {"saved_to": params["out_path"]}
         return {}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", done)
     out = mcp_server.TOOLS["gui_analyze_poll"]["handler"]({"tab_id": "t1"})
-    assert out["status"] == "finished"
-    assert out["figure_path"].endswith("zcu_tools_figure_t1.png")
-
-
-def test_analyze_reply_omits_figure_path_when_no_figure(monkeypatch):
-    from zcu_tools.mcp.measure import server as mcp_server
-
-    def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
-        del timeout_seconds, params
-        if method == "tab.snapshot":
-            return {"interaction": {"has_figure": False}}
-        return {}
-
-    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    monkeypatch.setattr(
-        mcp_server,
-        "_await_operation_by_key",
-        lambda key, what, timeout: {"status": "finished"},
-    )
-    out = mcp_server.TOOLS["gui_analyze"]["handler"]({"tab_id": "t1"})
-
     assert out["status"] == "finished"
     assert "figure_path" not in out
 
@@ -934,25 +921,26 @@ def test_run_poll_running_when_op_in_flight(monkeypatch):
     assert out["status"] == "running"
 
 
-def test_run_poll_finished_attaches_figure(monkeypatch):
+def test_run_poll_finished_without_figure_fold(monkeypatch):
     from zcu_tools.mcp.measure import server as mcp_server
 
     monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {"tab:t1": 7})
 
+    calls: list[str] = []
+
     def fake_send(method, params, timeout_seconds=30.0):
-        del timeout_seconds
+        del timeout_seconds, params
+        calls.append(method)
         if method == "operation.await":
             return {"status": "finished"}
-        if method == "tab.snapshot":
-            return {"interaction": {"has_figure": True}}
-        if method == "tab.get_current_figure":
-            return {"saved_to": params["out_path"]}
         return {}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
     out = mcp_server.TOOLS["gui_run_poll"]["handler"]({"tab_id": "t1"})
     assert out["status"] == "finished"
-    assert out["figure_path"].endswith("zcu_tools_figure_t1.png")
+    # A finished poll no longer pulls the figure on its own (consolidation WIRE 24).
+    assert "figure_path" not in out
+    assert "tab.get_current_figure" not in calls
 
 
 def test_run_poll_failed_does_not_raise(monkeypatch):

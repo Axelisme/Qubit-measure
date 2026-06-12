@@ -306,6 +306,24 @@ def _h_save_image(
     return {"image_path": written}
 
 
+def _h_save_post_image(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    tab_id = str(params["tab_id"])
+    image_path = params["image_path"]
+    try:
+        written = adapter.ctrl.save_post_image(
+            tab_id, str(image_path) if image_path is not None else None
+        )
+    except RuntimeError as exc:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
+    return {"image_path": written}
+
+
 def _h_save_result(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
@@ -1165,30 +1183,6 @@ def _h_dialog_screenshot(
     return {"png_b64": payload, "bytes": len(png)}
 
 
-def _h_view_screenshot(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    import base64
-
-    tab_id_raw = params.get("tab_id")
-    tab_id: str | None = str(tab_id_raw) if tab_id_raw is not None else None
-    try:
-        png = _render_view(adapter).take_screenshot(tab_id)
-    except RuntimeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
-    if not isinstance(png, (bytes, bytearray)):
-        raise RemoteError(
-            ErrorCode.INTERNAL,
-            f"screenshot returned non-bytes {type(png).__name__}",
-        )
-    payload = base64.b64encode(bytes(png)).decode("ascii")
-    return {"png_b64": payload, "bytes": len(png)}
-
-
 # ---------------------------------------------------------------------------
 # Tab analyze result + analyze start + cfg summary handlers
 # ---------------------------------------------------------------------------
@@ -1735,6 +1729,7 @@ _HANDLERS: dict[str, Handler] = {
     "run.running_tab": _h_run_running_tab,
     "save.data": _h_save_data,
     "save.image": _h_save_image,
+    "save.post_image": _h_save_post_image,
     "save.result": _h_save_result,
     "save.set_paths": _h_save_set_paths,
     "context.use": _h_context_use,
@@ -1783,7 +1778,6 @@ _HANDLERS: dict[str, Handler] = {
     "dialog.list_open": _h_dialog_list_open,
     "dialog.screenshot": _h_dialog_screenshot,
     "view.snapshot": _h_view_snapshot,
-    "view.screenshot": _h_view_screenshot,
     "tab.get_current_figure": _h_tab_get_current_figure,
     "predictor.load": _h_predictor_load,
     "predictor.clear": _h_predictor_clear,

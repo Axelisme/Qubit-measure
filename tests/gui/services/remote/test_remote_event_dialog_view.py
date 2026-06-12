@@ -8,13 +8,12 @@ Each test spins up a real TCP socket on an ephemeral loopback port via
   - per-client writer thread + outbound queue overflow behaviour;
   - the Dialog API (``dialog.open`` / ``dialog.close`` / ``dialog.list_open``)
     against a mock ``ViewProtocol``;
-  - ``view.snapshot`` / ``view.screenshot``;
+  - ``view.snapshot``;
   - clean teardown that unsubscribes from EventBus.
 """
 
 from __future__ import annotations
 
-import base64
 from unittest.mock import MagicMock
 
 import pytest
@@ -301,7 +300,7 @@ def test_dialog_open_accepts_upper_or_lower(fx):
 
 
 # ---------------------------------------------------------------------------
-# view.snapshot / view.screenshot
+# view.snapshot
 # ---------------------------------------------------------------------------
 
 
@@ -314,31 +313,6 @@ def test_view_snapshot_roundtrip(fx):
         assert snap["context_label"] == "ctx001"
         assert snap["status"] == "Ready"
         assert snap["open_dialogs"] == []
-    finally:
-        sock.close()
-
-
-def test_view_screenshot_returns_png_magic(fx):
-    sock = open_client(fx.service.port)
-    try:
-        resp = call(sock, "view.screenshot")
-        assert resp["ok"] is True
-        decoded = base64.b64decode(resp["result"]["png_b64"])
-        assert decoded[:8] == b"\x89PNG\r\n\x1a\n"
-        assert resp["result"]["bytes"] == len(decoded)
-    finally:
-        sock.close()
-
-
-def test_view_screenshot_precondition_failed_for_unknown_tab(fx):
-    fx.view.take_screenshot = MagicMock(
-        side_effect=RuntimeError("tab 'ghost' is not the active tab")
-    )
-    sock = open_client(fx.service.port)
-    try:
-        resp = call(sock, "view.screenshot", {"tab_id": "ghost"})
-        assert resp["ok"] is False
-        assert resp["error"]["code"] == "precondition_failed"
     finally:
         sock.close()
 

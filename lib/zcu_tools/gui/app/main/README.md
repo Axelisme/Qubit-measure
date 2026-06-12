@@ -352,7 +352,7 @@ plot substrate 已抽到頂層共用套件 `lib/zcu_tools/gui/plotting/`（measu
 
 ### 固定尺寸出圖（`gui/figure_export.py`）
 
-save_image 與 figure-screenshot 出圖**與視窗無關**：兩者都用嵌進 tab canvas 的 live figure，而該 figure 的 `size_inches` 隨 Qt canvas（即視窗）變。`figure_export` 統一收口：`SAVE_FIGSIZE=(8,5)` / `SAVE_DPI=150` 常數 + `save_figure_to_path(fig,path)` / `render_figure_png(fig)->bytes`，內部 **set_size_inches(固定)→savefig→restore（try/finally，還原 on-screen 尺寸）**。screenshot（`MainWindow.take_figure_screenshot`）改用 `render_figure_png`（**不再 `canvas.grab()`**，後者抓當前 widget 像素=隨視窗）。皆主線程操作（live figure 為 GUI-owned）。
+save_image 與 figure-screenshot 出圖**與視窗無關**：兩者都用嵌進 tab canvas 的 live figure，而該 figure 的 `size_inches` 隨 Qt canvas（即視窗）變。`figure_export` 統一收口 `set_size_inches(固定)→savefig→restore（try/finally，還原 on-screen 尺寸）`，但**兩條路徑用不同的固定尺寸**：`save_figure_to_path(fig,path)`（存檔，全品質）用 `SAVE_FIGSIZE=(8,5)`/`SAVE_DPI=150`；`render_figure_png(fig)->bytes`（agent 截圖，省 token）用較小的 `SCREENSHOT_FIGSIZE=(6.4,4.8)`/`SCREENSHOT_DPI=100`（~640×480）。screenshot（`MainWindow.take_figure_screenshot`，被 `tab.get_current_figure` 唯一看圖路徑使用）走 `render_figure_png`（**不 `canvas.grab()`**，後者抓 widget 像素=隨視窗）。皆主線程操作（live figure 為 GUI-owned）。
 
 ### Run Cancellation
 

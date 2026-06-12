@@ -17,39 +17,52 @@ import io
 
 from matplotlib.figure import Figure
 
-# Fixed export geometry — independent of the GUI window size.
+# Fixed export geometry for SAVED images — full quality, independent of the GUI
+# window size. This is what the user gets on disk, so it stays large.
 SAVE_FIGSIZE: tuple[float, float] = (8.0, 5.0)  # inches
 SAVE_DPI: int = 150
 
+# Fixed export geometry for AGENT SCREENSHOTS (tab.get_current_figure). The agent
+# only needs to eyeball the plot, so this is deliberately small to keep the
+# base64 PNG token-light (~640x480). Distinct from the save path, which must keep
+# full quality. Tune here if the screenshot is too small/large to read.
+SCREENSHOT_FIGSIZE: tuple[float, float] = (6.4, 4.8)  # inches -> 640x480 at dpi=100
+SCREENSHOT_DPI: int = 100
+
 
 def _render_with_fixed_size(
-    fig: Figure, sink: object, **savefig_kwargs: object
+    fig: Figure,
+    sink: object,
+    figsize: tuple[float, float],
+    dpi: int,
+    **savefig_kwargs: object,
 ) -> None:
-    """Pin fig to the fixed export size, savefig to ``sink``, then restore.
+    """Pin fig to ``figsize``, savefig to ``sink`` at ``dpi``, then restore.
 
     ``sink`` is anything ``Figure.savefig`` accepts (a path str or a binary
-    file-like). Restore is in a finally so the GUI-displayed figure keeps its
-    on-screen size even if savefig raises.
+    file-like). The original on-screen size is restored in a finally so the
+    GUI-displayed figure is never permanently resized, even if savefig raises.
     """
     orig_w, orig_h = (float(v) for v in fig.get_size_inches())
     try:
-        fig.set_size_inches(*SAVE_FIGSIZE)
-        fig.savefig(sink, dpi=SAVE_DPI, **savefig_kwargs)  # type: ignore[arg-type]
+        fig.set_size_inches(*figsize)
+        fig.savefig(sink, dpi=dpi, **savefig_kwargs)  # type: ignore[arg-type]
     finally:
         fig.set_size_inches(orig_w, orig_h)
 
 
 def save_figure_to_path(fig: Figure, path: str) -> None:
-    """Save ``fig`` to ``path`` at the fixed export size/dpi (window-independent)."""
-    _render_with_fixed_size(fig, path)
+    """Save ``fig`` to ``path`` at the full-quality save size/dpi (window-independent)."""
+    _render_with_fixed_size(fig, path, SAVE_FIGSIZE, SAVE_DPI)
 
 
 def render_figure_png(fig: Figure) -> bytes:
-    """Render ``fig`` to PNG bytes at the fixed export size/dpi.
+    """Render ``fig`` to PNG bytes at the small screenshot size/dpi.
 
-    Replaces ``canvas.grab()`` for figure screenshots so the result is the same
-    fixed geometry as a saved image, not the current widget pixel size.
+    Used for agent figure screenshots (tab.get_current_figure). Replaces
+    ``canvas.grab()`` so the result has a fixed, window-independent geometry; it
+    is intentionally smaller/lower-dpi than a saved image to stay token-light.
     """
     buf = io.BytesIO()
-    _render_with_fixed_size(fig, buf, format="png")
+    _render_with_fixed_size(fig, buf, SCREENSHOT_FIGSIZE, SCREENSHOT_DPI, format="png")
     return buf.getvalue()

@@ -100,7 +100,12 @@ from __future__ import annotations
 #      {"__complex__": [re, im]} (in writeback.preview) and accepted back in the
 #      same shape (writeback.set), replacing the old one-way {"__repr__"} stringify.
 #      Serialization-shape change to the writeback surface = contract change.
-WIRE_VERSION = 23
+# v24: figure/screenshot consolidation — looking at a plot is now ONLY
+#      tab.get_current_figure (the tab's current plot-stack container, which also
+#      holds the post-analysis figure). Removed view.screenshot (whole-window /
+#      tab Qt grab). Added save.post_image (mirrors save.image, targets the
+#      post-analysis figure). Method-set change = contract change.
+WIRE_VERSION = 24
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -220,4 +225,10 @@ WIRE_VERSION = 23
 #      {"__complex__": [re, im]} + _coerce_wire_value decodes it on writeback.set;
 #      the UI Edit dialog parses "re+imj" (complex branch in _coerce_scalar_input);
 #      the GE adapter now proposes g_center / e_center (complex) alongside fid/ge_s.
-GUI_VERSION = 29
+# v30: figure/screenshot consolidation (WIRE 24). Removed MainWindow.take_screenshot
+#      (and the RenderView protocol entry); the only screenshot path is
+#      take_figure_screenshot, which now renders at a small fixed geometry
+#      (SCREENSHOT_FIGSIZE/SCREENSHOT_DPI in figure_export) so the agent PNG stays
+#      token-light while save_image keeps the full SAVE_FIGSIZE/SAVE_DPI quality.
+#      Added save_post_image dispatch (Controller.save_post_image already existed).
+GUI_VERSION = 30
