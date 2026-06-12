@@ -26,15 +26,18 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
+    CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     ExpContext,
+    ModuleWriteback,
     NoAnalyzeParams,
     SweepSpec,
     SweepValue,
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
 
 SingleToneLengthRunResult: TypeAlias = LengthResult
 
@@ -81,9 +84,11 @@ class SingleToneLengthAdapter(
                 "no library entry exists."
             ),
             typical_writeback=(
-                "No writeback — the chosen reset length is read off the decay "
-                "curve by eye, and registering the calibrated reset module is "
-                "left to the user."
+                "Proposes the ModuleLibrary module 'reset_10' — the calibrated "
+                "tested single-pulse reset (carrying its md-linked sideband "
+                "frequency) registered as the final reset module; the user picks "
+                "the final reset length in the writeback dialog. Skipped when no "
+                "cfg_snapshot is available (e.g. loaded from file)."
             ),
             recommended=(
                 "A length sweep from ~0.1 us to a few times the expected reset "
@@ -144,8 +149,22 @@ class SingleToneLengthAdapter(
         req: WritebackRequest[SingleToneLengthRunResult, SingleToneLengthAnalyzeResult],
     ) -> Sequence[WritebackItem]:
         # D5: no scalar is fitted, so nothing is proposed back to the MetaDict.
-        del req
-        return []
+        # D2(a): as the last single-tone step, register the whole calibrated
+        # tested_reset (which already carries its md-linked sideband freq) as the
+        # final 'reset_10' module. The user adjusts the final length in the
+        # writeback dialog. Skipped without a cfg_snapshot (e.g. loaded from file).
+        snapshot = req.run_result.cfg_snapshot
+        if snapshot is None:
+            return []
+
+        spec, value = module_cfg_to_value(snapshot.modules.tested_reset)
+        return [
+            ModuleWriteback(
+                target_name="reset_10",
+                description="Reset with one pulse from 1 to 0",
+                edit_schema=CfgSchema(spec=spec, value=value),
+            )
+        ]
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.qub_name}_sidereset_length_{time.strftime('%m%d')}"

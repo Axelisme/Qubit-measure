@@ -26,15 +26,18 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
+    CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     ExpContext,
+    ModuleWriteback,
     NoAnalyzeParams,
     SweepSpec,
     SweepValue,
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
 
 DualToneLengthRunResult: TypeAlias = LengthResult
 
@@ -82,9 +85,11 @@ class DualToneLengthAdapter(
                 "no library entry exists."
             ),
             typical_writeback=(
-                "No writeback — the chosen reset length is read off the decay "
-                "curve by eye, and registering the calibrated 'reset_120' module "
-                "is left to the user."
+                "Proposes the ModuleLibrary module 'reset_120' — the calibrated "
+                "tested two-pulse reset (carrying its md-linked sideband "
+                "frequencies and gains) registered as the final reset module; the "
+                "user picks the final reset length in the writeback dialog. "
+                "Skipped when no cfg_snapshot is available (e.g. loaded from file)."
             ),
             recommended=(
                 "A length sweep from ~0.05 us to a few times the expected reset "
@@ -157,8 +162,22 @@ class DualToneLengthAdapter(
         req: WritebackRequest[DualToneLengthRunResult, DualToneLengthAnalyzeResult],
     ) -> Sequence[WritebackItem]:
         # D5: no scalar is fitted, so nothing is proposed back to the MetaDict.
-        del req
-        return []
+        # D2(a): as the last dual-tone step, register the whole calibrated
+        # tested_reset (which already carries its md-linked sideband freqs and
+        # gains) as the final 'reset_120' module. The user adjusts the final
+        # length in the writeback dialog. Skipped without a cfg_snapshot.
+        snapshot = req.run_result.cfg_snapshot
+        if snapshot is None:
+            return []
+
+        spec, value = module_cfg_to_value(snapshot.modules.tested_reset)
+        return [
+            ModuleWriteback(
+                target_name="reset_120",
+                description="Reset with two pulse from 1 to 2 to 0",
+                edit_schema=CfgSchema(spec=spec, value=value),
+            )
+        ]
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.qub_name}_dualreset_length_{time.strftime('%m%d')}"

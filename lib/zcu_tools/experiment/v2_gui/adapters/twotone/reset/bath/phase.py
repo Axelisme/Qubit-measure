@@ -26,16 +26,19 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
+    CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     ExpContext,
     MetaDictWriteback,
+    ModuleWriteback,
     NoAnalyzeParams,
     SweepSpec,
     SweepValue,
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
 
 BathPhaseRunResult: TypeAlias = PhaseResult
 
@@ -84,9 +87,11 @@ class BathPhaseAdapter(
             typical_writeback=(
                 "Proposes the ground-reset phase into MetaDict "
                 "'bathreset_max_phase' and the excited-reset phase into "
-                "'bathreset_min_phase'. No ModuleLibrary writeback — these fix the "
-                "pi/2 phase of the final 'reset_bath' (max) and 'reset_bath_e' "
-                "(min) modules registered afterwards (D2(a))."
+                "'bathreset_min_phase'. Also proposes two ModuleLibrary modules: "
+                "'reset_bath' (the calibrated tested reset with pi/2 phase set to "
+                "the max/ground phase) and 'reset_bath_e' (pi/2 phase set to the "
+                "min/excited phase) — both skipped when no cfg_snapshot is "
+                "available (e.g. loaded from file) (D2(a))."
             ),
             recommended=(
                 "A full -360..360 deg sweep captures a clean cosine; the fit picks "
@@ -154,7 +159,7 @@ class BathPhaseAdapter(
         req: WritebackRequest[BathPhaseRunResult, BathPhaseAnalyzeResult],
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
-        return [
+        items: list[WritebackItem] = [
             MetaDictWriteback(
                 target_name="bathreset_max_phase",
                 description="Bath-reset pi/2 phase for ground reset (deg)",
@@ -166,6 +171,37 @@ class BathPhaseAdapter(
                 proposed_value=result.min_phase,
             ),
         ]
+
+        # D2(a): as the last bath step, register two final reset modules from the
+        # calibrated tested_reset (which already carries its md-linked cavity
+        # freq/gain). Each is the same reset with only pi2_cfg.phase overridden —
+        # 'reset_bath' to the max phase (resets to ground), 'reset_bath_e' to the
+        # min phase (resets to excited). Skipped without a cfg_snapshot.
+        snapshot = req.run_result.cfg_snapshot
+        if snapshot is not None:
+            for target, phase, desc in [
+                (
+                    "reset_bath",
+                    result.max_phase,
+                    "Reset to Ground with cavity-assisted bath reset",
+                ),
+                (
+                    "reset_bath_e",
+                    result.min_phase,
+                    "Reset to Excited with cavity-assisted bath reset",
+                ),
+            ]:
+                spec, value = module_cfg_to_value(snapshot.modules.tested_reset)
+                value.with_field("pi2_cfg.phase", phase)
+                items.append(
+                    ModuleWriteback(
+                        target_name=target,
+                        description=desc,
+                        edit_schema=CfgSchema(spec=spec, value=value),
+                    )
+                )
+
+        return items
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.qub_name}_bathreset_phase_{time.strftime('%m%d')}"
