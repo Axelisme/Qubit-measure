@@ -153,17 +153,46 @@ def test_ge_run_without_soc_fast_fails() -> None:
 def _patched_analyze(
     adapter: GEAdapter, result: GE_Result, monkeypatch: pytest.MonkeyPatch
 ) -> GEAnalyzeResult:
-    """Run the adapter's analyze with GE_Exp.analyze patched to a fixed 4-tuple,
-    isolating the adapter's result mapping from the domain fitter's numerics."""
+    """Run the adapter's analyze with GE_Exp.analyze and calc_confusion_matrix
+    patched to fixed returns, isolating the adapter's result mapping from the
+    domain fitter / confusion numerics."""
     fig = Figure()
     fit = _fake_fit_result()
+    pops = np.array([[0.9, 0.1], [0.1, 0.9]])
 
     def fake_analyze(self: Any, run_result: Any, backend: str) -> Any:
         del self, run_result
         assert backend == "pca"
-        return 0.95, np.zeros((2, 3)), fit, fig
+        return 0.95, pops, fit, fig
+
+    confusion = np.array(
+        [
+            [0.95, 0.03, 0.02],
+            [0.03, 0.95, 0.02],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+
+    def fake_confusion(
+        self: Any,
+        init_pops: Any,
+        g_center: Any,
+        e_center: Any,
+        radius: Any = None,
+        result: Any = None,
+        consider_other: bool = True,
+    ) -> Any:
+        del self, g_center, e_center, result
+        # The adapter must forward the fit's populations as init_pops, let the
+        # domain optimise the radius (None), and mirror the notebook's
+        # consider_other=False.
+        assert np.allclose(init_pops, pops)
+        assert radius is None
+        assert consider_other is False
+        return confusion, 0.42, Figure()
 
     monkeypatch.setattr(GE_Exp, "analyze", fake_analyze, raising=True)
+    monkeypatch.setattr(GE_Exp, "calc_confusion_matrix", fake_confusion, raising=True)
     req = AnalyzeRequest(
         run_result=result,
         analyze_params=adapter.get_analyze_params(result, _make_ctx()),
@@ -184,11 +213,21 @@ def test_ge_analyze_maps_fit_result(monkeypatch: pytest.MonkeyPatch) -> None:
     assert out.ge_s == pytest.approx(0.3)
     assert out.g_center == -1.0 + 0j
     assert out.e_center == 1.0 + 0j
+    assert out.ge_radius == pytest.approx(0.42)
+    # confusion comes back as a JSON-safe nested list (domain returns ndarray).
+    assert out.confusion == [
+        [0.95, 0.03, 0.02],
+        [0.03, 0.95, 0.02],
+        [0.0, 0.0, 1.0],
+    ]
     assert isinstance(out.figure, Figure)
-    # complex centers are skipped from the JSON summary; floats survive.
+    # complex centers are skipped from the JSON summary; floats + the nested-list
+    # confusion survive.
     summary = out.to_summary_dict()
     assert "fidelity" in summary
     assert "g_center" not in summary
+    assert summary["ge_radius"] == pytest.approx(0.42)
+    assert summary["confusion"] == out.confusion
 
 
 # ---------------------------------------------------------------------------
@@ -289,7 +328,7 @@ def test_ge_get_post_analyze_params_defaults_to_pca() -> None:
     assert params.angle is None
 
 
-def test_ge_writeback_proposes_fid_ge_s_and_complex_centers(
+def test_ge_writeback_proposes_fid_ge_s_centers_and_radius(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     adapter = GEAdapter()
@@ -310,10 +349,14 @@ def test_ge_writeback_proposes_fid_ge_s_and_complex_centers(
         for item in items
         if isinstance(item, MetaDictWriteback)
     }
-    assert set(targets) == {"fid", "ge_s", "g_center", "e_center"}
+    assert set(targets) == {"fid", "ge_s", "g_center", "e_center", "ge_radius"}
     assert targets["fid"] == pytest.approx(0.95)
     assert targets["ge_s"] == pytest.approx(0.3)
+    assert targets["ge_radius"] == pytest.approx(0.42)
     # The complex centres are proposed verbatim (default fixture: -1+0j / 1+0j).
     assert targets["g_center"] == -1.0 + 0j
     assert targets["e_center"] == 1.0 + 0j
     assert isinstance(targets["g_center"], complex)
+    # The confusion matrix is intentionally NOT a writeback item (3×3, not a
+    # scalar) — it surfaces only in the analyze summary.
+    assert "confusion" not in targets
