@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Optional
 from zcu_tools.gui.session.services.connection import ConnectionService
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.device import DeviceService
+from zcu_tools.gui.session.services.mock_flux import MockFluxProvisioner
 from zcu_tools.gui.session.services.startup import StartupService
 
 if TYPE_CHECKING:
@@ -43,6 +44,10 @@ class SessionServices:
     context: ContextService
     device: DeviceService
     startup: StartupService
+    # FLUX-AWARE-MOCK: self-wiring provisioner (subscribes SOC_CHANGED). Held on
+    # the bundle so its lifetime matches the services + a test can inspect it; the
+    # apps need no provisioning code of their own.
+    mock_flux: MockFluxProvisioner
 
 
 def build_session_services(
@@ -77,6 +82,13 @@ def build_session_services(
     # StartupService bridges the two session services it commands through their
     # ports (context bootstrap + remembered-device registration) + State prefs.
     startup = StartupService(context, device, state)
+    # FLUX-AWARE-MOCK: self-subscribes to SOC_CHANGED + chains the one-shot ramp
+    # off device.device_connected — both apps get mock flux provisioning for free.
+    mock_flux = MockFluxProvisioner(bus, device)
     return SessionServices(
-        connection=connection, context=context, device=device, startup=startup
+        connection=connection,
+        context=context,
+        device=device,
+        startup=startup,
+        mock_flux=mock_flux,
     )
