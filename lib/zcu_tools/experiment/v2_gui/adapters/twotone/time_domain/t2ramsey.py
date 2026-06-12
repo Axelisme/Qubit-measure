@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -26,16 +27,22 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
+    CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     ExpContext,
+    FloatSpec,
     MetaDictWriteback,
     ParamMeta,
+    RunRequest,
     SweepSpec,
     SweepValue,
     WritebackItem,
     WritebackRequest,
+    require_soc_handles,
 )
+
+logger = logging.getLogger(__name__)
 
 T2RamseyRunResult: TypeAlias = T2RamseyResult
 
@@ -98,16 +105,23 @@ class T2RamseyAdapter(
                 "ModuleLibrary writeback."
             ),
             recommended=(
-                "Analysis defaults to fitting the fringe (returning both T2* and "
-                "the detuning) — keep it on when you ran with a deliberate "
-                "detuning so an oscillation is visible; turn it off for a pure "
-                "decay fit (detune reported 0) when driving on resonance. A delay "
-                "sweep reaching a few T2* captures enough fringe periods and decay."
+                "Set the 'Detune (MHz)' cfg knob to a small deliberate offset "
+                "(default 0) — it advances the second pi/2 pulse phase so the "
+                "Ramsey signal oscillates at that detuning, and the analysis "
+                "'Fit fringe' option fits the fringe frequency to read back the "
+                "true qubit-frequency offset. Keep 'Fit fringe' on whenever detune "
+                "is non-zero so the oscillation is fit (returning both T2* and the "
+                "detuning); set detune=0 and turn 'Fit fringe' off for a pure decay "
+                "fit (detune reported 0) when driving on resonance. A delay sweep "
+                "reaching a few T2* captures enough fringe periods and decay."
             ),
         )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:
+        # detune is a run-only kwarg of T2RamseyExp.run (not part of T2RamseyCfg),
+        # so it lives in build_exp_spec's `extra` slot and is stripped before
+        # ml.make_cfg in build_exp_cfg (mirrors ro_optimize/auto's num_points).
         return build_exp_spec(
             modules={
                 "reset": make_reset_module_spec(optional=True),
@@ -115,6 +129,7 @@ class T2RamseyAdapter(
                 "readout": make_readout_module_spec(),
             },
             sweep={"length": SweepSpec(label="Delay (us)")},
+            extra={"detune": FloatSpec(label="Detune (MHz)", decimals=3)},
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
@@ -122,7 +137,7 @@ class T2RamseyAdapter(
         relax_delay = proper_relax(ctx)
         return (
             CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=100, rounds=100, relax_delay=relax_delay)
+            .scalars(reps=100, rounds=100, relax_delay=relax_delay, detune=0.0)
             .role("modules.pi2_pulse", "pi2_pulse")
             .role("modules.readout", "readout")
             # optional → None (disabled) when no library reset (ADR-0010)
@@ -132,6 +147,30 @@ class T2RamseyAdapter(
             )
             .build()
         )
+
+    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> T2RamseyCfg:
+        # Strip the run-only detune knob before lowering to T2RamseyCfg, which
+        # would reject the unknown key.
+        cfg_raw = dict(raw_cfg)
+        cfg_raw.pop("detune", None)
+        return req.ml.make_cfg(cfg_raw, T2RamseyCfg)
+
+    def _detune(self, raw_cfg: dict[str, object]) -> float:
+        value = raw_cfg.get("detune")
+        if not isinstance(value, (int, float)):
+            raise ValueError("detune must be a number")
+        return float(value)
+
+    def run(self, req: RunRequest, schema: CfgSchema) -> T2RamseyRunResult:
+        soc, soccfg = require_soc_handles(req)
+        raw_cfg = schema.to_raw_dict(req.md, req.ml)
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        detune = self._detune(raw_cfg)
+        # T2RamseyExp.run returns (result, true_detune); the GUI run contract
+        # returns only the Result, so log the realized detune and drop it.
+        result, true_detune = self.exp_cls().run(soc, soccfg, cfg, detune=detune)
+        logger.info("T2 Ramsey true detune: %.3f MHz", true_detune)
+        return result
 
     def get_analyze_params(
         self, result: T2RamseyRunResult, ctx: ExpContext

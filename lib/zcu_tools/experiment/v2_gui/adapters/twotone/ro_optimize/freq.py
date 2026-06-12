@@ -121,7 +121,7 @@ class RoOptFreqAdapter(
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(reps=1000, rounds=100, relax_delay=1.0)
             .role("modules.qub_pulse", "qub_probe", prefer_blank=True)
-            .role("modules.readout", "readout", prefer_blank=True)
+            .role("modules.readout", "readout")
             .role("modules.reset", "reset", optional=True)
             .set_sweep("sweep.freq", proper_res_freq_range(ctx, 301))
             .build()

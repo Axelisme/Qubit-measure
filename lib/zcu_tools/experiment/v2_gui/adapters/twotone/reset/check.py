@@ -100,7 +100,7 @@ class RabiCheckAdapter(BaseAdapter[RabiCheckCfg, Any]):
             # Library pi_amp is the canonical init pulse for the rabi check
             # (notebook: rabi_pulse = "pi_amp").
             .role("modules.rabi_pulse", "pi_pulse")
-            .role("modules.readout", "readout", prefer_blank=True)
+            .role("modules.readout", "readout")
             # tested_reset defaults to pulse_reset; the user switches shape in
             # the form when checking a two-pulse or bath reset.
             .role("modules.tested_reset", "reset")

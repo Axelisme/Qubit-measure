@@ -135,7 +135,7 @@ class DualTonePowerAdapter(
                 "modules.tested_reset.pulse2_cfg.freq",
                 md_scalar_float(ctx, "reset_f2", 0.0),
             )
-            .role("modules.readout", "readout", prefer_blank=True)
+            .role("modules.readout", "readout")
             # optional → None (disabled) when no library entry (ADR-0010)
             .role("modules.reset", "reset", optional=True)
             .role("modules.init_pulse", "pi_pulse", optional=True)

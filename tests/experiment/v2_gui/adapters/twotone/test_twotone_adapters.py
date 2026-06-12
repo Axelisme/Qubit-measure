@@ -22,7 +22,7 @@ from zcu_tools.experiment.v2_gui.adapters.twotone import (
     T2EchoAdapter,
     T2RamseyAdapter,
 )
-from zcu_tools.gui.app.main.adapter import CfgSchema, RunRequest
+from zcu_tools.gui.app.main.adapter import CfgSchema, DirectValue, RunRequest
 from zcu_tools.meta_tool import MetaDict
 from zcu_tools.program.v2 import ModuleCfgFactory, SweepCfg
 
@@ -63,8 +63,6 @@ def _lower(schema: CfgSchema, req: RunRequest) -> dict[str, object]:
         (AmpRabiAdapter(), AmpRabiCfg),
         (LenRabiAdapter(), LenRabiCfg),
         (T1Adapter(), T1Cfg),
-        (T2RamseyAdapter(), T2RamseyCfg),
-        (T2EchoAdapter(), T2EchoCfg),
     ],
 )
 def test_twotone_build_exp_cfg_delegates_to_ml_make_cfg(
@@ -81,6 +79,42 @@ def test_twotone_build_exp_cfg_delegates_to_ml_make_cfg(
 
     adapter.build_exp_cfg(raw, _make_req(ml))
     ml.make_cfg.assert_called_once_with(raw, cfg_model)
+
+
+@pytest.mark.parametrize(
+    ("adapter", "cfg_model"),
+    [
+        (T2RamseyAdapter(), T2RamseyCfg),
+        (T2EchoAdapter(), T2EchoCfg),
+    ],
+)
+def test_t2_detune_in_cfg_spec_default_zero(adapter: Any, cfg_model: type) -> None:
+    # detune is a run-only knob carried in the cfg spec (ADR-0011: the lowered
+    # value tree is complete and validates) and defaults to 0.0.
+    ml = _make_ml()
+    schema = adapter.make_default_cfg(_make_ctx(ml))  # validate() runs here
+    raw = _lower(schema, _make_req(ml))
+    assert raw["detune"] == 0.0
+
+
+@pytest.mark.parametrize(
+    ("adapter", "cfg_model"),
+    [
+        (T2RamseyAdapter(), T2RamseyCfg),
+        (T2EchoAdapter(), T2EchoCfg),
+    ],
+)
+def test_t2_build_exp_cfg_strips_detune(adapter: Any, cfg_model: type) -> None:
+    # detune is not part of the lowered ExpCfg, so build_exp_cfg must pop it
+    # before ml.make_cfg (mirrors ro_optimize/auto's num_points).
+    ml = _make_ml()
+    raw = _lower(adapter.make_default_cfg(_make_ctx(ml)), _make_req(ml))
+    assert "detune" in raw  # present in the lowered cfg
+
+    adapter.build_exp_cfg(raw, _make_req(ml))
+    passed_raw = ml.make_cfg.call_args.args[0]
+    assert "detune" not in passed_raw  # stripped before make_cfg
+    assert ml.make_cfg.call_args.args[1] is cfg_model
 
 
 @pytest.mark.parametrize(
@@ -154,6 +188,36 @@ def test_twotone_run_without_soc_fast_fails(adapter: Any) -> None:
         adapter.run(_make_req(ml), schema)
 
 
+@pytest.mark.parametrize(
+    "adapter_cls",
+    [T2RamseyAdapter, T2EchoAdapter],
+)
+def test_t2_run_unpacks_tuple_and_forwards_detune(adapter_cls: type) -> None:
+    # Domain T2*/T2echo run returns (result, true_detune); the GUI run override
+    # must forward the cfg detune knob as a kwarg and return only the bare result.
+    sentinel_result = object()
+    captured: dict[str, Any] = {}
+
+    class FakeExp:
+        def run(self, soc, soccfg, cfg, *, detune: float):
+            captured["detune"] = detune
+            return sentinel_result, 0.123  # (result, true_detune)
+
+    adapter = adapter_cls()
+    adapter.exp_cls = FakeExp  # type: ignore[assignment]
+
+    ml = _make_ml()
+    schema = adapter.make_default_cfg(_make_ctx(ml))
+    # set a non-zero detune in the draft to prove it reaches the kwarg
+    schema.value.fields["detune"] = DirectValue(1.5)
+
+    req = RunRequest(md=MagicMock(), ml=ml, soc=MagicMock(), soccfg=MagicMock())
+    result = adapter.run(req, schema)
+
+    assert result is sentinel_result  # tuple unpacked, only result returned
+    assert captured["detune"] == 1.5  # cfg detune forwarded to domain kwarg
+
+
 def test_t2echo_modules_contain_both_pulses() -> None:
     ml = _make_ml()
     adapter = T2EchoAdapter()
@@ -168,7 +232,8 @@ def test_t2echo_modules_contain_both_pulses() -> None:
 @pytest.mark.parametrize(
     "adapter", [FreqAdapter(), PowerDepAdapter(), FluxDepAdapter()]
 )
-def test_twotone_defaults_ignore_library_readout(adapter: Any) -> None:
+def test_twotone_readout_prefers_library_module(adapter: Any) -> None:
+    """When ml contains readout_dpm, the readout default links to it (not inline)."""
     from zcu_tools.gui.app.main.adapter import CfgSectionValue, ModuleRefValue
     from zcu_tools.meta_tool import ModuleLibrary
 
@@ -194,6 +259,24 @@ def test_twotone_defaults_ignore_library_readout(adapter: Any) -> None:
             ml=ml,
         )
     )
+    schema = adapter.make_default_cfg(_make_ctx(cast(Any, ml)))
+    modules = schema.value.fields["modules"]
+    assert isinstance(modules, CfgSectionValue)
+    readout = modules.fields["readout"]
+    assert isinstance(readout, ModuleRefValue)
+    # Should be a library link, not an inline custom readout.
+    assert readout.chosen_key == "readout_dpm"
+
+
+@pytest.mark.parametrize(
+    "adapter", [FreqAdapter(), PowerDepAdapter(), FluxDepAdapter()]
+)
+def test_twotone_readout_fallback_inline_when_ml_empty(adapter: Any) -> None:
+    """When ml has no calibrated readout module, fall back to inline pulse readout."""
+    from zcu_tools.gui.app.main.adapter import CfgSectionValue, ModuleRefValue
+    from zcu_tools.meta_tool import ModuleLibrary
+
+    ml = ModuleLibrary()  # empty — no readout_dpm / readout_rf
     schema = adapter.make_default_cfg(_make_ctx(cast(Any, ml)))
     modules = schema.value.fields["modules"]
     assert isinstance(modules, CfgSectionValue)

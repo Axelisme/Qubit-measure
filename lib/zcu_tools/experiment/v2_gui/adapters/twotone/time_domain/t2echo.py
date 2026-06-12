@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -26,16 +27,22 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
+    CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     ExpContext,
+    FloatSpec,
     MetaDictWriteback,
     ParamMeta,
+    RunRequest,
     SweepSpec,
     SweepValue,
     WritebackItem,
     WritebackRequest,
+    require_soc_handles,
 )
+
+logger = logging.getLogger(__name__)
 
 T2EchoRunResult: TypeAlias = T2EchoResult
 
@@ -97,16 +104,22 @@ class T2EchoAdapter(
                 "ModuleLibrary writeback."
             ),
             recommended=(
-                "Analysis 'Fit method' defaults to 'decay' (pure exponential "
-                "decay → T2E); use 'fringe' instead when a deliberate detuning "
-                "leaves a residual oscillation to fit (detune is then computed but "
-                "not written back). A total-delay sweep reaching a few T2E lets "
-                "the echo decay; the first sweep point is dropped in the fit."
+                "Leave the 'Detune (MHz)' cfg knob at 0 for a standard echo "
+                "(default) — analysis 'Fit method' then defaults to 'decay' (pure "
+                "exponential decay → T2E). Set a small detune to advance the final "
+                "pi/2 pulse phase and leave a residual oscillation, then switch "
+                "'Fit method' to 'fringe' so the fringe frequency is fit (detune is "
+                "computed but not written back). A total-delay sweep reaching a few "
+                "T2E lets the echo decay; the first sweep point is dropped in the "
+                "fit."
             ),
         )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:
+        # detune is a run-only kwarg of T2EchoExp.run (not part of T2EchoCfg),
+        # so it lives in build_exp_spec's `extra` slot and is stripped before
+        # ml.make_cfg in build_exp_cfg (mirrors ro_optimize/auto's num_points).
         return build_exp_spec(
             modules={
                 "reset": make_reset_module_spec(optional=True),
@@ -115,6 +128,7 @@ class T2EchoAdapter(
                 "readout": make_readout_module_spec(),
             },
             sweep={"length": SweepSpec(label="Total delay (us)")},
+            extra={"detune": FloatSpec(label="Detune (MHz)", decimals=3)},
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
@@ -122,7 +136,7 @@ class T2EchoAdapter(
         relax_delay = proper_relax(ctx)
         return (
             CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=100, rounds=100, relax_delay=relax_delay)
+            .scalars(reps=100, rounds=100, relax_delay=relax_delay, detune=0.0)
             .role("modules.pi2_pulse", "pi2_pulse")
             .role("modules.pi_pulse", "pi_pulse")
             .role("modules.readout", "readout")
@@ -133,6 +147,30 @@ class T2EchoAdapter(
             )
             .build()
         )
+
+    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> T2EchoCfg:
+        # Strip the run-only detune knob before lowering to T2EchoCfg, which
+        # would reject the unknown key.
+        cfg_raw = dict(raw_cfg)
+        cfg_raw.pop("detune", None)
+        return req.ml.make_cfg(cfg_raw, T2EchoCfg)
+
+    def _detune(self, raw_cfg: dict[str, object]) -> float:
+        value = raw_cfg.get("detune")
+        if not isinstance(value, (int, float)):
+            raise ValueError("detune must be a number")
+        return float(value)
+
+    def run(self, req: RunRequest, schema: CfgSchema) -> T2EchoRunResult:
+        soc, soccfg = require_soc_handles(req)
+        raw_cfg = schema.to_raw_dict(req.md, req.ml)
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        detune = self._detune(raw_cfg)
+        # T2EchoExp.run returns (result, true_detune); the GUI run contract
+        # returns only the Result, so log the realized detune and drop it.
+        result, true_detune = self.exp_cls().run(soc, soccfg, cfg, detune=detune)
+        logger.info("T2 Echo true detune: %.3f MHz", true_detune)
+        return result
 
     def get_analyze_params(
         self, result: T2EchoRunResult, ctx: ExpContext

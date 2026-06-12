@@ -126,7 +126,7 @@ class RoOptLengthAdapter(
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(reps=10000, rounds=1, relax_delay=1.0)
             .role("modules.qub_pulse", "qub_probe", prefer_blank=True)
-            .role("modules.readout", "readout", prefer_blank=True)
+            .role("modules.readout", "readout")
             .role("modules.reset", "reset", optional=True)
             .sweep("sweep.length", 0.01, 3.5, 51)
             .build()

@@ -137,7 +137,7 @@ class RoOptAutoAdapter(
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(reps=1000, rounds=10, relax_delay=1.0, num_points=1000)
             .role("modules.qub_pulse", "qub_probe", prefer_blank=True)
-            .role("modules.readout", "readout", prefer_blank=True)
+            .role("modules.readout", "readout")
             .role("modules.reset", "reset", optional=True)
             .set_sweep("sweep.freq", proper_res_freq_range(ctx, 51, span_factor=0.2))
             .sweep("sweep.gain", 0.1, 0.25, 51)
