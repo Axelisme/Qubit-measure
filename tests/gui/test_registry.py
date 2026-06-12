@@ -16,6 +16,7 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionValue,
     ExpContext,
     MetaDictWriteback,
+    NoAnalyzeParams,
     RunRequest,
     SaveDataRequest,
     WritebackRequest,
@@ -101,6 +102,20 @@ class _DummyAdapter:
         return []
 
     def make_save_paths(self, ctx: ExpContext):  # noqa: ARG002
+        raise NotImplementedError
+
+    # -- post-analysis stubs (mirror BaseAdapter raising defaults) -----------
+
+    @classmethod
+    def post_analyze_params_cls(cls) -> type:
+        # No annotated return on get_post_analyze_params → fall back to the
+        # same sentinel BaseAdapter returns when reflection finds nothing.
+        return NoAnalyzeParams
+
+    def get_post_analyze_params(self, analyze_result: object, ctx: ExpContext) -> None:  # noqa: ARG002
+        raise NotImplementedError
+
+    def post_analyze(self, req: object) -> None:  # noqa: ARG002
         raise NotImplementedError
 
     def save(self, req: SaveDataRequest[object]) -> None:  # noqa: ARG002

@@ -14,6 +14,7 @@ from .types import (
     InteractiveSession,
     NoAnalysisResult,
     NoAnalyzeParams,
+    PostAnalyzeRequest,
     RunRequest,
     SaveDataRequest,
     SavePaths,
@@ -90,6 +91,19 @@ class ExpAdapterProtocol(Protocol):
         self, req: AnalyzeRequest[Any, Any], host: InteractiveHost
     ) -> InteractiveSession:
         """Set up an interactive analysis on the host's figure (INTERACTIVE)."""
+        ...
+
+    @classmethod
+    def post_analyze_params_cls(cls) -> type:
+        """Return the post-analysis param dataclass type (post_analysis cap)."""
+        ...
+
+    def get_post_analyze_params(self, analyze_result: Any, ctx: ExpContext) -> Any:
+        """Build the post-analysis param instance presented to the user."""
+        ...
+
+    def post_analyze(self, req: PostAnalyzeRequest[Any, Any, Any]) -> Any:
+        """Run the second-layer analysis on the primary analyze result."""
         ...
 
     def get_writeback_items(

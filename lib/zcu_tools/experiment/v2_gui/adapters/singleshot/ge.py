@@ -8,6 +8,7 @@ from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
+from zcu_tools.experiment.utils.single_shot import singleshot_ge_analysis
 from zcu_tools.experiment.v2.singleshot import GE_Cfg, GE_Exp
 from zcu_tools.experiment.v2.singleshot.ge import GE_Result
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
@@ -20,7 +21,9 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     proper_relax,
 )
 from zcu_tools.gui.app.main.adapter import (
+    AdapterCapabilities,
     AdapterGuide,
+    AnalysisMode,
     AnalyzeRequest,
     AnalyzeResultBase,
     CfgSectionSpec,
@@ -30,6 +33,8 @@ from zcu_tools.gui.app.main.adapter import (
     LiteralSpec,
     MetaDictWriteback,
     ParamMeta,
+    PostAnalyzeRequest,
+    PostAnalyzeResultBase,
     WritebackItem,
     WritebackRequest,
 )
@@ -61,9 +66,41 @@ class GEAnalyzeResult(AnalyzeResultBase):
     figure: Figure
 
 
+@dataclass
+class GEPostAnalyzeParams:
+    # The post-analysis (multi-method) layer: re-runs the discrimination with a
+    # user-chosen ``backend``, or — when ``angle`` is supplied — a manual rotation
+    # (``angle`` overrides ``backend`` in the domain fitter). ``regression`` is
+    # intentionally NOT offered here (it is excluded from this adapter's surface).
+    backend: Annotated[Literal["pca", "center"], ParamMeta(label="Backend")] = "pca"
+    # ``angle`` (radians): when set, the domain ignores ``backend`` and rotates by
+    # this fixed angle (manual discrimination). Optional → blank means "use
+    # backend".
+    angle: Annotated[float | None, ParamMeta(label="Manual angle (rad)")] = None
+
+
+@dataclass
+class GEPostAnalyzeResult(PostAnalyzeResultBase):
+    # Same float scalars as the primary result (JSON-safe via to_summary_dict).
+    # ``g_center`` / ``e_center`` are complex and auto-skipped from the summary.
+    backend: str
+    fidelity: float
+    theta: float
+    threshold: float
+    ge_s: float
+    g_center: complex
+    e_center: complex
+    figure: Figure
+
+
 class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParams]):
     exp_cls = GE_Exp
     ExpCfg_cls: ClassVar[Any] = GE_Cfg
+    # FIT primary analysis + opt-in post-analysis (the multi-backend
+    # discrimination layer).
+    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
+        analysis=AnalysisMode.FIT, post_analysis=True
+    )
 
     @classmethod
     def guide(cls) -> AdapterGuide:
@@ -151,6 +188,39 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
             req.run_result, backend=params.backend
         )
         return GEAnalyzeResult(
+            fidelity=fidelity,
+            theta=fit_result["theta"],
+            threshold=fit_result["threshold"],
+            ge_s=fit_result["s"],
+            g_center=fit_result["g_center"],
+            e_center=fit_result["e_center"],
+            figure=fig,
+        )
+
+    def get_post_analyze_params(
+        self, analyze_result: GEAnalyzeResult, ctx: ExpContext
+    ) -> GEPostAnalyzeParams:
+        del analyze_result, ctx
+        # Default the post-analysis to the same backend the primary uses (pca),
+        # no manual angle.
+        return GEPostAnalyzeParams(backend="pca", angle=None)
+
+    def post_analyze(
+        self,
+        req: PostAnalyzeRequest[GERunResult, GEAnalyzeResult, GEPostAnalyzeParams],
+    ) -> GEPostAnalyzeResult:
+        params = req.post_analyze_params
+        # ``singleshot_ge_analysis`` ignores ``backend`` when ``angle`` is given
+        # (manual rotation), so pass both through verbatim — the domain owns the
+        # precedence. ``effective_backend`` records which path actually ran.
+        fidelity, _pops, fit_result, fig = singleshot_ge_analysis(
+            req.run_result.signals,
+            angle=params.angle,
+            backend=params.backend,
+        )
+        effective_backend = "manual" if params.angle is not None else params.backend
+        return GEPostAnalyzeResult(
+            backend=effective_backend,
             fidelity=fidelity,
             theta=fit_result["theta"],
             threshold=fit_result["threshold"],

@@ -67,6 +67,13 @@ class AdapterCapabilities:
 
     requires_soc: bool = True
     analysis: AnalysisMode = AnalysisMode.FIT
+    # ``post_analysis``: the adapter offers a *second* analysis layer that runs on
+    # top of the primary ``analyze`` result (e.g. single-shot multi-backend
+    # discrimination). Opt-in: an adapter declaring it must override
+    # ``post_analyze_spec`` / ``post_analyze``; the framework only routes
+    # post-analysis to a tab whose adapter sets this True AND whose primary
+    # analyze result exists.
+    post_analysis: bool = False
 
 
 @dataclass(frozen=True)
@@ -156,6 +163,51 @@ class RunRequest:
 class AnalyzeRequest(Generic[T_Result, T_AnalyzeParams]):
     run_result: T_Result
     analyze_params: T_AnalyzeParams
+    md: MetaDict
+    ml: ModuleLibrary
+    predictor: FluxoniumPredictor | None
+
+
+# ---------------------------------------------------------------------------
+# Post-analysis (AdapterCapabilities.post_analysis) — a second analysis layer
+# that operates *on top of* the primary ``analyze`` result. It mirrors the
+# primary analyze chain (request + figure-carrying result), but carries the
+# primary ``analyze_result`` in addition to the raw ``run_result`` because a
+# post-analysis typically refines/recomputes from the primary fit (centres,
+# threshold, …) plus the raw shots.
+# ---------------------------------------------------------------------------
+
+
+class PostAnalyzeResultBase(AnalyzeResultBase):
+    """Mixin for post-analysis results — same JSON-safe ``to_summary_dict`` as
+    :class:`AnalyzeResultBase`. A distinct type so the framework / adapters never
+    confuse a post-analysis result with a primary analyze result, even though the
+    summary projection is identical."""
+
+
+# Post-analysis result / params type vars, mirroring T_AnalyzeResult /
+# T_AnalyzeParams. Both carry PEP 696 defaults so they may trail the
+# default-bearing T_AnalyzeResult in PostAnalyzeRequest's parameter list.
+T_PostAnalyzeResult = TypeVar(
+    "T_PostAnalyzeResult",
+    bound=AnalyzeResultWithFigure,
+    default=NoAnalysisResult,
+)
+T_PostAnalyzeParams = TypeVar("T_PostAnalyzeParams", default=NoAnalyzeParams)
+
+
+@dataclass(frozen=True)
+class PostAnalyzeRequest(Generic[T_Result, T_AnalyzeResult, T_PostAnalyzeParams]):
+    """Mirror of :class:`AnalyzeRequest` for the post-analysis layer.
+
+    Carries the raw ``run_result`` AND the primary ``analyze_result`` (the
+    post-analysis depends on the primary fit being present), plus the
+    post-analysis params and the md/ml/predictor context.
+    """
+
+    run_result: T_Result
+    analyze_result: T_AnalyzeResult
+    post_analyze_params: T_PostAnalyzeParams
     md: MetaDict
     ml: ModuleLibrary
     predictor: FluxoniumPredictor | None

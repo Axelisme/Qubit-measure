@@ -16,6 +16,8 @@ from zcu_tools.gui.app.main.adapter import (
     InteractiveHost,
     InteractiveSession,
     NoAnalyzeParams,
+    PostAnalyzeRequest,
+    PostAnalyzeResultBase,
     RunRequest,
     SaveDataRequest,
     SavePaths,
@@ -148,6 +150,61 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         raise NotImplementedError(
             f"{type(self).__name__} declares INTERACTIVE analysis but does not "
             "override setup_interactive_analysis"
+        )
+
+    # -- post-analysis (raising no-op default; override when post_analysis) --
+    #
+    # Mirrors the primary analyze chain's param mechanism (dataclass + ParamMeta,
+    # reflected by ``analyze_params_cls`` → describe/reconstruct), NOT a CfgSchema:
+    # the post-analysis params flow through the exact same form/RPC plumbing as
+    # the primary analyze params.
+
+    @classmethod
+    def post_analyze_params_cls(cls) -> type:
+        """Return the post-analysis param dataclass type (static, no instance).
+
+        Reflected from the concrete ``get_post_analyze_params`` return annotation,
+        mirroring ``analyze_params_cls``. Falls back to ``NoAnalyzeParams`` when
+        the return is not annotated.
+        """
+        import typing
+
+        try:
+            hints = typing.get_type_hints(cls.get_post_analyze_params)
+        except Exception:
+            return NoAnalyzeParams
+        return hints.get("return", NoAnalyzeParams)
+
+    def get_post_analyze_params(
+        self, analyze_result: T_AnalyzeResult, ctx: ExpContext
+    ) -> Any:
+        """Build the post-analysis param instance presented to the user.
+
+        Default raises — an adapter declaring ``capabilities.post_analysis`` must
+        override this (Fast-Fail guard; adapters without post-analysis are never
+        routed here). Mirrors ``get_analyze_params`` but receives the primary
+        analyze result (the post params may seed from the primary fit).
+        """
+        del analyze_result, ctx
+        raise NotImplementedError(
+            f"{type(self).__name__} declares post-analysis support but does not "
+            "override get_post_analyze_params"
+        )
+
+    def post_analyze(
+        self,
+        req: PostAnalyzeRequest[T_Result, T_AnalyzeResult, Any],
+    ) -> PostAnalyzeResultBase:
+        """Run a second analysis on top of the primary analyze result.
+
+        Default raises — see ``get_post_analyze_params`` for the rationale. The
+        request carries both the raw ``run_result`` and the primary
+        ``analyze_result`` so the post-analysis can refine/recompute from either.
+        """
+        del req
+        raise NotImplementedError(
+            f"{type(self).__name__} declares post-analysis support but does not "
+            "override post_analyze"
         )
 
     # -- shared implementation (provided once) -----------------------------

@@ -64,6 +64,14 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     analyze_result: T_AnalyzeResult | None = None
     figure: Figure | None = None
     analyze_param_instance: T_AnalyzeParams | None = None
+    # Post-analysis layer (方案 A): parallel ``post_*`` fields that depend on the
+    # primary ``analyze_result``. Invalidated (cleared) whenever the primary
+    # analyze result changes or the run re-runs — a post result computed from a
+    # stale primary fit must never linger. ``post_analyze_param_instance`` holds
+    # the user's chosen post params (mirrors ``analyze_param_instance``).
+    post_analyze_result: Any = None
+    post_figure: Figure | None = None
+    post_analyze_param_instance: Any = None
     save_path_overrides: SavePaths | None = None
     # Persistent writeback draft (ADR-0008): computed once when analyze finishes,
     # read/edited in place by UI + agent, applied as-is. Module/waveform items
@@ -86,6 +94,9 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
 
     def has_analyze_result(self) -> bool:
         return self.analyze_result is not None
+
+    def has_post_analyze_result(self) -> bool:
+        return self.post_analyze_result is not None
 
     def has_figure(self) -> bool:
         return self.figure is not None
@@ -193,8 +204,10 @@ class State(SessionState):
         tab.analyze_param_instance = None
         tab.writeback_items = []
         tab.applied_session_ids.clear()
+        self._invalidate_post_analyze(tab)
         self.version.bump(f"tab:{tab_id}:result")
         self.version.bump(f"tab:{tab_id}:analyze")
+        self.version.bump(f"tab:{tab_id}:post_analyze")
 
     def update_tab_result(self, tab_id: str, result: object) -> None:
         logger.debug(
@@ -210,7 +223,11 @@ class State(SessionState):
         # teardown the per-item editor models (WritebackService) before this.
         tab.writeback_items = []
         tab.applied_session_ids.clear()
+        # New run → any post-analysis built on the previous analyze result is also
+        # stale (post depends on the primary analyze, which is cleared above).
+        self._invalidate_post_analyze(tab)
         self.version.bump(f"tab:{tab_id}:result")
+        self.version.bump(f"tab:{tab_id}:post_analyze")
 
     def update_tab_analyze(
         self,
@@ -232,9 +249,57 @@ class State(SessionState):
         # previous analyze must already have been torn down by the caller.
         tab.writeback_items = list(writeback_items or [])
         tab.applied_session_ids.clear()
+        # A re-analyze replaces the primary result the post-analysis depends on,
+        # so any existing post result is now stale (方案 A invalidation).
+        self._invalidate_post_analyze(tab)
         # Analyze result is a guarded resource (writeback depends on it), mirroring
         # update_tab_result's tab:<id>:result bump.
         self.version.bump(f"tab:{tab_id}:analyze")
+        self.version.bump(f"tab:{tab_id}:post_analyze")
+
+    @staticmethod
+    def _invalidate_post_analyze(tab: Session[Any, Any, Any, Any]) -> None:
+        """Drop a tab's post-analysis fields back to empty (no version bump — the
+        caller bumps ``tab:<id>:post_analyze`` alongside its own keys). Post-
+        analysis depends on the primary analyze result, so it is cleared at every
+        out-edge that changes/clears that result (run start, re-run, re-analyze)."""
+        tab.post_analyze_result = None
+        tab.post_figure = None
+        tab.post_analyze_param_instance = None
+
+    def update_tab_post_analyze(
+        self,
+        tab_id: str,
+        post_analyze_result: object,
+        figure: Figure | None,
+    ) -> None:
+        """Record a freshly computed post-analysis result + figure (mirrors
+        ``update_tab_analyze``). Fast-fails if the tab has no primary analyze
+        result — post-analysis requires the primary fit it builds on."""
+        tab = self.tabs[tab_id]
+        if not tab.has_analyze_result():
+            raise RuntimeError(
+                f"Cannot record post-analysis for tab {tab_id!r}: no primary "
+                "analyze result"
+            )
+        logger.debug(
+            "update_tab_post_analyze: tab_id=%r figure=%s",
+            tab_id,
+            "yes" if figure is not None else "none",
+        )
+        tab.post_analyze_result = post_analyze_result
+        tab.post_figure = figure
+        self.version.bump(f"tab:{tab_id}:post_analyze")
+
+    def update_tab_post_analyze_param_instance(
+        self, tab_id: str, instance: object
+    ) -> None:
+        logger.debug(
+            "update_tab_post_analyze_param_instance: tab_id=%r instance_type=%s",
+            tab_id,
+            type(instance).__name__,
+        )
+        self.tabs[tab_id].post_analyze_param_instance = instance
 
     def update_tab_cfg_schema(self, tab_id: str, schema: CfgSchema) -> None:
         logger.debug("update_tab_cfg_schema: tab_id=%r", tab_id)

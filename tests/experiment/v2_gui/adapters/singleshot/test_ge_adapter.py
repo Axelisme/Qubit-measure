@@ -10,7 +10,11 @@ from numpy.typing import NDArray
 from zcu_tools.experiment.v2.singleshot import GE_Cfg, GE_Exp
 from zcu_tools.experiment.v2.singleshot.ge import GE_Result
 from zcu_tools.experiment.v2_gui.adapters.singleshot import GEAdapter
-from zcu_tools.experiment.v2_gui.adapters.singleshot.ge import GEAnalyzeResult
+from zcu_tools.experiment.v2_gui.adapters.singleshot.ge import (
+    GEAnalyzeResult,
+    GEPostAnalyzeParams,
+    GEPostAnalyzeResult,
+)
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AnalysisMode,
@@ -19,6 +23,7 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionValue,
     MetaDictWriteback,
     ModuleRefValue,
+    PostAnalyzeRequest,
     RunRequest,
     WritebackRequest,
 )
@@ -133,6 +138,8 @@ def test_ge_capabilities_is_fit() -> None:
     assert isinstance(caps, AdapterCapabilities)
     assert caps.analysis is AnalysisMode.FIT
     assert caps.requires_soc is True
+    # GE opts into the post-analysis (multi-backend discrimination) layer.
+    assert caps.post_analysis is True
 
 
 def test_ge_run_without_soc_fast_fails() -> None:
@@ -182,6 +189,104 @@ def test_ge_analyze_maps_fit_result(monkeypatch: pytest.MonkeyPatch) -> None:
     summary = out.to_summary_dict()
     assert "fidelity" in summary
     assert "g_center" not in summary
+
+
+# ---------------------------------------------------------------------------
+# Post-analysis (multi-backend discrimination) — patches the domain fitter
+# (singleshot_ge_analysis) so only the adapter's param→domain→result mapping is
+# under test, mirroring the primary-analyze tests above.
+# ---------------------------------------------------------------------------
+
+
+def _patch_domain_ge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, Any]:
+    """Patch the domain ``singleshot_ge_analysis`` the adapter calls; capture the
+    (angle, backend) the adapter forwards. Returns the capture dict."""
+    fig = Figure()
+    fit = _fake_fit_result()
+    captured: dict[str, Any] = {}
+
+    def fake_domain(
+        signals: Any, angle: Any = None, backend: str = "pca", **kwargs: Any
+    ) -> Any:
+        del signals, kwargs
+        captured["angle"] = angle
+        captured["backend"] = backend
+        return 0.93, np.zeros((2, 3)), fit, fig
+
+    monkeypatch.setattr(
+        "zcu_tools.experiment.v2_gui.adapters.singleshot.ge.singleshot_ge_analysis",
+        fake_domain,
+        raising=True,
+    )
+    return captured
+
+
+def _make_post_req(
+    params: GEPostAnalyzeParams,
+) -> PostAnalyzeRequest[Any, Any, GEPostAnalyzeParams]:
+    return PostAnalyzeRequest(
+        run_result=GE_Result(signals=_fake_signals()),
+        analyze_result=MagicMock(),
+        post_analyze_params=params,
+        md=MagicMock(),
+        ml=_make_ml(),
+        predictor=None,
+    )
+
+
+def test_ge_post_analyze_pca_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _patch_domain_ge(monkeypatch)
+    out = GEAdapter().post_analyze(_make_post_req(GEPostAnalyzeParams(backend="pca")))
+
+    assert isinstance(out, GEPostAnalyzeResult)
+    assert out.backend == "pca"
+    assert out.fidelity == pytest.approx(0.93)
+    assert out.threshold == pytest.approx(0.0)
+    assert out.ge_s == pytest.approx(0.3)
+    assert out.g_center == -1.0 + 0j
+    assert captured == {"angle": None, "backend": "pca"}
+    # complex centers skipped from JSON summary; floats survive.
+    summary = out.to_summary_dict()
+    assert "fidelity" in summary and "g_center" not in summary
+
+
+def test_ge_post_analyze_center_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _patch_domain_ge(monkeypatch)
+    out = GEAdapter().post_analyze(
+        _make_post_req(GEPostAnalyzeParams(backend="center"))
+    )
+
+    assert out.backend == "center"
+    assert captured["backend"] == "center"
+    assert captured["angle"] is None
+
+
+def test_ge_post_analyze_manual_angle(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _patch_domain_ge(monkeypatch)
+    out = GEAdapter().post_analyze(
+        _make_post_req(GEPostAnalyzeParams(backend="pca", angle=0.5))
+    )
+
+    # angle set → effective backend is "manual"; angle forwarded to the domain.
+    assert out.backend == "manual"
+    assert captured["angle"] == pytest.approx(0.5)
+
+
+def test_ge_post_analyze_params_cls_reflects_dataclass() -> None:
+    from zcu_tools.gui.app.main.adapter import describe_analyze_params
+
+    assert GEAdapter.post_analyze_params_cls() is GEPostAnalyzeParams
+    fields = {f["name"] for f in describe_analyze_params(GEPostAnalyzeParams)}
+    assert fields == {"backend", "angle"}
+
+
+def test_ge_get_post_analyze_params_defaults_to_pca() -> None:
+    params = GEAdapter().get_post_analyze_params(MagicMock(), cast(Any, _make_ctx()))
+    assert isinstance(params, GEPostAnalyzeParams)
+    assert params.backend == "pca"
+    assert params.angle is None
 
 
 def test_ge_writeback_proposes_fid_and_ge_s(
