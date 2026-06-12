@@ -1,6 +1,6 @@
 # `simulate/fluxonium` 模塊重點文檔
 
-**Last updated:** 2026-06-12（coherence_fast 算子 lru_cache + batched eigh；predict 陣列批次路徑）
+**Last updated:** 2026-06-12（branch/floquet snr 路徑優化：serial photon + 可注入 solver options）
 
 基於 [scqubits](https://scqubits.readthedocs.io) 的 Fluxonium 量子比特數值模擬工具集,提供能譜、色散位移、矩陣元、相干時間與實驗參數預測等計算。
 
@@ -76,6 +76,20 @@
 
 `floquet.py`, `full_quantum.py`(本 `__init__` 未匯出,屬實驗性/特殊用途)。
 
+floquet 效能要點(design search 的 snr stage 主成本即在此):
+- **photon 層刻意 serial**:單個 FloquetBasis 建構 ~3ms,低於 joblib loky dispatch overhead,
+  平行反而慢 1.6x。平行度放在呼叫方的 **cell 層**(design/search.py `calculate_snr` 的
+  `Parallel(n_jobs=-1)`),勿在 photon 層加回 joblib。
+- **solver options 可注入**:analysis 類別 `__init__(solver_options=None)` 預設 = qutip 預設
+  (bit-exact,mist overlay 呼叫方不受影響);**snr 入口**(`calc_branch_infos`/`calc_ge_snr`/
+  `snr.calc_snr`)預設 `SNR_SOLVER_OPTIONS`(rtol=1e-3/atol=1e-5,snr[-3] rel_err ~6e-5,
+  崩潰邊界在 rtol≥5e-2),傳 `None` 回嚴格。`calc_branch_infos_with_tls` 預設嚴格(餵 mist
+  精度敏感分析)。
+- 結果 **bit-exact deterministic**(同參數重跑 spread=0),golden 測試見
+  `tests/simulate/fluxonium/branch/test_floquet.py`。
+- 呼叫方契約:design/search 的 `calculate_snr` **只算 `valid==True` 列**(其餘 NaN),
+  必須在 `avoid_*` cheap filter 之後呼叫(design.md 已同步順序)。
+
 ---
 
 ## 典型使用流程
@@ -116,3 +130,4 @@ f01 = predictor.predict_freq(current_value)                    # MHz
 | 2026-06-05 | `7f918a77` | `calculate_dispersive_vs_flux_fast` 抽 flux-independent operators 到 `_fluxonium_operators` @lru_cache，GUI live tuning 拖動 84→0.6ms（numerically identical）。 |
 | 2026-06-05 | `2c241b25` | 新增 `coherence_fast.py`：`calculate_eff_t1_vs_flux_fast`（scqubits-free，~60x，逐點對齊 1e-13）。繞掉 eigensolve（cos/sin 預算）+ flux-dep 算子的 per-flux `sinm`（三角拆解）+ 5 noise 公式逐字移植。 |
 | 2026-06-12 | — | coherence_fast：`_t1_operators` @lru_cache 消固定成本 + per-flux loop 批次化（batched eigh + 向量化 rates）。predict：array 輸入改走 energies/matrix_element 批次路徑（freq ~7x），補數值單測 `test_predict.py`。 |
+| 2026-06-12 | — | branch/floquet：photon 層 joblib 移除（serial 快 2x）+ solver options 可注入（snr 入口預設 rtol=1e-3、analysis 類別預設嚴格）；design search snr stage 端到端 ~9.6x（含呼叫方 staged+cell 平行）。golden 測試 `branch/test_floquet.py`。 |
