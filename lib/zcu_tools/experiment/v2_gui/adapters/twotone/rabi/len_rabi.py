@@ -25,16 +25,19 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
+    CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     ExpContext,
     MetaDictWriteback,
+    ModuleWriteback,
     ParamMeta,
     SweepSpec,
     SweepValue,
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
 
 LenRabiRunResult: TypeAlias = LenRabiResult
 
@@ -48,6 +51,9 @@ class LenRabiAnalyzeParams:
 class LenRabiAnalyzeResult(AnalyzeResultBase):
     pi_len: float
     pi2_len: float
+    # Rabi oscillation frequency in MHz (1/us), captured from the fit but
+    # previously discarded; now preserved for writeback as 'rabi_f'.
+    rabi_f: float
     figure: Figure
 
 
@@ -90,8 +96,12 @@ class LenRabiAdapter(
                 "'reset_120') when present, else stays disabled."
             ),
             typical_writeback=(
-                "Proposes the fitted pi-pulse length into MetaDict 'pi_len' and "
-                "the pi/2-pulse length into 'pi2_len'. No ModuleLibrary writeback."
+                "Proposes MetaDict scalars 'pi_len', 'pi2_len' (fitted lengths), "
+                "and 'rabi_f' (Rabi oscillation frequency in MHz). Also proposes "
+                "ModuleLibrary modules 'pi_len' and 'pi2_len' — copies of the "
+                "qubit drive module with waveform length overridden to the fitted "
+                "pi / pi/2 value. Module items are skipped when no cfg_snapshot "
+                "is available (e.g. loaded from file)."
             ),
             recommended=(
                 "Analysis defaults to fitting a decay envelope on the oscillation; "
@@ -137,17 +147,19 @@ class LenRabiAdapter(
         self, req: AnalyzeRequest[LenRabiRunResult, LenRabiAnalyzeParams]
     ) -> LenRabiAnalyzeResult:
         params = req.analyze_params
-        pi_len, pi2_len, _, fig = LenRabiExp().analyze(
+        pi_len, pi2_len, rabi_f, fig = LenRabiExp().analyze(
             req.run_result,
             decay=params.decay,
         )
-        return LenRabiAnalyzeResult(pi_len=pi_len, pi2_len=pi2_len, figure=fig)
+        return LenRabiAnalyzeResult(
+            pi_len=pi_len, pi2_len=pi2_len, rabi_f=rabi_f, figure=fig
+        )
 
     def get_writeback_items(
         self, req: WritebackRequest[LenRabiRunResult, LenRabiAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
-        return [
+        items: list[WritebackItem] = [
             MetaDictWriteback(
                 target_name="pi_len",
                 description="Pi pulse length (us)",
@@ -158,7 +170,35 @@ class LenRabiAdapter(
                 description="Pi/2 pulse length (us)",
                 proposed_value=result.pi2_len,
             ),
+            MetaDictWriteback(
+                target_name="rabi_f",
+                description="Rabi oscillation frequency (MHz)",
+                proposed_value=result.rabi_f,
+            ),
         ]
+
+        # Emit module writeback items when the run captured a cfg_snapshot.
+        # Each item is a copy of qub_pulse with waveform.length overridden to
+        # the fitted pi / pi/2 value, registered as a library module for
+        # subsequent experiments that reference the calibrated pulse by name.
+        snapshot = req.run_result.cfg_snapshot
+        if snapshot is not None:
+            qub_pulse_cfg = snapshot.modules.qub_pulse
+            for target, length, desc in [
+                ("pi_len", result.pi_len, "len pi pulse"),
+                ("pi2_len", result.pi2_len, "len pi/2 pulse"),
+            ]:
+                spec, value = module_cfg_to_value(qub_pulse_cfg)
+                value.with_field("waveform.length", length)
+                items.append(
+                    ModuleWriteback(
+                        target_name=target,
+                        description=desc,
+                        edit_schema=CfgSchema(spec=spec, value=value),
+                    )
+                )
+
+        return items
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.qub_name}_len_rabi_{time.strftime('%m%d')}"

@@ -25,16 +25,19 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
+    CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     ExpContext,
     MetaDictWriteback,
+    ModuleWriteback,
     ParamMeta,
     SweepSpec,
     SweepValue,
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
 
 AmpRabiRunResult: TypeAlias = AmpRabiResult
 
@@ -90,8 +93,11 @@ class AmpRabiAdapter(
                 "'reset_120') when present, else stays disabled."
             ),
             typical_writeback=(
-                "Proposes the fitted pi-pulse gain into MetaDict 'pi_amp' and the "
-                "pi/2-pulse gain into 'pi2_amp'. No ModuleLibrary writeback."
+                "Proposes MetaDict scalars 'pi_amp' and 'pi2_amp' (fitted gains). "
+                "Also proposes ModuleLibrary modules 'pi_amp' and 'pi2_amp' — "
+                "copies of the qubit drive module with gain overridden to the "
+                "fitted pi / pi/2 value. Module items are skipped when no "
+                "cfg_snapshot is available (e.g. loaded from file)."
             ),
             recommended=(
                 "Analysis takes a 'Skip points' count (default 0) to drop leading "
@@ -150,7 +156,7 @@ class AmpRabiAdapter(
         self, req: WritebackRequest[AmpRabiRunResult, AmpRabiAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
-        return [
+        items: list[WritebackItem] = [
             MetaDictWriteback(
                 target_name="pi_amp",
                 description="Pi pulse gain (a.u.)",
@@ -162,6 +168,29 @@ class AmpRabiAdapter(
                 proposed_value=result.pi2_amp,
             ),
         ]
+
+        # Emit module writeback items when the run captured a cfg_snapshot.
+        # Each item is a copy of qub_pulse with gain overridden to the fitted
+        # pi / pi/2 value, registered as a library module for subsequent
+        # experiments that reference the calibrated pulse by name.
+        snapshot = req.run_result.cfg_snapshot
+        if snapshot is not None:
+            qub_pulse_cfg = snapshot.modules.qub_pulse
+            for target, gain, desc in [
+                ("pi_amp", result.pi_amp, "amp pi pulse"),
+                ("pi2_amp", result.pi2_amp, "amp pi/2 pulse"),
+            ]:
+                spec, value = module_cfg_to_value(qub_pulse_cfg)
+                value.with_field("gain", gain)
+                items.append(
+                    ModuleWriteback(
+                        target_name=target,
+                        description=desc,
+                        edit_schema=CfgSchema(spec=spec, value=value),
+                    )
+                )
+
+        return items
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.qub_name}_amp_rabi_{time.strftime('%m%d')}"
