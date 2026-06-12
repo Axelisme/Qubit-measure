@@ -1,4 +1,5 @@
 from .bath import BathFreqGainAdapter, BathLengthAdapter, BathPhaseAdapter
+from .check import RabiCheckAdapter
 from .dual_tone import (
     DualToneFreqAdapter,
     DualToneLengthAdapter,
@@ -10,6 +11,7 @@ __all__ = [
     "BathFreqGainAdapter",
     "BathLengthAdapter",
     "BathPhaseAdapter",
+    "RabiCheckAdapter",
     "DualToneFreqAdapter",
     "DualToneLengthAdapter",
     "DualTonePowerAdapter",

@@ -9,6 +9,7 @@ from .reset import (
     DualToneFreqAdapter,
     DualToneLengthAdapter,
     DualTonePowerAdapter,
+    RabiCheckAdapter,
     SingleToneFreqAdapter,
     SingleToneLengthAdapter,
 )
@@ -23,6 +24,7 @@ __all__ = [
     "BathFreqGainAdapter",
     "BathLengthAdapter",
     "BathPhaseAdapter",
+    "RabiCheckAdapter",
     "DualToneFreqAdapter",
     "DualToneLengthAdapter",
     "DualTonePowerAdapter",

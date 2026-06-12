@@ -40,6 +40,7 @@ from zcu_tools.experiment.v2.twotone.reset.dual_tone.power import (
 from zcu_tools.experiment.v2.twotone.reset.dual_tone.power import (
     PowerResult as DualPowerResult,
 )
+from zcu_tools.experiment.v2.twotone.reset.rabi_check import RabiCheckCfg
 from zcu_tools.experiment.v2.twotone.reset.single_tone.freq import (
     FreqCfg,
     FreqResult,
@@ -55,6 +56,7 @@ from zcu_tools.experiment.v2_gui.adapters.twotone import (
     DualToneFreqAdapter,
     DualToneLengthAdapter,
     DualTonePowerAdapter,
+    RabiCheckAdapter,
     SingleToneFreqAdapter,
     SingleToneLengthAdapter,
 )
@@ -716,6 +718,128 @@ def test_bath_phase_writeback_proposes_max_and_min_phase() -> None:
 )
 def test_bath_reset_run_without_soc_fast_fails(adapter: Any) -> None:
     ml = _make_ml()
+    schema = adapter.make_default_cfg(_make_ctx(ml))
+
+    with pytest.raises(RuntimeError, match="soc is required"):
+        adapter.run(_make_req(ml), schema)
+
+
+# --- rabi check (shared across all three reset types) --------------------
+
+
+def test_rabi_check_round_trip() -> None:
+    """make_default_cfg → validate → to_raw_dict → ml.make_cfg is wired correctly."""
+    ml = _make_ml()
+    adapter = RabiCheckAdapter()
+    raw = _lower(adapter.make_default_cfg(_make_ctx(ml)), _make_req(ml))
+
+    assert "modules" in raw
+    assert "sweep" in raw
+    modules = cast(dict[str, Any], raw["modules"])
+    # Required modules are present.
+    assert "rabi_pulse" in modules
+    assert "tested_reset" in modules
+    assert "pi_pulse" in modules
+    assert "readout" in modules
+    # Optional upstream reset is disabled by default (no library entry).
+    assert "reset" not in modules
+
+    sweep = cast(dict[str, Any], raw["sweep"])
+    assert isinstance(sweep["gain"], SweepCfg)
+
+    adapter.build_exp_cfg(raw, _make_req(ml))
+    ml.make_cfg.assert_called_once_with(raw, RabiCheckCfg)
+
+
+def test_rabi_check_capabilities_analysis_none() -> None:
+    from zcu_tools.gui.app.main.adapter import AnalysisMode
+
+    assert RabiCheckAdapter.capabilities.analysis is AnalysisMode.NONE
+    assert RabiCheckAdapter.capabilities.requires_soc is True
+
+
+def test_rabi_check_tested_reset_is_4_shape() -> None:
+    """tested_reset accepts all four reset shapes (none/pulse/two_pulse/bath)."""
+    from zcu_tools.gui.app.main.adapter import (
+        CfgSectionValue,
+        DirectValue,
+        ModuleRefValue,
+    )
+    from zcu_tools.gui.app.main.specs.reset import (
+        make_bath_reset_spec,
+        make_none_reset_spec,
+        make_pulse_reset_spec,
+        make_two_pulse_reset_spec,
+    )
+
+    spec = RabiCheckAdapter.cfg_spec()
+    modules_spec = spec.fields["modules"]
+    # The spec tree owns a "modules" CfgSectionSpec containing the tested_reset slot.
+    tested_reset_spec = modules_spec.fields["tested_reset"]  # type: ignore[union-attr]
+
+    allowed_types = {s.fields["type"] for s in tested_reset_spec.allowed}  # type: ignore[union-attr]
+    for shape_spec in (
+        make_none_reset_spec(),
+        make_pulse_reset_spec(),
+        make_two_pulse_reset_spec(),
+        make_bath_reset_spec(),
+    ):
+        type_spec = shape_spec.fields["type"]
+        assert type_spec in allowed_types, (
+            f"Shape {type_spec} missing from tested_reset allowed list"
+        )
+
+
+def test_rabi_check_tested_reset_can_be_pulse_reset() -> None:
+    """Round-trip with a pulse-reset tested_reset validates correctly."""
+    from zcu_tools.gui.app.main.adapter import (
+        CfgSectionValue,
+        ModuleRefValue,
+    )
+
+    adapter = RabiCheckAdapter()
+    schema = adapter.make_default_cfg(_make_ctx(_make_ml()))
+    modules = schema.value.fields["modules"]
+    assert isinstance(modules, CfgSectionValue)
+    tested_reset = modules.fields["tested_reset"]
+    # Default shape is pulse reset (the reset role's blank).
+    assert isinstance(tested_reset, ModuleRefValue)
+    reset_type = tested_reset.value.fields.get("type")
+    assert reset_type is not None
+
+
+def test_rabi_check_sweep_gain_range() -> None:
+    """Default gain sweep spans 0.0 → 1.0 over 51 points."""
+    from zcu_tools.gui.app.main.adapter import CfgSectionValue, SweepValue
+
+    schema = RabiCheckAdapter().make_default_cfg(_make_ctx(_make_ml()))
+    sweep = schema.value.fields["sweep"]
+    assert isinstance(sweep, CfgSectionValue)
+    gain = sweep.fields["gain"]
+    assert isinstance(gain, SweepValue)
+    assert gain.start == 0.0
+    assert gain.stop == 1.0
+    assert gain.expts == 51
+
+
+def test_rabi_check_no_writeback() -> None:
+    """NONE analysis → get_writeback_items returns empty (base default)."""
+    adapter = RabiCheckAdapter()
+    # WritebackRequest with dummy values; writeback is never called for NONE
+    # mode by the framework, but the base must still return [] if invoked.
+    items = adapter.get_writeback_items(
+        WritebackRequest(
+            run_result=MagicMock(),
+            analyze_result=None,  # type: ignore[arg-type]
+            ctx=cast(Any, MagicMock()),
+        )
+    )
+    assert list(items) == []
+
+
+def test_rabi_check_run_without_soc_fast_fails() -> None:
+    ml = _make_ml()
+    adapter = RabiCheckAdapter()
     schema = adapter.make_default_cfg(_make_ctx(ml))
 
     with pytest.raises(RuntimeError, match="soc is required"):

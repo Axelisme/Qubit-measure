@@ -50,6 +50,7 @@ from .adapters.twotone.reset.bath import (
     BathLengthAdapter,
     BathPhaseAdapter,
 )
+from .adapters.twotone.reset.check import RabiCheckAdapter
 from .adapters.twotone.reset.dual_tone import (
     DualToneFreqAdapter,
     DualToneLengthAdapter,
@@ -91,6 +92,7 @@ ADAPTERS = {
     "twotone/reset/bath/freq_gain": BathFreqGainAdapter,
     "twotone/reset/bath/length": BathLengthAdapter,
     "twotone/reset/bath/phase": BathPhaseAdapter,
+    "twotone/reset/check": RabiCheckAdapter,
     "twotone/ro_optimize/freq": RoOptFreqAdapter,
     "twotone/ro_optimize/power": RoOptPowerAdapter,
     "twotone/ro_optimize/length": RoOptLengthAdapter,
