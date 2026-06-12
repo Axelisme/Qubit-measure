@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 16
+skill_version: 17
 ---
 
 # run-measure-gui
@@ -109,6 +109,9 @@ gui_tab_get_current_figure(tab_id)                # PNG of the CURRENT plot — 
                                                   # non-analysis 2D scans (flux_dep / power_dep). (Read the PNG.)
 gui_analyze(tab_id)                               # degrades like a run: a FIT settles -> {finished} (figure_path folded);
                                                   # an INTERACTIVE pick (flux_dep) -> {pending} → see "Interactive analysis" below
+gui_post_analyze(tab_id)                          # second analysis layer on top of the primary fit (e.g. single-shot ge);
+                                                  # FIT-only, degrades like gui_analyze; needs a primary analyze result first
+gui_tab_get_post_analyze_result(tab_id)           # the post-analysis summary (params: gui_tab_get_post_analyze_params)
 gui_save_data(tab_id) / gui_save_image / gui_save_result   # each returns the resolved written path ({data_path[, image_path]})
 gui_view_screenshot(tab_id)                       # base64 PNG of the WHOLE window/tab (config + progress + plot)
 ```
@@ -138,6 +141,16 @@ flags these (its writeback describes a hand-pick). The flow:
    (`flx_half` / `flx_int` / `flx_period`); apply them with `gui_writeback_apply`.
    **The picking is the user's judgement — you set up, prompt, observe, and write
    back; you never decide the line positions.**
+
+**Post-analysis (second layer, e.g. single-shot `ge` discrimination).** Some
+adapters offer a second analysis on top of the primary fit. After a primary
+`gui_analyze` settles, `gui_post_analyze(tab_id)` runs it — FIT-only, so it
+degrades exactly like `gui_analyze` (settles → `{status:finished}`, slow →
+`{status:pending}` then `gui_post_analyze_wait` / `gui_post_analyze_poll`). It
+fast-fails with `precondition_failed` until a primary analyze result exists, so
+run `gui_analyze` first. Read its summary with `gui_tab_get_post_analyze_result`
+(its params come from `gui_tab_get_post_analyze_params`). The post figure lives
+in the tab's separate post container, so the reply folds no `figure_path`.
 
 **`gui_run_wait` blocks your whole turn until the run ends** (a big sweep is
 minutes), and nothing pushes a completion event — the MCP server cannot wake

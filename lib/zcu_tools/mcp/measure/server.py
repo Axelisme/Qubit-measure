@@ -176,7 +176,14 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
 #      and clicks Done) never settles, so it degrades to pending and the agent
 #      prompts + polls. No wire change (analyze.start + operation.await/poll
 #      already exist; this is mcp-side degrade + two new poll/wait tools).
-MCP_VERSION = 26
+# MCP 27: post-analysis tools (WIRE 22). gui_post_analyze degrades like gui_analyze
+#      (short-wait then {status:'finished'|'pending'}; FIT-only, no INTERACTIVE
+#      mode) + gui_post_analyze_wait / gui_post_analyze_poll; gui_tab_get_post_
+#      analyze_params / gui_tab_get_post_analyze_result auto-generate from the new
+#      method_specs. Unlike gui_analyze, gui_post_analyze folds NO figure_path (the
+#      post figure lives in the tab's separate post container, which the render
+#      view does not screenshot).
+MCP_VERSION = 27
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -221,7 +228,12 @@ Typical experiment loop:
     INTERACTIVE analysis (the user picks on the plot + clicks Done — see
     gui_adapter_guide, e.g. flux_dep) returns {status:'pending'} — prompt the user,
     then gui_analyze_poll until finished, read flx_* with gui_tab_get_analyze_result
-    and gui_writeback_apply. Then gui_save_data / gui_save_image / gui_save_result to
+    and gui_writeback_apply. Some adapters offer a SECOND analysis layer on top of
+    the primary fit (e.g. single-shot ge discrimination): gui_post_analyze(tab_id)
+    runs it (FIT-only, degrades like gui_analyze; fast-fails until a primary analyze
+    result exists), then gui_tab_get_post_analyze_result reads its summary (its
+    params come from gui_tab_get_post_analyze_params). Then gui_save_data /
+    gui_save_image / gui_save_result to
     persist — each returns the resolved written path ({data_path[, image_path]},
     .hdf5 + uniqueness suffix applied), so you need not recover it from a later
     diagnostic. To look at a plot (a 2D run map or an analysis fit) call
@@ -353,6 +365,7 @@ _OP_KEY_OF: dict[str, Callable[[dict[str, Any]], str]] = {
     "run.start": lambda p: f"tab:{p.get('tab_id', '')}",
     "connect.start": lambda p: "soc",  # noqa: ARG005 — uniform signature
     "analyze.start": lambda p: f"analyze:{p.get('tab_id', '')}",
+    "post_analyze.start": lambda p: f"post_analyze:{p.get('tab_id', '')}",
 }
 
 
@@ -1020,6 +1033,59 @@ def tool_gui_analyze_poll(arguments: dict[str, Any]) -> dict[str, Any]:
     return _with_figure(tab_id, result)
 
 
+def tool_gui_post_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Start the second-layer (post) analysis, waiting briefly (degrades like a run).
+
+    Post-analysis runs on top of the tab's PRIMARY analyze result (e.g.
+    single-shot multi-backend ge discrimination) and is FIT-only — it computes on
+    a worker, so it usually settles in the short wait -> {status:'finished'} (read
+    the scalar result with gui_tab_get_post_analyze_result). A slow one degrades to
+    {status:'pending'} (await with gui_post_analyze_wait or gui_post_analyze_poll).
+    Fast-fails with precondition_failed when the tab has no primary analyze result
+    yet — run gui_analyze first. 'updates' optionally overrides post params (see
+    gui_tab_get_post_analyze_params). The post figure is kept in the tab's separate
+    post container; read its summary with gui_tab_get_post_analyze_result.
+    """
+    tab_id = str(arguments["tab_id"])
+    wait_seconds = float(arguments.get("wait_seconds", 1.0))
+    params: dict[str, Any] = {"tab_id": tab_id}
+    if "updates" in arguments and arguments["updates"] is not None:
+        params["updates"] = arguments["updates"]
+    # Start (captures operation_id under post_analyze:<tab_id>, strips it from the
+    # reply), then wait briefly. A FIT-only worker usually finishes in the wait.
+    send_gui_rpc("post_analyze.start", params)
+    return _start_op_with_short_wait(
+        f"post_analyze:{tab_id}",
+        f"Post-analysis on tab {tab_id!r}",
+        wait_seconds,
+        dict,
+        f"poll with gui_post_analyze_poll(tab_id={tab_id!r}).",
+    )
+
+
+def tool_gui_post_analyze_wait(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Block until the post-analysis on ``tab_id`` completes (mirrors
+    gui_analyze_wait). Returns {status, waited_seconds}: 'finished' / 'timed_out'
+    (re-wait or gui_post_analyze_poll) / 'no_operation'. Raises only on a genuine
+    failure. Use after gui_post_analyze returned status='pending'. Read the scalar
+    result with gui_tab_get_post_analyze_result."""
+    tab_id = str(arguments["tab_id"])
+    timeout = float(arguments.get("timeout", 600.0))
+    return _await_operation_by_key(
+        f"post_analyze:{tab_id}", f"Post-analysis on tab {tab_id!r}", timeout
+    )
+
+
+def tool_gui_post_analyze_poll(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Non-blocking status of the post-analysis on ``tab_id``: finished / running /
+    failed / no_operation. On a finished post-analysis read the scalar result with
+    gui_tab_get_post_analyze_result."""
+    tab_id = str(arguments["tab_id"])
+    return _poll_operation_by_key(
+        f"post_analyze:{tab_id}", f"Post-analysis on tab {tab_id!r}"
+    )
+
+
 def _connect_soc_summary() -> dict[str, Any]:
     """The SoC summary folded into a settled connect reply: only the human-
     readable ``description`` (the compact describe_soc per-channel table) +
@@ -1209,6 +1275,10 @@ _NON_GENERATED_METHODS = frozenset(
         # hand-written to fold figure_path into the synchronous reply (analysis
         # almost always produces a figure; agent skips gui_tab_get_current_figure).
         "analyze.start",
+        # hand-written short-wait degrade (FIT-only worker, mirrors analyze).
+        # Unlike analyze it folds NO figure_path: the post figure lives in the
+        # tab's separate post container, which the render view does not screenshot.
+        "post_analyze.start",
     }
 )
 
@@ -1569,6 +1639,71 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "required": ["tab_id"],
         },
     },
+    "gui_post_analyze": {
+        "handler": tool_gui_post_analyze,
+        "description": (
+            "Start the second-layer (post) analysis, waiting briefly — degrades "
+            "like gui_analyze. Post-analysis runs on top of the tab's PRIMARY "
+            "analyze result (e.g. single-shot multi-backend ge discrimination) and "
+            "is FIT-only: it usually finishes here -> {status:'finished'} (read the "
+            "scalar result with gui_tab_get_post_analyze_result); a slow one "
+            "degrades to {status:'pending'} (await with gui_post_analyze_wait or "
+            "gui_post_analyze_poll). Fast-fails with precondition_failed when the "
+            "tab has no primary analyze result yet — run gui_analyze first. "
+            "'updates' optionally overrides post params (see "
+            "gui_tab_get_post_analyze_params). The post figure is kept in the tab's "
+            "separate post container; this reply folds in no figure_path."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "tab_id": {"type": "string"},
+                "updates": {
+                    "type": "object",
+                    "description": "Post-analysis param updates",
+                },
+                "wait_seconds": {
+                    "type": "number",
+                    "description": "Seconds to wait before degrading to a handle (default 1.0)",
+                },
+            },
+            "required": ["tab_id"],
+        },
+    },
+    "gui_post_analyze_wait": {
+        "handler": tool_gui_post_analyze_wait,
+        "description": (
+            "Block until the post-analysis on tab_id completes (mirrors "
+            "gui_analyze_wait). Returns {status, waited_seconds}: 'finished' / "
+            "'timed_out' (re-wait or gui_post_analyze_poll) / 'no_operation'. Use "
+            "after gui_post_analyze returned status='pending'. Read the scalar "
+            "result with gui_tab_get_post_analyze_result."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "tab_id": {"type": "string"},
+                "timeout": {
+                    "type": "number",
+                    "description": "Seconds to wait (default 600)",
+                },
+            },
+            "required": ["tab_id"],
+        },
+    },
+    "gui_post_analyze_poll": {
+        "handler": tool_gui_post_analyze_poll,
+        "description": (
+            "Non-blocking status of the post-analysis on tab_id: 'finished' / "
+            "'running' / 'failed' / 'no_operation'. On a finished post-analysis "
+            "read the scalar result with gui_tab_get_post_analyze_result."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"tab_id": {"type": "string"}},
+            "required": ["tab_id"],
+        },
+    },
     "gui_connect_start": {
         "handler": tool_gui_connect_start,
         "description": (
@@ -1807,6 +1942,9 @@ _OVERRIDE_NAMES = frozenset(
         "gui_analyze",
         "gui_analyze_wait",
         "gui_analyze_poll",
+        "gui_post_analyze",
+        "gui_post_analyze_wait",
+        "gui_post_analyze_poll",
         "gui_connect_start",
         "gui_connect_wait",
         "gui_connect_poll",

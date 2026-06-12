@@ -90,7 +90,12 @@ from __future__ import annotations
 #      ({data_path[, image_path]}, .hdf5 + uniqueness suffix already applied)
 #      instead of {ok}/{} — the path is known synchronously at start, so the
 #      agent need not recover it from a later diagnostic.
-WIRE_VERSION = 21
+# v22: post-analysis (second analysis layer) RPCs — post_analyze.start
+#      (tab_id + updates -> {operation_id}; FIT-only worker, gates server-side on
+#      the primary analyze result), tab.get_post_analyze_params and
+#      tab.get_post_analyze_result (mirror the analyze read pair). New methods =
+#      contract change.
+WIRE_VERSION = 22
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -201,4 +206,9 @@ WIRE_VERSION = 21
 #      correct callers are unchanged — validate_params now enforces the contract
 #      that the handlers already assumed. WIRE_VERSION unchanged (no new RPC method
 #      or wire-shape change).
-GUI_VERSION = 27
+# v28: post-analysis dual-end RPCs (WIRE 22) — the existing PostAnalyzeService /
+#      start_post_analyze / get_post_analyze_result façade is now reachable over
+#      the wire (post_analyze.start + the two get_post_analyze read methods),
+#      mirroring the analyze trio. Carrier layer + UI were already in place; this
+#      only adds the dispatch handlers. Phase 4 (post-analysis dual-end).
+GUI_VERSION = 28

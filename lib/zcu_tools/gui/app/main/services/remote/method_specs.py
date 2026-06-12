@@ -478,6 +478,28 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         (_str("tab_id"), _obj_default("updates", "Analyze param updates")),
         tool_name="gui_analyze",
     ),
+    # Post-analysis (second analysis layer; mirrors the analyze trio above). It
+    # runs on top of an existing primary analyze result, so every entry gates
+    # server-side on that result existing (no version guard — same as
+    # analyze.start, which gates on has_run_result rather than expected_versions).
+    "tab.get_post_analyze_result": MethodSpec(
+        5.0, "Read tab post-analysis result scalar summary", (_str("tab_id"),)
+    ),
+    "tab.get_post_analyze_params": MethodSpec(
+        5.0, "Read current post-analysis params", (_str("tab_id"),)
+    ),
+    "post_analyze.start": MethodSpec(
+        30.0,
+        "Start the second-layer (post) analysis on the tab's PRIMARY analyze "
+        "result. Runs on a worker thread and returns an operation_id (like "
+        "analyze.start); the mcp gui_post_analyze tool awaits it so the agent "
+        "sees one synchronous call. Fast-fails with precondition_failed when the "
+        "tab has no primary analyze result to build on. 'updates' optionally "
+        "overrides post params (see gui_tab_get_post_analyze_params). Read the "
+        "fit summary with gui_tab_get_post_analyze_result.",
+        (_str("tab_id"), _obj_default("updates", "Post-analysis param updates")),
+        tool_name="gui_post_analyze",
+    ),
     "tab.get_cfg_summary": MethodSpec(
         5.0,
         "Read the tab cfg as a nested values view (read-only). Mirrors the cfg "
