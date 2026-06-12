@@ -9,6 +9,8 @@ This test proves the shared mechanism supports that pattern.
 
 from __future__ import annotations
 
+import weakref
+
 from qtpy.QtWidgets import QApplication, QLabel, QStackedWidget
 from zcu_tools.gui.plotting import (
     FigureContainer,
@@ -193,6 +195,119 @@ def test_attach_self_heals_dead_canvas_wrapper(qapp):
         assert container._stack.currentWidget() is fresh
     finally:
         plt.close(fig)
+
+
+def test_registry_evicts_gc_collected_figure(qapp):
+    """Root fix: the registry is weak-keyed, so once a figure is GC'd its entry
+    vanishes automatically — no stale ``id(fig)`` entry survives to be aliased by
+    a later figure that happens to reuse the collected id.
+
+    Without weak keys, the entry lingered forever (purge only ran in diagnostics)
+    and CPython id-reuse let a NEW figure hit the stale entry pointing at a
+    different container — the intermittent "analyze figure not displayed" bug.
+
+    The figure is registered directly (a bare ``Figure``, no canvas in any stack)
+    so the only strong reference is the local ``fig``; dropping it must let the
+    weak key evict the entry. This isolates weak-eviction from the explicit
+    pop paths (remove_canvas / clear_dynamic_canvases), which are the normal —
+    but not the only — way an entry leaves the registry.
+    """
+    del qapp
+    import gc
+
+    from matplotlib.figure import Figure
+    from zcu_tools.gui.plotting.host import _fig_container_registry
+
+    # The registry is a module global shared across tests, so measure the delta
+    # rather than the absolute count.
+    baseline = len(_fig_container_registry)
+
+    container = _make_container()
+    fig = Figure()
+    _fig_container_registry[fig] = container
+    assert get_figure_container(fig) is container
+    assert len(_fig_container_registry) == baseline + 1
+
+    fig_ref = weakref.ref(fig)
+    del fig
+    gc.collect()
+
+    assert fig_ref() is None, "figure was not GC'd; test cannot prove weak eviction"
+    # The weak key evicted exactly the collected figure's entry.
+    assert len(_fig_container_registry) == baseline
+
+
+def test_new_figure_does_not_detach_other_container(qapp):
+    """Root fix: attaching a new figure to container B never detaches the canvas
+    of an unrelated container A. After A's figure entry is gone from the registry
+    (weak-evicted), B's attach must leave A's current widget untouched (no
+    placeholder flip from a detach on the wrong container)."""
+    del qapp
+    import gc
+
+    import matplotlib.pyplot as plt
+    from matplotlib.figure import Figure
+    from zcu_tools.gui.plotting.host import _fig_container_registry
+
+    container_a = _make_container()
+    container_b = _make_container()
+
+    # A keeps a real, current canvas of its own.
+    fig_a = plt.figure()
+    canvas_a = attach_existing_figure_to_container(fig_a, container_a)
+    assert container_a._stack.currentWidget() is canvas_a
+
+    # A second figure was once mapped to container_a but its entry then got
+    # weak-evicted (the figure is GC'd). With an id-keyed dict this entry would
+    # linger and a new figure could alias it; weak keys make it vanish.
+    ghost = Figure()
+    _fig_container_registry[ghost] = container_a
+    del ghost
+    gc.collect()
+
+    fig_b = plt.figure()
+    try:
+        canvas_b = attach_existing_figure_to_container(fig_b, container_b)
+        # B got its own canvas; A's container is untouched (still showing A).
+        assert container_b._stack.currentWidget() is canvas_b
+        assert container_a._stack.currentWidget() is canvas_a
+    finally:
+        plt.close(fig_b)
+        plt.close(fig_a)
+
+
+def test_attach_ignores_stale_previous_container_entry(qapp):
+    """Stale-entry defense: if the registry maps a figure to a container that no
+    longer hosts its canvas, attaching to a new container must NOT call
+    detach_canvas on the stale one (which would flip it to its placeholder)."""
+    del qapp
+    import matplotlib.pyplot as plt
+    from zcu_tools.gui.plotting.host import _fig_container_registry
+
+    stale_container = _make_container()
+    target_container = _make_container()
+
+    # Give the stale container a real, current canvas of its own so we can detect
+    # an erroneous placeholder flip.
+    other_fig = plt.figure()
+    other_canvas = attach_existing_figure_to_container(other_fig, stale_container)
+    assert stale_container._stack.currentWidget() is other_canvas
+
+    fig = plt.figure()
+    try:
+        # Craft the stale state: registry says ``fig`` lives in stale_container,
+        # but stale_container never hosted fig's canvas.
+        _fig_container_registry[fig] = stale_container
+
+        canvas = attach_existing_figure_to_container(fig, target_container)
+
+        # The stale entry was dropped without detaching the unrelated container.
+        assert target_container._stack.currentWidget() is canvas
+        assert stale_container._stack.currentWidget() is other_canvas
+        assert get_figure_container(fig) is target_container
+    finally:
+        plt.close(fig)
+        plt.close(other_fig)
 
 
 # --- R4: a QThreadPool worker entering its own routing_scope routes correctly --

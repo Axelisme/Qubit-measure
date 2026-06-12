@@ -9,7 +9,7 @@ The host owns:
   worker→host plus a ``threading.Event`` round-trip that hands the attached
   canvas back to the worker. Containers (``container.py``) are passive widgets
   the host operates — they hold no signals.
-- the **figure registry** (``id(figure) → FigureContainer``). ``show`` / draw /
+- the **figure registry** (``Figure → FigureContainer``, weak-keyed). ``show`` / draw /
   ``close`` start from a bare ``Figure`` and resolve its container here; routing
   (``routing.py``) is only consulted at *attach* (which container new figures go
   to). Resolving refresh/activate/close from the registry — never from the
@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import weakref
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -49,7 +50,16 @@ if TYPE_CHECKING:
 
     from .container import FigureContainer
 
-_fig_container_registry: dict[int, FigureContainer] = {}
+# Keyed by the Figure itself (identity hash + weakref). A WeakKeyDictionary is
+# load-bearing, not a convenience: an ``id(fig)``-keyed dict never purges entries
+# on the normal render path, so after a figure is GC'd CPython can reuse its id
+# and a NEW figure aliases a stale entry pointing at a DIFFERENT container —
+# _attach_figure_canvas would then detach the wrong container's canvas and flip
+# it to its placeholder (the intermittent "analyze figure not displayed" bug).
+# Weak keys make GC'd figures vanish automatically, so id reuse cannot alias.
+_fig_container_registry: weakref.WeakKeyDictionary[Figure, FigureContainer] = (
+    weakref.WeakKeyDictionary()
+)
 _host: Any = None
 _shutting_down: bool = False
 
@@ -61,7 +71,7 @@ def set_shutting_down(value: bool) -> None:
 
 def drop_from_registry(fig: Figure) -> None:
     """Forget a figure→container mapping (called by Container.clear)."""
-    _fig_container_registry.pop(id(fig), None)
+    _fig_container_registry.pop(fig, None)
 
 
 @dataclass(frozen=True)
@@ -180,20 +190,23 @@ def refresh_figure_in_main_thread(fig: Figure) -> None:
 
 
 def get_figure_container(fig: Figure) -> FigureContainer | None:
-    return _fig_container_registry.get(id(fig))
+    return _fig_container_registry.get(fig)
 
 
 def _purge_stale_registry_entries() -> None:
     from qtpy import sip  # type: ignore[attr-defined]
     from qtpy.QtWidgets import QWidget  # type: ignore[attr-defined]
 
-    stale_ids: list[int] = []
-    for fig_id, container in list(_fig_container_registry.items()):
+    # GC-driven weakref eviction can mutate the registry mid-iteration, so snapshot
+    # to a plain list first (a live WeakKeyDictionary iterator would raise
+    # RuntimeError if a key is collected during the loop).
+    stale_figs: list[Figure] = []
+    for fig, container in list(_fig_container_registry.items()):
         try:
             container._stack.count()
         except RuntimeError:
             # The container's QStackedWidget itself was deleted.
-            stale_ids.append(fig_id)
+            stale_figs.append(fig)
             continue
         # Also evict entries whose canvas wrapper is dead: the registry maps a
         # figure to its container, but if the canvas was deleted the mapping is
@@ -202,18 +215,22 @@ def _purge_stale_registry_entries() -> None:
         for index in range(container._stack.count()):
             widget = container._stack.widget(index)
             figure = getattr(widget, "figure", None)
-            if isinstance(figure, Figure) and id(figure) == fig_id:
+            if figure is fig:
                 fig_canvas = widget
                 break
         if fig_canvas is None or sip.isdeleted(fig_canvas):  # type: ignore[attr-defined]
-            stale_ids.append(fig_id)
-    for fig_id in stale_ids:
-        _fig_container_registry.pop(fig_id, None)
+            stale_figs.append(fig)
+    for fig in stale_figs:
+        _fig_container_registry.pop(fig, None)
 
 
 def dump_plot_state() -> PlotStateSnapshot:
     _purge_stale_registry_entries()
-    attached_figure_ids = tuple(sorted(_fig_container_registry))
+    # Snapshot keys to a list before taking ids: WeakKeyDictionary iteration can
+    # raise if a figure is GC'd mid-loop.
+    attached_figure_ids = tuple(
+        sorted(id(fig) for fig in list(_fig_container_registry))
+    )
     return PlotStateSnapshot(
         active_figure_count=len(attached_figure_ids),
         attached_figure_ids=attached_figure_ids,
@@ -222,18 +239,20 @@ def dump_plot_state() -> PlotStateSnapshot:
 
 def assert_plot_invariants() -> None:
     _purge_stale_registry_entries()
-    for fig_id, container in _fig_container_registry.items():
+    # Snapshot before iterating: a key GC'd mid-loop would raise on a live
+    # WeakKeyDictionary iterator.
+    for fig, container in list(_fig_container_registry.items()):
         stack = container._stack
         found_canvas = False
         for index in range(stack.count()):
             widget = stack.widget(index)
             figure = getattr(widget, "figure", None)
-            if isinstance(figure, Figure) and id(figure) == fig_id:
+            if figure is fig:
                 found_canvas = True
                 break
         if not found_canvas:
             raise RuntimeError(
-                f"Figure registry invariant broken for figure id {fig_id}"
+                f"Figure registry invariant broken for figure id {id(fig)}"
             )
 
 
@@ -259,20 +278,43 @@ def _attach_figure_canvas(
     ):
         canvas = expected_canvas_class(fig)
 
-    previous_container = _fig_container_registry.get(id(fig))
+    previous_container = _fig_container_registry.get(fig)
     if previous_container is not None and previous_container is not container:
-        previous_container.detach_canvas(canvas)
+        # Defense in depth: only detach from the previous container if that entry
+        # is genuinely live — the container's stack must still exist (not a
+        # deleted Qt object) and must actually host this canvas. A stale/aliased
+        # entry (e.g. the canvas already moved, or the container was torn down)
+        # must NOT trigger detach_canvas, which would flip an unrelated
+        # container back to its placeholder. If stale, just drop the entry.
+        if _container_hosts_canvas(previous_container, canvas):
+            previous_container.detach_canvas(canvas)
+        else:
+            _fig_container_registry.pop(fig, None)
 
     container.attach_canvas(canvas)
-    _fig_container_registry[id(fig)] = container
+    _fig_container_registry[fig] = container
     return canvas
+
+
+def _container_hosts_canvas(container: FigureContainer, canvas: QWidget) -> bool:
+    """True if ``container``'s stack is live and currently holds ``canvas``.
+
+    Guards the detach path against stale/aliased registry entries: a dead
+    QStackedWidget raises on ``indexOf`` (treated as not-hosting), and a live
+    stack that does not contain the canvas means the mapping is stale.
+    """
+    try:
+        return container._stack.indexOf(canvas) >= 0
+    except RuntimeError:
+        # The container's QStackedWidget itself was deleted.
+        return False
 
 
 def _remove_canvas_impl(canvas: QWidget) -> None:
     figure = getattr(canvas, "figure", None)
     if not isinstance(figure, Figure):
         raise RuntimeError(f"Cannot remove canvas {canvas!r}: not a matplotlib canvas")
-    container = _fig_container_registry.pop(id(figure), None)
+    container = _fig_container_registry.pop(figure, None)
     if container is None:
         raise RuntimeError(
             f"Cannot remove canvas {canvas!r}: figure not tracked in registry"
@@ -327,7 +369,7 @@ def _get_host() -> Any:
                 try:
                     fig = payload["fig"]
                     canvas = fig.canvas
-                    container = _fig_container_registry.pop(id(fig), None)
+                    container = _fig_container_registry.pop(fig, None)
                     if container is not None and isinstance(canvas, QWidget):
                         container.detach_canvas(canvas)
                         canvas.deleteLater()
@@ -350,7 +392,7 @@ def _get_host() -> Any:
             def _on_activate(self, payload: Any) -> None:
                 try:
                     fig = payload["fig"]
-                    container = _fig_container_registry.get(id(fig))
+                    container = _fig_container_registry.get(fig)
                     if container is None:
                         raise RuntimeError(
                             "Figure is not attached to any FigureContainer"
