@@ -40,6 +40,8 @@ from zcu_tools.gui.app.main.adapter import (
     WritebackRequest,
 )
 
+from ._shared import bath_reset_writeback_items
+
 BathFreqGainRunResult: TypeAlias = FreqGainResult
 
 # The pi/2 readout tomography pulse sits at a fixed phase offset; the domain
@@ -162,7 +164,7 @@ class BathFreqGainAdapter(
         req: WritebackRequest[BathFreqGainRunResult, BathFreqGainAnalyzeResult],
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
-        return [
+        items: list[WritebackItem] = [
             MetaDictWriteback(
                 target_name="bathreset_gain",
                 description="Bath-reset cavity gain (a.u.)",
@@ -174,6 +176,8 @@ class BathFreqGainAdapter(
                 proposed_value=result.freq,
             ),
         ]
+        items.extend(bath_reset_writeback_items(req.ctx, req.run_result.cfg_snapshot))
+        return items
 
     def save(self, req: SaveDataRequest[BathFreqGainRunResult]) -> None:
         # D3: the domain FreqGainExp.save writes four phase-resolved HDF5 files

@@ -21,23 +21,21 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_readout_module_spec,
     make_reset_module_spec,
     md_scalar_float,
+    reset_module_writeback_items,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     ExpContext,
-    ModuleWriteback,
     NoAnalyzeParams,
     SweepSpec,
     SweepValue,
     WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
 
 SingleToneLengthRunResult: TypeAlias = LengthResult
 
@@ -149,22 +147,20 @@ class SingleToneLengthAdapter(
         req: WritebackRequest[SingleToneLengthRunResult, SingleToneLengthAnalyzeResult],
     ) -> Sequence[WritebackItem]:
         # D5: no scalar is fitted, so nothing is proposed back to the MetaDict.
-        # D2(a): as the last single-tone step, register the whole calibrated
-        # tested_reset (which already carries its md-linked sideband freq) as the
-        # final 'reset_10' module. The user adjusts the final length in the
-        # writeback dialog. Skipped without a cfg_snapshot (e.g. loaded from file).
-        snapshot = req.run_result.cfg_snapshot
-        if snapshot is None:
-            return []
-
-        spec, value = module_cfg_to_value(snapshot.modules.tested_reset)
-        return [
-            ModuleWriteback(
-                target_name="reset_10",
-                description="Reset with one pulse from 1 to 0",
-                edit_schema=CfgSchema(spec=spec, value=value),
+        # Gated per-experiment 'reset_10' proposal: when md carries the calibrated
+        # sideband freq, register the calibrated single-pulse reset built from this
+        # run's tested_reset template (md overwrites its freq).
+        items: list[WritebackItem] = []
+        items.extend(
+            reset_module_writeback_items(
+                req.ctx,
+                req.run_result.cfg_snapshot,
+                target="reset_10",
+                field_md_map=[("pulse_cfg.freq", "reset_f")],
+                desc="Reset with one pulse from 1 to 0",
             )
-        ]
+        )
+        return items
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.qub_name}_sidereset_length_{time.strftime('%m%d')}"

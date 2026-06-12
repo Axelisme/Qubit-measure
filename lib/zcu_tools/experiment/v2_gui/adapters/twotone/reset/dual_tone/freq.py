@@ -22,6 +22,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_two_pulse_reset_module_spec,
     md_scalar_float,
     proper_reset_freq_axis,
+    reset_module_writeback_items,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -39,6 +40,8 @@ from zcu_tools.gui.app.main.adapter import (
     WritebackRequest,
     require_soc_handles,
 )
+
+from ._shared import RESET_120_FIELD_MD_MAP
 
 DualToneFreqRunResult: TypeAlias = FreqResult
 
@@ -176,7 +179,7 @@ class DualToneFreqAdapter(
         req: WritebackRequest[DualToneFreqRunResult, DualToneFreqAnalyzeResult],
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
-        return [
+        items: list[WritebackItem] = [
             MetaDictWriteback(
                 target_name="reset_f1",
                 description="Dual-tone reset frequency 1 (MHz)",
@@ -188,6 +191,16 @@ class DualToneFreqAdapter(
                 proposed_value=result.freq2,
             ),
         ]
+        items.extend(
+            reset_module_writeback_items(
+                req.ctx,
+                req.run_result.cfg_snapshot,
+                target="reset_120",
+                field_md_map=RESET_120_FIELD_MD_MAP,
+                desc="Reset with two pulse from 1 to 2 to 0",
+            )
+        )
+        return items
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.qub_name}_dualreset_freq_{time.strftime('%m%d')}"

@@ -121,8 +121,8 @@ def _make_pulse(freq: float = 100.0, gain: float = 0.5) -> PulseCfg:
 def _snapshot_with_tested_reset(tested_reset: Any) -> Any:
     """A cfg_snapshot mock exposing modules.tested_reset (the calibrated reset).
 
-    The last-step adapters read only modules.tested_reset off the snapshot, so a
-    mock carrying the real reset cfg is enough to drive module writeback. Returned
+    The reset adapters read only modules.tested_reset off the snapshot, so a mock
+    carrying the real reset cfg is enough to drive module writeback. Returned
     untyped (Any) so it can seed the frozen result dataclasses' cfg_snapshot.
     """
     modules = MagicMock()
@@ -130,6 +130,21 @@ def _snapshot_with_tested_reset(tested_reset: Any) -> Any:
     cfg = MagicMock()
     cfg.modules = modules
     return cfg
+
+
+def _ctx_with_md(**md_values: float) -> Any:
+    """A WritebackRequest ctx whose md is a real MetaDict seeded with md_values.
+
+    The gated module writeback reads ``ctx.md`` (via md_has_key/md_get_float), so
+    module-writeback tests need a real MetaDict — a bare MagicMock md would make
+    every key "present" and defeat the gate.
+    """
+    ctx = MagicMock()
+    md = MetaDict()
+    for key, value in md_values.items():
+        setattr(md, key, value)
+    ctx.md = md
+    return ctx
 
 
 @pytest.mark.parametrize(
@@ -201,28 +216,69 @@ def test_reset_freq_locks_tested_reset_freq() -> None:
     assert pulse_cfg.fields["freq"] == DirectValue(0.0)
 
 
-def test_reset_freq_writeback_proposes_reset_f_and_resetf_w() -> None:
+def _single_freq_items(*, reset_f: float | None, with_snapshot: bool) -> list[Any]:
+    import numpy as np
     from matplotlib.figure import Figure
     from zcu_tools.experiment.v2_gui.adapters.twotone.reset.single_tone.freq import (
         SingleToneFreqAnalyzeResult,
     )
 
-    adapter = SingleToneFreqAdapter()
-
-    analyze = SingleToneFreqAnalyzeResult(freq=1523.4, fwhm=3.2, figure=Figure())
-    items = adapter.get_writeback_items(
-        WritebackRequest(
-            run_result=cast(FreqResult, MagicMock(spec=FreqResult)),
-            analyze_result=analyze,
-            ctx=cast(Any, MagicMock()),
+    snapshot: Any = None
+    if with_snapshot:
+        snapshot = _snapshot_with_tested_reset(
+            PulseResetCfg(pulse_cfg=_make_pulse(freq=0.0))
+        )
+    run_result = FreqResult(
+        freqs=np.array([0.0, 1.0]),
+        signals=np.array([0.0, 1.0], dtype=complex),
+        cfg_snapshot=snapshot,
+    )
+    md_kwargs = {} if reset_f is None else {"reset_f": reset_f}
+    return list(
+        SingleToneFreqAdapter().get_writeback_items(
+            WritebackRequest(
+                run_result=run_result,
+                analyze_result=SingleToneFreqAnalyzeResult(
+                    freq=1523.4, fwhm=3.2, figure=Figure()
+                ),
+                ctx=_ctx_with_md(**md_kwargs),
+            )
         )
     )
 
-    assert all(isinstance(it, MetaDictWriteback) for it in items)
-    by_name = {cast(MetaDictWriteback, it).target_name: it for it in items}
+
+def test_reset_freq_writeback_proposes_reset_f_and_resetf_w() -> None:
+    # md scalar items are always present; without the reset_f gate met there is no
+    # module item.
+    items = _single_freq_items(reset_f=None, with_snapshot=True)
+    md_items = [it for it in items if isinstance(it, MetaDictWriteback)]
+    by_name = {it.target_name: it for it in md_items}
     assert set(by_name) == {"reset_f", "resetf_w"}
-    assert cast(MetaDictWriteback, by_name["reset_f"]).proposed_value == 1523.4
-    assert cast(MetaDictWriteback, by_name["resetf_w"]).proposed_value == 3.2
+    assert by_name["reset_f"].proposed_value == 1523.4
+    assert by_name["resetf_w"].proposed_value == 3.2
+    assert not any(isinstance(it, ModuleWriteback) for it in items)
+
+
+def test_reset_freq_gated_reset_10_when_md_present() -> None:
+    from zcu_tools.gui.app.main.adapter import CfgSectionValue, DirectValue
+
+    # md has reset_f and a snapshot exists → reset_10 module proposed, freq from md.
+    items = _single_freq_items(reset_f=1500.0, with_snapshot=True)
+    mod_items = [it for it in items if isinstance(it, ModuleWriteback)]
+    assert len(mod_items) == 1
+    item = mod_items[0]
+    assert item.target_name == "reset_10"
+    assert item.description == "Reset with one pulse from 1 to 0"
+    assert item.edit_schema is not None
+    pulse_cfg = item.edit_schema.value.fields["pulse_cfg"]
+    assert isinstance(pulse_cfg, CfgSectionValue)
+    assert pulse_cfg.fields["freq"] == DirectValue(1500.0)
+
+
+def test_reset_freq_no_reset_10_without_snapshot() -> None:
+    # md has reset_f but no cfg_snapshot → only the md items remain.
+    items = _single_freq_items(reset_f=1500.0, with_snapshot=False)
+    assert all(isinstance(it, MetaDictWriteback) for it in items)
 
 
 def test_reset_length_sets_tested_reset_freq_from_md() -> None:
@@ -246,65 +302,62 @@ def test_reset_length_sets_tested_reset_freq_from_md() -> None:
     assert cast(EvalValue, pulse_cfg.fields["freq"]).expr == "reset_f"
 
 
-def test_reset_length_registers_reset_10_module() -> None:
+def _single_length_items(*, reset_f: float | None, with_snapshot: bool) -> list[Any]:
     import numpy as np
     from matplotlib.figure import Figure
     from zcu_tools.experiment.v2_gui.adapters.twotone.reset.single_tone.length import (
         SingleToneLengthAnalyzeResult,
     )
 
-    # D2(a): the last single-tone step registers the calibrated tested_reset as
-    # the final 'reset_10' module (no md scalar writeback).
-    tested_reset = PulseResetCfg(pulse_cfg=_make_pulse(freq=1500.0))
+    snapshot: Any = None
+    if with_snapshot:
+        # Swept freq is lock_literal 0.0 in the snapshot; md must overwrite it.
+        snapshot = _snapshot_with_tested_reset(
+            PulseResetCfg(pulse_cfg=_make_pulse(freq=0.0))
+        )
     run_result = LengthResult(
         lengths=np.array([0.1, 0.2]),
         signals=np.array([0.0, 1.0], dtype=complex),
-        cfg_snapshot=_snapshot_with_tested_reset(tested_reset),
+        cfg_snapshot=snapshot,
     )
-
-    items = list(
+    md_kwargs = {} if reset_f is None else {"reset_f": reset_f}
+    return list(
         SingleToneLengthAdapter().get_writeback_items(
             WritebackRequest(
                 run_result=run_result,
                 analyze_result=SingleToneLengthAnalyzeResult(figure=Figure()),
-                ctx=cast(Any, MagicMock()),
+                ctx=_ctx_with_md(**md_kwargs),
             )
         )
     )
 
+
+def test_reset_length_gated_reset_10_when_md_present() -> None:
     from zcu_tools.gui.app.main.adapter import CfgSchema, CfgSectionValue, DirectValue
 
-    assert len(items) == 1
-    item = items[0]
-    assert isinstance(item, ModuleWriteback)
+    # Gated per-experiment: md has reset_f + a snapshot → reset_10 proposed, with
+    # the calibrated sideband freq taken from md (overwriting the swept 0.0).
+    items = _single_length_items(reset_f=1500.0, with_snapshot=True)
+    mod_items = [it for it in items if isinstance(it, ModuleWriteback)]
+    assert len(mod_items) == 1
+    item = mod_items[0]
     assert item.target_name == "reset_10"
     assert item.description == "Reset with one pulse from 1 to 0"
-    # The calibrated sideband freq rides along in the registered module.
     assert isinstance(item.edit_schema, CfgSchema)
     pulse_cfg = item.edit_schema.value.fields["pulse_cfg"]
     assert isinstance(pulse_cfg, CfgSectionValue)
     assert pulse_cfg.fields["freq"] == DirectValue(1500.0)
 
 
-def test_reset_length_no_module_without_snapshot() -> None:
-    import numpy as np
-    from matplotlib.figure import Figure
-    from zcu_tools.experiment.v2_gui.adapters.twotone.reset.single_tone.length import (
-        SingleToneLengthAnalyzeResult,
-    )
+def test_reset_length_no_module_without_md() -> None:
+    # md lacks reset_f → gate not met → no module item (and no md item here).
+    items = _single_length_items(reset_f=None, with_snapshot=True)
+    assert list(items) == []
 
-    run_result = LengthResult(
-        lengths=np.array([0.1, 0.2]),
-        signals=np.array([0.0, 1.0], dtype=complex),
-        cfg_snapshot=None,
-    )
-    items = SingleToneLengthAdapter().get_writeback_items(
-        WritebackRequest(
-            run_result=run_result,
-            analyze_result=SingleToneLengthAnalyzeResult(figure=Figure()),
-            ctx=cast(Any, MagicMock()),
-        )
-    )
+
+def test_reset_length_no_module_without_snapshot() -> None:
+    # md has reset_f but no cfg_snapshot → gate not met → no module item.
+    items = _single_length_items(reset_f=1500.0, with_snapshot=False)
     assert list(items) == []
 
 
@@ -413,26 +466,138 @@ def test_dual_reset_freq_gains_md_link() -> None:
     assert cast(EvalValue, p2.fields["gain"]).expr == "reset_gain2"
 
 
+# The four md keys the gated reset_120 proposal needs (freq1/2 + gain1/2).
+_DUAL_RESET_MD = {
+    "reset_f1": 1438.0,
+    "reset_f2": 2615.0,
+    "reset_gain1": 0.5,
+    "reset_gain2": 0.6,
+}
+
+
+def _dual_two_pulse_snapshot() -> Any:
+    # Swept fields are lock_literal 0.0 in the snapshot; md overwrites all four.
+    return _snapshot_with_tested_reset(
+        TwoPulseResetCfg(
+            pulse1_cfg=_make_pulse(freq=0.0, gain=0.0),
+            pulse2_cfg=_make_pulse(freq=0.0, gain=0.0),
+        )
+    )
+
+
+def _assert_reset_120(items: list[Any]) -> None:
+    from zcu_tools.gui.app.main.adapter import CfgSchema, CfgSectionValue, DirectValue
+
+    mod_items = [it for it in items if isinstance(it, ModuleWriteback)]
+    assert len(mod_items) == 1
+    item = mod_items[0]
+    assert item.target_name == "reset_120"
+    assert item.description == "Reset with two pulse from 1 to 2 to 0"
+    assert isinstance(item.edit_schema, CfgSchema)
+    p1 = item.edit_schema.value.fields["pulse1_cfg"]
+    p2 = item.edit_schema.value.fields["pulse2_cfg"]
+    assert isinstance(p1, CfgSectionValue) and isinstance(p2, CfgSectionValue)
+    # All four calibrated fields taken from md (overwriting the swept 0.0).
+    assert p1.fields["freq"] == DirectValue(1438.0)
+    assert p2.fields["freq"] == DirectValue(2615.0)
+    assert p1.fields["gain"] == DirectValue(0.5)
+    assert p2.fields["gain"] == DirectValue(0.6)
+
+
 def test_dual_reset_freq_writeback_proposes_reset_f1_and_f2() -> None:
+    import numpy as np
     from matplotlib.figure import Figure
     from zcu_tools.experiment.v2_gui.adapters.twotone.reset.dual_tone.freq import (
         DualToneFreqAnalyzeResult,
     )
 
-    adapter = DualToneFreqAdapter()
+    # md scalar items always present; without all four gate keys no module item.
+    run_result = DualFreqResult(
+        freqs1=np.array([0.0, 1.0]),
+        freqs2=np.array([0.0, 1.0]),
+        signals=np.array([0.0, 1.0], dtype=complex),
+        cfg_snapshot=_dual_two_pulse_snapshot(),
+    )
     analyze = DualToneFreqAnalyzeResult(freq1=1438.0, freq2=2615.0, figure=Figure())
-    items = adapter.get_writeback_items(
-        WritebackRequest(
-            run_result=cast(DualFreqResult, MagicMock(spec=DualFreqResult)),
-            analyze_result=analyze,
-            ctx=cast(Any, MagicMock()),
+    items = list(
+        DualToneFreqAdapter().get_writeback_items(
+            WritebackRequest(
+                run_result=run_result, analyze_result=analyze, ctx=_ctx_with_md()
+            )
         )
     )
-    assert all(isinstance(it, MetaDictWriteback) for it in items)
-    by_name = {cast(MetaDictWriteback, it).target_name: it for it in items}
+    md_items = [it for it in items if isinstance(it, MetaDictWriteback)]
+    by_name = {it.target_name: it for it in md_items}
     assert set(by_name) == {"reset_f1", "reset_f2"}
-    assert cast(MetaDictWriteback, by_name["reset_f1"]).proposed_value == 1438.0
-    assert cast(MetaDictWriteback, by_name["reset_f2"]).proposed_value == 2615.0
+    assert by_name["reset_f1"].proposed_value == 1438.0
+    assert by_name["reset_f2"].proposed_value == 2615.0
+    assert not any(isinstance(it, ModuleWriteback) for it in items)
+
+
+def test_dual_reset_per_experiment_each_step_emits_reset_120() -> None:
+    """freq / power / length all propose reset_120 once md is complete — the
+    gated, order-independent, repeatable behavior (not a single 'last step')."""
+    import numpy as np
+    from matplotlib.figure import Figure
+    from zcu_tools.experiment.v2_gui.adapters.twotone.reset.dual_tone.freq import (
+        DualToneFreqAnalyzeResult,
+    )
+    from zcu_tools.experiment.v2_gui.adapters.twotone.reset.dual_tone.length import (
+        DualToneLengthAnalyzeResult,
+    )
+    from zcu_tools.experiment.v2_gui.adapters.twotone.reset.dual_tone.power import (
+        DualTonePowerAnalyzeResult,
+    )
+
+    freq_items = list(
+        DualToneFreqAdapter().get_writeback_items(
+            WritebackRequest(
+                run_result=DualFreqResult(
+                    freqs1=np.array([0.0, 1.0]),
+                    freqs2=np.array([0.0, 1.0]),
+                    signals=np.array([0.0, 1.0], dtype=complex),
+                    cfg_snapshot=_dual_two_pulse_snapshot(),
+                ),
+                analyze_result=DualToneFreqAnalyzeResult(
+                    freq1=1438.0, freq2=2615.0, figure=Figure()
+                ),
+                ctx=_ctx_with_md(**_DUAL_RESET_MD),
+            )
+        )
+    )
+    power_items = list(
+        DualTonePowerAdapter().get_writeback_items(
+            WritebackRequest(
+                run_result=DualPowerResult(
+                    gains1=np.array([0.0, 1.0]),
+                    gains2=np.array([0.0, 1.0]),
+                    signals=np.array([0.0, 1.0], dtype=complex),
+                    cfg_snapshot=_dual_two_pulse_snapshot(),
+                ),
+                analyze_result=DualTonePowerAnalyzeResult(
+                    gain1=0.5, gain2=0.7, figure=Figure()
+                ),
+                ctx=_ctx_with_md(**_DUAL_RESET_MD),
+            )
+        )
+    )
+    length_items = list(
+        DualToneLengthAdapter().get_writeback_items(
+            WritebackRequest(
+                run_result=DualLengthResult(
+                    lengths=np.array([0.1, 0.2]),
+                    signals=np.array([0.0, 1.0], dtype=complex),
+                    cfg_snapshot=_dual_two_pulse_snapshot(),
+                ),
+                analyze_result=DualToneLengthAnalyzeResult(figure=Figure()),
+                ctx=_ctx_with_md(**_DUAL_RESET_MD),
+            )
+        )
+    )
+    # Each step's own cfg snapshot is the template; md overwrites all four fields.
+    _assert_reset_120(freq_items)
+    _assert_reset_120(power_items)
+    _assert_reset_120(length_items)
 
 
 def test_dual_reset_freq_run_passes_method_hard() -> None:
@@ -483,25 +648,33 @@ def test_dual_reset_power_locks_gains_and_freqs_md_link() -> None:
 
 
 def test_dual_reset_power_writeback_proposes_reset_gains() -> None:
+    import numpy as np
     from matplotlib.figure import Figure
     from zcu_tools.experiment.v2_gui.adapters.twotone.reset.dual_tone.power import (
         DualTonePowerAnalyzeResult,
     )
 
-    adapter = DualTonePowerAdapter()
+    # md scalar items always present; without all four gate keys no module item.
+    run_result = DualPowerResult(
+        gains1=np.array([0.0, 1.0]),
+        gains2=np.array([0.0, 1.0]),
+        signals=np.array([0.0, 1.0], dtype=complex),
+        cfg_snapshot=_dual_two_pulse_snapshot(),
+    )
     analyze = DualTonePowerAnalyzeResult(gain1=0.5, gain2=0.7, figure=Figure())
-    items = adapter.get_writeback_items(
-        WritebackRequest(
-            run_result=cast(DualPowerResult, MagicMock(spec=DualPowerResult)),
-            analyze_result=analyze,
-            ctx=cast(Any, MagicMock()),
+    items = list(
+        DualTonePowerAdapter().get_writeback_items(
+            WritebackRequest(
+                run_result=run_result, analyze_result=analyze, ctx=_ctx_with_md()
+            )
         )
     )
-    assert all(isinstance(it, MetaDictWriteback) for it in items)
-    by_name = {cast(MetaDictWriteback, it).target_name: it for it in items}
+    md_items = [it for it in items if isinstance(it, MetaDictWriteback)]
+    by_name = {it.target_name: it for it in md_items}
     assert set(by_name) == {"reset_gain1", "reset_gain2"}
-    assert cast(MetaDictWriteback, by_name["reset_gain1"]).proposed_value == 0.5
-    assert cast(MetaDictWriteback, by_name["reset_gain2"]).proposed_value == 0.7
+    assert by_name["reset_gain1"].proposed_value == 0.5
+    assert by_name["reset_gain2"].proposed_value == 0.7
+    assert not any(isinstance(it, ModuleWriteback) for it in items)
 
 
 def test_dual_reset_length_carries_calibrated_reset() -> None:
@@ -532,73 +705,43 @@ def test_dual_reset_length_carries_calibrated_reset() -> None:
     assert cast(EvalValue, p2.fields["gain"]).expr == "reset_gain2"
 
 
-def test_dual_reset_length_registers_reset_120_module() -> None:
+def _dual_length_items(*, md: dict[str, float], with_snapshot: bool) -> list[Any]:
     import numpy as np
     from matplotlib.figure import Figure
     from zcu_tools.experiment.v2_gui.adapters.twotone.reset.dual_tone.length import (
         DualToneLengthAnalyzeResult,
     )
-    from zcu_tools.gui.app.main.adapter import (
-        CfgSchema,
-        CfgSectionValue,
-        DirectValue,
-    )
 
-    # D2(a): the last dual-tone step registers the calibrated tested_reset as the
-    # final 'reset_120' module (no md scalar writeback).
-    tested_reset = TwoPulseResetCfg(
-        pulse1_cfg=_make_pulse(freq=1438.0, gain=0.5),
-        pulse2_cfg=_make_pulse(freq=2615.0, gain=0.6),
-    )
     run_result = DualLengthResult(
         lengths=np.array([0.1, 0.2]),
         signals=np.array([0.0, 1.0], dtype=complex),
-        cfg_snapshot=_snapshot_with_tested_reset(tested_reset),
+        cfg_snapshot=_dual_two_pulse_snapshot() if with_snapshot else None,
     )
-
-    items = list(
+    return list(
         DualToneLengthAdapter().get_writeback_items(
             WritebackRequest(
                 run_result=run_result,
                 analyze_result=DualToneLengthAnalyzeResult(figure=Figure()),
-                ctx=cast(Any, MagicMock()),
+                ctx=_ctx_with_md(**md),
             )
         )
     )
 
-    assert len(items) == 1
-    item = items[0]
-    assert isinstance(item, ModuleWriteback)
-    assert item.target_name == "reset_120"
-    # Both calibrated tone frequencies ride along in the registered module.
-    assert isinstance(item.edit_schema, CfgSchema)
-    p1 = item.edit_schema.value.fields["pulse1_cfg"]
-    p2 = item.edit_schema.value.fields["pulse2_cfg"]
-    assert isinstance(p1, CfgSectionValue) and isinstance(p2, CfgSectionValue)
-    assert p1.fields["freq"] == DirectValue(1438.0)
-    assert p2.fields["freq"] == DirectValue(2615.0)
+
+def test_dual_reset_length_gated_reset_120_when_md_complete() -> None:
+    # All four md keys present + snapshot → reset_120 proposed, fields from md.
+    _assert_reset_120(_dual_length_items(md=_DUAL_RESET_MD, with_snapshot=True))
+
+
+def test_dual_reset_length_no_module_with_partial_md() -> None:
+    # Only some of the four gate keys → gate not met → no module item.
+    partial = {"reset_f1": 1438.0, "reset_f2": 2615.0}
+    assert list(_dual_length_items(md=partial, with_snapshot=True)) == []
 
 
 def test_dual_reset_length_no_module_without_snapshot() -> None:
-    import numpy as np
-    from matplotlib.figure import Figure
-    from zcu_tools.experiment.v2_gui.adapters.twotone.reset.dual_tone.length import (
-        DualToneLengthAnalyzeResult,
-    )
-
-    run_result = DualLengthResult(
-        lengths=np.array([0.1, 0.2]),
-        signals=np.array([0.0, 1.0], dtype=complex),
-        cfg_snapshot=None,
-    )
-    items = DualToneLengthAdapter().get_writeback_items(
-        WritebackRequest(
-            run_result=run_result,
-            analyze_result=DualToneLengthAnalyzeResult(figure=Figure()),
-            ctx=cast(Any, MagicMock()),
-        )
-    )
-    assert list(items) == []
+    # md complete but no cfg_snapshot → gate not met → no module item.
+    assert list(_dual_length_items(md=_DUAL_RESET_MD, with_snapshot=False)) == []
 
 
 @pytest.mark.parametrize(
@@ -697,26 +840,130 @@ def test_bath_freq_gain_centres_freq_and_locks_cavity_and_pi2() -> None:
     assert pi2.fields["phase"] == DirectValue(90.0)
 
 
+# The four md keys both gated bath variants need (cavity freq/gain + the two
+# pi/2 phase keys). reset_bath gates on max_phase, reset_bath_e on min_phase.
+_BATH_RESET_MD = {
+    "bathreset_freq": 5500.0,
+    "bathreset_gain": 0.7,
+    "bathreset_max_phase": 12.5,
+    "bathreset_min_phase": 192.5,
+}
+
+
+def _bath_snapshot() -> Any:
+    # Swept cavity freq/gain + pi/2 phase are lock_literal in the snapshot; md
+    # overwrites them.
+    return _snapshot_with_tested_reset(
+        BathResetCfg(
+            cavity_tone_cfg=_make_pulse(freq=0.0, gain=0.0),
+            qubit_tone_cfg=_make_pulse(freq=3000.0, gain=0.1),
+            pi2_cfg=_make_pulse(freq=3000.0, gain=0.2),
+        )
+    )
+
+
+def _assert_reset_bath_pair(items: list[Any]) -> None:
+    from zcu_tools.gui.app.main.adapter import CfgSchema, CfgSectionValue, DirectValue
+
+    mod_items = [it for it in items if isinstance(it, ModuleWriteback)]
+    by_name = {it.target_name: it for it in mod_items}
+    assert set(by_name) == {"reset_bath", "reset_bath_e"}
+    assert (
+        by_name["reset_bath"].description
+        == "Reset to Ground with cavity-assisted bath reset"
+    )
+    assert (
+        by_name["reset_bath_e"].description
+        == "Reset to Excited with cavity-assisted bath reset"
+    )
+    for target, phase in [("reset_bath", 12.5), ("reset_bath_e", 192.5)]:
+        edit_schema = by_name[target].edit_schema
+        assert isinstance(edit_schema, CfgSchema)
+        pi2 = edit_schema.value.fields["pi2_cfg"]
+        assert isinstance(pi2, CfgSectionValue)
+        assert pi2.fields["phase"] == DirectValue(phase)
+        # Cavity freq/gain taken from md (overwriting the swept 0.0).
+        cavity = edit_schema.value.fields["cavity_tone_cfg"]
+        assert isinstance(cavity, CfgSectionValue)
+        assert cavity.fields["freq"] == DirectValue(5500.0)
+        assert cavity.fields["gain"] == DirectValue(0.7)
+
+
 def test_bath_freq_gain_writeback_proposes_bathreset_gain_and_freq() -> None:
+    import numpy as np
     from matplotlib.figure import Figure
     from zcu_tools.experiment.v2_gui.adapters.twotone.reset.bath.freq_gain import (
         BathFreqGainAnalyzeResult,
     )
 
-    adapter = BathFreqGainAdapter()
+    # md scalar items always present; without the bath gate keys no module item.
+    run_result = BathFreqGainResult(
+        gains=np.array([0.0, 1.0]),
+        freqs=np.array([0.0, 1.0]),
+        signals=np.array([0.0, 1.0], dtype=complex),
+        cfg_snapshot=_bath_snapshot(),
+    )
     analyze = BathFreqGainAnalyzeResult(gain=0.72, freq=5483.0, figure=Figure())
-    items = adapter.get_writeback_items(
-        WritebackRequest(
-            run_result=cast(BathFreqGainResult, MagicMock(spec=BathFreqGainResult)),
-            analyze_result=analyze,
-            ctx=cast(Any, MagicMock()),
+    items = list(
+        BathFreqGainAdapter().get_writeback_items(
+            WritebackRequest(
+                run_result=run_result, analyze_result=analyze, ctx=_ctx_with_md()
+            )
         )
     )
-    assert all(isinstance(it, MetaDictWriteback) for it in items)
-    by_name = {cast(MetaDictWriteback, it).target_name: it for it in items}
+    md_items = [it for it in items if isinstance(it, MetaDictWriteback)]
+    by_name = {it.target_name: it for it in md_items}
     assert set(by_name) == {"bathreset_gain", "bathreset_freq"}
-    assert cast(MetaDictWriteback, by_name["bathreset_gain"]).proposed_value == 0.72
-    assert cast(MetaDictWriteback, by_name["bathreset_freq"]).proposed_value == 5483.0
+    assert by_name["bathreset_gain"].proposed_value == 0.72
+    assert by_name["bathreset_freq"].proposed_value == 5483.0
+    assert not any(isinstance(it, ModuleWriteback) for it in items)
+
+
+def test_bath_per_experiment_each_step_emits_reset_bath_pair() -> None:
+    """freq_gain / length / phase all propose reset_bath + reset_bath_e once the
+    bath md is complete — gated, order-independent, repeatable."""
+    import numpy as np
+    from matplotlib.figure import Figure
+    from zcu_tools.experiment.v2_gui.adapters.twotone.reset.bath.freq_gain import (
+        BathFreqGainAnalyzeResult,
+    )
+    from zcu_tools.experiment.v2_gui.adapters.twotone.reset.bath.length import (
+        BathLengthAnalyzeResult,
+    )
+
+    freq_items = list(
+        BathFreqGainAdapter().get_writeback_items(
+            WritebackRequest(
+                run_result=BathFreqGainResult(
+                    gains=np.array([0.0, 1.0]),
+                    freqs=np.array([0.0, 1.0]),
+                    signals=np.array([0.0, 1.0], dtype=complex),
+                    cfg_snapshot=_bath_snapshot(),
+                ),
+                analyze_result=BathFreqGainAnalyzeResult(
+                    gain=0.72, freq=5483.0, figure=Figure()
+                ),
+                ctx=_ctx_with_md(**_BATH_RESET_MD),
+            )
+        )
+    )
+    length_items = list(
+        BathLengthAdapter().get_writeback_items(
+            WritebackRequest(
+                run_result=BathLengthResult(
+                    lengths=np.array([0.1, 0.2]),
+                    signals=np.array([0.0, 1.0], dtype=complex),
+                    cfg_snapshot=_bath_snapshot(),
+                ),
+                analyze_result=BathLengthAnalyzeResult(figure=Figure()),
+                ctx=_ctx_with_md(**_BATH_RESET_MD),
+            )
+        )
+    )
+    phase_items = _bath_phase_items(with_snapshot=True, md=_BATH_RESET_MD)
+    _assert_reset_bath_pair(freq_items)
+    _assert_reset_bath_pair(length_items)
+    _assert_reset_bath_pair(phase_items)
 
 
 def test_bath_freq_gain_save_not_supported() -> None:
@@ -773,12 +1020,20 @@ def test_bath_length_holds_cavity_md_link_and_no_writeback() -> None:
     assert isinstance(pi2, CfgSectionValue)
     assert pi2.fields["phase"] == DirectValue(90.0)
 
-    # D5: no scalar fit → no writeback.
+    # D5: no scalar fit → no md writeback; with empty md the gated module proposal
+    # is also withheld, so nothing is proposed.
+    import numpy as np
+
+    run_result = BathLengthResult(
+        lengths=np.array([0.1, 0.2]),
+        signals=np.array([0.0, 1.0], dtype=complex),
+        cfg_snapshot=_bath_snapshot(),
+    )
     items = BathLengthAdapter().get_writeback_items(
         WritebackRequest(
-            run_result=cast(BathLengthResult, MagicMock(spec=BathLengthResult)),
+            run_result=run_result,
             analyze_result=BathLengthAnalyzeResult(figure=Figure()),
-            ctx=cast(Any, MagicMock()),
+            ctx=_ctx_with_md(),
         )
     )
     assert list(items) == []
@@ -820,7 +1075,11 @@ def test_bath_phase_locks_pi2_phase_and_holds_cavity() -> None:
 
 
 def _bath_phase_items(
-    *, with_snapshot: bool, max_phase: float = 12.5, min_phase: float = 192.5
+    *,
+    with_snapshot: bool,
+    max_phase: float = 12.5,
+    min_phase: float = 192.5,
+    md: dict[str, float] | None = None,
 ) -> list[Any]:
     import numpy as np
     from matplotlib.figure import Figure
@@ -828,19 +1087,10 @@ def _bath_phase_items(
         BathPhaseAnalyzeResult,
     )
 
-    snapshot: Any = None
-    if with_snapshot:
-        tested_reset = BathResetCfg(
-            cavity_tone_cfg=_make_pulse(freq=5500.0, gain=0.7),
-            qubit_tone_cfg=_make_pulse(freq=3000.0, gain=0.1),
-            pi2_cfg=_make_pulse(freq=3000.0, gain=0.2),
-        )
-        snapshot = _snapshot_with_tested_reset(tested_reset)
-
     run_result = BathPhaseResult(
         phases=np.array([-360.0, 360.0]),
         signals=np.array([0.0, 1.0], dtype=complex),
-        cfg_snapshot=snapshot,
+        cfg_snapshot=_bath_snapshot() if with_snapshot else None,
     )
 
     analyze = BathPhaseAnalyzeResult(
@@ -851,7 +1101,7 @@ def _bath_phase_items(
             WritebackRequest(
                 run_result=run_result,
                 analyze_result=analyze,
-                ctx=cast(Any, MagicMock()),
+                ctx=_ctx_with_md(**(md or {})),
             )
         )
     )
@@ -868,43 +1118,30 @@ def test_bath_phase_writeback_proposes_max_and_min_phase() -> None:
 
 
 def test_bath_phase_registers_reset_bath_and_reset_bath_e_modules() -> None:
-    from zcu_tools.gui.app.main.adapter import (
-        CfgSchema,
-        CfgSectionValue,
-        DirectValue,
-    )
+    # Gated per-experiment: md carries cavity freq/gain + both pi/2 phases → the
+    # phase step proposes reset_bath (max/ground) and reset_bath_e (min/excited),
+    # each with its pi/2 phase taken from the matching md key.
+    items = _bath_phase_items(with_snapshot=True, md=_BATH_RESET_MD)
+    _assert_reset_bath_pair(items)
 
-    # D2(a): the last bath step registers two final reset modules — reset_bath
-    # (pi/2 phase = max/ground) and reset_bath_e (pi/2 phase = min/excited).
-    items = _bath_phase_items(with_snapshot=True, max_phase=12.5, min_phase=192.5)
+
+def test_bath_phase_only_one_variant_when_partial_phase_md() -> None:
+    # Each variant gates independently: with only the max-phase key present,
+    # reset_bath is proposed but reset_bath_e is withheld.
+    partial = {
+        "bathreset_freq": 5500.0,
+        "bathreset_gain": 0.7,
+        "bathreset_max_phase": 12.5,
+    }
+    items = _bath_phase_items(with_snapshot=True, md=partial)
     mod_items = [it for it in items if isinstance(it, ModuleWriteback)]
-    by_name = {it.target_name: it for it in mod_items}
-    assert set(by_name) == {"reset_bath", "reset_bath_e"}
-    assert (
-        by_name["reset_bath"].description
-        == "Reset to Ground with cavity-assisted bath reset"
-    )
-    assert (
-        by_name["reset_bath_e"].description
-        == "Reset to Excited with cavity-assisted bath reset"
-    )
-
-    # Only pi2_cfg.phase differs between the two variants (max vs min).
-    for target, phase in [("reset_bath", 12.5), ("reset_bath_e", 192.5)]:
-        edit_schema = by_name[target].edit_schema
-        assert isinstance(edit_schema, CfgSchema)
-        pi2 = edit_schema.value.fields["pi2_cfg"]
-        assert isinstance(pi2, CfgSectionValue)
-        assert pi2.fields["phase"] == DirectValue(phase)
-        # The calibrated cavity freq rides along unchanged.
-        cavity = edit_schema.value.fields["cavity_tone_cfg"]
-        assert isinstance(cavity, CfgSectionValue)
-        assert cavity.fields["freq"] == DirectValue(5500.0)
+    assert {it.target_name for it in mod_items} == {"reset_bath"}
 
 
 def test_bath_phase_no_module_without_snapshot() -> None:
-    # Without a cfg_snapshot only the two md items remain (no module writeback).
-    items = _bath_phase_items(with_snapshot=False)
+    # Without a cfg_snapshot only the two md items remain (no module writeback),
+    # even when the bath md is complete.
+    items = _bath_phase_items(with_snapshot=False, md=_BATH_RESET_MD)
     assert all(isinstance(it, MetaDictWriteback) for it in items)
     assert len(items) == 2
 

@@ -36,6 +36,8 @@ from zcu_tools.gui.app.main.adapter import (
     WritebackRequest,
 )
 
+from ._shared import bath_reset_writeback_items
+
 BathLengthRunResult: TypeAlias = LengthResult
 
 # The domain replaces pi2_cfg.phase with a 4-point QickSweep1D("phase", 0, 270)
@@ -159,8 +161,11 @@ class BathLengthAdapter(
         req: WritebackRequest[BathLengthRunResult, BathLengthAnalyzeResult],
     ) -> Sequence[WritebackItem]:
         # D5: no scalar is fitted, so nothing is proposed back to the MetaDict.
-        del req
-        return []
+        # Gated per-experiment 'reset_bath' / 'reset_bath_e' proposals: emitted when
+        # md carries the calibrated cavity freq/gain and the matching pi/2 phase.
+        items: list[WritebackItem] = []
+        items.extend(bath_reset_writeback_items(req.ctx, req.run_result.cfg_snapshot))
+        return items
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.qub_name}_bathreset_len_{time.strftime('%m%d')}"

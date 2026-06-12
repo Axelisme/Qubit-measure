@@ -26,19 +26,18 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     ExpContext,
     MetaDictWriteback,
-    ModuleWriteback,
     NoAnalyzeParams,
     SweepSpec,
     SweepValue,
     WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
+
+from ._shared import bath_reset_writeback_items
 
 BathPhaseRunResult: TypeAlias = PhaseResult
 
@@ -172,34 +171,11 @@ class BathPhaseAdapter(
             ),
         ]
 
-        # D2(a): as the last bath step, register two final reset modules from the
-        # calibrated tested_reset (which already carries its md-linked cavity
-        # freq/gain). Each is the same reset with only pi2_cfg.phase overridden —
-        # 'reset_bath' to the max phase (resets to ground), 'reset_bath_e' to the
-        # min phase (resets to excited). Skipped without a cfg_snapshot.
-        snapshot = req.run_result.cfg_snapshot
-        if snapshot is not None:
-            for target, phase, desc in [
-                (
-                    "reset_bath",
-                    result.max_phase,
-                    "Reset to Ground with cavity-assisted bath reset",
-                ),
-                (
-                    "reset_bath_e",
-                    result.min_phase,
-                    "Reset to Excited with cavity-assisted bath reset",
-                ),
-            ]:
-                spec, value = module_cfg_to_value(snapshot.modules.tested_reset)
-                value.with_field("pi2_cfg.phase", phase)
-                items.append(
-                    ModuleWriteback(
-                        target_name=target,
-                        description=desc,
-                        edit_schema=CfgSchema(spec=spec, value=value),
-                    )
-                )
+        # Gated per-experiment 'reset_bath' / 'reset_bath_e' proposals: each variant
+        # is the calibrated tested_reset with cavity freq/gain and its pi/2 phase
+        # overwritten from md (max-phase → ground, min-phase → excited). Emitted
+        # only when the matching md keys are present.
+        items.extend(bath_reset_writeback_items(req.ctx, req.run_result.cfg_snapshot))
 
         return items
 

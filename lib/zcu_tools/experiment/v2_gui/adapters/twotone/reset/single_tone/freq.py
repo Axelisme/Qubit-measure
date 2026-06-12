@@ -21,6 +21,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_readout_module_spec,
     make_reset_module_spec,
     proper_reset_freq_range,
+    reset_module_writeback_items,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -142,7 +143,7 @@ class SingleToneFreqAdapter(
         req: WritebackRequest[SingleToneFreqRunResult, SingleToneFreqAnalyzeResult],
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
-        return [
+        items: list[WritebackItem] = [
             MetaDictWriteback(
                 target_name="reset_f",
                 description="Sideband reset frequency (MHz)",
@@ -154,6 +155,19 @@ class SingleToneFreqAdapter(
                 proposed_value=result.fwhm,
             ),
         ]
+        # Gated per-experiment 'reset_10' proposal: when md carries the calibrated
+        # sideband freq, register the calibrated single-pulse reset built from this
+        # run's tested_reset template (md overwrites its freq).
+        items.extend(
+            reset_module_writeback_items(
+                req.ctx,
+                req.run_result.cfg_snapshot,
+                target="reset_10",
+                field_md_map=[("pulse_cfg.freq", "reset_f")],
+                desc="Reset with one pulse from 1 to 0",
+            )
+        )
+        return items
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.qub_name}_sidereset_freq_{time.strftime('%m%d')}"
