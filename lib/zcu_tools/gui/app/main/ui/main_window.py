@@ -291,7 +291,51 @@ class ExpTabWidget(QWidget):
         analysis_scroll.setWidget(analysis_inner)
         self._left_tabs.addTab(analysis_scroll, "Analysis")
 
-        # ── Tab 2: Guide ─────────────────────────────────────────────────
+        # ── Tab 2: Post-Analysis ─────────────────────────────────────────
+        # A second analysis layer that runs on top of the primary analyze result
+        # (e.g. single-shot multi-backend discrimination). Only adapters declaring
+        # ``capabilities.post_analysis`` enable it; for the rest the whole sub-tab
+        # is hidden. Its figure lives in this sub-tab (a *separate* container from
+        # the primary plot on the right pane), so the two never overwrite.
+        post_scroll = QScrollArea()
+        post_scroll.setWidgetResizable(True)
+        post_inner = QWidget()
+        post_layout = QVBoxLayout(post_inner)
+        post_layout.setAlignment(Qt.AlignTop)  # type: ignore[attr-defined]
+
+        self._post_analyze_section = _CollapsibleSection(
+            "Post-Analysis", collapsible=True, collapsed=False
+        )
+        self.post_analyze_form = AnalyzeFormWidget()
+        self._post_analyze_section.body_layout.addWidget(self.post_analyze_form)
+        post_layout.addWidget(self._post_analyze_section)
+
+        # Gate hint shown until a primary analyze result exists (form/Run disabled).
+        self._post_gate_label = QLabel("Run analyze first to enable post-analysis.")
+        self._post_gate_label.setWordWrap(True)
+        self._post_gate_label.setStyleSheet("color: gray;")
+        post_layout.addWidget(self._post_gate_label)
+
+        self.post_analyze_btn = QPushButton("Run Post-Analysis")
+        post_layout.addWidget(self.post_analyze_btn)
+
+        # The post figure renders in its own stack here (separate from the primary
+        # analyze plot on the right pane).
+        self._post_plot_stack = QStackedWidget()
+        self._post_plot_placeholder = QLabel("(no post-analysis plot yet)")
+        self._post_plot_placeholder.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
+        self._post_plot_stack.addWidget(self._post_plot_placeholder)
+        self._post_figure_container = FigureContainer(
+            self._post_plot_stack, self._post_plot_placeholder
+        )
+        self._post_canvas_widget: QWidget | None = None
+        self._post_plot_stack.setMinimumHeight(240)
+        post_layout.addWidget(self._post_plot_stack, stretch=1)
+
+        post_scroll.setWidget(post_inner)
+        self._post_tab_index = self._left_tabs.addTab(post_scroll, "Post-Analysis")
+
+        # ── Tab 3: Guide ─────────────────────────────────────────────────
         # Read-only orientation for this adapter (behavior / expects / writeback
         # / recommended). Static content — filled once at tab creation from the
         # adapter's AdapterGuide; no subscription/refresh needed.
@@ -445,6 +489,8 @@ class ExpTabWidget(QWidget):
         self._populate_cfg(snapshot.cfg_schema, self._ctrl)
         if snapshot.analyze_params is not None and self.has_analyze_params():
             self.analyze_form.populate_values(snapshot.analyze_params)
+        if snapshot.post_analyze_params is not None and self.has_post_analyze_params():
+            self.post_analyze_form.populate_values(snapshot.post_analyze_params)
         if snapshot.save_paths is not None:
             self.set_save_paths(
                 snapshot.save_paths.data_path, snapshot.save_paths.image_path
@@ -476,6 +522,15 @@ class ExpTabWidget(QWidget):
 
     def has_analyze_params(self) -> bool:
         return self.analyze_form.has_params()
+
+    def populate_post_analyze_params(self, instance: object) -> None:
+        self.post_analyze_form.populate(instance)
+
+    def read_post_analyze_params(self) -> object:
+        return self.post_analyze_form.read_params()
+
+    def has_post_analyze_params(self) -> bool:
+        return self.post_analyze_form.has_params()
 
     def update_writeback_items(self, items: list[WritebackItem]) -> None:
         self._writeback_count = sum(1 for item in items if item.selected)
@@ -534,6 +589,27 @@ class ExpTabWidget(QWidget):
             raise RuntimeError("Attached analysis canvas does not support draw()")
         draw()
         logger.debug("show_analysis_figure: tab_id=%r canvas set", self.tab_id)
+
+    def reset_post_plot(self) -> None:
+        """Drop any post-analysis canvas, revert to the post placeholder."""
+        self._post_figure_container.clear_dynamic_canvases()
+        self._post_canvas_widget = None
+
+    def show_post_analysis_figure(self, fig: Figure) -> None:
+        """Embed a post-analysis Figure in the Post sub-tab's own plot stack
+        (separate from the primary analyze plot)."""
+        canvas = attach_existing_figure_to_container(fig, self._post_figure_container)
+        if (
+            self._post_canvas_widget is not None
+            and self._post_canvas_widget is not canvas
+        ):
+            remove_canvas(self._post_canvas_widget)
+        self._post_canvas_widget = canvas
+        draw = getattr(canvas, "draw", None)
+        if not callable(draw):
+            raise RuntimeError("Attached post-analysis canvas does not support draw()")
+        draw()
+        logger.debug("show_post_analysis_figure: tab_id=%r canvas set", self.tab_id)
 
     def _on_cfg_validity_changed(self, valid: bool) -> None:
         del valid
@@ -659,6 +735,17 @@ class ExpTabWidget(QWidget):
             idle and state.has_context and state.has_analyze_result
         )
 
+        # Post-analysis sub-tab: shown only for adapters that declare it. The form
+        # + Run are gated on a *primary* analyze result existing (the post layer
+        # builds on it); a hint label is shown while that gate is closed.
+        has_post = capabilities.post_analysis
+        self._left_tabs.setTabVisible(self._post_tab_index, has_post)
+        if has_post:
+            post_enabled = idle and state.has_analyze_result
+            self.post_analyze_form.setEnabled(post_enabled)
+            self.post_analyze_btn.setEnabled(post_enabled)
+            self._post_gate_label.setVisible(not state.has_analyze_result)
+
     def _bind_to_controller(self, main_window: MainWindow) -> None:
         tab_id = self.tab_id
         # Held so the Reset handler can refresh interaction state after re-seeding
@@ -689,12 +776,20 @@ class ExpTabWidget(QWidget):
                 tab_id, instance
             )
         )
+        self.post_analyze_form.params_changed.connect(
+            lambda instance: self._ctrl.update_tab_post_analyze_param_instance(
+                tab_id, instance
+            )
+        )
         self._data_path_edit.textChanged.connect(save_paths_cb)
         self._image_path_edit.textChanged.connect(save_paths_cb)
         self.reset_btn.clicked.connect(self._on_reset_cfg_clicked)
         self.run_btn.clicked.connect(lambda: main_window._on_run_stop_clicked(tab_id))
         self.analyze_btn.clicked.connect(
             lambda: main_window._on_analyze_clicked(tab_id)
+        )
+        self.post_analyze_btn.clicked.connect(
+            lambda: main_window._on_post_analyze_clicked(tab_id)
         )
         self.writeback_widget.apply_requested.connect(
             lambda: main_window._on_writeback_inline_apply(tab_id)
@@ -940,9 +1035,11 @@ class MainWindow(QMainWindow):
             return
         snapshot = self._ctrl.get_tab_snapshot(tab_id)
         self.refresh_tab_analyze_form(tab_id, snapshot)
+        self.refresh_tab_post_analyze_form(tab_id, snapshot)
         self.refresh_tab_writeback(tab_id, snapshot)
         self.refresh_tab_save_paths(tab_id, snapshot)
         self.refresh_tab_figure(tab_id, snapshot)
+        self.refresh_tab_post_figure(tab_id, snapshot)
         # The auto-switch to Analysis lives in _on_bus_run_finished (it needs the
         # run outcome); content refresh here is outcome-agnostic.
         self.refresh_tab_interaction(tab_id, snapshot)
@@ -988,6 +1085,25 @@ class MainWindow(QMainWindow):
         tab_w.populate_analyze_params(current.analyze_params)
         tab_w.analyze_form.populate_values(current.analyze_params)
 
+    def refresh_tab_post_analyze_form(
+        self, tab_id: str, snapshot: TabSnapshot | None = None
+    ) -> None:
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return
+        current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
+        assert current.capabilities is not None  # render snapshot fills live fields
+        # Only post-analysis adapters have a post form; for the rest there is
+        # nothing to fill. When the primary analyze result is invalidated the post
+        # params are cleared (State), so there is no instance to populate — the
+        # gate (update_interaction_state) disables the empty form.
+        if not current.capabilities.post_analysis:
+            return
+        if current.post_analyze_params is None:
+            return
+        tab_w.populate_post_analyze_params(current.post_analyze_params)
+        tab_w.post_analyze_form.populate_values(current.post_analyze_params)
+
     def refresh_tab_writeback(
         self, tab_id: str, snapshot: TabSnapshot | None = None
     ) -> None:
@@ -1018,6 +1134,21 @@ class MainWindow(QMainWindow):
         figure = current.figure
         if figure is not None:
             self.show_analysis_image(tab_id, figure)
+
+    def refresh_tab_post_figure(
+        self, tab_id: str, snapshot: TabSnapshot | None = None
+    ) -> None:
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return
+        current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
+        post_figure = current.post_figure
+        if post_figure is not None:
+            self.show_post_analysis_image(tab_id, post_figure)
+        else:
+            # Invalidation (re-run / re-analyze cleared the post result): drop any
+            # stale post canvas so the Post sub-tab shows its placeholder.
+            tab_w.reset_post_plot()
 
     def refresh_run_lock(self, running_tab_id: str | None) -> None:
         logger.debug("refresh_run_lock: running_tab_id=%r", running_tab_id)
@@ -1087,6 +1218,15 @@ class MainWindow(QMainWindow):
         tab_w.reset_plot()  # clear prior liveplot before new run/analyze
         return tab_w._figure_container
 
+    def make_post_live_container(self, tab_id: str) -> Any:
+        """RenderHost impl: the tab's separate post-analysis figure container,
+        cleared before each post run (mirrors ``make_live_container``)."""
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return None
+        tab_w.reset_post_plot()
+        return tab_w._post_figure_container
+
     def mount_interactive_analysis(
         self,
         tab_id: str,
@@ -1155,6 +1295,13 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         tab_w.show_analysis_figure(fig)
+
+    def show_post_analysis_image(self, tab_id: str, fig: Any) -> None:
+        logger.debug("show_post_analysis_image: tab_id=%r", tab_id)
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return
+        tab_w.show_post_analysis_figure(fig)
 
     # ------------------------------------------------------------------
     # Internal event handlers
@@ -1258,6 +1405,13 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         self._ctrl.analyze(tab_id, tab_w.read_analyze_params())
+
+    def _on_post_analyze_clicked(self, tab_id: str) -> None:
+        logger.info("_on_post_analyze_clicked: tab_id=%r", tab_id)
+        tab_w = self._resolve_tab_widget(tab_id, "_on_post_analyze_clicked")
+        if tab_w is None:
+            return
+        self._ctrl.start_post_analyze(tab_id, tab_w.read_post_analyze_params())
 
     def _on_writeback_inline_apply(self, tab_id: str) -> None:
         logger.info("_on_writeback_inline_apply: tab_id=%r", tab_id)

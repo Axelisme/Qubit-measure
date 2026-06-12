@@ -71,6 +71,10 @@ class TabSnapshot:
     interaction: TabInteractionState | None = None
     capabilities: AdapterCapabilities | None = None
     analyze_params: object | None = None
+    # Post-analysis (second layer) live render fields, mirroring analyze_params /
+    # figure. None until the user has a post param instance / a post result.
+    post_analyze_params: object | None = None
+    post_figure: Figure | None = None
     writeback_items: tuple[WritebackItem, ...] = ()
     figure: Figure | None = None
     # Render-computed effective paths (override, else adapter suggestion from

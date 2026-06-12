@@ -124,6 +124,10 @@ class TabInteractionState:
     has_run_result: bool
     has_analyze_result: bool
     has_figure: bool
+    # Post-analysis (second layer) facts — gate the Post sub-tab. The post form
+    # is enabled once a primary analyze result exists; the post figure/summary
+    # render once a post result exists.
+    has_post_analyze_result: bool = False
 
 
 class State(SessionState):

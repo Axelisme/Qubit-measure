@@ -72,6 +72,7 @@ class TabService:
             has_run_result=tab.has_run_result(),
             has_analyze_result=tab.has_analyze_result(),
             has_figure=tab.has_figure(),
+            has_post_analyze_result=tab.has_post_analyze_result(),
         )
         return TabSnapshot(
             adapter_name=tab.adapter_name,
@@ -81,6 +82,8 @@ class TabService:
             interaction=interaction,
             capabilities=tab.adapter.capabilities,
             analyze_params=tab.analyze_param_instance,
+            post_analyze_params=tab.post_analyze_param_instance,
+            post_figure=tab.post_figure,
             writeback_items=tuple(self._writeback.get_tab_writeback_items(tab_id)),
             figure=tab.figure,
             save_paths=tab.effective_save_paths(ctx),
@@ -145,6 +148,16 @@ class TabService:
             return []
         return describe_analyze_params(adapter.analyze_params_cls())
 
+    def adapter_post_analyze_params(self, adapter_name: str) -> list[dict]:
+        """Static post-analysis param field spec, or [] when post-analysis is not
+        supported. Mirrors ``adapter_analyze_params`` for the second layer."""
+        from zcu_tools.gui.app.main.adapter import describe_analyze_params
+
+        adapter = self._registry.create(adapter_name)
+        if not adapter.capabilities.post_analysis:
+            return []
+        return describe_analyze_params(adapter.post_analyze_params_cls())
+
     def adapter_guide(self, adapter_name: str) -> dict:
         """Static human-facing orientation guide of an adapter (five fields)."""
         import dataclasses
@@ -184,6 +197,29 @@ class TabService:
 
     def update_tab_analyze_param_instance(self, tab_id: str, instance: object) -> None:
         self._state.update_tab_analyze_param_instance(tab_id, instance)
+
+    def initialize_tab_post_analyze_params(self, tab_id: str) -> object:
+        """Build + store the post-analysis param instance once the primary analyze
+        result exists (mirrors ``initialize_tab_analyze_params``). Fast-fails if
+        there is no primary analyze result to seed from."""
+        tab = self._state.get_tab(tab_id)
+        if tab.analyze_result is None:
+            raise RuntimeError(
+                "No primary analyze result available to build post-analysis params"
+            )
+        instance = tab.adapter.get_post_analyze_params(
+            tab.analyze_result, self._state.exp_context
+        )
+        self._state.update_tab_post_analyze_param_instance(tab_id, instance)
+        return instance
+
+    def update_tab_post_analyze_param_instance(
+        self, tab_id: str, instance: object
+    ) -> None:
+        self._state.update_tab_post_analyze_param_instance(tab_id, instance)
+
+    def get_tab_post_analyze_result(self, tab_id: str) -> object | None:
+        return self._state.get_tab(tab_id).post_analyze_result
 
     def get_tab_save_paths(self, tab_id: str) -> SavePaths | None:
         tab = self._state.get_tab(tab_id)

@@ -16,6 +16,7 @@ from .background import BackgroundService
 from .cfg_editor import CfgEditorService
 from .guard import GuardService
 from .operation_gate import OperationGate
+from .post_analyze import PostAnalyzeService
 from .run import RunService
 from .save import SaveService
 from .tab import TabService
@@ -56,6 +57,7 @@ class AppServices:
     tab: TabService
     run: RunService
     analyze: AnalyzeService
+    post_analyze: PostAnalyzeService
     save: SaveService
     writeback: WritebackService
     workspace: WorkspaceService
@@ -123,6 +125,9 @@ def build_app_services(
             state, background, bus, operation_gate, handles, writeback, progress
         ),
         analyze=AnalyzeService(state, background, bus, writeback, handles),
+        # Second analysis layer (post_analysis cap) — handle-only off-main worker,
+        # same background/handles as the primary analyze (ADR-0019).
+        post_analyze=PostAnalyzeService(state, background, bus, handles),
         save=SaveService(state, background, bus),
         writeback=writeback,
         workspace=WorkspaceService(state, tab, bus),

@@ -40,6 +40,7 @@ from .persistence_types import (
     PersistenceError,
 )
 from .ports import RestoreIssue, RestoreReport
+from .post_analyze import PostAnalyzeService
 from .run import RunService
 from .save import SaveResultOutcome, SaveService
 from .tab import TabService, TabSnapshot
@@ -61,6 +62,7 @@ __all__ = [
     "OperationConflictError",
     "OperationGate",
     "OperationKind",
+    "PostAnalyzeService",
     "GuardError",
     "GuardService",
     "RunPermit",

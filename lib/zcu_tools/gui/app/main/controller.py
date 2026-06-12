@@ -115,6 +115,12 @@ class RenderHost(Protocol):
 
     def make_live_container(self, tab_id: str) -> FigureContainer | None: ...
 
+    def make_post_live_container(self, tab_id: str) -> FigureContainer | None:
+        """The tab's *separate* post-analysis figure container (the Post sub-tab
+        owns its own canvas, kept apart from the primary analyze plot). Headless
+        Views may return None, like ``make_live_container``."""
+        ...
+
     def mount_interactive_analysis(
         self,
         tab_id: str,
@@ -226,6 +232,7 @@ class Controller:
         self._tab_svc = services.tab
         self._run_svc = services.run
         self._analyze_svc = services.analyze
+        self._post_analyze_svc = services.post_analyze
         self._save_svc = services.save
         self._writeback_svc = services.writeback
         self._workspace_svc = services.workspace
@@ -248,6 +255,10 @@ class Controller:
         self._run_svc.run_failed.connect(self._on_run_failed)
         self._analyze_svc.analyze_finished.connect(self._on_analyze_finished)
         self._analyze_svc.analyze_failed.connect(self._on_analyze_failed)
+        self._post_analyze_svc.post_analyze_finished.connect(
+            self._on_post_analyze_finished
+        )
+        self._post_analyze_svc.post_analyze_failed.connect(self._on_post_analyze_failed)
         self._save_svc.save_finished.connect(self._on_save_finished)
         self._save_svc.save_failed.connect(self._on_save_failed)
         self._save_svc.save_result_finished.connect(self._on_save_result_finished)
@@ -320,10 +331,24 @@ class Controller:
         self._notify("error", "Run failed", str(error))
 
     def _on_analyze_finished(self, tab_id: str, _result: object) -> None:
+        # A fresh primary analyze result seeds the post-analysis params (mirrors
+        # how a finished run seeds the analyze params). Only adapters declaring
+        # post_analysis are routed there; the base get_post_analyze_params is a
+        # Fast-Fail guard. The primary result is already in State (AnalyzeService).
+        if self._state.get_tab(tab_id).adapter.capabilities.post_analysis:
+            self._tab_svc.initialize_tab_post_analyze_params(tab_id)
         self._bus.emit(TabContentChangedPayload(tab_id=tab_id))
 
     def _on_analyze_failed(self, _tab_id: str, error: Exception) -> None:
         self._notify("error", "Analyze failed", str(error))
+
+    def _on_post_analyze_finished(self, tab_id: str, _result: object) -> None:
+        # The post result + figure are already in State (PostAnalyzeService);
+        # emit the content event so the View refreshes the Post sub-tab.
+        self._bus.emit(TabContentChangedPayload(tab_id=tab_id))
+
+    def _on_post_analyze_failed(self, _tab_id: str, error: Exception) -> None:
+        self._notify("error", "Post-analysis failed", str(error))
 
     def _on_save_finished(self, tab_id: str, data_path: str) -> None:
         del tab_id
@@ -712,6 +737,34 @@ class Controller:
                 lambda session: self._analyze_svc.finish_interactive(tab_id, session),
             )
         return token
+
+    # ------------------------------------------------------------------
+    # Post-analysis flow (second layer; PostAnalyzeService)
+    # ------------------------------------------------------------------
+
+    def start_post_analyze(
+        self, tab_id: str, post_analyze_params_instance: object
+    ) -> int:
+        """Start the second-layer analysis on a tab's primary analyze result.
+
+        Returns the operation token. PostAnalyzeService gates on tab-busy + a
+        primary analyze result existing. The post figure goes to the tab's
+        *separate* post container (kept apart from the primary plot)."""
+        host = self._render_host
+        figure_container = (
+            host.make_post_live_container(tab_id) if host is not None else None
+        )
+        return self._post_analyze_svc.start_post_analyze(
+            tab_id, post_analyze_params_instance, figure_container
+        )
+
+    def get_post_analyze_result(self, tab_id: str) -> object | None:
+        return self._tab_svc.get_tab_post_analyze_result(tab_id)
+
+    def update_tab_post_analyze_param_instance(
+        self, tab_id: str, instance: object
+    ) -> None:
+        self._tab_svc.update_tab_post_analyze_param_instance(tab_id, instance)
 
     def run_background(
         self, compute: Callable[[], object], on_done: Callable[[object], None]
