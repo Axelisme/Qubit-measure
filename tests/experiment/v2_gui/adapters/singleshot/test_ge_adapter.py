@@ -289,7 +289,7 @@ def test_ge_get_post_analyze_params_defaults_to_pca() -> None:
     assert params.angle is None
 
 
-def test_ge_writeback_proposes_fid_and_ge_s(
+def test_ge_writeback_proposes_fid_ge_s_and_complex_centers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     adapter = GEAdapter()
@@ -310,4 +310,10 @@ def test_ge_writeback_proposes_fid_and_ge_s(
         for item in items
         if isinstance(item, MetaDictWriteback)
     }
-    assert targets == {"fid": pytest.approx(0.95), "ge_s": pytest.approx(0.3)}
+    assert set(targets) == {"fid", "ge_s", "g_center", "e_center"}
+    assert targets["fid"] == pytest.approx(0.95)
+    assert targets["ge_s"] == pytest.approx(0.3)
+    # The complex centres are proposed verbatim (default fixture: -1+0j / 1+0j).
+    assert targets["g_center"] == -1.0 + 0j
+    assert targets["e_center"] == 1.0 + 0j
+    assert isinstance(targets["g_center"], complex)

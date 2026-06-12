@@ -128,10 +128,9 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
                 "exists."
             ),
             typical_writeback=(
-                "Proposes the fitted assignment fidelity into MetaDict 'fid' and "
-                "the cluster width into 'ge_s'. The discrimination centres "
-                "(g_center / e_center) are complex and are computed but not "
-                "written back through this path."
+                "Proposes the fitted assignment fidelity into MetaDict 'fid', the "
+                "cluster width into 'ge_s', and the complex discrimination centres "
+                "into 'g_center' / 'e_center'."
             ),
             recommended=(
                 "Use a large 'shots' (~1e5) so the IQ histograms are well sampled; "
@@ -234,10 +233,11 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
         self, req: WritebackRequest[GERunResult, GEAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
-        # Only the writeback-safe float scalars are proposed. The notebook also
-        # records g_center / e_center (complex), but those do not round-trip
-        # through the GUI writeback wire/UI (which assume JSON scalars); their
-        # writeback is deferred to the post-analysis phase.
+        # Float scalars plus the complex discrimination centres. complex md
+        # values round-trip end-to-end now (in-process apply + MetaDict str
+        # persistence both speak complex; the wire carries {"__complex__": [...]}
+        # and the UI parses "re+imj"). Mirrors the notebook's md.g_center /
+        # md.e_center.
         return [
             MetaDictWriteback(
                 target_name="fid",
@@ -248,6 +248,16 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
                 target_name="ge_s",
                 description="Single-shot IQ cluster width (s)",
                 proposed_value=result.ge_s,
+            ),
+            MetaDictWriteback(
+                target_name="g_center",
+                description="Single-shot |g> IQ cluster centre (complex)",
+                proposed_value=result.g_center,
+            ),
+            MetaDictWriteback(
+                target_name="e_center",
+                description="Single-shot |e> IQ cluster centre (complex)",
+                proposed_value=result.e_center,
             ),
         ]
 

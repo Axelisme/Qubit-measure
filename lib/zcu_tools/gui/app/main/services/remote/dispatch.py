@@ -394,15 +394,57 @@ def _h_context_active(
     return {"label": adapter.ctrl.get_active_context_label()}
 
 
+# Wire tag for a Python ``complex`` scalar. JSON has no complex type, so a
+# complex md value (e.g. a single-shot IQ centre) is carried as a self-describing
+# structured tag the agent can both read and round-trip — ``_coerce_wire_value``
+# turns it back into ``complex`` on the set/apply input side. Lossless, unlike the
+# old ``{"__repr__"}`` fallback (which stringified complex one-way).
+_COMPLEX_TAG = "__complex__"
+
+
+def _complex_tag(value: complex) -> dict[str, list[float]]:
+    return {_COMPLEX_TAG: [value.real, value.imag]}
+
+
+def _is_complex_tag(value: object) -> bool:
+    return (
+        isinstance(value, dict)
+        and set(value) == {_COMPLEX_TAG}
+        and isinstance(value[_COMPLEX_TAG], (list, tuple))
+        and len(value[_COMPLEX_TAG]) == 2
+        and all(isinstance(p, (int, float)) for p in value[_COMPLEX_TAG])
+    )
+
+
 def _json_safe(value: object) -> object:
-    """Return ``value`` if it round-trips through JSON, else its ``repr``."""
+    """Make ``value`` JSON-safe without loss where the type has a wire encoding.
+
+    ``complex`` → ``{"__complex__": [re, im]}`` (round-trips via
+    ``_coerce_wire_value``). Otherwise return ``value`` if it round-trips through
+    JSON as-is, else its ``repr`` (lossy last resort for opaque objects).
+    """
     import json
 
+    if isinstance(value, complex):
+        return _complex_tag(value)
     try:
         json.dumps(value)
         return value
     except (TypeError, ValueError):
         return {"__repr__": repr(value)}
+
+
+def _coerce_wire_value(value: object) -> object:
+    """Inverse of :func:`_json_safe`'s structured tags for inbound wire values.
+
+    A ``{"__complex__": [re, im]}`` tag becomes a Python ``complex``; every other
+    value passes through untouched. Used on the writeback ``set`` input so an
+    agent-supplied complex proposed_value applies as a real ``complex`` (the
+    in-process md apply + MetaDict persistence both speak ``complex``)."""
+    if _is_complex_tag(value):
+        re, im = value[_COMPLEX_TAG]  # type: ignore[index]
+        return complex(re, im)
+    return value
 
 
 def _h_context_get_md(
@@ -1409,7 +1451,9 @@ def _h_writeback_set(
             )
         changes["target_name"] = name
     if params.get("proposed_value") is not None:
-        changes["proposed_value"] = params["proposed_value"]
+        # Structured tags (e.g. {"__complex__": [re, im]}) coerce back to their
+        # Python type so the applied md value matches what preview serialized.
+        changes["proposed_value"] = _coerce_wire_value(params["proposed_value"])
     try:
         adapter.ctrl.set_writeback_item(tab_id, session_id, **changes)
     except RuntimeError as exc:

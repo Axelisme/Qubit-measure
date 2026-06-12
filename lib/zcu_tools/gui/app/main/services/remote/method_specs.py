@@ -518,15 +518,18 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "List the tab's persistent writeback draft. Each item: id "
         "(<kind>-<n>, kind∈md|ml|wf), target_name (apply destination, editable), "
         "kind (metadict|module|waveform), description, selected; metadict adds "
-        "proposed_value; module/waveform add editor_id + has_edit_schema. Edit a "
-        "module/waveform's cfg via editor.* on its editor_id; the user's Edit "
-        "dialog renders the same model (WYSIWYG).",
+        "proposed_value; module/waveform add editor_id + has_edit_schema. A "
+        'complex metadict proposed_value is carried as {"__complex__": [re, im]} '
+        "(JSON has no complex). Edit a module/waveform's cfg via editor.* on its "
+        "editor_id; the user's Edit dialog renders the same model (WYSIWYG).",
         (_str("tab_id"),),
     ),
     "writeback.set": MethodSpec(
         5.0,
         "Edit a persistent writeback item by id: selected? / target_name? / "
-        "proposed_value? (metadict only). Module/waveform cfg edits go through "
+        "proposed_value? (metadict only). A complex proposed_value is passed as "
+        '{"__complex__": [re, im]} (the same shape preview emits); it applies as '
+        "a Python complex. Module/waveform cfg edits go through "
         "editor.set_field on the item's editor_id, not here.",
         (
             _str("tab_id"),

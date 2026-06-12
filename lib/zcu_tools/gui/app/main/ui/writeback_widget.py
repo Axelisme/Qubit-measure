@@ -263,6 +263,12 @@ def _coerce_scalar_input(text: str, original: Any) -> Any:
         raise RuntimeError(f"Invalid bool value: {text}")
     if isinstance(original, int) and not isinstance(original, bool):
         return int(text)
+    # complex before float: a complex md value (e.g. a single-shot IQ centre)
+    # parses via Python's ``complex("1+2j")``. ``float`` would reject "1+2j", so
+    # this branch must precede it. ``complex`` also accepts a bare real ("1.5"),
+    # which keeps a real-only re-entry valid.
+    if isinstance(original, complex):
+        return complex(text.strip())
     if isinstance(original, float):
         return float(text)
     return text

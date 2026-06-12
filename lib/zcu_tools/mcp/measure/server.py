@@ -183,7 +183,12 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
 #      method_specs. Unlike gui_analyze, gui_post_analyze folds NO figure_path (the
 #      post figure lives in the tab's separate post container, which the render
 #      view does not screenshot).
-MCP_VERSION = 27
+# MCP 28: complex writeback scalars (WIRE 23). gui_writeback_preview /
+#      gui_writeback_set descriptions now document the {"__complex__": [re, im]}
+#      encoding for a complex metadict proposed_value (the GE adapter proposes
+#      g_center / e_center as complex). Tool descriptions auto-generate from the
+#      updated method_specs; the mcp forwards the tagged value verbatim.
+MCP_VERSION = 28
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)

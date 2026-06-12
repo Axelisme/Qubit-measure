@@ -86,6 +86,61 @@ def test_edit_md_item_rejects_blank_target_name(qapp):
         dialog.close()
 
 
+def test_edit_md_item_parses_complex_value(qapp):
+    """A complex md value coerces the user's "re+imj" input to complex (not str)."""
+    item = MetaDictWriteback(
+        target_name="g_center", description="|g> centre", proposed_value=complex(1, 2)
+    )
+    item.session_id = "md-1"
+
+    widget = WritebackWidget(MagicMock())
+    widget.populate([item])
+
+    cb = QCheckBox()
+    widget._edit_md_item(item, cb)
+    dialog = _find_open_dialog("Edit Value:")
+    try:
+        value_edit = dialog.findChildren(QLineEdit)[1]
+        value_edit.setText("3-4j")
+        save_btn = next(
+            b for b in dialog.findChildren(QPushButton) if b.text() == "Save"
+        )
+        save_btn.click()
+
+        assert item.proposed_value == complex(3, -4)
+        assert isinstance(item.proposed_value, complex)
+    finally:
+        dialog.close()
+
+
+def test_edit_md_item_rejects_unparseable_complex(qapp):
+    """An unparseable complex input fast-fails and leaves the original value."""
+    item = MetaDictWriteback(
+        target_name="g_center", description="|g> centre", proposed_value=complex(1, 2)
+    )
+    item.session_id = "md-1"
+
+    widget = WritebackWidget(MagicMock())
+    widget.populate([item])
+
+    cb = QCheckBox()
+    widget._edit_md_item(item, cb)
+    dialog = _find_open_dialog("Edit Value:")
+    try:
+        value_edit = dialog.findChildren(QLineEdit)[1]
+        value_edit.setText("not a number")
+        save_btn = next(
+            b for b in dialog.findChildren(QPushButton) if b.text() == "Save"
+        )
+        with patch("zcu_tools.gui.app.main.ui.writeback_widget.QMessageBox.critical"):
+            save_btn.click()
+
+        # Invalid input rejected: value unchanged, dialog stays open.
+        assert item.proposed_value == complex(1, 2)
+    finally:
+        dialog.close()
+
+
 def test_edit_cfg_item_can_change_target_name(qapp):
     """The module/waveform Edit dialog exposes an editable apply-as that commits
     on editingFinished."""

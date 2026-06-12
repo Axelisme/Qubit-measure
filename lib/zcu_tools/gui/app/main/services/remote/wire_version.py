@@ -95,7 +95,12 @@ from __future__ import annotations
 #      the primary analyze result), tab.get_post_analyze_params and
 #      tab.get_post_analyze_result (mirror the analyze read pair). New methods =
 #      contract change.
-WIRE_VERSION = 22
+# v23: complex writeback scalars round-trip losslessly. A metadict writeback
+#      proposed_value that is a Python complex is serialized on the wire as
+#      {"__complex__": [re, im]} (in writeback.preview) and accepted back in the
+#      same shape (writeback.set), replacing the old one-way {"__repr__"} stringify.
+#      Serialization-shape change to the writeback surface = contract change.
+WIRE_VERSION = 23
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -211,4 +216,8 @@ WIRE_VERSION = 22
 #      the wire (post_analyze.start + the two get_post_analyze read methods),
 #      mirroring the analyze trio. Carrier layer + UI were already in place; this
 #      only adds the dispatch handlers. Phase 4 (post-analysis dual-end).
-GUI_VERSION = 28
+# v29: complex writeback round-trip (WIRE 23). _json_safe encodes complex as
+#      {"__complex__": [re, im]} + _coerce_wire_value decodes it on writeback.set;
+#      the UI Edit dialog parses "re+imj" (complex branch in _coerce_scalar_input);
+#      the GE adapter now proposes g_center / e_center (complex) alongside fid/ge_s.
+GUI_VERSION = 29

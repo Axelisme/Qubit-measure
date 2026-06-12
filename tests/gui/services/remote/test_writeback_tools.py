@@ -149,3 +149,60 @@ def test_set_unknown_id_rejected():
             ctrl, "writeback.set", {"tab_id": "t", "id": "md-99", "selected": True}
         )
     assert exc.value.code is ErrorCode.INVALID_PARAMS
+
+
+# ---------------------------------------------------------------------------
+# Complex writeback scalar wire round-trip (WIRE 23). A complex metadict
+# proposed_value serializes losslessly as {"__complex__": [re, im]} and a
+# matching tag on writeback.set coerces back to a Python complex.
+# ---------------------------------------------------------------------------
+
+
+def _complex_items() -> list:
+    md = MetaDictWriteback(
+        target_name="g_center",
+        description="|g> IQ centre",
+        proposed_value=complex(1.5, -2.25),
+    )
+    md.session_id = "md-1"
+    return [md]
+
+
+def test_preview_serializes_complex_as_tag():
+    ctrl = _ctrl()
+    ctrl.get_tab_writeback_items.side_effect = lambda tab_id: _complex_items()
+    res = _dispatch(ctrl, "writeback.preview", {"tab_id": "t"})
+    item = list(res["items"])[0]  # type: ignore[call-overload]
+    assert item["proposed_value"] == {"__complex__": [1.5, -2.25]}
+
+
+def test_set_coerces_complex_tag_back_to_complex():
+    ctrl = _ctrl()
+    _dispatch(
+        ctrl,
+        "writeback.set",
+        {
+            "tab_id": "t",
+            "id": "md-1",
+            "proposed_value": {"__complex__": [1.5, -2.25]},
+        },
+    )
+    _, kwargs = ctrl.set_writeback_item.call_args
+    assert kwargs["proposed_value"] == complex(1.5, -2.25)
+    assert isinstance(kwargs["proposed_value"], complex)
+
+
+def test_complex_preview_set_round_trip_is_lossless():
+    """preview tag -> set -> the same complex the service would apply."""
+    ctrl = _ctrl()
+    ctrl.get_tab_writeback_items.side_effect = lambda tab_id: _complex_items()
+    preview = _dispatch(ctrl, "writeback.preview", {"tab_id": "t"})
+    wire_value = list(preview["items"])[0]["proposed_value"]  # type: ignore[call-overload]
+
+    _dispatch(
+        ctrl,
+        "writeback.set",
+        {"tab_id": "t", "id": "md-1", "proposed_value": wire_value},
+    )
+    _, kwargs = ctrl.set_writeback_item.call_args
+    assert kwargs["proposed_value"] == complex(1.5, -2.25)
