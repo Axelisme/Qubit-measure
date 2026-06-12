@@ -4,6 +4,24 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.experiment.v2.twotone.reset.bath.freq import (
+    FreqGainCfg as BathFreqGainCfg,
+)
+from zcu_tools.experiment.v2.twotone.reset.bath.freq import (
+    FreqGainResult as BathFreqGainResult,
+)
+from zcu_tools.experiment.v2.twotone.reset.bath.length import (
+    LengthCfg as BathLengthCfg,
+)
+from zcu_tools.experiment.v2.twotone.reset.bath.length import (
+    LengthResult as BathLengthResult,
+)
+from zcu_tools.experiment.v2.twotone.reset.bath.phase import (
+    PhaseCfg as BathPhaseCfg,
+)
+from zcu_tools.experiment.v2.twotone.reset.bath.phase import (
+    PhaseResult as BathPhaseResult,
+)
 from zcu_tools.experiment.v2.twotone.reset.dual_tone.freq import (
     FreqCfg as DualFreqCfg,
 )
@@ -31,6 +49,9 @@ from zcu_tools.experiment.v2.twotone.reset.single_tone.length import (
     LengthResult,
 )
 from zcu_tools.experiment.v2_gui.adapters.twotone import (
+    BathFreqGainAdapter,
+    BathLengthAdapter,
+    BathPhaseAdapter,
     DualToneFreqAdapter,
     DualToneLengthAdapter,
     DualTonePowerAdapter,
@@ -462,6 +483,239 @@ def test_dual_reset_freq_run_without_soc_fast_fails() -> None:
     # same soc-handle guard as the base run.
     ml = _make_ml()
     adapter = DualToneFreqAdapter()
+    schema = adapter.make_default_cfg(_make_ctx(ml))
+
+    with pytest.raises(RuntimeError, match="soc is required"):
+        adapter.run(_make_req(ml), schema)
+
+
+# --- bath-reset adapters -------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("adapter", "cfg_model", "sweep_axes"),
+    [
+        (BathFreqGainAdapter(), BathFreqGainCfg, ("freq", "gain")),
+        (BathLengthAdapter(), BathLengthCfg, ("length",)),
+        (BathPhaseAdapter(), BathPhaseCfg, ("phase",)),
+    ],
+)
+def test_bath_reset_build_exp_cfg_round_trip(
+    adapter: Any, cfg_model: type, sweep_axes: tuple[str, ...]
+) -> None:
+    ml = _make_ml()
+    # make_default_cfg validates the value tree (ADR-0011) before lowering.
+    raw = _lower(adapter.make_default_cfg(_make_ctx(ml)), _make_req(ml))
+
+    assert "modules" in raw
+    assert "sweep" in raw
+    modules = cast(dict[str, Any], raw["modules"])
+    assert "tested_reset" in modules
+    assert "readout" in modules
+    # optional reset / init_pulse disabled by default (no library entries)
+    assert "reset" not in modules
+    assert "init_pulse" not in modules
+
+    sweep = cast(dict[str, Any], raw["sweep"])
+    for axis in sweep_axes:
+        assert isinstance(sweep[axis], SweepCfg)
+
+    adapter.build_exp_cfg(raw, _make_req(ml))
+    ml.make_cfg.assert_called_once_with(raw, cfg_model)
+
+
+def test_bath_freq_gain_centres_freq_and_locks_cavity_and_pi2() -> None:
+    from zcu_tools.gui.app.main.adapter import (
+        CfgSectionValue,
+        DirectValue,
+        EvalValue,
+        ModuleRefValue,
+        SweepValue,
+    )
+
+    ctx = _make_ctx(_make_ml())
+    ctx.md.r_f = 6000.0
+    ctx.md.rabi_f = 10.0
+    schema = BathFreqGainAdapter().make_default_cfg(ctx)
+
+    # Freq axis centres on r_f - rabi_f (md-linked); gain axis is a literal span.
+    sweep = schema.value.fields["sweep"]
+    assert isinstance(sweep, CfgSectionValue)
+    freq = sweep.fields["freq"]
+    assert isinstance(freq, SweepValue)
+    assert isinstance(freq.start, EvalValue) and freq.start.expr == "r_f - 1.2 * rabi_f"
+    assert isinstance(freq.stop, EvalValue) and freq.stop.expr == "r_f - 0.8 * rabi_f"
+
+    modules = schema.value.fields["modules"]
+    assert isinstance(modules, CfgSectionValue)
+    tested = modules.fields["tested_reset"]
+    assert isinstance(tested, ModuleRefValue)
+    cavity = tested.value.fields["cavity_tone_cfg"]
+    assert isinstance(cavity, CfgSectionValue)
+    # The sweep owns cavity freq + gain → locked to 0.0 (notebook: not used).
+    assert cavity.fields["freq"] == DirectValue(0.0)
+    assert cavity.fields["gain"] == DirectValue(0.0)
+    # The domain adds the 4-point phase axis onto pi2_cfg.phase → locked to the
+    # notebook base offset (90 deg).
+    pi2 = tested.value.fields["pi2_cfg"]
+    assert isinstance(pi2, CfgSectionValue)
+    assert pi2.fields["phase"] == DirectValue(90.0)
+
+
+def test_bath_freq_gain_writeback_proposes_bathreset_gain_and_freq() -> None:
+    from matplotlib.figure import Figure
+    from zcu_tools.experiment.v2_gui.adapters.twotone.reset.bath.freq_gain import (
+        BathFreqGainAnalyzeResult,
+    )
+
+    adapter = BathFreqGainAdapter()
+    analyze = BathFreqGainAnalyzeResult(gain=0.72, freq=5483.0, figure=Figure())
+    items = adapter.get_writeback_items(
+        WritebackRequest(
+            run_result=cast(BathFreqGainResult, MagicMock(spec=BathFreqGainResult)),
+            analyze_result=analyze,
+            ctx=cast(Any, MagicMock()),
+        )
+    )
+    assert all(isinstance(it, MetaDictWriteback) for it in items)
+    by_name = {cast(MetaDictWriteback, it).target_name: it for it in items}
+    assert set(by_name) == {"bathreset_gain", "bathreset_freq"}
+    assert cast(MetaDictWriteback, by_name["bathreset_gain"]).proposed_value == 0.72
+    assert cast(MetaDictWriteback, by_name["bathreset_freq"]).proposed_value == 5483.0
+
+
+def test_bath_freq_gain_save_not_supported() -> None:
+    from zcu_tools.gui.app.main.adapter import SaveDataRequest
+
+    # D3: the 2D bath freq-gain experiment writes four phase-resolved files, which
+    # the single-path GUI save pipeline cannot represent — save must fast-fail
+    # rather than report a path that never exists.
+    req = SaveDataRequest(
+        run_result=cast(BathFreqGainResult, MagicMock(spec=BathFreqGainResult)),
+        data_path="/tmp/whatever.hdf5",
+        md=MagicMock(),
+        ml=MagicMock(),
+        chip_name="C",
+        qub_name="Q1",
+        res_name="R",
+        active_label="flux0",
+        comment="",
+    )
+    with pytest.raises(NotImplementedError, match="not supported"):
+        BathFreqGainAdapter().save(req)
+
+
+def test_bath_length_holds_cavity_md_link_and_no_writeback() -> None:
+    from matplotlib.figure import Figure
+    from zcu_tools.experiment.v2_gui.adapters.twotone.reset.bath.length import (
+        BathLengthAnalyzeResult,
+    )
+    from zcu_tools.gui.app.main.adapter import (
+        CfgSectionValue,
+        DirectValue,
+        EvalValue,
+        ModuleRefValue,
+    )
+
+    ctx = _make_ctx(_make_ml())
+    ctx.md.bathreset_freq = 5500.0
+    ctx.md.bathreset_gain = 0.7
+    schema = BathLengthAdapter().make_default_cfg(ctx)
+    modules = schema.value.fields["modules"]
+    assert isinstance(modules, CfgSectionValue)
+    tested = modules.fields["tested_reset"]
+    assert isinstance(tested, ModuleRefValue)
+    cavity = tested.value.fields["cavity_tone_cfg"]
+    assert isinstance(cavity, CfgSectionValue)
+    # Cavity freq/gain held md-linked so the cfg snapshot carries the calibrated
+    # reset forward (D2(a)).
+    assert isinstance(cavity.fields["freq"], EvalValue)
+    assert cast(EvalValue, cavity.fields["freq"]).expr == "bathreset_freq"
+    assert isinstance(cavity.fields["gain"], EvalValue)
+    assert cast(EvalValue, cavity.fields["gain"]).expr == "bathreset_gain"
+    # The domain replaces pi2_cfg.phase with its own sweep → locked off the form.
+    pi2 = tested.value.fields["pi2_cfg"]
+    assert isinstance(pi2, CfgSectionValue)
+    assert pi2.fields["phase"] == DirectValue(90.0)
+
+    # D5: no scalar fit → no writeback.
+    items = BathLengthAdapter().get_writeback_items(
+        WritebackRequest(
+            run_result=cast(BathLengthResult, MagicMock(spec=BathLengthResult)),
+            analyze_result=BathLengthAnalyzeResult(figure=Figure()),
+            ctx=cast(Any, MagicMock()),
+        )
+    )
+    assert list(items) == []
+
+
+def test_bath_phase_locks_pi2_phase_and_holds_cavity() -> None:
+    from zcu_tools.gui.app.main.adapter import (
+        CfgSectionValue,
+        DirectValue,
+        EvalValue,
+        ModuleRefValue,
+        SweepValue,
+    )
+
+    ctx = _make_ctx(_make_ml())
+    ctx.md.bathreset_freq = 5500.0
+    ctx.md.bathreset_gain = 0.7
+    schema = BathPhaseAdapter().make_default_cfg(ctx)
+
+    sweep = schema.value.fields["sweep"]
+    assert isinstance(sweep, CfgSectionValue)
+    phase = sweep.fields["phase"]
+    assert isinstance(phase, SweepValue)
+    assert phase.start == -360.0 and phase.stop == 360.0
+
+    modules = schema.value.fields["modules"]
+    assert isinstance(modules, CfgSectionValue)
+    tested = modules.fields["tested_reset"]
+    assert isinstance(tested, ModuleRefValue)
+    # The sweep owns pi2_cfg.phase → locked to 0.0.
+    pi2 = tested.value.fields["pi2_cfg"]
+    assert isinstance(pi2, CfgSectionValue)
+    assert pi2.fields["phase"] == DirectValue(0.0)
+    # Cavity still carries the calibrated freq/gain forward (D2(a)).
+    cavity = tested.value.fields["cavity_tone_cfg"]
+    assert isinstance(cavity, CfgSectionValue)
+    assert isinstance(cavity.fields["freq"], EvalValue)
+    assert cast(EvalValue, cavity.fields["freq"]).expr == "bathreset_freq"
+
+
+def test_bath_phase_writeback_proposes_max_and_min_phase() -> None:
+    from matplotlib.figure import Figure
+    from zcu_tools.experiment.v2_gui.adapters.twotone.reset.bath.phase import (
+        BathPhaseAnalyzeResult,
+    )
+
+    adapter = BathPhaseAdapter()
+    analyze = BathPhaseAnalyzeResult(max_phase=12.5, min_phase=192.5, figure=Figure())
+    items = adapter.get_writeback_items(
+        WritebackRequest(
+            run_result=cast(BathPhaseResult, MagicMock(spec=BathPhaseResult)),
+            analyze_result=analyze,
+            ctx=cast(Any, MagicMock()),
+        )
+    )
+    assert all(isinstance(it, MetaDictWriteback) for it in items)
+    by_name = {cast(MetaDictWriteback, it).target_name: it for it in items}
+    assert set(by_name) == {"bathreset_max_phase", "bathreset_min_phase"}
+    assert (
+        cast(MetaDictWriteback, by_name["bathreset_max_phase"]).proposed_value == 12.5
+    )
+    assert (
+        cast(MetaDictWriteback, by_name["bathreset_min_phase"]).proposed_value == 192.5
+    )
+
+
+@pytest.mark.parametrize(
+    "adapter",
+    [BathFreqGainAdapter(), BathLengthAdapter(), BathPhaseAdapter()],
+)
+def test_bath_reset_run_without_soc_fast_fails(adapter: Any) -> None:
+    ml = _make_ml()
     schema = adapter.make_default_cfg(_make_ctx(ml))
 
     with pytest.raises(RuntimeError, match="soc is required"):

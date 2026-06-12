@@ -3,6 +3,9 @@ from .freq import FreqAdapter
 from .power_dep import PowerDepAdapter
 from .rabi import AmpRabiAdapter, LenRabiAdapter
 from .reset import (
+    BathFreqGainAdapter,
+    BathLengthAdapter,
+    BathPhaseAdapter,
     DualToneFreqAdapter,
     DualToneLengthAdapter,
     DualTonePowerAdapter,
@@ -17,6 +20,9 @@ __all__ = [
     "FluxDepAdapter",
     "AmpRabiAdapter",
     "LenRabiAdapter",
+    "BathFreqGainAdapter",
+    "BathLengthAdapter",
+    "BathPhaseAdapter",
     "DualToneFreqAdapter",
     "DualToneLengthAdapter",
     "DualTonePowerAdapter",

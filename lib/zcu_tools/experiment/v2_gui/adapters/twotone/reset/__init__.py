@@ -1,3 +1,4 @@
+from .bath import BathFreqGainAdapter, BathLengthAdapter, BathPhaseAdapter
 from .dual_tone import (
     DualToneFreqAdapter,
     DualToneLengthAdapter,
@@ -6,6 +7,9 @@ from .dual_tone import (
 from .single_tone import SingleToneFreqAdapter, SingleToneLengthAdapter
 
 __all__ = [
+    "BathFreqGainAdapter",
+    "BathLengthAdapter",
+    "BathPhaseAdapter",
     "DualToneFreqAdapter",
     "DualToneLengthAdapter",
     "DualTonePowerAdapter",
