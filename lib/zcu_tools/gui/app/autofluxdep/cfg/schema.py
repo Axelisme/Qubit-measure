@@ -201,3 +201,35 @@ class NodeCfgSchema:
         needed to resolve them.
         """
         return dict(self.schema.to_raw_dict(md=None, ml=ml))
+
+    def read_knobs(self) -> dict[str, Any]:
+        """The current *un-lowered* user knob values, as a JSON-friendly dict.
+
+        Read-only projection of the value tree for an observer (the remote
+        bridge's ``node.cfg``): a scalar knob reads to its plain value (or None
+        when unset), a sweep knob reads to ``{start, stop, expts}``. Unlike
+        ``lower``, this does NOT build a ``SweepCfg`` (whose internal axis object
+        is not JSON-serialisable) and needs no ``ModuleLibrary`` — it reports
+        exactly what the user set, not the lowered run cfg. Flat node knobs hold
+        no ``EvalValue`` (``lower`` passes ``md=None``), so a ``DirectValue`` here
+        always carries a plain scalar.
+        """
+        knobs: dict[str, Any] = {}
+        for key in self.keys:
+            leaf = self.schema.value.fields[key]
+            if isinstance(leaf, SweepValue):
+                knobs[key] = {
+                    "start": leaf.start,
+                    "stop": leaf.stop,
+                    "expts": leaf.expts,
+                }
+            elif isinstance(leaf, DirectValue):
+                knobs[key] = leaf.value
+            else:
+                # The value tree for a flat node holds only DirectValue / SweepValue
+                # leaves (ADR-0010 / ADR-0011); anything else is a contract breach.
+                raise TypeError(
+                    f"Knob {key!r} has unexpected value-tree leaf "
+                    f"{type(leaf).__name__}; expected DirectValue or SweepValue"
+                )
+        return knobs

@@ -19,6 +19,7 @@ from zcu_tools.gui.app.autofluxdep.state import AutoFluxDepState, ProjectInfo
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.app.autofluxdep.services.remote.service import ControlOptions
     from zcu_tools.gui.app.autofluxdep.ui.main_window import MainWindow
 
 
@@ -45,8 +46,16 @@ def build_core(
     return Controller(state, EventBus(), project_root=project_root)
 
 
-def run_app(project: ProjectInfo | None = None) -> None:
-    """Build and launch the autofluxdep-gui. Blocks until the window closes."""
+def run_app(
+    project: ProjectInfo | None = None,
+    control: ControlOptions | None = None,
+) -> None:
+    """Build and launch the autofluxdep-gui. Blocks until the window closes.
+
+    ``control`` (a ``ControlOptions`` with a TCP port/token) opts the run into the
+    read-only remote-control bridge — the RPC face an agent/MCP observes the
+    workflow through. None (the default) leaves the GUI un-instrumented.
+    """
     from pathlib import Path
 
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
@@ -61,6 +70,21 @@ def run_app(project: ProjectInfo | None = None) -> None:
     ctrl = build_core(project, project_root=repo_root)
     window = MainWindow(ctrl)
     window.show()
+
+    # Start the read-only remote-control adapter in-place (decision 6: app-local
+    # start/stop, mirroring the shared run_qt_app's three lines, rather than
+    # routing through run_qt_app — autofluxdep owns its own startup-dialog loop and
+    # uses Agg, so it does not run through that shared helper). Inert until the
+    # GUI is up; stop() unsubscribes the EventBus synchronously, so it must run on
+    # the Qt main thread — aboutToQuit fires there.
+    if control is not None:
+        from zcu_tools.gui.app.autofluxdep.services.remote.service import (
+            RemoteControlAdapter,
+        )
+
+        adapter = RemoteControlAdapter(ctrl, control)
+        adapter.start()
+        app.aboutToQuit.connect(adapter.stop)
 
     # Mirror measure-gui: open the setup dialog non-modally on startup so the
     # user can configure the project (chip/qub names, connection) immediately.

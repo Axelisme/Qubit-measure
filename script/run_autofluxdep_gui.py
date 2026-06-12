@@ -33,6 +33,18 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--no-log", action="store_true", help="Disable file logging")
     parser.add_argument(
+        "--control-port",
+        type=int,
+        default=None,
+        help="Start the read-only remote-control TCP server on this port (for agents/MCP)",
+    )
+    parser.add_argument(
+        "--control-token",
+        type=str,
+        default=None,
+        help="Shared auth token required by remote-control clients",
+    )
+    parser.add_argument(
         "--log-file",
         type=str,
         default=None,
@@ -64,5 +76,12 @@ if __name__ == "__main__":
     matplotlib.use("Agg")
 
     from zcu_tools.gui.app.autofluxdep.app import run_app
+    from zcu_tools.gui.app.autofluxdep.services.remote.service import ControlOptions
 
-    run_app()
+    control = (
+        ControlOptions(port=args.control_port, token=args.control_token)
+        if args.control_port is not None
+        else None
+    )
+
+    run_app(control=control)
