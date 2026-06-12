@@ -295,8 +295,9 @@ class ExpTabWidget(QWidget):
         # A second analysis layer that runs on top of the primary analyze result
         # (e.g. single-shot multi-backend discrimination). Only adapters declaring
         # ``capabilities.post_analysis`` enable it; for the rest the whole sub-tab
-        # is hidden. Its figure lives in this sub-tab (a *separate* container from
-        # the primary plot on the right pane), so the two never overwrite.
+        # is hidden. The post figure renders into the *shared* right-pane container
+        # (the same one run/analyze use) — the container shows the most recently
+        # produced figure, so the post layer never gets a private plot stack.
         post_scroll = QScrollArea()
         post_scroll.setWidgetResizable(True)
         post_inner = QWidget()
@@ -319,18 +320,28 @@ class ExpTabWidget(QWidget):
         self.post_analyze_btn = QPushButton("Run Post-Analysis")
         post_layout.addWidget(self.post_analyze_btn)
 
-        # The post figure renders in its own stack here (separate from the primary
-        # analyze plot on the right pane).
-        self._post_plot_stack = QStackedWidget()
-        self._post_plot_placeholder = QLabel("(no post-analysis plot yet)")
-        self._post_plot_placeholder.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
-        self._post_plot_stack.addWidget(self._post_plot_placeholder)
-        self._post_figure_container = FigureContainer(
-            self._post_plot_stack, self._post_plot_placeholder
+        # Save group for the post layer — mirrors the primary Save section but
+        # image-only: the post figure (``tab.post_figure``) is the thing to save;
+        # there is no separate post data file (it shares the run result's data).
+        post_save_section = _CollapsibleSection(
+            "Save", collapsible=True, collapsed=False
         )
-        self._post_canvas_widget: QWidget | None = None
-        self._post_plot_stack.setMinimumHeight(240)
-        post_layout.addWidget(self._post_plot_stack, stretch=1)
+        post_save_layout = post_save_section.form
+
+        post_image_path_row = QHBoxLayout()
+        self._post_image_path_edit = QLineEdit()
+        self._post_image_path_edit.setPlaceholderText("/tmp/post_image.png")
+        post_image_path_row.addWidget(self._post_image_path_edit)
+        browse_post_image_btn = QPushButton("Browse…")
+        browse_post_image_btn.clicked.connect(self._on_browse_post_image_path)
+        post_image_path_row.addWidget(browse_post_image_btn)
+        post_save_layout.addRow("Image path:", post_image_path_row)
+
+        self.post_save_image_btn = QPushButton("Save Image")
+        post_save_layout.addRow("", self.post_save_image_btn)
+
+        post_layout.addWidget(post_save_section)
+        post_layout.addStretch()
 
         post_scroll.setWidget(post_inner)
         self._post_tab_index = self._left_tabs.addTab(post_scroll, "Post-Analysis")
@@ -554,6 +565,16 @@ class ExpTabWidget(QWidget):
         if path:
             self._image_path_edit.setText(path)
 
+    def _on_browse_post_image_path(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save post-analysis image file",
+            "",
+            "PNG files (*.png);;All files (*)",
+        )
+        if path:
+            self._post_image_path_edit.setText(path)
+
     def set_save_paths(self, data_path: str, image_path: str) -> None:
         if data_path:
             self._data_path_edit.blockSignals(True)
@@ -563,12 +584,20 @@ class ExpTabWidget(QWidget):
             self._image_path_edit.blockSignals(True)
             self._image_path_edit.setText(image_path)
             self._image_path_edit.blockSignals(False)
+            # Seed the post image path from the same suggestion when the user has
+            # not typed their own — the post layer saves to its own field, which
+            # follows the tab's image path until overridden.
+            if not self._post_image_path_edit.text():
+                self._post_image_path_edit.setText(image_path)
 
     def get_data_path(self) -> str:
         return self._data_path_edit.text()
 
     def get_image_path(self) -> str:
         return self._image_path_edit.text()
+
+    def get_post_image_path(self) -> str:
+        return self._post_image_path_edit.text()
 
     def get_comment(self) -> str:
         return self._comment_edit.toPlainText()
@@ -589,27 +618,6 @@ class ExpTabWidget(QWidget):
             raise RuntimeError("Attached analysis canvas does not support draw()")
         draw()
         logger.debug("show_analysis_figure: tab_id=%r canvas set", self.tab_id)
-
-    def reset_post_plot(self) -> None:
-        """Drop any post-analysis canvas, revert to the post placeholder."""
-        self._post_figure_container.clear_dynamic_canvases()
-        self._post_canvas_widget = None
-
-    def show_post_analysis_figure(self, fig: Figure) -> None:
-        """Embed a post-analysis Figure in the Post sub-tab's own plot stack
-        (separate from the primary analyze plot)."""
-        canvas = attach_existing_figure_to_container(fig, self._post_figure_container)
-        if (
-            self._post_canvas_widget is not None
-            and self._post_canvas_widget is not canvas
-        ):
-            remove_canvas(self._post_canvas_widget)
-        self._post_canvas_widget = canvas
-        draw = getattr(canvas, "draw", None)
-        if not callable(draw):
-            raise RuntimeError("Attached post-analysis canvas does not support draw()")
-        draw()
-        logger.debug("show_post_analysis_figure: tab_id=%r canvas set", self.tab_id)
 
     def _on_cfg_validity_changed(self, valid: bool) -> None:
         del valid
@@ -745,6 +753,11 @@ class ExpTabWidget(QWidget):
             self.post_analyze_form.setEnabled(post_enabled)
             self.post_analyze_btn.setEnabled(post_enabled)
             self._post_gate_label.setVisible(not state.has_analyze_result)
+            # Post Save Image gates on a post result existing (its figure is the
+            # thing saved), mirroring the primary Save Image gate on has_figure.
+            self.post_save_image_btn.setEnabled(
+                idle and state.has_active_context and state.has_post_analyze_result
+            )
 
     def _bind_to_controller(self, main_window: MainWindow) -> None:
         tab_id = self.tab_id
@@ -802,6 +815,9 @@ class ExpTabWidget(QWidget):
         )
         self.save_result_btn.clicked.connect(
             lambda: main_window._on_save_result_clicked(tab_id)
+        )
+        self.post_save_image_btn.clicked.connect(
+            lambda: main_window._on_post_save_image_clicked(tab_id)
         )
 
         self._validity_cb = validity_cb
@@ -1144,11 +1160,12 @@ class MainWindow(QMainWindow):
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
         post_figure = current.post_figure
         if post_figure is not None:
+            # Post + analyze share one container; ``refresh_tab_figure`` runs just
+            # before this and renders ``tab.figure``, so when a post figure exists
+            # it is drawn last and the shared container shows the most recent
+            # (post) figure. On invalidation (post_figure is None) there is nothing
+            # to do: the shared container already shows the primary figure.
             self.show_post_analysis_image(tab_id, post_figure)
-        else:
-            # Invalidation (re-run / re-analyze cleared the post result): drop any
-            # stale post canvas so the Post sub-tab shows its placeholder.
-            tab_w.reset_post_plot()
 
     def refresh_run_lock(self, running_tab_id: str | None) -> None:
         logger.debug("refresh_run_lock: running_tab_id=%r", running_tab_id)
@@ -1217,15 +1234,6 @@ class MainWindow(QMainWindow):
             return None
         tab_w.reset_plot()  # clear prior liveplot before new run/analyze
         return tab_w._figure_container
-
-    def make_post_live_container(self, tab_id: str) -> Any:
-        """RenderHost impl: the tab's separate post-analysis figure container,
-        cleared before each post run (mirrors ``make_live_container``)."""
-        tab_w = self._tab_widgets.get(tab_id)
-        if tab_w is None:
-            return None
-        tab_w.reset_post_plot()
-        return tab_w._post_figure_container
 
     def mount_interactive_analysis(
         self,
@@ -1297,11 +1305,14 @@ class MainWindow(QMainWindow):
         tab_w.show_analysis_figure(fig)
 
     def show_post_analysis_image(self, tab_id: str, fig: Any) -> None:
+        # Post figures share the primary right-pane container (the container shows
+        # the most recently produced figure), so this routes through the same
+        # render path as the analyze figure.
         logger.debug("show_post_analysis_image: tab_id=%r", tab_id)
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
-        tab_w.show_post_analysis_figure(fig)
+        tab_w.show_analysis_figure(fig)
 
     # ------------------------------------------------------------------
     # Internal event handlers
@@ -1439,6 +1450,14 @@ class MainWindow(QMainWindow):
             return
         path = tab_w.get_image_path()
         self._ctrl.save_image(tab_id, path)
+
+    def _on_post_save_image_clicked(self, tab_id: str) -> None:
+        logger.info("_on_post_save_image_clicked: tab_id=%r", tab_id)
+        tab_w = self._resolve_tab_widget(tab_id, "_on_post_save_image_clicked")
+        if tab_w is None:
+            return
+        path = tab_w.get_post_image_path()
+        self._ctrl.save_post_image(tab_id, path)
 
     def _on_save_result_clicked(self, tab_id: str) -> None:
         logger.info("_on_save_result_clicked: tab_id=%r", tab_id)

@@ -137,6 +137,19 @@ class SaveService(QObject):
         self._ensure_parent_directory(image_path)
         save_figure_to_path(tab.figure, image_path)
 
+    def save_post_image_sync(self, permit: SavePermit, image_path: str) -> None:
+        """Save the tab's *post-analysis* figure (``tab.post_figure``) — the post
+        sub-tab's own Save Image. Mirrors ``save_image_sync`` but targets the
+        post layer's figure, which is distinct from the primary ``tab.figure``
+        (the two are separate State fields though they share one container)."""
+        tab_id = permit.tab_id
+        tab = self._state.get_tab(tab_id)
+        if tab.post_figure is None:
+            raise RuntimeError("No post-analysis figure available to save")
+        logger.info("save_post_image_sync: tab_id=%r path=%r", tab_id, image_path)
+        self._ensure_parent_directory(image_path)
+        save_figure_to_path(tab.post_figure, image_path)
+
     @staticmethod
     def _ensure_parent_directory(path: str) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)

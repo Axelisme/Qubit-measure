@@ -113,12 +113,10 @@ class RenderHost(Protocol):
     artefacts (the live figure container). Progress bars no longer come from the
     View — they are minted by ProgressService, bound to the operation."""
 
-    def make_live_container(self, tab_id: str) -> FigureContainer | None: ...
-
-    def make_post_live_container(self, tab_id: str) -> FigureContainer | None:
-        """The tab's *separate* post-analysis figure container (the Post sub-tab
-        owns its own canvas, kept apart from the primary analyze plot). Headless
-        Views may return None, like ``make_live_container``."""
+    def make_live_container(self, tab_id: str) -> FigureContainer | None:
+        """The tab's single right-pane figure container, shared by run, analyze,
+        and post-analysis (the container always shows the most recently produced
+        figure). Headless Views may return None."""
         ...
 
     def mount_interactive_analysis(
@@ -748,11 +746,12 @@ class Controller:
         """Start the second-layer analysis on a tab's primary analyze result.
 
         Returns the operation token. PostAnalyzeService gates on tab-busy + a
-        primary analyze result existing. The post figure goes to the tab's
-        *separate* post container (kept apart from the primary plot)."""
+        primary analyze result existing. The post figure live-plots into the same
+        shared right-pane container as run/analyze (the container shows the most
+        recent figure)."""
         host = self._render_host
         figure_container = (
-            host.make_post_live_container(tab_id) if host is not None else None
+            host.make_live_container(tab_id) if host is not None else None
         )
         return self._post_analyze_svc.start_post_analyze(
             tab_id, post_analyze_params_instance, figure_container
@@ -831,6 +830,18 @@ class Controller:
         resolved = image_path or self._resolve_save_paths(tab_id).image_path
         self._save_svc.save_image_sync(permit, resolved)
         self._info(f"Image saved to {resolved}")
+        return resolved
+
+    def save_post_image(self, tab_id: str, image_path: str | None = None) -> str:
+        """Save the post-analysis figure synchronously; returns the written path.
+
+        The post sub-tab's own Save Image — targets ``tab.post_figure`` (distinct
+        from the primary ``save_image``). Reuses the save permit (active context +
+        run result); the View additionally gates the button on a post result."""
+        permit = self._guard_svc.acquire_save_permit(tab_id)
+        resolved = image_path or self._resolve_save_paths(tab_id).image_path
+        self._save_svc.save_post_image_sync(permit, resolved)
+        self._info(f"Post-analysis image saved to {resolved}")
         return resolved
 
     def save_result(

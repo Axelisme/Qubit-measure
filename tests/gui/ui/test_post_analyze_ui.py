@@ -2,8 +2,10 @@
 
 Mirrors the primary-analyze UI tests (``test_main_window_ui.py``): the Post
 sub-tab only appears for adapters declaring ``post_analysis``, its form/Run gate
-on a primary analyze result, Run dispatches through the controller, and a
-re-analyze invalidation clears the post figure.
+on a primary analyze result, Run dispatches through the controller. The post
+figure renders into the *shared* right-pane container (run/analyze/post all show
+the most recent figure); the post sub-tab has its own Save Image button gated on
+a post result.
 """
 
 from __future__ import annotations
@@ -54,6 +56,7 @@ def _snapshot(
     post_analysis: bool = True,
     post_analyze_params: object | None = None,
     post_figure: Figure | None = None,
+    figure: Figure | None = None,
 ) -> TabSnapshot:
     return TabSnapshot(
         adapter_name="ge",
@@ -81,7 +84,7 @@ def _snapshot(
         post_figure=post_figure,
         writeback_items=(),
         save_paths=None,
-        figure=None,
+        figure=figure,
     )
 
 
@@ -159,8 +162,9 @@ def test_post_run_click_starts_post_analyze(qapp):
 
 
 def test_post_content_refresh_populates_form_and_figure(qapp, monkeypatch):
-    """A content event with a post result populates the post form and shows the
-    post figure in the separate post container."""
+    """A content event with a post result populates the post form and renders the
+    post figure into the *shared* right-pane container (the post figure draws into
+    the same ``_figure_container`` run/analyze use)."""
     from matplotlib.figure import Figure
     from zcu_tools.gui.app.main.events.tab import TabContentChangedPayload
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget, MainWindow
@@ -185,56 +189,144 @@ def test_post_content_refresh_populates_form_and_figure(qapp, monkeypatch):
     captured: dict[str, object] = {}
     monkeypatch.setattr(
         "zcu_tools.gui.app.main.ui.main_window.attach_existing_figure_to_container",
-        lambda fig, container: captured.setdefault("canvas", MagicMock()),
+        lambda fig, container: (
+            captured.setdefault("container", container) or MagicMock()
+        ),
     )
 
     bus.emit(TabContentChangedPayload(tab_id="tab-1"))
 
     assert tab_w.has_post_analyze_params() is True
-    assert captured.get("canvas") is not None
+    # The post figure was attached to the shared primary container, not a private
+    # post container.
+    assert captured.get("container") is tab_w._figure_container
 
 
-def test_post_figure_cleared_on_invalidation(qapp):
+def test_post_figure_refresh_is_noop_on_invalidation(qapp, monkeypatch):
     """A content event whose snapshot has no post figure (re-run / re-analyze
-    invalidated the post result) drops the stale post canvas."""
+    invalidated the post result) must NOT touch the shared container — the primary
+    figure refresh (run just before) already owns what it shows."""
     from zcu_tools.gui.app.main.events.tab import TabContentChangedPayload
-    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget, MainWindow
 
     ctrl = _mock_ctrl()
     bus = EventBus()
     ctrl.get_bus.return_value = bus
     ctrl.get_tab_snapshot.return_value = _snapshot(
-        "tab-1", has_post_analyze_result=False, post_figure=None
+        "tab-1", has_post_analyze_result=False, post_figure=None, figure=None
     )
 
     window = MainWindow(ctrl)
-    tab_w = MagicMock()
+    tab_w = ExpTabWidget("tab-1", ctrl)
     window._tab_widgets["tab-1"] = tab_w
 
-    bus.emit(TabContentChangedPayload(tab_id="tab-1"))
+    attached: list[object] = []
+    monkeypatch.setattr(
+        "zcu_tools.gui.app.main.ui.main_window.attach_existing_figure_to_container",
+        lambda fig, container: attached.append(container) or MagicMock(),
+    )
 
-    tab_w.reset_post_plot.assert_called()
+    # The dedicated post-figure refresh is a no-op when there is no post figure.
+    window.refresh_tab_post_figure("tab-1")
+
+    assert attached == []
 
 
-def test_make_post_container_is_separate_from_primary(qapp):
-    """The post container must be a different object than the primary live
-    container, so the two figures never overwrite each other."""
-    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+def test_make_live_container_is_shared_by_post(qapp):
+    """Post-analysis live-plots into the SAME container as run/analyze — there is
+    no longer a separate post container."""
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget, MainWindow
 
     ctrl = _mock_ctrl()
     ctrl.get_bus.return_value = EventBus()
     window = MainWindow(ctrl)
-    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
     tab_w = ExpTabWidget("tab-1", ctrl)
     window._tab_widgets["tab-1"] = tab_w
 
     primary = window.make_live_container("tab-1")
-    post = window.make_post_live_container("tab-1")
 
     assert primary is tab_w._figure_container
-    assert post is tab_w._post_figure_container
-    assert primary is not post
+    # The separate post container is gone — the widget exposes no post stack/field.
+    assert not hasattr(tab_w, "_post_figure_container")
+    assert not hasattr(tab_w, "_post_plot_stack")
+
+
+def test_take_figure_screenshot_captures_post_figure(qapp):
+    """``take_figure_screenshot`` reads the shared ``_plot_stack`` current widget;
+    because the post figure now renders there, the screenshot path reaches it
+    (the Phase B dependency: a post run is screenshot-able like run/analyze)."""
+    from matplotlib.figure import Figure
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget, MainWindow
+
+    ctrl = _mock_ctrl()
+    ctrl.get_bus.return_value = EventBus()
+    window = MainWindow(ctrl)
+
+    tab_w = ExpTabWidget("tab-1", ctrl)
+    window._tab_widgets["tab-1"] = tab_w
+
+    post_fig = Figure()
+    post_fig.add_subplot(111).plot([0, 1], [0, 1])
+    # Render the post figure through the real shared-container path.
+    window.show_post_analysis_image("tab-1", post_fig)
+
+    png = window.take_figure_screenshot("tab-1")
+
+    assert isinstance(png, bytes)
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_post_save_image_button_gated_on_post_result(qapp):
+    """The post Save Image button enables only with an active context + a post
+    result (its figure is the thing it saves)."""
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
+
+    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab.show()
+    qapp.processEvents()
+
+    tab.update_interaction_state(
+        _snapshot("tab-1", has_analyze_result=True, has_post_analyze_result=False)
+    )
+    assert tab.post_save_image_btn.isEnabled() is False
+
+    tab.update_interaction_state(
+        _snapshot("tab-1", has_analyze_result=True, has_post_analyze_result=True)
+    )
+    assert tab.post_save_image_btn.isEnabled() is True
+
+
+def test_post_save_image_button_disabled_without_active_context(qapp):
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
+
+    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab.update_interaction_state(
+        _snapshot(
+            "tab-1",
+            has_analyze_result=True,
+            has_post_analyze_result=True,
+            has_active_context=False,
+        )
+    )
+    assert tab.post_save_image_btn.isEnabled() is False
+
+
+def test_post_save_image_click_saves_post_figure(qapp):
+    """Clicking the post Save Image reads the post image path and dispatches
+    through the controller's ``save_post_image`` (which saves ``tab.post_figure``)."""
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+
+    ctrl = _mock_ctrl()
+    ctrl.get_bus.return_value = EventBus()
+    window = MainWindow(ctrl)
+    tab_w = MagicMock()
+    tab_w.get_post_image_path.return_value = "/tmp/post.png"
+    window._tab_widgets["tab-1"] = tab_w
+
+    window._on_post_save_image_clicked("tab-1")
+
+    ctrl.save_post_image.assert_called_once_with("tab-1", "/tmp/post.png")
 
 
 def test_post_tab_uses_separate_qt_tab_index(qapp):
