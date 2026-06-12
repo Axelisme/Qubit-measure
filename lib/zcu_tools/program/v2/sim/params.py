@@ -23,7 +23,7 @@ Alignment with FluxoniumPredictor.__init__ (simulate/fluxonium/predict.py):
 
 from __future__ import annotations
 
-from pydantic import model_validator
+from pydantic import field_validator, model_validator
 
 from zcu_tools.cfg_model import ConfigBase
 
@@ -139,6 +139,13 @@ class SimParams(ConfigBase):
     # Qi > Ql enforced by _validate_qi_gt_ql; Qc is derived, not stored.
     Qi: float
 
+    # --- mock pacing (not physics) ---
+    # poll_latency: seconds of time.sleep per data element in MockQickSoc.poll_data.
+    # This is purely synthetic pacing — it has no physical meaning and does not
+    # affect the simulated IQ values.  Set to 0.0 to skip the sleep entirely (e.g.
+    # in tests where wall-time matters but measurement realism does not).
+    poll_latency: float = 1e-7
+
     # --- runtime flux binding (FLUX-AWARE-MOCK) ---
     # flux_device: name of a connected device in GlobalDeviceManager whose live
     # value drives the operating flux of the simulation.  When None (the default,
@@ -160,6 +167,16 @@ class SimParams(ConfigBase):
     # giving the simulated lookback a physical rising edge to recover as trig_offset.
     timeFly: float = 0.5
     seed: int | None = None
+
+    @field_validator("poll_latency")
+    @classmethod
+    def _validate_poll_latency(cls, v: float) -> float:
+        # Negative latency is meaningless; 0.0 is the explicit "no sleep" sentinel.
+        if v < 0.0:
+            raise ValueError(
+                f"poll_latency must be >= 0.0 (got {v}); use 0.0 to disable pacing"
+            )
+        return v
 
     @model_validator(mode="after")
     def _validate_qi_gt_ql(self) -> SimParams:

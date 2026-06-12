@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-06-12 (FLUX-AWARE-MOCK: operating flux can read a live FakeDevice value)
+**Last updated:** 2026-06-12 (poll_latency: configurable mock pacing per data element in poll_data)
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -87,7 +87,9 @@ every coupling point.
 - `params.py` — `SimParams`: the physical parameter container (EJ/EC/EL, flux
   alignment, T1/T2/T2_star/thermal_pop, bare_rf/g/Ql/Qi, snr, pi_gain_len, seed),
   with the `0 < T2_star ≤ T2 ≤ 2·T1` validators and the derived
-  `inhomogeneous_rate` (Γ). Data + validation only, no physics logic.
+  `inhomogeneous_rate` (Γ). Also carries `poll_latency` (seconds/element, default
+  1e-7): synthetic pacing for `MockQickSoc.poll_data`, not physics — set to 0.0 to
+  skip the sleep entirely (e.g. in tests). Data + validation only, no physics logic.
 - `bloch.py` — leaf TLS optical-Bloch propagator: segment generator, `expm`
   propagator, `evolve`, ground/excited helpers. Imports nothing from the project.
 - `lowering.py` — module tree -> Bloch timeline + readout plan for one sweep

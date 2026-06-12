@@ -1,5 +1,13 @@
+import time
+from unittest.mock import patch
+
 import pytest
-from zcu_tools.program.v2.mocksoc import make_mock_soc, make_mock_soccfg
+from zcu_tools.program.v2.mocksoc import (
+    _DEFAULT_POLL_LATENCY,
+    make_mock_soc,
+    make_mock_soccfg,
+)
+from zcu_tools.program.v2.sim import DEFAULT_SIMPARAM
 
 
 def test_make_mock_soccfg():
@@ -37,6 +45,49 @@ def test_mock_soc_methods():
 
     # Second poll should return empty
     assert soc.poll_data() == []
+
+
+class TestPollLatency:
+    """poll_latency controls whether time.sleep is called in poll_data."""
+
+    def test_default_white_noise_sleep_called(self) -> None:
+        # White-noise path (no SimParams) uses _DEFAULT_POLL_LATENCY; sleep is called.
+        soc, _ = make_mock_soc(n_gens=1, n_readouts=1)
+        soc.start_readout(
+            total_shots=10, counter_addr=0, ch_list=[0], reads_per_shot=[1]
+        )
+        with patch("zcu_tools.program.v2.mocksoc.time.sleep") as mock_sleep:
+            soc.poll_data()
+        mock_sleep.assert_called_once()
+        args, _ = mock_sleep.call_args
+        # sleep argument should be proportional to _DEFAULT_POLL_LATENCY and data size
+        assert args[0] > 0.0
+
+    def test_poll_latency_zero_no_sleep(self) -> None:
+        # poll_latency=0.0 must not call time.sleep at all (avoid sleep(0) syscall noise).
+        sim = DEFAULT_SIMPARAM.model_copy(update={"poll_latency": 0.0})
+        soc, _ = make_mock_soc(n_gens=1, n_readouts=1, sim=sim)
+        soc.start_readout(
+            total_shots=10, counter_addr=0, ch_list=[0], reads_per_shot=[1]
+        )
+        with patch("zcu_tools.program.v2.mocksoc.time.sleep") as mock_sleep:
+            soc.poll_data()
+        mock_sleep.assert_not_called()
+
+    def test_poll_latency_default_sim_sleep_called(self) -> None:
+        # Sim path with the default poll_latency (1e-7) must call time.sleep.
+        sim = DEFAULT_SIMPARAM.model_copy(update={"poll_latency": 1e-7})
+        soc, _ = make_mock_soc(n_gens=1, n_readouts=1, sim=sim)
+        soc.start_readout(
+            total_shots=10, counter_addr=0, ch_list=[0], reads_per_shot=[1]
+        )
+        with patch("zcu_tools.program.v2.mocksoc.time.sleep") as mock_sleep:
+            soc.poll_data()
+        mock_sleep.assert_called_once()
+
+    def test_default_poll_latency_constant(self) -> None:
+        # Sanity-check that the module-level constant matches the expected default.
+        assert _DEFAULT_POLL_LATENCY == 1e-7
 
 
 def test_mock_soc_decimated_accumulated():

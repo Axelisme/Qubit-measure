@@ -43,6 +43,18 @@ def high_snr_simparams(snr: float = 5000.0) -> Any:
     return DEFAULT_SIMPARAM.model_copy(update={"snr": snr})
 
 
+def _default_test_simparams() -> Any:
+    """DEFAULT_SIMPARAM with poll_latency=0.0 for all test connects.
+
+    poll_latency is mock pacing (not physics); 0.0 skips the sleep entirely so
+    tests that don't care about wall-time fidelity don't pay the sleep overhead.
+    The simulated IQ values, noise model, and all physics are unchanged.
+    """
+    from zcu_tools.program.v2.sim import DEFAULT_SIMPARAM
+
+    return DEFAULT_SIMPARAM.model_copy(update={"poll_latency": 0.0})
+
+
 def connect_mock(ctrl: Controller, *, sim_params: Any = None) -> None:
     """Establish a mock SoC synchronously-enough for a headless test.
 
@@ -74,6 +86,10 @@ def connect_mock(ctrl: Controller, *, sim_params: Any = None) -> None:
     ctrl.bind_connection_outcome(
         on_finished=loop.quit, on_failed=lambda _msg: loop.quit()
     )
+    # Use poll_latency=0.0 by default in tests to skip mock sleep overhead.
+    # The SimEngine physics (IQ values, noise, fits) is unaffected by this field.
+    if sim_params is None:
+        sim_params = _default_test_simparams()
     ctrl.start_connect(ConnectMockRequest(sim_params=sim_params))
     loop.exec()
 

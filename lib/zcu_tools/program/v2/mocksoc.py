@@ -3,6 +3,11 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
+# Default poll pacing for the white-noise mock path (no SimParams).
+# When a SimParams is attached, its poll_latency field overrides this value.
+# Set to 0 to skip the sleep entirely (avoids the syscall overhead of sleep(0)).
+_DEFAULT_POLL_LATENCY: float = 1e-7
+
 import numpy as np
 from qick import QickConfig
 from qick.asm_v2 import QickProgramV2
@@ -309,8 +314,16 @@ class MockQickSoc(QickConfig):
                 for n in reads_per_shot
             ]
 
-        # token poll latency: keeps async pacing realistic without dominating test wall time
-        time.sleep(1e-7 * np.asarray(data).size)
+        # Synthetic poll pacing — not physics; sim path uses SimParams.poll_latency,
+        # white-noise path uses the module-level _DEFAULT_POLL_LATENCY constant.
+        # Skip the sleep call entirely when latency == 0 to avoid syscall noise.
+        latency = (
+            self._sim_params.poll_latency
+            if self._sim_params is not None
+            else _DEFAULT_POLL_LATENCY
+        )
+        if latency > 0.0:
+            time.sleep(latency * np.asarray(data).size)
 
         self._poll_done = True
         return [(total_shots, (data, {}))]

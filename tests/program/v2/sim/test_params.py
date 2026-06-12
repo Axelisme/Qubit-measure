@@ -157,6 +157,27 @@ class TestSimParamsCoherenceHelpers:
         assert p.inhomogeneous_rate < 1.0 / 29.0
 
 
+class TestSimParamsPollLatency:
+    """poll_latency is mock pacing — not physics; validated >= 0."""
+
+    def test_default_is_1e7(self) -> None:
+        p = SimParams(**_VALID)
+        assert p.poll_latency == 1e-7
+
+    def test_zero_disables_sleep(self) -> None:
+        # 0.0 is the explicit sentinel to skip time.sleep entirely.
+        p = SimParams(**_VALID, poll_latency=0.0)
+        assert p.poll_latency == 0.0
+
+    def test_custom_positive_value(self) -> None:
+        p = SimParams(**_VALID, poll_latency=1e-5)
+        assert p.poll_latency == 1e-5
+
+    def test_negative_raises(self) -> None:
+        with pytest.raises(ValidationError, match="poll_latency must be >= 0.0"):
+            SimParams(**_VALID, poll_latency=-1e-8)
+
+
 class TestSimParamsParamsJsonRoundTrip:
     """Verify that a params.json-shaped dict can be unpacked into SimParams.
 
