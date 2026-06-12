@@ -33,7 +33,7 @@ fidelity landscape varies with the operating flux.
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, MutableMapping
+from collections.abc import MutableMapping
 from copy import deepcopy
 from typing import Any, Optional, cast
 
@@ -293,17 +293,6 @@ class RoOptimizeBuilder(Builder):
     )
     requires_modules = (ModuleDep("pi_pulse", default=_placeholder_pi_pulse),)
     optional_modules = (ModuleDep("readout", default=_default_readout),)
-    base_params = (
-        "freq_expts",
-        "gain_expts",
-        "reps",
-        "rounds",
-        # the cfg sweep-window half-widths the cfg builder lowers into
-        # freq_range / gain_range (centred on the previous best). The freq /
-        # gain centres come from the snapshot; the rest from these params.
-        "freq_window",
-        "gain_window",
-    )
 
     def make_default_schema(self) -> NodeCfgSchema:
         """The typed node-knob schema (defaults + types) — the param SSOT.
@@ -336,8 +325,8 @@ class RoOptimizeBuilder(Builder):
             )
         )
 
-    def make_init_result(self, params: Mapping[str, Any], flux: Any) -> Sweep2DResult:
-        knobs = self.make_default_schema().with_overrides(params).lower(None)
+    def make_init_result(self, schema: NodeCfgSchema, flux: Any) -> Sweep2DResult:
+        knobs = schema.lower(None)
         freq_expts = int(knobs["freq_expts"])
         gain_expts = int(knobs["gain_expts"])
 
@@ -380,7 +369,7 @@ class RoOptimizeBuilder(Builder):
                 "ro_optimize.make_cfg needs the pi_pulse + readout modules "
                 "(none produced or preset)"
             )
-        knobs = self.make_default_schema().with_overrides(env.params).lower(ml)
+        knobs = env.schema.lower(ml)
         prev_best_freq = float(snapshot["best_ro_freq"])
         prev_best_gain = float(snapshot["best_ro_gain"])
         t1 = float(snapshot["t1"])

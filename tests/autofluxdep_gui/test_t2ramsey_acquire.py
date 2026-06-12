@@ -18,7 +18,12 @@ from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.t2ramsey import T2RamseyBuilder
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
-from ._helpers import ACQUIRE_READOUT, connect_mock, make_acquire_env
+from ._helpers import (
+    ACQUIRE_READOUT,
+    connect_mock,
+    make_acquire_env,
+    node_schema,
+)
 
 # sweep_range overrides the schema default's 121 pts → 61 pts for test speed;
 # the production default stays at 121 in the node schema.
@@ -51,12 +56,13 @@ def test_t2ramsey_acquire_fits_finite_positive_t2():
     )
 
     builder = T2RamseyBuilder()
+    schema = node_schema(builder, _PARAMS)
     flux_values = [0.0, 0.1]
     t2s: list[float] = []
     for idx, flux in enumerate(flux_values):
-        result = builder.make_init_result(_PARAMS, np.asarray(flux_values))
+        result = builder.make_init_result(schema, np.asarray(flux_values))
         env = make_acquire_env(
-            ctrl, flux=flux, flux_idx=idx, params=_PARAMS, ml=ml, result=result
+            ctrl, flux=flux, flux_idx=idx, schema=schema, ml=ml, result=result
         )
         f01 = float(predictor.predict_freq(flux))
         snap = Snapshot(

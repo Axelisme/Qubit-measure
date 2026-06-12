@@ -58,7 +58,7 @@ def test_qubit_freq_acquire_fit_varies_with_flux():
     ctrl.set_flux_device(FAKE_FLUX_DEVICE_NAME)
 
     node = ctrl.add_node_by_type("qubit_freq")
-    node.params.update(
+    node.schema.with_overrides(
         {
             "qub_waveform": "qub_drive",
             "qub_ch": 1,
@@ -117,14 +117,15 @@ def test_plotter_update_runs_after_a_real_produce():
         "relax_delay": 0.0,
         "detune_sweep": SweepValue(start=-60.0, stop=60.0, expts=121),
     }
-    result = builder.make_init_result(params, flux)
+    schema = builder.make_default_schema().with_overrides(params)
+    result = builder.make_init_result(schema, flux)
     figure = Figure()
     plotter = builder.make_plotter(figure)
     ctx = ctrl.state.exp_context
     env = RunEnv(
         flux=0.0,
         flux_idx=0,
-        params=params,
+        schema=schema,
         soc=ctx.soc,
         soccfg=ctx.soccfg,
         ml=ctx.ml,
@@ -164,14 +165,15 @@ def test_good_fit_calibrates_the_predictor():
         "relax_delay": 0.0,
         "detune_sweep": SweepValue(start=-60.0, stop=60.0, expts=121),
     }
-    result = builder.make_init_result(params, np.array([0.0]))
+    schema = builder.make_default_schema().with_overrides(params)
+    result = builder.make_init_result(schema, np.array([0.0]))
     predictor = SimplePredictor(base=600.0, slope=50.0)
     before = predictor.predict_freq(0.0)
     ctx = ctrl.state.exp_context
     env = RunEnv(
         flux=0.0,
         flux_idx=0,
-        params=params,
+        schema=schema,
         soc=ctx.soc,
         soccfg=ctx.soccfg,
         ml=ctx.ml,

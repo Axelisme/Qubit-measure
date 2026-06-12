@@ -8,8 +8,10 @@ the real ``ml.make_cfg`` lowering path without hardware.
 
 from __future__ import annotations
 
-from zcu_tools.gui.app.autofluxdep.cfg import SweepValue
-from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
+from typing import Any
+
+from zcu_tools.gui.app.autofluxdep.cfg import NodeCfgSchema, SweepValue
+from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import (
     QubitFreqBuilder,
@@ -42,18 +44,30 @@ def _ml() -> ModuleLibrary:
     return ml
 
 
+def _schema(builder: Builder, params: dict[str, Any]) -> NodeCfgSchema:
+    """The placement schema a Node lowers — the builder's defaults + overrides.
+
+    Phase 160b: RunEnv carries a ``NodeCfgSchema`` (not a params dict), so these
+    cfg-maker tests build one per builder from the knob overrides under test.
+    """
+    return builder.make_default_schema().with_overrides(params)
+
+
 def _env(ml: ModuleLibrary) -> RunEnv:
     return RunEnv(
         flux=0.0,
         flux_idx=0,
-        params={
-            "qub_waveform": "qub_flat",
-            "qub_ch": 3,
-            "qub_nqz": 2,
-            "qub_gain": 0.05,
-            "reps": 100,
-            "rounds": 2,
-        },
+        schema=_schema(
+            QubitFreqBuilder(),
+            {
+                "qub_waveform": "qub_flat",
+                "qub_ch": 3,
+                "qub_nqz": 2,
+                "qub_gain": 0.05,
+                "reps": 100,
+                "rounds": 2,
+            },
+        ),
         ml=ml,
     )
 
@@ -79,13 +93,15 @@ def test_qubit_freq_produce_fast_fails_when_context_unconfigured():
 
     builder = QubitFreqBuilder()
     result = builder.make_init_result(
-        {"detune_sweep": SweepValue(start=-20.0, stop=50.0, expts=141)},
+        _schema(
+            builder, {"detune_sweep": SweepValue(start=-20.0, stop=50.0, expts=141)}
+        ),
         np.array([0.0]),
     )
     env = RunEnv(
         flux=0.0,
         flux_idx=0,
-        params={"qub_waveform": "qub_flat", "qub_ch": 3},
+        schema=_schema(builder, {"qub_waveform": "qub_flat", "qub_ch": 3}),
         ml=None,
         result=result,
     )
@@ -114,7 +130,7 @@ def test_lenrabi_make_cfg_lowers_context():
         "rounds": 10,
         "relax_delay": 1.0,
     }
-    env = RunEnv(flux=0.0, flux_idx=0, params=params, ml=ml)
+    env = RunEnv(flux=0.0, flux_idx=0, schema=_schema(LenRabiBuilder(), params), ml=ml)
     snap = Snapshot({"qubit_freq": 5135.0}, modules={"opt_readout": _READOUT})
     cfg = LenRabiBuilder().make_cfg(env, snap)
     assert isinstance(cfg, LenRabiCfgTemplate)
@@ -139,8 +155,9 @@ def test_lenrabi_produce_fast_fails_when_context_unconfigured():
         "qub_ch": 4,
         "sweep_range": SweepValue(start=0.05, stop=2.5, expts=61),
     }
-    result = builder.make_init_result(params, np.linspace(0.0, 1.0, 11))
-    env = RunEnv(flux=0.1, flux_idx=1, params=params, ml=None, result=result)
+    schema = _schema(builder, params)
+    result = builder.make_init_result(schema, np.linspace(0.0, 1.0, 11))
+    env = RunEnv(flux=0.1, flux_idx=1, schema=schema, ml=None, result=result)
     snap = Snapshot({"qubit_freq": 5135.0}, modules={"opt_readout": _READOUT})
     with pytest.raises(RuntimeError, match="ModuleLibrary"):
         builder.build_node(env).produce(snap)
@@ -180,12 +197,15 @@ def test_ro_optimize_make_cfg_lowers_context():
     env = RunEnv(
         flux=0.0,
         flux_idx=0,
-        params={
-            "reps": 1000,
-            "rounds": 10,
-            "freq_window": 1.0,
-            "gain_window": 0.05,
-        },
+        schema=_schema(
+            RoOptimizeBuilder(),
+            {
+                "reps": 1000,
+                "rounds": 10,
+                "freq_window": 1.0,
+                "gain_window": 0.05,
+            },
+        ),
         ml=ml,
     )
     cfg = RoOptimizeBuilder().make_cfg(env, snap)
@@ -214,8 +234,9 @@ def test_ro_optimize_produce_fast_fails_when_context_unconfigured():
         "freq_window": 1.0,
         "gain_window": 0.05,
     }
-    result = builder.make_init_result(params, np.linspace(0.0, 1.0, 11))
-    env = RunEnv(flux=0.1, flux_idx=1, params=params, ml=None, result=result)
+    schema = _schema(builder, params)
+    result = builder.make_init_result(schema, np.linspace(0.0, 1.0, 11))
+    env = RunEnv(flux=0.1, flux_idx=1, schema=schema, ml=None, result=result)
     snap = Snapshot(
         {"best_ro_freq": 7444.6, "best_ro_gain": 0.5, "t1": 10.0},
         modules={"pi_pulse": _T1_PI_PULSE, "readout": _READOUT},
@@ -253,7 +274,10 @@ def test_t1_make_cfg_lowers_context():
     from zcu_tools.meta_tool import ModuleLibrary
 
     env = RunEnv(
-        flux=0.0, flux_idx=0, params={"reps": 100, "rounds": 2}, ml=ModuleLibrary()
+        flux=0.0,
+        flux_idx=0,
+        schema=_schema(T1Builder(), {"reps": 100, "rounds": 2}),
+        ml=ModuleLibrary(),
     )
     snap = Snapshot(
         {"t1": 12.0}, modules={"pi_pulse": _T1_PI_PULSE, "opt_readout": _READOUT}
@@ -285,11 +309,14 @@ def test_t1_produce_fast_fails_when_context_unconfigured():
     env = RunEnv(
         flux=0.5,
         flux_idx=0,
-        params={
-            "sweep_range": SweepValue(start=0.5, stop=60.0, expts=101),
-            "reps": 100,
-            "rounds": 2,
-        },
+        schema=_schema(
+            T1Builder(),
+            {
+                "sweep_range": SweepValue(start=0.5, stop=60.0, expts=101),
+                "reps": 100,
+                "rounds": 2,
+            },
+        ),
         ml=None,
         result=result,
     )
@@ -335,7 +362,7 @@ def test_t2ramsey_make_cfg_lowers_context():
     env = RunEnv(
         flux=0.0,
         flux_idx=0,
-        params={"reps": 1000, "rounds": 10},
+        schema=_schema(T2RamseyBuilder(), {"reps": 1000, "rounds": 10}),
         ml=ml,
     )
     snap = Snapshot(
@@ -370,7 +397,7 @@ def test_t2ramsey_produce_fast_fails_when_context_unconfigured():
     env = RunEnv(
         flux=float(flux[1]),
         flux_idx=1,
-        params={"reps": 1000, "rounds": 2},
+        schema=_schema(T2RamseyBuilder(), {"reps": 1000, "rounds": 2}),
         ml=None,
         result=result,
     )
@@ -415,10 +442,12 @@ def _t2echo_pulses(ml: ModuleLibrary):
 
 
 def _t2echo_env(ml: ModuleLibrary) -> RunEnv:
+    from zcu_tools.gui.app.autofluxdep.nodes.t2echo import T2EchoBuilder
+
     return RunEnv(
         flux=0.0,
         flux_idx=0,
-        params={"reps": 1000, "rounds": 10},
+        schema=_schema(T2EchoBuilder(), {"reps": 1000, "rounds": 10}),
         ml=ml,
     )
 
@@ -469,7 +498,7 @@ def test_t2echo_produce_fast_fails_when_context_unconfigured():
     env = RunEnv(
         flux=float(flux_arr[1]),
         flux_idx=1,
-        params={"reps": 1000, "rounds": 1},
+        schema=_schema(T2EchoBuilder(), {"reps": 1000, "rounds": 1}),
         ml=None,
         result=result,
     )
@@ -511,18 +540,23 @@ def _mist_ml() -> ModuleLibrary:
 
 
 def _mist_env(ml: ModuleLibrary, **result_tools) -> RunEnv:
+    from zcu_tools.gui.app.autofluxdep.nodes.mist import MistBuilder
+
     return RunEnv(
         flux=0.0,
         flux_idx=0,
-        params={
-            "mist_waveform": "mist_flat",
-            "mist_ch": 4,
-            "mist_nqz": 2,
-            "mist_freq": 5135.0,
-            "mist_gain": 0.5,
-            "reps": 100,
-            "rounds": 2,
-        },
+        schema=_schema(
+            MistBuilder(),
+            {
+                "mist_waveform": "mist_flat",
+                "mist_ch": 4,
+                "mist_nqz": 2,
+                "mist_freq": 5135.0,
+                "mist_gain": 0.5,
+                "reps": 100,
+                "rounds": 2,
+            },
+        ),
         ml=ml,
         **result_tools,
     )

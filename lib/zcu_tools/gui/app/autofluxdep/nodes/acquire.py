@@ -16,13 +16,16 @@ each Node.
 from __future__ import annotations
 
 from collections.abc import Callable, MutableMapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.experiment.v2.utils import snr_checker
 from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.app.autofluxdep.cfg import NodeCfgSchema
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.utils.process import rotate2real
 
@@ -161,22 +164,15 @@ class SnrProbe:
     value: NDArray[np.complex128] | None = None
 
 
-def earlystop_snr(params: Any) -> float | None:
-    """The SNR early-stop threshold from a Node's params, or None (no early-stop).
+def earlystop_snr(schema: NodeCfgSchema) -> float | None:
+    """The SNR early-stop threshold from a Node's schema, or None (no early-stop).
 
-    Mirrors the lower-layer task's ``earlystop_snr``. The prototype's param field
-    is free text, so an unset / unparseable value disables early-stop rather than
-    failing the acquire."""
-    try:
-        value = params.get("earlystop_snr")
-    except AttributeError:
-        return None
-    if value is None or value == "":
-        return None
-    try:
-        return float(value)
-    except (ValueError, TypeError):
-        return None
+    Mirrors the lower-layer task's ``earlystop_snr``. The knob is an optional
+    ``FloatSpec`` (Phase 160b): unset → the lowered dict omits the key → None
+    (no early-stop). A node type without the knob (ro_optimize) likewise yields
+    None. No text parsing — the schema already lowered it to ``float | None``.
+    """
+    return schema.lower(None).get("earlystop_snr")
 
 
 def build_stop_checkers(
@@ -192,5 +188,5 @@ def build_stop_checkers(
     checkers: list[Callable[[], bool]] = []
     if env.should_stop is not None:
         checkers.append(env.should_stop)
-    checkers.append(snr_checker(probe, earlystop_snr(env.params), signal2real_fn))
+    checkers.append(snr_checker(probe, earlystop_snr(env.schema), signal2real_fn))
     return checkers

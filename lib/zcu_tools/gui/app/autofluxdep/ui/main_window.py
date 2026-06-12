@@ -159,7 +159,7 @@ class MainWindow(QMainWindow):
     def _on_select(self, row: int) -> None:
         nodes = self._ctrl.state.nodes
         node = nodes[row] if 0 <= row < len(nodes) else None
-        self._detail.show_node(node)
+        self._detail.show_node(self._ctrl, node, row)
         # show this Node's live canvas (if a run built one)
         canvas = None
         if node is not None and node.name in self._plots:

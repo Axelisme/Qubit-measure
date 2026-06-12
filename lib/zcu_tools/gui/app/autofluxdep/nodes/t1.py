@@ -50,7 +50,7 @@ window).
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, MutableMapping
+from collections.abc import MutableMapping
 from typing import Any, Optional, cast
 
 import numpy as np
@@ -259,12 +259,6 @@ class T1Builder(Builder):
     optional = (Dependency("t1", smooth="ewma", default=_default_t1),)
     requires_modules = (ModuleDep("pi_pulse", default=_placeholder_pi_pulse),)
     optional_modules = (ModuleDep("opt_readout", default=_default_readout),)
-    base_params = (
-        "sweep_range",
-        "reps",
-        "rounds",
-        "earlystop_snr",
-    )
 
     def make_default_schema(self) -> NodeCfgSchema:
         """The typed node-knob schema (defaults + types) — the param SSOT.
@@ -294,8 +288,8 @@ class T1Builder(Builder):
             )
         )
 
-    def make_init_result(self, params: Mapping[str, Any], flux: Any) -> Sweep1DResult:
-        knobs = self.make_default_schema().with_overrides(params).lower(None)
+    def make_init_result(self, schema: NodeCfgSchema, flux: Any) -> Sweep1DResult:
+        knobs = schema.lower(None)
         times = sweepcfg_to_axis(knobs["sweep_range"])
         return Sweep1DResult.allocate(flux, times, x_label="relax time (us)")
 
@@ -332,7 +326,7 @@ class T1Builder(Builder):
             raise RuntimeError(
                 "t1.make_cfg needs a readout module (none produced or preset)"
             )
-        knobs = self.make_default_schema().with_overrides(env.params).lower(ml)
+        knobs = env.schema.lower(ml)
         smoothed_t1 = float(snapshot["t1"])
         return ml.make_cfg(
             {

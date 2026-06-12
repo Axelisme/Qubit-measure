@@ -14,7 +14,7 @@ from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.ro_optimize import RoOptimizeBuilder
 
-from ._helpers import connect_mock, make_acquire_env
+from ._helpers import connect_mock, make_acquire_env, node_schema
 
 # the swept readout pulse template (its freq/gain are swept by the node)
 _READOUT = {
@@ -58,11 +58,12 @@ def test_ro_optimize_acquire_finds_best_point():
     pi_pulse = _pi_pulse(ml)
 
     builder = RoOptimizeBuilder()
+    schema = node_schema(builder, _PARAMS)
     flux_values = [0.0, 0.1]
     for idx, flux in enumerate(flux_values):
-        result = builder.make_init_result(_PARAMS, np.asarray(flux_values))
+        result = builder.make_init_result(schema, np.asarray(flux_values))
         env = make_acquire_env(
-            ctrl, flux=flux, flux_idx=idx, params=_PARAMS, ml=ml, result=result
+            ctrl, flux=flux, flux_idx=idx, schema=schema, ml=ml, result=result
         )
         snap = Snapshot(
             {"best_ro_freq": 6000.0, "best_ro_gain": 0.5, "t1": 10.0},

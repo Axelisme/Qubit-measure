@@ -287,7 +287,7 @@ class Orchestrator:
         return RunEnv(
             flux=flux,
             flux_idx=idx,
-            params=dict(provider.params),
+            schema=provider.schema,
             soc=self.soc,
             soccfg=self.soccfg,
             ml=self.ml,

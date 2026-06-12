@@ -1,8 +1,8 @@
 """NodeDetailPane — the right side: the selected Node's edit / run sub-tabs.
 
 Shows ONE Node at a time (whichever the left list selects). Inner QTabWidget:
-- "編輯" (Edit): the ParamForm (settings + dep summary). Locked read-only during a
-  run so the user can still see "what this run used".
+- "編輯" (Edit): the typed ``NodeCfgForm`` (settings + dep summary). Locked
+  read-only during a run so the user can still see "what this run used".
 - "執行" (Run): the Node's liveplot — a bare matplotlib ``FigureCanvasQTAgg``
   embedded directly (NOT via gui/plotting's backend; the worker never draws, so
   the plain Qt canvas suffices — see ADR-0017). The MainWindow owns the per-Node
@@ -16,7 +16,7 @@ selected Node's live canvas (or a placeholder when there is none).
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QLabel,
@@ -27,7 +27,10 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 
 from zcu_tools.gui.app.autofluxdep.nodes.builder import PlacedNode
 
-from .param_form import ParamForm
+from .node_cfg_form import NodeCfgForm
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.app.autofluxdep.controller import Controller
 
 _EDIT_TAB = 0
 _RUN_TAB = 1
@@ -39,7 +42,7 @@ class NodeDetailPane(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._node: PlacedNode | None = None
-        self._form: ParamForm | None = None
+        self._form: NodeCfgForm | None = None
         self._running = False
         self._canvas: QWidget | None = None
         # Where a de-selected canvas is parked instead of being left parentless.
@@ -72,17 +75,29 @@ class NodeDetailPane(QWidget):
 
     # --- selection ---
 
-    def show_node(self, node: PlacedNode | None) -> None:
+    def show_node(
+        self,
+        controller: Controller | None,
+        node: PlacedNode | None,
+        index: int,
+    ) -> None:
+        """Rebuild the edit form for the selected ``node`` at workflow ``index``.
+
+        ``controller`` is the typed-form's commit target + LiveModel env (None only
+        when clearing the selection). ``index`` is the placement's list position —
+        the key ``set_node_params`` writes through on edit.
+        """
         self._node = node
-        # clear old form
+        # clear old form (detach the CfgFormWidget + drop the LiveModel draft)
         if self._form is not None:
+            self._form.teardown()
             self._form.setParent(None)
             self._form = None
-        if node is None:
+        if node is None or controller is None:
             self._title.setText("(no node selected)")
             return
         self._title.setText(node.name)
-        self._form = ParamForm(node)
+        self._form = NodeCfgForm(controller, node, index)
         self._form.set_read_only(self._running)
         self._edit_layout.addWidget(self._form)
 
@@ -133,7 +148,7 @@ class NodeDetailPane(QWidget):
     # --- testing accessors ---
 
     @property
-    def current_form(self) -> ParamForm | None:
+    def current_form(self) -> NodeCfgForm | None:
         return self._form
 
     @property

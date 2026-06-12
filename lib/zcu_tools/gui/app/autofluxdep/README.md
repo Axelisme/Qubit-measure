@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-12（autofluxdep real-acquire migration / RB-0..RB-4）
+**Last updated:** 2026-06-13（Phase 160b：node 參數 SSOT 物理化進 NodeCfgSchema + typed cfg form）
 
 # gui/app/autofluxdep/ — autofluxdep-gui app shell
 
@@ -14,7 +14,8 @@ autofluxdep/
 ├── event_bus.py     — EventBus=BaseEventBus + autofluxdep payload（Workflow/Flux/Run* — SetupDone 已退）
 ├── operation_gate.py— app-local OperationGate（str-keyed 衝突矩陣 over session kinds + 自己 RUN kind）
 ├── background.py    — 瘦 BackgroundService（組合共用 BackgroundRunner；_entered 只 pbar+ActiveTask，無 figure routing，ADR-0018）
-├── ui/              — main_window / node_list（Setup/Devices/Predictor button + flux-source picker）/ node_detail / param_form
+├── cfg/             — 唯一 import measure spec/value 模型的 seam：`__init__`（純資料：CfgSchema/*Spec/*Value re-export）+ `schema`（NodeCfgSchema：node 旋鈕 SSOT，lower/set_field/with_overrides）+ `form`（CfgFormWidget/SectionLiveField/LiveModelEnv re-export，UI seam）
+├── ui/              — main_window / node_list（Setup/Devices/Predictor button + flux-source picker）/ node_detail / node_cfg_form（typed cfg form：SectionLiveField over PlacedNode.schema + CfgFormWidget，編輯經 controller.set_node_params 寫回 schema SSOT）
 ├── nodes/           — **domain core（別動）**：builder（Builder/Node/RunEnv）/ qubit_freq/lenrabi/ro_optimize/t1/t2ramsey/t2echo/mist/predictor / acquire（共用 real-acquire helpers：set_flux_by_name/require_flux_device/build_stop_checkers/is_good_fit/parse_linear_axis）/ result / plotters / io / spec
 ├── orchestrator.py / derivation.py / tools.py / registry.py — **domain core（別動）**
 └── CONTEXT.md / README.md
@@ -27,5 +28,6 @@ autofluxdep/
 - **Run path（real acquire）**：每 node `produce` 用 `Builder.make_cfg`（決策 A，D1：在 produce 跑）lower context→真 cfg，把這點 flux 值寫進 `cfg.dev[flux_device]`（`set_flux_by_name`，by device **name**＝picker 存的，非下層 `flux_dev` label）→ `setup_devices` 推送 → 建 program（TwoToneProgram/ModularProgramV2…）`.acquire`（`round_hook`+`stop_checkers`：cooperative stop＋SNR early-stop）→ fit（qubit_freq 並 `predictor.calibrate`；mist/ro_optimize 無 fit）。**無 synthetic fallback**：context 未配置時 `make_cfg` **Fast Fail**（→ orchestrator 轉 `RunFailedPayload`，不讓 worker QThread abort）。offline 測試走 flux-aware MockSoc（`connect_mock` 起 `fake_flux`），資料隨 flux 變化。詳見 `CONTEXT.md` 的 "Run path"。
 - **produce 例外保護**：`orchestrator.run` catch `produce` 例外 → 記 `self.run_error`＋停 sweep；`controller.start_run` 檢查後 emit `RunFailedPayload(message)`，UI `MainWindow._on_run_failed` 解鎖＋彈 warning。真 GUI run 的 node 例外不會 crash app。
 - **predictor 兩層**：`exp_context.predictor` 存 raw `FluxoniumPredictor`（PredictorDialog/ConnectionService 載）；`_build_tools` 每 run wrap 成自適應 `FluxoniumPredictorAdapter`（None→`SimplePredictor`），stash 進 run-lived `state.run_predictor`。**勿混** measure 的 freq-預測 predictor。
+- **node 參數 SSOT（Phase 160b）**：`PlacedNode` 持自己的 `NodeCfgSchema`（per-placement 可變 value 樹，從 `builder.make_default_schema()` 建，建構時 `overrides=` 種子）——`params: dict`/`base_params` 已刪。orchestrator 把 `provider.schema` 帶進 `RunEnv.schema`，node `make_cfg`/`make_init_result`/`detune_ratio`/`earlystop_snr` 都從 schema lower（`env.schema.lower(ml)`），推導欄位仍由 produce 注入（不變）。UI typed form 編輯經 `controller.set_node_params(index, {key: leaf})`（單一 typed 入口，接受 value-tree leaf 或 raw，fast-fail 未知 key），主執行緒寫 + bump workflow version。**無 persist**（nodes 純記憶體）。
 
 跨模組設計見 ADR-0017（worker 畫圖 marshal，本 app 不適用——worker 不畫）/0018（orchestrator 需求解析器）/0020（session-core extraction）。

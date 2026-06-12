@@ -15,7 +15,12 @@ from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.t2echo import T2EchoBuilder
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
-from ._helpers import ACQUIRE_READOUT, connect_mock, make_acquire_env
+from ._helpers import (
+    ACQUIRE_READOUT,
+    connect_mock,
+    make_acquire_env,
+    node_schema,
+)
 
 # reps=2000 x rounds=2 averages the mock per-shot noise enough that the echo
 # fringe clears the fit-quality gate (the echo contrast is lower than T1's).
@@ -59,12 +64,13 @@ def test_t2echo_acquire_fits_finite_positive_t2():
     )
 
     builder = T2EchoBuilder()
+    schema = node_schema(builder, _PARAMS)
     flux_values = [0.0, 0.1]
     t2s: list[float] = []
     for idx, flux in enumerate(flux_values):
-        result = builder.make_init_result(_PARAMS, np.asarray(flux_values))
+        result = builder.make_init_result(schema, np.asarray(flux_values))
         env = make_acquire_env(
-            ctrl, flux=flux, flux_idx=idx, params=_PARAMS, ml=ml, result=result
+            ctrl, flux=flux, flux_idx=idx, schema=schema, ml=ml, result=result
         )
         f01 = float(predictor.predict_freq(flux))
         pi_pulse, pi2_pulse = _pulses(ml, f01)

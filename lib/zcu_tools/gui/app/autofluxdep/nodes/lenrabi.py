@@ -25,7 +25,7 @@ Fast Fails when the context is unconfigured. Compare ``notebook_md/autofluxdep.m
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, MutableMapping
+from collections.abc import MutableMapping
 from typing import Any, Optional, cast
 
 import numpy as np
@@ -219,20 +219,6 @@ class LenRabiBuilder(Builder):
     provides_modules = ("pi_pulse", "pi2_pulse")
     requires = (Dependency("qubit_freq"),)
     optional_modules = (ModuleDep("opt_readout", default=_default_readout),)
-    base_params = (
-        "sweep_range",
-        "reps",
-        "rounds",
-        "relax_delay",
-        "earlystop_snr",
-        # the drive pulse "設定頭" — what the cfg builder lowers into rabi_pulse
-        # (freq comes from the required qubit_freq, readout from the snapshot)
-        "qub_waveform",
-        "qub_ch",
-        "qub_nqz",
-        "qub_gain",
-        "qub_length",
-    )
 
     def make_default_schema(self) -> NodeCfgSchema:
         """The typed node-knob schema (defaults + types) — the param SSOT.
@@ -271,8 +257,8 @@ class LenRabiBuilder(Builder):
             )
         )
 
-    def make_init_result(self, params: Mapping[str, Any], flux: Any) -> Sweep1DResult:
-        knobs = self.make_default_schema().with_overrides(params).lower(None)
+    def make_init_result(self, schema: NodeCfgSchema, flux: Any) -> Sweep1DResult:
+        knobs = schema.lower(None)
         lengths = sweepcfg_to_axis(knobs["sweep_range"])
         return Sweep1DResult.allocate(flux, lengths, x_label="pulse length (us)")
 
@@ -314,7 +300,7 @@ class LenRabiBuilder(Builder):
             raise RuntimeError(
                 "lenrabi.make_cfg needs a readout module (none produced or preset)"
             )
-        knobs = self.make_default_schema().with_overrides(env.params).lower(ml)
+        knobs = env.schema.lower(ml)
         waveform_name = knobs.get("qub_waveform")
         ch = knobs.get("qub_ch")
         if not waveform_name or ch is None:

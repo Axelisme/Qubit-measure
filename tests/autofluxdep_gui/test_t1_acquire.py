@@ -18,7 +18,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.t1 import T1Builder
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
-from ._helpers import ACQUIRE_READOUT, connect_mock, make_acquire_env
+from ._helpers import ACQUIRE_READOUT, connect_mock, make_acquire_env, node_schema
 
 # reps=1000 averages the mock per-shot noise enough that the decay clears the
 # fit-quality gate (200 reps leaves residual > the gate at this T1 contrast).
@@ -50,12 +50,13 @@ def test_t1_acquire_fits_finite_positive_t1():
     )
 
     builder = T1Builder()
+    schema = node_schema(builder, _PARAMS)
     flux_values = [0.0, 0.1]
     t1s: list[float] = []
     for idx, flux in enumerate(flux_values):
-        result = builder.make_init_result(_PARAMS, np.asarray(flux_values))
+        result = builder.make_init_result(schema, np.asarray(flux_values))
         env = make_acquire_env(
-            ctrl, flux=flux, flux_idx=idx, params=_PARAMS, ml=ml, result=result
+            ctrl, flux=flux, flux_idx=idx, schema=schema, ml=ml, result=result
         )
         f01 = float(predictor.predict_freq(flux))
         snap = Snapshot(

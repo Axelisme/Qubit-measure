@@ -18,7 +18,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.mist import MistBuilder
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
-from ._helpers import ACQUIRE_READOUT, connect_mock, make_acquire_env
+from ._helpers import ACQUIRE_READOUT, connect_mock, make_acquire_env, node_schema
 
 _PARAMS = {
     "gain_sweep": SweepValue(start=0.0, stop=1.0, expts=21),
@@ -56,14 +56,16 @@ def test_mist_acquire_runs_or_skips_on_simengine_gap():
 
     builder = MistBuilder()
     flux = 0.0
-    result = builder.make_init_result(_PARAMS, np.asarray([flux]))
-    env = make_acquire_env(
-        ctrl, flux=flux, flux_idx=0, params=_PARAMS, ml=ml, result=result
-    )
     f01 = float(predictor.predict_freq(flux))
-    # the mist_freq param sets the disturbance drive; set it on resonance so the
-    # mist pulse actually drives the qubit under the SimEngine.
+    # the mist_freq knob sets the disturbance drive; set it on resonance so the
+    # mist pulse actually drives the qubit under the SimEngine (before building
+    # the schema the env lowers).
     _PARAMS["mist_freq"] = f01
+    schema = node_schema(builder, _PARAMS)
+    result = builder.make_init_result(schema, np.asarray([flux]))
+    env = make_acquire_env(
+        ctrl, flux=flux, flux_idx=0, schema=schema, ml=ml, result=result
+    )
     snap = Snapshot(
         {"success": 1.0},
         modules={"pi_pulse": _pi_pulse(ml, f01), "opt_readout": ACQUIRE_READOUT},

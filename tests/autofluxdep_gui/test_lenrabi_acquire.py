@@ -19,7 +19,12 @@ from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import LenRabiBuilder
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
-from ._helpers import ACQUIRE_READOUT, connect_mock, make_acquire_env
+from ._helpers import (
+    ACQUIRE_READOUT,
+    connect_mock,
+    make_acquire_env,
+    node_schema,
+)
 
 _PARAMS = {
     "qub_waveform": "rabi_drive",
@@ -50,12 +55,13 @@ def test_lenrabi_acquire_fits_finite_pi_length():
     )
 
     builder = LenRabiBuilder()
+    schema = node_schema(builder, _PARAMS)
     flux_values = [0.0, 0.06, 0.1]
     pis: list[float] = []
     for idx, flux in enumerate(flux_values):
-        result = builder.make_init_result(_PARAMS, np.asarray(flux_values))
+        result = builder.make_init_result(schema, np.asarray(flux_values))
         env = make_acquire_env(
-            ctrl, flux=flux, flux_idx=idx, params=_PARAMS, ml=ml, result=result
+            ctrl, flux=flux, flux_idx=idx, schema=schema, ml=ml, result=result
         )
         f01 = predictor.predict_freq(flux)
         snap = Snapshot(

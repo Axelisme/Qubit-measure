@@ -1,16 +1,17 @@
-"""Phase 160a — typed node-knob CfgSchema: structure, defaults, equivalence, seam.
+"""Typed node-knob CfgSchema: structure, defaults, equivalence, seam.
 
 Three families of test:
 
 1. **Structure** — each node's ``make_default_schema`` declares exactly the user
-   knobs (the old ``base_params``, now typed), and *no* derived/upstream field
-   (predict_freq, relax=3·T1, the pi/readout modules) leaks into the spec.
+   knobs (the typed node settings), and *no* derived/upstream field (predict_freq,
+   relax=3·T1, the pi/readout modules) leaks into the spec.
 2. **Defaults** — the lowered default knobs reproduce the prototype's hardcoded
    ``make_cfg`` values (reps/rounds/relax/the pulse "設定頭"), and a node's
    ``make_cfg`` built from those defaults yields the same run cfg the prototype's
    ``params.get(k, default)`` path produced (golden, field-by-field).
-3. **Seam invariant** — only ``cfg/__init__.py`` / ``cfg/schema.py`` may import
-   ``zcu_tools.gui.app.main`` from inside the autofluxdep package.
+3. **Seam invariant** — only the ``cfg/`` seam (``__init__.py`` / ``schema.py`` /
+   ``form.py``) may import ``zcu_tools.gui.app.main`` from inside the autofluxdep
+   package.
 """
 
 from __future__ import annotations
@@ -65,7 +66,60 @@ def _ml() -> ModuleLibrary:
     return ml
 
 
-# --- 1. structure: knob keys == base_params, no derived field in the spec ------
+# --- 1. structure: knob keys are the declared user knobs, no derived field ------
+
+# Each node's exact user-knob key set (the typed knobs the schema owns). This is
+# the golden structural contract: the spec declares these and nothing else (no
+# derived/upstream field — see _DERIVED_FORBIDDEN below).
+_EXPECTED_KEYS = {
+    "qubit_freq": {
+        "detune_sweep",
+        "reps",
+        "rounds",
+        "relax_delay",
+        "earlystop_snr",
+        "qub_waveform",
+        "qub_ch",
+        "qub_nqz",
+        "qub_gain",
+        "qub_length",
+    },
+    "lenrabi": {
+        "sweep_range",
+        "reps",
+        "rounds",
+        "relax_delay",
+        "earlystop_snr",
+        "qub_waveform",
+        "qub_ch",
+        "qub_nqz",
+        "qub_gain",
+        "qub_length",
+    },
+    "ro_optimize": {
+        "freq_expts",
+        "gain_expts",
+        "reps",
+        "rounds",
+        "freq_window",
+        "gain_window",
+    },
+    "t1": {"sweep_range", "reps", "rounds", "earlystop_snr"},
+    "t2ramsey": {"sweep_range", "detune_ratio", "reps", "rounds", "earlystop_snr"},
+    "t2echo": {"sweep_range", "detune_ratio", "reps", "rounds", "earlystop_snr"},
+    "mist": {
+        "gain_sweep",
+        "reps",
+        "rounds",
+        "relax_delay",
+        "mist_waveform",
+        "mist_ch",
+        "mist_nqz",
+        "mist_freq",
+        "mist_gain",
+        "mist_length",
+    },
+}
 
 # The complete derived/upstream set that MUST NOT appear as a user knob (it is
 # injected by make_cfg / produce from the predictor, prev-point fits, or modules).
@@ -88,7 +142,7 @@ _DERIVED_FORBIDDEN = {
 }
 
 
-def test_schema_keys_match_base_params():
+def test_schema_keys_match_declared_knobs():
     for builder in (
         QubitFreqBuilder(),
         LenRabiBuilder(),
@@ -99,7 +153,7 @@ def test_schema_keys_match_base_params():
         MistBuilder(),
     ):
         schema = builder.make_default_schema()
-        assert set(schema.keys) == set(builder.base_params), builder.name
+        assert set(schema.keys) == _EXPECTED_KEYS[builder.name], builder.name
 
 
 def test_no_derived_field_in_any_spec():
@@ -198,16 +252,20 @@ def test_t2_default_knobs():
 
 def test_qubit_freq_make_cfg_uses_schema_defaults():
     ml = _ml()
+    builder = QubitFreqBuilder()
     env = RunEnv(
         flux=0.0,
         flux_idx=0,
-        params={"qub_waveform": "drive_flat", "qub_ch": 3},  # the rest = defaults
+        # the rest = defaults
+        schema=builder.make_default_schema().with_overrides(
+            {"qub_waveform": "drive_flat", "qub_ch": 3}
+        ),
         ml=ml,
     )
     snap = Snapshot(
         {"predict_freq": 5135.0, "fit_kappa": 0.05}, modules={"readout": _READOUT}
     )
-    cfg = QubitFreqBuilder().make_cfg(env, snap)
+    cfg = builder.make_cfg(env, snap)
     # the hardcoded prototype defaults, now sourced from the schema
     assert cfg.reps == 1000
     assert cfg.rounds == 100
@@ -226,16 +284,20 @@ def test_mist_make_cfg_uses_schema_defaults():
             "raise_waveform": {"style": "cosine", "length": 0.02},
         }
     )
+    builder = MistBuilder()
     env = RunEnv(
         flux=0.0,
         flux_idx=0,
-        params={"mist_waveform": "mist_flat", "mist_ch": 4},  # the rest = defaults
+        # the rest = defaults
+        schema=builder.make_default_schema().with_overrides(
+            {"mist_waveform": "mist_flat", "mist_ch": 4}
+        ),
         ml=ml,
     )
     snap = Snapshot(
         {"success": 1.0}, modules={"pi_pulse": _PI_PULSE, "opt_readout": _READOUT}
     )
-    cfg = MistBuilder().make_cfg(env, snap)
+    cfg = builder.make_cfg(env, snap)
     assert cfg.reps == 1000
     assert cfg.rounds == 100
     assert cfg.relax_delay == 0.5
@@ -272,28 +334,36 @@ def test_with_overrides_unknown_key_fast_fails():
         schema.with_overrides({"bogus": 1})
 
 
-# --- 2d. set_node_params bridge (controller level): type, fast-fail, sweep-skip --
+# --- 2d. set_node_params (controller typed entry): type, sweep, fast-fail -------
 
 
 def test_set_node_params_types_and_fast_fails():
     import pytest
     from zcu_tools.gui.app.autofluxdep.app import build_core
+    from zcu_tools.gui.app.autofluxdep.cfg import SweepValue
 
     ctrl = build_core()
     node = ctrl.add_node_by_type("qubit_freq")
     index = ctrl.state.nodes.index(node)
 
-    # text values are coerced to the declared types and stored on node.params
+    # scalar values are coerced to the declared types and written into the schema
+    # SSOT (read back via the lowered knobs)
     ctrl.set_node_params(index, {"reps": "250", "qub_gain": "0.2", "qub_ch": "3"})
-    assert node.params["reps"] == 250 and isinstance(node.params["reps"], int)
-    assert node.params["qub_gain"] == 0.2
-    assert node.params["qub_ch"] == 3
+    knobs = node.schema.lower(None)
+    assert knobs["reps"] == 250 and isinstance(knobs["reps"], int)
+    assert knobs["qub_gain"] == 0.2
+    assert knobs["qub_ch"] == 3
 
-    # a sweep knob's text is ignored (not text-editable until the 160b form); it
-    # never lands as a malformed string on node.params
-    ctrl.set_node_params(index, {"detune_sweep": "-20,50,0.5", "reps": "100"})
-    assert "detune_sweep" not in node.params
-    assert node.params["reps"] == 100
+    # a sweep knob now accepts a SweepValue (the 160b typed sweep widget edits it)
+    ctrl.set_node_params(
+        index, {"detune_sweep": SweepValue(start=-30.0, stop=40.0, expts=71)}
+    )
+    detune = node.schema.lower(None)["detune_sweep"]
+    assert (float(detune.start), float(detune.stop), int(detune.expts)) == (
+        -30.0,
+        40.0,
+        71,
+    )
 
     # an unknown key fast-fails (a real typo — the form only renders declared knobs)
     with pytest.raises(KeyError, match="Unknown node param"):
@@ -307,7 +377,11 @@ def test_only_cfg_seam_imports_measure_app():
     pkg = pathlib.Path(__file__).resolve().parents[2] / (
         "lib/zcu_tools/gui/app/autofluxdep"
     )
-    allowed = {pkg / "cfg" / "__init__.py", pkg / "cfg" / "schema.py"}
+    allowed = {
+        pkg / "cfg" / "__init__.py",
+        pkg / "cfg" / "schema.py",
+        pkg / "cfg" / "form.py",
+    }
     offenders: list[str] = []
     for py in pkg.rglob("*.py"):
         tree = ast.parse(py.read_text())

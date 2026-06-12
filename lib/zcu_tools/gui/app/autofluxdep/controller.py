@@ -15,11 +15,10 @@ dependency model.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Optional
 
 from zcu_tools.gui.app.autofluxdep.background import BackgroundService
-from zcu_tools.gui.app.autofluxdep.cfg import DirectValue, SweepSpec
 from zcu_tools.gui.app.autofluxdep.derivation import DerivationService
 from zcu_tools.gui.app.autofluxdep.events.run import (
     NodeEnteredPayload,
@@ -338,6 +337,18 @@ class Controller:
     def get_current_ml(self) -> ModuleLibrary:
         return self._ctx_svc.get_current_ml()
 
+    # -- cfg form (node detail pane): the LiveModel env contract --
+    # The reused measure LiveModel fields fetch their environment through this
+    # surface (ControllerProtocol). autofluxdep's node knobs are flat scalars /
+    # sweeps with no md-reference / module-ref / device-ref, so these two never
+    # fire for our schemas — they exist only so the controller structurally
+    # conforms to the shared LiveModelEnv contract.
+    def has_soc(self) -> bool:
+        return self._state.exp_context.has_soc()
+
+    def list_device_names(self) -> list[str]:
+        return [entry.name for entry in self._dev_svc.list_devices()]
+
     def coerce_md_value(self, key: str, text: str) -> Any:
         return self._ctx_svc.coerce_md_value(key, text)
 
@@ -377,7 +388,7 @@ class Controller:
 
     def add_node(self, builder: Builder, **params: Any) -> PlacedNode:
         name = self._unique_name(builder.name)
-        node = PlacedNode(builder=builder, name=name, params=dict(params))
+        node = PlacedNode(builder=builder, name=name, overrides=params)
         self._state.nodes.append(node)
         self._state.version.bump(WORKFLOW_VERSION_KEY)
         logger.debug("add_node: %r (type=%r) params=%s", name, builder.name, params)
@@ -389,13 +400,14 @@ class Controller:
 
         The instance name defaults to the type name, de-duped within the
         workflow (a second ``mist`` becomes ``mist_2``); the user can rename it.
-        A Node is seeded with the default acquire ``rounds`` so the GUI run
-        averages a sensible number of passes (the user can tune it).
+        A Node is seeded with the GUI's default acquire ``rounds`` so the run
+        averages a sensible number of passes (the user can tune it) — written
+        through the placement's schema (the SSOT) rather than a params dict.
         """
         node = create_placement(type_name)
         node.name = self._unique_name(node.name)
-        if "rounds" in node.builder.base_params:
-            node.params.setdefault("rounds", DEFAULT_ROUNDS)
+        if "rounds" in node.schema.keys:
+            node.schema.set_field("rounds", DEFAULT_ROUNDS)
         self._state.nodes.append(node)
         self._state.version.bump(WORKFLOW_VERSION_KEY)
         logger.debug("add_node_by_type: %r -> %r", type_name, node.name)
@@ -443,46 +455,26 @@ class Controller:
         self._bus.emit(WorkflowChangedPayload(name=None))
         return new_index
 
-    def set_node_params(self, index: int, params: dict[str, Any]) -> None:
-        """Replace the tuned params of the Node at ``index``, typed through its schema.
+    def set_node_params(self, index: int, params: Mapping[str, Any]) -> None:
+        """Write one-or-more knob leaves of the Node at ``index`` into its schema SSOT.
 
-        The bridge into the typed param SSOT (Phase 160a): each incoming key is
-        written into the Builder's CfgSchema leaf, which coerces a (text) value to
-        the field's declared type and fast-fails an unknown key (a real typo —
-        the form only renders declared knobs). The lowered scalar overrides are
-        stored back as ``node.params`` (the dict the UI / orchestrator / Result
-        allocation still read until the 160b form swap). Sweep-typed knobs
-        (qubit_freq detune, mist gain, the 1-D delay/length axes) are not editable
-        from the prototype's text form — they keep their schema defaults here and
-        gain a typed widget in 160b — so a text value for one is ignored rather
-        than mis-coerced.
+        Phase 160b typed entry: each incoming key writes directly into the
+        placement's own ``NodeCfgSchema`` (the per-placement value tree, the SSOT).
+        A scalar value is coerced to the field's declared type; a ``SweepValue`` is
+        accepted for a ``SweepSpec`` knob (the typed sweep widget now edits those).
+        An unknown key fast-fails — the form only renders declared knobs, so an
+        undeclared key is a real typo, not a silent extra. State writes happen on
+        the main thread (the UI calls this), preserving the State main-thread
+        invariant; the workflow version bumps + a ``WorkflowChangedPayload`` fires
+        so dependents refresh, exactly as before.
         """
         node = self._state.nodes[index]
-        schema = node.builder.make_default_schema()
-        scalar_keys = {
-            key
-            for key in schema.keys
-            if not isinstance(schema.schema.spec.fields[key], SweepSpec)
-        }
-        typed: dict[str, Any] = {}
         for key, value in params.items():
-            if key not in schema.keys:
-                raise KeyError(
-                    f"Unknown node param {key!r} for {node.builder.name!r}; "
-                    f"declared: {', '.join(schema.keys)}"
-                )
-            if key not in scalar_keys:
-                continue  # sweep knob: not text-editable until the 160b typed form
-            schema.set_field(key, value)
-            lowered = schema.schema.value.fields[key]
-            # an unset (blank) scalar lowers to None → drop it so the schema default
-            # (or the node's Fast-Fail guard) applies, matching the old form's
-            # "leave blank to use the default" behaviour.
-            if isinstance(lowered, DirectValue) and lowered.value is not None:
-                typed[key] = lowered.value
-        node.params = typed
+            node.schema.set_field(key, value)  # fast-fails unknown key / wrong type
         self._state.version.bump(WORKFLOW_VERSION_KEY)
-        logger.debug("set_node_params[%d] (%r): %s", index, node.name, typed)
+        logger.debug(
+            "set_node_params[%d] (%r): keys=%s", index, node.name, list(params)
+        )
         self._bus.emit(WorkflowChangedPayload(name=None))
 
     def set_flux_values(self, values: list[float]) -> None:
@@ -554,7 +546,7 @@ class Controller:
         """
         results: dict[str, Any] = {}
         for node in self._state.nodes:
-            result = node.builder.make_init_result(node.params, flux)
+            result = node.builder.make_init_result(node.schema, flux)
             if result is not None:
                 results[node.name] = result
         return results

@@ -4,7 +4,7 @@ A node's user knobs are a *flat* set of scalars (reps / rounds / relax_delay /
 earlystop_snr / the pulse "設定頭" ch/nqz/gain/length/freq + the by-name waveform
 string) plus, for sweep-defined knobs, a ``SweepSpec`` (qubit_freq's detune).
 There is no nesting: unlike a measure cfg (modules / sweep / dev sections), a
-node's knobs are the leaves the old ``base_params`` named, now typed.
+node's knobs are flat typed leaves (the node's user-tunable settings).
 
 ``flat_node_schema`` builds the ``CfgSchema`` (spec + a complete default value
 tree) from a field list. ``NodeCfgSchema`` wraps it as the node's param SSOT:
@@ -13,10 +13,11 @@ tree) from a field list. ``NodeCfgSchema`` wraps it as the node's param SSOT:
   replacing the old ``params.get(k, default)``). Scalars lower to their value;
   a ``SweepSpec`` lowers to a ``SweepCfg`` (via the framework lowering).
 - ``set_field(key, value)`` writes one leaf, fast-failing an unknown key — the
-  set_node_params bridge (Phase 160a) routes the old ParamForm's flat writes here.
+  single typed entry both the cfg form (value-tree leaves) and tests (raw values)
+  route through.
 - ``with_overrides(params)`` seeds the value tree from a flat dict (a placement's
-  stored params), fast-failing unknown keys — the boundary that turns a
-  ``PlacedNode``'s param dict into the typed schema.
+  construction overrides), fast-failing unknown keys — the boundary that turns a
+  ``PlacedNode``'s seed dict into its typed schema.
 
 The lowering uses ``md=None``: node knobs are plain scalars / sweeps with no
 ``EvalValue``, so no MetaDict is needed to resolve them (ml is passed through for
@@ -62,7 +63,7 @@ def sweepcfg_to_axis(sweep: Any) -> NDArray[np.float64]:
 def _coerce_scalar(value: Any, type_: type) -> Any:
     """Coerce a (possibly text) scalar to its declared type, or None if blank/unset.
 
-    Bridges the prototype's text-valued ParamForm into the typed value tree: a
+    Bridges a raw (possibly text) override into the typed value tree: a
     blank string / None means "unset" (leaf stays None → spec default or the
     node's Fast-Fail guard applies). A present value is coerced to the field's
     physical type (str passes through; int/float/bool parse). A malformed numeric
@@ -144,18 +145,22 @@ class NodeCfgSchema:
 
     @property
     def keys(self) -> tuple[str, ...]:
-        """The declared knob keys (the old ``base_params``)."""
+        """The declared knob keys (the node's typed user knobs)."""
         return tuple(self.schema.spec.fields.keys())
 
     def set_field(self, key: str, value: Any) -> None:
-        """Write one knob leaf, coercing to the field's type, fast-failing unknown.
+        """Write one knob leaf into the value tree, fast-failing an unknown key.
 
-        The set_node_params bridge routes the old (text-valued) ParamForm's flat
-        per-key writes here; an unknown key is a real typo (the form only renders
-        declared keys), so it fast-fails rather than silently storing an orphan
-        param. A scalar value is coerced to its declared type (the text→int/float
-        the old ``make_cfg`` did inline); a blank/None leaves the leaf unset so the
-        spec default or a node's explicit Fast-Fail guard applies.
+        The single typed entry into the SSOT, used by two writers: the typed cfg
+        form (which emits value-tree leaves — ``DirectValue`` / ``SweepValue``)
+        and tests / ``with_overrides`` (which pass raw scalars). An unknown key is
+        a real typo (only declared knobs are writable), so it fast-fails.
+
+        - A ``SweepSpec`` knob accepts a ``SweepValue`` (stored verbatim).
+        - A ``ScalarSpec`` knob accepts either a ``DirectValue`` (stored verbatim —
+          its value is the type-correct one the form produced) or a raw value
+          (coerced to the field's declared type; a blank/None leaves the leaf
+          unset so the spec default or a node's Fast-Fail guard applies).
         """
         if key not in self.schema.spec.fields:
             raise KeyError(
@@ -171,6 +176,9 @@ class NodeCfgSchema:
             self.schema.value.fields[key] = value
             return
         assert isinstance(spec, ScalarSpec)
+        if isinstance(value, DirectValue):
+            self.schema.value.fields[key] = value
+            return
         self.schema.value.fields[key] = DirectValue(_coerce_scalar(value, spec.type))
 
     def with_overrides(self, params: Mapping[str, Any]) -> NodeCfgSchema:

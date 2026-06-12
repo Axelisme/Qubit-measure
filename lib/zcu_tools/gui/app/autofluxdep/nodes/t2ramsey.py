@@ -42,7 +42,7 @@ Compare ``notebook_md/autofluxdep.md`` (the T2RamseyTask block):
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, MutableMapping
+from collections.abc import MutableMapping
 from typing import Any, Optional, cast
 
 import numpy as np
@@ -168,7 +168,7 @@ class T2RamseyNode(Node):
         # (lower layer: activate_detune = detune_ratio / len_sweep.step).
         length_sweep = axis_to_sweep(times)
         length_param = sweep2param("length", length_sweep)
-        detune_ratio = self._builder.detune_ratio(env.params)
+        detune_ratio = self._builder.detune_ratio(env.schema)
         activate_detune = detune_ratio / length_sweep.step
         pi2_pulse = cfg.modules.pi2_pulse
 
@@ -251,13 +251,6 @@ class T2RamseyBuilder(Builder):
     )
     requires_modules = (ModuleDep("pi2_pulse", default=_placeholder_pi2_pulse),)
     optional_modules = (ModuleDep("opt_readout", default=_default_readout),)
-    base_params = (
-        "sweep_range",
-        "detune_ratio",
-        "reps",
-        "rounds",
-        "earlystop_snr",
-    )
 
     def make_default_schema(self) -> NodeCfgSchema:
         """The typed node-knob schema (defaults + types) — the param SSOT.
@@ -292,13 +285,12 @@ class T2RamseyBuilder(Builder):
             )
         )
 
-    def detune_ratio(self, params: Mapping[str, Any]) -> float:
+    def detune_ratio(self, schema: NodeCfgSchema) -> float:
         """The activate-detune ratio for this placement (typed knob, default 0.2)."""
-        knobs = self.make_default_schema().with_overrides(params).lower(None)
-        return float(knobs["detune_ratio"])
+        return float(schema.lower(None)["detune_ratio"])
 
-    def make_init_result(self, params: Mapping[str, Any], flux: Any) -> Sweep1DResult:
-        knobs = self.make_default_schema().with_overrides(params).lower(None)
+    def make_init_result(self, schema: NodeCfgSchema, flux: Any) -> Sweep1DResult:
+        knobs = schema.lower(None)
         times = sweepcfg_to_axis(knobs["sweep_range"])
         return Sweep1DResult.allocate(flux, times, x_label="delay time (us)")
 
@@ -338,7 +330,7 @@ class T2RamseyBuilder(Builder):
             raise RuntimeError(
                 "t2ramsey.make_cfg needs a readout module (none produced or preset)"
             )
-        knobs = self.make_default_schema().with_overrides(env.params).lower(ml)
+        knobs = env.schema.lower(ml)
         t1 = float(snapshot["t1"])
         t2r = float(snapshot["t2r"])
         return ml.make_cfg(

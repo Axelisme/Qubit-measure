@@ -32,7 +32,7 @@ predictor calibration closed loop.
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, MutableMapping
+from collections.abc import MutableMapping
 from typing import Any, cast
 
 import numpy as np
@@ -312,20 +312,6 @@ class QubitFreqBuilder(Builder):
     )
     # the readout module: Node-produced (ro_optimize) → ml preset → default.
     optional_modules = (ModuleDep("readout", default=_default_readout),)
-    base_params = (
-        "detune_sweep",
-        "reps",
-        "rounds",
-        "relax_delay",
-        "earlystop_snr",
-        # the drive pulse "設定頭" — what the cfg builder lowers into qub_pulse
-        # (freq comes from the predicted qubit freq, readout from the snapshot)
-        "qub_waveform",
-        "qub_ch",
-        "qub_nqz",
-        "qub_gain",
-        "qub_length",
-    )
 
     def make_default_schema(self) -> NodeCfgSchema:
         """The typed node-knob schema (defaults + types) — the param SSOT.
@@ -366,8 +352,8 @@ class QubitFreqBuilder(Builder):
             )
         )
 
-    def make_init_result(self, params: Mapping[str, Any], flux: Any) -> QubitFreqResult:
-        knobs = self.make_default_schema().with_overrides(params).lower(None)
+    def make_init_result(self, schema: NodeCfgSchema, flux: Any) -> QubitFreqResult:
+        knobs = schema.lower(None)
         detune = sweepcfg_to_axis(knobs["detune_sweep"])
         return QubitFreqResult.allocate(flux, detune)
 
@@ -399,9 +385,10 @@ class QubitFreqBuilder(Builder):
             raise RuntimeError(
                 "qubit_freq.make_cfg needs a readout module (none produced or preset)"
             )
-        # the typed knobs (defaults + types owned by the schema); reps/rounds/relax
-        # come pre-typed, the optional drive waveform/ch are omitted when unset.
-        knobs = self.make_default_schema().with_overrides(env.params).lower(ml)
+        # the typed knobs (defaults + types owned by the placement's schema);
+        # reps/rounds/relax come pre-typed, the optional drive waveform/ch are
+        # omitted when unset.
+        knobs = env.schema.lower(ml)
         waveform_name = knobs.get("qub_waveform")
         ch = knobs.get("qub_ch")
         if not waveform_name or ch is None:

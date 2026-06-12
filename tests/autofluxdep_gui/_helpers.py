@@ -12,6 +12,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Optional
 
+from zcu_tools.gui.app.autofluxdep.cfg import NodeCfgSchema, flat_node_schema
+from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeField
 from zcu_tools.gui.app.autofluxdep.nodes.builder import (
     Builder,
     Node,
@@ -134,7 +136,7 @@ def make_builder(
     requires_modules: tuple[ModuleDep, ...] = (),
     optional_modules: tuple[ModuleDep, ...] = (),
     provides_modules: tuple[str, ...] = (),
-    base_params: tuple[str, ...] = (),
+    schema_fields: tuple[NodeField, ...] = (),
     produce_fn: ProduceFn | None = None,
     result_factory: ResultFactory | None = None,
     plotter_factory: Callable[[Any], Any] | None = None,
@@ -142,7 +144,9 @@ def make_builder(
     """A Builder whose declarations are the given tuples and whose Node's
     ``produce`` calls ``produce_fn(env, snapshot)`` (or returns an empty Patch).
 
-    ``result_factory(params, flux) -> Result`` (optional) gives the fake Builder a
+    ``schema_fields`` (the ``(key, spec, default)`` tuples) declare the fake
+    Builder's typed knobs — most dependency-model tests pass none (no knobs).
+    ``result_factory(schema, flux) -> Result`` (optional) gives the fake Builder a
     sweep Result so a mechanics test that asserts ``run_results`` / per-instance
     containers can use it without a real measurement Builder.
     ``plotter_factory(figure) -> Plotter`` (optional) gives it a Plotter so a UI
@@ -150,13 +154,16 @@ def make_builder(
     """
 
     class _AdHocBuilder(Builder):
+        def make_default_schema(self) -> NodeCfgSchema:
+            return NodeCfgSchema(flat_node_schema(schema_fields))
+
         def build_node(self, env: RunEnv) -> Node:
             return _FnNode(env, produce_fn)
 
-        def make_init_result(self, params: Any, flux: Any) -> Any:
+        def make_init_result(self, schema: NodeCfgSchema, flux: Any) -> Any:
             if result_factory is None:
                 return None
-            return result_factory(params, flux)
+            return result_factory(schema, flux)
 
         def make_plotter(self, figure: Any) -> Any:
             if plotter_factory is None:
@@ -171,13 +178,26 @@ def make_builder(
     b.requires_modules = requires_modules
     b.optional_modules = optional_modules
     b.provides_modules = provides_modules
-    b.base_params = base_params
     return b
 
 
-def place(builder: Builder, **params: Any) -> PlacedNode:
-    """Wrap ``builder`` into a PlacedNode with the given params."""
-    return PlacedNode(builder=builder, params=dict(params))
+def place(builder: Builder, **overrides: Any) -> PlacedNode:
+    """Wrap ``builder`` into a PlacedNode, seeding its schema with ``overrides``."""
+    return PlacedNode(builder=builder, overrides=overrides)
+
+
+def node_schema(builder: Builder, params: Any = None) -> NodeCfgSchema:
+    """The placement schema a Node lowers — defaults overridden by ``params``.
+
+    The acquire / cfg tests build a Node off a bare Builder; this mirrors what a
+    ``PlacedNode`` carries (``builder.make_default_schema()`` seeded with the
+    test's knob overrides) so ``make_init_result`` / ``make_acquire_env`` get a
+    schema, not a raw dict.
+    """
+    schema = builder.make_default_schema()
+    if params:
+        schema.with_overrides(params)
+    return schema
 
 
 class _TrivialPlotter:
@@ -207,8 +227,8 @@ def make_measurement_builder(name: str) -> Builder:
     import numpy as np
     from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
 
-    def _result_factory(params: Any, flux: Any) -> Any:
-        del params
+    def _result_factory(schema: Any, flux: Any) -> Any:
+        del schema
         return Sweep1DResult.allocate(
             np.asarray(flux, dtype=float), np.linspace(0.0, 1.0, 4), x_label="x"
         )
@@ -255,7 +275,8 @@ def make_acquire_env(ctrl: Controller, *, flux: float, flux_idx: int, **kw: Any)
 
     Mirrors what ``Orchestrator._make_env`` curries for a real run, so a Node
     built off this env runs the same real-acquire path a full run would.
-    Extra keyword args (params / ml / result / tools) flow straight through.
+    Extra keyword args (schema / ml / result / tools) flow straight through —
+    ``schema`` is the placement's ``NodeCfgSchema`` (build it via ``node_schema``).
     """
     from zcu_tools.gui.session.services.mock_flux import FAKE_FLUX_DEVICE_NAME
 

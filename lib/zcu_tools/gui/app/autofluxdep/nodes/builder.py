@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import InitVar, dataclass, field
 from typing import Any, Optional, Protocol
 
 from zcu_tools.gui.app.autofluxdep.cfg import NodeCfgSchema, flat_node_schema
@@ -43,10 +43,12 @@ RoundHook = Callable[[Any], None]
 class RunEnv:
     """The per-flux-point execution environment a Builder curries into a Node.
 
-    ``flux`` / ``flux_idx`` — this point. ``params`` — the placed provider's
-    user-tuned params. ``soc`` / ``soccfg`` / ``ml`` / ``tools`` — sweep
-    resources: the connected board + its QICK config, the active ModuleLibrary
-    (the Builder lowers it into the run cfg, Phase B), and the stateful tools.
+    ``flux`` / ``flux_idx`` — this point. ``schema`` — the placed provider's typed
+    param SSOT (its ``NodeCfgSchema``); a Node lowers it (``schema.lower(ml)``) to
+    the flat knob dict ``make_cfg`` reads. ``soc`` / ``soccfg`` / ``ml`` /
+    ``tools`` — sweep resources: the connected board + its QICK config, the active
+    ModuleLibrary (the Builder lowers it into the run cfg, Phase B), and the
+    stateful tools.
     ``flux_device`` — the name of the connected device the flux value is applied
     through (the user's flux-source pick, ``state.flux_device_name``); a real
     acquire writes ``flux`` into ``cfg.dev[flux_device]`` so ``setup_devices``
@@ -61,7 +63,7 @@ class RunEnv:
 
     flux: float
     flux_idx: int
-    params: Mapping[str, Any]
+    schema: NodeCfgSchema
     soc: Any = None
     soccfg: Any = None
     ml: Any = None
@@ -120,7 +122,6 @@ class Builder(ABC):
     requires_modules: tuple[ModuleDep, ...] = ()
     optional_modules: tuple[ModuleDep, ...] = ()
     provides_modules: tuple[str, ...] = ()
-    base_params: tuple[str, ...] = ()
 
     # --- declaration helpers (the orchestrator reads these) ---
 
@@ -140,24 +141,25 @@ class Builder(ABC):
     def make_default_schema(self) -> NodeCfgSchema:
         """The node's typed knob schema (defaults + types) — the param SSOT.
 
-        Measurement Builders override this to declare their knobs (the old
-        ``base_params``, now typed). A Service (the predictor) has no user knobs,
-        so the base returns an empty schema.
+        Measurement Builders override this to declare their typed knobs. A Service
+        (the predictor) has no user knobs, so the base returns an empty schema.
         """
         return NodeCfgSchema(flat_node_schema(()))
 
     # --- sweep-lived factories (Run start; no-op for pure-compute Services) ---
 
-    def make_init_result(self, params: Mapping[str, Any], flux: Any) -> Any:
+    def make_init_result(self, schema: NodeCfgSchema, flux: Any) -> Any:
         """Pre-allocate the empty sweep Result. None = no Result.
 
+        ``schema`` is the placement's typed param SSOT — the Builder lowers it to
+        read the sweep axis knob (e.g. ``detune_sweep``) that sizes the Result.
         ``flux`` is the full (n_flux,) flux axis — known at Run start, so the
         Result fills its flux axis up front (the trailing signal/fit fields stay
         nan until each ``produce`` fills its row). The Plotter needs the complete
         flux axis as its colormap/line x, which is why the whole array is passed
         (not just the length).
         """
-        del params, flux  # base is a no-op; measurement Builders override
+        del schema, flux  # base is a no-op; measurement Builders override
         return None
 
     def make_plotter(self, figure: Any) -> Any:
@@ -175,14 +177,22 @@ class Builder(ABC):
 
 @dataclass
 class PlacedNode:
-    """A provider placed in a workflow: its Builder + a name + the user's params.
+    """A provider placed in a workflow: its Builder + a name + its typed param SSOT.
 
     This is the unit State holds and the GUI edits — distinct from the Builder
     (the stateless kind): the same Builder can be placed twice with different
-    params and *different names* (e.g. two ``mist`` placements named ``g_mist`` /
-    ``e_mist``). The user tunes ``params`` (the Builder's ``base_params``), the
-    list order, and the instance ``name``; ``produce``/Result/Plotter are domain
-    code they never edit.
+    knobs and *different names* (e.g. two ``mist`` placements named ``g_mist`` /
+    ``e_mist``). The user tunes ``schema`` (the Builder's typed knobs), the list
+    order, and the instance ``name``; ``produce``/Result/Plotter are domain code
+    they never edit.
+
+    ``schema`` is the placement's own ``NodeCfgSchema`` — the SSOT physicalised in
+    Phase 160b: a per-placement mutable value tree (the old sparse ``params`` dict
+    is gone). It is built from the Builder's defaults in ``__post_init__`` and seeded
+    by the ``overrides`` constructor kwarg (a flat dict, fast-failing unknown keys);
+    after construction the GUI / controller write leaves through ``schema.set_field``.
+    Two placements of the same Builder get independent schemas (cloned defaults), so
+    editing one never bleeds into the other.
 
     ``name`` is the **instance identity** — the display label, the key into
     ``run_results`` / the Plotter map, the auto-follow / remove target. It
@@ -198,11 +208,17 @@ class PlacedNode:
 
     builder: Builder
     name: str = ""
-    params: dict[str, Any] = field(default_factory=dict)
+    # Seed for the per-placement schema. Consumed once in ``__post_init__`` to
+    # build ``schema``; not retained (the schema is the SSOT thereafter).
+    overrides: InitVar[Mapping[str, Any] | None] = None
+    schema: NodeCfgSchema = field(init=False)
 
-    def __post_init__(self) -> None:
+    def __post_init__(self, overrides: Mapping[str, Any] | None) -> None:
         if not self.name:
             self.name = self.builder.name
+        self.schema = self.builder.make_default_schema()
+        if overrides:
+            self.schema.with_overrides(overrides)
 
     @property
     def type_name(self) -> str:

@@ -31,7 +31,7 @@ context is unconfigured. There is no fit — mist reads the variance directly.
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, MutableMapping
+from collections.abc import MutableMapping
 from typing import Any, Optional, cast
 
 import numpy as np
@@ -230,20 +230,6 @@ class MistBuilder(Builder):
     provides_modules: tuple[str, ...] = ()
     requires_modules = (ModuleDep("pi_pulse", default=_placeholder_pi_pulse),)
     optional_modules = (ModuleDep("opt_readout", default=_default_opt_readout),)
-    base_params = (
-        "gain_sweep",
-        "reps",
-        "rounds",
-        "relax_delay",
-        # the mist disturbance pulse "設定頭" — what the cfg builder lowers into
-        # mist_pulse (the experiment then sweeps mist_pulse.gain over the gain axis)
-        "mist_waveform",
-        "mist_ch",
-        "mist_nqz",
-        "mist_freq",
-        "mist_gain",
-        "mist_length",
-    )
 
     def make_default_schema(self) -> NodeCfgSchema:
         """The typed node-knob schema (defaults + types) — the param SSOT.
@@ -279,8 +265,8 @@ class MistBuilder(Builder):
             )
         )
 
-    def make_init_result(self, params: Mapping[str, Any], flux: Any) -> Sweep1DResult:
-        knobs = self.make_default_schema().with_overrides(params).lower(None)
+    def make_init_result(self, schema: NodeCfgSchema, flux: Any) -> Sweep1DResult:
+        knobs = schema.lower(None)
         gains = sweepcfg_to_axis(knobs["gain_sweep"])
         return Sweep1DResult.allocate(flux, gains, x_label="gain")
 
@@ -326,7 +312,7 @@ class MistBuilder(Builder):
             raise RuntimeError(
                 "mist.make_cfg needs a readout module (none produced or preset)"
             )
-        knobs = self.make_default_schema().with_overrides(env.params).lower(ml)
+        knobs = env.schema.lower(ml)
         waveform_name = knobs.get("mist_waveform")
         ch = knobs.get("mist_ch")
         if not waveform_name or ch is None:
