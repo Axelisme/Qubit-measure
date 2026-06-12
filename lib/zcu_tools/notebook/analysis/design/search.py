@@ -83,17 +83,24 @@ def calculate_esys(params_table: pd.DataFrame) -> None:
         1.0, 1.0, 1.0, flux=0.5, cutoff=DESIGN_CUTOFF, truncated_dim=DESIGN_EVALS_COUNT
     )
 
-    def calc_single_esys(row):
-        nonlocal fluxonium
+    # Iterate over raw numpy columns instead of pandas rows: the per-cell work
+    # is a single scqubits eigensys call, so pandas' per-row Series overhead
+    # dominated the runtime. Results are collected into an object array and
+    # assigned once to keep the "esys" column dtype/content identical.
+    fluxs = params_table["flux"].to_numpy()
+    eJs = params_table["EJ"].to_numpy()
+    eCs = params_table["EC"].to_numpy()
+    eLs = params_table["EL"].to_numpy()
 
-        fluxonium.flux = row["flux"]
-        fluxonium.EJ = row["EJ"]
-        fluxonium.EC = row["EC"]
-        fluxonium.EL = row["EL"]
-        return fluxonium.eigensys(evals_count=fluxonium.truncated_dim)
+    esys_out = np.empty(len(params_table), dtype=object)
+    for i in tqdm(range(len(params_table)), desc="Calculating esys"):
+        fluxonium.flux = fluxs[i]
+        fluxonium.EJ = eJs[i]
+        fluxonium.EC = eCs[i]
+        fluxonium.EL = eLs[i]
+        esys_out[i] = fluxonium.eigensys(evals_count=fluxonium.truncated_dim)
 
-    tqdm.pandas(desc="Calculating esys")
-    params_table["esys"] = params_table.progress_apply(calc_single_esys, axis=1)
+    params_table["esys"] = esys_out
 
 
 def calculate_f01(params_table: pd.DataFrame) -> None:
@@ -107,11 +114,11 @@ def calculate_f01(params_table: pd.DataFrame) -> None:
     if "esys" not in params_table.columns:
         raise ValueError("This function requires esys to be calculated")
 
-    def calc_single_f01(row):
-        evals, _ = row["esys"]
-        return evals[1] - evals[0]
-
-    params_table["f01"] = params_table.apply(calc_single_f01, axis=1)
+    esys = params_table["esys"].to_numpy()
+    f01 = np.fromiter(
+        (es[0][1] - es[0][0] for es in esys), dtype=np.float64, count=len(esys)
+    )
+    params_table["f01"] = f01
 
 
 def calculate_m01(params_table: pd.DataFrame) -> None:
@@ -131,15 +138,21 @@ def calculate_m01(params_table: pd.DataFrame) -> None:
         1.0, 1.0, 1.0, flux=0.5, cutoff=DESIGN_CUTOFF, truncated_dim=DESIGN_EVALS_COUNT
     )
 
-    def calc_single_m01(row):
-        fluxonium.flux = row["flux"]
-        fluxonium.EJ = row["EJ"]
-        fluxonium.EC = row["EC"]
-        fluxonium.EL = row["EL"]
+    fluxs = params_table["flux"].to_numpy()
+    eJs = params_table["EJ"].to_numpy()
+    eCs = params_table["EC"].to_numpy()
+    eLs = params_table["EL"].to_numpy()
+    esys = params_table["esys"].to_numpy()
 
-        return np.abs(fluxonium.n_operator(energy_esys=row["esys"])[0, 1])
+    m01 = np.empty(len(params_table), dtype=np.float64)
+    for i in range(len(params_table)):
+        fluxonium.flux = fluxs[i]
+        fluxonium.EJ = eJs[i]
+        fluxonium.EC = eCs[i]
+        fluxonium.EL = eLs[i]
+        m01[i] = np.abs(fluxonium.n_operator(energy_esys=esys[i])[0, 1])
 
-    params_table["m01"] = params_table.apply(calc_single_m01, axis=1)
+    params_table["m01"] = m01
 
 
 def calculate_dipersive_shift(params_table: pd.DataFrame, g: float, r_f: float) -> None:
@@ -206,19 +219,25 @@ def calculate_t1(
     # Suppress the warning when calculating t1
     old, scq.T1_DEFAULT_WARNING = scq.T1_DEFAULT_WARNING, False
 
-    def calc_single_t1(row):
-        fluxonium.flux = row["flux"]
-        fluxonium.EJ = row["EJ"]
-        fluxonium.EC = row["EC"]
-        fluxonium.EL = row["EL"]
+    fluxs = params_table["flux"].to_numpy()
+    eJs = params_table["EJ"].to_numpy()
+    eCs = params_table["EC"].to_numpy()
+    eLs = params_table["EL"].to_numpy()
+    esys = params_table["esys"].to_numpy()
 
-        return fluxonium.t1_effective(
+    t1 = np.empty(len(params_table), dtype=np.float64)
+    for i in range(len(params_table)):
+        fluxonium.flux = fluxs[i]
+        fluxonium.EJ = eJs[i]
+        fluxonium.EC = eCs[i]
+        fluxonium.EL = eLs[i]
+        t1[i] = fluxonium.t1_effective(
             noise_channels=noise_channels,
             common_noise_options=dict(i=1, j=0, T=Temp),
-            esys=row["esys"],
+            esys=esys[i],
         )
 
-    params_table["t1"] = params_table.apply(calc_single_t1, axis=1)
+    params_table["t1"] = t1
 
     scq.T1_DEFAULT_WARNING = old
 
@@ -237,9 +256,11 @@ def avoid_collision(
         raise ValueError("This function requires esys to be calculated")
 
     freqs = np.array(avoid_freqs)[None, :]
+    esys = params_table["esys"].to_numpy()
 
-    def calc_single_collision(row):
-        evals, _ = row["esys"]
+    collision = np.empty(len(params_table), dtype=bool)
+    for i in range(len(params_table)):
+        evals = esys[i][0]
         e0x = evals - evals[0]
         e1x = evals - evals[1]
 
@@ -247,9 +268,9 @@ def avoid_collision(
         e0x_collision = np.min(np.abs(e0x[:, None] - freqs), axis=0) < threshold
         e1x_collision = np.min(np.abs(e1x[:, None] - freqs), axis=0) < threshold
 
-        return np.any(e0x_collision | e1x_collision)
+        collision[i] = np.any(e0x_collision | e1x_collision)
 
-    params_table["collision"] = params_table.apply(calc_single_collision, axis=1)
+    params_table["collision"] = collision
     params_table["valid"] &= ~params_table["collision"]
 
 

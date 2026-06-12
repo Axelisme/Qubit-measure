@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from functools import lru_cache
 from typing import Optional
@@ -13,7 +14,13 @@ from numpy.typing import NDArray
 from scipy.optimize import minimize
 from tqdm.auto import tqdm
 
-from zcu_tools.simulate.fluxonium import calculate_dispersive_vs_flux
+from zcu_tools.simulate.fluxonium import (
+    DressedLabelingError,
+    calculate_dispersive_vs_flux,
+    calculate_dispersive_vs_flux_fast,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def search_proper_g(
@@ -72,9 +79,9 @@ def search_proper_g(
         plt.close(fig)
         clear_output(wait=False)
 
-    finish_button = widgets.Button(
-        description="Finish", style={"description_width": "initial"}
-    )
+    # ButtonStyle has no description_width trait; passing it triggers a
+    # traitlets DeprecationWarning and has no visual effect.
+    finish_button = widgets.Button(description="Finish")
     finish_button.on_click(on_finish)
 
     # Create slider widgets
@@ -111,17 +118,32 @@ def search_proper_g(
         res_dim: int = default_res_dim,
         step: int = default_step,
     ) -> tuple[np.ndarray, ...]:
-        # Calculate the dispersive shift using provided parameters
-        return calculate_dispersive_vs_flux(
-            params,
-            sp_fluxs[::step],
-            r_f,
-            g,
-            progress=False,
-            res_dim=res_dim,
-            qub_cutoff=qub_cutoff,
-            qub_dim=qub_dim,
-        )
+        # Fast numpy-only path; fall back to scqubits on ambiguous dressed labeling.
+        fluxs_slice = sp_fluxs[::step]
+        try:
+            return calculate_dispersive_vs_flux_fast(
+                params,
+                fluxs_slice,
+                r_f,
+                g,
+                res_dim=res_dim,
+                qub_cutoff=qub_cutoff,
+                qub_dim=qub_dim,
+            )
+        except DressedLabelingError:
+            logger.warning(
+                "fast dispersive labeling ambiguous (g=%s); falling back to scqubits", g
+            )
+            return calculate_dispersive_vs_flux(
+                params,
+                fluxs_slice,
+                r_f,
+                g,
+                progress=False,
+                res_dim=res_dim,
+                qub_cutoff=qub_cutoff,
+                qub_dim=qub_dim,
+            )
 
     flux_step = step_input.value
     rf_0, rf_1 = get_dispersive(g_init, bare_rf)
@@ -241,10 +263,20 @@ def auto_fit_dispersive(
     def loss_fn(g, bare_rf_GHz):
         update_pbar(g, bare_rf_GHz)
 
-        # only use 4 states to calculate the ground state dispersive shift for speed
-        rf_0, rf_1 = calculate_dispersive_vs_flux(
-            params, sp_fluxs, bare_rf_GHz, g, progress=False, res_dim=4
-        )
+        # Only 4 resonator states needed here; fast path saves ~25x vs scqubits sweep.
+        # qub_dim/qub_cutoff match calculate_dispersive_vs_flux defaults (10/30) so
+        # the fallback path produces identical results.
+        try:
+            rf_0, rf_1 = calculate_dispersive_vs_flux_fast(
+                params, sp_fluxs, bare_rf_GHz, g, res_dim=4, qub_dim=10, qub_cutoff=30
+            )
+        except DressedLabelingError:
+            logger.warning(
+                "fast dispersive labeling ambiguous (g=%s); falling back to scqubits", g
+            )
+            rf_0, rf_1 = calculate_dispersive_vs_flux(
+                params, sp_fluxs, bare_rf_GHz, g, progress=False, res_dim=4
+            )
 
         # 用線性插值取得每個 rf_0 對應的 signal
         vals = [
@@ -258,7 +290,9 @@ def auto_fit_dispersive(
 
     fit_kwargs = dict(
         method="L-BFGS-B",
-        options={"disp": False, "maxiter": MAX_ITER, "ftol": ftol},
+        # "disp" is deprecated for L-BFGS-B (removal in SciPy 1.18); silent is
+        # already the default.
+        options={"maxiter": MAX_ITER, "ftol": ftol},
     )
     if fit_bare_rf:
         res = minimize(
