@@ -12,11 +12,14 @@ active context and simulating the acquire (no hardware in this phase).
 from __future__ import annotations
 
 import sys
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from zcu_tools.gui.app.autofluxdep.controller import Controller
 from zcu_tools.gui.app.autofluxdep.state import AutoFluxDepState, ProjectInfo
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.app.autofluxdep.ui.main_window import MainWindow
 
 
 def _make_empty_ctx():
@@ -58,4 +61,31 @@ def run_app(project: ProjectInfo | None = None) -> None:
     ctrl = build_core(project, project_root=repo_root)
     window = MainWindow(ctrl)
     window.show()
+
+    # Mirror measure-gui: open the setup dialog non-modally on startup so the
+    # user can configure the project (chip/qub names, connection) immediately.
+    # Non-modal keeps the Qt event loop pumping (required for the run worker and
+    # any background operations) while the dialog is visible (ADR mirrors main/app.py).
+    _show_startup_dialog(ctrl, parent=window)
+
     sys.exit(app.exec())
+
+
+def _show_startup_dialog(
+    ctrl: Controller,
+    parent: "MainWindow",
+) -> None:
+    """Open the setup dialog non-modally on first launch.
+
+    Mirrors ``zcu_tools.gui.app.main.app._show_startup_dialog``.  Non-modal is
+    required so the Qt event loop keeps pumping while the dialog is visible —
+    this lets background session operations (mock-soc connect, device setup)
+    complete without deadlocking.
+    """
+    from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+
+    from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
+
+    dlg = SetupDialog(ctrl, parent=parent, startup_mode=True)
+    dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+    dlg.open()
