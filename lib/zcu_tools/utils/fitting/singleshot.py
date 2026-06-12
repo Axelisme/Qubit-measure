@@ -177,6 +177,14 @@ def fit_singleshot(
     if s <= xs[1] - xs[0]:
         raise ValueError("s is too small")
 
+    # scipy requires p0 within bounds; data-derived guesses (sg, se, s, …) can fall
+    # outside when the histogram is wide or pathological.  Clip each param into its
+    # bound before handing off so curve_fit never sees an out-of-bounds p0.
+    # lower < upper is guaranteed by the conditional derivation above, so np.clip is safe.
+    lower = np.array(bounds[0], dtype=np.float64)
+    upper = np.array(bounds[1], dtype=np.float64)
+    fitparams = list(np.clip(np.array(fitparams, dtype=np.float64), lower, upper))
+
     cat_xs = np.concatenate([xs, xs])
     cat_pdfs = np.concatenate([g_pdfs, e_pdfs])
 
