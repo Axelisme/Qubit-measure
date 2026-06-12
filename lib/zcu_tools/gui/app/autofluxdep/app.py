@@ -73,7 +73,7 @@ def run_app(project: ProjectInfo | None = None) -> None:
 
 def _show_startup_dialog(
     ctrl: Controller,
-    parent: "MainWindow",
+    parent: MainWindow,
 ) -> None:
     """Open the setup dialog non-modally on first launch.
 
