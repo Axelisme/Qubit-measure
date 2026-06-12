@@ -1,10 +1,10 @@
 """Cooperative run-cancellation — the controller honours stop_run() mid-sweep.
 
-These exercise the stateful cancel path the orchestrator/controller tests
-otherwise skip: stop_run() flips the cooperative flag, start_run breaks the
-sweep early at the next should_stop poll, and the run ends on RUN_STOPPED (not
-RUN_FINISHED) leaving a partial InfoStore. Headless: real controller + real
-orchestrator over synthetic signals, no Qt.
+These exercise the stateful cancel path: stop_run() flips the cooperative flag,
+start_run breaks the sweep early at the next should_stop poll, and the run ends on
+RUN_STOPPED (not RUN_FINISHED) leaving a partial InfoStore. The cancel mechanic is
+independent of experiment physics, so a fake measurement Node (a deterministic
+``make_builder`` double) drives the run — fast, no acquire, no Qt.
 """
 
 from __future__ import annotations
@@ -16,19 +16,16 @@ from zcu_tools.gui.app.autofluxdep.events.run import (
     RunFinishedPayload,
     RunStoppedPayload,
 )
+from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 
-from ._helpers import connect_mock
+from ._helpers import make_builder
 
 _FLUX = [0.0, 0.25, 0.5, 0.75, 1.0]
 
 
 def _build_ready_controller():
     ctrl = build_core()
-    ctrl.add_node_by_type("qubit_freq")
-    # zero the GUI-pacing acquire delay so the headless run is instant
-    for node in ctrl.state.nodes:
-        node.params["acquire_delay"] = 0
-    connect_mock(ctrl)
+    ctrl.add_node(make_builder("probe", produce_fn=lambda env, snap: Patch()))
     ctrl.set_flux_values(_FLUX)
     return ctrl
 

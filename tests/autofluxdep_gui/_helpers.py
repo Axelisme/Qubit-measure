@@ -36,9 +36,23 @@ def connect_mock(ctrl: Controller) -> None:
     measure-gui's tests use). The autouse ``qapp`` fixture has already created the
     QApplication. On return, ``ctrl.state.exp_context.soc`` is the MockSoc and
     ``has_setup`` is true.
+
+    FLUX-AWARE-MOCK: a mock connect also fires the shared MockFluxProvisioner,
+    which registers + ramps a ``fake_flux`` FakeDevice through the controller's
+    BackgroundService (async). We pump until that settles so a flux-aware acquire
+    sees the operating value and no background op is left running at teardown
+    (an unquiesced worker QThread segfaults the process). Best-effort with a
+    timeout — a test that does not exercise flux still returns promptly.
     """
-    from qtpy.QtCore import QEventLoop
+    import time
+
+    from qtpy.QtCore import QCoreApplication, QEventLoop
     from zcu_tools.gui.session.services.connection import ConnectMockRequest
+    from zcu_tools.gui.session.services.mock_flux import (
+        FAKE_FLUX_DEVICE_NAME,
+        FAKE_FLUX_INITIAL_VALUE,
+    )
+    from zcu_tools.gui.session.state import DeviceStatus
 
     loop = QEventLoop()
     ctrl.bind_connection_outcome(
@@ -46,6 +60,23 @@ def connect_mock(ctrl: Controller) -> None:
     )
     ctrl.start_connect(ConnectMockRequest())
     loop.exec()
+
+    # Drive the async fake_flux provisioning (connect + initial-value ramp) to
+    # completion before returning.
+    app = QCoreApplication.instance()
+    assert app is not None
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline:
+        app.processEvents()
+        dev = ctrl.state.get_device(FAKE_FLUX_DEVICE_NAME)
+        if (
+            dev is not None
+            and dev.status is DeviceStatus.CONNECTED
+            and dev.info is not None
+            and getattr(dev.info, "value", None) == FAKE_FLUX_INITIAL_VALUE
+        ):
+            break
+        time.sleep(0.005)
 
 
 class _FnNode(Node):
@@ -59,6 +90,9 @@ class _FnNode(Node):
         return self._fn(self._env, snapshot)
 
 
+ResultFactory = Callable[[Any, Any], Any]
+
+
 def make_builder(
     name: str,
     *,
@@ -70,14 +104,32 @@ def make_builder(
     provides_modules: tuple[str, ...] = (),
     base_params: tuple[str, ...] = (),
     produce_fn: ProduceFn | None = None,
+    result_factory: ResultFactory | None = None,
+    plotter_factory: Callable[[Any], Any] | None = None,
 ) -> Builder:
     """A Builder whose declarations are the given tuples and whose Node's
     ``produce`` calls ``produce_fn(env, snapshot)`` (or returns an empty Patch).
+
+    ``result_factory(params, flux) -> Result`` (optional) gives the fake Builder a
+    sweep Result so a mechanics test that asserts ``run_results`` / per-instance
+    containers can use it without a real measurement Builder.
+    ``plotter_factory(figure) -> Plotter`` (optional) gives it a Plotter so a UI
+    test that builds a liveplot canvas works without a real measurement Builder.
     """
 
     class _AdHocBuilder(Builder):
         def build_node(self, env: RunEnv) -> Node:
             return _FnNode(env, produce_fn)
+
+        def make_init_result(self, params: Any, flux: Any) -> Any:
+            if result_factory is None:
+                return None
+            return result_factory(params, flux)
+
+        def make_plotter(self, figure: Any) -> Any:
+            if plotter_factory is None:
+                return None
+            return plotter_factory(figure)
 
     b = _AdHocBuilder()
     b.name = name
@@ -94,3 +146,93 @@ def make_builder(
 def place(builder: Builder, **params: Any) -> PlacedNode:
     """Wrap ``builder`` into a PlacedNode with the given params."""
     return PlacedNode(builder=builder, params=dict(params))
+
+
+class _TrivialPlotter:
+    """A minimal Plotter the UI can build + call ``update`` on without matplotlib.
+
+    The UI's liveplot path needs only a ``.update(result, idx)`` method per run
+    point; this records the calls so a UI mechanics test can assert redraws fired
+    without a real LivePlot-backed Plotter (those are physics-shaped and need a
+    configured Result)."""
+
+    def __init__(self, figure: Any) -> None:
+        del figure
+        self.updates: list[int] = []
+
+    def update(self, result: Any, idx: int) -> None:
+        del result
+        self.updates.append(idx)
+
+
+def make_measurement_builder(name: str) -> Builder:
+    """A fake MEASUREMENT Builder for UI mechanics tests: a fillable 1-D Result + a
+    trivial Plotter + a produce that fills this point's row.
+
+    Lets a UI test drive a real run worker (lock → fill → unlock, build canvases,
+    auto-follow) without a real experiment's acquire — the run path under test is
+    the UI's, not the physics. Provides nothing (UI tests don't assert deps)."""
+    import numpy as np
+    from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
+
+    def _result_factory(params: Any, flux: Any) -> Any:
+        del params
+        return Sweep1DResult.allocate(
+            np.asarray(flux, dtype=float), np.linspace(0.0, 1.0, 4), x_label="x"
+        )
+
+    def _produce(env: RunEnv, snapshot: Snapshot) -> Patch:
+        del snapshot
+        env.result.signal[env.flux_idx] = np.ones(env.result.n_x)
+        if env.round_hook is not None:
+            env.round_hook(env.flux_idx)
+        return Patch()
+
+    return make_builder(
+        name,
+        produce_fn=_produce,
+        result_factory=_result_factory,
+        plotter_factory=_TrivialPlotter,
+    )
+
+
+# --- RB-2 real-acquire integration helpers -----------------------------------
+#
+# Every real-acquire roll-out test (lenrabi / ro_optimize / t1 / t2* / mist)
+# follows the same recipe as test_qubit_freq_acquire: connect a flux-aware
+# MockSoc, pick fake_flux, then run a single Node directly over a few flux values
+# and assert the physically-meaningful output varies with flux. These helpers
+# factor out the boilerplate so each test only declares its modules + fitter.
+
+# A readout module near the dressed resonator (~6 GHz under DEFAULT_SIMPARAM).
+ACQUIRE_READOUT = {
+    "type": "readout/pulse",
+    "pulse_cfg": {
+        "ch": 0,
+        "nqz": 2,
+        "freq": 6000.0,
+        "gain": 1.0,
+        "waveform": {"style": "const", "length": 1.0},
+    },
+    "ro_cfg": {"ro_ch": 0, "ro_length": 0.9, "trig_offset": 0.6},
+}
+
+
+def make_acquire_env(ctrl: Controller, *, flux: float, flux_idx: int, **kw: Any):
+    """A ``RunEnv`` carrying the connected mock soc/soccfg + the fake_flux pick.
+
+    Mirrors what ``Orchestrator._make_env`` curries for a real run, so a Node
+    built off this env runs the same real-acquire path a full run would.
+    Extra keyword args (params / ml / result / tools) flow straight through.
+    """
+    from zcu_tools.gui.session.services.mock_flux import FAKE_FLUX_DEVICE_NAME
+
+    ctx = ctrl.state.exp_context
+    return RunEnv(
+        flux=flux,
+        flux_idx=flux_idx,
+        soc=ctx.soc,
+        soccfg=ctx.soccfg,
+        flux_device=FAKE_FLUX_DEVICE_NAME,
+        **kw,
+    )

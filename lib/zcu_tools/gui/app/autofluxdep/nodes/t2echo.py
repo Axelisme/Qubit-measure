@@ -1,67 +1,71 @@
-"""t2echo — Hahn-echo Builder: decay_cos → fit_decay_fringe → t2e.
+"""t2echo — Hahn-echo Builder: acquire decay cosine → fit_decay_fringe → t2e.
 
-Translates the notebook's T2EchoTask cfg_maker. Synthesises a decaying cosine
-fringe vs delay time (t2 planted from the smoothed previous t2e * 1.1, fringe
-frequency fixed at 0.3 1/us), fits it with the real ``fit_decay_fringe``, fills
-its sweep Result row in place, and returns the raw t2e.
+Translates the notebook's T2EchoTask cfg_maker. Sets this flux point's value on
+the picked flux device, sets up devices, acquires a decaying cosine fringe vs
+delay time with ``ModularProgramV2`` (a Hahn-echo sequence), fits it with the
+real ``fit_decay_fringe``, fills its sweep Result row in place, and returns the
+raw t2e.
 
 Unlike t2ramsey, the echo sequence refocuses static dephasing and typically
-yields a longer coherence time, but the synthetic + fit path is identical (the
-real-hardware difference is purely in the pulse sequence). The prototype
-uniformly uses the decay-cosine / fringe path regardless of the ``detune_ratio``
+yields a longer coherence time; the difference is purely in the pulse sequence.
+The same decay-cosine / fringe fit path applies regardless of the ``detune_ratio``
 param (no branch).
 
 - needs the ``pi_pulse`` and ``pi2_pulse`` modules (lenrabi produces both) — the
-  Hahn echo needs both a pi refocusing pulse and two pi/2 pulses. In the
-  prototype both carry placeholder defaults, so they never actually skip;
-  Phase B drops the defaults (real lenrabi output) to restore true skip.
+  Hahn echo needs both a pi refocusing pulse and two pi/2 pulses. Both carry
+  placeholder defaults, so they never actually skip when lenrabi is absent.
 - reads ``t1`` (smooth="ewma") and ``t2e`` (smooth="ewma") as optional deps:
   ``t2e`` seeds the planted t2 so the sweep tracks a plausible echo time;
   ``t1`` is available for cfg sanity checks (not used directly in the prototype).
 - the ``opt_readout`` module is optional (ro_optimize produces it → ml preset →
   default).
 
-Phase B (cfg-builder): when the active context is configured — a populated
-``ml`` + the upstream ``pi_pulse`` / ``pi2_pulse`` / ``opt_readout`` modules on
-the snapshot (real ``PulseCfg`` / ``ReadoutCfg`` lenrabi/ro_optimize output) —
-``produce`` lowers it into a runnable ``T2EchoCfgTemplate`` via
-``ml.make_cfg`` (mirroring the notebook's T2EchoTask cfg_maker) and takes the
-delay-time window (``sweep_range``) from the built cfg to parameterise the
-synthetic acquire. The acquire is ALWAYS simulated (no hardware); routing
-through ``make_cfg`` only exercises the real cfg pipeline and makes the cfg the
-source of the measurement window. With the demo / empty-ml context (and the
-existing run tests, which pass sentinel modules + no ml) the cfg is None and
-produce keeps the pure snapshot/params simulation unchanged.
+``produce`` lowers the active context (a populated ``ml`` + the upstream
+``pi_pulse`` / ``pi2_pulse`` / ``opt_readout`` modules on the snapshot, real
+``PulseCfg`` / ``ReadoutCfg`` lenrabi/ro_optimize output) into a runnable
+``T2EchoCfgTemplate`` via ``ml.make_cfg`` (mirroring the notebook's T2EchoTask
+cfg_maker), takes the delay-time window (``sweep_range``) from the built cfg, and
+acquires against a flux-aware MockSoc (offline) or real hardware. The cfg is the
+source of the measurement window; ``make_cfg`` Fast Fails when the context is
+unconfigured.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
-from typing import Any, Optional
+from collections.abc import Mapping, MutableMapping
+from typing import Any, Optional, cast
 
 import numpy as np
-from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
+    SnrProbe,
+    acquire_to_complex,
+    axis_to_sweep,
+    build_stop_checkers,
+    is_good_fit,
+    parse_linear_axis,
+    require_flux_device,
+    set_flux_by_name,
+    signal2real_flip,
+)
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.plotters import Decay1DPlotter
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
-from zcu_tools.gui.app.autofluxdep.nodes.synth import (
-    accumulate_rounds,
-    decay_cos,
-    flux_drift,
-    flux_snr,
-    is_good_fit,
-    parse_linear_axis,
-    resolve_acquire_delay,
-    resolve_rounds,
-    signal_to_real,
+from zcu_tools.program.v2 import (
+    Delay,
+    ModularProgramV2,
+    ProgramV2Cfg,
+    Pulse,
+    Readout,
+    Reset,
+    sweep2param,
 )
-from zcu_tools.program.v2 import ProgramV2Cfg
 from zcu_tools.program.v2.modules import PulseCfg, ReadoutCfg, ResetCfg
 from zcu_tools.utils.fitting import fit_decay_fringe
 
@@ -69,9 +73,26 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_T1 = 10.0  # us — smoothed t1 fallback
 _DEFAULT_T2E = 5.0  # us — smoothed t2e fallback
-_FRINGE_FREQ = 0.3  # 1/us — fixed planted fringe frequency
 _DEFAULT_SWEEP = (0.0, 25.0, 121)  # delay-time axis (us): start, stop, npts
 _T2E_WINDOW_FACTOR = 2.5  # notebook: sweep_range = (0, 2.5 * prev_t2e)
+_DEFAULT_DETUNE_RATIO = 0.2  # activate-detune fraction (one fringe per sweep)
+
+
+def _resolve_detune_ratio(params: Any) -> float:
+    """The activate-detune ratio from a node's param, or the default if unset/bad.
+
+    Mirrors the lower-layer ``T2EchoTask.detune_ratio``. Free-text field, so a
+    malformed value degrades to the default rather than failing the acquire."""
+    try:
+        value = params.get("detune_ratio")
+    except AttributeError:
+        return _DEFAULT_DETUNE_RATIO
+    if value is None or value == "":
+        return _DEFAULT_DETUNE_RATIO
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return _DEFAULT_DETUNE_RATIO
 
 
 def _default_t1() -> float:
@@ -102,9 +123,9 @@ def _is_lowerable_pulse(module: Any) -> bool:
     A real lenrabi drive pulse is a ``PulseCfg`` (or its raw dict, ``type ==
     "pulse"``) and lowers into the run cfg. The prototype's placeholder
     ``{"type": "pi"/"pi2", "length": ...}`` is NOT a PulseCfg (it never
-    validates), so this returns False there — the guard then keeps the pure
-    synthetic path (no failed ``make_cfg``). Mirrors qubit_freq's guard naturally
-    returning None in the prototype context.
+    validates), so this returns False there — the guard then rejects the
+    placeholder so ``make_cfg`` Fast Fails for an unconfigured context. Mirrors
+    qubit_freq's guard naturally returning None in that context.
     """
     if isinstance(module, PulseCfg):
         return True
@@ -135,10 +156,8 @@ class T2EchoCfgTemplate(ProgramV2Cfg, ExpCfgModel):
     ``ProgramV2Cfg`` (reps/rounds/relax) + the ``ExpCfgModel`` device/save fields
     + the t2echo modules and the ``sweep_range`` delay window — same bases as the
     lower-layer ``experiment/v2/autofluxdep`` ``T2EchoCfgTemplate``. The flux
-    ``dev`` entry and the concrete ``length`` sweep are merged in by the
-    lower-layer ``run`` (the GUI Builder only constructs this template); here
-    ``produce`` reads the ``sweep_range`` window to parameterise the synthetic
-    acquire.
+    ``dev`` entry and the concrete ``length`` sweep are merged in by ``produce``;
+    here ``produce`` reads the ``sweep_range`` window to parameterise the acquire.
     """
 
     modules: T2EchoModuleCfg
@@ -146,88 +165,89 @@ class T2EchoCfgTemplate(ProgramV2Cfg, ExpCfgModel):
 
 
 class T2EchoNode(Node):
-    """One flux point's t2echo: synth decay-cos fringe → fit_decay_fringe → fill row → Patch."""
+    """One flux point's t2echo: set flux → real acquire → fit_decay_fringe → Patch.
+
+    Mirrors the lower-layer ``T2EchoTask`` ``measure_t2echo_fn`` + ``run``: a
+    Hahn-echo sequence (pi/2 → τ/2 → pi → τ/2 → detuned pi/2) sweeps the total delay
+    τ, the second pi/2 carries the activate-detune phase ramp, and
+    ``fit_decay_fringe`` recovers T2Echo.
+    """
 
     def __init__(self, env: RunEnv, builder: T2EchoBuilder) -> None:
         self._env = env
         self._builder = builder
 
-    def _maybe_make_cfg(self, snapshot: Snapshot) -> T2EchoCfgTemplate | None:
-        """Build the run cfg when the context is configured for it, else None.
-
-        ``make_cfg`` needs a populated ml + the upstream drive pulses
-        (``pi_pulse`` / ``pi2_pulse``, real ``PulseCfg`` lenrabi output) + a
-        readout (``opt_readout``); the default / demo context (empty ml, sentinel
-        modules) has none, so produce keeps the pure snapshot-driven simulation
-        there. No hardware is touched either way — Phase B simulates the acquire
-        uniformly; routing through ``make_cfg`` (when configured) exercises the
-        real cfg pipeline and makes the cfg the source of the delay-time window.
-        """
-        env = self._env
-        if (
-            env.ml is None
-            or not _is_lowerable_pulse(snapshot.module("pi_pulse"))
-            or not _is_lowerable_pulse(snapshot.module("pi2_pulse"))
-            or snapshot.module("opt_readout") is None
-        ):
-            return None
-        return self._builder.make_cfg(env, snapshot)
-
     def produce(self, snapshot: Snapshot) -> Patch:
         env = self._env
-        _ = snapshot["t1"]  # optional smoothed t1 (available for cfg sanity)
-        _ = float(
-            snapshot["t2e"]
-        )  # smoothed (declared smooth="ewma") — dependency contract
-        _ = snapshot.module("pi_pulse")  # required module — prototype does not use
-        _ = snapshot.module("pi2_pulse")  # required module — prototype does not use
-        _ = snapshot.module("opt_readout")  # optional — prototype does not use
+        _ = snapshot["t1"]  # optional smoothed t1 — relax_delay in make_cfg
+        _ = snapshot["t2e"]  # smoothed (declared smooth="ewma") — sweep_range
+        _ = snapshot.module("pi_pulse")  # required — refocusing pulse
+        _ = snapshot.module("pi2_pulse")  # required — the two pi/2 pulses
+        _ = snapshot.module("opt_readout")  # required — readout
 
         result: Sweep1DResult = env.result
-
-        # Build the run cfg from the active context (when configured) and take the
-        # delay-time window from it; the acquire is SIMULATED below. With the demo
-        # / empty-ml context the cfg is None and the delay axis is the param-driven
-        # ``result.x`` (allocated at Run start) directly.
-        cfg = self._maybe_make_cfg(snapshot)
-        if cfg is not None:
-            # the cfg's sweep_range = (0, 2.5 * smoothed_t2e) is the measurement
-            # window; rebuild the delay axis over it (same point count as the
-            # pre-allocated Result so the row shapes match)
-            lo, hi = float(cfg.sweep_range[0]), float(cfg.sweep_range[1])
-            times = np.linspace(lo, hi, result.n_x)
-        else:
-            times = result.x
-
-        # t2e drifts parabolically with flux: ~6 us at sweet spot, up to ~21 us at
-        # the edges. SNR varies sinusoidally to 0 at its troughs (dead points).
-        # normalised sweep position (0→1): the drift/SNR shapes live on
-        # [0,1], while real flux values are tiny — use the position so the
-        # whole sweep spans one drift parabola and a few SNR cycles.
-        pos = env.flux_idx / max(1, result.n_flux - 1)
-        true_t2 = flux_drift(pos, baseline=6.0, amplitude=15.0)
-        snr = flux_snr(pos)
-
         idx = env.flux_idx
+
+        # Lower the active context into the run cfg (Fast Fail if unconfigured: a
+        # real acquire needs concrete pi / pi2 drive pulses + a readout). The cfg's
+        # sweep_range = (0, 2.5 × smoothed_t2e) sets the total-delay axis.
+        cfg = self._builder.make_cfg(env, snapshot)
+        lo, hi = float(cfg.sweep_range[0]), float(cfg.sweep_range[1])
+        times = np.linspace(lo, hi, result.n_x)
+        result.x[:] = times
+
+        flux_device = require_flux_device(env, "t2echo")
+        set_flux_by_name(
+            cast("MutableMapping[str, Any] | None", cfg.dev), flux_device, env.flux
+        )
+        setup_devices(cfg, progress=False)
+
+        # The total-delay sweep, split across the two echo halves (Delay 0.5·τ each),
+        # + the activate-detune phase ramp on the 2nd pi/2 (lower layer:
+        # activate_detune = detune_ratio / len_sweep.step).
+        length_sweep = axis_to_sweep(times)
+        length_param = sweep2param("length", length_sweep)
+        activate_detune = _resolve_detune_ratio(env.params) / length_sweep.step
+        pi2_pulse = cfg.modules.pi2_pulse
+
         result.flux[idx] = env.flux
 
-        base = env.flux_idx * 1000
+        probe = SnrProbe()
 
-        def make_round(k: int) -> NDArray[np.complex128]:
-            return decay_cos(times, true_t2, _FRINGE_FREQ, snr=snr, seed=base + k)
-
-        def on_round(avg: NDArray[np.complex128], _k: int) -> None:
-            np.copyto(result.signal[idx], signal_to_real(avg))
+        def on_round(_round_count: int, avg_d: Any) -> None:
+            signal = acquire_to_complex(avg_d)
+            probe.value = signal
+            np.copyto(result.signal[idx], signal2real_flip(signal))
             if env.round_hook is not None:
                 env.round_hook(idx)
 
-        averaged = accumulate_rounds(
-            make_round,
-            resolve_rounds(env.params),
-            on_round,
-            delay=resolve_acquire_delay(env.params),
+        stop_checkers = build_stop_checkers(env, probe, signal2real_flip)
+
+        raw = ModularProgramV2(
+            env.soccfg,
+            cfg,
+            modules=[
+                Reset("reset", cfg.modules.reset),
+                Pulse("pi2_pulse1", pi2_pulse),
+                Delay("t2e_delay1", delay=0.5 * length_param),
+                Pulse("pi_pulse", cfg.modules.pi_pulse),
+                Delay("t2e_delay2", delay=0.5 * length_param),
+                Pulse(
+                    "pi2_pulse2",
+                    pi2_pulse.with_updates(
+                        phase=pi2_pulse.phase + 360 * activate_detune * length_param
+                    ),
+                ),
+                Readout("readout", cfg.modules.readout),
+            ],
+            sweep=[("length", length_sweep)],
+        ).acquire(
+            env.soc,
+            progress=False,
+            round_hook=on_round,
+            stop_checkers=stop_checkers,
         )
-        real = signal_to_real(averaged)
+        real = signal2real_flip(acquire_to_complex(raw))
 
         t2f, _, _, _, fit_curve, _ = fit_decay_fringe(times, real)
 
@@ -242,12 +262,7 @@ class T2EchoNode(Node):
         if env.round_hook is not None:
             env.round_hook(idx)
 
-        logger.debug(
-            "t2echo fit @flux%d: t2e=%.3f us (plant t2=%.3f)",
-            idx,
-            float(t2f),
-            true_t2,
-        )
+        logger.debug("t2echo fit @flux%d: t2e=%.3f us", idx, float(t2f))
 
         patch = Patch()
         patch.set("t2e", float(t2f))
@@ -255,7 +270,7 @@ class T2EchoNode(Node):
 
 
 class T2EchoBuilder(Builder):
-    """The t2echo provider — decay-cosine synth, real fit_decay_fringe, accumulating
+    """The t2echo provider — acquire decay cosine, real fit_decay_fringe, accumulating
     colormap.  Reports only the raw echo t2e (detune is refocused and not reported).
     """
 
@@ -277,7 +292,6 @@ class T2EchoBuilder(Builder):
         "reps",
         "rounds",
         "earlystop_snr",
-        "acquire_delay",
     )
 
     def make_init_result(self, params: Mapping[str, Any], flux: Any) -> Sweep1DResult:
@@ -304,8 +318,7 @@ class T2EchoBuilder(Builder):
         lower-layer ``run`` merges them.
 
         Raises if the ml / drive pulses / readout are unavailable — a real run
-        needs concrete drive pulses (Fast Fail), unlike the synthetic path which
-        fabricates a signal.
+        needs concrete drive pulses (Fast Fail).
         """
         params = env.params
         ml = env.ml

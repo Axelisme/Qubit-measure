@@ -44,3 +44,17 @@ def _drain_qt_events(qapp):
     yield
     qapp.processEvents()
     qapp.processEvents()
+
+
+@pytest.fixture(autouse=True)
+def _drop_fake_flux():
+    """FLUX-AWARE-MOCK: drop the process-global ``fake_flux`` FakeDevice after each
+    test. A mock connect (via ``connect_mock``) now auto-provisions it through the
+    shared MockFluxProvisioner; it lands in the process-wide GlobalDeviceManager,
+    so it must be dropped between tests or a later connect sees it "already
+    registered" at the driver layer."""
+    from zcu_tools.device import GlobalDeviceManager
+    from zcu_tools.gui.session.services.mock_flux import FAKE_FLUX_DEVICE_NAME
+
+    yield
+    GlobalDeviceManager.drop_device(FAKE_FLUX_DEVICE_NAME, ignore_error=True)

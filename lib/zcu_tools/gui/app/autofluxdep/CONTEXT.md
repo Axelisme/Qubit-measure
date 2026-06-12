@@ -29,19 +29,27 @@ Patch out". This is what keeps the orchestrator's three-interface surface narrow
 and lets it call `produce` uniformly on every provider — zero `isinstance`, no
 distinguishing a Node from a Service.
 
-**Run path (current phase).** The app composes the shared session services
+**Run path (real acquire).** The app composes the shared session services
 (`gui/session`: connection / context / device / startup) and uses the shared
 setup / device / predictor dialogs; `State(AutoFluxDepState)` inherits
 `SessionState` and the run reads the active `exp_context`. Each measurement
 Node's `produce` builds the real run cfg from that context (`Builder.make_cfg`
-→ `ml.make_cfg` lowering) when it is configured (a populated ml + the needed
-modules / drive params), and drives a **simulated** acquire from the cfg (a
-synthetic signal — no hardware); the demo / empty-ml context falls back to a
-pure snapshot-driven simulation. Wiring a real acquire (per-point
-`setup_devices` + the experiment program's `acquire`, writing the flux device
-into `cfg.dev`) is a future phase that swaps only the synthesis step in
-`produce` — the cfg pipeline, dependency model, fit, and feedback are already
-in place.
+→ `ml.make_cfg` lowering), writes this flux point's value into
+`cfg.dev[flux_device]` by device **name** (`set_flux_by_name` — the GUI picker
+stores a device name, e.g. the auto-provisioned `fake_flux`; the lower layer's
+`flux_dev` label is a different dimension), pushes it with `setup_devices`, then
+runs the experiment program's `.acquire` (TwoToneProgram / ModularProgramV2 /
+…) with a running-average `round_hook` + `stop_checkers` (cooperative cancel +
+SNR early-stop), and fits — `qubit_freq` then feeds `predictor.calibrate`
+(closed loop), `ro_optimize` takes an argmax, `mist` reads the variance, both
+without a fit. There is **no synthetic fallback**: `make_cfg` Fast Fails
+(`RuntimeError`) when the context is unconfigured, and the orchestrator turns a
+`produce` exception into a terminal `RunFailedPayload` (the run worker QThread is
+never aborted). Offline, the acquire runs against the **flux-aware MockSoc**
+(`connect_mock` provisions `fake_flux`); since the SimEngine reads the operating
+flux live, the acquired signal varies with the swept flux. The shared
+real-acquire helpers (set-flux / stop-checkers / fit-quality gate / axis parse)
+live in `nodes/acquire.py`.
 
 ## Language
 
@@ -163,8 +171,9 @@ reader to `isnan`-check and fall back itself; omitting the key keeps that out of
 the call sites. So `validate_patch` requires the Patch's keys to be a *subset* of
 `provides` (not exactly equal). The Result still gets its row filled (raw
 present, fit fields nan). (Fit-quality judgement and cross-point state like
-"steps since last success" are domain logic inside `produce`; the prototype
-keeps them minimal — synthetic signals nearly always fit.)
+"steps since last success" are domain logic inside `produce`; the fit-quality
+gate (`is_good_fit`) discards a noisy / dead flux point — its `produce` returns a
+partial Patch, omitting the key.)
 
 The Builder pre-allocates the empty (nan-filled) Result at Run start via
 `make_init_result(params, n_flux)` — its flux extent is known (`n_flux`) and its

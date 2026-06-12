@@ -1,64 +1,82 @@
 """mist — 1D gain-sweep Builder: variance curve readout (no fit).
 
-Synthesises a state-disturbance curve (``variance_curve``) over a gain axis,
-reads the variance directly — there is no fit step — and fills its Sweep1DResult
-row in place. ``fit_value`` and ``fit_curve`` remain nan (allocated as nan by
-``Sweep1DResult.allocate``); the ``ColormapLinePlotter`` shows the flux × gain
-colormap with the latest flux rows as traces (no fit marker).
+Sets this flux point's value on the picked flux device, sets up devices, acquires
+a state-disturbance curve over a gain axis with ``ModularProgramV2`` (Reset →
+pi_pulse → mist_pulse → Readout), reads the variance directly — there is no fit
+step — and fills its Sweep1DResult row in place. ``fit_value`` and ``fit_curve``
+remain nan (allocated as nan by ``Sweep1DResult.allocate``); the
+``ColormapLinePlotter`` shows the flux × gain colormap with the latest flux rows
+as traces (no fit marker).
 
 - needs the ``pi_pulse`` module (pi-pulse prepares the excited state whose
-  disturbance the variance measures). In the prototype it carries a placeholder
-  default, so it never actually skips; Phase B drops the default to restore true
-  skip-if-absent.
+  disturbance the variance measures). It carries a placeholder default, so it
+  never actually skips when lenrabi is absent.
 - the ``opt_readout`` module is optional (ro_optimize produces it); used by the
-  cfg builder as the run cfg's ``readout`` when the context is configured.
+  cfg builder as the run cfg's ``readout``.
 
-No fit step: the variance curve is a monotone logistic ramp; MIST reads the
-variance magnitude directly (the real pipeline reads IQ scatter). The row is
-considered complete after one compute step, so ``round_hook`` is called once.
-Provides ``success=1.0`` (float, consistent with the info-value domain) to signal
-that the MIST pass completed without a hardware error.
+No fit step: MIST reads the disturbance magnitude directly from the acquired IQ
+scatter. The row is considered complete after one round, so ``round_hook`` is
+called once per round. Provides ``success=1.0`` (float, consistent with the
+info-value domain) to signal that the MIST pass completed without a hardware
+error.
 
-Phase B cfg-builder (mirrors qubit_freq): when the active context is configured
-(a populated ml + a ``pi_pulse`` module on the snapshot + the mist-drive "設定頭"
-params present) ``produce`` lowers it into the lower-layer ``MistCfgTemplate``
-(``ProgramV2Cfg`` + ``ExpCfgModel`` with ``pi_pulse`` / ``mist_pulse`` / ``readout``
-modules) via ``ml.make_cfg`` — exercising the real cfg pipeline — and takes the
-mist-drive onset gain from the built cfg's ``mist_pulse.gain``. The acquire is
-ALWAYS simulated (no ``ModularProgramV2`` / no ``soc.acquire``); with the demo /
-empty-ml context the cfg is None and the onset falls back to the fixed prototype
-value. There is no fit either way — mist reads the variance directly.
+``produce`` lowers the active context (a populated ml + a ``pi_pulse`` module on
+the snapshot + the mist-drive "設定頭" params present) into the lower-layer
+``MistCfgTemplate`` (``ProgramV2Cfg`` + ``ExpCfgModel`` with ``pi_pulse`` /
+``mist_pulse`` / ``readout`` modules) via ``ml.make_cfg``, then acquires against a
+flux-aware MockSoc (offline) or real hardware. ``make_cfg`` Fast Fails when the
+context is unconfigured. There is no fit — mist reads the variance directly.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
-from typing import Any, Optional
+from collections.abc import Mapping, MutableMapping
+from typing import Any, Optional, cast
 
 import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
+    acquire_to_complex,
+    axis_to_sweep,
+    parse_linear_axis,
+    require_flux_device,
+    set_flux_by_name,
+)
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.plotters import ColormapLinePlotter
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import ModuleDep
-from zcu_tools.gui.app.autofluxdep.nodes.synth import (
-    accumulate_rounds,
-    parse_linear_axis,
-    resolve_acquire_delay,
-    resolve_rounds,
-    variance_curve,
+from zcu_tools.program.v2 import (
+    ModularProgramV2,
+    ProgramV2Cfg,
+    Pulse,
+    Readout,
+    Reset,
+    sweep2param,
 )
-from zcu_tools.program.v2 import ProgramV2Cfg
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_GAIN_SWEEP: tuple[float, float, int] = (0.0, 1.0, 51)
-_ONSET_GAIN = 0.5  # fixed onset for the prototype variance curve (empty-ml fallback)
+
+
+def _mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """The MIST state-disturbance magnitude (lower-layer ``mist_signal2real``).
+
+    The disturbance is read directly from the IQ scatter — no fit: the centred
+    magnitude normalised by its own spread, so a flat (undisturbed) trace reads
+    near zero and the onset shows as the magnitude rising past a gain threshold."""
+    if np.all(np.isnan(signals)):
+        return np.abs(signals)
+    mag = np.abs(signals - np.mean(signals))
+    std = float(np.std(mag))
+    return mag / (std + 1e-12)
 
 
 class MistModuleCfg(ConfigBase):
@@ -103,87 +121,86 @@ def _default_opt_readout() -> Any | None:
 
 
 class MistNode(Node):
-    """One flux point's MIST: synth variance curve → fill row → Patch.
+    """One flux point's MIST: set flux → real acquire → variance curve → fill row → Patch.
 
-    No fit step: ``variance_curve`` returns a real (n_gain,) magnitude directly.
+    No fit step: ``_mist_signal2real`` returns a real (n_gain,) magnitude directly.
     ``fit_value[idx]`` and ``fit_curve[idx]`` are left as nan (already the
     allocate default), so the ``ColormapLinePlotter`` shows only the colormap
     (no fit marker). Calls ``round_hook`` once per round while filling the row.
 
-    When the active context is configured, ``produce`` first lowers it into the
-    run cfg via the Builder's ``make_cfg`` (exercising the real ml pipeline) and
-    takes the disturbance onset gain from the built cfg's ``mist_pulse.gain``;
-    otherwise (demo / empty-ml) it falls back to the fixed prototype onset. The
-    acquire is SIMULATED either way — no hardware is touched.
+    ``produce`` lowers the active context into the run cfg via the Builder's
+    ``make_cfg`` (Fast Fail if unconfigured), sweeps the disturbance pulse gain,
+    and acquires against a flux-aware MockSoc (offline) or real hardware.
     """
 
     def __init__(self, env: RunEnv, builder: MistBuilder) -> None:
         self._env = env
         self._builder = builder
 
-    def _maybe_make_cfg(self, snapshot: Snapshot) -> MistCfgTemplate | None:
-        """Build the run cfg when the context is configured for it, else None.
-
-        ``make_cfg`` needs a ``pi_pulse`` module + the mist-drive params; the
-        default / demo context (empty ml) has neither, so produce keeps the pure
-        snapshot-driven simulation there. No hardware is touched either way —
-        Phase B simulates the acquire uniformly; routing through ``make_cfg``
-        (when configured) exercises the real cfg pipeline and makes the cfg the
-        source of the disturbance onset gain.
-        """
-        env = self._env
-        if (
-            env.ml is None
-            or snapshot.module("pi_pulse") is None
-            or not env.params.get("mist_waveform")
-            or env.params.get("mist_ch") is None
-        ):
-            return None
-        return self._builder.make_cfg(env, snapshot)
-
     def produce(self, snapshot: Snapshot) -> Patch:
         env = self._env
 
-        _ = snapshot.module("pi_pulse")  # required — consumed by real hardware
-        _ = snapshot.module("opt_readout")  # optional — optimised readout preset
-
-        # Build the run cfg from the active context (when configured) and take the
-        # disturbance onset gain from it; the acquire is SIMULATED below. With the
-        # demo / empty-ml context the cfg is None and the onset is the fixed
-        # prototype value (the synthetic variance curve's logistic step centre).
-        cfg = self._maybe_make_cfg(snapshot)
-        onset = float(cfg.modules.mist_pulse.gain) if cfg is not None else _ONSET_GAIN
+        _ = snapshot.module("pi_pulse")  # required — excited-state preparation
+        _ = snapshot.module("opt_readout")  # required — readout
 
         result: Sweep1DResult = env.result
         gains = result.x
-
         idx = env.flux_idx
+
+        # Lower the active context into the run cfg (Fast Fail if unconfigured: a
+        # real acquire needs concrete pi_pulse + mist_pulse + readout). MIST is a
+        # known SimEngine gap — the .acquire below raises (not swallowed) under the
+        # mock if the engine cannot model the disturbance program, surfacing the
+        # gap rather than degrading to noise.
+        cfg = self._builder.make_cfg(env, snapshot)
+
+        flux_device = require_flux_device(env, "mist")
+        set_flux_by_name(
+            cast("MutableMapping[str, Any] | None", cfg.dev), flux_device, env.flux
+        )
+        setup_devices(cfg, progress=False)
+
+        # Sweep the disturbance pulse gain over the Result's gain axis (lower layer
+        # sets sweep2param("gain") on mist_pulse).
+        gain_sweep = axis_to_sweep(gains)
+        cfg.modules.mist_pulse.set_param("gain", sweep2param("gain", gain_sweep))
+
         result.flux[idx] = env.flux
         # fit_value[idx] and fit_curve[idx] remain nan — mist has no fit scalar
 
-        base = env.flux_idx * 1000
-
-        def make_round(k: int) -> NDArray[np.float64]:
-            return variance_curve(gains, onset, seed=base + k)
-
-        def on_round(avg: NDArray[np.float64], _k: int) -> None:
-            np.copyto(result.signal[idx], avg)
+        def on_round(_round_count: int, avg_d: Any) -> None:
+            np.copyto(result.signal[idx], _mist_signal2real(acquire_to_complex(avg_d)))
             if env.round_hook is not None:
                 env.round_hook(idx)
 
-        curve = accumulate_rounds(
-            make_round,
-            resolve_rounds(env.params),
-            on_round,
-            delay=resolve_acquire_delay(env.params),
+        stop_checkers: list[Any] = []
+        if env.should_stop is not None:
+            stop_checkers.append(env.should_stop)
+
+        raw = ModularProgramV2(
+            env.soccfg,
+            cfg,
+            modules=[
+                Reset("reset", cfg.modules.reset),
+                Pulse("pi_pulse", cfg.modules.pi_pulse),
+                Pulse("mist_pulse", cfg.modules.mist_pulse),
+                Readout("readout", cfg.modules.readout),
+            ],
+            sweep=[("gain", gain_sweep)],
+        ).acquire(
+            env.soc,
+            progress=False,
+            round_hook=on_round,
+            stop_checkers=stop_checkers,
         )
+        curve = _mist_signal2real(acquire_to_complex(raw))
+        np.copyto(result.signal[idx], curve)
 
         logger.debug(
-            "mist @flux%d: success, variance range [%.3f, %.3f] (onset=%.3f)",
+            "mist @flux%d: success, variance range [%.3f, %.3f]",
             idx,
             float(curve.min()),
             float(curve.max()),
-            onset,
         )
 
         patch = Patch()
@@ -192,9 +209,9 @@ class MistNode(Node):
 
 
 class MistBuilder(Builder):
-    """The MIST provider — variance-curve synth, no fit, accumulating colormap.
+    """The MIST provider — acquire variance curve, no fit, accumulating colormap.
 
-    Sweeps a gain axis per flux point, synthesises a state-disturbance curve, and
+    Sweeps a gain axis per flux point, acquires a state-disturbance curve, and
     records the variance directly (no fit). ``fit_value`` stays nan so the
     ``ColormapLinePlotter`` renders only the flux×gain colormap. Provides ``success``
     (float 1.0) to signal that the MIST pass completed; the ``opt_readout``
@@ -212,10 +229,8 @@ class MistBuilder(Builder):
         "reps",
         "rounds",
         "relax_delay",
-        "acquire_delay",
         # the mist disturbance pulse "設定頭" — what the cfg builder lowers into
-        # mist_pulse (the experiment then sweeps mist_pulse.gain; this base gain is
-        # the onset the synthetic variance curve uses when the cfg drives produce)
+        # mist_pulse (the experiment then sweeps mist_pulse.gain over the gain axis)
         "mist_waveform",
         "mist_ch",
         "mist_nqz",
@@ -250,8 +265,7 @@ class MistBuilder(Builder):
 
         Raises if the ``pi_pulse`` module is unavailable or the mist-drive params
         are unset — a real run needs a concrete disturbance pulse + an excited-state
-        preparation pulse (Fast Fail), unlike the synthetic path which fabricates a
-        variance curve.
+        preparation pulse (Fast Fail).
         """
         params = env.params
         ml = env.ml

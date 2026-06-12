@@ -242,6 +242,10 @@ class Orchestrator:
     soc: Any = None
     soccfg: Any = None
     md: Any = None
+    # The name of the connected device the flux value is applied through (the
+    # user's flux-source pick). Curried into each RunEnv so a real-acquire Node
+    # writes ``flux`` into ``cfg.dev[flux_device]``. None when no source is picked.
+    flux_device: str | None = None
     results: Mapping[str, Any] = field(default_factory=dict)
     notify: Notify | None = None
     derivations: list[DerivationService] = field(default_factory=list)
@@ -252,6 +256,15 @@ class Orchestrator:
         self._smoothing: SmoothingService | None = (
             SmoothingService.from_specs(specs) if specs else None
         )
+        # The run's cooperative cancel poll, set at the start of ``run`` so
+        # ``_make_env`` can curry it into each RunEnv (a real acquire threads it
+        # into ``stop_checkers``). None until ``run`` is entered.
+        self._should_stop: Callable[[], bool] | None = None
+        # The exception a Node's ``produce`` raised mid-sweep, if any. ``run``
+        # catches it (a real acquire can Fast-Fail on an unconfigured Node), stops
+        # the sweep, and exposes it here so the caller turns it into a terminal
+        # RUN_FAILED instead of letting it abort the run worker's QThread.
+        self.run_error: Exception | None = None
 
     def _make_env(self, provider: PlacedNode, idx: int, flux: float) -> RunEnv:
         """Curry this point's execution environment for ``provider`` into a RunEnv.
@@ -280,8 +293,10 @@ class Orchestrator:
             ml=self.ml,
             md=self.md,
             tools=self.tools,
+            flux_device=self.flux_device,
             result=result,
             round_hook=round_hook,
+            should_stop=self._should_stop,
         )
 
     def run(
@@ -310,6 +325,10 @@ class Orchestrator:
             [p.name for p in self.providers],
             len(flux_values),
         )
+        # Stash for ``_make_env`` to curry into each RunEnv (a real acquire threads
+        # it into ``stop_checkers``).
+        self._should_stop = should_stop
+        self.run_error = None
         info = InfoStore()
         for idx, flux in enumerate(flux_values):
             if should_stop is not None and should_stop():
@@ -329,7 +348,17 @@ class Orchestrator:
                 if on_node is not None:
                     on_node(provider.name, idx)
                 node = provider.builder.build_node(self._make_env(provider, idx, flux))
-                patch = node.produce(snapshot)
+                try:
+                    patch = node.produce(snapshot)
+                except Exception as exc:  # a real acquire can Fast-Fail (e.g.
+                    # unconfigured Node / no flux device). Record it as the run's
+                    # terminal error and stop the sweep gracefully — never let it
+                    # propagate out of ``run`` and abort the run worker's QThread.
+                    logger.exception(
+                        "produce failed for %r at flux idx %d", provider.name, idx
+                    )
+                    self.run_error = exc
+                    return info
                 validate_patch(
                     patch, provider.provides, provider.provides_modules
                 )  # provides / provides_modules = the output contract

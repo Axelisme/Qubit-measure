@@ -13,8 +13,34 @@ import numpy as np
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.events.run import NodeEnteredPayload
 from zcu_tools.gui.app.autofluxdep.events.workflow import WorkflowChangedPayload
+from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
+from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
 
-from ._helpers import connect_mock
+from ._helpers import make_builder
+
+
+def _make_filling_builder(name: str):
+    """A fake measurement Builder: a 1-D Result whose row this point's produce fills.
+
+    Mechanics tests assert per-instance ``run_results`` containers without any
+    acquire — the Node just writes a constant signal row so the Result is "filled"."""
+
+    def _result_factory(params, flux):
+        del params
+        return Sweep1DResult.allocate(
+            np.asarray(flux, dtype=float), np.linspace(0.0, 1.0, 4), x_label="x"
+        )
+
+    def _produce(env, snapshot):
+        del snapshot
+        env.result.signal[env.flux_idx] = np.ones(env.result.n_x)
+        patch = Patch()
+        patch.set("success", 1.0)
+        return patch
+
+    return make_builder(
+        name, provides=("success",), produce_fn=_produce, result_factory=_result_factory
+    )
 
 
 def test_repeated_placement_auto_dedups_name():
@@ -63,14 +89,13 @@ def test_rename_emits_workflow_changed():
 
 
 def test_two_mist_instances_get_independent_results():
+    # two placements of the same fake measurement Builder, renamed, get independent
+    # Result containers keyed by instance name (the rename mechanic, no acquire).
     ctrl = build_core()
-    ctrl.add_node_by_type("mist")
+    ctrl.add_node(_make_filling_builder("mist"))
     ctrl.rename_node(0, "g_mist")
-    ctrl.add_node_by_type("mist")
+    ctrl.add_node(_make_filling_builder("mist"))
     ctrl.rename_node(1, "e_mist")
-    for node in ctrl.state.nodes:
-        node.params["acquire_delay"] = 0  # instant headless run
-    connect_mock(ctrl)
     ctrl.set_flux_values([0.0, 0.5])
     ctrl.start_run()
 
@@ -93,14 +118,13 @@ def test_remove_uses_instance_name():
 
 def test_node_entered_excludes_predictor_service():
     # the controller forwards NODE_ENTERED only for user-list Nodes; the injected
-    # predictor Service has no list row, so it is filtered out.
+    # predictor Service has no list row, so it is filtered out (no acquire needed).
+    from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency
+
     ctrl = build_core()
-    ctrl.add_node_by_type("qubit_freq")
-    ctrl.add_node_by_type("mist")
+    ctrl.add_node(make_builder("qubit_freq", requires=(Dependency("predict_freq"),)))
+    ctrl.add_node(_make_filling_builder("mist"))
     ctrl.rename_node(1, "g_mist")
-    for node in ctrl.state.nodes:
-        node.params["acquire_delay"] = 0  # instant headless run
-    connect_mock(ctrl)
     ctrl.set_flux_values([0.0, 1.0])
 
     entered = []

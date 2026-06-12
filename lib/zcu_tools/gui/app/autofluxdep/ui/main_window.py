@@ -15,8 +15,8 @@ switch and owns the liveplot integration:
   ``plotter.update(result, idx)`` — all drawing stays on the main thread
   (ADR-0017: the worker never touches matplotlib).
 
-Prototype: the run uses synthetic signals (no hardware); Setup builds a MockSoc +
-FakeDevice + a SimplePredictor.
+The run acquires against a flux-aware MockSoc (offline) or real hardware; Setup
+builds a MockSoc + FakeDevice + a SimplePredictor.
 """
 
 from __future__ import annotations
@@ -35,6 +35,7 @@ from zcu_tools.gui.app.autofluxdep.controller import Controller
 from zcu_tools.gui.app.autofluxdep.events.run import (
     NodeEnteredPayload,
     PointDonePayload,
+    RunFailedPayload,
     RunFinishedPayload,
     RunStartedPayload,
     RunStoppedPayload,
@@ -76,6 +77,7 @@ class _RunBridge(QObject):
     point_done = Signal(int)
     run_finished = Signal()
     run_stopped = Signal()
+    run_failed = Signal(str)
     row_updated = Signal(str, int)
 
     def __init__(self, ctrl: Controller) -> None:
@@ -86,6 +88,7 @@ class _RunBridge(QObject):
         bus.subscribe(PointDonePayload, lambda p: self.point_done.emit(p.idx))
         bus.subscribe(RunFinishedPayload, lambda p: self.run_finished.emit())
         bus.subscribe(RunStoppedPayload, lambda p: self.run_stopped.emit())
+        bus.subscribe(RunFailedPayload, lambda p: self.run_failed.emit(p.message))
 
     def _on_node_entered(self, p: NodeEnteredPayload) -> None:
         self.node_entered.emit(p.name, p.idx)
@@ -143,6 +146,7 @@ class MainWindow(QMainWindow):
         self._bridge.row_updated.connect(self._on_row_updated)
         self._bridge.run_finished.connect(self._on_run_done)
         self._bridge.run_stopped.connect(self._on_run_done)
+        self._bridge.run_failed.connect(self._on_run_failed)
 
         # a SoC connect (via the shared setup dialog) flips the setup light /
         # run-enabled state — the run prerequisite is now "a SoC is connected".
@@ -244,3 +248,14 @@ class MainWindow(QMainWindow):
         if self._worker is not None:
             self._worker.wait()
             self._worker = None
+
+    def _on_run_failed(self, message: str) -> None:
+        """A Node's produce raised mid-sweep → unlock the UI + surface the error.
+
+        Same unlock path as a stop/finish (the run is over), plus a message box so
+        the user sees why the sweep aborted (e.g. an unconfigured Node Fast-Failed)
+        rather than the run silently ending."""
+        from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]
+
+        self._on_run_done()
+        QMessageBox.warning(self, "Run failed", message)

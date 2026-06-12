@@ -31,8 +31,7 @@ class ProjectInfo:
     """Project handle — chip/qubit identity + where params.json lives.
 
     ``params_path`` is where a real FluxoniumPredictor would be loaded from when
-    predictor loading is wired (deferred to Phase B — the synthetic run uses a
-    SimplePredictor stand-in).
+    predictor loading is wired (the run uses a SimplePredictor stand-in).
     """
 
     chip_name: str

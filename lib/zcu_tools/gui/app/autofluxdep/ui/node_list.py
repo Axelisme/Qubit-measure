@@ -189,7 +189,7 @@ class NodeListPane(QWidget):
         from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
 
         # The shared predictor dialog loads a FluxoniumPredictor into the active
-        # context; the run reads exp_context.predictor (synthetic + real paths).
+        # context; the run reads exp_context.predictor.
         dlg = PredictorDialog(self._ctrl, self)
         dlg.exec()
 

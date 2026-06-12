@@ -46,9 +46,16 @@ class RunEnv:
     user-tuned params. ``soc`` / ``soccfg`` / ``ml`` / ``tools`` — sweep
     resources: the connected board + its QICK config, the active ModuleLibrary
     (the Builder lowers it into the run cfg, Phase B), and the stateful tools.
+    ``flux_device`` — the name of the connected device the flux value is applied
+    through (the user's flux-source pick, ``state.flux_device_name``); a real
+    acquire writes ``flux`` into ``cfg.dev[flux_device]`` so ``setup_devices``
+    pushes it to that device. None when no flux source is picked.
     ``result`` — the sweep-lived Result this Node fills (its row ``flux_idx``);
     None for pure-compute Nodes. ``round_hook`` — called by acquire each round
-    (fill row + notify); None for pure-compute Nodes.
+    (fill row + notify); None for pure-compute Nodes. ``should_stop`` — the run's
+    cooperative cancel poll (the controller's stop flag), threaded into a real
+    acquire's ``stop_checkers`` so a long sweep stops mid-acquire; None for a
+    pure-compute Node or a headless run with no cancel.
     """
 
     flux: float
@@ -59,8 +66,10 @@ class RunEnv:
     ml: Any = None
     md: Any = None
     tools: Any = None
+    flux_device: str | None = None
     result: Any = None
     round_hook: RoundHook | None = None
+    should_stop: Callable[[], bool] | None = None
 
 
 class Node(ABC):

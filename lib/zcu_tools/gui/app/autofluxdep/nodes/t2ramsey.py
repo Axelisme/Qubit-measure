@@ -1,9 +1,11 @@
-"""t2ramsey — Ramsey-fringe Builder: decay_cos → fit_decay_fringe → t2r.
+"""t2ramsey — Ramsey-fringe Builder: acquire decay cosine → fit_decay_fringe → t2r.
 
-Translates the notebook's T2RamseyTask cfg_maker. Synthesises a decaying cosine
-fringe vs delay time (t2 planted from the smoothed previous t2r * 1.1, fringe
-frequency fixed at 0.3 1/us), fits it with the real ``fit_decay_fringe``, fills
-its sweep Result row in place, and returns the raw t2r and the measured detune.
+Translates the notebook's T2RamseyTask cfg_maker. Sets this flux point's value on
+the picked flux device, sets up devices, acquires a decaying cosine fringe vs
+delay time with ``ModularProgramV2`` (two pi/2 pulses bracketing a swept delay,
+the second carrying an activate-detune phase ramp), fits it with the real
+``fit_decay_fringe``, fills its sweep Result row in place, and returns the raw t2r
+and the measured detune.
 
 - requires the ``pi2_pulse`` module (lenrabi produces it) — the Ramsey sequence
   needs a pi/2 pulse; it is a required module dep with a placeholder default for
@@ -14,14 +16,13 @@ its sweep Result row in place, and returns the raw t2r and the measured detune.
 - the ``opt_readout`` module is optional (ro_optimize produces it → ml preset →
   default).
 
-Phase B (cfg-builder): when the active context is configured for a real run (a
-populated ml + the ``pi2_pulse`` drive module + the ``opt_readout`` readout module
-both present on the snapshot), ``make_cfg`` lowers the context + this point's
-snapshot into the base ``T2RamseyCfgTemplate`` — exercising the real
-``ml.make_cfg`` pipeline — and ``produce`` takes the planted-t2 baseline from the
-cfg's ``sweep_range`` (which encodes ``2.5 * prev_t2r``). The acquire is still
-SIMULATED (no hardware); with the demo / empty-ml context the cfg is None and the
-baseline falls back to ``_DEFAULT_T2R`` (the pure snapshot-driven path, unchanged).
+``make_cfg`` lowers the active context (a populated ml + the ``pi2_pulse`` drive
+module + the ``opt_readout`` readout module both present on the snapshot) + this
+point's snapshot into the base ``T2RamseyCfgTemplate`` — exercising the real
+``ml.make_cfg`` pipeline — and ``produce`` takes the delay-time window from the
+cfg's ``sweep_range`` (which encodes ``2.5 * prev_t2r``), then acquires against a
+flux-aware MockSoc (offline) or real hardware. ``make_cfg`` Fast Fails when the
+context is unconfigured.
 
 Compare ``notebook_md/autofluxdep.md`` (the T2RamseyTask block):
 
@@ -41,59 +42,66 @@ Compare ``notebook_md/autofluxdep.md`` (the T2RamseyTask block):
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
-from typing import Any, Optional
+from collections.abc import Mapping, MutableMapping
+from typing import Any, Optional, cast
 
 import numpy as np
-from numpy.typing import NDArray
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.autofluxdep.t2ramsey import T2RamseyModuleCfg
+from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
+    SnrProbe,
+    acquire_to_complex,
+    axis_to_sweep,
+    build_stop_checkers,
+    is_good_fit,
+    parse_linear_axis,
+    require_flux_device,
+    set_flux_by_name,
+    signal2real_flip,
+)
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.plotters import Decay1DPlotter
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
-from zcu_tools.gui.app.autofluxdep.nodes.synth import (
-    accumulate_rounds,
-    decay_cos,
-    flux_drift,
-    flux_snr,
-    is_good_fit,
-    parse_linear_axis,
-    resolve_acquire_delay,
-    resolve_rounds,
-    signal_to_real,
+from zcu_tools.program.v2 import (
+    Delay,
+    ModularProgramV2,
+    ProgramV2Cfg,
+    Pulse,
+    Readout,
+    Reset,
+    sweep2param,
 )
-from zcu_tools.program.v2 import ProgramV2Cfg
 from zcu_tools.utils.fitting import fit_decay_fringe
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_T1 = 10.0  # us — smoothed t1 fallback
 _DEFAULT_T2R = 5.0  # us — smoothed t2r fallback
-_FRINGE_FREQ = 0.3  # 1/us — fixed planted fringe (detune) frequency
 _DEFAULT_SWEEP = (0.0, 25.0, 121)  # delay-time axis (us): start, stop, npts
 _SWEEP_T2R_FACTOR = 2.5  # notebook: sweep_range = (0, 2.5 * prev_t2r)
-
-# the real cfg ``type`` tags make_cfg can lower: a configured run supplies a
-# concrete pi/2 ``pulse`` + a ``readout/*`` module, whereas the prototype workflow
-# flows placeholder modules ({"type": "pi2"} / {"type": "readout"}) that are NOT
-# valid PulseCfg / ReadoutCfg — so the guard routes only the former through the cfg
-# pipeline and keeps the placeholder context on the pure synthetic path.
-_REAL_PULSE_TYPE = "pulse"
-_REAL_READOUT_TYPES = ("readout/pulse", "readout/direct")
+_DEFAULT_DETUNE_RATIO = 0.2  # default activate-detune fraction (one fringe per sweep)
 
 
-def _module_type(module: Any) -> str | None:
-    """The ``type`` tag of a snapshot module (raw dict or built cfg), or None."""
-    if module is None:
-        return None
-    if isinstance(module, Mapping):
-        value = module.get("type")
-    else:
-        value = getattr(module, "type", None)
-    return value if isinstance(value, str) else None
+def _resolve_detune_ratio(params: Any) -> float:
+    """The activate-detune ratio from a node's param, or the default if unset/bad.
+
+    Mirrors the lower-layer ``T2RamseyTask.detune_ratio``: a fixed fringe count
+    across the sweep. The prototype's field is free text, so a malformed value
+    degrades to the default rather than failing the acquire."""
+    try:
+        value = params.get("detune_ratio")
+    except AttributeError:
+        return _DEFAULT_DETUNE_RATIO
+    if value is None or value == "":
+        return _DEFAULT_DETUNE_RATIO
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return _DEFAULT_DETUNE_RATIO
 
 
 class T2RamseyCfgTemplate(ProgramV2Cfg, ExpCfgModel):
@@ -130,90 +138,90 @@ def _default_readout() -> Any | None:
 
 
 class T2RamseyNode(Node):
-    """One flux point's t2ramsey: synth decay-cos fringe → fit_decay_fringe → fill row → Patch."""
+    """One flux point's t2ramsey: set flux → real acquire → fit_decay_fringe → Patch.
+
+    Mirrors the lower-layer ``T2RamseyTask`` ``measure_ramsey_fn`` + ``run``: two
+    pi/2 pulses bracket a swept delay, the second carries an activate-detune phase
+    ramp (``360·detune·length``) so the fringe is resolvable, and
+    ``fit_decay_fringe`` recovers T2Ramsey + the measured detune (the activate
+    detune is subtracted back out, as the lower layer does).
+    """
 
     def __init__(self, env: RunEnv, builder: T2RamseyBuilder) -> None:
         self._env = env
         self._builder = builder
 
-    def _maybe_make_cfg(self, snapshot: Snapshot) -> T2RamseyCfgTemplate | None:
-        """Build the run cfg when the context is configured for it, else None.
-
-        ``make_cfg`` needs a populated ml + a *concrete* ``pi2_pulse`` drive cfg +
-        a *concrete* ``opt_readout`` readout cfg on the snapshot. The default /
-        demo context has an empty ml; the prototype workflow flows placeholder
-        modules ({"type": "pi2"} / {"type": "readout"}) that are not valid
-        PulseCfg / ReadoutCfg — both keep the pure snapshot-driven simulation
-        (t2ramsey has no raw drive 設定頭 param to gate on, unlike qubit_freq,
-        because its pi/2 pulse arrives pre-built as a module, so the gate is the
-        module being a real cfg type). No hardware is touched either way — Phase B
-        simulates the acquire uniformly; routing through ``make_cfg`` (when
-        configured) exercises the real cfg pipeline and makes the cfg the source
-        of the planted-t2 baseline (its ``sweep_range``).
-        """
-        env = self._env
-        if env.ml is None:
-            return None
-        if _module_type(snapshot.module("pi2_pulse")) != _REAL_PULSE_TYPE:
-            return None
-        if _module_type(snapshot.module("opt_readout")) not in _REAL_READOUT_TYPES:
-            return None
-        return self._builder.make_cfg(env, snapshot)
-
     def produce(self, snapshot: Snapshot) -> Patch:
         env = self._env
-        _ = snapshot["t1"]  # optional smoothed t1 (available for cfg sanity)
-        prev_t2r = float(
-            snapshot["t2r"]
-        )  # smoothed (declared smooth="ewma") — dependency contract
+        _ = snapshot["t1"]  # optional smoothed t1 — relax_delay in make_cfg
+        _ = snapshot["t2r"]  # smoothed (declared smooth="ewma") — sweep_range
         _ = snapshot.module("pi2_pulse")  # required module — lowered into the cfg
-        _ = snapshot.module("opt_readout")  # optional — lowered into the cfg
-
-        # Build the run cfg from the active context (when configured) and take the
-        # planted-t2 baseline from its sweep_range (= 2.5 * prev_t2r); the acquire is
-        # SIMULATED below. With the demo / empty-ml context the cfg is None and the
-        # baseline is the default (5 us) — the pure snapshot-driven path, unchanged.
-        cfg = self._maybe_make_cfg(snapshot)
-        if cfg is not None:
-            t2r_baseline = float(cfg.sweep_range[1]) / _SWEEP_T2R_FACTOR
-        else:
-            t2r_baseline = _DEFAULT_T2R
-        del prev_t2r  # the cfg's sweep_range carries the same smoothed t2r
+        _ = snapshot.module("opt_readout")  # required — lowered into the cfg
 
         result: Sweep1DResult = env.result
         times = result.x
-
-        # t2r drifts parabolically with flux: ~t2r_baseline at the sweet spot, up to
-        # ~+15 us at the edges. SNR varies sinusoidally to 0 at its troughs (dead
-        # points). normalised sweep position (0→1): the drift/SNR shapes live on
-        # [0,1], while real flux values are tiny — use the position so the
-        # whole sweep spans one drift parabola and a few SNR cycles.
-        pos = env.flux_idx / max(1, result.n_flux - 1)
-        true_t2 = flux_drift(pos, baseline=t2r_baseline, amplitude=15.0)
-        snr = flux_snr(pos)
-
         idx = env.flux_idx
+
+        # Lower the active context into the run cfg (Fast Fail if unconfigured: a
+        # real acquire needs a concrete pi/2 pulse + readout). sweep_range encodes
+        # 2.5 × smoothed_t2r; rebuild the delay axis over it.
+        cfg = self._builder.make_cfg(env, snapshot)
+        lo, hi = cfg.sweep_range
+        times = np.linspace(float(lo), float(hi), result.n_x)
+        result.x[:] = times
+
+        flux_device = require_flux_device(env, "t2ramsey")
+        set_flux_by_name(
+            cast("MutableMapping[str, Any] | None", cfg.dev), flux_device, env.flux
+        )
+        setup_devices(cfg, progress=False)
+
+        # The Ramsey delay sweep + the activate-detune phase ramp on the 2nd pi/2
+        # (lower layer: activate_detune = detune_ratio / len_sweep.step).
+        length_sweep = axis_to_sweep(times)
+        length_param = sweep2param("length", length_sweep)
+        activate_detune = _resolve_detune_ratio(env.params) / length_sweep.step
+        pi2_pulse = cfg.modules.pi2_pulse
+
         result.flux[idx] = env.flux
 
-        base = env.flux_idx * 1000
+        probe = SnrProbe()
 
-        def make_round(k: int) -> NDArray[np.complex128]:
-            return decay_cos(times, true_t2, _FRINGE_FREQ, snr=snr, seed=base + k)
-
-        def on_round(avg: NDArray[np.complex128], _k: int) -> None:
-            np.copyto(result.signal[idx], signal_to_real(avg))
+        def on_round(_round_count: int, avg_d: Any) -> None:
+            signal = acquire_to_complex(avg_d)
+            probe.value = signal
+            np.copyto(result.signal[idx], signal2real_flip(signal))
             if env.round_hook is not None:
                 env.round_hook(idx)
 
-        averaged = accumulate_rounds(
-            make_round,
-            resolve_rounds(env.params),
-            on_round,
-            delay=resolve_acquire_delay(env.params),
+        stop_checkers = build_stop_checkers(env, probe, signal2real_flip)
+
+        raw = ModularProgramV2(
+            env.soccfg,
+            cfg,
+            modules=[
+                Reset("reset", cfg.modules.reset),
+                Pulse("pi2_pulse1", pi2_pulse),
+                Delay("t2r_delay", delay=length_param),
+                Pulse(
+                    "pi2_pulse2",
+                    pi2_pulse.with_updates(
+                        phase=pi2_pulse.phase + 360 * activate_detune * length_param
+                    ),
+                ),
+                Readout("readout", cfg.modules.readout),
+            ],
+            sweep=[("length", length_sweep)],
+        ).acquire(
+            env.soc,
+            progress=False,
+            round_hook=on_round,
+            stop_checkers=stop_checkers,
         )
-        real = signal_to_real(averaged)
+        real = signal2real_flip(acquire_to_complex(raw))
 
         t2f, _, detune, _, fit_curve, _ = fit_decay_fringe(times, real)
+        detune = detune - activate_detune  # back out the applied activate-detune
 
         if not is_good_fit(real, fit_curve):
             logger.debug(
@@ -229,11 +237,10 @@ class T2RamseyNode(Node):
             env.round_hook(idx)
 
         logger.debug(
-            "t2ramsey fit @flux%d: t2r=%.3f us detune=%.4f (plant t2=%.3f)",
+            "t2ramsey fit @flux%d: t2r=%.3f us detune=%.4f",
             idx,
             float(t2f),
             float(detune),
-            true_t2,
         )
 
         patch = Patch()
@@ -243,7 +250,7 @@ class T2RamseyNode(Node):
 
 
 class T2RamseyBuilder(Builder):
-    """The t2ramsey provider — decay-cosine synth, real fit_decay_fringe, accumulating
+    """The t2ramsey provider — acquire decay cosine, real fit_decay_fringe, accumulating
     colormap.  Reports the raw Ramsey t2r and the measured detuning detune.
     """
 
@@ -262,7 +269,6 @@ class T2RamseyBuilder(Builder):
         "reps",
         "rounds",
         "earlystop_snr",
-        "acquire_delay",
     )
 
     def make_init_result(self, params: Mapping[str, Any], flux: Any) -> Sweep1DResult:
@@ -290,8 +296,7 @@ class T2RamseyBuilder(Builder):
         ``activate_detune`` are NOT here — the lower-layer ``run()`` merges them.
 
         Raises if the ml / drive / readout modules are unavailable — a real run
-        needs a concrete Ramsey sequence (Fast Fail), unlike the synthetic path
-        which fabricates a signal.
+        needs a concrete Ramsey sequence (Fast Fail).
         """
         params = env.params
         ml = env.ml

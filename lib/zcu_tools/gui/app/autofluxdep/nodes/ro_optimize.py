@@ -1,9 +1,11 @@
 """ro_optimize — 2D readout-optimisation Builder: argmax over freq × gain.
 
-Synthesises a Gaussian peak landscape (``gaussian_peak_2d``) over a freq × gain
-grid, finds the optimum via ``argmax`` (no fit — the peak location IS the result),
-fills its Sweep2DResult row in place, and returns a Patch with ``best_ro_freq``
-and ``best_ro_gain``, plus the ``opt_readout`` module constructed from them.
+Sets this flux point's value on the picked flux device, runs a real readout
+acquire over a freq × gain grid (against the flux-aware MockSoc offline or real
+hardware), finds the optimum via ``argmax`` (no fit — the peak location IS the
+result), fills its Sweep2DResult row in place, and returns a Patch with
+``best_ro_freq`` and ``best_ro_gain``, plus the ``opt_readout`` module constructed
+from them.
 
 - requires the ``pi_pulse`` module (a pi-pulse is needed to prepare the excited
   state before measuring readout fidelity); placeholder default for the prototype.
@@ -19,43 +21,76 @@ and ``best_ro_gain``, plus the ``opt_readout`` module constructed from them.
 No fit step: the 2D landscape is computed in one shot (one effective "round"), so
 ``round_hook`` is called exactly once after filling the row.
 
-Phase B — cfg-driven simulation. ``produce`` lowers the active context + this
-point's snapshot into a runnable ``RoOptimizeCfgTemplate`` via the Builder's
-``make_cfg`` WHEN the context is configured (a populated ml + the ``pi_pulse`` and
-``readout`` modules on the snapshot), exercising the real ``ml.make_cfg`` lowering
-pipeline. The cfg's ``freq_range`` / ``gain_range`` (centred on the previous best,
-mirroring the notebook ``RO_OptTask`` ``cfg_maker``) supply the plant centre of
-the synthetic landscape; the acquire itself is still SIMULATED (no hardware). With
-the demo / empty-ml context the cfg is None and the centre is the previous best
-directly — the existing pure snapshot-driven simulation, unchanged.
+``produce`` lowers the active context + this point's snapshot into a runnable
+``RoOptimizeCfgTemplate`` via the Builder's ``make_cfg`` (Fast Fail if the context
+is unconfigured — a real acquire needs a concrete ``pi_pulse`` + ``readout``). The
+cfg's ``freq_range`` / ``gain_range`` (centred on the previous best, mirroring the
+notebook ``RO_OptTask`` ``cfg_maker``) define the swept grid; the acquire runs the
+real readout program over it. The mock path uses the flux-aware MockSoc, so the
+fidelity landscape varies with the operating flux.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
-from typing import Any, Optional
+from collections.abc import Mapping, MutableMapping
+from copy import deepcopy
+from typing import Any, Optional, cast
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy.ndimage import gaussian_filter
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.v2.utils import snr_as_signal
+from zcu_tools.experiment.v2.utils.tracker import MomentTracker
+from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
+    axis_to_sweep,
+    parse_linear_axis,
+    require_flux_device,
+    set_flux_by_name,
+)
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.plotters import Landscape2DPlotter
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep2DResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
-from zcu_tools.gui.app.autofluxdep.nodes.synth import (
-    accumulate_rounds,
-    gaussian_peak_2d,
-    parse_linear_axis,
-    resolve_acquire_delay,
-    resolve_rounds,
+from zcu_tools.program.v2 import (
+    Branch,
+    ModularProgramV2,
+    ProgramV2Cfg,
+    Pulse,
+    PulseCfg,
+    PulseReadout,
+    PulseReadoutCfg,
+    Reset,
+    ResetCfg,
+    sweep2param,
 )
-from zcu_tools.program.v2 import ProgramV2Cfg, PulseCfg, PulseReadoutCfg, ResetCfg
 
 logger = logging.getLogger(__name__)
+
+
+def _ro_signal2real(signals: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Smooth the SNR landscape before argmax (lower-layer ``ro_opt_signal2real``)."""
+    return np.abs(gaussian_filter(signals, sigma=1))
+
+
+def _ro_landscape(
+    tracker: MomentTracker, shape: tuple[int, ...]
+) -> NDArray[np.float64]:
+    """The smoothed (n_freq, n_gain) SNR landscape from the readout-channel tracker.
+
+    The sweep is ``[("ge", 2), ("freq", n), ("gain", m)]`` plus a soft-average
+    axis, so the tracker mean carries a leading reps singleton and the ge axis at
+    index 1 — same layout the measure-side ``freq_gain`` ro_optimize reduces with
+    ``ge_axis=1``. ``snr_as_signal`` reduces the ge axis to a per-(freq, gain) SNR;
+    we reshape it to the Result's row shape (dropping the singleton) and smooth."""
+    snr = snr_as_signal([tracker], ge_axis=1)
+    return _ro_signal2real(np.asarray(snr, dtype=np.float64).reshape(shape))
+
 
 # Default axis specs: (start, stop, npts)
 _DEFAULT_FREQ: tuple[float, float, int] = (4998.0, 5002.0, 21)
@@ -138,97 +173,83 @@ def _resolve_window(value: Any, default: float) -> float:
 
 
 class RoOptimizeNode(Node):
-    """One flux point's ro_optimize: synth 2D Gaussian → argmax → fill row → Patch.
+    """One flux point's ro_optimize: set flux → real acquire → SNR argmax → Patch.
 
-    No fit step: ``gaussian_peak_2d`` is the landscape; ``argmax`` along each axis
-    recovers (best_freq, best_gain). Fills ``result.signal[idx]``,
-    ``result.best_freq[idx]``, ``result.best_gain[idx]``, and ``result.flux[idx]``
-    in place, then calls ``round_hook`` once. Produces the ``opt_readout`` module
-    from the argmax result.
-
-    When the active context is configured (a populated ml + the pi_pulse / readout
-    modules) ``produce`` lowers it into ``RoOptimizeCfgTemplate`` via the Builder's
-    ``make_cfg`` and takes the plant-centre freq / gain from the cfg's sweep-window
-    midpoints; the acquire is SIMULATED either way (no hardware).
+    Mirrors the lower-layer ``RO_OptTask`` ``measure_ro_fn`` + ``run``: a
+    ``ModularProgramV2`` (Reset → ge-Branch(pi_pulse) → PulseReadout) sweeps the
+    readout freq × gain (interleaved with the ge axis), a ``MomentTracker``
+    accumulates per-shot moments, and ``snr_as_signal`` turns them into an SNR
+    landscape whose argmax is the best (freq, gain). No fit step.
     """
 
     def __init__(self, env: RunEnv, builder: RoOptimizeBuilder) -> None:
         self._env = env
         self._builder = builder
 
-    def _maybe_make_cfg(self, snapshot: Snapshot) -> RoOptimizeCfgTemplate | None:
-        """Build the run cfg when the context is configured for it, else None.
-
-        ``make_cfg`` needs a populated ml + the ``pi_pulse`` (required) and
-        ``readout`` (optional, the swept pulse) modules; the default / demo
-        context (empty ml, ``readout`` resolving to None) has neither, so produce
-        keeps the pure snapshot-driven simulation there. No hardware is touched
-        either way — Phase B simulates the acquire uniformly; routing through
-        ``make_cfg`` (when configured) exercises the real cfg pipeline and makes
-        the cfg the source of the plant-centre freq / gain.
-        """
-        env = self._env
-        if (
-            env.ml is None
-            or snapshot.module("pi_pulse") is None
-            or snapshot.module("readout") is None
-        ):
-            return None
-        return self._builder.make_cfg(env, snapshot)
-
     def produce(self, snapshot: Snapshot) -> Patch:
         env = self._env
 
-        # read optional previous best to plant the Gaussian centre (tracks flux)
-        prev_best_freq = float(snapshot["best_ro_freq"])
-        prev_best_gain = float(snapshot["best_ro_gain"])
+        _ = snapshot["best_ro_freq"]  # optional — make_cfg centres the freq window
+        _ = snapshot["best_ro_gain"]  # optional — make_cfg centres the gain window
         _ = snapshot["t1"]  # declared optional; relax_delay = 3·T1 in make_cfg
-        _ = snapshot.module("pi_pulse")  # required — consumed by real hardware
-        _ = snapshot.module("readout")  # optional — the swept readout template
-
-        # Build the run cfg from the active context (when configured) and take the
-        # plant-centre freq / gain from its sweep windows; the acquire is SIMULATED
-        # below. With the demo / empty-ml context the cfg is None and the centre is
-        # the previous best directly (same value — make_cfg centres freq_range /
-        # gain_range on the previous best, mirroring the notebook cfg_maker).
-        cfg = self._maybe_make_cfg(snapshot)
-        if cfg is not None:
-            center_freq = 0.5 * (cfg.freq_range[0] + cfg.freq_range[1])
-            center_gain = 0.5 * (cfg.gain_range[0] + cfg.gain_range[1])
-        else:
-            center_freq = prev_best_freq
-            center_gain = prev_best_gain
+        _ = snapshot.module("pi_pulse")  # required — ge-branch excitation
+        _ = snapshot.module("readout")  # required — the swept readout pulse
 
         result: Sweep2DResult = env.result
         freqs = result.freq
         gains = result.gain
-
-        # plant the peak slightly offset from the centre so it drifts, clamped to
-        # BOTH grids so the planted centre stays inside the sweep window —
-        # otherwise the +0.2/point freq drift walks off the freq grid after ~10
-        # flux points and the argmax pins to the boundary.
-        plant_freq = float(np.clip(center_freq + 0.2, freqs[0], freqs[-1]))
-        plant_gain = float(np.clip(center_gain, gains[0], gains[-1]))
-
         idx = env.flux_idx
+
+        # Lower the active context into the run cfg (Fast Fail if unconfigured: a
+        # real acquire needs a concrete pi_pulse + readout pulse).
+        cfg = self._builder.make_cfg(env, snapshot)
+
+        flux_device = require_flux_device(env, "ro_optimize")
+        set_flux_by_name(
+            cast("MutableMapping[str, Any] | None", cfg.dev), flux_device, env.flux
+        )
+        setup_devices(cfg, progress=False)
+
+        # Sweep the readout freq × gain over the Result's axes (lower layer sets the
+        # freq / gain params on the readout pulse).
+        freq_sweep = axis_to_sweep(freqs)
+        gain_sweep = axis_to_sweep(gains)
+        cfg.modules.readout.set_param("freq", sweep2param("freq", freq_sweep))
+        cfg.modules.readout.set_param("gain", sweep2param("gain", gain_sweep))
+
         result.flux[idx] = env.flux
 
-        base = env.flux_idx * 1000
+        tracker = MomentTracker()
 
-        def make_round(k: int) -> NDArray[np.float64]:
-            return gaussian_peak_2d(freqs, gains, plant_freq, plant_gain, seed=base + k)
-
-        def on_round(avg: NDArray[np.float64], _k: int) -> None:
-            np.copyto(result.signal[idx], avg)
+        def on_round(_round_count: int, _avg_d: Any) -> None:
+            # the SNR landscape (n_freq, n_gain) accumulated so far → overwrite row
+            landscape = _ro_landscape(tracker, result.signal[idx].shape)
+            np.copyto(result.signal[idx], landscape)
             if env.round_hook is not None:
                 env.round_hook(idx)
 
-        landscape = accumulate_rounds(
-            make_round,
-            resolve_rounds(env.params),
-            on_round,
-            delay=resolve_acquire_delay(env.params),
+        ModularProgramV2(
+            env.soccfg,
+            cfg,
+            modules=[
+                Reset("reset", cfg.modules.reset),
+                Branch("ge", [], Pulse("pi_pulse", cfg.modules.pi_pulse)),
+                PulseReadout("readout", cfg.modules.readout),
+            ],
+            sweep=[
+                ("ge", 2),
+                ("freq", freq_sweep),
+                ("gain", gain_sweep),
+            ],
+        ).acquire(
+            env.soc,
+            progress=False,
+            round_hook=on_round,
+            trackers=[tracker],
         )
+
+        landscape = _ro_landscape(tracker, result.signal[idx].shape)
+        np.copyto(result.signal[idx], landscape)
 
         # argmax: project onto each axis and take the index of the max
         best_fi = int(np.argmax(landscape.max(axis=1)))
@@ -240,20 +261,24 @@ class RoOptimizeNode(Node):
         result.best_gain[idx] = best_gain
 
         logger.debug(
-            "ro_optimize @flux%d: best_freq=%.3f best_gain=%.3f (plant freq=%.3f gain=%.3f)",
+            "ro_optimize @flux%d: best_freq=%.3f best_gain=%.3f",
             idx,
             best_freq,
             best_gain,
-            plant_freq,
-            plant_gain,
         )
+
+        # produce the tuned readout MODULE so downstream consumers (t1 / t2* / mist)
+        # sweep against the optimised point: a deepcopy of the (real) readout cfg
+        # with its freq / gain set to the argmax, mirroring the lower-layer
+        # ``RO_OptTask.run`` (deepcopy(cfg.modules.readout); set_param freq/gain).
+        opt_readout = deepcopy(cfg.modules.readout)
+        opt_readout.set_param("freq", best_freq)
+        opt_readout.set_param("gain", best_gain)
 
         patch = Patch()
         patch.set("best_ro_freq", best_freq)
         patch.set("best_ro_gain", best_gain)
-        patch.set_module(
-            "opt_readout", {"type": "readout", "freq": best_freq, "gain": best_gain}
-        )
+        patch.set_module("opt_readout", opt_readout)
         return patch
 
 
@@ -281,7 +306,6 @@ class RoOptimizeBuilder(Builder):
         "gain_expts",
         "reps",
         "rounds",
-        "acquire_delay",
         # the cfg sweep-window half-widths the cfg builder lowers into
         # freq_range / gain_range (centred on the previous best). The freq /
         # gain centres come from the snapshot; the rest from these params.

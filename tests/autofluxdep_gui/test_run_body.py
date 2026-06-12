@@ -1,127 +1,107 @@
-"""qubit_freq Builder tests — synthesise → real fit → fill Result → Patch.
+"""Run-body mechanics — the controller drives the orchestrator over providers.
 
-The qubit_freq Node synthesises a Lorentzian dip and fits it with the real
-``fit_qubit_freq``; the fitted freq/kappa must recover the planted values, the
-sweep Result's row must be filled in place, and the round_hook must fire. This
-exercises the full build_node → produce → fit → fill → notify path without
-hardware (MockSoc gives only noise, so the Node synthesises).
+These exercise the run *wiring* (predictor Service prepended, RunEnv threaded,
+Patch merged into the InfoStore, the ModuleSource bridge), NOT experiment
+physics: the per-Node real-acquire fit is covered against the flux-aware MockSoc
+by the ``test_*_acquire.py`` integration tests. A fake measurement Node (a
+``make_builder`` double whose ``produce`` returns a deterministic Patch) keeps the
+mechanics fast and decoupled from any acquire.
 """
 
 from __future__ import annotations
 
-import numpy as np
-from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
-from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
-from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import QubitFreqBuilder
+from zcu_tools.gui.app.autofluxdep.app import build_core
+from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
+from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency
 
-from ._helpers import connect_mock
-
-
-def _produce(predict_freq: float, flux=0.0, flux_idx: int = 0, sweep="-20,50,0.5"):
-    """Build the Result + Node for one flux point and run produce.
-
-    ``flux`` is the device flux value (in [0,1]); the true resonance drifts with
-    it (``flux_drift``) and the SNR varies (``flux_snr``), so pick a flux away
-    from an SNR trough for the recovery tests. ``flux_idx`` is the Result row.
-    """
-    builder = QubitFreqBuilder()
-    result = builder.make_init_result({"detune_sweep": sweep}, np.linspace(0.0, 1.0, 8))
-    fired: list = []
-    env = RunEnv(
-        flux=flux,
-        flux_idx=flux_idx,
-        params={"detune_sweep": sweep},
-        result=result,
-        round_hook=lambda payload: fired.append(payload),
-    )
-    node = builder.build_node(env)
-    snap = Snapshot(
-        {"predict_freq": predict_freq, "fit_kappa": 0.05},
-        modules={"readout": "<ro>"},
-    )
-    patch = node.produce(snap)
-    return patch, result, fired
+from ._helpers import make_builder
 
 
-def _planted_freq(predict_freq: float, flux_idx: int, n_flux: int = 8) -> float:
-    """The drifted true resonance qubit_freq plants at sweep position ``flux_idx``.
+def _consume_predict(env, snapshot):
+    """A fake measurement Node: echo the Service's predict_freq into a Patch.
 
-    The drift uses the NORMALISED sweep position (flux_idx/(n_flux-1)), not the
-    raw flux value — so the expected plant is computed from the same position.
-    """
-    from zcu_tools.gui.app.autofluxdep.nodes.synth import flux_drift
-
-    pos = flux_idx / max(1, n_flux - 1)
-    return predict_freq + flux_drift(pos, baseline=1.5, amplitude=20.0)
-
-
-def test_produce_recovers_planted_freq_and_kappa():
-    # flux_idx 3 of 8 → pos ≈ 0.43, a full-SNR point near the drift sweet spot
-    patch, _result, _fired = _produce(5000.0, flux=0.5, flux_idx=3)
-    vals = patch.values()
-    expected = _planted_freq(5000.0, flux_idx=3)
-    assert abs(vals["qubit_freq"] - expected) < 0.5
-    assert abs(vals["fit_kappa"] - 2.0) < 0.6
+    Reads ``predict_freq`` (provided by the prepended predictor Service) and the
+    flux from the env, and emits a deterministic ``measured`` key so the run wiring
+    (snapshot projection → produce → Patch merge) is observable without physics."""
+    predicted = float(snapshot["predict_freq"])
+    patch = Patch()
+    patch.set("measured", predicted + 0.5)  # a fixed, deterministic offset
+    return patch
 
 
-def test_produce_emits_exactly_the_declared_keys():
-    patch, _result, _fired = _produce(5000.0, flux=0.5, flux_idx=3)
-    assert set(patch.values()) == {"qubit_freq", "fit_detune", "fit_kappa"}
-    assert patch.modules() == {}  # qubit_freq produces no module
-
-
-def test_produce_fills_the_result_row_in_place():
-    patch, result, _fired = _produce(5000.0, flux=0.5, flux_idx=3)
-    assert "qubit_freq" in patch.values()  # a good fit near the sweet spot
-    # the produced row carries flux, predict_freq, signal, fit curve + fit_freq
-    assert result.flux[3] == 0.5
-    assert result.predict_freq[3] == 5000.0
-    assert not np.isnan(result.signal[3]).any()
-    assert not np.isnan(result.fit_curve[3]).any()
-    assert abs(result.fit_freq[3] - _planted_freq(5000.0, flux_idx=3)) < 0.5
-    # untouched rows stay nan (honest "not measured")
-    assert np.isnan(result.fit_freq[0])
-    assert np.isnan(result.signal[0]).all()
-
-
-def test_produce_fires_round_hook_for_liveplot():
-    _patch, _result, fired = _produce(5000.0)
-    # the Node notifies at least once (raw filled) — drives the main-thread redraw
-    assert len(fired) >= 1
-
-
-def test_produce_tracks_the_predicted_frequency():
-    # the resonance sits 1.5 MHz above the prediction → fitted freq follows it
-    a = _produce(5000.0)[0].values()["qubit_freq"]
-    b = _produce(5200.0)[0].values()["qubit_freq"]
-    assert abs((b - a) - 200.0) < 1.0
-
-
-def test_produce_deterministic_per_flux_index():
-    # same flux index → same synthetic noise seed → identical fit
-    assert _produce(5000.0, flux_idx=3)[0].values() == (
-        _produce(5000.0, flux_idx=3)[0].values()
+def _fake_consumer():
+    return make_builder(
+        "consumer",
+        provides=("measured",),
+        requires=(Dependency("predict_freq"),),
+        produce_fn=_consume_predict,
     )
 
 
-def test_controller_run_drives_real_produce_with_predictor_service():
-    # a full controller run (no Qt) drives the predictor Service + qubit_freq's
-    # produce and leaves a fitted qubit_freq in the final InfoStore.
-    from zcu_tools.gui.app.autofluxdep.app import build_core
-
+def test_controller_run_drives_predictor_service_then_consumer():
+    # the controller prepends the predictor Service and runs the user node after it;
+    # the consumer reads the Service's predict_freq and the final InfoStore carries
+    # both keys — the full predictor-Service-then-Node run wiring.
     ctrl = build_core()
-    ctrl.add_node_by_type("qubit_freq")
-    ctrl.state.nodes[0].params["acquire_delay"] = 0  # instant headless run
-    connect_mock(ctrl)
+    ctrl.add_node(_fake_consumer())
     ctrl.set_flux_values([0.0, 1.0])
     info = ctrl.start_run()
-    # the predictor Service produced predict_freq + closed-loop feedback adapted
-    # it: the drifting resonance is measured and calibrated, so flux 1.0's predict
-    # is above the bare linear 5050, and qubit_freq sits in the detune window above.
-    assert info.point["predict_freq"] > 5050.0  # adapted by feedback
-    offset = info.point["qubit_freq"] - info.point["predict_freq"]
-    assert 0.0 < offset < 50.0  # the drifted resonance, within the sweep window
-    assert info.point["qubit_freq"] != 1.0  # not the fake fallback
+    # the predictor Service produced predict_freq at the last point, and the
+    # consumer produced its derived key off it
+    assert "predict_freq" in info.point
+    assert info.point["measured"] == info.point["predict_freq"] + 0.5
+
+
+def test_run_threads_flux_into_env():
+    # the run threads each flux point's value into the Node's RunEnv: the consumer
+    # records env.flux per point, so the recorded sequence matches the sweep.
+    seen: list[float] = []
+
+    def record_flux(env, snapshot):
+        del snapshot
+        seen.append(env.flux)
+        return Patch()
+
+    ctrl = build_core()
+    ctrl.add_node(
+        make_builder(
+            "recorder", requires=(Dependency("predict_freq"),), produce_fn=record_flux
+        )
+    )
+    ctrl.set_flux_values([0.0, 0.5, 1.0])
+    ctrl.start_run()
+    assert seen == [0.0, 0.5, 1.0]
+
+
+def test_produce_exception_fails_run_gracefully():
+    # a Node whose produce raises (e.g. an unconfigured real acquire Fast-Failing)
+    # must NOT propagate out of the run: the orchestrator catches it, the run ends
+    # on RUN_FAILED (not RUN_FINISHED), the controller unlocks, and the error is
+    # carried on the payload. This is what stops a GUI run worker QThread aborting.
+    from zcu_tools.gui.app.autofluxdep.events.run import (
+        RunFailedPayload,
+        RunFinishedPayload,
+    )
+
+    def boom(env, snapshot):
+        del env, snapshot
+        raise RuntimeError("node not configured")
+
+    ctrl = build_core()
+    ctrl.add_node(
+        make_builder("broken", requires=(Dependency("predict_freq"),), produce_fn=boom)
+    )
+    ctrl.set_flux_values([0.0, 1.0])
+
+    events: list[str] = []
+    ctrl.bus.subscribe(RunFailedPayload, lambda p: events.append(f"failed:{p.message}"))
+    ctrl.bus.subscribe(RunFinishedPayload, lambda p: events.append("finished"))
+
+    ctrl.start_run()  # must not raise
+
+    assert len(events) == 1 and events[0].startswith("failed:")
+    assert "node not configured" in events[0]
+    assert not ctrl.is_running  # the controller unlocked
 
 
 def test_ml_module_source_returns_none_on_absent():

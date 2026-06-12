@@ -22,6 +22,7 @@ class RunEvent(str, Enum):
     POINT_DONE = "point_done"
     RUN_FINISHED = "run_finished"
     RUN_STOPPED = "run_stopped"
+    RUN_FAILED = "run_failed"
 
 
 @dataclass(frozen=True)
@@ -67,3 +68,16 @@ class RunStoppedPayload(_RunPayload):
     """Payload for RUN_STOPPED."""
 
     EVENT: ClassVar[RunEvent] = RunEvent.RUN_STOPPED
+
+
+@dataclass(frozen=True)
+class RunFailedPayload(_RunPayload):
+    """Payload for RUN_FAILED: a Node's ``produce`` raised mid-sweep.
+
+    Carries the human-readable error so the UI can surface it. A failed run is a
+    terminal state distinct from a cooperative stop: the sweep aborted on an
+    unexpected error (e.g. an unconfigured Node Fast-Failing), not the user's
+    Stop. The run still unlocks the UI exactly like a stop/finish."""
+
+    EVENT: ClassVar[RunEvent] = RunEvent.RUN_FAILED
+    message: str

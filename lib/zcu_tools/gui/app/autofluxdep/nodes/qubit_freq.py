@@ -1,27 +1,24 @@
-"""qubit_freq — the worked Builder: synthesise → fit → fill Result → liveplot.
+"""qubit_freq — the worked Builder: acquire → fit → fill Result → liveplot.
 
-The first end-to-end measurement provider in the Builder model. It translates
-the notebook's ``cfg_maker`` lambda + ``ctx.env`` walrus chain into:
+The first end-to-end real-acquire measurement provider in the Builder model. It
+translates the notebook's ``cfg_maker`` lambda + ``ctx.env`` walrus chain into:
 
 - a stateless ``QubitFreqBuilder`` declaring provides/requires + the sweep-lived
   factories (``make_init_result`` allocates the (n_flux, n_detune) Result;
   ``make_plotter`` builds the accumulating colormap Plotter);
 - a short-lived ``QubitFreqNode`` (built per flux point by ``build_node``, with
   the flux point + soc + Result + round_hook curried in) whose ``produce``
-  synthesises a Lorentzian dip vs detune, fits it with the real
-  ``fit_qubit_freq``, fills the Result's flux-idx row in place, notifies via the
-  round_hook, and returns the raw qubit_freq / fit_detune / fit_kappa Patch.
+  sets this point's flux on the picked flux device, recenters the detune sweep on
+  the predicted qubit freq, runs a real ``TwoToneProgram.acquire`` (against the
+  flux-aware MockSoc offline or real hardware), fits it with ``fit_qubit_freq``,
+  fills the Result's flux-idx row in place, notifies via the round_hook, and
+  returns the raw qubit_freq / fit_detune / fit_kappa Patch.
 
-Compare ``notebook_md/autofluxdep.md`` (the QubitFreqTask block):
-
-    cfg_maker=lambda ctx, ml: (
-        (info := ctx.env["info"])
-        and (pred_qf := info["predict_freq"])                          # required
-        and (prev_factor := info.last.get("qfw_factor", md.qf_w/0.05)) # smoothed kappa
-        and (opt_readout := info.last.get("opt_readout", readout_cfg)) # optional module
-        and ml.make_cfg({"modules": {"qub_pulse": {"gain": min(1.0, 6.5/prev_factor),
-                                                    "freq": pred_qf},
-                                     "readout": opt_readout}, ...}) )
+Mirrors the lower-layer ground truth ``experiment/v2/autofluxdep/qubit_freq.py``
+(``QubitFreqTask.run`` + ``measure_fn``): predict-centred drive freq, detune
+sweep via ``sweep2param``, ``setup_devices`` to push the flux, ``.acquire`` with
+``round_hook`` + ``stop_checkers`` (cooperative stop + SNR early-stop), and the
+predictor calibration closed loop.
 
 - ``predict_freq`` — required; provided by the predictor Service (a Builder
   whose Node computes it), resolved latest-available like any dependency.
@@ -30,37 +27,32 @@ Compare ``notebook_md/autofluxdep.md`` (the QubitFreqTask block):
   back; the orchestrator's SmoothingService projects the smoothed value in.
 - ``readout`` — optional module, Node-produced (ro_optimize) → ml preset →
   default.
-
-MockSoc.acquire returns only noise, so ``produce`` synthesises a
-physically-plausible signal (``synth.lorentzian_dip``) and fits it with the real
-fitter — exercising the whole acquire→fit→fill→notify→draw path without
-hardware. Phase B swaps the synthesis for ``soc.acquire``.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
-from typing import Any, Optional
+from collections.abc import Mapping, MutableMapping
+from typing import Any, cast
 
 import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
+    SnrProbe,
+    acquire_to_complex,
+    build_stop_checkers,
+    is_good_fit,
+    require_flux_device,
+    set_flux_by_name,
+)
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.result import QubitFreqResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
-from zcu_tools.gui.app.autofluxdep.nodes.synth import (
-    accumulate_rounds,
-    flux_drift,
-    flux_snr,
-    is_good_fit,
-    lorentzian_dip,
-    resolve_acquire_delay,
-    resolve_rounds,
-)
-from zcu_tools.program.v2 import TwoToneCfg
+from zcu_tools.program.v2 import SweepCfg, TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import rotate2real
 
@@ -122,94 +114,97 @@ def _signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return real
 
 
+def detune_axis_to_sweep(detune: NDArray[np.float64]) -> SweepCfg:
+    """Turn the Result's detune axis into the ``SweepCfg`` ``sweep2param`` needs.
+
+    The Result stores the detune axis as an explicit array (from
+    ``parse_detune_sweep``); the program-side sweep is a ``SweepCfg``
+    (start/stop/expts/step). Reconstructs it from the axis endpoints + length so
+    the FPGA sweep matches the Result's columns exactly."""
+    det = np.asarray(detune, dtype=np.float64)
+    expts = int(det.shape[0])
+    start = float(det[0])
+    stop = float(det[-1])
+    step = 0.0 if expts == 1 else (stop - start) / (expts - 1)
+    return SweepCfg(start=start, stop=stop, expts=expts, step=step)
+
+
 class QubitFreqNode(Node):
     """One flux point's qubit_freq execution, environment curried in by build_node.
 
-    Synthesises a Lorentzian dip vs detune (centred on the snapshot's
-    ``predict_freq``), fits it, fills the sweep Result's ``flux_idx`` row in
-    place, fires the ``round_hook`` so the main thread redraws, and returns the
-    raw fit Patch. ``soc`` is the connected (mock) board, unused here — the
-    signal is synthesised because MockSoc gives only noise.
+    Sets this point's flux on the picked flux device, recenters the detune sweep
+    on the snapshot's ``predict_freq``, runs a real ``TwoToneProgram.acquire``
+    against the connected board (the flux-aware MockSoc offline, or real hardware),
+    fits the dip with ``fit_qubit_freq``, fills the sweep Result's ``flux_idx`` row
+    in place, fires the ``round_hook`` so the main thread redraws, and returns the
+    raw fit Patch.
     """
 
     def __init__(self, env: RunEnv, builder: QubitFreqBuilder) -> None:
         self._env = env
         self._builder = builder
 
-    def _maybe_make_cfg(self, snapshot: Snapshot) -> QubitFreqCfgTemplate | None:
-        """Build the run cfg when the context is configured for it, else None.
-
-        ``make_cfg`` needs a readout module + the drive params; the default /
-        demo context (empty ml) has neither, so produce keeps the pure
-        snapshot-driven simulation there. No hardware is touched either way —
-        Phase B simulates the acquire uniformly; routing through ``make_cfg``
-        (when configured) exercises the real cfg pipeline and makes the cfg the
-        source of the drive centre frequency.
-        """
-        env = self._env
-        if (
-            env.ml is None
-            or snapshot.module("readout") is None
-            or not env.params.get("qub_waveform")
-            or env.params.get("qub_ch") is None
-        ):
-            return None
-        return self._builder.make_cfg(env, snapshot)
-
     def produce(self, snapshot: Snapshot) -> Patch:
         env = self._env
         pred_qf = float(snapshot["predict_freq"])
         _ = snapshot["fit_kappa"]  # smoothed kappa (drives the real drive-gain)
 
-        # Build the run cfg from the active context (when configured) and take the
-        # drive centre frequency from it; the acquire is SIMULATED below. With the
-        # demo / empty-ml context the cfg is None and the centre is the predicted
-        # freq directly (same value — make_cfg sets qub_pulse.freq = predict_freq).
-        cfg = self._maybe_make_cfg(snapshot)
-        center = float(cfg.modules.qub_pulse.freq) if cfg is not None else pred_qf
-
         result: QubitFreqResult = env.result
-        detunes = result.detune
-        freqs = center + detunes  # absolute frequency axis
-
-        # The drift / SNR use the flux point's NORMALISED position in the sweep
-        # (0 → 1), not the raw flux value: real flux values are tiny (mA-scale),
-        # while the drift/SNR shapes are defined over [0, 1]. Using the position
-        # makes the whole sweep span one parabola of drift and a few SNR cycles,
-        # whatever the actual flux range. The true resonance DRIFTS so the
-        # predictor has a moving target to track via feedback; the SNR varies
-        # sinusoidally to 0 at its troughs (those points are pure noise → the
-        # fit-quality gate rejects them and skips calibration).
         idx = env.flux_idx
-        pos = idx / max(1, result.n_flux - 1)
-        true_freq = pred_qf + flux_drift(pos, baseline=1.5, amplitude=20.0)
-        true_fwhm = 2.0  # MHz
-        snr = flux_snr(pos)
+        detunes = result.detune  # MHz, relative to the drive centre
+
+        # Build the run cfg from the active context (Fast Fail if unconfigured: a
+        # real acquire needs a concrete readout + drive pulse). The drive centre is
+        # the predicted qubit freq (make_cfg sets qub_pulse.freq = predict_freq).
+        cfg = self._builder.make_cfg(env, snapshot)
+        center = float(cfg.modules.qub_pulse.freq)
+        freqs = center + detunes  # absolute frequency axis (for the fit + plot)
+
+        # Point the flux device at this sweep point and push it to hardware (mock:
+        # writes the FakeDevice value → SimEngine reads it live). Fast Fail if no
+        # flux source is picked — a real flux sweep must drive a device.
+        flux_device = require_flux_device(env, "qubit_freq")
+        # cfg.dev is typed Mapping but make_cfg always populates it with a mutable
+        # dict (GlobalDeviceManager.get_all_info); cast for the in-place name write.
+        set_flux_by_name(
+            cast("MutableMapping[str, Any] | None", cfg.dev), flux_device, env.flux
+        )
+        setup_devices(cfg, progress=False)
+
+        # Recenter the detune sweep on the predicted freq (mirrors the lower layer:
+        # qub_pulse.freq + detune_param), so the FPGA sweeps freq across the detune
+        # window around the drive centre.
+        detune_sweep = detune_axis_to_sweep(detunes)
+        detune_param = sweep2param("detune", detune_sweep)
+        cfg.modules.qub_pulse.set_param(
+            "freq", cfg.modules.qub_pulse.freq + detune_param
+        )
 
         result.flux[idx] = env.flux
         result.predict_freq[idx] = pred_qf
 
-        # emulate a multi-round acquire: each round is a fresh noise realisation,
-        # the running average settles round by round (the row grows clearer as the
-        # acquire progresses), and each round overwrites the row + notifies so the
-        # liveplot shows the row converging. The total delay is split over rounds.
-        base = env.flux_idx * 1000
+        # Real multi-round acquire. round_hook fires per round with the running
+        # average; we rotate it to real, overwrite the Result row, and notify so the
+        # liveplot settles round by round. The SNR probe + stop poll are threaded
+        # into stop_checkers (early-stop on good SNR; cooperative cancel).
+        probe = SnrProbe()
 
-        def make_round(k: int) -> NDArray[np.complex128]:
-            return lorentzian_dip(freqs, true_freq, true_fwhm, snr=snr, seed=base + k)
-
-        def on_round(avg: NDArray[np.complex128], _k: int) -> None:
-            np.copyto(result.signal[idx], _signal2real(avg))
+        def on_round(_round_count: int, avg_d: Any) -> None:
+            signal = acquire_to_complex(avg_d)
+            probe.value = signal
+            np.copyto(result.signal[idx], _signal2real(signal))
             if env.round_hook is not None:
                 env.round_hook(idx)
 
-        averaged = accumulate_rounds(
-            make_round,
-            resolve_rounds(env.params),
-            on_round,
-            delay=resolve_acquire_delay(env.params),
+        stop_checkers = build_stop_checkers(env, probe, _signal2real)
+
+        raw = TwoToneProgram(env.soccfg, cfg, sweep=[("detune", detune_sweep)]).acquire(
+            env.soc,
+            progress=False,
+            round_hook=on_round,
+            stop_checkers=stop_checkers,
         )
-        real = _signal2real(averaged)
+        real = _signal2real(acquire_to_complex(raw))
 
         # fit the fully-averaged signal
         freq, _, fwhm, _, fit_curve, _ = fit_qubit_freq(freqs, real)
@@ -335,7 +330,6 @@ class QubitFreqBuilder(Builder):
         "rounds",
         "relax_delay",
         "earlystop_snr",
-        "acquire_delay",
         # the drive pulse "設定頭" — what the cfg builder lowers into qub_pulse
         # (freq comes from the predicted qubit freq, readout from the snapshot)
         "qub_waveform",
@@ -367,8 +361,7 @@ class QubitFreqBuilder(Builder):
         recentred on the predicted freq).
 
         Raises if the readout module is unavailable or the drive params are unset
-        — a real run needs a concrete drive pulse (Fast Fail), unlike the
-        synthetic path which fabricates a signal.
+        — a real run needs a concrete drive pulse (Fast Fail).
         """
         params = env.params
         ml = env.ml

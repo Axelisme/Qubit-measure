@@ -5,8 +5,9 @@ definition commands (add/remove/reorder Nodes, set flux, set Node params), a
 Setup that builds a MockSoc + FakeDevice flux board (the prototype's offline
 resources), and a cancellable run that drives the orchestrator over the user's
 ordered providers (with the predictor Service prepended). Each provider's Node
-``produce`` synthesises a signal, fits it, fills the provider's sweep Result in
-place, and notifies the main thread to redraw — no hardware. ``dry_run`` runs
+``produce`` runs a real acquire (against a flux-aware MockSoc offline or real
+hardware), fits it, fills the provider's sweep Result in place, and notifies the
+main thread to redraw. ``dry_run`` runs
 the same orchestrator headless (no Results / notify) for direct testing of the
 dependency model.
 """
@@ -22,6 +23,7 @@ from zcu_tools.gui.app.autofluxdep.derivation import DerivationService
 from zcu_tools.gui.app.autofluxdep.events.run import (
     NodeEnteredPayload,
     PointDonePayload,
+    RunFailedPayload,
     RunFinishedPayload,
     RunStartedPayload,
     RunStoppedPayload,
@@ -30,12 +32,9 @@ from zcu_tools.gui.app.autofluxdep.events.workflow import (
     FluxChangedPayload,
     WorkflowChangedPayload,
 )
+from zcu_tools.gui.app.autofluxdep.nodes.acquire import DEFAULT_ROUNDS
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, PlacedNode
 from zcu_tools.gui.app.autofluxdep.nodes.predictor import PredictorBuilder
-from zcu_tools.gui.app.autofluxdep.nodes.synth import (
-    DEFAULT_ACQUIRE_DELAY,
-    DEFAULT_ROUNDS,
-)
 from zcu_tools.gui.app.autofluxdep.operation_gate import OperationGate
 from zcu_tools.gui.app.autofluxdep.orchestrator import (
     InfoStore,
@@ -389,14 +388,11 @@ class Controller:
 
         The instance name defaults to the type name, de-duped within the
         workflow (a second ``mist`` becomes ``mist_2``); the user can rename it.
-        A Node is seeded with the default ``acquire_delay`` / ``rounds`` so the
-        GUI run paces the synthetic liveplot visibly and shows the per-round
-        accumulation (the user can tune both).
+        A Node is seeded with the default acquire ``rounds`` so the GUI run
+        averages a sensible number of passes (the user can tune it).
         """
         node = create_placement(type_name)
         node.name = self._unique_name(node.name)
-        if "acquire_delay" in node.builder.base_params:
-            node.params.setdefault("acquire_delay", DEFAULT_ACQUIRE_DELAY)
         if "rounds" in node.builder.base_params:
             node.params.setdefault("rounds", DEFAULT_ROUNDS)
         self._state.nodes.append(node)
@@ -531,8 +527,9 @@ class Controller:
 
     def start_run(self, notify: Notify | None = None) -> InfoStore:
         """Run flux × providers, emitting run events. Each provider's Node
-        ``produce`` synthesises a signal, fits it, fills its sweep Result in
-        place, and fires ``notify(name, idx)`` so the main thread redraws.
+        ``produce`` runs a real acquire (flux-aware MockSoc offline or real
+        hardware), fits it, fills its sweep Result in place, and fires
+        ``notify(name, idx)`` so the main thread redraws.
 
         ``notify`` is the row-updated callback (the UI passes one bound to its
         Plotters); None for a headless run. Blocks until the sweep finishes or
@@ -591,6 +588,9 @@ class Controller:
             soc=soc,
             soccfg=soccfg,
             md=md,
+            # The user's flux-source pick reaches each RunEnv so a real acquire
+            # writes this point's flux into cfg.dev[flux_device] (RB-0b).
+            flux_device=self._state.flux_device_name,
             results=results,
             notify=notify,
         )
@@ -601,11 +601,18 @@ class Controller:
             should_stop=lambda: self._stop,
         )
         self._running = False
-        if self._stop:
+        # A produce error is a terminal RUN_FAILED (distinct from a cooperative
+        # stop): the orchestrator caught it so the worker QThread never aborts.
+        # Either terminal state unlocks the UI; the failure carries its message.
+        if orch.run_error is not None:
+            logger.error("run failed at flux idx %d: %s", self._cur_idx, orch.run_error)
+            self._bus.emit(RunFailedPayload(message=str(orch.run_error)))
+        elif self._stop:
             logger.info("run stopped at flux idx %d", self._cur_idx)
+            self._bus.emit(RunStoppedPayload())
         else:
             logger.info("run finished: %d flux point(s)", len(self._state.flux_values))
-        self._bus.emit(RunStoppedPayload() if self._stop else RunFinishedPayload())
+            self._bus.emit(RunFinishedPayload())
         return info
 
     def prepare_run_results(self) -> dict[str, Any]:

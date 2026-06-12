@@ -1,10 +1,13 @@
 """Headless interaction tests for the autofluxdep-gui prototype.
 
 Drives the window through the Controller / NodeListPane (not real dialogs) and
-asserts the UI reflects State and the edit↔run switch. The run uses synthetic
-signals (no hardware); the run worker is a real QThread driven to completion via
-the Qt event loop. A second ad-hoc provider (added directly, no registry) gives
-the list two rows for reorder/remove without a second real experiment.
+asserts the UI reflects State and the edit↔run switch. The run uses FAKE
+measurement Nodes (deterministic produce, no acquire): these tests exercise the
+UI's run wiring (lock → fill → unlock, build canvases, auto-follow), not the
+experiment physics — the real-acquire path is covered by the ``test_*_acquire``
+integration tests. The run worker is a real QThread driven to completion via the
+Qt event loop. A second ad-hoc provider (no Result → no liveplot) gives the list
+two rows for reorder/remove.
 """
 
 from __future__ import annotations
@@ -14,13 +17,13 @@ from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.ui.main_window import MainWindow
 
-from .._helpers import connect_mock, make_builder
+from .._helpers import connect_mock, make_builder, make_measurement_builder
 
 
 @pytest.fixture
 def app(qapp):
     ctrl = build_core()
-    ctrl.add_node_by_type("qubit_freq")
+    ctrl.add_node(make_measurement_builder("qubit_freq"))
     # a second provider (ad-hoc, no Result → no liveplot) so the list has 2 rows
     ctrl.add_node(make_builder("probe", provides=("v",)))
     win = MainWindow(ctrl)
@@ -129,11 +132,10 @@ def test_run_disabled_until_setup(app):
 
 
 def _zero_delays(ctrl):
-    # zero the per-Node acquire delay so a test runs instantly (the delay is a
-    # GUI-pacing default seeded by add_node_by_type; its behaviour is tested
-    # separately — UI tests must not wait on it).
-    for node in ctrl.state.nodes:
-        node.params["acquire_delay"] = 0
+    # the fake measurement Nodes produce instantly (no acquire / no delay), so a UI
+    # run completes within the event pump without any pacing to neutralise. Kept as
+    # a no-op so the run helpers read the same with or without a delay seam.
+    del ctrl
 
 
 def _pump_until_done(ctrl, win):
@@ -164,6 +166,48 @@ def test_run_locks_then_unlocks(app):
     assert win._progress.value() == 3
 
 
+def test_produce_exception_during_gui_run_does_not_crash_and_unlocks(qapp, monkeypatch):
+    # a Node whose produce raises mid-run (e.g. an unconfigured real acquire) must
+    # NOT abort the run worker QThread: the orchestrator catches it, the run ends on
+    # RUN_FAILED, and the UI unlocks back to edit state. The warning dialog is
+    # stubbed so the headless test does not block on a modal.
+    from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]
+    from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency
+
+    from .._helpers import make_builder
+
+    def boom(env, snapshot):
+        del env, snapshot
+        raise RuntimeError("node not configured")
+
+    ctrl = build_core()
+    ctrl.add_node(
+        make_builder("broken", requires=(Dependency("predict_freq"),), produce_fn=boom)
+    )
+    win = MainWindow(ctrl)
+    shown: list[str] = []
+    monkeypatch.setattr(
+        QMessageBox, "warning", lambda *a, **k: shown.append(a[2] if len(a) > 2 else "")
+    )
+
+    ctrl.set_flux_values([0.0, 1.0])
+    connect_mock(ctrl)
+    win._list._refresh_buttons()
+    win._start()
+    _pump_until_done(ctrl, win)
+
+    # the run ended (worker quiesced, not aborted) and the UI is back in edit state
+    assert win._worker is None
+    assert not ctrl.is_running
+    assert win._list._run_btn.text() == "▶ Run"
+    assert win._list._add_btn.isEnabled()
+    # the failure surfaced to the user
+    assert any("node not configured" in m for m in shown)
+    ctrl._background_svc.quiesce()
+    win.close()
+    win.deleteLater()
+
+
 def test_run_builds_liveplot_canvas_for_measurement_node(app):
     ctrl, win = app
     win._list.select_index(0)  # qubit_freq has a Result → a canvas is built
@@ -175,8 +219,10 @@ def test_run_builds_liveplot_canvas_for_measurement_node(app):
     # the ad-hoc "probe" provider has no Result → no canvas
     assert "probe" not in win._plots
     # the Result was filled (the worker ran produce over the sweep)
+    import numpy as np
+
     result = ctrl.state.run_results["qubit_freq"]
-    assert not all(map(lambda r: r != r, result.fit_freq))  # at least one non-nan
+    assert not np.isnan(result.signal[-1]).any()  # the last row was filled
 
 
 def test_run_switches_detail_to_run_tab(app):
@@ -201,7 +247,7 @@ def test_multiple_real_experiments_each_get_a_liveplot(qapp):
     # main thread (every experiment shares the same notify→update→draw wiring).
     ctrl = build_core()
     for t in ("qubit_freq", "t1", "ro_optimize", "mist"):
-        ctrl.add_node_by_type(t)
+        ctrl.add_node(make_measurement_builder(t))
     win = MainWindow(ctrl)
     win._list.select_index(1)  # follow t1's plot
     redraws = {"t1": 0}
@@ -241,7 +287,7 @@ def test_run_auto_follows_each_entered_node(qapp):
     # pane switches to its run tab (the canvas it shows follows the selection).
     ctrl = build_core()
     for t in ("qubit_freq", "t1", "mist"):
-        ctrl.add_node_by_type(t)
+        ctrl.add_node(make_measurement_builder(t))
     win = MainWindow(ctrl)
     win._list.select_index(0)
 
@@ -274,8 +320,8 @@ def test_rename_updates_list_and_keeps_canvas_key(qapp):
     # renaming two mist placements to g_mist / e_mist relabels the list and keys
     # each one's liveplot canvas under its instance name.
     ctrl = build_core()
-    ctrl.add_node_by_type("mist")
-    ctrl.add_node_by_type("mist")
+    ctrl.add_node(make_measurement_builder("mist"))
+    ctrl.add_node(make_measurement_builder("mist"))
     win = MainWindow(ctrl)
     ctrl.rename_node(0, "g_mist")
     ctrl.rename_node(1, "e_mist")
@@ -303,7 +349,7 @@ def test_no_canvas_is_ever_a_toplevel_window(qapp):
     # one in the run tab, the rest under the hidden park — so none is a window.
     ctrl = build_core()
     for t in ("qubit_freq", "t1", "mist"):
-        ctrl.add_node_by_type(t)
+        ctrl.add_node(make_measurement_builder(t))
     win = MainWindow(ctrl)
     win.show()
     win._list.select_index(0)

@@ -1,14 +1,14 @@
-"""t1 — the simplest 1D Builder: exp decay → fit_decay → t1.
+"""t1 — the simplest 1D Builder: acquire exp decay → fit_decay → t1.
 
-Translates the notebook's T1Task cfg_maker. Synthesises an exponential decay vs
-relax time (time constant planted from the smoothed previous t1), fits it with
-the real ``fit_decay``, fills its sweep Result row in place, and returns the raw
-``t1`` Patch.
+Translates the notebook's T1Task cfg_maker. Sets this flux point's value on the
+picked flux device, sets up devices, acquires an exponential decay vs relax time
+with ``ModularProgramV2`` (Reset → pi_pulse → variable Delay → Readout), fits it
+with the real ``fit_decay``, fills its sweep Result row in place, and returns the
+raw ``t1`` Patch.
 
 - needs the ``pi_pulse`` module (lenrabi produces it) — without a pi-pulse there
-  is no excited state to relax. In the prototype it carries a placeholder
-  default, so it never actually skips; Phase B drops the default (real lenrabi
-  output) to restore true skip-if-absent.
+  is no excited state to relax. It carries a placeholder default, so it never
+  actually skips when lenrabi is absent.
 - reads ``t1`` declared ``smooth="ewma"`` (the notebook's smooth_t1) for the
   relax_delay guess + the planted decay constant; reports raw ``t1`` back.
 - the ``opt_readout`` module is optional (ro_optimize produces it → ml preset →
@@ -19,9 +19,8 @@ smoothed and provides raw ``t1`` — the orchestrator's SmoothingService project
 the smoothed estimate under the same key for the next point's readers (lenrabi /
 ro_optimize / t2*), so no separate ``smooth_t1`` key exists.
 
-Phase B (cfg-builder): ``make_cfg`` lowers the active context + this point's
-snapshot into a runnable ``T1CfgTemplate`` (no acquire — construction only),
-mirroring the notebook's T1Task ``cfg_maker``:
+``make_cfg`` lowers the active context + this point's snapshot into a runnable
+``T1CfgTemplate``, mirroring the notebook's T1Task ``cfg_maker``:
 
     cfg_maker=lambda ctx, ml: (
         (info := ctx.env["info"])
@@ -40,46 +39,52 @@ drive ``pi_pulse`` and ``readout`` are MODULES taken from the snapshot (lenrabi 
 ro_optimize produce them, or an ml preset / default). The ``relax_delay`` and the
 ``sweep_range`` derive from the snapshot's smoothed ``t1``; ``reps`` / ``rounds``
 come from the node's params. The flux ``dev`` entry + the ``length`` sweep are NOT
-in the template — the lower-layer ``run`` merges them per point.
+in the template — ``produce`` merges them per point.
 
-The acquire is always SIMULATED (no hardware): when the context is configured the
-cfg-derived ``sweep_range`` sets the relax-time axis (so the cfg drives the
-simulation); with the demo / empty-ml context the cfg is None and the axis is the
-``sweep_range`` param directly — the existing pure-synthetic path, unchanged.
+``produce`` sets this flux point on the picked flux device, sets up devices, and
+acquires against a flux-aware MockSoc (offline) or real hardware. The cfg-derived
+``sweep_range`` sets the relax-time axis (so the cfg drives the measurement
+window).
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
-from typing import Any, Optional
+from collections.abc import Mapping, MutableMapping
+from typing import Any, Optional, cast
 
 import numpy as np
-from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
+    SnrProbe,
+    acquire_to_complex,
+    axis_to_sweep,
+    build_stop_checkers,
+    is_good_fit,
+    parse_linear_axis,
+    require_flux_device,
+    set_flux_by_name,
+    signal2real_flip,
+)
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.plotters import Decay1DPlotter
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
-from zcu_tools.gui.app.autofluxdep.nodes.synth import (
-    accumulate_rounds,
-    exp_decay,
-    flux_drift,
-    flux_snr,
-    is_good_fit,
-    parse_linear_axis,
-    resolve_acquire_delay,
-    resolve_rounds,
-    signal_to_real,
-)
 from zcu_tools.program.v2 import (
+    Delay,
+    ModularProgramV2,
     ProgramV2Cfg,
+    Pulse,
     PulseCfg,
+    Readout,
     ReadoutCfg,
+    Reset,
     ResetCfg,
+    sweep2param,
 )
 from zcu_tools.utils.fitting import fit_decay
 
@@ -109,8 +114,8 @@ class T1CfgTemplate(ProgramV2Cfg, ExpCfgModel):
     ``ProgramV2Cfg`` (reps/rounds/relax) + the ``ExpCfgModel`` device fields + the
     t1 modules and the ``sweep_range`` (start, stop) the relax-time axis spans —
     mirroring the lower-layer ``T1CfgTemplate``. The flux ``dev`` entry and the
-    ``length`` sweep are merged in by the lower-layer ``run`` (and ``produce``
-    derives the synthetic relax-time axis from ``sweep_range``).
+    ``length`` sweep are merged in by ``produce`` (which derives the relax-time
+    axis from ``sweep_range``).
     """
 
     modules: T1ModuleCfg
@@ -150,100 +155,75 @@ def _resolve_relax_delay(smoothed_t1: float) -> float:
 
 
 class T1Node(Node):
-    """One flux point's t1: synth exp decay → fit_decay → fill row → Patch."""
+    """One flux point's t1: set flux → real acquire → fit_decay → fill row → Patch.
+
+    Mirrors the lower-layer ``T1Task`` ``measure_t1_fn`` + ``run``: a
+    ``ModularProgramV2`` (Reset → pi_pulse → variable Delay → Readout) sweeps the
+    relax delay (its axis spans ``5 × smoothed_t1``, from ``make_cfg``), and
+    ``fit_decay`` recovers T1.
+    """
 
     def __init__(self, env: RunEnv, builder: T1Builder) -> None:
         self._env = env
         self._builder = builder
-
-    def _maybe_make_cfg(self, snapshot: Snapshot) -> T1CfgTemplate | None:
-        """Build the run cfg when the context is configured for it, else None.
-
-        ``make_cfg`` needs a real ``pi_pulse`` + ``readout`` module (validatable
-        as ``PulseCfg`` / ``ReadoutCfg``); the default / demo context (empty ml,
-        or only the prototype placeholder modules) has neither, so produce keeps
-        the pure snapshot-driven simulation there. No hardware is touched either
-        way — Phase B simulates the acquire uniformly; routing through
-        ``make_cfg`` (when configured) exercises the real cfg pipeline and makes
-        the cfg the source of the relax-time axis.
-
-        The placeholder modules the prototype workflow flows (a ``{"type": "pi",
-        ...}`` pi_pulse, a ``{"type": "readout", ...}`` opt_readout) do NOT lower
-        into a valid ``T1CfgTemplate``, so the lowering itself is the
-        configured/not-configured discriminator: if it raises, the context is not
-        configured and produce falls back to the synthetic axis. ``make_cfg``
-        called directly (a real configured context) still Fast-Fails on a missing
-        module — the guard only converts that into "not configured" here.
-        """
-        env = self._env
-        if (
-            env.ml is None
-            or not snapshot.has_module("pi_pulse")
-            or snapshot.module("pi_pulse") is None
-            or not snapshot.has_module("opt_readout")
-            or snapshot.module("opt_readout") is None
-        ):
-            return None
-        try:
-            return self._builder.make_cfg(env, snapshot)
-        except Exception:
-            # the snapshot modules are the prototype placeholders (not real
-            # PulseCfg / ReadoutCfg) — not a configured run; synthesize instead.
-            logger.debug(
-                "t1._maybe_make_cfg: context not lowerable (placeholder modules?)"
-                " — falling back to synthetic axis",
-                exc_info=True,
-            )
-            return None
 
     def produce(self, snapshot: Snapshot) -> Patch:
         env = self._env
         _ = snapshot["t1"]  # smoothed (declared smooth="ewma") — dependency contract
 
         result: Sweep1DResult = env.result
-
-        # Build the run cfg from the active context (when configured) and take the
-        # relax-time axis from its sweep_range; the acquire is SIMULATED below.
-        # With the demo / empty-ml context the cfg is None and the axis is the
-        # sweep_range param directly (the existing pure-synthetic path, unchanged).
-        cfg = self._maybe_make_cfg(snapshot)
-        if cfg is not None:
-            lo, hi = cfg.sweep_range
-            # keep the pre-allocated row length (n_x), recompute only the values,
-            # then write them back so the Plotter + the fit share one axis.
-            times = np.linspace(float(lo), float(hi), result.n_x)
-            result.x[:] = times
-        times = result.x
-
-        # t1 drifts parabolically with flux: ~10 us at the sweet spot, up to ~50 us
-        # at the edges. SNR varies sinusoidally to 0 at its troughs (dead points).
-        # normalised sweep position (0→1): the drift/SNR shapes live on
-        # [0,1], while real flux values are tiny — use the position so the
-        # whole sweep spans one drift parabola and a few SNR cycles.
-        pos = env.flux_idx / max(1, result.n_flux - 1)
-        true_t1 = flux_drift(pos, baseline=10.0, amplitude=40.0)
-        snr = flux_snr(pos)
-
         idx = env.flux_idx
+
+        # Lower the active context into the run cfg (Fast Fail if unconfigured: a
+        # real acquire needs concrete pi_pulse + readout modules). Its sweep_range
+        # (= 5 × smoothed_t1) sets the relax-time axis; rebuild result.x over it so
+        # the Plotter + the fit share one axis.
+        cfg = self._builder.make_cfg(env, snapshot)
+        lo, hi = cfg.sweep_range
+        times = np.linspace(float(lo), float(hi), result.n_x)
+        result.x[:] = times
+
+        flux_device = require_flux_device(env, "t1")
+        set_flux_by_name(
+            cast("MutableMapping[str, Any] | None", cfg.dev), flux_device, env.flux
+        )
+        setup_devices(cfg, progress=False)
+
+        # Sweep the relax delay over the relax-time axis (lower layer feeds
+        # sweep2param("length") to the Delay module).
+        length_sweep = axis_to_sweep(times)
+        length_param = sweep2param("length", length_sweep)
+
         result.flux[idx] = env.flux
 
-        base = env.flux_idx * 1000
+        probe = SnrProbe()
 
-        def make_round(k: int) -> NDArray[np.complex128]:
-            return exp_decay(times, true_t1, snr=snr, seed=base + k)
-
-        def on_round(avg: NDArray[np.complex128], _k: int) -> None:
-            np.copyto(result.signal[idx], signal_to_real(avg))
+        def on_round(_round_count: int, avg_d: Any) -> None:
+            signal = acquire_to_complex(avg_d)
+            probe.value = signal
+            np.copyto(result.signal[idx], signal2real_flip(signal))
             if env.round_hook is not None:
                 env.round_hook(idx)
 
-        averaged = accumulate_rounds(
-            make_round,
-            resolve_rounds(env.params),
-            on_round,
-            delay=resolve_acquire_delay(env.params),
+        stop_checkers = build_stop_checkers(env, probe, signal2real_flip)
+
+        raw = ModularProgramV2(
+            env.soccfg,
+            cfg,
+            modules=[
+                Reset("reset", cfg.modules.reset),
+                Pulse("pi_pulse", cfg.modules.pi_pulse),
+                Delay("t1_delay", delay=length_param),
+                Readout("readout", cfg.modules.readout),
+            ],
+            sweep=[("length", length_sweep)],
+        ).acquire(
+            env.soc,
+            progress=False,
+            round_hook=on_round,
+            stop_checkers=stop_checkers,
         )
-        real = signal_to_real(averaged)
+        real = signal2real_flip(acquire_to_complex(raw))
 
         t1, _t1err, fit_curve, _ = fit_decay(times, real)
 
@@ -258,12 +238,7 @@ class T1Node(Node):
         if env.round_hook is not None:
             env.round_hook(idx)
 
-        logger.debug(
-            "t1 fit @flux%d: t1=%.3f us (plant=%.3f)",
-            idx,
-            float(t1),
-            true_t1,
-        )
+        logger.debug("t1 fit @flux%d: t1=%.3f us", idx, float(t1))
 
         patch = Patch()
         patch.set("t1", float(t1))
@@ -271,7 +246,7 @@ class T1Node(Node):
 
 
 class T1Builder(Builder):
-    """The t1 provider — exp-decay synth, real fit_decay, accumulating colormap."""
+    """The t1 provider — acquire exp decay, real fit_decay, accumulating colormap."""
 
     name = "t1"
     provides = ("t1",)
@@ -284,7 +259,6 @@ class T1Builder(Builder):
         "reps",
         "rounds",
         "earlystop_snr",
-        "acquire_delay",
     )
 
     def make_init_result(self, params: Mapping[str, Any], flux: Any) -> Sweep1DResult:
@@ -311,8 +285,7 @@ class T1Builder(Builder):
         lower-layer ``run`` merges them per point.
 
         Raises if the ml is absent or a required module is unavailable — a real
-        run needs concrete drive + readout modules (Fast Fail), unlike the
-        synthetic path which fabricates a signal.
+        run needs concrete drive + readout modules (Fast Fail).
         """
         ml = env.ml
         params = env.params

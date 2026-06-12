@@ -7,8 +7,8 @@ are the OperationGate's job (a sibling leaf the domain service composes alongsid
 this).
 
 This is the **thin** variant of measure's BackgroundService: autofluxdep's worker
-never draws matplotlib figures (it synthesises / acquires numeric rows the main
-thread plots, ADR-0018), so ``_entered`` enters only two facets — the per-
+never draws matplotlib figures (it acquires numeric rows the main thread plots,
+ADR-0018), so ``_entered`` enters only two facets — the per-
 operation ``pbar_factory`` (Progress) and the ``ActiveTask`` stop event (Cancel).
 There is no ``figure_container`` / ``QtLivePlotBackend`` routing scope.
 
