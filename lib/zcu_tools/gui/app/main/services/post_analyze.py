@@ -48,12 +48,15 @@ class PostAnalyzeService(QObject):
         self._bg = bg
         self._bus = bus
         self._handles = handles
-        self._active_token: int | None = None
+        # Per-tab token map: post-analyze has NO exclusion gate (ADR-0019), so two
+        # different tabs can run concurrently. A single token would let the second
+        # start clobber the first, leaking the first's handle. Keyed by tab_id,
+        # every terminal path settles exactly the token its own start created.
+        self._active_tokens: dict[str, int] = {}
 
-    def _release(self, outcome: OperationOutcome) -> None:
-        token = self._active_token
+    def _release(self, tab_id: str, outcome: OperationOutcome) -> None:
+        token = self._active_tokens.pop(tab_id, None)
         if token is not None:
-            self._active_token = None
             self._handles.settle(token, outcome)
 
     def start_post_analyze(
@@ -93,7 +96,7 @@ class PostAnalyzeService(QObject):
             type(post_analyze_params_instance).__name__,
         )
         token = self._handles.create()
-        self._active_token = token
+        self._active_tokens[tab_id] = token
         adapter = tab.adapter
         scopes = OffMainScopes(figure_container=figure_container)
         try:
@@ -105,7 +108,9 @@ class PostAnalyzeService(QObject):
                 on_error=lambda exc: self._on_post_analyze_failed(tab_id, exc),
             )
         except Exception:
-            self._release(OperationOutcome("failed", "post-analyze failed to start"))
+            self._release(
+                tab_id, OperationOutcome("failed", "post-analyze failed to start")
+            )
             raise
         # The tab is marked analyzing for the duration so concurrent run/analyze
         # is gated out (is_tab_busy covers analyzing).
@@ -119,19 +124,36 @@ class PostAnalyzeService(QObject):
             tab_id,
             type(post_result).__name__,
         )
-        # Record result + figure through the single State mutator (bumps the
-        # post_analyze version); it fast-fails if the primary result vanished
-        # mid-flight (invalidated by a concurrent re-run/re-analyze).
-        self._state.update_tab_post_analyze(tab_id, post_result, post_result.figure)
+        try:
+            # Record result + figure through the single State mutator (bumps the
+            # post_analyze version); it fast-fails if the primary result vanished
+            # mid-flight (invalidated by a concurrent re-run/re-analyze).
+            self._state.update_tab_post_analyze(tab_id, post_result, post_result.figure)
+        except Exception as exc:
+            # Service-side recording failed after a successful worker. Without this
+            # the tab would stay analyzing forever and the handle would never
+            # settle, since the worker's _failed path is not on this code path.
+            logger.exception(
+                "_on_post_analyze_finished post-processing failed: %r", exc
+            )
+            self._fail(tab_id, exc)
+            return
         self._state.set_tab_analyzing(tab_id, False)
         # Settle the handle only after State is observable, then emit.
-        self._release(OperationOutcome("finished"))
+        self._release(tab_id, OperationOutcome("finished"))
         self._bus.emit(TabInteractionChangedPayload(tab_id=tab_id))
         self.post_analyze_finished.emit(tab_id, post_result)
 
     def _on_post_analyze_failed(self, tab_id: str, error: Exception) -> None:
         logger.warning("_on_post_analyze_failed: tab_id=%r error=%r", tab_id, error)
+        self._fail(tab_id, error)
+
+    def _fail(self, tab_id: str, error: Exception) -> None:
+        """The single failure terminal path: clear analyzing, settle the tab's
+        handle failed, emit the interaction + post_analyze_failed signals. Shared
+        by the worker-side failure (_on_post_analyze_failed) and a slot-internal
+        failure during _on_post_analyze_finished so both leave identical state."""
         self._state.set_tab_analyzing(tab_id, False)
-        self._release(OperationOutcome("failed", str(error)))
+        self._release(tab_id, OperationOutcome("failed", str(error)))
         self._bus.emit(TabInteractionChangedPayload(tab_id=tab_id))
         self.post_analyze_failed.emit(tab_id, error)

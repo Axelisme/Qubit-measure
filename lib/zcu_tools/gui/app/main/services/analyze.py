@@ -48,12 +48,16 @@ class AnalyzeService(QObject):
         # The handle is settled exactly once on the terminal slot (_on_analyze_
         # finished / _failed).
         self._handles = handles
-        self._active_token: int | None = None
+        # Per-tab token map: analyze has NO exclusion gate (ADR-0019), so two
+        # different tabs can run concurrently. A single token would let the
+        # second start clobber the first, leaking the first's handle. Keyed by
+        # tab_id, every terminal path settles exactly the token its own start
+        # created.
+        self._active_tokens: dict[str, int] = {}
 
-    def _release(self, outcome: OperationOutcome) -> None:
-        token = self._active_token
+    def _release(self, tab_id: str, outcome: OperationOutcome) -> None:
+        token = self._active_tokens.pop(tab_id, None)
         if token is not None:
-            self._active_token = None
             self._handles.settle(token, outcome)
 
     def start_analyze(
@@ -87,7 +91,7 @@ class AnalyzeService(QObject):
         # is not cancellable in this minimal integration). Settled exactly once on
         # the terminal slot, or here if the worker fails to start.
         token = self._handles.create()
-        self._active_token = token
+        self._active_tokens[tab_id] = token
         adapter = tab.adapter
         scopes = OffMainScopes(figure_container=figure_container)
         try:
@@ -99,7 +103,7 @@ class AnalyzeService(QObject):
                 on_error=lambda exc: self._on_analyze_failed(tab_id, exc),
             )
         except Exception:
-            self._release(OperationOutcome("failed", "analyze failed to start"))
+            self._release(tab_id, OperationOutcome("failed", "analyze failed to start"))
             raise
         self._state.set_tab_analyzing(tab_id, True)
         self._bus.emit(
@@ -117,7 +121,7 @@ class AnalyzeService(QObject):
         if self._state.is_tab_busy(tab_id):
             raise RuntimeError(f"Tab {tab_id!r} is busy")
         token = self._handles.create()
-        self._active_token = token
+        self._active_tokens[tab_id] = token
         self._state.set_tab_analyzing(tab_id, True)
         self._bus.emit(
             TabInteractionChangedPayload(tab_id=tab_id),
@@ -136,21 +140,30 @@ class AnalyzeService(QObject):
             tab_id,
             type(analyze_result).__name__,
         )
-        # Tear down the previous analyze's writeback editor models before the new
-        # draft replaces them (ADR-0008: per-item gc=False models are tied to a
-        # specific analyze result). Compute the fresh persistent draft from the
-        # new result (passed in, not written to State early), then commit result
-        # + figure + items through the single mutator (which bumps the version).
-        self._writeback.teardown_tab_items(tab_id)
-        items = self._writeback.compute_items_for_tab(tab_id, analyze_result)
-        self._state.update_tab_analyze(
-            tab_id, analyze_result, analyze_result.figure, writeback_items=items
-        )
+        try:
+            # Tear down the previous analyze's writeback editor models before the
+            # new draft replaces them (ADR-0008: per-item gc=False models are tied
+            # to a specific analyze result). Compute the fresh persistent draft
+            # from the new result (passed in, not written to State early), then
+            # commit result + figure + items through the single mutator (which
+            # bumps the version).
+            self._writeback.teardown_tab_items(tab_id)
+            items = self._writeback.compute_items_for_tab(tab_id, analyze_result)
+            self._state.update_tab_analyze(
+                tab_id, analyze_result, analyze_result.figure, writeback_items=items
+            )
+        except Exception as exc:
+            # Service-side post-processing failed after a successful worker. Without
+            # this the tab would stay analyzing forever and the handle would never
+            # settle, since the worker's _failed path is not on this code path.
+            logger.exception("_on_analyze_finished post-processing failed: %r", exc)
+            self._fail(tab_id, exc)
+            return
         self._state.set_tab_analyzing(tab_id, False)
         # Figure + result are now in State (above), so the handle settles only
         # after they are observable — an awaiter that wakes on this sees a ready
         # figure. Release before emitting so a synchronous awaiter unblocks.
-        self._release(OperationOutcome("finished"))
+        self._release(tab_id, OperationOutcome("finished"))
         self._bus.emit(
             TabInteractionChangedPayload(tab_id=tab_id),
         )
@@ -158,8 +171,15 @@ class AnalyzeService(QObject):
 
     def _on_analyze_failed(self, tab_id: str, error: Exception) -> None:
         logger.warning("_on_analyze_failed: tab_id=%r error=%r", tab_id, error)
+        self._fail(tab_id, error)
+
+    def _fail(self, tab_id: str, error: Exception) -> None:
+        """The single failure terminal path: clear analyzing, settle the tab's
+        handle failed, emit the interaction + analyze_failed signals. Shared by
+        the worker-side failure (_on_analyze_failed) and a slot-internal failure
+        during _on_analyze_finished so both leave identical observable state."""
         self._state.set_tab_analyzing(tab_id, False)
-        self._release(OperationOutcome("failed", str(error)))
+        self._release(tab_id, OperationOutcome("failed", str(error)))
         self._bus.emit(
             TabInteractionChangedPayload(tab_id=tab_id),
         )

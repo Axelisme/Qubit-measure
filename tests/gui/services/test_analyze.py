@@ -52,6 +52,16 @@ def _make_service(
     return svc, bg
 
 
+def _make_two_tab_state() -> State:
+    state = _make_state("tab1")
+    state.add_tab(
+        "tab2",
+        Session(adapter_name="fake", adapter=MagicMock(), cfg_schema=MagicMock()),
+    )
+    state.update_tab_result("tab2", object())
+    return state
+
+
 # ---------------------------------------------------------------------------
 # start_analyze — normal path
 # ---------------------------------------------------------------------------
@@ -241,3 +251,89 @@ def test_on_analyze_failed_emits_interaction_event(qapp):  # noqa: ARG001
     svc._on_analyze_failed("tab1", RuntimeError("oops"))
 
     assert "tab1" in received
+
+
+# ---------------------------------------------------------------------------
+# Concurrent tabs — no exclusion gate (ADR-0019): each settles its own token
+# ---------------------------------------------------------------------------
+
+
+def test_two_tabs_settle_their_own_tokens(qapp):  # noqa: ARG001
+    state = _make_two_tab_state()
+    svc, _ = _make_service(state, EventBus())
+    handles = svc._handles
+
+    token1 = svc.start_analyze(
+        AnalyzePermit(tab_id="tab1"), analyze_params_instance=object()
+    )
+    token2 = svc.start_analyze(
+        AnalyzePermit(tab_id="tab2"), analyze_params_instance=object()
+    )
+
+    # Two distinct live handles — the second start must not clobber the first.
+    assert token1 != token2
+    assert handles.poll(token1) is None  # still pending
+    assert handles.poll(token2) is None
+    assert handles.live_count() == 2
+
+    # Finish tab1 only: its token settles, tab2's stays live.
+    r1 = MagicMock()
+    r1.figure = None
+    svc._on_analyze_finished("tab1", r1)
+
+    outcome1 = handles.poll(token1)
+    assert outcome1 is not None and outcome1.status == "finished"
+    assert handles.poll(token2) is None  # tab2 untouched
+    assert state.get_tab("tab1").is_analyzing is False
+    assert state.get_tab("tab2").is_analyzing is True
+    assert handles.live_count() == 1
+
+    # Finish tab2: its own (later) token settles.
+    r2 = MagicMock()
+    r2.figure = None
+    svc._on_analyze_finished("tab2", r2)
+
+    outcome2 = handles.poll(token2)
+    assert outcome2 is not None and outcome2.status == "finished"
+    assert handles.live_count() == 0
+    assert "tab2" not in svc._active_tokens
+
+
+# ---------------------------------------------------------------------------
+# Terminal slot post-processing raises — tab cleared, handle settled failed
+# ---------------------------------------------------------------------------
+
+
+def test_on_analyze_finished_post_processing_raise_settles_failed(qapp):  # noqa: ARG001
+    state = _make_state()
+    svc, _ = _make_service(state, EventBus())
+    handles = svc._handles
+
+    token = svc.start_analyze(
+        AnalyzePermit(tab_id="tab1"), analyze_params_instance=object()
+    )
+
+    # Make the service-side post-processing raise (writeback compute blows up).
+    # _writeback is the MagicMock injected by _make_service.
+    boom = RuntimeError("writeback boom")
+    writeback = svc._writeback
+    assert isinstance(writeback, MagicMock)
+    writeback.compute_items_for_tab.side_effect = boom
+
+    failed: list = []
+    svc.analyze_failed.connect(lambda tid, err: failed.append((tid, err)))
+
+    result = MagicMock()
+    result.figure = None
+    # Must not raise out of the slot (would crash Qt).
+    svc._on_analyze_finished("tab1", result)
+
+    # Tab cleared, handle settled failed, failure signal emitted — mirroring the
+    # worker-side _failed path.
+    assert state.get_tab("tab1").is_analyzing is False
+    outcome = handles.poll(token)
+    assert outcome is not None
+    assert outcome.status == "failed"
+    assert outcome.error == str(boom)
+    assert failed == [("tab1", boom)]
+    assert handles.live_count() == 0
