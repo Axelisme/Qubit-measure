@@ -1,19 +1,34 @@
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.simulate.fluxonium.branch.floquet import calc_branch_infos
+from zcu_tools.simulate.fluxonium.branch.floquet import (
+    SNR_SOLVER_OPTIONS,
+    calc_branch_infos,
+)
 
 
 def calc_snr(
-    params, r_f, g, flux, qub_dim, qub_cutoff, max_photon, rf_w
+    params,
+    r_f,
+    g,
+    flux,
+    qub_dim,
+    qub_cutoff,
+    max_photon,
+    rf_w,
+    solver_options: dict[str, Any] | None = SNR_SOLVER_OPTIONS,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
     branchs = [0, 1]
 
     amps = np.arange(0.0, 2 * g * np.sqrt(max_photon), rf_w)
     photons = (amps / (2 * g)) ** 2
 
+    # snr design-search path: relaxed tolerance by default; pass
+    # solver_options=None for the strict (qutip-default) solver.
     branch_infos, fbasis_n = calc_branch_infos(
         branchs,
         params=params,
@@ -23,6 +38,7 @@ def calc_snr(
         qub_dim=qub_dim,
         qub_cutoff=qub_cutoff,
         photons=photons,
+        solver_options=solver_options,
     )
 
     branch_energies = {

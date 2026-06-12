@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Optional, cast
+from typing import Any, cast
 
 import numpy as np
 import qutip as qt
-from joblib import Parallel, delayed
 from numpy.typing import NDArray
 from tqdm.auto import tqdm
+
+# Relaxed FloquetBasis ODE tolerance used only on the ge-SNR design-search path.
+# The design metric is sort(snr)[-3], a relative ranking, so the ~6e-5 relative
+# error this introduces is far below the parameter-grid step. Callers that need
+# the strict (qutip-default) solver pass solver_options=None explicitly.
+SNR_SOLVER_OPTIONS: dict[str, Any] = {"rtol": 1e-3, "atol": 1e-5}
 
 
 class FloquetBranchAnalysis:
@@ -20,9 +25,14 @@ class FloquetBranchAnalysis:
         qub_dim: int = 40,
         qub_cutoff: int = 60,
         esys: tuple[NDArray[np.float64], NDArray[np.complex128]] | None = None,
+        solver_options: dict[str, Any] | None = None,
     ) -> None:
         self.r_f = r_f
         self.g = g
+        # Default None == qutip-default solver tolerance, so direct users of this
+        # class (e.g. mist overlay) stay bit-exact. The snr path opts into
+        # relaxed tolerance via the calc_* module functions, not here.
+        self.solver_options = solver_options
 
         from scqubits.core.fluxonium import Fluxonium  # lazy import
 
@@ -42,6 +52,7 @@ class FloquetBranchAnalysis:
             self.H_with_drive,
             2 * np.pi / self.r_f,
             args=dict(amp=2 * self.g * np.sqrt(photon)),
+            options=self.solver_options,  # type: ignore[arg-type]  # qutip stubs declare dict but accept None
             precompute=precompute,  # type: ignore[arg-type]  # qutip stubs declare ArrayLike but accept None
         )
 
@@ -106,18 +117,18 @@ class FloquetBranchAnalysis:
                 np.abs(np.dot(dag_weighted_bare_states, fstates_t[..., i].T)) ** 2
             ) / len(fstates_t)
 
-        branch_populations = Parallel(n_jobs=-1)(
-            delayed(
-                lambda b: (
-                    b,
-                    [
-                        calc_pop(fstates_t, i)
-                        for fstates_t, i in zip(fstates_t_n, branch_infos[b])
-                    ],
-                )
-            )(b)
+        # Serial: branchs is a 2-element list, so this is a handful of tasks off
+        # the snr hot path; kept serial for consistency with the photon layer.
+        branch_populations = [
+            (
+                b,
+                [
+                    calc_pop(fstates_t, i)
+                    for fstates_t, i in zip(fstates_t_n, branch_infos[b])
+                ],
+            )
             for b in branch_infos.keys()
-        )
+        ]
         branch_populations = dict(branch_populations)  # type: ignore
         branch_populations = cast(dict[int, list[float]], branch_populations)
 
@@ -137,19 +148,31 @@ def calc_branch_infos(
     avg_times: NDArray[np.float64] | None = None,
     progress: bool = True,
     esys: tuple[NDArray[np.float64], NDArray[np.complex128]] | None = None,
+    solver_options: dict[str, Any] | None = SNR_SOLVER_OPTIONS,
 ) -> tuple[dict[int, list[int]], list[qt.FloquetBasis]]:
+    # This is a ge-SNR entry point, so the relaxed tolerance is the default;
+    # pass solver_options=None for the strict (qutip-default) solver.
     fb_analysis = FloquetBranchAnalysis(
-        params, r_f, g, flux=flux, qub_dim=qub_dim, qub_cutoff=qub_cutoff, esys=esys
+        params,
+        r_f,
+        g,
+        flux=flux,
+        qub_dim=qub_dim,
+        qub_cutoff=qub_cutoff,
+        esys=esys,
+        solver_options=solver_options,
     )
 
-    fbasis_n = Parallel(n_jobs=-1)(
-        delayed(fb_analysis.make_floquet_basis)(photon, precompute=avg_times)
+    # Serial build: each FloquetBasis is ~3ms, far below loky dispatch+pickle
+    # overhead, so process-level parallelism here is a net loss (measured serial
+    # 851ms vs Parallel 1386ms for 263 photons). Cell-level parallelism in the
+    # search.py caller owns the concurrency instead (no nested oversubscription).
+    fbasis_n: list[qt.FloquetBasis] = [
+        fb_analysis.make_floquet_basis(photon, precompute=avg_times)
         for photon in tqdm(
             photons, desc="Computing Floquet basis", disable=not progress
         )
-    )
-    assert isinstance(fbasis_n, list)
-    fbasis_n = cast(list[qt.FloquetBasis], fbasis_n)
+    ]
 
     branch_infos = fb_analysis.calc_branch_infos(fbasis_n, branchs, progress=progress)
     return branch_infos, fbasis_n
@@ -165,6 +188,7 @@ def calc_ge_snr(
     qub_cutoff: int,
     max_photon: int,
     esys: tuple[NDArray[np.float64], NDArray[np.complex128]] | None = None,
+    solver_options: dict[str, Any] | None = SNR_SOLVER_OPTIONS,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     branchs = [0, 1]
 
@@ -182,6 +206,7 @@ def calc_ge_snr(
         photons=photons,
         progress=False,
         esys=esys,
+        solver_options=solver_options,
     )
 
     branch_energies = np.array(
@@ -214,9 +239,12 @@ class FloquetWithTLSBranchAnalysis:
         qub_dim: int = 40,
         qub_cutoff: int = 60,
         esys: tuple[NDArray[np.float64], NDArray[np.complex128]] | None = None,
+        solver_options: dict[str, Any] | None = None,
     ) -> None:
         self.r_f = r_f
         self.g = g
+        # See FloquetBranchAnalysis: None keeps the qutip-default tolerance.
+        self.solver_options = solver_options
 
         from scqubits.core.fluxonium import Fluxonium  # lazy import
 
@@ -244,6 +272,7 @@ class FloquetWithTLSBranchAnalysis:
             self.H_with_drive,
             2 * np.pi / self.r_f,
             args=dict(amp=2 * self.g * np.sqrt(photon)),
+            options=self.solver_options,  # type: ignore[arg-type]  # qutip stubs declare dict but accept None
             precompute=precompute,  # type: ignore[arg-type]  # qutip stubs declare ArrayLike but accept None
         )
 
@@ -304,19 +333,18 @@ class FloquetWithTLSBranchAnalysis:
                 np.abs(np.dot(dag_weighted_bare_states, fstates_t[..., i].T)) ** 2
             ) / len(fstates_t)
 
-        branch_populations = Parallel(n_jobs=-1)(
-            delayed(
-                lambda b: (
-                    b,
-                    [
-                        calc_pop(fstates_t, i)
-                        for fstates_t, i in zip(fstates_t_n, branch_infos[b])
-                    ],
-                )
-            )(b)
+        # Serial: branchs is a 2-element list, so this is a handful of tasks off
+        # the snr hot path; kept serial for consistency with the photon layer.
+        branch_populations = [
+            (
+                b,
+                [
+                    calc_pop(fstates_t, i)
+                    for fstates_t, i in zip(fstates_t_n, branch_infos[b])
+                ],
+            )
             for b in branch_infos.keys()
-        )
-        assert isinstance(branch_populations, list)
+        ]
 
         branch_populations = dict(branch_populations)  # type: ignore
         branch_populations = cast(dict[int, list[float]], branch_populations)
@@ -339,7 +367,12 @@ def calc_branch_infos_with_tls(
     avg_times: NDArray[np.float64] | None = None,
     progress: bool = True,
     esys: tuple[NDArray[np.float64], NDArray[np.complex128]] | None = None,
+    solver_options: dict[str, Any] | None = None,
 ) -> tuple[dict[int, list[int]], list[qt.FloquetBasis]]:
+    # Unlike calc_branch_infos (the design-search snr entry), the TLS path is not
+    # on the snr hot path and feeds precision-sensitive mist analyses, so the
+    # default here is the strict (qutip-default) solver; pass solver_options to
+    # opt into relaxed tolerance.
     fb_analysis = FloquetWithTLSBranchAnalysis(
         params,
         r_f,
@@ -350,16 +383,18 @@ def calc_branch_infos_with_tls(
         qub_dim=qub_dim,
         qub_cutoff=qub_cutoff,
         esys=esys,
+        solver_options=solver_options,
     )
 
-    fbasis_n = Parallel(n_jobs=-1)(
-        delayed(fb_analysis.make_floquet_basis)(photon, precompute=avg_times)
+    # Serial build for the same reason as calc_branch_infos: per-photon work is
+    # too small for process-level parallelism to pay off; concurrency lives at
+    # the cell layer.
+    fbasis_n: list[qt.FloquetBasis] = [
+        fb_analysis.make_floquet_basis(photon, precompute=avg_times)
         for photon in tqdm(
             photons, desc="Computing Floquet basis", disable=not progress
         )
-    )
-    assert isinstance(fbasis_n, list)
-    fbasis_n = cast(list[qt.FloquetBasis], fbasis_n)
+    ]
 
     branch_infos = fb_analysis.calc_branch_infos(fbasis_n, branchs, progress=progress)
     return branch_infos, fbasis_n
@@ -376,10 +411,13 @@ class FloquetDualCouplingBranchAnalysis:
         qub_dim: int = 40,
         qub_cutoff: int = 60,
         esys: tuple[NDArray[np.float64], NDArray[np.complex128]] | None = None,
+        solver_options: dict[str, Any] | None = None,
     ) -> None:
         self.r_f = r_f
         self.g1 = g1
         self.g2 = g2
+        # See FloquetBranchAnalysis: None keeps the qutip-default tolerance.
+        self.solver_options = solver_options
 
         from scqubits.core.fluxonium import Fluxonium  # lazy import
 
@@ -407,6 +445,7 @@ class FloquetDualCouplingBranchAnalysis:
                 amp1=2 * self.g1 * np.sqrt(photon),
                 amp2=2 * self.g2 * np.sqrt(photon),
             ),
+            options=self.solver_options,  # type: ignore[arg-type]  # qutip stubs declare dict but accept None
             precompute=precompute,  # type: ignore[arg-type]  # qutip stubs declare ArrayLike but accept None
         )
 
@@ -471,18 +510,18 @@ class FloquetDualCouplingBranchAnalysis:
                 np.abs(np.dot(dag_weighted_bare_states, fstates_t[..., i].T)) ** 2
             ) / len(fstates_t)
 
-        branch_populations = Parallel(n_jobs=-1)(
-            delayed(
-                lambda b: (
-                    b,
-                    [
-                        calc_pop(fstates_t, i)
-                        for fstates_t, i in zip(fstates_t_n, branch_infos[b])
-                    ],
-                )
-            )(b)
+        # Serial: branchs is a 2-element list, so this is a handful of tasks off
+        # the snr hot path; kept serial for consistency with the photon layer.
+        branch_populations = [
+            (
+                b,
+                [
+                    calc_pop(fstates_t, i)
+                    for fstates_t, i in zip(fstates_t_n, branch_infos[b])
+                ],
+            )
             for b in branch_infos.keys()
-        )
+        ]
         branch_populations = dict(branch_populations)  # type: ignore
         branch_populations = cast(dict[int, list[float]], branch_populations)
 

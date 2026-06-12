@@ -83,14 +83,18 @@ zd.calculate_f01(params_table)
 zd.calculate_m01(params_table)
 zd.calculate_t1(params_table, noise_channels, Temp)
 # zd.calculate_dipersive_shift(params_table, g=g, r_f=r_f)
-zd.calculate_snr(params_table, g, r_f, rf_w=7e-3, max_photon=70)
-```
 
-```python
+# Run the cheap avoid_* filters first so the expensive Floquet snr only runs on
+# the surviving valid cells (staged search).
 params_table["valid"] = True
 zd.avoid_collision(params_table, avoid_freqs, threshold=0.4)
 zd.avoid_low_f01(params_table, f01_threshold=0.08)
 zd.avoid_low_m01(params_table, m01_threshold=0.07)
+
+zd.calculate_snr(params_table, g, r_f, rf_w=7e-3, max_photon=70)
+```
+
+```python
 result_table = params_table.drop(["esys"], axis=1)
 result_table.to_parquet(f"../../result/{qub_name}/data/design_table.parquet")
 result_table

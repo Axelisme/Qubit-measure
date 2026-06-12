@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from joblib import Parallel, delayed
 from tqdm.auto import tqdm
 
 from zcu_tools.notebook.persistance import load_result
@@ -173,6 +174,15 @@ def calculate_dipersive_shift(params_table: pd.DataFrame, g: float, r_f: float) 
 def calculate_snr(
     params_table: pd.DataFrame, g: float, r_f: float, rf_w: float, max_photon: int
 ) -> None:
+    """Compute the ge-SNR design metric per cell, only for ``valid==True`` rows.
+
+    The Floquet ge-SNR is by far the most expensive stage, so it runs only on
+    cells that survived the cheap ``avoid_*`` filters; rows with ``valid==False``
+    get ``snr = NaN``. Call the ``avoid_*`` helpers *before* this function. The
+    downstream plot hides invalid cells and ``annotate_best_point`` only ranks
+    valid cells, so NaN on filtered-out rows does not affect the final selection.
+    """
+
     # check if esys is calculated
     if "esys" not in params_table.columns:
         raise ValueError("This function requires esys to be calculated")
@@ -191,8 +201,20 @@ def calculate_snr(
         )
         return np.sort(snrs)[-3]
 
-    tqdm.pandas(desc="Calculating snr")
-    params_table["snr"] = params_table.progress_apply(_calc_single_snr, axis=1)
+    valid_mask = params_table["valid"].to_numpy()
+    snr = np.full(len(params_table), np.nan, dtype=np.float64)
+
+    # Cell-level parallelism over valid rows: each cell is ~0.5s of Floquet ODE
+    # work (no inner joblib in calc_ge_snr, so no nested oversubscription).
+    # Invalid cells stay NaN in the prefilled output.
+    valid_positions = np.flatnonzero(valid_mask)
+    valid_snrs = Parallel(n_jobs=-1)(
+        delayed(_calc_single_snr)(params_table.iloc[pos])
+        for pos in tqdm(valid_positions, desc="Calculating snr")
+    )
+    snr[valid_positions] = np.asarray(valid_snrs, dtype=np.float64)
+
+    params_table["snr"] = snr
 
 
 def calculate_t1(
