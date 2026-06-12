@@ -40,6 +40,7 @@ from .adapters.onetone.flux_dep import OneToneFluxDepAdapter
 from .adapters.onetone.freq import OneToneFreqAdapter
 from .adapters.onetone.power_dep import OneTonePowerDepAdapter
 from .adapters.shared import ROLE_FACTORIES
+from .adapters.singleshot.ge import GEAdapter
 from .adapters.twotone.flux_dep import FluxDepAdapter
 from .adapters.twotone.freq import FreqAdapter
 from .adapters.twotone.power_dep import PowerDepAdapter
@@ -101,6 +102,7 @@ ADAPTERS = {
     "twotone/t1": T1Adapter,
     "twotone/t2ramsey": T2RamseyAdapter,
     "twotone/t2echo": T2EchoAdapter,
+    "singleshot/ge": GEAdapter,
 }
 
 

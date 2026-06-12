@@ -1,0 +1,185 @@
+from __future__ import annotations
+
+import time
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Annotated, Any, ClassVar, Literal, TypeAlias
+
+from matplotlib.figure import Figure
+from numpy.typing import NDArray
+
+from zcu_tools.experiment.v2.singleshot import GE_Cfg, GE_Exp
+from zcu_tools.experiment.v2.singleshot.ge import GE_Result
+from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
+from zcu_tools.experiment.v2_gui.adapters.shared import (
+    CfgBuilder,
+    build_exp_spec,
+    make_pulse_module_spec,
+    make_pulse_readout_module_spec,
+    make_reset_module_spec,
+    proper_relax,
+)
+from zcu_tools.gui.app.main.adapter import (
+    AdapterGuide,
+    AnalyzeRequest,
+    AnalyzeResultBase,
+    CfgSectionSpec,
+    CfgSectionValue,
+    ExpContext,
+    IntSpec,
+    LiteralSpec,
+    MetaDictWriteback,
+    ParamMeta,
+    WritebackItem,
+    WritebackRequest,
+)
+
+GERunResult: TypeAlias = GE_Result
+
+
+@dataclass
+class GEAnalyzeParams:
+    # ``backend`` selects the rotation/threshold method. This phase ships the
+    # primary analysis fixed to PCA (the domain default); the other backends are
+    # the post-analysis (multi-method) phase, so only the two implemented choices
+    # are offered (the Literal supplies the form's choices) and the default is
+    # "pca".
+    backend: Annotated[Literal["pca", "center"], ParamMeta(label="Backend")]
+
+
+@dataclass
+class GEAnalyzeResult(AnalyzeResultBase):
+    # ``fidelity`` and ``ge_s`` are plain floats (writeback-safe). ``g_center`` /
+    # ``e_center`` are complex — kept here for downstream post-analysis use, but
+    # skipped from ``to_summary_dict`` automatically (complex is not JSON-safe).
+    fidelity: float
+    theta: float
+    threshold: float
+    ge_s: float
+    g_center: complex
+    e_center: complex
+    figure: Figure
+
+
+class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParams]):
+    exp_cls = GE_Exp
+    ExpCfg_cls: ClassVar[Any] = GE_Cfg
+
+    @classmethod
+    def guide(cls) -> AdapterGuide:
+        return AdapterGuide(
+            behavior=(
+                "Single-shot ground/excited readout: prepares the qubit in |g> "
+                "(no probe pulse) and |e> (probe pi-pulse), takes 'shots' "
+                "single-shot readouts of each, and fits the two IQ clusters to "
+                "extract the assignment fidelity, rotation angle and threshold. "
+                "Runs on real hardware; the domain forces rounds=1 and reps=shots, "
+                "running the readout twice (g-prep / e-prep) internally."
+            ),
+            expects_md=(
+                "Reads from the MetaDict (all optional): 't1' — sets the relax "
+                "delay as 5*t1 (absent → a fixed 100 us); 'r_f' / 'res_ch' / "
+                "'ro_ch' / 'timeFly' / 'best_ro_*' seed the pulse-readout module; "
+                "'q_f' / 'qub_ch' seed the probe pi-pulse drive."
+            ),
+            expects_ml=(
+                "Needs a probe pulse (a library pi pulse — 'pi_amp' — when "
+                "present) and a pulse-readout module (references a calibrated "
+                "library readout 'readout_dpm' / 'readout_rf' when present, else a "
+                "blank inline pulse readout). Optionally references a calibrated "
+                "reset and an init pulse — both disabled when no library entry "
+                "exists."
+            ),
+            typical_writeback=(
+                "Proposes the fitted assignment fidelity into MetaDict 'fid' and "
+                "the cluster width into 'ge_s'. The discrimination centres "
+                "(g_center / e_center) are complex and are computed but not "
+                "written back through this path."
+            ),
+            recommended=(
+                "Use a large 'shots' (~1e5) so the IQ histograms are well sampled; "
+                "the default analysis backend is 'pca'. Run once the qubit pi-pulse "
+                "and the readout are both calibrated — a clean two-cluster IQ "
+                "scatter indicates good discrimination."
+            ),
+        )
+
+    @classmethod
+    def cfg_spec(cls) -> CfgSectionSpec:
+        return build_exp_spec(
+            # Module field order mirrors GEModuleCfg: reset, init_pulse,
+            # probe_pulse, readout.
+            modules={
+                "reset": make_reset_module_spec(optional=True),
+                "init_pulse": make_pulse_module_spec(optional=True),
+                "probe_pulse": make_pulse_module_spec(label="Probe Pulse"),
+                "readout": make_pulse_readout_module_spec(),
+            },
+            # Single-shot has no swept axis; the shot count is the run-only knob
+            # that the domain copies into reps.
+            extra={"shots": IntSpec(label="Shots")},
+            # The domain overwrites reps (← shots) and rounds (← 1) at run, so lock
+            # them off the form (lookback locks reps the same way) — showing fields
+            # the run silently discards would be misleading.
+            reps=LiteralSpec(value=1, label="Reps"),
+            rounds=LiteralSpec(value=1, label="Rounds"),
+        )
+
+    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+        return (
+            CfgBuilder(ctx, self.cfg_spec())
+            .scalars(shots=100000)
+            .set("relax_delay", proper_relax(ctx))
+            .role("modules.probe_pulse", "pi_pulse", prefer_blank=True)
+            .role("modules.readout", "readout")
+            # optional → None (disabled) when no library entry (ADR-0010)
+            .role("modules.reset", "reset", optional=True)
+            .role("modules.init_pulse", "pi_pulse", optional=True)
+            .build()
+        )
+
+    def get_analyze_params(
+        self, result: GERunResult, ctx: ExpContext
+    ) -> GEAnalyzeParams:
+        return GEAnalyzeParams(backend="pca")
+
+    def analyze(
+        self, req: AnalyzeRequest[GERunResult, GEAnalyzeParams]
+    ) -> GEAnalyzeResult:
+        params = req.analyze_params
+        fidelity, _pops, fit_result, fig = GE_Exp().analyze(
+            req.run_result, backend=params.backend
+        )
+        return GEAnalyzeResult(
+            fidelity=fidelity,
+            theta=fit_result["theta"],
+            threshold=fit_result["threshold"],
+            ge_s=fit_result["s"],
+            g_center=fit_result["g_center"],
+            e_center=fit_result["e_center"],
+            figure=fig,
+        )
+
+    def get_writeback_items(
+        self, req: WritebackRequest[GERunResult, GEAnalyzeResult]
+    ) -> Sequence[WritebackItem]:
+        result = req.analyze_result
+        # Only the writeback-safe float scalars are proposed. The notebook also
+        # records g_center / e_center (complex), but those do not round-trip
+        # through the GUI writeback wire/UI (which assume JSON scalars); their
+        # writeback is deferred to the post-analysis phase.
+        return [
+            MetaDictWriteback(
+                target_name="fid",
+                description="Single-shot assignment fidelity",
+                proposed_value=result.fidelity,
+            ),
+            MetaDictWriteback(
+                target_name="ge_s",
+                description="Single-shot IQ cluster width (s)",
+                proposed_value=result.ge_s,
+            ),
+        ]
+
+    def make_filename_stem(self, ctx: ExpContext) -> str:
+        return f"{ctx.qub_name}_sh_ge_{time.strftime('%m%d')}"
