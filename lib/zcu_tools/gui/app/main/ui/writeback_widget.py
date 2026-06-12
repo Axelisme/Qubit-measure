@@ -121,7 +121,11 @@ class WritebackWidget(QWidget):
 
     def _is_editable(self, item: WritebackItem) -> bool:
         if isinstance(item, MetaDictWriteback):
-            return True
+            # Scalar md values are hand-editable; a non-scalar (list/matrix, e.g.
+            # the singleshot confusion matrix) is a derived value applied verbatim
+            # — shown read-only, no Edit dialog (the scalar coercion can't parse a
+            # matrix and the user does not hand-tune it).
+            return _is_scalar_md_value(item.proposed_value)
         if isinstance(item, ModuleWriteback):
             return item.edit_schema is not None
         if isinstance(item, WaveformWriteback):
@@ -243,6 +247,16 @@ class WritebackWidget(QWidget):
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.finished.connect(_on_finished)
         dialog.open()
+
+
+def _is_scalar_md_value(value: Any) -> bool:
+    """A md proposed_value the scalar Edit dialog can round-trip.
+
+    Scalars (bool/int/float/complex/str/None) are hand-editable via
+    ``_coerce_scalar_input``; a non-scalar (list/matrix, e.g. the confusion
+    matrix) is a derived value applied verbatim, so the UI treats it read-only.
+    """
+    return value is None or isinstance(value, (bool, int, float, complex, str))
 
 
 def _require_target_name(text: str) -> str:

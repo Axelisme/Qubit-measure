@@ -139,9 +139,9 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
             typical_writeback=(
                 "Proposes the fitted assignment fidelity into MetaDict 'fid', the "
                 "cluster width into 'ge_s', the complex discrimination centres into "
-                "'g_center' / 'e_center', and the optimised classification radius "
-                "into 'ge_radius'. The 3x3 confusion matrix is reported in the "
-                "analyze summary only (not a scalar writeback)."
+                "'g_center' / 'e_center', the optimised classification radius into "
+                "'ge_radius', and the 3x3 confusion matrix (nested list) into "
+                "'confusion_matrix' (a non-scalar, read-only writeback item)."
             ),
             recommended=(
                 "Use a large 'shots' (~1e5) so the IQ histograms are well sampled; "
@@ -293,14 +293,22 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
             ),
             # ``ge_radius`` is the per-qubit classification radius downstream
             # single-shot experiments consume — a clean scalar, mirrors the
-            # notebook's md.ge_radius. The confusion matrix is intentionally NOT
-            # written back: it is a 3×3 matrix (not a scalar), so it only surfaces
-            # in the analyze summary / save comment, not the scalar md writeback
-            # path.
+            # notebook's md.ge_radius.
             MetaDictWriteback(
                 target_name="ge_radius",
                 description="Single-shot classification radius",
                 proposed_value=result.ge_radius,
+            ),
+            # ``confusion_matrix`` is the 3×3 prepared→measured confusion matrix
+            # as a nested ``list[list[float]]`` (md key mirrors the notebook's
+            # md.confusion_matrix). It is a non-scalar md value: MetaDict already
+            # stores nested lists (it cannot hold ndarray — dumps tolist(), loads
+            # raw), the value is JSON-safe so the wire carries it as-is, and the
+            # writeback UI renders it read-only (derived value, applied verbatim).
+            MetaDictWriteback(
+                target_name="confusion_matrix",
+                description="Single-shot 3x3 confusion matrix (prepared->measured)",
+                proposed_value=result.confusion,
             ),
         ]
 

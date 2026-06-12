@@ -206,3 +206,58 @@ def test_complex_preview_set_round_trip_is_lossless():
     )
     _, kwargs = ctrl.set_writeback_item.call_args
     assert kwargs["proposed_value"] == complex(1.5, -2.25)
+
+
+# ---------------------------------------------------------------------------
+# Non-scalar (nested-list) writeback wire round-trip. A confusion matrix is
+# already JSON-safe, so it needs no wire tag: it serializes verbatim through
+# preview and passes through writeback.set untouched (no _coerce_wire_value tag).
+# ---------------------------------------------------------------------------
+
+
+_CONFUSION = [[0.95, 0.03, 0.02], [0.03, 0.95, 0.02], [0.0, 0.0, 1.0]]
+
+
+def _matrix_items() -> list:
+    md = MetaDictWriteback(
+        target_name="confusion_matrix",
+        description="3x3 confusion matrix",
+        proposed_value=_CONFUSION,
+    )
+    md.session_id = "md-1"
+    return [md]
+
+
+def test_preview_serializes_nested_list_verbatim():
+    ctrl = _ctrl()
+    ctrl.get_tab_writeback_items.side_effect = lambda tab_id: _matrix_items()
+    res = _dispatch(ctrl, "writeback.preview", {"tab_id": "t"})
+    item = list(res["items"])[0]  # type: ignore[call-overload]
+    assert item["proposed_value"] == _CONFUSION
+
+
+def test_set_passes_nested_list_through_untouched():
+    ctrl = _ctrl()
+    _dispatch(
+        ctrl,
+        "writeback.set",
+        {"tab_id": "t", "id": "md-1", "proposed_value": _CONFUSION},
+    )
+    _, kwargs = ctrl.set_writeback_item.call_args
+    assert kwargs["proposed_value"] == _CONFUSION
+
+
+def test_nested_list_preview_set_round_trip_is_lossless():
+    """preview verbatim -> set -> the same nested list the service would apply."""
+    ctrl = _ctrl()
+    ctrl.get_tab_writeback_items.side_effect = lambda tab_id: _matrix_items()
+    preview = _dispatch(ctrl, "writeback.preview", {"tab_id": "t"})
+    wire_value = list(preview["items"])[0]["proposed_value"]  # type: ignore[call-overload]
+
+    _dispatch(
+        ctrl,
+        "writeback.set",
+        {"tab_id": "t", "id": "md-1", "proposed_value": wire_value},
+    )
+    _, kwargs = ctrl.set_writeback_item.call_args
+    assert kwargs["proposed_value"] == _CONFUSION

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from qtpy.QtWidgets import QPushButton
+from qtpy.QtWidgets import QCheckBox, QPushButton
 from zcu_tools.experiment.v2_gui.adapters.fake.freq import (
     FakeFreqAdapter,
     FakeFreqAnalyzeParams,
@@ -11,6 +11,7 @@ from zcu_tools.experiment.v2_gui.adapters.fake.freq import (
 from zcu_tools.gui.app.main.adapter import (
     AnalyzeRequest,
     ExpContext,
+    MetaDictWriteback,
     RunRequest,
     WritebackRequest,
 )
@@ -69,3 +70,27 @@ def test_writeback_widget_lists_items_and_edit_buttons(qapp):
     assert len(selected) == len(items)  # all selected by default
     assert {it.target_name for it in items} == {"r_f", "rf_w"}
     assert len(edit_buttons) == 2
+
+
+def test_writeback_widget_non_scalar_item_is_read_only(qapp):
+    """A non-scalar md item (e.g. a confusion matrix) renders selectable but
+    with no Edit button — it is a derived value applied verbatim."""
+    matrix = [[0.95, 0.03, 0.02], [0.03, 0.95, 0.02], [0.0, 0.0, 1.0]]
+    scalar = MetaDictWriteback(target_name="fid", description="d", proposed_value=0.95)
+    scalar.session_id = "md-1"
+    nonscalar = MetaDictWriteback(
+        target_name="confusion_matrix", description="d", proposed_value=matrix
+    )
+    nonscalar.session_id = "md-2"
+
+    widget = WritebackWidget(MagicMock())
+    widget.populate([scalar, nonscalar])
+
+    edit_buttons = [w for w in widget.findChildren(QPushButton) if w.text() == "Edit"]
+    # Only the scalar item gets an Edit button; the matrix is read-only.
+    assert len(edit_buttons) == 1
+    # Both items are still selectable for apply (the matrix label shows its value).
+    checks = widget.findChildren(QCheckBox)
+    assert len(checks) == 2
+    assert any("confusion_matrix" in cb.text() for cb in checks)
+    assert all(cb.isChecked() for cb in checks)

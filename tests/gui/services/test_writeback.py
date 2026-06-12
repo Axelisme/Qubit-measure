@@ -144,6 +144,25 @@ def test_apply_uses_target_name_as_destination():
     assert state.exp_context.md.r_f_alt == 42.0
 
 
+def test_apply_non_scalar_md_value_lands_verbatim():
+    """A nested-list md proposed_value (e.g. the singleshot confusion matrix) is
+    applied verbatim — md holds nested lists, no scalar coercion on apply."""
+    state = _make_state_with_tab()
+    svc = _svc(state)
+
+    matrix = [[0.95, 0.03, 0.02], [0.03, 0.95, 0.02], [0.0, 0.0, 1.0]]
+    item = MetaDictWriteback(
+        target_name="confusion_matrix", description="d", proposed_value=matrix
+    )
+    item.session_id = "md-1"
+    _put_items(state, item)
+
+    applied = svc.apply_tab_writeback(WritebackPermit(tab_id="t1"))
+
+    assert applied == ["md-1"]
+    assert state.exp_context.md.confusion_matrix == matrix
+
+
 # ---------------------------------------------------------------------------
 # compute_items_for_tab + get (pure read)
 # ---------------------------------------------------------------------------

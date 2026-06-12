@@ -349,7 +349,14 @@ def test_ge_writeback_proposes_fid_ge_s_centers_and_radius(
         for item in items
         if isinstance(item, MetaDictWriteback)
     }
-    assert set(targets) == {"fid", "ge_s", "g_center", "e_center", "ge_radius"}
+    assert set(targets) == {
+        "fid",
+        "ge_s",
+        "g_center",
+        "e_center",
+        "ge_radius",
+        "confusion_matrix",
+    }
     assert targets["fid"] == pytest.approx(0.95)
     assert targets["ge_s"] == pytest.approx(0.3)
     assert targets["ge_radius"] == pytest.approx(0.42)
@@ -357,6 +364,10 @@ def test_ge_writeback_proposes_fid_ge_s_centers_and_radius(
     assert targets["g_center"] == -1.0 + 0j
     assert targets["e_center"] == 1.0 + 0j
     assert isinstance(targets["g_center"], complex)
-    # The confusion matrix is intentionally NOT a writeback item (3×3, not a
-    # scalar) — it surfaces only in the analyze summary.
-    assert "confusion" not in targets
+    # The confusion matrix is proposed as a nested list (the analyze result's
+    # JSON-safe ``confusion``) — a non-scalar md writeback applied verbatim.
+    assert targets["confusion_matrix"] == [
+        [0.95, 0.03, 0.02],
+        [0.03, 0.95, 0.02],
+        [0.0, 0.0, 1.0],
+    ]
