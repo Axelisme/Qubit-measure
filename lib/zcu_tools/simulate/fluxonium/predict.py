@@ -57,6 +57,15 @@ class FluxoniumPredictor:
     def value_to_flux(self, cur_value: float) -> float:
         return (cur_value + self.flux_bias - self.flux_half) / self.flux_period + 0.5
 
+    def _value_to_flux_array(
+        self, cur_values: NDArray[np.float64]
+    ) -> NDArray[np.float64]:
+        # Array form of value_to_flux (same affine, kept in lockstep): a separate
+        # method so the scalar value_to_flux keeps its float-only public signature
+        # while the batched paths get a typed array transform.
+        flux = (cur_values + self.flux_bias - self.flux_half) / self.flux_period + 0.5
+        return np.asarray(flux, dtype=np.float64)
+
     def flux_to_value(self, cur_flux: float) -> float:
         return (cur_flux - 0.5) * self.flux_period + self.flux_half - self.flux_bias
 
@@ -163,8 +172,34 @@ class FluxoniumPredictor:
             float: transition frequency in MHz.
         """
         if isinstance(cur_value, Iterable):
-            return np.array([self._predict_freq(ca, transition) for ca in cur_value])
+            return self._predict_freq_array(np.asarray(cur_value), transition)
         return self._predict_freq(cur_value, transition)
+
+    def _predict_freq_array(
+        self,
+        cur_values: NDArray[np.float64],
+        transition: tuple[int, int],
+    ) -> NDArray[np.float64]:
+        """Batched ``_predict_freq``: one vectorised flux sweep instead of N
+        scalar diagonalisations.
+
+        Reuses ``calculate_energy_vs_flux`` (precomputes the flux-independent
+        cos/sin(phi) operators once, then combines per flux), so this does not
+        touch ``self.fluxonium`` — the shared scqubits object whose ``.flux`` the
+        scalar path mutates. Building a fresh local engine inside the helper keeps
+        the batched path free of cross-call shared mutable state (thread-safe),
+        unlike the scalar path. ``evals_count`` mirrors the scalar path's
+        ``max(*transition) + 5`` so the two stay numerically aligned.
+        """
+        from zcu_tools.simulate.fluxonium.energies import calculate_energy_vs_flux
+
+        fluxs = self._value_to_flux_array(cur_values)
+        evals_count = max(*transition) + 5
+        _, energies = calculate_energy_vs_flux(
+            self.params, fluxs, cutoff=40, evals_count=evals_count
+        )
+        diff = energies[:, transition[1]] - energies[:, transition[0]]
+        return np.asarray(diff * 1e3, dtype=np.float64)  # MHz
 
     def _predict_matrix_element(
         self,
@@ -214,11 +249,39 @@ class FluxoniumPredictor:
             float: matrix element of operator between two levels.
         """
         if isinstance(cur_value, Iterable):
-            return np.array(
-                [
-                    self._predict_matrix_element(ca, transition, operator)
-                    for ca in cur_value
-                ],
-                dtype=np.float64,
+            return self._predict_matrix_element_array(
+                np.asarray(cur_value), transition, operator
             )
         return self._predict_matrix_element(cur_value, transition, operator)
+
+    def _predict_matrix_element_array(
+        self,
+        cur_values: NDArray[np.float64],
+        transition: tuple[int, int],
+        operator: Literal["phi", "n"],
+    ) -> NDArray[np.float64]:
+        """Batched ``_predict_matrix_element``: one vectorised operator sweep.
+
+        Reuses ``calculate_{n,phi}_oper_vs_flux``, which build a local scqubits
+        engine and run ``get_matelements_vs_paramvals`` over the whole flux grid,
+        so this avoids mutating the shared ``self.fluxonium`` (thread-safe, unlike
+        the scalar path).
+
+        Like the scalar path (whose ``self.fluxonium`` has ``truncated_dim=2``)
+        this only takes the [0, 1] sub-block via ``return_dim=2``; a ``transition``
+        with a level >= 2 indexes past that block and raises, matching the scalar
+        path's behaviour. Supporting higher levels is a separate feature.
+        """
+        from zcu_tools.simulate.fluxonium.matrix_element import (
+            calculate_n_oper_vs_flux,
+            calculate_phi_oper_vs_flux,
+        )
+
+        fluxs = self._value_to_flux_array(cur_values)
+        if operator == "n":
+            _, opers = calculate_n_oper_vs_flux(self.params, fluxs, return_dim=2)
+        else:
+            _, opers = calculate_phi_oper_vs_flux(self.params, fluxs, return_dim=2)
+
+        elems = opers[:, transition[0], transition[1]]
+        return np.abs(elems).astype(np.float64)

@@ -157,6 +157,43 @@ def test_per_channel_unknown_option_raises():
         )
 
 
+def test_empty_fluxs_returns_empty():
+    # The batched eigensolve must short-circuit on an empty flux array (np.linalg.eigh
+    # on a (0, dim, dim) stack is fine, but the N==0 guard keeps the contract explicit).
+    out = calculate_eff_t1_vs_flux_fast(
+        _PARAMS, np.empty(0, dtype=np.float64), [("t1_capacitive", {})], _TEMP
+    )
+    assert out.shape == (0,)
+    assert out.dtype == np.float64
+
+
+def test_single_flux_consistent_with_batched():
+    # The single-flux form goes through the same batched code with N==1; one flux taken
+    # out of a multi-flux sweep must match calling the sweep on just that flux.
+    noise = [(c, {}) for c in CHANNELS]
+    sweep = calculate_eff_t1_vs_flux_fast(_PARAMS, _FLUXS, noise, _TEMP)
+    single = calculate_eff_t1_fast(float(_FLUXS[7]), _PARAMS, noise, _TEMP)
+    assert single == pytest.approx(sweep[7], rel=1e-12)
+
+
+def test_repeated_calls_same_params_consistent():
+    # The lru_cache on the flux-independent operators must not change results across
+    # repeated calls that share (params, cutoff, qub_dim) but vary noise options — this
+    # is exactly the t1_curve sweep-over-noise_values caller pattern.
+    base = calculate_eff_t1_vs_flux_fast(
+        _PARAMS, _FLUXS, [("t1_capacitive", {"Q_cap": 1e6})], _TEMP
+    )
+    again = calculate_eff_t1_vs_flux_fast(
+        _PARAMS, _FLUXS, [("t1_capacitive", {"Q_cap": 2e6})], _TEMP
+    )
+    base2 = calculate_eff_t1_vs_flux_fast(
+        _PARAMS, _FLUXS, [("t1_capacitive", {"Q_cap": 1e6})], _TEMP
+    )
+    np.testing.assert_array_equal(base, base2)  # cache reuse is bit-identical
+    # different Q_cap genuinely changes the rate (Q_cap scales T1), so not all-equal
+    assert not np.allclose(base, again)
+
+
 def test_valid_per_channel_options_still_work():
     # the validation must not break the legitimate option keys
     noise = [

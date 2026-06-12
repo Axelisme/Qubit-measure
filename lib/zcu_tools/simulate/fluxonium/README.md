@@ -1,6 +1,6 @@
 # `simulate/fluxonium` 模塊重點文檔
 
-**Last updated:** 2026-06-08
+**Last updated:** 2026-06-12（coherence_fast 算子 lru_cache + batched eigh；predict 陣列批次路徑）
 
 基於 [scqubits](https://scqubits.readthedocs.io) 的 Fluxonium 量子比特數值模擬工具集,提供能譜、色散位移、矩陣元、相干時間與實驗參數預測等計算。
 
@@ -51,7 +51,7 @@
   - **單位修正**:scqubits 回傳 `ns/rad`,此處已乘 `2π` 轉為 `ns`。
   - `_with` 版本接受已建好的 `Fluxonium` 物件與可選的 `spectrum_data`,供重複呼叫時重用。
   - 內部暫時關閉 `scq_settings.T1_DEFAULT_WARNING`,並以 1 秒門檻啟動 `tqdm` 進度條(短任務不顯示)。
-- **`calculate_eff_t1_vs_flux_fast` / `calculate_eff_t1_fast`**(`coherence_fast.py`)— scqubits-free numpy 等效,**~60x**(13.6s→0.36s/100flux/4ch)。**逐點對齊 scqubits 到 ~1e-13 相對**(見 `tests/simulate/fluxonium/test_coherence_fast.py`)。**兩個瓶頸都繞掉**:(1) eigensolve 用 `energies.py` 的 cos/sin 預算技巧自己 `eigh`(`H=-EJ·cos(φ+β)`);(2) flux-dependent noise 算子(`dH/dflux=-2πEJ·sin(φ+β)`、`sin(φ/2+π·flux)`)用三角恆等式 `sin(αφ+β)=sin(αφ)cos(β)+cos(αφ)sin(β)` 從一次算好的 `sin/cos(αφ)` 重組,**消掉 scqubits 每 flux 一次的 `scipy.linalg.sinm`**(profiling:flux_bias_line 2.6s + quasiparticle 5.6s/100flux 全在 sinm)。**5 個 noise spectral density 公式逐字移植自 `scqubits/core/noise.py`**(常數 `R_k=h/e²`、`to_standard_units=×1e9`、`calc_therm_ratio`、各 channel 的 Q_cap/Q_ind/Y_qp 預設),Fermi rate = `|⟨i|op|j⟩|²·[S(ω)+S(-ω)]`、`T1[ns]=2π/Σrate`。介面同 scqubits(`noise_channels` 為 str 或 `(str,opts)`,支援 per-channel Q_cap/Q_ind/Y_qp/M/Z/x_qp/Delta);不支援的 channel raise `UnsupportedNoiseChannelError`。**fast-fail kwarg 驗證**:固定 `total=True`,傳 `total=False`、頂層未知 kwarg、或 per-channel opts 放了該 channel 不接受的鍵(如 `t1_capacitive` 放 `M`),都 raise `UnsupportedNoiseOptionError`(不靜默丟棄,免回傳 wrong-but-plausible T1)。每 channel 的合法 opts 在 `_CHANNELS` 第二元素(frozenset)。**半通量 0.5**:quasiparticle `sin(φ/2)` 矩陣元 parity-vanish → T1~∞(~1e32 ns),fast 與 scqubits 都同意 rate≈0(殘差相對差大但物理上都是無限,非 bug)。舊 scqubits 版全保留。
+- **`calculate_eff_t1_vs_flux_fast` / `calculate_eff_t1_fast`**(`coherence_fast.py`)— scqubits-free numpy 等效,**~60x**(13.6s→0.36s/100flux/4ch)。**逐點對齊 scqubits 到 ~1e-13 相對**(見 `tests/simulate/fluxonium/test_coherence_fast.py`)。**兩個瓶頸都繞掉**:(1) eigensolve 用 `energies.py` 的 cos/sin 預算技巧自己 `eigh`(`H=-EJ·cos(φ+β)`);(2) flux-dependent noise 算子(`dH/dflux=-2πEJ·sin(φ+β)`、`sin(φ/2+π·flux)`)用三角恆等式 `sin(αφ+β)=sin(αφ)cos(β)+cos(αφ)sin(β)` 從一次算好的 `sin/cos(αφ)` 重組,**消掉 scqubits 每 flux 一次的 `scipy.linalg.sinm`**(profiling:flux_bias_line 2.6s + quasiparticle 5.6s/100flux 全在 sinm)。**5 個 noise spectral density 公式逐字移植自 `scqubits/core/noise.py`**(常數 `R_k=h/e²`、`to_standard_units=×1e9`、`calc_therm_ratio`、各 channel 的 Q_cap/Q_ind/Y_qp 預設),Fermi rate = `|⟨i|op|j⟩|²·[S(ω)+S(-ω)]`、`T1[ns]=2π/Σrate`。介面同 scqubits(`noise_channels` 為 str 或 `(str,opts)`,支援 per-channel Q_cap/Q_ind/Y_qp/M/Z/x_qp/Delta);不支援的 channel raise `UnsupportedNoiseChannelError`。**fast-fail kwarg 驗證**:固定 `total=True`,傳 `total=False`、頂層未知 kwarg、或 per-channel opts 放了該 channel 不接受的鍵(如 `t1_capacitive` 放 `M`),都 raise `UnsupportedNoiseOptionError`(不靜默丟棄,免回傳 wrong-but-plausible T1)。每 channel 的合法 opts 在 `_CHANNELS` 第二元素(frozenset)。**flux-independent 算子用 `_t1_operators` @lru_cache(params,cutoff,qub_dim)**(對標 dispersive 的 `_fluxonium_operators`;noise opts/Temp/transition 不進 key,不同 noise 設定共用同份算子)——同 params 重複呼叫(t1_curve 掃 noise_values 的典型場景)固定成本(~110ms 的 scqubits 算子建構)只付一次。**per-flux loop 已批次化**:H 堆成 `(N,dim,dim)` 一次 batched `np.linalg.eigh`,算子變換/Fermi rate 全向量化。warm cache 下各 N 比 scqubits 慢路徑快 ~7-10x;cold + 小 N(<~50)單次呼叫仍可能比慢路徑慢(一次性 ~110ms,刻意不加 N 閾值 dispatch 以免複雜化語義)。**半通量 0.5**:quasiparticle `sin(φ/2)` 矩陣元 parity-vanish → T1~∞(~1e32 ns),fast 與 scqubits 都同意 rate≈0(殘差相對差大但物理上都是無限,非 bug)。舊 scqubits 版全保留。
 - `calculate_percell_t1_vs_flux` — 自訂 Purcell 通道 T1,手動求和 resonator 熱態佔據下的 `⟨0,n'|a†|1,n⟩` / `⟨0,n'|a|1,n⟩` 矩陣元:
   - `P_res(n) = (1 − e^{−βℏωr}) e^{−nβℏωr}`
   - `Γ↑ = Σ P_res(n) κ n_th(ΔE) |⟨…|a†|…⟩|²`
@@ -65,8 +65,8 @@
 - 建構: `(params, flux_half, flux_period, flux_bias)`;另可 `FluxoniumPredictor.from_file(result_path, flux_bias)` 從 fluxdep_fit 結果載入。
 - 座標轉換: `value_to_flux` / `flux_to_value`,使用
   `flux = (value + bias − flux_half)/flux_period + 0.5`。
-- `predict_freq(cur_value, transition=(0,1))` — 回傳 **MHz**;輸入支援 scalar 或 array。
-- `predict_matrix_element(cur_value, transition, operator="n"|"phi")` — 回傳 `|⟨i|O|j⟩|`。
+- `predict_freq(cur_value, transition=(0,1))` — 回傳 **MHz**;輸入支援 scalar 或 array。**array 輸入走等效矩陣批次路徑**(`calculate_energy_vs_flux`,~7x@200 點);批次路徑各自建 local `Fluxonium`、不 mutate `self.fluxonium`(比 scalar 路徑 thread-safe)。
+- `predict_matrix_element(cur_value, transition, operator="n"|"phi")` — 回傳 `|⟨i|O|j⟩|`。**只支援含 level 0,1 的 transition**(`truncated_dim=2`,level≥2 raise;高 level 支援屬功能擴充另案)。array 輸入批次走 `calculate_n/phi_oper_vs_flux`。
 - `calculate_bias(cur_value, cur_freq, transition)` —
   在 `[cur_value ± 0.25·flux_period]` 中以 `scipy.root_scalar` (secant+bracket) 找使預測頻率吻合的點,然後枚舉 **週期 + 鏡像對稱** 的所有等價 bias,回傳 `|bias|` 最小者。
 - `update_bias(flux_bias)` — 就地更新 bias。
@@ -115,3 +115,4 @@ f01 = predictor.predict_freq(current_value)                    # MHz
 | 2026-04-27 | `5e09cf1c` | 修正 Markdown 結構：合併重複的「更新紀錄」區塊。 |
 | 2026-06-05 | `7f918a77` | `calculate_dispersive_vs_flux_fast` 抽 flux-independent operators 到 `_fluxonium_operators` @lru_cache，GUI live tuning 拖動 84→0.6ms（numerically identical）。 |
 | 2026-06-05 | `2c241b25` | 新增 `coherence_fast.py`：`calculate_eff_t1_vs_flux_fast`（scqubits-free，~60x，逐點對齊 1e-13）。繞掉 eigensolve（cos/sin 預算）+ flux-dep 算子的 per-flux `sinm`（三角拆解）+ 5 noise 公式逐字移植。 |
+| 2026-06-12 | — | coherence_fast：`_t1_operators` @lru_cache 消固定成本 + per-flux loop 批次化（batched eigh + 向量化 rates）。predict：array 輸入改走 energies/matrix_element 批次路徑（freq ~7x），補數值單測 `test_predict.py`。 |

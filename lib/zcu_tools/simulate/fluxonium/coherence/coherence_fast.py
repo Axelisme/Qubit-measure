@@ -26,6 +26,7 @@ are the five Fluxonium T1 channels; an unsupported channel name fast-fails.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from functools import lru_cache
 from typing import Any
 
 import numpy as np
@@ -88,9 +89,13 @@ def _s_capacitive(omega, T, EC, Q_cap=None):
     return s * 2 * np.pi
 
 
-def _real(value: Any) -> float:
-    """The real part of a (possibly complex) impedance/admittance value."""
-    return complex(value).real  # type: ignore[arg-type]
+def _real(value: Any) -> Any:
+    """The real part of a (possibly complex) impedance/admittance value.
+
+    Uses ``np.real`` so it works for both a scalar impedance ``Z`` and an array-valued
+    admittance ``Y_qp`` (the vectorised-over-flux quasiparticle path passes a length-N
+    omega, making ``y`` a length-N array)."""
+    return np.real(value)
 
 
 def _s_charge_impedance(omega, T, Z=_DEF_Z):
@@ -167,14 +172,16 @@ def _s_quasiparticle(omega, T, EJ, x_qp=_DEF_X_QP, Delta=_DEF_DELTA, Y_qp=None):
     )
 
 
+# A spectral density S(omega, T): omega may be a scalar or a length-N flux array (the
+# vs-flux path evaluates all fluxes at once), so the return mirrors the input shape.
+SpectralDensity = Callable[[Any, float], Any]
+
 # Each channel: (operator key, allowed per-channel option keys, spectral-density
 # builder). The operator key indexes the per-flux eigenbasis operators built in the
 # sweep; the allowed-keys set is validated so an unknown / unsupported option (e.g.
 # ``total``, which the fast path fixes to True) raises instead of being silently
 # ignored. The option keys mirror the scqubits channel signatures.
-_CHANNELS: dict[
-    str, tuple[str, frozenset[str], Callable[..., Callable[[float, float], float]]]
-] = {
+_CHANNELS: dict[str, tuple[str, frozenset[str], Callable[..., SpectralDensity]]] = {
     "t1_capacitive": (
         "n",
         frozenset({"Q_cap"}),
@@ -221,7 +228,7 @@ def _resolve_channels(
     EJ: float,
     EC: float,
     EL: float,
-) -> list[tuple[str, Callable[[float, float], float]]]:
+) -> list[tuple[str, SpectralDensity]]:
     """Resolve ``noise_channels`` (str or (str, opts)) to (op_key, spectral_density).
 
     Each channel's option keys are validated against its allowed set, so an unknown
@@ -251,18 +258,46 @@ def _resolve_channels(
     return resolved
 
 
-def _channel_rate(
-    sfunc: Callable[[float, float], float],
-    op_eig: NDArray[np.complex128],
-    evals: NDArray[np.float64],
-    T: float,
-    i: int = 1,
-    j: int = 0,
-) -> float:
-    """Fermi rate ``|<i|op|j>|^2 * [S(omega) + S(-omega)]`` (``total=True``)."""
-    omega = 2 * np.pi * (evals[i] - evals[j])
-    s = sfunc(omega, T) + sfunc(-omega, T)
-    return float(abs(op_eig[i, j]) ** 2 * s)
+@lru_cache(maxsize=32)
+def _t1_operators(
+    params: tuple[float, float, float], cutoff: int, qub_dim: int
+) -> tuple[
+    NDArray[np.float64],  # lc_diag (dim,)
+    NDArray[np.float64],  # cos_phi
+    NDArray[np.float64],  # sin_phi
+    NDArray[np.complex128],  # n_op
+    NDArray[np.float64],  # phi_op
+    NDArray[np.float64],  # cos_half (alpha=0.5)
+    NDArray[np.float64],  # sin_half (alpha=0.5)
+    float,  # EJ
+]:
+    """The flux-independent native operators for the fast T1 path, taken from scqubits
+    ONCE per (params, cutoff, qub_dim) and memoised.
+
+    Building these costs ~110 ms on a fresh ``Fluxonium`` (``cos_phi_operator`` /
+    ``sin_phi_operator`` each go through scipy's matrix ``cosm`` / ``sinm`` = an
+    ``expm``). The notebook caller (t1_curve/base.py) sweeps several ``noise_values``
+    with the same ``params`` / ``cutoff`` / ``qub_dim``, so without the cache that fixed
+    cost is paid per call; with it, only the cheap per-flux recombination + batched
+    eigensolve runs each time. Mirrors ``dispersive._fluxonium_operators``.
+
+    The returned arrays are the cache's own copies — callers must NOT mutate them
+    (the fast path only reads them).
+    """
+    from scqubits.core.fluxonium import Fluxonium
+
+    fx = Fluxonium(*params, flux=0.0, cutoff=cutoff, truncated_dim=qub_dim)
+    dim = fx.hilbertdim()
+    lc_diag = np.array(
+        [(k + 0.5) * fx.plasma_energy() for k in range(dim)], dtype=np.float64
+    )
+    cos_phi = np.asarray(fx.cos_phi_operator(beta=0.0), dtype=np.float64)
+    sin_phi = np.asarray(fx.sin_phi_operator(beta=0.0), dtype=np.float64)
+    n_op = np.asarray(fx.n_operator(), dtype=np.complex128)
+    phi_op = np.asarray(fx.phi_operator(), dtype=np.float64)
+    cos_half = np.asarray(fx.cos_phi_operator(alpha=0.5, beta=0.0), dtype=np.float64)
+    sin_half = np.asarray(fx.sin_phi_operator(alpha=0.5, beta=0.0), dtype=np.float64)
+    return lc_diag, cos_phi, sin_phi, n_op, phi_op, cos_half, sin_half, float(fx.EJ)
 
 
 def calculate_eff_t1_vs_flux_fast(
@@ -293,8 +328,6 @@ def calculate_eff_t1_vs_flux_fast(
     ``total=False``) raises ``UnsupportedNoiseOptionError`` rather than being silently
     dropped.
     """
-    from scqubits.core.fluxonium import Fluxonium
-
     if other_noise_options:
         raise UnsupportedNoiseOptionError(
             f"unsupported keyword option(s) {sorted(other_noise_options)} for the fast "
@@ -305,57 +338,69 @@ def calculate_eff_t1_vs_flux_fast(
     EJ, EC, EL = params
     fluxs = np.asarray(fluxs, dtype=np.float64)
 
-    # Flux-independent native operators, taken from scqubits ONCE.
-    fx = Fluxonium(EJ, EC, EL, flux=0.0, cutoff=cutoff, truncated_dim=qub_dim)
-    dim = fx.hilbertdim()
-    lc_diag = np.array(
-        [(k + 0.5) * fx.plasma_energy() for k in range(dim)], dtype=np.float64
+    # Flux-independent native operators — built once and memoised across calls that
+    # share (params, cutoff, qub_dim) (see _t1_operators).
+    lc_diag, cos_phi, sin_phi, n_op, phi_op, cos_half, sin_half, EJ_val = _t1_operators(
+        params, cutoff, qub_dim
     )
-    cos_phi = np.asarray(fx.cos_phi_operator(beta=0.0), dtype=np.float64)
-    sin_phi = np.asarray(fx.sin_phi_operator(beta=0.0), dtype=np.float64)
-    n_op = np.asarray(fx.n_operator(), dtype=np.complex128)
-    phi_op = np.asarray(fx.phi_operator(), dtype=np.float64)
-    cos_half = np.asarray(fx.cos_phi_operator(alpha=0.5, beta=0.0), dtype=np.float64)
-    sin_half = np.asarray(fx.sin_phi_operator(alpha=0.5, beta=0.0), dtype=np.float64)
-    EJ_val = float(fx.EJ)
 
     chans = _resolve_channels(noise_channels, EJ, EC, EL)
     # Which flux-dependent operators are actually needed (skip building unused ones).
     need = {op for op, _ in chans}
 
-    out = np.empty(len(fluxs), dtype=np.float64)
-    for fi, flux in enumerate(fluxs):
-        beta = 2.0 * np.pi * float(flux)
-        cb, sb = np.cos(beta), np.sin(beta)
-        # H(flux) = H_LC - EJ*cos(phi + beta) via the cos/sin recombination.
-        Hq = np.diag(lc_diag) - EJ_val * (cos_phi * cb - sin_phi * sb)
-        evals, evecs = np.linalg.eigh(Hq)
-        evals = evals[:qub_dim]
-        evecs = evecs[:, :qub_dim]
+    n = len(fluxs)
+    if n == 0:
+        return np.empty(0, dtype=np.float64)
 
-        # Operator matrices are complex or real depending on the channel; NDArray[Any]
-        # is the honest type here since some ops (phi, dHdflux, sinhalf) are float64.
-        ops: dict[str, NDArray[Any]] = {}
-        if "n" in need:
-            ops["n"] = evecs.conj().T @ n_op @ evecs
-        if "phi" in need:
-            ops["phi"] = evecs.conj().T @ phi_op @ evecs
-        if "dHdflux" in need:
-            # dH/dflux = -2*pi*EJ*sin(phi + beta) (recombined, no sinm)
-            dHdflux = -2 * np.pi * EJ_val * (sin_phi * cb + cos_phi * sb)
-            ops["dHdflux"] = evecs.conj().T @ dHdflux @ evecs
-        if "sinhalf" in need:
-            bh = 0.5 * beta  # sin(phi/2 + pi*flux)
-            cbh, sbh = np.cos(bh), np.sin(bh)
-            sinhalf = sin_half * cbh + cos_half * sbh
-            ops["sinhalf"] = evecs.conj().T @ sinhalf @ evecs
+    # --- Batched per-flux eigensolve ------------------------------------------------
+    # Stack H(flux) = H_LC - EJ*cos(phi + beta) for all fluxes into (N, dim, dim) and
+    # diagonalise in one np.linalg.eigh call (it vmaps over the leading axis). beta has
+    # shape (N,); broadcasting (N,1,1)*(dim,dim) builds the stack without a Python loop.
+    beta = 2.0 * np.pi * fluxs  # (N,)
+    cb = np.cos(beta)[:, None, None]  # (N,1,1)
+    sb = np.sin(beta)[:, None, None]
+    Hq = np.diag(lc_diag)[None] - EJ_val * (cos_phi[None] * cb - sin_phi[None] * sb)
+    evals_full, evecs_full = np.linalg.eigh(Hq)  # (N,dim), (N,dim,dim)
+    evals = evals_full[:, :qub_dim]  # (N, qub_dim)
+    evecs = evecs_full[:, :, :qub_dim]  # (N, dim, qub_dim)
+    evecs_h = np.conj(np.swapaxes(evecs, -1, -2))  # (N, qub_dim, dim)
 
-        total = 0.0
-        for op_key, sfunc in chans:
-            total += _channel_rate(sfunc, ops[op_key], evals, Temp, i, j)
-        out[fi] = (2 * np.pi / total) if total != 0.0 else np.inf
+    def _to_eigbasis(op: NDArray[Any]) -> NDArray[Any]:
+        # evecs^H @ op @ evecs, batched over flux: (N,d,d)->(N,qub,qub).
+        return evecs_h @ (op[None] @ evecs)
 
-    return out
+    # Operator matrices are complex or real depending on the channel; NDArray[Any]
+    # is honest here since some ops (phi, dHdflux, sinhalf) are float64.
+    ops: dict[str, NDArray[Any]] = {}
+    if "n" in need:
+        ops["n"] = _to_eigbasis(n_op)
+    if "phi" in need:
+        ops["phi"] = _to_eigbasis(phi_op)
+    if "dHdflux" in need:
+        # dH/dflux = -2*pi*EJ*sin(phi + beta) (recombined, no sinm), stacked over flux.
+        dHdflux = -2 * np.pi * EJ_val * (sin_phi[None] * cb + cos_phi[None] * sb)
+        ops["dHdflux"] = evecs_h @ (dHdflux @ evecs)
+    if "sinhalf" in need:
+        bh = 0.5 * beta  # sin(phi/2 + pi*flux)
+        cbh = np.cos(bh)[:, None, None]
+        sbh = np.sin(bh)[:, None, None]
+        sinhalf = sin_half[None] * cbh + cos_half[None] * sbh
+        ops["sinhalf"] = evecs_h @ (sinhalf @ evecs)
+
+    # --- Per-channel Fermi rates, vectorised over flux -------------------------------
+    # omega = 2*pi*(E_i - E_j) is now a length-N vector; the spectral densities are
+    # written with numpy ops so they accept the array directly (same scalar math).
+    omega = 2 * np.pi * (evals[:, i] - evals[:, j])  # (N,)
+    matelem2 = {  # |<i|op|j>|^2 per flux, only for the ops actually requested
+        key: np.abs(op[:, i, j]) ** 2 for key, op in ops.items()
+    }
+    total = np.zeros(n, dtype=np.float64)
+    for op_key, sfunc in chans:
+        s = sfunc(omega, Temp) + sfunc(-omega, Temp)  # (N,)
+        total += matelem2[op_key] * np.real(s)
+
+    out = np.where(total != 0.0, 2 * np.pi / total, np.inf)
+    return out.astype(np.float64, copy=False)
 
 
 def calculate_eff_t1_fast(

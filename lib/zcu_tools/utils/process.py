@@ -283,15 +283,22 @@ def peak_n_avg(
     if np.sum(~np.isnan(data)) <= n:
         return np.nanmean(data)  # type: ignore
 
-    peak_fn = np.nanargmax if mode == "max" else np.nanargmin
+    # Replace NaN with a sentinel that loses the argpartition race so NaN
+    # positions are never selected as top-n candidates.
+    # For "max": NaN -> -inf (guaranteed smaller than any finite value).
+    # For "min": NaN -> +inf (guaranteed larger than any finite value).
+    sentinel = -np.inf if mode == "max" else np.inf
+    flat = data.flatten()
+    masked = np.where(np.isnan(flat), sentinel, flat)
 
-    peaks = np.empty(n, dtype=data.dtype)
-    _data = data.copy().flatten()  # prevent in-place modification
-    for i in range(n):
-        peak_idx = peak_fn(_data)
-        peaks[i], _data[peak_idx] = _data[peak_idx], np.nan
+    if mode == "max":
+        # argpartition(-n:) contains indices of the n largest values in O(N).
+        # The slice is unordered, but we only need the mean — order doesn't matter.
+        top_indices = np.argpartition(masked, -n)[-n:]
+    else:
+        top_indices = np.argpartition(masked, n)[:n]
 
-    return np.mean(peaks)  # type: ignore
+    return float(np.mean(flat[top_indices]))
 
 
 def rotate_phase(
