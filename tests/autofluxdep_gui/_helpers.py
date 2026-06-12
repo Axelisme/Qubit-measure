@@ -27,7 +27,23 @@ if TYPE_CHECKING:
 ProduceFn = Callable[[RunEnv, Snapshot], Patch]
 
 
-def connect_mock(ctrl: Controller) -> None:
+def high_snr_simparams(snr: float = 5000.0) -> Any:
+    """A copy of DEFAULT_SIMPARAM with a high snr for fast acquire tests.
+
+    The acquire roll-out tests average mock per-shot noise with large
+    reps×rounds purely to clear the fit-quality gate at DEFAULT_SIMPARAM's
+    snr=300. Raising the snr lets the same decay/fringe clear the gate at a
+    fraction of the reps, cutting wall time without weakening what the test
+    proves (it still drives the full real-acquire + real-fit path and asserts a
+    finite, positive coherence time). snr only scales per-shot noise, so the
+    sim-predictor provisioning derived from these params stays consistent.
+    """
+    from zcu_tools.program.v2.sim import DEFAULT_SIMPARAM
+
+    return DEFAULT_SIMPARAM.model_copy(update={"snr": snr})
+
+
+def connect_mock(ctrl: Controller, *, sim_params: Any = None) -> None:
     """Establish a mock SoC synchronously-enough for a headless test.
 
     The session ``ConnectionService`` settles a mock connect via
@@ -58,7 +74,7 @@ def connect_mock(ctrl: Controller) -> None:
     ctrl.bind_connection_outcome(
         on_finished=loop.quit, on_failed=lambda _msg: loop.quit()
     )
-    ctrl.start_connect(ConnectMockRequest())
+    ctrl.start_connect(ConnectMockRequest(sim_params=sim_params))
     loop.exec()
 
     # Drive the async fake_flux provisioning (connect + initial-value ramp) to

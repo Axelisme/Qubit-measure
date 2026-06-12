@@ -18,7 +18,9 @@ from ._helpers import ACQUIRE_READOUT, connect_mock, make_acquire_env
 
 # reps=2000 x rounds=2 averages the mock per-shot noise enough that the echo
 # fringe clears the fit-quality gate (the echo contrast is lower than T1's).
-_PARAMS = {"reps": 2000, "rounds": 2, "detune_ratio": 0.2}
+# sweep_range overrides _DEFAULT_SWEEP's 121 pts → 61 pts for test speed;
+# the production default stays at 121 in the node module.
+_PARAMS = {"reps": 2000, "rounds": 2, "detune_ratio": 0.2, "sweep_range": "0.0,25.0,61"}
 
 
 def _pulses(ml, freq: float):

@@ -353,7 +353,7 @@ def test_t2ramsey_produce_fast_fails_when_context_unconfigured():
     from zcu_tools.gui.app.autofluxdep.nodes.t2ramsey import T2RamseyBuilder
 
     flux = np.linspace(0.0, 1.0, 11)
-    times = parse_linear_axis("0,25,121", (0.0, 25.0, 121))
+    times = parse_linear_axis("0,25,61", (0.0, 25.0, 61))
     result = Sweep1DResult.allocate(flux, times, x_label="delay time (us)")
     env = RunEnv(
         flux=float(flux[1]),
@@ -452,7 +452,7 @@ def test_t2echo_produce_fast_fails_when_context_unconfigured():
     pi_pulse, pi2_pulse = _t2echo_pulses(_ml())
     flux_arr = np.linspace(0.0, 1.0, 11)
     result = Sweep1DResult.allocate(
-        flux_arr, np.linspace(0.0, 25.0, 121), x_label="delay time (us)"
+        flux_arr, np.linspace(0.0, 25.0, 61), x_label="delay time (us)"
     )
     env = RunEnv(
         flux=float(flux_arr[1]),

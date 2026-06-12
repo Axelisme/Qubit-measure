@@ -309,7 +309,8 @@ class MockQickSoc(QickConfig):
                 for n in reads_per_shot
             ]
 
-        time.sleep(0.00001 * np.asarray(data).size)
+        # token poll latency: keeps async pacing realistic without dominating test wall time
+        time.sleep(1e-7 * np.asarray(data).size)
 
         self._poll_done = True
         return [(total_shots, (data, {}))]

@@ -19,7 +19,9 @@ from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 from ._helpers import ACQUIRE_READOUT, connect_mock, make_acquire_env
 
-_PARAMS = {"reps": 1000, "rounds": 1, "detune_ratio": 0.2}
+# sweep_range overrides _DEFAULT_SWEEP's 121 pts → 61 pts for test speed;
+# the production default stays at 121 in the node module.
+_PARAMS = {"reps": 1000, "rounds": 1, "detune_ratio": 0.2, "sweep_range": "0.0,25.0,61"}
 
 
 def _pi2_pulse(ml, freq: float):

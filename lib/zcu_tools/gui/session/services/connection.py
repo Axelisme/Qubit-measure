@@ -4,7 +4,7 @@ import dataclasses
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,16 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class ConnectMockRequest:
-    """Connect to a local in-process MockSoc."""
+    """Connect to a local in-process MockSoc.
+
+    ``sim_params`` is an optional ``SimParams`` override (typed ``Any`` to avoid an
+    import-time dependency on the sim package). The production GUI never sets it, so
+    the mock keeps yielding ``DEFAULT_SIMPARAM`` data; tests pass a high-snr params
+    to cut the reps/rounds a fittable decay needs (the snr only changes per-shot
+    noise, so the sim-predictor provisioning stays consistent).
+    """
+
+    sim_params: Any = None
 
 
 @dataclass(frozen=True)
@@ -220,8 +229,10 @@ class ConnectionService(QObject):
                 # Inject the dev-only default SimParams so mock-connect yields
                 # physically-realistic data (not white noise).  The make_mock_soc
                 # signature default stays sim=None so all direct test callers are
-                # unaffected (D1 guarantee).
-                soc, soccfg = make_mock_soc(sim=DEFAULT_SIMPARAM)
+                # unaffected (D1 guarantee). A request-supplied override (tests
+                # only) replaces the default — e.g. a high-snr params.
+                sim = req.sim_params if req.sim_params is not None else DEFAULT_SIMPARAM
+                soc, soccfg = make_mock_soc(sim=sim)
             except Exception as exc:
                 error = f"Mock SoC initialisation failed: {exc}"
                 QTimer.singleShot(0, lambda err=error: self._finish_failure(err))

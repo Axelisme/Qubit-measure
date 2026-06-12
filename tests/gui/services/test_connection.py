@@ -81,6 +81,29 @@ def test_start_connect_mock_soc_carries_default_simparam(qapp):
     assert sim_params == DEFAULT_SIMPARAM
 
 
+def test_start_connect_mock_sim_params_override_is_honoured(qapp):
+    """ConnectMockRequest(sim_params=...) propagates the override into the soc.
+
+    Tests pass a high-snr SimParams to cut wall time (seam documented in
+    ConnectMockRequest). This confirms the override path is wired end-to-end:
+    the soc must carry the *supplied* params, not DEFAULT_SIMPARAM.
+    """
+    custom = DEFAULT_SIMPARAM.model_copy(update={"snr": 9999.0})
+    svc = _make_svc()
+    loop = QEventLoop()
+    svc.connection_finished.connect(loop.quit)
+    svc.connection_failed.connect(lambda msg: loop.quit())
+
+    svc.start_connect(ConnectMockRequest(sim_params=custom))
+    loop.exec()
+
+    soc = svc._state.exp_context.soc
+    assert soc is not None, "soc must be set after mock connect"
+    sim_params = getattr(soc, "_sim_params", None)
+    assert sim_params is not None, "mock soc must expose _sim_params"
+    assert sim_params == custom, f"soc carries {sim_params!r}, expected custom override"
+
+
 def test_connect_bumps_soc_not_context_version(qapp):
     svc = _make_svc()
     ctx_before = svc._state.version.get("context")
