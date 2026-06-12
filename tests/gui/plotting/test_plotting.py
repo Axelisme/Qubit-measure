@@ -9,7 +9,7 @@ This test proves the shared mechanism supports that pattern.
 
 from __future__ import annotations
 
-from qtpy.QtWidgets import QLabel, QStackedWidget
+from qtpy.QtWidgets import QApplication, QLabel, QStackedWidget
 from zcu_tools.gui.plotting import (
     FigureContainer,
     assert_plot_invariants,
@@ -122,6 +122,76 @@ def test_close_figure_noop_when_shutting_down(qapp):
         close_figure(fig)
     finally:
         set_shutting_down(False)
+        plt.close(fig)
+
+
+def test_two_figures_coexist_in_one_container(qapp):
+    """Regression: a run/analyze figure and a post-analysis figure share one
+    container's stack. Alternating attaches (A, B, A) must NOT delete the other
+    figure's canvas — both stay alive, and the last-attached is current.
+
+    This is the exact failure from the post-analysis shared-container bug: the
+    old single-slot ``_canvas_widget`` evicted the other figure's canvas, whose
+    dead wrapper was then reused on the next attach and crashed.
+    """
+    del qapp
+    import matplotlib.pyplot as plt
+    from qtpy import sip  # type: ignore[attr-defined]
+
+    container = _make_container()
+    fig_a = plt.figure()  # run/analyze figure
+    fig_b = plt.figure()  # post-analysis figure
+    try:
+        canvas_a = attach_existing_figure_to_container(fig_a, container)
+        canvas_b = attach_existing_figure_to_container(fig_b, container)
+        # Re-attaching A simulates the per-content-change re-render order
+        # (analyze figure rendered, then post figure) repeating.
+        canvas_a_again = attach_existing_figure_to_container(fig_a, container)
+
+        # Same figure -> same (live) canvas reused, not a fresh dead wrapper.
+        assert canvas_a_again is canvas_a
+        assert not sip.isdeleted(canvas_a)  # type: ignore[attr-defined]
+        assert not sip.isdeleted(canvas_b)  # type: ignore[attr-defined]
+
+        # Both canvases coexist in the stack (placeholder + 2 canvases).
+        assert container._stack.count() == 3
+        # Last attached (A) is the visible one.
+        assert container._stack.currentWidget() is canvas_a
+        assert get_figure_container(fig_a) is container
+        assert get_figure_container(fig_b) is container
+    finally:
+        plt.close(fig_a)
+        plt.close(fig_b)
+
+
+def test_attach_self_heals_dead_canvas_wrapper(qapp):
+    """Defense: if a figure's canvas widget is force-deleted out from under it,
+    re-attaching the same figure builds a fresh canvas instead of crashing on
+    the dead wrapper."""
+    del qapp
+    import matplotlib.pyplot as plt
+    from qtpy import sip  # type: ignore[attr-defined]
+
+    container = _make_container()
+    fig = plt.figure()
+    try:
+        canvas = attach_existing_figure_to_container(fig, container)
+
+        # Force-delete the canvas widget at the C++ level (simulating a path that
+        # deleted it while matplotlib still holds fig.canvas). ``deleteLater`` is
+        # not enough here: matplotlib keeps a strong reference so the DeferredDelete
+        # never collects the C++ object — ``sip.delete`` is the deterministic kill.
+        container.detach_canvas(canvas)
+        sip.delete(canvas)  # type: ignore[attr-defined]
+        QApplication.instance().processEvents()  # type: ignore[union-attr]
+        assert sip.isdeleted(canvas)  # type: ignore[attr-defined]
+
+        # Re-attach must not raise; it creates a fresh, live canvas.
+        fresh = attach_existing_figure_to_container(fig, container)
+        assert fresh is not canvas
+        assert not sip.isdeleted(fresh)  # type: ignore[attr-defined]
+        assert container._stack.currentWidget() is fresh
+    finally:
         plt.close(fig)
 
 

@@ -184,11 +184,28 @@ def get_figure_container(fig: Figure) -> FigureContainer | None:
 
 
 def _purge_stale_registry_entries() -> None:
+    from qtpy import sip  # type: ignore[attr-defined]
+    from qtpy.QtWidgets import QWidget  # type: ignore[attr-defined]
+
     stale_ids: list[int] = []
-    for fig_id, container in _fig_container_registry.items():
+    for fig_id, container in list(_fig_container_registry.items()):
         try:
             container._stack.count()
         except RuntimeError:
+            # The container's QStackedWidget itself was deleted.
+            stale_ids.append(fig_id)
+            continue
+        # Also evict entries whose canvas wrapper is dead: the registry maps a
+        # figure to its container, but if the canvas was deleted the mapping is
+        # stale and would resurrect a dead wrapper on the next attach/activate.
+        fig_canvas: QWidget | None = None
+        for index in range(container._stack.count()):
+            widget = container._stack.widget(index)
+            figure = getattr(widget, "figure", None)
+            if isinstance(figure, Figure) and id(figure) == fig_id:
+                fig_canvas = widget
+                break
+        if fig_canvas is None or sip.isdeleted(fig_canvas):  # type: ignore[attr-defined]
             stale_ids.append(fig_id)
     for fig_id in stale_ids:
         _fig_container_registry.pop(fig_id, None)
@@ -226,12 +243,20 @@ def _attach_figure_canvas(
     canvas_class: type[FigureCanvasQTAgg] | None = None,
 ) -> FigureCanvasQTAgg:
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+    from qtpy import sip  # type: ignore[attr-defined]
 
     canvas = fig.canvas
     expected_canvas_class = (
         canvas_class if canvas_class is not None else FigureCanvasQTAgg
     )
-    if not isinstance(canvas, expected_canvas_class):
+    # ``fig.canvas`` can be a dead Qt wrapper if a previous render path deleted
+    # the canvas widget while matplotlib still holds the Python reference. Reusing
+    # it would crash at the first C++ call (e.g. stack.indexOf). Treat a deleted
+    # wrapper as "no usable canvas" and rebuild a fresh one. This keeps the system
+    # self-healing even if some path deletes a canvas out from under its figure.
+    if (
+        not isinstance(canvas, expected_canvas_class) or sip.isdeleted(canvas)  # type: ignore[attr-defined]
+    ):
         canvas = expected_canvas_class(fig)
 
     previous_container = _fig_container_registry.get(id(fig))

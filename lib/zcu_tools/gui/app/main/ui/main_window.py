@@ -21,7 +21,6 @@ from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
 from zcu_tools.gui.plotting import (
     FigureContainer,
     attach_existing_figure_to_container,
-    remove_canvas,
     set_shutting_down,
 )
 from zcu_tools.gui.session.events import (
@@ -377,8 +376,6 @@ class ExpTabWidget(QWidget):
             self._plot_stack, self._plot_placeholder
         )
 
-        self._canvas_widget: QWidget | None = None
-
         plot_layout.addWidget(self._plot_stack, stretch=1)
         splitter.addWidget(plot_panel)
 
@@ -603,16 +600,27 @@ class ExpTabWidget(QWidget):
         return self._comment_edit.toPlainText()
 
     def reset_plot(self) -> None:
-        """Remove all canvases from plot_stack, revert to placeholder."""
+        """Remove all canvases from plot_stack, revert to placeholder.
+
+        This is the genuine-invalidation teardown for BOTH the analyze and post
+        figures (they coexist in the same stack); it runs before each new
+        run/analyze so stale canvases never linger.
+        """
         self._figure_container.clear_dynamic_canvases()
-        self._canvas_widget = None
 
     def show_analysis_figure(self, fig: Figure) -> None:
-        """Embed a matplotlib Figure in the plot area (replaces prior analysis canvas)."""
+        """Embed a matplotlib Figure in the plot area and bring it to front.
+
+        The run/analyze figure (``tab.figure``) and the post-analysis figure
+        (``tab.post_figure``) are two distinct Figure objects sharing this one
+        container's QStackedWidget. They coexist as separate canvases; attaching
+        a figure only switches the stack to it (``attach_canvas`` setsCurrent),
+        it must NOT evict the other figure's canvas — doing so deletes a canvas
+        still owned by a live figure and the next attach reuses the dead wrapper.
+        Genuine teardown of both canvases happens in ``reset_plot`` (before a new
+        run/analyze) and on tab close.
+        """
         canvas = attach_existing_figure_to_container(fig, self._figure_container)
-        if self._canvas_widget is not None and self._canvas_widget is not canvas:
-            remove_canvas(self._canvas_widget)
-        self._canvas_widget = canvas
         draw = getattr(canvas, "draw", None)
         if not callable(draw):
             raise RuntimeError("Attached analysis canvas does not support draw()")

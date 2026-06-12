@@ -833,10 +833,13 @@ def test_show_analysis_figure_draws_canvas(qapp, monkeypatch):
     tab.show_analysis_figure(Figure())
 
     canvas.draw.assert_called_once_with()
-    assert tab._canvas_widget is canvas
 
 
-def test_show_analysis_figure_keeps_new_canvas_current_when_replacing_old(qapp):
+def test_show_analysis_figure_keeps_two_figures_coexisting(qapp):
+    """The analyze figure and post figure share one container's stack; showing
+    one brings it to front without evicting the other (the post-analysis shared-
+    container regression). The most recently shown figure is current; both
+    canvases stay alive in the stack."""
     from matplotlib.figure import Figure
     from qtpy.QtWidgets import QApplication
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
@@ -846,16 +849,24 @@ def test_show_analysis_figure_keeps_new_canvas_current_when_replacing_old(qapp):
     tab.show()
     QApplication.processEvents()
 
-    fig1 = Figure()
-    fig2 = Figure()
+    fig1 = Figure()  # run/analyze figure
+    fig2 = Figure()  # post-analysis figure
+    stack = tab._figure_container._stack
 
     tab.show_analysis_figure(fig1)
-    first_canvas = tab._canvas_widget
+    first_canvas = stack.currentWidget()
     assert first_canvas is not None
-    assert tab._figure_container._stack.currentWidget() is first_canvas
 
     tab.show_analysis_figure(fig2)
-    second_canvas = tab._canvas_widget
+    second_canvas = stack.currentWidget()
     assert second_canvas is not None
     assert second_canvas is not first_canvas
-    assert tab._figure_container._stack.currentWidget() is second_canvas
+
+    # Both canvases coexist (placeholder + 2 canvases); fig2 is current.
+    assert stack.count() == 3
+    assert stack.indexOf(first_canvas) >= 0
+
+    # Re-showing fig1 brings it back to front without deleting fig2's canvas.
+    tab.show_analysis_figure(fig1)
+    assert stack.currentWidget() is first_canvas
+    assert stack.count() == 3

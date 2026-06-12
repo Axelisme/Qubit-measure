@@ -39,7 +39,11 @@ def _setup_logging(to_file: bool = True, log_file: Path | None = None) -> None:
         file_handler = logging.FileHandler(target, mode="w", encoding="utf-8")
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE))
-        for name in ("zcu_tools.gui.app.main", "zcu_tools.experiment.v2_gui"):
+        # Attach at the whole ``zcu_tools.gui`` namespace (not just
+        # ``...gui.app.main``) so cross-cutting subpackages — event_bus,
+        # plotting, session — also reach the file. Otherwise their ERRORs
+        # (e.g. event_bus swallowing a handler exception) never hit the log.
+        for name in ("zcu_tools.gui", "zcu_tools.experiment.v2_gui"):
             log = logging.getLogger(name)
             log.addHandler(file_handler)
             log.setLevel(logging.DEBUG)
