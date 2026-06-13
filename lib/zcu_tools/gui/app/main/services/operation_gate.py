@@ -80,16 +80,20 @@ class OperationGate(ExclusionGate):
     def __init__(self) -> None:
         self._active: dict[int, _ActiveLease] = {}
 
-    def ensure_can_start(self, kind: str) -> None:
+    def ensure_can_start(self, kind: str, *, resource_id: str | None = None) -> None:
         """Fail-fast guard: raise ``OperationConflictError`` if an active lease
         conflicts with ``kind``. Called before the handle is created, so a
-        conflict aborts without leaving a half-built operation behind."""
+        conflict aborts without leaving a half-built operation behind.
+
+        ``resource_id`` scopes device-mutation conflicts: two device mutations
+        conflict only when they target the same device (so different devices can
+        be set up concurrently). Global kinds (RUN / soc connect) ignore it."""
         requested = _norm(kind)
         conflicting = next(
             (
                 lease
                 for lease in self._active.values()
-                if self._conflicts(lease.kind, requested)
+                if self._conflicts(lease, requested, resource_id)
             ),
             None,
         )
@@ -132,17 +136,27 @@ class OperationGate(ExclusionGate):
         )
 
     @staticmethod
-    def _conflicts(existing: str, requested: str) -> bool:
-        if existing == _RUN:
+    def _conflicts(
+        existing: _ActiveLease, requested: str, requested_resource: str | None
+    ) -> bool:
+        existing_kind = existing.kind
+        if existing_kind == _RUN:
             return (
                 requested == _RUN
                 or requested == _SOC_CONNECT
                 or requested in _DEVICE_MUTATIONS
             )
         if requested == _RUN:
-            return existing == _SOC_CONNECT or existing in _DEVICE_MUTATIONS
-        if existing == _SOC_CONNECT:
+            return existing_kind == _SOC_CONNECT or existing_kind in _DEVICE_MUTATIONS
+        if existing_kind == _SOC_CONNECT:
             return requested == _SOC_CONNECT
-        if existing in _DEVICE_MUTATIONS:
-            return requested in _DEVICE_MUTATIONS
+        if existing_kind in _DEVICE_MUTATIONS:
+            # Resource-aware: two device mutations conflict only on the SAME
+            # device — different devices each own an independent driver + lock +
+            # VISA session, so concurrent setup is safe (phase C). A None
+            # requested_resource (defensive) is treated as conflicting with any
+            # in-flight device mutation rather than silently allowed.
+            return requested in _DEVICE_MUTATIONS and (
+                requested_resource is None or existing.resource_id == requested_resource
+            )
         return False

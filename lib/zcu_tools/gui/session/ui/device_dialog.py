@@ -35,7 +35,6 @@ from zcu_tools.gui.session.events import (
 )
 from zcu_tools.gui.session.services.device import (
     ConnectDeviceRequest,
-    DeviceSetupSnapshot,
     DeviceSnapshot,
     DeviceStatus,
     DisconnectDeviceRequest,
@@ -317,8 +316,6 @@ class DeviceDialog(QDialog):
         btn_row.addWidget(close_btn)
         right_layout.addLayout(btn_row)
 
-        self._active_setup: DeviceSetupSnapshot | None = None
-
         splitter.addWidget(right_widget)
         splitter.setSizes([300, 500])
 
@@ -331,11 +328,12 @@ class DeviceDialog(QDialog):
         bus.subscribe(DeviceSetupStartedPayload, self._on_setup_started)
         bus.subscribe(DeviceSetupFinishedPayload, self._on_setup_finished)
         self._bus_subs_active = True
-        # Progress subscription for the currently-active setup's device (managed
-        # in _render_setup as the active setup comes and goes). None when no
-        # setup is active or the dialog has detached.
-        self._progress_unsub: Callable[[], None] | None = None
-        self._progress_owner: str | None = None
+        # Phase C: concurrent setups. Progress is now multi-owner — every device
+        # currently setting up has its own ProgressService subscription, keyed by
+        # device name. _sync_progress_subscriptions diffs the live setup set
+        # against these on every setup start/finish; _on_progress_changed merges
+        # all owners' bars into the single ProgressStack.
+        self._progress_unsubs: dict[str, Callable[[], None]] = {}
         self.finished.connect(self._cleanup_bus_subscriptions)
         self.destroyed.connect(self._cleanup_bus_subscriptions)
 
@@ -351,7 +349,9 @@ class DeviceDialog(QDialog):
         self._poll_timer.timeout.connect(self._on_poll_tick)
 
         self._refresh_list()
-        self._render_setup(self._ctrl.get_active_device_setup())
+        # Phase C: subscribe progress for every device already setting up (the
+        # dialog may open mid-setup, possibly with several concurrent setups).
+        self._sync_progress_subscriptions()
 
     def _cleanup_bus_subscriptions(self, *_args: object) -> None:
         if not self._bus_subs_active:
@@ -363,7 +363,7 @@ class DeviceDialog(QDialog):
             DeviceSetupFinishedPayload, self._on_setup_finished
         )
         self._ctrl.get_bus().unsubscribe(DeviceChangedPayload, self._on_device_changed)
-        self._detach_progress()
+        self._detach_all_progress()
         self._poll_timer.stop()
         self._bus_subs_active = False
 
@@ -461,8 +461,8 @@ class DeviceDialog(QDialog):
         if snapshot is None:
             return
 
-        # Recompute button states per-device: the setup lock is scoped to
-        # _active_setup.device_name, not the whole dialog. Pass the already-
+        # Recompute button states per-device: the setup lock is scoped to each
+        # device's own setup status, not the whole dialog. Pass the already-
         # fetched snapshot to avoid a second controller call.
         self._refresh_button_states(name, snapshot)
 
@@ -487,31 +487,43 @@ class DeviceDialog(QDialog):
         if page > 0 and isinstance(panel, DevicePanelProtocol):
             panel.load(info)
 
+    def _setup_device_names(self) -> set[str]:
+        """The set of devices currently setting up (Phase C, possibly several).
+
+        Derived from per-device snapshot status (SETTING_UP) rather than a single
+        ``_active_setup`` snapshot: DeviceService runs setups for different
+        devices concurrently, and its State-owned status is the SSOT for "which
+        devices are mid-setup". The single-valued ``get_active_device_setup``
+        port stays for the remote contract but no longer drives the dialog."""
+        names: set[str] = set()
+        for entry in self._ctrl.list_devices():
+            snapshot = self._ctrl.get_device_snapshot(entry.name)
+            if snapshot is not None and snapshot.status is DeviceStatus.SETTING_UP:
+                names.add(entry.name)
+        return names
+
     def _refresh_button_states(
         self,
         selected_name: str | None,
         snapshot: DeviceSnapshot | None = None,
     ) -> None:
-        """Recompute button states based on the currently-selected device and
-        whether a setup operation is in flight for some device.
+        """Recompute button states for the currently-selected device (Phase C).
 
-        Per-device locking: only the device that owns the active setup is locked
-        (apply shows Stop, edit fields disabled). Other devices can be selected
-        and viewed freely; their Apply button is greyed out with a tooltip that
-        explains why, and drop/refresh are also disabled to avoid concurrent
-        operation conflicts.
+        Per-device locking: the lock is scoped to *each* device's own setup, and
+        setups of different devices run concurrently. The selected device is
+        locked (Apply -> red Stop, edit fields disabled) only when *it* is
+        setting up; a different device being set up no longer blocks this one —
+        the user can Apply it to start a concurrent setup.
 
         ``snapshot`` may be supplied by the caller (e.g. _on_selection_changed)
         to avoid a redundant controller call; if omitted and selected_name is
         not None, it is fetched once here.
         """
-        active_name = (
-            self._active_setup.device_name if self._active_setup is not None else None
-        )
-        setup_in_flight = active_name is not None
-
         if selected_name is None:
-            # Nothing selected — all device-action buttons disabled.
+            # Nothing selected — all device-action buttons disabled. The Add-box
+            # stays enabled: registering a new device is a connect on a fresh
+            # name, which never conflicts with an in-flight mutation (the gate is
+            # resource-aware in Phase C).
             self._drop_btn.setEnabled(False)
             self._drop_btn.setText("Drop")
             self._refresh_btn.setEnabled(False)
@@ -519,13 +531,7 @@ class DeviceDialog(QDialog):
             self._apply_btn.setText("Apply Changes")
             self._apply_btn.setStyleSheet("")
             self._apply_btn.setToolTip("")
-            # Add-box lock follows global setup state (adding a device requires
-            # a connect operation — don't allow concurrent ops with an active setup).
-            add_enabled = not setup_in_flight
-            self._type_combo.setEnabled(add_enabled)
-            self._name_edit.setEnabled(add_enabled)
-            self._addr_edit.setEnabled(add_enabled)
-            self._add_btn.setEnabled(add_enabled)
+            self._set_add_box_enabled(True)
             return
 
         if snapshot is None:
@@ -535,51 +541,47 @@ class DeviceDialog(QDialog):
             DeviceStatus.MEMORY_ONLY,
             DeviceStatus.CONNECTED,
         }
+        is_setting_up = snapshot is not None and (
+            snapshot.status is DeviceStatus.SETTING_UP
+        )
 
-        is_setup_owner = selected_name == active_name
-
-        # --- Add-box: disabled while any setup is in flight ---
-        add_enabled = not setup_in_flight
-        self._type_combo.setEnabled(add_enabled)
-        self._name_edit.setEnabled(add_enabled)
-        self._addr_edit.setEnabled(add_enabled)
-        self._add_btn.setEnabled(add_enabled)
+        # --- Add-box: always enabled (a new-name connect never conflicts) ---
+        self._set_add_box_enabled(True)
 
         # --- Drop button ---
-        # Conservative: disable drop for all devices while any setup is running,
-        # regardless of which device is selected. Dropping a device could trigger
-        # a disconnect operation, which would conflict with the active setup.
-        self._drop_btn.setEnabled(not setup_in_flight and not is_busy)
+        # Dropping the selected device disconnects it; that conflicts with its
+        # OWN in-flight mutation (a busy device, incl. setting up) but not with a
+        # different device's setup. So: enable iff the selected device is idle.
+        self._drop_btn.setEnabled(not is_busy)
         self._drop_btn.setText("Forget" if is_memory else "Drop")
 
         # --- Refresh button ---
-        # refresh calls get_device_info (a read, not a gate-guarded op) — allow
-        # it for non-owner, non-memory, non-busy devices even during setup.
-        self._refresh_btn.setEnabled(
-            not is_memory and not is_busy and not is_setup_owner
-        )
+        # refresh reads get_device_info; the read is gate-guarded against the
+        # selected device's own mutation, so disable it only when the selected
+        # device is memory-only or busy (incl. its own setup). A different
+        # device's concurrent setup is irrelevant here.
+        self._refresh_btn.setEnabled(not is_memory and not is_busy)
 
         # --- Apply button ---
-        if is_setup_owner:
-            # This device is the active setup owner: show red Stop button.
+        if is_setting_up:
+            # The selected device is mid-setup: show its red Stop button.
             self._apply_btn.setEnabled(True)
             self._apply_btn.setText("Stop")
             self._apply_btn.setStyleSheet("color: red;")
             self._apply_btn.setToolTip("Cancel the in-progress setup.")
-        elif setup_in_flight:
-            # Another device is being set up: grey out Apply and explain why.
-            self._apply_btn.setEnabled(False)
-            self._apply_btn.setText("Apply Changes")
-            self._apply_btn.setStyleSheet("")
-            self._apply_btn.setToolTip(
-                f"Cannot apply: setup of '{active_name}' is in progress."
-            )
         else:
-            # Normal (no setup in flight): enable based on device state.
+            # Idle (or another device setting up — no longer blocks this one):
+            # enable Apply based on the selected device's own state.
             self._apply_btn.setEnabled(not is_busy)
             self._apply_btn.setText("Reconnect" if is_memory else "Apply Changes")
             self._apply_btn.setStyleSheet("")
             self._apply_btn.setToolTip("")
+
+    def _set_add_box_enabled(self, enabled: bool) -> None:
+        self._type_combo.setEnabled(enabled)
+        self._name_edit.setEnabled(enabled)
+        self._addr_edit.setEnabled(enabled)
+        self._add_btn.setEnabled(enabled)
 
     @staticmethod
     def _unique_name(base: str, existing: set[str]) -> str:
@@ -626,14 +628,18 @@ class DeviceDialog(QDialog):
         self._on_selection_changed(self._list.currentRow())
 
     def _on_apply_or_stop_clicked(self) -> None:
-        if self._active_setup is not None:
-            self._ctrl.cancel_device_operation(self._active_setup.device_name)
-            return
-
         item = self._list.currentItem()
         if item is None:
             return
         name = item.data(Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
+
+        # Phase C: the button means Stop only for the selected device's OWN
+        # in-flight setup (the same device that shows the red Stop). A different
+        # device's concurrent setup never makes this button a Stop.
+        snapshot = self._ctrl.get_device_snapshot(name)
+        if snapshot is not None and snapshot.status is DeviceStatus.SETTING_UP:
+            self._ctrl.cancel_device_operation(name)
+            return
 
         if self._ctrl.is_memory_device(name):
             self._add_status.setText("")
@@ -687,63 +693,62 @@ class DeviceDialog(QDialog):
             )
 
     def _on_setup_started(self, payload: DeviceSetupStartedPayload) -> None:
-        self._render_setup(self._ctrl.get_active_device_setup())
+        self._sync_progress_subscriptions()
+        # A concurrent setup may have started on a device other than the selected
+        # one; recompute the selected device's buttons so e.g. its Apply stays
+        # available (Phase C no longer globally blocks Apply during any setup).
+        self._refresh_button_states(self._selected_device_name())
 
     def _on_setup_finished(self, payload: DeviceSetupFinishedPayload) -> None:
-        # Terminal — re-read active setup (now None) to hide the panel.
-        self._render_setup(self._ctrl.get_active_device_setup())
-
-    def _render_setup(self, setup: DeviceSetupSnapshot | None) -> None:
-        self._active_setup = setup
-        if setup is not None:
-            # Surface the setup owner only when nothing is currently selected
-            # (e.g. dialog opened from scratch mid-setup). If the user already
-            # has another device selected, preserve that selection so they can
-            # keep viewing it — this is the whole point of Phase A per-device lock.
-            if self._selected_device_name() is None:
-                for row in range(self._list.count()):
-                    item = self._list.item(row)
-                    if (
-                        item is not None
-                        and item.data(Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
-                        == setup.device_name
-                    ):
-                        self._list.setCurrentRow(row)
-                        break
-            # Subscribe progress so live bars render even if the dialog opened
-            # mid-setup; closing the dialog only detaches — the container lives on
-            # in ProgressService.
-            self._attach_progress(setup.device_name)
-            self._progress.show()
-            # Refresh button states for the currently-selected device so the UI
-            # reflects the new per-device lock state immediately.
-            self._refresh_button_states(self._selected_device_name())
-            return
-        self._detach_progress()
-        self._progress.hide()
-        # Setup finished — refresh button states, then repaint the right panel in
-        # case the finished device was selected (its panel may need a fresh info
-        # load if the setup changed hardware state).
+        self._sync_progress_subscriptions()
+        # Repaint the right panel + buttons in case the finished device was the
+        # selected one (its panel may need a fresh info load if setup changed
+        # hardware state); _on_selection_changed also re-derives button states.
         self._on_selection_changed(self._list.currentRow())
 
-    def _attach_progress(self, device_name: str) -> None:
-        self._detach_progress()
-        self._progress_owner = device_name
-        self._progress_unsub = self._ctrl.attach_progress(
-            device_name, self._on_progress_changed
-        )
+    def _sync_progress_subscriptions(self) -> None:
+        """Diff the live setup set against current subscriptions (Phase C).
+
+        Every device currently setting up gets its own ProgressService
+        subscription (keyed by device name); subscriptions for devices that have
+        finished are disposed. The single ProgressStack then shows the merged
+        bars of all live setups. Subscriptions survive a dialog reopen because
+        the container lives in ProgressService, not here."""
+        live = self._setup_device_names()
+        # Surface a setup owner only when nothing is selected (dialog opened
+        # mid-setup with no prior selection); otherwise keep the user's choice.
+        if self._selected_device_name() is None and live:
+            owner = next(iter(sorted(live)))
+            for row in range(self._list.count()):
+                item = self._list.item(row)
+                if (
+                    item is not None and item.data(Qt.ItemDataRole.UserRole) == owner  # type: ignore[attr-defined]
+                ):
+                    self._list.setCurrentRow(row)
+                    break
+        # Subscribe newly-started setups.
+        for name in live - set(self._progress_unsubs):
+            self._progress_unsubs[name] = self._ctrl.attach_progress(
+                name, self._on_progress_changed
+            )
+        # Dispose finished ones.
+        for name in set(self._progress_unsubs) - live:
+            self._progress_unsubs.pop(name)()
+        if self._progress_unsubs:
+            self._progress.show()
+        else:
+            self._progress.hide()
         self._on_progress_changed()  # render whatever is already live
 
-    def _detach_progress(self) -> None:
-        if self._progress_unsub is not None:
-            self._progress_unsub()
-            self._progress_unsub = None
-            self._progress_owner = None
+    def _detach_all_progress(self) -> None:
+        for dispose in self._progress_unsubs.values():
+            dispose()
+        self._progress_unsubs.clear()
 
     def _on_progress_changed(self) -> None:
-        if self._progress_owner is None:
-            return
-        models = tuple(m for _, m in self._ctrl.progress_bars(self._progress_owner))
-        self._progress.render_models(models)
-
-    # _set_setup_running removed: replaced by per-device _refresh_button_states.
+        # Merge every subscribed owner's live bars into the single stack
+        # (sorted by name so the order is stable across ticks).
+        models: list[Any] = []
+        for name in sorted(self._progress_unsubs):
+            models.extend(m for _, m in self._ctrl.progress_bars(name))
+        self._progress.render_models(tuple(models))

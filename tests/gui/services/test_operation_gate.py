@@ -54,6 +54,52 @@ def test_allows_soc_connect_during_device_mutation() -> None:
     gate.release(2)
 
 
+def test_device_mutations_of_different_devices_are_concurrent() -> None:
+    """Phase C: a device mutation does not block a mutation of a *different*
+    device (resource-aware conflict scoped by resource_id)."""
+    gate = OperationGate()
+    gate.register(1, OperationKind.DEVICE_SETUP, owner_id="a", resource_id="devA")
+
+    # Different device → no conflict; it registers alongside.
+    gate.ensure_can_start(OperationKind.DEVICE_SETUP, resource_id="devB")
+    gate.register(2, OperationKind.DEVICE_SETUP, owner_id="b", resource_id="devB")
+
+    assert gate.is_device_mutating("devA")
+    assert gate.is_device_mutating("devB")
+    gate.release(1)
+    gate.release(2)
+
+
+def test_device_mutation_of_same_device_conflicts() -> None:
+    """A mutation of the SAME device still conflicts (resource-aware match)."""
+    gate = OperationGate()
+    gate.register(1, OperationKind.DEVICE_SETUP, owner_id="a", resource_id="devA")
+
+    with pytest.raises(OperationConflictError):
+        gate.ensure_can_start(OperationKind.DEVICE_CONNECT, resource_id="devA")
+    gate.release(1)
+
+
+def test_run_blocks_every_device_mutation_regardless_of_resource() -> None:
+    """RUN ↔ device-mutation stays a *global* mutual exclusion (resource_id is
+    irrelevant): a sweep drives hardware, so no device may be mutated during it
+    and vice-versa."""
+    gate = OperationGate()
+    gate.register(1, MeasureOpKind.RUN, owner_id="tab")
+    # Any device, any name → still blocked.
+    with pytest.raises(OperationConflictError):
+        gate.ensure_can_start(OperationKind.DEVICE_SETUP, resource_id="devA")
+    with pytest.raises(OperationConflictError):
+        gate.ensure_can_start(OperationKind.DEVICE_SETUP, resource_id="devB")
+    gate.release(1)
+
+    # And the reverse: a device mutation blocks RUN.
+    gate.register(2, OperationKind.DEVICE_SETUP, owner_id="a", resource_id="devA")
+    with pytest.raises(OperationConflictError):
+        gate.ensure_can_start(MeasureOpKind.RUN)
+    gate.release(2)
+
+
 def test_tracks_device_mutation_by_name() -> None:
     gate = OperationGate()
     gate.register(1, OperationKind.DEVICE_SETUP, owner_id="setup", resource_id="flux")

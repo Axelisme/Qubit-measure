@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -471,3 +472,219 @@ def test_poll_device_info_swallows_read_failure(qapp):
     # Failure swallowed: no bump, no emit, state untouched.
     assert state.version.get("device:dev1") == before
     assert events == []
+
+
+# ---------------------------------------------------------------------------
+# Phase C: concurrent per-device setup (gate is resource-aware; the in-flight
+# state machine is keyed by device name)
+# ---------------------------------------------------------------------------
+
+
+def _make_multi_svc(
+    gate: OperationGate | None = None,
+) -> tuple[DeviceService, dict[str, MagicMock]]:
+    """A DeviceService whose driver_factory mints a distinct mock driver per
+    device name, so two devices can be set up concurrently with independent
+    setup() / get_info() behaviour. Returns (svc, drivers-by-name)."""
+    drivers: dict[str, MagicMock] = {}
+
+    def factory(_type: str, address: str) -> MagicMock:
+        # The address carries the device name in these tests (one driver each).
+        device = MagicMock()
+        device.get_info.return_value = FakeDeviceInfo(address=address, value=0.0)
+        drivers[address] = device
+        return device
+
+    svc = DeviceService(
+        EventBus(),
+        State(MagicMock()),
+        gate or OperationGate(),
+        _bg(),
+        ProgressService(QtProgressTransport()),
+        driver_factory=factory,  # type: ignore[arg-type]
+    )
+    return svc, drivers
+
+
+def _connect_named(svc: DeviceService, name: str) -> None:
+    loop = QEventLoop()
+    svc.device_connected.connect(lambda _r: loop.quit())
+    svc.operation_failed.connect(lambda _n, _e: loop.quit())
+    # address == name so _make_multi_svc keys the driver by name.
+    svc.start_connect_device(
+        ConnectDeviceRequest(type_name="FakeDevice", name=name, address=name)
+    )
+    loop.exec()
+
+
+def test_gate_allows_concurrent_setup_of_different_devices(qapp):
+    """Resource-aware gate: a setup of one device does NOT block a setup of a
+    different device (the core of Phase C)."""
+    gate = OperationGate()
+    svc, drivers = _make_multi_svc(gate=gate)
+    _connect_named(svc, "devA")
+    _connect_named(svc, "devB")
+
+    # Hold devA mid-setup on a barrier so its lease is still active.
+    release_a = threading.Event()
+    drivers["devA"].setup.side_effect = lambda _info, stop_event=None: release_a.wait(
+        2.0
+    )
+
+    svc.start_setup_device(
+        SetupDeviceRequest(name="devA", info=FakeDeviceInfo(address="devA", value=1.0))
+    )
+    # devB setup must start concurrently (no OperationConflictError).
+    finished_b = QEventLoop()
+    svc.setup_finished.connect(lambda n: finished_b.quit() if n == "devB" else None)
+    token_b = svc.start_setup_device(
+        SetupDeviceRequest(name="devB", info=FakeDeviceInfo(address="devB", value=2.0))
+    )
+    assert isinstance(token_b, int)
+
+    # Both devices are mid-setup at the same instant.
+    assert svc.get_device_snapshot("devA").status is DeviceStatus.SETTING_UP  # type: ignore[union-attr]
+    assert svc.get_device_snapshot("devB").status is DeviceStatus.SETTING_UP  # type: ignore[union-attr]
+    assert gate.is_device_mutating("devA")
+    assert gate.is_device_mutating("devB")
+
+    finished_b.exec()  # devB finishes while devA is still ramping
+    assert svc.get_device_snapshot("devB").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
+    # devA is independent: still mid-setup.
+    assert svc.get_device_snapshot("devA").status is DeviceStatus.SETTING_UP  # type: ignore[union-attr]
+
+    # Let devA finish too.
+    finished_a = QEventLoop()
+    svc.setup_finished.connect(lambda n: finished_a.quit() if n == "devA" else None)
+    release_a.set()
+    finished_a.exec()
+    assert svc.get_device_snapshot("devA").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
+
+
+def test_same_device_setup_still_blocked_while_in_flight(qapp):
+    """A second setup of the SAME device while one is in flight is rejected
+    (resource-aware conflict only relaxes across *distinct* devices). The device
+    is SETTING_UP, so _require_connected_device fast-fails first; the gate's
+    same-resource conflict is the deeper guard (covered separately in
+    test_device_mutation_is_globally_exclusive_and_blocks_same_device_read)."""
+    gate = OperationGate()
+    svc, drivers = _make_multi_svc(gate=gate)
+    _connect_named(svc, "devA")
+
+    release = threading.Event()
+    drivers["devA"].setup.side_effect = lambda _info, stop_event=None: release.wait(2.0)
+    svc.start_setup_device(
+        SetupDeviceRequest(name="devA", info=FakeDeviceInfo(address="devA", value=1.0))
+    )
+    try:
+        with pytest.raises(RuntimeError):
+            svc.start_setup_device(
+                SetupDeviceRequest(
+                    name="devA", info=FakeDeviceInfo(address="devA", value=2.0)
+                )
+            )
+        # The in-flight op is untouched: exactly one lease for devA.
+        assert gate.is_device_mutating("devA")
+    finally:
+        release.set()
+        loop = QEventLoop()
+        svc.setup_finished.connect(lambda n: loop.quit() if n == "devA" else None)
+        loop.exec()
+
+
+def test_concurrent_setups_cancel_independently(qapp):
+    """Cancelling one in-flight setup must not affect the other device's setup."""
+    gate = OperationGate()
+    svc, drivers = _make_multi_svc(gate=gate)
+    _connect_named(svc, "devA")
+    _connect_named(svc, "devB")
+
+    # Both setups poll their stop_event and only return when set (so cancel is
+    # observable) — but devB never gets cancelled, it finishes on a barrier.
+    def cancellable(_info, stop_event=None):
+        # Wait until cancelled (stop_event set) or a short timeout elapses.
+        if stop_event is not None:
+            stop_event.wait(2.0)
+
+    drivers["devA"].setup.side_effect = cancellable
+    release_b = threading.Event()
+    drivers["devB"].setup.side_effect = lambda _info, stop_event=None: release_b.wait(
+        2.0
+    )
+
+    cancelled: list[str] = []
+    svc.setup_cancelled.connect(lambda n: cancelled.append(n))
+    finished: list[str] = []
+    svc.setup_finished.connect(lambda n: finished.append(n))
+
+    svc.start_setup_device(
+        SetupDeviceRequest(name="devA", info=FakeDeviceInfo(address="devA", value=1.0))
+    )
+    svc.start_setup_device(
+        SetupDeviceRequest(name="devB", info=FakeDeviceInfo(address="devB", value=2.0))
+    )
+    assert gate.is_device_mutating("devA")
+    assert gate.is_device_mutating("devB")
+
+    # Cancel only devA.
+    cancel_loop = QEventLoop()
+    svc.setup_cancelled.connect(lambda n: cancel_loop.quit() if n == "devA" else None)
+    svc.cancel_device_operation("devA")
+    cancel_loop.exec()
+
+    assert cancelled == ["devA"]
+    assert svc.get_device_snapshot("devA").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
+    # devB is untouched: still mid-setup, then finishes on its own.
+    assert svc.get_device_snapshot("devB").status is DeviceStatus.SETTING_UP  # type: ignore[union-attr]
+    assert "devB" not in cancelled
+
+    finish_loop = QEventLoop()
+    svc.setup_finished.connect(lambda n: finish_loop.quit() if n == "devB" else None)
+    release_b.set()
+    finish_loop.exec()
+    assert "devB" in finished
+    assert svc.get_device_snapshot("devB").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
+
+
+def test_concurrent_setup_failure_does_not_affect_other(qapp):
+    """A failed setup of one device rolls back only that device; the other
+    device's concurrent setup is unaffected."""
+    gate = OperationGate()
+    svc, drivers = _make_multi_svc(gate=gate)
+    _connect_named(svc, "devA")
+    _connect_named(svc, "devB")
+
+    drivers["devA"].setup.side_effect = lambda _info, stop_event=None: (
+        _ for _ in ()
+    ).throw(RuntimeError("devA boom"))
+    release_b = threading.Event()
+    drivers["devB"].setup.side_effect = lambda _info, stop_event=None: release_b.wait(
+        2.0
+    )
+
+    failed: list[tuple[str, str]] = []
+    svc.setup_failed.connect(lambda n, e: failed.append((n, e)))
+
+    svc.start_setup_device(
+        SetupDeviceRequest(name="devB", info=FakeDeviceInfo(address="devB", value=2.0))
+    )
+    fail_loop = QEventLoop()
+    svc.setup_failed.connect(lambda n, _e: fail_loop.quit() if n == "devA" else None)
+    svc.start_setup_device(
+        SetupDeviceRequest(name="devA", info=FakeDeviceInfo(address="devA", value=1.0))
+    )
+    fail_loop.exec()
+
+    assert failed and failed[0][0] == "devA" and "devA boom" in failed[0][1]
+    # devA rolled back to CONNECTED (prior state), its lease released.
+    assert svc.get_device_snapshot("devA").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
+    assert not gate.is_device_mutating("devA")
+    # devB still mid-setup, lease intact.
+    assert svc.get_device_snapshot("devB").status is DeviceStatus.SETTING_UP  # type: ignore[union-attr]
+    assert gate.is_device_mutating("devB")
+
+    finish_loop = QEventLoop()
+    svc.setup_finished.connect(lambda n: finish_loop.quit() if n == "devB" else None)
+    release_b.set()
+    finish_loop.exec()
+    assert svc.get_device_snapshot("devB").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]

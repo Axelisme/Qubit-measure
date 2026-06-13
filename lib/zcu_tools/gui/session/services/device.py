@@ -128,6 +128,30 @@ class DeviceSetupSnapshot:
     device_name: str
 
 
+@dataclass(frozen=True)
+class _InflightOp:
+    """One in-flight device operation, keyed by device name in DeviceService.
+
+    Phase C makes the device state machine per-device concurrent: connect /
+    disconnect / setup of *different* devices run in parallel, so the formerly
+    scalar ``_active_*`` fields become a ``dict[str, _InflightOp]`` keyed by the
+    operation's device name (its resource_id). Each entry carries everything the
+    terminal path needs for that device's operation, independent of any other:
+
+    - ``token``: the operation token (handle + gate lease key), unique per op.
+    - ``kind``: the operation kind — outcome handling branches on it
+      (``_on_operation_failed`` distinguishes a failed first-connect from a
+      failed mutation of an existing device).
+    - ``prior``: the device-state rollback buffer captured at begin (the State
+      entry before the optimistic write); ``None`` when there was no prior entry
+      (a brand-new connect), which the rollback paths interpret as "remove".
+    """
+
+    token: int
+    kind: OperationKind
+    prior: DeviceState | None
+
+
 class DeviceRegistrationError(RuntimeError):
     """Expected driver construction or registration failure."""
 
@@ -213,14 +237,15 @@ class DeviceService(QObject):
         self._progress: ProgressHub = progress
         # Device state lives in State (the SSOT). This service holds only the
         # live driver (in GlobalDeviceManager), the worker threads, and the
-        # in-flight operation transient below. Setup progress lives in the
-        # shared ProgressService, keyed by this operation's token (owner = name).
-        self._active_token: int | None = None
-        self._active_kind: OperationKind | None = None
-        self._active_name: str | None = None
-        # Rollback buffer for the in-flight transition (worker-bound, not
-        # serializable, so it stays here rather than in State).
-        self._active_prior: DeviceState | None = None
+        # in-flight operation transients below. Setup progress lives in the
+        # shared ProgressService, keyed by each operation's token (owner = name).
+        #
+        # Phase C: per-device concurrency. Connect / disconnect / setup of
+        # different devices run in parallel, so the in-flight bookkeeping is a
+        # dict keyed by device name (each op's resource_id) rather than a single
+        # scalar set. The gate enforces that the SAME device has at most one
+        # in-flight mutation, so each name maps to exactly one _InflightOp.
+        self._inflight: dict[str, _InflightOp] = {}
 
     def start_connect_device(self, req: ConnectDeviceRequest) -> int:
         current = self._state.get_device(req.name)
@@ -233,13 +258,11 @@ class DeviceService(QObject):
             status=DeviceStatus.MEMORY_ONLY,
             remember=req.remember,
         )
-        self._begin_operation(
+        token = self._begin_operation(
             OperationKind.DEVICE_CONNECT,
             req.name,
             replace(initial, status=DeviceStatus.CONNECTING, error=None),
         )
-        assert self._active_token is not None  # set by _begin_operation
-        token = self._active_token
         self._submit_command(
             req.name,
             lambda: self._connect(req),
@@ -262,13 +285,11 @@ class DeviceService(QObject):
 
     def start_disconnect_device(self, req: DisconnectDeviceRequest) -> int:
         current = self._require_connected_device(req.name)
-        self._begin_operation(
+        token = self._begin_operation(
             OperationKind.DEVICE_DISCONNECT,
             req.name,
             replace(current, status=DeviceStatus.DISCONNECTING, error=None),
         )
-        assert self._active_token is not None  # set by _begin_operation
-        token = self._active_token
         self._submit_command(
             req.name,
             lambda: self._disconnect(req.name),
@@ -284,14 +305,12 @@ class DeviceService(QObject):
         # Single owner of the cancellation flag: passed to both the gate (set on
         # cancel) and the worker (polls it / self-judges 'cancelled').
         stop_event = threading.Event()
-        self._begin_operation(
+        token = self._begin_operation(
             OperationKind.DEVICE_SETUP,
             req.name,
             replace(current, status=DeviceStatus.SETTING_UP, error=None),
             stop_event=stop_event,
         )
-        assert self._active_token is not None  # set by _begin_operation
-        token = self._active_token
         # Setup is the OffMain-thread strategy with the progress scope (no figure
         # routing). The stop_event is NOT an ActiveTask scope — the driver's
         # setup() polls it directly — so it is captured by the work closure, not
@@ -324,16 +343,13 @@ class DeviceService(QObject):
         return token
 
     def cancel_device_operation(self, name: str) -> None:
-        if (
-            self._active_name != name
-            or self._active_kind is not OperationKind.DEVICE_SETUP
-            or self._active_token is None
-        ):
+        op = self._inflight.get(name)
+        if op is None or op.kind is not OperationKind.DEVICE_SETUP:
             raise RuntimeError(f"No cancellable device setup is active for {name!r}")
         # Async notification via the handle: set the operation's stop_event and
         # return. The worker self-judges 'cancelled' and emits its cancelled
         # signal — no direct worker.cancel() coupling.
-        self._handles.cancel(self._active_token)
+        self._handles.cancel(op.token)
 
     def register_remembered_devices(self, entries: list[DeviceMemoryInfo]) -> None:
         for entry in entries:
@@ -381,16 +397,31 @@ class DeviceService(QObject):
         return None if dev is None else self._project(dev)
 
     def get_active_device_operation(self) -> DeviceSnapshot | None:
-        if self._active_name is None:
+        """Project *any one* in-flight device operation (single-valued contract).
+
+        Phase C runs operations for different devices concurrently, so "the
+        active operation" is no longer unique. This keeps the single-valued
+        SessionControllerPort / remote contract by returning an arbitrary
+        in-flight op; views that need every concurrent operation read per-device
+        snapshot status instead (SETTING_UP names a live setup)."""
+        name = next(iter(self._inflight), None)
+        if name is None:
             return None
-        dev = self._state.get_device(self._active_name)
+        dev = self._state.get_device(name)
         return None if dev is None else self._project(dev)
 
     def get_active_setup(self) -> DeviceSetupSnapshot | None:
-        snapshot = self.get_active_device_operation()
-        if snapshot is None or snapshot.status is not DeviceStatus.SETTING_UP:
-            return None
-        return DeviceSetupSnapshot(device_name=snapshot.name)
+        """Name *any one* device currently setting up (single-valued contract).
+
+        Like :meth:`get_active_device_operation`, this stays single-valued for
+        the port / remote contract; the device dialog enumerates all concurrent
+        setups from per-device snapshot status (Phase C)."""
+        for name, op in self._inflight.items():
+            if op.kind is OperationKind.DEVICE_SETUP:
+                dev = self._state.get_device(name)
+                if dev is not None and dev.status is DeviceStatus.SETTING_UP:
+                    return DeviceSetupSnapshot(device_name=name)
+        return None
 
     def list_devices(self) -> list[DeviceEntry]:
         return [
@@ -584,24 +615,25 @@ class DeviceService(QObject):
         name: str,
         pending: DeviceState,
         stop_event: threading.Event | None = None,
-    ) -> None:
-        # Symmetric release: this lease + _active_name/_active_prior are cleared
-        # exactly-once on the terminal path via _finish_operation, called from
-        # every _on_*_finished/_failed/_cancelled and _on_operation_failed.
+    ) -> int:
+        # Symmetric release: this device's _inflight entry + its gate lease are
+        # cleared exactly-once on the terminal path via _finish_operation, called
+        # from every _on_*_finished/_failed/_cancelled and _on_operation_failed.
         # stop_event is set only for cancellable operations (setup); connect /
         # disconnect have no cancellation point, so cancel is a no-op for them.
         # Compose both leaves (ADR-0019): fail-fast on conflict before the handle,
         # then mint the handle (holding stop_event) and register the exclusion
-        # under the same token. _active_kind is tracked because outcome handling
-        # (_on_operation_failed) branches on the operation kind.
-        self._gate.ensure_can_start(kind)
+        # under the same token. The kind is recorded in the _InflightOp because
+        # outcome handling (_on_operation_failed) branches on it.
+        #
+        # Phase C: pass resource_id=name so the gate only blocks a *same-device*
+        # in-flight mutation; mutations of different devices start concurrently
+        # and each owns its own _inflight[name] entry.
+        self._gate.ensure_can_start(kind, resource_id=name)
         token = self._handles.create(stop_event=stop_event)
         self._gate.register(token, kind, owner_id=name, resource_id=name)
         prior = self._state.get_device(name)
-        self._active_token = token
-        self._active_kind = kind
-        self._active_name = name
-        self._active_prior = prior
+        self._inflight[name] = _InflightOp(token=token, kind=kind, prior=prior)
         self._state.put_device(pending)
         # Announce the optimistic state. A DEVICE_CHANGED subscriber (e.g. a View
         # redraw) raising here is swallowed + logged by the EventBus and does NOT
@@ -609,15 +641,13 @@ class DeviceService(QObject):
         # released at the real terminal (_finish_operation), never on a
         # subscriber's failure (one bad subscriber must not break the publisher).
         self._emit_device_changed(name)
+        return token
 
     def _finish_operation(self, name: str, outcome: OperationOutcome) -> None:
-        if self._active_name != name or self._active_token is None:
+        op = self._inflight.pop(name, None)
+        if op is None:
             raise RuntimeError(f"Device operation for {name!r} has no active operation")
-        token = self._active_token
-        self._active_name = None
-        self._active_token = None
-        self._active_kind = None
-        self._active_prior = None
+        token = op.token
         # Destroy this operation's progress container (a no-op for connect/
         # disconnect, which never minted one; setup's leave=True bars never emit
         # CLOSE, so the terminal path must clear them), settle the handle, free
@@ -647,7 +677,8 @@ class DeviceService(QObject):
             raise
 
     def _abort_unstarted_operation(self, name: str) -> None:
-        prior = self._active_prior
+        op = self._inflight.get(name)
+        prior = op.prior if op is not None else None
         if prior is None:
             if self._state.has_device(name):
                 self._state.remove_device(name)
@@ -757,9 +788,11 @@ class DeviceService(QObject):
         # The real traceback is logged at the worker (background.py); ``error`` is
         # the marshalled value, so log the message at WARNING here.
         logger.warning("device operation failed: name=%r error=%s", name, message)
+        op = self._inflight.get(name)
         if (
-            self._active_kind is OperationKind.DEVICE_CONNECT
-            and self._active_prior is None
+            op is not None
+            and op.kind is OperationKind.DEVICE_CONNECT
+            and op.prior is None
         ):
             self._state.remove_device(name)
         else:
@@ -769,7 +802,8 @@ class DeviceService(QObject):
         self.operation_failed.emit(name, message)
 
     def _restore_prior_device(self, name: str, error: str | None) -> None:
-        prior = self._active_prior
+        op = self._inflight.get(name)
+        prior = op.prior if op is not None else None
         if prior is None:
             pending = self._require_device(name)
             prior = replace(

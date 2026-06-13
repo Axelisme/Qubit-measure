@@ -61,9 +61,14 @@ class ExclusionGate(Protocol):
     service only ever names session kinds through this port.
     """
 
-    def ensure_can_start(self, kind: str) -> None:
+    def ensure_can_start(self, kind: str, *, resource_id: str | None = None) -> None:
         """Fail-fast: raise ``OperationConflictError`` if an active lease
-        conflicts with ``kind`` (called before the handle is opened)."""
+        conflicts with ``kind`` (called before the handle is opened).
+
+        ``resource_id`` scopes the conflict for resource-keyed kinds: two device
+        mutations conflict only when they target the *same* device, so different
+        devices can be set up concurrently. Global kinds (RUN / soc connect)
+        ignore it and stay mutually exclusive regardless."""
         ...
 
     def register(
