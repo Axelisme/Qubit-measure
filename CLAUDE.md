@@ -39,7 +39,7 @@
 
 - **動工前先認領**：要 Edit/Write 任何檔案前，先在看板 *Active claims* 表加一列，標明 owner（自選的 session 標籤）、scope（會碰的路徑或 area）、簡短任務描述、status 與日期。
 - **動工前先掃看板**：Edit 前先看 *Active claims*；scope 與他人重疊就先協調（縮小/改 scope、等對方釋出、或交用戶決定），*不要硬上*。
-- **收尾即釋出**：任務完成或暫停時，把該列移到 *Released*（或標 `done`/移除）。
+- **commit 後才釋出**：把該列移到 *Released*（或標 `done`/移除）要等**自己的改動 commit 之後**再做；未 commit 前一律保留 claim，否則未提交的 working-tree 改動可能與他人後續的編輯/commit 混在一起被污染。
 - **granularity = 路徑或 area**；純讀 / 純查詢 / 單檔顯而易見的小修可免認領；claim 明顯過期（owner 已離開）由接手者判斷後可回收。
 
 ## 專案概觀
