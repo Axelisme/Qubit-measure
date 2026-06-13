@@ -220,7 +220,10 @@ class AgentChatService:
         parts = [f"[{status}]", terminal_reason]
         if cost_str:
             parts.append(cost_str)
-        if result_text:
+        # On success the result_text duplicates the assistant prose already shown
+        # via the streamed ``assistant`` frame, so omit it; keep it only on error
+        # where it may carry an error detail not surfaced elsewhere.
+        if result_text and is_error:
             snippet = result_text[:200] + ("…" if len(result_text) > 200 else "")
             parts.append(snippet)
         text = " ".join(parts)
