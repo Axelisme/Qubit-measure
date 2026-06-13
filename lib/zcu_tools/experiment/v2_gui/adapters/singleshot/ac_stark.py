@@ -35,7 +35,7 @@ from zcu_tools.gui.app.main.adapter import (
     require_soc_handles,
 )
 
-from ._shared import read_chi_eta, read_ge_centers
+from ._shared import read_chi_kappa, read_ge_centers
 
 # Domain AcStarkExp.analyze returns (ac_coeff, fig). The fitted AC-Stark
 # coefficient is written back to the MetaDict (key ``ac_stark_coeff``, matching
@@ -150,17 +150,18 @@ class SsAcStarkAdapter(
     def analyze(
         self, req: AnalyzeRequest[SsAcStarkRunResult, NoAnalyzeParams]
     ) -> SsAcStarkAnalyzeResult:
-        # ``chi`` / ``eta`` (= md 'rf_w', the resonator linewidth) are required fit
-        # inputs read from md — fast-fail if either is missing. ``confusion_matrix``
+        # ``chi`` / ``kappa`` (= md 'rf_w', the resonator linewidth) are required
+        # fit inputs read from md — fast-fail if either is missing. The domain
+        # derives eta = kappa²/(kappa²+chi²) internally. ``confusion_matrix``
         # (readout correction) and ``cutoff`` (drop high gains before fitting) are
         # optional md inputs, never user knobs; absent → domain defaults.
-        chi, eta = read_chi_eta(req.md)
+        chi, kappa = read_chi_kappa(req.md)
         confusion = req.md.get("confusion_matrix")
         cutoff = req.md.get("cutoff")
         ac_coeff, fig = AcStarkExp().analyze(
             chi,
             req.run_result,
-            eta=eta,
+            kappa=kappa,
             confusion_matrix=confusion,
             cutoff=cutoff,
         )

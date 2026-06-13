@@ -30,9 +30,9 @@ _MISSING_HINT = (
 
 # MetaDict keys the dispersive-shift experiment owns (chi + resonator linewidth).
 _CHI_KEY = "chi"
-_ETA_KEY = "rf_w"
+_KAPPA_KEY = "rf_w"
 
-_CHI_ETA_HINT = (
+_CHI_KAPPA_HINT = (
     "run the dispersive-shift experiment first so 'chi' (dispersive shift) and "
     "'rf_w' (resonator linewidth kappa) are present in the MetaDict"
 )
@@ -53,18 +53,19 @@ def read_ge_centers(md: MetaDict) -> tuple[complex, complex, float]:
     return g_center, e_center, radius
 
 
-def read_chi_eta(md: MetaDict) -> tuple[float, float]:
-    """Read the ``(chi, eta)`` AC-Stark fit inputs from md.
+def read_chi_kappa(md: MetaDict) -> tuple[float, float]:
+    """Read the ``(chi, kappa)`` AC-Stark fit inputs from md.
 
-    ``chi`` is the dispersive shift (md 'chi', MHz) and ``eta`` is the resonator
-    linewidth kappa (md 'rf_w', MHz) — both required by the AC-Stark coefficient
-    fit (``ac_coeff = |b| / (2 * eta * chi)``). Fast-fails with an actionable
+    ``chi`` is the dispersive shift (md 'chi', MHz) and ``kappa`` is the
+    resonator linewidth (md 'rf_w', MHz) — both required by the AC-Stark
+    coefficient fit, which derives ``eta = kappa² / (kappa² + chi²)`` internally
+    (matching the twotone AcStarkExp.analyze). Fast-fails with an actionable
     message if either is absent, so the fit never runs against missing
-    calibration. (The notebook passes 'rf_w' as the linewidth into this slot.)
+    calibration.
     """
-    chi = _require_float(md, _CHI_KEY, _CHI_ETA_HINT)
-    eta = _require_float(md, _ETA_KEY, _CHI_ETA_HINT)
-    return chi, eta
+    chi = _require_float(md, _CHI_KEY, _CHI_KAPPA_HINT)
+    kappa = _require_float(md, _KAPPA_KEY, _CHI_KAPPA_HINT)
+    return chi, kappa
 
 
 def _require_complex(md: MetaDict, key: str) -> complex:

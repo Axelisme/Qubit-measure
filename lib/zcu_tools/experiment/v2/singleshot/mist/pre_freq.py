@@ -180,7 +180,7 @@ class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
         filepath: str,
         result: PreFreqResult | None = None,
         comment: str | None = None,
-        tag: str = "singleshot/mist/gain",
+        tag: str = "singleshot/mist/pre_freq",
         **kwargs,
     ) -> None:
         if result is None:

@@ -3319,7 +3319,7 @@ sh_ac_stark_exp.save(
 %matplotlib inline
 ac_stark_coeff, fig = sh_ac_stark_exp.analyze(
     md.chi,
-    md.rf_w,
+    kappa=md.rf_w,
     confusion_matrix=md.confusion_matrix,
     cutoff=0.05,
 )

@@ -164,7 +164,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         filepath: str,
         result: LenRabiResult | None = None,
         comment: str | None = None,
-        tag: str = "singleshot/ge/rabi_length",
+        tag: str = "singleshot/len_rabi",
         **kwargs,
     ) -> None:
         if result is None:

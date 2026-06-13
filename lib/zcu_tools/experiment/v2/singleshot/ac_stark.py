@@ -239,7 +239,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         chi: float,
         result: AcStarkResult | None = None,
         *,
-        eta: float = 1.0,
+        kappa: float,
         confusion_matrix: NDArray[np.float64] | None = None,
         cutoff: float | None = None,
     ) -> tuple[float, Figure]:
@@ -277,7 +277,10 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         b, c = np.polyfit(s_gains2, s_freqs, 1)
         y_fit = b * x2_fit + c
 
-        # Calculate the Stark shift
+        # Calculate the Stark shift. eta accounts for the finite resonator
+        # linewidth kappa relative to the dispersive shift chi (matches the
+        # twotone AcStarkExp.analyze formula).
+        eta = kappa**2 / (kappa**2 + chi**2)
         ac_coeff = abs(b) / (2 * eta * chi)
 
         # plot the data and the fitted polynomial

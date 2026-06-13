@@ -353,7 +353,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         filepath: str,
         result: T1Result | None = None,
         comment: str | None = None,
-        tag: str = "twotone/t1",
+        tag: str = "singleshot/t1",
         **kwargs,
     ) -> None:
         if result is None:

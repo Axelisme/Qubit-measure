@@ -6,7 +6,7 @@ Covers:
   + make_default_cfg().validate(ml) + filename stem
 - run override: md has GE centres → correct domain run call (mock)
 - run override: md missing centres → fast-fail
-- ac_stark analyze: chi/rf_w present → forwarded into (chi positional, eta kw);
+- ac_stark analyze: chi/rf_w present → forwarded into (chi positional, kappa kw);
   missing chi or rf_w → fast-fail; ac_stark_coeff writeback
 - mist/power_freq + t1_tone_sweep analyze: figure-only result
 - t1_tone_sweep: each adapter lowers exactly one outer sweep (domain
@@ -347,7 +347,7 @@ def test_t1_tone_sweep_run_fast_fails_without_centers(
 # ---------------------------------------------------------------------------
 
 
-def test_ac_stark_analyze_forwards_chi_and_eta(
+def test_ac_stark_analyze_forwards_chi_and_kappa(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, Any] = {}
@@ -358,12 +358,12 @@ def test_ac_stark_analyze_forwards_chi_and_eta(
         chi: float,
         result: Any = None,
         *,
-        eta: float = 1.0,
+        kappa: float,
         confusion_matrix=None,
         cutoff=None,
     ) -> tuple[float, Figure]:
         del self, result
-        captured.update(chi=chi, eta=eta, confusion=confusion_matrix, cutoff=cutoff)
+        captured.update(chi=chi, kappa=kappa, confusion=confusion_matrix, cutoff=cutoff)
         return 3.14, fig
 
     monkeypatch.setattr(AcStarkExp, "analyze", fake_analyze, raising=True)
@@ -377,7 +377,7 @@ def test_ac_stark_analyze_forwards_chi_and_eta(
     assert out.figure is fig
     assert out.ac_stark_coeff == pytest.approx(3.14)
     assert captured["chi"] == pytest.approx(1.5)
-    assert captured["eta"] == pytest.approx(0.8)  # rf_w → eta
+    assert captured["kappa"] == pytest.approx(0.8)  # rf_w → kappa
     assert captured["confusion"] == [[0.9, 0.1], [0.05, 0.95]]
     assert captured["cutoff"] == pytest.approx(0.05)
 
@@ -388,9 +388,9 @@ def test_ac_stark_analyze_cutoff_absent_is_none(
     captured: dict[str, Any] = {}
 
     def fake_analyze(
-        self: Any, chi, result=None, *, eta=1.0, confusion_matrix=None, cutoff=None
+        self: Any, chi, result=None, *, kappa, confusion_matrix=None, cutoff=None
     ) -> tuple[float, Figure]:
-        del self, chi, result, eta, confusion_matrix
+        del self, chi, result, kappa, confusion_matrix
         captured["cutoff"] = cutoff
         return 1.0, Figure()
 
@@ -403,7 +403,7 @@ def test_ac_stark_analyze_cutoff_absent_is_none(
 
 
 @pytest.mark.parametrize("missing", ["chi", "rf_w"])
-def test_ac_stark_analyze_fast_fails_without_chi_or_eta(
+def test_ac_stark_analyze_fast_fails_without_chi_or_kappa(
     missing: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
