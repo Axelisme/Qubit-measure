@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import dataclasses
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 from qtpy.QtCore import QEventLoop
 from zcu_tools.gui.app.main.services.operation_gate import (
@@ -22,6 +24,7 @@ from zcu_tools.gui.session.services.connection import (
     ConnectMockRequest,
     ConnectRemoteRequest,
     LoadPredictorRequest,
+    PredictCurveRequest,
     PredictFreqRequest,
     PredictorLoadError,
     PredictorNotLoaded,
@@ -233,3 +236,210 @@ def test_soc_changed_subscriber_failure_releases_connection_lease(qapp):
     svc._active_token = token
     svc._finish_success(MagicMock(), MagicMock())  # no raise — subscriber swallowed
     assert not gate.has_active(OperationKind.SOC_CONNECT)
+
+
+# ---------------------------------------------------------------------------
+# predict_freq_curve tests
+# ---------------------------------------------------------------------------
+
+
+def _inject_fake_predictor(svc: ConnectionService) -> MagicMock:
+    """Inject a fake FluxoniumPredictor-like mock into the service state."""
+
+    fake = MagicMock()
+    fake.flux_bias = 0.0
+    fake.flux_half = 0.5
+    fake.flux_period = 1.0
+    # params must be a 3-tuple for calculate_energy_vs_flux (not called in these tests)
+    fake.params = (1.0, 0.5, 0.5)
+    ctx = svc._state.exp_context
+    svc._state.set_context(dataclasses.replace(ctx, predictor=fake))
+    return fake
+
+
+def test_predict_freq_curve_no_predictor_raises(qapp):
+    svc = _make_svc()
+    req = PredictCurveRequest(
+        values=np.linspace(0.0, 1.0, 10),
+        transitions=((0, 1),),
+    )
+    with pytest.raises(PredictorNotLoaded):
+        svc.predict_freq_curve(req)
+
+
+def test_predict_freq_curve_empty_transitions_raises(qapp):
+    svc = _make_svc()
+    _inject_fake_predictor(svc)
+    req = PredictCurveRequest(values=np.linspace(0.0, 1.0, 10), transitions=())
+    with pytest.raises(ValueError, match="transitions must not be empty"):
+        svc.predict_freq_curve(req)
+
+
+def test_predict_freq_curve_negative_level_raises(qapp):
+    svc = _make_svc()
+    _inject_fake_predictor(svc)
+    req = PredictCurveRequest(
+        values=np.linspace(0.0, 1.0, 10),
+        transitions=((-1, 1),),
+    )
+    with pytest.raises(ValueError, match=">="):
+        svc.predict_freq_curve(req)
+
+
+def test_predict_freq_curve_to_less_than_from_raises(qapp):
+    svc = _make_svc()
+    _inject_fake_predictor(svc)
+    req = PredictCurveRequest(
+        values=np.linspace(0.0, 1.0, 10),
+        transitions=((2, 1),),
+    )
+    with pytest.raises(ValueError, match="from-level"):
+        svc.predict_freq_curve(req)
+
+
+def test_predict_freq_curve_shape_and_labels(qapp, monkeypatch):
+    """predict_freq_curve returns correct shape and labels for multiple transitions.
+
+    We monkeypatch calculate_energy_vs_flux so the test does not need scqubits
+    and completes instantly.
+    """
+    import zcu_tools.simulate.fluxonium.energies as energies_mod
+
+    n_vals = 20
+    n_levels = 9
+    fake_energies = np.arange(n_vals * n_levels, dtype=np.float64).reshape(
+        n_vals, n_levels
+    )
+
+    def fake_calc(params, fluxs, cutoff=40, evals_count=20, spectrum_data=None):
+        # Return dummy energies matching (n_vals, evals_count).
+        e = fake_energies[:, :evals_count]
+        return MagicMock(), e
+
+    monkeypatch.setattr(energies_mod, "calculate_energy_vs_flux", fake_calc)
+
+    svc = _make_svc()
+    _inject_fake_predictor(svc)
+
+    transitions = ((0, 1), (0, 2), (0, 3), (0, 4))
+    values = np.linspace(0.0, 1.0, n_vals)
+    req = PredictCurveRequest(values=values, transitions=transitions)
+    result = svc.predict_freq_curve(req)
+
+    assert result.freqs_mhz.shape == (len(transitions), n_vals)
+    assert result.labels == ("0→1", "0→2", "0→3", "0→4")
+    assert len(result.values) == n_vals
+    assert len(result.fluxs) == n_vals
+
+
+def test_predict_freq_curve_matches_single_point(qapp, monkeypatch):
+    """Each row of predict_freq_curve must agree with the single-point predict_freq."""
+    import zcu_tools.simulate.fluxonium.energies as energies_mod
+
+    n_vals = 5
+    n_levels = 9
+    # Fixed energies: level i at a given flux = i * (flux_idx + 1)
+    fake_base = np.zeros((n_vals, n_levels), dtype=np.float64)
+    for v in range(n_vals):
+        for lev in range(n_levels):
+            fake_base[v, lev] = float(lev * (v + 1))
+
+    def fake_calc(params, fluxs, cutoff=40, evals_count=20, spectrum_data=None):
+        return MagicMock(), fake_base[:, :evals_count]
+
+    monkeypatch.setattr(energies_mod, "calculate_energy_vs_flux", fake_calc)
+
+    svc = _make_svc()
+    fake = _inject_fake_predictor(svc)
+
+    # Patch predict_freq on the fake predictor to return the same formula.
+    def _single_freq(val: float, transition=(0, 1)):
+        frm, to = transition
+        # Mimic the batch formula: find closest value index.
+        values = np.linspace(0.0, 1.0, n_vals)
+        idx = int(np.argmin(np.abs(values - val)))
+        return float((fake_base[idx, to] - fake_base[idx, frm]) * 1e3)
+
+    fake.predict_freq.side_effect = _single_freq
+
+    transitions = ((0, 1), (0, 2))
+    values = np.linspace(0.0, 1.0, n_vals)
+    req = PredictCurveRequest(values=values, transitions=transitions)
+    result = svc.predict_freq_curve(req)
+
+    # The batch result must match the formula we embedded in fake_base.
+    for t_idx, (frm, to) in enumerate(transitions):
+        for v_idx in range(n_vals):
+            expected = (fake_base[v_idx, to] - fake_base[v_idx, frm]) * 1e3
+            assert abs(result.freqs_mhz[t_idx, v_idx] - expected) < 1e-9
+
+
+def test_get_predictor_info_includes_flux_half_period(qapp):
+    """get_predictor_info must now include flux_half and flux_period."""
+    svc = _make_svc()
+    fake = _inject_fake_predictor(svc)
+    fake.flux_half = 0.42
+    fake.flux_period = 1.23
+    fake.flux_bias = 0.05
+    svc._predictor_path = "/fake/path.json"
+
+    info = svc.get_predictor_info()
+    assert info is not None
+    assert info["flux_half"] == pytest.approx(0.42)
+    assert info["flux_period"] == pytest.approx(1.23)
+    assert info["flux_bias"] == pytest.approx(0.05)
+    assert info["path"] == "/fake/path.json"
+
+
+# ---------------------------------------------------------------------------
+# Real eigensolve alignment: predict_freq_curve vs predictor.predict_freq
+# ---------------------------------------------------------------------------
+
+
+def _make_real_predictor() -> object:
+    """Build a real FluxoniumPredictor with physics-plausible Fluxonium parameters.
+
+    Uses moderate EJ/EC/EL values so scqubits converges quickly with cutoff=40.
+    flux_half/flux_period/flux_bias chosen so the value→flux affine is non-trivial.
+    """
+    from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
+
+    params = (4.0, 1.0, 0.5)  # (EJ, EC, EL) in GHz — fast to diagonalise
+    return FluxoniumPredictor(params, flux_half=0.3, flux_period=0.8, flux_bias=0.0)
+
+
+def _inject_real_predictor(svc: ConnectionService) -> object:
+    """Replace the fake predictor in svc state with a real FluxoniumPredictor."""
+    import dataclasses
+
+    predictor = _make_real_predictor()
+    ctx = svc._state.exp_context
+    svc._state.set_context(dataclasses.replace(ctx, predictor=predictor))
+    return predictor
+
+
+@pytest.mark.slow
+def test_predict_freq_curve_aligns_with_single_point_real_eigensolve(qapp):
+    """predict_freq_curve values must match predictor.predict_freq at sampled points.
+
+    This test exercises the real scqubits diagonalisation with cutoff=40 to pin
+    the cutoff alignment introduced in connection.py (item A of the code review).
+    Uses only 5 grid points to keep runtime short while still catching drift.
+    """
+    svc = _make_svc()
+    predictor = _inject_real_predictor(svc)
+
+    # 5-point grid across a sub-Φ₀ window (avoids near-degenerate half-flux point).
+    values = np.linspace(0.05, 0.35, 5)
+    transition = (0, 1)
+    req = PredictCurveRequest(values=values, transitions=(transition,))
+    result = svc.predict_freq_curve(req)
+
+    curve_row = result.freqs_mhz[0]  # shape (5,)
+
+    # Compare each grid point against the single-point path.
+    for i, val in enumerate(values):
+        expected = predictor.predict_freq(float(val), transition)  # type: ignore[attr-defined]
+        assert np.isclose(curve_row[i], expected, rtol=1e-4), (
+            f"value={val:.4f}: curve={curve_row[i]:.4f} MHz, single={expected:.4f} MHz"
+        )

@@ -66,6 +66,8 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.services.connection import (
         ConnectRequest,
         LoadPredictorRequest,
+        PredictCurveRequest,
+        PredictCurveResult,
         PredictFreqRequest,
     )
     from zcu_tools.gui.session.services.device import (
@@ -282,6 +284,9 @@ class Controller:
 
     def predict_freq(self, req: PredictFreqRequest) -> float:
         return self._conn_svc.predict_freq(req)
+
+    def predict_freq_curve(self, req: PredictCurveRequest) -> PredictCurveResult:
+        return self._conn_svc.predict_freq_curve(req)
 
     def get_predictor_info(self) -> dict | None:
         return self._conn_svc.get_predictor_info()

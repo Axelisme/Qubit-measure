@@ -6,6 +6,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
+from numpy.typing import NDArray
+
 logger = logging.getLogger(__name__)
 
 from qtpy.QtCore import QObject, QThread, QTimer, Signal  # type: ignore[attr-defined]
@@ -64,6 +67,25 @@ class LoadPredictorRequest:
 class PredictFreqRequest:
     value: float
     transition: tuple[int, int]
+
+
+@dataclass(frozen=True)
+class PredictCurveRequest:
+    """Request a batch of transition-frequency curves over a device-value grid."""
+
+    values: NDArray[np.float64]
+    transitions: tuple[tuple[int, int], ...]
+
+
+@dataclass(frozen=True)
+class PredictCurveResult:
+    """Result of a batch curve computation."""
+
+    labels: tuple[str, ...]
+    values: NDArray[np.float64]
+    fluxs: NDArray[np.float64]
+    # shape: (n_transitions, n_values), frequencies in MHz
+    freqs_mhz: NDArray[np.float64]
 
 
 # ---------------------------------------------------------------------------
@@ -189,10 +211,21 @@ class ConnectionService(QObject):
         return self._state.exp_context.predictor
 
     def get_predictor_info(self) -> dict | None:
+        """Return metadata about the current predictor, or None if not loaded.
+
+        Keys: path, flux_bias, flux_half, flux_period.
+        Adding flux_half / flux_period here (vs predictor's attributes) lets
+        the dialog build the affine conversions without importing FluxoniumPredictor.
+        """
         predictor = self._state.exp_context.predictor
         if predictor is None:
             return None
-        return {"path": self._predictor_path, "flux_bias": predictor.flux_bias}
+        return {
+            "path": self._predictor_path,
+            "flux_bias": predictor.flux_bias,
+            "flux_half": predictor.flux_half,
+            "flux_period": predictor.flux_period,
+        }
 
     # ------------------------------------------------------------------
     # Connect (async-shaped API)
@@ -351,3 +384,56 @@ class ConnectionService(QObject):
         if predictor is None:
             raise PredictorNotLoaded("No predictor loaded — load one first")
         return float(predictor.predict_freq(req.value, transition=req.transition))
+
+    def predict_freq_curve(self, req: PredictCurveRequest) -> PredictCurveResult:
+        """Compute f_ij vs device-value curves for multiple transitions in one pass.
+
+        Uses calculate_energy_vs_flux (same backend as FluxoniumPredictor._predict_freq_array)
+        so all transitions share a single diagonalisation sweep — O(n_values) eigen-
+        solves rather than O(n_transitions * n_values). The value→flux conversion
+        replicates the public scalar value_to_flux affine in vectorised form to
+        avoid calling the private _value_to_flux_array.
+        """
+        predictor = self._state.exp_context.predictor
+        if predictor is None:
+            raise PredictorNotLoaded("No predictor loaded — load one first")
+        if len(req.transitions) == 0:
+            raise ValueError("transitions must not be empty")
+        for frm, to in req.transitions:
+            if frm < 0 or to < 0:
+                raise ValueError(f"Transition levels must be >= 0, got ({frm}, {to})")
+            if to < frm:
+                raise ValueError(
+                    f"Transition to-level must be >= from-level, got ({frm}, {to})"
+                )
+
+        # Vectorised value→flux (mirrors the public value_to_flux affine exactly).
+        values = np.asarray(req.values, dtype=np.float64)
+        fluxs = (
+            values + predictor.flux_bias - predictor.flux_half
+        ) / predictor.flux_period + 0.5
+
+        from zcu_tools.simulate.fluxonium.energies import calculate_energy_vs_flux
+
+        evals_count = max(to for _, to in req.transitions) + 5
+        # cutoff=40 must match FluxoniumPredictor._predict_freq_array (predict.py:199)
+        # to keep both code paths numerically consistent.
+        _, energies = calculate_energy_vs_flux(
+            predictor.params, fluxs, cutoff=40, evals_count=evals_count
+        )
+        # energies shape: (n_values, evals_count)
+
+        freq_rows: list[NDArray[np.float64]] = []
+        labels: list[str] = []
+        for frm, to in req.transitions:
+            diff = (energies[:, to] - energies[:, frm]) * 1e3  # GHz→MHz
+            freq_rows.append(np.asarray(diff, dtype=np.float64))
+            labels.append(f"{frm}→{to}")
+
+        freqs_mhz = np.stack(freq_rows, axis=0)  # (n_transitions, n_values)
+        return PredictCurveResult(
+            labels=tuple(labels),
+            values=values,
+            fluxs=fluxs,
+            freqs_mhz=freqs_mhz,
+        )

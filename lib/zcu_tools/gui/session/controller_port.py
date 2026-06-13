@@ -50,6 +50,8 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.services.connection import (
         ConnectRequest,
         LoadPredictorRequest,
+        PredictCurveRequest,
+        PredictCurveResult,
         PredictFreqRequest,
     )
     from zcu_tools.gui.session.services.device import (
@@ -105,6 +107,7 @@ class SessionControllerPort(Protocol):
     def load_predictor(self, req: LoadPredictorRequest) -> None: ...
     def clear_predictor(self) -> None: ...
     def predict_freq(self, req: PredictFreqRequest) -> float: ...
+    def predict_freq_curve(self, req: PredictCurveRequest) -> PredictCurveResult: ...
     def get_predictor_info(self) -> dict | None: ...
 
     # --- device dialog: lifecycle ------------------------------------------

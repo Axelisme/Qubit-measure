@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-13 — InspectDialogBase 第二 consumer：autofluxdep 直接複用（Phase 160c）
+**Last updated:** 2026-06-13 — predictor dialog 互動視覺化（右側 f_ij 曲線 + 可拖動 flux 垂線）
 
 # gui/session/ — 量測 session core（measure + autofluxdep 共用）
 
@@ -13,12 +13,12 @@ session/
 ├── state.py            — SessionState（exp_context+devices/DeviceState+startup_prefs/StartupPrefs+shared VersionTable+device mutators）；DeviceStatus
 ├── ports.py            — session service 依賴的 driven-adapter/seam ports：ExclusionGate(+OperationKind/OperationConflictError)、OffMainScopes、BackgroundExecutor、ProgressHub、ProgressEvent/Kind/Transport、DriverFactoryPort、RememberedDevicePort、ProjectIOPort、ContextReadPort、StartupContextPort
 ├── operation_handles.py— OperationHandles/OperationOutcome/OperationStatus（async Handle/Cancel facet，零 kind）
-├── controller_port.py  — SessionControllerPort：共用 dialog 依賴的窄 Controller 面（setup/context/connection + device lifecycle/queries/progress + predictor load/clear/predict + inspect md/ml）；回傳宣告對 BaseEventBus 故 app EventBus covariant 滿足
+├── controller_port.py  — SessionControllerPort：共用 dialog 依賴的窄 Controller 面（setup/context/connection + device lifecycle/queries/progress + predictor load/clear/predict/curve + inspect md/ml）；回傳宣告對 BaseEventBus 故 app EventBus covariant 滿足
 ├── pbar_host.py        — ProgressBar(worker)/ProgressBarModel(主線程 SSOT)，Qt-free
 ├── adapters/
 │   └── qt_progress_transport.py — QtProgressTransport（worker→主線程 progress marshal，queued signal；app-agnostic）
 ├── services/
-│   ├── connection.py   — ConnectionService（SoC connect worker、predictor IO、typed requests）
+│   ├── connection.py   — ConnectionService（SoC connect worker、predictor IO + 批次曲線計算 predict_freq_curve、typed requests）
 │   ├── context.py      — ContextService（context-switch + md ops + ml del/rename + 單一寫入 primitive apply_ml_writes，CfgSchema lowering 經 callback 注入；MdValueError/MlEntryValidationError）
 │   ├── device.py       — DeviceService（connect/disconnect/setup off-main，**全 port 注入**：gate/bg/progress 必傳）；`_mode_dependent_unit(dev)` module-level helper 集中 YOKOGS200 voltage/current→V/A 判斷（`get_device_unit` + `get_device_unit_strict` 共用，消除逐字重複）
 │   ├── startup.py      — StartupService + PersistedStartup/PersistedDeviceEntry memento + requests + derive_project_paths
@@ -31,7 +31,8 @@ session/
     ├── progress_stack.py — ProgressStack widget（唯一拉 Qt 的 progress 件）
     ├── setup_dialog.py   — Project + Context + Connection 合併（QSplitter）
     ├── device_dialog.py  — 設備管理；per-device panel lazy-import zcu_tools.device.*
-    ├── predictor_dialog.py — FluxoniumPredictor 載入 + 頻率預測（load/clear/predict + PREDICTOR_CHANGED 訂閱）
+    ├── predictor_dialog.py — FluxoniumPredictor 載入 + 頻率預測（左控制 / 右繪圖兩欄；load/clear/predict + PREDICTOR_CHANGED 訂閱）；右欄 PredictorCurveCanvas 與 Flux value spinbox 雙向連動（debounce）
+    ├── predictor_canvas.py — PredictorCurveCanvas：f_ij 曲線 over device value（雙 x 軸 flux/value）+ 可拖動 flux 垂線（方案 B：marker 不折、出窗平移）；主線程同步繪圖不需 marshal
     └── inspect_base.py   — InspectDialogBase：md tab + ml view/rename/del；hook _build_extra_ml_buttons/_on_ml_selection_changed 讓子類加 ml create/modify。**consumers**：measure subclass（InspectDialog，加 CfgEditor create/modify）；autofluxdep **直接用不 subclass**（不要 create/modify）
 ```
 
