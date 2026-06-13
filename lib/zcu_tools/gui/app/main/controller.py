@@ -1145,27 +1145,35 @@ class Controller:
         assert isinstance(self._agent_chat_svc, AgentChatService)
         return self._agent_chat_svc
 
-    def get_agent_runner_callbacks(self):
-        """Return the _RunnerCallbacks tuple wired to this Controller's services.
+    def get_agent_session(self):
+        """Return an AgentSessionPort-conforming backend wired to this Controller.
 
-        Convenience factory so ``AgentChatDialog`` can build an ``AgentRunner``
-        without importing the full callback bundle from agent_runner directly.
-        The dialog still owns the runner instance; this just wires the callbacks.
+        Builds and returns an ``AgentRunner`` (CLI/subscription backend) with
+        all callbacks connected to this Controller's services. The dialog owns
+        the returned instance; calling this method twice creates two independent
+        runners — callers should hold and reuse the reference.
+
+        Annotated as ``AgentSessionPort`` so pyright verifies structural conformance
+        at the call site.
+
+        Future API-mode backend: replace the body to build a different class that
+        implements the same port; AgentChatDialog requires zero changes.
         """
-        from .services.agent_runner import _RunnerCallbacks
+        from .services.agent_runner import (
+            AgentRunner,
+            AssistantTextUpdate,
+            ResultUpdate,
+            SystemInitUpdate,
+            ToolUseUpdate,
+            _RunnerCallbacks,
+        )
+        from .services.ports import AgentSessionPort
 
         def _on_update(updates):  # type: ignore[no-untyped-def]
             # TranscriptUpdate variants → record_* on AgentChatService.
             # Tool *results* are intentionally not recorded: they are verbose
             # payloads (raw JSON) that only add noise — the assistant prose
             # summarises outcomes. Tool *uses* show the name only (no payload).
-            from .services.agent_runner import (
-                AssistantTextUpdate,
-                ResultUpdate,
-                SystemInitUpdate,
-                ToolUseUpdate,
-            )
-
             chat = self.get_agent_chat()
             for update in updates:
                 if isinstance(update, AssistantTextUpdate):
@@ -1195,12 +1203,16 @@ class Controller:
         def _on_process_error(msg: str) -> None:
             self._notify("error", "Agent process error", msg)
 
-        return _RunnerCallbacks(
+        callbacks = _RunnerCallbacks(
             on_update=_on_update,
             on_state_changed=_on_state_changed,
             on_process_error=_on_process_error,
             has_pending_wait=self.has_pending_wait,
         )
+        # parent=None: the dialog will hold the reference; Qt parent is not set
+        # here because the controller does not own the dialog's lifetime.
+        session: AgentSessionPort = AgentRunner(callbacks, parent=None)
+        return session
 
     # ------------------------------------------------------------------
     # Startup application workflow (StartupService)

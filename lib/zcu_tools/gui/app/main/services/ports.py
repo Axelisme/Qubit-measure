@@ -16,10 +16,12 @@ infrastructure capability it has no business using.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
     Any,
+    Literal,
     Protocol,
     runtime_checkable,
 )
@@ -37,6 +39,14 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.main.state import TabInteractionState
 
     from .persistence_types import AppPersistedState
+
+
+# ---------------------------------------------------------------------------
+# AgentState — owned here (contract layer) so both AgentRunner and the port
+# share the same Literal without circular imports.
+# ---------------------------------------------------------------------------
+
+AgentState = Literal["idle", "working", "waiting", "stopped"]
 
 
 @dataclass(frozen=True)
@@ -214,3 +224,57 @@ class CfgEditorPort(Protocol):
     def teardown(self, editor_id: str, *, reason: str = ...) -> None: ...
 
     def get_root(self, editor_id: str) -> SectionLiveField: ...
+
+
+@runtime_checkable
+class AgentSessionPort(Protocol):
+    """Qt-free control/lifecycle surface for an embedded agent backend.
+
+    The frontend (AgentChatDialog) depends only on this port; the concrete
+    backend (currently AgentRunner, CLI/subscription mode) is injected via
+    the Controller factory ``get_agent_session()``.
+
+    Transcript content is delivered separately through AgentChatService
+    (record_assistant / record_tool_use / …); this port is the control face
+    only — start/stop/send and state observation.
+
+    A future API-mode backend (Agent SDK + API key) would implement this same
+    port; AgentChatDialog and any other consumer would require zero changes.
+    """
+
+    @property
+    def state(self) -> AgentState:
+        """Current lifecycle state of the agent session."""
+        ...
+
+    def is_running(self) -> bool:
+        """True when a backend process/task is alive (not yet terminated)."""
+        ...
+
+    def start(self, task: str, repo_root: str) -> None:
+        """Launch a new agent turn with the given task description.
+
+        Fast-fails if a session is already running.
+        """
+        ...
+
+    def send_user_message(self, text: str) -> None:
+        """Deliver a user message into the running session (next stdin turn)."""
+        ...
+
+    def stop(self) -> None:
+        """Request graceful shutdown of the running session."""
+        ...
+
+    def session_id(self) -> str:
+        """Return the session identifier from the last system/init frame."""
+        ...
+
+    def add_state_listener(self, cb: Callable[[AgentState], None]) -> None:
+        """Register a callback that is called on every state transition.
+
+        The callback is always invoked on the main thread. Exceptions raised
+        by the callback are swallowed (logged) so they cannot interrupt the
+        state machine or other listeners.
+        """
+        ...

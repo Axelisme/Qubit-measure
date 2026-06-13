@@ -36,7 +36,7 @@ import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from qtpy.QtCore import (  # type: ignore[attr-defined]
     QObject,
@@ -46,6 +46,8 @@ from qtpy.QtCore import (  # type: ignore[attr-defined]
 
 if TYPE_CHECKING:
     pass
+
+from .ports import AgentState  # noqa: E402  (after TYPE_CHECKING block)
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +135,11 @@ TranscriptUpdate = (
 # AgentRunState
 # ---------------------------------------------------------------------------
 
-AgentState = Literal["idle", "working", "waiting", "stopped"]
+# AgentState is defined in .ports (the contract layer) and re-exported here
+# so that existing import sites (``from agent_runner import AgentState``) do
+# not need to change immediately. New code should import from .ports directly.
+# The import of AgentState from .ports above makes it a module-level name,
+# so ``from agent_runner import AgentState`` already works without __all__.
 
 
 class AgentRunState:
@@ -502,6 +508,8 @@ class AgentRunner(QObject):
         self._stdout_buf = bytearray()
         # Path to the temp MCP config written by the last start() call.
         self._mcp_config_path: str = ""
+        # AgentSessionPort compliance: listeners registered via add_state_listener.
+        self._state_listeners: list[Callable[[AgentState], None]] = []
 
     # ------------------------------------------------------------------
     # Public API
@@ -617,6 +625,16 @@ class AgentRunner(QObject):
         """Return the session_id from the last ``system/init`` frame (B1 use)."""
         return self._parser.session_id
 
+    def add_state_listener(self, cb: Callable[[AgentState], None]) -> None:
+        """Register a callback invoked on every state transition (main-thread).
+
+        Implements AgentSessionPort. Exceptions raised by ``cb`` are swallowed
+        and logged so they cannot interrupt the state machine or other listeners.
+        Duplicate registrations are silently ignored.
+        """
+        if cb not in self._state_listeners:
+            self._state_listeners.append(cb)
+
     # ------------------------------------------------------------------
     # QProcess slots (main-thread)
     # ------------------------------------------------------------------
@@ -695,4 +713,11 @@ class AgentRunner(QObject):
         self._callbacks.on_process_error(msg)
 
     def _emit_state(self) -> None:
-        self._callbacks.on_state_changed(self._run_state.state)
+        current = self._run_state.state
+        self._callbacks.on_state_changed(current)
+        # Notify AgentSessionPort listeners registered via add_state_listener.
+        for cb in self._state_listeners:
+            try:
+                cb(current)
+            except Exception:
+                logger.exception("AgentRunner: state listener %r raised; swallowed", cb)

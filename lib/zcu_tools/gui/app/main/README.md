@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-13（Phase B0：AgentRunner + embedded claude child + stream-json parser）
+**Last updated:** 2026-06-13（Phase B1a：AgentSessionPort seam + 可插拔後端）
 
 # `zcu_tools/gui/app/main/` — measure-gui Framework AI Note
 
@@ -49,13 +49,13 @@ gui/
 │   ├── analyze.py        — AnalyzeService (主分析層：FIT worker + INTERACTIVE finish；算 writeback items)
 │   ├── post_analyze.py   — PostAnalyzeService (第二分析層，鏡像 AnalyzeService：FIT-only、在 primary analyze 結果之上重算、gate on primary 已存在；State 平行 post_* 欄位)
 │   ├── agent_chat.py     — AgentChatService (純 Python、非 QObject)：ring buffer ~1000 TranscriptEntry、8 種 kind (activity/feedback/diagnostic + B0 stream kinds: assistant/tool_use/tool_result/system/result)、plain observer list；activity tap 在 embedded active 時 skip；set_embedded_active/is_embedded_active 控制；session_id 留 B1 resume 用。
-│   ├── agent_runner.py   — AgentRunner（QObject，B0）：QProcess spawn claude --output-format stream-json；StreamJsonParser line-buffer 解各 frame type；AgentRunState 狀態機 (idle/working/waiting/stopped)；build_loopback_mcp_config 寫暫存 mcp.json（repo_root cwd + uv run measure/server.py）；send_user_message 寫 stdin；stop() SIGINT；callbacks 注入 (on_update/on_state_changed/on_process_error/has_pending_wait)。
+│   ├── agent_runner.py   — AgentRunner（QObject，B0）：QProcess spawn claude --output-format stream-json；StreamJsonParser line-buffer 解各 frame type；AgentRunState 狀態機 (idle/working/waiting/stopped)；build_loopback_mcp_config 寫暫存 mcp.json（repo_root cwd + uv run measure/server.py）；send_user_message 寫 stdin；stop() SIGINT；callbacks 注入 (on_update/on_state_changed/on_process_error/has_pending_wait)。**B1a**：實作 AgentSessionPort（add_state_listener + 既有 6 成員）；`AgentState` 定義已搬到 ports.py、此處 re-export 維持向後相容。
 │   ├── tab.py            — TabService (分頁狀態與 tab-local query/update)
 │   ├── tab_view.py       — TabViewService / TabViewSnapshot (pure tab render read model)
 │   ├── save.py           — SaveService (資料/圖片儲存 pipeline)
 │   ├── writeback.py      — WritebackService (分析結果寫回 md/ml)
 │   ├── cfg_editor.py     — CfgEditorSession (aggregate root：set_field/commit_schema 行為上身，只到 CfgSchema 快照) + CfgEditorService (Repository：lifecycle/LRU/變更流)；commit 把 CfgSchema 交 ContextWritePort 寫 (ADR-0006，session 不再 lower/register)
-│   ├── ports.py          — driven-adapter / sibling-service ports (Protocol)：PersistOriginator(Caretaker↔Controller 窄介面)/ProjectIO/DriverFactory/ContextRead/ContextWrite(+ContextWrites batch)/WritebackQuery/TabLifecycle/StartupContext/RememberedDevice。app service 依賴 port 而非具體 infra/sibling (ADR-0005/0006)
+│   ├── ports.py          — driven-adapter / sibling-service ports (Protocol)：PersistOriginator(Caretaker↔Controller 窄介面)/ProjectIO/DriverFactory/ContextRead/ContextWrite(+ContextWrites batch)/WritebackQuery/TabLifecycle/StartupContext/RememberedDevice。**B1a 新增**：`AgentState = Literal[idle/working/waiting/stopped]`（contract 層所有者）+ `AgentSessionPort`（@runtime_checkable Protocol，Qt-free 控制面：`state/is_running/start/send_user_message/stop/session_id/add_state_listener`）；未來 API-mode 後端實作同 port、前端零改。app service 依賴 port 而非具體 infra/sibling (ADR-0005/0006)
 │   └── remote/           — RemoteControlAdapter：第二個 driving View，是共用 NdjsonRpcEndpoint 上的 router；socket/NDJSON-over-TCP transport 住在共用層 zcu_tools.gui.remote（見下「共用 transport 層」）
 │       ├── method_specs.py — METHOD_SPECS 契約表 (wire 參數型別 SSOT)；MethodSpec 型別來自 gui.remote
 │       └── dispatch.py     — BoundMethod 綁 handler→METHOD_SPECS；METHOD_REGISTRY
@@ -64,7 +64,7 @@ gui/
     ├── cfg_form.py         — CfgFormWidget：LiveModel 反應式容器
     ├── fields/             — 渲染邏輯：registry.py / common.py / containers.py
     ├── inspect_dialog.py   — InspectDialog(InspectDialogBase 子類)：只補 ml create/modify（_MlCreateDialog/_MlModifyDialog 拖 CfgEditor）；md tab + ml view/rename/del 在 base（session）
-    ├── agent_chat_dialog.py — AgentChatDialog(QDialog)：非模態 transcript 視圖（QPlainTextEdit readOnly）+ Start/Stop 按鈕 + 狀態列 + 輸入框；B0 lazy 建 AgentRunner（Start 點後）；_on_send 依 runner state 路由（working→stdin、waiting/has_pending_wait→inbox.post、idle→inbox.post）；finished 時 remove_listener + stop runner。
+    ├── agent_chat_dialog.py — AgentChatDialog(QDialog)：非模態 transcript 視圖（QPlainTextEdit readOnly）+ Start/Stop 按鈕 + 狀態列 + 輸入框；**B1a**：依賴 AgentSessionPort（非 concrete AgentRunner）；_ensure_session() 首次建 session 並 add_state_listener(_update_runner_ui)（取代舊 rewrap hack）；_on_send 依 state 路由（working→send_user_message、waiting/has_pending_wait→inbox.post、idle→start）；finished 時 remove_listener + stop session。Controller.get_agent_session() 是唯一建構點；未來 API 後端同 port 可插拔。
     ├── main_window.py      — MainWindow(QMainWindow) 實作 ViewProtocol；toolbar 有 Agent… 按鈕（_open_agent_chat lazy 建/raise-existing）；舊 feedback bar 已移除
     └── analyze_form.py     — AnalyzeFormWidget：扁平 analysis 參數表單
 （共用件已下放 session：setup_dialog/device_dialog/predictor_dialog/inspect_base 在 `gui/session/ui/`（吃 `SessionControllerPort`）、ProgressService/IOManager 在 `gui/session/services/`、QtProgressTransport 在 `gui/session/adapters/`、TrimDoubleSpinBox 在 `gui/widgets/spinbox.py`。measure 保留 app-local OperationGate/BackgroundService（policy/Qt facet）+ 自己的 cfg-editor/role-catalog/inspect ml-edit）

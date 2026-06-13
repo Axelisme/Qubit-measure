@@ -7,11 +7,12 @@ diagnostics, AND the embedded claude child's stream-json output (B0).
 B0 additions
 ------------
 - **Start** button: opens an optional task-prompt dialog, then spawns the
-  embedded ``claude`` child via ``AgentRunner``.
+  embedded ``claude`` child via the backend obtained from
+  ``Controller.get_agent_session()``.
 - **Stop** button: sends SIGINT to the child.
 - **Status bar**: shows idle / working / waiting / stopped plus the last
   result cost (optional).
-- **Input routing**: ``Send`` routes text depending on ``AgentRunState``:
+- **Input routing**: ``Send`` routes text depending on ``AgentState``:
     - idle or stopped → queued into the FeedbackInbox (unchanged Phase-A path)
     - working → sent as stdin message to the running claude child
     - waiting (has_pending_wait) → sent as FeedbackInbox feedback wakeup
@@ -23,6 +24,11 @@ does not clear the transcript (service owns the history; re-opening shows it).
 Threading: all Qt mutations here are on the main thread. The listener registered
 into AgentChatService is called synchronously by that service, which itself is
 always called from the main thread — no cross-thread Qt calls occur.
+
+B1a: the dialog depends only on ``AgentSessionPort`` (Qt-free control surface)
+and never imports the concrete ``AgentRunner``. The Controller factory
+``get_agent_session()`` injects the CLI/subscription backend; a future API-mode
+backend would implement the same port without any dialog changes.
 """
 
 from __future__ import annotations
@@ -45,7 +51,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.controller import Controller
     from zcu_tools.gui.app.main.services.agent_chat import AgentChatService
-    from zcu_tools.gui.app.main.services.agent_runner import AgentRunner, AgentState
+    from zcu_tools.gui.app.main.services.ports import AgentSessionPort, AgentState
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +78,9 @@ class AgentChatDialog(QDialog):
         self._ctrl = ctrl
         self._chat: AgentChatService = ctrl.get_agent_chat()
 
-        # B0: embedded AgentRunner (created lazily on first Start click).
-        self._runner: AgentRunner | None = None
+        # B1a: session backend obtained lazily from the Controller factory.
+        # The type is AgentSessionPort (Qt-free); no concrete AgentRunner import.
+        self._session: AgentSessionPort | None = None
 
         self.setWindowTitle("Agent Chat")
         self.resize(700, 560)
@@ -162,8 +169,22 @@ class AgentChatDialog(QDialog):
         return entry.text
 
     # ------------------------------------------------------------------
-    # B0 — Start / Stop
+    # B0/B1a — Start / Stop
     # ------------------------------------------------------------------
+
+    def _ensure_session(self) -> AgentSessionPort:
+        """Return the session backend, creating it on first call.
+
+        Registers ``_update_runner_ui`` as a state listener so the dialog
+        refreshes without any callback rewrap hack (B1a).
+        """
+        if self._session is None:
+            self._session = self._ctrl.get_agent_session()
+            # Subscribe to state changes; the listener holds a reference to self
+            # which is fine — the dialog owns the session lifetime and unregisters
+            # on close.
+            self._session.add_state_listener(self._update_runner_ui)
+        return self._session
 
     def _on_start(self) -> None:
         """Prompt for a task and spawn the embedded claude child."""
@@ -178,43 +199,16 @@ class AgentChatDialog(QDialog):
             return
         task = task.strip()
 
-        # Build or reuse runner.
-        if self._runner is None:
-            self._runner = self._build_runner()
-
+        session = self._ensure_session()
         repo_root = self._ctrl.get_project_root()
-        self._runner.start(task, repo_root)
+        session.start(task, repo_root)
         # Record a local transcript note that a new session was started.
         self._chat.record_feedback(f"[start] {task}")
 
     def _on_stop(self) -> None:
         """Send SIGINT to the running agent."""
-        if self._runner is not None:
-            self._runner.stop()
-
-    def _build_runner(self) -> AgentRunner:
-        """Instantiate AgentRunner wired to this Controller."""
-        from zcu_tools.gui.app.main.services.agent_runner import AgentRunner
-
-        callbacks = self._ctrl.get_agent_runner_callbacks()
-
-        # Wrap the supplied on_state_changed to also update dialog UI.
-        _original_state_cb = callbacks.on_state_changed
-
-        def _on_state_with_ui(state: AgentState) -> None:
-            _original_state_cb(state)
-            self._update_runner_ui(state)
-
-        # Replace the callback with the wrapped version.
-        from zcu_tools.gui.app.main.services.agent_runner import _RunnerCallbacks
-
-        wired = _RunnerCallbacks(
-            on_update=callbacks.on_update,
-            on_state_changed=_on_state_with_ui,
-            on_process_error=callbacks.on_process_error,
-            has_pending_wait=callbacks.has_pending_wait,
-        )
-        return AgentRunner(wired, parent=self)
+        if self._session is not None:
+            self._session.stop()
 
     def _update_runner_ui(self, state: AgentState) -> None:
         """Refresh the Start/Stop buttons and status label for the new state."""
@@ -247,21 +241,20 @@ class AgentChatDialog(QDialog):
         if not text:
             return
 
-        runner = self._runner
+        session = self._session
 
         # No live process → start a new turn/session with this text.
-        if runner is None or not runner.is_running():
-            if runner is None:
-                runner = self._runner = self._build_runner()
+        if session is None or not session.is_running():
+            session = self._ensure_session()
             repo_root = self._ctrl.get_project_root()
-            runner.start(text, repo_root)
+            session.start(text, repo_root)
             self._chat.record_feedback(text)
             self._input.clear()
             self._set_status("Started agent.")
             return
 
         # Live process blocked on an operation → wake via feedback inbox.
-        if runner.state == "waiting" or self._ctrl.has_pending_wait():
+        if session.state == "waiting" or self._ctrl.has_pending_wait():
             self._ctrl.get_feedback_inbox().post(text)
             self._chat.record_feedback(text)
             self._input.clear()
@@ -269,7 +262,7 @@ class AgentChatDialog(QDialog):
             return
 
         # Live process between/within turns → next user turn via stdin.
-        runner.send_user_message(text)
+        session.send_user_message(text)
         self._chat.record_feedback(text)
         self._input.clear()
         self._set_status("Sent to agent.")
@@ -288,9 +281,9 @@ class AgentChatDialog(QDialog):
         """Remove listener when the dialog is closed/destroyed (WA_DeleteOnClose).
 
         Prevents a stale reference from calling Qt widget methods after deletion.
-        If the runner is still active, stop it so the child process does not
+        If the session is still active, stop it so the child process does not
         outlive the dialog.
         """
         self._chat.remove_listener(self._on_transcript_changed)
-        if self._runner is not None and self._runner.state in ("working", "waiting"):
-            self._runner.stop()
+        if self._session is not None and self._session.state in ("working", "waiting"):
+            self._session.stop()
