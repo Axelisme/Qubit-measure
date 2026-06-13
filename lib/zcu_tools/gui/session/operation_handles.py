@@ -16,11 +16,18 @@ the handle here, then frees the exclusion (if any).
 Session-core (``gui/session``): the handle lifecycle carries zero operation-kind
 knowledge, so it is shared verbatim by every session-driving app; each app keeps
 its own ``OperationGate`` exclusion policy.
+
+ADR-0023 extension: ``await_outcome`` supports a second wakeup source via
+``FeedbackInbox`` — a thread-safe queue of user-feedback strings. A pending wait
+returns early with reason='user_feedback' when a feedback arrives; the operation
+handle is left unsettled (the operation keeps running). This is a non-terminal
+return; the same handle can be awaited again.
 """
 
 from __future__ import annotations
 
 import logging
+import queue
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -35,7 +42,15 @@ logger = logging.getLogger(__name__)
 # losing the recorded outcome, which then reads as a default 'finished').
 _DONE_EVENT_LIMIT = 32
 
+# Poll-tick duration for the feedback-aware wait. Short enough for responsive
+# feedback delivery; long enough not to busy-spin. The outer timeout is honoured
+# with resolution at this granularity.
+_AWAIT_TICK_SECONDS: float = 2.0
+
 OperationStatus = Literal["pending", "finished", "failed", "cancelled"]
+
+# Reason tag for AwaitResult: what caused await_outcome to return.
+AwaitReason = Literal["completed", "user_feedback", "timeout"]
 
 
 @dataclass(frozen=True)
@@ -52,6 +67,75 @@ class OperationOutcome:
     error: str | None = None
 
 
+@dataclass(frozen=True)
+class AwaitResult:
+    """The result of one ``await_outcome`` call (ADR-0023).
+
+    ``reason`` distinguishes the three return paths:
+    - ``'completed'``: the operation settled (terminal). ``outcome`` is set.
+    - ``'user_feedback'``: a feedback string arrived before the op settled (non-
+      terminal). ``feedback`` is set; the operation is still running and the handle
+      can be awaited again.
+    - ``'timeout'``: the bounded wait elapsed without the op settling or feedback
+      arriving (non-terminal). The operation is still running.
+    """
+
+    reason: AwaitReason
+    outcome: OperationOutcome | None = None
+    feedback: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.reason == "completed" and self.outcome is None:
+            raise ValueError("AwaitResult with reason='completed' must have outcome")
+        if self.reason == "user_feedback" and not self.feedback:
+            raise ValueError(
+                "AwaitResult with reason='user_feedback' must have feedback"
+            )
+
+
+class FeedbackInbox:
+    """Thread-safe inbox for user-feedback strings (ADR-0023).
+
+    Written on the Qt main thread (GUI widget); read/drained on an IO worker
+    thread (``await_outcome``). The ``notify_event`` fires on every ``post``
+    so that a blocked ``await_outcome`` poll-tick is woken early.
+
+    Session-scoped: inbox is never persisted; cleared on a new session context.
+    Not stored in State (State main-thread write invariant).
+    """
+
+    def __init__(self) -> None:
+        self._q: queue.SimpleQueue[str] = queue.SimpleQueue()
+        # Set by post(), cleared by drain(); allows await to detect new feedback
+        # without draining prematurely (notify_event is level-triggered: stays set
+        # until drained).
+        self.notify_event: threading.Event = threading.Event()
+
+    def post(self, text: str) -> None:
+        """Enqueue a feedback string and wake any pending await. Main-thread only."""
+        if not text.strip():
+            return  # ignore whitespace-only feedback
+        self._q.put(text)
+        self.notify_event.set()
+
+    def drain(self) -> list[str]:
+        """Drain all pending feedback strings; clear the notify_event. Thread-safe."""
+        msgs: list[str] = []
+        while True:
+            try:
+                msgs.append(self._q.get_nowait())
+            except queue.Empty:
+                break
+        # Clear only after draining; a concurrent post between the loop and here
+        # would re-set the event, which is correct (the next poll tick picks it up).
+        self.notify_event.clear()
+        return msgs
+
+    def has_pending(self) -> bool:
+        """True if at least one feedback string is waiting. Thread-safe best-effort."""
+        return not self._q.empty()
+
+
 class OperationHandles:
     """Async-operation handles keyed by token: create / settle / await / poll /
     cancel (ADR-0019). The completion ``Event`` lets a blocking off-main handler
@@ -61,7 +145,7 @@ class OperationHandles:
     callback), and the worker self-translates "stopped" into a ``cancelled``
     outcome."""
 
-    def __init__(self) -> None:
+    def __init__(self, feedback_inbox: FeedbackInbox | None = None) -> None:
         self._next_token = 1
         # Live (pending) operations: token -> not-yet-set completion Event.
         self._events: dict[int, threading.Event] = {}
@@ -73,6 +157,15 @@ class OperationHandles:
         self._done: OrderedDict[int, tuple[threading.Event, OperationOutcome]] = (
             OrderedDict()
         )
+        # Optional shared feedback inbox (ADR-0023). When set, await_outcome
+        # returns early with reason='user_feedback' on the next poll tick where
+        # feedback is present. None disables the second wakeup source (for tests
+        # or apps that do not use feedback).
+        self._feedback_inbox: FeedbackInbox | None = feedback_inbox
+
+    def set_feedback_inbox(self, inbox: FeedbackInbox) -> None:
+        """Wire the shared feedback inbox (called by app wiring after construction)."""
+        self._feedback_inbox = inbox
 
     def create(self, stop_event: threading.Event | None = None) -> int:
         """Mint an operation token and open its handle (pending). ``stop_event``
@@ -132,26 +225,98 @@ class OperationHandles:
             self.cancel(token)
         return tokens
 
-    def await_outcome(self, token: int, timeout: float) -> OperationOutcome | None:
-        """Block until the token settles; return its outcome.
+    def await_outcome(self, token: int, timeout: float) -> AwaitResult | None:
+        """Block until the token settles or a wakeup condition fires.
 
-        Thread-safe; for off-main blocking handlers. A token with no live or
-        retained Event is treated as already-done (returns a default 'finished'
-        outcome) so callers never hang on an operation that finished before they
-        began waiting. Returns None only on timeout while still pending.
+        Thread-safe; for off-main blocking handlers. Returns:
+        - ``AwaitResult(reason='completed', outcome=<outcome>)`` when the
+          operation settles (terminal). Never None on this path.
+        - ``AwaitResult(reason='user_feedback', feedback=<text>)`` when a user
+          feedback string arrives before the op settles (non-terminal). The
+          operation is still running; the caller may re-await the same token.
+        - ``AwaitResult(reason='timeout', ...)`` when the bounded ``timeout``
+          elapses without completion or feedback (non-terminal).
+        - ``None`` is never returned (kept as a contract break to distinguish from
+          the old API during the migration; all callers must handle AwaitResult).
+
+        ADR-0023: the feedback wakeup path is intentionally non-terminal — it
+        does NOT settle the handle. The operation continues running and the caller
+        (agent) decides whether to cancel or continue awaiting.
+
+        A token with no live or retained Event is treated as already-done
+        (returns a completed 'finished' outcome) so callers never hang on an
+        operation that finished before they began waiting.
         """
+        # Fast-path: already settled before this call.
         live = self._events.get(token)
-        if live is not None:
-            if not live.wait(timeout=timeout):
-                return None
-            # Woken by settle(), which moved the token into _done with its outcome.
+        if live is None:
             retained = self._done.get(token)
-            return retained[1] if retained is not None else OperationOutcome("finished")
-        retained = self._done.get(token)
-        if retained is not None:
-            return retained[1]
-        # Unknown / evicted: treat as already finished.
-        return OperationOutcome("finished")
+            if retained is not None:
+                return AwaitResult(reason="completed", outcome=retained[1])
+            # Unknown / evicted: treat as already finished.
+            return AwaitResult(reason="completed", outcome=OperationOutcome("finished"))
+
+        inbox = self._feedback_inbox
+
+        # --- pre-enter check: drain feedback accumulated between waits --------
+        # If feedback arrived while no await was active (inbox-to-next-wait
+        # residual), return it immediately without blocking. This guarantees
+        # that feedback sent between two awaits is delivered on the very next
+        # await entry rather than waiting a full tick.
+        if inbox is not None and inbox.has_pending():
+            msgs = inbox.drain()
+            if msgs:
+                feedback_text = "\n".join(msgs)
+                logger.debug(
+                    "await_outcome: pre-enter feedback for token=%d: %r",
+                    token,
+                    feedback_text,
+                )
+                return AwaitResult(reason="user_feedback", feedback=feedback_text)
+
+        # --- poll-loop: check operation + feedback each tick ------------------
+        # Using a short-tick poll rather than two parallel threads avoids the
+        # complexity of safely joining a companion thread that may outlive the
+        # caller. Tick granularity is _AWAIT_TICK_SECONDS; the outer timeout is
+        # honoured to within one tick.
+        import time
+
+        deadline = time.monotonic() + timeout
+
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return AwaitResult(reason="timeout")
+
+            tick = min(_AWAIT_TICK_SECONDS, remaining)
+
+            # Wait on the operation event; wake early when the operation settles
+            # OR when the tick elapses (whichever comes first).
+            settled = live.wait(timeout=tick)
+
+            if settled:
+                # Operation completed — terminal return.
+                retained = self._done.get(token)
+                outcome = (
+                    retained[1]
+                    if retained is not None
+                    else OperationOutcome("finished")
+                )
+                return AwaitResult(reason="completed", outcome=outcome)
+
+            # Check feedback inbox on every tick (including after the tick timeout).
+            if inbox is not None and inbox.has_pending():
+                msgs = inbox.drain()
+                if msgs:
+                    feedback_text = "\n".join(msgs)
+                    logger.debug(
+                        "await_outcome: feedback wakeup for token=%d: %r",
+                        token,
+                        feedback_text,
+                    )
+                    return AwaitResult(reason="user_feedback", feedback=feedback_text)
+
+            # Neither settled nor feedback — continue loop until outer deadline.
 
     def poll(self, token: int) -> OperationOutcome | None:
         """Non-blocking: outcome if settled (or unknown), None if still pending."""

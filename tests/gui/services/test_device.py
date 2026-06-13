@@ -297,8 +297,11 @@ def test_wait_setup_done_wakes_from_worker_thread_without_deadlock(qapp):
         time.sleep(0.01)
     wt.join(timeout=1.0)
 
-    outcome: Any = result.get("outcome")
-    assert outcome is not None and outcome.status == "finished"
+    await_result: Any = result.get("outcome")
+    assert await_result is not None
+    assert await_result.reason == "completed"
+    assert await_result.outcome is not None
+    assert await_result.outcome.status == "finished"
     dt = result.get("dt")
     assert isinstance(dt, float)
     assert dt < 2.0  # woke shortly after the 0.5s setup, not on timeout
@@ -334,9 +337,12 @@ def test_wait_setup_done_raises_on_setup_failure(qapp):
         time.sleep(0.01)
     wt.join(timeout=1.0)
 
-    outcome: Any = result.get("outcome")
-    assert outcome is not None and outcome.status == "failed"
-    assert "hardware boom" in str(outcome.error)
+    await_result: Any = result.get("outcome")
+    assert await_result is not None
+    assert await_result.reason == "completed"
+    assert await_result.outcome is not None
+    assert await_result.outcome.status == "failed"
+    assert "hardware boom" in str(await_result.outcome.error)
 
 
 def test_disconnect_close_failure_retains_connected_device_and_releases_gate(qapp):

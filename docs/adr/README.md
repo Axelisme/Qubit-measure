@@ -52,3 +52,4 @@
 ## IX. 多 agent 協作
 
 - [0022 — taskboard 為主協調層、worktree 為輔](0022-agent-coordination-taskboard.md)：多 agent 共享 checkout 的協調＝stdio MCP taskboard（file-backed JSON+flock、path 衝突偵測、read/write 鎖、資源 token、pending/wait、TTL 自動回收、md 視圖）；worktree 解不了 singleton 資源爭用故僅為輔。
+- [0023 — Cooperative interrupt：feedback 喚醒 pending wait](0023-cooperative-interrupt-feedback-wakeup.md)：訂閱認證下讓 user 即時糾正操作 GUI 的 agent＝給單一共用 await（`await_outcome`）加第二喚醒源（thread-safe feedback inbox），pending wait 提早返回帶判別 payload `{reason,result?,feedback?}`；擴展 [[0002]]、具體化擱置的 gui-inbox（piggyback 降為被動 residual）。

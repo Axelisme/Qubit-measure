@@ -928,6 +928,24 @@ class MainWindow(QMainWindow):
         self._tabs.currentChanged.connect(self._on_current_tab_changed)
         main_layout.addWidget(self._tabs, stretch=1)
 
+        # --- agent feedback bar (ADR-0023) ---
+        # Lets the user send a feedback string to a blocked agent wait.
+        feedback_bar = QHBoxLayout()
+        feedback_bar.setContentsMargins(4, 0, 4, 0)
+        feedback_label = QLabel("Agent feedback:")
+        feedback_bar.addWidget(feedback_label)
+        self._feedback_input = QLineEdit()
+        self._feedback_input.setPlaceholderText("Type feedback for the agent…")
+        self._feedback_input.returnPressed.connect(self._on_feedback_send)
+        feedback_bar.addWidget(self._feedback_input, stretch=1)
+        self._feedback_send_btn = QPushButton("Send")
+        self._feedback_send_btn.clicked.connect(self._on_feedback_send)
+        feedback_bar.addWidget(self._feedback_send_btn)
+        self._feedback_status_label = QLabel("")
+        self._feedback_status_label.setStyleSheet("color: gray; font-style: italic;")
+        feedback_bar.addWidget(self._feedback_status_label)
+        main_layout.addLayout(feedback_bar)
+
         # --- status bar ---
         self._status_bar = QStatusBar()
         self.setStatusBar(self._status_bar)
@@ -1280,6 +1298,32 @@ class MainWindow(QMainWindow):
         if isinstance(current, ExpTabWidget):
             return current._splitter_left_saved
         return DEFAULT_LEFT_PANEL_WIDTH
+
+    # ------------------------------------------------------------------
+    # Agent feedback (ADR-0023): user → agent wakeup channel
+    # ------------------------------------------------------------------
+
+    def _on_feedback_send(self) -> None:
+        """Post the feedback text to the inbox (main-thread safe).
+
+        If a pending await is active (has_pending_wait), the text wakes it
+        immediately; otherwise it lands in the inbox and is delivered at the
+        next wait entry.
+        """
+        text = self._feedback_input.text().strip()
+        if not text:
+            return
+        inbox = self._ctrl.get_feedback_inbox()
+        inbox.post(text)
+        self._feedback_input.clear()
+        if self._ctrl.has_pending_wait():
+            self._feedback_status_label.setText("Sent — agent will see it now.")
+        else:
+            self._feedback_status_label.setText(
+                "Queued — agent will see it at the next wait."
+            )
+        # Clear the status label after 4 s so it does not linger.
+        QTimer.singleShot(4000, lambda: self._feedback_status_label.setText(""))
 
     def notify_diagnostic(self, severity: str, title: str, message: str) -> None:
         """DiagnosticSink impl (ADR-0013): render a Controller diagnostic the Qt

@@ -1077,25 +1077,41 @@ def _h_device_active_operations(
 def _h_operation_await(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    # off_main_thread handler: blocks the IO worker thread on the gate's
-    # thread-safe registry (never touches main-thread-owned state). Returns the
-    # terminal outcome; failed/cancelled become a PRECONDITION_FAILED so the
-    # caller's await raises; timeout becomes TIMEOUT.
+    # off_main_thread handler: blocks the IO worker thread on the handle's
+    # thread-safe registry (never touches main-thread-owned state). Returns a
+    # structured payload with reason in {'completed', 'user_feedback', 'timeout'}
+    # (ADR-0023). failed/cancelled are still raised as PRECONDITION_FAILED so
+    # existing callers see an error; other reasons are returned as wire data.
     operation_id = int(params["operation_id"])  # type: ignore[arg-type]
     timeout = float(params["timeout"])  # type: ignore[arg-type]
-    outcome = adapter.ctrl.await_operation(operation_id, timeout)
-    if outcome is None:
+    result = adapter.ctrl.await_operation(operation_id, timeout)
+    if result is None:
+        # Should not happen with the new API, but guard for forward-compat.
         raise RemoteError(
             ErrorCode.TIMEOUT,
             f"operation {operation_id} did not complete within {timeout}s",
         )
+    if result.reason == "timeout":
+        raise RemoteError(
+            ErrorCode.TIMEOUT,
+            f"operation {operation_id} did not complete within {timeout}s",
+        )
+    if result.reason == "user_feedback":
+        # Non-terminal: operation still running; feedback delivered to the agent.
+        return {
+            "reason": "user_feedback",
+            "feedback": result.feedback,
+        }
+    # reason == 'completed'
+    outcome = result.outcome
+    assert outcome is not None  # invariant: completed always has outcome
     if outcome.status in ("failed", "cancelled"):
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
             outcome.error or f"operation {outcome.status}",
             reason=outcome.status,
         )
-    return {"status": outcome.status}
+    return {"reason": "completed", "status": outcome.status}
 
 
 # ---------------------------------------------------------------------------

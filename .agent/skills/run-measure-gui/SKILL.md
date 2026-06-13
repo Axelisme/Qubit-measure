@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 19
+skill_version: 20
 ---
 
 # run-measure-gui
@@ -168,6 +168,23 @@ you. So for a long run, pick by who should wait:
 Reserve inline `gui_run_wait` for runs you expect to finish quickly. The same
 choice applies to `gui_connect_wait` / `gui_device_wait_operation`, though those
 ops are usually short.
+
+### User feedback wakeup (cooperative interrupt — ADR-0023)
+
+While you are blocked inside any `*_wait` tool, the user can type into the
+GUI's feedback bar (a text field above the status bar) and click Send. The
+wait returns early with:
+
+```json
+{"status": "user_feedback", "feedback": "<user's text>"}
+```
+
+The operation is **not cancelled** — it keeps running. You should:
+1. Read and act on `feedback` (re-plan, adjust parameters, ask a follow-up).
+2. Re-call the same `*_wait` with a fresh timeout to keep observing.
+
+If you never re-await, `gui_run_poll` / `gui_run_running_tab` still work for
+non-blocking status checks.
 
 A `diagnostic{severity}` push (errors / info the GUI would show in a dialog) rides
 along in the *next* tool reply's notifications — you get it without asking. Don't

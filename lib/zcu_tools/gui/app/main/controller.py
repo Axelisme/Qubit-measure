@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 from zcu_tools.device.base import BaseDeviceInfo
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.plotting import FigureContainer
+from zcu_tools.gui.session.operation_handles import AwaitResult, FeedbackInbox
 from zcu_tools.gui.session.services.connection import (
     ConnectRequest,
     LoadPredictorRequest,
@@ -218,6 +219,11 @@ class Controller:
         self._services = services
         self._operation_gate = services.operation_gate
         self._operation_handles = services.handles
+        # ADR-0023: session-scoped feedback inbox (thread-safe; not in State).
+        # Wired into OperationHandles so await_outcome can deliver feedback as a
+        # second wakeup source without touching main-thread-owned State.
+        self._feedback_inbox = FeedbackInbox()
+        self._operation_handles.set_feedback_inbox(self._feedback_inbox)
         self._background_svc = services.background
         self._progress_svc = services.progress
         self._guard_svc = services.guard
@@ -1095,13 +1101,31 @@ class Controller:
         operation (empty if none live)."""
         return self._progress_svc.bars_for_owner(owner_id)
 
-    def await_operation(self, operation_id: int, timeout: float):
-        """Block until an async operation settles; return its OperationOutcome.
+    def await_operation(self, operation_id: int, timeout: float) -> AwaitResult | None:
+        """Block until an async operation settles or a wakeup condition fires.
 
-        Runs on an off-main IO thread (operation.await is off_main_thread) — only
-        touches the thread-safe OperationHandles, no main-thread-owned state.
+        Returns an AwaitResult with reason in {'completed', 'user_feedback',
+        'timeout'}. Never returns None (kept for type-checker clarity during
+        migration). Runs on an off-main IO thread — only touches the thread-safe
+        OperationHandles and FeedbackInbox, no main-thread-owned state. (ADR-0023)
         """
         return self._operation_handles.await_outcome(operation_id, timeout)
+
+    def get_feedback_inbox(self) -> FeedbackInbox:
+        """Return the session-scoped user-feedback inbox (ADR-0023).
+
+        Thread-safe: the main-thread GUI widget calls ``inbox.post(text)``
+        and the IO worker thread reads it via ``await_outcome``. Always non-None
+        after __init__ completes.
+        """
+        return self._feedback_inbox
+
+    def has_pending_wait(self) -> bool:
+        """True when at least one operation is live (pending) — i.e. an await
+        call is potentially blocking. The feedback widget reads this to decide
+        whether to show 'will be delivered now' vs 'will take effect at next wait'.
+        """
+        return self._operation_handles.live_count() > 0
 
     # ------------------------------------------------------------------
     # Startup application workflow (StartupService)
