@@ -50,6 +50,7 @@ import signal
 import string
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -206,6 +207,17 @@ def run_supervisor_loop(
     spool_dir = session_dir / _SPOOL_DIRNAME
     spool_dir.mkdir(parents=True, exist_ok=True)
 
+    # Self-log to a file: the supervisor is detached with stdout/stderr → DEVNULL,
+    # so without this its own warnings/errors (spool failures, stdout-pump crashes)
+    # are invisible. ``supervisor.log`` sits beside the claude log for debugging.
+    try:
+        _fh = logging.FileHandler(session_dir / "supervisor.log", encoding="utf-8")
+        _fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        logger.addHandler(_fh)
+        logger.setLevel(logging.DEBUG)
+    except OSError:
+        pass
+
     # Write registry record before spawning claude, so the GUI can attach
     # even if the spawn fails (it will self-heal to stopped on next read).
     if session_id is not None:
@@ -317,36 +329,48 @@ def _io_loop(
     log_path: Path,
     spool_dir: Path,
 ) -> None:
-    """Core I/O loop: read claude stdout → log; poll spool → claude stdin.
+    """Core I/O: read claude stdout → log (reader thread); poll spool → claude
+    stdin (main loop). Runs until claude exits.
 
-    Runs until the claude process exits.  Uses non-blocking readline via
-    ``proc.stdout`` in text mode with a short timeout emulated by checking
-    ``proc.poll()`` between reads.
-
-    Note: ``subprocess.Popen`` stdout is opened in binary mode; we decode
-    per-line rather than using text mode to avoid platform newline translation
-    surprises on Windows (Windows-verify).
+    stdout reading and spool delivery MUST be on separate threads: claude stays
+    alive between turns (``--input-format stream-json``) and produces no stdout
+    while waiting for the next stdin message, so a blocking ``read1`` on the main
+    loop would starve the spool poll and the next user turn would never reach
+    claude. The reader thread owns the (blocking) stdout read; the main loop owns
+    the spool→stdin delivery. Single reader / single writer → no shared-state lock
+    needed. ``read1`` blocks portably (no ``select``, which does not work on
+    Windows pipes).
     """
     assert proc.stdin is not None
     assert proc.stdout is not None
+    stdout = proc.stdout
 
-    buf = bytearray()
-    while True:
-        # Read available bytes from claude stdout (non-blocking-style).
-        # We read in small chunks; on EOF this returns b"".
-        chunk = proc.stdout.read1(4096)  # type: ignore[union-attr]
-        if chunk:
-            buf.extend(chunk)
-            # Extract complete lines and append to log.
+    def _pump_stdout() -> None:
+        """Blocking-read claude stdout → append complete lines to the log."""
+        buf = bytearray()
+        try:
             while True:
-                nl = buf.find(b"\n")
-                if nl == -1:
-                    break
-                line = buf[:nl].decode("utf-8", errors="replace")
-                del buf[: nl + 1]
-                if line.strip():
-                    append_log_line(log_path, line)
+                chunk = stdout.read1(4096)  # type: ignore[union-attr]
+                if not chunk:
+                    break  # EOF — claude exited
+                buf.extend(chunk)
+                while True:
+                    nl = buf.find(b"\n")
+                    if nl == -1:
+                        break
+                    line = buf[:nl].decode("utf-8", errors="replace")
+                    del buf[: nl + 1]
+                    if line.strip():
+                        append_log_line(log_path, line)
+        except Exception:
+            logger.exception("supervisor: stdout pump error")
 
+    reader = threading.Thread(
+        target=_pump_stdout, name="claude-stdout-pump", daemon=True
+    )
+    reader.start()
+
+    while True:
         # Poll spool directory and feed pending messages to claude stdin.
         for spool_file in consume_spool_entries(spool_dir):
             try:
@@ -365,6 +389,8 @@ def _io_loop(
             break
 
         time.sleep(_SPOOL_POLL_INTERVAL)
+
+    reader.join(timeout=2.0)
 
 
 # ---------------------------------------------------------------------------
