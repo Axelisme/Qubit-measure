@@ -53,6 +53,8 @@ if TYPE_CHECKING:
         PredictCurveRequest,
         PredictCurveResult,
         PredictFreqRequest,
+        PredictMatrixCurveRequest,
+        PredictMatrixCurveResult,
     )
     from zcu_tools.gui.session.services.device import (
         ConnectDeviceRequest,
@@ -108,6 +110,9 @@ class SessionControllerPort(Protocol):
     def clear_predictor(self) -> None: ...
     def predict_freq(self, req: PredictFreqRequest) -> float: ...
     def predict_freq_curve(self, req: PredictCurveRequest) -> PredictCurveResult: ...
+    def predict_matrix_element_curve(
+        self, req: PredictMatrixCurveRequest
+    ) -> PredictMatrixCurveResult: ...
     def get_predictor_info(self) -> dict | None: ...
 
     # --- device dialog: lifecycle ------------------------------------------

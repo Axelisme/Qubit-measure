@@ -4,7 +4,7 @@ import dataclasses
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -86,6 +86,26 @@ class PredictCurveResult:
     fluxs: NDArray[np.float64]
     # shape: (n_transitions, n_values), frequencies in MHz
     freqs_mhz: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class PredictMatrixCurveRequest:
+    """Request a batch of transition matrix-element magnitudes over a device-value grid."""
+
+    values: NDArray[np.float64]
+    transitions: tuple[tuple[int, int], ...]
+    operator: Literal["n", "phi"]
+
+
+@dataclass(frozen=True)
+class PredictMatrixCurveResult:
+    """Result of a batch matrix-element curve computation."""
+
+    labels: tuple[str, ...]
+    values: NDArray[np.float64]
+    fluxs: NDArray[np.float64]
+    # shape: (n_transitions, n_values), dimensionless magnitudes |<i|op|j>|
+    mags: NDArray[np.float64]
 
 
 # ---------------------------------------------------------------------------
@@ -436,4 +456,64 @@ class ConnectionService(QObject):
             values=values,
             fluxs=fluxs,
             freqs_mhz=freqs_mhz,
+        )
+
+    def predict_matrix_element_curve(
+        self, req: PredictMatrixCurveRequest
+    ) -> PredictMatrixCurveResult:
+        """Compute |<i|op|j>| vs device-value curves for multiple transitions.
+
+        Uses calculate_n_oper_vs_flux / calculate_phi_oper_vs_flux directly so
+        there is no per-level cap — unlike FluxoniumPredictor.predict_matrix_element
+        which hard-limits both levels to <=1.  return_dim is set to max(level)+1
+        so higher transitions (e.g. 0->3) work correctly.
+        """
+        predictor = self._state.exp_context.predictor
+        if predictor is None:
+            raise PredictorNotLoaded("No predictor loaded — load one first")
+        if len(req.transitions) == 0:
+            raise ValueError("transitions must not be empty")
+        for frm, to in req.transitions:
+            if frm < 0 or to < 0:
+                raise ValueError(f"Transition levels must be >= 0, got ({frm}, {to})")
+            if to < frm:
+                raise ValueError(
+                    f"Transition to-level must be >= from-level, got ({frm}, {to})"
+                )
+
+        # Vectorised value→flux (mirrors predict_freq_curve affine exactly).
+        values = np.asarray(req.values, dtype=np.float64)
+        fluxs = (
+            values + predictor.flux_bias - predictor.flux_half
+        ) / predictor.flux_period + 0.5
+
+        # Return dimension must cover the highest level in any transition.
+        needed_dim = max(max(frm, to) for frm, to in req.transitions) + 1
+
+        from zcu_tools.simulate.fluxonium.matrix_element import (
+            calculate_n_oper_vs_flux,
+            calculate_phi_oper_vs_flux,
+        )
+
+        calc = (
+            calculate_n_oper_vs_flux
+            if req.operator == "n"
+            else calculate_phi_oper_vs_flux
+        )
+        _, opers = calc(predictor.params, fluxs, return_dim=needed_dim)
+        # opers shape: (n_values, needed_dim, needed_dim), dtype complex
+
+        mag_rows: list[NDArray[np.float64]] = []
+        labels: list[str] = []
+        for frm, to in req.transitions:
+            mag = np.abs(opers[:, frm, to]).astype(np.float64)
+            mag_rows.append(mag)
+            labels.append(f"{frm}→{to}")
+
+        mags = np.stack(mag_rows, axis=0)  # (n_transitions, n_values)
+        return PredictMatrixCurveResult(
+            labels=tuple(labels),
+            values=values,
+            fluxs=fluxs,
+            mags=mags,
         )

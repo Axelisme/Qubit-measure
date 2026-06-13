@@ -17,6 +17,8 @@ from zcu_tools.gui.session.services.connection import (
     PredictCurveRequest,
     PredictCurveResult,
     PredictFreqRequest,
+    PredictMatrixCurveRequest,
+    PredictMatrixCurveResult,
 )
 from zcu_tools.gui.session.services.device import (
     DeviceEntry,
@@ -1164,6 +1166,11 @@ class Controller:
 
     def predict_freq_curve(self, req: PredictCurveRequest) -> PredictCurveResult:
         return self._conn_svc.predict_freq_curve(req)
+
+    def predict_matrix_element_curve(
+        self, req: PredictMatrixCurveRequest
+    ) -> PredictMatrixCurveResult:
+        return self._conn_svc.predict_matrix_element_curve(req)
 
     def get_soccfg(self) -> SocCfgHandle | None:
         return self._conn_svc.get_soccfg()

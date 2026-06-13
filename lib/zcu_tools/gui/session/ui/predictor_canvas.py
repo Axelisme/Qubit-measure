@@ -8,16 +8,14 @@ flux-position marker. Designed for main-thread synchronous drawing only
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING
 
+import numpy as np
 from matplotlib.backend_bases import Event
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
+from numpy.typing import NDArray
 from qtpy.QtWidgets import QVBoxLayout, QWidget  # type: ignore[attr-defined]
-
-if TYPE_CHECKING:
-    from zcu_tools.gui.session.services.connection import PredictCurveResult
 
 # How close (in axes-width fraction) a click must be to the marker line to grab it.
 _PICK_TOL_FRAC = 0.02
@@ -123,8 +121,11 @@ class PredictorCurveCanvas(QWidget):
 
     def render_curves(
         self,
-        result: PredictCurveResult,
         *,
+        values: NDArray[np.float64],
+        labels: tuple[str, ...],
+        series: NDArray[np.float64],
+        ylabel: str,
         highlight: tuple[int, int] | None = None,
         marker_value: float,
         flux_window: tuple[float, float] = (0.4, 1.1),
@@ -132,6 +133,10 @@ class PredictorCurveCanvas(QWidget):
         flux_to_value: Callable[[float], float],
     ) -> None:
         """Redraw all transition curves onto the figure.
+
+        Decoupled from any specific result type: ``values`` is the x-axis array,
+        ``labels`` are the per-curve legend labels (e.g. "0→1"), ``series`` is
+        shape (n_transitions, n_values), and ``ylabel`` is the y-axis label.
 
         The primary x-axis is device value (A).  A secondary top x-axis shows
         flux (Φ/Φ₀) using the affine callables ``value_to_flux`` / ``flux_to_value``.
@@ -152,14 +157,14 @@ class PredictorCurveCanvas(QWidget):
         highlight_label = (
             f"{highlight[0]}→{highlight[1]}" if highlight is not None else None
         )
-        for i, label in enumerate(result.labels):
+        for i, label in enumerate(labels):
             is_hi = highlight_label is not None and label == highlight_label
             # Parse "frm→to" back to a key tuple for the artist registry.
             parts = label.split("→")
             key: tuple[int, int] = (int(parts[0]), int(parts[1]))
             (line,) = ax.plot(
-                result.values,
-                result.freqs_mhz[i],
+                values,
+                series[i],
                 label=label,
                 linewidth=_HIGHLIGHT_LW if is_hi else _NORMAL_LW,
                 alpha=_HIGHLIGHT_ALPHA if is_hi else _NORMAL_ALPHA,
@@ -168,7 +173,7 @@ class PredictorCurveCanvas(QWidget):
             self._curve_lines[key] = line
 
         ax.set_xlabel("Device value (A)")
-        ax.set_ylabel("Frequency (MHz)")
+        ax.set_ylabel(ylabel)
         ax.legend(fontsize=8, loc="best")
 
         # Secondary top x-axis: flux Φ/Φ₀ (monotone affine, so both callables

@@ -26,6 +26,7 @@ from zcu_tools.gui.session.services.connection import (
     LoadPredictorRequest,
     PredictCurveRequest,
     PredictFreqRequest,
+    PredictMatrixCurveRequest,
     PredictorLoadError,
     PredictorNotLoaded,
 )
@@ -443,3 +444,172 @@ def test_predict_freq_curve_aligns_with_single_point_real_eigensolve(qapp):
         assert np.isclose(curve_row[i], expected, rtol=1e-4), (
             f"value={val:.4f}: curve={curve_row[i]:.4f} MHz, single={expected:.4f} MHz"
         )
+
+
+# ---------------------------------------------------------------------------
+# predict_matrix_element_curve tests
+# ---------------------------------------------------------------------------
+
+
+def test_predict_matrix_element_curve_no_predictor_raises(qapp):
+    svc = _make_svc()
+    req = PredictMatrixCurveRequest(
+        values=np.linspace(0.0, 1.0, 10),
+        transitions=((0, 1),),
+        operator="n",
+    )
+    with pytest.raises(PredictorNotLoaded):
+        svc.predict_matrix_element_curve(req)
+
+
+def test_predict_matrix_element_curve_empty_transitions_raises(qapp):
+    svc = _make_svc()
+    _inject_fake_predictor(svc)
+    req = PredictMatrixCurveRequest(
+        values=np.linspace(0.0, 1.0, 10),
+        transitions=(),
+        operator="n",
+    )
+    with pytest.raises(ValueError, match="transitions must not be empty"):
+        svc.predict_matrix_element_curve(req)
+
+
+def test_predict_matrix_element_curve_negative_level_raises(qapp):
+    svc = _make_svc()
+    _inject_fake_predictor(svc)
+    req = PredictMatrixCurveRequest(
+        values=np.linspace(0.0, 1.0, 10),
+        transitions=((-1, 1),),
+        operator="n",
+    )
+    with pytest.raises(ValueError, match=">="):
+        svc.predict_matrix_element_curve(req)
+
+
+def test_predict_matrix_element_curve_to_less_than_from_raises(qapp):
+    svc = _make_svc()
+    _inject_fake_predictor(svc)
+    req = PredictMatrixCurveRequest(
+        values=np.linspace(0.0, 1.0, 10),
+        transitions=((2, 1),),
+        operator="n",
+    )
+    with pytest.raises(ValueError, match="from-level"):
+        svc.predict_matrix_element_curve(req)
+
+
+def test_predict_matrix_element_curve_shape_and_labels_n_oper(qapp, monkeypatch):
+    """predict_matrix_element_curve returns correct shape and labels (n operator)."""
+    import zcu_tools.simulate.fluxonium.matrix_element as mat_mod
+
+    n_vals = 15
+
+    def fake_n_oper_vs_flux(params, fluxs, return_dim=4, spectrum_data=None):
+        # Return complex opers of shape (n_vals, return_dim, return_dim)
+        opers = np.ones((n_vals, return_dim, return_dim), dtype=np.complex128) * (
+            0.3 + 0.1j
+        )
+        return MagicMock(), opers
+
+    monkeypatch.setattr(mat_mod, "calculate_n_oper_vs_flux", fake_n_oper_vs_flux)
+
+    svc = _make_svc()
+    _inject_fake_predictor(svc)
+
+    transitions = ((0, 1), (0, 2), (0, 3), (1, 4))
+    values = np.linspace(0.0, 1.0, n_vals)
+    req = PredictMatrixCurveRequest(
+        values=values, transitions=transitions, operator="n"
+    )
+    result = svc.predict_matrix_element_curve(req)
+
+    assert result.mags.shape == (len(transitions), n_vals)
+    assert result.labels == ("0→1", "0→2", "0→3", "1→4")
+    assert len(result.values) == n_vals
+    assert len(result.fluxs) == n_vals
+    # All magnitudes are abs(0.3+0.1j) ≈ 0.3162
+    assert np.allclose(result.mags, abs(0.3 + 0.1j))
+
+
+def test_predict_matrix_element_curve_phi_operator(qapp, monkeypatch):
+    """predict_matrix_element_curve dispatches to phi operator when requested."""
+    import zcu_tools.simulate.fluxonium.matrix_element as mat_mod
+
+    n_vals = 10
+    call_log: list[str] = []
+
+    def fake_n(params, fluxs, return_dim=4, spectrum_data=None):
+        call_log.append("n")
+        return MagicMock(), np.zeros(
+            (n_vals, return_dim, return_dim), dtype=np.complex128
+        )
+
+    def fake_phi(params, fluxs, return_dim=4, spectrum_data=None):
+        call_log.append("phi")
+        return MagicMock(), np.ones(
+            (n_vals, return_dim, return_dim), dtype=np.complex128
+        ) * 0.5
+
+    monkeypatch.setattr(mat_mod, "calculate_n_oper_vs_flux", fake_n)
+    monkeypatch.setattr(mat_mod, "calculate_phi_oper_vs_flux", fake_phi)
+
+    svc = _make_svc()
+    _inject_fake_predictor(svc)
+
+    req = PredictMatrixCurveRequest(
+        values=np.linspace(0.0, 1.0, n_vals),
+        transitions=((0, 1),),
+        operator="phi",
+    )
+    result = svc.predict_matrix_element_curve(req)
+
+    assert "phi" in call_log
+    assert "n" not in call_log
+    assert np.allclose(result.mags, 0.5)
+
+
+def test_predict_matrix_element_curve_high_level_transition_does_not_raise(
+    qapp, monkeypatch
+):
+    """Transitions with levels > 1 (e.g. 0→3) must not raise.
+
+    This verifies the key goal: we bypass FluxoniumPredictor.predict_matrix_element's
+    hard level<=1 cap by calling calculate_*_oper_vs_flux directly with needed_dim.
+    """
+    import zcu_tools.simulate.fluxonium.matrix_element as mat_mod
+
+    n_vals = 8
+    captured_dim: list[int] = []
+
+    def fake_n(params, fluxs, return_dim=4, spectrum_data=None):
+        captured_dim.append(return_dim)
+        # Large enough matrix for the test transitions.
+        opers = np.zeros((n_vals, return_dim, return_dim), dtype=np.complex128)
+        # Set distinct non-zero values on each requested off-diagonal.
+        for i in range(return_dim):
+            for j in range(return_dim):
+                if i != j:
+                    opers[:, i, j] = 0.1 * (i + 1) + 0.01j * (j + 1)
+        return MagicMock(), opers
+
+    monkeypatch.setattr(mat_mod, "calculate_n_oper_vs_flux", fake_n)
+
+    svc = _make_svc()
+    _inject_fake_predictor(svc)
+
+    transitions = (
+        (0, 1),
+        (0, 3),
+    )  # level 3 would be rejected by predict_matrix_element
+    req = PredictMatrixCurveRequest(
+        values=np.linspace(0.0, 1.0, n_vals),
+        transitions=transitions,
+        operator="n",
+    )
+    result = svc.predict_matrix_element_curve(req)
+
+    # Confirm needed_dim was passed as 4 (max level 3 + 1).
+    assert captured_dim[-1] == 4
+    assert result.mags.shape == (2, n_vals)
+    # (0,3) magnitude must be non-zero (would be zero if level cap was enforced).
+    assert np.all(result.mags[1] > 0)

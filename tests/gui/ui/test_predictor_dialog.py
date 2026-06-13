@@ -9,26 +9,45 @@ import pytest
 from zcu_tools.gui.session.services.connection import (
     LoadPredictorRequest,
     PredictCurveResult,
+    PredictMatrixCurveResult,
     PredictorLoadError,
     PredictorNotLoaded,
 )
 from zcu_tools.gui.session.ui.predictor_dialog import (
+    _COL_FREQ,
+    _COL_MAG,
     _DEFAULT_TRANSITIONS,
     PredictorDialog,
 )
 
 
-def _make_result(n_transitions: int, n: int = 20) -> PredictCurveResult:
-    """Build a minimal PredictCurveResult for ``n_transitions`` curves."""
-    transitions = _DEFAULT_TRANSITIONS[:n_transitions]
+def _make_freq_result(
+    transitions: list[tuple[int, int]], n: int = 20
+) -> PredictCurveResult:
+    """Build a minimal PredictCurveResult for the given transitions."""
     values = np.linspace(-0.5, 0.5, n)
     labels = tuple(f"{f}→{t}" for f, t in transitions)
-    freqs = np.ones((n_transitions, n), dtype=np.float64) * 1000.0
+    freqs = np.ones((len(transitions), n), dtype=np.float64) * 1000.0
     return PredictCurveResult(
         labels=labels,
         values=values,
         fluxs=values.copy(),
         freqs_mhz=freqs,
+    )
+
+
+def _make_mat_result(
+    transitions: list[tuple[int, int]], n: int = 20
+) -> PredictMatrixCurveResult:
+    """Build a minimal PredictMatrixCurveResult for the given transitions."""
+    values = np.linspace(-0.5, 0.5, n)
+    labels = tuple(f"{f}→{t}" for f, t in transitions)
+    mags = np.ones((len(transitions), n), dtype=np.float64) * 0.3
+    return PredictMatrixCurveResult(
+        labels=labels,
+        values=values,
+        fluxs=values.copy(),
+        mags=mags,
     )
 
 
@@ -39,7 +58,6 @@ def _make_ctrl(
     flux_period: float = 1.0,
     flux_bias: float = 0.0,
     path: str | None = None,
-    n_transitions: int = 5,
 ) -> MagicMock:
     """Build a MagicMock controller pre-configured for dialog tests."""
     ctrl = MagicMock()
@@ -53,21 +71,14 @@ def _make_ctrl(
     else:
         ctrl.get_predictor_info.return_value = None
 
-    # Return a result whose transition count matches whatever is tracked.
-    # The mock simply returns a fresh result on every call.
-    def _make_curve_result(req):  # type: ignore[no-untyped-def]
-        n = len(req.transitions)
-        values = np.linspace(-0.5, 0.5, 20)
-        labels = tuple(f"{f}→{t}" for f, t in req.transitions)
-        freqs = np.ones((n, 20), dtype=np.float64) * 1000.0
-        return PredictCurveResult(
-            labels=labels,
-            values=values,
-            fluxs=values.copy(),
-            freqs_mhz=freqs,
-        )
+    def _freq_side(req):  # type: ignore[no-untyped-def]
+        return _make_freq_result(list(req.transitions))
 
-    ctrl.predict_freq_curve.side_effect = _make_curve_result
+    def _mat_side(req):  # type: ignore[no-untyped-def]
+        return _make_mat_result(list(req.transitions))
+
+    ctrl.predict_freq_curve.side_effect = _freq_side
+    ctrl.predict_matrix_element_curve.side_effect = _mat_side
     ctrl.predict_freq.return_value = 1234.5
     return ctrl
 
@@ -85,23 +96,16 @@ def test_predictor_dialog_init_and_load_dispatches_request(qapp):
         "flux_half": 0.5,
         "flux_period": 1.0,
     }
-    # predict_freq must return a float so _update_freq_column can format it.
     ctrl.predict_freq.return_value = 1234.5
 
-    # predict_freq_curve returns a minimal result matching the tracked set.
-    def _make_curve_result(req):  # type: ignore[no-untyped-def]
-        n = len(req.transitions)
-        values = np.linspace(-0.5, 0.5, 20)
-        labels = tuple(f"{f}→{t}" for f, t in req.transitions)
-        freqs = np.ones((n, 20), dtype=np.float64) * 1000.0
-        return PredictCurveResult(
-            labels=labels,
-            values=values,
-            fluxs=values.copy(),
-            freqs_mhz=freqs,
-        )
+    def _freq_side(req):  # type: ignore[no-untyped-def]
+        return _make_freq_result(list(req.transitions))
 
-    ctrl.predict_freq_curve.side_effect = _make_curve_result
+    def _mat_side(req):  # type: ignore[no-untyped-def]
+        return _make_mat_result(list(req.transitions))
+
+    ctrl.predict_freq_curve.side_effect = _freq_side
+    ctrl.predict_matrix_element_curve.side_effect = _mat_side
 
     dialog = PredictorDialog(ctrl)
 
@@ -136,10 +140,12 @@ def test_predictor_dialog_clear(qapp):
 
     dialog._on_clear()
     ctrl.clear_predictor.assert_called_once()
-    # All Freq cells must show "—" after clear.
+    # All Freq and |M| cells must show "—" after clear.
     for row in range(dialog._table.rowCount()):
-        item = dialog._table.item(row, 1)
-        assert item is not None and item.text() == "—"
+        freq_item = dialog._table.item(row, _COL_FREQ)
+        assert freq_item is not None and freq_item.text() == "—"
+        mag_item = dialog._table.item(row, _COL_MAG)
+        assert mag_item is not None and mag_item.text() == "—"
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +161,25 @@ def test_predictor_dialog_default_tracked_count(qapp):
     assert dialog._table.rowCount() == 5
 
 
+def test_predictor_dialog_table_has_4_columns(qapp):
+    """Table must have 4 columns: Transition | f (MHz) | |M| | (delete)."""
+    ctrl = _make_ctrl(has_predictor=False)
+    dialog = PredictorDialog(ctrl)
+    assert dialog._table.columnCount() == 4
+
+
+def test_predictor_dialog_right_side_has_two_tabs(qapp):
+    """Right panel is a QTabWidget with exactly 2 tabs: Frequency and Matrix element."""
+    from qtpy.QtWidgets import QTabWidget  # type: ignore[attr-defined]
+
+    ctrl = _make_ctrl(has_predictor=False)
+    dialog = PredictorDialog(ctrl)
+    assert isinstance(dialog._tab_widget, QTabWidget)
+    assert dialog._tab_widget.count() == 2
+    assert dialog._tab_widget.tabText(0) == "Frequency"
+    assert dialog._tab_widget.tabText(1) == "Matrix element"
+
+
 def test_predictor_dialog_default_predict_freq_curve_call(qapp):
     """With predictor loaded at init, predict_freq_curve is called with the 5 defaults."""
     ctrl = _make_ctrl(has_predictor=True, path="/p.json")
@@ -164,18 +189,47 @@ def test_predictor_dialog_default_predict_freq_curve_call(qapp):
     assert set(last_req.transitions) == set(map(tuple, _DEFAULT_TRANSITIONS))
 
 
+def test_predictor_dialog_default_predict_matrix_element_curve_call(qapp):
+    """With predictor loaded at init, predict_matrix_element_curve is called.
+
+    _refresh_curves calls it once with all transitions; _update_value_columns then
+    calls it once per transition (single-point column fill).  We verify at least one
+    call used the full default transition set AND all calls used operator "n".
+    """
+    ctrl = _make_ctrl(has_predictor=True, path="/p.json")
+    PredictorDialog(ctrl)
+    ctrl.predict_matrix_element_curve.assert_called()
+    all_reqs = [
+        call.args[0] for call in ctrl.predict_matrix_element_curve.call_args_list
+    ]
+    # At least one call covers all 5 default transitions (the _refresh_curves call).
+    full_call = next(
+        (
+            r
+            for r in all_reqs
+            if set(r.transitions) == set(map(tuple, _DEFAULT_TRANSITIONS))
+        ),
+        None,
+    )
+    assert full_call is not None, "No call with full default transition set found"
+    # All calls must use the default operator "n".
+    assert all(r.operator == "n" for r in all_reqs)
+
+
 def test_predictor_dialog_init_no_predictor_no_curve_call(qapp):
-    """With no predictor at init, predict_freq_curve is never called."""
+    """With no predictor at init, neither curve function is called."""
     ctrl = _make_ctrl(has_predictor=False)
     PredictorDialog(ctrl)
     ctrl.predict_freq_curve.assert_not_called()
+    ctrl.predict_matrix_element_curve.assert_not_called()
 
 
-def test_predictor_dialog_init_with_predictor_canvas_has_axes(qapp):
-    """After init with a loaded predictor, the canvas has axes (curve was drawn)."""
+def test_predictor_dialog_init_with_predictor_both_canvases_have_axes(qapp):
+    """After init with a loaded predictor, both canvases have axes (curves were drawn)."""
     ctrl = _make_ctrl(has_predictor=True, path="/p.json")
     dialog = PredictorDialog(ctrl)
-    assert len(dialog._canvas.figure.get_axes()) > 0
+    assert len(dialog._freq_canvas.figure.get_axes()) > 0
+    assert len(dialog._mat_canvas.figure.get_axes()) > 0
 
 
 # ---------------------------------------------------------------------------
@@ -196,7 +250,6 @@ def test_predictor_dialog_add_valid_transition(qapp):
     assert len(dialog._tracked) == 6
     assert dialog._table.rowCount() == 6
     assert (2, 4) in dialog._tracked
-    # Curve refresh triggered.
     assert ctrl.predict_freq_curve.call_count > initial_count
 
 
@@ -246,8 +299,8 @@ def test_predictor_dialog_delete_transition(qapp):
     assert ctrl.predict_freq_curve.call_count > initial_count
 
 
-def test_predictor_dialog_delete_all_transitions_clears_canvas(qapp):
-    """Deleting all tracked transitions results in an empty table and cleared canvas."""
+def test_predictor_dialog_delete_all_transitions_clears_both_canvases(qapp):
+    """Deleting all tracked transitions results in an empty table and cleared canvases."""
     ctrl = _make_ctrl(has_predictor=True, path="/p.json")
     dialog = PredictorDialog(ctrl)
 
@@ -255,12 +308,42 @@ def test_predictor_dialog_delete_all_transitions_clears_canvas(qapp):
         dialog._delete_transition(t)
 
     assert dialog._table.rowCount() == 0
-    # Canvas clear() resets marker_value.
-    assert dialog._canvas._marker_value is None
+    # Both canvases clear() resets marker_value.
+    assert dialog._freq_canvas._marker_value is None
+    assert dialog._mat_canvas._marker_value is None
 
 
 # ---------------------------------------------------------------------------
-# Spinbox / debounce → freq column update
+# Operator change
+# ---------------------------------------------------------------------------
+
+
+def test_predictor_dialog_operator_change_triggers_refresh(qapp):
+    """Changing the operator combobox re-calls predict_matrix_element_curve."""
+    ctrl = _make_ctrl(has_predictor=True, path="/p.json")
+    dialog = PredictorDialog(ctrl)
+    initial_mat_count = ctrl.predict_matrix_element_curve.call_count
+
+    dialog._operator_combo.setCurrentText("phi")
+
+    # Changing operator triggers _on_operator_changed → _refresh_curves
+    assert ctrl.predict_matrix_element_curve.call_count > initial_mat_count
+    last_req = ctrl.predict_matrix_element_curve.call_args.args[0]
+    assert last_req.operator == "phi"
+
+
+def test_predictor_dialog_operator_stored_in_self(qapp):
+    """_operator attribute reflects combobox selection."""
+    ctrl = _make_ctrl(has_predictor=False)
+    dialog = PredictorDialog(ctrl)
+    assert dialog._operator == "n"
+    # Simulate operator change without predictor — no crash.
+    dialog._operator_combo.setCurrentText("phi")
+    assert dialog._operator == "phi"
+
+
+# ---------------------------------------------------------------------------
+# Spinbox / debounce → column update
 # ---------------------------------------------------------------------------
 
 
@@ -275,36 +358,54 @@ def test_predictor_dialog_spinbox_change_does_not_recompute_curves(qapp):
     assert ctrl.predict_freq_curve.call_count == initial_count
 
 
-def test_predictor_dialog_freq_column_updated_after_debounce(qapp):
-    """After _update_freq_column, each tracked row's Freq cell is filled."""
+def test_predictor_dialog_spinbox_change_updates_both_markers(qapp):
+    """Changing spinbox calls set_marker on both canvases."""
+    ctrl = _make_ctrl(has_predictor=True, path="/p.json")
+    dialog = PredictorDialog(ctrl)
+
+    with (
+        patch.object(dialog._freq_canvas, "set_marker") as freq_mock,
+        patch.object(dialog._mat_canvas, "set_marker") as mat_mock,
+    ):
+        dialog._on_spinbox_changed(0.3)
+
+    freq_mock.assert_called_with(0.3)
+    mat_mock.assert_called_with(0.3)
+
+
+def test_predictor_dialog_value_columns_updated_after_debounce(qapp):
+    """After _update_value_columns, each tracked row's Freq and |M| cells are filled."""
     ctrl = _make_ctrl(has_predictor=True, path="/p.json")
     dialog = PredictorDialog(ctrl)
 
     dialog._predict_value_spin.setValue(0.1)
-    dialog._update_freq_column()
+    dialog._update_value_columns()
 
     # Each row should now show a numeric freq (not "—").
     for row in range(dialog._table.rowCount()):
-        item = dialog._table.item(row, 1)
-        assert item is not None
-        assert item.text() != "—"
-    # predict_freq called at least once per tracked transition in this call.
-    # (init also calls _update_freq_column once, so total >= 2×n.)
-    assert ctrl.predict_freq.call_count >= len(dialog._tracked)
+        freq_item = dialog._table.item(row, _COL_FREQ)
+        assert freq_item is not None
+        assert freq_item.text() != "—"
+        # |M| should also be filled.
+        mag_item = dialog._table.item(row, _COL_MAG)
+        assert mag_item is not None
+        assert mag_item.text() != "—"
 
 
-def test_predictor_dialog_freq_column_dash_when_not_loaded(qapp):
-    """predict_freq raising PredictorNotLoaded → Freq cell shows '—', no crash."""
+def test_predictor_dialog_columns_dash_when_not_loaded(qapp):
+    """predict_freq raising PredictorNotLoaded → both columns show '—', no crash."""
     ctrl = _make_ctrl(has_predictor=False)
     ctrl.predict_freq.side_effect = PredictorNotLoaded("no predictor")
+    ctrl.predict_matrix_element_curve.side_effect = PredictorNotLoaded("no predictor")
     dialog = PredictorDialog(ctrl)
 
-    dialog._update_freq_column()
+    dialog._update_value_columns()
 
     for row in range(dialog._table.rowCount()):
-        item = dialog._table.item(row, 1)
-        assert item is not None
-        assert item.text() == "—"
+        freq_item = dialog._table.item(row, _COL_FREQ)
+        assert freq_item is not None and freq_item.text() == "—"
+        mag_item = dialog._table.item(row, _COL_MAG)
+        assert mag_item is not None and mag_item.text() == "—"
 
 
 def test_predictor_dialog_canvas_drag_updates_spinbox_no_loop(qapp):
@@ -321,33 +422,41 @@ def test_predictor_dialog_canvas_drag_updates_spinbox_no_loop(qapp):
 
 
 # ---------------------------------------------------------------------------
-# Table selection → canvas highlight
+# Table selection → both canvas highlights
 # ---------------------------------------------------------------------------
 
 
-def test_predictor_dialog_row_select_calls_set_highlight(qapp):
-    """Selecting a table row calls canvas.set_highlight with the right transition."""
+def test_predictor_dialog_row_select_calls_set_highlight_both_canvases(qapp):
+    """Selecting a table row calls set_highlight on BOTH canvases."""
     ctrl = _make_ctrl(has_predictor=True, path="/p.json")
     dialog = PredictorDialog(ctrl)
 
-    with patch.object(dialog._canvas, "set_highlight") as mock_hi:
+    with (
+        patch.object(dialog._freq_canvas, "set_highlight") as freq_hi,
+        patch.object(dialog._mat_canvas, "set_highlight") as mat_hi,
+    ):
         dialog._table.selectRow(1)
         dialog._on_selection_changed()
 
     expected = dialog._tracked[1]
-    mock_hi.assert_called_with(expected)
+    freq_hi.assert_called_with(expected)
+    mat_hi.assert_called_with(expected)
 
 
-def test_predictor_dialog_no_selection_calls_set_highlight_none(qapp):
-    """Clearing selection calls canvas.set_highlight(None)."""
+def test_predictor_dialog_no_selection_calls_set_highlight_none_both(qapp):
+    """Clearing selection calls set_highlight(None) on both canvases."""
     ctrl = _make_ctrl(has_predictor=True, path="/p.json")
     dialog = PredictorDialog(ctrl)
 
-    with patch.object(dialog._canvas, "set_highlight") as mock_hi:
+    with (
+        patch.object(dialog._freq_canvas, "set_highlight") as freq_hi,
+        patch.object(dialog._mat_canvas, "set_highlight") as mat_hi,
+    ):
         dialog._table.clearSelection()
         dialog._on_selection_changed()
 
-    mock_hi.assert_called_with(None)
+    freq_hi.assert_called_with(None)
+    mat_hi.assert_called_with(None)
 
 
 # ---------------------------------------------------------------------------
@@ -370,21 +479,23 @@ def test_predictor_dialog_on_predictor_changed_bus_event_refreshes_curves(qapp):
     dialog._on_predictor_changed(object())
 
     assert ctrl.predict_freq_curve.call_count >= 1
+    assert ctrl.predict_matrix_element_curve.call_count >= 1
 
 
-def test_predictor_dialog_on_predictor_changed_cleared_clears_canvas(qapp):
-    """Bus event with no predictor must blank the canvas."""
+def test_predictor_dialog_on_predictor_changed_cleared_clears_both_canvases(qapp):
+    """Bus event with no predictor must blank both canvases."""
     ctrl = _make_ctrl(has_predictor=True, path="/p.json")
     dialog = PredictorDialog(ctrl)
 
     ctrl.get_predictor_info.return_value = None
     dialog._on_predictor_changed(object())
 
-    assert dialog._canvas._marker_line is None
+    assert dialog._freq_canvas._marker_line is None
+    assert dialog._mat_canvas._marker_line is None
 
 
-def test_predictor_dialog_on_predictor_changed_cleared_resets_freq_column(qapp):
-    """After a cleared bus event, all Freq cells show '—'."""
+def test_predictor_dialog_on_predictor_changed_cleared_resets_both_columns(qapp):
+    """After a cleared bus event, all Freq and |M| cells show '—'."""
     ctrl = _make_ctrl(has_predictor=True, path="/p.json")
     dialog = PredictorDialog(ctrl)
 
@@ -392,8 +503,10 @@ def test_predictor_dialog_on_predictor_changed_cleared_resets_freq_column(qapp):
     dialog._on_predictor_changed(object())
 
     for row in range(dialog._table.rowCount()):
-        item = dialog._table.item(row, 1)
-        assert item is not None and item.text() == "—"
+        freq_item = dialog._table.item(row, _COL_FREQ)
+        assert freq_item is not None and freq_item.text() == "—"
+        mag_item = dialog._table.item(row, _COL_MAG)
+        assert mag_item is not None and mag_item.text() == "—"
 
 
 def test_predictor_dialog_predict_curve_error_shown_in_status(qapp):
