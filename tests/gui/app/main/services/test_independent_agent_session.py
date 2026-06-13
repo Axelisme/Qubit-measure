@@ -719,3 +719,29 @@ def test_detach_then_attach_replays(tmp_path: Path) -> None:
     ]
     assert any(u.text == "Re-attached" for u in all_updates)
     session._timer.stop()
+
+
+# ---------------------------------------------------------------------------
+# Regression — attached idle session with a live supervisor stays "running"
+# (the "agent does nothing on Send" bug: result-replay set state idle, the old
+# is_running() AND-ed is_active() → False → Send wrongly routed to start()).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("qapp")
+def test_attached_idle_session_still_running(tmp_path: Path) -> None:
+    session, _, _, _ = _make_session()
+    fake_handle = _fake_handle(tmp_path)
+    fake_handle.spool_dir.mkdir(parents=True, exist_ok=True)
+    session._handle = fake_handle
+    session._run_state.on_start()
+    _write_log_lines(fake_handle.log_path, [_assistant_line("hi"), _result_line()])
+
+    with patch(
+        "zcu_tools.gui.app.main.services.independent_agent_session._supervisor_alive",
+        return_value=True,
+    ):
+        session.tick()
+        assert session.state == "idle"  # turn complete
+        assert session.is_running() is True  # but supervisor alive → still running
+    session._timer.stop()

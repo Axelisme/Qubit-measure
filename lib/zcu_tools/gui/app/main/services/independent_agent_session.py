@@ -145,10 +145,17 @@ class IndependentAgentSession(QObject):
         return self._run_state.state
 
     def is_running(self) -> bool:
-        """True while the supervisor process is alive and run-state is active."""
+        """True while the detached supervisor process is alive.
+
+        Process-liveness, NOT run-state: an idle session *between turns* (after a
+        ``result`` frame set state to ``idle``) still has a live supervisor whose
+        claude keeps reading stdin, so a follow-up Send must route to
+        ``send_user_message`` (not a fresh ``start``). Mirrors the CLI backend's
+        ``is_running`` (QProcess alive) — see AgentSessionPort contract.
+        """
         if self._handle is None:
             return False
-        return _supervisor_alive(self._handle.pid) and self._run_state.is_active()
+        return _supervisor_alive(self._handle.pid)
 
     def start(self, task: str, repo_root: str) -> None:
         """Create session dir under registry_dir, spawn detached supervisor, begin poll-tail.
@@ -335,17 +342,27 @@ class IndependentAgentSession(QObject):
             return
 
         if not new_bytes:
-            # No new data; check if supervisor died unexpectedly.
-            if not _supervisor_alive(self._handle.pid) and self._run_state.is_active():
-                logger.warning(
-                    "IndependentAgentSession: supervisor pid=%s disappeared without "
-                    "result frame; forcing stopped",
+            # No new data; if the supervisor has exited (session truly ended),
+            # mark stopped and stop tailing — regardless of run-state (an idle
+            # between-turns session whose supervisor then dies must also stop).
+            if (
+                not _supervisor_alive(self._handle.pid)
+                and self._run_state.state != "stopped"
+            ):
+                # working/waiting at death = died mid-turn (unexpected crash);
+                # idle = normal between-turns session end (no error).
+                was_active = self._run_state.is_active()
+                logger.info(
+                    "IndependentAgentSession: supervisor pid=%s exited; stopping tail",
                     self._handle.pid,
                 )
                 self._run_state.on_stop()
                 self._timer.stop()
                 self._emit_state()
-                self._on_process_error("supervisor process disappeared unexpectedly")
+                if was_active:
+                    self._on_process_error(
+                        "supervisor process disappeared unexpectedly"
+                    )
             return
 
         self._log_offset += len(new_bytes)
@@ -386,8 +403,10 @@ class IndependentAgentSession(QObject):
         for update in updates:
             if isinstance(update, ResultUpdate):
                 self._run_state.on_result(update.is_error)
-                # Result frame = session complete; stop the timer.
-                self._timer.stop()
+                # A result frame ends a *turn*, not the session: the detached
+                # supervisor stays alive between turns, so keep poll-tailing for
+                # the next turn's output. The timer stops only on supervisor
+                # death (_on_tick) or detach()/stop().
         self._emit_state()
 
     def _emit_state(self) -> None:
