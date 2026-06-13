@@ -52,7 +52,6 @@ for _blas_var in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
     os.environ.setdefault(_blas_var, "1")
 
 from collections.abc import Callable
-from typing import Optional
 
 import h5py as h5
 import numpy as np
