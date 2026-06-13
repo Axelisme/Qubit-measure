@@ -239,6 +239,7 @@ class Controller:
         self._workspace_svc = services.workspace
         self._startup_svc = services.startup
         self._cfg_editor_svc = services.cfg_editor
+        self._agent_chat_svc = services.agent_chat
         # App-level PersistenceCaretaker, injected by run_app via attach_caretaker
         # (None in bare-Controller tests that don't exercise persistence).
         self._caretaker: PersistenceCaretaker | None = None
@@ -290,9 +291,15 @@ class Controller:
 
     def _notify(self, severity: Severity, title: str, message: str) -> None:
         """Fan a diagnostic out to every attached View (ADR-0013). Never via
-        EventBus — diagnostics must not depend on the channel they report on."""
+        EventBus — diagnostics must not depend on the channel they report on.
+        Also records to AgentChatService so the transcript shows GUI events."""
         for sink in list(self._diag_sinks):
             sink.notify_diagnostic(severity, title, message)
+        # Best-effort — transcript is display-only; never let it block diagnostics.
+        try:
+            self._agent_chat_svc.record_diagnostic(severity, title, message)
+        except Exception:
+            logger.exception("AgentChatService.record_diagnostic raised; ignoring")
 
     def _info(self, message: str) -> None:
         """Transient status diagnostic (no title) — Qt status bar / wire line."""
@@ -1126,6 +1133,17 @@ class Controller:
         whether to show 'will be delivered now' vs 'will take effect at next wait'.
         """
         return self._operation_handles.live_count() > 0
+
+    def get_agent_chat(self):
+        """Return the session-scoped AgentChatService (transcript + observers).
+
+        Used by AgentChatDialog to register listeners and by RemoteControlAdapter
+        to record activity entries. Always non-None after __init__ completes.
+        """
+        from .services.agent_chat import AgentChatService
+
+        assert isinstance(self._agent_chat_svc, AgentChatService)
+        return self._agent_chat_svc
 
     # ------------------------------------------------------------------
     # Startup application workflow (StartupService)

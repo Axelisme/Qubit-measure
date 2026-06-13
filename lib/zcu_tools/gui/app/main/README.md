@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-13（第二分析層 PostAnalyzeService + singleshot ge 多 backend + t2 detune_ratio）
+**Last updated:** 2026-06-13（Phase A：AgentChatService + AgentChatDialog + feedback bar → dialog 升級）
 
 # `zcu_tools/gui/app/main/` — measure-gui Framework AI Note
 
@@ -48,6 +48,7 @@ gui/
 │   ├── staged_analyze.py — _StagedAnalyzeService (analyze/post-analyze 共用基底：handle-only off-main worker + 主線程 record result/figure + 失敗路徑)
 │   ├── analyze.py        — AnalyzeService (主分析層：FIT worker + INTERACTIVE finish；算 writeback items)
 │   ├── post_analyze.py   — PostAnalyzeService (第二分析層，鏡像 AnalyzeService：FIT-only、在 primary analyze 結果之上重算、gate on primary 已存在；State 平行 post_* 欄位)
+│   ├── agent_chat.py     — AgentChatService (純 Python、非 QObject)：ring buffer ~1000 TranscriptEntry、三種 kind (activity/feedback/diagnostic)、plain observer list (add/remove_listener)；activity 由 RemoteControlAdapter._after_success tap（IO→主線程 marshal，best-effort）、diagnostic 由 Controller._notify 順手記、feedback 由 AgentChatDialog._on_send 記。_should_record() 過濾純查詢/poll 不入流。
 │   ├── tab.py            — TabService (分頁狀態與 tab-local query/update)
 │   ├── tab_view.py       — TabViewService / TabViewSnapshot (pure tab render read model)
 │   ├── save.py           — SaveService (資料/圖片儲存 pipeline)
@@ -62,7 +63,8 @@ gui/
     ├── cfg_form.py         — CfgFormWidget：LiveModel 反應式容器
     ├── fields/             — 渲染邏輯：registry.py / common.py / containers.py
     ├── inspect_dialog.py   — InspectDialog(InspectDialogBase 子類)：只補 ml create/modify（_MlCreateDialog/_MlModifyDialog 拖 CfgEditor）；md tab + ml view/rename/del 在 base（session）
-    ├── main_window.py      — MainWindow(QMainWindow) 實作 ViewProtocol
+    ├── agent_chat_dialog.py — AgentChatDialog(QDialog)：非模態 transcript 視圖（QPlainTextEdit readOnly）+ 輸入框 + Send；init 自 service.entries() 初填、add_listener 刷新；finished 時 remove_listener 防懸空；_on_send → inbox.post + record_feedback + 狀態小字 4s 自清。
+    ├── main_window.py      — MainWindow(QMainWindow) 實作 ViewProtocol；toolbar 有 Agent… 按鈕（_open_agent_chat lazy 建/raise-existing）；舊 feedback bar 已移除
     └── analyze_form.py     — AnalyzeFormWidget：扁平 analysis 參數表單
 （共用件已下放 session：setup_dialog/device_dialog/predictor_dialog/inspect_base 在 `gui/session/ui/`（吃 `SessionControllerPort`）、ProgressService/IOManager 在 `gui/session/services/`、QtProgressTransport 在 `gui/session/adapters/`、TrimDoubleSpinBox 在 `gui/widgets/spinbox.py`。measure 保留 app-local OperationGate/BackgroundService（policy/Qt facet）+ 自己的 cfg-editor/role-catalog/inspect ml-edit）
 ```
