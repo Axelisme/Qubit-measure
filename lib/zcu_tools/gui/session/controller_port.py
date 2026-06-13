@@ -21,7 +21,7 @@ The port is the union of exactly the methods the two dialogs call:
   ``start_disconnect_device`` / ``start_reconnect_device`` /
   ``start_setup_device`` / ``forget_device`` / ``cancel_device_operation``),
   device queries (``list_devices`` / ``get_device_snapshot`` /
-  ``get_device_info`` / ``is_memory_device`` / ``get_active_device_setup``),
+  ``get_device_info`` / ``is_memory_device``),
   and progress attach/read (``attach_progress`` / ``progress_bars``).
 - **inspect dialog base**: md read/edit (``get_current_md`` / ``coerce_md_value``
   / ``set_md_attr`` / ``del_md_attr``) + ml view/rename/delete
@@ -59,7 +59,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.services.device import (
         ConnectDeviceRequest,
         DeviceEntry,
-        DeviceSetupSnapshot,
         DeviceSnapshot,
         DisconnectDeviceRequest,
         SetupDeviceRequest,
@@ -129,7 +128,6 @@ class SessionControllerPort(Protocol):
     def get_device_info(self, name: str) -> BaseDeviceInfo | None: ...
     def poll_device_info(self, name: str) -> None: ...
     def is_memory_device(self, name: str) -> bool: ...
-    def get_active_device_setup(self) -> DeviceSetupSnapshot | None: ...
 
     # --- device dialog: progress -------------------------------------------
     def attach_progress(

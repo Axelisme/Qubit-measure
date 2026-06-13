@@ -1036,33 +1036,41 @@ def _progress_bars_wire(bars) -> Mapping[str, object]:
     }
 
 
-def _h_device_active_setup(
+def _h_device_active_setups(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    setup = adapter.ctrl.get_active_device_setup()
-    if setup is None:
-        return {"active_setup": None}
-    # Names which device is setting up; live progress is via operation.progress
-    # (by the setup's operation_id, folded into the device poll reply).
-    return {"active_setup": {"device_name": setup.device_name}}
-
-
-def _h_device_active_operation(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    del params
-    snap = adapter.ctrl.get_active_device_operation()
-    if snap is None:
-        return {"active_operation": None}
+    # Phase C concurrency: enumerate *every* device currently setting up (sorted
+    # by name). Live progress per device is via operation.progress (by the
+    # setup's operation_id, folded into that device's poll reply).
     return {
-        "active_operation": {
-            "name": snap.name,
-            "type_name": snap.type_name,
-            "address": snap.address,
-            "status": snap.status.value,
-            "error": snap.error,
-        }
+        "active_setups": [
+            {"device_name": setup.device_name}
+            for setup in adapter.ctrl.get_active_device_setups()
+        ]
+    }
+
+
+def _h_device_active_operations(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    del params
+    # Phase C concurrency: enumerate *every* in-flight device operation (sorted
+    # by name), each tagged with its kind (connect / disconnect / setup) so the
+    # agent knows which device and which operation is live.
+    return {
+        "active_operations": [
+            {
+                "device_name": op.device_name,
+                "kind": op.kind.value,
+                "name": op.snapshot.name,
+                "type_name": op.snapshot.type_name,
+                "address": op.snapshot.address,
+                "status": op.snapshot.status.value,
+                "error": op.snapshot.error,
+            }
+            for op in adapter.ctrl.get_active_device_operations()
+        ]
     }
 
 
@@ -1762,8 +1770,8 @@ _HANDLERS: dict[str, Handler] = {
     "device.setup": _h_device_setup,
     "device.setup_spec": _h_device_setup_spec,
     "device.cancel_operation": _h_device_cancel_operation,
-    "device.active_setup": _h_device_active_setup,
-    "device.active_operation": _h_device_active_operation,
+    "device.active_setups": _h_device_active_setups,
+    "device.active_operations": _h_device_active_operations,
     "operation.await": _h_operation_await,
     "operation.progress": _h_operation_progress,
     "device.list": _h_device_list,

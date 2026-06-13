@@ -30,7 +30,6 @@ def _entry(
 def _make_ctrl() -> MagicMock:
     ctrl = MagicMock()
     ctrl.get_bus.return_value = EventBus()
-    ctrl.get_active_device_setup.return_value = None
     ctrl.progress_bars.return_value = ()
     ctrl.list_devices.return_value = []
     ctrl.is_memory_device.return_value = False
@@ -52,7 +51,7 @@ def _connected_snapshot(name: str, info: object) -> DeviceSnapshot:
 def _setting_up_snapshot(name: str, info: object) -> DeviceSnapshot:
     """A snapshot whose status is SETTING_UP — Phase C's SSOT for 'this device
     is mid-setup' (the dialog derives the live-setup set from snapshot status,
-    not from the single-valued get_active_device_setup)."""
+    not from the device service's active-op enumerators)."""
     return DeviceSnapshot(
         name=name,
         type_name=getattr(info, "type", "FakeDevice"),

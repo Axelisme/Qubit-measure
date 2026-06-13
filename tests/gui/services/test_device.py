@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import threading
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -171,12 +171,90 @@ def test_setup_uses_gate_and_returns_to_connected_snapshot(qapp):
     svc.start_setup_device(
         SetupDeviceRequest(name="dev1", info=FakeDeviceInfo(address="addr", value=2.0))
     )
-    assert svc.get_active_setup() is not None
+    active = svc.get_active_device_setups()
+    assert [s.device_name for s in active] == ["dev1"]
     loop.exec()
 
     device.setup.assert_called_once()
-    assert svc.get_active_setup() is None
+    assert svc.get_active_device_setups() == ()
     assert svc.get_device_snapshot("dev1").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
+
+
+def test_active_device_setups_enumerates_concurrent_setups(qapp):
+    """Phase C: two devices setting up concurrently both appear, sorted by name,
+    and each in-flight op is reported with its kind (regression for the old
+    single-valued getter that returned only one)."""
+    import time
+
+    # Per-name drivers so two devices coexist in one service.
+    drivers: dict[str, MagicMock] = {}
+
+    def factory(_type: str, _address: str) -> MagicMock:
+        # The service does not pass the name to the factory, so build a generic
+        # driver and let the caller register it under the connecting name.
+        dev = MagicMock()
+        dev.get_info.return_value = FakeDeviceInfo(address="addr", value=0.0)
+        return dev
+
+    svc = DeviceService(
+        EventBus(),
+        State(MagicMock()),
+        OperationGate(),
+        _bg(),
+        ProgressService(QtProgressTransport()),
+        driver_factory=factory,  # type: ignore[arg-type]
+    )
+
+    for name in ("alpha", "beta"):
+        loop = QEventLoop()
+        svc.device_connected.connect(lambda _r: loop.quit())
+        svc.start_connect_device(_req(name))
+        loop.exec()
+        drivers[name] = cast(MagicMock, GlobalDeviceManager.get_device(name))
+
+    # Both setups block on the same gate event so they stay in-flight together.
+    release = threading.Event()
+
+    def blocking_setup(_info, stop_event=None):
+        release.wait(timeout=3.0)
+
+    for name in ("alpha", "beta"):
+        drivers[name].setup.side_effect = blocking_setup
+        drivers[name].get_info.return_value = FakeDeviceInfo(address="addr", value=1.0)
+        svc.start_setup_device(
+            SetupDeviceRequest(
+                name=name, info=FakeDeviceInfo(address="addr", value=1.0)
+            )
+        )
+
+    # Wait until both workers have entered setup (status flipped to SETTING_UP).
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        qapp.processEvents()
+        if len(svc.get_active_device_setups()) == 2:
+            break
+        time.sleep(0.01)
+
+    setups = svc.get_active_device_setups()
+    assert [s.device_name for s in setups] == ["alpha", "beta"]  # sorted by name
+
+    ops = svc.get_active_device_operations()
+    assert [o.device_name for o in ops] == ["alpha", "beta"]
+    assert all(o.kind is OperationKind.DEVICE_SETUP for o in ops)
+    assert all(o.snapshot.status is DeviceStatus.SETTING_UP for o in ops)
+
+    # Let both setups finish so the autouse teardown can quiesce cleanly.
+    finished: set[str] = set()
+    done = QEventLoop()
+    svc.setup_finished.connect(
+        lambda name: (finished.add(name), len(finished) == 2 and done.quit())
+    )
+    release.set()
+    spin_deadline = time.monotonic() + 3.0
+    while len(finished) < 2 and time.monotonic() < spin_deadline:
+        qapp.processEvents()
+        time.sleep(0.01)
+    assert finished == {"alpha", "beta"}
 
 
 def test_wait_setup_done_wakes_from_worker_thread_without_deadlock(qapp):

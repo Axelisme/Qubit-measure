@@ -490,11 +490,11 @@ class DeviceDialog(QDialog):
     def _setup_device_names(self) -> set[str]:
         """The set of devices currently setting up (Phase C, possibly several).
 
-        Derived from per-device snapshot status (SETTING_UP) rather than a single
-        ``_active_setup`` snapshot: DeviceService runs setups for different
-        devices concurrently, and its State-owned status is the SSOT for "which
-        devices are mid-setup". The single-valued ``get_active_device_setup``
-        port stays for the remote contract but no longer drives the dialog."""
+        Derived from per-device snapshot status (SETTING_UP): DeviceService runs
+        setups for different devices concurrently, and its State-owned status is
+        the SSOT for "which devices are mid-setup". The remote contract exposes
+        the same set via the ``device.active_setups`` enumerator, but the dialog
+        reads snapshot status directly rather than going through it."""
         names: set[str] = set()
         for entry in self._ctrl.list_devices():
             snapshot = self._ctrl.get_device_snapshot(entry.name)

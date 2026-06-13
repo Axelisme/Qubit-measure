@@ -12,8 +12,12 @@ from zcu_tools.gui.session.events import (
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
 )
+from zcu_tools.gui.session.ports import OperationKind
 from zcu_tools.gui.session.services.device import (
+    ActiveDeviceOperation,
     DeviceSetupSnapshot,
+    DeviceSnapshot,
+    DeviceStatus,
     SetupDeviceRequest,
 )
 from zcu_tools.mcp.measure.server import TOOLS
@@ -30,7 +34,7 @@ def fx(qapp):  # noqa: ARG001
 
 
 def test_event_requery_hints_point_to_registered_methods():
-    assert "device.active_setup" in METHOD_REGISTRY
+    assert "device.active_setups" in METHOD_REGISTRY
     assert "context.get_md_attr" in METHOD_REGISTRY
     assert "context.get_ml" in METHOD_REGISTRY
 
@@ -57,17 +61,78 @@ def test_device_setup_started_and_finished_push(fx):
         sock.close()
 
 
-def test_device_active_setup_names_the_device(fx):
-    # active_setup now only names which device is setting up; live progress is
-    # via device.setup_progress (ADR-0013 device↔run alignment).
-    fx.ctrl.get_active_device_setup = MagicMock(  # type: ignore[method-assign]
-        return_value=DeviceSetupSnapshot(device_name="bias")
+def test_device_active_setups_enumerate_all(fx):
+    # Phase C: active_setups lists EVERY device setting up (sorted by name);
+    # live progress per device is via operation.progress.
+    fx.ctrl.get_active_device_setups = MagicMock(  # type: ignore[method-assign]
+        return_value=(
+            DeviceSetupSnapshot(device_name="bias"),
+            DeviceSetupSnapshot(device_name="flux"),
+        )
     )
     sock = open_client(fx.service.port)
     try:
-        resp = call(sock, "device.active_setup")
+        resp = call(sock, "device.active_setups")
         assert resp["ok"] is True
-        assert resp["result"]["active_setup"] == {"device_name": "bias"}
+        assert resp["result"]["active_setups"] == [
+            {"device_name": "bias"},
+            {"device_name": "flux"},
+        ]
+    finally:
+        sock.close()
+
+
+def test_device_active_operations_enumerate_with_kind(fx):
+    # Phase C: active_operations lists EVERY in-flight op, each tagged with its
+    # kind + device_name so the agent knows which device and which operation.
+    fx.ctrl.get_active_device_operations = MagicMock(  # type: ignore[method-assign]
+        return_value=(
+            ActiveDeviceOperation(
+                device_name="bias",
+                kind=OperationKind.DEVICE_SETUP,
+                snapshot=DeviceSnapshot(
+                    name="bias",
+                    type_name="YOKOGS200",
+                    address="addr1",
+                    status=DeviceStatus.SETTING_UP,
+                ),
+            ),
+            ActiveDeviceOperation(
+                device_name="flux",
+                kind=OperationKind.DEVICE_CONNECT,
+                snapshot=DeviceSnapshot(
+                    name="flux",
+                    type_name="FakeDevice",
+                    address="addr2",
+                    status=DeviceStatus.CONNECTING,
+                ),
+            ),
+        )
+    )
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "device.active_operations")
+        assert resp["ok"] is True
+        assert resp["result"]["active_operations"] == [
+            {
+                "device_name": "bias",
+                "kind": "device_setup",
+                "name": "bias",
+                "type_name": "YOKOGS200",
+                "address": "addr1",
+                "status": DeviceStatus.SETTING_UP.value,
+                "error": None,
+            },
+            {
+                "device_name": "flux",
+                "kind": "device_connect",
+                "name": "flux",
+                "type_name": "FakeDevice",
+                "address": "addr2",
+                "status": DeviceStatus.CONNECTING.value,
+                "error": None,
+            },
+        ]
     finally:
         sock.close()
 
@@ -361,8 +426,8 @@ def test_mcp_tool_schemas_include_required_discovery_tools():
         "gui_device_connect",
         "gui_device_disconnect",
         "gui_device_setup",
-        "gui_device_active_setup",
-        "gui_device_active_operation",
+        "gui_device_active_setups",
+        "gui_device_active_operations",
         "gui_state_check",
     }
     assert expected <= set(TOOLS)

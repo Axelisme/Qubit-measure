@@ -105,7 +105,13 @@ from __future__ import annotations
 #      holds the post-analysis figure). Removed view.screenshot (whole-window /
 #      tab Qt grab). Added save.post_image (mirrors save.image, targets the
 #      post-analysis figure). Method-set change = contract change.
-WIRE_VERSION = 24
+# v25: device active-op enumeration for Phase C concurrency. Renamed the singular
+#      device.active_setup / device.active_operation to plural
+#      device.active_setups / device.active_operations, each now returning a
+#      list of ALL in-flight ops (sorted by device name) instead of an arbitrary
+#      one; active_operations entries gain 'kind' + 'device_name'. Method-rename
+#      + return-shape change = contract change.
+WIRE_VERSION = 25
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -231,4 +237,8 @@ WIRE_VERSION = 24
 #      (SCREENSHOT_FIGSIZE/SCREENSHOT_DPI in figure_export) so the agent PNG stays
 #      token-light while save_image keeps the full SAVE_FIGSIZE/SAVE_DPI quality.
 #      Added save_post_image dispatch (Controller.save_post_image already existed).
-GUI_VERSION = 30
+# v31: device active-op enumeration (WIRE 25). DeviceService singular getters
+#      (get_active_setup / get_active_device_operation) replaced by plural
+#      enumerators (get_active_device_setups / get_active_device_operations); the
+#      stale single-valued port declaration is dropped.
+GUI_VERSION = 31

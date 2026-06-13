@@ -358,10 +358,21 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "device.cancel_operation": MethodSpec(
         5.0, "Cancel active device setup", (_str("name", "Device name"),)
     ),
-    "device.active_setup": MethodSpec(
-        5.0, "Which device (if any) is currently setting up: {device_name} or null"
+    "device.active_setups": MethodSpec(
+        5.0,
+        "List EVERY device currently setting up (devices set up concurrently): "
+        "{active_setups: [{device_name}, ...]} (empty list if none), sorted by "
+        "device name. Live progress per device is polled via gui_device_poll(name).",
     ),
-    "device.active_operation": MethodSpec(5.0, "Read active device operation"),
+    "device.active_operations": MethodSpec(
+        5.0,
+        "List EVERY in-flight device operation (connect / disconnect / setup run "
+        "concurrently): {active_operations: [{device_name, kind, name, type_name, "
+        "address, status, error}, ...]} (empty list if none), sorted by device "
+        "name. 'kind' is device_connect / device_disconnect / device_setup. Use "
+        "gui_device_poll(name) / gui_device_wait_operation(name) per device to "
+        "track each one.",
+    ),
     # Async operation handle: block until an operation (device.connect /
     # device.disconnect / device.setup / run.start / connect.start, identified by
     # the operation_id they return) settles. mcp bookkeeping only — agents drive

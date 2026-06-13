@@ -75,7 +75,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.services.device import (
         ConnectDeviceRequest,
         DeviceEntry,
-        DeviceSetupSnapshot,
         DeviceSnapshot,
         DisconnectDeviceRequest,
         SetupDeviceRequest,
@@ -334,9 +333,6 @@ class Controller:
 
     def is_memory_device(self, name: str) -> bool:
         return self._dev_svc.is_memory_device(name)
-
-    def get_active_device_setup(self) -> DeviceSetupSnapshot | None:
-        return self._dev_svc.get_active_setup()
 
     # -- device dialog: progress --
     def attach_progress(

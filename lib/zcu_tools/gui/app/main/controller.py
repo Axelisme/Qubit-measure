@@ -21,6 +21,7 @@ from zcu_tools.gui.session.services.connection import (
     PredictMatrixCurveResult,
 )
 from zcu_tools.gui.session.services.device import (
+    ActiveDeviceOperation,
     DeviceEntry,
     DeviceSetupSnapshot,
 )
@@ -1053,8 +1054,8 @@ class Controller:
     def start_setup_device(self, req: SetupDeviceRequest) -> int:
         return self._dev_svc.start_setup_device(req)
 
-    def get_active_device_setup(self) -> DeviceSetupSnapshot | None:
-        return self._dev_svc.get_active_setup()
+    def get_active_device_setups(self) -> tuple[DeviceSetupSnapshot, ...]:
+        return self._dev_svc.get_active_device_setups()
 
     def cancel_device_operation(self, name: str) -> None:
         self._dev_svc.cancel_device_operation(name)
@@ -1077,8 +1078,8 @@ class Controller:
     def get_device_snapshot(self, name: str) -> DeviceSnapshot | None:
         return self._dev_svc.get_device_snapshot(name)
 
-    def get_active_device_operation(self) -> DeviceSnapshot | None:
-        return self._dev_svc.get_active_device_operation()
+    def get_active_device_operations(self) -> tuple[ActiveDeviceOperation, ...]:
+        return self._dev_svc.get_active_device_operations()
 
     def attach_progress(
         self, owner_id: str, listener: Callable[[], None]

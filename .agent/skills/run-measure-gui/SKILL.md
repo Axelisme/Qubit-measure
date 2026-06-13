@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 18
+skill_version: 19
 ---
 
 # run-measure-gui
@@ -332,7 +332,11 @@ Flux/RF sources (YOKOGS200, SGS100A) are driven as **devices**:
 updates={"value": ...})` ramps an output (cancellable; a slow setup degrades to
 a handle, and its progress bars ride the `gui_device_poll` reply while running).
 `gui_device_setup_spec(name)` lists the settable fields. Sweeping a device across an experiment is done in the adapter cfg's
-`dev` / sweep section, not by manual per-point setup.
+`dev` / sweep section, not by manual per-point setup. Different devices set up
+**concurrently**: `gui_device_active_operations` lists every in-flight device op
+in one call (each entry has `device_name` + `kind`, where kind is
+device_connect / device_disconnect / device_setup), and `gui_device_active_setups`
+lists just the ones setting up — then poll/wait each device by name.
 
 **Stash reusable constants in the context (md/ml), then reference them by name
 in cfg.** Channel numbers, `res_probe_len`, probe-pulse lengths etc. go into the

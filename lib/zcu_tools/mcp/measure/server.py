@@ -198,7 +198,13 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
 #      and also covers the post-analysis figure. Added gui_save_post_image
 #      (auto-generated from the new save.post_image method_spec; mirrors
 #      gui_save_image). gui_save_image keeps full save quality.
-MCP_VERSION = 29
+# MCP 30: device active-op enumeration (WIRE 25). gui_device_active_setup /
+#      gui_device_active_operation are replaced (auto-generated from the renamed
+#      plural method_specs) by gui_device_active_setups / gui_device_active_operations,
+#      each returning the full list of in-flight ops (sorted by device name);
+#      active_operations entries gain 'kind' + 'device_name'. Concurrent setups
+#      are now fully observable in one call.
+MCP_VERSION = 30
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -274,6 +280,10 @@ Detecting completion — no events; wait or poll a handle:
   - While 'running', the poll reply carries the live progress bars (active,
     bars[token/format/maximum/value/percent/n/total]) — no separate progress
     tool. Don't busy-poll gui_run_running_tab in a sleep loop; use gui_run_poll.
+  - Devices set up concurrently (different devices run in parallel). To see ALL
+    in-flight device ops in one call use gui_device_active_operations (each entry
+    has device_name + kind), or gui_device_active_setups for just the setups;
+    then poll/wait each device by name.
   - GUI diagnostics still reach you UNSOLICITED: every tool reply piggybacks any
     {severity:'error'|'info', title, message} the GUI surfaced since your last
     call (e.g. "Data saved to …", a run-failure reason) under "notifications

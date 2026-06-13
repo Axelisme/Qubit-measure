@@ -129,6 +129,23 @@ class DeviceSetupSnapshot:
 
 
 @dataclass(frozen=True)
+class ActiveDeviceOperation:
+    """One in-flight device operation in the concurrent-enumeration view.
+
+    Phase C runs operations for different devices in parallel, so the read-only
+    "what is in flight" surface is a *set*, not a single op. Each entry pairs the
+    device-state projection with the operation ``kind`` (connect / disconnect /
+    setup) so an agent knows both which device and which kind of operation is
+    live without re-deriving it from ``status``. ``device_name`` mirrors
+    ``snapshot.name`` for callers that only need the key.
+    """
+
+    device_name: str
+    kind: OperationKind
+    snapshot: DeviceSnapshot
+
+
+@dataclass(frozen=True)
 class _InflightOp:
     """One in-flight device operation, keyed by device name in DeviceService.
 
@@ -396,32 +413,40 @@ class DeviceService(QObject):
         dev = self._state.get_device(name)
         return None if dev is None else self._project(dev)
 
-    def get_active_device_operation(self) -> DeviceSnapshot | None:
-        """Project *any one* in-flight device operation (single-valued contract).
+    def get_active_device_operations(self) -> tuple[ActiveDeviceOperation, ...]:
+        """Enumerate *all* in-flight device operations (Phase C concurrency).
 
-        Phase C runs operations for different devices concurrently, so "the
-        active operation" is no longer unique. This keeps the single-valued
-        SessionControllerPort / remote contract by returning an arbitrary
-        in-flight op; views that need every concurrent operation read per-device
-        snapshot status instead (SETTING_UP names a live setup)."""
-        name = next(iter(self._inflight), None)
-        if name is None:
-            return None
-        dev = self._state.get_device(name)
-        return None if dev is None else self._project(dev)
+        Returns one entry per ``_inflight`` op — each carrying the device-state
+        projection plus the operation ``kind`` — sorted by device name so the
+        order is stable for agents (dict insertion order is not a contract). A
+        device whose State entry has vanished is skipped (it has no projection)."""
+        out: list[ActiveDeviceOperation] = []
+        for name in sorted(self._inflight):
+            dev = self._state.get_device(name)
+            if dev is None:
+                continue
+            out.append(
+                ActiveDeviceOperation(
+                    device_name=name,
+                    kind=self._inflight[name].kind,
+                    snapshot=self._project(dev),
+                )
+            )
+        return tuple(out)
 
-    def get_active_setup(self) -> DeviceSetupSnapshot | None:
-        """Name *any one* device currently setting up (single-valued contract).
+    def get_active_device_setups(self) -> tuple[DeviceSetupSnapshot, ...]:
+        """Name *every* device currently setting up (Phase C concurrency).
 
-        Like :meth:`get_active_device_operation`, this stays single-valued for
-        the port / remote contract; the device dialog enumerates all concurrent
-        setups from per-device snapshot status (Phase C)."""
-        for name, op in self._inflight.items():
-            if op.kind is OperationKind.DEVICE_SETUP:
-                dev = self._state.get_device(name)
-                if dev is not None and dev.status is DeviceStatus.SETTING_UP:
-                    return DeviceSetupSnapshot(device_name=name)
-        return None
+        Filters the in-flight set to ``DEVICE_SETUP`` ops whose State status is
+        ``SETTING_UP``, sorted by device name for a stable agent-facing order.
+        The device dialog derives the same set from per-device snapshot status."""
+        return tuple(
+            DeviceSetupSnapshot(device_name=name)
+            for name in sorted(self._inflight)
+            if self._inflight[name].kind is OperationKind.DEVICE_SETUP
+            and (dev := self._state.get_device(name)) is not None
+            and dev.status is DeviceStatus.SETTING_UP
+        )
 
     def list_devices(self) -> list[DeviceEntry]:
         return [
