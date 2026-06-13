@@ -355,6 +355,13 @@ class DeviceDialog(QDialog):
         self._bus_subs_active = False
 
     def _refresh_list(self, select_name: str | None = None) -> None:
+        # Rebuilding the list clears the selection; preserve the user's current
+        # selection across the rebuild so an unrelated device change (e.g. a poll
+        # tick or another device's status update) never steals focus from the
+        # device the user is inspecting. ``select_name`` is an explicit override
+        # for the cases that *want* to move the selection (e.g. surfacing a newly
+        # connected device when nothing is selected yet).
+        current_name = self._selected_device_name()
         self._list.clear()
         entries = self._ctrl.list_devices()
         for entry in entries:
@@ -368,10 +375,11 @@ class DeviceDialog(QDialog):
             item.setData(Qt.ItemDataRole.UserRole, entry.name)  # type: ignore[attr-defined]
             self._list.addItem(item)
 
-        if select_name is not None:
+        target = select_name if select_name is not None else current_name
+        if target is not None:
             for row in range(self._list.count()):
                 it = self._list.item(row)
-                if it is not None and it.data(Qt.ItemDataRole.UserRole) == select_name:  # type: ignore[attr-defined]
+                if it is not None and it.data(Qt.ItemDataRole.UserRole) == target:  # type: ignore[attr-defined]
                     self._list.setCurrentRow(row)
                     break
 
@@ -380,6 +388,12 @@ class DeviceDialog(QDialog):
         dtype = self._type_combo.currentText()
         existing = {e.name for e in entries}
         self._name_edit.setText(self._unique_name(dtype.lower(), existing))
+
+    def _selected_device_name(self) -> str | None:
+        item = self._list.currentItem()
+        if item is None:
+            return None
+        return item.data(Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
 
     def _on_selection_changed(self, _row: int) -> None:
         item = self._list.currentItem()
@@ -507,7 +521,13 @@ class DeviceDialog(QDialog):
 
     def _on_device_changed(self, payload: DeviceChangedPayload) -> None:
         name = payload.name
-        self._refresh_list(select_name=name)
+        # Keep the user's current selection across the refresh; only surface the
+        # changed device when nothing is selected yet (e.g. the first device just
+        # connected). When the changed device IS the selected one, _refresh_list's
+        # trailing _on_selection_changed repaints the right panel with the fresh
+        # cached info, so a value that moved underneath us shows up immediately.
+        select = name if self._selected_device_name() is None else None
+        self._refresh_list(select_name=select)
         if name is None:
             return
         snapshot = self._ctrl.get_device_snapshot(name)

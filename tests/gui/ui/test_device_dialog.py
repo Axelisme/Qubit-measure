@@ -6,7 +6,10 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
-from zcu_tools.gui.session.events import DeviceSetupFinishedPayload
+from zcu_tools.gui.session.events import (
+    DeviceChangedPayload,
+    DeviceSetupFinishedPayload,
+)
 from zcu_tools.gui.session.services.device import (
     ConnectDeviceRequest,
     DeviceEntry,
@@ -164,6 +167,72 @@ def test_device_dialog_refresh_reloads_selected_device_info(qapp):
 
     assert panel._value_spin.value() == 2.0
     ctrl.get_device_info.assert_called_once_with("fd")
+
+
+def test_device_changed_repaints_selected_panel(qapp):
+    """A DEVICE_CHANGED for the selected device repaints the right panel with the
+    fresh cached info (so a value that moved underneath us shows immediately)."""
+    from zcu_tools.device.fake import FakeDeviceInfo
+
+    ctrl = _make_ctrl()
+    ctrl.list_devices.return_value = [_entry("fd")]
+    values = iter([1.0, 2.0])
+    ctrl.get_device_snapshot.side_effect = lambda _n: _connected_snapshot(
+        "fd", FakeDeviceInfo(address="none", value=next(values))
+    )
+
+    dialog = DeviceDialog(ctrl)
+    dialog._list.setCurrentRow(0)
+    panel = dialog._stack.currentWidget()
+    assert isinstance(panel, _FakeDevicePanel)
+    assert panel._value_spin.value() == 1.0
+
+    ctrl.get_bus.return_value.emit(DeviceChangedPayload(name="fd"))
+
+    assert panel._value_spin.value() == 2.0
+
+
+def test_device_changed_for_other_device_keeps_selection(qapp):
+    """A DEVICE_CHANGED for a non-selected device must not steal the selection
+    away from the device the user is currently inspecting."""
+    from zcu_tools.device.fake import FakeDeviceInfo
+
+    ctrl = _make_ctrl()
+    ctrl.list_devices.return_value = [_entry("A"), _entry("B")]
+    ctrl.get_device_snapshot.side_effect = lambda n: _connected_snapshot(
+        n, FakeDeviceInfo(address="none")
+    )
+
+    dialog = DeviceDialog(ctrl)
+    dialog._list.setCurrentRow(0)
+    item = dialog._list.currentItem()
+    assert item is not None and item.data(256) == "A"
+
+    ctrl.get_bus.return_value.emit(DeviceChangedPayload(name="B"))
+
+    item = dialog._list.currentItem()
+    assert item is not None and item.data(256) == "A"
+
+
+def test_device_changed_surfaces_device_when_none_selected(qapp):
+    """With nothing selected, a DEVICE_CHANGED surfaces the changed device (the
+    'first device just connected' case)."""
+    from zcu_tools.device.fake import FakeDeviceInfo
+
+    ctrl = _make_ctrl()
+    ctrl.list_devices.return_value = [_entry("fd")]
+    ctrl.get_device_snapshot.side_effect = lambda n: _connected_snapshot(
+        n, FakeDeviceInfo(address="none")
+    )
+
+    dialog = DeviceDialog(ctrl)
+    dialog._list.setCurrentRow(-1)
+
+    ctrl.get_bus.return_value.emit(DeviceChangedPayload(name="fd"))
+
+    item = dialog._list.currentItem()
+    assert item is not None
+    assert item.data(256) == "fd"
 
 
 def test_device_dialog_apply_changes(qapp):
