@@ -33,10 +33,10 @@ import logging
 import os
 import signal
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
-from collections.abc import Callable
 
 from qtpy.QtCore import (  # type: ignore[attr-defined]
     QObject,
@@ -228,10 +228,12 @@ def build_claude_argv(
     ``--allowedTools`` restricts tool access to the measure-gui MCP server
     to prevent unintended side-effects on other tools.
 
-    B0: we pass ``-p <task>`` to seed the first turn, but keep stdin open so
-    ``send_user_message`` can inject follow-up messages.  ``claude`` in
-    interactive stream-json mode reads additional user turns from stdin after
-    the initial ``-p`` turn completes.
+    ``-p`` keeps claude in non-interactive print mode; under
+    ``--input-format stream-json`` its positional ``task`` arg is IGNORED —
+    claude reads every user turn (including the first) from stdin.  So the
+    real first turn is seeded by ``AgentRunner.start()`` writing a stdin
+    message, and ``send_user_message`` injects follow-ups the same way.
+    (Empirically verified against claude v2.1.177.)
     """
     return [
         "claude",
@@ -534,6 +536,18 @@ class AgentRunner(QObject):
         args = argv[1:]
         proc.start(program, args)
         self._process = proc
+
+        # Under --input-format stream-json claude ignores the -p positional and
+        # reads every turn (incl. the first) from stdin. Seed the first turn by
+        # writing it to stdin; without this the child blocks waiting for input
+        # and emits no stdout at all.
+        if not proc.waitForStarted(5000):
+            logger.error("AgentRunner: claude failed to start")
+            self._callbacks.on_process_error("claude failed to start")
+            self._run_state.on_stop()
+            self._emit_state()
+            return
+        proc.write(build_stdin_message(task))
 
         self._emit_state()
         logger.info("AgentRunner: spawned claude pid=%s", proc.processId())
