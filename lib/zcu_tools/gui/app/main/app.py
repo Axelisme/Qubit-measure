@@ -100,7 +100,19 @@ def run_app(
         adapter = RemoteControlAdapter(
             controller=ctrl, opts=control_opts, render_view=window
         )
-        adapter.start()
+        try:
+            adapter.start()
+        except RuntimeError as exc:
+            port = control_opts.port
+            print(
+                f"\nERROR: cannot open control socket on port {port}.\n"
+                f"  {exc}\n\n"
+                f"  Another measure-gui may already be running on that port.\n"
+                f"  Pass --control-port <N> to use a different port,\n"
+                f"  or --no-control to disable the remote-control socket.\n",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         # Stash on the window so MainWindow.closeEvent can stop it; keep a
         # strong ref so the GC does not retire the daemon thread early.
         window.remote_control_service = adapter  # type: ignore[attr-defined]

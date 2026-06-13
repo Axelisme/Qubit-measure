@@ -83,7 +83,19 @@ def run_app(
         )
 
         adapter = RemoteControlAdapter(ctrl, control)
-        adapter.start()
+        try:
+            adapter.start()
+        except RuntimeError as exc:
+            port = control.port
+            print(
+                f"\nERROR: cannot open control socket on port {port}.\n"
+                f"  {exc}\n\n"
+                f"  Another autofluxdep-gui may already be running on that port.\n"
+                f"  Pass --control-port <N> to use a different port,\n"
+                f"  or --no-control to disable the remote-control socket.\n",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         app.aboutToQuit.connect(adapter.stop)
 
     # Mirror measure-gui: open the setup dialog non-modally on startup so the

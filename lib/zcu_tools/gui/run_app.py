@@ -68,7 +68,19 @@ def run_qt_app(
 
     if control is not None and adapter_factory is not None:
         adapter = adapter_factory(ctrl, control)
-        adapter.start()
+        try:
+            adapter.start()
+        except RuntimeError as exc:
+            port = getattr(control, "port", "?")
+            print(
+                f"\nERROR: cannot open control socket on port {port}.\n"
+                f"  {exc}\n\n"
+                f"  Another GUI instance may already be running on that port.\n"
+                f"  Pass --control-port <N> to use a different port,\n"
+                f"  or --no-control to disable the remote-control socket.\n",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         # stop() unsubscribes EventBus synchronously, so it must run on the Qt
         # main thread; aboutToQuit fires there.
         app.aboutToQuit.connect(adapter.stop)  # type: ignore[attr-defined]

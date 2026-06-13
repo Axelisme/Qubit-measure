@@ -1,7 +1,8 @@
 """Launcher for the dispersive-shift analysis GUI.
 
 Examples:
-    uv run python run_dispersive_gui.py
+    uv run python run_dispersive_gui.py                       # opens control socket on port 8767
+    uv run python run_dispersive_gui.py --no-control          # disable the remote-control socket
     uv run python run_dispersive_gui.py --chip Q12_2D --qub Q1 --result-dir ../result/Q12_2D/Q1
 """
 
@@ -23,6 +24,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         description="Launch the fluxonium dispersive-shift fitting GUI",
     )
     parser.add_argument("--no-log", action="store_true", help="Disable file logging")
+    parser.add_argument(
+        "--no-control",
+        action="store_true",
+        help="Disable the remote-control TCP socket entirely (overrides --control-port).",
+    )
     parser.add_argument("--chip", type=str, default="", help="Chip name")
     parser.add_argument("--qub", type=str, default="", help="Qubit name")
     parser.add_argument("--result-dir", type=str, default="", help="Result directory")
@@ -32,8 +38,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--control-port",
         type=int,
-        default=None,
-        help="Start the remote-control TCP server on this port (for agents/MCP)",
+        default=8767,
+        help=(
+            "Start the remote-control TCP server on this port (default: 8767, the "
+            "agreed-upon port for agent attach; 0 = OS-assigned ephemeral port). "
+            "Use --no-control to disable the socket entirely."
+        ),
     )
     parser.add_argument(
         "--control-token",
@@ -71,7 +81,7 @@ if __name__ == "__main__":
     from zcu_tools.gui.app.dispersive.state import ProjectInfo
 
     control = None
-    if args.control_port is not None:
+    if not args.no_control:
         from zcu_tools.gui.app.dispersive.services.remote.service import ControlOptions
 
         control = ControlOptions(port=args.control_port, token=args.control_token)

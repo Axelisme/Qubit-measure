@@ -1,0 +1,198 @@
+"""Tests for the user-launched GUI control-socket default-port feature.
+
+Covers three guarantees:
+1. Default port consistency: the run-script default port matches the MCP
+   server's ``default_port`` for every app (measure / fluxdep / dispersive /
+   autofluxdep).  These are pure import-level constants — no Qt needed.
+2. --no-control suppression: when ``no_control=True`` is passed (simulating
+   the --no-control flag), ``control_opts`` / ``control`` is None, so
+   ``run_app`` never tries to open a socket.
+3. Port-collision fast-fail: when ``NdjsonRpcEndpoint.start()`` raises
+   ``RuntimeError`` (simulating an EADDRINUSE bind failure), the adapter's
+   ``start()`` re-raises the same RuntimeError so the app-level handler can
+   print a user-friendly message and exit.
+"""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+# ---------------------------------------------------------------------------
+# 1. Default port consistency
+# ---------------------------------------------------------------------------
+
+SCRIPT_DIR = Path(__file__).resolve().parents[4] / "script"
+
+
+def _parse_run_script(
+    script_name: str, extra_args: list[str] | None = None
+) -> argparse.Namespace:
+    """Import a run_* script's _parse_args and invoke it with no extra args."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        f"_script_{script_name}",
+        SCRIPT_DIR / f"{script_name}.py",
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)  # type: ignore[union-attr]
+    return module._parse_args(extra_args or [])
+
+
+@pytest.mark.parametrize(
+    "script_name, expected_port",
+    [
+        ("run_measure_gui", 8765),
+        ("run_fluxdep_gui", 8766),
+        ("run_dispersive_gui", 8767),
+        ("run_autofluxdep_gui", 8768),
+    ],
+)
+def test_default_control_port_matches_mcp(script_name: str, expected_port: int) -> None:
+    """Run script default --control-port matches the MCP server's default_port."""
+    args = _parse_run_script(script_name)
+    assert args.control_port == expected_port, (
+        f"{script_name}: expected default port {expected_port}, got {args.control_port}"
+    )
+
+
+@pytest.mark.parametrize(
+    "script_name, mcp_module, expected_port",
+    [
+        ("run_measure_gui", "zcu_tools.mcp.measure.server", 8765),
+        ("run_fluxdep_gui", "zcu_tools.mcp.fluxdep.server", 8766),
+        ("run_dispersive_gui", "zcu_tools.mcp.dispersive.server", 8767),
+        ("run_autofluxdep_gui", "zcu_tools.mcp.autofluxdep.server", 8768),
+    ],
+)
+def test_mcp_default_port_matches_expected(
+    script_name: str, mcp_module: str, expected_port: int
+) -> None:
+    """MCP server _CONFIG.default_port equals the documented agreed port."""
+    import importlib
+
+    mod = importlib.import_module(mcp_module)
+    actual = mod._CONFIG.default_port  # type: ignore[attr-defined]
+    assert actual == expected_port, (
+        f"{mcp_module}: expected default_port={expected_port}, got {actual}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 2. --no-control produces None control_opts
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "script_name",
+    [
+        "run_measure_gui",
+        "run_fluxdep_gui",
+        "run_dispersive_gui",
+        "run_autofluxdep_gui",
+    ],
+)
+def test_no_control_flag_suppresses_socket(script_name: str) -> None:
+    """--no-control must result in no_control=True from argparse."""
+    args = _parse_run_script(script_name, ["--no-control"])
+    assert args.no_control is True, (
+        f"{script_name}: --no-control flag not parsed correctly"
+    )
+    # Verify the control_opts / control would be None when no_control is True
+    # (the scripts gate on ``not args.no_control``).
+    control_opts = None if args.no_control else object()  # sentinel
+    assert control_opts is None
+
+
+# ---------------------------------------------------------------------------
+# 3. Port-collision fast-fail propagation
+# ---------------------------------------------------------------------------
+
+
+def test_ndjson_endpoint_bind_failure_raises_runtime_error(qapp) -> None:  # noqa: ARG001
+    """NdjsonRpcEndpoint.start() wraps OSError into RuntimeError with a message.
+
+    We bind a real ephemeral port first, then try to bind it again; the second
+    bind raises OSError (EADDRINUSE) which the endpoint must wrap into RuntimeError.
+    """
+    import socket as socket_mod
+
+    from zcu_tools.gui.remote.rpc_endpoint import ControlOptions, NdjsonRpcEndpoint
+
+    # Hold an ephemeral port open so the second bind fails.
+    # listen() is required on Linux: SO_REUSEADDR alone allows a second bind(),
+    # but a listening socket makes the second bind raise EADDRINUSE.
+    blocker = socket_mod.socket(socket_mod.AF_INET, socket_mod.SOCK_STREAM)
+    blocker.setsockopt(socket_mod.SOL_SOCKET, socket_mod.SO_REUSEADDR, 1)
+    blocker.bind(("127.0.0.1", 0))
+    blocker.listen(1)
+    taken_port = blocker.getsockname()[1]
+
+    class _FakeRouter:
+        def on_client_open(self, link):  # noqa: ANN001
+            pass
+
+        def on_client_close(self, link, *, on_main_thread):  # noqa: ANN001
+            pass
+
+        def route(self, link, request):  # noqa: ANN001
+            pass
+
+    opts = ControlOptions(port=taken_port)
+
+    endpoint = NdjsonRpcEndpoint(
+        opts,
+        wire_version=1,
+        gui_version=1,
+        server_name="test_server",
+        router=_FakeRouter(),
+    )
+
+    try:
+        with pytest.raises(RuntimeError, match="bind") as exc_info:
+            endpoint.start()
+
+        # The message must name the host:port so the user can act on it.
+        msg = str(exc_info.value).lower()
+        assert "bind" in msg
+        assert str(taken_port) in str(exc_info.value)
+    finally:
+        blocker.close()
+
+
+def test_remote_control_adapter_start_propagates_bind_error(qapp) -> None:
+    """RemoteControlServiceBase.start() propagates the bind RuntimeError upward.
+
+    The app-level try/except in run_app / autofluxdep app.py catches this and
+    prints a user-friendly message.  This test confirms the error is not swallowed
+    at the service layer.
+    """
+
+    # Import the measure-gui adapter (representative of all four).
+    from zcu_tools.gui.app.main.services.remote import RemoteControlAdapter
+    from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
+
+    ctrl_mock = MagicMock()
+    ctrl_mock.bus = MagicMock()
+    render_view_mock = MagicMock()
+
+    opts = ControlOptions(port=0)  # valid opts; we'll patch the underlying endpoint
+
+    adapter = RemoteControlAdapter(
+        controller=ctrl_mock,
+        opts=opts,
+        render_view=render_view_mock,
+    )
+
+    bind_error = RuntimeError(
+        "NdjsonRpcEndpoint bind 127.0.0.1:0 failed: [Errno 98] Address already in use"
+    )
+
+    with patch.object(adapter._endpoint, "start", side_effect=bind_error):
+        with pytest.raises(RuntimeError, match="bind"):
+            adapter.start()

@@ -1,7 +1,8 @@
 """Launcher for the fluxdep analysis GUI.
 
 Examples:
-    uv run python run_fluxdep_gui.py
+    uv run python run_fluxdep_gui.py                          # opens control socket on port 8766
+    uv run python run_fluxdep_gui.py --no-control             # disable the remote-control socket
     uv run python run_fluxdep_gui.py --chip Q5_2D --qub Q1 --result-dir ../result/Q5_2D/Q1
 """
 
@@ -23,6 +24,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         description="Launch the fluxonium flux-dependence fitting GUI",
     )
     parser.add_argument("--no-log", action="store_true", help="Disable file logging")
+    parser.add_argument(
+        "--no-control",
+        action="store_true",
+        help="Disable the remote-control TCP socket entirely (overrides --control-port).",
+    )
     parser.add_argument("--chip", type=str, default="", help="Chip name")
     parser.add_argument("--qub", type=str, default="", help="Qubit name")
     parser.add_argument("--result-dir", type=str, default="", help="Result directory")
@@ -30,8 +36,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--control-port",
         type=int,
-        default=None,
-        help="Start the remote-control TCP server on this port (for agents/MCP)",
+        default=8766,
+        help=(
+            "Start the remote-control TCP server on this port (default: 8766, the "
+            "agreed-upon port for agent attach; 0 = OS-assigned ephemeral port). "
+            "Use --no-control to disable the socket entirely."
+        ),
     )
     parser.add_argument(
         "--control-token",
@@ -70,9 +80,9 @@ if __name__ == "__main__":
     from zcu_tools.gui.app.fluxdep.state import ProjectInfo
 
     control = (
-        ControlOptions(port=args.control_port, token=args.control_token)
-        if args.control_port is not None
-        else None
+        None
+        if args.no_control
+        else ControlOptions(port=args.control_port, token=args.control_token)
     )
 
     # Anchor default result/database paths at the repo root (this script lives in

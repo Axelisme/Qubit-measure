@@ -1,9 +1,10 @@
 """Launcher for the v2 GUI.
 
 Examples:
-    uv run python run_measure_gui.py                          # default file logging
+    uv run python run_measure_gui.py                          # default file logging; opens control socket on port 8765
     uv run python run_measure_gui.py --no-log                 # no file log
     uv run python run_measure_gui.py --clean                  # don't restore the previous persisted session
+    uv run python run_measure_gui.py --no-control             # disable the remote-control socket entirely
     uv run python run_measure_gui.py --control-port 0         # start remote control on an ephemeral loopback port
     uv run python run_measure_gui.py --control-port 8765 --control-token <hex>
 """
@@ -37,12 +38,19 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="Override the DEBUG log file path (default: a per-session file under logs/gui/measure/).",
     )
     parser.add_argument(
+        "--no-control",
+        action="store_true",
+        help="Disable the remote-control TCP socket entirely (overrides --control-port).",
+    )
+    parser.add_argument(
         "--control-port",
         type=int,
-        default=None,
+        default=8765,
         help=(
-            "Start RemoteControlService on this TCP port (0 = pick an ephemeral "
-            "free port). Bound to 127.0.0.1 unless --control-allow-external is set."
+            "Start RemoteControlService on this TCP port (default: 8765, the "
+            "agreed-upon port for agent attach; 0 = OS-assigned ephemeral port). "
+            "Bound to 127.0.0.1 unless --control-allow-external is set. "
+            "Use --no-control to disable the socket entirely."
         ),
     )
     parser.add_argument(
@@ -101,7 +109,7 @@ if __name__ == "__main__":
     register_all_roles(role_catalog)
 
     control_opts = None
-    if args.control_port is not None:
+    if not args.no_control:
         from zcu_tools.gui.app.main.services.remote import ControlOptions
 
         control_opts = ControlOptions(
