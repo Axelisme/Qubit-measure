@@ -59,6 +59,18 @@
         "lib/zcu_tools/mcp/agent_memory/server.py"
       ],
       "env": {}
+    },
+    "taskboard": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "--extra",
+        "client",
+        "python",
+        "lib/zcu_tools/mcp/taskboard/server.py"
+      ],
+      "env": {}
     }
   }
 }

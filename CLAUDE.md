@@ -10,8 +10,8 @@
 - **完成任務後**：依序跑 `pyright`/`pytest`（檢查錯誤、測試失敗、覆蓋率不足；全套測試加 `-n auto` 平行加速，已裝 pytest-xdist），再用 `ruff` 格式化與修正風格；用戶要求才 git commit；最後更新對應的模組 README.md。
 - **測試**：放在根目錄 `tests/`，目錄結構對應被測檔案，命名 `test_*.py`，用 `pytest` 撰寫，盡量涵蓋主要功能與邏輯；測試需獨立、可重複、不依賴外部狀態。
 - **工具優先序**：少用 Shell 指令，優先用內建工具（前者需用戶審核、後者自證安全）；*不要用 `sed`* 替換子串（跨平台行為不一），需替換時優先 mcp/function tool，其次 Python 腳本。
-- **文件追蹤**：CLAUDE.md、模組 README.md 與 docs/adr/ 已入 git 追蹤，會進 diff 與 commit；`task_plans/` 為 gitignored 工作檔（見 .gitignore），不入 commit。其中 `task_plans/taskboard.md` 是多 agent 並行時的認領看板（見下方「平行 agent 協調」）。
-- **平行 agent 協調**：可能有多個 agent/session 同時在這個 repo 工作，動工前先讀 `task_plans/taskboard.md` 並按下方「### 平行 agent 協調」的規範認領 scope，避免改到同一份檔案。
+- **文件追蹤**：CLAUDE.md、模組 README.md 與 docs/adr/ 已入 git 追蹤，會進 diff 與 commit；`task_plans/` 為 gitignored 工作檔（見 .gitignore），不入 commit。
+- **平行 agent 協調**：可能有多個 agent/session 同時在這個 repo 工作，動工前使用 `agent-taskboard` skill（`taskboard_*` MCP 工具）認領 scope，避免改到同一份檔案（見下方「### 平行 agent 協調」）。
 - **task_plan.md Phase 壓縮**：每累積 5 個新 Phase 就把最舊的 5 個詳細記錄壓縮成「歷史 Phase 摘要表」中的列（一列一 Phase：編號｜主題｜結論/commit），即詳細記錄*最多保留 10 個 Phase*；被壓縮的原文移入同目錄 `archive.md`（同為 gitignored）以備查。
 
 ### 模組 README.md
@@ -33,14 +33,15 @@
 - 程式碼註解與記憶檔以 `ADR-NNNN` 引用 ADR，ADR 之間以 `[[NNNN]]` 互鏈。
 - 處理跨模組設計前先查索引找相關 ADR。
 
-### 平行 agent 協調（task_plans/taskboard.md）
+### 平行 agent 協調
 
-多個 agent/session 可能同時在同一個 checkout 上工作。`task_plans/taskboard.md` 是共用的**認領看板**（advisory lock；隨 `task_plans/` gitignored，純本地協調用、非強制），用來避免兩方同時改到同一份檔案：
+多個 agent/session 可能同時在同一個 checkout 上工作。協調透過 **`agent-taskboard` skill**（`taskboard_*` MCP 工具）完成：原子、可程式化的 path 衝突偵測，取代手編 markdown。完整協議見 `agent-taskboard` skill 文件。
 
-- **動工前先認領**：要 Edit/Write 任何檔案前，先在看板 *Active claims* 表加一列，標明 owner（自選的 session 標籤）、scope（會碰的路徑或 area）、簡短任務描述、status 與日期。
-- **動工前先掃看板**：Edit 前先看 *Active claims*；scope 與他人重疊就先協調（縮小/改 scope、等對方釋出、或交用戶決定），*不要硬上*。
-- **commit 後才釋出**：把該列移到 *Released*（或標 `done`/移除）要等**自己的改動 commit 之後**再做；未 commit 前一律保留 claim，否則未提交的 working-tree 改動可能與他人後續的編輯/commit 混在一起被污染。
-- **granularity = 路徑或 area**；純讀 / 純查詢 / 單檔顯而易見的小修可免認領；claim 明顯過期（owner 已離開）由接手者判斷後可回收。
+要點摘要（細節在 skill）：
+- **動工前 `taskboard_claim`**：取得 `granted` 後才動 Edit/Write；若 `pending` 則等待或 ScheduleWakeup 輪詢。
+- **commit 後才 `taskboard_release`**：未 commit 的 working-tree 改動一律保留 claim，否則後進 agent 的 commit 會污染你的未提交改動。
+- **純讀 / 純查詢 / 無爭用的顯而易見小修** 免認領。
+- 人類視圖：`task_plans/taskboard.md`（auto-rendered，勿手編）。
 
 ## 專案概觀
 

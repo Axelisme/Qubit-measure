@@ -48,3 +48,7 @@
 
 - [0018 — autofluxdep orchestrator 純需求解析器](0018-autofluxdep-orchestrator-requirement-resolver-builder-currying.md)：三介面（requires/provides/produce）+ Builder 柯里化統一 Node 與 Service。
 - [0020 — session-core 共用層（gui/session/）](0020-session-core-shared-layer.md)：measure 量測 session core（context/SoC/device/dialog）抽共用、autofluxdep 整套複用；app-local（OperationGate/BackgroundService）vs shared（Handles/Progress/IOManager/QtProgressTransport）邊界 + SessionControllerPort 契約 + Phase B cfg-driven 模擬 run path。
+
+## IX. 多 agent 協作
+
+- [0022 — taskboard 為主協調層、worktree 為輔](0022-agent-coordination-taskboard.md)：多 agent 共享 checkout 的協調＝stdio MCP taskboard（file-backed JSON+flock、path 衝突偵測、read/write 鎖、資源 token、pending/wait、TTL 自動回收、md 視圖）；worktree 解不了 singleton 資源爭用故僅為輔。
