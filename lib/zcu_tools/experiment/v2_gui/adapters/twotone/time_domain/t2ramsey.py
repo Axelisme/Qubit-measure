@@ -23,6 +23,11 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     md_eval_scaled,
     proper_relax,
 )
+from zcu_tools.experiment.v2_gui.adapters.twotone.time_domain._detune_shared import (
+    detune_ratio_of,
+    resolve_detune,
+    strip_detune_ratio,
+)
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
@@ -170,35 +175,15 @@ class T2RamseyAdapter(
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> T2RamseyCfg:
         # Strip the run-only detune_ratio knob before lowering to T2RamseyCfg,
         # which would reject the unknown key.
-        cfg_raw = dict(raw_cfg)
-        cfg_raw.pop("detune_ratio", None)
-        return req.ml.make_cfg(cfg_raw, T2RamseyCfg)
-
-    def _detune_ratio(self, raw_cfg: dict[str, object]) -> float:
-        value = raw_cfg.get("detune_ratio")
-        if not isinstance(value, (int, float)):
-            raise ValueError("detune_ratio must be a number")
-        return float(value)
+        return req.ml.make_cfg(strip_detune_ratio(raw_cfg), T2RamseyCfg)
 
     def run(self, req: RunRequest, schema: CfgSchema) -> T2RamseyRunResult:
         soc, soccfg = require_soc_handles(req)
         raw_cfg = schema.to_raw_dict(req.md, req.ml)
         cfg = self.build_exp_cfg(raw_cfg, req)
-        detune_ratio = self._detune_ratio(raw_cfg)
-        # detune_ratio is fringes-per-step; the absolute applied detune (MHz) is
-        # detune_ratio / step, where step is the lowered length sweep step (us).
-        # Mirrors the notebook's `activate_detune = ratio / cfg.sweep.length.step`.
-        # detune_ratio == 0 → no fringe (detune 0), skipping the divide.
-        if detune_ratio == 0.0:
-            detune = 0.0
-        else:
-            step = cfg.sweep.length.step  # SweepCfg guarantees step != 0 for expts>1
-            if step == 0.0:
-                raise ValueError(
-                    "cannot apply a nonzero detune_ratio on a degenerate "
-                    "length sweep (expts < 2, step == 0)"
-                )
-            detune = detune_ratio / step
+        # detune_ratio (fringes-per-step) → absolute applied detune (MHz) over the
+        # lowered length sweep step (SweepCfg guarantees step != 0 for expts > 1).
+        detune = resolve_detune(detune_ratio_of(raw_cfg), cfg.sweep.length.step)
         # T2RamseyExp.run returns (result, true_detune); the GUI run contract
         # returns only the Result. Stash true_detune for the q_f writeback and
         # log the realized detune.

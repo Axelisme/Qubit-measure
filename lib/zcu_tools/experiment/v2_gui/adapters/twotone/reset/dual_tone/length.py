@@ -5,8 +5,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar, TypeAlias
 
-from matplotlib.figure import Figure
-
 from zcu_tools.experiment.v2.twotone.reset.dual_tone.length import (
     LengthCfg,
     LengthExp,
@@ -15,6 +13,7 @@ from zcu_tools.experiment.v2.twotone.reset.dual_tone.length import (
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
+    FigureOnlyAnalyzeResult,
     build_exp_spec,
     make_pulse_module_spec,
     make_readout_module_spec,
@@ -22,11 +21,11 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_two_pulse_reset_module_spec,
     md_scalar_float,
     reset_module_writeback_items,
+    run_figure_only_analyze,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
-    AnalyzeResultBase,
     CfgSectionSpec,
     CfgSectionValue,
     ExpContext,
@@ -43,11 +42,11 @@ DualToneLengthRunResult: TypeAlias = LengthResult
 
 
 @dataclass
-class DualToneLengthAnalyzeResult(AnalyzeResultBase):
-    # D5: the length sweep is a look-at-the-curve fit — analysis renders the
-    # decay trace for the Analyze tab but extracts no scalar, so there is no
-    # writeback. Only the figure is carried.
-    figure: Figure
+class DualToneLengthAnalyzeResult(FigureOnlyAnalyzeResult):
+    # D5: the length sweep is a look-at-the-curve fit — analysis renders the decay
+    # trace for the Analyze tab but extracts no scalar, so there is no writeback.
+    # The single ``figure`` field is inherited from FigureOnlyAnalyzeResult.
+    pass
 
 
 class DualToneLengthAdapter(
@@ -146,16 +145,13 @@ class DualToneLengthAdapter(
             .build()
         )
 
-    def get_analyze_params(
-        self, result: DualToneLengthRunResult, ctx: ExpContext
-    ) -> NoAnalyzeParams:
-        return NoAnalyzeParams()
+    # No get_analyze_params override: NoAnalyzeParams (the 4th generic arg) makes
+    # BaseAdapter return the empty params instance and reflect the type.
 
     def analyze(
         self, req: AnalyzeRequest[DualToneLengthRunResult, NoAnalyzeParams]
     ) -> DualToneLengthAnalyzeResult:
-        fig = LengthExp().analyze(req.run_result)
-        return DualToneLengthAnalyzeResult(figure=fig)
+        return run_figure_only_analyze(LengthExp, DualToneLengthAnalyzeResult, req)
 
     def get_writeback_items(
         self,

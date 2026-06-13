@@ -140,10 +140,8 @@ class BathPhaseAdapter(
             .build()
         )
 
-    def get_analyze_params(
-        self, result: BathPhaseRunResult, ctx: ExpContext
-    ) -> NoAnalyzeParams:
-        return NoAnalyzeParams()
+    # No get_analyze_params override: NoAnalyzeParams (the 4th generic arg) makes
+    # BaseAdapter return the empty params instance and reflect the type.
 
     def analyze(
         self, req: AnalyzeRequest[BathPhaseRunResult, NoAnalyzeParams]

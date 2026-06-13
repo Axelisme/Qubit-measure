@@ -54,6 +54,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     acquire_to_complex,
     build_stop_checkers,
     is_good_fit,
+    make_on_round,
     require_flux_device,
     set_flux_by_name,
 )
@@ -176,14 +177,7 @@ class QubitFreqNode(Node):
         # liveplot settles round by round. The SNR probe + stop poll are threaded
         # into stop_checkers (early-stop on good SNR; cooperative cancel).
         probe = SnrProbe()
-
-        def on_round(_round_count: int, avg_d: Any) -> None:
-            signal = acquire_to_complex(avg_d)
-            probe.value = signal
-            np.copyto(result.signal[idx], _signal2real(signal))
-            if env.round_hook is not None:
-                env.round_hook(idx)
-
+        on_round = make_on_round(result, idx, _signal2real, env.round_hook, probe=probe)
         stop_checkers = build_stop_checkers(env, probe, _signal2real)
 
         raw = TwoToneProgram(env.soccfg, cfg, sweep=[("detune", detune_sweep)]).acquire(

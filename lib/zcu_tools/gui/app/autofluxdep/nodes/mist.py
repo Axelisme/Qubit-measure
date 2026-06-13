@@ -52,6 +52,7 @@ from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     acquire_to_complex,
     axis_to_sweep,
+    make_on_round,
     require_flux_device,
     set_flux_by_name,
 )
@@ -172,12 +173,9 @@ class MistNode(Node):
         cfg.modules.mist_pulse.set_param("gain", sweep2param("gain", gain_sweep))
 
         result.flux[idx] = env.flux
-        # fit_value[idx] and fit_curve[idx] remain nan — mist has no fit scalar
-
-        def on_round(_round_count: int, avg_d: Any) -> None:
-            np.copyto(result.signal[idx], _mist_signal2real(acquire_to_complex(avg_d)))
-            if env.round_hook is not None:
-                env.round_hook(idx)
+        # fit_value[idx] and fit_curve[idx] remain nan — mist has no fit scalar.
+        # probe=None: a single-round scatter, so there is no SNR early-stop to feed.
+        on_round = make_on_round(result, idx, _mist_signal2real, env.round_hook)
 
         stop_checkers: list[Any] = []
         if env.should_stop is not None:

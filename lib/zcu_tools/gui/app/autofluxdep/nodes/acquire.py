@@ -190,3 +190,63 @@ def build_stop_checkers(
         checkers.append(env.should_stop)
     checkers.append(snr_checker(probe, earlystop_snr(env.schema), signal2real_fn))
     return checkers
+
+
+def make_on_round(
+    result: Any,
+    idx: int,
+    signal2real_fn: Callable[[np.ndarray], np.ndarray],
+    round_hook: Callable[[int], None] | None,
+    probe: SnrProbe | None = None,
+) -> Callable[[int, Any], None]:
+    """Build the per-round ``round_hook`` shared by the 1-D measurement nodes.
+
+    Each round collapses the running average to a complex trace, rotates it to the
+    real, normalised curve, writes it into this flux point's Result row, and fires
+    the run's ``round_hook`` so the main thread redraws. When a ``probe`` is given
+    its ``value`` is updated each round so the SNR early-stop sees the latest
+    average (the measurement nodes); mist passes ``probe=None`` (no early-stop on a
+    single-round scatter)."""
+
+    def on_round(_round_count: int, avg_d: Any) -> None:
+        signal = acquire_to_complex(avg_d)
+        if probe is not None:
+            probe.value = signal
+        np.copyto(result.signal[idx], signal2real_fn(signal))
+        if round_hook is not None:
+            round_hook(idx)
+
+    return on_round
+
+
+def fill_decay_fit_or_skip(
+    result: Any,
+    idx: int,
+    real: NDArray[np.float64],
+    fit_scalar: float,
+    fit_curve: NDArray[np.float64],
+    round_hook: Callable[[int], None] | None,
+    logger: Any,
+    node_name: str,
+) -> bool:
+    """Gate a single-scalar 1-D fit and fill (or skip) its Result row.
+
+    Shared by the single-key decay nodes (t1, lenrabi): an SNR-trough flux point
+    fits poorly (``is_good_fit`` False) — log it, fire the round_hook so the raw
+    row stays shown with nan fit fields, and return False so the caller returns a
+    partial ``Patch()`` (no downstream contamination). On a good fit, record the
+    scalar + curve and fire the round_hook, returning True so the caller builds its
+    Patch. The node-specific success log (and any extra Patch keys/modules) stays
+    in the caller; only the gate + row-fill bookkeeping is shared here."""
+    if not is_good_fit(real, fit_curve):
+        logger.debug(
+            "%s fit @flux%d: poor fit (SNR-trough?) — discarded", node_name, idx
+        )
+        if round_hook is not None:
+            round_hook(idx)  # raw row already shown; fit fields stay nan
+        return False
+    result.fit_value[idx] = float(fit_scalar)
+    np.copyto(result.fit_curve[idx], np.asarray(fit_curve, dtype=np.float64))
+    if round_hook is not None:
+        round_hook(idx)
+    return True

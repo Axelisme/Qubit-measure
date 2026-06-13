@@ -1,3 +1,4 @@
+from .analyze_results import FigureOnlyAnalyzeResult, run_figure_only_analyze
 from .cfg_builder import CfgBuilder
 from .ctx_helpers import (
     md_eval_scaled,
@@ -68,6 +69,9 @@ from .writeback_helpers import reset_module_writeback_items
 __all__ = [
     # value-tree assembly
     "CfgBuilder",
+    # shared analyze-result shapes
+    "FigureOnlyAnalyzeResult",
+    "run_figure_only_analyze",
     # interactive flux-pick analysis (shared by onetone/twotone flux_dep)
     "FluxPickParams",
     "FluxPickResult",

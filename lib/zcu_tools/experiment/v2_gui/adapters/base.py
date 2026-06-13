@@ -30,6 +30,30 @@ from zcu_tools.gui.app.main.adapter import (
     require_soc_handles,
 )
 
+# Index of T_AnalyzeParams in BaseAdapter's generic parameter list
+# (Cfg, Result, AnalyzeResult, AnalyzeParams).
+_ANALYZE_PARAMS_GENERIC_INDEX = 3
+
+
+def _analyze_params_generic_arg(cls: type) -> type:
+    """Recover an adapter's analyze-params type from its declared 4th generic arg.
+
+    Used when ``get_analyze_params`` is not overridden (its annotation is the
+    unbound TypeVar): the concrete type is whatever the adapter wrote as
+    ``BaseAdapter[..., AnalyzeParams]``. Falls back to ``NoAnalyzeParams`` when the
+    arg is absent (PEP 696 default — adapters that omit the last two generic args)
+    or not a plain class (e.g. still a TypeVar).
+    """
+    import typing
+
+    for base in getattr(cls, "__orig_bases__", ()):
+        args = typing.get_args(base)
+        if len(args) > _ANALYZE_PARAMS_GENERIC_INDEX:
+            arg = args[_ANALYZE_PARAMS_GENERIC_INDEX]
+            if isinstance(arg, type):
+                return arg
+    return NoAnalyzeParams
+
 
 class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     """Shared implementation for experiment adapters.
@@ -111,12 +135,18 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     def get_analyze_params(self, result: T_Result, ctx: ExpContext) -> T_AnalyzeParams:
         """Build the analyze parameter instance presented to the user.
 
-        Default raises: an adapter that declares ``analysis=AnalysisMode.FIT`` must
-        override this. Adapters with ``analysis=AnalysisMode.NONE`` are never routed
-        here by the framework, so the raise is a Fast-Fail guard against a
-        forgotten override, not a normal code path.
+        An adapter whose analysis takes tunable params overrides this. An adapter
+        whose analyze is a look-at-the-curve render with NO params declares
+        ``NoAnalyzeParams`` as its 4th generic arg and inherits this default, which
+        returns the empty ``NoAnalyzeParams()`` (no override boilerplate). When the
+        adapter declares a real (non-``NoAnalyzeParams``) param type but forgets the
+        override, this Fast-Fails — a forgotten override, not a normal code path.
+        Adapters with ``analysis=AnalysisMode.NONE`` are never routed here.
         """
         del result, ctx
+        params_cls = type(self).analyze_params_cls()
+        if params_cls is NoAnalyzeParams:
+            return NoAnalyzeParams()  # type: ignore[return-value]
         raise NotImplementedError(
             f"{type(self).__name__} declares analysis support but does not "
             "override get_analyze_params"
@@ -226,16 +256,26 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         """Return the analyze-params dataclass type (static, no instance/result).
 
         Reflected from the concrete ``get_analyze_params`` return annotation, so
-        agents can query the param schema without running an experiment. Falls
-        back to ``NoAnalyzeParams`` when the return is not annotated.
+        agents can query the param schema without running an experiment. An adapter
+        with tunable params overrides ``get_analyze_params`` with a concrete return
+        annotation, which is read here directly. An adapter with no params does NOT
+        override it (no boilerplate); its base annotation is the unbound
+        ``T_AnalyzeParams`` TypeVar, so the type is instead recovered from the 4th
+        generic arg (``BaseAdapter[..., NoAnalyzeParams]``), falling back to
+        ``NoAnalyzeParams`` when absent (PEP 696 default) or unreadable.
         """
         import typing
 
         try:
             hints = typing.get_type_hints(cls.get_analyze_params)
         except Exception:
-            return NoAnalyzeParams
-        return hints.get("return", NoAnalyzeParams)
+            return _analyze_params_generic_arg(cls)
+        ret = hints.get("return", T_AnalyzeParams)
+        if isinstance(ret, typing.TypeVar):
+            # The default (un-overridden) get_analyze_params — recover the concrete
+            # type from the class's declared 4th generic arg instead.
+            return _analyze_params_generic_arg(cls)
+        return ret
 
     def run(self, req: RunRequest, schema: CfgSchema) -> T_Result:
         raw_cfg = schema.to_raw_dict(req.md, req.ml)

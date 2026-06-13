@@ -20,6 +20,7 @@ from zcu_tools.gui.app.main.adapter import (
     ModuleRefSpec,
     ModuleRefValue,
     ModuleWriteback,
+    NoAnalysisResult,
     ScalarSpec,
     SweepSpec,
     SweepValue,
@@ -684,10 +685,44 @@ def test_make_default_save_paths_raises_without_active_label():
 # ---------------------------------------------------------------------------
 
 
-def test_base_adapter_get_analyze_params_raises_by_default():
+def test_base_adapter_get_analyze_params_returns_noparams_when_no_params():
+    # A NoAnalyzeParams adapter (the 4th generic arg defaults to it) inherits the
+    # base get_analyze_params, which returns the empty params instance — no
+    # per-adapter boilerplate override needed.
     adapter = _make_concrete_adapter()
+    assert isinstance(
+        adapter.get_analyze_params(MagicMock(), _make_ctx()), NoAnalyzeParams
+    )
+
+
+def test_base_adapter_get_analyze_params_raises_for_forgotten_real_override():
+    # An adapter declaring a REAL (non-NoAnalyzeParams) analyze-params type via its
+    # 4th generic arg but forgetting the override still Fast-Fails (the guard).
+    from dataclasses import dataclass
+
+    @dataclass
+    class _RealParams:
+        flag: bool = False
+
+    class _Adapter(BaseAdapter[MagicMock, MagicMock, NoAnalysisResult, _RealParams]):
+        capabilities = AdapterCapabilities(analysis=AnalysisMode.FIT)
+        exp_cls = MagicMock()
+
+        @classmethod
+        def cfg_spec(cls):
+            return CfgSectionSpec()
+
+        def make_default_value(self, ctx):
+            return CfgSectionValue()
+
+        def build_exp_cfg(self, raw_cfg, req):
+            return MagicMock()
+
+        def make_filename_stem(self, ctx):
+            return "stem"
+
     with pytest.raises(NotImplementedError, match="get_analyze_params"):
-        adapter.get_analyze_params(MagicMock(), _make_ctx())
+        _Adapter().get_analyze_params(MagicMock(), _make_ctx())
 
 
 def test_base_adapter_analyze_raises_by_default():

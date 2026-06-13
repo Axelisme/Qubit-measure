@@ -64,6 +64,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     axis_to_sweep,
     build_stop_checkers,
     is_good_fit,
+    make_on_round,
     require_flux_device,
     set_flux_by_name,
     signal2real_flip,
@@ -175,14 +176,9 @@ class T2RamseyNode(Node):
         result.flux[idx] = env.flux
 
         probe = SnrProbe()
-
-        def on_round(_round_count: int, avg_d: Any) -> None:
-            signal = acquire_to_complex(avg_d)
-            probe.value = signal
-            np.copyto(result.signal[idx], signal2real_flip(signal))
-            if env.round_hook is not None:
-                env.round_hook(idx)
-
+        on_round = make_on_round(
+            result, idx, signal2real_flip, env.round_hook, probe=probe
+        )
         stop_checkers = build_stop_checkers(env, probe, signal2real_flip)
 
         raw = ModularProgramV2(

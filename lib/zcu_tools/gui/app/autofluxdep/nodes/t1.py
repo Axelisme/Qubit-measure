@@ -71,7 +71,8 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     acquire_to_complex,
     axis_to_sweep,
     build_stop_checkers,
-    is_good_fit,
+    fill_decay_fit_or_skip,
+    make_on_round,
     require_flux_device,
     set_flux_by_name,
     signal2real_flip,
@@ -203,14 +204,9 @@ class T1Node(Node):
         result.flux[idx] = env.flux
 
         probe = SnrProbe()
-
-        def on_round(_round_count: int, avg_d: Any) -> None:
-            signal = acquire_to_complex(avg_d)
-            probe.value = signal
-            np.copyto(result.signal[idx], signal2real_flip(signal))
-            if env.round_hook is not None:
-                env.round_hook(idx)
-
+        on_round = make_on_round(
+            result, idx, signal2real_flip, env.round_hook, probe=probe
+        )
         stop_checkers = build_stop_checkers(env, probe, signal2real_flip)
 
         raw = ModularProgramV2(
@@ -233,16 +229,10 @@ class T1Node(Node):
 
         t1, _t1err, fit_curve, _ = fit_decay(times, real)
 
-        if not is_good_fit(real, fit_curve):
-            logger.debug("t1 fit @flux%d: poor fit (SNR-trough?) — discarded", idx)
-            if env.round_hook is not None:
-                env.round_hook(idx)  # raw row already shown; fit fields stay nan
+        if not fill_decay_fit_or_skip(
+            result, idx, real, float(t1), fit_curve, env.round_hook, logger, "t1"
+        ):
             return Patch()  # partial: omit t1 → downstream fallback
-
-        result.fit_value[idx] = float(t1)
-        np.copyto(result.fit_curve[idx], np.asarray(fit_curve, dtype=np.float64))
-        if env.round_hook is not None:
-            env.round_hook(idx)
 
         logger.debug("t1 fit @flux%d: t1=%.3f us", idx, float(t1))
 

@@ -5,8 +5,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar, TypeAlias
 
-from matplotlib.figure import Figure
-
 from zcu_tools.experiment.v2.twotone.reset.bath.length import (
     LengthCfg,
     LengthExp,
@@ -15,17 +13,18 @@ from zcu_tools.experiment.v2.twotone.reset.bath.length import (
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
+    FigureOnlyAnalyzeResult,
     build_exp_spec,
     make_bath_reset_module_spec,
     make_pulse_module_spec,
     make_readout_module_spec,
     make_reset_module_spec,
     md_scalar_float,
+    run_figure_only_analyze,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
-    AnalyzeResultBase,
     CfgSectionSpec,
     CfgSectionValue,
     ExpContext,
@@ -47,11 +46,11 @@ _PI2_PHASE_OFFSET_DEG: float = 90.0
 
 
 @dataclass
-class BathLengthAnalyzeResult(AnalyzeResultBase):
-    # D5: the length sweep is a look-at-the-curve fit — analysis renders the
-    # decay trace for the Analyze tab but extracts no scalar, so there is no
-    # writeback. Only the figure is carried.
-    figure: Figure
+class BathLengthAnalyzeResult(FigureOnlyAnalyzeResult):
+    # D5: the length sweep is a look-at-the-curve fit — analysis renders the decay
+    # trace for the Analyze tab but extracts no scalar, so there is no writeback.
+    # The single ``figure`` field is inherited from FigureOnlyAnalyzeResult.
+    pass
 
 
 class BathLengthAdapter(
@@ -145,16 +144,13 @@ class BathLengthAdapter(
             .build()
         )
 
-    def get_analyze_params(
-        self, result: BathLengthRunResult, ctx: ExpContext
-    ) -> NoAnalyzeParams:
-        return NoAnalyzeParams()
+    # No get_analyze_params override: NoAnalyzeParams (the 4th generic arg) makes
+    # BaseAdapter return the empty params instance and reflect the type.
 
     def analyze(
         self, req: AnalyzeRequest[BathLengthRunResult, NoAnalyzeParams]
     ) -> BathLengthAnalyzeResult:
-        fig = LengthExp().analyze(req.run_result)
-        return BathLengthAnalyzeResult(figure=fig)
+        return run_figure_only_analyze(LengthExp, BathLengthAnalyzeResult, req)
 
     def get_writeback_items(
         self,

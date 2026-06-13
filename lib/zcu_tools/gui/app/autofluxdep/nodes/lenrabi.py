@@ -47,7 +47,8 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     acquire_to_complex,
     axis_to_sweep,
     build_stop_checkers,
-    is_good_fit,
+    fill_decay_fit_or_skip,
+    make_on_round,
     require_flux_device,
     set_flux_by_name,
     signal2real_flip,
@@ -151,14 +152,9 @@ class LenRabiNode(Node):
         result.flux[idx] = env.flux
 
         probe = SnrProbe()
-
-        def on_round(_round_count: int, avg_d: Any) -> None:
-            signal = acquire_to_complex(avg_d)
-            probe.value = signal
-            np.copyto(result.signal[idx], signal2real_flip(signal))
-            if env.round_hook is not None:
-                env.round_hook(idx)
-
+        on_round = make_on_round(
+            result, idx, signal2real_flip, env.round_hook, probe=probe
+        )
         stop_checkers = build_stop_checkers(env, probe, signal2real_flip)
 
         raw = ModularProgramV2(
@@ -180,16 +176,13 @@ class LenRabiNode(Node):
 
         pi_x, _, pi2_x, _, freq, _, fit_curve, _ = fit_rabi(lengths, real)
 
-        if not is_good_fit(real, fit_curve):
-            logger.debug("lenrabi fit @flux%d: poor fit (SNR-trough?) — discarded", idx)
-            if env.round_hook is not None:
-                env.round_hook(idx)  # raw row already shown; fit fields stay nan
-            return Patch()  # partial: omit pi_length/pi2_length/rabi_freq + modules → downstream fallback
-
-        result.fit_value[idx] = float(pi_x)
-        np.copyto(result.fit_curve[idx], np.asarray(fit_curve, dtype=np.float64))
-        if env.round_hook is not None:
-            env.round_hook(idx)
+        # The fitted single scalar (the Result's fit_value) is the pi length; the
+        # extra Patch keys/modules below are lenrabi-specific and stay in the node.
+        if not fill_decay_fit_or_skip(
+            result, idx, real, float(pi_x), fit_curve, env.round_hook, logger, "lenrabi"
+        ):
+            # partial: omit pi_length/pi2_length/rabi_freq + modules → downstream fallback
+            return Patch()
 
         logger.debug(
             "lenrabi fit @flux%d: rabi_freq=%.4f pi_len=%.3f pi2_len=%.3f",
