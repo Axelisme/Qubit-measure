@@ -1070,6 +1070,12 @@ def test_stale_error_message_names_changed_resources(monkeypatch):
 
     monkeypatch.setattr(mcp_server._BRIDGE, "send_rpc_raw", fake_raw)
     monkeypatch.setattr(mcp_server, "_refresh_versions", lambda: None)
+    # send_gui_rpc lazily auto-connects on the first call; here we test the
+    # stale-message translation on an already-connected bridge, so short-circuit
+    # _ensure_connected by reporting a live socket.
+    monkeypatch.setattr(
+        type(mcp_server._BRIDGE), "is_connected", property(lambda _self: True)
+    )
     with pytest.raises(RuntimeError) as ei:
         mcp_server.send_gui_rpc("run.start", {"tab_id": "t"})
     msg = str(ei.value)

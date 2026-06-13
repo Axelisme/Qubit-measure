@@ -215,6 +215,8 @@ _SERVER_INSTRUCTIONS = """\
 Drive a live qubit-measure GUI over a TCP control socket.
 
 Getting started (same path a GUI user takes — no mock shortcut):
+  0. The first gui_* call auto-attaches to a running GUI (resolved via session
+     discovery), so gui_connect is optional — call it only to pin a port/token.
   1. gui_launch (auto-connects).
   2. gui_connect_start(kind='mock') for offline/testing (or kind='remote',
      ip, port for hardware) — the same connect the user picks via the setup
@@ -549,6 +551,34 @@ class GuiRpcError(RuntimeError):
         self.code = code
 
 
+def _ensure_connected() -> None:
+    """Lazily attach to the running GUI before the first guarded RPC.
+
+    An agent should not have to call gui_connect by hand: the first time any
+    gui_* tool reaches send_gui_rpc with no live socket, we resolve the running
+    GUI's port via session discovery (the SAME path gui_connect takes) and
+    attach. This is a measure-specific attach policy (session-discovery slug +
+    resolve_connect_port), so it stays here rather than in the shared bridge,
+    whose send_rpc_raw also serves the read-only apps.
+
+    Only the control channel is attached — never connect.start: choosing the SoC
+    (mock vs remote) is the user's decision, not an auto-connect side effect.
+
+    Fail-fast when no GUI is discoverable, with a message that no longer tells
+    the agent to "call gui_connect first" (it is automatic now).
+    """
+    if _BRIDGE.is_connected:
+        return
+    port = resolve_connect_port(_CONFIG, None)
+    try:
+        _BRIDGE.connect(port)
+    except RuntimeError as exc:
+        raise RuntimeError(
+            "no running measure-gui found to attach to "
+            f"(tried 127.0.0.1:{port}); start one with gui_launch."
+        ) from exc
+
+
 def send_gui_rpc(
     method: str,
     params: dict[str, Any],
@@ -556,10 +586,14 @@ def send_gui_rpc(
 ) -> dict[str, Any]:
     """Issue one RPC against the GUI; raises on error or timeout.
 
-    For guarded methods (run/save/commit) attaches ``expected_versions`` from
-    the mcp-side bookkeeping so the server can reject stale operations. On a
-    stale rejection the version table is re-read so the agent's retry is fresh.
+    If no socket is live yet, lazily attaches to the running GUI first
+    (:func:`_ensure_connected`) so an agent never has to call gui_connect by
+    hand. For guarded methods (run/save/commit) attaches ``expected_versions``
+    from the mcp-side bookkeeping so the server can reject stale operations. On
+    a stale rejection the version table is re-read so the agent's retry is fresh.
     """
+    _ensure_connected()
+
     send_params = params
     if method in _GUARD_DEPS:
         send_params = dict(params)
@@ -1300,11 +1334,12 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
         "handler": tool_gui_connect,
         "description": (
             "Connect the MCP bridge to an ALREADY-RUNNING GUI's TCP control port. "
-            "Omit 'port' to auto-discover the running GUI via its session file "
-            "(covers the case where it fell back off port 8765), falling back to "
-            "8765 if none is found. Errors if no GUI is listening — use gui_launch "
-            "to start one. Skip this if you used gui_launch with auto_connect=true "
-            "(default)."
+            "OPTIONAL: the first gui_* call already auto-attaches to the running "
+            "GUI via session discovery — call this only to pin a specific 'port' or "
+            "pass a 'token'. Omit 'port' to auto-discover the running GUI via its "
+            "session file (covers the case where it fell back off port 8765), "
+            "falling back to 8765 if none is found. Errors if no GUI is listening — "
+            "use gui_launch to start one."
         ),
         "inputSchema": {
             "type": "object",
