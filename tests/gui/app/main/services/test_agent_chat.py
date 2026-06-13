@@ -242,3 +242,89 @@ def test_should_not_record_query_methods():
     assert _should_record("state.check") is False
     assert _should_record("resources.versions") is False
     assert _should_record("context.get_md") is False
+
+
+# ---------------------------------------------------------------------------
+# Issue 3 — session-id dedup (record_system)
+# ---------------------------------------------------------------------------
+
+
+def test_record_system_same_id_twice_appends_once():
+    """Same session_id on every stdin turn must only produce one [session] line."""
+    svc = _svc()
+    svc.record_system("sid-X")
+    svc.record_system("sid-X")
+    system_entries = [e for e in svc.entries() if e.kind == "system"]
+    assert len(system_entries) == 1
+
+
+def test_record_system_different_ids_appends_both():
+    """A genuinely new session_id (e.g. after --resume) appends a second line."""
+    svc = _svc()
+    svc.record_system("sid-X")
+    svc.record_system("sid-Y")
+    system_entries = [e for e in svc.entries() if e.kind == "system"]
+    assert len(system_entries) == 2
+
+
+def test_record_system_still_updates_internal_id_on_skip():
+    """get_session_id() must reflect the latest id even when the append is skipped."""
+    svc = _svc()
+    svc.record_system("sid-A")
+    svc.record_system("sid-A")  # skipped in transcript
+    assert svc.get_session_id() == "sid-A"
+
+
+def test_record_system_dedup_resets_after_clear():
+    """After clear(), the same id may appear again (new conversation display)."""
+    svc = _svc()
+    svc.record_system("sid-X")
+    svc.clear()
+    svc.record_system("sid-X")
+    system_entries = [e for e in svc.entries() if e.kind == "system"]
+    assert len(system_entries) == 1
+
+
+# ---------------------------------------------------------------------------
+# Issue 4 — cumulative session cost in [DONE] / [ERROR]
+# ---------------------------------------------------------------------------
+
+
+def test_record_result_cost_accumulates_across_turns():
+    """Multiple turns: [DONE] shows running session total, not last-turn value."""
+    svc = _svc()
+    svc.record_result(False, "", 0.0010, "completed")  # turn 1 → session $0.0010
+    svc.record_result(False, "", 0.0020, "completed")  # turn 2 → session $0.0030
+    entries = [e for e in svc.entries() if e.kind == "result"]
+    # Second [DONE] must show $0.0030 (accumulated), not $0.0020 (per-turn).
+    assert "0.0030" in entries[1].text
+
+
+def test_record_result_zero_cost_shows_session_total():
+    """total_cost_usd=0.0 (falsy) must not crash and still shows session est. line."""
+    svc = _svc()
+    svc.record_result(False, "", 0.0, "completed")
+    text = svc.entries()[0].text
+    assert "cost≈$" in text
+    assert "session est." in text
+
+
+def test_record_result_cost_resets_after_clear():
+    """After clear(), the session cost accumulator starts fresh from zero."""
+    svc = _svc()
+    svc.record_result(False, "", 0.0050, "completed")
+    svc.clear()
+    svc.record_result(False, "", 0.0010, "completed")
+    entries = [e for e in svc.entries() if e.kind == "result"]
+    # Only $0.0010 accumulated after the clear — must not include the prior $0.0050.
+    assert "0.0010" in entries[0].text
+    assert "0.0060" not in entries[0].text
+
+
+def test_record_result_cost_label_always_present():
+    """Every result entry must carry the cost≈$ label regardless of amount."""
+    svc = _svc()
+    svc.record_result(False, "", 0.1234, "completed")
+    text = svc.entries()[0].text
+    assert "cost≈$" in text
+    assert "session est." in text

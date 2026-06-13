@@ -146,19 +146,25 @@ class AgentRunState:
     """Lightweight state machine for the embedded agent lifecycle.
 
     Transitions:
-      idle    → working   on start()
+      idle    → working   on start(), on a new stdin turn, or when the agent
+                          starts replying again (assistant chunk) — the latter
+                          two pull a *new* turn out of the inter-turn idle that
+                          ``on_result`` leaves behind (the backend is a single
+                          long-lived claude process spanning many turns).
       working → waiting   when has_pending_wait() is True (checked after
                           each assistant turn or tool-use batch finishes)
-      working → idle      on result (terminal_reason=="completed")
+      working → idle      on result (terminal_reason=="completed", turn boundary)
       working → stopped   on stop() or result (is_error / other reason)
-      waiting → working   when an input message is sent via stdin
+      waiting → working   when an input message is sent via stdin / feedback
       waiting → stopped   on stop()
       stopped → idle      on reset() (new start clears old state)
 
     The ``waiting`` state is informational for the dialog's input routing
     (feedback vs stdin message). The actual has_pending_wait() comes from the
     Controller's OperationHandles — we call a supplied callable each time we
-    need to know.
+    need to know. ``waiting`` is left ONLY by ``on_stdin_sent`` (the user
+    delivered the awaited feedback) or a terminal frame — a plain assistant
+    chunk must never silently drop it.
     """
 
     def __init__(self, has_pending_wait: Callable[[], bool]) -> None:
@@ -174,17 +180,26 @@ class AgentRunState:
         self._state = "working"
 
     def on_stdin_sent(self) -> None:
-        """Called after sending a message via stdin."""
-        # If we were waiting, sending moves us back to working.
-        if self._state in ("waiting", "working"):
+        """Called after sending a new user turn via stdin / feedback.
+
+        Any live state (idle between turns, working, or waiting on feedback)
+        moves to working: a fresh user turn is now in flight. Only ``stopped``
+        (process dead) is inert — there ``send_user_message`` is a no-op anyway.
+        """
+        if self._state != "stopped":
             self._state = "working"
 
     def on_assistant_chunk_received(self) -> None:
         """Called after processing an assistant message frame.
 
-        Re-evaluates whether we are now in 'waiting' state (i.e. an operation
-        is live and the agent is waiting for a feedback wakeup).
+        Pulls a *new* turn out of inter-turn idle (the agent began replying
+        again), then — only from working — re-evaluates whether we are now
+        waiting for a feedback wakeup. ``waiting`` is intentionally NOT touched
+        here: a plain chunk while waiting must not drop the cooperative-interrupt
+        state (only ``on_stdin_sent`` or a terminal frame leaves ``waiting``).
         """
+        if self._state == "idle":
+            self._state = "working"
         if self._state == "working" and self._has_pending_wait():
             self._state = "waiting"
 
@@ -217,14 +232,18 @@ def _truncate(text: str, max_len: int = _MAX_INPUT_LEN) -> str:
     return text
 
 
-# Appended to claude's system prompt so the embedded agent connects to the
-# already-running GUI up-front and stays terse (no ToolSearch/Skill fumbling).
+# Appended to claude's system prompt. The mcp__measure-gui__* tools auto-attach
+# to the live GUI (lazy auto-connect in the MCP server), so the agent must NOT
+# issue any connect itself — doing so conflicts with the user-owned SoC link.
+# Kept short for token economy / prompt-cache friendliness.
 _EMBEDDED_SYSTEM_PROMPT = (
-    "You are embedded in a running qubit-measure GUI. The measure-gui is already "
-    "running and exposed via the measure-gui MCP server: call gui_connect once at "
-    "the very start, then use the mcp__measure-gui__* tools directly. Do NOT use "
-    "ToolSearch or the run-measure-gui Skill to find GUI tools — they are already "
-    "available. Be concise and act directly; do not narrate every step."
+    "You are operating a measure-gui that is already running. The "
+    "mcp__measure-gui__* tools are already attached to it — do NOT call "
+    "gui_connect, gui_connect_start, or any other connect; the SoC link is the "
+    "user's decision, not yours. To see the current state call gui_state_check / "
+    "gui_soc_info and other query tools. Do NOT use ToolSearch or the "
+    "run-measure-gui Skill — the GUI tools are already available. Be concise and "
+    "act directly; do not narrate every step."
 )
 
 

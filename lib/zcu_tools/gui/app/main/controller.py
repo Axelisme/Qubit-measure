@@ -1154,6 +1154,42 @@ class Controller:
         """
         return self.new_agent_session()
 
+    def build_first_turn_task(self, user_text: str) -> str:
+        """Prepend a compact GUI-state snapshot to the first turn's user text.
+
+        Only the *first* turn of a conversation carries this block: the dialog
+        routes follow-up turns through ``send_user_message`` (not ``start``), so
+        the snapshot is injected exactly once, giving the agent the live project /
+        context / SoC / open-tabs picture without it having to probe for them.
+
+        Fast-fail-safe by construction: every getter used here returns a default
+        rather than raising when the project / context / SoC is absent (SoC kind
+        is only read while ``has_soc()``), so a fresh GUI with nothing set up
+        still yields a well-formed block instead of crashing the first turn.
+        """
+        ctx = self.get_exp_context()
+        has_soc = self.has_soc()
+        soc_kind = (
+            ("mock" if self._conn_svc.is_mock_soc() else "remote")
+            if has_soc
+            else "none"
+        )
+        tab_summary = ", ".join(
+            f"{self.get_tab_adapter_name(tid)}({tid})" for tid in self.list_tab_ids()
+        )
+        lines = [
+            "[measure-gui current state]",
+            f"project: chip={ctx.chip_name} qub={ctx.qub_name} res={ctx.res_name}",
+            f"context: {self.get_active_context_label() or '(none)'} "
+            f"(has_context={self.has_context()})",
+            f"soc: connected={has_soc} kind={soc_kind}",
+            f"open tabs: {tab_summary or '(none)'}",
+            "[end state]",
+            "",
+            user_text,
+        ]
+        return "\n".join(lines)
+
     # ------------------------------------------------------------------
     # B1b-2: backend mode + session factory methods
     # ------------------------------------------------------------------

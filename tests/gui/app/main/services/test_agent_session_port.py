@@ -239,6 +239,9 @@ def _make_ctrl_stub(
     ctrl.agent_backend_mode.return_value = "independent"
     ctrl.get_project_root.return_value = "/fake/repo"
     ctrl.has_pending_wait.return_value = has_pending
+    # First-turn task injection: identity passthrough so routing assertions can
+    # check the raw text (the real Controller prepends a GUI-state snapshot).
+    ctrl.build_first_turn_task.side_effect = lambda text: text
     # FeedbackInbox stub: just record post() calls.
     inbox = MagicMock()
     ctrl.get_feedback_inbox.return_value = inbox

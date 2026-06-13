@@ -19,7 +19,7 @@ import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 # Maximum number of entries kept in memory (ring buffer).
 _MAX_ENTRIES = 1000
@@ -147,6 +147,15 @@ class AgentChatService:
         # session_id from the last system/init frame; persisted for future
         # --resume support (B1); not used in B0.
         self._session_id: str = ""
+        # Dedup: last session_id for which a [session] line was appended.
+        # claude re-sends system/init on every stdin turn with the *same*
+        # session_id; only append a new line when the id actually changes.
+        self._last_session_id: Optional[str] = None
+        # Accumulated per-session cost estimate across all turns.
+        # total_cost_usd from each result frame is per-turn (not cumulative),
+        # so we sum them here to report a session total in [DONE] lines.
+        # Reset on clear() so the transcript display stays consistent.
+        self._session_cost_usd: float = 0.0
 
     # ------------------------------------------------------------------
     # Record methods — main-thread only
@@ -208,8 +217,16 @@ class AgentChatService:
         )
 
     def record_system(self, session_id: str) -> None:
-        """Append a system-init entry and store the session_id. Main-thread only."""
+        """Append a system-init entry and store the session_id. Main-thread only.
+
+        Dedup: claude re-sends system/init on every stdin turn with the same
+        session_id. Only one [session] line per unique id is appended to avoid
+        transcript clutter; the internal session_id is always updated.
+        """
         self.set_session_id(session_id)
+        if session_id == self._last_session_id:
+            return
+        self._last_session_id = session_id
         text = f"[session] id={session_id}"
         self._append(TranscriptEntry(kind="system", text=text, timestamp=time.time()))
 
@@ -220,12 +237,17 @@ class AgentChatService:
         total_cost_usd: float,
         terminal_reason: str,
     ) -> None:
-        """Append a terminal result entry. Main-thread only."""
+        """Append a terminal result entry. Main-thread only.
+
+        Accumulates total_cost_usd across turns into _session_cost_usd and
+        reports the running session total rather than the per-turn value.
+        Per-turn cost from claude is an estimate; the session total is marked
+        as such with "(session est.)".
+        """
         status = "ERROR" if is_error else "DONE"
-        cost_str = f"${total_cost_usd:.4f}" if total_cost_usd else ""
-        parts = [f"[{status}]", terminal_reason]
-        if cost_str:
-            parts.append(cost_str)
+        self._session_cost_usd += total_cost_usd
+        session_cost_str = f"cost≈${self._session_cost_usd:.4f} (session est.)"
+        parts = [f"[{status}]", terminal_reason, session_cost_str]
         # On success the result_text duplicates the assistant prose already shown
         # via the streamed ``assistant`` frame, so omit it; keep it only on error
         # where it may carry an error detail not surfaced elsewhere.
@@ -285,8 +307,14 @@ class AgentChatService:
         )
 
     def clear(self) -> None:
-        """Remove all entries. Main-thread only."""
+        """Remove all entries. Main-thread only.
+
+        Resets the session-cost accumulator and session-id dedup state so that
+        the next conversation starts fresh in the display.
+        """
         self._entries.clear()
+        self._session_cost_usd = 0.0
+        self._last_session_id = None
         self._notify_listeners()
 
     # ------------------------------------------------------------------

@@ -502,6 +502,9 @@ class TestAgentChatServiceEmbedded:
         assert entries[0].kind == "result"
         assert "DONE" in entries[0].text
         assert "completed" in entries[0].text
+        # Cost displayed as session-cumulative estimate.
+        assert "cost≈$" in entries[0].text
+        assert "session est." in entries[0].text
 
     def test_record_result_error(self) -> None:
         svc = self._svc()
@@ -539,3 +542,72 @@ class TestTapSkipWhenEmbeddedActive:
         if not svc.is_embedded_active():
             svc.record_activity("run.start", {}, {})
         assert len(svc.entries()) == 0
+
+
+# ---------------------------------------------------------------------------
+# AgentRunState — multi-turn regression
+# ---------------------------------------------------------------------------
+
+
+class TestAgentRunStateMultiTurn:
+    """Regression cases for multi-turn state-machine behaviour.
+
+    These complement the existing TestAgentRunState single-turn cases.
+    """
+
+    def test_two_complete_turns(self) -> None:
+        """Turn 1: start→working→idle. Turn 2: stdin→working→idle."""
+        s = AgentRunState(has_pending_wait=lambda: False)
+        # Turn 1
+        s.on_start()
+        assert s.state == "working"
+        s.on_result(is_error=False)
+        assert s.state == "idle"
+        # Turn 2 — user sends follow-up; agent begins replying
+        s.on_stdin_sent()
+        assert s.state == "working"
+        s.on_assistant_chunk_received()
+        assert s.state == "working"  # no pending wait
+        s.on_result(is_error=False)
+        assert s.state == "idle"
+
+    def test_idle_on_assistant_chunk_transitions_to_working(self) -> None:
+        """Agent starts replying in a new turn while state is idle (no stdin yet)."""
+        s = AgentRunState(has_pending_wait=lambda: False)
+        s.on_start()
+        s.on_result(is_error=False)  # → idle
+        # Agent proactively begins replying (e.g. from an earlier queued turn).
+        s.on_assistant_chunk_received()
+        assert s.state == "working"
+
+    def test_waiting_protects_against_assistant_chunk(self) -> None:
+        """on_assistant_chunk_received must NOT leave the waiting state."""
+        pending = [True]  # mutable so closure can see it
+
+        def _has_pending() -> bool:
+            return pending[0]
+
+        s = AgentRunState(has_pending_wait=_has_pending)
+        s.on_start()
+        s.on_assistant_chunk_received()  # working → waiting
+        assert s.state == "waiting"
+        # Another assistant chunk arrives while we are waiting — must stay waiting.
+        s.on_assistant_chunk_received()
+        assert s.state == "waiting"
+
+    def test_stdin_sent_from_waiting_transitions_to_working(self) -> None:
+        """on_stdin_sent is the only exit from waiting (besides a terminal frame)."""
+        s = AgentRunState(has_pending_wait=lambda: True)
+        s.on_start()
+        s.on_assistant_chunk_received()  # → waiting
+        assert s.state == "waiting"
+        s.on_stdin_sent()
+        assert s.state == "working"
+
+    def test_stop_from_waiting_sets_stopped(self) -> None:
+        """on_stop works from the waiting state (user cancels while in feedback loop)."""
+        s = AgentRunState(has_pending_wait=lambda: True)
+        s.on_start()
+        s.on_assistant_chunk_received()  # → waiting
+        s.on_stop()
+        assert s.state == "stopped"

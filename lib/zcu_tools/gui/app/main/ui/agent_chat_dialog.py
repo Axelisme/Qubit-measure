@@ -38,6 +38,11 @@ import logging
 from typing import TYPE_CHECKING
 
 from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
+from qtpy.QtGui import (  # type: ignore[attr-defined]
+    QColor,
+    QTextCharFormat,
+    QTextCursor,
+)
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QDialog,
     QHBoxLayout,
@@ -71,6 +76,135 @@ _PAGE_CONVERSATION = 1
 
 # Maximum characters of task shown as session title in the picker.
 _TITLE_MAX_CHARS = 60
+
+# ---------------------------------------------------------------------------
+# Transcript entry formatting — kind → (hex_color, line_prefix)
+#
+# Colors chosen for readability on both light and dark Qt themes:
+#   - Avoid pure black/white (clashes with theme background).
+#   - Use medium-saturation hues so they are legible on dark *and* light bg.
+# ---------------------------------------------------------------------------
+
+# Mapping from TranscriptEntry.kind to (color_hex, line_prefix).
+# "feedback" text already starts with "you: " (set by AgentChatService); the
+# "▶ " prefix is prepended to give a visual anchor without duplicating "you".
+_KIND_FORMAT: dict[str, tuple[str, str]] = {
+    "feedback": ("#4d9ff0", "▶ "),  # blue — user input
+    "assistant": ("#4ec94e", "◀ "),  # green — agent prose
+    "tool_use": ("#888888", "  "),  # grey — secondary info
+    "tool_result": ("#888888", "  "),  # grey — secondary info
+    "system": ("#888888", "  "),  # grey — secondary info
+    "result": ("#aaaaaa", "  "),  # lighter grey — done marker
+    "activity": ("#888888", "  "),  # grey — MCP activity
+    "diagnostic": ("#e87c30", "! "),  # orange — warnings / errors
+}
+_KIND_FORMAT_DEFAULT: tuple[str, str] = ("#aaaaaa", "  ")
+
+
+def entry_format(kind: str) -> tuple[str, str]:
+    """Return (color_hex, prefix) for a given TranscriptEntry kind.
+
+    Pure function — no Qt dependency — so it can be unit-tested without a QApp.
+    """
+    return _KIND_FORMAT.get(kind, _KIND_FORMAT_DEFAULT)
+
+
+# ---------------------------------------------------------------------------
+# HistoryLineEdit — QLineEdit with shell-style Up/Down history navigation
+# ---------------------------------------------------------------------------
+
+
+class HistoryLineEdit(QLineEdit):
+    """QLineEdit with Up/Down key navigation through submitted message history.
+
+    Navigation semantics (standard shell behaviour):
+      - Up: move to the previous (older) entry.  Stops at the oldest.
+      - Down: move to the next (newer) entry.  Past the newest, restores the
+        draft that was in the field when Up was first pressed.
+      - The draft is saved on the *first* Up keypress of a navigation sequence
+        and restored when Down goes past the newest history entry.
+
+    Callers must call ``push_history(text)`` after a successful send so the
+    submitted text is appended.  Empty strings and consecutive duplicates are
+    not stored.
+
+    Only Up/Down are overridden; all other keys (including Left/Right/cursor
+    movement) pass through unchanged.  Because QLineEdit is single-line, Up
+    and Down have no built-in meaning, so intercepting them is safe.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._history: list[str] = []
+        # _index == len(_history) means "not navigating / at the draft position".
+        self._index: int = 0
+        # Draft saved when the user first presses Up.
+        self._draft: str = ""
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def push_history(self, text: str) -> None:
+        """Append *text* to history after a successful send.
+
+        Empty strings are ignored.  Consecutive duplicates of the last entry
+        are also ignored (avoids accumulating the same message on rapid resend).
+        """
+        if not text:
+            return
+        if self._history and self._history[-1] == text:
+            return
+        self._history.append(text)
+        # Reset navigation state so next Up starts from the newest entry.
+        self._index = len(self._history)
+        self._draft = ""
+
+    # ------------------------------------------------------------------
+    # Key event override
+    # ------------------------------------------------------------------
+
+    def keyPressEvent(self, event) -> None:  # type: ignore[override]
+        key = event.key()
+
+        if key == Qt.Key.Key_Up:  # type: ignore[attr-defined]
+            self._navigate_up()
+            event.accept()
+            return
+
+        if key == Qt.Key.Key_Down:  # type: ignore[attr-defined]
+            self._navigate_down()
+            event.accept()
+            return
+
+        super().keyPressEvent(event)
+
+    # ------------------------------------------------------------------
+    # Navigation helpers
+    # ------------------------------------------------------------------
+
+    def _navigate_up(self) -> None:
+        """Move one step toward older history entries."""
+        if not self._history:
+            return
+
+        if self._index == len(self._history):
+            # First Up press: save current text as draft before overwriting.
+            self._draft = self.text()
+
+        if self._index > 0:
+            self._index -= 1
+            self.setText(self._history[self._index])
+
+    def _navigate_down(self) -> None:
+        """Move one step toward newer history entries (or restore draft)."""
+        if self._index < len(self._history):
+            self._index += 1
+            if self._index == len(self._history):
+                # Past the newest entry: restore the saved draft.
+                self.setText(self._draft)
+            else:
+                self.setText(self._history[self._index])
 
 
 class AgentChatDialog(QDialog):
@@ -214,10 +348,10 @@ class AgentChatDialog(QDialog):
         self._transcript.setFont(font)
         layout.addWidget(self._transcript, stretch=1)
 
-        # Input row.
+        # Input row — HistoryLineEdit enables Up/Down shell-style history.
         input_row = QHBoxLayout()
         input_row.setSpacing(4)
-        self._input = QLineEdit()
+        self._input: HistoryLineEdit = HistoryLineEdit()
         self._input.setPlaceholderText(
             "Type a message (routed to agent stdin / feedback inbox)…"
         )
@@ -348,22 +482,43 @@ class AgentChatDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _on_transcript_changed(self) -> None:
-        """Append the newest transcript entry (main thread, synchronous call)."""
+        """Append the newest transcript entry with colour (main thread, synchronous)."""
         entries = self._chat.entries()
         if not entries:
             return
-        last = entries[-1]
-        self._transcript.appendPlainText(self._format_entry(last))
+        self._append_colored_entry(entries[-1])
 
     def _refresh_all(self) -> None:
-        """Seed the transcript widget from the full service history."""
+        """Seed the transcript widget from the full service history (with colour)."""
         self._transcript.clear()
         for entry in self._chat.entries():
-            self._transcript.appendPlainText(self._format_entry(entry))
+            self._append_colored_entry(entry)
 
-    @staticmethod
-    def _format_entry(entry) -> str:  # type: ignore[no-untyped-def]
-        return entry.text
+    def _append_colored_entry(self, entry) -> None:  # type: ignore[no-untyped-def]
+        """Insert one transcript entry as a coloured line at the end.
+
+        Uses QTextCursor + QTextCharFormat so each entry can carry its own
+        foreground colour while QPlainTextEdit remains read-only and scrollable.
+        After insertion the view auto-scrolls to the bottom.
+        """
+        color_hex, prefix = entry_format(entry.kind)
+
+        fmt = QTextCharFormat()
+        fmt.setForeground(QColor(color_hex))
+
+        cursor: QTextCursor = self._transcript.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)  # type: ignore[attr-defined]
+
+        # Insert a newline separator before each entry (except the very first).
+        doc = self._transcript.document()
+        if doc is not None and not doc.isEmpty():
+            cursor.insertText("\n", QTextCharFormat())
+
+        cursor.insertText(f"{prefix}{entry.text}", fmt)
+
+        # Scroll to the bottom so the newest entry is visible.
+        self._transcript.setTextCursor(cursor)
+        self._transcript.ensureCursorVisible()
 
     # ------------------------------------------------------------------
     # Send handler (three-state routing, unchanged from B1a)
@@ -390,8 +545,9 @@ class AgentChatDialog(QDialog):
                 self._session = session
                 session.add_state_listener(self._update_runner_ui)
             repo_root = self._ctrl.get_project_root()
-            session.start(text, repo_root)
+            session.start(self._ctrl.build_first_turn_task(text), repo_root)
             self._chat.record_feedback(text)
+            self._input.push_history(text)
             self._input.clear()
             self._set_status("Started agent.")
             return
@@ -400,6 +556,7 @@ class AgentChatDialog(QDialog):
         if session.state == "waiting" or self._ctrl.has_pending_wait():
             self._ctrl.get_feedback_inbox().post(text)
             self._chat.record_feedback(text)
+            self._input.push_history(text)
             self._input.clear()
             self._set_status("Sent — agent will see it now.")
             return
@@ -407,6 +564,7 @@ class AgentChatDialog(QDialog):
         # Live process between/within turns → next user turn via stdin.
         session.send_user_message(text)
         self._chat.record_feedback(text)
+        self._input.push_history(text)
         self._input.clear()
         self._set_status("Sent to agent.")
 
