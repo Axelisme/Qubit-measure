@@ -498,6 +498,16 @@ class AgentRunner(QObject):
     def state(self) -> AgentState:
         return self._run_state.state
 
+    def is_running(self) -> bool:
+        """True if a child ``claude`` process is currently alive.
+
+        Distinct from ``state``: after a turn's ``result`` frame the state is
+        ``idle`` but the process stays alive reading the next stdin turn, so
+        callers route follow-up input via stdin (not a fresh spawn).
+        """
+        proc = self._process
+        return proc is not None and proc.state() != QProcess.ProcessState.NotRunning
+
     def start(self, task: str, repo_root: str) -> None:
         """Spawn ``claude`` with the loopback MCP config.
 

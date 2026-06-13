@@ -234,35 +234,45 @@ class AgentChatDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _on_send(self) -> None:
-        """Route the input text based on current agent state. Main-thread."""
+        """Single smart entry: Send always does the right thing. Main-thread.
+
+        - No live agent process → start a new turn with this text (so the input
+          box alone drives the conversation, Claude-Code style; no separate Start
+          needed).
+        - Live process blocked on an operation → wake it via the feedback inbox
+          (ADR-0023 cooperative interrupt).
+        - Live process otherwise → next user turn via stdin.
+        """
         text = self._input.text().strip()
         if not text:
             return
 
         runner = self._runner
-        runner_state = runner.state if runner is not None else "idle"
 
-        if runner_state in ("working",) and runner is not None:
-            # Agent is running: send directly to its stdin.
-            runner.send_user_message(text)
+        # No live process → start a new turn/session with this text.
+        if runner is None or not runner.is_running():
+            if runner is None:
+                runner = self._runner = self._build_runner()
+            repo_root = self._ctrl.get_project_root()
+            runner.start(text, repo_root)
             self._chat.record_feedback(text)
             self._input.clear()
-            self._set_status("Sent to agent stdin.")
+            self._set_status("Started agent.")
             return
 
-        if runner_state == "waiting" or self._ctrl.has_pending_wait():
-            # An operation is live and the agent is blocked — wake it via inbox.
-            inbox = self._ctrl.get_feedback_inbox()
-            inbox.post(text)
+        # Live process blocked on an operation → wake via feedback inbox.
+        if runner.state == "waiting" or self._ctrl.has_pending_wait():
+            self._ctrl.get_feedback_inbox().post(text)
             self._chat.record_feedback(text)
             self._input.clear()
             self._set_status("Sent — agent will see it now.")
             return
 
-        # Default (idle / stopped / no runner): queue in the feedback inbox.
-        inbox = self._ctrl.get_feedback_inbox()
-        inbox.post(text)
+        # Live process between/within turns → next user turn via stdin.
+        runner.send_user_message(text)
         self._chat.record_feedback(text)
+        self._input.clear()
+        self._set_status("Sent to agent.")
         self._input.clear()
         self._set_status("Queued — agent will see it at the next wait.")
 
