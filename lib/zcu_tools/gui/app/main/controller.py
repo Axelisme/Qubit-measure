@@ -1145,6 +1145,59 @@ class Controller:
         assert isinstance(self._agent_chat_svc, AgentChatService)
         return self._agent_chat_svc
 
+    def get_agent_runner_callbacks(self):
+        """Return the _RunnerCallbacks tuple wired to this Controller's services.
+
+        Convenience factory so ``AgentChatDialog`` can build an ``AgentRunner``
+        without importing the full callback bundle from agent_runner directly.
+        The dialog still owns the runner instance; this just wires the callbacks.
+        """
+        from .services.agent_runner import _RunnerCallbacks
+
+        def _on_update(updates):  # type: ignore[no-untyped-def]
+            # All TranscriptUpdate variants → record_* on AgentChatService.
+            from .services.agent_runner import (
+                AssistantTextUpdate,
+                ResultUpdate,
+                SystemInitUpdate,
+                ToolResultUpdate,
+                ToolUseUpdate,
+            )
+
+            chat = self.get_agent_chat()
+            for update in updates:
+                if isinstance(update, AssistantTextUpdate):
+                    chat.record_assistant(update.text)
+                elif isinstance(update, ToolUseUpdate):
+                    chat.record_tool_use(update.tool_name, update.input_summary)
+                elif isinstance(update, ToolResultUpdate):
+                    chat.record_tool_result(update.summary)
+                elif isinstance(update, SystemInitUpdate):
+                    chat.record_system(update.session_id)
+                elif isinstance(update, ResultUpdate):
+                    chat.record_result(
+                        update.is_error,
+                        update.result_text,
+                        update.total_cost_usd,
+                        update.terminal_reason,
+                    )
+                # RateLimitUpdate is informational; not recorded.
+
+        def _on_state_changed(state):  # type: ignore[no-untyped-def]
+            # Sync embedded-active flag with runner state.
+            chat = self.get_agent_chat()
+            chat.set_embedded_active(state in ("working", "waiting"))
+
+        def _on_process_error(msg: str) -> None:
+            self._notify("error", "Agent process error", msg)
+
+        return _RunnerCallbacks(
+            on_update=_on_update,
+            on_state_changed=_on_state_changed,
+            on_process_error=_on_process_error,
+            has_pending_wait=self.has_pending_wait,
+        )
+
     # ------------------------------------------------------------------
     # Startup application workflow (StartupService)
     # ------------------------------------------------------------------

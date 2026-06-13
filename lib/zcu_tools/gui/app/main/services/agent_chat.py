@@ -25,6 +25,8 @@ from typing import Any, Literal
 _MAX_ENTRIES = 1000
 # Maximum characters kept for a single params/result repr in an activity line.
 _MAX_FIELD_LEN = 500
+# Maximum characters kept for a single agent prose block shown inline.
+_MAX_PROSE_LEN = 2000
 
 # Methods considered pure queries — never recorded as activity entries.
 # Heuristic: keep list explicit and conservative (better to miss a recording
@@ -112,7 +114,17 @@ def _short(obj: Any) -> str:
 
 @dataclass(frozen=True)
 class TranscriptEntry:
-    kind: Literal["activity", "feedback", "diagnostic"]
+    kind: Literal[
+        "activity",
+        "feedback",
+        "diagnostic",
+        # Embedded-agent stream kinds (B0):
+        "assistant",  # prose text from the claude child
+        "tool_use",  # a tool call the child is making
+        "tool_result",  # the tool's return value
+        "system",  # init / session metadata
+        "result",  # terminal result frame (cost, reason)
+    ]
     text: str
     timestamp: float  # time.time()
 
@@ -128,6 +140,91 @@ class AgentChatService:
     def __init__(self) -> None:
         self._entries: deque[TranscriptEntry] = deque(maxlen=_MAX_ENTRIES)
         self._listeners: list[Callable[[], None]] = []
+        # B0 embedded-agent flag: when True the _after_success activity tap
+        # in RemoteControlAdapter is skipped (the stream-json transcript
+        # already carries every tool call; recording twice would be noise).
+        self._embedded_active: bool = False
+        # session_id from the last system/init frame; persisted for future
+        # --resume support (B1); not used in B0.
+        self._session_id: str = ""
+
+    # ------------------------------------------------------------------
+    # Record methods — main-thread only
+    # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Embedded-agent control
+    # ------------------------------------------------------------------
+
+    def set_embedded_active(self, active: bool) -> None:
+        """Enable or disable the embedded-agent mode.
+
+        When active, ``_after_success`` in ``RemoteControlAdapter`` skips
+        recording activity entries — the stream-json transcript is the
+        authoritative source. Main-thread only.
+        """
+        self._embedded_active = active
+
+    def is_embedded_active(self) -> bool:
+        """True while the embedded claude process is live."""
+        return self._embedded_active
+
+    def set_session_id(self, session_id: str) -> None:
+        """Store the session_id from the child's ``system/init`` frame (B1 hook)."""
+        self._session_id = session_id
+
+    def get_session_id(self) -> str:
+        """Return the most recently received session_id."""
+        return self._session_id
+
+    # ------------------------------------------------------------------
+    # Embedded-agent transcript record methods (B0)
+    # ------------------------------------------------------------------
+
+    def record_assistant(self, text: str) -> None:
+        """Append a prose text block from the claude child. Main-thread only."""
+        if len(text) > _MAX_PROSE_LEN:
+            text = text[:_MAX_PROSE_LEN] + "…"
+        self._append(
+            TranscriptEntry(kind="assistant", text=text, timestamp=time.time())
+        )
+
+    def record_tool_use(self, tool_name: str, input_summary: str) -> None:
+        """Append a tool-call entry from the child. Main-thread only."""
+        text = f"[tool] {tool_name}({input_summary})"
+        self._append(TranscriptEntry(kind="tool_use", text=text, timestamp=time.time()))
+
+    def record_tool_result(self, summary: str) -> None:
+        """Append a tool-result entry. Main-thread only."""
+        text = f"[result] {summary}"
+        self._append(
+            TranscriptEntry(kind="tool_result", text=text, timestamp=time.time())
+        )
+
+    def record_system(self, session_id: str) -> None:
+        """Append a system-init entry and store the session_id. Main-thread only."""
+        self.set_session_id(session_id)
+        text = f"[session] id={session_id}"
+        self._append(TranscriptEntry(kind="system", text=text, timestamp=time.time()))
+
+    def record_result(
+        self,
+        is_error: bool,
+        result_text: str,
+        total_cost_usd: float,
+        terminal_reason: str,
+    ) -> None:
+        """Append a terminal result entry. Main-thread only."""
+        status = "ERROR" if is_error else "DONE"
+        cost_str = f"${total_cost_usd:.4f}" if total_cost_usd else ""
+        parts = [f"[{status}]", terminal_reason]
+        if cost_str:
+            parts.append(cost_str)
+        if result_text:
+            snippet = result_text[:200] + ("…" if len(result_text) > 200 else "")
+            parts.append(snippet)
+        text = " ".join(parts)
+        self._append(TranscriptEntry(kind="result", text=text, timestamp=time.time()))
 
     # ------------------------------------------------------------------
     # Record methods — main-thread only

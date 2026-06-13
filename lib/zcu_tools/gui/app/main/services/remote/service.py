@@ -265,6 +265,9 @@ class RemoteControlAdapter(RemoteControlServiceBase):
         Called from the IO thread; schedules a lambda on the Qt main thread via
         the existing dispatcher invoke signal so record_activity runs in the right
         thread context. No-op if the dispatcher is not available.
+
+        Skipped when the embedded agent is active: the stream-json transcript
+        already carries every tool call, so recording again would double-log.
         """
         dispatcher = getattr(self, "_dispatcher", None)
         if dispatcher is None:
@@ -272,7 +275,11 @@ class RemoteControlAdapter(RemoteControlServiceBase):
 
         def _record() -> None:
             try:
-                self.ctrl.get_agent_chat().record_activity(method, params, result)
+                chat = self.ctrl.get_agent_chat()
+                # Skip tap when embedded agent is live (avoids double-recording).
+                if chat.is_embedded_active():
+                    return
+                chat.record_activity(method, params, result)
             except Exception:
                 logger.exception("AgentChatService.record_activity raised; ignoring")
 

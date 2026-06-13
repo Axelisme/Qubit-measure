@@ -1,8 +1,20 @@
 """AgentChatDialog — non-modal dialog for the agent conversation transcript.
 
 Opened by MainWindow via the "Agent…" toolbar button. Displays a scrollable
-plain-text transcript of agent tool-call activity, user feedback, and GUI
-diagnostics, plus an input field for sending feedback to a blocked agent.
+plain-text transcript of agent tool-call activity, user feedback, GUI
+diagnostics, AND the embedded claude child's stream-json output (B0).
+
+B0 additions
+------------
+- **Start** button: opens an optional task-prompt dialog, then spawns the
+  embedded ``claude`` child via ``AgentRunner``.
+- **Stop** button: sends SIGINT to the child.
+- **Status bar**: shows idle / working / waiting / stopped plus the last
+  result cost (optional).
+- **Input routing**: ``Send`` routes text depending on ``AgentRunState``:
+    - idle or stopped → queued into the FeedbackInbox (unchanged Phase-A path)
+    - working → sent as stdin message to the running claude child
+    - waiting (has_pending_wait) → sent as FeedbackInbox feedback wakeup
 
 The underlying AgentChatService is the source of truth; this dialog is a pure
 View that registers a listener and refreshes on every append. Closing the dialog
@@ -22,6 +34,7 @@ from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QDialog,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
@@ -32,11 +45,17 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.controller import Controller
     from zcu_tools.gui.app.main.services.agent_chat import AgentChatService
+    from zcu_tools.gui.app.main.services.agent_runner import AgentRunner, AgentState
 
 logger = logging.getLogger(__name__)
 
 # Status-label auto-clear delay (milliseconds).
 _STATUS_CLEAR_MS = 4000
+
+# Default task prompt shown in the Start dialog.
+_DEFAULT_TASK = (
+    "Check the current state of the measure-gui and report what is configured."
+)
 
 
 class AgentChatDialog(QDialog):
@@ -53,12 +72,32 @@ class AgentChatDialog(QDialog):
         self._ctrl = ctrl
         self._chat: AgentChatService = ctrl.get_agent_chat()
 
+        # B0: embedded AgentRunner (created lazily on first Start click).
+        self._runner: AgentRunner | None = None
+
         self.setWindowTitle("Agent Chat")
-        self.resize(700, 500)
+        self.resize(700, 560)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(6)
+
+        # --- runner control row ---
+        ctrl_row = QHBoxLayout()
+        ctrl_row.setSpacing(4)
+        self._start_btn = QPushButton("Start")
+        self._start_btn.setToolTip("Spawn an embedded claude agent to operate this GUI")
+        self._start_btn.clicked.connect(self._on_start)
+        ctrl_row.addWidget(self._start_btn)
+        self._stop_btn = QPushButton("Stop")
+        self._stop_btn.setToolTip("Send SIGINT to the running agent (graceful stop)")
+        self._stop_btn.setEnabled(False)
+        self._stop_btn.clicked.connect(self._on_stop)
+        ctrl_row.addWidget(self._stop_btn)
+        self._agent_status = QLabel("idle")
+        self._agent_status.setStyleSheet("color: gray; font-style: italic;")
+        ctrl_row.addWidget(self._agent_status, stretch=1)
+        layout.addLayout(ctrl_row)
 
         # --- transcript view ---
         self._transcript = QPlainTextEdit()
@@ -73,7 +112,9 @@ class AgentChatDialog(QDialog):
         input_row = QHBoxLayout()
         input_row.setSpacing(4)
         self._input = QLineEdit()
-        self._input.setPlaceholderText("Type feedback for the agent…")
+        self._input.setPlaceholderText(
+            "Type a message (routed to agent stdin / feedback inbox / queue)…"
+        )
         self._input.returnPressed.connect(self._on_send)
         input_row.addWidget(self._input, stretch=1)
         send_btn = QPushButton("Send")
@@ -116,30 +157,117 @@ class AgentChatDialog(QDialog):
             self._transcript.appendPlainText(self._format_entry(entry))
 
     @staticmethod
-    def _format_entry(entry) -> str:
+    def _format_entry(entry) -> str:  # type: ignore[no-untyped-def]
         """Render one TranscriptEntry as a display line (no timestamp for brevity)."""
         return entry.text
+
+    # ------------------------------------------------------------------
+    # B0 — Start / Stop
+    # ------------------------------------------------------------------
+
+    def _on_start(self) -> None:
+        """Prompt for a task and spawn the embedded claude child."""
+        task, ok = QInputDialog.getText(
+            self,
+            "Start Agent",
+            "Task for the agent:",
+            QLineEdit.EchoMode.Normal,
+            _DEFAULT_TASK,
+        )
+        if not ok or not task.strip():
+            return
+        task = task.strip()
+
+        # Build or reuse runner.
+        if self._runner is None:
+            self._runner = self._build_runner()
+
+        repo_root = self._ctrl.get_project_root()
+        self._runner.start(task, repo_root)
+        # Record a local transcript note that a new session was started.
+        self._chat.record_feedback(f"[start] {task}")
+
+    def _on_stop(self) -> None:
+        """Send SIGINT to the running agent."""
+        if self._runner is not None:
+            self._runner.stop()
+
+    def _build_runner(self) -> AgentRunner:
+        """Instantiate AgentRunner wired to this Controller."""
+        from zcu_tools.gui.app.main.services.agent_runner import AgentRunner
+
+        callbacks = self._ctrl.get_agent_runner_callbacks()
+
+        # Wrap the supplied on_state_changed to also update dialog UI.
+        _original_state_cb = callbacks.on_state_changed
+
+        def _on_state_with_ui(state: AgentState) -> None:
+            _original_state_cb(state)
+            self._update_runner_ui(state)
+
+        # Replace the callback with the wrapped version.
+        from zcu_tools.gui.app.main.services.agent_runner import _RunnerCallbacks
+
+        wired = _RunnerCallbacks(
+            on_update=callbacks.on_update,
+            on_state_changed=_on_state_with_ui,
+            on_process_error=callbacks.on_process_error,
+            has_pending_wait=callbacks.has_pending_wait,
+        )
+        return AgentRunner(wired, parent=self)
+
+    def _update_runner_ui(self, state: AgentState) -> None:
+        """Refresh the Start/Stop buttons and status label for the new state."""
+        is_active = state in ("working", "waiting")
+        self._start_btn.setEnabled(not is_active)
+        self._stop_btn.setEnabled(is_active)
+        label_map = {
+            "idle": "idle",
+            "working": "working…",
+            "waiting": "waiting for feedback…",
+            "stopped": "stopped",
+        }
+        self._agent_status.setText(label_map.get(state, state))
 
     # ------------------------------------------------------------------
     # Send handler
     # ------------------------------------------------------------------
 
     def _on_send(self) -> None:
-        """Post feedback to the inbox and record it in the transcript. Main-thread."""
+        """Route the input text based on current agent state. Main-thread."""
         text = self._input.text().strip()
         if not text:
             return
-        # Wire to the cooperative-interrupt inbox (ADR-0023).
+
+        runner = self._runner
+        runner_state = runner.state if runner is not None else "idle"
+
+        if runner_state in ("working",) and runner is not None:
+            # Agent is running: send directly to its stdin.
+            runner.send_user_message(text)
+            self._chat.record_feedback(text)
+            self._input.clear()
+            self._set_status("Sent to agent stdin.")
+            return
+
+        if runner_state == "waiting" or self._ctrl.has_pending_wait():
+            # An operation is live and the agent is blocked — wake it via inbox.
+            inbox = self._ctrl.get_feedback_inbox()
+            inbox.post(text)
+            self._chat.record_feedback(text)
+            self._input.clear()
+            self._set_status("Sent — agent will see it now.")
+            return
+
+        # Default (idle / stopped / no runner): queue in the feedback inbox.
         inbox = self._ctrl.get_feedback_inbox()
         inbox.post(text)
-        # Record in the transcript so the user sees their own message.
         self._chat.record_feedback(text)
         self._input.clear()
-        # Show delivery status.
-        if self._ctrl.has_pending_wait():
-            self._status_label.setText("Sent — agent will see it now.")
-        else:
-            self._status_label.setText("Queued — agent will see it at the next wait.")
+        self._set_status("Queued — agent will see it at the next wait.")
+
+    def _set_status(self, msg: str) -> None:
+        self._status_label.setText(msg)
         QTimer.singleShot(_STATUS_CLEAR_MS, lambda: self._status_label.setText(""))
 
     # ------------------------------------------------------------------
@@ -150,5 +278,9 @@ class AgentChatDialog(QDialog):
         """Remove listener when the dialog is closed/destroyed (WA_DeleteOnClose).
 
         Prevents a stale reference from calling Qt widget methods after deletion.
+        If the runner is still active, stop it so the child process does not
+        outlive the dialog.
         """
         self._chat.remove_listener(self._on_transcript_changed)
+        if self._runner is not None and self._runner.state in ("working", "waiting"):
+            self._runner.stop()
