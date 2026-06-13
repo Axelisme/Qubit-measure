@@ -28,6 +28,15 @@ _MISSING_HINT = (
     "(it proposes 'g_center' / 'e_center' / 'ge_radius' into the MetaDict)"
 )
 
+# MetaDict keys the dispersive-shift experiment owns (chi + resonator linewidth).
+_CHI_KEY = "chi"
+_ETA_KEY = "rf_w"
+
+_CHI_ETA_HINT = (
+    "run the dispersive-shift experiment first so 'chi' (dispersive shift) and "
+    "'rf_w' (resonator linewidth kappa) are present in the MetaDict"
+)
+
 
 def read_ge_centers(md: MetaDict) -> tuple[complex, complex, float]:
     """Read the ``(g_center, e_center, radius)`` GE classification trio from md.
@@ -42,6 +51,20 @@ def read_ge_centers(md: MetaDict) -> tuple[complex, complex, float]:
     e_center = _require_complex(md, _E_CENTER_KEY)
     radius = _require_float(md, _GE_RADIUS_KEY)
     return g_center, e_center, radius
+
+
+def read_chi_eta(md: MetaDict) -> tuple[float, float]:
+    """Read the ``(chi, eta)`` AC-Stark fit inputs from md.
+
+    ``chi`` is the dispersive shift (md 'chi', MHz) and ``eta`` is the resonator
+    linewidth kappa (md 'rf_w', MHz) — both required by the AC-Stark coefficient
+    fit (``ac_coeff = |b| / (2 * eta * chi)``). Fast-fails with an actionable
+    message if either is absent, so the fit never runs against missing
+    calibration. (The notebook passes 'rf_w' as the linewidth into this slot.)
+    """
+    chi = _require_float(md, _CHI_KEY, _CHI_ETA_HINT)
+    eta = _require_float(md, _ETA_KEY, _CHI_ETA_HINT)
+    return chi, eta
 
 
 def _require_complex(md: MetaDict, key: str) -> complex:
@@ -60,13 +83,12 @@ def _require_complex(md: MetaDict, key: str) -> complex:
     )
 
 
-def _require_float(md: MetaDict, key: str) -> float:
+def _require_float(md: MetaDict, key: str, hint: str = _MISSING_HINT) -> float:
     value = md.get(key)
     if value is None:
-        raise RuntimeError(f"MetaDict is missing '{key}': {_MISSING_HINT}")
+        raise RuntimeError(f"MetaDict is missing '{key}': {hint}")
     if isinstance(value, (int, float)):
         return float(value)
     raise RuntimeError(
-        f"MetaDict '{key}' is not a numeric value (got {type(value).__name__}); "
-        f"{_MISSING_HINT}"
+        f"MetaDict '{key}' is not a numeric value (got {type(value).__name__}); {hint}"
     )

@@ -44,10 +44,14 @@ from .adapters.singleshot import (
     GEAdapter,
     MistFreqAdapter,
     MistPowerAdapter,
+    MistPowerFreqAdapter,
     MistPreFreqAdapter,
+    SsAcStarkAdapter,
     SsLenRabiAdapter,
     SsT1Adapter,
     SsT1ToneAdapter,
+    SsT1ToneSweepFreqAdapter,
+    SsT1ToneSweepGainAdapter,
 )
 from .adapters.twotone.flux_dep import FluxDepAdapter
 from .adapters.twotone.freq import FreqAdapter
@@ -115,8 +119,12 @@ ADAPTERS = {
     "singleshot/len_rabi": SsLenRabiAdapter,
     "singleshot/t1": SsT1Adapter,
     "singleshot/t1_tone": SsT1ToneAdapter,
+    "singleshot/t1_tone_sweep_gain": SsT1ToneSweepGainAdapter,
+    "singleshot/t1_tone_sweep_freq": SsT1ToneSweepFreqAdapter,
+    "singleshot/ac_stark": SsAcStarkAdapter,
     "singleshot/mist/freq": MistFreqAdapter,
     "singleshot/mist/power": MistPowerAdapter,
+    "singleshot/mist/power_freq": MistPowerFreqAdapter,
     "singleshot/mist/pre_freq": MistPreFreqAdapter,
 }
 
