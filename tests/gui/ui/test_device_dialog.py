@@ -235,6 +235,96 @@ def test_device_changed_surfaces_device_when_none_selected(qapp):
     assert item.data(256) == "fd"
 
 
+def test_poll_timer_runs_only_when_visible_and_selected(qapp):
+    """The live poller is dialog-scoped + selection-scoped: it runs only while
+    the dialog is visible AND a device is selected, and stops otherwise."""
+    from zcu_tools.device.fake import FakeDeviceInfo
+
+    ctrl = _make_ctrl()
+    ctrl.list_devices.return_value = [_entry("fd")]
+    ctrl.get_device_snapshot.side_effect = lambda n: _connected_snapshot(
+        n, FakeDeviceInfo(address="none")
+    )
+
+    dialog = DeviceDialog(ctrl)
+    try:
+        # Hidden + nothing selected → stopped.
+        assert not dialog._poll_timer.isActive()
+
+        # Visible but still nothing selected → stopped.
+        dialog.show()
+        qapp.processEvents()
+        dialog._list.setCurrentRow(-1)
+        assert not dialog._poll_timer.isActive()
+
+        # Visible + selected → running.
+        dialog._list.setCurrentRow(0)
+        assert dialog._poll_timer.isActive()
+
+        # Hiding the dialog stops the poller (dialog-scoped).
+        dialog.hide()
+        qapp.processEvents()
+        assert not dialog._poll_timer.isActive()
+    finally:
+        dialog.close()
+
+
+def test_poll_tick_polls_selected_device(qapp):
+    """Each tick asks the controller to off-main poll the *selected* device."""
+    from zcu_tools.device.fake import FakeDeviceInfo
+
+    ctrl = _make_ctrl()
+    ctrl.list_devices.return_value = [_entry("A"), _entry("B")]
+    ctrl.get_device_snapshot.side_effect = lambda n: _connected_snapshot(
+        n, FakeDeviceInfo(address="none")
+    )
+
+    dialog = DeviceDialog(ctrl)
+    try:
+        dialog._list.setCurrentRow(1)  # select "B"
+        dialog._on_poll_tick()
+        ctrl.poll_device_info.assert_called_once_with("B")
+    finally:
+        dialog.close()
+
+
+def test_poll_tick_with_no_selection_stops_timer(qapp):
+    """A tick that finds nothing selected stops the timer instead of polling
+    None (guards a race where the selection vanished between decisions)."""
+    ctrl = _make_ctrl()
+    ctrl.list_devices.return_value = []
+
+    dialog = DeviceDialog(ctrl)
+    try:
+        dialog._poll_timer.start()  # force-running with no selection
+        dialog._on_poll_tick()
+        ctrl.poll_device_info.assert_not_called()
+        assert not dialog._poll_timer.isActive()
+    finally:
+        dialog.close()
+
+
+def test_poll_timer_stops_on_dialog_close(qapp):
+    """Closing the dialog stops the poll timer (no leak after close)."""
+    from zcu_tools.device.fake import FakeDeviceInfo
+
+    ctrl = _make_ctrl()
+    ctrl.list_devices.return_value = [_entry("fd")]
+    ctrl.get_device_snapshot.side_effect = lambda n: _connected_snapshot(
+        n, FakeDeviceInfo(address="none")
+    )
+
+    dialog = DeviceDialog(ctrl)
+    dialog.show()
+    qapp.processEvents()
+    dialog._list.setCurrentRow(0)
+    assert dialog._poll_timer.isActive()
+
+    dialog.accept()  # finished → _cleanup_bus_subscriptions stops the timer
+    qapp.processEvents()
+    assert not dialog._poll_timer.isActive()
+
+
 def test_device_dialog_apply_changes(qapp):
     from zcu_tools.device.fake import FakeDeviceInfo
 

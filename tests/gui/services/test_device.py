@@ -361,3 +361,113 @@ def test_get_device_info_changed_bumps_and_emits(qapp):
     # but the cached info on State is refreshed
     cached = state.get_device("dev1")
     assert cached is not None and getattr(cached.info, "value", None) == 2.0
+
+
+def _drain_poll(qapp) -> None:
+    """Wait for the off-main poll read + flush its queued main-thread delivery.
+
+    ``poll_device_info`` runs ``read_work`` in the shared pool and marshals
+    ``on_read`` back to the main thread; quiesce the runner(s) then pump the
+    event loop so the queued ``on_read`` actually fires.
+    """
+    for bg in _LIVE_BG:
+        bg.quiesce()
+    qapp.processEvents()
+    qapp.processEvents()
+
+
+def test_poll_device_info_changed_value_bumps_and_emits_on_main(qapp):
+    """The off-main poll reads the driver on a worker; the main-thread on_done
+    does the cache compare + bump + DEVICE_CHANGED. A value that drifted under
+    us (mock: backgrounded set_value) shows up after a poll."""
+    svc, device = _make_svc()
+    state = svc._state
+    _connect(svc, _req())  # connected with FakeDeviceInfo(value=0.0)
+    before = state.version.get("device:dev1")
+    events: list[object] = []
+    svc._bus.subscribe(DeviceChangedPayload, lambda p: events.append(p.name))
+
+    # Simulate an external drift: the driver now reports a different value than
+    # the cache (mock stand-in for a real hardware change between reads).
+    device.get_info.return_value = FakeDeviceInfo(address="addr", value=3.0)
+    svc.poll_device_info("dev1")
+    _drain_poll(qapp)
+
+    # State write (bump) + emit happened on the main thread (on_done), not the
+    # worker — the version moved and exactly one DEVICE_CHANGED fired.
+    assert state.version.get("device:dev1") == before + 1
+    assert events == ["dev1"]
+    cached = state.get_device("dev1")
+    assert cached is not None and getattr(cached.info, "value", None) == 3.0
+
+
+def test_poll_device_info_unchanged_value_does_not_bump_or_emit(qapp):
+    """An unchanged poll is a pure cache sync — no spurious version bump (would
+    invalidate other clients' expected_versions) and no DEVICE_CHANGED."""
+    svc, device = _make_svc()
+    state = svc._state
+    _connect(svc, _req())  # connected with FakeDeviceInfo(value=0.0)
+    before = state.version.get("device:dev1")
+    events: list[object] = []
+    svc._bus.subscribe(DeviceChangedPayload, lambda p: events.append(p.name))
+
+    device.get_info.return_value = FakeDeviceInfo(address="addr", value=0.0)
+    svc.poll_device_info("dev1")
+    _drain_poll(qapp)
+
+    assert state.version.get("device:dev1") == before
+    assert events == []
+
+
+def test_poll_device_info_skips_memory_only_device(qapp):
+    """A memory-only (not connected) device is not a live-read target — the poll
+    skips it without submitting any worker / raising."""
+    svc, device = _make_svc()
+    _connect(svc, _req())
+    # Disconnect (remember=True) → MEMORY_ONLY.
+    drop_loop = QEventLoop()
+    svc.device_disconnected.connect(lambda _r: drop_loop.quit())
+    svc.start_disconnect_device(DisconnectDeviceRequest(name="dev1"))
+    drop_loop.exec()
+    device.get_info.reset_mock()
+
+    svc.poll_device_info("dev1")
+    _drain_poll(qapp)
+
+    # No driver read attempted for a memory-only device.
+    device.get_info.assert_not_called()
+
+
+def test_poll_device_info_skips_mutating_device(qapp):
+    """A device being mutated (setup/connect/disconnect lease held) must not be
+    polled — a poll must never compete with a mutation read-lock."""
+    gate = OperationGate()
+    svc, device = _make_svc(gate=gate)
+    _connect(svc, _req())
+    device.get_info.reset_mock()
+    gate.register(99, OperationKind.DEVICE_SETUP, owner_id="held", resource_id="dev1")
+
+    svc.poll_device_info("dev1")  # skipped without raising (unlike get_device_info)
+    _drain_poll(qapp)
+
+    device.get_info.assert_not_called()
+    gate.release(99)
+
+
+def test_poll_device_info_swallows_read_failure(qapp):
+    """A single failed read (timeout / driver boom) is logged and dropped so the
+    poller keeps ticking — best-effort, not Fast-Fail."""
+    svc, device = _make_svc()
+    state = svc._state
+    _connect(svc, _req())
+    before = state.version.get("device:dev1")
+    events: list[object] = []
+    svc._bus.subscribe(DeviceChangedPayload, lambda p: events.append(p.name))
+
+    device.get_info.side_effect = RuntimeError("read timeout")
+    svc.poll_device_info("dev1")  # must not raise
+    _drain_poll(qapp)
+
+    # Failure swallowed: no bump, no emit, state untouched.
+    assert state.version.get("device:dev1") == before
+    assert events == []

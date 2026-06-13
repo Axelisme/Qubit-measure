@@ -320,6 +320,11 @@ class Controller:
     def get_device_info(self, name: str) -> BaseDeviceInfo | None:
         return self._dev_svc.get_device_info(name)
 
+    def poll_device_info(self, name: str) -> None:
+        # Dialog-scoped off-main live-read (best-effort); result flows back via
+        # DEVICE_CHANGED. DeviceService owns the worker/main-thread split.
+        self._dev_svc.poll_device_info(name)
+
     def is_memory_device(self, name: str) -> bool:
         return self._dev_svc.is_memory_device(name)
 

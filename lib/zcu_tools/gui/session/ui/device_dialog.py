@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
 
-from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
 from qtpy.QtGui import QColor  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QComboBox,
@@ -338,6 +338,17 @@ class DeviceDialog(QDialog):
         self.finished.connect(self._cleanup_bus_subscriptions)
         self.destroyed.connect(self._cleanup_bus_subscriptions)
 
+        # Dialog-scoped + selection-scoped live poller (Phase 2): while the
+        # dialog is visible AND a connected device is selected, tick once a
+        # second and best-effort off-main read the selected device's real driver
+        # values. The result flows back through DEVICE_CHANGED (only when it
+        # actually moved), which the Phase 1 repaint+preserve-selection path
+        # absorbs. Built stopped; _update_poll_timer (re)decides on every
+        # selection change and on show/hide.
+        self._poll_timer = QTimer(self)
+        self._poll_timer.setInterval(1000)
+        self._poll_timer.timeout.connect(self._on_poll_tick)
+
         self._refresh_list()
         self._render_setup(self._ctrl.get_active_device_setup())
 
@@ -352,7 +363,44 @@ class DeviceDialog(QDialog):
         )
         self._ctrl.get_bus().unsubscribe(DeviceChangedPayload, self._on_device_changed)
         self._detach_progress()
+        self._poll_timer.stop()
         self._bus_subs_active = False
+
+    # --- live-value poller (dialog-scoped + selection-scoped) ----------------
+
+    def showEvent(self, a0: Any) -> None:  # noqa: N802 (Qt override)
+        super().showEvent(a0)
+        self._update_poll_timer()
+
+    def hideEvent(self, a0: Any) -> None:  # noqa: N802 (Qt override)
+        super().hideEvent(a0)
+        self._update_poll_timer()
+
+    def _update_poll_timer(self) -> None:
+        """(Re)decide whether the live poller should be running.
+
+        Dialog-scoped + selection-scoped: poll only while the dialog is visible
+        AND a device is selected. A memory-only / busy selection still keeps the
+        timer running — the per-tick poll itself skips those cheaply
+        (DeviceService.poll_device_info) and the selection may flip to
+        connected without another timer decision. The timer stops when the
+        dialog hides or nothing is selected, so there is no always-on / all-
+        device polling and no leak after close.
+        """
+        should_run = self.isVisible() and self._selected_device_name() is not None
+        if should_run:
+            if not self._poll_timer.isActive():
+                self._poll_timer.start()
+        elif self._poll_timer.isActive():
+            self._poll_timer.stop()
+
+    def _on_poll_tick(self) -> None:
+        name = self._selected_device_name()
+        if name is None:
+            # Selection vanished between decisions — stop rather than poll None.
+            self._poll_timer.stop()
+            return
+        self._ctrl.poll_device_info(name)
 
     def _refresh_list(self, select_name: str | None = None) -> None:
         # Rebuilding the list clears the selection; preserve the user's current
@@ -396,6 +444,9 @@ class DeviceDialog(QDialog):
         return item.data(Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
 
     def _on_selection_changed(self, _row: int) -> None:
+        # Selection-scoped poller decision: a change in what is selected (or to
+        # nothing selected) re-evaluates whether the live poller runs.
+        self._update_poll_timer()
         item = self._list.currentItem()
         if item is None:
             self._stack.setCurrentIndex(0)

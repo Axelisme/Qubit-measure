@@ -473,6 +473,58 @@ class DeviceService(QObject):
             self._emit_device_changed(name)
         return info
 
+    def poll_device_info(self, name: str) -> None:
+        """Best-effort off-main live-read of a device's real driver values.
+
+        The dialog-scoped poller calls this once per tick for the selected
+        device. It is the off-main twin of :meth:`get_device_info`: the worker
+        only *reads* the driver (the blocking SCPI I/O), and the main-thread
+        ``on_done`` does the cache compare + bump + DEVICE_CHANGED emit, so the
+        State main-thread invariant holds (the worker never touches State).
+
+        Skip without raising when the device is not a live read target — not
+        connected / memory-only, or being mutated (connect/disconnect/setup,
+        i.e. SETTING_UP ramp): a poll must never compete with a mutation. A
+        single read that fails (timeout / no response / driver gone) is logged
+        and swallowed so the next tick still runs — this is the best-effort
+        core, not a Fast-Fail path.
+        """
+        from zcu_tools.device.manager import GlobalDeviceManager
+
+        dev = self._state.get_device(name)
+        if dev is None or dev.is_memory_only():
+            return
+        if self._gate.is_device_mutating(name):
+            return
+
+        def read_work() -> BaseDeviceInfo:
+            # Worker thread: pure driver read, no State touch, no emit.
+            return GlobalDeviceManager.get_info(name)
+
+        def on_read(info: object) -> None:
+            # Main thread: the device may have gone away or started mutating
+            # between submit and delivery; re-check before the cache refresh so
+            # a late poll result never bumps a now-mutating / removed device.
+            current = self._state.get_device(name)
+            if current is None or current.is_memory_only():
+                return
+            if self._gate.is_device_mutating(name):
+                return
+            if self._state.refresh_device_info_cache(name, cast(BaseDeviceInfo, info)):
+                self._emit_device_changed(name)
+
+        def on_read_failed(exc: Exception) -> None:
+            # Best-effort: a failed single read is logged and dropped so the
+            # poller keeps ticking.
+            logger.debug("device poll read failed: name=%r error=%s", name, exc)
+
+        self._bg.submit(
+            read_work,
+            run_in_pool=True,
+            on_done=on_read,
+            on_error=on_read_failed,
+        )
+
     def get_device_value_for_new_context(self, name: str) -> float | None:
         info = self.get_device_info(name)
         if info is None:
