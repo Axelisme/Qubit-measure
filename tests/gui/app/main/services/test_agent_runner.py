@@ -397,6 +397,11 @@ class TestBuildClaudeArgv:
         idx = argv.index("--allowedTools")
         assert argv[idx + 1] == "mcp__measure-gui__*"
 
+    def test_contains_append_system_prompt(self) -> None:
+        argv = build_claude_argv("task", "/tmp/mcp.json")
+        idx = argv.index("--append-system-prompt")
+        assert "gui_connect" in argv[idx + 1]
+
     def test_contains_verbose(self) -> None:
         argv = build_claude_argv("task", "/tmp/mcp.json")
         assert "--verbose" in argv
@@ -468,6 +473,13 @@ class TestAgentChatServiceEmbedded:
         entries = svc.entries()
         assert entries[0].kind == "tool_use"
         assert "gui_state_check" in entries[0].text
+
+    def test_record_tool_use_hides_payload(self) -> None:
+        svc = self._svc()
+        svc.record_tool_use("gui_tab_new", '{"adapter_name": "twotone/freq"}')
+        text = svc.entries()[0].text
+        assert "gui_tab_new" in text
+        assert "adapter_name" not in text  # payload must not be shown
 
     def test_record_tool_result_appends(self) -> None:
         svc = self._svc()

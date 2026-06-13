@@ -1155,12 +1155,14 @@ class Controller:
         from .services.agent_runner import _RunnerCallbacks
 
         def _on_update(updates):  # type: ignore[no-untyped-def]
-            # All TranscriptUpdate variants → record_* on AgentChatService.
+            # TranscriptUpdate variants → record_* on AgentChatService.
+            # Tool *results* are intentionally not recorded: they are verbose
+            # payloads (raw JSON) that only add noise — the assistant prose
+            # summarises outcomes. Tool *uses* show the name only (no payload).
             from .services.agent_runner import (
                 AssistantTextUpdate,
                 ResultUpdate,
                 SystemInitUpdate,
-                ToolResultUpdate,
                 ToolUseUpdate,
             )
 
@@ -1169,9 +1171,7 @@ class Controller:
                 if isinstance(update, AssistantTextUpdate):
                     chat.record_assistant(update.text)
                 elif isinstance(update, ToolUseUpdate):
-                    chat.record_tool_use(update.tool_name, update.input_summary)
-                elif isinstance(update, ToolResultUpdate):
-                    chat.record_tool_result(update.summary)
+                    chat.record_tool_use(update.tool_name)
                 elif isinstance(update, SystemInitUpdate):
                     chat.record_system(update.session_id)
                 elif isinstance(update, ResultUpdate):
@@ -1184,9 +1184,13 @@ class Controller:
                 # RateLimitUpdate is informational; not recorded.
 
         def _on_state_changed(state):  # type: ignore[no-untyped-def]
-            # Sync embedded-active flag with runner state.
+            # Sync embedded-active flag with runner liveness. Sticky across the
+            # whole session (incl. idle between turns) so the queued activity tap
+            # — which checks this flag late on the main thread — stays suppressed
+            # and does not double-record tool calls already in the stream-json
+            # transcript. Only a terminal "stopped" re-enables the Phase-A tap.
             chat = self.get_agent_chat()
-            chat.set_embedded_active(state in ("working", "waiting"))
+            chat.set_embedded_active(state != "stopped")
 
         def _on_process_error(msg: str) -> None:
             self._notify("error", "Agent process error", msg)

@@ -6,7 +6,6 @@ listener notification, and the skip-method filter.
 
 from __future__ import annotations
 
-
 from zcu_tools.gui.app.main.services.agent_chat import (
     _MAX_ENTRIES,
     _MAX_FIELD_LEN,
@@ -103,6 +102,14 @@ def test_record_diagnostic_info_no_title():
     text = svc.entries()[0].text
     assert "[INFO]" in text
     assert "Data saved" in text
+
+
+def test_record_diagnostic_suppressed_when_embedded():
+    """Embedded mode drops GUI-internal diagnostics (e.g. device connect)."""
+    svc = _svc()
+    svc.set_embedded_active(True)
+    svc.record_diagnostic("info", "", "Device connected: fake_flux")
+    assert svc.entries() == ()
 
 
 # ---------------------------------------------------------------------------

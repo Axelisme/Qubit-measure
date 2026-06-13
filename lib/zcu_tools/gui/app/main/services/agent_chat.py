@@ -189,9 +189,15 @@ class AgentChatService:
             TranscriptEntry(kind="assistant", text=text, timestamp=time.time())
         )
 
-    def record_tool_use(self, tool_name: str, input_summary: str) -> None:
-        """Append a tool-call entry from the child. Main-thread only."""
-        text = f"[tool] {tool_name}({input_summary})"
+    def record_tool_use(self, tool_name: str, input_summary: str = "") -> None:
+        """Append a tool-call marker (name only). Main-thread only.
+
+        The tool input payload is intentionally NOT shown — it is noise in the
+        conversation view. ``input_summary`` is accepted for caller compatibility
+        but not rendered.
+        """
+        del input_summary
+        text = f"⏺ {tool_name}"
         self._append(TranscriptEntry(kind="tool_use", text=text, timestamp=time.time()))
 
     def record_tool_result(self, summary: str) -> None:
@@ -261,9 +267,12 @@ class AgentChatService:
     def record_diagnostic(self, severity: str, title: str, message: str) -> None:
         """Append a Controller diagnostic. Main-thread only.
 
-        ``severity`` ∈ {"error", "info"}.  The format mirrors the wire's
-        diagnostic push so agents can correlate.
+        ``severity`` ∈ {"error", "info"}.  Suppressed while the embedded agent
+        is active — GUI-internal diagnostics (e.g. "Device connected") are not
+        part of the agent conversation and only add noise to the transcript.
         """
+        if self._embedded_active:
+            return
         label = severity.upper()
         parts = [f"[{label}]"]
         if title:

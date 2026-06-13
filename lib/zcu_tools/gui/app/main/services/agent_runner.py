@@ -211,6 +211,17 @@ def _truncate(text: str, max_len: int = _MAX_INPUT_LEN) -> str:
     return text
 
 
+# Appended to claude's system prompt so the embedded agent connects to the
+# already-running GUI up-front and stays terse (no ToolSearch/Skill fumbling).
+_EMBEDDED_SYSTEM_PROMPT = (
+    "You are embedded in a running qubit-measure GUI. The measure-gui is already "
+    "running and exposed via the measure-gui MCP server: call gui_connect once at "
+    "the very start, then use the mcp__measure-gui__* tools directly. Do NOT use "
+    "ToolSearch or the run-measure-gui Skill to find GUI tools — they are already "
+    "available. Be concise and act directly; do not narrate every step."
+)
+
+
 def build_claude_argv(
     task: str,
     mcp_config_path: str,
@@ -246,6 +257,8 @@ def build_claude_argv(
         mcp_config_path,
         "--allowedTools",
         allowed_tools,
+        "--append-system-prompt",
+        _EMBEDDED_SYSTEM_PROMPT,
         "-p",
         task,
     ]
