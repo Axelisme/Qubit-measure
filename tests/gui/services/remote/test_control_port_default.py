@@ -16,6 +16,7 @@ Covers three guarantees:
 from __future__ import annotations
 
 import argparse
+import socket
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -45,19 +46,26 @@ def _parse_run_script(
 
 
 @pytest.mark.parametrize(
-    "script_name, expected_port",
+    "script_name",
     [
-        ("run_measure_gui", 8765),
-        ("run_fluxdep_gui", 8766),
-        ("run_dispersive_gui", 8767),
-        ("run_autofluxdep_gui", 8768),
+        "run_measure_gui",
+        "run_fluxdep_gui",
+        "run_dispersive_gui",
+        "run_autofluxdep_gui",
     ],
 )
-def test_default_control_port_matches_mcp(script_name: str, expected_port: int) -> None:
-    """Run script default --control-port matches the MCP server's default_port."""
+def test_omitted_control_port_is_none(script_name: str) -> None:
+    """Omitting --control-port yields None (the sentinel for 'use convention port').
+
+    The agreed-upon port is no longer the argparse default; an omitted port means
+    "use the convention port AND allow ephemeral fallback", distinguished from an
+    explicitly-pinned port (which fast-fails on collision). The convention port is
+    re-checked against the MCP default_port in
+    ``test_mcp_default_port_matches_expected``.
+    """
     args = _parse_run_script(script_name)
-    assert args.control_port == expected_port, (
-        f"{script_name}: expected default port {expected_port}, got {args.control_port}"
+    assert args.control_port is None, (
+        f"{script_name}: omitted --control-port should be None, got {args.control_port}"
     )
 
 
@@ -81,6 +89,32 @@ def test_mcp_default_port_matches_expected(
     assert actual == expected_port, (
         f"{mcp_module}: expected default_port={expected_port}, got {actual}"
     )
+
+
+# ---------------------------------------------------------------------------
+# 1b. Discovery slug consistency: MCP reader slug == GUI writer slug
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "mcp_module, expected_slug",
+    [
+        ("zcu_tools.mcp.measure.server", "measure"),
+        ("zcu_tools.mcp.fluxdep.server", "fluxdep"),
+        ("zcu_tools.mcp.dispersive.server", "dispersive"),
+        ("zcu_tools.mcp.autofluxdep.server", "autofluxdep"),
+    ],
+)
+def test_mcp_app_slug_matches_expected(mcp_module: str, expected_slug: str) -> None:
+    """Each MCP server advertises the discovery slug its GUI writes under.
+
+    The run scripts pass these same slugs to ``ControlOptions(app_slug=...)``; the
+    GUI writer and MCP reader must agree or discovery silently misses.
+    """
+    import importlib
+
+    mod = importlib.import_module(mcp_module)
+    assert mod._CONFIG.app_slug == expected_slug  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------
@@ -196,3 +230,72 @@ def test_remote_control_adapter_start_propagates_bind_error(qapp) -> None:
     with patch.object(adapter._endpoint, "start", side_effect=bind_error):
         with pytest.raises(RuntimeError, match="bind"):
             adapter.start()
+
+
+# ---------------------------------------------------------------------------
+# 4. Ephemeral fallback (default port) vs fast-fail (pinned port)
+# ---------------------------------------------------------------------------
+
+
+class _FakeRouter:
+    def on_client_open(self, link):  # noqa: ANN001, ANN201
+        pass
+
+    def on_client_close(self, link, *, on_main_thread):  # noqa: ANN001, ANN201
+        pass
+
+    def route(self, link, request):  # noqa: ANN001, ANN201
+        pass
+
+
+def _take_port() -> tuple[socket.socket, int]:
+    """Bind+listen an ephemeral port so a re-bind there raises EADDRINUSE."""
+    blocker = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    blocker.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    blocker.bind(("127.0.0.1", 0))
+    blocker.listen(1)
+    return blocker, blocker.getsockname()[1]
+
+
+def test_default_port_busy_falls_back_to_ephemeral() -> None:
+    """allow_port_fallback=True: a taken port retries on 0 and binds elsewhere."""
+    from zcu_tools.gui.remote.rpc_endpoint import ControlOptions, NdjsonRpcEndpoint
+
+    blocker, taken_port = _take_port()
+    opts = ControlOptions(port=taken_port, allow_port_fallback=True)
+    endpoint = NdjsonRpcEndpoint(
+        opts,
+        wire_version=1,
+        gui_version=1,
+        server_name="test_fallback",
+        router=_FakeRouter(),
+    )
+    try:
+        bound = endpoint.start()
+        assert bound != taken_port and bound != 0, (
+            "fallback must bind a real OS-assigned port, not the busy one or 0"
+        )
+        assert endpoint.port == bound
+    finally:
+        endpoint.stop()
+        blocker.close()
+
+
+def test_pinned_port_busy_fast_fails() -> None:
+    """allow_port_fallback=False (explicit --control-port): a taken port raises."""
+    from zcu_tools.gui.remote.rpc_endpoint import ControlOptions, NdjsonRpcEndpoint
+
+    blocker, taken_port = _take_port()
+    opts = ControlOptions(port=taken_port, allow_port_fallback=False)
+    endpoint = NdjsonRpcEndpoint(
+        opts,
+        wire_version=1,
+        gui_version=1,
+        server_name="test_pinned",
+        router=_FakeRouter(),
+    )
+    try:
+        with pytest.raises(RuntimeError, match="bind"):
+            endpoint.start()
+    finally:
+        blocker.close()

@@ -92,6 +92,7 @@ safe.
 
 _CONFIG = MCPBridgeConfig(
     app_name="fluxdep",
+    app_slug="fluxdep",
     tool_prefix="fluxdep_",
     default_port=8766,
     mcp_version=MCP_VERSION,

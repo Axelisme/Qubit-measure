@@ -79,11 +79,24 @@ class ControlOptions:
     ``port=0`` asks the OS for an ephemeral free port — useful for tests.
     ``allow_external`` flips the bind from loopback to all interfaces; combined
     with a missing ``token`` this is refused at startup.
+
+    ``allow_port_fallback`` lets :meth:`NdjsonRpcEndpoint.start` retry once on an
+    OS-assigned ephemeral port (0) when the requested port is already taken by an
+    unrelated process. It is set only when the user did NOT pin a specific port:
+    a default agreed-upon port that is busy falls back (the real port is then
+    advertised via session discovery), while an explicitly-requested ``--control-port
+    N`` that is busy fast-fails — pinning a port means the user wants *that* port.
+
+    ``app_slug`` is the stable per-app discovery key (e.g. ``measure`` /
+    ``fluxdep``), shared by the GUI writer and the MCP reader. Empty means the
+    session is not advertised (no discovery file written).
     """
 
     port: int
     token: str | None = None
     allow_external: bool = False
+    allow_port_fallback: bool = False
+    app_slug: str = ""
 
     def host(self) -> str:
         return "0.0.0.0" if self.allow_external else "127.0.0.1"
@@ -231,15 +244,7 @@ class NdjsonRpcEndpoint:
         if self._thread is not None:
             raise RuntimeError("NdjsonRpcEndpoint.start() called twice")
         host = self._opts.host()
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            sock.bind((host, self._opts.port))
-        except OSError as exc:
-            sock.close()
-            raise RuntimeError(
-                f"NdjsonRpcEndpoint bind {host}:{self._opts.port} failed: {exc}"
-            ) from exc
+        sock = self._bind(host)
         sock.listen(8)
         sock.setblocking(False)
         self._server_sock = sock
@@ -262,6 +267,47 @@ class NdjsonRpcEndpoint:
             "yes" if self._opts.token else "no",
         )
         return port
+
+    def _bind(self, host: str) -> socket.socket:
+        """Bind the requested port; fall back to an ephemeral port if allowed.
+
+        A free socket is returned. When the requested port is taken and
+        ``allow_port_fallback`` is set (the default agreed-upon port, not a
+        user-pinned one), retry once on port 0 so the OS hands out a free port —
+        the real port is then advertised through session discovery. A pinned port
+        (fallback off) fast-fails so the user's explicit choice is respected.
+        """
+
+        def _make() -> socket.socket:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            return s
+
+        sock = _make()
+        try:
+            sock.bind((host, self._opts.port))
+            return sock
+        except OSError as exc:
+            sock.close()
+            if not (self._opts.allow_port_fallback and self._opts.port != 0):
+                raise RuntimeError(
+                    f"NdjsonRpcEndpoint bind {host}:{self._opts.port} failed: {exc}"
+                ) from exc
+            logger.warning(
+                "%s: port %d is taken (%s); falling back to an ephemeral port",
+                self._server_name,
+                self._opts.port,
+                exc,
+            )
+        sock = _make()
+        try:
+            sock.bind((host, 0))
+            return sock
+        except OSError as exc:
+            sock.close()
+            raise RuntimeError(
+                f"NdjsonRpcEndpoint ephemeral-port bind on {host} failed: {exc}"
+            ) from exc
 
     def stop(self) -> None:
         """Wake the selector loop, close all sockets, join threads.

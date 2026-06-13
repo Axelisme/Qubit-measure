@@ -36,8 +36,10 @@ nothing from ``gui.app``.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from collections.abc import Callable, Mapping
+from datetime import datetime, timezone
 from typing import Any
 
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
@@ -50,6 +52,7 @@ from zcu_tools.gui.remote.rpc_endpoint import (
     MainThreadDispatcher,
     NdjsonRpcEndpoint,
 )
+from zcu_tools.gui.remote.session_discovery import clear_session, write_session
 from zcu_tools.gui.remote.wire import Request
 
 logger = logging.getLogger(__name__)
@@ -102,6 +105,8 @@ class RemoteControlServiceBase:
         wire_event_name: Callable[[Any], str],
     ) -> None:
         self.ctrl = controller
+        self._opts = opts
+        self._wire_version = wire_version
         self._method_registry = method_registry
         self._event_serializers = event_serializers
         self._wire_event_name = wire_event_name
@@ -168,17 +173,37 @@ class RemoteControlServiceBase:
         """Hook EventBus (+ any extra listeners), then start the endpoint.
 
         Returns the bound port. App-side wiring happens before the socket opens
-        so no event is missed.
+        so no event is missed. Once the (possibly ephemeral-fallback) real port is
+        known, advertise it via session discovery so an agent can find this GUI
+        without being told the port.
         """
         self._subscribe_event_bus()
         self._extra_start()
-        return self._endpoint.start()
+        port = self._endpoint.start()
+        self._advertise_session(port)
+        return port
 
     def stop(self) -> None:
         """Unwire listeners, then stop the endpoint. Idempotent. Main thread."""
         self._unsubscribe_event_bus()
         self._extra_stop()
+        if self._opts.app_slug:
+            clear_session(self._opts.app_slug)
         self._endpoint.stop()
+
+    def _advertise_session(self, port: int) -> None:
+        """Write the discovery file for this app's running session (best-effort)."""
+        slug = self._opts.app_slug
+        if not slug:
+            return
+        write_session(
+            slug,
+            port,
+            pid=os.getpid(),
+            host=self._opts.host(),
+            wire_version=self._wire_version,
+            started=datetime.now(timezone.utc).isoformat(),
+        )
 
     @property
     def port(self) -> int:

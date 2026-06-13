@@ -38,10 +38,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--control-port",
         type=int,
-        default=8767,
+        default=None,
         help=(
-            "Start the remote-control TCP server on this port (default: 8767, the "
-            "agreed-upon port for agent attach; 0 = OS-assigned ephemeral port). "
+            "Start the remote-control TCP server on this port. Omit to use the "
+            "agreed-upon port 8767 (auto-falls back to an ephemeral port if 8767 "
+            "is taken, advertised via session discovery); pass an explicit port to "
+            "pin it (fast-fails if taken). 0 = OS-assigned ephemeral port. "
             "Use --no-control to disable the socket entirely."
         ),
     )
@@ -84,7 +86,15 @@ if __name__ == "__main__":
     if not args.no_control:
         from zcu_tools.gui.app.dispersive.services.remote.service import ControlOptions
 
-        control = ControlOptions(port=args.control_port, token=args.control_token)
+        # Omitting --control-port uses the agreed-upon port and allows ephemeral
+        # fallback; pinning a port disables fallback (the user wants *that* port).
+        explicit_port = args.control_port is not None
+        control = ControlOptions(
+            port=args.control_port if explicit_port else 8767,
+            token=args.control_token,
+            allow_port_fallback=not explicit_port,
+            app_slug="dispersive",
+        )
 
     # Anchor default result/database paths at the repo root (this script lives in
     # script/, so its parent is the repo root) rather than cwd — a .bat launcher

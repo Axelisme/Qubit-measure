@@ -103,13 +103,16 @@ def run_app(
         try:
             adapter.start()
         except RuntimeError as exc:
+            # With the default port, a busy port already fell back to an ephemeral
+            # one inside start(); reaching here means either an explicitly-pinned
+            # port is taken or even the ephemeral bind failed.
             port = control_opts.port
             print(
                 f"\nERROR: cannot open control socket on port {port}.\n"
                 f"  {exc}\n\n"
-                f"  Another measure-gui may already be running on that port.\n"
-                f"  Pass --control-port <N> to use a different port,\n"
-                f"  or --no-control to disable the remote-control socket.\n",
+                f"  That port is pinned and already in use.\n"
+                f"  Pass a different --control-port <N>, omit it to auto-pick a\n"
+                f"  free port, or --no-control to disable the remote-control socket.\n",
                 file=sys.stderr,
             )
             sys.exit(1)

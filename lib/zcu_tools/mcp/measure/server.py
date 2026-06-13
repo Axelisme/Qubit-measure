@@ -75,6 +75,7 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
     MCPBridgeConfig,
     assemble_tools,
     generate_tools,
+    resolve_connect_port,
     run_stdio_loop,
 )
 
@@ -277,6 +278,15 @@ Detecting completion — no events; wait or poll a handle:
     agent: the block lives in the sub-agent, your main loop stays free, and the
     harness re-invokes you with the result when it returns. Reserve inline waits
     for ops you expect to finish quickly.
+  - USER FEEDBACK WAKEUP (ADR-0023): the user can type a feedback message in the
+    GUI's feedback bar at any time. If you are waiting (gui_run_wait /
+    gui_analyze_wait / gui_device_wait_operation / gui_connect_wait), the wait
+    returns early with status='user_feedback' and 'feedback' carrying the text.
+    Treat 'feedback' as a HIGH-PRIORITY instruction — re-plan accordingly. The
+    operation is still running; you hold its key and can gui_run_cancel or re-await.
+    If you are not currently waiting (reasoning or quick calls), feedback lands in
+    an inbox and is delivered at your next wait entry — the GUI shows the user
+    "will take effect at the next wait point". You never lose feedback.
   - While 'running', the poll reply carries the live progress bars (active,
     bars[token/format/maximum/value/percent/n/total]) — no separate progress
     tool. Don't busy-poll gui_run_running_tab in a sleep loop; use gui_run_poll.
@@ -429,6 +439,7 @@ def _drain_pending() -> dict[str, list]:
 # version guard + operation tracking below.
 _CONFIG = MCPBridgeConfig(
     app_name="gui",
+    app_slug="measure",
     tool_prefix="gui_",
     default_port=8765,
     mcp_version=MCP_VERSION,
@@ -593,12 +604,14 @@ def send_gui_rpc(
 
 
 def tool_gui_connect(arguments: dict[str, Any]) -> str:
-    # Default port 8765, symmetric with gui_launch — but opposite expectation:
-    # connect attaches to a GUI that is ALREADY running there (launch starts a
-    # new one on a free port). So a missing GUI is the error case here.
-    port = arguments.get("port", _CONFIG.default_port)
-    if not isinstance(port, int):
+    # connect attaches to a GUI that is ALREADY running (launch starts a new one),
+    # so a missing GUI is the error case here. Omitting 'port' auto-discovers the
+    # running GUI via its session file (covers the ephemeral-fallback case where
+    # it is not on 8765), then falls back to the agreed-upon 8765.
+    requested = arguments.get("port")
+    if requested is not None and not isinstance(requested, int):
         raise ValueError("Invalid 'port' argument (must be integer)")
+    port = resolve_connect_port(_CONFIG, requested)
     return _BRIDGE.connect(port, arguments.get("token"))
 
 
@@ -744,11 +757,16 @@ def _await_operation_by_key(key: str, what: str, timeout: float) -> dict[str, An
     """Block until the latest operation for ``key`` settles, or ``timeout`` s
     elapse; semantic result.
 
-    Returns ``{status, waited_seconds[, message]}``: 'finished' (settled OK),
-    'timed_out' (still running after the bounded wait — NOT a crash, no raise),
-    or 'no_operation' (nothing tracked). ``waited_seconds`` is how long the wait
-    actually blocked. A genuine failed/cancelled outcome still raises (the agent
-    must see it as an error), distinct from a timeout.
+    Returns ``{status, waited_seconds[, message[, feedback]]}``:
+    - 'finished': settled OK.
+    - 'user_feedback': a user-feedback string arrived before the op settled
+      (ADR-0023). ``feedback`` carries the text; ``reason`` is 'user_feedback'.
+      The operation is still running; the agent holds the key and can re-await
+      or cancel via gui_run_cancel.
+    - 'timed_out': still running after the bounded wait — NOT a crash, no raise.
+    - 'no_operation': nothing tracked.
+    ``waited_seconds`` is how long the wait actually blocked. A genuine
+    failed/cancelled outcome still raises (the agent must see it as an error).
     """
     operation_id = _OP_BY_KEY.get(key)
     if operation_id is None:
@@ -783,9 +801,25 @@ def _await_operation_by_key(key: str, what: str, timeout: float) -> dict[str, An
                 "message": f"{what} still in progress after {timeout}s.",
             }
         raise  # genuine failure/cancellation — surfaces to the agent as an error
+    # Unwrap the structured reason from the wire payload (ADR-0023).
+    reason = res.get("reason", "completed")
+    waited = round(time.monotonic() - start, 3)
+    if reason == "user_feedback":
+        feedback = res.get("feedback") or ""
+        return {
+            "status": "user_feedback",
+            "reason": "user_feedback",
+            "feedback": feedback,
+            "waited_seconds": waited,
+            "message": (
+                f"User sent feedback while {what} was running. "
+                "Treat this as a high-priority instruction and re-plan. "
+                "The operation is still running — you may gui_run_cancel or re-await."
+            ),
+        }
     return {
         "status": res.get("status", "finished"),
-        "waited_seconds": round(time.monotonic() - start, 3),
+        "waited_seconds": waited,
         "message": f"{what} completed.",
     }
 
@@ -1265,8 +1299,10 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
     "gui_connect": {
         "handler": tool_gui_connect,
         "description": (
-            "Connect the MCP bridge to an ALREADY-RUNNING GUI's TCP control port "
-            "(default 8765). Errors if no GUI is listening there — use gui_launch "
+            "Connect the MCP bridge to an ALREADY-RUNNING GUI's TCP control port. "
+            "Omit 'port' to auto-discover the running GUI via its session file "
+            "(covers the case where it fell back off port 8765), falling back to "
+            "8765 if none is found. Errors if no GUI is listening — use gui_launch "
             "to start one. Skip this if you used gui_launch with auto_connect=true "
             "(default)."
         ),
@@ -1276,7 +1312,8 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
                 "port": {
                     "type": "integer",
                     "description": (
-                        "TCP port of a running GUI control service (default 8765)"
+                        "TCP port of a running GUI control service. Omit to "
+                        "auto-discover (then fall back to 8765)."
                     ),
                 },
                 "token": {
@@ -1442,11 +1479,15 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "Block until the named device's current operation (connect / disconnect "
             "/ setup — whichever was started last) completes or 'timeout' s elapse. "
             "Returns {status, waited_seconds}: 'finished' / 'timed_out' (still "
-            "running — re-wait or gui_device_poll) / 'no_operation'. Raises only on "
-            "a genuine failure/cancellation. Use after a gui_device_* tool returned "
-            "status='pending'. This blocks your turn; for a long op (e.g. a slow "
-            "ramp) prefer gui_device_poll, or run this from a background agent to "
-            "keep your main loop free."
+            "running — re-wait or gui_device_poll) / 'no_operation'. "
+            "IMPORTANT — user feedback wakeup (ADR-0023): if the user types feedback "
+            "while you are waiting, this returns immediately with "
+            "status='user_feedback' and a 'feedback' field. Treat it as a "
+            "HIGH-PRIORITY instruction and re-plan. The operation is still running. "
+            "Raises only on a genuine failure/cancellation. Use after a gui_device_* "
+            "tool returned status='pending'. This blocks your turn; for a long op "
+            "(e.g. a slow ramp) prefer gui_device_poll, or run this from a "
+            "background agent to keep your main loop free."
         ),
         "inputSchema": {
             "type": "object",
@@ -1504,6 +1545,12 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "with gui_tab_get_current_figure), 'timed_out' (still running after the "
             "wait — not an error, re-wait or gui_run_poll), or 'no_operation' "
             "(none in flight). "
+            "IMPORTANT — user feedback wakeup (ADR-0023): if the user types feedback "
+            "while you are waiting, this returns immediately with "
+            "status='user_feedback' and a 'feedback' field carrying the text. Treat "
+            "it as a HIGH-PRIORITY instruction: re-plan based on it. You still hold "
+            "the operation; use gui_run_cancel to stop it, or re-await with "
+            "gui_run_wait to continue. "
             "Raises only on a genuine run failure/cancellation. Use after "
             "gui_run_start returned status='pending'. NOTE: this blocks your whole "
             "turn until the run ends (minutes for a big sweep), and nothing pushes "
@@ -1577,10 +1624,14 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "Block until the analyze on tab_id completes (mirrors gui_run_wait). "
             "Returns {status, waited_seconds}: 'finished' (see the fit plot with "
             "gui_tab_get_current_figure) / 'timed_out' (re-wait or gui_analyze_poll) "
-            "/ 'no_operation'. Use after "
-            "gui_analyze returned status='pending'. For an INTERACTIVE pick this "
-            "blocks until the USER clicks Done — prefer gui_analyze_poll so you can "
-            "prompt and check back, or run this from a background agent."
+            "/ 'no_operation'. "
+            "IMPORTANT — user feedback wakeup (ADR-0023): if the user types feedback "
+            "while you are waiting, this returns immediately with "
+            "status='user_feedback' and a 'feedback' field. Treat it as a "
+            "HIGH-PRIORITY instruction and re-plan. The operation is still running. "
+            "Use after gui_analyze returned status='pending'. For an INTERACTIVE pick "
+            "this blocks until the USER clicks Done — prefer gui_analyze_poll so you "
+            "can prompt and check back, or run this from a background agent."
         ),
         "inputSchema": {
             "type": "object",
@@ -1646,8 +1697,10 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
         "description": (
             "Block until the post-analysis on tab_id completes (mirrors "
             "gui_analyze_wait). Returns {status, waited_seconds}: 'finished' / "
-            "'timed_out' (re-wait or gui_post_analyze_poll) / 'no_operation'. Use "
-            "after gui_post_analyze returned status='pending'. Read the scalar "
+            "'timed_out' (re-wait or gui_post_analyze_poll) / 'no_operation'. "
+            "IMPORTANT — user feedback wakeup (ADR-0023): status='user_feedback' "
+            "means the user sent a high-priority instruction; re-plan with 'feedback'. "
+            "Use after gui_post_analyze returned status='pending'. Read the scalar "
             "result with gui_tab_get_post_analyze_result."
         ),
         "inputSchema": {
@@ -1703,10 +1756,14 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "Block until the SoC connect completes or 'timeout' s elapse. Returns "
             "{status, waited_seconds}: 'finished' (also returns the SoC summary) / "
             "'timed_out' (still connecting — re-wait or gui_connect_poll) / "
-            "'no_operation'. Raises only on a genuine connect failure. Use after "
-            "gui_connect_start returned status='pending'. This blocks your turn; if "
-            "it is slow, prefer gui_connect_poll or run this from a background "
-            "agent rather than blocking."
+            "'no_operation'. "
+            "IMPORTANT — user feedback wakeup (ADR-0023): if the user types feedback "
+            "while you are waiting, this returns immediately with "
+            "status='user_feedback' and a 'feedback' field. Treat it as a "
+            "HIGH-PRIORITY instruction and re-plan. "
+            "Raises only on a genuine connect failure. Use after gui_connect_start "
+            "returned status='pending'. This blocks your turn; if it is slow, prefer "
+            "gui_connect_poll or run this from a background agent rather than blocking."
         ),
         "inputSchema": {
             "type": "object",

@@ -36,6 +36,7 @@ from zcu_tools.mcp.core.bridge import (
     ToolTable,
     assemble_tools,
     generate_tools,
+    resolve_connect_port,
     run_stdio_loop,
 )
 
@@ -81,9 +82,10 @@ def _make_lifecycle_tools(
     port = config.default_port
 
     def _connect(arguments: dict[str, Any]) -> str:
-        p = arguments.get("port", port)
-        if not isinstance(p, int):
+        requested = arguments.get("port")
+        if requested is not None and not isinstance(requested, int):
             raise ValueError("Invalid 'port' argument (must be integer)")
+        p = resolve_connect_port(config, requested)
         return bridge.connect(p, arguments.get("token"))
 
     def _disconnect(arguments: dict[str, Any]) -> str:
@@ -101,9 +103,12 @@ def _make_lifecycle_tools(
             "handler": _connect,
             "description": (
                 f"Connect the MCP bridge to an ALREADY-RUNNING {gui_name}'s TCP "
-                f"control port (default {port}). Errors if no GUI is listening "
-                f"there — use {prefix}launch to start one. Skip this if you used "
-                f"{prefix}launch with auto_connect=true (default)."
+                f"control port. Omit 'port' to auto-discover the running GUI (reads "
+                f"the session file the GUI writes; covers the case where it fell "
+                f"back off port {port}), falling back to port {port} if none is "
+                f"found. Errors if no GUI is listening — use {prefix}launch to start "
+                f"one. Skip this if you used {prefix}launch with auto_connect=true "
+                f"(default)."
             ),
             "inputSchema": {
                 "type": "object",
@@ -111,7 +116,8 @@ def _make_lifecycle_tools(
                     "port": {
                         "type": "integer",
                         "description": (
-                            f"TCP port of a running GUI control service (default {port})"
+                            f"TCP port of a running GUI control service. Omit to "
+                            f"auto-discover (then fall back to {port})."
                         ),
                     },
                     "token": {

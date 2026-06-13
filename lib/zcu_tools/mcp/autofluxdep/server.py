@@ -93,6 +93,7 @@ A failed call always raises; the read tools are idempotent, so retrying is safe.
 
 _CONFIG = MCPBridgeConfig(
     app_name="autofluxdep",
+    app_slug="autofluxdep",
     tool_prefix="autofluxdep_",
     default_port=8768,
     mcp_version=MCP_VERSION,

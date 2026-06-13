@@ -93,6 +93,28 @@ class MCPBridgeConfig(McpServerConfig):
     pid_file: Path
     log_file: Path
     run_script_name: str
+    # The session-discovery slug the GUI advertises under (e.g. "measure"); shared
+    # with the GUI writer. Distinct from app_name (measure's app_name is "gui").
+    app_slug: str = ""
+
+
+def resolve_connect_port(config: MCPBridgeConfig, requested: int | None) -> int:
+    """Pick the port a ``connect`` tool should attach to.
+
+    An explicit ``requested`` port always wins. Otherwise consult session
+    discovery for a live GUI advertised under ``config.app_slug`` (covers the
+    ephemeral-fallback case where the GUI is not on its agreed-upon port); if none
+    is live, fall back to the agreed-upon ``default_port`` (backward compatible).
+    """
+    if requested is not None:
+        return requested
+    if config.app_slug:
+        from zcu_tools.gui.remote.session_discovery import read_session
+
+        entry = read_session(config.app_slug)
+        if entry is not None:
+            return entry["port"]
+    return config.default_port
 
 
 def _port_is_open(port: int) -> bool:
@@ -941,5 +963,6 @@ __all__ = [
     "coerce_arg",
     "generate_tools",
     "make_forwarder",
+    "resolve_connect_port",
     "run_stdio_loop",
 ]

@@ -36,10 +36,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--control-port",
         type=int,
-        default=8766,
+        default=None,
         help=(
-            "Start the remote-control TCP server on this port (default: 8766, the "
-            "agreed-upon port for agent attach; 0 = OS-assigned ephemeral port). "
+            "Start the remote-control TCP server on this port. Omit to use the "
+            "agreed-upon port 8766 (auto-falls back to an ephemeral port if 8766 "
+            "is taken, advertised via session discovery); pass an explicit port to "
+            "pin it (fast-fails if taken). 0 = OS-assigned ephemeral port. "
             "Use --no-control to disable the socket entirely."
         ),
     )
@@ -79,10 +81,18 @@ if __name__ == "__main__":
     from zcu_tools.gui.app.fluxdep.services.remote.service import ControlOptions
     from zcu_tools.gui.app.fluxdep.state import ProjectInfo
 
+    # Omitting --control-port uses the agreed-upon port and allows ephemeral
+    # fallback; pinning a port disables fallback (the user wants *that* port).
+    explicit_port = args.control_port is not None
     control = (
         None
         if args.no_control
-        else ControlOptions(port=args.control_port, token=args.control_token)
+        else ControlOptions(
+            port=args.control_port if explicit_port else 8766,
+            token=args.control_token,
+            allow_port_fallback=not explicit_port,
+            app_slug="fluxdep",
+        )
     )
 
     # Anchor default result/database paths at the repo root (this script lives in

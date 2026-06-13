@@ -98,6 +98,7 @@ safe.
 
 _CONFIG = MCPBridgeConfig(
     app_name="dispersive",
+    app_slug="dispersive",
     tool_prefix="dispersive_",
     default_port=8767,
     mcp_version=MCP_VERSION,

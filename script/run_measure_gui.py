@@ -45,12 +45,14 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--control-port",
         type=int,
-        default=8765,
+        default=None,
         help=(
-            "Start RemoteControlService on this TCP port (default: 8765, the "
-            "agreed-upon port for agent attach; 0 = OS-assigned ephemeral port). "
-            "Bound to 127.0.0.1 unless --control-allow-external is set. "
-            "Use --no-control to disable the socket entirely."
+            "Start RemoteControlService on this TCP port. Omit to use the "
+            "agreed-upon port 8765 (auto-falls back to an OS-assigned ephemeral "
+            "port if 8765 is taken, advertised via session discovery); pass an "
+            "explicit port to pin it (fast-fails if that port is taken). "
+            "0 = OS-assigned ephemeral port. Bound to 127.0.0.1 unless "
+            "--control-allow-external is set. Use --no-control to disable entirely."
         ),
     )
     parser.add_argument(
@@ -112,10 +114,15 @@ if __name__ == "__main__":
     if not args.no_control:
         from zcu_tools.gui.app.main.services.remote import ControlOptions
 
+        # Omitting --control-port uses the agreed-upon port and allows ephemeral
+        # fallback; pinning a port disables fallback (the user wants *that* port).
+        explicit_port = args.control_port is not None
         control_opts = ControlOptions(
-            port=args.control_port,
+            port=args.control_port if explicit_port else 8765,
             token=args.control_token,
             allow_external=args.control_allow_external,
+            allow_port_fallback=not explicit_port,
+            app_slug="measure",
         )
 
     # Anchor default result/database paths at the repo root (this script lives in
