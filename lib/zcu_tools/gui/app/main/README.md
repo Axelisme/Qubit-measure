@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-13（Phase B1a：AgentSessionPort seam + 可插拔後端）
+**Last updated:** 2026-06-14（Phase B1b-1：agent_supervisor + IndependentAgentSession + 可攜檔案 IPC）
 
 # `zcu_tools/gui/app/main/` — measure-gui Framework AI Note
 
@@ -49,7 +49,9 @@ gui/
 │   ├── analyze.py        — AnalyzeService (主分析層：FIT worker + INTERACTIVE finish；算 writeback items)
 │   ├── post_analyze.py   — PostAnalyzeService (第二分析層，鏡像 AnalyzeService：FIT-only、在 primary analyze 結果之上重算、gate on primary 已存在；State 平行 post_* 欄位)
 │   ├── agent_chat.py     — AgentChatService (純 Python、非 QObject)：ring buffer ~1000 TranscriptEntry、8 種 kind (activity/feedback/diagnostic + B0 stream kinds: assistant/tool_use/tool_result/system/result)、plain observer list；activity tap 在 embedded active 時 skip；set_embedded_active/is_embedded_active 控制；session_id 留 B1 resume 用。
-│   ├── agent_runner.py   — AgentRunner（QObject，B0）：QProcess spawn claude --output-format stream-json；StreamJsonParser line-buffer 解各 frame type；AgentRunState 狀態機 (idle/working/waiting/stopped)；build_loopback_mcp_config 寫暫存 mcp.json（repo_root cwd + uv run measure/server.py）；send_user_message 寫 stdin；stop() SIGINT；callbacks 注入 (on_update/on_state_changed/on_process_error/has_pending_wait)。**B1a**：實作 AgentSessionPort（add_state_listener + 既有 6 成員）；`AgentState` 定義已搬到 ports.py、此處 re-export 維持向後相容。
+│   ├── agent_runner.py   — AgentRunner（QObject，B0/CLI 後端）：QProcess spawn claude --output-format stream-json；StreamJsonParser line-buffer 解各 frame type；AgentRunState 狀態機 (idle/working/waiting/stopped)；build_loopback_mcp_config 寫暫存 mcp.json（repo_root cwd + uv run measure/server.py）；send_user_message 寫 stdin；stop() SIGINT；callbacks 注入 (on_update/on_state_changed/on_process_error/has_pending_wait)。**B1a**：實作 AgentSessionPort（add_state_listener + 既有 6 成員）；`AgentState` 定義已搬到 ports.py、此處 re-export 維持向後相容。純函式（build_claude_argv / build_loopback_mcp_config / build_stdin_message / StreamJsonParser / AgentRunState）可被 B1b 後端跨檔複用。
+│   ├── agent_supervisor.py — **B1b-1** 可攜 IPC supervisor：detached Python wrapper（`python -m …agent_supervisor`）spawn claude 後 stdout→log.ndjson（逐行 append）、spool dir poll→claude stdin；純邏輯函式（write_spool_message / consume_spool_entries / append_log_line / stop_supervisor）可在不真 spawn 下單測；spawn_supervisor_detached() 回 SupervisorHandle（pid + log_path + spool_dir）供 GUI 端呼叫；跨平台：POSIX start_new_session / Windows DETACHED_PROCESS|CREATE_NEW_PROCESS_GROUP（Windows-verify）；stop SIGINT(POSIX) / CTRL_BREAK_EVENT+taskkill fallback(Windows)。
+│   ├── independent_agent_session.py — **B1b-1** IndependentAgentSession（QObject，實作 AgentSessionPort）：start() 建 session_dir → spawn_supervisor_detached → 啟 QTimer poll-tail；send_user_message 寫 spool 檔；stop() 送 stop_supervisor；_on_tick 增量讀 log.ndjson（byte offset）→ StreamJsonParser → _route_updates → callbacks；supervisor 消失自動轉 stopped；tick() 測試用 seam（繞過 QTimer）；_read_log_tail / _supervisor_alive 可跨平台單測。B1b-1 session_dir 為暫存目錄（registry 是 B1b-2）。
 │   ├── tab.py            — TabService (分頁狀態與 tab-local query/update)
 │   ├── tab_view.py       — TabViewService / TabViewSnapshot (pure tab render read model)
 │   ├── save.py           — SaveService (資料/圖片儲存 pipeline)
