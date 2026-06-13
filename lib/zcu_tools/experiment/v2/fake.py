@@ -4,7 +4,6 @@ import time
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Optional
 
 import numpy as np
 from matplotlib.figure import Figure

@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from typing import ClassVar, Generic, Optional, ParamSpec, overload
+from typing import ClassVar, Generic, ParamSpec, overload
 
 P = ParamSpec("P")
 

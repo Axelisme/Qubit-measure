@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import Literal, Optional, TypeVar, cast
+from typing import Literal, TypeVar, cast
 
 import numpy as np
 from numpy.typing import NDArray

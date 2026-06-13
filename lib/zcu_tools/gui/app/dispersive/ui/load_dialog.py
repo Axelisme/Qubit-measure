@@ -9,7 +9,7 @@ layout.
 
 from __future__ import annotations
 
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QHBoxLayout,

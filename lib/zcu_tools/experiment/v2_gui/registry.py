@@ -21,7 +21,6 @@ seeds a fresh entry, it does not reference an existing library entry.)
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Union
 
 from zcu_tools.gui.app.main.adapter import (
     ExpContext,

@@ -10,7 +10,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.main.services.cfg_editor import CfgEditorError
-from zcu_tools.gui.app.main.services.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.services.context import MlEntryValidationError
 

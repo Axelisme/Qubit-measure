@@ -43,7 +43,7 @@ offending call rather than surfacing as a later lowering error.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional, Self
+from typing import TYPE_CHECKING, Self
 
 from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,

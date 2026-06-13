@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Self, TypeAlias, Union
+from typing import TYPE_CHECKING, Self, TypeAlias
 
 from qick.asm_v2 import QickParam
 

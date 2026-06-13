@@ -13,7 +13,6 @@ device / tab) — only the fluxdep pipeline actions.
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 import numpy as np
 from numpy.typing import NDArray

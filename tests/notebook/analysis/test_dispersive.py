@@ -12,10 +12,9 @@ Numeric cross-checks between fast and slow are covered at the simulate layer
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import numpy as np
-import pytest
 
 FAST_PATH = "zcu_tools.notebook.analysis.dispersive.calculate_dispersive_vs_flux_fast"
 SLOW_PATH = "zcu_tools.notebook.analysis.dispersive.calculate_dispersive_vs_flux"

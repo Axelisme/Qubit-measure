@@ -20,7 +20,7 @@ do them.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 
 Ctrl = TypeVar("Ctrl")
 Window = TypeVar("Window")

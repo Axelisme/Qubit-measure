@@ -4,7 +4,7 @@ from abc import abstractmethod
 from collections import OrderedDict, defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Generic, Optional, Self, TypeVar
+from typing import Any, Generic, Self, TypeVar
 
 import matplotlib
 import matplotlib.pyplot as plt

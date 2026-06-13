@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Optional
 
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.notebook.persistance import SpectrumResult, dump_spectrums

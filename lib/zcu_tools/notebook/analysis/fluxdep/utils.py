@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Optional, Self, Union
+from typing import Self
 
 import numpy as np
 import pandas as pd

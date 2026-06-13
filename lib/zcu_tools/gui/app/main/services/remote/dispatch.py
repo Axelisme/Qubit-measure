@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING, Optional, cast
+from typing import TYPE_CHECKING, cast
 
 from zcu_tools.gui.app.main.adapter import (
     CfgSchema,

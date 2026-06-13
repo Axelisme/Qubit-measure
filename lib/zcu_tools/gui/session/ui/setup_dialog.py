@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
 
@@ -309,8 +309,6 @@ class SetupDialog(QDialog):
         from zcu_tools.gui.session.services.startup import derive_project_paths
 
         data = self._ctrl.get_persisted_startup()
-        if data is None:
-            return
         if data.chip_name:
             self._chip_edit.setText(data.chip_name)
         if data.qub_name:

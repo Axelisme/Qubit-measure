@@ -22,7 +22,7 @@ import logging
 import os
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget

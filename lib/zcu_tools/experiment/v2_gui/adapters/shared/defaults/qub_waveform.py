@@ -6,7 +6,7 @@ library waveforms (qub_flat / qub_cos); the blank is a plain cosine.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, Optional, overload
+from typing import TYPE_CHECKING, Literal, overload
 
 from zcu_tools.gui.app.main.adapter import (
     DirectValue,

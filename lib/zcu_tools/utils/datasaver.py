@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import warnings
 from datetime import datetime
-from typing import Any, Literal, Optional, overload
+from typing import Any, Literal, overload
 
 import numpy as np
 from numpy.typing import NDArray

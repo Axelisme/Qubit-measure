@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Generic, Literal, Optional, TypeVar, Union, cast, overload
+from typing import Any, Generic, Literal, TypeVar, cast, overload
 
 import numpy as np
 from matplotlib.axes import Axes

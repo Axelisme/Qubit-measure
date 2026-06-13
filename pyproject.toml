@@ -59,12 +59,17 @@ package-dir = { "" = "lib" }
 packages = ["zcu_tools"]
 
 [tool.ruff.lint]
-ignore = ["E402", "F401"]
+# E402 stays global: several MCP server scripts inject the lib path before their
+# first import (a legitimate module-level ordering). F401 is no longer global — it
+# is allowed only in __init__.py barrel files (intentional re-exports); every other
+# file must keep its imports live, so dead imports surface.
+ignore = ["E402"]
 extend-select = ["UP006", "UP007", "UP035", "UP037", "UP045"]
 
 [tool.ruff.lint.per-file-ignores]
 "script/start_server.py" = ["UP"]
 "lib/zcu_tools/remote/pyro.py" = ["UP"]
+"__init__.py" = ["F401"]
 
 [tool.pyright]
 include = ["lib", "tests", "script"]

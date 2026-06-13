@@ -20,7 +20,7 @@ flx_* writeback items from ``get_writeback_items``.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 from matplotlib.figure import Figure
 
@@ -28,7 +28,6 @@ from zcu_tools.gui.app.main.adapter import (
     AnalyzeRequest,
     AnalyzeResultBase,
     InteractiveHost,
-    InteractiveSession,
 )
 from zcu_tools.notebook.analysis.fluxdep.interactive.two_line_picker import (
     TwoLinePicker,

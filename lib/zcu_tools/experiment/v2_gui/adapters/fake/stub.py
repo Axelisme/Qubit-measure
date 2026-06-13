@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Annotated, ClassVar, Optional, TypeAlias, cast
+from typing import Annotated, ClassVar, TypeAlias, cast
 
 import numpy as np
 from matplotlib.axes import Axes

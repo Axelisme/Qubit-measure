@@ -2,14 +2,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from numpy.typing import NDArray
 
 if TYPE_CHECKING:
     from scqubits.core.fluxonium import Fluxonium
-    from scqubits.core.param_sweep import ParameterSweep
 
 
 @lru_cache(maxsize=32)

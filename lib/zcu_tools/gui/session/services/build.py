@@ -15,7 +15,7 @@ The app injects concrete infrastructure through the session *ports*
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from zcu_tools.gui.session.services.connection import ConnectionService
 from zcu_tools.gui.session.services.context import ContextService
@@ -44,10 +44,6 @@ class SessionServices:
     context: ContextService
     device: DeviceService
     startup: StartupService
-    # FLUX-AWARE-MOCK: self-wiring provisioner (subscribes SOC_CHANGED). Held on
-    # the bundle so its lifetime matches the services + a test can inspect it; the
-    # apps need no provisioning code of their own.
-    mock_flux: MockFluxProvisioner
 
 
 def build_session_services(
@@ -84,11 +80,14 @@ def build_session_services(
     startup = StartupService(context, device, state)
     # FLUX-AWARE-MOCK: self-subscribes to SOC_CHANGED + chains the one-shot ramp
     # off device.device_connected — both apps get mock flux provisioning for free.
-    mock_flux = MockFluxProvisioner(bus, device, connection)
+    # Not exposed on the returned bundle: nothing reads it. Its lifetime is anchored
+    # by the strong reference the EventBus holds to its bound subscriber (and the
+    # device_connected signal connection), both of which outlive the bundle, so the
+    # provisioner survives despite not being a field here.
+    MockFluxProvisioner(bus, device, connection)
     return SessionServices(
         connection=connection,
         context=context,
         device=device,
         startup=startup,
-        mock_flux=mock_flux,
     )

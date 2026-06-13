@@ -6,7 +6,7 @@ from collections import OrderedDict, UserDict, defaultdict
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Generic, Optional, Self, TypeVar
+from typing import Any, Generic, Self, TypeVar
 
 import matplotlib
 import matplotlib.pyplot as plt

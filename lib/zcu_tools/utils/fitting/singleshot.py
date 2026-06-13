@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Optional, cast
+from typing import cast
 
 import numpy as np
 import scipy.stats as stats

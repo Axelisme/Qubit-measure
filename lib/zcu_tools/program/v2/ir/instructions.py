@@ -3,7 +3,7 @@ from __future__ import annotations
 import dataclasses
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Literal, Optional, Union
+from typing import Any, Literal
 
 from .hw_semantics import STATUS_REG, TIMED_BASE_REG, USR_TIME_REG
 from .labels import Label, LabelRef
@@ -30,7 +30,6 @@ from .operands import (
     parse_side_write,
     parse_src,
     parse_time,
-    parse_value,
 )
 
 CondCode = Literal["Z", "S", "NZ", "NS"]

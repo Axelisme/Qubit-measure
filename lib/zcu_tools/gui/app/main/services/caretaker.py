@@ -19,7 +19,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile, gettempdir
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from platformdirs import user_cache_dir
 

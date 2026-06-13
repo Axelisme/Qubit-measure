@@ -38,7 +38,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable, Mapping
-from typing import Any, Optional
+from typing import Any
 
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.framing import encode_line

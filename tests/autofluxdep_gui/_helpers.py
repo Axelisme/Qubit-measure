@@ -10,7 +10,7 @@ params. Together they replace the old ``NodeSpec`` + injected ``run_node``.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from zcu_tools.gui.app.autofluxdep.cfg import NodeCfgSchema, flat_node_schema
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeField

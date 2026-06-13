@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
-from typing import Literal, Optional, overload
+from typing import Literal, overload
 
 import matplotlib.pyplot as plt
 import numpy as np

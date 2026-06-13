@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-10
+**Last updated:** 2026-06-13（共用層依賴校正：McpBridge 住 mcp.core.bridge、worker 不依賴 gui.plotting）
 
 # `zcu_tools/gui/app/dispersive/` — Fluxonium Dispersive-Shift Analysis GUI AI Note
 
@@ -23,9 +23,9 @@
 **load onetone 有 live preview**：`ui/load_dialog.py`（`LoadOnetoneDialog`，**subclass 共用 `gui/widgets/load_dialog.LoadDataDialog`** —— 共用 file row/transpose/preview/OK-gate，`_build_options` 不加額外 widget、`result_request` 回 2-field `LoadOnetoneRequest`；去掉 fluxdep 的 type/inherit）。best-effort `load_data` 讀檔 + imshow 預覽，transpose toggle 翻 preview x/y，user 看著判斷軸要不要轉。transpose flag 只在 Load 傳給 Controller（State 永遠存 canonical x=flux/y=freq）。
 
 ### 共用層（與 fluxdep / measure 三方共用）
-- `zcu_tools.gui.plotting`（backend/host/routing/container）—— worker 畫圖 marshal substrate（ADR-0017）。
-- `zcu_tools.gui.remote.{errors,framing,param_spec,wire}` + `zcu_tools.gui.version_table.VersionTable`。
-- `zcu_tools.gui.remote`：transport 機制三方共用。RPC 方法登錄 `MethodSpec/BoundMethod/build_method_registry`（`method_spec.py`）；GUI 側傳輸 `NdjsonRpcEndpoint`（`rpc_endpoint.py` —— socket 生命週期 + accept loop + NDJSON framing + per-client writer/outbound queue + 內建 `wire.version`/auth handshake + reply 編碼 + `broadcast` push fan-out + 主執行緒 marshal primitive + `ClientLink`）；MCP-server 側傳輸 `McpBridge`（`mcp_bridge.py` —— socket 狀態為 instance attrs、send_rpc_raw/connect/disconnect/launch/stop/reader thread/RID routing + 注入 on_event hook）。
+- `zcu_tools.gui.version_table.VersionTable`（直接依賴：`state.py`）。
+- `zcu_tools.gui.remote.{errors,framing,param_spec,wire}`（傳遞依賴——經共用 transport 層帶入，dispersive 不直接 import）。**dispersive 的 worker 不畫圖（compute/record 模式），故不依賴 `zcu_tools.gui.plotting`（ADR-0017 R4 不適用）。**
+- `zcu_tools.gui.remote`：transport 機制三方共用。RPC 方法登錄 `MethodSpec/BoundMethod/build_method_registry`（`method_spec.py`）；GUI 側傳輸 `NdjsonRpcEndpoint`（`rpc_endpoint.py` —— socket 生命週期 + accept loop + NDJSON framing + per-client writer/outbound queue + 內建 `wire.version`/auth handshake + reply 編碼 + `broadcast` push fan-out + 主執行緒 marshal primitive + `ClientLink`）；MCP-server 側傳輸 `McpBridge`（住 `zcu_tools.mcp.core.bridge` —— socket 狀態為 instance attrs、send_rpc_raw/connect/disconnect/launch/stop/reader thread/RID routing + 注入 on_event hook）。
 - `zcu_tools.gui.event_bus`：`BaseEventBus`/`BasePayload` 三方共用機制。
 - wire 版本常數 `services/remote/wire_version.py` 留各 app（dispersive **WIRE=3/GUI=3**：v3 fit.result 去 step）。每 app 各自演化 wire 契約故不入共用 `remote.wire`。
 

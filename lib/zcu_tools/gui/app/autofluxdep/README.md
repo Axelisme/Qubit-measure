@@ -11,7 +11,7 @@ autofluxdep/
 ├── controller.py    — Controller façade：組 build_session_services + 實作 SessionControllerPort（委派 conn/ctx/dev/startup/progress/predictor）；workflow 編輯命令；start_run/stop_run/dry_run；_build_tools（exp_context.predictor→FluxoniumPredictorAdapter / None→SimplePredictor）；_MlModuleSource（ModuleLibrary→ModuleSource proxy，None-on-absent + forward make_cfg/get_waveform）
 ├── state.py         — AutoFluxDepState(SessionState)：nodes/flux_values/flux_device_name/run_results/run_predictor + ProjectInfo；version keys workflow/flux
 ├── app.py           — build_core(project?, project_root?) + run_app（注入 repo-root project_root，組 MainWindow）
-├── event_bus.py     — EventBus=BaseEventBus + autofluxdep payload（Workflow/Flux/Run* — SetupDone 已退）
+├── events/          — autofluxdep domain payloads（`run.py`：Run* 生命週期；`workflow.py`：Workflow/Flux 編輯）；`EventBus` 本身只是 `BaseEventBus` 的別名（app.py/controller.py `import BaseEventBus as EventBus`，無獨立 event_bus.py）
 ├── operation_gate.py— app-local OperationGate（str-keyed 衝突矩陣 over session kinds + 自己 RUN kind）
 ├── background.py    — 瘦 BackgroundService（組合共用 BackgroundRunner；_entered 只 pbar+ActiveTask，無 figure routing，ADR-0018）
 ├── cfg/             — 唯一 import measure spec/value 模型的 seam：`__init__`（純資料：CfgSchema/*Spec/*Value re-export）+ `schema`（NodeCfgSchema：node 旋鈕 SSOT，lower/set_field/with_overrides）+ `form`（CfgFormWidget/SectionLiveField/LiveModelEnv re-export，UI seam）

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Optional, Self
+from typing import Any, Self
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, ValidationError

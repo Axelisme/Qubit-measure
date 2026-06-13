@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Union
 
 from .pi2_pulse import make_pi2_pulse_default, make_pi2_pulse_ref_default
 from .pi_pulse import make_pi_pulse_default, make_pi_pulse_ref_default

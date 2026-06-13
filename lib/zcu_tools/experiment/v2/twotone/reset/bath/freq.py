@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional, TypeAlias
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np

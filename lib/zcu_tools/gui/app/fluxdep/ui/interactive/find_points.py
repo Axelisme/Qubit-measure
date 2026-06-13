@@ -10,7 +10,6 @@ smoothing are Qt sliders; Select/Erase is a combo box.
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 import numpy as np
 from matplotlib.backend_bases import MouseEvent

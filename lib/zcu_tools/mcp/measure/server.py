@@ -31,7 +31,7 @@ from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 from tempfile import gettempdir
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -1915,7 +1915,7 @@ def _cleanup_on_exit() -> None:
         # we don't leak a GUI process when the bridge goes away.
         tool_gui_stop({"timeout_kill": True})
     except Exception:
-        pass
+        logger.debug("gui_stop on exit failed", exc_info=True)
 
 
 def _setup_logging() -> None:

@@ -11,7 +11,6 @@ from zcu_tools.program.v2.ir.operands import (
     Register,
     SrcKeyword,
 )
-from zcu_tools.program.v2.ir.pipeline import make_default_pipeline
 
 
 def test_structural_loop_roundtrip():

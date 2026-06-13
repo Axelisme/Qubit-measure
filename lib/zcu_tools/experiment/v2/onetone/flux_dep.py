@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Optional, cast
+from typing import cast
 
 import numpy as np
 from numpy.typing import NDArray

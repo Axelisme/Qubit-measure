@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from zcu_tools.experiment.v2_gui.adapters.shared import reset_module_writeback_items
 from zcu_tools.gui.app.main.adapter import ExpContext, ModuleWriteback
+
+if TYPE_CHECKING:
+    from zcu_tools.experiment.v2_gui.adapters.shared.writeback_helpers import (
+        _HasModules,
+    )
 
 # The bath chain proposes two final modules from the same calibrated tested_reset:
 # 'reset_bath' (pi/2 phase = ground/max) and 'reset_bath_e' (pi/2 phase =
@@ -32,7 +38,7 @@ _BATH_VARIANTS: tuple[tuple[str, str, str], ...] = (
 
 
 def bath_reset_writeback_items(
-    ctx: ExpContext, cfg_snapshot: object | None
+    ctx: ExpContext, cfg_snapshot: _HasModules | None
 ) -> list[ModuleWriteback]:
     """Gated 'reset_bath' + 'reset_bath_e' proposals from a bath calibration run.
 

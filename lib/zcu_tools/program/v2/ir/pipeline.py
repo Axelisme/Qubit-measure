@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Optional, Union, cast
+from typing import cast
 
 from .factory import IRLexer, IRParser
 from .instructions import BaseInst, Instruction, MetaInst, RegWriteInst

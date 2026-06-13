@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import ClassVar, TypeAlias, Union
+from typing import ClassVar, TypeAlias
 
 from zcu_tools.experiment.v2.onetone.flux_dep import (
     FluxDepCfg,

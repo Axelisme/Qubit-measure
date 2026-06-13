@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Optional, TypeVar, Union, cast
+from typing import Any, TypeVar, cast
 
 import yaml
 from yaml.nodes import MappingNode

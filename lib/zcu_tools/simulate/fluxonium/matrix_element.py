@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional, cast
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -93,7 +93,6 @@ def calculate_system_n_oper_vs_flux(
         from scqubits.core.hilbert_space import HilbertSpace
         from scqubits.core.oscillator import Oscillator
         from scqubits.core.param_sweep import ParameterSweep
-        from scqubits.utils.spectrum_utils import identity_wrap
 
         resonator = Oscillator(bare_rf, truncated_dim=res_dim)
         fluxonium = Fluxonium(*params, flux=0.5, cutoff=cutoff, truncated_dim=qub_dim)

@@ -5,7 +5,7 @@ import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-from typing import TYPE_CHECKING, Any, Generic, Optional, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from zcu_tools.utils.debug import print_traceback
 from zcu_tools.utils.func_tools import min_interval

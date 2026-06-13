@@ -3,21 +3,18 @@ from __future__ import annotations
 from typing import Any, cast
 from unittest.mock import MagicMock
 
-import numpy as np
 import pytest
 from zcu_tools.experiment.v2.onetone.flux_dep import FluxDepCfg
 from zcu_tools.experiment.v2.onetone.freq import FreqCfg
 from zcu_tools.experiment.v2.onetone.power_dep import PowerDepCfg
 from zcu_tools.experiment.v2_gui.adapters.onetone.flux_dep import (
     OneToneFluxDepAdapter,
-    OneToneFluxDepRunResult,
 )
 from zcu_tools.experiment.v2_gui.adapters.onetone.freq import OneToneFreqAdapter
 from zcu_tools.experiment.v2_gui.adapters.onetone.power_dep import (
     OneTonePowerDepAdapter,
-    OneTonePowerDepRunResult,
 )
-from zcu_tools.gui.app.main.adapter import AnalyzeRequest, CfgSchema, RunRequest
+from zcu_tools.gui.app.main.adapter import CfgSchema, RunRequest
 from zcu_tools.meta_tool import MetaDict
 from zcu_tools.program.v2 import ModuleCfgFactory, SweepCfg
 

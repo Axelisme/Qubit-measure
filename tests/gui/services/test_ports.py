@@ -9,8 +9,6 @@ see test_caretaker / test_startup.)
 
 from __future__ import annotations
 
-from typing import Optional
-
 from zcu_tools.gui.app.main.adapter import ExpContext
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.ports import ProjectIOPort

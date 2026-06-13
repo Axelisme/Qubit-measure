@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import threading
-from typing import Literal, Optional
+from typing import Literal
 
 from .base import BaseDevice, BaseDeviceInfo
 

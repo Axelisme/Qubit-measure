@@ -35,7 +35,7 @@ from __future__ import annotations
 import logging
 from collections.abc import MutableMapping
 from copy import deepcopy
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 import numpy as np
 from numpy.typing import NDArray

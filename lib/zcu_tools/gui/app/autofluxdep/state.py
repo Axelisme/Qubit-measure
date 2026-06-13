@@ -10,7 +10,7 @@ but the domain content is the Node graph, not spectra.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from zcu_tools.gui.app.autofluxdep.nodes.builder import PlacedNode
 from zcu_tools.gui.session.state import SessionState

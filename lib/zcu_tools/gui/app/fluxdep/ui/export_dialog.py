@@ -8,8 +8,6 @@ filepath (or None on cancel).
 
 from __future__ import annotations
 
-from typing import Optional
-
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QDialog,
     QDialogButtonBox,

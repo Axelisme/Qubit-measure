@@ -11,7 +11,7 @@ being "the last step" — letting any run that has the full calibration emit it.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from zcu_tools.gui.app.main.adapter import (
     CfgSchema,
@@ -25,9 +25,29 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.main.adapter import ExpContext
 
 
+class _HasTestedReset(Protocol):
+    # Read-only property (not a bare attr) so the Protocol is covariant: a concrete
+    # ``modules`` whose ``tested_reset`` is a specific ResetCfg subtype still
+    # matches ``object`` (a mutable attr would be invariant and reject it).
+    @property
+    def tested_reset(self) -> object: ...
+
+
+class _HasModules(Protocol):
+    """Structural surface of any reset cfg snapshot: a ``modules.tested_reset``.
+
+    Every reset calibration cfg carries the run's tested reset under
+    ``modules.tested_reset``; this is the only attribute this helper reads, so the
+    Protocol stays as narrow as the access (no whole-cfg type dependency).
+    """
+
+    @property
+    def modules(self) -> _HasTestedReset: ...
+
+
 def reset_module_writeback_items(
     ctx: ExpContext,
-    cfg_snapshot: object | None,
+    cfg_snapshot: _HasModules | None,
     *,
     target: str,
     field_md_map: Sequence[tuple[str, str]],
@@ -48,7 +68,7 @@ def reset_module_writeback_items(
     if not all(md_has_key(ctx, md_key) for _, md_key in field_md_map):
         return []
 
-    tested_reset = cfg_snapshot.modules.tested_reset  # type: ignore[attr-defined]
+    tested_reset = cfg_snapshot.modules.tested_reset
     spec, value = module_cfg_to_value(tested_reset)
     for field_path, md_key in field_md_map:
         # md_has_key gated every key above, so md_get_float's default is unreachable;

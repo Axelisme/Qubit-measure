@@ -9,7 +9,6 @@ consumer thread" contract is trivially met.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Optional
 
 from zcu_tools.gui.session.ports import ProgressEvent
 

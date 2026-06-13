@@ -6,7 +6,7 @@ waveforms (res_flat / res_const); the blank is a plain const.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, Optional, overload
+from typing import TYPE_CHECKING, Literal, overload
 
 from zcu_tools.gui.app.main.adapter import (
     DirectValue,

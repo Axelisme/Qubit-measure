@@ -21,7 +21,7 @@ builds a MockSoc + FakeDevice + a SimplePredictor.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from qtpy.QtCore import QObject, Qt, QThread, Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]

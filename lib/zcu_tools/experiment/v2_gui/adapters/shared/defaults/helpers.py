@@ -8,7 +8,7 @@ from here (plus ctx_helpers and the gui specs).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 from zcu_tools.gui.app.main.adapter import (
     CfgSectionValue,

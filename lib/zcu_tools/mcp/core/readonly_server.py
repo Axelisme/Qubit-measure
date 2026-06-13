@@ -23,6 +23,7 @@ GUI is not orphaned).
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,6 +38,8 @@ from zcu_tools.mcp.core.bridge import (
     generate_tools,
     run_stdio_loop,
 )
+
+logger = logging.getLogger(__name__)
 
 # This MCP server code revision is reported (not compared) in the version note so
 # an agent can confirm a reconnect picked up bridge-side edits. All three
@@ -203,10 +206,12 @@ def build_readonly_server(
     )
 
     def _cleanup_on_exit() -> None:
+        # Best-effort GUI shutdown on host disconnect; swallow so a stop failure
+        # never crashes the exit path, but log it so the leak is observable.
         try:
             bridge.stop(timeout_kill=True)
         except Exception:
-            pass
+            logger.debug("read-only bridge stop on exit failed", exc_info=True)
 
     def main() -> None:
         run_stdio_loop(config, tools, on_cleanup=_cleanup_on_exit)

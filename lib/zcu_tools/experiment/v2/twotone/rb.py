@@ -4,7 +4,7 @@ from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Any, Literal, Optional, TypeAlias, Union
+from typing import Any, Literal, TypeAlias
 
 import matplotlib.pyplot as plt
 import numpy as np

@@ -4,7 +4,7 @@ from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np

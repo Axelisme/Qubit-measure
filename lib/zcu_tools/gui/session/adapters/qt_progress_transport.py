@@ -10,7 +10,6 @@ service main-thread-only and lock-free.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Optional
 
 from qtpy.QtCore import QObject, Qt, Signal  # type: ignore[attr-defined]
 

@@ -5,7 +5,7 @@ import json
 import os
 from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING
 
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure

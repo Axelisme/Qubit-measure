@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 from zcu_tools.gui.app.main.adapter import (
     DirectValue,
@@ -31,10 +31,7 @@ def md_get_int(ctx: ExpContext, key: str, default: int) -> int:
 
 def md_has_key(ctx: ExpContext, key: str) -> bool:
     sentinel = object()
-    try:
-        value = ctx.md.get(key, sentinel)  # type: ignore[call-arg]
-    except TypeError:
-        value = ctx.md.get(key)
+    value = ctx.md.get(key, sentinel)
     return value is not sentinel and value is not None
 
 

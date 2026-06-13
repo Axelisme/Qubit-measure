@@ -4,7 +4,6 @@ import warnings
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -19,7 +18,6 @@ from zcu_tools.experiment.utils import make_comment, parse_comment, setup_device
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
-    DirectReadoutCfg,
     ModularProgramV2,
     ProgramV2Cfg,
     Pulse,

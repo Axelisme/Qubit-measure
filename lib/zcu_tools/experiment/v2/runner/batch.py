@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Hashable, Mapping
-from typing import Optional, TypeVar
+from typing import TypeVar
 
 from zcu_tools.progress_bar import BaseProgressBar, make_pbar
 
 from .base import AbsTask
-from .state import Result, T_Cfg, T_ChildResult, T_RootResult, TaskState, cast
+from .state import (
+    T_Cfg,
+    T_ChildResult,
+    T_RootResult,
+    TaskState,  # noqa: F401 — used only in a cast() string literal below
+    cast,
+)
 
 logger = logging.getLogger(__name__)
 

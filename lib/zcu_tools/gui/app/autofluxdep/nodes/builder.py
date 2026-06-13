@@ -28,7 +28,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
 from dataclasses import InitVar, dataclass, field
-from typing import Any, Optional, Protocol
+from typing import Any, Protocol
 
 from zcu_tools.gui.app.autofluxdep.cfg import NodeCfgSchema, flat_node_schema
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from zcu_tools.gui.app.main.adapter import AnalysisMode, CfgSchema
 from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload

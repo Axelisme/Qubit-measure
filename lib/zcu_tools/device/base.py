@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 import threading
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Generic, Optional, Self, TypeVar
+from typing import TYPE_CHECKING, Generic, Self, TypeVar
 
 from zcu_tools.cfg_model import ConfigBase
 

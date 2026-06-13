@@ -24,7 +24,7 @@ mechanism it builds on.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional, Protocol
+from typing import Any, Protocol
 
 # SmoothMode is owned by nodes.spec (a dependency's ``smooth`` flag is one);
 # re-used here so Smoother and the SmoothingService speak the same modes.

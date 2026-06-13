@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Literal, Optional, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 

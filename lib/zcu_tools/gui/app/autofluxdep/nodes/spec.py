@@ -48,7 +48,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 SmoothMode = Literal["ewma", "step_weighted"]
 

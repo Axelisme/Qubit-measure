@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Sequence
-from typing import Any, Optional, TypeVar, Union
+from typing import Any, TypeVar
 
 from zcu_tools.progress_bar import BaseProgressBar, make_pbar
 

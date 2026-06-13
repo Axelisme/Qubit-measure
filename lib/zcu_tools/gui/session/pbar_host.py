@@ -23,7 +23,6 @@ autofluxdep) reuses these for per-operation progress.
 from __future__ import annotations
 
 import time
-from typing import Optional
 
 from zcu_tools.gui.session.ports import (
     ProgressEvent,

@@ -206,7 +206,6 @@ def test_post_figure_refresh_is_noop_on_invalidation(qapp, monkeypatch):
     """A content event whose snapshot has no post figure (re-run / re-analyze
     invalidated the post result) must NOT touch the shared container — the primary
     figure refresh (run just before) already owns what it shows."""
-    from zcu_tools.gui.app.main.events.tab import TabContentChangedPayload
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget, MainWindow
 
     ctrl = _mock_ctrl()

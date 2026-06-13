@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional, Union, cast
+from typing import cast
 
 from .dispatch import (
     build_dispatch_table_island,

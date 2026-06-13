@@ -15,7 +15,7 @@ painting happens on the Qt main thread, so a plain ``draw_idle`` is sufficient
 
 from __future__ import annotations
 
-from typing import Optional, cast
+from typing import cast
 
 from matplotlib.backend_bases import Event, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg

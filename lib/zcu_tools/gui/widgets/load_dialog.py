@@ -23,7 +23,6 @@ is selected (i.e. when building the UI).
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg

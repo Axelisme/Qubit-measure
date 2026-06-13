@@ -21,7 +21,7 @@ dependency / provides summary footer is kept for at-a-glance context.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QFrame,

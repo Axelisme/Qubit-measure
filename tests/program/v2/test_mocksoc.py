@@ -1,7 +1,5 @@
-import time
 from unittest.mock import patch
 
-import pytest
 from zcu_tools.program.v2.mocksoc import (
     _DEFAULT_POLL_LATENCY,
     make_mock_soc,

@@ -11,7 +11,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Annotated, Any, ClassVar, Literal, Optional, TypeAlias, cast
+from typing import Annotated, Any, ClassVar, Literal, TypeAlias, cast
 
 import numpy as np
 from matplotlib.figure import Figure

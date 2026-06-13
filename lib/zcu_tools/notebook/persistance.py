@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from typing import Any, NotRequired, Optional, cast
+from typing import Any, NotRequired, cast
 
 import h5py as h5
 import numpy as np

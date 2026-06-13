@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import warnings
-from typing import Optional, Union
 
 import numpy as np
 from qick.asm_v2 import QickParam, QickProgramV2

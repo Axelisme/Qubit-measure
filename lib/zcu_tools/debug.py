@@ -5,7 +5,7 @@ import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from types import ModuleType
-from typing import IO, Optional, Union
+from typing import IO
 
 import zcu_tools
 

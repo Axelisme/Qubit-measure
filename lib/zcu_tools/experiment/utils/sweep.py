@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Optional, TypeVar, Union, cast, get_args
+from typing import Any, TypeVar, cast, get_args
 
 import numpy as np
 from pydantic import BaseModel

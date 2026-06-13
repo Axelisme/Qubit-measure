@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional, Self, TypeAlias, Union
+from typing import Self, TypeAlias
 
 from qick.asm_v2 import AsmInst, QickParam, WriteLabel
 

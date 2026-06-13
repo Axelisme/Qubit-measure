@@ -18,7 +18,10 @@ from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 
 def _make_ctrl(**overrides: object) -> MagicMock:
     ctrl = MagicMock()
-    ctrl.get_persisted_startup.return_value = None
+    # SessionControllerPort.get_persisted_startup is non-Optional (a default
+    # PersistedStartup when nothing is remembered), so the double honours that
+    # contract rather than returning None.
+    ctrl.get_persisted_startup.return_value = PersistedStartup()
     ctrl.list_devices.return_value = []
     ctrl.get_context_labels.return_value = []
     ctrl.get_active_context_label.return_value = None

@@ -17,8 +17,8 @@ distinct gates (run_result vs analyze_result) live in the subclasses, not here.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
 from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 from qtpy.QtCore import QObject  # type: ignore[attr-defined]
 

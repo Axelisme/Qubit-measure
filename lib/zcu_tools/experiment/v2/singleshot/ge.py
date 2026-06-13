@@ -3,7 +3,7 @@ from __future__ import annotations
 import warnings
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Literal, Optional, cast
+from typing import Any, Literal, cast
 
 import matplotlib.pyplot as plt
 import numpy as np

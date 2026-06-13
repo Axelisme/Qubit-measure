@@ -16,7 +16,7 @@ selected Node's live canvas (or a placeholder when there is none).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QLabel,

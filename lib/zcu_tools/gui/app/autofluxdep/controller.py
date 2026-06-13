@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from zcu_tools.gui.app.autofluxdep.background import BackgroundService
 from zcu_tools.gui.app.autofluxdep.derivation import DerivationService

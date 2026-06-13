@@ -1,7 +1,8 @@
 """Shared optimistic-concurrency version table for the GUI apps.
 
 App-agnostic, import-clean (stdlib only): a monotonic per-resource version
-counter both ``app/main`` and ``app/fluxdep`` use to guard against concurrent
+counter every GUI app (``app/main`` / ``app/fluxdep`` / ``app/dispersive`` /
+``app/autofluxdep`` via ``SessionState``) uses to guard against concurrent
 edits. The resource KEYS are domain-specific (each app names its own
 ``context`` / ``tab:<id>`` / ``spectrum:<name>`` / ... keys next to its own
 ``*_VERSION_KEY`` constants), but the counter mechanism is identical, so it lives

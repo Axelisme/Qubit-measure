@@ -2,7 +2,6 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
-from pydantic import TypeAdapter
 from qick.asm_v2 import QickParam
 from zcu_tools.program.v2.modules import (
     WaveformCfgFactory,  # ensures leaf subclass registration
@@ -21,7 +20,6 @@ from zcu_tools.program.v2.modules.waveform import (
     FlatTopWaveformCfg,
     GaussWaveform,
     GaussWaveformCfg,
-    WaveformCfg,
     resolve_waveform_ref,
 )
 

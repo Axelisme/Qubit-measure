@@ -12,7 +12,7 @@ active context and simulating the acquire (no hardware in this phase).
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from zcu_tools.gui.app.autofluxdep.controller import Controller
 from zcu_tools.gui.app.autofluxdep.state import AutoFluxDepState, ProjectInfo

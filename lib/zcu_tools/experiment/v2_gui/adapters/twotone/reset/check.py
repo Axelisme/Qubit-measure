@@ -3,7 +3,11 @@ from __future__ import annotations
 import time
 from typing import Any, ClassVar
 
-from zcu_tools.experiment.v2.twotone.reset.rabi_check import RabiCheckCfg, RabiCheckExp
+from zcu_tools.experiment.v2.twotone.reset.rabi_check import (
+    RabiCheckCfg,
+    RabiCheckExp,
+    RabiCheckResult,
+)
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
@@ -23,7 +27,7 @@ from zcu_tools.gui.app.main.adapter import (
 )
 
 
-class RabiCheckAdapter(BaseAdapter[RabiCheckCfg, Any]):
+class RabiCheckAdapter(BaseAdapter[RabiCheckCfg, RabiCheckResult]):
     """Rabi-amplitude check for any reset type (single-tone / two-pulse / bath).
 
     Sweeps the initialisation pulse gain and records three signal branches in

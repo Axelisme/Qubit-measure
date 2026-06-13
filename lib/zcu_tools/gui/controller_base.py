@@ -19,7 +19,7 @@ lifecycle); only the two copy-then-rewrite analysis siblings do.
 from __future__ import annotations
 
 import os
-from typing import Generic, Optional, TypeVar
+from typing import Generic, TypeVar
 
 from zcu_tools.gui.event_bus import BaseEventBus, BasePayload
 

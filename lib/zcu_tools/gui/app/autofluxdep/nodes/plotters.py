@@ -26,7 +26,7 @@ Three shapes cover the experiments (qubit_freq keeps its own two-panel Plotter):
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 

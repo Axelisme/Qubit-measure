@@ -11,7 +11,7 @@ import json
 import socket
 import time
 from collections.abc import Callable, Mapping
-from typing import Any, Optional
+from typing import Any
 from unittest.mock import MagicMock
 
 from qtpy.QtCore import QCoreApplication

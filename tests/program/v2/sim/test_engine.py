@@ -37,7 +37,7 @@ from zcu_tools.program.v2.modules.readout import DirectReadoutCfg, PulseReadoutC
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.sim import SimParams
 from zcu_tools.program.v2.sim.engine import _FULL_SCALE
-from zcu_tools.program.v2.sim.readout import mixed_signal, resonator_freqs, s21
+from zcu_tools.program.v2.sim.readout import resonator_freqs, s21
 from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.program.v2.utils import sweep2param
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor

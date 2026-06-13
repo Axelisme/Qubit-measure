@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, Optional, Union
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np

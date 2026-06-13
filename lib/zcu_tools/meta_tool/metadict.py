@@ -6,7 +6,7 @@ from collections.abc import ItemsView
 from copy import deepcopy
 from pathlib import Path
 from pprint import pformat
-from typing import Any, Optional, Self, Union
+from typing import Any, Self
 
 from zcu_tools.utils import format_obj
 

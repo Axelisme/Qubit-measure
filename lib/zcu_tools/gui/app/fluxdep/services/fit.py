@@ -21,7 +21,6 @@ import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Optional
 
 import numpy as np
 from matplotlib.figure import Figure

@@ -46,7 +46,7 @@ import socket
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Optional, Protocol
+from typing import Protocol
 
 from qtpy.QtCore import QObject, Qt, Signal  # type: ignore[attr-defined]
 

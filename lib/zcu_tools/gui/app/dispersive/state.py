@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, replace
-from typing import Optional
 
 import numpy as np
 from numpy.typing import NDArray

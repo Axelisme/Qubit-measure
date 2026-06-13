@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Optional
 
 from zcu_tools.progress_bar import BaseProgressBar, make_pbar
 from zcu_tools.utils.func_tools import MinIntervalFunc

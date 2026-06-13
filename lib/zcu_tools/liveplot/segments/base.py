@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from itertools import chain
-from typing import Optional, Self
+from typing import Self
 
-import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
 
 from ..backend import close_figure, make_plot_frame, refresh_figure

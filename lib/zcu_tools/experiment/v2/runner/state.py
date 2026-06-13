@@ -5,7 +5,7 @@ from collections.abc import Callable, Hashable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
 from numbers import Number
-from typing import Any, Generic, Optional, TypeAlias, TypeVar, Union, cast, overload
+from typing import Any, Generic, TypeAlias, TypeVar, cast, overload
 
 import numpy as np
 from numpy.typing import NDArray

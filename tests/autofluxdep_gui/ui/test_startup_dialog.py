@@ -7,7 +7,7 @@ so the user is immediately prompted to configure the project/connection.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from zcu_tools.gui.app.autofluxdep.app import _show_startup_dialog, build_core

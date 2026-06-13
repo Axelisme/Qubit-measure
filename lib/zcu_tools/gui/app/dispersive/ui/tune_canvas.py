@@ -17,7 +17,7 @@ fluxdep's InteractiveMplWidget (which carries a Finish button + controls column)
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Optional, cast
+from typing import TYPE_CHECKING, cast
 
 from matplotlib.backend_bases import Event, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg

@@ -16,7 +16,7 @@ port (ADR-0019), which marshals the result back to the main thread.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Optional, Protocol
+from typing import Protocol
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure

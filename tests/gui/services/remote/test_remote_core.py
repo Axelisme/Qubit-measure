@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 import socket
 import time
-from typing import Optional
 from unittest.mock import MagicMock
 
 import pytest

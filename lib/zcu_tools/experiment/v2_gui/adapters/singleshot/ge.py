@@ -7,7 +7,6 @@ from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
-from numpy.typing import NDArray
 
 from zcu_tools.experiment.utils.single_shot import singleshot_ge_analysis
 from zcu_tools.experiment.v2.singleshot import GE_Cfg, GE_Exp

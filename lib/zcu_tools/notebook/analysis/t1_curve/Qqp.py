@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional, Union, overload
+from typing import overload
 
 import numpy as np
 import scipy.constants as sp

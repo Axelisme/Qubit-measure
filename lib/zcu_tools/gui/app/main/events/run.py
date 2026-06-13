@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import ClassVar, Optional
+from typing import ClassVar
 
 from zcu_tools.gui.event_bus import BasePayload
 

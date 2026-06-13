@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Literal
 
 from zcu_tools.gui.app.main.adapter import ParamMeta
 from zcu_tools.gui.app.main.ui.analyze_form import AnalyzeFormWidget

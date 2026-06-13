@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import Literal, TypeAlias, Union
+from typing import Literal, TypeAlias
 
 from .adapter import ExpContext, ModuleRefValue, WaveformRefValue
 

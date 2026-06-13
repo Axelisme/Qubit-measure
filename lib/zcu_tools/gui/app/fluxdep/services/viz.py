@@ -20,7 +20,6 @@ module only turns them into transition lines via ``energy2transition``.
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 import numpy as np
 from matplotlib.figure import Figure

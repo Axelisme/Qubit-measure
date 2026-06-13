@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from copy import deepcopy
-from typing import TYPE_CHECKING, Annotated, Literal, Optional, TypeAlias, Union
+from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias
 
 from pydantic import BeforeValidator, Field
 from qick.asm_v2 import QickParam

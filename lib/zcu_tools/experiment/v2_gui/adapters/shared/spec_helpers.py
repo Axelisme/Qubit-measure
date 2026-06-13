@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from zcu_tools.gui.app.main.adapter import (
     CfgNodeSpec,
     CfgSchema,

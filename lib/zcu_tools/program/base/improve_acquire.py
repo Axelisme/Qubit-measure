@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Callable
-from typing import Optional, Protocol, TypeAlias, Union, cast, final
+from typing import Protocol, TypeAlias, cast, final
 
 import numpy as np
 from numpy.typing import NDArray

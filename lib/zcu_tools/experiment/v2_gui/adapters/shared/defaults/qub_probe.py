@@ -9,7 +9,7 @@ the field is optional and nothing matches. See ADR-0009.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, Optional, overload
+from typing import TYPE_CHECKING, Literal, overload
 
 from zcu_tools.gui.app.main.adapter import ModuleRefValue
 from zcu_tools.gui.app.main.specs.pulse import make_pulse_spec

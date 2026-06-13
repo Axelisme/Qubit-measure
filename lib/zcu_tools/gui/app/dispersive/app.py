@@ -14,7 +14,7 @@ passing ``control`` before then raises a clear ImportError.)
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from zcu_tools.gui.app.dispersive.controller import Controller
 from zcu_tools.gui.app.dispersive.event_bus import EventBus

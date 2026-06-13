@@ -26,7 +26,7 @@ different kinds of thing:
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
-from typing import Any, Optional
+from typing import Any
 
 
 class PatchContractError(ValueError):

@@ -11,7 +11,6 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass, field
 from math import ceil
-from typing import Optional
 
 import numpy as np
 from numpy.typing import NDArray

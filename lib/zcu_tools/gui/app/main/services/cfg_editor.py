@@ -43,7 +43,7 @@ import logging
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Optional, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from zcu_tools.gui.app.main.adapter import (
     CfgSchema,

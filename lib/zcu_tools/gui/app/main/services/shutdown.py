@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from enum import Enum
-from typing import Optional
 
 from zcu_tools.gui.session.operation_handles import OperationHandles
 

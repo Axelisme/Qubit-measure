@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import (
     Annotated,
     Any,
-    Optional,
     TypeVar,
     get_args,
     get_origin,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Union
+from typing import Literal
 
 PSEUDO_LABELS: frozenset[str] = frozenset({"PREV", "HERE", "NEXT", "SKIP"})
 

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Union, cast
-
 import numpy as np
 import scipy as sp
 from numpy.typing import NDArray

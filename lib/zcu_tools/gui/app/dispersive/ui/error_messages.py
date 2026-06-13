@@ -11,7 +11,6 @@ domain rules live here.
 from __future__ import annotations
 
 import os
-from typing import Union
 
 from zcu_tools.gui.error_messages import (
     FriendlyRule,

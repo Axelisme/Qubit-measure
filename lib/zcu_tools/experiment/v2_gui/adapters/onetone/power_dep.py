@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import ClassVar, Optional, TypeAlias
+from typing import ClassVar, TypeAlias
 
 from zcu_tools.experiment.v2.onetone.power_dep import (
     PowerDepCfg,

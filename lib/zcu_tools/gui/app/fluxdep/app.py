@@ -10,7 +10,6 @@ only persisted artifacts).
 from __future__ import annotations
 
 import sys
-from typing import Optional
 
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import EventBus

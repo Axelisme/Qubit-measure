@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from numbers import Number
-from typing import Any, Literal, Optional, TypeVar, Union
+from typing import Any, Literal, TypeVar
 
 import numpy as np
 from numpy.typing import NDArray

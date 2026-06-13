@@ -6,8 +6,6 @@ Pure constants and predicates — must not import any IR module to avoid cycles.
 
 from __future__ import annotations
 
-from typing import Optional
-
 TIMED_BASE_REG = (
     "s14"  # implicit base for WPORT/WMEM/DPORT/TRIG; written by TIME inc_ref/set_ref
 )

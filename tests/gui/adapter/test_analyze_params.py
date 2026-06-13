@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 from dataclasses import dataclass
-from typing import Annotated, Literal, Optional, Union, get_type_hints
+from typing import Annotated, Literal, get_type_hints
 
 import pytest
 from zcu_tools.gui.app.main.adapter import ParamMeta

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from functools import wraps
-from typing import Optional, TypeVar, cast
+from typing import TypeVar, cast
 
 import numpy as np
 import scipy as sp

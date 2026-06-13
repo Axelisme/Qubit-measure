@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from numbers import Integral
-from typing import Union
 
 from qick.asm_v2 import AsmInst, Macro
 

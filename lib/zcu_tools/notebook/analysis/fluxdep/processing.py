@@ -4,8 +4,6 @@ This module provides functions for processing flux-dependent spectroscopy data,
 including removing close points, preprocessing data, and analyzing spectra.
 """
 
-from typing import Optional
-
 import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d

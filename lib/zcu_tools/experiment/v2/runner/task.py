@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Sequence
-from typing import Any, Generic, Optional, TypeVar
+from typing import Any, Generic, TypeVar
 
 import numpy as np
 from numpy.typing import NDArray

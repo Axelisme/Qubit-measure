@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Generic, Optional, TypeVar
+from typing import Generic, TypeVar
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 

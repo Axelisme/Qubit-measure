@@ -7,8 +7,6 @@ collection). The panel owns the pipeline; the window just frames it.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import QMainWindow, QWidget  # type: ignore[attr-defined]
 

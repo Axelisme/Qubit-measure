@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Generic, Optional, TypeVar, cast
+from typing import Generic, TypeVar, cast
 
 import numpy as np
 from matplotlib.axes import Axes

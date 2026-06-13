@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field, replace
-from typing import Literal, Optional
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray

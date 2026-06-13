@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, Optional, Union
+from typing import Literal
 
 from .library import ModuleLibrary
 from .metadict import MetaDict

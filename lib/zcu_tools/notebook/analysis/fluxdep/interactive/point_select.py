@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from threading import Timer
-from typing import Optional
 
 import ipywidgets as widgets
 import matplotlib.pyplot as plt

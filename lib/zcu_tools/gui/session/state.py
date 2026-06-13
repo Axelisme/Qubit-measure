@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, replace
 from enum import Enum
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.gui.version_table import VersionTable

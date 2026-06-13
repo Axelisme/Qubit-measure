@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
-
 from ...hw_semantics import needs_big_jump
 from ...instructions import JumpInst, RegWriteInst, TestInst
 from ...labels import LabelRef

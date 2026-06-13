@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any, Optional, Union, cast
+from typing import Any, cast
 
 import numpy as np
 from matplotlib.axes import Axes

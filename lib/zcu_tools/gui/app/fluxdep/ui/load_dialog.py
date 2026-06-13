@@ -10,7 +10,7 @@ flag is passed to the Controller only on Load, so State always stores the canoni
 
 from __future__ import annotations
 
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QComboBox,

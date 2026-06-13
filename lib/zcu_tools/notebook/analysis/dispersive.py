@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from functools import lru_cache
-from typing import Optional
 
 import ipywidgets as widgets
 import matplotlib.pyplot as plt

@@ -9,7 +9,6 @@ points and records the cross-spectrum selection mask.
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 import numpy as np
 from numpy.typing import NDArray

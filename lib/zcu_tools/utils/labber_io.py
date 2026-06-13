@@ -102,7 +102,7 @@ import os
 import time
 from collections import namedtuple
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import TYPE_CHECKING, Any
 
 import h5py
 import numpy as np

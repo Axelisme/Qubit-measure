@@ -20,7 +20,6 @@ from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
     Any,
-    Optional,
     Protocol,
     runtime_checkable,
 )

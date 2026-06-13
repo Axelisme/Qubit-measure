@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from functools import wraps
 from pathlib import Path
-from typing import Literal, Optional, ParamSpec, TypeVar, Union, cast
+from typing import Literal, ParamSpec, TypeVar, cast
 
 P = ParamSpec("P")
 T = TypeVar("T")

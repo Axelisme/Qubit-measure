@@ -6,7 +6,7 @@ ref prefers the library ``pi_amp`` / ``pi_len`` entries.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, Optional, overload
+from typing import TYPE_CHECKING, Literal, overload
 
 from zcu_tools.gui.app.main.adapter import ModuleRefValue
 from zcu_tools.program.v2.modules.pulse import PulseCfg

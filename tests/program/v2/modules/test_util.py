@@ -1,5 +1,4 @@
 import math
-import warnings
 
 import pytest
 from qick.asm_v2 import QickParam, QickProgramV2

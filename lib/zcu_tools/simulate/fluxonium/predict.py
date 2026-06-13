@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Literal, Union, overload
+from typing import Literal, overload
 
 import numpy as np
 from numpy.typing import NDArray

@@ -38,6 +38,7 @@ Threading:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import signal
 import socket
@@ -49,9 +50,11 @@ import traceback
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional, Protocol
+from typing import Any, Protocol
 
 from zcu_tools.gui.remote.param_spec import JsonType, build_input_schema
+
+logger = logging.getLogger(__name__)
 
 # The type of a generated/override MCP tool entry.
 Tool = dict[str, Any]
@@ -269,6 +272,9 @@ class SocketTransport:
                 try:
                     msg = json.loads(line.decode("utf-8"))
                 except Exception:
+                    # A malformed NDJSON line is skipped so one bad frame never
+                    # stalls the reader; log it so the drop is observable.
+                    logger.debug("skipping unparseable GUI socket line", exc_info=True)
                     continue
                 if isinstance(msg, dict) and "id" in msg:
                     if self._deliver_reply is not None:

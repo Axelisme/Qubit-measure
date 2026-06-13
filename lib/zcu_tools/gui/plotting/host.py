@@ -30,7 +30,7 @@ import logging
 import threading
 import weakref
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 logger = logging.getLogger(__name__)
 
@@ -195,7 +195,6 @@ def get_figure_container(fig: Figure) -> FigureContainer | None:
 
 def _purge_stale_registry_entries() -> None:
     from qtpy import sip  # type: ignore[attr-defined]
-    from qtpy.QtWidgets import QWidget  # type: ignore[attr-defined]
 
     # GC-driven weakref eviction can mutate the registry mid-iteration, so snapshot
     # to a plain list first (a live WeakKeyDictionary iterator would raise

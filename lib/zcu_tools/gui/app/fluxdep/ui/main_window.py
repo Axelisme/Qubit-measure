@@ -23,7 +23,6 @@ spectrum that has selected points.
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from qtpy.QtCore import Qt  # type: ignore[attr-defined]
 from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]

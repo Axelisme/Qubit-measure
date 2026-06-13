@@ -17,7 +17,6 @@ existence, not just substrings) but shares the ``details_tail`` formatting.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Optional, Union
 
 # An ordered domain rule: (matches the lowercased raw error?) → the friendly head.
 FriendlyRule = tuple[Callable[[str], bool], str]

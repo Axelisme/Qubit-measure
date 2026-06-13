@@ -14,6 +14,9 @@ The port is the union of exactly the methods the two dialogs call:
   ``get_active_context_label``), connection (``start_connect`` /
   ``bind_connection_outcome`` / ``remember_startup_connection`` /
   ``get_soccfg``), device unit lookup.
+- **predictor dialog**: FluxoniumPredictor load / clear / frequency predict
+  (``load_predictor`` / ``clear_predictor`` / ``predict_freq`` /
+  ``get_predictor_info``).
 - **device dialog**: device lifecycle (``start_connect_device`` /
   ``start_disconnect_device`` / ``start_reconnect_device`` /
   ``start_setup_device`` / ``forget_device`` / ``cancel_device_operation``),
@@ -38,7 +41,7 @@ site.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Optional, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     from zcu_tools.device.base import BaseDeviceInfo

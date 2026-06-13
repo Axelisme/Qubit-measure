@@ -15,8 +15,6 @@ core for backwards compatibility (callers used to import them from here).
 
 from __future__ import annotations
 
-from typing import Optional
-
 import numpy as np
 from numpy.typing import NDArray
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]

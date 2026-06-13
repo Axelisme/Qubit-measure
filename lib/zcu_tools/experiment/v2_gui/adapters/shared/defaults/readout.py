@@ -11,7 +11,7 @@ library readouts (readout_dpm / readout_rf).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, Optional, overload
+from typing import TYPE_CHECKING, Literal, overload
 
 from zcu_tools.gui.app.main.adapter import (
     CfgSectionValue,

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Literal, Optional, cast
+from typing import Any, Literal, cast
 
 import numpy as np
 from matplotlib.figure import Figure

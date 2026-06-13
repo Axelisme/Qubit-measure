@@ -30,7 +30,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Optional, Protocol, Union, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 from .adapter import (
     CfgNodeSpec,

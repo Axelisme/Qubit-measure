@@ -4,12 +4,12 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Optional, TypeAlias, Union
+from typing import TYPE_CHECKING, TypeAlias
 
 from .hw_semantics import GENERAL_REGS, VOLATILE_REGS, WAVE_REGS
 
 if TYPE_CHECKING:
-    from .labels import Label, LabelRef, PseudoLabel
+    from .labels import Label, LabelRef
 
 # Pattern to extract registers, literals and operators
 _OP_TOKEN_RE = re.compile(

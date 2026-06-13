@@ -9,7 +9,6 @@ display — no controls, no interaction. The user returns to editing via the
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Optional
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure

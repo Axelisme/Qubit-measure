@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any, Optional, Union
+from typing import Any
 
 import numpy as np
 from matplotlib.collections import PathCollection

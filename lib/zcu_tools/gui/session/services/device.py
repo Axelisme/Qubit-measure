@@ -8,7 +8,6 @@ from dataclasses import dataclass, replace
 from typing import (
     TYPE_CHECKING,
     Any,
-    Optional,
     Protocol,
     cast,
     runtime_checkable,

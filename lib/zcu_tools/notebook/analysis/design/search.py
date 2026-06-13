@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from itertools import product
-from typing import Any, Union
+from typing import Any
 
 import numpy as np
 import pandas as pd

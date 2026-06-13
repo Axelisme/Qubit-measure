@@ -9,8 +9,6 @@ scipy find_peaks); only the ipywidgets shell becomes Qt.
 
 from __future__ import annotations
 
-from typing import Optional
-
 import numpy as np
 from numpy.typing import NDArray
 from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]

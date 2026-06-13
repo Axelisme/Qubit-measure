@@ -3,7 +3,7 @@ from __future__ import annotations
 import warnings
 from collections.abc import Mapping
 from copy import deepcopy
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo

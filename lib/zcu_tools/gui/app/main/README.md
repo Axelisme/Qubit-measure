@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-10
+**Last updated:** 2026-06-13（第二分析層 PostAnalyzeService + singleshot ge 多 backend + t2 detune_ratio）
 
 # `zcu_tools/gui/app/main/` — measure-gui Framework AI Note
 
@@ -45,6 +45,9 @@ gui/
 │   ├── session_codec.py  — tabs raw↔live codec (Workspace 內部，Caretaker 只見不透明 cfg_raw)
 │   ├── startup.py        — StartupService (typed startup requests + capture_startup/restore_startup；無狀態)
 │   ├── run.py            — RunService (執行與進度條)
+│   ├── staged_analyze.py — _StagedAnalyzeService (analyze/post-analyze 共用基底：handle-only off-main worker + 主線程 record result/figure + 失敗路徑)
+│   ├── analyze.py        — AnalyzeService (主分析層：FIT worker + INTERACTIVE finish；算 writeback items)
+│   ├── post_analyze.py   — PostAnalyzeService (第二分析層，鏡像 AnalyzeService：FIT-only、在 primary analyze 結果之上重算、gate on primary 已存在；State 平行 post_* 欄位)
 │   ├── tab.py            — TabService (分頁狀態與 tab-local query/update)
 │   ├── tab_view.py       — TabViewService / TabViewSnapshot (pure tab render read model)
 │   ├── save.py           — SaveService (資料/圖片儲存 pipeline)

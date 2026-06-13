@@ -16,8 +16,6 @@ dir" (its raw one-tone root). The app passes its label; everything else is share
 
 from __future__ import annotations
 
-from typing import Optional
-
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QDialog,
     QDialogButtonBox,

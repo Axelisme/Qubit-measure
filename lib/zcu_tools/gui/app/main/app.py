@@ -15,7 +15,7 @@ backend itself.
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.adapter import ExpContext

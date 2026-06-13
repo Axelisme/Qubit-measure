@@ -12,8 +12,6 @@ went to the Caretaker, this codec stays as WorkspaceService's helper.
 
 from __future__ import annotations
 
-from typing import Union
-
 from zcu_tools.gui.app.main.adapter import (
     CfgNodeSpec,
     CfgNodeValue,

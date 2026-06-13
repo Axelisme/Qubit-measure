@@ -10,8 +10,6 @@ the right pane follows.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from qtpy.QtCore import Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QComboBox,

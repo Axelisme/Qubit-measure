@@ -1,8 +1,6 @@
 import pytest
 from qick.asm_v2 import Label
 from zcu_tools.program.v2.ir.base import IRCompileMixin
-from zcu_tools.program.v2.ir.labels import LabelRef
-from zcu_tools.program.v2.ir.pipeline import PipeLineContext
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 
 
