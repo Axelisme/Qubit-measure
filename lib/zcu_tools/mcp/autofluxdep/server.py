@@ -7,14 +7,13 @@ over a single persistent TCP socket. The exposed tools are READ-ONLY: every
 workflow-observation tool is generated 1:1 from the wire-method contract table
 (``METHOD_SPECS``, all pure queries — the user drives the GUI); the agent-facing
 lifecycle tools (``autofluxdep_launch`` / ``autofluxdep_connect`` /
-``autofluxdep_disconnect``) are hand-written and fork
+``autofluxdep_disconnect``) are built by the shared read-only factory and fork
 ``script/run_autofluxdep_gui.py``.
 
-The socket/RPC/stdio plumbing lives in the shared
-:mod:`zcu_tools.mcp.core.bridge` (:class:`McpBridge` + helpers); this module
-keeps only autofluxdep's config + the read-only ``send_gui_rpc`` wrapper + the
-three lifecycle tools. Events are dropped (the agent uses request/reply, not
-event subscription), so no ``on_event`` hook is wired.
+The whole server body (``send_gui_rpc``, the lifecycle tools, cleanup, the stdio
+loop) lives in :func:`zcu_tools.mcp.core.readonly_server.build_readonly_server`;
+this module keeps only autofluxdep's config + instructions + the imports the
+factory needs. Events are dropped (request/reply, not event subscription).
 
 Threading: see :mod:`zcu_tools.mcp.core.bridge`.
 """
@@ -25,7 +24,6 @@ import importlib.util
 import sys
 from pathlib import Path
 from tempfile import gettempdir
-from typing import Any
 
 # This bridge is launched standalone (``python .../server.py``), so the repo
 # ``lib`` dir is not on sys.path by default. Add it so the wire-contract modules
@@ -53,17 +51,15 @@ from zcu_tools.gui.app.autofluxdep.services.remote.method_specs import (  # noqa
 from zcu_tools.gui.app.autofluxdep.services.remote.wire_version import (  # noqa: E402
     WIRE_VERSION as MCP_WIRE_VERSION,
 )
-from zcu_tools.mcp.core.bridge import (  # noqa: E402
-    McpBridge,
-    MCPBridgeConfig,
-    assemble_tools,
-    generate_tools,
-    run_stdio_loop,
+from zcu_tools.mcp.core.bridge import MCPBridgeConfig  # noqa: E402
+from zcu_tools.mcp.core.readonly_server import (  # noqa: E402
+    READONLY_MCP_VERSION,
+    build_readonly_server,
 )
 
 # This MCP server's own code revision — reported (not compared) in the version
 # note so an agent can confirm a reconnect picked up bridge-side edits.
-MCP_VERSION = 1
+MCP_VERSION = READONLY_MCP_VERSION
 
 _SERVER_INSTRUCTIONS = """\
 Observe a live autofluxdep-gui (automated flux-dependence workflow) over a TCP socket.
@@ -108,143 +104,19 @@ _CONFIG = MCPBridgeConfig(
     run_script_name="run_autofluxdep_gui.py",
 )
 
-# One bridge per process. Events are dropped (READ-ONLY: no on_event hook).
-_BRIDGE = McpBridge(_CONFIG)
-
-
-def send_gui_rpc(
-    method: str, params: dict[str, Any], timeout_seconds: float = 30.0
-) -> dict[str, Any]:
-    """Issue one RPC against the GUI; raises on error or timeout."""
-    resp = _BRIDGE.send_rpc_raw(method, params, timeout_seconds)
-    if not resp.get("ok", False):
-        err = resp.get("error", {})
-        msg = f"GUI Error ({err.get('code')}): {err.get('message')}"
-        reason = err.get("reason")
-        if reason:
-            msg += f" (reason: {reason})"
-        raise RuntimeError(msg)
-    return dict(resp.get("result", {}))
-
-
-# ---------------------------------------------------------------------------
-# Hand-written lifecycle tools (thin wrappers over the bridge)
-# ---------------------------------------------------------------------------
-
-
-def tool_autofluxdep_connect(arguments: dict[str, Any]) -> str:
-    port = arguments.get("port", _CONFIG.default_port)
-    if not isinstance(port, int):
-        raise ValueError("Invalid 'port' argument (must be integer)")
-    return _BRIDGE.connect(port, arguments.get("token"))
-
-
-def tool_autofluxdep_disconnect(arguments: dict[str, Any]) -> str:
-    del arguments
-    return _BRIDGE.disconnect()
-
-
-def tool_autofluxdep_launch(arguments: dict[str, Any]) -> str:
-    port = int(arguments.get("port", _CONFIG.default_port))
-    token: str | None = arguments.get("token")
-    auto_connect = bool(arguments.get("auto_connect", True))
-    # lib/zcu_tools/mcp/autofluxdep -> repo root
-    repo_root = Path(__file__).parents[4]
-    return _BRIDGE.launch(repo_root, port, token, auto_connect)
-
-
-# autofluxdep_stop is intentionally NOT exposed as an agent tool: the agent
-# observes a GUI the user drives and must not kill the user's GUI nor stop a
-# running sweep. The bridge's own stop() is used in _cleanup_on_exit so a
-# server-launched GUI is not orphaned.
-_NON_GENERATED_METHODS = frozenset(
-    {
-        # mcp<->RPC bookkeeping only; version numbers must not surface to the agent.
-        "resources.versions",
-    }
+# lib/zcu_tools/mcp/autofluxdep -> repo root
+_SERVER = build_readonly_server(
+    _CONFIG,
+    METHOD_SPECS,
+    repo_root=Path(__file__).parents[4],
+    gui_name="autofluxdep-gui",
 )
 
-_OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
-    "autofluxdep_connect": {
-        "handler": tool_autofluxdep_connect,
-        "description": (
-            "Connect the MCP bridge to an ALREADY-RUNNING autofluxdep-gui's TCP "
-            "control port (default 8768). Errors if no GUI is listening there — "
-            "use autofluxdep_launch to start one. Skip this if you used "
-            "autofluxdep_launch with auto_connect=true (default)."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "port": {
-                    "type": "integer",
-                    "description": "TCP port of a running GUI control service (default 8768)",
-                },
-                "token": {
-                    "type": "string",
-                    "description": "Optional authentication token",
-                },
-            },
-        },
-    },
-    "autofluxdep_disconnect": {
-        "handler": tool_autofluxdep_disconnect,
-        "description": (
-            "Disconnect the MCP bridge from the GUI control port. Does NOT stop "
-            "the GUI process — it keeps running for the user to drive."
-        ),
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    "autofluxdep_launch": {
-        "handler": tool_autofluxdep_launch,
-        "description": (
-            "Launch the autofluxdep-gui as a NEW subprocess on a TCP control port "
-            "(default 8768), wait until ready, and optionally connect. Use as the "
-            "first step. Errors if the port is already in use (a stale GUI). By "
-            "default auto_connect=true."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "port": {
-                    "type": "integer",
-                    "description": "TCP control port for the GUI (default 8768)",
-                },
-                "token": {
-                    "type": "string",
-                    "description": "Optional shared auth token",
-                },
-                "auto_connect": {
-                    "type": "boolean",
-                    "default": True,
-                    "description": "Call autofluxdep_connect automatically once ready (default true)",
-                },
-            },
-        },
-    },
-}
-
-_OVERRIDE_NAMES = frozenset(
-    {"autofluxdep_connect", "autofluxdep_disconnect", "autofluxdep_launch"}
-)
-
-
-TOOLS: dict[str, dict[str, Any]] = assemble_tools(
-    generate_tools(_CONFIG, METHOD_SPECS, _NON_GENERATED_METHODS, send_gui_rpc),
-    _OVERRIDE_TOOLS,
-    _OVERRIDE_NAMES,
-)
-
-
-def _cleanup_on_exit() -> None:
-    try:
-        _BRIDGE.stop(timeout_kill=True)
-    except Exception:
-        pass
-
-
-def main() -> None:
-    run_stdio_loop(_CONFIG, TOOLS, on_cleanup=_cleanup_on_exit)
+# Module-level aliases preserved for tests that patch the bridge / inspect tools.
+_BRIDGE = _SERVER.bridge
+send_gui_rpc = _SERVER.send_gui_rpc
+TOOLS = _SERVER.tools
+main = _SERVER.main
 
 
 if __name__ == "__main__":

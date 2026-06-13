@@ -40,6 +40,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.result import (
 from zcu_tools.gui.app.autofluxdep.state import AutoFluxDepState
 from zcu_tools.gui.project import DEFAULT_CHIP, DEFAULT_QUBIT
 from zcu_tools.gui.remote.method_spec import BoundMethod, build_method_registry
+from zcu_tools.gui.remote.readonly_handlers import h_resources_versions
 
 from .method_specs import METHOD_SPECS
 
@@ -209,15 +210,10 @@ def _h_result_summary(
 
 
 # ---------------------------------------------------------------------------
-# Resource versions / state handlers
+# State handler (app-specific; resources.versions is shared, see
+# zcu_tools.gui.remote.readonly_handlers; project.info is app-local because
+# autofluxdep's ProjectInfo shape differs from the shared one).
 # ---------------------------------------------------------------------------
-
-
-def _h_resources_versions(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    del params
-    return {"versions": adapter.ctrl.state.version.snapshot()}
 
 
 def _h_state_check(
@@ -251,7 +247,7 @@ _HANDLERS: dict[str, Handler] = {
     "workflow.list": _h_workflow_list,
     "node.cfg": _h_node_cfg,
     "result.summary": _h_result_summary,
-    "resources.versions": _h_resources_versions,
+    "resources.versions": h_resources_versions,
     "state.check": _h_state_check,
 }
 

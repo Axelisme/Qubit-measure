@@ -162,7 +162,7 @@ MCP bridge 不訂任何 event-push（無 `on_event` hook）；RPC 層的 `Remote
   `resources.versions`/`state.check`），**無任何 mutation**。所有分析（load/align/
   pick/select/fit/export）是 user 在 GUI 裡做；agent 只觀測。原因：選點與軸向判斷需
   人眼看 preview，agent 沒有。`test_dispatch.test_registry_is_read_only` 守這條線。
-- **`_h_project_info` / `_h_state_check` 呼叫共用 helper**：`dispatch.py` 使用 `gui/project.py` 的 `project_info_payload(project)` 與 `is_real_project(project)` 而非把 4-field payload 與 placeholder 判斷內聯——dispersive 用同一份，兩 app 永遠同步。
+- **`project.info` / `resources.versions` 用共用 handler**：`dispatch.py` 直接註冊 `gui/remote/readonly_handlers.py` 的 `h_project_info` / `h_resources_versions`（dispersive 用同一份，兩 app 永遠同步）；`_h_state_check` 仍 app-local（用 `gui/project.py` 的 `is_real_project` 判 placeholder）。
 - **MCP 工具集**：讀工具自 method_specs 生成（`fluxdep_project_info`/`spectrum_list`/
   `selection_pointcloud`/`fit_result`/`state_check`；`resources.versions` 不曝露）+ 3 個
   生命週期手寫工具（`fluxdep_launch`/`connect`/`disconnect`）。**無 `fluxdep_stop`**——

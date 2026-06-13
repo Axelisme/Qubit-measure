@@ -27,7 +27,6 @@ import logging
 import sys
 import threading
 import time
-import traceback
 from collections import deque
 from collections.abc import Callable
 from pathlib import Path
@@ -76,6 +75,7 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
     MCPBridgeConfig,
     assemble_tools,
     generate_tools,
+    run_stdio_loop,
 )
 
 # This MCP server's own code revision — reported (not compared) in the version
@@ -1918,16 +1918,14 @@ def _cleanup_on_exit() -> None:
         pass
 
 
-def main() -> None:
-    # Set stdin/stdout to UTF-8 encoded mode.
-    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-    sys.stdin.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+def _setup_logging() -> None:
+    """Attach the MCP server process's per-session file logging (Phase 157).
 
-    # Per-session file logging for the MCP server process (Phase 157). stdout is
-    # the JSON-RPC transport, so logging must never touch it — the shared helper
-    # only adds a stderr (WARNING) handler plus a DEBUG file handler. Attach at
-    # ``zcu_tools.mcp`` so this module + tool error logs reach the file.
-    # parents[4]: server.py -> measure -> mcp -> zcu_tools -> lib -> repo root.
+    stdout is the JSON-RPC transport, so logging must never touch it — the shared
+    helper only adds a stderr (WARNING) handler plus a DEBUG file handler. Attach
+    at ``zcu_tools.mcp`` so this module + tool error logs reach the file.
+    parents[4]: server.py -> measure -> mcp -> zcu_tools -> lib -> repo root.
+    """
     from zcu_tools.gui.logging_setup import setup_gui_logging
 
     setup_gui_logging(
@@ -1937,147 +1935,36 @@ def main() -> None:
         extra_namespaces=("zcu_tools.mcp",),
     )
 
-    while True:
-        try:
-            line = sys.stdin.readline()
-            if not line:
-                _cleanup_on_exit()
-                break
-            line = line.strip()
-            if not line:
-                continue
 
-            req = json.loads(line)
-            method = req.get("method")
-            rid = req.get("id")
+def _piggyback_blocks() -> list[dict[str, Any]]:
+    """Diagnostics buffered since the last tool call, as extra content blocks.
 
-            if method == "initialize":
-                resp = {
-                    "jsonrpc": "2.0",
-                    "id": rid,
-                    "result": {
-                        "protocolVersion": "2024-11-05",
-                        "capabilities": {"tools": {}},
-                        "serverInfo": {
-                            "name": "qubit-measure-control",
-                            "version": "1.1.0",
-                        },
-                        "instructions": _SERVER_INSTRUCTIONS,
-                    },
-                }
-                sys.stdout.write(json.dumps(resp) + "\n")
-                sys.stdout.flush()
+    Piggyback (ADR-0013): drain GUI diagnostics onto every successful tool reply
+    so the agent gets the GUI's error/info feedback ("Data saved to …", a
+    run-failure reason) without a dedicated poll. Only diagnostics ride here now —
+    resource-change events are not exposed to the agent (Phase 120c-2).
+    """
+    pending = _drain_pending()
+    if not pending["diagnostics"]:
+        return []
+    return [
+        {
+            "type": "text",
+            "text": "notifications since last call:\n" + json.dumps(pending, indent=2),
+        }
+    ]
 
-            elif method == "notifications/initialized":
-                continue
 
-            elif method == "tools/list":
-                tools_list = []
-                for name, info in TOOLS.items():
-                    tools_list.append(
-                        {
-                            "name": name,
-                            "description": info["description"],
-                            "inputSchema": info["inputSchema"],
-                        }
-                    )
-                resp = {"jsonrpc": "2.0", "id": rid, "result": {"tools": tools_list}}
-                sys.stdout.write(json.dumps(resp) + "\n")
-                sys.stdout.flush()
-
-            elif method == "tools/call":
-                params = req.get("params", {})
-                name = params.get("name")
-                arguments = params.get("arguments", {})
-
-                tool = TOOLS.get(name)
-                if not tool:
-                    resp = {
-                        "jsonrpc": "2.0",
-                        "id": rid,
-                        "error": {
-                            "code": -32601,
-                            "message": f"Method not found: {name}",
-                        },
-                    }
-                else:
-                    try:
-                        handler: Callable[[dict[str, Any]], Any] = tool["handler"]
-                        res = handler(arguments)
-                        text = (
-                            res if isinstance(res, str) else json.dumps(res, indent=2)
-                        )
-                        content = [{"type": "text", "text": text}]
-                        # Piggyback (ADR-0013): drain GUI diagnostics buffered
-                        # since the last tool call onto this result, so the agent
-                        # gets the GUI's error/info feedback ("Data saved to …",
-                        # a run-failure reason) without a dedicated poll. Only
-                        # diagnostics ride here now — resource-change events are
-                        # not exposed to the agent (Phase 120c-2).
-                        pending = _drain_pending()
-                        if pending["diagnostics"]:
-                            content.append(
-                                {
-                                    "type": "text",
-                                    "text": "notifications since last call:\n"
-                                    + json.dumps(pending, indent=2),
-                                }
-                            )
-                        resp = {
-                            "jsonrpc": "2.0",
-                            "id": rid,
-                            "result": {"content": content},
-                        }
-                    except Exception as e:
-                        logger.exception("MCP tool %r dispatch failed", name)
-                        # GUI-side business errors (send_gui_rpc raises
-                        # RuntimeError with an already-clear "GUI Error (code):
-                        # message") carry no useful Python stack for the agent —
-                        # the traceback is always the same forwarder→send_gui_rpc
-                        # frames, pure noise. Strip it for those; keep the full
-                        # traceback only for unexpected bridge-side failures,
-                        # where the stack is the actual debugging signal.
-                        if isinstance(e, RuntimeError):
-                            text = f"Error executing tool {name!r}: {e}"
-                            # Surface the machine-readable reason tag (e.g.
-                            # no_run_result / no_project) when the wire carried
-                            # one, so the agent can branch on it without parsing
-                            # the message prose. GuiRpcError.reason is set from
-                            # the wire error envelope (Phase 129).
-                            reason = getattr(e, "reason", None)
-                            if reason:
-                                text += f"\nreason: {reason}"
-                        else:
-                            text = (
-                                f"Error executing tool {name!r}: {e}\n"
-                                f"{traceback.format_exc()}"
-                            )
-                        resp = {
-                            "jsonrpc": "2.0",
-                            "id": rid,
-                            "result": {
-                                "isError": True,
-                                "content": [{"type": "text", "text": text}],
-                            },
-                        }
-                sys.stdout.write(json.dumps(resp) + "\n")
-                sys.stdout.flush()
-            else:
-                if rid is not None:
-                    resp = {
-                        "jsonrpc": "2.0",
-                        "id": rid,
-                        "error": {
-                            "code": -32601,
-                            "message": f"Method not found: {method}",
-                        },
-                    }
-                    sys.stdout.write(json.dumps(resp) + "\n")
-                    sys.stdout.flush()
-        except Exception as e:
-            logger.exception("MCP loop exception")
-            sys.stderr.write(f"MCP Loop Exception: {e}\n{traceback.format_exc()}\n")
-            sys.stderr.flush()
+def main() -> None:
+    run_stdio_loop(
+        _CONFIG,
+        TOOLS,
+        on_cleanup=_cleanup_on_exit,
+        on_each_reply=_piggyback_blocks,
+        on_start=_setup_logging,
+        on_error=logger.exception,
+        server_version="1.1.0",
+    )
 
 
 if __name__ == "__main__":

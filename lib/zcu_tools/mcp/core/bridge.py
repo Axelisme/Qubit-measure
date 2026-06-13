@@ -759,11 +759,13 @@ def assemble_tools(
 # ---------------------------------------------------------------------------
 
 
-def build_initialize_result(config: McpServerConfig) -> dict[str, Any]:
+def build_initialize_result(
+    config: McpServerConfig, server_version: str = "1.0.0"
+) -> dict[str, Any]:
     return {
         "protocolVersion": "2024-11-05",
         "capabilities": {"tools": {}},
-        "serverInfo": {"name": config.server_display_name, "version": "1.0.0"},
+        "serverInfo": {"name": config.server_display_name, "version": server_version},
         "instructions": config.server_instructions,
     }
 
@@ -773,17 +775,35 @@ def run_stdio_loop(
     tools: ToolTable,
     *,
     on_cleanup: Callable[[], None] | None = None,
-    on_each_reply: Callable[[], dict[str, Any]] | None = None,
+    on_each_reply: Callable[[], list[dict[str, Any]]] | None = None,
+    on_start: Callable[[], None] | None = None,
+    on_error: Callable[[str], None] | None = None,
+    server_version: str = "1.0.0",
 ) -> None:
     """Run the MCP stdio JSON-RPC loop until stdin closes.
 
-    ``on_cleanup`` runs once when stdin closes (e.g. stop a server-launched GUI).
-    ``on_each_reply`` (measure-gui) returns extra content blocks to piggyback on
-    every successful tool reply (diagnostics) — returns a dict whose values are
-    lists of message dicts; non-empty lists become extra text content blocks.
+    Hooks (all optional; defaults give the bare read-only behaviour):
+      - ``on_start`` runs once after stdin/stdout are reconfigured to UTF-8, before
+        the loop (measure-gui attaches its per-session file logging here).
+      - ``on_cleanup`` runs once when stdin closes (e.g. stop a server-launched GUI).
+      - ``on_each_reply`` (measure-gui) returns ready-made content blocks to
+        piggyback on every successful tool reply (e.g. drained diagnostics): a list
+        of ``{"type": "text", "text": ...}`` dicts, each appended after the tool's
+        own content. The hook owns the wording (returns ``[]`` for nothing).
+      - ``on_error`` is called from within each ``except`` block with a
+        preformatted context message (measure-gui passes ``logger.exception``) so
+        the active exception is logged with its traceback.
+
+    ``server_version`` is the ``serverInfo.version`` reported on ``initialize``.
+
+    A ``RuntimeError`` carrying a ``reason`` attribute (set from the GUI wire error
+    envelope) has its tag appended to the tool-error text, so an agent can branch
+    on the machine-readable reason without parsing the prose.
     """
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
     sys.stdin.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+    if on_start is not None:
+        on_start()
 
     while True:
         try:
@@ -804,7 +824,7 @@ def run_stdio_loop(
                 resp = {
                     "jsonrpc": "2.0",
                     "id": rid,
-                    "result": build_initialize_result(config),
+                    "result": build_initialize_result(config, server_version),
                 }
                 sys.stdout.write(json.dumps(resp) + "\n")
                 sys.stdout.flush()
@@ -849,22 +869,29 @@ def run_stdio_loop(
                         )
                         content = [{"type": "text", "text": text}]
                         if on_each_reply is not None:
-                            for extra in on_each_reply().values():
-                                if extra:
-                                    content.append(
-                                        {
-                                            "type": "text",
-                                            "text": json.dumps(extra, indent=2),
-                                        }
-                                    )
+                            content.extend(on_each_reply())
                         resp = {
                             "jsonrpc": "2.0",
                             "id": rid,
                             "result": {"content": content},
                         }
                     except Exception as e:
+                        if on_error is not None:
+                            on_error(f"MCP tool {name!r} dispatch failed")
+                        # GUI-side business errors (RuntimeError with an already-
+                        # clear message) carry no useful Python stack for the agent
+                        # — the traceback is always the same forwarder frames, pure
+                        # noise. Strip it for those; keep the full traceback only for
+                        # unexpected bridge-side failures, where the stack is the
+                        # actual debugging signal.
                         if isinstance(e, RuntimeError):
                             text = f"Error executing tool {name!r}: {e}"
+                            # Surface the machine-readable reason tag (e.g.
+                            # no_run_result / no_project) when the wire carried one,
+                            # so the agent can branch on it without parsing prose.
+                            reason = getattr(e, "reason", None)
+                            if reason:
+                                text += f"\nreason: {reason}"
                         else:
                             text = (
                                 f"Error executing tool {name!r}: {e}\n"
@@ -893,6 +920,8 @@ def run_stdio_loop(
                     sys.stdout.write(json.dumps(resp) + "\n")
                     sys.stdout.flush()
         except Exception as e:
+            if on_error is not None:
+                on_error("MCP loop exception")
             sys.stderr.write(f"MCP Loop Exception: {e}\n{traceback.format_exc()}\n")
             sys.stderr.flush()
 

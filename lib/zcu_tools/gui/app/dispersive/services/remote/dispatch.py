@@ -19,8 +19,12 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .service import RemoteControlAdapter
 
-from zcu_tools.gui.project import is_real_project, project_info_payload
+from zcu_tools.gui.project import is_real_project
 from zcu_tools.gui.remote.method_spec import BoundMethod, build_method_registry
+from zcu_tools.gui.remote.readonly_handlers import (
+    h_project_info,
+    h_resources_versions,
+)
 
 from .method_specs import METHOD_SPECS
 
@@ -34,13 +38,6 @@ Handler = Callable[["RemoteControlAdapter", Mapping[str, object]], Mapping[str, 
 # ---------------------------------------------------------------------------
 # Read-only handlers — the agent observes, the user drives.
 # ---------------------------------------------------------------------------
-
-
-def _h_project_info(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    del params
-    return project_info_payload(adapter.ctrl.state.project)
 
 
 def _h_fit_inputs_info(
@@ -96,13 +93,6 @@ def _h_fit_result(
     }
 
 
-def _h_resources_versions(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    del params
-    return {"versions": adapter.ctrl.state.version.snapshot()}
-
-
 def _h_state_check(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
@@ -123,11 +113,11 @@ def _h_state_check(
 
 
 _HANDLERS: dict[str, Handler] = {
-    "project.info": _h_project_info,
+    "project.info": h_project_info,
     "fit_inputs.info": _h_fit_inputs_info,
     "preprocess.status": _h_preprocess_status,
     "fit.result": _h_fit_result,
-    "resources.versions": _h_resources_versions,
+    "resources.versions": h_resources_versions,
     "state.check": _h_state_check,
 }
 

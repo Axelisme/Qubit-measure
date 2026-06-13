@@ -21,8 +21,12 @@ if TYPE_CHECKING:
     # this module). String annotations keep pyright checking the call sites.
     from .service import RemoteControlAdapter
 
-from zcu_tools.gui.project import is_real_project, project_info_payload
+from zcu_tools.gui.project import is_real_project
 from zcu_tools.gui.remote.method_spec import BoundMethod, build_method_registry
+from zcu_tools.gui.remote.readonly_handlers import (
+    h_project_info,
+    h_resources_versions,
+)
 
 from .method_specs import METHOD_SPECS
 
@@ -42,13 +46,6 @@ Handler = Callable[["RemoteControlAdapter", Mapping[str, object]], Mapping[str, 
 # picking and axis-orientation judgement need the human's eye on the preview,
 # which the agent does not have, so driving them over RPC was removed.
 # ---------------------------------------------------------------------------
-
-
-def _h_project_info(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    del params
-    return project_info_payload(adapter.ctrl.state.project)
 
 
 def _h_spectrum_list(
@@ -106,15 +103,9 @@ def _h_fit_result(
 
 
 # ---------------------------------------------------------------------------
-# Resource versions / state handlers
+# State handler (app-specific; project.info + resources.versions are shared, see
+# zcu_tools.gui.remote.readonly_handlers).
 # ---------------------------------------------------------------------------
-
-
-def _h_resources_versions(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    del params
-    return {"versions": adapter.ctrl.state.version.snapshot()}
 
 
 def _h_state_check(
@@ -135,11 +126,11 @@ def _h_state_check(
 
 
 _HANDLERS: dict[str, Handler] = {
-    "project.info": _h_project_info,
+    "project.info": h_project_info,
     "spectrum.list": _h_spectrum_list,
     "selection.pointcloud": _h_selection_pointcloud,
     "fit.result": _h_fit_result,
-    "resources.versions": _h_resources_versions,
+    "resources.versions": h_resources_versions,
     "state.check": _h_state_check,
 }
 
