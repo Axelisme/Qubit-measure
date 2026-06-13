@@ -364,7 +364,9 @@ def test_device_dialog_restores_background_setup_and_stops_it(qapp):
     assert item is not None
     assert item.data(256) == "fd"
     assert dialog._apply_btn.text() == "Stop"
-    assert dialog._list.isEnabled() is False
+    # Phase A per-device lock: the list stays enabled (user can switch devices).
+    assert dialog._list.isEnabled() is True
+    # Refresh is disabled for the setup owner (no point refreshing mid-apply).
     assert dialog._refresh_btn.isEnabled() is False
     # The dialog attached to progress by the active setup's device_name (owner),
     # so live bars render even though it opened mid-setup.
@@ -383,6 +385,161 @@ def test_device_dialog_restores_background_setup_and_stops_it(qapp):
     assert dialog._apply_btn.text() == "Apply Changes"
     assert dialog._list.isEnabled() is True
     assert dialog._refresh_btn.isEnabled() is True
+
+
+# ---------------------------------------------------------------------------
+# Phase A per-device lock tests
+# ---------------------------------------------------------------------------
+
+
+def _setup_two_device_dialog(qapp):
+    """Helper: return a dialog with two connected FakeDevices and an active
+    setup on 'fd_a'. The user's selection is initially on 'fd_b' (the
+    non-owner). Returns (dialog, ctrl)."""
+    from zcu_tools.device.fake import FakeDeviceInfo
+
+    ctrl = _make_ctrl()
+    ctrl.list_devices.return_value = [_entry("fd_a"), _entry("fd_b")]
+    ctrl.get_device_snapshot.side_effect = lambda n: _connected_snapshot(
+        n, FakeDeviceInfo(address="none")
+    )
+    ctrl.get_active_device_setup.return_value = DeviceSetupSnapshot(device_name="fd_a")
+
+    dialog = DeviceDialog(ctrl)
+    # Move selection to the non-owner device.
+    dialog._list.setCurrentRow(1)  # "fd_b"
+    return dialog, ctrl
+
+
+def test_setup_running_list_remains_enabled(qapp):
+    """During an active setup the device list stays enabled so the user can
+    switch to view another device."""
+    dialog, _ = _setup_two_device_dialog(qapp)
+    assert dialog._list.isEnabled() is True
+
+
+def test_setup_running_can_switch_to_other_device(qapp):
+    """Switching to a non-owner device changes the right panel to that device's
+    info (not the setup owner's)."""
+    dialog, _ = _setup_two_device_dialog(qapp)
+
+    item = dialog._list.currentItem()
+    assert item is not None
+    assert item.data(256) == "fd_b"
+    # Right panel should be on page 1 (FakeDevice) for fd_b.
+    assert dialog._stack.currentIndex() == 1
+
+
+def test_setup_owner_shows_stop_button(qapp):
+    """Switching back to the setup-owner device shows the red Stop button."""
+    dialog, _ = _setup_two_device_dialog(qapp)
+
+    # Move back to the owner.
+    dialog._list.setCurrentRow(0)  # "fd_a"
+    assert dialog._apply_btn.text() == "Stop"
+    assert "red" in dialog._apply_btn.styleSheet()
+    assert dialog._apply_btn.isEnabled() is True
+
+
+def test_non_owner_apply_is_disabled_with_tooltip(qapp):
+    """The Apply button is disabled for a non-owner device while setup is in
+    flight, with a tooltip explaining that another device is being set up."""
+    dialog, _ = _setup_two_device_dialog(qapp)
+
+    # fd_b is selected (non-owner).
+    assert dialog._apply_btn.text() == "Apply Changes"
+    assert dialog._apply_btn.isEnabled() is False
+    assert "fd_a" in dialog._apply_btn.toolTip()
+
+
+def test_switch_back_to_owner_still_shows_stop(qapp):
+    """After switching away from the owner and back, the Stop button is still
+    shown correctly (regression: ensure _render_setup no longer forces
+    selection but button state is recalculated on each selection change)."""
+    dialog, _ = _setup_two_device_dialog(qapp)
+
+    # Was on fd_b (non-owner), go back to fd_a (owner).
+    dialog._list.setCurrentRow(0)
+    assert dialog._apply_btn.text() == "Stop"
+    assert dialog._apply_btn.isEnabled() is True
+
+    # Go to fd_b again.
+    dialog._list.setCurrentRow(1)
+    assert dialog._apply_btn.text() == "Apply Changes"
+    assert dialog._apply_btn.isEnabled() is False
+
+
+def test_setup_finished_restores_all_buttons(qapp):
+    """When the setup finishes both devices' buttons return to normal state."""
+    from zcu_tools.device.fake import FakeDeviceInfo
+
+    ctrl = _make_ctrl()
+    ctrl.list_devices.return_value = [_entry("fd_a"), _entry("fd_b")]
+    ctrl.get_device_snapshot.side_effect = lambda n: _connected_snapshot(
+        n, FakeDeviceInfo(address="none")
+    )
+    ctrl.get_active_device_setup.return_value = DeviceSetupSnapshot(device_name="fd_a")
+
+    dialog = DeviceDialog(ctrl)
+    # Select the non-owner while setup is running.
+    dialog._list.setCurrentRow(1)  # "fd_b"
+    assert dialog._apply_btn.isEnabled() is False
+
+    # Setup finishes.
+    ctrl.get_active_device_setup.return_value = None
+    ctrl.get_bus.return_value.emit(
+        DeviceSetupFinishedPayload(name="fd_a", outcome="success"),
+    )
+
+    # After finish, fd_b is still selected and Apply should now be enabled.
+    item = dialog._list.currentItem()
+    assert item is not None and item.data(256) == "fd_b"
+    assert dialog._apply_btn.text() == "Apply Changes"
+    assert dialog._apply_btn.isEnabled() is True
+    assert dialog._list.isEnabled() is True
+
+
+def test_drop_disabled_for_all_devices_during_setup(qapp):
+    """Drop is disabled for both the setup owner and other devices to prevent
+    concurrent disconnect+setup operations."""
+    dialog, _ = _setup_two_device_dialog(qapp)
+
+    # Non-owner selected: drop disabled.
+    dialog._list.setCurrentRow(1)  # "fd_b"
+    assert dialog._drop_btn.isEnabled() is False
+
+    # Owner selected: drop also disabled.
+    dialog._list.setCurrentRow(0)  # "fd_a"
+    assert dialog._drop_btn.isEnabled() is False
+
+
+def test_add_box_disabled_during_setup(qapp):
+    """The Add-box (register new device) is disabled while any setup is in
+    flight to avoid concurrent connect+setup operations."""
+    dialog, _ = _setup_two_device_dialog(qapp)
+
+    assert dialog._add_btn.isEnabled() is False
+    assert dialog._type_combo.isEnabled() is False
+    assert dialog._name_edit.isEnabled() is False
+    assert dialog._addr_edit.isEnabled() is False
+
+
+def test_refresh_enabled_for_non_owner_non_memory_device(qapp):
+    """Refresh is allowed for a non-owner connected device during setup
+    (get_device_info is a read, not a gate-guarded operation)."""
+    dialog, _ = _setup_two_device_dialog(qapp)
+
+    # fd_b is non-owner and connected.
+    dialog._list.setCurrentRow(1)  # "fd_b"
+    assert dialog._refresh_btn.isEnabled() is True
+
+
+def test_refresh_disabled_for_setup_owner(qapp):
+    """Refresh is disabled for the device that owns the active setup."""
+    dialog, _ = _setup_two_device_dialog(qapp)
+
+    dialog._list.setCurrentRow(0)  # "fd_a" (the owner)
+    assert dialog._refresh_btn.isEnabled() is False
 
 
 def test_device_dialog_close_keeps_setup_running_and_unsubscribes(qapp):

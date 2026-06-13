@@ -36,6 +36,7 @@ from zcu_tools.gui.session.events import (
 from zcu_tools.gui.session.services.device import (
     ConnectDeviceRequest,
     DeviceSetupSnapshot,
+    DeviceSnapshot,
     DeviceStatus,
     DisconnectDeviceRequest,
     SetupDeviceRequest,
@@ -450,30 +451,22 @@ class DeviceDialog(QDialog):
         item = self._list.currentItem()
         if item is None:
             self._stack.setCurrentIndex(0)
-            if self._active_setup is None:
-                self._drop_btn.setEnabled(False)
-                self._refresh_btn.setEnabled(False)
-                self._apply_btn.setEnabled(False)
+            # Per-device button refresh still runs; no device selected means all
+            # action buttons are disabled regardless of setup state.
+            self._refresh_button_states(None)
             return
 
         name = item.data(Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
         snapshot = self._ctrl.get_device_snapshot(name)
         if snapshot is None:
             return
+
+        # Recompute button states per-device: the setup lock is scoped to
+        # _active_setup.device_name, not the whole dialog. Pass the already-
+        # fetched snapshot to avoid a second controller call.
+        self._refresh_button_states(name, snapshot)
+
         is_memory = snapshot.status is DeviceStatus.MEMORY_ONLY
-        is_busy = snapshot.status not in {
-            DeviceStatus.MEMORY_ONLY,
-            DeviceStatus.CONNECTED,
-        }
-
-        if self._active_setup is None:
-            self._drop_btn.setEnabled(not is_busy)
-            self._drop_btn.setText("Forget" if is_memory else "Drop")
-            self._refresh_btn.setEnabled(not is_memory and not is_busy)
-            self._apply_btn.setEnabled(not is_busy)
-            self._apply_btn.setText("Reconnect" if is_memory else "Apply Changes")
-            self._apply_btn.setStyleSheet("")
-
         if is_memory:
             self._memory_panel.load_memory(
                 snapshot.type_name, snapshot.name, snapshot.address
@@ -493,6 +486,100 @@ class DeviceDialog(QDialog):
         panel = self._stack.currentWidget()
         if page > 0 and isinstance(panel, DevicePanelProtocol):
             panel.load(info)
+
+    def _refresh_button_states(
+        self,
+        selected_name: str | None,
+        snapshot: DeviceSnapshot | None = None,
+    ) -> None:
+        """Recompute button states based on the currently-selected device and
+        whether a setup operation is in flight for some device.
+
+        Per-device locking: only the device that owns the active setup is locked
+        (apply shows Stop, edit fields disabled). Other devices can be selected
+        and viewed freely; their Apply button is greyed out with a tooltip that
+        explains why, and drop/refresh are also disabled to avoid concurrent
+        operation conflicts.
+
+        ``snapshot`` may be supplied by the caller (e.g. _on_selection_changed)
+        to avoid a redundant controller call; if omitted and selected_name is
+        not None, it is fetched once here.
+        """
+        active_name = (
+            self._active_setup.device_name if self._active_setup is not None else None
+        )
+        setup_in_flight = active_name is not None
+
+        if selected_name is None:
+            # Nothing selected — all device-action buttons disabled.
+            self._drop_btn.setEnabled(False)
+            self._drop_btn.setText("Drop")
+            self._refresh_btn.setEnabled(False)
+            self._apply_btn.setEnabled(False)
+            self._apply_btn.setText("Apply Changes")
+            self._apply_btn.setStyleSheet("")
+            self._apply_btn.setToolTip("")
+            # Add-box lock follows global setup state (adding a device requires
+            # a connect operation — don't allow concurrent ops with an active setup).
+            add_enabled = not setup_in_flight
+            self._type_combo.setEnabled(add_enabled)
+            self._name_edit.setEnabled(add_enabled)
+            self._addr_edit.setEnabled(add_enabled)
+            self._add_btn.setEnabled(add_enabled)
+            return
+
+        if snapshot is None:
+            snapshot = self._ctrl.get_device_snapshot(selected_name)
+        is_memory = snapshot is not None and snapshot.status is DeviceStatus.MEMORY_ONLY
+        is_busy = snapshot is not None and snapshot.status not in {
+            DeviceStatus.MEMORY_ONLY,
+            DeviceStatus.CONNECTED,
+        }
+
+        is_setup_owner = selected_name == active_name
+
+        # --- Add-box: disabled while any setup is in flight ---
+        add_enabled = not setup_in_flight
+        self._type_combo.setEnabled(add_enabled)
+        self._name_edit.setEnabled(add_enabled)
+        self._addr_edit.setEnabled(add_enabled)
+        self._add_btn.setEnabled(add_enabled)
+
+        # --- Drop button ---
+        # Conservative: disable drop for all devices while any setup is running,
+        # regardless of which device is selected. Dropping a device could trigger
+        # a disconnect operation, which would conflict with the active setup.
+        self._drop_btn.setEnabled(not setup_in_flight and not is_busy)
+        self._drop_btn.setText("Forget" if is_memory else "Drop")
+
+        # --- Refresh button ---
+        # refresh calls get_device_info (a read, not a gate-guarded op) — allow
+        # it for non-owner, non-memory, non-busy devices even during setup.
+        self._refresh_btn.setEnabled(
+            not is_memory and not is_busy and not is_setup_owner
+        )
+
+        # --- Apply button ---
+        if is_setup_owner:
+            # This device is the active setup owner: show red Stop button.
+            self._apply_btn.setEnabled(True)
+            self._apply_btn.setText("Stop")
+            self._apply_btn.setStyleSheet("color: red;")
+            self._apply_btn.setToolTip("Cancel the in-progress setup.")
+        elif setup_in_flight:
+            # Another device is being set up: grey out Apply and explain why.
+            self._apply_btn.setEnabled(False)
+            self._apply_btn.setText("Apply Changes")
+            self._apply_btn.setStyleSheet("")
+            self._apply_btn.setToolTip(
+                f"Cannot apply: setup of '{active_name}' is in progress."
+            )
+        else:
+            # Normal (no setup in flight): enable based on device state.
+            self._apply_btn.setEnabled(not is_busy)
+            self._apply_btn.setText("Reconnect" if is_memory else "Apply Changes")
+            self._apply_btn.setStyleSheet("")
+            self._apply_btn.setToolTip("")
 
     @staticmethod
     def _unique_name(base: str, existing: set[str]) -> str:
@@ -609,21 +696,34 @@ class DeviceDialog(QDialog):
     def _render_setup(self, setup: DeviceSetupSnapshot | None) -> None:
         self._active_setup = setup
         if setup is not None:
-            for row in range(self._list.count()):
-                item = self._list.item(row)
-                if item.data(Qt.ItemDataRole.UserRole) == setup.device_name:  # type: ignore[attr-defined]
-                    self._list.setCurrentRow(row)
-                    break
-            # Subscribe (by device_name = the setup operation's owner) so the
-            # live bars render even if this dialog opened mid-setup; closing the
-            # dialog only detaches — the container lives on in ProgressService.
+            # Surface the setup owner only when nothing is currently selected
+            # (e.g. dialog opened from scratch mid-setup). If the user already
+            # has another device selected, preserve that selection so they can
+            # keep viewing it — this is the whole point of Phase A per-device lock.
+            if self._selected_device_name() is None:
+                for row in range(self._list.count()):
+                    item = self._list.item(row)
+                    if (
+                        item is not None
+                        and item.data(Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
+                        == setup.device_name
+                    ):
+                        self._list.setCurrentRow(row)
+                        break
+            # Subscribe progress so live bars render even if the dialog opened
+            # mid-setup; closing the dialog only detaches — the container lives on
+            # in ProgressService.
             self._attach_progress(setup.device_name)
             self._progress.show()
-            self._set_setup_running(True)
+            # Refresh button states for the currently-selected device so the UI
+            # reflects the new per-device lock state immediately.
+            self._refresh_button_states(self._selected_device_name())
             return
         self._detach_progress()
         self._progress.hide()
-        self._set_setup_running(False)
+        # Setup finished — refresh button states, then repaint the right panel in
+        # case the finished device was selected (its panel may need a fresh info
+        # load if the setup changed hardware state).
         self._on_selection_changed(self._list.currentRow())
 
     def _attach_progress(self, device_name: str) -> None:
@@ -646,19 +746,4 @@ class DeviceDialog(QDialog):
         models = tuple(m for _, m in self._ctrl.progress_bars(self._progress_owner))
         self._progress.render_models(models)
 
-    def _set_setup_running(self, running: bool) -> None:
-        has_selection = self._list.currentItem() is not None
-        self._drop_btn.setEnabled(has_selection and not running)
-        self._refresh_btn.setEnabled(has_selection and not running)
-        self._list.setEnabled(not running)
-        self._type_combo.setEnabled(not running)
-        self._name_edit.setEnabled(not running)
-        self._addr_edit.setEnabled(not running)
-        self._add_btn.setEnabled(not running)
-        self._apply_btn.setEnabled(has_selection)
-        if running:
-            self._apply_btn.setText("Stop")
-            self._apply_btn.setStyleSheet("color: red;")
-        else:
-            self._apply_btn.setText("Apply Changes")
-            self._apply_btn.setStyleSheet("")
+    # _set_setup_running removed: replaced by per-device _refresh_button_states.
