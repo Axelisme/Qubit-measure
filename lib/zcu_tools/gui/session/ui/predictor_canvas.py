@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from matplotlib.backend_bases import Event, MouseEvent
+from matplotlib.backend_bases import Event
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
@@ -125,7 +125,7 @@ class PredictorCurveCanvas(QWidget):
         self,
         result: PredictCurveResult,
         *,
-        highlight: tuple[int, int],
+        highlight: tuple[int, int] | None = None,
         marker_value: float,
         flux_window: tuple[float, float] = (0.4, 1.1),
         value_to_flux: Callable[[float], float],
@@ -135,6 +135,7 @@ class PredictorCurveCanvas(QWidget):
 
         The primary x-axis is device value (A).  A secondary top x-axis shows
         flux (Φ/Φ₀) using the affine callables ``value_to_flux`` / ``flux_to_value``.
+        ``highlight=None`` renders all curves in normal style (no curve highlighted).
         """
         self._flux_window = flux_window
         self._value_to_flux = value_to_flux
@@ -146,11 +147,13 @@ class PredictorCurveCanvas(QWidget):
         self._current_highlight = highlight
         ax = self.figure.add_subplot(1, 1, 1)
 
-        # Draw each transition curve; highlight the selected one.
+        # Draw each transition curve; highlight the selected one (if any).
         # Store each artist in _curve_lines so set_highlight can restyle without recompute.
-        highlight_label = f"{highlight[0]}→{highlight[1]}"
+        highlight_label = (
+            f"{highlight[0]}→{highlight[1]}" if highlight is not None else None
+        )
         for i, label in enumerate(result.labels):
-            is_hi = label == highlight_label
+            is_hi = highlight_label is not None and label == highlight_label
             # Parse "frm→to" back to a key tuple for the artist registry.
             parts = label.split("→")
             key: tuple[int, int] = (int(parts[0]), int(parts[1]))
@@ -225,18 +228,17 @@ class PredictorCurveCanvas(QWidget):
         self._current_highlight = None
         self.canvas.draw_idle()
 
-    def set_highlight(self, transition: tuple[int, int]) -> None:
+    def set_highlight(self, transition: tuple[int, int] | None) -> None:
         """Restyle curve artists to highlight ``transition`` without recomputing data.
 
-        If ``transition`` is not among the rendered curves (e.g. an arbitrary
-        (from, to) pair not in _DEFAULT_TRANSITIONS), all curves revert to the
-        normal (non-highlighted) style instead of raising.
+        Pass ``None`` (or a transition not in the rendered set) to revert all curves
+        to normal style.  Graceful: never raises if the transition is absent.
         """
         if not self._curve_lines:
             return
         self._current_highlight = transition
         for key, line in self._curve_lines.items():
-            is_hi = key == transition
+            is_hi = transition is not None and key == transition
             line.set_linewidth(_HIGHLIGHT_LW if is_hi else _NORMAL_LW)
             line.set_alpha(_HIGHLIGHT_ALPHA if is_hi else _NORMAL_ALPHA)
             line.set_zorder(3 if is_hi else 2)
@@ -262,28 +264,36 @@ class PredictorCurveCanvas(QWidget):
         tol = abs(x_hi - x_lo) * _PICK_TOL_FRAC
         return abs(x_data - self._marker_value) <= tol
 
+    @staticmethod
+    def _event_xdata(event: Event) -> float | None:
+        """xdata if the event is an in-axes location event, else None.
+
+        Duck-typed (getattr) rather than isinstance so headless tests can drive
+        the handlers with a lightweight fake event; matplotlib only ever passes a
+        real MouseEvent here at runtime.
+        """
+        inaxes = getattr(event, "inaxes", None)
+        xdata = getattr(event, "xdata", None)
+        if inaxes is None or xdata is None:
+            return None
+        return float(xdata)
+
     def _on_press(self, event: Event) -> None:
-        mouse = event  # type: MouseEvent  # type: ignore[assignment]
-        if not hasattr(mouse, "inaxes") or mouse.inaxes is None or mouse.xdata is None:
-            return
-        if self._pick_marker(float(mouse.xdata)):
+        x = self._event_xdata(event)
+        if x is not None and self._pick_marker(x):
             self._dragging = True
             self._dragged = False
 
     def _on_move(self, event: Event) -> None:
-        mouse = event  # type: MouseEvent  # type: ignore[assignment]
-        if (
-            not self._dragging
-            or not hasattr(mouse, "inaxes")
-            or mouse.inaxes is None
-            or mouse.xdata is None
-        ):
+        if not self._dragging:
+            return
+        x = self._event_xdata(event)
+        if x is None:
             return
         self._dragged = True
-        value = float(mouse.xdata)
         # Move the visual marker immediately (no recompute).
-        self.set_marker(value)
-        self._on_drag(value)
+        self.set_marker(x)
+        self._on_drag(x)
 
     def _on_release(self, event: Event) -> None:
         del event

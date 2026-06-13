@@ -117,7 +117,7 @@ def test_canvas_render_creates_four_curves(canvas):
     # which is also a Line2D but labelled "_marker").
     ax = canvas._get_ax()
     assert ax is not None
-    data_lines = [l for l in ax.lines if not l.get_label().startswith("_")]
+    data_lines = [ln for ln in ax.lines if not ln.get_label().startswith("_")]
     assert len(data_lines) == 4
 
 
@@ -220,3 +220,86 @@ def test_canvas_drop_callback_fires(canvas):
 
     assert len(drops) == 1
     assert drops[0] == pytest.approx(0.7)
+
+
+# ---------------------------------------------------------------------------
+# highlight=None renders all curves in normal style
+# ---------------------------------------------------------------------------
+
+
+def test_canvas_render_curves_highlight_none_no_error(canvas):
+    """render_curves with highlight=None must not raise."""
+    result = _make_curve_result()
+    canvas.render_curves(
+        result,
+        highlight=None,
+        marker_value=0.5,
+        flux_window=(0.4, 1.1),
+        value_to_flux=_value_to_flux,
+        flux_to_value=_flux_to_value,
+    )
+    assert len(canvas.figure.get_axes()) > 0
+
+
+def test_canvas_render_curves_highlight_none_all_normal_lw(canvas):
+    """With highlight=None, all curve lines use the normal (non-highlighted) linewidth."""
+    from zcu_tools.gui.session.ui.predictor_canvas import _NORMAL_LW
+
+    result = _make_curve_result()
+    canvas.render_curves(
+        result,
+        highlight=None,
+        marker_value=0.5,
+        flux_window=(0.4, 1.1),
+        value_to_flux=_value_to_flux,
+        flux_to_value=_flux_to_value,
+    )
+    for line in canvas._curve_lines.values():
+        assert line.get_linewidth() == pytest.approx(_NORMAL_LW)
+
+
+def test_canvas_set_highlight_none_reverts_all_to_normal(canvas):
+    """set_highlight(None) reverts all previously highlighted curves to normal."""
+    from zcu_tools.gui.session.ui.predictor_canvas import _NORMAL_LW
+
+    result = _make_curve_result()
+    canvas.render_curves(
+        result,
+        highlight=(0, 1),
+        marker_value=0.5,
+        flux_window=(0.4, 1.1),
+        value_to_flux=_value_to_flux,
+        flux_to_value=_flux_to_value,
+    )
+    canvas.set_highlight(None)
+    for line in canvas._curve_lines.values():
+        assert line.get_linewidth() == pytest.approx(_NORMAL_LW)
+
+
+def test_canvas_render_curves_dynamic_count(canvas):
+    """render_curves with varying transition counts (5, 6, 0-equivalent) must not raise."""
+    from zcu_tools.gui.session.services.connection import PredictCurveResult
+
+    for n in (5, 6):
+        tuple((0, i) for i in range(1, n + 1))
+        values = np.linspace(0.0, 1.0, 20)
+        labels = tuple(f"0→{i}" for i in range(1, n + 1))
+        freqs = np.ones((n, 20), dtype=np.float64) * 1000.0
+        result = PredictCurveResult(
+            labels=labels,
+            values=values,
+            fluxs=values.copy(),
+            freqs_mhz=freqs,
+        )
+        canvas.render_curves(
+            result,
+            highlight=None,
+            marker_value=0.5,
+            flux_window=(0.4, 1.1),
+            value_to_flux=_value_to_flux,
+            flux_to_value=_flux_to_value,
+        )
+        ax = canvas._get_ax()
+        assert ax is not None
+        data_lines = [ln for ln in ax.lines if not ln.get_label().startswith("_")]
+        assert len(data_lines) == n

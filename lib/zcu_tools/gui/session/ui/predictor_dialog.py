@@ -1,9 +1,10 @@
 """PredictorDialog — load FluxoniumPredictor from params.json and predict frequencies.
 
-Layout: left control column (load / predict / status) + right PredictorCurveCanvas.
-The canvas shows f_01, f_02, f_03, f_04 transition curves vs device value (A), with
-the selected transition highlighted and a draggable flux-marker that is bidirectionally
-coupled to the "Flux value (A)" spinbox.
+Layout: left control column (load / tracked-transitions table / status) + right
+PredictorCurveCanvas.  The canvas shows N transition curves vs device value (A) for
+whatever transitions are in the tracked list.  A draggable flux-marker is
+bidirectionally coupled to the "Flux value (A)" spinbox; per-transition predicted
+frequencies are shown in the table and updated on marker movement (debounced).
 """
 
 from __future__ import annotations
@@ -29,6 +30,8 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QLineEdit,
     QPushButton,
     QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -42,10 +45,21 @@ if TYPE_CHECKING:
 _DEFAULT_FLUX_WINDOW: tuple[float, float] = (0.4, 1.1)
 # Number of grid points for the curve computation.
 _CURVE_GRID_N = 200
-# Debounce delay (ms) before updating the single-point prediction label.
+# Debounce delay (ms) before updating the per-transition frequency column.
 _DEBOUNCE_MS = 150
-# Default transitions to display on the canvas.
-_DEFAULT_TRANSITIONS: tuple[tuple[int, int], ...] = ((0, 1), (0, 2), (0, 3), (0, 4))
+# Default tracked transitions: from∈{0,1}, from<to<4.
+_DEFAULT_TRANSITIONS: list[tuple[int, int]] = [
+    (0, 1),
+    (0, 2),
+    (0, 3),
+    (1, 2),
+    (1, 3),
+]
+
+# Column indices for the tracked-transitions table.
+_COL_TRANSITION = 0
+_COL_FREQ = 1
+_COL_DELETE = 2
 
 
 class PredictorDialog(QDialog):
@@ -64,6 +78,14 @@ class PredictorDialog(QDialog):
         self.setWindowTitle("Predictor")
         self.setMinimumWidth(900)
         self.setMinimumHeight(480)
+
+        # Mutable list of currently tracked (from, to) transition pairs.
+        # Modified only by _add_transition / _delete_transition.
+        self._tracked: list[tuple[int, int]] = list(_DEFAULT_TRANSITIONS)
+
+        # Last computed PredictCurveResult; None when predictor is not loaded or
+        # tracked list is empty.
+        self._last_curve_result = None
 
         # Root layout: left controls | right canvas.
         root_layout = QHBoxLayout(self)
@@ -103,41 +125,56 @@ class PredictorDialog(QDialog):
 
         left_layout.addWidget(load_group)
 
-        # ── Predict frequency ─────────────────────────────────────────────
-        predict_group = QGroupBox("Predict frequency")
-        predict_form = QFormLayout(predict_group)
+        # ── Predict / marker ─────────────────────────────────────────────
+        marker_group = QGroupBox("Predict frequency")
+        marker_form = QFormLayout(marker_group)
 
         self._predict_value_spin = QDoubleSpinBox()
         self._predict_value_spin.setRange(-1e6, 1e6)
         self._predict_value_spin.setDecimals(6)
         self._predict_value_spin.setValue(0.0)
         self._predict_value_spin.valueChanged.connect(self._on_spinbox_changed)
-        predict_form.addRow("Flux value (A):", self._predict_value_spin)
+        marker_form.addRow("Flux value (A):", self._predict_value_spin)
 
-        transition_row = QHBoxLayout()
-        self._from_spin = QSpinBox()
-        self._from_spin.setRange(0, 20)
-        self._from_spin.setValue(0)
-        self._to_spin = QSpinBox()
-        self._to_spin.setRange(0, 20)
-        self._to_spin.setValue(1)
-        self._from_spin.valueChanged.connect(self._on_transition_changed)
-        self._to_spin.valueChanged.connect(self._on_transition_changed)
-        transition_row.addWidget(QLabel("from"))
-        transition_row.addWidget(self._from_spin)
-        transition_row.addWidget(QLabel("to"))
-        transition_row.addWidget(self._to_spin)
-        predict_form.addRow("Transition:", transition_row)
+        left_layout.addWidget(marker_group)
 
-        predict_btn = QPushButton("Predict")
-        predict_btn.clicked.connect(self._on_predict_clicked)
-        predict_form.addRow("", predict_btn)
+        # ── Tracked transitions table ─────────────────────────────────────
+        transitions_group = QGroupBox("Tracked transitions")
+        transitions_layout = QVBoxLayout(transitions_group)
 
-        self._predict_result_label = QLabel("—")
-        self._predict_result_label.setStyleSheet("font-weight: bold;")
-        predict_form.addRow("Result:", self._predict_result_label)
+        # 3-column table: Transition | Freq (MHz) | (delete button placeholder)
+        self._table = QTableWidget(0, 3)
+        self._table.setHorizontalHeaderLabels(["Transition", "Freq (MHz)", ""])
+        header = self._table.horizontalHeader()
+        if header is not None:
+            header.setStretchLastSection(False)
+        self._table.setSelectionBehavior(
+            QTableWidget.SelectRows  # type: ignore[attr-defined]
+        )
+        self._table.setEditTriggers(
+            QTableWidget.NoEditTriggers  # type: ignore[attr-defined]
+        )
+        self._table.itemSelectionChanged.connect(self._on_selection_changed)
+        transitions_layout.addWidget(self._table)
 
-        left_layout.addWidget(predict_group)
+        # Add-transition controls row below the table.
+        add_row = QHBoxLayout()
+        add_row.addWidget(QLabel("from"))
+        self._add_from_spin = QSpinBox()
+        self._add_from_spin.setRange(0, 20)
+        self._add_from_spin.setValue(0)
+        add_row.addWidget(self._add_from_spin)
+        add_row.addWidget(QLabel("to"))
+        self._add_to_spin = QSpinBox()
+        self._add_to_spin.setRange(0, 20)
+        self._add_to_spin.setValue(1)
+        add_row.addWidget(self._add_to_spin)
+        add_btn = QPushButton("Add")
+        add_btn.clicked.connect(self._on_add_clicked)
+        add_row.addWidget(add_btn)
+        transitions_layout.addLayout(add_row)
+
+        left_layout.addWidget(transitions_group)
 
         # ── status label ──────────────────────────────────────────────────
         self._status_label = QLabel("")
@@ -159,17 +196,20 @@ class PredictorDialog(QDialog):
         root_layout.addWidget(left_widget, stretch=0)
         root_layout.addWidget(self._canvas, stretch=1)
 
-        # ── Debounce timer for the single-point predict label ─────────────
+        # ── Debounce timer for per-row freq updates ────────────────────────
         self._debounce_timer = QTimer(self)
         self._debounce_timer.setSingleShot(True)
         self._debounce_timer.setInterval(_DEBOUNCE_MS)
-        self._debounce_timer.timeout.connect(self._on_predict_clicked)
+        self._debounce_timer.timeout.connect(self._update_freq_column)
 
         # ── Predictor info cache (flux_half, flux_period for conversions) ──
         self._flux_half: float | None = None
         self._flux_period: float | None = None
 
-        # pre-fill with current predictor state
+        # Populate table from default transitions before loading predictor.
+        self._rebuild_table()
+
+        # Pre-fill with current predictor state.
         info = controller.get_predictor_info()
         if info is not None:
             if info["path"] is not None:
@@ -180,7 +220,7 @@ class PredictorDialog(QDialog):
             self._set_status("Currently loaded", error=False)
             self._refresh_curves()
 
-        # EventBus subscription for live predictor state updates
+        # EventBus subscription for live predictor state updates.
         from zcu_tools.gui.session.events import PredictorChangedPayload
 
         self._bus_subscribed = False
@@ -221,15 +261,97 @@ class PredictorDialog(QDialog):
         return value_to_flux, flux_to_value
 
     # ------------------------------------------------------------------
+    # Table helpers
+    # ------------------------------------------------------------------
+
+    def _rebuild_table(self) -> None:
+        """Rebuild the QTableWidget rows from self._tracked.
+
+        Called after any add/delete operation.  Preserves the previous row
+        selection if the transition is still present.
+        """
+        # Remember the currently selected transition so we can restore it.
+        selected = self._selected_transition()
+
+        # Disconnect selection signal while rebuilding to avoid spurious events.
+        self._table.itemSelectionChanged.disconnect(self._on_selection_changed)
+        self._table.setRowCount(0)
+
+        for row_idx, (frm, to) in enumerate(self._tracked):
+            self._table.insertRow(row_idx)
+
+            # Column 0: transition label (e.g. "0→1")
+            label_item = QTableWidgetItem(f"{frm}→{to}")
+            self._table.setItem(row_idx, _COL_TRANSITION, label_item)
+
+            # Column 1: freq placeholder — populated by _update_freq_column
+            freq_item = QTableWidgetItem("—")
+            self._table.setItem(row_idx, _COL_FREQ, freq_item)
+
+            # Column 2: Delete button
+            del_btn = QPushButton("✕")
+            # Capture (frm, to) in the lambda closure explicitly.
+            del_btn.clicked.connect(
+                lambda _checked, t=(frm, to): self._delete_transition(t)
+            )
+            self._table.setCellWidget(row_idx, _COL_DELETE, del_btn)
+
+        self._table.resizeColumnsToContents()
+        self._table.itemSelectionChanged.connect(self._on_selection_changed)
+
+        # Restore selection if the transition is still present.
+        if selected is not None and selected in self._tracked:
+            row = self._tracked.index(selected)
+            self._table.selectRow(row)
+
+    def _selected_transition(self) -> tuple[int, int] | None:
+        """Return the (from, to) tuple for the currently selected table row, or None."""
+        rows = self._table.selectedItems()
+        if not rows:
+            return None
+        row = self._table.currentRow()
+        if row < 0 or row >= len(self._tracked):
+            return None
+        return self._tracked[row]
+
+    def _update_freq_column(self) -> None:
+        """Fill the Freq column for every tracked transition at the current marker value.
+
+        Called by the debounce timer.  Uses predict_freq for each row individually
+        so each value is as accurate as possible.  Any failure per-row shows "—".
+        """
+        from zcu_tools.gui.session.services.connection import (
+            PredictFreqRequest,
+            PredictorNotLoaded,
+        )
+
+        marker_value = self._predict_value_spin.value()
+        for row_idx, transition in enumerate(self._tracked):
+            try:
+                freq = self._ctrl.predict_freq(
+                    PredictFreqRequest(value=marker_value, transition=transition)
+                )
+                text = f"{freq:.4f}"
+            except (PredictorNotLoaded, ValueError):
+                text = "—"
+            item = self._table.item(row_idx, _COL_FREQ)
+            if item is not None:
+                item.setText(text)
+
+    # ------------------------------------------------------------------
     # Curve refresh
     # ------------------------------------------------------------------
 
     def _refresh_curves(self) -> None:
-        """Recompute and redraw all transition curves."""
+        """Recompute and redraw all transition curves for the current tracked set."""
         from zcu_tools.gui.session.services.connection import (
             PredictCurveRequest,
             PredictorNotLoaded,
         )
+
+        if not self._tracked:
+            self._canvas.clear()
+            return
 
         value_to_flux, flux_to_value = self._make_affine()
         if value_to_flux is None or flux_to_value is None:
@@ -244,13 +366,14 @@ class PredictorDialog(QDialog):
 
         try:
             result = self._ctrl.predict_freq_curve(
-                PredictCurveRequest(values=grid, transitions=_DEFAULT_TRANSITIONS)
+                PredictCurveRequest(values=grid, transitions=tuple(self._tracked))
             )
         except (PredictorNotLoaded, ValueError) as exc:
             self._set_status(str(exc), error=True)
             return
 
-        highlight = (self._from_spin.value(), self._to_spin.value())
+        self._last_curve_result = result
+        highlight = self._selected_transition()
         marker_value = self._predict_value_spin.value()
 
         self._canvas.render_curves(
@@ -262,12 +385,55 @@ class PredictorDialog(QDialog):
             flux_to_value=flux_to_value,
         )
 
+        # Refresh the Freq column for the new marker position.
+        self._update_freq_column()
+
+    # ------------------------------------------------------------------
+    # Add / delete transitions
+    # ------------------------------------------------------------------
+
+    def _add_transition(self, frm: int, to: int) -> bool:
+        """Validate and append (frm, to) to self._tracked.
+
+        Returns True on success, False if the transition is invalid or duplicate.
+        Validation: frm >= 0, to >= 0, frm < to, and not already tracked.
+        """
+        if frm < 0 or to < 0:
+            self._set_status("Transition levels must be non-negative.", error=True)
+            return False
+        if frm >= to:
+            self._set_status(
+                f"Invalid transition {frm}→{to}: 'from' must be < 'to'.", error=True
+            )
+            return False
+        if (frm, to) in self._tracked:
+            self._set_status(f"Transition {frm}→{to} is already tracked.", error=True)
+            return False
+        self._tracked.append((frm, to))
+        return True
+
+    def _delete_transition(self, transition: tuple[int, int]) -> None:
+        """Remove ``transition`` from self._tracked and refresh."""
+        if transition not in self._tracked:
+            return
+        self._tracked.remove(transition)
+        self._rebuild_table()
+        self._refresh_curves()
+
+    def _on_add_clicked(self) -> None:
+        """Validate and add the transition from the add-row spinboxes."""
+        frm = self._add_from_spin.value()
+        to = self._add_to_spin.value()
+        if self._add_transition(frm, to):
+            self._rebuild_table()
+            self._refresh_curves()
+
     # ------------------------------------------------------------------
     # Spinbox / canvas bidirectional coupling
     # ------------------------------------------------------------------
 
     def _on_spinbox_changed(self, value: float) -> None:
-        """Spinbox changed → update marker; schedule debounced label update."""
+        """Spinbox changed → update marker; schedule debounced freq-column update."""
         self._canvas.set_marker(value)
         self._debounce_timer.start()
 
@@ -279,20 +445,21 @@ class PredictorDialog(QDialog):
         # Canvas already moved the marker in set_marker; nothing else needed.
 
     def _on_canvas_drop(self, value: float) -> None:
-        """Canvas drop → update spinbox and trigger label recompute immediately."""
+        """Canvas drop → update spinbox and trigger freq column recompute immediately."""
         self._predict_value_spin.blockSignals(True)
         self._predict_value_spin.setValue(value)
         self._predict_value_spin.blockSignals(False)
-        # Drop triggers an immediate predict (cancel any pending debounce first).
+        # Drop triggers an immediate update (cancel any pending debounce first).
         self._debounce_timer.stop()
-        self._on_predict_clicked()
+        self._update_freq_column()
 
-    def _on_transition_changed(self) -> None:
-        """Transition spinbox changed → restyle existing curve artists; no recompute."""
-        self._canvas.set_highlight((self._from_spin.value(), self._to_spin.value()))
+    def _on_selection_changed(self) -> None:
+        """Table row selection changed → restyle highlighted curve on canvas."""
+        transition = self._selected_transition()
+        self._canvas.set_highlight(transition)
 
     # ------------------------------------------------------------------
-    # File / load / clear / predict handlers
+    # File / load / clear handlers
     # ------------------------------------------------------------------
 
     def _on_browse_file(self) -> None:
@@ -322,40 +489,16 @@ class PredictorDialog(QDialog):
 
     def _on_clear(self) -> None:
         self._ctrl.clear_predictor()
-        self._predict_result_label.setText("—")
         self._set_status("Predictor cleared")
         self._flux_half = None
         self._flux_period = None
         self._canvas.clear()
+        # Reset Freq column to "—" without rebuilding rows.
+        for row_idx in range(self._table.rowCount()):
+            item = self._table.item(row_idx, _COL_FREQ)
+            if item is not None:
+                item.setText("—")
         logger.info("PredictorDialog: predictor cleared")
-
-    def _on_predict_clicked(self) -> None:
-        from zcu_tools.gui.session.services.connection import (
-            PredictFreqRequest,
-            PredictorNotLoaded,
-        )
-
-        value = self._predict_value_spin.value()
-        from_lvl = self._from_spin.value()
-        to_lvl = self._to_spin.value()
-        transition = (from_lvl, to_lvl)
-        try:
-            freq = self._ctrl.predict_freq(
-                PredictFreqRequest(value=value, transition=transition)
-            )
-        except PredictorNotLoaded as exc:
-            self._set_status(str(exc), error=True)
-            return
-        self._predict_result_label.setText(f"{freq:.4f} MHz")
-        self._set_status(
-            f"Predicted ({from_lvl},{to_lvl}) @ {value:.6g}: {freq:.4f} MHz"
-        )
-        logger.info(
-            "PredictorDialog: predict value=%r transition=%r → %.4f MHz",
-            value,
-            transition,
-            freq,
-        )
 
     # ------------------------------------------------------------------
     # Bus subscription
@@ -387,6 +530,10 @@ class PredictorDialog(QDialog):
             self._flux_period = None
             self._set_status("Not loaded", error=False)
             self._canvas.clear()
+            for row_idx in range(self._table.rowCount()):
+                item = self._table.item(row_idx, _COL_FREQ)
+                if item is not None:
+                    item.setText("—")
 
     # ------------------------------------------------------------------
     # Status helper
