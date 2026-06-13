@@ -635,6 +635,15 @@ class AgentRunner(QObject):
         if cb not in self._state_listeners:
             self._state_listeners.append(cb)
 
+    def detach(self) -> None:
+        """CLI backend: detach == stop.
+
+        A bound QProcess child has no meaningful life outside this dialog, so
+        detaching is identical to stopping.  Implements AgentSessionPort.detach
+        (decision H, ADR-0024 B1b-2).
+        """
+        self.stop()
+
     # ------------------------------------------------------------------
     # QProcess slots (main-thread)
     # ------------------------------------------------------------------

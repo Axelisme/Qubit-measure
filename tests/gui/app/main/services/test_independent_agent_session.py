@@ -513,3 +513,209 @@ def test_independent_agent_session_conforms_to_port() -> None:
 
     session, _, _, _ = _make_session()
     assert isinstance(session, AgentSessionPort)
+
+
+# ---------------------------------------------------------------------------
+# I17 — start() uses registry_dir (B1b-2: named dir, not tmpdir)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("qapp")
+def test_start_uses_registry_dir(tmp_path: Path) -> None:
+    """start() must use registry_dir()/<session_id>/ not a tmpdir."""
+    from unittest.mock import patch
+
+    session, _, _, _ = _make_session()
+    fake_handle = _fake_handle(tmp_path)
+
+    captured_dirs: list[Path] = []
+
+    def _fake_spawn(session_dir, task, repo_root, *, session_id=None):
+        captured_dirs.append(Path(session_dir))
+        return fake_handle
+
+    with (
+        patch(
+            "zcu_tools.gui.app.main.services.independent_agent_session.registry_dir",
+            return_value=tmp_path,
+        ),
+        patch(
+            "zcu_tools.gui.app.main.services.independent_agent_session.spawn_supervisor_detached",
+            side_effect=_fake_spawn,
+        ),
+    ):
+        session.start("my task", "/repo")
+
+    assert len(captured_dirs) == 1
+    # The session_dir must be a subdirectory of registry_dir (tmp_path).
+    assert captured_dirs[0].parent == tmp_path
+    session._timer.stop()
+
+
+# ---------------------------------------------------------------------------
+# I18 — attach() rebuilds transcript from existing log fixture
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("qapp")
+def test_attach_replays_log(tmp_path: Path) -> None:
+    """attach() must reset offset=0 and replay the full log through callbacks."""
+    from unittest.mock import patch
+
+    from zcu_tools.gui.app.main.services.agent_runner import AssistantTextUpdate
+
+    session, updates, states, _ = _make_session()
+    fake_handle = _fake_handle(tmp_path)
+    fake_handle.spool_dir.mkdir(parents=True, exist_ok=True)
+
+    # Pre-write log: system init + assistant text + result.
+    _write_log_lines(
+        fake_handle.log_path,
+        [
+            _system_init_line("sid-attach"),
+            _assistant_line("Hello from attach"),
+            _result_line(is_error=False),
+        ],
+    )
+
+    record = {
+        "session_id": "test0001",
+        "claude_session_id": "",
+        "pid": fake_handle.pid,
+        "status": "stopped",
+        "log_path": str(fake_handle.log_path),
+        "spool_dir": str(fake_handle.spool_dir),
+        "created": "2026-06-14T00:00:00",
+        "title": "test attach",
+    }
+
+    with patch(
+        "zcu_tools.gui.app.main.services.independent_agent_session._supervisor_alive",
+        return_value=False,  # stopped session
+    ):
+        session.attach(record)  # type: ignore[arg-type]
+        session.tick()
+
+    assistant_updates = [
+        u for batch in updates for u in batch if isinstance(u, AssistantTextUpdate)
+    ]
+    assert len(assistant_updates) >= 1
+    assert any(u.text == "Hello from attach" for u in assistant_updates)
+    assert session.session_id() == "sid-attach"
+    session._timer.stop()
+
+
+# ---------------------------------------------------------------------------
+# I19 — attach() stopped record: state eventually transitions to stopped
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("qapp")
+def test_attach_stopped_record_transitions_stopped(tmp_path: Path) -> None:
+    """attach() of a stopped session: after reading the result frame, state=stopped."""
+    from unittest.mock import patch
+
+    session, _, states, _ = _make_session()
+    fake_handle = _fake_handle(tmp_path)
+    fake_handle.spool_dir.mkdir(parents=True, exist_ok=True)
+
+    _write_log_lines(
+        fake_handle.log_path,
+        [_result_line(is_error=False)],
+    )
+
+    record = {
+        "session_id": "test0002",
+        "claude_session_id": "",
+        "pid": fake_handle.pid,
+        "status": "stopped",
+        "log_path": str(fake_handle.log_path),
+        "spool_dir": str(fake_handle.spool_dir),
+        "created": "2026-06-14T00:00:00",
+        "title": "test stopped attach",
+    }
+
+    with patch(
+        "zcu_tools.gui.app.main.services.independent_agent_session._supervisor_alive",
+        return_value=False,
+    ):
+        session.attach(record)  # type: ignore[arg-type]
+        session.tick()
+
+    assert session.state == "idle"
+    session._timer.stop()
+
+
+# ---------------------------------------------------------------------------
+# I20 — detach() stops timer without calling stop_supervisor
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("qapp")
+def test_detach_stops_timer_not_supervisor(tmp_path: Path) -> None:
+    """detach() must stop the timer and clear handle; stop_supervisor must NOT be called."""
+    from unittest.mock import patch
+
+    session, _, _, _ = _make_session()
+    fake_handle = _fake_handle(tmp_path)
+    session._handle = fake_handle
+    session._run_state.on_start()
+    session._timer.start()
+
+    with patch(
+        "zcu_tools.gui.app.main.services.independent_agent_session.stop_supervisor"
+    ) as mock_stop:
+        session.detach()
+
+    mock_stop.assert_not_called()
+    assert session._handle is None
+    assert not session._timer.isActive()
+
+
+# ---------------------------------------------------------------------------
+# I21 — detach() then attach() re-starts the tail from offset=0
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("qapp")
+def test_detach_then_attach_replays(tmp_path: Path) -> None:
+    """After detach(), a subsequent attach() must replay the log from scratch."""
+    from unittest.mock import patch
+
+    from zcu_tools.gui.app.main.services.agent_runner import AssistantTextUpdate
+
+    session, updates, _, _ = _make_session()
+    fake_handle = _fake_handle(tmp_path)
+    fake_handle.spool_dir.mkdir(parents=True, exist_ok=True)
+
+    _write_log_lines(fake_handle.log_path, [_assistant_line("Re-attached")])
+
+    session._handle = fake_handle
+    session._run_state.on_start()
+    session._log_offset = 999  # simulate an earlier offset
+    session.detach()
+
+    record = {
+        "session_id": "test0003",
+        "claude_session_id": "",
+        "pid": fake_handle.pid,
+        "status": "stopped",
+        "log_path": str(fake_handle.log_path),
+        "spool_dir": str(fake_handle.spool_dir),
+        "created": "2026-06-14T00:00:00",
+        "title": "re-attach",
+    }
+
+    with patch(
+        "zcu_tools.gui.app.main.services.independent_agent_session._supervisor_alive",
+        return_value=False,
+    ):
+        session.attach(record)  # type: ignore[arg-type]
+        assert session._log_offset == 0
+        session.tick()
+
+    all_updates = [
+        u for batch in updates for u in batch if isinstance(u, AssistantTextUpdate)
+    ]
+    assert any(u.text == "Re-attached" for u in all_updates)
+    session._timer.stop()

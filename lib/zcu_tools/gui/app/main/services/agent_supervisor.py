@@ -61,6 +61,13 @@ from zcu_tools.gui.app.main.services.agent_runner import (
     build_stdin_message,
 )
 
+# Registry helpers — imported lazily in run_supervisor_loop to keep the
+# supervisor importable even when called without a session_id (B1b-1 compat).
+from zcu_tools.gui.app.main.services.agent_session_registry import (
+    AgentSessionRecord,
+    write_record,
+)
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -177,6 +184,7 @@ def run_supervisor_loop(
     task: str,
     repo_root: str,
     *,
+    session_id: str | None = None,
     _spawn_claude: bool = True,
 ) -> int:
     """Blocking supervisor main loop.
@@ -184,14 +192,42 @@ def run_supervisor_loop(
     Spawns claude, routes stdout → log file, polls spool dir → claude stdin.
     Returns the claude exit code (or -1 if spawn failed).
 
+    If ``session_id`` is provided, a registry record is written (status=running)
+    at startup and updated to status=stopped in the ``finally`` block.
+
     ``_spawn_claude=False`` is a test seam: skips the real Popen but exercises
     log/spool routing logic with a fake process object injected externally.
     Used only by unit tests.
     """
+    import datetime
+
     session_dir = Path(session_dir)
     log_path = session_dir / _LOG_FILENAME
     spool_dir = session_dir / _SPOOL_DIRNAME
     spool_dir.mkdir(parents=True, exist_ok=True)
+
+    # Write registry record before spawning claude, so the GUI can attach
+    # even if the spawn fails (it will self-heal to stopped on next read).
+    if session_id is not None:
+        record: AgentSessionRecord = {
+            "session_id": session_id,
+            "claude_session_id": "",  # populated in B1b-4 via --resume
+            "pid": os.getpid(),
+            "status": "running",
+            "log_path": str(log_path),
+            "spool_dir": str(spool_dir),
+            "created": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "title": task[:60],  # first 60 chars as display title
+        }
+        try:
+            write_record(record)
+            logger.info(
+                "supervisor: wrote registry record session_id=%s pid=%s",
+                session_id,
+                os.getpid(),
+            )
+        except OSError as exc:
+            logger.warning("supervisor: could not write registry record: %s", exc)
 
     mcp_config_path = build_loopback_mcp_config(repo_root)
     argv = build_claude_argv(task, mcp_config_path)
@@ -199,6 +235,8 @@ def run_supervisor_loop(
     if not _spawn_claude:
         # Test path: caller sets up a fake proc externally; we just return.
         logger.debug("supervisor: _spawn_claude=False, returning without spawn")
+        if session_id is not None:
+            _update_registry_stopped(session_id, log_path, spool_dir)
         return 0
 
     env = os.environ.copy()
@@ -217,6 +255,8 @@ def run_supervisor_loop(
         )
     except OSError as exc:
         logger.error("supervisor: failed to spawn claude: %s", exc)
+        if session_id is not None:
+            _update_registry_stopped(session_id, log_path, spool_dir)
         return -1
 
     assert proc.stdin is not None
@@ -239,8 +279,37 @@ def run_supervisor_loop(
                 if raw.strip():
                     append_log_line(log_path, raw)
         logger.info("supervisor: done, exit_code=%s", proc.returncode)
+        # Update registry to stopped now that the session has ended.
+        if session_id is not None:
+            _update_registry_stopped(session_id, log_path, spool_dir)
 
     return proc.returncode if proc.returncode is not None else -1
+
+
+def _update_registry_stopped(session_id: str, log_path: Path, spool_dir: Path) -> None:
+    """Write a stopped-status registry record for this session.
+
+    Called from ``run_supervisor_loop``'s finally block; silently logs on
+    failure (the GUI self-heals via pid-probe on the next ``list_records``).
+    """
+    from zcu_tools.gui.app.main.services.agent_session_registry import read_record
+
+    try:
+        existing = read_record(session_id)
+        if existing is not None:
+            existing["status"] = "stopped"
+            write_record(existing)
+        else:
+            # Record was removed (e.g. user deleted it); don't recreate.
+            logger.debug(
+                "supervisor: registry record %s already gone at shutdown", session_id
+            )
+    except OSError as exc:
+        logger.warning(
+            "supervisor: could not update registry to stopped for %s: %s",
+            session_id,
+            exc,
+        )
 
 
 def _io_loop(
@@ -307,12 +376,14 @@ def spawn_supervisor_detached(
     session_dir: Path,
     task: str,
     repo_root: str,
+    *,
+    session_id: str | None = None,
 ) -> SupervisorHandle:
     """Spawn the supervisor as a detached process and return a handle.
 
     The supervisor is launched as ``python -m <this_module>`` with the
-    session directory, task, and repo root passed as CLI arguments.  It is
-    detached from the calling GUI process's lifetime:
+    session directory, task, repo root, and optional session_id as CLI
+    arguments.  It is detached from the calling GUI process's lifetime:
 
     POSIX:   ``start_new_session=True`` (new session, no controlling tty,
              SIGHUP-independent).
@@ -320,7 +391,8 @@ def spawn_supervisor_detached(
              Windows-verify — not runnable on Linux.
 
     The caller is responsible for creating ``session_dir`` before calling
-    this function.
+    this function.  If ``session_id`` is provided, the detached supervisor
+    writes a registry record at startup and marks it stopped on exit.
     """
     session_dir = Path(session_dir)
     session_dir.mkdir(parents=True, exist_ok=True)
@@ -336,6 +408,8 @@ def spawn_supervisor_detached(
         "--repo-root",
         repo_root,
     ]
+    if session_id is not None:
+        argv.extend(["--session-id", session_id])
 
     if sys.platform == "win32":
         # Windows-verify: DETACHED_PROCESS keeps the console hidden;
@@ -435,6 +509,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--session-dir", required=True, help="Session directory path.")
     parser.add_argument("--task", required=True, help="Initial user task string.")
     parser.add_argument("--repo-root", required=True, help="Repository root path.")
+    parser.add_argument(
+        "--session-id",
+        default=None,
+        help=(
+            "Registry session_id (8-hex).  When provided, the supervisor writes "
+            "a running record to the agent-session registry at startup and "
+            "a stopped record on exit."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -449,6 +532,7 @@ def main(argv: list[str] | None = None) -> None:
         session_dir=Path(args.session_dir),
         task=args.task,
         repo_root=args.repo_root,
+        session_id=args.session_id,
     )
     sys.exit(exit_code if exit_code >= 0 else 1)
 

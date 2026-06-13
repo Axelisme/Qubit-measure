@@ -278,3 +278,17 @@ class AgentSessionPort(Protocol):
         state machine or other listeners.
         """
         ...
+
+    def detach(self) -> None:
+        """Detach from the session without stopping it.
+
+        CLI backend (AgentRunner): equivalent to ``stop()`` — a bound child
+        process has no life outside the dialog.
+        Independent backend (IndependentAgentSession): stops the poll-tail
+        timer and clears the handle; the detached supervisor process keeps
+        running and can be re-attached later via ``attach()``.
+
+        Decision H (ADR-0024 B1b-2): the port declares ``detach()`` so the
+        dialog can call the same method regardless of which backend is active.
+        """
+        ...

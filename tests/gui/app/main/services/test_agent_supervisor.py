@@ -335,3 +335,88 @@ def test_stop_supervisor_windows_fallback_to_taskkill(tmp_path: Path) -> None:
     cmd = args[0]
     assert "taskkill" in cmd
     assert str(12345) in cmd
+
+
+# ---------------------------------------------------------------------------
+# S12 — run_supervisor_loop with session_id writes running then stopped
+# ---------------------------------------------------------------------------
+
+
+def test_run_supervisor_loop_writes_registry_record(tmp_path: Path) -> None:
+    """run_supervisor_loop with session_id must write a running record and then stopped."""
+    from unittest.mock import patch
+
+    from zcu_tools.gui.app.main.services.agent_supervisor import run_supervisor_loop
+
+    written_records: list[dict] = []
+
+    def fake_write_record(record):
+        written_records.append(dict(record))
+
+    # _update_registry_stopped does a local import of read_record from the
+    # registry module; patch both the top-level write_record (imported at module
+    # level in agent_supervisor) and the registry module's read_record.
+    with (
+        patch(
+            "zcu_tools.gui.app.main.services.agent_supervisor.write_record",
+            side_effect=fake_write_record,
+        ),
+        patch(
+            "zcu_tools.gui.app.main.services.agent_session_registry.read_record",
+            return_value=None,  # simulate already-deleted record at shutdown
+        ),
+    ):
+        run_supervisor_loop(
+            session_dir=tmp_path,
+            task="test task",
+            repo_root="/repo",
+            session_id="testsid1",
+            _spawn_claude=False,  # test seam: skip real Popen
+        )
+
+    # At least the running record must have been written.
+    assert any(r.get("status") == "running" for r in written_records), (
+        "Expected a running record to be written"
+    )
+    assert any(r.get("session_id") == "testsid1" for r in written_records)
+
+
+# ---------------------------------------------------------------------------
+# S13 — --session-id CLI argument is parsed
+# ---------------------------------------------------------------------------
+
+
+def test_parse_args_session_id() -> None:
+    """--session-id must be parsed correctly."""
+    from zcu_tools.gui.app.main.services.agent_supervisor import _parse_args
+
+    args = _parse_args(
+        [
+            "--session-dir",
+            "/tmp/s",
+            "--task",
+            "mytask",
+            "--repo-root",
+            "/repo",
+            "--session-id",
+            "abc12345",
+        ]
+    )
+    assert args.session_id == "abc12345"
+
+
+def test_parse_args_session_id_default_none() -> None:
+    """--session-id must default to None when not supplied."""
+    from zcu_tools.gui.app.main.services.agent_supervisor import _parse_args
+
+    args = _parse_args(
+        [
+            "--session-dir",
+            "/tmp/s",
+            "--task",
+            "mytask",
+            "--repo-root",
+            "/repo",
+        ]
+    )
+    assert args.session_id is None

@@ -1,7 +1,7 @@
 """IndependentAgentSession — AgentSessionPort backed by a detached supervisor.
 
-This is the B1b-1 implementation of ``AgentSessionPort``.  A detached Python
-supervisor process owns the ``claude`` subprocess; this class tails the
+This is the B1b-1/B1b-2 implementation of ``AgentSessionPort``.  A detached
+Python supervisor process owns the ``claude`` subprocess; this class tails the
 supervisor's NDJSON log file from the GUI main thread via a ``QTimer`` poll
 and writes user messages into the command spool directory.
 
@@ -26,12 +26,16 @@ Threading model
   All methods must be called from the Qt main thread.  The ``QTimer`` callback
   ``_on_tick`` is also main-thread (Qt guarantee), so no locking is needed.
 
-B1b-1 scope
------------
-  - Session dir is a fixed temp path per session (registry is B1b-2).
-  - ``session_id`` is populated from the ``system/init`` frame in the log.
-  - No lease / heartbeat / registry (B1b-2/3).
-  - No ``--resume`` (B1b-4).
+B1b-2 additions over B1b-1
+---------------------------
+  - ``start()`` uses ``registry_dir()/<session_id>/`` instead of a tmpdir;
+    the ``session_id`` is passed to ``spawn_supervisor_detached`` which forwards
+    it to the detached supervisor so it writes the registry record.
+  - ``attach(record)`` rebuilds the tail state from an existing registry record
+    without spawning a new supervisor.  The poll-tail runs from offset=0 so the
+    full transcript history is replayed.
+  - ``detach()`` stops the poll timer and clears ``_handle`` **without** calling
+    ``stop_supervisor`` — the session keeps running and can be re-attached later.
 """
 
 from __future__ import annotations
@@ -39,8 +43,6 @@ from __future__ import annotations
 import logging
 import os
 import sys
-import tempfile
-import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -54,6 +56,11 @@ from .agent_runner import (
     StreamJsonParser,
     ToolUseUpdate,
     TranscriptUpdate,
+)
+from .agent_session_registry import (
+    AgentSessionRecord,
+    new_session_id,
+    registry_dir,
 )
 from .agent_supervisor import (
     SupervisorHandle,
@@ -79,18 +86,26 @@ _MAX_BYTES_PER_TICK = 512 * 1024  # 512 KiB
 class IndependentAgentSession(QObject):
     """AgentSessionPort backed by a detached supervisor + file-based IPC.
 
-    Lifecycle:
-      1. ``start(task, repo_root)`` — create session_dir, spawn supervisor,
-         start QTimer poll-tail.
+    Lifecycle (new session):
+      1. ``start(task, repo_root)`` — create session_dir under registry_dir,
+         spawn supervisor (which writes the registry record), start QTimer poll-tail.
       2. ``send_user_message(text)`` — write a spool file.
       3. ``stop()`` — send platform stop signal to supervisor pid.
       4. Poll-tail reads log lines → StreamJsonParser → callbacks → state machine.
       5. When the log shows a ``result`` frame (or supervisor disappears),
          the session ends.
 
+    Lifecycle (attach to existing session):
+      1. ``attach(record)`` — set up ``_handle`` from record's log/spool/pid;
+         reset parser + offset to 0; start poll-tail from beginning.
+      2. The full log history is replayed through callbacks (transcript rebuild).
+      3. If the record is stopped, the session reads to EOF and transitions to
+         stopped naturally; ``send_user_message`` is a no-op.
+      4. ``detach()`` — stop the poll timer, clear ``_handle``, do NOT kill supervisor.
+
     ``callbacks`` mirrors the ``_RunnerCallbacks`` dataclass from AgentRunner
-    so the wiring in ``Controller.get_agent_session()`` can share the same
-    callback-construction code for both backends.
+    so the wiring in ``Controller`` can share the same callback-construction
+    code for both backends.
     """
 
     def __init__(
@@ -136,7 +151,13 @@ class IndependentAgentSession(QObject):
         return _supervisor_alive(self._handle.pid) and self._run_state.is_active()
 
     def start(self, task: str, repo_root: str) -> None:
-        """Create session dir, spawn detached supervisor, begin poll-tail.
+        """Create session dir under registry_dir, spawn detached supervisor, begin poll-tail.
+
+        B1b-2: the session dir is ``registry_dir()/<session_id>/`` instead of
+        a tmpdir so the registry and log/spool dirs share the same root.  The
+        short ``session_id`` is passed to ``spawn_supervisor_detached`` which
+        forwards ``--session-id`` to the supervisor CLI; the supervisor writes
+        the registry record with its own PID.
 
         Fast-fails if a supervisor is already running.
         """
@@ -153,14 +174,16 @@ class IndependentAgentSession(QObject):
         self._line_buf = bytearray()
         self._run_state.on_start()
 
-        # B1b-1: use a per-session temp directory.  Registry (B1b-2) will
-        # replace this with a named path under ~/.cache/zcu-tools/agent_sessions/.
-        session_id_short = uuid.uuid4().hex[:8]
-        session_dir = Path(tempfile.gettempdir()) / f"zcu_agent_{session_id_short}"
+        # B1b-2: use a named dir under registry_dir so registry record and
+        # log/spool are co-located.  The supervisor will write the record.
+        session_id = new_session_id()
+        session_dir = registry_dir() / session_id
         session_dir.mkdir(parents=True, exist_ok=True)
 
         try:
-            self._handle = spawn_supervisor_detached(session_dir, task, repo_root)
+            self._handle = spawn_supervisor_detached(
+                session_dir, task, repo_root, session_id=session_id
+            )
         except OSError as exc:
             logger.error("IndependentAgentSession.start(): spawn failed: %s", exc)
             self._run_state.on_stop()
@@ -224,6 +247,71 @@ class IndependentAgentSession(QObject):
         """
         if cb not in self._state_listeners:
             self._state_listeners.append(cb)
+
+    # ------------------------------------------------------------------
+    # B1b-2: attach / detach
+    # ------------------------------------------------------------------
+
+    def attach(self, record: AgentSessionRecord) -> None:
+        """Attach to an existing session without spawning a new supervisor.
+
+        Rebuilds the poll-tail state from ``record``'s log_path / spool_dir /
+        pid.  The log is tailed from offset=0 so the full transcript history
+        is replayed through the callbacks, letting the dialog's AgentChatService
+        rebuild its transcript display.
+
+        If the record's ``status`` is ``"stopped"`` the session is started in
+        ``"working"`` state (so the ticker can run and reach EOF naturally);
+        once the result frame arrives (or the log is fully consumed with no
+        result), the state machine transitions to stopped.  If the record status
+        is ``"running"`` the normal live-tail behaviour applies.
+
+        Any previous handle is detached first (timer stopped, handle cleared)
+        without sending a stop signal.
+        """
+        if self._handle is not None:
+            self.detach()
+
+        log_path = Path(record["log_path"])
+        spool_dir = Path(record["spool_dir"])
+        pid = record["pid"]
+
+        self._handle = SupervisorHandle(pid=pid, log_path=log_path, spool_dir=spool_dir)
+
+        # Fresh parser and offset=0: replay the full log history.
+        self._parser = StreamJsonParser()
+        self._log_offset = 0
+        self._line_buf = bytearray()
+
+        # Transition to working so the ticker runs.  The state machine will
+        # converge to stopped when the result frame is reached (or pid dies).
+        self._run_state.on_start()
+
+        self._timer.start()
+        self._emit_state()
+        logger.info(
+            "IndependentAgentSession.attach: session_id=%s pid=%s status=%s",
+            record.get("session_id"),
+            pid,
+            record.get("status"),
+        )
+
+    def detach(self) -> None:
+        """Detach from the current session without stopping the supervisor.
+
+        Stops the poll timer and clears the handle so this object is idle.
+        The remote supervisor process is left running; a future ``attach()``
+        call can re-connect to the same session.
+
+        This is the Close button's action in the Picker UI (decision H):
+        CLI AgentRunner's ``detach()`` calls ``stop()``; Independent's
+        ``detach()`` only stops the tail.
+        """
+        self._timer.stop()
+        self._handle = None
+        self._run_state.on_stop()
+        self._emit_state()
+        logger.debug("IndependentAgentSession.detach(): timer stopped, handle cleared")
 
     # ------------------------------------------------------------------
     # Log poll-tail (QTimer callback, main thread)

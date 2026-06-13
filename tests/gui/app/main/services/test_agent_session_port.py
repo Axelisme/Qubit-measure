@@ -181,6 +181,7 @@ class FakeAgentSession:
         self.started_tasks: list[tuple[str, str]] = []
         self.sent_messages: list[str] = []
         self.stop_calls: int = 0
+        self.detach_calls: int = 0
         self._listeners: list[Callable[..., None]] = []
 
     @property
@@ -201,6 +202,11 @@ class FakeAgentSession:
     def stop(self) -> None:
         self.stop_calls += 1
         self._state = "stopped"  # type: ignore[assignment]
+        self._running = False
+
+    def detach(self) -> None:
+        """B1b-2: detach from session without stopping it."""
+        self.detach_calls += 1
         self._running = False
 
     def session_id(self) -> str:
@@ -226,7 +232,11 @@ def _make_ctrl_stub(
 
     ctrl = MagicMock()
     ctrl.get_agent_chat.return_value = AgentChatService()
+    # B1b-2: new_agent_session replaces get_agent_session as the factory.
+    ctrl.new_agent_session.return_value = fake_session
     ctrl.get_agent_session.return_value = fake_session
+    ctrl.list_agent_sessions.return_value = []
+    ctrl.agent_backend_mode.return_value = "independent"
     ctrl.get_project_root.return_value = "/fake/repo"
     ctrl.has_pending_wait.return_value = has_pending
     # FeedbackInbox stub: just record post() calls.
@@ -244,6 +254,8 @@ def test_dialog_routes_idle_to_start() -> None:
     ctrl = _make_ctrl_stub(fake)
 
     dialog = AgentChatDialog(ctrl)  # type: ignore[arg-type]
+    # Switch to conversation page (New) so _on_send can reach the input widget.
+    dialog._on_picker_new()
     try:
         dialog._input.setText("do the thing")
         dialog._on_send()
@@ -267,8 +279,8 @@ def test_dialog_routes_working_to_send_user_message() -> None:
     ctrl = _make_ctrl_stub(fake, has_pending=False)
 
     dialog = AgentChatDialog(ctrl)  # type: ignore[arg-type]
-    # Force session into dialog without Start click.
-    dialog._session = fake
+    # Force session into dialog without picker interaction.
+    dialog._switch_to_conversation(fake)
     try:
         dialog._input.setText("redirect the agent")
         dialog._on_send()
@@ -289,7 +301,7 @@ def test_dialog_routes_waiting_to_feedback_inbox() -> None:
     ctrl = _make_ctrl_stub(fake, has_pending=True)
 
     dialog = AgentChatDialog(ctrl)  # type: ignore[arg-type]
-    dialog._session = fake
+    dialog._switch_to_conversation(fake)
     try:
         dialog._input.setText("wake up now")
         dialog._on_send()
@@ -305,25 +317,23 @@ def test_dialog_routes_waiting_to_feedback_inbox() -> None:
 
 @pytest.mark.usefixtures("qapp")
 def test_dialog_state_listener_updates_ui() -> None:
-    """add_state_listener registered by the dialog must update button state."""
+    """add_state_listener registered by the dialog must update the status label."""
     from zcu_tools.gui.app.main.ui.agent_chat_dialog import AgentChatDialog
 
     fake = FakeAgentSession(initial_state="idle", running=False)
     ctrl = _make_ctrl_stub(fake)
 
     dialog = AgentChatDialog(ctrl)  # type: ignore[arg-type]
-    # Trigger session creation so the listener is registered.
-    _ = dialog._ensure_session()
+    # Switch to conversation so the status label is visible and listener registered.
+    dialog._switch_to_conversation(fake)
     try:
         # Simulate backend transitioning to working.
         fake.emit_state("working")
-        assert not dialog._start_btn.isEnabled()
-        assert dialog._stop_btn.isEnabled()
+        assert "working" in dialog._agent_status.text()
 
         # Simulate backend going idle again.
         fake.emit_state("idle")
-        assert dialog._start_btn.isEnabled()
-        assert not dialog._stop_btn.isEnabled()
+        assert "idle" in dialog._agent_status.text()
     finally:
         dialog._on_finished()
         dialog.close()

@@ -1146,28 +1146,45 @@ class Controller:
         return self._agent_chat_svc
 
     def get_agent_session(self):
-        """Return an AgentSessionPort-conforming backend wired to this Controller.
+        """Return an AgentSessionPort backend (kept for backwards compat).
 
-        Builds and returns an ``AgentRunner`` (CLI/subscription backend) with
-        all callbacks connected to this Controller's services. The dialog owns
-        the returned instance; calling this method twice creates two independent
-        runners — callers should hold and reuse the reference.
+        Delegates to ``new_agent_session()`` or ``_cli_agent_session()``
+        depending on the backend mode.  Existing callers that do not yet use
+        the picker can continue using this method.
+        """
+        return self.new_agent_session()
 
-        Annotated as ``AgentSessionPort`` so pyright verifies structural conformance
-        at the call site.
+    # ------------------------------------------------------------------
+    # B1b-2: backend mode + session factory methods
+    # ------------------------------------------------------------------
 
-        Future API-mode backend: replace the body to build a different class that
-        implements the same port; AgentChatDialog requires zero changes.
+    def agent_backend_mode(self) -> Literal["cli", "independent"]:
+        """Return the active agent backend mode.
+
+        Reads ``ZCU_AGENT_BACKEND`` from the environment (default=independent).
+        Callers (dialog, tests) should call this instead of reading os.environ
+        directly — one place to override the default.
+        """
+        import os as _os
+
+        raw = _os.environ.get("ZCU_AGENT_BACKEND", "independent").lower().strip()
+        if raw == "cli":
+            return "cli"
+        return "independent"
+
+    def _build_agent_callbacks(self):  # type: ignore[no-untyped-def]
+        """Build the shared callback bundle for any agent session backend.
+
+        Returns ``(on_update, on_state_changed, on_process_error, has_pending_wait)``
+        — the four arguments consumed by both ``_RunnerCallbacks`` (AgentRunner)
+        and the ``IndependentAgentSession`` keyword arguments.
         """
         from .services.agent_runner import (
-            AgentRunner,
             AssistantTextUpdate,
             ResultUpdate,
             SystemInitUpdate,
             ToolUseUpdate,
-            _RunnerCallbacks,
         )
-        from .services.ports import AgentSessionPort
 
         def _on_update(updates):  # type: ignore[no-untyped-def]
             # TranscriptUpdate variants → record_* on AgentChatService.
@@ -1192,27 +1209,116 @@ class Controller:
                 # RateLimitUpdate is informational; not recorded.
 
         def _on_state_changed(state):  # type: ignore[no-untyped-def]
-            # Sync embedded-active flag with runner liveness. Sticky across the
+            # Sync embedded-active flag with runner liveness.  Sticky across the
             # whole session (incl. idle between turns) so the queued activity tap
-            # — which checks this flag late on the main thread — stays suppressed
-            # and does not double-record tool calls already in the stream-json
-            # transcript. Only a terminal "stopped" re-enables the Phase-A tap.
+            # stays suppressed and does not double-record tool calls already in
+            # the stream-json transcript. Only a terminal "stopped" re-enables.
             chat = self.get_agent_chat()
             chat.set_embedded_active(state != "stopped")
 
         def _on_process_error(msg: str) -> None:
             self._notify("error", "Agent process error", msg)
 
-        callbacks = _RunnerCallbacks(
-            on_update=_on_update,
-            on_state_changed=_on_state_changed,
-            on_process_error=_on_process_error,
-            has_pending_wait=self.has_pending_wait,
+        return _on_update, _on_state_changed, _on_process_error, self.has_pending_wait
+
+    def new_agent_session(self):  # type: ignore[return]
+        """Return a freshly built AgentSessionPort backend.
+
+        In ``independent`` mode (default): returns an ``IndependentAgentSession``
+        that has NOT been started yet — the dialog calls ``start()`` on the first
+        Send (decision E).
+
+        In ``cli`` mode (``ZCU_AGENT_BACKEND=cli``): returns an ``AgentRunner``
+        (QProcess, bound child process; the original B0/B1a behaviour).
+        """
+        from .services.ports import AgentSessionPort
+
+        on_update, on_state_changed, on_process_error, has_pending_wait = (
+            self._build_agent_callbacks()
         )
-        # parent=None: the dialog will hold the reference; Qt parent is not set
-        # here because the controller does not own the dialog's lifetime.
-        session: AgentSessionPort = AgentRunner(callbacks, parent=None)
+
+        if self.agent_backend_mode() == "cli":
+            from .services.agent_runner import AgentRunner, _RunnerCallbacks
+
+            callbacks = _RunnerCallbacks(
+                on_update=on_update,
+                on_state_changed=on_state_changed,
+                on_process_error=on_process_error,
+                has_pending_wait=has_pending_wait,
+            )
+            session: AgentSessionPort = AgentRunner(callbacks, parent=None)
+            return session
+
+        # Independent mode (default).
+        from .services.independent_agent_session import IndependentAgentSession
+
+        session = IndependentAgentSession(
+            on_update=on_update,
+            on_state_changed=on_state_changed,
+            on_process_error=on_process_error,
+            has_pending_wait=has_pending_wait,
+            parent=None,
+        )
         return session
+
+    def attach_agent_session(self, record):  # type: ignore[no-untyped-def]
+        """Build an ``IndependentAgentSession`` and attach it to ``record``.
+
+        Returns a session whose poll-tail starts at offset=0 so the full log
+        history is replayed through the callbacks.  The dialog calls this when
+        the user clicks Attach/Resume in the picker.
+        """
+        from .services.agent_session_registry import AgentSessionRecord
+        from .services.independent_agent_session import IndependentAgentSession
+        from .services.ports import AgentSessionPort
+
+        on_update, on_state_changed, on_process_error, has_pending_wait = (
+            self._build_agent_callbacks()
+        )
+        session = IndependentAgentSession(
+            on_update=on_update,
+            on_state_changed=on_state_changed,
+            on_process_error=on_process_error,
+            has_pending_wait=has_pending_wait,
+            parent=None,
+        )
+        rec: AgentSessionRecord = record
+        session.attach(rec)
+        result: AgentSessionPort = session
+        return result
+
+    def list_agent_sessions(self):  # type: ignore[return]
+        """Return all agent session records sorted by ``created`` (oldest first).
+
+        Applies stale-running self-heal (dead pid → stopped) on each record.
+        Always returns a list (empty when no sessions exist).
+        """
+        from .services.agent_session_registry import AgentSessionRecord, list_records
+
+        result: list[AgentSessionRecord] = list_records()
+        return result
+
+    def remove_agent_session(self, session_id: str) -> None:
+        """Remove a session record from the registry (decision C).
+
+        For stopped sessions: deletes the record file.  For running sessions:
+        also stops the supervisor before deleting (best-effort; if the process
+        is already gone the stop call is a no-op).
+        """
+        from .services.agent_session_registry import read_record, remove_record
+        from .services.agent_supervisor import stop_supervisor
+
+        record = read_record(session_id)
+        if record is not None and record.get("status") == "running":
+            try:
+                stop_supervisor(record["pid"])
+            except Exception:
+                logger.exception(
+                    "controller.remove_agent_session: stop_supervisor failed "
+                    "for pid=%s; continuing removal",
+                    record.get("pid"),
+                )
+        remove_record(session_id)
 
     # ------------------------------------------------------------------
     # Startup application workflow (StartupService)
