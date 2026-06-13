@@ -150,6 +150,59 @@ def test_inspect_dialog_md_edit(qapp):
     ctrl.set_md_attr.assert_called_with("key1", 20)
 
 
+def test_inspect_dialog_md_set_success_clears_value_keeps_key(qapp):
+    """After a successful Set, the value field is cleared; the key field is kept."""
+    ctrl = MagicMock()
+    bus = MagicMock()
+
+    mock_md = MagicMock()
+    mock_md.items.return_value = {"key1": 10}.items()
+    ctrl.get_current_md.return_value = mock_md
+    ctrl.coerce_md_value.return_value = 42
+    dialog = InspectDialog(ctrl, bus)
+
+    dialog._on_md_row_clicked(0, 0)  # fills key="key1", value="10"
+    dialog._edit_value.setText("42")
+
+    dialog._set_btn.click()
+
+    # Value field must be empty after successful set (visual "committed" signal).
+    assert dialog._edit_value.text() == ""
+    # Key field must be preserved so the user can chain edits or use Delete.
+    assert dialog._edit_key.text() == "key1"
+    # Set button remains enabled because the key is still present.
+    assert dialog._set_btn.isEnabled()
+
+
+def test_inspect_dialog_md_set_failure_preserves_value(qapp, monkeypatch):
+    """When coerce_md_value raises MdValueError, the value field is NOT cleared."""
+    from qtpy.QtWidgets import QMessageBox
+    from zcu_tools.gui.session.services.context import MdValueError
+
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
+
+    ctrl = MagicMock()
+    bus = MagicMock()
+
+    mock_md = MagicMock()
+    mock_md.items.return_value = {"key1": 10}.items()
+    ctrl.get_current_md.return_value = mock_md
+    ctrl.coerce_md_value.side_effect = MdValueError("bad value")
+    dialog = InspectDialog(ctrl, bus)
+
+    dialog._on_md_row_clicked(0, 0)  # fills key="key1", value="10"
+    dialog._edit_value.setText("not_a_valid_value")
+
+    dialog._set_btn.click()
+
+    # coerce raised: set_md_attr must NOT have been called.
+    ctrl.set_md_attr.assert_not_called()
+    # Value field must still contain the user's input so they can fix it.
+    assert dialog._edit_value.text() == "not_a_valid_value"
+    # Key field must also be untouched.
+    assert dialog._edit_key.text() == "key1"
+
+
 def test_inspect_dialog_ml_delete(qapp, monkeypatch):
     from qtpy.QtWidgets import QMessageBox
 

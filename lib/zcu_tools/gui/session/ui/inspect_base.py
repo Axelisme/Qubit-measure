@@ -320,10 +320,15 @@ class InspectDialogBase(QDialog):
         try:
             value = self._ctrl.coerce_md_value(key, self._edit_value.text())
         except MdValueError as exc:
+            # Keep the user's input so they can correct it; do not clear.
             QMessageBox.warning(self, "Invalid value", str(exc))
             return
         self._ctrl.set_md_attr(key, value)
         self._populate_md(self._ctrl.get_current_md())
+        # Clear only the value field to signal the submitted value is now live.
+        # The key field is intentionally kept: the user may want to set the same
+        # key again (e.g. during calibration) or use Delete immediately after.
+        self._edit_value.clear()
         now = datetime.now().strftime("%H:%M:%S")
         self._status_label.setText(f"Last updated: {now}")
 
