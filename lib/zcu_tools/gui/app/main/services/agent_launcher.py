@@ -7,7 +7,7 @@ GUI via session discovery). There is no in-process transcript, no PTY, and no
 stream-json bridge — the user talks to claude directly in their own terminal.
 
 This module is Qt-free and holds no process state: it builds the argv / MCP
-config / launch script and spawns a detached terminal via ``subprocess.Popen``.
+config / Python launcher and spawns a detached terminal via ``subprocess.Popen``.
 
 The MCP loopback config and the embedded system prompt own the "GUI already
 attached" contract (the live ``mcp__measure-gui__*`` tools auto-attach to the
@@ -23,7 +23,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -134,9 +133,16 @@ def record_launched_session(session_id: str) -> None:
 def claude_project_dir(repo_root: str) -> Path:
     """Return the ``~/.claude/projects/<slug>`` directory for ``repo_root``.
 
-    The slug encoding matches claude's own convention: take the absolute path of
-    ``repo_root`` and replace every character outside ``[A-Za-z0-9-]`` with
-    ``-``. For example ``/home/user/my.repo`` → ``-home-user-my-repo``.
+    The slug encoding matches claude's own convention on POSIX: take the absolute
+    path of ``repo_root`` and replace every character outside ``[A-Za-z0-9-]``
+    with ``-``. For example ``/home/user/my.repo`` → ``-home-user-my-repo``.
+
+    NOTE (Windows-verify): claude's actual slug encoding for Windows paths (drive
+    letter ``C:``, backslash separators, the colon) has not been verified against
+    a real claude install. If it diverges, the ``<id>.jsonl`` lookup below will
+    miss and ``list_resumable_sessions`` degrades gracefully — it still returns
+    every recorded session using the stored ``created`` timestamp and an
+    ``<id[:8]>`` label (no crash, just no extracted first-message label / mtime).
     """
     abspath = os.path.abspath(repo_root)
     slug = re.sub(r"[^A-Za-z0-9-]", "-", abspath)
@@ -349,73 +355,126 @@ def build_claude_argv(
 # ---------------------------------------------------------------------------
 
 
-def _write_launch_script(repo_root: str, argv: list[str]) -> str:
-    """Write a temp launcher script that ``cd``s into the repo and execs argv.
+def build_python_launcher_source(repo_root: str, argv: list[str]) -> str:
+    """Return the source of a cross-platform Python launcher that execs ``argv``.
 
-    Spawning a terminal that runs a *script* (rather than passing the full argv
-    through the terminal's own ``-e`` arg) sidesteps per-terminal quoting rules
-    for the long ``--append-system-prompt`` value. The script is shell-quoted
-    so embedded spaces/quotes survive.
+    The launcher embeds ``argv`` and ``repo_root`` as *data* via ``json.dumps``
+    (whose output is a valid Python literal), so the multi-line
+    ``--append-system-prompt`` value — newlines, quotes, anything — survives
+    without any shell/cmd/bat quoting. This is the whole reason for the indirection:
+    a ``.bat`` could not carry a multi-line GUI-state snapshot without breaking
+    cmd syntax, and ``.sh`` quoting was POSIX-only.
 
-    POSIX: a ``.sh`` running ``cd <repo> && exec <argv...>``.
-    Windows: a ``.bat`` running ``cd /d <repo>`` then the argv.
+    The generated launcher chdirs into the repo, drops ``ANTHROPIC_API_KEY`` so
+    claude uses subscription auth, resolves the binary via ``shutil.which`` (on
+    Windows ``claude`` is usually ``claude.cmd`` — ``os.execv`` alone would not
+    find it on PATH), and Fast-Fails with a clear message when the binary is
+    absent. It is run as ``<python> <launcher.py>``, so it needs no execute bit.
     """
-    tmp_dir = Path(tempfile.gettempdir())
-    if sys.platform == "win32":
-        # cmd.exe quoting: wrap each arg in double quotes; embedded quotes are
-        # doubled. argv values here contain no double quotes, so this is safe.
-        quoted = " ".join('"' + a.replace('"', '""') + '"' for a in argv)
-        script = tmp_dir / "zcu_agent_launch.bat"
-        body = f'@echo off\r\ncd /d "{repo_root}"\r\n{quoted}\r\n'
-        script.write_text(body, encoding="utf-8")
-        return str(script)
-    quoted = " ".join(shlex.quote(a) for a in argv)
-    script = tmp_dir / "zcu_agent_launch.sh"
-    body = f"#!/bin/sh\ncd {shlex.quote(repo_root)} && exec {quoted}\n"
-    script.write_text(body, encoding="utf-8")
-    script.chmod(0o755)
-    return str(script)
+    argv_literal = json.dumps(argv)
+    cwd_literal = json.dumps(os.path.abspath(repo_root))
+    # ARGV / CWD are written as json.dumps output, i.e. valid Python list/str
+    # literals — this is what makes the multi-line prompt safe.
+    return (
+        "import os, shutil, sys\n"
+        f"ARGV = {argv_literal}\n"
+        f"CWD = {cwd_literal}\n"
+        "os.chdir(CWD)\n"
+        "os.environ.pop('ANTHROPIC_API_KEY', None)\n"
+        "_bin = shutil.which(ARGV[0])\n"
+        "if _bin is None:\n"
+        "    sys.exit(\n"
+        '        f"zcu agent launcher: command not found on PATH: {ARGV[0]!r}. "\n'
+        '        "Install it or set ZCU_AGENT_CMD to the right CLI."\n'
+        "    )\n"
+        # execv replaces this process with the resolved binary, preserving the
+        # terminal's TTY so claude runs in its normal interactive UI.
+        "os.execv(_bin, ARGV)\n"
+    )
 
 
-def _spawn_terminal_argv(script_path: str) -> list[str]:
-    """Resolve the OS terminal-emulator argv that runs ``script_path``.
+def _write_python_launcher(repo_root: str, argv: list[str]) -> str:
+    """Write the cross-platform Python launcher to a temp ``.py``; return its path.
+
+    A fresh per-launch filename avoids clobbering a concurrently launched agent.
+    """
+    source = build_python_launcher_source(repo_root, argv)
+    fd, path = tempfile.mkstemp(prefix="zcu_agent_launch_", suffix=".py")
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(source)
+    return path
+
+
+def _spawn_terminal_argv(launcher_path: str) -> list[str]:
+    """Resolve the OS terminal-emulator argv that runs ``launcher_path``.
+
+    The command run inside the terminal is always the two tokens
+    ``[sys.executable, launcher_path]`` — all argv complexity lives inside the
+    launcher, so the terminal command stays trivial to quote.
 
     Fast-fails with a RuntimeError teaching the user to set ``ZCU_AGENT_TERMINAL``
     when no known terminal is found (Linux). macOS/Windows branches use their
     platform-standard launchers.
     """
+    py = sys.executable
+
     if sys.platform == "darwin":
-        # ``open -a Terminal <script>`` opens the script in Terminal.app.
-        return ["open", "-a", "Terminal", script_path]
+        # macOS-verify: Terminal.app's ``do script`` takes a *shell string*, so
+        # the python + launcher paths are double-quoted into it. AppleScript
+        # string literals escape embedded double quotes with a backslash.
+        shell_cmd = f"{_applescript_quote(py)} {_applescript_quote(launcher_path)}"
+        script = f'tell application "Terminal" to do script "{shell_cmd}"'
+        return ["osascript", "-e", script]
 
     if sys.platform == "win32":
         wt = shutil.which("wt")
         if wt is not None:
-            return [wt, "cmd", "/k", script_path]
-        # ``start "" cmd /k <bat>`` opens a new console window running the bat.
-        return ["cmd", "/c", "start", "", "cmd", "/k", script_path]
+            # Windows-verify. ``wt new-tab <exe> <args...>`` runs an external
+            # command in a new tab; the trailing positional is wt's ``commandline``
+            # (executable + its arguments). subprocess quotes the two tokens for
+            # us when they contain spaces. ``cmd /k`` is intentionally NOT wrapped
+            # here — that was the old bug ("open a profile calling cmd"); the
+            # tab closes when claude exits, which is the least-surprising default.
+            return [wt, "new-tab", py, launcher_path]
+        # No Windows Terminal: fall back to a fresh console window via
+        # ``cmd /c start "" <py> <launcher>``. The first "" is start's window
+        # *title* (required, else a quoted path would be taken as the title).
+        # py and launcher are quoted so space-containing paths do not split.
+        return ["cmd", "/c", "start", "", f'"{py}"', f'"{launcher_path}"']
 
     # Linux / other POSIX. An explicit override wins so headless/custom setups
     # can point at any terminal: ZCU_AGENT_TERMINAL is the full program name and
-    # the script path is appended as the final arg.
+    # the python + launcher are appended as the trailing args.
     override = os.environ.get("ZCU_AGENT_TERMINAL")
     if override:
-        return [override, script_path]
-    # gnome-terminal/konsole/xterm all run a shell with the script as a command;
-    # the flag form differs per terminal.
+        return [override, py, launcher_path]
+    # gnome-terminal/konsole/xterm all run a program with its args; the flag form
+    # differs per terminal. Passed as a list to Popen, so no shell quoting needed.
     if shutil.which("gnome-terminal") is not None:
-        return ["gnome-terminal", "--", "bash", script_path]
+        return ["gnome-terminal", "--", py, launcher_path]
     if shutil.which("konsole") is not None:
-        return ["konsole", "-e", "bash", script_path]
+        return ["konsole", "-e", py, launcher_path]
     if shutil.which("xterm") is not None:
-        return ["xterm", "-e", "bash", script_path]
+        return ["xterm", "-e", py, launcher_path]
     if shutil.which("x-terminal-emulator") is not None:
-        return ["x-terminal-emulator", "-e", "bash", script_path]
+        return ["x-terminal-emulator", "-e", py, launcher_path]
     raise RuntimeError(
         "No terminal emulator found (looked for gnome-terminal, konsole, xterm, "
         "x-terminal-emulator). Set the ZCU_AGENT_TERMINAL environment variable to "
-        "your terminal program (it is invoked as '<terminal> <launch-script>')."
+        "your terminal program (it is invoked as "
+        "'<terminal> <python> <launcher.py>')."
     )
+
+
+def _applescript_quote(value: str) -> str:
+    """Escape ``value`` for embedding inside an AppleScript double-quoted string.
+
+    AppleScript string literals escape ``\\`` and ``"`` with a backslash. The
+    result is wrapped in double quotes so a space-containing path stays one token
+    inside Terminal.app's ``do script`` shell string.
+    """
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'\\"{escaped}\\"'
 
 
 # ---------------------------------------------------------------------------
@@ -441,9 +500,12 @@ def launch_agent_terminal(
     to the embedded system prompt so the agent starts already knowing the current
     project / context / SoC / open tabs. ``None`` keeps only the static prompt.
 
-    The spawn is detached (``subprocess.Popen``, not waited). The child env drops
-    ``ANTHROPIC_API_KEY`` so claude uses subscription auth, mirroring the legacy
-    runner. Cross-platform branches Fast-Fail rather than silently degrading.
+    The spawn is detached (``subprocess.Popen``, not waited). The terminal runs a
+    cross-platform Python launcher (``<python> <launcher.py>``) that chdirs into
+    the repo, drops ``ANTHROPIC_API_KEY`` so claude uses subscription auth, and
+    execs claude; the env passed to ``Popen`` also drops the key (double safety,
+    so even the terminal process never sees it). Cross-platform branches Fast-Fail
+    rather than silently degrading.
     """
     mcp_config_path = build_loopback_mcp_config(repo_root)
 
@@ -465,8 +527,8 @@ def launch_agent_terminal(
             state_context=state_context,
         )
 
-    script_path = _write_launch_script(repo_root, argv)
-    spawn_argv = _spawn_terminal_argv(script_path)
+    launcher_path = _write_python_launcher(repo_root, argv)
+    spawn_argv = _spawn_terminal_argv(launcher_path)
 
     env = os.environ.copy()
     # Subscription auth: claude must NOT see an API key (mirrors agent_runner).

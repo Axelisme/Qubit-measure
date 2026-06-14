@@ -5,13 +5,16 @@ These exercise the Qt-free helpers in isolation (no real terminal is spawned;
 construction, the loopback MCP config, session-id format, the session-list
 store (record/dedup/cap), ``claude_project_dir`` slug encoding,
 ``list_resumable_sessions`` (label extraction / jsonl fallback / sorting /
-empty store), and the per-platform terminal-spawn branches including the
-Fast-Fail when no terminal is found.
+empty store), the cross-platform Python launcher (json-embedded argv/cwd that
+keeps a multi-line prompt safe — ``compile`` regression), and the per-platform
+terminal-spawn branches (Linux / Windows-with-wt / Windows-without-wt) including
+the Fast-Fail when no terminal is found.
 """
 
 from __future__ import annotations
 
 import json
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -412,6 +415,17 @@ def _patch_linux_gnome(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("ZCU_AGENT_TERMINAL", raising=False)
 
 
+def _spawned_launcher_source() -> str:
+    """Read the launcher ``.py`` from the single recorded spawn.
+
+    The terminal command is always ``[<term>..., python, launcher_path]`` and the
+    launcher path is the *last* argv token, so reading argv[-1] works across the
+    gnome / konsole / xterm / override branches.
+    """
+    launcher_path = _FakePopen.instances[0].argv[-1]
+    return Path(launcher_path).read_text(encoding="utf-8")
+
+
 def test_launch_new_session_records_and_spawns(
     monkeypatch: pytest.MonkeyPatch, _sessions_file: Path
 ) -> None:
@@ -426,17 +440,21 @@ def test_launch_new_session_records_and_spawns(
     assert any(r["session_id"] == "fixed-uuid" for r in records)
     assert len(_FakePopen.instances) == 1
     spawn = _FakePopen.instances[0]
-    # gnome-terminal runs the launch script via bash.
-    assert spawn.argv[:3] == ["gnome-terminal", "--", "bash"]
-    script_path = spawn.argv[3]
-    script_body = Path(script_path).read_text(encoding="utf-8")
-    # The script cds into the repo and execs claude in --session-id (new) mode.
-    assert "cd /repo" in script_body
-    assert "--session-id" in script_body
-    assert "fixed-uuid" in script_body
-    # ANTHROPIC_API_KEY is stripped for subscription auth.
+    # gnome-terminal runs the python launcher: [term, --, <python>, <launcher.py>].
+    assert spawn.argv[:2] == ["gnome-terminal", "--"]
+    assert spawn.argv[2] == sys.executable
+    launcher_path = spawn.argv[3]
+    assert launcher_path.endswith(".py")
+    source = Path(launcher_path).read_text(encoding="utf-8")
+    # The launcher chdirs into the repo and execs claude in --session-id mode.
+    # repo_root is abspath'd, so match the basename rather than the literal "/repo".
+    assert "os.chdir(CWD)" in source
+    assert '"--session-id"' in source
+    assert "fixed-uuid" in source
+    # ANTHROPIC_API_KEY is stripped for subscription auth (both in env and launcher).
     assert spawn.env is not None
     assert "ANTHROPIC_API_KEY" not in spawn.env
+    assert "ANTHROPIC_API_KEY" in source  # the launcher also pops it
 
 
 def test_launch_resume_uses_given_session_id(
@@ -449,9 +467,9 @@ def test_launch_resume_uses_given_session_id(
     )
 
     assert session_id == "prev-sess"
-    script_body = Path(_FakePopen.instances[0].argv[3]).read_text(encoding="utf-8")
-    assert "--resume" in script_body
-    assert "prev-sess" in script_body
+    source = _spawned_launcher_source()
+    assert '"--resume"' in source
+    assert "prev-sess" in source
 
 
 def test_launch_resume_does_not_re_record(
@@ -472,19 +490,22 @@ def test_launch_resume_does_not_re_record(
     assert len(records) == 1
 
 
-def test_launch_passes_state_context_into_spawned_argv(
+def test_launch_passes_state_context_into_launcher(
     monkeypatch: pytest.MonkeyPatch, _sessions_file: Path
 ) -> None:
     _patch_linux_gnome(monkeypatch)
     monkeypatch.setattr(agent_launcher, "new_session_id", lambda: "sess-state")
-    state = "[measure-gui current state]\nproject: chip=Q5\n[end state]"
+    # Multi-line state context: the very case that broke a .bat (#1). It is
+    # json-embedded into the launcher, so it must round-trip and still compile.
+    state = "[measure-gui current state]\nproject: chip=Q5\nopen tabs: 3\n[end state]"
 
     agent_launcher.launch_agent_terminal("/repo", state_context=state)
 
-    # The state block is shell-quoted into the exec'd argv inside the script.
-    script_body = Path(_FakePopen.instances[0].argv[3]).read_text(encoding="utf-8")
-    assert "measure-gui current state" in script_body
-    assert "chip=Q5" in script_body
+    source = _spawned_launcher_source()
+    assert "measure-gui current state" in source
+    assert "chip=Q5" in source
+    # The multi-line value must not break the generated launcher's syntax.
+    compile(source, "<launcher>", "exec")
 
 
 def test_launch_without_state_context_omits_state_block(
@@ -495,8 +516,8 @@ def test_launch_without_state_context_omits_state_block(
 
     agent_launcher.launch_agent_terminal("/repo")
 
-    script_body = Path(_FakePopen.instances[0].argv[3]).read_text(encoding="utf-8")
-    assert "measure-gui current state" not in script_body
+    source = _spawned_launcher_source()
+    assert "measure-gui current state" not in source
 
 
 def test_launch_terminal_override_env(
@@ -510,8 +531,11 @@ def test_launch_terminal_override_env(
     agent_launcher.launch_agent_terminal("/repo")
 
     spawn = _FakePopen.instances[0]
+    # Override branch: [<terminal>, <python>, <launcher.py>].
     assert spawn.argv[0] == "/opt/myterm"
-    assert Path(spawn.argv[1]).exists()
+    assert spawn.argv[1] == sys.executable
+    assert Path(spawn.argv[2]).exists()
+    assert spawn.argv[2].endswith(".py")
 
 
 def test_launch_fast_fails_when_no_terminal(
@@ -524,3 +548,165 @@ def test_launch_fast_fails_when_no_terminal(
 
     with pytest.raises(RuntimeError, match="ZCU_AGENT_TERMINAL"):
         agent_launcher.launch_agent_terminal("/repo")
+
+
+# ---------------------------------------------------------------------------
+# build_python_launcher_source — the cross-platform launcher (#1 regression)
+# ---------------------------------------------------------------------------
+
+
+def test_launcher_source_compiles_and_embeds_argv_and_cwd() -> None:
+    argv = ["claude", "--allowedTools", "mcp__measure-gui__*"]
+    source = agent_launcher.build_python_launcher_source("/repo/root", argv)
+    # Must be valid Python.
+    compile(source, "<launcher>", "exec")
+    # argv/cwd are embedded as json (valid Python literals).
+    assert json.dumps(argv) in source
+    import os as _os
+
+    assert json.dumps(_os.path.abspath("/repo/root")) in source
+    # Resolves the binary via shutil.which and execs it.
+    assert "shutil.which(ARGV[0])" in source
+    assert "os.execv(_bin, ARGV)" in source
+    # Drops the API key for subscription auth.
+    assert "ANTHROPIC_API_KEY" in source
+
+
+def test_launcher_source_multiline_prompt_does_not_break_syntax() -> None:
+    """#1 regression: a multi-line --append-system-prompt must stay safe.
+
+    A multi-line GUI-state snapshot broke .bat quoting; json-embedding it into a
+    Python launcher must keep the source compilable AND preserve the full prompt.
+    """
+    multiline_prompt = (
+        "You are operating a measure-gui.\n"
+        "[measure-gui current state]\n"
+        "project: chip=\"Q5\" qub='A'\n"
+        "open tabs: 3\n"
+        "weird chars: $ ` \\ % ! ^ & |\n"
+        "[end state]"
+    )
+    argv = ["claude", "--append-system-prompt", multiline_prompt]
+    source = agent_launcher.build_python_launcher_source("/repo", argv)
+
+    # Compiles despite newlines / quotes / backslashes in the prompt.
+    code = compile(source, "<launcher>", "exec")
+    # Execute just the assignment lines to recover ARGV and assert the full
+    # multi-line prompt round-trips intact (json literal preserves everything).
+    namespace: dict[str, object] = {}
+    # ARGV/CWD are plain literal assignments; exec'ing the first 3 lines is safe
+    # (import + ARGV + CWD), the os.chdir/execv lines are not reached.
+    header = "\n".join(source.splitlines()[:3])
+    exec(compile(header, "<launcher-header>", "exec"), namespace)
+    assert namespace["ARGV"] == argv
+    assert multiline_prompt in namespace["ARGV"]  # type: ignore[operator]
+    assert code is not None
+
+
+def test_launcher_source_missing_binary_exits_with_message() -> None:
+    source = agent_launcher.build_python_launcher_source("/repo", ["claude"])
+    # The Fast-Fail path teaches the user about ZCU_AGENT_CMD.
+    assert "command not found on PATH" in source
+    assert "ZCU_AGENT_CMD" in source
+
+
+# ---------------------------------------------------------------------------
+# Windows terminal-spawn branches (#2 wt, #4 cmd start quoting)
+# ---------------------------------------------------------------------------
+
+
+def _patch_windows(monkeypatch: pytest.MonkeyPatch, *, has_wt: bool) -> None:
+    monkeypatch.setattr(agent_launcher.sys, "platform", "win32")
+
+    def _which(name: str) -> str | None:
+        if name == "wt" and has_wt:
+            return r"C:\Windows\System32\wt.exe"
+        return None
+
+    monkeypatch.setattr(agent_launcher.shutil, "which", _which)
+    monkeypatch.setattr(agent_launcher.subprocess, "Popen", _FakePopen)
+
+
+def test_launch_windows_with_wt_uses_new_tab(
+    monkeypatch: pytest.MonkeyPatch, _sessions_file: Path
+) -> None:
+    _patch_windows(monkeypatch, has_wt=True)
+    monkeypatch.setattr(agent_launcher, "new_session_id", lambda: "win-sess")
+
+    agent_launcher.launch_agent_terminal("/repo")
+
+    spawn = _FakePopen.instances[0]
+    # #2 fix: ``wt new-tab <python> <launcher>`` runs an external command in a new
+    # tab (the trailing tokens are wt's ``commandline``), not "open a cmd profile".
+    assert spawn.argv[0] == r"C:\Windows\System32\wt.exe"
+    assert spawn.argv[1] == "new-tab"
+    assert spawn.argv[2] == sys.executable
+    assert spawn.argv[3].endswith(".py")
+    # The launcher still compiles on the Windows path.
+    compile(Path(spawn.argv[3]).read_text(encoding="utf-8"), "<launcher>", "exec")
+
+
+def test_launch_windows_without_wt_uses_cmd_start_with_quotes(
+    monkeypatch: pytest.MonkeyPatch, _sessions_file: Path
+) -> None:
+    _patch_windows(monkeypatch, has_wt=False)
+    monkeypatch.setattr(agent_launcher, "new_session_id", lambda: "win-sess2")
+
+    agent_launcher.launch_agent_terminal("/repo")
+
+    spawn = _FakePopen.instances[0]
+    # #4 fix: ``cmd /c start "" "<py>" "<launcher>"`` — the empty "" is start's
+    # window title, and BOTH paths are double-quoted so spaces do not split them.
+    assert spawn.argv[:4] == ["cmd", "/c", "start", ""]
+    quoted_py = spawn.argv[4]
+    quoted_launcher = spawn.argv[5]
+    assert quoted_py.startswith('"') and quoted_py.endswith('"')
+    assert quoted_launcher.startswith('"') and quoted_launcher.endswith('"')
+    assert sys.executable in quoted_py
+    assert quoted_launcher.strip('"').endswith(".py")
+
+
+def test_launch_windows_multiline_prompt_launcher_compiles(
+    monkeypatch: pytest.MonkeyPatch, _sessions_file: Path
+) -> None:
+    """#1 on Windows: multi-line state still produces a compilable launcher."""
+    _patch_windows(monkeypatch, has_wt=True)
+    monkeypatch.setattr(agent_launcher, "new_session_id", lambda: "win-ml")
+    state = "[measure-gui current state]\nproject: chip=Q5\n[end state]"
+
+    agent_launcher.launch_agent_terminal("/repo", state_context=state)
+
+    spawn = _FakePopen.instances[0]
+    source = Path(spawn.argv[3]).read_text(encoding="utf-8")
+    compile(source, "<launcher>", "exec")
+    assert "measure-gui current state" in source
+
+
+# ---------------------------------------------------------------------------
+# Binary resolution + env handling
+# ---------------------------------------------------------------------------
+
+
+def test_launch_drops_api_key_from_spawn_env(
+    monkeypatch: pytest.MonkeyPatch, _sessions_file: Path
+) -> None:
+    _patch_linux_gnome(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "secret-key")
+    monkeypatch.setattr(agent_launcher, "new_session_id", lambda: "sess-env")
+
+    agent_launcher.launch_agent_terminal("/repo")
+
+    spawn = _FakePopen.instances[0]
+    assert spawn.env is not None
+    assert "ANTHROPIC_API_KEY" not in spawn.env
+
+
+def test_launcher_resolves_binary_via_which(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The launcher source resolves argv[0] via shutil.which (Windows .cmd)."""
+    # This is a source-level assertion: the launcher does ``shutil.which(ARGV[0])``
+    # so a Windows ``claude.cmd`` on PATH resolves even though os.execv would not.
+    source = agent_launcher.build_python_launcher_source(
+        "/repo", [agent_launcher.AGENT_CMD]
+    )
+    assert "shutil.which(ARGV[0])" in source
+    assert "os.execv(_bin, ARGV)" in source
