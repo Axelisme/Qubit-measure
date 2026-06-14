@@ -346,22 +346,31 @@ class MainWindow(QMainWindow):
             parent=self,
             start_dir=raw_spectrum_dir(self._ctrl.state.project),
         )
-        if dialog.exec() != int(dialog.DialogCode.Accepted):
-            return
-        req = dialog.result_request()
-        if req is None:
-            return
-        try:
-            name = self._ctrl.load_spectrum(
-                req.filepath,
-                req.spec_type,
-                inherit_from=req.inherit_from,
-                transpose_axes=req.transpose_axes,
-            )
-            self._ctrl.set_active_spectrum(name)  # jump straight into line picking
-        except Exception as exc:  # noqa: BLE001 — surface load errors, don't crash the shell
-            logger.exception("load_spectrum failed")
-            self._show_io_error("Load", req.filepath, exc)
+        # Non-blocking open() keeps the Qt event loop (and the read-only control
+        # socket) responsive; the post-accept logic moves onto the accepted signal.
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+
+        def _on_accepted() -> None:
+            req = dialog.result_request()
+            if req is None:
+                return
+            try:
+                name = self._ctrl.load_spectrum(
+                    req.filepath,
+                    req.spec_type,
+                    inherit_from=req.inherit_from,
+                    transpose_axes=req.transpose_axes,
+                )
+                self._ctrl.set_active_spectrum(name)  # jump straight into line picking
+            except Exception as exc:  # noqa: BLE001 — surface load errors, don't crash the shell
+                logger.exception("load_spectrum failed")
+                self._show_io_error("Load", req.filepath, exc)
+
+        dialog.accepted.connect(_on_accepted)
+        # Hold a reference so open()'s immediate return doesn't let the dialog be GC'd.
+        self._load_dialog = dialog
+        dialog.finished.connect(lambda _result=0: setattr(self, "_load_dialog", None))
+        dialog.open()
 
     def _on_reload_clicked(self) -> None:
         """Restore a processed spectrums.hdf5 (aligned + selected spectra)."""
@@ -409,9 +418,20 @@ class MainWindow(QMainWindow):
         dialog = ProjectDialog(
             self._ctrl.state.project, parent=self, db_label="Database path"
         )
-        if dialog.exec() != int(dialog.DialogCode.Accepted):
-            return
-        self._ctrl.setup_project(dialog.result_project())
+        # Non-blocking open() keeps the Qt event loop (and the read-only control
+        # socket) responsive; the post-accept logic moves onto the accepted signal.
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+
+        def _on_accepted() -> None:
+            self._ctrl.setup_project(dialog.result_project())
+
+        dialog.accepted.connect(_on_accepted)
+        # Hold a reference so open()'s immediate return doesn't let the dialog be GC'd.
+        self._project_dialog = dialog
+        dialog.finished.connect(
+            lambda _result=0: setattr(self, "_project_dialog", None)
+        )
+        dialog.open()
 
     def _on_export_clicked(self) -> None:
         from .export_dialog import ExportSpectrumsDialog
@@ -420,17 +440,26 @@ class MainWindow(QMainWindow):
         # the dialog only confirms / overrides the path.
         project = self._ctrl.state.project
         dialog = ExportSpectrumsDialog(result_dir=project.result_dir, parent=self)
-        if dialog.exec() != int(dialog.DialogCode.Accepted):
-            return
-        path = dialog.export_path()
-        if path is None:
-            return
-        try:
-            resolved = self._ctrl.export_spectrums(filepath=path, mode="w")
-            self._show_info("Exported", f"Wrote {resolved}")
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("export failed")
-            self._show_io_error("Export", path, exc)
+        # Non-blocking open() keeps the Qt event loop (and the read-only control
+        # socket) responsive; the post-accept logic moves onto the accepted signal.
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+
+        def _on_accepted() -> None:
+            path = dialog.export_path()
+            if path is None:
+                return
+            try:
+                resolved = self._ctrl.export_spectrums(filepath=path, mode="w")
+                self._show_info("Exported", f"Wrote {resolved}")
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("export failed")
+                self._show_io_error("Export", path, exc)
+
+        dialog.accepted.connect(_on_accepted)
+        # Hold a reference so open()'s immediate return doesn't let the dialog be GC'd.
+        self._export_dialog = dialog
+        dialog.finished.connect(lambda _result=0: setattr(self, "_export_dialog", None))
+        dialog.open()
 
     # --- dialogs ---------------------------------------------------------
 
