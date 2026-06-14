@@ -239,7 +239,6 @@ class Controller:
         self._workspace_svc = services.workspace
         self._startup_svc = services.startup
         self._cfg_editor_svc = services.cfg_editor
-        self._agent_chat_svc = services.agent_chat
         # App-level PersistenceCaretaker, injected by run_app via attach_caretaker
         # (None in bare-Controller tests that don't exercise persistence).
         self._caretaker: PersistenceCaretaker | None = None
@@ -291,15 +290,9 @@ class Controller:
 
     def _notify(self, severity: Severity, title: str, message: str) -> None:
         """Fan a diagnostic out to every attached View (ADR-0013). Never via
-        EventBus — diagnostics must not depend on the channel they report on.
-        Also records to AgentChatService so the transcript shows GUI events."""
+        EventBus — diagnostics must not depend on the channel they report on."""
         for sink in list(self._diag_sinks):
             sink.notify_diagnostic(severity, title, message)
-        # Best-effort — transcript is display-only; never let it block diagnostics.
-        try:
-            self._agent_chat_svc.record_diagnostic(severity, title, message)
-        except Exception:
-            logger.exception("AgentChatService.record_diagnostic raised; ignoring")
 
     def _info(self, message: str) -> None:
         """Transient status diagnostic (no title) — Qt status bar / wire line."""
@@ -1118,54 +1111,17 @@ class Controller:
         """
         return self._operation_handles.await_outcome(operation_id, timeout)
 
-    def get_feedback_inbox(self) -> FeedbackInbox:
-        """Return the session-scoped user-feedback inbox (ADR-0023).
+    def build_agent_state_context(self) -> str:
+        """Render a compact GUI-state snapshot for an external agent's prompt.
 
-        Thread-safe: the main-thread GUI widget calls ``inbox.post(text)``
-        and the IO worker thread reads it via ``await_outcome``. Always non-None
-        after __init__ completes.
-        """
-        return self._feedback_inbox
-
-    def has_pending_wait(self) -> bool:
-        """True when at least one operation is live (pending) — i.e. an await
-        call is potentially blocking. The feedback widget reads this to decide
-        whether to show 'will be delivered now' vs 'will take effect at next wait'.
-        """
-        return self._operation_handles.live_count() > 0
-
-    def get_agent_chat(self):
-        """Return the session-scoped AgentChatService (transcript + observers).
-
-        Used by AgentChatDialog to register listeners and by RemoteControlAdapter
-        to record activity entries. Always non-None after __init__ completes.
-        """
-        from .services.agent_chat import AgentChatService
-
-        assert isinstance(self._agent_chat_svc, AgentChatService)
-        return self._agent_chat_svc
-
-    def get_agent_session(self):
-        """Return an AgentSessionPort backend (kept for backwards compat).
-
-        Delegates to ``new_agent_session()`` or ``_cli_agent_session()``
-        depending on the backend mode.  Existing callers that do not yet use
-        the picker can continue using this method.
-        """
-        return self.new_agent_session()
-
-    def build_first_turn_task(self, user_text: str) -> str:
-        """Prepend a compact GUI-state snapshot to the first turn's user text.
-
-        Only the *first* turn of a conversation carries this block: the dialog
-        routes follow-up turns through ``send_user_message`` (not ``start``), so
-        the snapshot is injected exactly once, giving the agent the live project /
-        context / SoC / open-tabs picture without it having to probe for them.
+        Injected into the launched ``claude`` system prompt (Round 2) so the
+        agent starts knowing the live project / context / SoC / open-tabs picture
+        without having to probe for it via ``gui_state_check``.
 
         Fast-fail-safe by construction: every getter used here returns a default
         rather than raising when the project / context / SoC is absent (SoC kind
         is only read while ``has_soc()``), so a fresh GUI with nothing set up
-        still yields a well-formed block instead of crashing the first turn.
+        still yields a well-formed block instead of crashing the launch.
         """
         ctx = self.get_exp_context()
         has_soc = self.has_soc()
@@ -1185,176 +1141,8 @@ class Controller:
             f"soc: connected={has_soc} kind={soc_kind}",
             f"open tabs: {tab_summary or '(none)'}",
             "[end state]",
-            "",
-            user_text,
         ]
         return "\n".join(lines)
-
-    # ------------------------------------------------------------------
-    # B1b-2: backend mode + session factory methods
-    # ------------------------------------------------------------------
-
-    def agent_backend_mode(self) -> Literal["cli", "independent"]:
-        """Return the active agent backend mode.
-
-        Reads ``ZCU_AGENT_BACKEND`` from the environment (default=independent).
-        Callers (dialog, tests) should call this instead of reading os.environ
-        directly — one place to override the default.
-        """
-        import os as _os
-
-        raw = _os.environ.get("ZCU_AGENT_BACKEND", "independent").lower().strip()
-        if raw == "cli":
-            return "cli"
-        return "independent"
-
-    def _build_agent_callbacks(self):  # type: ignore[no-untyped-def]
-        """Build the shared callback bundle for any agent session backend.
-
-        Returns ``(on_update, on_state_changed, on_process_error, has_pending_wait)``
-        — the four arguments consumed by both ``_RunnerCallbacks`` (AgentRunner)
-        and the ``IndependentAgentSession`` keyword arguments.
-        """
-        from .services.agent_runner import (
-            AssistantTextUpdate,
-            ResultUpdate,
-            SystemInitUpdate,
-            ToolUseUpdate,
-        )
-
-        def _on_update(updates):  # type: ignore[no-untyped-def]
-            # TranscriptUpdate variants → record_* on AgentChatService.
-            # Tool *results* are intentionally not recorded: they are verbose
-            # payloads (raw JSON) that only add noise — the assistant prose
-            # summarises outcomes. Tool *uses* show the name only (no payload).
-            chat = self.get_agent_chat()
-            for update in updates:
-                if isinstance(update, AssistantTextUpdate):
-                    chat.record_assistant(update.text)
-                elif isinstance(update, ToolUseUpdate):
-                    chat.record_tool_use(update.tool_name)
-                elif isinstance(update, SystemInitUpdate):
-                    chat.record_system(update.session_id)
-                elif isinstance(update, ResultUpdate):
-                    chat.record_result(
-                        update.is_error,
-                        update.result_text,
-                        update.total_cost_usd,
-                        update.terminal_reason,
-                    )
-                # RateLimitUpdate is informational; not recorded.
-
-        def _on_state_changed(state):  # type: ignore[no-untyped-def]
-            # Sync embedded-active flag with runner liveness.  Sticky across the
-            # whole session (incl. idle between turns) so the queued activity tap
-            # stays suppressed and does not double-record tool calls already in
-            # the stream-json transcript. Only a terminal "stopped" re-enables.
-            chat = self.get_agent_chat()
-            chat.set_embedded_active(state != "stopped")
-
-        def _on_process_error(msg: str) -> None:
-            self._notify("error", "Agent process error", msg)
-
-        return _on_update, _on_state_changed, _on_process_error, self.has_pending_wait
-
-    def new_agent_session(self):  # type: ignore[return]
-        """Return a freshly built AgentSessionPort backend.
-
-        In ``independent`` mode (default): returns an ``IndependentAgentSession``
-        that has NOT been started yet — the dialog calls ``start()`` on the first
-        Send (decision E).
-
-        In ``cli`` mode (``ZCU_AGENT_BACKEND=cli``): returns an ``AgentRunner``
-        (QProcess, bound child process; the original B0/B1a behaviour).
-        """
-        from .services.ports import AgentSessionPort
-
-        on_update, on_state_changed, on_process_error, has_pending_wait = (
-            self._build_agent_callbacks()
-        )
-
-        if self.agent_backend_mode() == "cli":
-            from .services.agent_runner import AgentRunner, _RunnerCallbacks
-
-            callbacks = _RunnerCallbacks(
-                on_update=on_update,
-                on_state_changed=on_state_changed,
-                on_process_error=on_process_error,
-                has_pending_wait=has_pending_wait,
-            )
-            session: AgentSessionPort = AgentRunner(callbacks, parent=None)
-            return session
-
-        # Independent mode (default).
-        from .services.independent_agent_session import IndependentAgentSession
-
-        session = IndependentAgentSession(
-            on_update=on_update,
-            on_state_changed=on_state_changed,
-            on_process_error=on_process_error,
-            has_pending_wait=has_pending_wait,
-            parent=None,
-        )
-        return session
-
-    def attach_agent_session(self, record):  # type: ignore[no-untyped-def]
-        """Build an ``IndependentAgentSession`` and attach it to ``record``.
-
-        Returns a session whose poll-tail starts at offset=0 so the full log
-        history is replayed through the callbacks.  The dialog calls this when
-        the user clicks Attach/Resume in the picker.
-        """
-        from .services.agent_session_registry import AgentSessionRecord
-        from .services.independent_agent_session import IndependentAgentSession
-        from .services.ports import AgentSessionPort
-
-        on_update, on_state_changed, on_process_error, has_pending_wait = (
-            self._build_agent_callbacks()
-        )
-        session = IndependentAgentSession(
-            on_update=on_update,
-            on_state_changed=on_state_changed,
-            on_process_error=on_process_error,
-            has_pending_wait=has_pending_wait,
-            parent=None,
-        )
-        rec: AgentSessionRecord = record
-        session.attach(rec)
-        result: AgentSessionPort = session
-        return result
-
-    def list_agent_sessions(self):  # type: ignore[return]
-        """Return all agent session records sorted by ``created`` (oldest first).
-
-        Applies stale-running self-heal (dead pid → stopped) on each record.
-        Always returns a list (empty when no sessions exist).
-        """
-        from .services.agent_session_registry import AgentSessionRecord, list_records
-
-        result: list[AgentSessionRecord] = list_records()
-        return result
-
-    def remove_agent_session(self, session_id: str) -> None:
-        """Remove a session record from the registry (decision C).
-
-        For stopped sessions: deletes the record file.  For running sessions:
-        also stops the supervisor before deleting (best-effort; if the process
-        is already gone the stop call is a no-op).
-        """
-        from .services.agent_session_registry import read_record, remove_record
-        from .services.agent_supervisor import stop_supervisor
-
-        record = read_record(session_id)
-        if record is not None and record.get("status") == "running":
-            try:
-                stop_supervisor(record["pid"])
-            except Exception:
-                logger.exception(
-                    "controller.remove_agent_session: stop_supervisor failed "
-                    "for pid=%s; continuing removal",
-                    record.get("pid"),
-                )
-        remove_record(session_id)
 
     # ------------------------------------------------------------------
     # Startup application workflow (StartupService)

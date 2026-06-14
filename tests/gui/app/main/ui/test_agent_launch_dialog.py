@@ -3,7 +3,8 @@
 Headless (offscreen qapp from tests/gui/conftest.py). The launcher module is
 monkeypatched so no terminal is spawned; the tests assert the Resume button's
 enabled state and that each button calls ``launch_agent_terminal`` with the
-right ``resume`` flag and the controller's project root.
+right ``resume`` flag, the controller's project root, and the live GUI-state
+snapshot from ``build_agent_state_context`` (Round 2 state injection).
 """
 
 from __future__ import annotations
@@ -14,10 +15,13 @@ import pytest
 from zcu_tools.gui.app.main.services import agent_launcher
 from zcu_tools.gui.app.main.ui.agent_launch_dialog import AgentLaunchDialog
 
+_STATE_CONTEXT = "[measure-gui current state]\n...\n[end state]"
+
 
 def _make_ctrl(project_root: str = "/repo/root") -> MagicMock:
     ctrl = MagicMock()
     ctrl.get_project_root.return_value = project_root
+    ctrl.build_agent_state_context.return_value = _STATE_CONTEXT
     return ctrl
 
 
@@ -52,7 +56,9 @@ def test_new_button_launches_with_resume_false(
     dialog = AgentLaunchDialog(ctrl)  # type: ignore[arg-type]
     dialog._new_btn.click()
 
-    launch.assert_called_once_with("/repo/root", resume=False)
+    launch.assert_called_once_with(
+        "/repo/root", resume=False, state_context=_STATE_CONTEXT
+    )
     assert "new-sess" in dialog._status_label.text()
     # A launch persists a "last" session, so Resume becomes available.
     assert dialog._resume_btn.isEnabled()
@@ -69,7 +75,9 @@ def test_resume_button_launches_with_resume_true(
     dialog = AgentLaunchDialog(_make_ctrl())  # type: ignore[arg-type]
     dialog._resume_btn.click()
 
-    launch.assert_called_once_with("/repo/root", resume=True)
+    launch.assert_called_once_with(
+        "/repo/root", resume=True, state_context=_STATE_CONTEXT
+    )
 
 
 @pytest.mark.usefixtures("qapp")

@@ -11,7 +11,6 @@ from zcu_tools.gui.session.services.device import DeviceService
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.services.startup import StartupService
 
-from .agent_chat import AgentChatService
 from .analyze import AnalyzeService
 from .background import BackgroundService
 from .cfg_editor import CfgEditorService
@@ -64,7 +63,6 @@ class AppServices:
     workspace: WorkspaceService
     startup: StartupService
     cfg_editor: CfgEditorService
-    agent_chat: AgentChatService
 
 
 def build_app_services(
@@ -135,5 +133,4 @@ def build_app_services(
         workspace=WorkspaceService(state, tab, bus),
         startup=session.startup,
         cfg_editor=cfg_editor,
-        agent_chat=AgentChatService(),
     )

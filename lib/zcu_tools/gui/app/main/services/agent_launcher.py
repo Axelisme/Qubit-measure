@@ -9,12 +9,13 @@ stream-json bridge — the user talks to claude directly in their own terminal.
 This module is Qt-free and holds no process state: it builds the argv / MCP
 config / launch script and spawns a detached terminal via ``subprocess.Popen``.
 
-The MCP loopback config and the embedded system prompt mirror the legacy
-stream-json runner's logic (the live ``mcp__measure-gui__*`` tools auto-attach
-to the running GUI, so the agent must not issue its own connect). They are
-copied rather than imported because the legacy runner (``agent_runner.py``) is
-slated for removal in Round 2; both copies coexisting this iteration is
-intentional.
+The MCP loopback config and the embedded system prompt own the "GUI already
+attached" contract (the live ``mcp__measure-gui__*`` tools auto-attach to the
+running GUI, so the agent must not issue its own connect). The launcher
+optionally appends a live GUI-state snapshot (from the Controller) to the
+embedded prompt so the agent starts already knowing the current project /
+context / SoC / open tabs. The legacy in-process stream-json runner is gone
+(Round 2); this is the only embedded-agent path.
 """
 
 from __future__ import annotations
@@ -103,6 +104,7 @@ def build_claude_argv(
     resume_session_id: str | None = None,
     new_session_id: str | None = None,
     allowed_tools: str = "mcp__measure-gui__*",
+    state_context: str | None = None,
 ) -> list[str]:
     """Build argv for an *interactive* ``claude`` child (no ``-p`` print mode).
 
@@ -111,7 +113,9 @@ def build_claude_argv(
       - ``--mcp-config <path>`` loopback to the running GUI's MCP server,
       - ``--allowedTools <allowed_tools>`` to restrict tool access,
       - ``--append-system-prompt`` carrying the embedded "GUI already attached"
-        instruction.
+        instruction, plus the live GUI-state snapshot when ``state_context`` is
+        given (appended after the embedded prompt so the agent starts already
+        knowing the project / context / SoC / open tabs — Round 2).
 
     Session continuity: ``resume_session_id`` (if given) wins and maps to
     ``--resume <id>``; otherwise ``new_session_id`` (if given) maps to
@@ -119,6 +123,9 @@ def build_claude_argv(
 
     argv[0] is ``AGENT_CMD`` (``claude`` by default, ``ZCU_AGENT_CMD`` override).
     """
+    system_prompt = _EMBEDDED_SYSTEM_PROMPT
+    if state_context is not None:
+        system_prompt = _EMBEDDED_SYSTEM_PROMPT + "\n\n" + state_context
     argv = [
         AGENT_CMD,
         "--mcp-config",
@@ -126,7 +133,7 @@ def build_claude_argv(
         "--allowedTools",
         allowed_tools,
         "--append-system-prompt",
-        _EMBEDDED_SYSTEM_PROMPT,
+        system_prompt,
     ]
     if resume_session_id is not None:
         argv += ["--resume", resume_session_id]
@@ -232,13 +239,20 @@ def _spawn_terminal_argv(script_path: str) -> list[str]:
     )
 
 
-def launch_agent_terminal(repo_root: str, *, resume: bool) -> str:
+def launch_agent_terminal(
+    repo_root: str, *, resume: bool, state_context: str | None = None
+) -> str:
     """Open the system terminal running interactive ``claude`` against the GUI.
 
     Decides the session (resume the persisted last id when ``resume`` is True and
     one exists; otherwise a fresh uuid that is persisted as the new last id),
     builds the loopback MCP config + argv, writes a launcher script, and spawns a
     detached terminal emulator running it. Returns the session id that was used.
+
+    ``state_context`` (a live GUI-state snapshot from the Controller) is appended
+    to the embedded system prompt for both the new and resume paths so the agent
+    starts already knowing the current project / context / SoC / open tabs
+    (Round 2). ``None`` keeps only the static embedded prompt.
 
     The spawn is detached (``subprocess.Popen``, not waited). The child env drops
     ``ANTHROPIC_API_KEY`` so claude uses subscription auth, mirroring the legacy
@@ -249,11 +263,19 @@ def launch_agent_terminal(repo_root: str, *, resume: bool) -> str:
     last = read_last_session_id() if resume else None
     if last is not None:
         session_id = last
-        argv = build_claude_argv(mcp_config_path, resume_session_id=session_id)
+        argv = build_claude_argv(
+            mcp_config_path,
+            resume_session_id=session_id,
+            state_context=state_context,
+        )
     else:
         session_id = new_session_id()
         write_last_session_id(session_id)
-        argv = build_claude_argv(mcp_config_path, new_session_id=session_id)
+        argv = build_claude_argv(
+            mcp_config_path,
+            new_session_id=session_id,
+            state_context=state_context,
+        )
 
     script_path = _write_launch_script(repo_root, argv)
     spawn_argv = _spawn_terminal_argv(script_path)

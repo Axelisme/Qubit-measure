@@ -72,6 +72,25 @@ def test_build_claude_argv_respects_agent_cmd_override(
     assert argv[0] == "codex"
 
 
+def test_build_claude_argv_appends_state_context_to_system_prompt() -> None:
+    state = "[measure-gui current state]\nproject: chip=C\n[end state]"
+    argv = agent_launcher.build_claude_argv("/tmp/mcp.json", state_context=state)
+    prompt = argv[argv.index("--append-system-prompt") + 1]
+    # The static embedded prompt and the state block both ride one flag, with the
+    # state block appended after the embedded prompt (Round 2 state injection).
+    assert agent_launcher._EMBEDDED_SYSTEM_PROMPT in prompt
+    assert prompt.endswith(state)
+    assert "[measure-gui current state]" in prompt
+
+
+def test_build_claude_argv_without_state_context_is_static_prompt_only() -> None:
+    argv = agent_launcher.build_claude_argv("/tmp/mcp.json")
+    prompt = argv[argv.index("--append-system-prompt") + 1]
+    # Default (no state_context): only the static embedded prompt, no state block.
+    assert prompt == agent_launcher._EMBEDDED_SYSTEM_PROMPT
+    assert "[measure-gui current state]" not in prompt
+
+
 # ---------------------------------------------------------------------------
 # build_loopback_mcp_config
 # ---------------------------------------------------------------------------
@@ -219,6 +238,33 @@ def test_launch_resume_with_no_last_falls_back_to_new(
     assert session_id == "fresh"
     script_body = Path(_FakePopen.instances[0].argv[3]).read_text(encoding="utf-8")
     assert "--session-id" in script_body
+
+
+def test_launch_passes_state_context_into_spawned_argv(
+    monkeypatch: pytest.MonkeyPatch, _last_session_path: Path
+) -> None:
+    _patch_linux_gnome(monkeypatch)
+    monkeypatch.setattr(agent_launcher, "new_session_id", lambda: "sess-state")
+    state = "[measure-gui current state]\nproject: chip=Q5\n[end state]"
+
+    agent_launcher.launch_agent_terminal("/repo", resume=False, state_context=state)
+
+    # The state block is shell-quoted into the exec'd argv inside the script.
+    script_body = Path(_FakePopen.instances[0].argv[3]).read_text(encoding="utf-8")
+    assert "measure-gui current state" in script_body
+    assert "chip=Q5" in script_body
+
+
+def test_launch_without_state_context_omits_state_block(
+    monkeypatch: pytest.MonkeyPatch, _last_session_path: Path
+) -> None:
+    _patch_linux_gnome(monkeypatch)
+    monkeypatch.setattr(agent_launcher, "new_session_id", lambda: "sess-plain")
+
+    agent_launcher.launch_agent_terminal("/repo", resume=False)
+
+    script_body = Path(_FakePopen.instances[0].argv[3]).read_text(encoding="utf-8")
+    assert "measure-gui current state" not in script_body
 
 
 def test_launch_terminal_override_env(

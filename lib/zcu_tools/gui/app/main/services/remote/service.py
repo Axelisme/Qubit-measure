@@ -244,49 +244,6 @@ class RemoteControlAdapter(RemoteControlServiceBase):
         # Base dispatch seam → measure-gui's named editor-lifecycle bookkeeping.
         assert isinstance(ctx, _ClientCtx)
         self._track_editor_lifecycle(ctx, method, params, result)
-        # Best-effort activity tap for AgentChatService transcript. Runs on the
-        # IO thread immediately after a successful handler return; marshalled onto
-        # the Qt main thread so record_activity honours its main-thread invariant.
-        # Any exception here must never propagate back — it must not affect the RPC
-        # reply already sent to the client.
-        try:
-            self._dispatch_chat_activity(method, params, result)
-        except Exception:
-            logger.exception("chat activity tap raised; ignoring")
-
-    def _dispatch_chat_activity(
-        self,
-        method: str,
-        params: Mapping[str, object],
-        result: Mapping[str, object],
-    ) -> None:
-        """Marshal an activity record onto the Qt main thread (best-effort).
-
-        Called from the IO thread; schedules a lambda on the Qt main thread via
-        the existing dispatcher invoke signal so record_activity runs in the right
-        thread context. No-op if the dispatcher is not available.
-
-        Skipped when the embedded agent is active: the stream-json transcript
-        already carries every tool call, so recording again would double-log.
-        """
-        dispatcher = getattr(self, "_dispatcher", None)
-        if dispatcher is None:
-            return
-
-        def _record() -> None:
-            try:
-                chat = self.ctrl.get_agent_chat()
-                # Skip tap when embedded agent is live (avoids double-recording).
-                if chat.is_embedded_active():
-                    return
-                chat.record_activity(method, params, result)
-            except Exception:
-                logger.exception("AgentChatService.record_activity raised; ignoring")
-
-        try:
-            dispatcher.invoke.emit(_record)
-        except Exception:
-            logger.exception("chat activity dispatch failed; ignoring")
 
     def _track_editor_lifecycle(
         self,

@@ -79,7 +79,9 @@ class AgentLaunchDialog(QDialog):
     def _launch(self, *, resume: bool) -> None:
         try:
             session_id = agent_launcher.launch_agent_terminal(
-                self._ctrl.get_project_root(), resume=resume
+                self._ctrl.get_project_root(),
+                resume=resume,
+                state_context=self._ctrl.build_agent_state_context(),
             )
         except Exception as exc:  # noqa: BLE001 — surface any launch failure to UI
             logger.exception("AgentLaunchDialog: failed to launch agent terminal")
