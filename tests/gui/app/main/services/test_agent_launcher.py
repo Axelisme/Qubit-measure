@@ -4,7 +4,7 @@ These exercise the Qt-free helpers in isolation (no real terminal is spawned;
 ``subprocess.Popen`` and ``shutil.which`` are monkeypatched). They cover argv
 construction, the loopback MCP config, session-id format, the session-list
 store (record/dedup/cap), ``claude_project_dir`` slug encoding,
-``list_resumable_sessions`` (label extraction / jsonl fallback / sorting /
+``list_resumable_sessions`` (label extraction / phantom-session skip / sorting /
 empty store), the cross-platform Python launcher (json-embedded argv/cwd that
 keeps a multi-line prompt safe — ``compile`` regression), and the per-platform
 terminal-spawn branches (Linux / Windows-with-wt / Windows-without-wt) including
@@ -290,9 +290,12 @@ def test_list_resumable_sessions_label_truncated(
     assert len(result[0].label) == agent_launcher._LABEL_MAX_CHARS
 
 
-def test_list_resumable_sessions_jsonl_missing_fallback(
+def test_list_resumable_sessions_skips_phantom_without_jsonl(
     _sessions_env: tuple[Path, Path],
 ) -> None:
+    # A recorded id whose jsonl was never created (a launch that Fast-Failed
+    # before claude ran) is a phantom — there is nothing to resume, so it must
+    # NOT be listed.
     sessions_file, _project_dir = _sessions_env
     sid = "bbbbbbbb-0000-0000-0000-000000000001"
     sessions_file.write_text(
@@ -300,11 +303,34 @@ def test_list_resumable_sessions_jsonl_missing_fallback(
     )
 
     result = agent_launcher.list_resumable_sessions("/repo")
-    assert len(result) == 1
-    # Label falls back to first 8 chars of sid.
-    assert result[0].label == sid[:8]
-    # last_active falls back to stored created timestamp.
-    assert result[0].last_active == pytest.approx(2000.0)
+    assert result == []
+
+
+def test_list_resumable_sessions_keeps_real_drops_phantom(
+    _sessions_env: tuple[Path, Path],
+) -> None:
+    # Mixed store: only the id with a real jsonl is returned; the phantom is dropped.
+    sessions_file, project_dir = _sessions_env
+    real = "aaaaaaaa-0000-0000-0000-000000000009"
+    phantom = "bbbbbbbb-0000-0000-0000-000000000009"
+    (project_dir / f"{real}.jsonl").write_text(
+        json.dumps({"type": "user", "message": {"role": "user", "content": "real one"}})
+        + "\n",
+        encoding="utf-8",
+    )
+    sessions_file.write_text(
+        json.dumps(
+            [
+                {"session_id": phantom, "created": 3000.0},
+                {"session_id": real, "created": 1000.0},
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = agent_launcher.list_resumable_sessions("/repo")
+    assert [s.session_id for s in result] == [real]
+    assert result[0].label == "real one"
 
 
 def test_list_resumable_sessions_malformed_lines_do_not_crash(

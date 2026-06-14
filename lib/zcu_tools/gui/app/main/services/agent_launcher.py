@@ -205,15 +205,21 @@ def list_resumable_sessions(repo_root: str) -> list[ResumableSession]:
     """Return previously launched sessions that can be resumed, newest first.
 
     Only sessions we have launched ourselves (recorded in ``_SESSIONS_FILE``)
-    are returned — the claude project directory typically contains many unrelated
-    dev sessions. For each recorded id:
+    are considered — the claude project directory typically contains many
+    unrelated dev sessions. A recorded id is returned only when its
+    ``<id>.jsonl`` actually exists in the project dir, i.e. claude really created
+    the session: ``last_active`` = the jsonl mtime, ``label`` = first user message
+    (truncated) or ``<id[:8]>`` fallback.
 
-    - If the corresponding ``<id>.jsonl`` exists: ``last_active`` = mtime,
-      ``label`` = first user message (truncated) or ``<id[:8]>`` fallback.
-    - If the jsonl is absent: ``last_active`` = stored ``created`` timestamp,
-      ``label`` = ``<id[:8]>``.
+    Recorded ids with no jsonl are **skipped** — they are *phantom* sessions
+    (``record_launched_session`` stamps the id before the spawn, so a launch that
+    Fast-Fails before claude ever runs leaves an id with nothing to resume).
+    Listing them would offer the user a ``--resume`` that resumes nothing. The
+    claude slug encoding is verified to match on this platform, so an absent jsonl
+    reliably means "never created", not "found under a different slug".
 
-    Returns ``[]`` when the store is empty or the project directory is absent.
+    Returns ``[]`` when the store is empty, the project directory is absent, or
+    every recorded id is a phantom.
     """
     records = _read_sessions_store()
     if not records:
@@ -226,18 +232,17 @@ def list_resumable_sessions(repo_root: str) -> list[ResumableSession]:
         session_id = record.get("session_id")
         if not isinstance(session_id, str) or not session_id:
             continue
-        created: float = float(record.get("created", 0.0))  # type: ignore[arg-type]
 
         jsonl = project_dir / f"{session_id}.jsonl"
-        if jsonl.exists():
-            try:
-                last_active = jsonl.stat().st_mtime
-            except OSError:
-                last_active = created
-            label = _extract_label_from_jsonl(jsonl) or session_id[:8]
-        else:
+        if not jsonl.exists():
+            # Phantom: recorded but claude never created the session. Not resumable.
+            continue
+        created: float = float(record.get("created", 0.0))  # type: ignore[arg-type]
+        try:
+            last_active = jsonl.stat().st_mtime
+        except OSError:
             last_active = created
-            label = session_id[:8]
+        label = _extract_label_from_jsonl(jsonl) or session_id[:8]
 
         sessions.append(
             ResumableSession(
