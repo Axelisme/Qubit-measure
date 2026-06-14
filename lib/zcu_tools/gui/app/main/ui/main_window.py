@@ -1334,7 +1334,12 @@ class MainWindow(QMainWindow):
         msg_box.setIcon(QMessageBox.Icon.Critical)
         msg_box.setWindowTitle(title)
         msg_box.setText(message)
-        msg_box.exec()
+        # Non-blocking: don't stall the Qt event loop (and the RPC control
+        # socket) waiting for the user to dismiss the dialog.
+        # WA_DeleteOnClose ensures the C++ object is freed on close even
+        # though ``self`` (parent) already holds a reference.
+        msg_box.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        msg_box.open()
 
     def show_plot(self, tab_id: str, fig: Any) -> None:  # Phase 11
         logger.debug("show_plot: tab_id=%r fig=%s", tab_id, type(fig).__name__)
