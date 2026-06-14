@@ -22,21 +22,29 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 # argv[0] for the agent CLI. ``claude`` by default; ``ZCU_AGENT_CMD`` overrides
 # it so a future codex-style CLI can be swapped in without code changes.
 AGENT_CMD: str = os.environ.get("ZCU_AGENT_CMD", "claude")
 
-# Persisted "last session" file. A single id is enough — Round 1 supports one
-# agent terminal at a time and only the "resume last" affordance reads it.
-_LAST_SESSION_FILE = Path.home() / ".cache" / "zcu-tools" / "agent_last_session"
+# Persisted session list. Replaces the old single-id ``agent_last_session`` file.
+# Stores a JSON array of {"session_id": str, "created": float} records (most
+# recently launched first). Capped at _SESSION_CAP entries.
+_SESSIONS_FILE = Path.home() / ".cache" / "zcu-tools" / "agent_sessions.json"
+_SESSION_CAP = 30
+
+# Maximum label length extracted from the first user message in a jsonl.
+_LABEL_MAX_CHARS = 60
 
 # Appended to claude's system prompt. The mcp__measure-gui__* tools auto-attach
 # to the live GUI (lazy auto-connect in the MCP server), so the agent must NOT
@@ -51,6 +59,200 @@ _EMBEDDED_SYSTEM_PROMPT = (
     "run-measure-gui Skill — the GUI tools are already available. Be concise and "
     "act directly; do not narrate every step."
 )
+
+
+# ---------------------------------------------------------------------------
+# ResumableSession
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ResumableSession:
+    """A previously launched agent session that can be resumed.
+
+    ``last_active`` is the Unix epoch float of the jsonl mtime (or the
+    ``created`` timestamp from the store when the jsonl is absent).
+    ``label`` is a best-effort excerpt of the first user message (≤60 chars),
+    falling back to the first 8 chars of the session id when the jsonl is
+    unreadable.
+    """
+
+    session_id: str
+    last_active: float
+    label: str
+
+
+# ---------------------------------------------------------------------------
+# Session store helpers
+# ---------------------------------------------------------------------------
+
+
+def _read_sessions_store() -> list[dict[str, object]]:
+    """Return the raw list from ``_SESSIONS_FILE``, or [] on any read/parse error."""
+    try:
+        raw = _SESSIONS_FILE.read_text(encoding="utf-8")
+        data = json.loads(raw)
+        if not isinstance(data, list):
+            return []
+        return data  # type: ignore[return-value]
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return []
+
+
+def _write_sessions_store(records: list[dict[str, object]]) -> None:
+    """Atomically write ``records`` to ``_SESSIONS_FILE``."""
+    _SESSIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = _SESSIONS_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(records, indent=2), encoding="utf-8")
+    os.replace(tmp, _SESSIONS_FILE)
+
+
+def record_launched_session(session_id: str) -> None:
+    """Append ``session_id`` to the persistent session list (dedup, cap at 30).
+
+    Most-recently-launched is kept at index 0. An existing entry with the same
+    id is moved to the front rather than duplicated. The list is capped at
+    ``_SESSION_CAP`` entries so the file does not grow unboundedly.
+    """
+    if not session_id:
+        raise ValueError("session_id must be non-empty")
+    records = _read_sessions_store()
+    # Remove any existing entry with the same id (dedup).
+    records = [r for r in records if r.get("session_id") != session_id]
+    # Prepend the new entry so the list is sorted newest-first.
+    records.insert(0, {"session_id": session_id, "created": time.time()})
+    # Cap to avoid unbounded growth.
+    records = records[:_SESSION_CAP]
+    _write_sessions_store(records)
+
+
+# ---------------------------------------------------------------------------
+# claude project directory
+# ---------------------------------------------------------------------------
+
+
+def claude_project_dir(repo_root: str) -> Path:
+    """Return the ``~/.claude/projects/<slug>`` directory for ``repo_root``.
+
+    The slug encoding matches claude's own convention: take the absolute path of
+    ``repo_root`` and replace every character outside ``[A-Za-z0-9-]`` with
+    ``-``. For example ``/home/user/my.repo`` → ``-home-user-my-repo``.
+    """
+    abspath = os.path.abspath(repo_root)
+    slug = re.sub(r"[^A-Za-z0-9-]", "-", abspath)
+    return Path.home() / ".claude" / "projects" / slug
+
+
+# ---------------------------------------------------------------------------
+# Label extraction from a claude jsonl
+# ---------------------------------------------------------------------------
+
+
+def _extract_label_from_jsonl(jsonl_path: Path) -> str | None:
+    """Return the first user message text from a claude session jsonl, or None.
+
+    Scans lines until it finds a ``{"type": "user", ...}`` entry whose
+    ``message.content`` yields a non-empty text string. The result is truncated
+    to ``_LABEL_MAX_CHARS`` characters. Any malformed line is silently skipped
+    (never raises).
+
+    ``content`` may be a plain string or a list of content blocks
+    (``[{"type": "text", "text": "..."}]``).
+    """
+    try:
+        with jsonl_path.open(encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(obj, dict):
+                    continue
+                if obj.get("type") != "user":
+                    continue
+                message = obj.get("message")
+                if not isinstance(message, dict):
+                    continue
+                content = message.get("content")
+                text: str | None = None
+                if isinstance(content, str):
+                    text = content.strip() or None
+                elif isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            candidate = block.get("text", "")
+                            if isinstance(candidate, str) and candidate.strip():
+                                text = candidate.strip()
+                                break
+                if text:
+                    return text[:_LABEL_MAX_CHARS]
+    except OSError:
+        pass
+    return None
+
+
+# ---------------------------------------------------------------------------
+# list_resumable_sessions
+# ---------------------------------------------------------------------------
+
+
+def list_resumable_sessions(repo_root: str) -> list[ResumableSession]:
+    """Return previously launched sessions that can be resumed, newest first.
+
+    Only sessions we have launched ourselves (recorded in ``_SESSIONS_FILE``)
+    are returned — the claude project directory typically contains many unrelated
+    dev sessions. For each recorded id:
+
+    - If the corresponding ``<id>.jsonl`` exists: ``last_active`` = mtime,
+      ``label`` = first user message (truncated) or ``<id[:8]>`` fallback.
+    - If the jsonl is absent: ``last_active`` = stored ``created`` timestamp,
+      ``label`` = ``<id[:8]>``.
+
+    Returns ``[]`` when the store is empty or the project directory is absent.
+    """
+    records = _read_sessions_store()
+    if not records:
+        return []
+
+    project_dir = claude_project_dir(repo_root)
+    sessions: list[ResumableSession] = []
+
+    for record in records:
+        session_id = record.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            continue
+        created: float = float(record.get("created", 0.0))  # type: ignore[arg-type]
+
+        jsonl = project_dir / f"{session_id}.jsonl"
+        if jsonl.exists():
+            try:
+                last_active = jsonl.stat().st_mtime
+            except OSError:
+                last_active = created
+            label = _extract_label_from_jsonl(jsonl) or session_id[:8]
+        else:
+            last_active = created
+            label = session_id[:8]
+
+        sessions.append(
+            ResumableSession(
+                session_id=session_id,
+                last_active=last_active,
+                label=label,
+            )
+        )
+
+    # Sort newest-first by last_active.
+    sessions.sort(key=lambda s: s.last_active, reverse=True)
+    return sessions
+
+
+# ---------------------------------------------------------------------------
+# Core argv / config builders
+# ---------------------------------------------------------------------------
 
 
 def build_loopback_mcp_config(repo_root: str) -> str:
@@ -142,32 +344,9 @@ def build_claude_argv(
     return argv
 
 
-def read_last_session_id() -> str | None:
-    """Return the persisted last-launched session id, or None if unset.
-
-    Returns None when the file is missing or empty (whitespace-only). A blank
-    file is treated as "no session" rather than an error so a corrupted/cleared
-    cache degrades to the New-session path.
-    """
-    try:
-        text = _LAST_SESSION_FILE.read_text(encoding="utf-8").strip()
-    except FileNotFoundError:
-        return None
-    return text or None
-
-
-def write_last_session_id(session_id: str) -> None:
-    """Persist ``session_id`` as the last-launched session (atomic replace).
-
-    Writes to a sibling temp file then ``os.replace`` so a concurrent reader
-    never sees a half-written id. No flock — Round 1 has at most one writer.
-    """
-    if not session_id:
-        raise ValueError("session_id must be non-empty")
-    _LAST_SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = _LAST_SESSION_FILE.with_suffix(".tmp")
-    tmp.write_text(session_id, encoding="utf-8")
-    os.replace(tmp, _LAST_SESSION_FILE)
+# ---------------------------------------------------------------------------
+# Private helpers
+# ---------------------------------------------------------------------------
 
 
 def _write_launch_script(repo_root: str, argv: list[str]) -> str:
@@ -239,20 +418,28 @@ def _spawn_terminal_argv(script_path: str) -> list[str]:
     )
 
 
+# ---------------------------------------------------------------------------
+# Main launch entry point
+# ---------------------------------------------------------------------------
+
+
 def launch_agent_terminal(
-    repo_root: str, *, resume: bool, state_context: str | None = None
+    repo_root: str,
+    *,
+    resume_session_id: str | None = None,
+    state_context: str | None = None,
 ) -> str:
     """Open the system terminal running interactive ``claude`` against the GUI.
 
-    Decides the session (resume the persisted last id when ``resume`` is True and
-    one exists; otherwise a fresh uuid that is persisted as the new last id),
-    builds the loopback MCP config + argv, writes a launcher script, and spawns a
-    detached terminal emulator running it. Returns the session id that was used.
+    When ``resume_session_id`` is given the terminal resumes that specific
+    session (``--resume <id>``). Otherwise a fresh UUID is generated, recorded
+    in the persistent session list, and passed via ``--session-id <id>``.
+
+    Returns the session id that was used (the given resume id or the new id).
 
     ``state_context`` (a live GUI-state snapshot from the Controller) is appended
-    to the embedded system prompt for both the new and resume paths so the agent
-    starts already knowing the current project / context / SoC / open tabs
-    (Round 2). ``None`` keeps only the static embedded prompt.
+    to the embedded system prompt so the agent starts already knowing the current
+    project / context / SoC / open tabs. ``None`` keeps only the static prompt.
 
     The spawn is detached (``subprocess.Popen``, not waited). The child env drops
     ``ANTHROPIC_API_KEY`` so claude uses subscription auth, mirroring the legacy
@@ -260,17 +447,18 @@ def launch_agent_terminal(
     """
     mcp_config_path = build_loopback_mcp_config(repo_root)
 
-    last = read_last_session_id() if resume else None
-    if last is not None:
-        session_id = last
+    if resume_session_id is not None:
+        session_id = resume_session_id
         argv = build_claude_argv(
             mcp_config_path,
             resume_session_id=session_id,
             state_context=state_context,
         )
+        # Resuming an existing session: do not re-record it (it is already in
+        # the store from when it was first launched).
     else:
         session_id = new_session_id()
-        write_last_session_id(session_id)
+        record_launched_session(session_id)
         argv = build_claude_argv(
             mcp_config_path,
             new_session_id=session_id,

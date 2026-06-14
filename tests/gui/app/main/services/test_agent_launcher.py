@@ -2,14 +2,17 @@
 
 These exercise the Qt-free helpers in isolation (no real terminal is spawned;
 ``subprocess.Popen`` and ``shutil.which`` are monkeypatched). They cover argv
-construction, the loopback MCP config, session-id format + persistence, and the
-per-platform terminal-spawn branches including the Fast-Fail when no terminal
-is found.
+construction, the loopback MCP config, session-id format, the session-list
+store (record/dedup/cap), ``claude_project_dir`` slug encoding,
+``list_resumable_sessions`` (label extraction / jsonl fallback / sorting /
+empty store), and the per-platform terminal-spawn branches including the
+Fast-Fail when no terminal is found.
 """
 
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from pathlib import Path
 
@@ -124,36 +127,257 @@ def test_new_session_id_is_dashed_uuid() -> None:
 
 
 # ---------------------------------------------------------------------------
-# last-session file roundtrip
+# Session store: record_launched_session
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture
-def _last_session_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Redirect the last-session file into a temp dir."""
-    path = tmp_path / "agent_last_session"
-    monkeypatch.setattr(agent_launcher, "_LAST_SESSION_FILE", path)
+def _sessions_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Redirect _SESSIONS_FILE into a temp dir."""
+    path = tmp_path / "agent_sessions.json"
+    monkeypatch.setattr(agent_launcher, "_SESSIONS_FILE", path)
     return path
 
 
-def test_read_last_session_id_missing(_last_session_path: Path) -> None:
-    assert agent_launcher.read_last_session_id() is None
+def test_record_launched_session_creates_file(_sessions_file: Path) -> None:
+    agent_launcher.record_launched_session("abc-123")
+    records = json.loads(_sessions_file.read_text())
+    assert len(records) == 1
+    assert records[0]["session_id"] == "abc-123"
+    assert "created" in records[0]
 
 
-def test_write_then_read_last_session_id(_last_session_path: Path) -> None:
-    agent_launcher.write_last_session_id("abc-123")
-    assert agent_launcher.read_last_session_id() == "abc-123"
+def test_record_launched_session_appends_newest_first(
+    _sessions_file: Path,
+) -> None:
+    agent_launcher.record_launched_session("first")
+    agent_launcher.record_launched_session("second")
+    records = json.loads(_sessions_file.read_text())
+    assert records[0]["session_id"] == "second"
+    assert records[1]["session_id"] == "first"
 
 
-def test_read_last_session_id_blank_is_none(_last_session_path: Path) -> None:
-    _last_session_path.parent.mkdir(parents=True, exist_ok=True)
-    _last_session_path.write_text("   \n", encoding="utf-8")
-    assert agent_launcher.read_last_session_id() is None
+def test_record_launched_session_deduplicates(_sessions_file: Path) -> None:
+    agent_launcher.record_launched_session("dup")
+    agent_launcher.record_launched_session("other")
+    agent_launcher.record_launched_session("dup")  # moves dup to front
+    records = json.loads(_sessions_file.read_text())
+    ids = [r["session_id"] for r in records]
+    assert ids.count("dup") == 1
+    assert ids[0] == "dup"
 
 
-def test_write_last_session_id_rejects_empty(_last_session_path: Path) -> None:
+def test_record_launched_session_caps_at_limit(
+    _sessions_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(agent_launcher, "_SESSION_CAP", 3)
+    for i in range(5):
+        agent_launcher.record_launched_session(f"sess-{i}")
+    records = json.loads(_sessions_file.read_text())
+    assert len(records) == 3
+    # Most recently recorded are kept.
+    assert records[0]["session_id"] == "sess-4"
+
+
+def test_record_launched_session_rejects_empty(_sessions_file: Path) -> None:
     with pytest.raises(ValueError):
-        agent_launcher.write_last_session_id("")
+        agent_launcher.record_launched_session("")
+
+
+# ---------------------------------------------------------------------------
+# claude_project_dir slug encoding
+# ---------------------------------------------------------------------------
+
+
+def test_claude_project_dir_simple_path() -> None:
+    path = agent_launcher.claude_project_dir("/home/user/myrepo")
+    assert path.name == "-home-user-myrepo"
+    assert path.parent.name == "projects"
+
+
+def test_claude_project_dir_special_chars() -> None:
+    # Dots and underscores become dashes; hyphens are preserved.
+    path = agent_launcher.claude_project_dir("/home/user/my.repo_v2")
+    assert "-" in path.name
+    assert "." not in path.name
+    assert "_" not in path.name
+
+
+def test_claude_project_dir_dotclaude_segment() -> None:
+    # The ".claude" segment in a path must encode the dot.
+    path = agent_launcher.claude_project_dir("/home/user/.claude/repo")
+    # ".claude" → "--claude" (dot becomes dash).
+    assert "--claude" in path.name
+
+
+# ---------------------------------------------------------------------------
+# list_resumable_sessions
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def _sessions_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
+    """Redirect _SESSIONS_FILE and claude_project_dir into tmp_path.
+
+    Returns (sessions_file, project_dir).
+    """
+    sessions_file = tmp_path / "agent_sessions.json"
+    monkeypatch.setattr(agent_launcher, "_SESSIONS_FILE", sessions_file)
+
+    project_dir = tmp_path / "claude_project"
+    project_dir.mkdir()
+
+    # Override claude_project_dir to return our temp project_dir.
+    monkeypatch.setattr(agent_launcher, "claude_project_dir", lambda _root: project_dir)
+    return sessions_file, project_dir
+
+
+def test_list_resumable_sessions_empty_store(
+    _sessions_env: tuple[Path, Path],
+) -> None:
+    sessions = agent_launcher.list_resumable_sessions("/repo")
+    assert sessions == []
+
+
+def test_list_resumable_sessions_returns_recorded_sessions(
+    _sessions_env: tuple[Path, Path],
+) -> None:
+    sessions_file, project_dir = _sessions_env
+    sid = "aaaaaaaa-0000-0000-0000-000000000001"
+    # Write a minimal jsonl with a user message.
+    jsonl = project_dir / f"{sid}.jsonl"
+    jsonl.write_text(
+        json.dumps(
+            {"type": "user", "message": {"role": "user", "content": "Hello there!"}}
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    sessions_file.write_text(
+        json.dumps([{"session_id": sid, "created": 1000.0}]), encoding="utf-8"
+    )
+
+    result = agent_launcher.list_resumable_sessions("/repo")
+    assert len(result) == 1
+    assert result[0].session_id == sid
+    assert result[0].label == "Hello there!"
+
+
+def test_list_resumable_sessions_label_truncated(
+    _sessions_env: tuple[Path, Path],
+) -> None:
+    sessions_file, project_dir = _sessions_env
+    sid = "aaaaaaaa-0000-0000-0000-000000000002"
+    long_text = "A" * 100
+    jsonl = project_dir / f"{sid}.jsonl"
+    jsonl.write_text(
+        json.dumps({"type": "user", "message": {"role": "user", "content": long_text}})
+        + "\n",
+        encoding="utf-8",
+    )
+    sessions_file.write_text(
+        json.dumps([{"session_id": sid, "created": 1000.0}]), encoding="utf-8"
+    )
+
+    result = agent_launcher.list_resumable_sessions("/repo")
+    assert len(result[0].label) == agent_launcher._LABEL_MAX_CHARS
+
+
+def test_list_resumable_sessions_jsonl_missing_fallback(
+    _sessions_env: tuple[Path, Path],
+) -> None:
+    sessions_file, _project_dir = _sessions_env
+    sid = "bbbbbbbb-0000-0000-0000-000000000001"
+    sessions_file.write_text(
+        json.dumps([{"session_id": sid, "created": 2000.0}]), encoding="utf-8"
+    )
+
+    result = agent_launcher.list_resumable_sessions("/repo")
+    assert len(result) == 1
+    # Label falls back to first 8 chars of sid.
+    assert result[0].label == sid[:8]
+    # last_active falls back to stored created timestamp.
+    assert result[0].last_active == pytest.approx(2000.0)
+
+
+def test_list_resumable_sessions_malformed_lines_do_not_crash(
+    _sessions_env: tuple[Path, Path],
+) -> None:
+    sessions_file, project_dir = _sessions_env
+    sid = "cccccccc-0000-0000-0000-000000000001"
+    jsonl = project_dir / f"{sid}.jsonl"
+    # Mix of malformed JSON, wrong types, and a valid user message.
+    lines = [
+        "not-json\n",
+        json.dumps({"type": "user", "message": None}) + "\n",  # None message
+        json.dumps({"type": "user", "message": {"role": "user", "content": ""}})
+        + "\n",  # empty
+        json.dumps({"type": "user", "message": {"role": "user", "content": "Good msg"}})
+        + "\n",
+    ]
+    jsonl.write_text("".join(lines), encoding="utf-8")
+    sessions_file.write_text(
+        json.dumps([{"session_id": sid, "created": 1000.0}]), encoding="utf-8"
+    )
+
+    # Must not raise; label should be the first parseable non-empty user text.
+    result = agent_launcher.list_resumable_sessions("/repo")
+    assert result[0].label == "Good msg"
+
+
+def test_list_resumable_sessions_content_as_list(
+    _sessions_env: tuple[Path, Path],
+) -> None:
+    """content as a list of blocks — pick the first text block."""
+    sessions_file, project_dir = _sessions_env
+    sid = "dddddddd-0000-0000-0000-000000000001"
+    jsonl = project_dir / f"{sid}.jsonl"
+    content = [{"type": "text", "text": "Block message"}]
+    jsonl.write_text(
+        json.dumps({"type": "user", "message": {"role": "user", "content": content}})
+        + "\n",
+        encoding="utf-8",
+    )
+    sessions_file.write_text(
+        json.dumps([{"session_id": sid, "created": 1000.0}]), encoding="utf-8"
+    )
+
+    result = agent_launcher.list_resumable_sessions("/repo")
+    assert result[0].label == "Block message"
+
+
+def test_list_resumable_sessions_sorted_newest_first(
+    _sessions_env: tuple[Path, Path],
+) -> None:
+    sessions_file, project_dir = _sessions_env
+    now = time.time()
+    # Two sessions: older jsonl mtime vs newer.
+    sid_old = "eeeeeeee-0000-0000-0000-000000000001"
+    sid_new = "eeeeeeee-0000-0000-0000-000000000002"
+
+    jsonl_old = project_dir / f"{sid_old}.jsonl"
+    jsonl_new = project_dir / f"{sid_new}.jsonl"
+    jsonl_old.write_text("{}\n", encoding="utf-8")
+    jsonl_new.write_text("{}\n", encoding="utf-8")
+    # Set mtimes explicitly.
+    import os
+
+    os.utime(jsonl_old, (now - 3600, now - 3600))
+    os.utime(jsonl_new, (now, now))
+
+    sessions_file.write_text(
+        json.dumps(
+            [
+                {"session_id": sid_old, "created": now - 3600},
+                {"session_id": sid_new, "created": now},
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = agent_launcher.list_resumable_sessions("/repo")
+    assert result[0].session_id == sid_new
+    assert result[1].session_id == sid_old
 
 
 # ---------------------------------------------------------------------------
@@ -188,16 +412,18 @@ def _patch_linux_gnome(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("ZCU_AGENT_TERMINAL", raising=False)
 
 
-def test_launch_new_session_persists_and_spawns(
-    monkeypatch: pytest.MonkeyPatch, _last_session_path: Path
+def test_launch_new_session_records_and_spawns(
+    monkeypatch: pytest.MonkeyPatch, _sessions_file: Path
 ) -> None:
     _patch_linux_gnome(monkeypatch)
     monkeypatch.setattr(agent_launcher, "new_session_id", lambda: "fixed-uuid")
 
-    session_id = agent_launcher.launch_agent_terminal("/repo", resume=False)
+    session_id = agent_launcher.launch_agent_terminal("/repo")
 
     assert session_id == "fixed-uuid"
-    assert agent_launcher.read_last_session_id() == "fixed-uuid"
+    # Session must be recorded in the store.
+    records = json.loads(_sessions_file.read_text())
+    assert any(r["session_id"] == "fixed-uuid" for r in records)
     assert len(_FakePopen.instances) == 1
     spawn = _FakePopen.instances[0]
     # gnome-terminal runs the launch script via bash.
@@ -213,13 +439,14 @@ def test_launch_new_session_persists_and_spawns(
     assert "ANTHROPIC_API_KEY" not in spawn.env
 
 
-def test_launch_resume_uses_persisted_id(
-    monkeypatch: pytest.MonkeyPatch, _last_session_path: Path
+def test_launch_resume_uses_given_session_id(
+    monkeypatch: pytest.MonkeyPatch, _sessions_file: Path
 ) -> None:
     _patch_linux_gnome(monkeypatch)
-    agent_launcher.write_last_session_id("prev-sess")
 
-    session_id = agent_launcher.launch_agent_terminal("/repo", resume=True)
+    session_id = agent_launcher.launch_agent_terminal(
+        "/repo", resume_session_id="prev-sess"
+    )
 
     assert session_id == "prev-sess"
     script_body = Path(_FakePopen.instances[0].argv[3]).read_text(encoding="utf-8")
@@ -227,27 +454,32 @@ def test_launch_resume_uses_persisted_id(
     assert "prev-sess" in script_body
 
 
-def test_launch_resume_with_no_last_falls_back_to_new(
-    monkeypatch: pytest.MonkeyPatch, _last_session_path: Path
+def test_launch_resume_does_not_re_record(
+    monkeypatch: pytest.MonkeyPatch, _sessions_file: Path
 ) -> None:
+    """Resuming an existing session must not add a duplicate record."""
     _patch_linux_gnome(monkeypatch)
-    monkeypatch.setattr(agent_launcher, "new_session_id", lambda: "fresh")
+    # Pre-populate the store with the session being resumed.
+    _sessions_file.parent.mkdir(parents=True, exist_ok=True)
+    _sessions_file.write_text(
+        json.dumps([{"session_id": "prev-sess", "created": 1000.0}]), encoding="utf-8"
+    )
 
-    session_id = agent_launcher.launch_agent_terminal("/repo", resume=True)
+    agent_launcher.launch_agent_terminal("/repo", resume_session_id="prev-sess")
 
-    assert session_id == "fresh"
-    script_body = Path(_FakePopen.instances[0].argv[3]).read_text(encoding="utf-8")
-    assert "--session-id" in script_body
+    records = json.loads(_sessions_file.read_text())
+    # Still exactly one entry (no re-record on resume).
+    assert len(records) == 1
 
 
 def test_launch_passes_state_context_into_spawned_argv(
-    monkeypatch: pytest.MonkeyPatch, _last_session_path: Path
+    monkeypatch: pytest.MonkeyPatch, _sessions_file: Path
 ) -> None:
     _patch_linux_gnome(monkeypatch)
     monkeypatch.setattr(agent_launcher, "new_session_id", lambda: "sess-state")
     state = "[measure-gui current state]\nproject: chip=Q5\n[end state]"
 
-    agent_launcher.launch_agent_terminal("/repo", resume=False, state_context=state)
+    agent_launcher.launch_agent_terminal("/repo", state_context=state)
 
     # The state block is shell-quoted into the exec'd argv inside the script.
     script_body = Path(_FakePopen.instances[0].argv[3]).read_text(encoding="utf-8")
@@ -256,26 +488,26 @@ def test_launch_passes_state_context_into_spawned_argv(
 
 
 def test_launch_without_state_context_omits_state_block(
-    monkeypatch: pytest.MonkeyPatch, _last_session_path: Path
+    monkeypatch: pytest.MonkeyPatch, _sessions_file: Path
 ) -> None:
     _patch_linux_gnome(monkeypatch)
     monkeypatch.setattr(agent_launcher, "new_session_id", lambda: "sess-plain")
 
-    agent_launcher.launch_agent_terminal("/repo", resume=False)
+    agent_launcher.launch_agent_terminal("/repo")
 
     script_body = Path(_FakePopen.instances[0].argv[3]).read_text(encoding="utf-8")
     assert "measure-gui current state" not in script_body
 
 
 def test_launch_terminal_override_env(
-    monkeypatch: pytest.MonkeyPatch, _last_session_path: Path
+    monkeypatch: pytest.MonkeyPatch, _sessions_file: Path
 ) -> None:
     monkeypatch.setattr(agent_launcher.sys, "platform", "linux")
     monkeypatch.setattr(agent_launcher.shutil, "which", lambda name: None)
     monkeypatch.setattr(agent_launcher.subprocess, "Popen", _FakePopen)
     monkeypatch.setenv("ZCU_AGENT_TERMINAL", "/opt/myterm")
 
-    agent_launcher.launch_agent_terminal("/repo", resume=False)
+    agent_launcher.launch_agent_terminal("/repo")
 
     spawn = _FakePopen.instances[0]
     assert spawn.argv[0] == "/opt/myterm"
@@ -283,7 +515,7 @@ def test_launch_terminal_override_env(
 
 
 def test_launch_fast_fails_when_no_terminal(
-    monkeypatch: pytest.MonkeyPatch, _last_session_path: Path
+    monkeypatch: pytest.MonkeyPatch, _sessions_file: Path
 ) -> None:
     monkeypatch.setattr(agent_launcher.sys, "platform", "linux")
     monkeypatch.setattr(agent_launcher.shutil, "which", lambda name: None)
@@ -291,4 +523,4 @@ def test_launch_fast_fails_when_no_terminal(
     monkeypatch.delenv("ZCU_AGENT_TERMINAL", raising=False)
 
     with pytest.raises(RuntimeError, match="ZCU_AGENT_TERMINAL"):
-        agent_launcher.launch_agent_terminal("/repo", resume=False)
+        agent_launcher.launch_agent_terminal("/repo")

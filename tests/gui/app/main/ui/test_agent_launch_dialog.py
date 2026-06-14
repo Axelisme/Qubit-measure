@@ -1,10 +1,8 @@
-"""Tests for ``AgentLaunchDialog`` — the two-button external-terminal launcher.
+"""Tests for ``AgentLaunchDialog`` — the session-list external-terminal launcher.
 
 Headless (offscreen qapp from tests/gui/conftest.py). The launcher module is
-monkeypatched so no terminal is spawned; the tests assert the Resume button's
-enabled state and that each button calls ``launch_agent_terminal`` with the
-right ``resume`` flag, the controller's project root, and the live GUI-state
-snapshot from ``build_agent_state_context`` (Round 2 state injection).
+monkeypatched so no terminal is spawned; the tests assert list population,
+Resume-selected / New button behaviour, and enabled-state of the Resume button.
 """
 
 from __future__ import annotations
@@ -12,10 +10,27 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from qtpy.QtCore import Qt  # type: ignore[attr-defined]
 from zcu_tools.gui.app.main.services import agent_launcher
+from zcu_tools.gui.app.main.services.agent_launcher import ResumableSession
 from zcu_tools.gui.app.main.ui.agent_launch_dialog import AgentLaunchDialog
 
+_SESSION_ID_ROLE = Qt.ItemDataRole.UserRole
+
 _STATE_CONTEXT = "[measure-gui current state]\n...\n[end state]"
+
+_FAKE_SESSIONS = [
+    ResumableSession(
+        session_id="sess-aaa",
+        last_active=2000.0,
+        label="First user message of session aaa",
+    ),
+    ResumableSession(
+        session_id="sess-bbb",
+        last_active=1000.0,
+        label="Earlier session bbb",
+    ),
+]
 
 
 def _make_ctrl(project_root: str = "/repo/root") -> MagicMock:
@@ -25,30 +40,135 @@ def _make_ctrl(project_root: str = "/repo/root") -> MagicMock:
     return ctrl
 
 
-@pytest.mark.usefixtures("qapp")
-def test_resume_disabled_when_no_last_session(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(agent_launcher, "read_last_session_id", lambda: None)
-    dialog = AgentLaunchDialog(_make_ctrl())  # type: ignore[arg-type]
-    assert not dialog._resume_btn.isEnabled()
-    assert dialog._new_btn.isEnabled()
+# ---------------------------------------------------------------------------
+# List population
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.usefixtures("qapp")
-def test_resume_enabled_when_last_session_present(
+def test_dialog_populates_list_from_resumable_sessions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(agent_launcher, "read_last_session_id", lambda: "sess-1")
+    monkeypatch.setattr(
+        agent_launcher, "list_resumable_sessions", lambda _root: _FAKE_SESSIONS
+    )
     dialog = AgentLaunchDialog(_make_ctrl())  # type: ignore[arg-type]
+    assert dialog._session_list.count() == 2
+    # First item in the list corresponds to the first (most recent) session.
+    item0 = dialog._session_list.item(0)
+    assert item0 is not None
+    assert "sess-aaa" in item0.data(_SESSION_ID_ROLE)
+
+
+@pytest.mark.usefixtures("qapp")
+def test_dialog_selects_first_item_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        agent_launcher, "list_resumable_sessions", lambda _root: _FAKE_SESSIONS
+    )
+    dialog = AgentLaunchDialog(_make_ctrl())  # type: ignore[arg-type]
+    assert dialog._session_list.currentRow() == 0
+
+
+@pytest.mark.usefixtures("qapp")
+def test_dialog_empty_list_when_no_sessions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(agent_launcher, "list_resumable_sessions", lambda _root: [])
+    dialog = AgentLaunchDialog(_make_ctrl())  # type: ignore[arg-type]
+    assert dialog._session_list.count() == 0
+
+
+# ---------------------------------------------------------------------------
+# Resume button enabled/disabled state
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("qapp")
+def test_resume_enabled_when_session_selected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        agent_launcher, "list_resumable_sessions", lambda _root: _FAKE_SESSIONS
+    )
+    dialog = AgentLaunchDialog(_make_ctrl())  # type: ignore[arg-type]
+    # Default selection → Resume enabled.
     assert dialog._resume_btn.isEnabled()
 
 
 @pytest.mark.usefixtures("qapp")
-def test_new_button_launches_with_resume_false(
+def test_resume_disabled_when_no_sessions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(agent_launcher, "read_last_session_id", lambda: None)
+    monkeypatch.setattr(agent_launcher, "list_resumable_sessions", lambda _root: [])
+    dialog = AgentLaunchDialog(_make_ctrl())  # type: ignore[arg-type]
+    assert not dialog._resume_btn.isEnabled()
+    # New button is always enabled.
+    assert dialog._new_btn.isEnabled()
+
+
+# ---------------------------------------------------------------------------
+# Resume selected button
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("qapp")
+def test_resume_button_launches_with_selected_session_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        agent_launcher, "list_resumable_sessions", lambda _root: _FAKE_SESSIONS
+    )
+    launch = MagicMock(return_value="sess-aaa")
+    monkeypatch.setattr(agent_launcher, "launch_agent_terminal", launch)
+
+    ctrl = _make_ctrl()
+    dialog = AgentLaunchDialog(ctrl)  # type: ignore[arg-type]
+    # First item is selected by default; click Resume.
+    dialog._resume_btn.click()
+
+    launch.assert_called_once_with(
+        "/repo/root",
+        resume_session_id="sess-aaa",
+        state_context=_STATE_CONTEXT,
+    )
+    assert "sess-aaa" in dialog._status_label.text()
+
+
+@pytest.mark.usefixtures("qapp")
+def test_resume_button_uses_explicitly_selected_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        agent_launcher, "list_resumable_sessions", lambda _root: _FAKE_SESSIONS
+    )
+    launch = MagicMock(return_value="sess-bbb")
+    monkeypatch.setattr(agent_launcher, "launch_agent_terminal", launch)
+
+    ctrl = _make_ctrl()
+    dialog = AgentLaunchDialog(ctrl)  # type: ignore[arg-type]
+    # Select the second row explicitly.
+    dialog._session_list.setCurrentRow(1)
+    dialog._resume_btn.click()
+
+    launch.assert_called_once_with(
+        "/repo/root",
+        resume_session_id="sess-bbb",
+        state_context=_STATE_CONTEXT,
+    )
+
+
+# ---------------------------------------------------------------------------
+# New session button
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("qapp")
+def test_new_button_launches_without_resume_session_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(agent_launcher, "list_resumable_sessions", lambda _root: [])
     launch = MagicMock(return_value="new-sess")
     monkeypatch.setattr(agent_launcher, "launch_agent_terminal", launch)
 
@@ -57,34 +177,23 @@ def test_new_button_launches_with_resume_false(
     dialog._new_btn.click()
 
     launch.assert_called_once_with(
-        "/repo/root", resume=False, state_context=_STATE_CONTEXT
+        "/repo/root",
+        resume_session_id=None,
+        state_context=_STATE_CONTEXT,
     )
     assert "new-sess" in dialog._status_label.text()
-    # A launch persists a "last" session, so Resume becomes available.
-    assert dialog._resume_btn.isEnabled()
 
 
-@pytest.mark.usefixtures("qapp")
-def test_resume_button_launches_with_resume_true(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(agent_launcher, "read_last_session_id", lambda: "sess-1")
-    launch = MagicMock(return_value="sess-1")
-    monkeypatch.setattr(agent_launcher, "launch_agent_terminal", launch)
-
-    dialog = AgentLaunchDialog(_make_ctrl())  # type: ignore[arg-type]
-    dialog._resume_btn.click()
-
-    launch.assert_called_once_with(
-        "/repo/root", resume=True, state_context=_STATE_CONTEXT
-    )
+# ---------------------------------------------------------------------------
+# Failure path
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.usefixtures("qapp")
 def test_launch_failure_shown_in_status(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(agent_launcher, "read_last_session_id", lambda: None)
+    monkeypatch.setattr(agent_launcher, "list_resumable_sessions", lambda _root: [])
 
     def _boom(*_args: object, **_kwargs: object) -> str:
         raise RuntimeError("no terminal found")
