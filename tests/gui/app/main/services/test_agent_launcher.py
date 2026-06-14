@@ -668,6 +668,7 @@ def test_resolve_agent_command_non_windows_is_bare_claude(
 ) -> None:
     monkeypatch.delenv("ZCU_AGENT_CMD", raising=False)
     monkeypatch.setattr(agent_launcher.sys, "platform", "linux")
+    monkeypatch.setattr(agent_launcher.shutil, "which", lambda name: None)
     # The Desktop lookup must not even run off Windows.
     monkeypatch.setattr(
         agent_launcher,
@@ -677,23 +678,44 @@ def test_resolve_agent_command_non_windows_is_bare_claude(
     assert agent_launcher.resolve_agent_command() == "claude"
 
 
-def test_resolve_agent_command_windows_prefers_desktop_bundle(
+def test_resolve_agent_command_prefers_path_claude_over_bundle(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # A standalone `claude` on PATH wins over the Desktop-bundled CLI (the latter
+    # must not even be probed).
     monkeypatch.delenv("ZCU_AGENT_CMD", raising=False)
     monkeypatch.setattr(agent_launcher.sys, "platform", "win32")
+    monkeypatch.setattr(
+        agent_launcher.shutil, "which", lambda name: r"C:\Users\u\.local\bin\claude.exe"
+    )
+    monkeypatch.setattr(
+        agent_launcher,
+        "_find_desktop_bundled_claude",
+        lambda: pytest.fail("must not probe Desktop when claude is on PATH"),
+    )
+    assert agent_launcher.resolve_agent_command() == "claude"
+
+
+def test_resolve_agent_command_windows_uses_bundle_when_no_path_claude(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # No standalone `claude` on PATH → fall back to the Desktop-bundled CLI.
+    monkeypatch.delenv("ZCU_AGENT_CMD", raising=False)
+    monkeypatch.setattr(agent_launcher.sys, "platform", "win32")
+    monkeypatch.setattr(agent_launcher.shutil, "which", lambda name: None)
     bundled = r"C:\Users\u\AppData\Roaming\Claude\claude-code\2.1.170\claude.exe"
     monkeypatch.setattr(agent_launcher, "_find_desktop_bundled_claude", lambda: bundled)
     assert agent_launcher.resolve_agent_command() == bundled
 
 
-def test_resolve_agent_command_windows_falls_back_to_path_claude(
+def test_resolve_agent_command_falls_back_to_bare_claude_when_nothing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # On Windows with no override and no Desktop bundle, fall back to bare
-    # "claude" (PATH lookup happens in the launcher, which Fast-Fails if absent).
+    # No PATH claude and no Desktop bundle → bare "claude" (the launcher then
+    # Fast-Fails if it is absent).
     monkeypatch.delenv("ZCU_AGENT_CMD", raising=False)
     monkeypatch.setattr(agent_launcher.sys, "platform", "win32")
+    monkeypatch.setattr(agent_launcher.shutil, "which", lambda name: None)
     monkeypatch.setattr(agent_launcher, "_find_desktop_bundled_claude", lambda: None)
     assert agent_launcher.resolve_agent_command() == "claude"
 

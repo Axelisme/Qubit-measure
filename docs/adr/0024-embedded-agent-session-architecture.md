@@ -41,10 +41,11 @@ dialog 直接委 `services/agent_launcher.py` 的 `launch_agent_terminal()`；la
   - Windows：直接 `subprocess.Popen([py, launcher], creationflags=CREATE_NEW_CONSOLE)` 開新主控台視窗。**不用** Store 版 Windows Terminal：`wt` 是 UWP app，它 spawn 的子進程拿到虛擬化的 `AppData\Roaming`，因此讀不到 Claude Desktop 內建在 `%APPDATA%\Roaming\Claude` 的 `claude.exe`（`os.path.exists` 都回 False、launcher fast-fail）。**也不用** `cmd /c start "" "<py>" "<launcher>"`：預先加引號的 token 會被 subprocess 二次轉義，破壞路徑。從本進程（非封裝）直接 Popen 無 AppData 沙箱，subprocess 也會正確 quote 兩個真實路徑。`ZCU_AGENT_TERMINAL` 可覆寫。
   - **agent CLI（argv[0]）由 `resolve_agent_command()` 解析**，依序：
     1. `ZCU_AGENT_CMD` 環境變數（任何平台的顯式覆寫，如換 `codex`）。
-    2. **Windows：Claude Desktop 內建 CLI**——`_find_desktop_bundled_claude()` 取最新版 `%APPDATA%\Claude\claude-code\<version>\claude.exe`。Desktop 安裝不把 `claude` 放進 PATH，故在 PATH 查找前優先採用；版本資料夾帶版號，挑數字最大者（`2.1.170` > `2.1.9`，非字典序）。
-    3. 裸 `claude`——由 launcher 經 PATH 解析（獨立安裝的 Claude Code CLI）；找不到即 fast-fail。
-    Windows 實際解析序＝Desktop 內建 → PATH `claude` → fast-fail；其他平台＝`ZCU_AGENT_CMD` → PATH `claude` → fast-fail。
-  - 從子程序環境移除 `ANTHROPIC_API_KEY`（訂閱認證下無需）。
+    2. **PATH 上的獨立 `claude` 優先**（如 `claude install` 裝的；`shutil.which("claude")` 找得到就用）——真正的 CLI、持續更新、跨平台一致，與「全程走 CLI」的用法一致。
+    3. **Windows 後備：Claude Desktop 內建 CLI**——`_find_desktop_bundled_claude()` 取最新版 `%APPDATA%\Claude\claude-code\<version>\claude.exe`（挑數字最大版，非字典序）。給「只裝 Desktop、`claude` 不在 PATH」的環境用。
+    4. 裸 `claude`——launcher 經 PATH 解析；找不到即 fast-fail。
+    Windows 實際解析序＝PATH `claude` → Desktop 內建 → fast-fail；其他平台＝`ZCU_AGENT_CMD` → PATH `claude` → fast-fail。
+  - 剝除父進程的 Claude Code 編排環境變數（`ANTHROPIC_API_KEY` 為訂閱認證；`CLAUDE_CODE_*` / `CLAUDECODE` / `CLAUDE_AGENT_SDK*` 讓子 claude 以乾淨 `cli` 啟動，而非繼承 Desktop-embedded entrypoint）。
 
 ### 自動連線
 

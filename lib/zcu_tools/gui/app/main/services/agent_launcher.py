@@ -350,18 +350,25 @@ def resolve_agent_command() -> str:
 
     Precedence:
       1. ``ZCU_AGENT_CMD`` (explicit override, any platform) — e.g. swap in codex.
-      2. On Windows: Claude Desktop's bundled CLI (newest
-         ``%APPDATA%\\Claude\\claude-code\\*\\claude.exe``). Desktop installs do
-         not put ``claude`` on PATH, so this is preferred before the PATH lookup.
-      3. The bare ``"claude"`` — resolved via PATH in the launcher (a standalone
-         Claude Code CLI install). The launcher Fast-Fails if it is absent.
+      2. A standalone ``claude`` on PATH (e.g. from ``claude install``) — the real
+         CLI, kept current and identical across platforms. Preferred so the launch
+         is consistent with a "CLI everywhere" setup.
+      3. On Windows only: the Claude Desktop-bundled CLI (newest
+         ``%APPDATA%\\Claude\\claude-code\\*\\claude.exe``) — the fallback for a
+         Desktop-only install, where ``claude`` is not on PATH.
+      4. The bare ``"claude"`` — the launcher resolves it via PATH and Fast-Fails
+         if it is absent.
 
-    The Windows order is therefore: Desktop-bundled CLI → PATH ``claude`` →
+    The Windows order is therefore: PATH ``claude`` → Desktop-bundled CLI →
     Fast-Fail; other platforms: ``ZCU_AGENT_CMD`` → PATH ``claude`` → Fast-Fail.
+    Returning the bare name (not the resolved path) keeps the launcher as the
+    single PATH-resolution + Fast-Fail point.
     """
     override = os.environ.get("ZCU_AGENT_CMD")
     if override:
         return override
+    if shutil.which("claude") is not None:
+        return "claude"
     if sys.platform == "win32":
         bundled = _find_desktop_bundled_claude()
         if bundled is not None:
