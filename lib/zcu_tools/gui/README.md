@@ -1,10 +1,24 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-06-12 (Phase 157: logging system)
+**Last updated:** 2026-06-14 (non-blocking dialog convention)
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
 `plotting`, `remote`, `session`, `widgets`) are shared by every app.
+
+## Dialogs — always non-blocking
+
+Every app embeds a control socket whose RPC handler runs on the Qt event loop,
+so **all dialogs (and message boxes) launch with `open()`, never `exec()`**.
+A blocking `exec()` would freeze the event loop until the user dismisses the
+dialog, stalling the control socket (and, for measure, deadlocking cross-thread
+marshalling). Read a dialog's outcome from its `accepted` / `finished` signal
+instead of `exec()`'s return value, set `WA_DeleteOnClose`, and hold an instance
+reference so `open()`'s immediate return does not let it be garbage-collected.
+The measure registry path (`MainWindow.open_dialog` / `close_dialog`) is detailed
+in `app/main/services/remote/README.md`. The sole intentional `exec()` is the
+global unhandled-exception hook in `app/main/utils/error_handler.py`, where the
+process is already crashing and the message must block.
 
 ## Logging (`logging_setup.py`)
 
