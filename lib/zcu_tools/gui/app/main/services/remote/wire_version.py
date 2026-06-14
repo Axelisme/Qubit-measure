@@ -248,4 +248,9 @@ WIRE_VERSION = 26
 #      stale single-valued port declaration is dropped.
 # v32: removed the device.active_setups wire method (WIRE 26) — superseded by
 #      device.active_operations. The domain getter is untouched.
-GUI_VERSION = 32
+# v33: view.snapshot tab_ids / active_tab_id now project from State
+#      (ctrl.list_tab_ids) instead of MainWindow._tab_widgets — a widget map that
+#      diverged from the tab registry can no longer leak "ghost" tab ids that
+#      gui_tab_list / gui_tab_list_paths reject. WIRE unchanged (no RPC/param/event
+#      change; pure GUI-side projection fix).
+GUI_VERSION = 33

@@ -214,7 +214,12 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
 #      renamed to gui_editor_save_as_module (wire key stays editor.commit). Removed
 #      gui_device_active_setups (the device.active_setups wire method was dropped;
 #      gui_device_active_operations covers it).
-MCP_VERSION = 31
+# MCP 32: gui_tab_get_current_figure always returns a written file path
+#      ({saved_to, bytes}), never inline base64 — out_path when given, else a
+#      per-tab temp file (gettempdir()/measure_fig_<tab_id>.png). Removes the
+#      base64 reply that overran the tool-output token limit. Wire unchanged (the
+#      wire tab.get_current_figure still supports png_b64 for raw consumers).
+MCP_VERSION = 32
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
