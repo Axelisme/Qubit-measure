@@ -32,10 +32,6 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-# argv[0] for the agent CLI. ``claude`` by default; ``ZCU_AGENT_CMD`` overrides
-# it so a future codex-style CLI can be swapped in without code changes.
-AGENT_CMD: str = os.environ.get("ZCU_AGENT_CMD", "claude")
-
 # Persisted session list. Replaces the old single-id ``agent_last_session`` file.
 # Stores a JSON array of {"session_id": str, "created": float} records (most
 # recently launched first). Capped at _SESSION_CAP entries.
@@ -306,6 +302,68 @@ def new_session_id() -> str:
     return str(uuid.uuid4())
 
 
+def _find_desktop_bundled_claude() -> str | None:
+    """Return the newest Claude Desktop-bundled ``claude.exe`` path, or None.
+
+    Claude Desktop ships the Claude Code CLI under
+    ``%APPDATA%\\Claude\\claude-code\\<version>\\claude.exe`` — a version-pinned
+    directory that is *not* on PATH, so ``shutil.which("claude")`` cannot find it
+    on a Desktop-only install. This returns the highest-version ``claude.exe``
+    that exists, or None when Desktop is absent / the layout differs.
+
+    Windows-only by construction (relies on ``%APPDATA%``); callers gate on
+    ``sys.platform == "win32"``.
+    """
+    appdata = os.environ.get("APPDATA")
+    if not appdata:
+        return None
+    base = Path(appdata) / "Claude" / "claude-code"
+    if not base.is_dir():
+        return None
+    candidates: list[tuple[tuple[int, ...], str]] = []
+    for child in base.iterdir():
+        exe = child / "claude.exe"
+        if not exe.is_file():
+            continue
+        # Order by the dir name parsed as a dotted version so 2.1.170 wins over
+        # 2.1.9 (lexicographic order would get that backwards). Parsing stops at
+        # the first non-numeric part, so a well-formed version sorts highest.
+        version: list[int] = []
+        for part in child.name.split("."):
+            if not part.isdigit():
+                break
+            version.append(int(part))
+        candidates.append((tuple(version), str(exe)))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda c: c[0])
+    return candidates[-1][1]
+
+
+def resolve_agent_command() -> str:
+    """Resolve argv[0] for the agent CLI — the binary the launcher execs.
+
+    Precedence:
+      1. ``ZCU_AGENT_CMD`` (explicit override, any platform) — e.g. swap in codex.
+      2. On Windows: Claude Desktop's bundled CLI (newest
+         ``%APPDATA%\\Claude\\claude-code\\*\\claude.exe``). Desktop installs do
+         not put ``claude`` on PATH, so this is preferred before the PATH lookup.
+      3. The bare ``"claude"`` — resolved via PATH in the launcher (a standalone
+         Claude Code CLI install). The launcher Fast-Fails if it is absent.
+
+    The Windows order is therefore: Desktop-bundled CLI → PATH ``claude`` →
+    Fast-Fail; other platforms: ``ZCU_AGENT_CMD`` → PATH ``claude`` → Fast-Fail.
+    """
+    override = os.environ.get("ZCU_AGENT_CMD")
+    if override:
+        return override
+    if sys.platform == "win32":
+        bundled = _find_desktop_bundled_claude()
+        if bundled is not None:
+            return bundled
+    return "claude"
+
+
 def build_claude_argv(
     mcp_config_path: str,
     *,
@@ -329,13 +387,14 @@ def build_claude_argv(
     ``--resume <id>``; otherwise ``new_session_id`` (if given) maps to
     ``--session-id <id>``. Both ``None`` is valid — claude manages the session.
 
-    argv[0] is ``AGENT_CMD`` (``claude`` by default, ``ZCU_AGENT_CMD`` override).
+    argv[0] is ``resolve_agent_command()`` (``ZCU_AGENT_CMD`` override → on
+    Windows the Claude Desktop-bundled CLI → bare ``claude`` resolved via PATH).
     """
     system_prompt = _EMBEDDED_SYSTEM_PROMPT
     if state_context is not None:
         system_prompt = _EMBEDDED_SYSTEM_PROMPT + "\n\n" + state_context
     argv = [
-        AGENT_CMD,
+        resolve_agent_command(),
         "--mcp-config",
         mcp_config_path,
         "--allowedTools",

@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-14（外部終端 launch agent：刪除內嵌 agent 架構，改為系統終端 spawn 真互動式 claude + loopback MCP）
+**Last updated:** 2026-06-14（agent launch：Windows argv[0] 由 `resolve_agent_command()` 解析——Claude Desktop 內建 CLI 優先、再 PATH `claude`、否則 fast-fail）
 
 # `zcu_tools/gui/app/main/` — measure-gui Framework AI Note
 
@@ -48,7 +48,7 @@ gui/
 │   ├── staged_analyze.py — _StagedAnalyzeService (analyze/post-analyze 共用基底：handle-only off-main worker + 主線程 record result/figure + 失敗路徑)
 │   ├── analyze.py        — AnalyzeService (主分析層：FIT worker + INTERACTIVE finish；算 writeback items)
 │   ├── post_analyze.py   — PostAnalyzeService (第二分析層，鏡像 AnalyzeService：FIT-only、在 primary analyze 結果之上重算、gate on primary 已存在；State 平行 post_* 欄位)
-│   ├── agent_launcher.py — Qt-free 外部終端 agent launch 服務：`build_loopback_mcp_config`（暫存 mcp.json，repo_root cwd + uv run measure/server.py loopback）、`_EMBEDDED_SYSTEM_PROMPT`（告知 agent「gui_* 工具已自動 attach、勿自呼 connect、需要狀態自呼 gui_state_check」）、`build_claude_argv`（互動模式不帶 -p、`--mcp-config` / `--allowedTools "mcp__measure-gui__*"` / `--append-system-prompt` / `--resume <id>` 或 `--session-id <uuid>`）、`new_session_id`、`record_launched_session`/`list_resumable_sessions`/`claude_project_dir`（追蹤我們 launch 過的 session 於 `~/.cache/zcu-tools/agent_sessions.json`，列表時從 claude `~/.claude/projects/<slug>/*.jsonl` 補 last-active + 首則訊息 label）、`launch_agent_terminal(repo_root, *, resume_session_id=None, state_context=None)`（跨平台 spawn：Linux gnome-terminal/konsole/xterm/x-terminal-emulator 或 `ZCU_AGENT_TERMINAL` 覆寫、macOS `open -a Terminal`、Windows `wt`/`start`；寫暫存啟動 script 避 quoting；移除 ANTHROPIC_API_KEY；`AGENT_CMD` 預設 `claude`、env `ZCU_AGENT_CMD` 可換為 codex）
+│   ├── agent_launcher.py — Qt-free 外部終端 agent launch 服務：`build_loopback_mcp_config`（暫存 mcp.json，repo_root cwd + uv run measure/server.py loopback）、`_EMBEDDED_SYSTEM_PROMPT`（告知 agent「gui_* 工具已自動 attach、勿自呼 connect、需要狀態自呼 gui_state_check」）、`build_claude_argv`（互動模式不帶 -p、`--mcp-config` / `--allowedTools "mcp__measure-gui__*"` / `--append-system-prompt` / `--resume <id>` 或 `--session-id <uuid>`）、`new_session_id`、`record_launched_session`/`list_resumable_sessions`/`claude_project_dir`（追蹤我們 launch 過的 session 於 `~/.cache/zcu-tools/agent_sessions.json`，列表時從 claude `~/.claude/projects/<slug>/*.jsonl` 補 last-active + 首則訊息 label）、`launch_agent_terminal(repo_root, *, resume_session_id=None, state_context=None)`（跨平台 spawn：Linux gnome-terminal/konsole/xterm/x-terminal-emulator 或 `ZCU_AGENT_TERMINAL` 覆寫、macOS `open -a Terminal`、Windows `wt`/`start`；寫暫存啟動 script 避 quoting；移除 ANTHROPIC_API_KEY；argv[0] 由 `resolve_agent_command()` 解析：`ZCU_AGENT_CMD` 覆寫（任何平台，如換 codex）> Windows 取 Claude Desktop 內建 CLI（`_find_desktop_bundled_claude` 找最新版 `%APPDATA%\Claude\claude-code\*\claude.exe`，因 Desktop 裝法不入 PATH）> 裸 `claude`（launcher 經 PATH 解析、無則 fast-fail）。Windows 解析序＝Desktop 內建 → PATH `claude` → fast-fail）
 │   ├── tab.py            — TabService (分頁狀態與 tab-local query/update)
 │   ├── tab_view.py       — TabViewService / TabViewSnapshot (pure tab render read model)
 │   ├── save.py           — SaveService (資料/圖片儲存 pipeline)
@@ -117,7 +117,7 @@ measure / fluxdep / dispersive 三個 GUI app 共用 transport + wire 機制，d
 
 #### 外部終端 Agent Launch 架構（ADR-0024）
 
-GUI 上的「Agent」按鈕觸發 `AgentLaunchDialog`（可選 resumable session 清單 + Resume selected / New session）→ `build_agent_state_context()` 組裝當前 GUI 快照（project / context / SoC / open tabs）→ 委 `services/agent_launcher.py` 的 `launch_agent_terminal()` spawn 系統終端（Linux：gnome-terminal/konsole/xterm，macOS：`open -a Terminal`，Windows：wt/start；`ZCU_AGENT_TERMINAL` 可覆寫；`ZCU_AGENT_CMD` 可換 agent）。
+GUI 上的「Agent」按鈕觸發 `AgentLaunchDialog`（可選 resumable session 清單 + Resume selected / New session）→ `build_agent_state_context()` 組裝當前 GUI 快照（project / context / SoC / open tabs）→ 委 `services/agent_launcher.py` 的 `launch_agent_terminal()` spawn 系統終端（Linux：gnome-terminal/konsole/xterm，macOS：`open -a Terminal`，Windows：wt/start；`ZCU_AGENT_TERMINAL` 可覆寫終端；agent CLI 由 `resolve_agent_command()` 解析（`ZCU_AGENT_CMD` 覆寫 → Windows 取 Claude Desktop 內建 CLI → PATH `claude` → fast-fail））。
 
 終端內跑**真互動式 `claude`**（不是 headless subprocess）：
 - 經 `--mcp-config`（暫存 loopback mcp.json）掛上 GUI control socket；首次 `gui_*` 呼叫即由 lazy auto-connect 自動 attach。

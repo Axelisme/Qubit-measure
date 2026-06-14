@@ -32,8 +32,8 @@ def test_build_claude_argv_is_interactive_with_core_flags() -> None:
     # Interactive mode: no print flag.
     assert "-p" not in argv
     assert "--output-format" not in argv
-    # argv[0] is the configured agent command.
-    assert argv[0] == agent_launcher.AGENT_CMD
+    # argv[0] is the resolved agent command (see resolve_agent_command).
+    assert argv[0] == agent_launcher.resolve_agent_command()
     # Core flags present with their values.
     assert argv[argv.index("--mcp-config") + 1] == "/tmp/mcp.json"
     assert argv[argv.index("--allowedTools") + 1] == "mcp__measure-gui__*"
@@ -73,7 +73,8 @@ def test_build_claude_argv_neither_session() -> None:
 def test_build_claude_argv_respects_agent_cmd_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(agent_launcher, "AGENT_CMD", "codex")
+    # ZCU_AGENT_CMD is the explicit escape hatch — it wins on every platform.
+    monkeypatch.setenv("ZCU_AGENT_CMD", "codex")
     argv = agent_launcher.build_claude_argv("/tmp/mcp.json")
     assert argv[0] == "codex"
 
@@ -194,7 +195,10 @@ def test_record_launched_session_rejects_empty(_sessions_file: Path) -> None:
 
 def test_claude_project_dir_simple_path() -> None:
     path = agent_launcher.claude_project_dir("/home/user/myrepo")
-    assert path.name == "-home-user-myrepo"
+    # os.path.abspath prepends a drive letter on Windows (C:\home\user\myrepo →
+    # "C--home-user-myrepo"), so assert the slug suffix rather than a hardcoded
+    # POSIX result — the encoding of the path body is identical on both platforms.
+    assert path.name.endswith("-home-user-myrepo")
     assert path.parent.name == "projects"
 
 
@@ -611,6 +615,104 @@ def test_launcher_source_missing_binary_exits_with_message() -> None:
 
 
 # ---------------------------------------------------------------------------
+# resolve_agent_command / _find_desktop_bundled_claude (Windows CLI resolution)
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_agent_command_env_override_wins(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The explicit override wins on every platform, ahead of any Desktop lookup.
+    monkeypatch.setenv("ZCU_AGENT_CMD", "codex")
+    monkeypatch.setattr(agent_launcher.sys, "platform", "win32")
+    monkeypatch.setattr(
+        agent_launcher, "_find_desktop_bundled_claude", lambda: r"C:\bundled\claude.exe"
+    )
+    assert agent_launcher.resolve_agent_command() == "codex"
+
+
+def test_resolve_agent_command_non_windows_is_bare_claude(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("ZCU_AGENT_CMD", raising=False)
+    monkeypatch.setattr(agent_launcher.sys, "platform", "linux")
+    # The Desktop lookup must not even run off Windows.
+    monkeypatch.setattr(
+        agent_launcher,
+        "_find_desktop_bundled_claude",
+        lambda: pytest.fail("must not probe Desktop off Windows"),
+    )
+    assert agent_launcher.resolve_agent_command() == "claude"
+
+
+def test_resolve_agent_command_windows_prefers_desktop_bundle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("ZCU_AGENT_CMD", raising=False)
+    monkeypatch.setattr(agent_launcher.sys, "platform", "win32")
+    bundled = r"C:\Users\u\AppData\Roaming\Claude\claude-code\2.1.170\claude.exe"
+    monkeypatch.setattr(agent_launcher, "_find_desktop_bundled_claude", lambda: bundled)
+    assert agent_launcher.resolve_agent_command() == bundled
+
+
+def test_resolve_agent_command_windows_falls_back_to_path_claude(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # On Windows with no override and no Desktop bundle, fall back to bare
+    # "claude" (PATH lookup happens in the launcher, which Fast-Fails if absent).
+    monkeypatch.delenv("ZCU_AGENT_CMD", raising=False)
+    monkeypatch.setattr(agent_launcher.sys, "platform", "win32")
+    monkeypatch.setattr(agent_launcher, "_find_desktop_bundled_claude", lambda: None)
+    assert agent_launcher.resolve_agent_command() == "claude"
+
+
+def test_find_desktop_bundled_claude_picks_newest_version(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Lay out %APPDATA%\Claude\claude-code\<ver>\claude.exe for several versions;
+    # the highest *numeric* version must win (2.1.170 > 2.1.9, not lexicographic).
+    base = tmp_path / "Claude" / "claude-code"
+    for ver in ("2.1.9", "2.1.170", "2.0.300"):
+        d = base / ver
+        d.mkdir(parents=True)
+        (d / "claude.exe").write_text("", encoding="utf-8")
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+
+    result = agent_launcher._find_desktop_bundled_claude()
+    assert result == str(base / "2.1.170" / "claude.exe")
+
+
+def test_find_desktop_bundled_claude_ignores_dirs_without_exe(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # A higher-version dir with no claude.exe must be skipped in favour of a
+    # lower-version dir that does have one.
+    base = tmp_path / "Claude" / "claude-code"
+    (base / "9.9.9").mkdir(parents=True)
+    have = base / "1.0.0"
+    have.mkdir(parents=True)
+    (have / "claude.exe").write_text("", encoding="utf-8")
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+
+    assert agent_launcher._find_desktop_bundled_claude() == str(have / "claude.exe")
+
+
+def test_find_desktop_bundled_claude_absent_returns_none(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # APPDATA set but no Claude\claude-code tree → None (Desktop not installed).
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    assert agent_launcher._find_desktop_bundled_claude() is None
+
+
+def test_find_desktop_bundled_claude_no_appdata_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("APPDATA", raising=False)
+    assert agent_launcher._find_desktop_bundled_claude() is None
+
+
+# ---------------------------------------------------------------------------
 # Windows terminal-spawn branches (#2 wt, #4 cmd start quoting)
 # ---------------------------------------------------------------------------
 
@@ -625,6 +727,11 @@ def _patch_windows(monkeypatch: pytest.MonkeyPatch, *, has_wt: bool) -> None:
 
     monkeypatch.setattr(agent_launcher.shutil, "which", _which)
     monkeypatch.setattr(agent_launcher.subprocess, "Popen", _FakePopen)
+    # These tests assert the terminal-spawn argv, not agent-binary resolution:
+    # pin resolve_agent_command to the bare "claude" so the launcher argv[0] is
+    # deterministic regardless of the host (no override env, no Desktop CLI).
+    monkeypatch.delenv("ZCU_AGENT_CMD", raising=False)
+    monkeypatch.setattr(agent_launcher, "_find_desktop_bundled_claude", lambda: None)
 
 
 def test_launch_windows_with_wt_uses_new_tab(
@@ -705,8 +812,6 @@ def test_launcher_resolves_binary_via_which(monkeypatch: pytest.MonkeyPatch) -> 
     """The launcher source resolves argv[0] via shutil.which (Windows .cmd)."""
     # This is a source-level assertion: the launcher does ``shutil.which(ARGV[0])``
     # so a Windows ``claude.cmd`` on PATH resolves even though os.execv would not.
-    source = agent_launcher.build_python_launcher_source(
-        "/repo", [agent_launcher.AGENT_CMD]
-    )
+    source = agent_launcher.build_python_launcher_source("/repo", ["claude"])
     assert "shutil.which(ARGV[0])" in source
     assert "os.execv(_bin, ARGV)" in source

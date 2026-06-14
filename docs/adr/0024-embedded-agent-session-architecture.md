@@ -39,7 +39,11 @@ dialog 直接委 `services/agent_launcher.py` 的 `launch_agent_terminal()`；la
   - Linux：依序嘗試 `gnome-terminal` / `konsole` / `xterm` / `x-terminal-emulator`；環境變數 `ZCU_AGENT_TERMINAL` 可覆寫。
   - macOS：`open -a Terminal`。
   - Windows：`wt` → `start cmd`。
-  - `AGENT_CMD` 預設 `claude`；環境變數 `ZCU_AGENT_CMD` 可換（如 `codex`）。
+  - **agent CLI（argv[0]）由 `resolve_agent_command()` 解析**，依序：
+    1. `ZCU_AGENT_CMD` 環境變數（任何平台的顯式覆寫，如換 `codex`）。
+    2. **Windows：Claude Desktop 內建 CLI**——`_find_desktop_bundled_claude()` 取最新版 `%APPDATA%\Claude\claude-code\<version>\claude.exe`。Desktop 安裝不把 `claude` 放進 PATH，故在 PATH 查找前優先採用；版本資料夾帶版號，挑數字最大者（`2.1.170` > `2.1.9`，非字典序）。
+    3. 裸 `claude`——由 launcher 經 PATH 解析（獨立安裝的 Claude Code CLI）；找不到即 fast-fail。
+    Windows 實際解析序＝Desktop 內建 → PATH `claude` → fast-fail；其他平台＝`ZCU_AGENT_CMD` → PATH `claude` → fast-fail。
   - 從子程序環境移除 `ANTHROPIC_API_KEY`（訂閱認證下無需）。
 
 ### 自動連線
