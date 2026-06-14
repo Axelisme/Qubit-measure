@@ -458,9 +458,7 @@ def build_python_launcher_source(repo_root: str, argv: list[str]) -> str:
     so the child does not start in Desktop-embedded mode and inject a phantom
     input), resolves the binary via ``shutil.which`` (on Windows ``claude`` is
     usually ``claude.cmd`` — ``os.execv`` alone would not find it on PATH), and
-    Fast-Fails with a clear message when the binary is absent. On Windows it also
-    drains the fresh console's input buffer before exec (a focus/IME commit
-    otherwise injects a phantom typed first line). It is run as
+    Fast-Fails with a clear message when the binary is absent. It is run as
     ``<python> <launcher.py>``, so it needs no execute bit.
     """
     argv_literal = json.dumps(argv)
@@ -487,25 +485,6 @@ def build_python_launcher_source(repo_root: str, argv: list[str]) -> str:
         '        f"zcu agent launcher: command not found on PATH: {ARGV[0]!r}. "\n'
         '        "Install it or set ZCU_AGENT_CMD to the right CLI."\n'
         "    )\n"
-        # The fresh CREATE_NEW_CONSOLE window can receive a phantom first line:
-        # when it steals focus, an IME composition gets committed into its input
-        # buffer (observed as a typed "are" first message every launch). The
-        # commit lands a few hundred ms AFTER the window appears (focus transfer +
-        # IME finalize), so drain the console input buffer repeatedly over ~1.2s,
-        # right up to the exec, to discard it before claude starts reading. The
-        # GetStdHandle restype is set to a pointer so the 64-bit handle is not
-        # truncated. Best-effort + Windows-only.
-        "if sys.platform == 'win32':\n"
-        "    try:\n"
-        "        import ctypes, time as _t\n"
-        "        _k32 = ctypes.windll.kernel32\n"
-        "        _k32.GetStdHandle.restype = ctypes.c_void_p\n"
-        "        _h = ctypes.c_void_p(_k32.GetStdHandle(-10))\n"
-        "        for _ in range(30):\n"
-        "            _t.sleep(0.05)\n"
-        "            _k32.FlushConsoleInputBuffer(_h)\n"
-        "    except Exception:\n"
-        "        pass\n"
         # execv replaces this process with the resolved binary, preserving the
         # terminal's TTY so claude runs in its normal interactive UI.
         "os.execv(_bin, ARGV)\n"
