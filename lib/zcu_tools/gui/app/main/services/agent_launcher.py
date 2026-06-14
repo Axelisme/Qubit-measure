@@ -471,9 +471,12 @@ def _spawn_terminal_argv(launcher_path: str) -> list[str]:
     ``[sys.executable, launcher_path]`` — all argv complexity lives inside the
     launcher, so the terminal command stays trivial to quote.
 
-    Fast-fails with a RuntimeError teaching the user to set ``ZCU_AGENT_TERMINAL``
-    when no known terminal is found (Linux). macOS/Windows branches use their
-    platform-standard launchers.
+    ``ZCU_AGENT_TERMINAL`` overrides the terminal on both Windows and Linux. macOS
+    uses Terminal.app; Windows defaults to a classic console (``cmd /c start`` /
+    conhost) rather than the Store-packaged Windows Terminal, whose AppData\\Roaming
+    sandbox hides the Desktop-bundled CLI (see the win32 branch). Fast-fails with a
+    RuntimeError teaching the user to set ``ZCU_AGENT_TERMINAL`` when no known
+    terminal is found on Linux.
     """
     py = sys.executable
 
@@ -486,19 +489,21 @@ def _spawn_terminal_argv(launcher_path: str) -> list[str]:
         return ["osascript", "-e", script]
 
     if sys.platform == "win32":
-        wt = shutil.which("wt")
-        if wt is not None:
-            # Windows-verify. ``wt new-tab <exe> <args...>`` runs an external
-            # command in a new tab; the trailing positional is wt's ``commandline``
-            # (executable + its arguments). subprocess quotes the two tokens for
-            # us when they contain spaces. ``cmd /k`` is intentionally NOT wrapped
-            # here — that was the old bug ("open a profile calling cmd"); the
-            # tab closes when claude exits, which is the least-surprising default.
-            return [wt, "new-tab", py, launcher_path]
-        # No Windows Terminal: fall back to a fresh console window via
-        # ``cmd /c start "" <py> <launcher>``. The first "" is start's window
-        # *title* (required, else a quoted path would be taken as the title).
-        # py and launcher are quoted so space-containing paths do not split.
+        # An explicit terminal override wins (mirrors the Linux branch): a power
+        # user with a non-sandboxed terminal can force it.
+        override = os.environ.get("ZCU_AGENT_TERMINAL")
+        if override:
+            return [override, py, launcher_path]
+        # Default to a classic console via ``cmd /c start`` (conhost), NOT the
+        # Store-packaged Windows Terminal (``wt``). ``wt`` runs as a UWP app and
+        # the child processes it spawns get a virtualized view of AppData\Roaming,
+        # so a wt-launched agent cannot read the Claude Desktop-bundled claude.exe
+        # under %APPDATA%\Roaming\Claude — the binary is invisible (os.path.exists
+        # is False) and the launcher Fast-Fails. conhost has no such restriction
+        # and works for both the Desktop-bundled CLI and a PATH install. The first
+        # "" is start's window *title* (required, else a quoted path is taken as
+        # the title); py and launcher are quoted so space-containing paths do not
+        # split. See ADR-0024 (Windows terminal sandbox).
         return ["cmd", "/c", "start", "", f'"{py}"', f'"{launcher_path}"']
 
     # Linux / other POSIX. An explicit override wins so headless/custom setups

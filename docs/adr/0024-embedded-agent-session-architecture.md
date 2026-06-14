@@ -38,7 +38,7 @@ dialog 直接委 `services/agent_launcher.py` 的 `launch_agent_terminal()`；la
 - `launch_agent_terminal(repo_root, *, resume, state_context)` → 寫暫存啟動 script（避 shell quoting 問題）→ 跨平台 spawn：
   - Linux：依序嘗試 `gnome-terminal` / `konsole` / `xterm` / `x-terminal-emulator`；環境變數 `ZCU_AGENT_TERMINAL` 可覆寫。
   - macOS：`open -a Terminal`。
-  - Windows：`wt` → `start cmd`。
+  - Windows：`cmd /c start`（conhost）。**不用** Store 版 Windows Terminal：`wt` 是 UWP app，它 spawn 的子進程拿到的是虛擬化的 `AppData\Roaming`，因此讀不到 Claude Desktop 內建在 `%APPDATA%\Roaming\Claude` 的 `claude.exe`（`os.path.exists` 都回 False、launcher fast-fail）。conhost 無此限制，對內建 CLI 與 PATH 安裝皆可。`ZCU_AGENT_TERMINAL` 可覆寫。
   - **agent CLI（argv[0]）由 `resolve_agent_command()` 解析**，依序：
     1. `ZCU_AGENT_CMD` 環境變數（任何平台的顯式覆寫，如換 `codex`）。
     2. **Windows：Claude Desktop 內建 CLI**——`_find_desktop_bundled_claude()` 取最新版 `%APPDATA%\Claude\claude-code\<version>\claude.exe`。Desktop 安裝不把 `claude` 放進 PATH，故在 PATH 查找前優先採用；版本資料夾帶版號，挑數字最大者（`2.1.170` > `2.1.9`，非字典序）。
