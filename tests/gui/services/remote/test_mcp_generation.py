@@ -67,11 +67,14 @@ def test_generated_optional_param_not_required():
 
 
 def test_cfg_editor_tools_generated():
+    # editor.commit's MCP tool is named gui_editor_save_as_module (tool_name
+    # override): its real semantics are "register the draft as an ml module/
+    # waveform", not "apply a tab cfg edit" (those edits are already live).
     expected = {
         "gui_editor_open",
         "gui_editor_set_field",
         "gui_editor_get",
-        "gui_editor_commit",
+        "gui_editor_save_as_module",
         "gui_editor_discard",
     }
     assert expected.issubset(set(m.TOOLS))

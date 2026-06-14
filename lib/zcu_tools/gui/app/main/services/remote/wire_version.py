@@ -111,7 +111,12 @@ from __future__ import annotations
 #      list of ALL in-flight ops (sorted by device name) instead of an arbitrary
 #      one; active_operations entries gain 'kind' + 'device_name'. Method-rename
 #      + return-shape change = contract change.
-WIRE_VERSION = 25
+# v26: removed device.active_setups — device.active_operations is a strict
+#      superset (it lists every in-flight op, setups included, each tagged with
+#      kind / device_name). The setup-only enumerator was redundant. Method-set
+#      change = contract change. (The DeviceService domain getter
+#      get_active_device_setups stays — the device dialog still uses it.)
+WIRE_VERSION = 26
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -241,4 +246,6 @@ WIRE_VERSION = 25
 #      (get_active_setup / get_active_device_operation) replaced by plural
 #      enumerators (get_active_device_setups / get_active_device_operations); the
 #      stale single-valued port declaration is dropped.
-GUI_VERSION = 31
+# v32: removed the device.active_setups wire method (WIRE 26) — superseded by
+#      device.active_operations. The domain getter is untouched.
+GUI_VERSION = 32

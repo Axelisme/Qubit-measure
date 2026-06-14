@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 20
+skill_version: 21
 ---
 
 # run-measure-gui
@@ -64,7 +64,7 @@ the moment a real `YOKOGS200`/`SGS100A` is involved, it does.
 
 ## Prerequisites
 
-- The project venv (`.venv`) with deps installed; Python is pinned to 3.9.
+- The project venv (`.venv`) with deps installed; Python is pinned to 3.13.
 - An X display. On a headless box: `sudo apt-get install -y xvfb` and prefix
   GUI launches with `xvfb-run -a`. On a desktop session `DISPLAY` is already
   set and no xvfb is needed.
@@ -86,7 +86,9 @@ gui_context_new(bind_device="flux")             # create a context bound to a fl
                                                 # current value/unit; FakeDevice->none, YOKOGS200->A).
                                                 # Omit bind_device for an unbound context; clone_from=<label>
                                                 # clones an existing one. Or gui_context_use(label) for an existing one.
-gui_state_check                                 # all four flags must be true before running
+gui_state_check                                 # global readiness: four flags (has_project/has_context/has_active_context/has_soc)
+                                                # — all must be true before running; use gui_tab_snapshot for per-tab
+                                                # progress (is_running/is_analyzing/has_run_result/…)
 gui_soc_info                                    # the board: per-channel type, sample rate, port, max length (+ full cfg)
 ```
 
@@ -98,21 +100,33 @@ gui_adapter_guide(adapter_name="onetone/flux_dep")# READ FIRST (before configuri
                                                   # haven't run this session): per-experiment behavior, expected
                                                   # md/ml, recommended ranges + gotchas live here, not in this skill
 gui_tab_new(adapter_name="fake/freq") -> tab_id   # readable id, e.g. fake-freq-1a2b3c4d
-gui_tab_snapshot(tab_id) -> editor_id             # the cfg-editing session handle
+gui_tab_snapshot(tab_id) -> editor_id             # per-tab progress + the cfg-editing session handle
 gui_tab_list_paths(tab_id)                        # dotted cfg paths (compact: path+kind+choices)
 gui_tab_get_cfg_summary(tab_id)                   # current values/expressions, nested (ref nodes wrap {chosen,value} → not a path source; see list_paths)
-gui_editor_set_field(editor_id, "rounds", 30)     # WYSIWYG edit of the form's draft
+gui_editor_set_field(tab_id, "rounds", 30)        # convenience: tab_id resolves the tab's cfg-editor automatically;
+                                                  # explicit editor_id (from gui_tab_snapshot) also accepted
+                                                  # Sweep edge fields (start/stop/expts/step) only accept plain numbers;
+                                                  # eval/ref expressions are not accepted there (use scalar leaf fields
+                                                  # for eval). If an adapter pre-wires an eval edge, override it by
+                                                  # passing a numeric value directly.
 gui_run_start(tab_id)                             # waits ~1s; finished -> {status:finished,...}, slow -> {status:pending}
 gui_run_wait(tab_id)                              # block until done (only after pending; blocks your turn — for a long run background it, see "Detecting completion")
-gui_tab_get_current_figure(tab_id)                # small fixed-size PNG of the CURRENT plot — the run's 2D map, the
-                                                  # analysis fit, or a post-analysis figure (whatever is on the tab's
-                                                  # plot stack). THIS is the ONLY way to look at any plot, including
-                                                  # non-analysis 2D scans (flux_dep / power_dep). (Read the PNG.)
-gui_analyze(tab_id)                               # degrades like a run: a FIT settles -> {finished};
-                                                  # an INTERACTIVE pick (flux_dep) -> {pending} → see "Interactive analysis" below
+gui_tab_get_current_figure(tab_id)                # PNG of the CURRENT plot (run's 2D map, analysis fit, or post-analysis
+                                                  # figure — whatever is on the tab's plot stack). THE ONLY way to look
+                                                  # at any plot, including non-analysis 2D scans (flux_dep / power_dep).
+                                                  # Two modes:
+                                                  #   out_path omitted → inline base64 reply {png_b64, bytes} (fixed 640×480)
+                                                  #   out_path="<abs path>" → writes PNG to that file, replies {bytes,
+                                                  #     saved_to} — no base64 in the reply.
+                                                  # PREFER out_path: base64 of a full-size figure can exhaust the tool-
+                                                  # output token limit; writing to a file then Read-ing it avoids that.
+gui_analyze(tab_id)                               # degrades like a run: a FIT settles -> {status:finished, summary:{...}}
+                                                  # with the fit summary inline (same shape as gui_tab_get_analyze_result);
+                                                  # an INTERACTIVE pick (flux_dep) -> {status:pending} → see below
 gui_post_analyze(tab_id)                          # second analysis layer on top of the primary fit (e.g. single-shot ge);
-                                                  # FIT-only, degrades like gui_analyze; needs a primary analyze result first
-gui_tab_get_post_analyze_result(tab_id)           # the post-analysis summary (params: gui_tab_get_post_analyze_params)
+                                                  # FIT-only, settles -> {status:finished, summary:{...}} inline;
+                                                  # slow -> {pending} then gui_post_analyze_wait/poll; needs primary analyze first
+gui_tab_get_post_analyze_result(tab_id)           # re-fetch post-analysis summary (params: gui_tab_get_post_analyze_params)
 gui_save_data(tab_id) / gui_save_image / gui_save_result   # each returns the resolved written path ({data_path[, image_path]})
 gui_save_post_image(tab_id)                       # save the post-analysis figure (mirrors gui_save_image)
 ```
@@ -138,7 +152,8 @@ flags these (its writeback describes a hand-pick). The flow:
    `gui_analyze_poll(tab_id)` until `{status:finished}` (it stays `running` until the
    user clicks Done). Don't `gui_analyze_wait` inline — it blocks your turn on a
    human; poll and check back (or wait from a background agent).
-3. On finished, `gui_tab_get_analyze_result(tab_id)` returns the picked values
+3. On finished, the `summary` in the `{status:finished}` reply (or
+   `gui_tab_get_analyze_result(tab_id)` to re-fetch) contains the picked values
    (`flx_half` / `flx_int` / `flx_period`); apply them with `gui_writeback_apply`.
    **The picking is the user's judgement — you set up, prompt, observe, and write
    back; you never decide the line positions.**
@@ -315,9 +330,11 @@ the options, and let the user choose.
   the stronger readout drive so the signal-to-noise ratio is good enough to
   judge timing and resonator features cleanly.
 - **After every important `run`, look at the figure before trusting any number.**
-  Call `gui_tab_get_current_figure(tab_id)` and Read the PNG — it returns the
-  current plot whether or not the adapter does analysis, so for a **2D scan with
-  no fit** (`onetone/twotone flux_dep`, `power_dep`) it is the 2D map itself.
+  Call `gui_tab_get_current_figure(tab_id, out_path="/tmp/fig.png")` and Read the
+  PNG — passing `out_path` writes the file and avoids a large base64 in the reply.
+  It returns the current plot whether or not the adapter does analysis, so for a
+  **2D scan with no fit** (`onetone/twotone flux_dep`, `power_dep`) it is the 2D
+  map itself.
   Judge: is the feature clean, the window right (too wide / too narrow), the SNR
   acceptable, the dispersive shift actually small? See the figure first, trust the
   number second. A plausible-looking fit value can still come from a visibly bad
@@ -352,12 +369,14 @@ a handle, and its progress bars ride the `gui_device_poll` reply while running).
 `dev` / sweep section, not by manual per-point setup. Different devices set up
 **concurrently**: `gui_device_active_operations` lists every in-flight device op
 in one call (each entry has `device_name` + `kind`, where kind is
-device_connect / device_disconnect / device_setup), and `gui_device_active_setups`
-lists just the ones setting up — then poll/wait each device by name.
+device_connect / device_disconnect / device_setup) — then poll/wait each device
+by name.
 
 **Stash reusable constants in the context (md/ml), then reference them by name
 in cfg.** Channel numbers, `res_probe_len`, probe-pulse lengths etc. go into the
-MetaDict (`gui_context_set_md_attr`); named waveforms/modules go into the
+MetaDict (`gui_context_set_md_attr` for a single key, `gui_context_set_md_attrs`
+for a batch); to read multiple keys at once use `gui_context_get_md_attrs([keys])`
+which returns `{values: {key: value}}`. Named waveforms/modules go into the
 ModuleLibrary (`gui_ml_create_from_role`/role tools). A cfg field can then reference
 `md.<attr>` (e.g. a pulse `freq: r_f`) or a module/waveform by its library key,
 instead of hard-coding — the notebook does exactly this (`md.res_ch`,
@@ -420,10 +439,18 @@ hardware) — the smoke harness uses it.
   (so it can keep EvalValue expressions and the chosen variant, which lowering
   would drop) — so its keys carry the extra `.value.` segment. It is a values/
   expressions view, not a path source; get editable paths from `list_paths`.
-- **Edit through the tab's `editor_id`, not the tab directly.** Take `editor_id`
-  from `gui_tab_snapshot`; `gui_editor_set_field` edits the same draft the form
-  shows. Switching a ModuleRef key (`<path>.ref`) returns `removed`/`added`
-  settable paths so you needn't re-list.
+- **`gui_editor_set_field` / `gui_editor_set_fields` accept either a `tab_id`
+  (convenience — the server resolves that tab's cfg-editor automatically) or an
+  explicit `editor_id` from `gui_tab_snapshot`.** Both edit the same live draft
+  the form shows (WYSIWYG — no separate commit step is needed to run). Switching
+  a ModuleRef key (`<path>.ref`) returns `removed`/`added` settable paths so you
+  needn't re-list.
+- **Tab cfg edits are live — no commit needed before `gui_run_start`.** Changes
+  made via `gui_editor_set_field` / `gui_editor_set_fields` take effect on the
+  tab immediately (WYSIWYG). `gui_editor_save_as_module(name=...)` is a separate
+  operation that saves the current draft as a *named ModuleLibrary module/waveform*
+  — it has nothing to do with applying the tab's cfg edits, and you never need it
+  just to run the experiment.
 - **Real VISA devices (YOKOGS200/SGS100A) need a VISA backend.** Without
   `pyvisa-py` or the IVI binary, `gui_device_connect` fails
   `Could not locate a VISA implementation`. Use `FakeDevice` for offline device

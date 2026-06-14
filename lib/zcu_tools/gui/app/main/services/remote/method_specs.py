@@ -113,12 +113,22 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "tab.snapshot": MethodSpec(
         5.0, "Tab summary", (_str_opt("tab_id", "Tab to inspect; omit for all tabs"),)
     ),
-    "tab.get_cfg": MethodSpec(5.0, "Read tab cfg raw", (_str("tab_id"),)),
+    "tab.get_cfg": MethodSpec(
+        5.0,
+        "Read tab cfg as the raw tagged form (not a set_field path source — use "
+        "tab.list_paths for editable dotted paths).",
+        (_str("tab_id"),),
+    ),
     "tab.list_paths": MethodSpec(
         5.0,
-        "List the settable cfg dotted paths. Edit a path with editor.set_field "
-        "on the tab's editor_id (from tab.snapshot). kind ∈ scalar / sweep_edge "
-        "/ moduleref_key / deviceref. 'under' restricts to the sub-tree at that "
+        "List the settable cfg dotted paths — the path source for "
+        "editor.set_field (edit a path with editor.set_field on the tab's "
+        "editor_id, from tab.snapshot). kind ∈ scalar / sweep_edge "
+        "/ moduleref_key / deviceref. A sweep_edge (a sweep's start/stop/expts/"
+        "step) accepts ONLY a number/int — NOT an eval/ref; an adapter's default "
+        "eval edge cannot be overwritten through this path, pass a numeric value "
+        "instead. (A scalar leaf, by contrast, also accepts an eval reference.) "
+        "'under' restricts to the sub-tree at that "
         "dotted path (e.g. 'modules.readout'); omit for the whole cfg. "
         "'verbosity' shapes each entry: 'compact' (default) = {path, kind, "
         "choices?}; 'full' adds current value + type; 'paths' = a bare list of "
@@ -358,12 +368,6 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "device.cancel_operation": MethodSpec(
         5.0, "Cancel active device setup", (_str("name", "Device name"),)
     ),
-    "device.active_setups": MethodSpec(
-        5.0,
-        "List EVERY device currently setting up (devices set up concurrently): "
-        "{active_setups: [{device_name}, ...]} (empty list if none), sorted by "
-        "device name. Live progress per device is polled via gui_device_poll(name).",
-    ),
     "device.active_operations": MethodSpec(
         5.0,
         "List EVERY in-flight device operation (connect / disconnect / setup run "
@@ -521,8 +525,10 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "tab.get_cfg_summary": MethodSpec(
         5.0,
-        "Read the tab cfg as a nested values view (read-only). Mirrors the cfg "
-        "tree and KEEPS info lowering would drop — EvalValue fields stay as their "
+        "Read the tab cfg as a nested values view (read-only). NOT a set_field "
+        "path source (use tab.list_paths for editable dotted paths). Mirrors the "
+        "cfg tree and KEEPS info lowering would drop — EvalValue fields stay as "
+        "their "
         "expression string (e.g. 'r_f - 0.1', not the evaluated number) and each "
         "module/waveform ref node is shown as {chosen, value:{...}}. That ref "
         "wrapper means its key shape is NOT the editable path shape: a field reads "
@@ -589,7 +595,11 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "editor.open/get (ModuleRef sub-fields descend directly, no 'value' "
         "segment); 'value' is a JSON scalar, or an md-reference expression as "
         '{"__kind":"eval","expr":"r_f - 0.1"} (resolved against MetaDict at '
-        "commit). Returns {valid, removed, added} — does NOT echo cfg content "
+        "commit). NOTE: the eval form is accepted ONLY on a scalar leaf — a "
+        "sweep_edge (a sweep's start/stop/expts/step) accepts ONLY a number/int, "
+        "never an eval/ref; an adapter's default eval edge cannot be overwritten "
+        "this way, pass a numeric value instead. "
+        "Returns {valid, removed, added} — does NOT echo cfg content "
         "(that would force a lowering pass that eagerly evaluates EvalValue). "
         "'valid' is whether the whole draft is currently valid; 'removed'/'added' "
         "list settable paths a ModuleRef key switch ('<path>.ref') dropped/"
@@ -615,15 +625,18 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "editor.commit": MethodSpec(
         10.0,
-        "Lower the session (eval expressions resolved against MetaDict to concrete "
-        "numbers) and register it into the ModuleLibrary under 'name'. On success "
-        "the session is destroyed; on validation failure it is kept so you can fix "
-        "and retry.",
+        "Save the current draft as a ModuleLibrary module/waveform: lower the "
+        "session (eval expressions resolved against MetaDict to concrete numbers) "
+        "and register it into the ModuleLibrary under 'name'. This is NOT 'apply "
+        "a tab cfg edit' — tab cfg set_field edits are already live (WYSIWYG); "
+        "this persists the draft as a named ml entry. On success the session is "
+        "destroyed; on validation failure it is kept so you can fix and retry.",
         (
             _str("editor_id"),
             _str("name", "ml entry name to register under"),
             _expected_versions(),
         ),
+        tool_name="gui_editor_save_as_module",
     ),
     "editor.discard": MethodSpec(
         5.0,

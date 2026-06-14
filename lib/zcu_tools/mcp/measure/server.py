@@ -199,129 +199,89 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
 #      and also covers the post-analysis figure. Added gui_save_post_image
 #      (auto-generated from the new save.post_image method_spec; mirrors
 #      gui_save_image). gui_save_image keeps full save quality.
-# MCP 30: device active-op enumeration (WIRE 25). gui_device_active_setup /
-#      gui_device_active_operation are replaced (auto-generated from the renamed
-#      plural method_specs) by gui_device_active_setups / gui_device_active_operations,
-#      each returning the full list of in-flight ops (sorted by device name);
-#      active_operations entries gain 'kind' + 'device_name'. Concurrent setups
-#      are now fully observable in one call.
-MCP_VERSION = 30
+# MCP 30: device active-op enumeration (WIRE 25). gui_device_active_operations
+#      returns the full list of in-flight device ops (sorted by device name); each
+#      entry carries 'kind' + 'device_name'. Concurrent setups are observable in
+#      one call.
+# MCP 31: convenience-layer batch (no wire change). gui_analyze / gui_post_analyze
+#      fold the fit summary into a finished short-wait reply (one fewer round-trip;
+#      the getters stay for re-fetch + the wait/poll path). New
+#      gui_context_get_md_attrs (batch read, fan-out over context.get_md_attr) —
+#      the symmetric counterpart of gui_context_set_md_attrs. gui_editor_set_field
+#      / _set_fields accept 'tab_id' and resolve the editor_id from the tab
+#      snapshot (editor_id still works for non-tab editors). The 'running' poll
+#      reply slims each progress bar to {token, format, percent}. gui_editor_commit
+#      renamed to gui_editor_save_as_module (wire key stays editor.commit). Removed
+#      gui_device_active_setups (the device.active_setups wire method was dropped;
+#      gui_device_active_operations covers it).
+MCP_VERSION = 31
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
 # ---------------------------------------------------------------------------
 
 _SERVER_INSTRUCTIONS = """\
-Drive a live qubit-measure GUI over a TCP control socket.
+Drive a live qubit-measure GUI over a TCP control socket. This is the machine
+contract (tool semantics + call rules); the operating manual (how to choose
+wait/poll/background, hardware-safety, when to act vs ask the user) lives in the
+run-measure-gui SKILL — follow it for workflow.
 
-Getting started (same path a GUI user takes — no mock shortcut):
-  0. The first gui_* call auto-attaches to a running GUI (resolved via session
-     discovery), so gui_connect is optional — call it only to pin a port/token.
-  1. gui_launch (auto-connects).
-  2. gui_connect_start(kind='mock') for offline/testing (or kind='remote',
-     ip, port for hardware) — the same connect the user picks via the setup
-     dialog's "Use MockSoc" checkbox. It short-wait degrades; gui_connect_wait
-     if it returns pending.
-  3. gui_startup_apply(chip_name, qub_name, res_name[, result_dir,
-     database_path]) — applies the project; omitting result_dir/database_path
-     scopes them under chip/qub per the notebook layout.
-  4. gui_context_use(label) to activate an existing context, or
-     gui_context_new([bind_device][, clone_from]) to create one. The flux
-     value/unit are NOT supplied directly: bind_device names a connected flux
-     device (FakeDevice->unit none, YOKOGS200->unit A) and its *current* value
-     is read (never set) to name the context; omit it for an unbound context.
-     clone_from is the label of an existing context to clone ml/md from.
-  5. gui_state_check — all four flags (has_project / has_context /
-     has_active_context / has_soc) should be true before running experiments.
+Tool families:
+  - Lifecycle: gui_launch / gui_connect / gui_stop / gui_app_shutdown.
+  - Startup: gui_connect_start (kind='mock'|'remote'), gui_startup_apply,
+    gui_context_use / gui_context_new, gui_state_check (the four readiness flags
+    has_project / has_context / has_active_context / has_soc).
+  - Tabs + cfg: gui_adapter_list / gui_tab_new / gui_tab_snapshot;
+    gui_tab_get_cfg / gui_tab_list_paths; gui_editor_set_field / _set_fields
+    (a tab's cfg form is the editor session keyed by its tab_id — pass tab_id or
+    an explicit editor_id).
+  - Run + analyze: gui_run_start, gui_analyze, gui_post_analyze (each waits briefly
+    then degrades to a handle). gui_tab_get_analyze_result /
+    gui_tab_get_post_analyze_result read the fit summary; gui_tab_get_current_figure
+    renders a small PNG of the current plot. gui_save_data / _image / _result /
+    _post_image persist and return the resolved written path.
+  - Async handles: every degrading op exposes a _wait (blocking) and a _poll
+    (non-blocking) tool keyed by name/tab_id.
 
-Typical experiment loop:
-  - gui_adapter_list -> gui_tab_new(adapter_name) -> note the returned tab_id.
-  - Inspect/edit config: gui_tab_get_cfg, then edit single fields via the tab's
-    cfg-editor session — take editor_id from gui_tab_snapshot and call
-    gui_editor_set_field(editor_id, path, value). Paths are dotted and must match
-    gui_tab_list_paths, e.g. 'reps', 'sweep.gain.expts',
-    'modules.qub_pulse.value.freq'. Nested module fields need the 'modules.'
-    prefix; an unknown path fails with invalid_params rather than silently
-    no-op'ing. (This is the same draft the GUI form shows — edits are WYSIWYG.)
-  - gui_run_start(tab_id) waits briefly (wait_seconds, default 1.0): a fast run
-    returns {status:'finished', tab:{...}}; a slow one returns {status:'pending'}
-    — then gui_run_wait(tab_id) or gui_run_poll(tab_id). (gui_device_* and
-    gui_connect_start degrade the same way.)
-  - gui_analyze(tab_id) after a run degrades like a run: a FIT usually settles in
-    the short wait -> {status:'finished'} (read gui_tab_get_analyze_result); an
-    INTERACTIVE analysis (the user picks on the plot + clicks Done — see
-    gui_adapter_guide, e.g. flux_dep) returns {status:'pending'} — prompt the user,
-    then gui_analyze_poll until finished, read flx_* with gui_tab_get_analyze_result
-    and gui_writeback_apply. Some adapters offer a SECOND analysis layer on top of
-    the primary fit (e.g. single-shot ge discrimination): gui_post_analyze(tab_id)
-    runs it (FIT-only, degrades like gui_analyze; fast-fails until a primary analyze
-    result exists), then gui_tab_get_post_analyze_result reads its summary (its
-    params come from gui_tab_get_post_analyze_params). Then gui_save_data /
-    gui_save_image / gui_save_result (and gui_save_post_image for the post figure)
-    to persist — each returns the resolved written path ({data_path[, image_path]},
-    .hdf5 + uniqueness suffix applied), so you need not recover it from a later
-    diagnostic. To look at ANY plot (a 2D run map, an analysis fit, or a
-    post-analysis figure) call gui_tab_get_current_figure — it returns a small
-    fixed-size PNG of whatever is currently on the tab's plot stack.
+Startup precondition: gui_state_check must report all four flags true before
+running experiments. Run/save require an active file-backed context; save/analyze
+require an existing run result. A precondition violation returns
+precondition_failed; editing cfg while a tab is running likewise.
 
-Detecting completion — no events; wait or poll a handle:
-  - A slow gui_run_start returns {status:'pending'}; then either gui_run_wait
-    (blocks until done, raises on failure/cancellation) or gui_run_poll (returns
-    immediately: 'finished'|'running'|'cancelled'|'failed'|'no_operation').
-    'cancelled' is a user/agent cancel, distinct from 'failed'. Same shape for
-    devices (gui_device_wait_operation / gui_device_poll), connect
-    (gui_connect_wait / gui_connect_poll) and analyze (gui_analyze_wait /
-    gui_analyze_poll — an INTERACTIVE pick stays 'running' until the user clicks
-    Done). To see the plot once finished, call gui_tab_get_current_figure(tab_id).
-  - A wait (gui_run_wait / gui_connect_wait / gui_device_wait_operation) BLOCKS
-    your whole turn until the op ends — minutes for a big sweep. Nothing pushes a
-    completion event; the server cannot wake you. For a long op either poll
-    instead (non-blocking — you check back), or run the wait from a background
-    agent: the block lives in the sub-agent, your main loop stays free, and the
-    harness re-invokes you with the result when it returns. Reserve inline waits
-    for ops you expect to finish quickly.
-  - USER FEEDBACK WAKEUP (ADR-0023): the user can type a feedback message in the
-    GUI's feedback bar at any time. If you are waiting (gui_run_wait /
-    gui_analyze_wait / gui_device_wait_operation / gui_connect_wait), the wait
-    returns early with status='user_feedback' and 'feedback' carrying the text.
-    Treat 'feedback' as a HIGH-PRIORITY instruction — re-plan accordingly. The
-    operation is still running; you hold its key and can gui_run_cancel or re-await.
-    If you are not currently waiting (reasoning or quick calls), feedback lands in
-    an inbox and is delivered at your next wait entry — the GUI shows the user
-    "will take effect at the next wait point". You never lose feedback.
-  - While 'running', the poll reply carries the live progress bars (active,
-    bars[token/format/maximum/value/percent/n/total]) — no separate progress
-    tool. Don't busy-poll gui_run_running_tab in a sleep loop; use gui_run_poll.
-  - Devices set up concurrently (different devices run in parallel). To see ALL
-    in-flight device ops in one call use gui_device_active_operations (each entry
-    has device_name + kind), or gui_device_active_setups for just the setups;
-    then poll/wait each device by name.
-  - GUI diagnostics still reach you UNSOLICITED: every tool reply piggybacks any
-    {severity:'error'|'info', title, message} the GUI surfaced since your last
-    call (e.g. "Data saved to …", a run-failure reason) under "notifications
-    since last call". Watch severity=='error' for failures the GUI raised,
-    including ones not tied to the call you just made. (Resource-change events
-    are NOT exposed — stale detection is the version guard's job; it rejects a
-    run/save/commit whose dependencies a GUI user changed under you.)
+Async status enum — completion is detected by wait/poll on a handle, NOT events:
+  - _poll returns immediately: 'finished' | 'running' | 'cancelled' | 'failed' |
+    'no_operation'. 'cancelled' (user/agent cancel) is distinct from 'failed'.
+    While 'running' the reply folds the live progress bars
+    (active, bars[token/format/percent]) — no separate progress tool.
+  - _wait blocks until the op ends and RAISES on failure/cancellation; on
+    success returns {status:'finished', waited_seconds[, ...]}; 'timed_out' (still
+    running after the bounded wait) is not a failure.
+  - A short-wait start that settles in time returns {status:'finished', <product>}
+    (gui_run_start -> tab; gui_connect_start -> soc; gui_analyze /
+    gui_post_analyze -> summary); a slow one returns {status:'pending'}.
+  - USER FEEDBACK WAKEUP (ADR-0023): a _wait can return early with
+    status='user_feedback' and a 'feedback' string; the op is still running.
 
-Preconditions are enforced server-side and identical to the GUI buttons:
-  - Run/save require an active file-backed context; save/analyze require an
-    existing run result. Violations return precondition_failed with a message.
-  - Editing cfg while a tab is running returns precondition_failed.
+Diagnostic push: every tool reply piggybacks any {severity:'error'|'info', title,
+message} the GUI surfaced since your last call, under "notifications since last
+call" — UNSOLICITED, including failures not tied to the call you just made.
+Resource-change events are NOT exposed.
+
+Stale model (optimistic concurrency): a guarded op (run / save / commit) rejects
+with precondition_failed when a dependency a GUI user changed under you moved
+since you last observed it; the error names which resources to re-read. Re-read
+then retry.
 
 Call contract — read before issuing defensive/duplicate calls:
-  - A failed call always raises an error; it never returns stale or partial
-    data. One call is therefore enough — never fire a backup copy of the same
-    tool in the same turn 'in case the first did not go through'.
-  - Query tools (gui_*_list / _get* / _snapshot / _check / _active* /
-    _progress, e.g. gui_tab_list, gui_tab_get_cfg, gui_state_check) are
-    read-only and side-effect-free. Safe to retry across turns, but duplicating
-    within a turn is pure waste — the result cannot change.
-  - Mutating tools DO have side effects and must be sent exactly once: gui_run_start
-    (fire-and-forget — a duplicate starts a SECOND run), gui_editor_set_field,
-    gui_tab_new / gui_tab_close, gui_save_*, gui_device_connect / _disconnect / _setup,
-    gui_context_set_* / _del_* / _rename_*, gui_editor_commit. Issue once and
-    read the response rather than re-sending.
+  - A failed call always raises; it never returns stale or partial data. One call
+    is enough — never fire a backup copy of the same tool in the same turn.
+  - Query tools (gui_*_list / _get* / _snapshot / _check / _active* / _poll) are
+    read-only and side-effect-free: safe to retry across turns, wasteful to
+    duplicate within one.
+  - Mutating tools have side effects and must be sent exactly once: gui_run_start
+    (a duplicate starts a SECOND run), gui_editor_set_field, gui_tab_new /
+    gui_tab_close, gui_save_*, gui_device_connect / _disconnect / _setup,
+    gui_context_set_* / _del_* / _rename_*, gui_editor_save_as_module.
 """
 
 # ---------------------------------------------------------------------------
@@ -732,18 +692,66 @@ def _coerce_pairs(
     return out
 
 
+def _resolve_editor_id(arguments: dict[str, Any]) -> str:
+    """Resolve the editor session id from either an explicit ``editor_id`` or a
+    ``tab_id`` (mutually exclusive, fail-fast).
+
+    A tab's cfg form is a CfgEditorService session keyed by its tab_id; the agent
+    can address it by tab_id without first running gui_tab_snapshot to pluck out
+    the editor_id. The explicit editor_id path stays for non-tab editors (e.g.
+    gui_editor_open on an ml entry). Fails fast on: neither / both supplied, or a
+    tab whose form has no live model yet (editor_id is None on the snapshot).
+    """
+    editor_id = arguments.get("editor_id")
+    tab_id = arguments.get("tab_id")
+    if (editor_id is None) == (tab_id is None):
+        raise ValueError("supply exactly one of 'editor_id' or 'tab_id'")
+    if editor_id is not None:
+        return str(editor_id)
+    snap = send_gui_rpc("tab.snapshot", {"tab_id": str(tab_id)})
+    resolved = snap.get("editor_id")
+    if resolved is None:
+        raise ValueError(
+            f"tab {tab_id!r} cfg form has no live editor session yet "
+            "(no editor_id on its snapshot)"
+        )
+    return str(resolved)
+
+
+def tool_gui_editor_set_field(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Set one cfg field, addressing the editor by ``editor_id`` OR ``tab_id``.
+
+    Thin override over the editor.set_field RPC that adds tab_id resolution: a
+    tab's cfg form is the editor session keyed by its tab_id, so the agent can
+    edit it without first running gui_tab_snapshot to find the editor_id. Returns
+    the RPC reply unchanged ({valid, removed, added}). See gui_editor_set_fields
+    for the batch form and the value/path semantics.
+    """
+    editor_id = _resolve_editor_id(arguments)
+    return send_gui_rpc(
+        "editor.set_field",
+        {
+            "editor_id": editor_id,
+            "path": str(arguments["path"]),
+            "value": arguments["value"],
+        },
+    )
+
+
 def tool_gui_editor_set_fields(arguments: dict[str, Any]) -> dict[str, Any]:
     """Apply several editor.set_field edits to ONE editor, fail-fast in order.
 
-    Convenience fan-out (a for-loop over the single-field RPC) — there is no
-    atomicity: edits before the failing one stay applied and are NOT rolled
-    back. On the first error this raises, reporting how many succeeded and which
-    path failed so the agent can reconcile. On success returns
-    ``{applied, valid}`` — the count applied and whether the resulting draft is
-    valid. It does NOT echo cfg content (that would force a lowering pass which
-    eagerly evaluates EvalValue); read the cfg with gui_tab_list_paths if needed.
+    The editor is addressed by ``editor_id`` OR ``tab_id`` (a tab's cfg form is
+    the editor session keyed by its tab_id). Convenience fan-out (a for-loop over
+    the single-field RPC) — there is no atomicity: edits before the failing one
+    stay applied and are NOT rolled back. On the first error this raises, reporting
+    how many succeeded and which path failed so the agent can reconcile. On success
+    returns ``{applied, valid}`` — the count applied and whether the resulting
+    draft is valid. It does NOT echo cfg content (that would force a lowering pass
+    which eagerly evaluates EvalValue); read the cfg with gui_tab_list_paths if
+    needed.
     """
-    editor_id = str(arguments["editor_id"])
+    editor_id = _resolve_editor_id(arguments)
     edits = _coerce_pairs(arguments.get("edits"), field="edits", keys=("path", "value"))
     valid = True
     for i, edit in enumerate(edits):
@@ -785,6 +793,27 @@ def tool_gui_context_set_md_attrs(arguments: dict[str, Any]) -> dict[str, Any]:
                 f"{i} attr(s) already set and NOT rolled back: {exc}"
             ) from exc
     return {"applied": len(attrs)}
+
+
+def tool_gui_context_get_md_attrs(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Read several MetaDict attributes at once, fail-fast on any missing key.
+
+    Convenience fan-out over context.get_md_attr (the read counterpart of
+    gui_context_set_md_attrs). Returns ``{values: {key: value}}`` — a map keyed by
+    the requested key (the natural shape for a batch read; the agent indexes
+    straight in). Reads are side-effect-free, so there is no partial-state concern:
+    an unknown key fails fast (the underlying RPC raises invalid_params), never
+    silently skipped.
+    """
+    keys = arguments.get("keys")
+    if not isinstance(keys, list) or not keys:
+        raise ValueError("'keys' must be a non-empty list")
+    values: dict[str, Any] = {}
+    for key in keys:
+        key_str = str(key)
+        res = send_gui_rpc("context.get_md_attr", {"key": key_str})
+        values[key_str] = res.get("value")
+    return {"values": values}
 
 
 def _await_operation_by_key(key: str, what: str, timeout: float) -> dict[str, Any]:
@@ -858,6 +887,29 @@ def _await_operation_by_key(key: str, what: str, timeout: float) -> dict[str, An
     }
 
 
+def _slim_progress(progress: dict[str, Any]) -> dict[str, Any]:
+    """Project the wire progress payload down to the fields an agent acts on.
+
+    The wire ``operation.progress`` carries Qt-scaled counters (maximum / value /
+    n / total) that the GUI's progress widget needs but the agent does not — it
+    reasons over the human-readable ``format`` line and the ``percent`` only.
+    Keep ``{token, format, percent}`` per bar; the precision/wire layer is left
+    untouched (this folding is mcp-side policy).
+    """
+    bars = progress.get("bars", [])
+    return {
+        "active": progress.get("active", False),
+        "bars": [
+            {
+                "token": b.get("token"),
+                "format": b.get("format"),
+                "percent": b.get("percent"),
+            }
+            for b in bars
+        ],
+    }
+
+
 def _poll_operation_by_key(key: str, what: str) -> dict[str, Any]:
     """Non-blocking status of the latest operation for ``key`` (no event needed).
 
@@ -875,14 +927,15 @@ def _poll_operation_by_key(key: str, what: str) -> dict[str, Any]:
     except RuntimeError as exc:
         if _is_timeout_error(exc):
             # Still running — fold the live progress bars into the poll reply so
-            # the agent watches progress without a separate tool call.
+            # the agent watches progress without a separate tool call, slimmed to
+            # {token, format, percent} (Qt-scaled counters are dropped here).
             progress = send_gui_rpc(
                 "operation.progress", {"operation_id": operation_id}
             )
             return {
                 "status": "running",
                 "message": f"{what} still in progress.",
-                **progress,
+                **_slim_progress(progress),
             }
         # terminal error — report as status rather than raising (poll is a query,
         # not an await). A user-initiated cancel is a distinct, non-failure
@@ -1033,6 +1086,20 @@ def tool_gui_run_poll(arguments: dict[str, Any]) -> dict[str, Any]:
     return _poll_operation_by_key(f"tab:{tab_id}", f"Run on tab {tab_id!r}")
 
 
+def _analyze_summary_product(result_method: str, tab_id: str) -> dict[str, Any]:
+    """Fold the analyze (or post-analyze) summary into a finished short-wait reply.
+
+    When the short wait settles in time, the agent's next move is always to read
+    the fit summary; folding it back here saves that extra round-trip. ``summary``
+    mirrors the shape of the dedicated getter (gui_tab_get_analyze_result /
+    gui_tab_get_post_analyze_result) — a dict for a FIT result, or None when the
+    settled op produced no scalar summary (e.g. an INTERACTIVE pick that the user
+    has not committed). The getters stay for re-fetch and for the wait/poll path
+    (which does not run this product).
+    """
+    return {"summary": send_gui_rpc(result_method, {"tab_id": tab_id}).get("summary")}
+
+
 def tool_gui_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
     """Start analyze, waiting briefly (degrades like a run).
 
@@ -1042,8 +1109,10 @@ def tool_gui_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
     settles -> {status:'finished', ...}; still running -> {status:'pending'} (await
     with gui_analyze_wait or gui_analyze_poll). For an INTERACTIVE adapter (see
     gui_adapter_guide) a 'pending' is expected — prompt the user to do the pick,
-    then poll. 'updates' optionally overrides analyze params. Read the scalar
-    result with gui_tab_get_analyze_result; see the fit plot with
+    then poll. 'updates' optionally overrides analyze params. A finished reply
+    folds in the fit 'summary' (same shape as gui_tab_get_analyze_result) so the
+    common read happens in one call; gui_tab_get_analyze_result stays for re-fetch
+    and for the wait/poll path. See the fit plot with
     gui_tab_get_current_figure(tab_id).
     """
     tab_id = str(arguments["tab_id"])
@@ -1059,7 +1128,7 @@ def tool_gui_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
         f"analyze:{tab_id}",
         f"Analyze on tab {tab_id!r}",
         wait_seconds,
-        dict,
+        lambda: _analyze_summary_product("tab.get_analyze_result", tab_id),
         f"poll with gui_analyze_poll(tab_id={tab_id!r}); for an INTERACTIVE pick, "
         "prompt the user to mark the lines + click Done first.",
     )
@@ -1095,13 +1164,15 @@ def tool_gui_post_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
 
     Post-analysis runs on top of the tab's PRIMARY analyze result (e.g.
     single-shot multi-backend ge discrimination) and is FIT-only — it computes on
-    a worker, so it usually settles in the short wait -> {status:'finished'} (read
-    the scalar result with gui_tab_get_post_analyze_result). A slow one degrades to
-    {status:'pending'} (await with gui_post_analyze_wait or gui_post_analyze_poll).
-    Fast-fails with precondition_failed when the tab has no primary analyze result
-    yet — run gui_analyze first. 'updates' optionally overrides post params (see
-    gui_tab_get_post_analyze_params). The post figure is kept in the tab's separate
-    post container; read its summary with gui_tab_get_post_analyze_result.
+    a worker, so it usually settles in the short wait -> {status:'finished',
+    summary:{...}} (the fit summary is folded in, same shape as
+    gui_tab_get_post_analyze_result, so the common read happens in one call). A
+    slow one degrades to {status:'pending'} (await with gui_post_analyze_wait or
+    gui_post_analyze_poll). Fast-fails with precondition_failed when the tab has no
+    primary analyze result yet — run gui_analyze first. 'updates' optionally
+    overrides post params (see gui_tab_get_post_analyze_params). The post figure is
+    kept in the tab's separate post container; gui_tab_get_post_analyze_result
+    stays for re-fetch and for the wait/poll path.
     """
     tab_id = str(arguments["tab_id"])
     wait_seconds = float(arguments.get("wait_seconds", 1.0))
@@ -1115,7 +1186,7 @@ def tool_gui_post_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
         f"post_analyze:{tab_id}",
         f"Post-analysis on tab {tab_id!r}",
         wait_seconds,
-        dict,
+        lambda: _analyze_summary_product("tab.get_post_analyze_result", tab_id),
         f"poll with gui_post_analyze_poll(tab_id={tab_id!r}).",
     )
 
@@ -1289,6 +1360,10 @@ _NON_GENERATED_METHODS = frozenset(
         # client-side file write of base64 PNG
         "dialog.screenshot",
         "tab.get_current_figure",
+        # hand-written override: adds tab_id -> editor_id resolution on top of the
+        # editor.set_field RPC (a tab's cfg form is the editor session keyed by its
+        # tab_id), so the generator must not also emit gui_editor_set_field.
+        "editor.set_field",
         # fan-out / MCP-side queue (handled at the service, not the registry)
         "state.has_project",
         "state.has_context",
@@ -1437,11 +1512,56 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
         ),
         "inputSchema": {"type": "object", "properties": {}},
     },
+    "gui_editor_set_field": {
+        "handler": tool_gui_editor_set_field,
+        "description": (
+            "Set ONE field in a cfg-editor session, addressing it by 'editor_id' "
+            "OR 'tab_id' (supply exactly one). A tab's cfg form is the editor "
+            "session keyed by its tab_id, so passing 'tab_id' edits the tab "
+            "directly without first running gui_tab_snapshot to find the "
+            "editor_id; 'editor_id' still works for non-tab editors (gui_editor_open "
+            "on an ml entry). 'path' is dotted (see gui_tab_list_paths); 'value' is "
+            "a JSON scalar or an md-ref {__kind:eval, expr} (the eval form is "
+            "accepted only on a scalar leaf, never a sweep edge). Returns "
+            "{valid, removed, added} — does NOT echo cfg content (read it with "
+            "gui_tab_list_paths). A tab whose form has no live model yet fails fast."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "editor_id": {
+                    "type": "string",
+                    "description": (
+                        "Editor session id (from gui_tab_snapshot or "
+                        "gui_editor_open). Supply this OR 'tab_id'."
+                    ),
+                },
+                "tab_id": {
+                    "type": "string",
+                    "description": (
+                        "Edit the tab's cfg form directly (resolves its editor_id). "
+                        "Supply this OR 'editor_id'."
+                    ),
+                },
+                "path": {"type": "string", "description": "Dotted field path"},
+                "value": {
+                    # Any JSON value (scalar leaf) or an md-ref {__kind:eval, expr};
+                    # mirror the generator's JsonType.JSON union so the schema shape
+                    # matches the sibling editor.* generated tools.
+                    "type": ["number", "string", "boolean", "object", "array", "null"],
+                    "description": "JSON scalar or {__kind:eval, expr}",
+                },
+            },
+            "required": ["path", "value"],
+        },
+    },
     "gui_editor_set_fields": {
         "handler": tool_gui_editor_set_fields,
         "description": (
-            "Batch-apply several field edits to ONE cfg-editor session in order. "
-            "Convenience fan-out over gui_editor_set_field — NOT atomic: it stops "
+            "Batch-apply several field edits to ONE cfg-editor session in order, "
+            "addressing it by 'editor_id' OR 'tab_id' (supply exactly one; a tab's "
+            "cfg form is the editor session keyed by its tab_id). Convenience "
+            "fan-out over gui_editor_set_field — NOT atomic: it stops "
             "at the first failure (fail-fast) and edits applied before it are NOT "
             "rolled back; the error names the failing path and how many already "
             "applied. On success returns {applied, valid} — the count applied "
@@ -1457,7 +1577,17 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "properties": {
                 "editor_id": {
                     "type": "string",
-                    "description": "Editor session id (from gui_tab_snapshot or gui_editor_open)",
+                    "description": (
+                        "Editor session id (from gui_tab_snapshot or "
+                        "gui_editor_open). Supply this OR 'tab_id'."
+                    ),
+                },
+                "tab_id": {
+                    "type": "string",
+                    "description": (
+                        "Edit the tab's cfg form directly (resolves its editor_id). "
+                        "Supply this OR 'editor_id'."
+                    ),
                 },
                 "edits": {
                     "type": "array",
@@ -1477,7 +1607,7 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
                     },
                 },
             },
-            "required": ["editor_id", "edits"],
+            "required": ["edits"],
         },
     },
     "gui_context_set_md_attrs": {
@@ -1506,6 +1636,27 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
                 },
             },
             "required": ["attrs"],
+        },
+    },
+    "gui_context_get_md_attrs": {
+        "handler": tool_gui_context_get_md_attrs,
+        "description": (
+            "Batch-read several MetaDict attributes at once — the read counterpart "
+            "of gui_context_set_md_attrs. Convenience fan-out over "
+            "gui_context_get_md_attr. Returns {values: {key: value}} keyed by the "
+            "requested key. An unknown key fails fast (invalid_params) — keys are "
+            "never silently skipped. Reads are side-effect-free."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "keys": {
+                    "type": "array",
+                    "description": "MetaDict keys to read",
+                    "items": {"type": "string"},
+                },
+            },
+            "required": ["keys"],
         },
     },
     "gui_device_wait_operation": {
@@ -1627,13 +1778,14 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
         "handler": tool_gui_analyze,
         "description": (
             "Start analyze, waiting briefly — degrades like gui_run_start. A FIT "
-            "usually finishes here -> {status:'finished'} (read the scalar result "
-            "with gui_tab_get_analyze_result, and the fit plot with "
-            "gui_tab_get_current_figure). An INTERACTIVE analysis (see "
-            "gui_adapter_guide — e.g. flux_dep, where the USER drags lines on the "
-            "2D map and clicks Done) never settles in the short wait -> "
-            "{status:'pending'}: that is EXPECTED — prompt the user to do the pick, "
-            "then gui_analyze_poll until finished and read flx_* with "
+            "usually finishes here -> {status:'finished', summary:{...}}: the fit "
+            "summary is folded into the reply (same shape as "
+            "gui_tab_get_analyze_result) so the common read happens in one call; "
+            "see the fit plot with gui_tab_get_current_figure. An INTERACTIVE "
+            "analysis (see gui_adapter_guide — e.g. flux_dep, where the USER drags "
+            "lines on the 2D map and clicks Done) never settles in the short wait "
+            "-> {status:'pending'}: that is EXPECTED — prompt the user to do the "
+            "pick, then gui_analyze_poll until finished and read flx_* with "
             "gui_tab_get_analyze_result + gui_writeback_apply. 'updates' optionally "
             "overrides analyze params (see gui_adapter_analyze_spec)."
         ),
@@ -1701,11 +1853,13 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "Start the second-layer (post) analysis, waiting briefly — degrades "
             "like gui_analyze. Post-analysis runs on top of the tab's PRIMARY "
             "analyze result (e.g. single-shot multi-backend ge discrimination) and "
-            "is FIT-only: it usually finishes here -> {status:'finished'} (read the "
-            "scalar result with gui_tab_get_post_analyze_result); a slow one "
-            "degrades to {status:'pending'} (await with gui_post_analyze_wait or "
-            "gui_post_analyze_poll). Fast-fails with precondition_failed when the "
-            "tab has no primary analyze result yet — run gui_analyze first. "
+            "is FIT-only: it usually finishes here -> {status:'finished', "
+            "summary:{...}} (the fit summary is folded in, same shape as "
+            "gui_tab_get_post_analyze_result, so the common read happens in one "
+            "call); a slow one degrades to {status:'pending'} (await with "
+            "gui_post_analyze_wait or gui_post_analyze_poll). Fast-fails with "
+            "precondition_failed when the tab has no primary analyze result yet — "
+            "run gui_analyze first. "
             "'updates' optionally overrides post params (see "
             "gui_tab_get_post_analyze_params). The post figure shares the tab's plot "
             "container; see it with gui_tab_get_current_figure and persist it with "
@@ -1975,8 +2129,10 @@ _OVERRIDE_NAMES = frozenset(
         "gui_dialog_screenshot",
         "gui_tab_get_current_figure",
         "gui_state_check",
+        "gui_editor_set_field",
         "gui_editor_set_fields",
         "gui_context_set_md_attrs",
+        "gui_context_get_md_attrs",
         "gui_device_wait_operation",
         "gui_run_start",
         "gui_run_wait",

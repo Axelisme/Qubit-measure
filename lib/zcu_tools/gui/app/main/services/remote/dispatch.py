@@ -1036,21 +1036,6 @@ def _progress_bars_wire(bars) -> Mapping[str, object]:
     }
 
 
-def _h_device_active_setups(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    del params
-    # Phase C concurrency: enumerate *every* device currently setting up (sorted
-    # by name). Live progress per device is via operation.progress (by the
-    # setup's operation_id, folded into that device's poll reply).
-    return {
-        "active_setups": [
-            {"device_name": setup.device_name}
-            for setup in adapter.ctrl.get_active_device_setups()
-        ]
-    }
-
-
 def _h_device_active_operations(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
@@ -1397,6 +1382,35 @@ def _strip_cfg_tags(raw: object) -> object:
     return raw
 
 
+def _is_number(value: object) -> bool:
+    """A real (non-bool) numeric scalar. In a stripped summary, a sweep edge is
+    either a number (resolved) or an expr string (an unresolved EvalValue, whose
+    ``{"__kind": "eval"}`` tag _strip_cfg_tags collapsed to the bare expr)."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _null_step_on_unresolved_sweeps(summary: object) -> None:
+    """Blank out ``step`` on any sweep node whose start/stop is unresolved.
+
+    ``step`` is the derived span/expts value the codec wrote against the lowered
+    numeric edges. When an edge is shown as an expr string (an unresolved
+    EvalValue in this read-only summary view), that step is stale relative to the
+    expression the user actually sees — so it would contradict the start/stop
+    span. Report ``None`` there rather than a misleading number; a numeric-edge
+    sweep keeps its correct derived step. Mutates the stripped summary in place."""
+    if isinstance(summary, dict):
+        is_sweep = set(summary) == {"start", "stop", "expts", "step"}
+        if is_sweep and not (
+            _is_number(summary["start"]) and _is_number(summary["stop"])
+        ):
+            summary["step"] = None
+        for child in summary.values():
+            _null_step_on_unresolved_sweeps(child)
+    elif isinstance(summary, list):
+        for child in summary:
+            _null_step_on_unresolved_sweeps(child)
+
+
 def _h_tab_get_cfg_summary(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
@@ -1405,7 +1419,11 @@ def _h_tab_get_cfg_summary(
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     schema = adapter.ctrl.get_tab_cfg_schema(tab_id)
     raw = schema_to_raw(schema)
-    return {"summary": _strip_cfg_tags(raw)}
+    summary = _strip_cfg_tags(raw)
+    # Projection-layer post-pass (does not touch session_codec, the persistence
+    # SSOT): a sweep node with an unresolved (expr-string) edge gets step=None.
+    _null_step_on_unresolved_sweeps(summary)
+    return {"summary": summary}
 
 
 # ---------------------------------------------------------------------------
@@ -1786,7 +1804,6 @@ _HANDLERS: dict[str, Handler] = {
     "device.setup": _h_device_setup,
     "device.setup_spec": _h_device_setup_spec,
     "device.cancel_operation": _h_device_cancel_operation,
-    "device.active_setups": _h_device_active_setups,
     "device.active_operations": _h_device_active_operations,
     "operation.await": _h_operation_await,
     "operation.progress": _h_operation_progress,

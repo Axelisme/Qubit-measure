@@ -15,7 +15,6 @@ from zcu_tools.gui.session.events import (
 from zcu_tools.gui.session.ports import OperationKind
 from zcu_tools.gui.session.services.device import (
     ActiveDeviceOperation,
-    DeviceSetupSnapshot,
     DeviceSnapshot,
     DeviceStatus,
     SetupDeviceRequest,
@@ -34,7 +33,7 @@ def fx(qapp):  # noqa: ARG001
 
 
 def test_event_requery_hints_point_to_registered_methods():
-    assert "device.active_setups" in METHOD_REGISTRY
+    assert "device.active_operations" in METHOD_REGISTRY
     assert "context.get_md_attr" in METHOD_REGISTRY
     assert "context.get_ml" in METHOD_REGISTRY
 
@@ -57,27 +56,6 @@ def test_device_setup_started_and_finished_push(fx):
         finished = recv_push(sock, "device_setup_finished")
         assert finished["payload"]["name"] == "bias"
         assert finished["payload"]["outcome"] == "finished"
-    finally:
-        sock.close()
-
-
-def test_device_active_setups_enumerate_all(fx):
-    # Phase C: active_setups lists EVERY device setting up (sorted by name);
-    # live progress per device is via operation.progress.
-    fx.ctrl.get_active_device_setups = MagicMock(  # type: ignore[method-assign]
-        return_value=(
-            DeviceSetupSnapshot(device_name="bias"),
-            DeviceSetupSnapshot(device_name="flux"),
-        )
-    )
-    sock = open_client(fx.service.port)
-    try:
-        resp = call(sock, "device.active_setups")
-        assert resp["ok"] is True
-        assert resp["result"]["active_setups"] == [
-            {"device_name": "bias"},
-            {"device_name": "flux"},
-        ]
     finally:
         sock.close()
 
@@ -426,7 +404,6 @@ def test_mcp_tool_schemas_include_required_discovery_tools():
         "gui_device_connect",
         "gui_device_disconnect",
         "gui_device_setup",
-        "gui_device_active_setups",
         "gui_device_active_operations",
         "gui_state_check",
     }
