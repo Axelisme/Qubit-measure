@@ -38,7 +38,7 @@ dialog 直接委 `services/agent_launcher.py` 的 `launch_agent_terminal()`；la
 - `launch_agent_terminal(repo_root, *, resume, state_context)` → 寫暫存啟動 script（避 shell quoting 問題）→ 跨平台 spawn：
   - Linux：依序嘗試 `gnome-terminal` / `konsole` / `xterm` / `x-terminal-emulator`；環境變數 `ZCU_AGENT_TERMINAL` 可覆寫。
   - macOS：`open -a Terminal`。
-  - Windows：直接 `subprocess.Popen([py, launcher], creationflags=CREATE_NEW_CONSOLE)` 開新主控台視窗。**不用** Store 版 Windows Terminal：`wt` 是 UWP app，它 spawn 的子進程拿到虛擬化的 `AppData\Roaming`，因此讀不到 Claude Desktop 內建在 `%APPDATA%\Roaming\Claude` 的 `claude.exe`（`os.path.exists` 都回 False、launcher fast-fail）。**也不用** `cmd /c start "" "<py>" "<launcher>"`：預先加引號的 token 會被 subprocess 二次轉義，破壞路徑。從本進程（非封裝）直接 Popen 無 AppData 沙箱，subprocess 也會正確 quote 兩個真實路徑。`ZCU_AGENT_TERMINAL` 可覆寫。
+  - Windows：**直接 `subprocess.Popen([claude_bin, *argv[1:]], creationflags=CREATE_NEW_CONSOLE)` spawn claude 本身**（在此就地 `shutil.which` 解析 + fast-fail），**不經** Python launcher 的 `os.execv`。原因：Windows 的 `os.execv` 會把 argv 陣列重新序列化成單一命令列字串，**把多行 `--append-system-prompt` 拆裂** —— 內嵌 prompt 的一個字（「…tools *are* already…」）變成獨立 positional 參數，被 claude 當成首則 typed 輸入（phantom 首訊息「are」）。`subprocess` 對 argv list 正確引號，無此問題（把 prompt 裡的 "are" 換成標記字，phantom 跟著變，確證）。**也不用** Store 版 `wt`（UWP 對子進程虛擬化 `AppData\Roaming`）或 `cmd /c start`（二次引號破壞路徑）。`ZCU_AGENT_TERMINAL` 可覆寫；覆寫與 POSIX 才走 launcher，launcher 在 win32 改用 `subprocess.run` 同避 execv 拆裂（POSIX `os.execv` 收 argv 陣列、無重新引號、不受影響）。
   - **agent CLI（argv[0]）由 `resolve_agent_command()` 解析**，依序：
     1. `ZCU_AGENT_CMD` 環境變數（任何平台的顯式覆寫，如換 `codex`）。
     2. **PATH 上的獨立 `claude` 優先**（如 `claude install` 裝的；`shutil.which("claude")` 找得到就用）——真正的 CLI、持續更新、跨平台一致，與「全程走 CLI」的用法一致。

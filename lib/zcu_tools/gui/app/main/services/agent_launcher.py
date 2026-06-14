@@ -492,8 +492,15 @@ def build_python_launcher_source(repo_root: str, argv: list[str]) -> str:
         '        f"zcu agent launcher: command not found on PATH: {ARGV[0]!r}. "\n'
         '        "Install it or set ZCU_AGENT_CMD to the right CLI."\n'
         "    )\n"
-        # execv replaces this process with the resolved binary, preserving the
-        # terminal's TTY so claude runs in its normal interactive UI.
+        # On Windows ``os.execv`` re-serialises ARGV into a command-line string and
+        # mangles the multi-line ``--append-system-prompt`` (a word of the prompt
+        # leaks as a phantom first "user" message — the "are" bug), so spawn via
+        # ``subprocess`` (correct list quoting) there. POSIX ``os.execv`` takes an
+        # argv array directly and is unaffected, and replacing the process keeps the
+        # terminal's TTY for claude's interactive UI.
+        "if sys.platform == 'win32':\n"
+        "    import subprocess\n"
+        "    raise SystemExit(subprocess.run([_bin, *ARGV[1:]]).returncode)\n"
         "os.execv(_bin, ARGV)\n"
     )
 
@@ -611,14 +618,17 @@ def launch_agent_terminal(
     to the embedded system prompt so the agent starts already knowing the current
     project / context / SoC / open tabs. ``None`` keeps only the static prompt.
 
-    The spawn is detached (``subprocess.Popen``, not waited). The terminal runs a
-    cross-platform Python launcher (``<python> <launcher.py>``) that chdirs into
-    the repo and strips the parent's Claude Code orchestration env vars (see
-    ``_STRIP_ENV_*``: ``ANTHROPIC_API_KEY`` for subscription auth, plus
-    ``CLAUDE_CODE_*`` / ``CLAUDECODE`` / ``CLAUDE_AGENT_SDK*`` so the child is a
-    clean standalone claude, not a Desktop-embedded one), then execs claude; the
-    env passed to ``Popen`` is stripped the same way (double safety). Cross-platform
-    branches Fast-Fail rather than silently degrading.
+    The spawn is detached (``subprocess.Popen``, not waited) and the parent's
+    Claude Code orchestration env vars are stripped (see ``_STRIP_ENV_*``:
+    ``ANTHROPIC_API_KEY`` for subscription auth, plus ``CLAUDE_CODE_*`` /
+    ``CLAUDECODE`` / ``CLAUDE_AGENT_SDK*`` so the child is a clean standalone
+    claude). On Windows, claude is spawned DIRECTLY in a new console — subprocess
+    quotes the multi-line ``--append-system-prompt`` correctly, whereas routing it
+    through the launcher's ``os.execv`` re-serialises argv into a command line,
+    splits the prompt, and leaks a word as a phantom first "user" message (the
+    "are" bug). macOS/Linux (and a Windows ``ZCU_AGENT_TERMINAL`` override) run the
+    cross-platform Python launcher inside a terminal emulator instead.
+    Cross-platform branches Fast-Fail rather than silently degrading.
     """
     mcp_config_path = build_loopback_mcp_config(repo_root)
 
@@ -640,23 +650,38 @@ def launch_agent_terminal(
             state_context=state_context,
         )
 
-    launcher_path = _write_python_launcher(repo_root, argv)
-    spawn_argv = _spawn_terminal_argv(launcher_path)
-
     # Strip the parent's Claude Code orchestration vars (API key for subscription
-    # auth, plus CLAUDE_CODE_*/CLAUDECODE/CLAUDE_AGENT_SDK* so the child does not
-    # start in Desktop-embedded mode and inject a phantom stdin input). The
-    # launcher repeats this at runtime (double safety, mirrors the old API-key pop).
+    # auth, plus CLAUDE_CODE_*/CLAUDECODE/CLAUDE_AGENT_SDK* so the child runs as a
+    # clean standalone claude rather than a Desktop-embedded one).
     env = _strip_orchestration_env(os.environ.copy())
 
-    # On Windows, the default spawn is the launcher itself ([py, launcher]); give
-    # it its own console window via CREATE_NEW_CONSOLE so claude's TUI has a real
-    # terminal. Skipped when ZCU_AGENT_TERMINAL is set (that terminal owns its own
-    # window) and a no-op (0) on non-Windows / when the flag is unavailable.
-    creationflags = 0
+    # Windows (default, no terminal override): spawn claude DIRECTLY in a new
+    # console. Do NOT route it through the Python launcher's ``os.execv`` — on
+    # Windows ``os.execv`` re-serialises argv into a command-line string and splits
+    # the multi-line ``--append-system-prompt``, leaking a word of the prompt as a
+    # phantom first "user" message (the "are" bug). ``subprocess`` quotes the argv
+    # list correctly. The launcher's PATH-resolve + Fast-Fail are done here instead.
     if sys.platform == "win32" and not os.environ.get("ZCU_AGENT_TERMINAL"):
-        creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+        binary = shutil.which(argv[0])
+        if binary is None:
+            raise RuntimeError(
+                f"zcu agent launcher: command not found on PATH: {argv[0]!r}. "
+                "Install it or set ZCU_AGENT_CMD to the right CLI."
+            )
+        subprocess.Popen(  # detached: do not wait
+            [binary, *argv[1:]],
+            env=env,
+            cwd=os.path.abspath(repo_root),
+            creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
+        )
+        return session_id
 
-    # detached: do not wait
-    subprocess.Popen(spawn_argv, env=env, creationflags=creationflags)
+    # macOS / Linux (and a Windows ``ZCU_AGENT_TERMINAL`` override): the terminal
+    # emulator runs the cross-platform Python launcher, which carries the multi-line
+    # prompt as json-embedded data (no shell quoting) and execs claude. POSIX
+    # ``os.execv`` takes an argv array directly, so it is free of the Windows
+    # re-quoting bug above.
+    launcher_path = _write_python_launcher(repo_root, argv)
+    spawn_argv = _spawn_terminal_argv(launcher_path)
+    subprocess.Popen(spawn_argv, env=env)  # detached: do not wait
     return session_id

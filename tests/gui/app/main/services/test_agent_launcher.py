@@ -419,7 +419,7 @@ def test_list_resumable_sessions_sorted_newest_first(
 
 
 class _FakePopen:
-    """Capture the argv + env + creationflags a spawn would have used."""
+    """Capture the argv + env + creationflags + cwd a spawn would have used."""
 
     instances: list[_FakePopen] = []
 
@@ -428,10 +428,12 @@ class _FakePopen:
         argv: list[str],
         env: dict[str, str] | None = None,
         creationflags: int = 0,
+        cwd: str | None = None,
     ) -> None:
         self.argv = argv
         self.env = env
         self.creationflags = creationflags
+        self.cwd = cwd
         _FakePopen.instances.append(self)
 
 
@@ -771,17 +773,26 @@ def test_find_desktop_bundled_claude_no_appdata_returns_none(
 # ---------------------------------------------------------------------------
 
 
+_FAKE_CLAUDE = r"C:\fake\bin\claude.exe"
+
+
 def _patch_windows(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(agent_launcher.sys, "platform", "win32")
     monkeypatch.setattr(agent_launcher.subprocess, "Popen", _FakePopen)
     # Pin agent-binary resolution + terminal override so the spawn is deterministic
-    # regardless of host (these tests assert the terminal-spawn shape).
+    # regardless of host (these tests assert the spawn shape). A standalone `claude`
+    # resolves on PATH to a fixed fake binary.
+    monkeypatch.setattr(
+        agent_launcher.shutil,
+        "which",
+        lambda name: _FAKE_CLAUDE if name == "claude" else None,
+    )
     monkeypatch.delenv("ZCU_AGENT_CMD", raising=False)
     monkeypatch.delenv("ZCU_AGENT_TERMINAL", raising=False)
     monkeypatch.setattr(agent_launcher, "_find_desktop_bundled_claude", lambda: None)
 
 
-def test_launch_windows_default_runs_launcher_in_new_console(
+def test_launch_windows_default_spawns_claude_directly(
     monkeypatch: pytest.MonkeyPatch, _sessions_file: Path
 ) -> None:
     _patch_windows(monkeypatch)
@@ -790,20 +801,21 @@ def test_launch_windows_default_runs_launcher_in_new_console(
     agent_launcher.launch_agent_terminal("/repo")
 
     spawn = _FakePopen.instances[0]
-    # The launcher is spawned DIRECTLY ([py, launcher.py]) — no ``wt`` (AppData
-    # sandbox) and no ``cmd /c start`` (quoting pitfalls); the new window comes
-    # from CREATE_NEW_CONSOLE, so subprocess quotes the two real paths itself.
-    assert spawn.argv[0] == sys.executable
-    launcher_path = spawn.argv[1]
-    assert launcher_path.endswith(".py")
+    # Windows spawns claude DIRECTLY (resolved binary + its args), NOT through a
+    # python launcher / os.execv — that re-quoted the multi-line prompt and leaked
+    # a word as a phantom first message (the "are" bug). subprocess quotes the list.
+    assert spawn.argv[0] == _FAKE_CLAUDE
+    assert "--mcp-config" in spawn.argv
+    assert spawn.argv[spawn.argv.index("--session-id") + 1] == "win-sess"
+    # No intermediate python launcher, no wt, no cmd.
+    assert sys.executable not in spawn.argv
+    assert not any(a.endswith(".py") for a in spawn.argv)
     assert "cmd" not in spawn.argv and "wt" not in spawn.argv
-    # CREATE_NEW_CONSOLE is applied (resolved the same way the code does, so the
-    # assertion holds on non-Windows hosts where the flag is absent → 0).
+    # New console window + spawned in the repo root.
     assert spawn.creationflags == getattr(
         agent_launcher.subprocess, "CREATE_NEW_CONSOLE", 0
     )
-    # The launcher still compiles on the Windows path.
-    compile(Path(launcher_path).read_text(encoding="utf-8"), "<launcher>", "exec")
+    assert spawn.cwd is not None
 
 
 def test_launch_windows_terminal_override_wins(
@@ -824,10 +836,12 @@ def test_launch_windows_terminal_override_wins(
     assert spawn.creationflags == 0
 
 
-def test_launch_windows_multiline_prompt_launcher_compiles(
+def test_launch_windows_multiline_prompt_passed_intact(
     monkeypatch: pytest.MonkeyPatch, _sessions_file: Path
 ) -> None:
-    """#1 on Windows: multi-line state still produces a compilable launcher."""
+    # The fix: the multi-line --append-system-prompt rides as ONE intact argv
+    # element (subprocess quotes it), instead of being split by the launcher's
+    # os.execv on Windows (which leaked a prompt word as a phantom first message).
     _patch_windows(monkeypatch)
     monkeypatch.setattr(agent_launcher, "new_session_id", lambda: "win-ml")
     state = "[measure-gui current state]\nproject: chip=Q5\n[end state]"
@@ -835,11 +849,11 @@ def test_launch_windows_multiline_prompt_launcher_compiles(
     agent_launcher.launch_agent_terminal("/repo", state_context=state)
 
     spawn = _FakePopen.instances[0]
-    # Direct spawn: the launcher path is argv[1].
-    launcher_path = spawn.argv[1]
-    source = Path(launcher_path).read_text(encoding="utf-8")
-    compile(source, "<launcher>", "exec")
-    assert "measure-gui current state" in source
+    prompt = spawn.argv[spawn.argv.index("--append-system-prompt") + 1]
+    # The whole multi-line prompt is a single argv element, newlines preserved.
+    assert "measure-gui current state" in prompt
+    assert state in prompt
+    assert "\n" in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -926,4 +940,15 @@ def test_launcher_resolves_binary_via_which(monkeypatch: pytest.MonkeyPatch) -> 
     # so a Windows ``claude.cmd`` on PATH resolves even though os.execv would not.
     source = agent_launcher.build_python_launcher_source("/repo", ["claude"])
     assert "shutil.which(ARGV[0])" in source
+    assert "os.execv(_bin, ARGV)" in source
+
+
+def test_launcher_source_uses_subprocess_on_windows() -> None:
+    # The launcher (used on POSIX and the Windows terminal-override path) spawns
+    # via subprocess on Windows: there os.execv re-quotes the multi-line prompt and
+    # leaks a word as a phantom first message. POSIX keeps os.execv (no re-quoting).
+    source = agent_launcher.build_python_launcher_source("/repo", ["claude"])
+    compile(source, "<launcher>", "exec")
+    assert "subprocess.run([_bin, *ARGV[1:]])" in source
+    assert "sys.platform == 'win32'" in source
     assert "os.execv(_bin, ARGV)" in source
