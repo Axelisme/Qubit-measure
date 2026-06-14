@@ -1624,17 +1624,29 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def get_view_snapshot(self) -> dict[str, object]:
-        """Capture the visible window state as a JSON-friendly dict."""
+        """Capture the visible window state as a JSON-friendly dict.
+
+        tab_ids and active_tab_id are sourced from State (via ctrl.list_tab_ids)
+        rather than _tab_widgets, so ghost widget entries that have diverged from
+        State never leak into the projection (ADR-0013 view = second SSOT reader).
+        """
+        # State.tabs is the single SSOT for which tabs exist.
+        state_tab_ids: list[str] = self._ctrl.list_tab_ids()
+        state_tab_id_set = set(state_tab_ids)
+
+        # Resolve the active tab through the widget hierarchy but only accept it
+        # when the corresponding id is also known to State.
         active_id: str | None = None
         if self._tabs.count() > 0:
             current = self._tabs.currentWidget()
             for tid, tab_w in self._tab_widgets.items():
-                if tab_w is current:
+                if tab_w is current and tid in state_tab_id_set:
                     active_id = tid
                     break
+
         return {
             "active_tab_id": active_id,
-            "tab_ids": list(self._tab_widgets.keys()),
+            "tab_ids": state_tab_ids,
             "context_label": self._ctx_label.text() if self._ctx_label else "",
             "predictor_label": (
                 self._predictor_label.text() if self._predictor_label else ""
