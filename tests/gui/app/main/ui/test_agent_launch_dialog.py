@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QDialog  # type: ignore[attr-defined]
 from zcu_tools.gui.app.main.services import agent_launcher
 from zcu_tools.gui.app.main.services.agent_launcher import ResumableSession
 from zcu_tools.gui.app.main.ui.agent_launch_dialog import AgentLaunchDialog
@@ -182,6 +183,8 @@ def test_new_button_launches_without_resume_session_id(
         state_context=_STATE_CONTEXT,
     )
     assert "new-sess" in dialog._status_label.text()
+    # Launch closes the dialog (accepted).
+    assert dialog.result() == QDialog.DialogCode.Accepted
 
 
 # ---------------------------------------------------------------------------
@@ -205,3 +208,5 @@ def test_launch_failure_shown_in_status(
 
     assert "Failed to launch terminal" in dialog._status_label.text()
     assert "no terminal found" in dialog._status_label.text()
+    # Failure keeps the dialog open (not accepted).
+    assert dialog.result() != QDialog.DialogCode.Accepted

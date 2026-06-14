@@ -186,6 +186,8 @@ class AgentLaunchDialog(QDialog):
             logger.exception("AgentLaunchDialog: failed to launch agent terminal")
             self._status_label.setText(f"Failed to launch terminal: {exc}")
             return
+        # Terminal launched (Resume or New) — close the dialog. The conversation
+        # now lives in the user's terminal; reopening the dialog re-reads the
+        # session list (so the freshly launched session shows up next time).
         self._status_label.setText(f"Launched session {session_id} in terminal.")
-        # Reload list so a newly launched session appears if it was not there.
-        self._reload_sessions()
+        self.accept()
