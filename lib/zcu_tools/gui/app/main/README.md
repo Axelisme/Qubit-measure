@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-14（agent-chat 實機修：持久多輪狀態、first-turn GUI 狀態注入、mcp lazy auto-connect、transcript 著色 + 輸入歷史）
+**Last updated:** 2026-06-14（外部終端 launch agent：刪除內嵌 agent 架構，改為系統終端 spawn 真互動式 claude + loopback MCP）
 
 # `zcu_tools/gui/app/main/` — measure-gui Framework AI Note
 
@@ -48,17 +48,13 @@ gui/
 │   ├── staged_analyze.py — _StagedAnalyzeService (analyze/post-analyze 共用基底：handle-only off-main worker + 主線程 record result/figure + 失敗路徑)
 │   ├── analyze.py        — AnalyzeService (主分析層：FIT worker + INTERACTIVE finish；算 writeback items)
 │   ├── post_analyze.py   — PostAnalyzeService (第二分析層，鏡像 AnalyzeService：FIT-only、在 primary analyze 結果之上重算、gate on primary 已存在；State 平行 post_* 欄位)
-│   ├── agent_chat.py     — AgentChatService (純 Python、非 QObject)：ring buffer ~1000 TranscriptEntry、8 種 kind (activity/feedback/diagnostic + B0 stream kinds: assistant/tool_use/tool_result/system/result)、plain observer list；activity tap 在 embedded active 時 skip；set_embedded_active/is_embedded_active 控制；session_id 留 B1b-4 --resume 用。`clear()` + re-tail 在 attach 切換 session 時由 controller 協調。**多輪顯示衛生**：`record_system` 去重重複 `[session]` 行（claude 每輪重發 system/init、同 session_id 只印一次）；`record_result` 累加 per-turn `total_cost_usd`、`[DONE]` 顯示**累計** session 成本（標 est.，因 claude 此值是 per-turn 且已知會高估）。
-│   ├── agent_runner.py   — AgentRunner（QObject，B0/CLI 後端）：QProcess spawn claude --output-format stream-json；StreamJsonParser line-buffer 解各 frame type；AgentRunState 狀態機 (idle/working/waiting/stopped，**持久多輪**：claude 是單一長壽 process 跨多 turn，新一輪的 stdin/assistant chunk 把 turn 之間的 idle 拉回 working；`waiting`=cooperative-interrupt parking、只由 on_stdin_sent 或終端 frame 離開、普通 chunk 不得掉出)；build_loopback_mcp_config 寫暫存 mcp.json（repo_root cwd + uv run measure/server.py）；send_user_message 寫 stdin；stop() SIGINT；callbacks 注入 (on_update/on_state_changed/on_process_error/has_pending_wait)；`_EMBEDDED_SYSTEM_PROMPT` 告知 agent「gui_* 工具已自動 attach、勿自呼任何 connect」（配合 mcp lazy auto-connect）。**B1a**：實作 AgentSessionPort（add_state_listener + 既有 6 成員）；`AgentState` 定義已搬到 ports.py、此處 re-export 維持向後相容。純函式（build_claude_argv / build_loopback_mcp_config / build_stdin_message / StreamJsonParser / AgentRunState）可被 B1b 後端跨檔複用。
-│   ├── agent_session_registry.py — **B1b-2** 檔案型 session registry：每個 session 一個 `<session_id>.json`（`~/.cache/zcu-tools/agent_sessions/`）；`AgentSessionRecord`（TypedDict：session_id/claude_session_id/pid/status/log_path/spool_dir/created/title）；原子寫（tmp+os.replace）；`read_record` 內建 stale-running self-heal（dead pid → status=stopped 更新回寫）；無 flock/fifo（Windows-verify 標記）。
-│   ├── agent_supervisor.py — **B1b-1/B1b-2** 可攜 IPC supervisor：detached Python wrapper（`python -m …agent_supervisor`）spawn claude 後 stdout→log.ndjson（逐行 append）、spool dir poll→claude stdin；純邏輯函式（write_spool_message / consume_spool_entries / append_log_line / stop_supervisor）可在不真 spawn 下單測；spawn_supervisor_detached() 回 SupervisorHandle（pid + log_path + spool_dir）供 GUI 端呼叫；跨平台：POSIX start_new_session / Windows DETACHED_PROCESS|CREATE_NEW_PROCESS_GROUP（Windows-verify）；stop SIGINT(POSIX) / CTRL_BREAK_EVENT+taskkill fallback(Windows)。**B1b-2** 新增 `--session-id` CLI 參數：啟動時寫 running record、結束時寫 stopped record（`_update_registry_stopped`）。
-│   ├── independent_agent_session.py — **B1b-1/B1b-2** IndependentAgentSession（QObject，實作 AgentSessionPort）：start() 建 registry_dir/<session_id>/ → spawn_supervisor_detached → 啟 QTimer poll-tail；send_user_message 寫 spool 檔；stop() 送 stop_supervisor；_on_tick 增量讀 log.ndjson（byte offset）→ StreamJsonParser → _route_updates → callbacks；supervisor 消失自動轉 stopped；tick() 測試用 seam（繞過 QTimer）。**B1b-2** 新增：`attach(record: AgentSessionRecord)` 從已存 record 重建 SupervisorHandle、offset=0 重播歷史、啟 timer；`detach()` 停 timer、清 handle、**不呼叫 stop_supervisor**（保 supervisor 繼續跑）。
+│   ├── agent_launcher.py — Qt-free 外部終端 agent launch 服務：`build_loopback_mcp_config`（暫存 mcp.json，repo_root cwd + uv run measure/server.py loopback）、`_EMBEDDED_SYSTEM_PROMPT`（告知 agent「gui_* 工具已自動 attach、勿自呼 connect、需要狀態自呼 gui_state_check」）、`build_claude_argv`（互動模式不帶 -p、`--mcp-config` / `--allowedTools "mcp__measure-gui__*"` / `--append-system-prompt` / `--resume <id>` 或 `--session-id <uuid>`）、`new_session_id`、`read/write_last_session_id`（存 `~/.cache/zcu-tools/agent_last_session`）、`launch_agent_terminal(repo_root, *, resume, state_context)`（跨平台 spawn：Linux gnome-terminal/konsole/xterm/x-terminal-emulator 或 `ZCU_AGENT_TERMINAL` 覆寫、macOS `open -a Terminal`、Windows `wt`/`start`；寫暫存啟動 script 避 quoting；移除 ANTHROPIC_API_KEY；`AGENT_CMD` 預設 `claude`、env `ZCU_AGENT_CMD` 可換為 codex）
 │   ├── tab.py            — TabService (分頁狀態與 tab-local query/update)
 │   ├── tab_view.py       — TabViewService / TabViewSnapshot (pure tab render read model)
 │   ├── save.py           — SaveService (資料/圖片儲存 pipeline)
 │   ├── writeback.py      — WritebackService (分析結果寫回 md/ml)
 │   ├── cfg_editor.py     — CfgEditorSession (aggregate root：set_field/commit_schema 行為上身，只到 CfgSchema 快照) + CfgEditorService (Repository：lifecycle/LRU/變更流)；commit 把 CfgSchema 交 ContextWritePort 寫 (ADR-0006，session 不再 lower/register)
-│   ├── ports.py          — driven-adapter / sibling-service ports (Protocol)：PersistOriginator(Caretaker↔Controller 窄介面)/ProjectIO/DriverFactory/ContextRead/ContextWrite(+ContextWrites batch)/WritebackQuery/TabLifecycle/StartupContext/RememberedDevice。**B1a** 新增 `AgentState = Literal[idle/working/waiting/stopped]`（contract 層所有者）+ `AgentSessionPort`（@runtime_checkable Protocol，Qt-free 控制面：state/is_running/start/send_user_message/stop/session_id/add_state_listener）；**B1b-2** 新增 `detach() -> None`：CLI backend `detach()=stop()`（child 無需活到 dialog 外）；IndependentAgentSession `detach()` 只停 timer 不停 supervisor。app service 依賴 port 而非具體 infra/sibling (ADR-0005/0006)
+│   ├── ports.py          — driven-adapter / sibling-service ports (Protocol)：PersistOriginator(Caretaker↔Controller 窄介面)/ProjectIO/DriverFactory/ContextRead/ContextWrite(+ContextWrites batch)/WritebackQuery/TabLifecycle/StartupContext/RememberedDevice。app service 依賴 port 而非具體 infra/sibling (ADR-0005/0006)
 │   └── remote/           — RemoteControlAdapter：第二個 driving View，是共用 NdjsonRpcEndpoint 上的 router；socket/NDJSON-over-TCP transport 住在共用層 zcu_tools.gui.remote（見下「共用 transport 層」）
 │       ├── method_specs.py — METHOD_SPECS 契約表 (wire 參數型別 SSOT)；MethodSpec 型別來自 gui.remote
 │       └── dispatch.py     — BoundMethod 綁 handler→METHOD_SPECS；METHOD_REGISTRY
@@ -67,8 +63,8 @@ gui/
     ├── cfg_form.py         — CfgFormWidget：LiveModel 反應式容器
     ├── fields/             — 渲染邏輯：registry.py / common.py / containers.py
     ├── inspect_dialog.py   — InspectDialog(InspectDialogBase 子類)：只補 ml create/modify（_MlCreateDialog/_MlModifyDialog 拖 CfgEditor）；md tab + ml view/rename/del 在 base（session）
-    ├── agent_chat_dialog.py — AgentChatDialog(QDialog)：**B1b-2** 兩頁 QStackedWidget 結構（independent 模式）：頁 0 = Picker（QListWidget 列出歷史 sessions，New/Attach/Stop-Remove/Refresh 按鈕）、頁 1 = Conversation（transcript + 輸入框 + Send + Close + 狀態列）。CLI 模式（`ZCU_AGENT_BACKEND=cli`）直接跳頁 1，Close=detach（等同 stop）。切換：New 呼 `ctrl.new_agent_session()`、Attach 呼 `ctrl.attach_agent_session(record)`，兩者均呼 `_switch_to_conversation(session)`；Close 呼 `session.detach()` 後返頁 0。`_on_send` 三路路由（idle→start、working→send_user_message、waiting→inbox）不變。Controller 提供 new_agent_session/attach_agent_session/list_agent_sessions/remove_agent_session/agent_backend_mode 五個 façade method（B1b-2 新增）+ `build_first_turn_task(text)`（idle→start 時把精簡 GUI 狀態快照 project/context/SoC/tabs 前置進第一輪 user message，只第一輪、follow-up 走 send_user_message）。無具體 AgentRunner import（B1a 不變式）。**transcript UX**：per-kind 著色 + 角色前綴（user vs agent vs tool/system 弱化 vs diagnostic 警示）；輸入用 `HistoryLineEdit`（上下鍵命令歷史 + 草稿保存）。
-    ├── main_window.py      — MainWindow(QMainWindow) 實作 ViewProtocol；toolbar 有 Agent… 按鈕（_open_agent_chat lazy 建/raise-existing）；舊 feedback bar 已移除
+    ├── agent_launch_dialog.py — AgentLaunchDialog(QDialog)：極簡兩按鈕（New session / Resume last），呼 Controller 的 `launch_agent_session(resume=False/True)`；Controller 組 `build_agent_state_context()` 快照後委 `agent_launcher.launch_agent_terminal()`。
+    ├── main_window.py      — MainWindow(QMainWindow) 實作 ViewProtocol；toolbar 有 Agent… 按鈕（開 AgentLaunchDialog）
     └── analyze_form.py     — AnalyzeFormWidget：扁平 analysis 參數表單
 （共用件已下放 session：setup_dialog/device_dialog/predictor_dialog/inspect_base 在 `gui/session/ui/`（吃 `SessionControllerPort`）、ProgressService/IOManager 在 `gui/session/services/`、QtProgressTransport 在 `gui/session/adapters/`、TrimDoubleSpinBox 在 `gui/widgets/spinbox.py`。measure 保留 app-local OperationGate/BackgroundService（policy/Qt facet）+ 自己的 cfg-editor/role-catalog/inspect ml-edit）
 ```
@@ -106,7 +102,7 @@ gui/
 - `ParamSpec`（共用層 `gui.remote.param_spec`）同時驅動執行期 per-param 驗證（service 在 dispatch 前驗）與 MCP `inputSchema` 生成（`build_input_schema`）；兩者不漂移。handler 收到已驗證的 typed params，不再呼叫 `_require_*`。
 - `zcu_tools/mcp/measure/server.py` 從 `METHOD_SPECS` 生成 1:1 RPC tool 的 schema + forwarder；手寫 override 僅留 lifecycle / fan-out / 檔案寫入 / 多欄位 coercion（connect/device/startup）。`coerce_*`（multi-param → frozen request）仍由 handler 顯式呼叫。MCP 端的 socket transport（連線/送 RPC/reader thread/RID 路由）由共用層 `McpBridge` 持有，measure-gui server 在其上加 guard bridge、operation tracking、override tools 與自己的 stdio loop。
 - 該 server 以 script 啟動，import `method_specs` 會經 `gui/__init__` 拉進 Qt；bridge 容忍此（不建 QApplication），換取與 dispatcher 共用單一 SSOT。
-- **lazy auto-connect**（measure-only policy，在 `send_gui_rpc`、非共用 bridge）：首次 `gui_*` 工具呼叫時若未連線，自動經 session-discovery 解析 control-socket port 並 attach（連不到才 raise）。讓 `gui_connect` 對人類使用者變可選、嵌入式 agent 無需自呼 connect；**只 attach 控制通道、不碰 SoC `connect.start`**（SoC 連線仍是使用者決定）。
+- **lazy auto-connect**（measure-only policy，在 `send_gui_rpc`、非共用 bridge）：首次 `gui_*` 工具呼叫時若未連線，自動經 session-discovery 解析 control-socket port 並 attach（連不到才 raise）。讓 `gui_connect` 對 agent 與人類使用者皆變可選；外部終端 agent 透過 loopback mcp.json 啟動後，第一個 gui_* 呼叫即自動連上 GUI；**只 attach 控制通道、不碰 SoC `connect.start`**（SoC 連線仍是使用者決定）。
 
 ### 共用 transport 層（`zcu_tools.gui.remote`，三 GUI app 共用；domain 仍各自）
 
@@ -118,6 +114,19 @@ measure / fluxdep / dispersive 三個 GUI app 共用 transport + wire 機制，d
 - 版本 guard、operation-handle 簿記等 measure-gui 專屬 policy **不**下放到共用層；共用層只提供 transport mechanism（三層分工：RPC=mechanism、mcp=簿記+翻譯、agent 只收語義）。
 
 ### Agent 體驗（事件 / 錯誤 / 發現）
+
+#### 外部終端 Agent Launch 架構（ADR-0024）
+
+GUI 上的「Agent」按鈕觸發 `AgentLaunchDialog`（New session / Resume last 兩選）→ Controller 呼 `build_agent_state_context()` 組裝當前 GUI 快照（project / context / SoC / open tabs）→ 委 `services/agent_launcher.py` 的 `launch_agent_terminal()` spawn 系統終端（Linux：gnome-terminal/konsole/xterm，macOS：`open -a Terminal`，Windows：wt/start；`ZCU_AGENT_TERMINAL` 可覆寫；`ZCU_AGENT_CMD` 可換 agent）。
+
+終端內跑**真互動式 `claude`**（不是 headless subprocess）：
+- 經 `--mcp-config`（暫存 loopback mcp.json）掛上 GUI control socket；首次 `gui_*` 呼叫即由 lazy auto-connect 自動 attach。
+- `--allowedTools "mcp__measure-gui__*"` 限制工具範圍。
+- 狀態快照以 `--append-system-prompt` 烤進 system prompt——agent 啟動即知 GUI 狀態，免呼 `gui_state_check`。
+- **New**：生成新 `session_id`（`--session-id <uuid>`）並寫入 `~/.cache/zcu-tools/agent_last_session`。
+- **Resume**：讀 last session id 帶 `--resume <id>` 接回上一個對話。
+- **中斷**：終端原生 Ctrl-C / Esc（無 GUI 插話）。
+- 關係：cooperative-interrupt 的 wait early-return wire（`OperationHandles.await_outcome` 第二喚醒源 + `FeedbackInbox`）仍在，但**只由 `mcp/measure/server.py` 的 feedback passthrough 驅動**；GUI 端無 feedback bar / nudge 入口（見 ADR-0023）。
 
 - **Run / Device-setup 生命週期（對齊，wire v10）**：`RUN_STARTED{tab_id}`+`RUN_FINISHED{tab_id,outcome,error_message}` 與 `DEVICE_SETUP_STARTED{name}`+`DEVICE_SETUP_FINISHED{name,outcome,error_message}` 同構（一事件一語義+outcome，拆自舊 RUN_LOCK_CHANGED / DEVICE_SETUP_CHANGED）。進度走 `operation.progress(operation_id)`（run+device 通用，按 id 查；`{active,bars}` 形狀，主線程 `ProgressBarModel` 實時算 format/percent + raw n/total；折進 `gui_*_poll` running 回傳）；進度純拉不發 event（高頻），完成才發 *_finished。**progress 由唯一 `ProgressService` 持有**（Phase 111，見下「Progress 子系統」）：container 生死綁 operation（discard_operation 於終局），View 經 owner_id（tab_id/device_name）attach 一次、跟隨 operation 輪替 → 關 dialog 不銷毀進度（container 在 service 仍活，重開 re-attach 即見）。
 - **可讀 id**：`tab_id` = `<adapter-slug>-<hash>`（如 `twotone-freq-1a2b3c4d`），owner-keyed `editor_id` = `<tab_id>-ed`（agent 不必查 snapshot 即知 editor 屬哪 tab）；仍是不透明唯一 string key。

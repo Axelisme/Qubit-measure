@@ -16,15 +16,21 @@
 
 ## 分層（依 ADR-0002 三層）
 
-- **mechanism（RPC/gui）**：`await_outcome` 第二喚醒源 + thread-safe inbox + dispatch payload 加 `reason/feedback`。inbox 寫入來自 GUI 主執行緒（使用者打字 widget）、讀取在 IO worker；**不放 State**（State 主執行緒寫入不變式，見 ADR-0007），由 Controller 持有 thread-safe inbox。
+- **mechanism（RPC/gui）**：`await_outcome` 第二喚醒源 + thread-safe inbox + dispatch payload 加 `reason/feedback`。inbox 寫入來自 `mcp/measure` 的 feedback passthrough（server 端；GUI feedback widget 已隨內嵌 agent 移除，見 ADR-0024）、讀取在 IO worker；**不放 State**（State 主執行緒寫入不變式，見 ADR-0007），由 Controller 持有 thread-safe inbox。
 - **簿記（mcp）**：`mcp/measure` 把判別 payload 原樣透傳。
 - **語義（agent）**：`*_wait` 工具 description / SKILL 明示「`reason=user_feedback` → 重規劃、持 operation_id 可 cancel/續跑」。
 
 ## residual / 邊界
 
-- agent 當下沒在 wait（推理中／連打瞬時呼叫／idle）：feedback 留在 inbox，下個 wait 進入時立即帶出；GUI 提示「將於下個等待點生效」。被動 piggyback（折進下個 reply）作為 residual 通道。
-- 真正暴走（不 wait）：留 **SIGINT** 當硬停逃生口。
+- agent 當下沒在 wait（推理中／連打瞬時呼叫／idle）：feedback 留在 inbox，下個 wait 進入時立即帶出。被動 piggyback（折進下個 reply）作為 residual 通道。
+- 真正暴走（不 wait）：留終端原生 Ctrl-C 當硬停逃生口。
 - 提早返回後 operation 仍在跑（op_id 有效），cancel/續跑由 agent 決定（與既有 handle 模型一致）。
+
+## 目前生效的 feedback 入口
+
+**wait early-return wire（`await_outcome` 第二喚醒源 + `FeedbackInbox` drain）仍在**，但入口只剩 `mcp/measure/server.py` 的 feedback passthrough：agent 透過 MCP 呼叫帶 feedback payload 可喚醒 pending wait，server 端負責寫入 inbox。
+
+GUI 端的 feedback bar 與 nudge 入口已移除（由外部終端 Ctrl-C 取代 SIGINT 硬停，見 ADR-0024）：使用者不再在 GUI 內輸入 feedback；`FeedbackInbox` 的寫入方僅剩 mcp server 側。被動 piggyback 通道（diagnostic / event push 折進 reply）不受影響。
 
 ## 與既有設計關係
 
