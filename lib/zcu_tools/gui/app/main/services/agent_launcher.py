@@ -524,11 +524,13 @@ def _spawn_terminal_argv(launcher_path: str) -> list[str]:
     ``[sys.executable, launcher_path]`` — all argv complexity lives inside the
     launcher, so the terminal command stays trivial to quote.
 
+    This is reached only for POSIX and the Windows ``ZCU_AGENT_TERMINAL`` override
+    case: ``launch_agent_terminal`` handles the Windows default (no override) by
+    spawning claude directly via CREATE_NEW_CONSOLE and returns *before* building
+    the launcher, so on Windows this is invoked only when the override is set.
+
     ``ZCU_AGENT_TERMINAL`` overrides the terminal on both Windows and Linux. macOS
-    uses Terminal.app; Windows runs the launcher directly (the caller attaches a
-    fresh window via CREATE_NEW_CONSOLE) rather than the Store-packaged Windows
-    Terminal, whose AppData\\Roaming sandbox hides the Desktop-bundled CLI (see the
-    win32 branch). Fast-fails with a RuntimeError teaching the user to set
+    uses Terminal.app. Fast-fails with a RuntimeError teaching the user to set
     ``ZCU_AGENT_TERMINAL`` when no known terminal is found on Linux.
     """
     py = sys.executable
@@ -542,23 +544,20 @@ def _spawn_terminal_argv(launcher_path: str) -> list[str]:
         return ["osascript", "-e", script]
 
     if sys.platform == "win32":
-        # An explicit terminal override wins (mirrors the Linux branch): a power
-        # user with a non-sandboxed terminal can force it.
+        # Only reached when ZCU_AGENT_TERMINAL is set (the Windows default is the
+        # direct CREATE_NEW_CONSOLE spawn in launch_agent_terminal, which returns
+        # before this is called). A power user with a non-sandboxed terminal forces
+        # it here; the launcher path is the trailing arg.
         override = os.environ.get("ZCU_AGENT_TERMINAL")
         if override:
             return [override, py, launcher_path]
-        # Default: run the launcher directly and let the caller attach a fresh
-        # console via CREATE_NEW_CONSOLE (see launch_agent_terminal). This beats
-        # both ``wt`` and ``cmd /c start``:
-        #   - ``wt`` is a UWP app and virtualizes AppData\Roaming for the children
-        #     it spawns, so a wt-launched agent cannot read the Claude Desktop CLI
-        #     under %APPDATA%\Roaming\Claude (os.path.exists is False → Fast-Fail).
-        #   - ``cmd /c start "" "<py>" "<launcher>"`` double-quotes when subprocess
-        #     re-escapes the already-quoted tokens, corrupting the path.
-        # A direct Popen from this normal (non-packaged) process has no AppData
-        # sandbox and lets subprocess quote the two real paths correctly. See
-        # ADR-0024 (Windows terminal sandbox).
-        return [py, launcher_path]
+        # Unreachable in practice (the no-override Windows default never builds a
+        # launcher), but Fast-Fail loudly instead of silently mis-spawning if the
+        # caller contract ever changes.
+        raise RuntimeError(
+            "internal error: _spawn_terminal_argv reached on Windows without "
+            "ZCU_AGENT_TERMINAL (the no-override default spawns claude directly)."
+        )
 
     # Linux / other POSIX. An explicit override wins so headless/custom setups
     # can point at any terminal: ZCU_AGENT_TERMINAL is the full program name and

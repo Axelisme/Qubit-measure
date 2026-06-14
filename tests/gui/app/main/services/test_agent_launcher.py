@@ -7,8 +7,9 @@ store (record/dedup/cap), ``claude_project_dir`` slug encoding,
 ``list_resumable_sessions`` (label extraction / phantom-session skip / sorting /
 empty store), the cross-platform Python launcher (json-embedded argv/cwd that
 keeps a multi-line prompt safe — ``compile`` regression), and the per-platform
-terminal-spawn branches (Linux / Windows-with-wt / Windows-without-wt) including
-the Fast-Fail when no terminal is found.
+spawn branches (Linux terminal, the Windows direct CREATE_NEW_CONSOLE default,
+and the Windows ``ZCU_AGENT_TERMINAL`` override) including the Fast-Fail when no
+terminal is found.
 """
 
 from __future__ import annotations
