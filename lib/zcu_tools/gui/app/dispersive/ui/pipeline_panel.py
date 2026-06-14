@@ -333,9 +333,23 @@ class PipelinePanelWidget(QWidget):
     # --- section 1: inputs ----------------------------------------------
 
     def _on_project(self) -> None:
+        # Non-blocking dialog: exec() would freeze the Qt event loop and stall the
+        # read-only control socket, so open() the dialog and act on its result via
+        # the ``accepted`` signal (it only fires on Accept; Reject runs nothing).
+        from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+
         dialog = ProjectDialog(self._ctrl.state.project, self, db_label="One-tone dir")
-        if dialog.exec():
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+
+        def _on_accepted() -> None:
             self._ctrl.setup_project(dialog.result_project())
+
+        dialog.accepted.connect(_on_accepted)
+        self._project_dialog = dialog  # hold a reference so it is not GC'd while open
+        dialog.finished.connect(
+            lambda _result=0: setattr(self, "_project_dialog", None)
+        )
+        dialog.open()
 
     def _on_load_inputs(self) -> None:
         from .paths import params_dir
@@ -364,28 +378,41 @@ class PipelinePanelWidget(QWidget):
     # --- section 2: load onetone ----------------------------------------
 
     def _on_load_onetone(self) -> None:
+        # Non-blocking dialog: exec() would freeze the Qt event loop and stall the
+        # read-only control socket, so open() the dialog and act on its result via
+        # the ``accepted`` signal (it only fires on Accept; Reject runs nothing).
+        from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+
         from .load_dialog import LoadOnetoneDialog
         from .paths import raw_onetone_dir
 
         start = raw_onetone_dir(self._ctrl.state.project)
         dialog = LoadOnetoneDialog(self, start_dir=start)
-        if not dialog.exec():
-            return
-        req = dialog.result_request()
-        if req is None:
-            return
-        try:
-            name = self._ctrl.load_onetone(
-                req.filepath, transpose_axes=req.transpose_axes
-            )
-        except Exception as exc:  # noqa: BLE001 — surface to the panel
-            self._warn(
-                "Load one-tone failed",
-                friendly_io_message("Load", req.filepath, exc),
-            )
-            return
-        self._onetone_label.setText(f"Loaded: {name}")
-        self._sync_enabled()
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+
+        def _on_accepted() -> None:
+            req = dialog.result_request()
+            if req is None:
+                return
+            try:
+                name = self._ctrl.load_onetone(
+                    req.filepath, transpose_axes=req.transpose_axes
+                )
+            except Exception as exc:  # noqa: BLE001 — surface to the panel
+                self._warn(
+                    "Load one-tone failed",
+                    friendly_io_message("Load", req.filepath, exc),
+                )
+                return
+            self._onetone_label.setText(f"Loaded: {name}")
+            self._sync_enabled()
+
+        dialog.accepted.connect(_on_accepted)
+        self._onetone_dialog = dialog  # hold a reference so it is not GC'd while open
+        dialog.finished.connect(
+            lambda _result=0: setattr(self, "_onetone_dialog", None)
+        )
+        dialog.open()
 
     # --- section 3: preprocess ------------------------------------------
 
