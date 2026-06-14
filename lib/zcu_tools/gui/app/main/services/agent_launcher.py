@@ -418,6 +418,29 @@ def build_claude_argv(
 # Private helpers
 # ---------------------------------------------------------------------------
 
+# Env vars that belong to the PARENT process's Claude Code orchestration (set by
+# Claude Desktop / the Agent SDK for the processes it spawns). The freshly
+# launched standalone ``claude`` must NOT inherit them — above all
+# ``CLAUDE_CODE_ENTRYPOINT=claude-desktop``, which makes the child run in
+# Desktop-embedded mode where it reads its inherited stdin as a control stream and
+# injects a stray phantom first message (observed as a typed "are"). Stripping all
+# of them makes the child behave exactly like ``claude`` typed in a plain terminal
+# (subscription auth still comes from ~/.claude, not these vars). ``ANTHROPIC_API_KEY``
+# rides here too so the child never sees an API key.
+_STRIP_ENV_EXACT: tuple[str, ...] = ("ANTHROPIC_API_KEY", "CLAUDECODE")
+_STRIP_ENV_PREFIXES: tuple[str, ...] = ("CLAUDE_CODE_", "CLAUDE_AGENT_SDK")
+
+
+def _strip_orchestration_env(env: dict[str, str]) -> dict[str, str]:
+    """Remove the parent's Claude Code orchestration vars from ``env`` (in place).
+
+    Returns the same dict for convenience. See ``_STRIP_ENV_*`` for the rationale.
+    """
+    for name in list(env):
+        if name in _STRIP_ENV_EXACT or name.startswith(_STRIP_ENV_PREFIXES):
+            del env[name]
+    return env
+
 
 def build_python_launcher_source(repo_root: str, argv: list[str]) -> str:
     """Return the source of a cross-platform Python launcher that execs ``argv``.
@@ -429,22 +452,33 @@ def build_python_launcher_source(repo_root: str, argv: list[str]) -> str:
     a ``.bat`` could not carry a multi-line GUI-state snapshot without breaking
     cmd syntax, and ``.sh`` quoting was POSIX-only.
 
-    The generated launcher chdirs into the repo, drops ``ANTHROPIC_API_KEY`` so
-    claude uses subscription auth, resolves the binary via ``shutil.which`` (on
-    Windows ``claude`` is usually ``claude.cmd`` — ``os.execv`` alone would not
-    find it on PATH), and Fast-Fails with a clear message when the binary is
-    absent. It is run as ``<python> <launcher.py>``, so it needs no execute bit.
+    The generated launcher chdirs into the repo, strips the parent's Claude Code
+    orchestration env vars (see ``_STRIP_ENV_*`` — ``ANTHROPIC_API_KEY`` for
+    subscription auth, plus ``CLAUDE_CODE_*`` / ``CLAUDECODE`` / ``CLAUDE_AGENT_SDK*``
+    so the child does not start in Desktop-embedded mode and inject a phantom
+    input), resolves the binary via ``shutil.which`` (on Windows ``claude`` is
+    usually ``claude.cmd`` — ``os.execv`` alone would not find it on PATH), and
+    Fast-Fails with a clear message when the binary is absent. It is run as
+    ``<python> <launcher.py>``, so it needs no execute bit.
     """
     argv_literal = json.dumps(argv)
     cwd_literal = json.dumps(os.path.abspath(repo_root))
+    strip_exact = json.dumps(list(_STRIP_ENV_EXACT))
+    strip_prefixes = json.dumps(list(_STRIP_ENV_PREFIXES))
     # ARGV / CWD are written as json.dumps output, i.e. valid Python list/str
     # literals — this is what makes the multi-line prompt safe.
     return (
         "import os, shutil, sys\n"
         f"ARGV = {argv_literal}\n"
         f"CWD = {cwd_literal}\n"
+        f"_STRIP_EXACT = {strip_exact}\n"
+        f"_STRIP_PREFIXES = tuple({strip_prefixes})\n"
         "os.chdir(CWD)\n"
-        "os.environ.pop('ANTHROPIC_API_KEY', None)\n"
+        # Strip the parent's Claude Code orchestration vars so claude runs as a
+        # clean standalone CLI (not Desktop-embedded -> no phantom stdin input).
+        "for _k in list(os.environ):\n"
+        "    if _k in _STRIP_EXACT or _k.startswith(_STRIP_PREFIXES):\n"
+        "        os.environ.pop(_k, None)\n"
         "_bin = shutil.which(ARGV[0])\n"
         "if _bin is None:\n"
         "    sys.exit(\n"
@@ -572,10 +606,12 @@ def launch_agent_terminal(
 
     The spawn is detached (``subprocess.Popen``, not waited). The terminal runs a
     cross-platform Python launcher (``<python> <launcher.py>``) that chdirs into
-    the repo, drops ``ANTHROPIC_API_KEY`` so claude uses subscription auth, and
-    execs claude; the env passed to ``Popen`` also drops the key (double safety,
-    so even the terminal process never sees it). Cross-platform branches Fast-Fail
-    rather than silently degrading.
+    the repo and strips the parent's Claude Code orchestration env vars (see
+    ``_STRIP_ENV_*``: ``ANTHROPIC_API_KEY`` for subscription auth, plus
+    ``CLAUDE_CODE_*`` / ``CLAUDECODE`` / ``CLAUDE_AGENT_SDK*`` so the child is a
+    clean standalone claude, not a Desktop-embedded one), then execs claude; the
+    env passed to ``Popen`` is stripped the same way (double safety). Cross-platform
+    branches Fast-Fail rather than silently degrading.
     """
     mcp_config_path = build_loopback_mcp_config(repo_root)
 
@@ -600,9 +636,11 @@ def launch_agent_terminal(
     launcher_path = _write_python_launcher(repo_root, argv)
     spawn_argv = _spawn_terminal_argv(launcher_path)
 
-    env = os.environ.copy()
-    # Subscription auth: claude must NOT see an API key (mirrors agent_runner).
-    env.pop("ANTHROPIC_API_KEY", None)
+    # Strip the parent's Claude Code orchestration vars (API key for subscription
+    # auth, plus CLAUDE_CODE_*/CLAUDECODE/CLAUDE_AGENT_SDK* so the child does not
+    # start in Desktop-embedded mode and inject a phantom stdin input). The
+    # launcher repeats this at runtime (double safety, mirrors the old API-key pop).
+    env = _strip_orchestration_env(os.environ.copy())
 
     # On Windows, the default spawn is the launcher itself ([py, launcher]); give
     # it its own console window via CREATE_NEW_CONSOLE so claude's TUI has a real

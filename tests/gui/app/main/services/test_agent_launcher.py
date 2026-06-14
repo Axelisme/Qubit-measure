@@ -839,6 +839,65 @@ def test_launch_drops_api_key_from_spawn_env(
     assert "ANTHROPIC_API_KEY" not in spawn.env
 
 
+def test_strip_orchestration_env_removes_parent_vars() -> None:
+    env = {
+        "PATH": "x",
+        "HOME": "h",
+        "ANTHROPIC_API_KEY": "k",
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_ENTRYPOINT": "claude-desktop",
+        "CLAUDE_CODE_SESSION_ID": "parent",
+        "CLAUDE_AGENT_SDK_VERSION": "0.3.170",
+    }
+    out = agent_launcher._strip_orchestration_env(env)
+    assert out is env  # mutated in place
+    # Only the parent's Claude Code orchestration vars are removed.
+    assert set(env) == {"PATH", "HOME"}
+
+
+def test_launch_strips_orchestration_env_from_spawn(
+    monkeypatch: pytest.MonkeyPatch, _sessions_file: Path
+) -> None:
+    # The bug: the child claude inherited CLAUDE_CODE_ENTRYPOINT=claude-desktop
+    # (and friends) and started Desktop-embedded, injecting a phantom "are".
+    _patch_linux_gnome(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "secret")
+    monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "claude-desktop")
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setenv("CLAUDE_AGENT_SDK_VERSION", "0.3.170")
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "parent-sess")
+    monkeypatch.setenv("ZCU_KEEP_ME", "yes")  # a normal var must survive
+    monkeypatch.setattr(agent_launcher, "new_session_id", lambda: "s")
+
+    agent_launcher.launch_agent_terminal("/repo")
+
+    spawn = _FakePopen.instances[0]
+    assert spawn.env is not None
+    for k in (
+        "ANTHROPIC_API_KEY",
+        "CLAUDE_CODE_ENTRYPOINT",
+        "CLAUDECODE",
+        "CLAUDE_AGENT_SDK_VERSION",
+        "CLAUDE_CODE_SESSION_ID",
+    ):
+        assert k not in spawn.env
+    assert spawn.env.get("ZCU_KEEP_ME") == "yes"
+    # The launcher source strips them at runtime too (double safety).
+    source = _spawned_launcher_source()
+    assert "_STRIP_PREFIXES" in source
+    assert "CLAUDE_CODE_" in source
+
+
+def test_launcher_source_strips_orchestration_env() -> None:
+    source = agent_launcher.build_python_launcher_source("/repo", ["claude"])
+    compile(source, "<launcher>", "exec")
+    assert "_STRIP_EXACT" in source and "_STRIP_PREFIXES" in source
+    assert "ANTHROPIC_API_KEY" in source
+    assert "CLAUDECODE" in source
+    assert "CLAUDE_CODE_" in source
+    assert "CLAUDE_AGENT_SDK" in source
+
+
 def test_launcher_resolves_binary_via_which(monkeypatch: pytest.MonkeyPatch) -> None:
     """The launcher source resolves argv[0] via shutil.which (Windows .cmd)."""
     # This is a source-level assertion: the launcher does ``shutil.which(ARGV[0])``
