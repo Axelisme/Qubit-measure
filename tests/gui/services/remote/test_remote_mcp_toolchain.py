@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -862,6 +863,56 @@ def test_every_registered_adapter_has_a_written_guide():
 # Figure/screenshot consolidation (WIRE 24) — run/analyze replies NO LONGER fold
 # figure_path; looking at a plot is a separate gui_tab_get_current_figure call.
 # ---------------------------------------------------------------------------
+
+
+def test_get_current_figure_omitted_out_path_writes_temp_file(monkeypatch):
+    """Omitting out_path must drive the wire in out_path mode (synthesised temp
+    path) and return {saved_to, bytes} with NO inline base64."""
+    from tempfile import gettempdir
+
+    from zcu_tools.mcp.measure import server as mcp_server
+
+    calls: list[tuple[str, dict]] = []
+
+    def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
+        del timeout_seconds
+        calls.append((method, params))
+        # Mirror the wire out_path branch: write nothing here, just echo saved_to.
+        return {"bytes": 1234, "saved_to": params["out_path"]}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
+    out = mcp_server.TOOLS["gui_tab_get_current_figure"]["handler"](
+        {"tab_id": "fake-freq-1"}
+    )
+
+    expected_path = str(Path(gettempdir()) / "measure_fig_fake-freq-1.png")
+    assert out == {"bytes": 1234, "saved_to": expected_path}
+    assert "png_b64" not in out
+    # The convenience layer forwarded an out_path so the wire never returns base64.
+    assert calls == [
+        ("tab.get_current_figure", {"tab_id": "fake-freq-1", "out_path": expected_path})
+    ]
+
+
+def test_get_current_figure_explicit_out_path_is_forwarded(monkeypatch):
+    from zcu_tools.mcp.measure import server as mcp_server
+
+    calls: list[tuple[str, dict]] = []
+
+    def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
+        del timeout_seconds
+        calls.append((method, params))
+        return {"bytes": 1234, "saved_to": params["out_path"]}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
+    out = mcp_server.TOOLS["gui_tab_get_current_figure"]["handler"](
+        {"tab_id": "t1", "out_path": "/tmp/custom.png"}
+    )
+
+    assert out == {"bytes": 1234, "saved_to": "/tmp/custom.png"}
+    assert calls == [
+        ("tab.get_current_figure", {"tab_id": "t1", "out_path": "/tmp/custom.png"})
+    ]
 
 
 def test_analyze_settles_without_folding_figure_path(monkeypatch):

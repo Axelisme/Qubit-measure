@@ -1285,6 +1285,27 @@ def tool_gui_dialog_screenshot(arguments: dict[str, Any]) -> dict[str, Any]:
     return res
 
 
+def tool_gui_tab_get_current_figure(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Render the tab's current figure to a PNG FILE and return its path.
+
+    The convenience layer always drives the wire in out_path mode so the agent
+    never receives inline base64 (a large figure would blow the token budget —
+    the footgun this override removes). When out_path is omitted we synthesise a
+    per-tab temp path under gettempdir(), overwriting the previous render of the
+    same tab. The raw wire method still supports base64 for non-MCP consumers.
+    """
+    tab_id = str(arguments["tab_id"])
+    out_path_arg = arguments.get("out_path")
+    out_path = (
+        str(out_path_arg)
+        if out_path_arg is not None
+        else str(Path(gettempdir()) / f"measure_fig_{tab_id}.png")
+    )
+    return send_gui_rpc(
+        "tab.get_current_figure", {"tab_id": tab_id, "out_path": out_path}
+    )
+
+
 # ---------------------------------------------------------------------------
 # Phase 81b tools — context queries / device queries
 # ---------------------------------------------------------------------------
@@ -2087,18 +2108,22 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
         },
     },
     "gui_tab_get_current_figure": {
-        "handler": lambda args: send_gui_rpc("tab.get_current_figure", args),
+        "handler": tool_gui_tab_get_current_figure,
         "description": (
-            "Get the tab's CURRENT figure as PNG — whatever is on top of the tab's "
-            "plot stack: the run's 2D map while/after a run, the analysis fit once "
-            "you have analyzed, or a post-analysis figure (the post sub-tab shares "
-            "this container). This is how you look at ANY plot, including non-analysis "
-            "2D scans (onetone/twotone flux_dep, power_dep). The PNG is rendered at a "
-            "fixed small geometry (token-light, ~640x480), independent of the GUI "
-            "window size; the live on-screen figure is never permanently resized. "
+            "Render the tab's CURRENT figure to a PNG FILE and return its path — "
+            "whatever is on top of the tab's plot stack: the run's 2D map "
+            "while/after a run, the analysis fit once you have analyzed, or a "
+            "post-analysis figure (the post sub-tab shares this container). This is "
+            "how you look at ANY plot, including non-analysis 2D scans (onetone/"
+            "twotone flux_dep, power_dep). The PNG is rendered at a fixed small "
+            "geometry (~640x480), independent of the GUI window size; the live "
+            "on-screen figure is never permanently resized. The figure is ALWAYS "
+            "written to disk and the reply is {saved_to, bytes} — Read the saved_to "
+            "path to view the plot (never inline base64, so it cannot blow the token "
+            "budget). Omit out_path to write a per-tab file under the temp dir "
+            "(overwritten each call); pass out_path to choose the location. "
             "Fails with PRECONDITION_FAILED if the tab has no figure yet "
-            "(run has not completed). "
-            "If out_path is given, the PNG is saved to disk and png_b64 is omitted from the reply."
+            "(run has not completed)."
         ),
         "inputSchema": {
             "type": "object",
@@ -2106,7 +2131,10 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
                 "tab_id": {"type": "string"},
                 "out_path": {
                     "type": "string",
-                    "description": "Optional file path to save the PNG",
+                    "description": (
+                        "Optional absolute path to write the PNG; omit to use a "
+                        "per-tab file under the temp dir"
+                    ),
                 },
             },
             "required": ["tab_id"],
