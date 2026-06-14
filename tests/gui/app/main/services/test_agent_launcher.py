@@ -80,23 +80,21 @@ def test_build_claude_argv_respects_agent_cmd_override(
     assert argv[0] == "codex"
 
 
-def test_build_claude_argv_appends_state_context_to_system_prompt() -> None:
-    state = "[measure-gui current state]\nproject: chip=C\n[end state]"
-    argv = agent_launcher.build_claude_argv("/tmp/mcp.json", state_context=state)
+def test_build_claude_argv_appends_bootstrap_prompt_to_system_prompt() -> None:
+    bootstrap = "Read the live GUI state with gui_overview before doing anything."
+    argv = agent_launcher.build_claude_argv("/tmp/mcp.json", bootstrap_prompt=bootstrap)
     prompt = argv[argv.index("--append-system-prompt") + 1]
-    # The static embedded prompt and the state block both ride one flag, with the
-    # state block appended after the embedded prompt (Round 2 state injection).
+    # The static embedded prompt and the bootstrap directive both ride one flag,
+    # with the directive appended after the embedded prompt.
     assert agent_launcher._EMBEDDED_SYSTEM_PROMPT in prompt
-    assert prompt.endswith(state)
-    assert "[measure-gui current state]" in prompt
+    assert prompt.endswith(bootstrap)
 
 
-def test_build_claude_argv_without_state_context_is_static_prompt_only() -> None:
+def test_build_claude_argv_without_bootstrap_prompt_is_static_prompt_only() -> None:
     argv = agent_launcher.build_claude_argv("/tmp/mcp.json")
     prompt = argv[argv.index("--append-system-prompt") + 1]
-    # Default (no state_context): only the static embedded prompt, no state block.
+    # Default (no bootstrap_prompt): only the static embedded prompt.
     assert prompt == agent_launcher._EMBEDDED_SYSTEM_PROMPT
-    assert "[measure-gui current state]" not in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -555,25 +553,24 @@ def test_launch_resume_does_not_re_record(
     assert len(records) == 1
 
 
-def test_launch_passes_state_context_into_launcher(
+def test_launch_passes_bootstrap_prompt_into_launcher(
     monkeypatch: pytest.MonkeyPatch, _sessions_file: Path
 ) -> None:
     _patch_linux_gnome(monkeypatch)
     monkeypatch.setattr(agent_launcher, "new_session_id", lambda: "sess-state")
-    # Multi-line state context: the very case that broke a .bat (#1). It is
+    # Multi-line bootstrap directive: the very case that broke a .bat (#1). It is
     # json-embedded into the launcher, so it must round-trip and still compile.
-    state = "[measure-gui current state]\nproject: chip=Q5\nopen tabs: 3\n[end state]"
+    bootstrap = "Read live GUI state with gui_overview.\nDo NOT assume any state."
 
-    agent_launcher.launch_agent_terminal("/repo", state_context=state)
+    agent_launcher.launch_agent_terminal("/repo", bootstrap_prompt=bootstrap)
 
     source = _spawned_launcher_source()
-    assert "measure-gui current state" in source
-    assert "chip=Q5" in source
+    assert "gui_overview" in source
     # The multi-line value must not break the generated launcher's syntax.
     compile(source, "<launcher>", "exec")
 
 
-def test_launch_without_state_context_omits_state_block(
+def test_launch_without_bootstrap_prompt_omits_directive(
     monkeypatch: pytest.MonkeyPatch, _sessions_file: Path
 ) -> None:
     _patch_linux_gnome(monkeypatch)
@@ -582,7 +579,7 @@ def test_launch_without_state_context_omits_state_block(
     agent_launcher.launch_agent_terminal("/repo")
 
     source = _spawned_launcher_source()
-    assert "measure-gui current state" not in source
+    assert "gui_overview" not in source
 
 
 def test_launch_terminal_override_env(
@@ -871,15 +868,15 @@ def test_launch_windows_multiline_prompt_passed_intact(
     # os.execv on Windows (which leaked a prompt word as a phantom first message).
     _patch_windows(monkeypatch)
     monkeypatch.setattr(agent_launcher, "new_session_id", lambda: "win-ml")
-    state = "[measure-gui current state]\nproject: chip=Q5\n[end state]"
+    bootstrap = "Read live GUI state with gui_overview.\nDo NOT assume any state."
 
-    agent_launcher.launch_agent_terminal("/repo", state_context=state)
+    agent_launcher.launch_agent_terminal("/repo", bootstrap_prompt=bootstrap)
 
     spawn = _FakePopen.instances[0]
     prompt = spawn.argv[spawn.argv.index("--append-system-prompt") + 1]
     # The whole multi-line prompt is a single argv element, newlines preserved.
-    assert "measure-gui current state" in prompt
-    assert state in prompt
+    assert "gui_overview" in prompt
+    assert bootstrap in prompt
     assert "\n" in prompt
 
 

@@ -278,6 +278,12 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "converter port, sample rate, max pulse/buffer length) plus a structured "
         "'cfg' carrying the full detail, and 'is_mock'. Requires a connected SoC.",
     ),
+    "project.info": MethodSpec(
+        5.0,
+        "Read the applied project identity: chip_name / qub_name / res_name plus "
+        "the resolved result_dir and database_path. Fast-fails with "
+        "precondition_failed (no_project) when no project is applied yet.",
+    ),
     # Resource version table (optimistic-concurrency guard baseline). Full
     # snapshot the mcp layer reads to track last-seen versions; the version
     # integers are mcp/RPC bookkeeping and are never surfaced to the agent.

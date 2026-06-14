@@ -1111,38 +1111,24 @@ class Controller:
         """
         return self._operation_handles.await_outcome(operation_id, timeout)
 
-    def build_agent_state_context(self) -> str:
-        """Render a compact GUI-state snapshot for an external agent's prompt.
+    def build_agent_bootstrap_prompt(self) -> str:
+        """Render the bootstrap directive injected into a launched agent's prompt.
 
-        Injected into the launched ``claude`` system prompt (Round 2) so the
-        agent starts knowing the live project / context / SoC / open-tabs picture
-        without having to probe for it via ``gui_state_check``.
+        Appended to the launched ``claude`` system prompt so the agent's FIRST
+        action is to read the live GUI picture instead of trusting any baked-in
+        snapshot. Intentionally carries NO project / context / SoC / tab DATA —
+        a snapshot frozen at launch time goes stale the moment the user touches
+        the GUI; the agent must read the live state over the wire.
 
-        Fast-fail-safe by construction: every getter used here returns a default
-        rather than raising when the project / context / SoC is absent (SoC kind
-        is only read while ``has_soc()``), so a fresh GUI with nothing set up
-        still yields a well-formed block instead of crashing the launch.
+        A constant directive (no GUI getters), so it can never crash the launch.
         """
-        ctx = self.get_exp_context()
-        has_soc = self.has_soc()
-        soc_kind = (
-            ("mock" if self._conn_svc.is_mock_soc() else "remote")
-            if has_soc
-            else "none"
+        return (
+            "Before doing anything else, read the live GUI state with the "
+            "gui_overview tool (it returns the current project / context / soc / "
+            "open tabs / what is running) — and re-read it with gui_overview / "
+            "gui_state_check whenever you need to know the state. Do NOT assume "
+            "any state; this prompt carries no snapshot."
         )
-        tab_summary = ", ".join(
-            f"{self.get_tab_adapter_name(tid)}({tid})" for tid in self.list_tab_ids()
-        )
-        lines = [
-            "[measure-gui current state]",
-            f"project: chip={ctx.chip_name} qub={ctx.qub_name} res={ctx.res_name}",
-            f"context: {self.get_active_context_label() or '(none)'} "
-            f"(has_context={self.has_context()})",
-            f"soc: connected={has_soc} kind={soc_kind}",
-            f"open tabs: {tab_summary or '(none)'}",
-            "[end state]",
-        ]
-        return "\n".join(lines)
 
     # ------------------------------------------------------------------
     # Startup application workflow (StartupService)

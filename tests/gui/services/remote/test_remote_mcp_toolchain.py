@@ -915,6 +915,178 @@ def test_get_current_figure_explicit_out_path_is_forwarded(monkeypatch):
     ]
 
 
+def test_dialog_screenshot_omitted_out_path_writes_temp_file(monkeypatch):
+    """Omitting out_path must decode + write a per-dialog temp PNG and return
+    {saved_to, bytes} with NO inline base64 (mirrors gui_tab_get_current_figure)."""
+    import base64
+    from tempfile import gettempdir
+
+    from zcu_tools.mcp.measure import server as mcp_server
+
+    raw = b"PNGDATA"
+    calls: list[tuple[str, dict]] = []
+
+    def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
+        del timeout_seconds
+        calls.append((method, params))
+        return {"png_b64": base64.b64encode(raw).decode("ascii"), "bytes": len(raw)}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
+    out = mcp_server.TOOLS["gui_dialog_screenshot"]["handler"]({"dialog_name": "setup"})
+
+    expected_path = str(Path(gettempdir()) / "measure_dialog_setup.png")
+    assert out == {"bytes": len(raw), "saved_to": expected_path}
+    assert "png_b64" not in out
+    assert Path(expected_path).read_bytes() == raw
+    # The wire dialog.screenshot has no out_path mode — only dialog_name forwarded.
+    assert calls == [("dialog.screenshot", {"dialog_name": "setup"})]
+
+
+def test_dialog_screenshot_explicit_out_path(monkeypatch, tmp_path):
+    import base64
+
+    from zcu_tools.mcp.measure import server as mcp_server
+
+    raw = b"X"
+    target = tmp_path / "shot.png"
+
+    def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
+        del timeout_seconds, method, params
+        return {"png_b64": base64.b64encode(raw).decode("ascii"), "bytes": len(raw)}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
+    out = mcp_server.TOOLS["gui_dialog_screenshot"]["handler"](
+        {"dialog_name": "device", "out_path": str(target)}
+    )
+
+    assert out == {"bytes": len(raw), "saved_to": str(target)}
+    assert target.read_bytes() == raw
+
+
+def _overview_fake_send(*, has_soc: bool):
+    """A send_gui_rpc stub answering the read RPCs _assemble_overview fans out
+    over, parameterised by SoC presence (soc.info only valid while connected)."""
+    flags = {
+        "state.has_project": {"value": True},
+        "state.has_context": {"value": True},
+        "state.has_active_context": {"value": False},
+        "state.has_soc": {"value": has_soc},
+        "project.info": {
+            "chip_name": "Q5_2D",
+            "qub_name": "Q1",
+            "res_name": "R1",
+            "result_dir": "/r",
+            "database_path": "/db",
+        },
+        "context.active": {"label": "default"},
+        "soc.info": {"description": "desc", "is_mock": True, "cfg": {}},
+        "run.running_tab": {"tab_id": "t2"},
+        "view.snapshot": {"active_tab_id": "t1", "context_label": "default"},
+        "tab.snapshot": {
+            "tabs": [
+                {
+                    "tab_id": "t1",
+                    "adapter_name": "Freq",
+                    "interaction": {"is_running": False},
+                },
+                {
+                    "tab_id": "t2",
+                    "adapter_name": "Rabi",
+                    "interaction": {"is_running": True},
+                },
+            ]
+        },
+    }
+
+    def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
+        del params, timeout_seconds
+        if method not in flags:
+            raise AssertionError(f"unexpected overview RPC: {method}")
+        return flags[method]
+
+    return fake_send
+
+
+def test_overview_assembles_from_read_rpcs_with_project(monkeypatch):
+    """gui_overview packs state / project / context / soc / tabs / running_tab /
+    active_tab from existing reads; with a project applied, project folds
+    {chip, qub, res} from project.info."""
+    from zcu_tools.mcp.measure import server as mcp_server
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", _overview_fake_send(has_soc=True))
+    out = mcp_server.TOOLS["gui_overview"]["handler"]({})
+
+    assert out == {
+        "state": {
+            "has_project": True,
+            "has_context": True,
+            "has_active_context": False,
+            "has_soc": True,
+        },
+        "project": {"chip": "Q5_2D", "qub": "Q1", "res": "R1"},
+        "context": "default",
+        "soc": {"connected": True, "is_mock": True},
+        "tabs": [
+            {"tab_id": "t1", "adapter": "Freq", "is_running": False},
+            {"tab_id": "t2", "adapter": "Rabi", "is_running": True},
+        ],
+        "running_tab": "t2",
+        "active_tab": "t1",
+    }
+
+
+def test_overview_project_is_null_when_no_project(monkeypatch):
+    """project.info fast-fails no_project without a project, so the overview
+    reports project=None and never queries project.info."""
+    from zcu_tools.mcp.measure import server as mcp_server
+
+    queried: list[str] = []
+    base = _overview_fake_send(has_soc=True)
+
+    def tracking(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
+        queried.append(method)
+        if method == "state.has_project":
+            return {"value": False}
+        return base(method, params, timeout_seconds)
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", tracking)
+    out = mcp_server.TOOLS["gui_overview"]["handler"]({})
+
+    assert out["project"] is None
+    assert "project.info" not in queried
+
+
+def test_overview_skips_soc_info_when_not_connected(monkeypatch):
+    """soc.info fast-fails without a SoC, so is_mock stays None and soc.info is
+    never queried when has_soc is False."""
+    from zcu_tools.mcp.measure import server as mcp_server
+
+    queried: list[str] = []
+    base = _overview_fake_send(has_soc=False)
+
+    def tracking(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
+        queried.append(method)
+        return base(method, params, timeout_seconds)
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", tracking)
+    out = mcp_server.TOOLS["gui_overview"]["handler"]({})
+
+    assert out["soc"] == {"connected": False, "is_mock": None}
+    assert "soc.info" not in queried
+
+
+def test_connect_folds_overview_into_reply(monkeypatch):
+    """gui_connect returns {note, overview} so attaching alone gives the picture."""
+    from zcu_tools.mcp.measure import server as mcp_server
+
+    monkeypatch.setattr(mcp_server, "resolve_connect_port", lambda cfg, req: 8765)
+    monkeypatch.setattr(mcp_server._BRIDGE, "connect", lambda port, token=None: "ok")
+    monkeypatch.setattr(mcp_server, "_assemble_overview", lambda: {"sentinel": True})
+
+    out = mcp_server.TOOLS["gui_connect"]["handler"]({})
+    assert out == {"note": "ok", "overview": {"sentinel": True}}
+
+
 def test_analyze_settles_without_folding_figure_path(monkeypatch):
     from zcu_tools.mcp.measure import server as mcp_server
 

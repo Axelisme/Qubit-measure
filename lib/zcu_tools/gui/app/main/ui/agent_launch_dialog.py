@@ -210,7 +210,7 @@ class AgentLaunchDialog(QDialog):
             session_id = agent_launcher.launch_agent_terminal(
                 self._ctrl.get_project_root(),
                 resume_session_id=resume_session_id,
-                state_context=self._ctrl.build_agent_state_context(),
+                bootstrap_prompt=self._ctrl.build_agent_bootstrap_prompt(),
             )
         except Exception as exc:  # noqa: BLE001 — surface any launch failure to UI
             logger.exception("AgentLaunchDialog: failed to launch agent terminal")

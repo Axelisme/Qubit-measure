@@ -116,7 +116,12 @@ from __future__ import annotations
 #      kind / device_name). The setup-only enumerator was redundant. Method-set
 #      change = contract change. (The DeviceService domain getter
 #      get_active_device_setups stays — the device dialog still uses it.)
-WIRE_VERSION = 26
+# v27: added project.info — read the applied project identity (chip_name /
+#      qub_name / res_name + resolved result_dir / database_path) from the
+#      in-process ExpContext (fast-fails no_project when none is applied). It is
+#      the sole wire query exposing the project identity; _assemble_overview now
+#      folds {chip, qub, res} from it. New method = contract change.
+WIRE_VERSION = 27
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -253,4 +258,13 @@ WIRE_VERSION = 26
 #      diverged from the tab registry can no longer leak "ghost" tab ids that
 #      gui_tab_list / gui_tab_list_paths reject. WIRE unchanged (no RPC/param/event
 #      change; pure GUI-side projection fix).
-GUI_VERSION = 33
+# v34: (a) project.info dispatch handler (WIRE 27) — exposes the in-process
+#      ExpContext project identity (chip/qub/res + result_dir/database_path) over
+#      the wire. (b) Controller.build_agent_state_context renamed
+#      build_agent_bootstrap_prompt and rewritten: it no longer bakes a GUI-state
+#      snapshot (project/context/soc/tabs) into the launched agent's prompt — that
+#      snapshot went stale the moment the user touched the GUI — but emits a
+#      constant directive telling the agent to read live state via gui_overview
+#      first. agent_launcher's state_context kwarg renamed bootstrap_prompt to
+#      match. WIRE bumped for (a) only.
+GUI_VERSION = 34

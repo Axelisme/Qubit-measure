@@ -18,7 +18,7 @@ from zcu_tools.gui.app.main.ui.agent_launch_dialog import AgentLaunchDialog
 
 _SESSION_ID_ROLE = Qt.ItemDataRole.UserRole
 
-_STATE_CONTEXT = "[measure-gui current state]\n...\n[end state]"
+_BOOTSTRAP_PROMPT = "Read live GUI state with gui_overview before doing anything."
 
 _FAKE_SESSIONS = [
     ResumableSession(
@@ -37,7 +37,7 @@ _FAKE_SESSIONS = [
 def _make_ctrl(project_root: str = "/repo/root") -> MagicMock:
     ctrl = MagicMock()
     ctrl.get_project_root.return_value = project_root
-    ctrl.build_agent_state_context.return_value = _STATE_CONTEXT
+    ctrl.build_agent_bootstrap_prompt.return_value = _BOOTSTRAP_PROMPT
     return ctrl
 
 
@@ -132,7 +132,7 @@ def test_resume_button_launches_with_selected_session_id(
     launch.assert_called_once_with(
         "/repo/root",
         resume_session_id="sess-aaa",
-        state_context=_STATE_CONTEXT,
+        bootstrap_prompt=_BOOTSTRAP_PROMPT,
     )
     assert "sess-aaa" in dialog._status_label.text()
 
@@ -156,7 +156,7 @@ def test_resume_button_uses_explicitly_selected_session(
     launch.assert_called_once_with(
         "/repo/root",
         resume_session_id="sess-bbb",
-        state_context=_STATE_CONTEXT,
+        bootstrap_prompt=_BOOTSTRAP_PROMPT,
     )
 
 
@@ -180,7 +180,7 @@ def test_new_button_launches_without_resume_session_id(
     launch.assert_called_once_with(
         "/repo/root",
         resume_session_id=None,
-        state_context=_STATE_CONTEXT,
+        bootstrap_prompt=_BOOTSTRAP_PROMPT,
     )
     assert "new-sess" in dialog._status_label.text()
     # Launch closes the dialog (accepted).

@@ -400,7 +400,7 @@ def build_claude_argv(
     resume_session_id: str | None = None,
     new_session_id: str | None = None,
     allowed_tools: str = "mcp__measure-gui__*",
-    state_context: str | None = None,
+    bootstrap_prompt: str | None = None,
 ) -> list[str]:
     """Build argv for an *interactive* ``claude`` child (no ``-p`` print mode).
 
@@ -409,9 +409,9 @@ def build_claude_argv(
       - ``--mcp-config <path>`` loopback to the running GUI's MCP server,
       - ``--allowedTools <allowed_tools>`` to restrict tool access,
       - ``--append-system-prompt`` carrying the embedded "GUI already attached"
-        instruction, plus the live GUI-state snapshot when ``state_context`` is
-        given (appended after the embedded prompt so the agent starts already
-        knowing the project / context / SoC / open tabs — Round 2).
+        instruction, plus the bootstrap directive when ``bootstrap_prompt`` is
+        given (appended after the embedded prompt so the agent's first action is
+        to read the live GUI state, not trust a baked-in snapshot).
 
     Session continuity: ``resume_session_id`` (if given) wins and maps to
     ``--resume <id>``; otherwise ``new_session_id`` (if given) maps to
@@ -421,8 +421,8 @@ def build_claude_argv(
     Windows the Claude Desktop-bundled CLI → bare ``claude`` resolved via PATH).
     """
     system_prompt = _EMBEDDED_SYSTEM_PROMPT
-    if state_context is not None:
-        system_prompt = _EMBEDDED_SYSTEM_PROMPT + "\n\n" + state_context
+    if bootstrap_prompt is not None:
+        system_prompt = _EMBEDDED_SYSTEM_PROMPT + "\n\n" + bootstrap_prompt
     argv = [
         resolve_agent_command(),
         "--mcp-config",
@@ -621,7 +621,7 @@ def launch_agent_terminal(
     repo_root: str,
     *,
     resume_session_id: str | None = None,
-    state_context: str | None = None,
+    bootstrap_prompt: str | None = None,
 ) -> str:
     """Open the system terminal running interactive ``claude`` against the GUI.
 
@@ -631,9 +631,10 @@ def launch_agent_terminal(
 
     Returns the session id that was used (the given resume id or the new id).
 
-    ``state_context`` (a live GUI-state snapshot from the Controller) is appended
-    to the embedded system prompt so the agent starts already knowing the current
-    project / context / SoC / open tabs. ``None`` keeps only the static prompt.
+    ``bootstrap_prompt`` (a bootstrap directive from the Controller) is appended
+    to the embedded system prompt so the agent's first action is to read the live
+    GUI state over the wire instead of trusting a baked-in snapshot. ``None``
+    keeps only the static prompt.
 
     The spawn is detached (``subprocess.Popen``, not waited) and the parent's
     Claude Code orchestration env vars are stripped (see ``_STRIP_ENV_*``:
@@ -654,7 +655,7 @@ def launch_agent_terminal(
         argv = build_claude_argv(
             mcp_config_path,
             resume_session_id=session_id,
-            state_context=state_context,
+            bootstrap_prompt=bootstrap_prompt,
         )
         # Resuming an existing session: do not re-record it (it is already in
         # the store from when it was first launched).
@@ -664,7 +665,7 @@ def launch_agent_terminal(
         argv = build_claude_argv(
             mcp_config_path,
             new_session_id=session_id,
-            state_context=state_context,
+            bootstrap_prompt=bootstrap_prompt,
         )
 
     # Strip the parent's Claude Code orchestration vars (API key for subscription

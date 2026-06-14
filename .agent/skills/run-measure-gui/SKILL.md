@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 22
+skill_version: 23
 ---
 
 # run-measure-gui
@@ -75,6 +75,35 @@ the moment a real `YOKOGS200`/`SGS100A` is involved, it does.
 This is the path you use when asked to "drive measure-gui". The MCP server
 auto-launches the GUI; you call tools.
 
+### Overview and project-identity tools
+
+```
+gui_overview         # standalone "current state" summary — returns:
+                     #   {state, project:{chip,qub,res}, context, soc,
+                     #    tabs:[{tab_id,adapter,is_running}],
+                     #    running_tab, active_tab}
+                     # Auto-connects if not already connected (pure read, no side effects).
+                     # active_tab is the USER's current focus (collaboration only —
+                     # not an operation target; agent ops always take an explicit tab_id).
+                     # FIRST CALL when attaching to a running session: call gui_overview
+                     # to load current state before assuming anything — the user may be
+                     # actively operating the same GUI.
+                     # gui_connect also folds the same overview into its reply ({soc, overview}).
+
+gui_tab_set_active(tab_id)   # push a tab to the user's foreground (user↔agent collaboration).
+                             # Agent operations all take an explicit tab_id and are independent
+                             # of which tab is active.  Use gui_tab_set_active only to guide the
+                             # user's attention — e.g. ask them to drag flux lines on a specific
+                             # tab — or to read back which tab they are currently looking at via
+                             # gui_overview's active_tab field.
+
+gui_project_info     # current project identity:
+                     #   {chip, qub, res [, result_dir, database_path]}
+                     # Fast-fails with precondition_failed: no_project when no project is applied.
+```
+
+### Startup (fresh session)
+
 ```
 gui_launch                                      # spawns the GUI, connects; banner shows the
                                                 # handshake: "wire vN (mcp==gui); gui code vX, mcp code vY"
@@ -117,6 +146,8 @@ gui_tab_get_current_figure(tab_id)                # writes the CURRENT plot (run
                                                   # non-analysis 2D scans (flux_dep / power_dep): Read the saved_to path.
                                                   # Always a file (fixed 640×480), never inline base64. Omit out_path to
                                                   # write a per-tab temp file; pass out_path="<abs path>" to choose where.
+                                                  # gui_dialog_screenshot follows the same contract: always writes a file
+                                                  # and replies {saved_to, bytes} — never inline base64.
 gui_analyze(tab_id)                               # degrades like a run: a FIT settles -> {status:finished, summary:{...}}
                                                   # with the fit summary inline (same shape as gui_tab_get_analyze_result);
                                                   # an INTERACTIVE pick (flux_dep) -> {status:pending} → see below

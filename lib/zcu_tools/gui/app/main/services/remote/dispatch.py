@@ -665,6 +665,31 @@ def _h_soc_info(
         raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
 
 
+def _h_project_info(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    # Project identity (the chip / qubit / resonator names + their output roots).
+    # It lives only on the in-process ExpContext, so this is the sole wire query
+    # that exposes it — _assemble_overview folds {chip, qub, res} from here. The
+    # res_name field is measure-specific (the other GUIs' shared project.info
+    # carries only chip/qub/result_dir/database_path).
+    del params
+    if not adapter.ctrl.has_project():
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            "No project applied yet; apply a project first (gui_startup_apply).",
+            reason="no_project",
+        )
+    ctx = adapter.ctrl.get_exp_context()
+    return {
+        "chip_name": ctx.chip_name,
+        "qub_name": ctx.qub_name,
+        "res_name": ctx.res_name,
+        "result_dir": ctx.result_dir,
+        "database_path": ctx.database_path,
+    }
+
+
 def _h_resources_versions(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
@@ -1794,6 +1819,7 @@ _HANDLERS: dict[str, Handler] = {
     "state.has_active_context": _h_state_has_active_context,
     "state.has_soc": _h_state_has_soc,
     "soc.info": _h_soc_info,
+    "project.info": _h_project_info,
     "resources.versions": _h_resources_versions,
     "connect.start": _h_connect_start,
     "startup.apply": _h_startup_apply,
