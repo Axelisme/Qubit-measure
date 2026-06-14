@@ -63,7 +63,14 @@ def purge_old_logs(log_dir: Path, retain: int) -> None:
         return
     log_files = sorted(log_dir.glob("*.log"))
     for stale in log_files[:-retain]:
-        stale.unlink(missing_ok=True)
+        try:
+            stale.unlink(missing_ok=True)
+        except OSError:
+            # Best-effort purge: on Windows a stale log still held open by another
+            # running GUI / MCP-server instance cannot be deleted (PermissionError,
+            # WinError 32). Skip it — it is purged on a later run once unlocked.
+            # Must never crash logging setup (and thus the whole process) startup.
+            pass
 
 
 def setup_gui_logging(

@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+import pytest
 from zcu_tools.gui.logging_setup import (
     purge_old_logs,
     session_log_path,
@@ -135,6 +136,37 @@ def test_purge_keeps_newest_n(tmp_path: Path) -> None:
     purge_old_logs(log_dir, retain=10)
     remaining = sorted(p.name for p in log_dir.glob("*.log"))
     assert remaining == names[-10:]
+
+
+def test_purge_tolerates_unlink_oserror(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # On Windows a stale log still held open by another running GUI/MCP-server
+    # instance cannot be deleted (PermissionError / WinError 32). purge must skip
+    # it and continue, NOT crash — else logging setup (and the whole process)
+    # fails to start when several instances run concurrently.
+    log_dir = tmp_path / "logs" / "mcp" / "measure"
+    log_dir.mkdir(parents=True)
+    names = [f"2026-06-12_1500{i:02d}.log" for i in range(13)]
+    for name in names:
+        (log_dir / name).write_text("x", encoding="utf-8")
+    locked = log_dir / names[0]  # oldest stale file: pretend it is held open
+
+    real_unlink = Path.unlink
+
+    def fake_unlink(self: Path, *args: object, **kwargs: object) -> None:
+        if self == locked:
+            raise PermissionError(32, "in use by another process")
+        real_unlink(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "unlink", fake_unlink)
+
+    purge_old_logs(log_dir, retain=10)  # must not raise
+
+    remaining = sorted(p.name for p in log_dir.glob("*.log"))
+    assert names[0] in remaining  # locked file skipped, survives
+    assert names[1] not in remaining and names[2] not in remaining  # others purged
+    assert all(n in remaining for n in names[-10:])  # newest 10 kept
 
 
 def test_setup_purges_old_session_files_to_retain(tmp_path: Path) -> None:
