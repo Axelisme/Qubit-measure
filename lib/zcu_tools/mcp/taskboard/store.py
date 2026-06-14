@@ -156,15 +156,77 @@ def paths_overlap(a: str, b: str) -> bool:
 def claims_conflict(c1: Claim, c2: Claim) -> bool:
     """Return True when two claims conflict.
 
-    Conflict requires: (a) at least one path pair from each claim overlaps, AND
-    (b) at least one of the two claims has mode ``write`` (read+read is non-conflicting).
+    Conflict requires: (a) the two claims have *different* identities, (b) at
+    least one path pair from each claim overlaps, AND (c) at least one of the two
+    claims has mode ``write`` (read+read is non-conflicting).
+
+    The identity gate (a) is what lets an orchestrator and its sub-agents — all
+    sharing one ``CLAUDE_CODE_SESSION_ID`` — never block each other: same identity
+    means "the same caller", and a caller cannot conflict with itself (ADR-0022).
+    Identity is stored under the ``identity`` key; when absent (legacy / not yet
+    set) it falls back to ``owner`` so the gate degrades to per-owner coordination.
     """
+    if _identity_of(c1) == _identity_of(c2):
+        return False
     if c1["mode"] == "read" and c2["mode"] == "read":
         return False
     for p1 in c1["paths"]:
         for p2 in c2["paths"]:
             if paths_overlap(p1, p2):
                 return True
+    return False
+
+
+# Sentinel identity for a ``check`` with neither a server session id nor an owner:
+# it never equals any stored identity, so every overlapping grant is reported.
+_NO_IDENTITY_SENTINEL = "\x00<no-identity>"
+
+
+def _identity_of(claim: Claim) -> str:
+    """Return a claim's conflict identity — the ``identity`` field if present,
+    else ``owner`` (back-compat / fallback when no CC session id was available).
+    """
+    return claim.get("identity") or claim["owner"]
+
+
+def _claim_covers(claim: Claim, paths: list[str], mode: str) -> bool:
+    """Return True when an existing *granted* ``claim`` already covers (paths, mode).
+
+    Coverage means every requested path is contained in (overlaps as a subset of)
+    some path the claim holds, and the claim's mode is strong enough — a held
+    ``write`` covers a requested ``read`` or ``write``; a held ``read`` covers only
+    a requested ``read``.  Used for re-claim idempotency: a same-identity re-claim
+    whose scope is already held returns the existing claim instead of adding a new
+    one (ADR-0022).
+    """
+    if mode == "write" and claim["mode"] == "read":
+        return False
+    return all(any(_path_subset(req, held) for held in claim["paths"]) for req in paths)
+
+
+def _path_subset(child: str, parent: str) -> bool:
+    """Return True when normalised ``child`` is covered by ``parent``.
+
+    Coverage = exact match, ``parent`` is an ancestor directory of ``child``, or
+    ``parent`` is a glob that matches ``child``.  This is the directional ("is the
+    requested path inside the held path?") form of :func:`paths_overlap`, which is
+    symmetric.  A held ``lib/foo`` covers a re-claim of ``lib/foo/bar.py`` but a
+    held ``lib/foo/bar.py`` does **not** cover a re-claim of the whole ``lib/foo``.
+    """
+    if child == parent:
+        return True
+    segs_child = _segments(child)
+    segs_parent = _segments(parent)
+    if (
+        len(segs_parent) <= len(segs_child)
+        and segs_child[: len(segs_parent)] == segs_parent
+    ):
+        return True
+    # Tokens never use fnmatch — literal segment match only.
+    if child.startswith("@") or parent.startswith("@"):
+        return False
+    if _is_glob(parent):
+        return fnmatch.fnmatch(child, parent)
     return False
 
 
@@ -203,14 +265,24 @@ def compute_conflicts(
     state: State,
     paths: list[str],
     mode: str,
+    identity: str,
     exclude_id: str | None = None,
 ) -> list[Claim]:
-    """Return all currently *granted* claims that conflict with the given (paths, mode).
+    """Return all currently *granted* claims that conflict with the given claim.
 
+    ``identity`` is the conflict identity of the prospective claim; granted claims
+    sharing that identity never conflict (handled inside :func:`claims_conflict`),
+    so a caller is never blocked by itself or its own sub-agents (ADR-0022).
     ``exclude_id`` skips one claim (used when re-evaluating a pending claim's own
     blockers after a release).
     """
-    probe: Claim = {"paths": paths, "mode": mode, "status": "granted", "claim_id": ""}
+    probe: Claim = {
+        "paths": paths,
+        "mode": mode,
+        "status": "granted",
+        "claim_id": "",
+        "identity": identity,
+    }
     return [
         c
         for c in state.get("claims", [])
@@ -226,9 +298,19 @@ def add_claim(
     paths: list[str],
     task: str,
     mode: str,
+    identity: str | None = None,
     now: float | None = None,
 ) -> tuple[State, Claim]:
     """Attempt to add a new claim; grant immediately or queue as pending.
+
+    ``identity`` is the conflict identity (CC-session-derived; see ADR-0022); when
+    omitted it falls back to ``owner`` so callers that do not thread an identity
+    coordinate per-owner.  ``owner`` itself stays a plain human-readable label.
+
+    Re-claim idempotency: when the requested (paths, mode) is already fully covered
+    by an existing *granted* claim of the same identity, that claim is returned
+    unchanged (same ``claim_id``, still granted) and no new claim is added.  This
+    makes a re-claim of an already-held scope a no-op rather than a duplicate.
 
     Returns ``(new_state, claim_record)``.  The caller decides whether to persist.
     Fast-fails on invalid mode or empty paths (caller must normalise paths first).
@@ -238,15 +320,32 @@ def add_claim(
     if not paths:
         raise ValueError("paths must be non-empty")
 
+    eff_identity = identity if identity is not None else owner
+
+    existing = next(
+        (
+            c
+            for c in state.get("claims", [])
+            if c["status"] == "granted"
+            and _identity_of(c) == eff_identity
+            and _claim_covers(c, paths, mode)
+        ),
+        None,
+    )
+    if existing is not None:
+        # Idempotent re-claim: scope already held by this identity — return as-is.
+        return state, existing
+
     ts = now if now is not None else _now()
     claim_id = _new_claim_id()
-    conflicts = compute_conflicts(state, paths, mode)
+    conflicts = compute_conflicts(state, paths, mode, eff_identity)
     status = "pending" if conflicts else "granted"
     blockers = [c["claim_id"] for c in conflicts]
 
     claim: Claim = {
         "claim_id": claim_id,
         "owner": owner,
+        "identity": eff_identity,
         "paths": paths,
         "mode": mode,
         "task": task,
@@ -273,13 +372,16 @@ def _try_promote(state: State) -> State:
         for i, c in enumerate(claims):
             if c["status"] != "pending":
                 continue
-            # Re-check conflicts against the current set of granted claims.
+            # Re-check conflicts against the current set of granted claims using
+            # this pending claim's own identity, so promotion stays consistent with
+            # the identity-aware grant decision made at claim time (ADR-0022).
             granted_set = [g for g in claims if g["status"] == "granted"]
             probe: Claim = {
                 "paths": c["paths"],
                 "mode": c["mode"],
                 "status": "granted",
                 "claim_id": "",
+                "identity": _identity_of(c),
             }
             still_blocked = [g for g in granted_set if claims_conflict(probe, g)]
             if not still_blocked:
@@ -601,8 +703,13 @@ class TaskboardStore:
         paths: list[str],
         task: str,
         mode: str = "write",
+        identity: str | None = None,
     ) -> dict[str, Any]:
         """Attempt to claim (paths, mode) for owner.
+
+        ``identity`` is the conflict identity supplied by the server (derived from
+        ``CLAUDE_CODE_SESSION_ID``; ADR-0022); it is not a wire parameter.  When
+        omitted it falls back to ``owner``.
 
         Returns ``{status, claim_id, conflicts}``.  Paths are normalised before
         storing.  Mode must be ``"read"`` or ``"write"``.
@@ -611,12 +718,15 @@ class TaskboardStore:
         if not paths:
             raise ValueError("paths must be non-empty")
         norm_paths = [normalize_path(p) for p in paths]
+        eff_identity = identity if identity is not None else owner
 
         def _mutate(state: State) -> tuple[State, dict[str, Any]]:
-            new_state, c = add_claim(state, owner, norm_paths, task, mode)
+            new_state, c = add_claim(
+                state, owner, norm_paths, task, mode, identity=eff_identity
+            )
             conflicts = [
                 {"owner": g["owner"], "paths": g["paths"], "mode": g["mode"]}
-                for g in compute_conflicts(state, norm_paths, mode)
+                for g in compute_conflicts(state, norm_paths, mode, eff_identity)
             ]
             return new_state, {
                 "status": c["status"],
@@ -648,8 +758,19 @@ class TaskboardStore:
 
         return self._with_lock(_mutate)
 
-    def check(self, paths: list[str], mode: str = "write") -> dict[str, Any]:
+    def check(
+        self,
+        paths: list[str],
+        mode: str = "write",
+        identity: str | None = None,
+    ) -> dict[str, Any]:
         """Dry-run conflict check — zero side effects, shared lock.
+
+        ``identity`` is the server-derived conflict identity (ADR-0022); granted
+        claims of the same identity are not reported as conflicts, so a check
+        mirrors what a subsequent ``claim`` from the same caller would see.  When
+        omitted it falls back to ``owner``-less behaviour by using a sentinel that
+        matches no existing claim, surfacing every overlapping grant.
 
         Returns ``{conflicts: [{owner, paths, mode}]}``.
         """
@@ -657,9 +778,13 @@ class TaskboardStore:
         if not paths:
             raise ValueError("paths must be non-empty")
         norm_paths = [normalize_path(p) for p in paths]
+        # No owner is passed to check, so when the server cannot supply an identity
+        # we use a sentinel that never equals a stored identity — check then reports
+        # all overlaps, which is the conservative answer for a dry run.
+        eff_identity = identity if identity is not None else _NO_IDENTITY_SENTINEL
 
         def _read(state: State) -> dict[str, Any]:
-            conflicts = compute_conflicts(state, norm_paths, mode)
+            conflicts = compute_conflicts(state, norm_paths, mode, eff_identity)
             return {
                 "conflicts": [
                     {"owner": c["owner"], "paths": c["paths"], "mode": c["mode"]}

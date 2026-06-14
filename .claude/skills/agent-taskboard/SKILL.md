@@ -1,7 +1,7 @@
 ---
 name: agent-taskboard
 description: Multi-agent path-coordination protocol using the taskboard MCP server. Use when starting work that edits files or holds a singleton resource shared with other agents.
-skill_version: 1
+skill_version: 2
 ---
 
 # agent-taskboard
@@ -14,7 +14,20 @@ Spec: ADR-0022.  JSON store: `task_plans/taskboard.json` (gitignored).  Human vi
 
 ## When to claim
 
-Claim before any `Edit` or `Write` operation whose scope could overlap with another active agent.  Pure reads, queries, and isolated one-file fixes that have no plausible contention do not require a claim.
+Claim before any `Edit` or `Write` operation whose scope could overlap with **another Claude Code session**.  Pure reads, queries, and isolated one-file fixes that have no plausible contention do not require a claim.
+
+---
+
+## Session identity & same-session claims
+
+The conflict identity is **the Claude Code session**, not the `owner` string you pass.  The server reads it from `CLAUDE_CODE_SESSION_ID`, which is the *same* value for a top-level session and every sub-agent it spawns, and *different* across top-level sessions.
+
+Consequences:
+
+- **An orchestrator and the sub-agents it launches share one session, so their claims never block each other.**  You do **not** need to tell a sub-agent to skip claiming or to claim under the orchestrator — let each agent claim normally; same-session overlap is auto-granted.
+- **Re-claiming a scope you already hold is ignored** — it returns the same `claim_id`, still granted, and adds no duplicate.  A held `write` covers a re-claimed `read`/`write` of the same or a narrower path; a held `read` covers a re-claimed `read`.
+- **Only a *different* session contends.**  Cross-session overlapping writes still queue as `pending`, which is exactly what coordination is for.
+- `owner` is just a human-readable label on the board; pick something descriptive (e.g. `'impl-162a'`).  It has no effect on conflict resolution unless `CLAUDE_CODE_SESSION_ID` is unset, in which case the server falls back to `owner` as the identity.
 
 ---
 

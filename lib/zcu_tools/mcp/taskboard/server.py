@@ -72,14 +72,43 @@ _CONFIG = McpServerConfig(
 )
 
 
+def _session_identity() -> str | None:
+    """The conflict identity for claims/checks from this server process.
+
+    Claude Code injects ``CLAUDE_CODE_SESSION_ID`` into every stdio MCP subprocess;
+    it is the *same* value for a top-level session and all its sub-agents, and
+    differs across top-level sessions.  Reading it from the process env (MCP tool
+    calls carry no per-request session context) is what lets an orchestrator and
+    its sub-agents share one coordination identity (ADR-0022).  Returns ``None``
+    when unset, so the store falls back to the per-call ``owner`` label.
+    """
+    return os.environ.get("CLAUDE_CODE_SESSION_ID")
+
+
 def build_dispatch(
     store: TaskboardStore,
 ) -> dict[str, Callable[[dict[str, Any]], Any]]:
-    """Map each wire method to a ``TaskboardStore`` call. Keys must match METHOD_SPECS."""
+    """Map each wire method to a ``TaskboardStore`` call. Keys must match METHOD_SPECS.
+
+    ``claim`` and ``check`` are augmented with a server-derived ``identity``: the CC
+    session id when present, else (for claim only — check carries no owner) the
+    caller's ``owner``.  Identity is never a wire parameter; callers do not pass it.
+    """
+    session_id = _session_identity()
+
+    def _claim(p: dict[str, Any]) -> Any:
+        identity = session_id if session_id is not None else p["owner"]
+        return store.claim(**p, identity=identity)
+
+    def _check(p: dict[str, Any]) -> Any:
+        # check has no owner argument; identity is the session id when available,
+        # else None (store reports all overlaps for an anonymous dry run).
+        return store.check(**p, identity=session_id)
+
     return {
-        "claim": lambda p: store.claim(**p),
+        "claim": _claim,
         "release": lambda p: store.release(**p),
-        "check": lambda p: store.check(**p),
+        "check": _check,
         "list": lambda p: store.list_claims(**p),
         "wait": lambda p: store.wait(**p),
         "touch": lambda p: store.touch(**p),

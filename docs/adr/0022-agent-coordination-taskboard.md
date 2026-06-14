@@ -10,6 +10,10 @@
 
 - **path 衝突偵測**：claim 一組 path（檔案 / 目錄前綴 / glob），正規化 repo-relative 後以「同檔 / 祖先目錄 / glob 交集」判重疊。
 - **read/write 鎖**：重疊 path 上 read+read 不衝突，涉及 write 才衝突。
+- **session 身分（衝突鍵）**：衝突鍵不是呼叫端傳的 `owner`，而是 server 程序啟動時從 `CLAUDE_CODE_SESSION_ID` 環境變數讀到的 identity（Claude Code 對一個 top-level session 及其所有 sub-agent 注入同一值、跨 top-level session 不同；MCP 呼叫不帶 per-request session context，故只能取 server 程序 env）。`owner` 降為純人類標籤（只進 claim 紀錄與 markdown 視圖）。規則：兩 claim 只有在 **path 重疊 + 涉及 write + identity 不同** 時才衝突——**同 identity 的重疊 claim 永不互卡**（orchestrator 與它開的 sub-agent 同 session，彼此 claim 不阻塞）。無 `CLAUDE_CODE_SESSION_ID` 時 fallback 回 `owner` 當衝突鍵（退化為 per-owner 協調）。
+- **re-claim idempotent**：當一筆 claim 的 (paths, mode) 已被「同 identity 的某個 granted claim」完整覆蓋（held write 涵蓋 read/write 請求、held read 只涵蓋 read 請求；path 以子集判定）時，直接回傳該既有 claim（同 `claim_id`、仍 granted）、不新增；同 identity 但 scope 是新的（未覆蓋）則照常 grant 一筆新 claim。
+
+> **Rationale**：taskboard 協調的是**跨 session** 的未提交污染與資源爭用；一個 session 內部（orchestrator 自己 sequence 它派的 sub-agent）的執行順序由 orchestrator 自負，不需要也不該被 taskboard 自我阻塞。把衝突鍵綁到 session identity 後，「要特別告知 sub-agent 別 claim」的死鎖被結構性消除，re-claim 也成為冪等的 no-op。
 - **資源 token**：path 也接受 `@hw/zcu216`、`@gui/measure`、`@port/8767` 等邏輯 token，用同一套鎖協調非檔案的 singleton 資源。
 - **pending + wait**：衝突時 claim 轉 pending（記 blockers + 佇列位置）；release 自動晉升下一個。等待以「pending + agent `ScheduleWakeup` 回來 poll」為主（回合制 agent 不凍結回合），短逾時阻塞 `wait` 為輔。
 - **TTL 自動回收**：每筆 claim 有 `touched` 時戳 + TTL；逾時標 stale 並回收（`touch` 心跳延長、`force_release` 手動）。

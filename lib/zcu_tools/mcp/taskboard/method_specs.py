@@ -29,12 +29,22 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "If status is 'pending' the claim is queued behind conflicting grants; "
         "use taskboard_wait(claim_id) or schedule a ScheduleWakeup to poll "
         "taskboard_list until your claim appears in 'active'.  "
+        "Only claims from a DIFFERENT Claude Code session contend: an orchestrator "
+        "and the sub-agents it spawns share one session, so their claims never "
+        "block each other, and re-claiming an already-held scope returns the same "
+        "claim_id (no duplicate).  "
         "Always release (taskboard_release) AFTER your changes are committed.",
         params=(
             P(
                 "owner",
                 J.STRING,
-                description="unique session/agent label, e.g. 'impl-162a'",
+                description=(
+                    "human-readable label shown on the board, e.g. 'impl-162a'.  "
+                    "NOT the conflict identity — the server derives that from the "
+                    "Claude Code session, so claims from one session (an "
+                    "orchestrator + its sub-agents) never block each other and a "
+                    "re-claim of an already-held scope is ignored."
+                ),
             ),
             P("paths", J.JSON, description=_PATHS_DOC),
             P(

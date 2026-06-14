@@ -38,8 +38,15 @@ def test_build_tools_exposes_seven_tools(tmp_path):
         assert spec["inputSchema"]["type"] == "object"
 
 
-def test_claim_tool_end_to_end(tmp_path):
-    """Full round-trip via MCP tool handlers: claim → check → list → release."""
+def test_claim_tool_end_to_end(tmp_path, monkeypatch):
+    """Full round-trip via MCP tool handlers: claim → check → list → release.
+
+    Identity is derived from CLAUDE_CODE_SESSION_ID, which the test runner inherits
+    from Claude Code; delete it so this test exercises the deterministic
+    owner-fallback path (check has no owner → reports the alien grant as a conflict)
+    regardless of where it runs.
+    """
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
     store = TaskboardStore(
         json_path=tmp_path / "taskboard.json",
         md_path=tmp_path / "taskboard.md",
@@ -98,3 +105,78 @@ def test_force_release_tool(tmp_path):
     )
     fr = tools["taskboard_force_release"]["handler"]({"claim_id": r["claim_id"]})
     assert fr["released_id"] == r["claim_id"]
+
+
+# ---------------------------------------------------------------------------
+# Env-derived identity (CLAUDE_CODE_SESSION_ID) — server glue
+# ---------------------------------------------------------------------------
+
+
+def _build_tools_for_session(json_path, session_id, monkeypatch):
+    """Build a fresh tool table whose dispatch snapshots ``session_id`` from env,
+    pointing at the shared ``json_path`` (one server process == one session)."""
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", session_id)
+    store = TaskboardStore(
+        json_path=json_path,
+        md_path=json_path.parent / "taskboard.md",
+    )
+    return server.build_tools(store)
+
+
+def test_same_session_overlapping_claims_both_granted(tmp_path, monkeypatch):
+    """Two different owners under the SAME CC session never block each other —
+    identity is derived from the env, overriding the per-call owner label."""
+    json_path = tmp_path / "taskboard.json"
+    tools = _build_tools_for_session(json_path, "session-A", monkeypatch)
+
+    r1 = tools["taskboard_claim"]["handler"](
+        {"owner": "orchestrator", "paths": ["lib/foo"], "task": "A"}
+    )
+    r2 = tools["taskboard_claim"]["handler"](
+        {"owner": "sub-agent", "paths": ["lib/bar"], "task": "B"}
+    )
+    assert r1["status"] == "granted"
+    assert r2["status"] == "granted"
+
+
+def test_cross_session_overlapping_claims_pending(tmp_path, monkeypatch):
+    """A different CC session (a separate server process) still contends on
+    overlapping write paths — second claim is queued."""
+    json_path = tmp_path / "taskboard.json"
+
+    tools_a = _build_tools_for_session(json_path, "session-A", monkeypatch)
+    r1 = tools_a["taskboard_claim"]["handler"](
+        {"owner": "alice", "paths": ["lib/foo"], "task": "A"}
+    )
+    assert r1["status"] == "granted"
+
+    tools_b = _build_tools_for_session(json_path, "session-B", monkeypatch)
+    r2 = tools_b["taskboard_claim"]["handler"](
+        {"owner": "bob", "paths": ["lib/foo"], "task": "B"}
+    )
+    assert r2["status"] == "pending"
+
+
+def test_no_session_id_falls_back_to_owner(tmp_path, monkeypatch):
+    """With CLAUDE_CODE_SESSION_ID unset, identity falls back to owner: same owner
+    overlap auto-grants (idempotent), different owner conflicts."""
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    store = TaskboardStore(
+        json_path=tmp_path / "taskboard.json",
+        md_path=tmp_path / "taskboard.md",
+    )
+    tools = server.build_tools(store)
+
+    r1 = tools["taskboard_claim"]["handler"](
+        {"owner": "alice", "paths": ["lib/foo"], "task": "A"}
+    )
+    r2 = tools["taskboard_claim"]["handler"](
+        {"owner": "alice", "paths": ["lib/foo"], "task": "A2"}
+    )
+    assert r1["status"] == "granted"
+    assert r2["claim_id"] == r1["claim_id"]  # same owner → idempotent re-claim
+
+    r3 = tools["taskboard_claim"]["handler"](
+        {"owner": "bob", "paths": ["lib/foo"], "task": "B"}
+    )
+    assert r3["status"] == "pending"  # different owner → conflict

@@ -106,44 +106,76 @@ def test_resource_token_no_overlap():
 # ---------------------------------------------------------------------------
 
 
-def _make_claim(paths, mode):
-    return {"paths": paths, "mode": mode, "status": "granted", "claim_id": "x"}
+def _make_claim(paths, mode, identity="x"):
+    """Build a granted claim record.
+
+    ``identity`` defaults to ``"x"`` and differs per call site only when a test
+    wants same- vs different-identity behaviour.  Two claims with the SAME identity
+    never conflict (the orchestrator/sub-agent invariant), so the conflict matrix
+    below gives each side a distinct identity to test the path/mode rules.
+    """
+    return {
+        "paths": paths,
+        "mode": mode,
+        "status": "granted",
+        "claim_id": "x",
+        "identity": identity,
+        "owner": identity,
+    }
 
 
 def test_read_read_no_conflict():
-    c1 = _make_claim(["lib/foo"], "read")
-    c2 = _make_claim(["lib/foo"], "read")
+    c1 = _make_claim(["lib/foo"], "read", identity="a")
+    c2 = _make_claim(["lib/foo"], "read", identity="b")
     assert not claims_conflict(c1, c2)
 
 
 def test_write_write_conflict():
-    c1 = _make_claim(["lib/foo"], "write")
-    c2 = _make_claim(["lib/foo"], "write")
+    c1 = _make_claim(["lib/foo"], "write", identity="a")
+    c2 = _make_claim(["lib/foo"], "write", identity="b")
     assert claims_conflict(c1, c2)
 
 
 def test_read_write_conflict():
-    c1 = _make_claim(["lib/foo"], "read")
-    c2 = _make_claim(["lib/foo"], "write")
+    c1 = _make_claim(["lib/foo"], "read", identity="a")
+    c2 = _make_claim(["lib/foo"], "write", identity="b")
     assert claims_conflict(c1, c2)
 
 
 def test_write_read_conflict():
-    c1 = _make_claim(["lib/foo"], "write")
-    c2 = _make_claim(["lib/foo"], "read")
+    c1 = _make_claim(["lib/foo"], "write", identity="a")
+    c2 = _make_claim(["lib/foo"], "read", identity="b")
     assert claims_conflict(c1, c2)
 
 
 def test_non_overlapping_paths_no_conflict():
-    c1 = _make_claim(["lib/a"], "write")
-    c2 = _make_claim(["lib/b"], "write")
+    c1 = _make_claim(["lib/a"], "write", identity="a")
+    c2 = _make_claim(["lib/b"], "write", identity="b")
     assert not claims_conflict(c1, c2)
 
 
 def test_token_write_write_conflict():
-    c1 = _make_claim(["@gui/measure"], "write")
-    c2 = _make_claim(["@gui/measure"], "write")
+    c1 = _make_claim(["@gui/measure"], "write", identity="a")
+    c2 = _make_claim(["@gui/measure"], "write", identity="b")
     assert claims_conflict(c1, c2)
+
+
+def test_same_identity_overlapping_write_no_conflict():
+    """Two write claims on the same path from the SAME identity do not conflict —
+    a caller (orchestrator + its sub-agents) cannot block itself."""
+    c1 = _make_claim(["lib/foo"], "write", identity="sess-1")
+    c2 = _make_claim(["lib/foo"], "write", identity="sess-1")
+    assert not claims_conflict(c1, c2)
+
+
+def test_identity_falls_back_to_owner_when_absent():
+    """A claim without an explicit identity uses owner as the conflict key."""
+    c1 = {"paths": ["lib/foo"], "mode": "write", "status": "granted", "owner": "a"}
+    c2 = {"paths": ["lib/foo"], "mode": "write", "status": "granted", "owner": "a"}
+    # Same owner → same fallback identity → no conflict.
+    assert not claims_conflict(c1, c2)
+    c3 = {"paths": ["lib/foo"], "mode": "write", "status": "granted", "owner": "b"}
+    assert claims_conflict(c1, c3)
 
 
 # ---------------------------------------------------------------------------
@@ -182,6 +214,104 @@ def test_add_claim_invalid_mode_raises():
 def test_add_claim_empty_paths_raises():
     with pytest.raises(ValueError, match="paths must be non-empty"):
         add_claim(empty_state(), "alice", [], "t", "write")
+
+
+# ---------------------------------------------------------------------------
+# add_claim — identity-aware conflict + re-claim idempotency
+# ---------------------------------------------------------------------------
+
+
+def test_add_claim_same_identity_overlap_both_granted():
+    """Same identity, overlapping write paths but distinct scopes → both granted
+    (the orchestrator + sub-agent never block each other)."""
+    state = empty_state()
+    state, c1 = add_claim(state, "orch", ["lib/foo"], "A", "write", identity="sess-1")
+    state, c2 = add_claim(
+        state, "sub", ["lib/foo/bar.py"], "B", "write", identity="sess-1"
+    )
+    # bar.py is covered by lib/foo held by c1, so c2 is an idempotent re-claim of
+    # an already-held scope and returns c1 itself.
+    assert c1["status"] == "granted"
+    assert c2["status"] == "granted"
+    assert c2["claim_id"] == c1["claim_id"]
+
+
+def test_add_claim_same_identity_new_scope_grants_new_claim():
+    """Same identity, NON-overlapping new paths → a fresh granted claim is added."""
+    state = empty_state()
+    state, c1 = add_claim(state, "orch", ["lib/foo"], "A", "write", identity="sess-1")
+    state, c2 = add_claim(state, "sub", ["lib/bar"], "B", "write", identity="sess-1")
+    assert c1["status"] == "granted"
+    assert c2["status"] == "granted"
+    assert c2["claim_id"] != c1["claim_id"]
+    assert len([c for c in state["claims"] if c["status"] == "granted"]) == 2
+
+
+def test_add_claim_different_identity_overlap_pending():
+    """Different identities, overlapping write → second is queued (cross-session
+    coordination still holds)."""
+    state = empty_state()
+    state, c1 = add_claim(state, "alice", ["lib/foo"], "A", "write", identity="sess-1")
+    state, c2 = add_claim(state, "bob", ["lib/foo"], "B", "write", identity="sess-2")
+    assert c1["status"] == "granted"
+    assert c2["status"] == "pending"
+    assert c1["claim_id"] in c2["blockers"]
+
+
+def test_add_claim_reclaim_same_paths_idempotent():
+    """Re-claim of the exact same scope by the same identity → same claim_id, no
+    new claim added."""
+    state = empty_state()
+    state, c1 = add_claim(state, "orch", ["lib/foo"], "A", "write", identity="sess-1")
+    n_before = len(state["claims"])
+    state, c2 = add_claim(
+        state, "orch", ["lib/foo"], "A again", "write", identity="sess-1"
+    )
+    assert c2["claim_id"] == c1["claim_id"]
+    assert c2["status"] == "granted"
+    assert len(state["claims"]) == n_before
+
+
+def test_add_claim_reclaim_subset_paths_idempotent():
+    """Re-claim of a subset (file under a held directory) by the same identity →
+    returns the covering claim, adds nothing."""
+    state = empty_state()
+    state, c1 = add_claim(state, "orch", ["lib/foo"], "dir", "write", identity="sess-1")
+    n_before = len(state["claims"])
+    state, c2 = add_claim(
+        state, "orch", ["lib/foo/sub/x.py"], "file", "write", identity="sess-1"
+    )
+    assert c2["claim_id"] == c1["claim_id"]
+    assert len(state["claims"]) == n_before
+
+
+def test_add_claim_reclaim_read_under_write_idempotent():
+    """A held write covers a re-claimed read of the same scope (same identity)."""
+    state = empty_state()
+    state, c1 = add_claim(state, "orch", ["lib/foo"], "W", "write", identity="sess-1")
+    state, c2 = add_claim(state, "orch", ["lib/foo"], "R", "read", identity="sess-1")
+    assert c2["claim_id"] == c1["claim_id"]
+
+
+def test_add_claim_write_not_covered_by_held_read():
+    """A held read does NOT cover a re-claimed write — a new claim is created
+    (which, same identity, is still granted)."""
+    state = empty_state()
+    state, c1 = add_claim(state, "orch", ["lib/foo"], "R", "read", identity="sess-1")
+    state, c2 = add_claim(state, "orch", ["lib/foo"], "W", "write", identity="sess-1")
+    assert c2["claim_id"] != c1["claim_id"]
+    assert c2["status"] == "granted"
+
+
+def test_add_claim_fallback_identity_is_owner():
+    """Without an explicit identity, owner is the conflict key: same owner overlap
+    auto-grants (idempotent re-claim), different owner conflicts."""
+    state = empty_state()
+    state, c1 = add_claim(state, "alice", ["lib/foo"], "A", "write")
+    state, c2 = add_claim(state, "alice", ["lib/foo"], "A2", "write")
+    assert c2["claim_id"] == c1["claim_id"]  # same owner → idempotent
+    state, c3 = add_claim(state, "bob", ["lib/foo"], "B", "write")
+    assert c3["status"] == "pending"  # different owner → conflict
 
 
 # ---------------------------------------------------------------------------
@@ -417,6 +547,58 @@ def test_store_force_release(tmp_path):
     r = store.claim("alice", ["lib/foo"], "A")
     fr = store.force_release(r["claim_id"])
     assert fr["released_id"] == r["claim_id"]
+
+
+def test_store_same_identity_overlap_both_granted(tmp_path):
+    """Two overlapping write claims with the same identity are both granted via the
+    store (identity threaded explicitly, not from env)."""
+    store = TaskboardStore(
+        json_path=tmp_path / "taskboard.json",
+        md_path=tmp_path / "taskboard.md",
+    )
+    r1 = store.claim("orch", ["lib/foo"], "A", identity="sess-1")
+    r2 = store.claim("sub", ["lib/bar"], "B", identity="sess-1")
+    assert r1["status"] == "granted"
+    assert r2["status"] == "granted"
+
+
+def test_store_different_identity_overlap_pending(tmp_path):
+    store = TaskboardStore(
+        json_path=tmp_path / "taskboard.json",
+        md_path=tmp_path / "taskboard.md",
+    )
+    r1 = store.claim("alice", ["lib/foo"], "A", identity="sess-1")
+    r2 = store.claim("bob", ["lib/foo"], "B", identity="sess-2")
+    assert r1["status"] == "granted"
+    assert r2["status"] == "pending"
+
+
+def test_store_reclaim_idempotent(tmp_path):
+    """Re-claiming a held scope with the same identity returns the same claim_id."""
+    store = TaskboardStore(
+        json_path=tmp_path / "taskboard.json",
+        md_path=tmp_path / "taskboard.md",
+    )
+    r1 = store.claim("orch", ["lib/foo"], "A", identity="sess-1")
+    r2 = store.claim("orch", ["lib/foo/x.py"], "A2", identity="sess-1")
+    assert r1["status"] == "granted"
+    assert r2["status"] == "granted"
+    assert r2["claim_id"] == r1["claim_id"]
+    lst = store.list_claims()
+    assert len(lst["active"]) == 1
+
+
+def test_store_check_skips_same_identity(tmp_path):
+    """check with a matching identity does not report the caller's own grant."""
+    store = TaskboardStore(
+        json_path=tmp_path / "taskboard.json",
+        md_path=tmp_path / "taskboard.md",
+    )
+    store.claim("orch", ["lib/foo"], "A", identity="sess-1")
+    same = store.check(["lib/foo"], identity="sess-1")
+    assert same["conflicts"] == []
+    other = store.check(["lib/foo"], identity="sess-2")
+    assert len(other["conflicts"]) == 1
 
 
 def test_store_check_read_read_no_conflict(tmp_path):
