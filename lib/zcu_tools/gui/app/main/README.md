@@ -48,7 +48,7 @@ gui/
 │   ├── staged_analyze.py — _StagedAnalyzeService (analyze/post-analyze 共用基底：handle-only off-main worker + 主線程 record result/figure + 失敗路徑)
 │   ├── analyze.py        — AnalyzeService (主分析層：FIT worker + INTERACTIVE finish；算 writeback items)
 │   ├── post_analyze.py   — PostAnalyzeService (第二分析層，鏡像 AnalyzeService：FIT-only、在 primary analyze 結果之上重算、gate on primary 已存在；State 平行 post_* 欄位)
-│   ├── agent_launcher.py — Qt-free 外部終端 agent launch 服務：`build_loopback_mcp_config`（暫存 mcp.json，repo_root cwd + uv run measure/server.py loopback）、`_EMBEDDED_SYSTEM_PROMPT`（告知 agent「gui_* 工具已自動 attach、勿自呼 connect、需要狀態自呼 gui_state_check」）、`build_claude_argv`（互動模式不帶 -p、`--mcp-config` / `--allowedTools "mcp__measure-gui__*"` / `--append-system-prompt` / `--resume <id>` 或 `--session-id <uuid>`）、`new_session_id`、`read/write_last_session_id`（存 `~/.cache/zcu-tools/agent_last_session`）、`launch_agent_terminal(repo_root, *, resume, state_context)`（跨平台 spawn：Linux gnome-terminal/konsole/xterm/x-terminal-emulator 或 `ZCU_AGENT_TERMINAL` 覆寫、macOS `open -a Terminal`、Windows `wt`/`start`；寫暫存啟動 script 避 quoting；移除 ANTHROPIC_API_KEY；`AGENT_CMD` 預設 `claude`、env `ZCU_AGENT_CMD` 可換為 codex）
+│   ├── agent_launcher.py — Qt-free 外部終端 agent launch 服務：`build_loopback_mcp_config`（暫存 mcp.json，repo_root cwd + uv run measure/server.py loopback）、`_EMBEDDED_SYSTEM_PROMPT`（告知 agent「gui_* 工具已自動 attach、勿自呼 connect、需要狀態自呼 gui_state_check」）、`build_claude_argv`（互動模式不帶 -p、`--mcp-config` / `--allowedTools "mcp__measure-gui__*"` / `--append-system-prompt` / `--resume <id>` 或 `--session-id <uuid>`）、`new_session_id`、`record_launched_session`/`list_resumable_sessions`/`claude_project_dir`（追蹤我們 launch 過的 session 於 `~/.cache/zcu-tools/agent_sessions.json`，列表時從 claude `~/.claude/projects/<slug>/*.jsonl` 補 last-active + 首則訊息 label）、`launch_agent_terminal(repo_root, *, resume_session_id=None, state_context=None)`（跨平台 spawn：Linux gnome-terminal/konsole/xterm/x-terminal-emulator 或 `ZCU_AGENT_TERMINAL` 覆寫、macOS `open -a Terminal`、Windows `wt`/`start`；寫暫存啟動 script 避 quoting；移除 ANTHROPIC_API_KEY；`AGENT_CMD` 預設 `claude`、env `ZCU_AGENT_CMD` 可換為 codex）
 │   ├── tab.py            — TabService (分頁狀態與 tab-local query/update)
 │   ├── tab_view.py       — TabViewService / TabViewSnapshot (pure tab render read model)
 │   ├── save.py           — SaveService (資料/圖片儲存 pipeline)
@@ -63,7 +63,7 @@ gui/
     ├── cfg_form.py         — CfgFormWidget：LiveModel 反應式容器
     ├── fields/             — 渲染邏輯：registry.py / common.py / containers.py
     ├── inspect_dialog.py   — InspectDialog(InspectDialogBase 子類)：只補 ml create/modify（_MlCreateDialog/_MlModifyDialog 拖 CfgEditor）；md tab + ml view/rename/del 在 base（session）
-    ├── agent_launch_dialog.py — AgentLaunchDialog(QDialog)：極簡兩按鈕（New session / Resume last），呼 Controller 的 `launch_agent_session(resume=False/True)`；Controller 組 `build_agent_state_context()` 快照後委 `agent_launcher.launch_agent_terminal()`。
+    ├── agent_launch_dialog.py — AgentLaunchDialog(QDialog)：可選 resumable session 清單（`list_resumable_sessions`：我們 launch 過的 session + claude jsonl 補 label/last-active、最近在上）+ Resume selected / New session / Refresh；直接呼 `agent_launcher.launch_agent_terminal(resume_session_id=…|None, state_context=ctrl.build_agent_state_context())`。
     ├── main_window.py      — MainWindow(QMainWindow) 實作 ViewProtocol；toolbar 有 Agent… 按鈕（開 AgentLaunchDialog）
     └── analyze_form.py     — AnalyzeFormWidget：扁平 analysis 參數表單
 （共用件已下放 session：setup_dialog/device_dialog/predictor_dialog/inspect_base 在 `gui/session/ui/`（吃 `SessionControllerPort`）、ProgressService/IOManager 在 `gui/session/services/`、QtProgressTransport 在 `gui/session/adapters/`、TrimDoubleSpinBox 在 `gui/widgets/spinbox.py`。measure 保留 app-local OperationGate/BackgroundService（policy/Qt facet）+ 自己的 cfg-editor/role-catalog/inspect ml-edit）
@@ -117,14 +117,14 @@ measure / fluxdep / dispersive 三個 GUI app 共用 transport + wire 機制，d
 
 #### 外部終端 Agent Launch 架構（ADR-0024）
 
-GUI 上的「Agent」按鈕觸發 `AgentLaunchDialog`（New session / Resume last 兩選）→ Controller 呼 `build_agent_state_context()` 組裝當前 GUI 快照（project / context / SoC / open tabs）→ 委 `services/agent_launcher.py` 的 `launch_agent_terminal()` spawn 系統終端（Linux：gnome-terminal/konsole/xterm，macOS：`open -a Terminal`，Windows：wt/start；`ZCU_AGENT_TERMINAL` 可覆寫；`ZCU_AGENT_CMD` 可換 agent）。
+GUI 上的「Agent」按鈕觸發 `AgentLaunchDialog`（可選 resumable session 清單 + Resume selected / New session）→ `build_agent_state_context()` 組裝當前 GUI 快照（project / context / SoC / open tabs）→ 委 `services/agent_launcher.py` 的 `launch_agent_terminal()` spawn 系統終端（Linux：gnome-terminal/konsole/xterm，macOS：`open -a Terminal`，Windows：wt/start；`ZCU_AGENT_TERMINAL` 可覆寫；`ZCU_AGENT_CMD` 可換 agent）。
 
 終端內跑**真互動式 `claude`**（不是 headless subprocess）：
 - 經 `--mcp-config`（暫存 loopback mcp.json）掛上 GUI control socket；首次 `gui_*` 呼叫即由 lazy auto-connect 自動 attach。
 - `--allowedTools "mcp__measure-gui__*"` 限制工具範圍。
 - 狀態快照以 `--append-system-prompt` 烤進 system prompt——agent 啟動即知 GUI 狀態，免呼 `gui_state_check`。
-- **New**：生成新 `session_id`（`--session-id <uuid>`）並寫入 `~/.cache/zcu-tools/agent_last_session`。
-- **Resume**：讀 last session id 帶 `--resume <id>` 接回上一個對話。
+- **New**：生成新 `session_id`（`--session-id <uuid>`）並 `record_launched_session` 進 `~/.cache/zcu-tools/agent_sessions.json`。
+- **Resume**：從清單（`list_resumable_sessions`：我們 launch 過的 session、依 claude jsonl 補 last-active + 首則訊息 label、最近在上）選一個，帶 `--resume <id>` 接回。
 - **中斷**：終端原生 Ctrl-C / Esc（無 GUI 插話）。
 - 關係：cooperative-interrupt 的 wait early-return wire（`OperationHandles.await_outcome` 第二喚醒源 + `FeedbackInbox`）仍在，但**只由 `mcp/measure/server.py` 的 feedback passthrough 驅動**；GUI 端無 feedback bar / nudge 入口（見 ADR-0023）。
 

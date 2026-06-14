@@ -19,10 +19,10 @@ measure-gui 提供一個「Agent」按鈕讓使用者委派 Claude agent 經 `gu
 ### GUI 入口
 
 `AgentLaunchDialog`（`ui/agent_launch_dialog.py`）呈現兩個按鈕：
+- **可選 resumable session 清單**：`list_resumable_sessions` 列出我們 launch 過的 session（依 claude `~/.claude/projects/<slug>/*.jsonl` 補 last-active + 首則訊息 label、最近在上），選一個 → **Resume selected** 帶 `--resume <id>`。
 - **New session**：建立新 uuid session id，spawn 終端。
-- **Resume last**：讀取 `~/.cache/zcu-tools/agent_last_session` 的上次 session id，帶 `--resume` spawn 終端。
 
-`Controller.launch_agent_session(resume)` 先組 `build_agent_state_context()`（當前 GUI 狀態快照），再委 `services/agent_launcher.py`。
+dialog 直接委 `services/agent_launcher.py` 的 `launch_agent_terminal()`；launch 前以 `Controller.build_agent_state_context()` 組當前 GUI 狀態快照傳入。
 
 ### 狀態注入
 
@@ -34,7 +34,7 @@ measure-gui 提供一個「Agent」按鈕讓使用者委派 Claude agent 經 `gu
 - `_EMBEDDED_SYSTEM_PROMPT`：告知 agent「gui_* 工具已自動 attach、勿自呼 connect、需要狀態自呼 gui_state_check」。
 - `build_claude_argv(session_id, *, resume, mcp_config_path, system_prompt)` → 互動模式不帶 `-p`；帶 `--mcp-config` / `--allowedTools "mcp__measure-gui__*"` / `--append-system-prompt` / `--resume <id>`（Resume）或 `--session-id <uuid>`（New）。
 - `new_session_id()` → uuid4 string。
-- `read_last_session_id()` / `write_last_session_id(id)`：存取 `~/.cache/zcu-tools/agent_last_session`。
+- `record_launched_session(id)` / `list_resumable_sessions(repo_root)` / `claude_project_dir(repo_root)`：追蹤我們 launch 過的 session 於 `~/.cache/zcu-tools/agent_sessions.json`；列表時對每個 id 查 claude 的 `<slug>/<id>.jsonl`（slug = abspath 非 `[A-Za-z0-9-]` 換 `-`），補 last-active mtime + 首則 user 訊息 label，依 last-active 排序。
 - `launch_agent_terminal(repo_root, *, resume, state_context)` → 寫暫存啟動 script（避 shell quoting 問題）→ 跨平台 spawn：
   - Linux：依序嘗試 `gnome-terminal` / `konsole` / `xterm` / `x-terminal-emulator`；環境變數 `ZCU_AGENT_TERMINAL` 可覆寫。
   - macOS：`open -a Terminal`。
@@ -48,7 +48,7 @@ measure-gui 提供一個「Agent」按鈕讓使用者委派 Claude agent 經 `gu
 
 ### Session 持久
 
-靠 `claude` 原生 `--resume <session_id>`：終端關閉後對話歷史保留；下次 Resume 直接接回。GUI 只存一個 last session id 檔（`~/.cache/zcu-tools/agent_last_session`）。
+靠 `claude` 原生 `--resume <session_id>`：終端關閉後對話歷史保留（claude 自存於 `~/.claude/projects/<slug>/<id>.jsonl`）；下次從清單選該 session 直接接回。GUI 端只追蹤「我們 launch 過的 session id 清單」（`~/.cache/zcu-tools/agent_sessions.json`），列表時與 claude 的 jsonl 交叉補 metadata（避免列出同 repo cwd 下大量無關的 dev session）。
 
 ### 中斷
 
