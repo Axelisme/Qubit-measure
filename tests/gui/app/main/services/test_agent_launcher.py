@@ -898,6 +898,19 @@ def test_launcher_source_strips_orchestration_env() -> None:
     assert "CLAUDE_AGENT_SDK" in source
 
 
+def test_launcher_source_flushes_console_input_on_windows() -> None:
+    # Windows: drain the fresh console's input buffer before exec so a focus/IME
+    # phantom first line ("are") is discarded rather than read as a typed prompt.
+    source = agent_launcher.build_python_launcher_source("/repo", ["claude"])
+    compile(source, "<launcher>", "exec")
+    assert "FlushConsoleInputBuffer" in source
+    assert "sys.platform == 'win32'" in source
+    # The flush must run BEFORE the exec that hands the console to claude.
+    assert source.index("FlushConsoleInputBuffer") < source.index(
+        "os.execv(_bin, ARGV)"
+    )
+
+
 def test_launcher_resolves_binary_via_which(monkeypatch: pytest.MonkeyPatch) -> None:
     """The launcher source resolves argv[0] via shutil.which (Windows .cmd)."""
     # This is a source-level assertion: the launcher does ``shutil.which(ARGV[0])``
