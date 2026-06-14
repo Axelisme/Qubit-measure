@@ -533,8 +533,11 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "module/waveform ref node is shown as {chosen, value:{...}}. That ref "
         "wrapper means its key shape is NOT the editable path shape: a field reads "
         "as modules.readout.value.pulse_cfg.freq here but edits (editor.set_field) "
-        "use the no-'value' form modules.readout.pulse_cfg.freq. Use this to read "
-        "values/expressions; for editable paths use list_paths.",
+        "use the no-'value' form modules.readout.pulse_cfg.freq. A sweep's derived "
+        "'step' reads null here when an edge is an unresolved eval expression (the "
+        "stored step cannot be trusted against an expr edge; it is recomputed only "
+        "for numeric edges). Use this to read values/expressions; for editable "
+        "paths use list_paths.",
         (_str("tab_id"),),
     ),
     # Writeback workflow — a persistent draft computed once at analyze time.

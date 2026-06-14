@@ -267,7 +267,7 @@ message} the GUI surfaced since your last call, under "notifications since last
 call" — UNSOLICITED, including failures not tied to the call you just made.
 Resource-change events are NOT exposed.
 
-Stale model (optimistic concurrency): a guarded op (run / save / commit) rejects
+Stale model (optimistic concurrency): a guarded op (run / save / save_as_module) rejects
 with precondition_failed when a dependency a GUI user changed under you moved
 since you last observed it; the error names which resources to re-read. Re-read
 then retry.
