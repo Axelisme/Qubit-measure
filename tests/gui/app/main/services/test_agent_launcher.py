@@ -189,6 +189,32 @@ def test_record_launched_session_rejects_empty(_sessions_file: Path) -> None:
         agent_launcher.record_launched_session("")
 
 
+def test_remove_recorded_session_removes_entry(_sessions_file: Path) -> None:
+    agent_launcher.record_launched_session("a")
+    agent_launcher.record_launched_session("b")
+    assert agent_launcher.remove_recorded_session("a") is True
+    ids = [r["session_id"] for r in json.loads(_sessions_file.read_text())]
+    assert ids == ["b"]
+
+
+def test_remove_recorded_session_absent_returns_false(_sessions_file: Path) -> None:
+    agent_launcher.record_launched_session("a")
+    assert agent_launcher.remove_recorded_session("missing") is False
+    ids = [r["session_id"] for r in json.loads(_sessions_file.read_text())]
+    assert ids == ["a"]  # store left untouched
+
+
+def test_remove_recorded_session_empty_store_returns_false(
+    _sessions_file: Path,
+) -> None:
+    assert agent_launcher.remove_recorded_session("x") is False
+
+
+def test_remove_recorded_session_rejects_empty(_sessions_file: Path) -> None:
+    with pytest.raises(ValueError):
+        agent_launcher.remove_recorded_session("")
+
+
 # ---------------------------------------------------------------------------
 # claude_project_dir slug encoding
 # ---------------------------------------------------------------------------

@@ -64,9 +64,10 @@ class AgentLaunchDialog(QDialog):
     """Session-list launcher for the external interactive ``claude`` terminal.
 
     Displays a scrollable list of previously launched sessions (label + relative
-    time + short id). The user selects a row to enable **Resume selected**. A
-    **New session** button always launches a fresh session. A **Refresh** button
-    reloads the list from disk.
+    time + short id). Selecting a row enables **Resume selected** and **Remove**
+    (the latter drops it from the Resume list without touching claude's
+    transcript). A **New session** button always launches a fresh session, and
+    **Refresh** reloads the list from disk.
     """
 
     def __init__(self, ctrl: Controller, parent: QWidget | None = None) -> None:
@@ -98,6 +99,12 @@ class AgentLaunchDialog(QDialog):
         self._resume_btn.setEnabled(False)
         self._resume_btn.clicked.connect(self._on_resume)
         button_row.addWidget(self._resume_btn)
+
+        self._remove_btn = QPushButton("Remove")
+        # Enabled only when a list item is selected; drops it from the Resume list.
+        self._remove_btn.setEnabled(False)
+        self._remove_btn.clicked.connect(self._on_remove)
+        button_row.addWidget(self._remove_btn)
 
         self._new_btn = QPushButton("New session")
         self._new_btn.clicked.connect(self._on_new)
@@ -143,7 +150,7 @@ class AgentLaunchDialog(QDialog):
         if self._session_list.count() > 0:
             self._session_list.setCurrentRow(0)
 
-        self._update_resume_btn()
+        self._update_selection_buttons()
 
     def _selected_session_id(self) -> str | None:
         """Return the session_id of the currently selected list item, or None."""
@@ -153,15 +160,18 @@ class AgentLaunchDialog(QDialog):
         data = items[0].data(_SESSION_ID_ROLE)
         return data if isinstance(data, str) else None
 
-    def _update_resume_btn(self) -> None:
-        self._resume_btn.setEnabled(self._selected_session_id() is not None)
+    def _update_selection_buttons(self) -> None:
+        # Resume + Remove both act on the selected session: enabled iff one is.
+        has_selection = self._selected_session_id() is not None
+        self._resume_btn.setEnabled(has_selection)
+        self._remove_btn.setEnabled(has_selection)
 
     # ------------------------------------------------------------------
     # Slots
     # ------------------------------------------------------------------
 
     def _on_selection_changed(self) -> None:
-        self._update_resume_btn()
+        self._update_selection_buttons()
 
     def _on_resume(self) -> None:
         session_id = self._selected_session_id()
@@ -174,6 +184,26 @@ class AgentLaunchDialog(QDialog):
 
     def _on_new(self) -> None:
         self._launch(resume_session_id=None)
+
+    def _on_remove(self) -> None:
+        session_id = self._selected_session_id()
+        if session_id is None:
+            # Button is disabled with no selection, but guard defensively.
+            self._status_label.setText("No session selected.")
+            return
+        try:
+            removed = agent_launcher.remove_recorded_session(session_id)
+        except Exception as exc:  # noqa: BLE001 — surface any failure to UI
+            logger.exception("AgentLaunchDialog: failed to remove session")
+            self._status_label.setText(f"Failed to remove session: {exc}")
+            return
+        self._reload_sessions()
+        short_id = session_id[:8]
+        self._status_label.setText(
+            f"Removed session {short_id} from the list."
+            if removed
+            else f"Session {short_id} was not in the list."
+        )
 
     def _launch(self, *, resume_session_id: str | None) -> None:
         try:

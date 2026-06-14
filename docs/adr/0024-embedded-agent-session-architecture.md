@@ -19,7 +19,7 @@ measure-gui 提供一個「Agent」按鈕讓使用者委派 Claude agent 經 `gu
 ### GUI 入口
 
 `AgentLaunchDialog`（`ui/agent_launch_dialog.py`）呈現兩個按鈕：
-- **可選 resumable session 清單**：`list_resumable_sessions` 列出我們 launch 過的 session（依 claude `~/.claude/projects/<slug>/*.jsonl` 補 last-active + 首則訊息 label、最近在上），選一個 → **Resume selected** 帶 `--resume <id>`。
+- **可選 resumable session 清單**：`list_resumable_sessions` 列出我們 launch 過的 session（依 claude `~/.claude/projects/<slug>/*.jsonl` 補 last-active + 首則訊息 label、最近在上），選一個 → **Resume selected** 帶 `--resume <id>`，或 **Remove**（`remove_recorded_session` 把該 session 從 Resume 清單移除，不動 claude 的 `<id>.jsonl` transcript）。
 - **New session**：建立新 uuid session id，spawn 終端。
 
 dialog 直接委 `services/agent_launcher.py` 的 `launch_agent_terminal()`；launch 前以 `Controller.build_agent_state_context()` 組當前 GUI 狀態快照傳入。

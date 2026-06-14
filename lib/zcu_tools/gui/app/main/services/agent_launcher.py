@@ -121,6 +121,24 @@ def record_launched_session(session_id: str) -> None:
     _write_sessions_store(records)
 
 
+def remove_recorded_session(session_id: str) -> bool:
+    """Drop ``session_id`` from the persistent session list (the Resume list).
+
+    Returns True if an entry was removed, False if it was not present. Only the
+    launcher's record is removed — claude's own ``<id>.jsonl`` transcript is left
+    untouched (the launcher does not own it); the session just stops being offered
+    for resume.
+    """
+    if not session_id:
+        raise ValueError("session_id must be non-empty")
+    records = _read_sessions_store()
+    kept = [r for r in records if r.get("session_id") != session_id]
+    if len(kept) == len(records):
+        return False
+    _write_sessions_store(kept)
+    return True
+
+
 # ---------------------------------------------------------------------------
 # claude project directory
 # ---------------------------------------------------------------------------

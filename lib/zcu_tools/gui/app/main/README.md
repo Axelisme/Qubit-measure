@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-14（agent launch：Windows **直接 spawn claude**（`subprocess.Popen` + `CREATE_NEW_CONSOLE`），不經 launcher 的 `os.execv` —— execv 在 Windows 會把多行 `--append-system-prompt` 重新引號拆裂、漏一個 prompt 字成 phantom 首訊息（"are" bug）；argv[0] 由 `resolve_agent_command()` 解析：PATH 獨立 `claude` 優先、Windows 再退 Desktop 內建）
+**Last updated:** 2026-06-14（agent launch：Windows **直接 spawn claude**（`subprocess.Popen` + `CREATE_NEW_CONSOLE`），不經 launcher 的 `os.execv` —— execv 在 Windows 會把多行 `--append-system-prompt` 重新引號拆裂、漏一個 prompt 字成 phantom 首訊息（"are" bug）；argv[0] 由 `resolve_agent_command()` 解析：PATH 獨立 `claude` 優先、Windows 再退 Desktop 內建；AgentLaunchDialog 加 **Remove** 按鈕（`remove_recorded_session`）移除選中 session）
 
 # `zcu_tools/gui/app/main/` — measure-gui Framework AI Note
 
@@ -63,7 +63,7 @@ gui/
     ├── cfg_form.py         — CfgFormWidget：LiveModel 反應式容器
     ├── fields/             — 渲染邏輯：registry.py / common.py / containers.py
     ├── inspect_dialog.py   — InspectDialog(InspectDialogBase 子類)：只補 ml create/modify（_MlCreateDialog/_MlModifyDialog 拖 CfgEditor）；md tab + ml view/rename/del 在 base（session）
-    ├── agent_launch_dialog.py — AgentLaunchDialog(QDialog)：可選 resumable session 清單（`list_resumable_sessions`：我們 launch 過的 session + claude jsonl 補 label/last-active、最近在上）+ Resume selected / New session / Refresh；直接呼 `agent_launcher.launch_agent_terminal(resume_session_id=…|None, state_context=ctrl.build_agent_state_context())`。
+    ├── agent_launch_dialog.py — AgentLaunchDialog(QDialog)：可選 resumable session 清單（`list_resumable_sessions`：我們 launch 過的 session + claude jsonl 補 label/last-active、最近在上）+ Resume selected / **Remove**（`remove_recorded_session`：把選中的從 Resume 清單移除，不動 claude transcript）/ New session / Refresh；直接呼 `agent_launcher.launch_agent_terminal(resume_session_id=…|None, state_context=ctrl.build_agent_state_context())`。
     ├── main_window.py      — MainWindow(QMainWindow) 實作 ViewProtocol；toolbar 有 Agent… 按鈕（開 AgentLaunchDialog）
     └── analyze_form.py     — AnalyzeFormWidget：扁平 analysis 參數表單
 （共用件已下放 session：setup_dialog/device_dialog/predictor_dialog/inspect_base 在 `gui/session/ui/`（吃 `SessionControllerPort`）、ProgressService/IOManager 在 `gui/session/services/`、QtProgressTransport 在 `gui/session/adapters/`、TrimDoubleSpinBox 在 `gui/widgets/spinbox.py`。measure 保留 app-local OperationGate/BackgroundService（policy/Qt facet）+ 自己的 cfg-editor/role-catalog/inspect ml-edit）
