@@ -393,13 +393,19 @@ def test_list_resumable_sessions_sorted_newest_first(
 
 
 class _FakePopen:
-    """Capture the argv + env a spawn would have used."""
+    """Capture the argv + env + creationflags a spawn would have used."""
 
     instances: list[_FakePopen] = []
 
-    def __init__(self, argv: list[str], env: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        argv: list[str],
+        env: dict[str, str] | None = None,
+        creationflags: int = 0,
+    ) -> None:
         self.argv = argv
         self.env = env
+        self.creationflags = creationflags
         _FakePopen.instances.append(self)
 
 
@@ -713,29 +719,21 @@ def test_find_desktop_bundled_claude_no_appdata_returns_none(
 
 
 # ---------------------------------------------------------------------------
-# Windows terminal-spawn branch (conhost default; ZCU_AGENT_TERMINAL override)
+# Windows terminal-spawn branch (CREATE_NEW_CONSOLE default; ZCU_AGENT_TERMINAL)
 # ---------------------------------------------------------------------------
 
 
 def _patch_windows(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(agent_launcher.sys, "platform", "win32")
-
-    # Simulate Windows Terminal being installed; the default must ignore it —
-    # Store-wt's AppData\Roaming sandbox hides the Desktop-bundled CLI, so the
-    # spawn falls back to conhost (cmd /c start).
-    def _which(name: str) -> str | None:
-        return r"C:\Windows\System32\wt.exe" if name == "wt" else None
-
-    monkeypatch.setattr(agent_launcher.shutil, "which", _which)
     monkeypatch.setattr(agent_launcher.subprocess, "Popen", _FakePopen)
-    # Pin agent-binary resolution + terminal override so the spawn argv is
-    # deterministic regardless of host (these tests assert terminal choice).
+    # Pin agent-binary resolution + terminal override so the spawn is deterministic
+    # regardless of host (these tests assert the terminal-spawn shape).
     monkeypatch.delenv("ZCU_AGENT_CMD", raising=False)
     monkeypatch.delenv("ZCU_AGENT_TERMINAL", raising=False)
     monkeypatch.setattr(agent_launcher, "_find_desktop_bundled_claude", lambda: None)
 
 
-def test_launch_windows_defaults_to_conhost_not_wt(
+def test_launch_windows_default_runs_launcher_in_new_console(
     monkeypatch: pytest.MonkeyPatch, _sessions_file: Path
 ) -> None:
     _patch_windows(monkeypatch)
@@ -744,19 +742,18 @@ def test_launch_windows_defaults_to_conhost_not_wt(
     agent_launcher.launch_agent_terminal("/repo")
 
     spawn = _FakePopen.instances[0]
-    # Even with wt "installed", Windows uses ``cmd /c start "" "<py>" "<launcher>"``
-    # (conhost), NOT Store-wt — wt's AppData\Roaming sandbox hides the Desktop CLI.
-    # The empty "" is start's window title; BOTH paths are double-quoted so spaces
-    # do not split them.
-    assert spawn.argv[0] != r"C:\Windows\System32\wt.exe"
-    assert spawn.argv[:4] == ["cmd", "/c", "start", ""]
-    quoted_py = spawn.argv[4]
-    quoted_launcher = spawn.argv[5]
-    assert quoted_py.startswith('"') and quoted_py.endswith('"')
-    assert quoted_launcher.startswith('"') and quoted_launcher.endswith('"')
-    assert sys.executable in quoted_py
-    launcher_path = quoted_launcher.strip('"')
+    # The launcher is spawned DIRECTLY ([py, launcher.py]) — no ``wt`` (AppData
+    # sandbox) and no ``cmd /c start`` (quoting pitfalls); the new window comes
+    # from CREATE_NEW_CONSOLE, so subprocess quotes the two real paths itself.
+    assert spawn.argv[0] == sys.executable
+    launcher_path = spawn.argv[1]
     assert launcher_path.endswith(".py")
+    assert "cmd" not in spawn.argv and "wt" not in spawn.argv
+    # CREATE_NEW_CONSOLE is applied (resolved the same way the code does, so the
+    # assertion holds on non-Windows hosts where the flag is absent → 0).
+    assert spawn.creationflags == getattr(
+        agent_launcher.subprocess, "CREATE_NEW_CONSOLE", 0
+    )
     # The launcher still compiles on the Windows path.
     compile(Path(launcher_path).read_text(encoding="utf-8"), "<launcher>", "exec")
 
@@ -772,9 +769,11 @@ def test_launch_windows_terminal_override_wins(
 
     spawn = _FakePopen.instances[0]
     # ZCU_AGENT_TERMINAL wins on Windows too: [<terminal>, <python>, <launcher.py>].
+    # That terminal owns its own window, so CREATE_NEW_CONSOLE is NOT applied.
     assert spawn.argv[0] == r"C:\tools\myterm.exe"
     assert spawn.argv[1] == sys.executable
     assert spawn.argv[2].endswith(".py")
+    assert spawn.creationflags == 0
 
 
 def test_launch_windows_multiline_prompt_launcher_compiles(
@@ -788,8 +787,8 @@ def test_launch_windows_multiline_prompt_launcher_compiles(
     agent_launcher.launch_agent_terminal("/repo", state_context=state)
 
     spawn = _FakePopen.instances[0]
-    # conhost spawn: the launcher path is the quoted last token (argv[5]).
-    launcher_path = spawn.argv[5].strip('"')
+    # Direct spawn: the launcher path is argv[1].
+    launcher_path = spawn.argv[1]
     source = Path(launcher_path).read_text(encoding="utf-8")
     compile(source, "<launcher>", "exec")
     assert "measure-gui current state" in source

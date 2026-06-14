@@ -472,11 +472,11 @@ def _spawn_terminal_argv(launcher_path: str) -> list[str]:
     launcher, so the terminal command stays trivial to quote.
 
     ``ZCU_AGENT_TERMINAL`` overrides the terminal on both Windows and Linux. macOS
-    uses Terminal.app; Windows defaults to a classic console (``cmd /c start`` /
-    conhost) rather than the Store-packaged Windows Terminal, whose AppData\\Roaming
-    sandbox hides the Desktop-bundled CLI (see the win32 branch). Fast-fails with a
-    RuntimeError teaching the user to set ``ZCU_AGENT_TERMINAL`` when no known
-    terminal is found on Linux.
+    uses Terminal.app; Windows runs the launcher directly (the caller attaches a
+    fresh window via CREATE_NEW_CONSOLE) rather than the Store-packaged Windows
+    Terminal, whose AppData\\Roaming sandbox hides the Desktop-bundled CLI (see the
+    win32 branch). Fast-fails with a RuntimeError teaching the user to set
+    ``ZCU_AGENT_TERMINAL`` when no known terminal is found on Linux.
     """
     py = sys.executable
 
@@ -494,17 +494,18 @@ def _spawn_terminal_argv(launcher_path: str) -> list[str]:
         override = os.environ.get("ZCU_AGENT_TERMINAL")
         if override:
             return [override, py, launcher_path]
-        # Default to a classic console via ``cmd /c start`` (conhost), NOT the
-        # Store-packaged Windows Terminal (``wt``). ``wt`` runs as a UWP app and
-        # the child processes it spawns get a virtualized view of AppData\Roaming,
-        # so a wt-launched agent cannot read the Claude Desktop-bundled claude.exe
-        # under %APPDATA%\Roaming\Claude — the binary is invisible (os.path.exists
-        # is False) and the launcher Fast-Fails. conhost has no such restriction
-        # and works for both the Desktop-bundled CLI and a PATH install. The first
-        # "" is start's window *title* (required, else a quoted path is taken as
-        # the title); py and launcher are quoted so space-containing paths do not
-        # split. See ADR-0024 (Windows terminal sandbox).
-        return ["cmd", "/c", "start", "", f'"{py}"', f'"{launcher_path}"']
+        # Default: run the launcher directly and let the caller attach a fresh
+        # console via CREATE_NEW_CONSOLE (see launch_agent_terminal). This beats
+        # both ``wt`` and ``cmd /c start``:
+        #   - ``wt`` is a UWP app and virtualizes AppData\Roaming for the children
+        #     it spawns, so a wt-launched agent cannot read the Claude Desktop CLI
+        #     under %APPDATA%\Roaming\Claude (os.path.exists is False → Fast-Fail).
+        #   - ``cmd /c start "" "<py>" "<launcher>"`` double-quotes when subprocess
+        #     re-escapes the already-quoted tokens, corrupting the path.
+        # A direct Popen from this normal (non-packaged) process has no AppData
+        # sandbox and lets subprocess quote the two real paths correctly. See
+        # ADR-0024 (Windows terminal sandbox).
+        return [py, launcher_path]
 
     # Linux / other POSIX. An explicit override wins so headless/custom setups
     # can point at any terminal: ZCU_AGENT_TERMINAL is the full program name and
@@ -598,5 +599,14 @@ def launch_agent_terminal(
     # Subscription auth: claude must NOT see an API key (mirrors agent_runner).
     env.pop("ANTHROPIC_API_KEY", None)
 
-    subprocess.Popen(spawn_argv, env=env)  # detached: do not wait
+    # On Windows, the default spawn is the launcher itself ([py, launcher]); give
+    # it its own console window via CREATE_NEW_CONSOLE so claude's TUI has a real
+    # terminal. Skipped when ZCU_AGENT_TERMINAL is set (that terminal owns its own
+    # window) and a no-op (0) on non-Windows / when the flag is unavailable.
+    creationflags = 0
+    if sys.platform == "win32" and not os.environ.get("ZCU_AGENT_TERMINAL"):
+        creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+
+    # detached: do not wait
+    subprocess.Popen(spawn_argv, env=env, creationflags=creationflags)
     return session_id
