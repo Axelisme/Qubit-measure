@@ -212,6 +212,11 @@ def build_readonly_server(
     )
 
     def _cleanup_on_exit() -> None:
+        # Only stop a GUI THIS server launched; an attach-only server must not shut
+        # down a GUI another process owns (the shared pid-file fallback in stop()
+        # would otherwise let it kill a GUI it merely connected to).
+        if not bridge.launched_gui:
+            return
         # Best-effort GUI shutdown on host disconnect; swallow so a stop failure
         # never crashes the exit path, but log it so the leak is observable.
         try:

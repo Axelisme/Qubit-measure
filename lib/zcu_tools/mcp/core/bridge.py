@@ -616,6 +616,22 @@ class McpBridge:
             )
         return f"GUI launched (pid={pid}) and listening on port {port}." + log_note
 
+    @property
+    def launched_gui(self) -> bool:
+        """True if THIS bridge launched a GUI subprocess that is still running.
+
+        Cleanup-on-exit guards on this so an *attach-only* server (lazy
+        auto-connect to a GUI another process launched) never stops that shared
+        GUI. Without the guard, the pid-file fallback in ``stop()`` lets any
+        attached server kill a GUI it merely connected to — e.g. the
+        external-terminal agent's loopback MCP server shutting down the user's
+        GUI when the agent window closes. ``stop()`` keeps the pid-file fallback
+        for the *explicit* ``gui_stop`` tool (a deliberate action); only the
+        automatic exit cleanup is restricted to launched-by-us GUIs.
+        """
+        proc = self._proc
+        return proc is not None and proc.poll() is None
+
     def _pid_for_stop(self) -> tuple[int | None, subprocess.Popen | None]:
         proc = self._proc
         if proc is not None and proc.poll() is None:

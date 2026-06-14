@@ -2011,7 +2011,15 @@ TOOLS: dict[str, dict[str, Any]] = assemble_tools(
 
 
 def _cleanup_on_exit() -> None:
-    """Stop the GUI process when the MCP host disconnects (stdin EOF)."""
+    """Stop the GUI when the MCP host disconnects (stdin EOF) — only if WE launched it.
+
+    An attach-only server (lazy auto-connect, e.g. the external-terminal agent's
+    loopback MCP server) must NOT shut down a GUI it merely connected to: that GUI
+    belongs to whoever launched it. Without this guard, closing the agent window
+    would terminate the user's GUI via the shared pid-file fallback in stop().
+    """
+    if not _BRIDGE.launched_gui:
+        return
     try:
         # Best-effort graceful close on host disconnect; force-kill on timeout so
         # we don't leak a GUI process when the bridge goes away.
