@@ -10,7 +10,7 @@ the right pane follows.
 
 from __future__ import annotations
 
-from qtpy.QtCore import Signal  # type: ignore[attr-defined]
+from qtpy.QtCore import Qt, Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QComboBox,
     QHBoxLayout,
@@ -177,27 +177,47 @@ class NodeListPane(QWidget):
     def _on_setup(self) -> None:
         from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 
+        # Non-blocking open() keeps the Qt event loop (and the control socket)
+        # alive while the dialog is visible.  WA_DeleteOnClose + instance ref
+        # prevent premature GC; finished clears the ref and refreshes state.
         dlg = SetupDialog(self._ctrl, self)
-        dlg.exec()  # the dialog drives ConnectionService; refresh either way
-        self._refresh_buttons()
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dlg.finished.connect(
+            lambda _r: (self._refresh_buttons(), setattr(self, "_setup_dialog", None))
+        )
+        self._setup_dialog = dlg
+        dlg.open()
 
     def _on_devices(self) -> None:
         from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 
         # The shared device dialog manages all instruments (a flux source among
         # them) through the same SessionControllerPort the setup dialog uses.
+        # Non-blocking open(); both refreshes run in the finished slot so they
+        # always fire after the dialog closes, whether accepted or rejected.
         dlg = DeviceDialog(self._ctrl, self)
-        dlg.exec()
-        self._refresh_buttons()
-        self._refresh_flux_sources()  # a flux source may have (dis)connected
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dlg.finished.connect(
+            lambda _r: (
+                self._refresh_buttons(),
+                self._refresh_flux_sources(),  # a flux source may have (dis)connected
+                setattr(self, "_devices_dialog", None),
+            )
+        )
+        self._devices_dialog = dlg
+        dlg.open()
 
     def _on_predictor(self) -> None:
         from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
 
         # The shared predictor dialog loads a FluxoniumPredictor into the active
         # context; the run reads exp_context.predictor.
+        # No post-close refresh needed; WA_DeleteOnClose + finished clears the ref.
         dlg = PredictorDialog(self._ctrl, self)
-        dlg.exec()
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dlg.finished.connect(lambda _r: setattr(self, "_predictor_dialog", None))
+        self._predictor_dialog = dlg
+        dlg.open()
 
     # --- flux source ---
 
