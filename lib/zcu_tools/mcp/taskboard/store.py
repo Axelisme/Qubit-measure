@@ -1,15 +1,19 @@
 """TaskboardStore — the file-backed claim store over ``task_plans/taskboard.json``.
 
-NOTE: This module uses ``fcntl.flock`` for cross-process atomic read-modify-write —
-Linux/macOS only (POSIX advisory lock).  Windows is not supported.
+NOTE: This module uses a cross-process advisory file lock for atomic
+read-modify-write.  The lock backend is selected per platform (``fcntl.flock`` on
+POSIX, ``msvcrt.locking`` on Windows) by ``_acquire_lock`` / ``_release_lock``, so
+the store works on Linux, macOS, and Windows.
 
 Design:
   - Pure functions (no file I/O) operate on a plain ``dict`` state and are the
     primary test target.  File I/O is isolated in ``_with_lock`` which wraps each
-    mutating call in an exclusive flock, writes back JSON, and re-renders the
+    mutating call in an exclusive lock, writes back JSON, and re-renders the
     markdown view.
-  - Read-only calls (``check``, ``list``) acquire a shared lock so they never
-    block each other but block writers.
+  - Read-only calls (``check``, ``list``) acquire a shared lock on POSIX so they
+    never block each other but block writers.  Windows has no shared-lock mode, so
+    they take the same exclusive lock there — readers serialise, but the
+    critical-section guarantee is identical.
   - ``claim_id`` is an 8-character hex prefix of a UUID4 — short and collision-safe
     across any realistic number of concurrent agents.
   - ``paths`` accepts repo-relative file/directory paths, glob patterns
@@ -21,14 +25,14 @@ Design:
 
 from __future__ import annotations
 
-import fcntl
 import fnmatch
 import json
 import os
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 from uuid import uuid4
 
 # Keep at most this many released claims in the history section.
@@ -458,6 +462,46 @@ def empty_state() -> State:
 
 
 # ---------------------------------------------------------------------------
+# Cross-platform advisory file lock
+# ---------------------------------------------------------------------------
+#
+# ``fcntl`` is POSIX-only and ``msvcrt`` is Windows-only; importing the wrong one
+# raises ``ModuleNotFoundError``.  Guard the import on ``sys.platform`` so this
+# module imports cleanly on every OS, and expose a single (acquire/release) pair
+# with uniform "exclusive lock around the critical section" semantics.
+
+if sys.platform == "win32":
+    import msvcrt
+
+    # Lock a single byte at offset 0; locking past EOF is allowed on Windows, so
+    # the empty lock file needs no priming.  ``msvcrt`` has no shared-lock mode —
+    # both readers and writers take this exclusive lock.
+    def _acquire_lock(lock_file: BinaryIO, exclusive: bool) -> None:
+        lock_file.seek(0)
+        # LK_LOCK blocks ~10 s (10 internal retries) then raises; loop so the wait
+        # is truly blocking, matching fcntl.flock's blocking acquire.
+        while True:
+            try:
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+                return
+            except OSError:
+                time.sleep(0.1)
+
+    def _release_lock(lock_file: BinaryIO) -> None:
+        lock_file.seek(0)
+        msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+
+else:
+    import fcntl
+
+    def _acquire_lock(lock_file: BinaryIO, exclusive: bool) -> None:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+
+    def _release_lock(lock_file: BinaryIO) -> None:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+# ---------------------------------------------------------------------------
 # File I/O layer
 # ---------------------------------------------------------------------------
 
@@ -465,14 +509,16 @@ def empty_state() -> State:
 class TaskboardStore:
     """File-backed claim store for ``task_plans/taskboard.json``.
 
-    All mutating methods use an exclusive ``fcntl.flock`` for atomic
-    read-modify-write.  Read-only methods (``list_claims``, ``check``) use a
-    shared lock so they never block each other.
+    All mutating methods take an exclusive advisory lock for atomic
+    read-modify-write.  Read-only methods (``list_claims``, ``check``) take a
+    shared lock on POSIX so they never block each other (Windows lacks shared
+    locks, so they serialise there — still correct, just less concurrent).
 
     After each successful mutating call the JSON is written back and
     ``taskboard.md`` is re-rendered in the same lock window.
 
-    NOTE: ``fcntl.flock`` is a POSIX advisory lock — Linux/macOS only.
+    The lock backend is platform-selected (``fcntl`` on POSIX, ``msvcrt`` on
+    Windows) by ``_acquire_lock`` / ``_release_lock``.
     """
 
     def __init__(self, json_path: Path, md_path: Path | None = None) -> None:
@@ -511,7 +557,7 @@ class TaskboardStore:
         return data
 
     def _write_state(self, state: State) -> None:
-        """Write state atomically (POSIX rename) so a crash mid-write never
+        """Write state atomically (``os.replace``) so a crash mid-write never
         leaves a partial / empty JSON file in place of a good one.
 
         The markdown view is a derived / human-readable artefact; it is written
@@ -519,21 +565,21 @@ class TaskboardStore:
         """
         tmp = self._json_path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
-        os.replace(tmp, self._json_path)  # POSIX atomic rename
+        os.replace(tmp, self._json_path)  # atomic same-volume rename (POSIX + Win)
         self._md_path.write_text(render_markdown(state), encoding="utf-8")
 
     def _with_lock(self, fn: Any, exclusive: bool = True) -> Any:
-        """Open the JSON file, acquire flock, call fn(state) -> (new_state, result),
-        write back if exclusive (mutating), release lock.
+        """Open the lock file, acquire the advisory lock, call
+        fn(state) -> (new_state, result), write back if exclusive (mutating),
+        release lock.
 
         ``fn`` signature: ``(state: State) -> (State, result)`` for mutating calls,
         or ``(state: State) -> result`` for read-only calls (exclusive=False).
         """
         lock_path = self._json_path.with_suffix(".lock")
         lock_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(lock_path, "a") as lf:
-            flag = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
-            fcntl.flock(lf.fileno(), flag)
+        with open(lock_path, "ab") as lf:
+            _acquire_lock(lf, exclusive)
             try:
                 state = self._read_state()
                 if exclusive:
@@ -545,7 +591,7 @@ class TaskboardStore:
                 else:
                     return fn(state)
             finally:
-                fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+                _release_lock(lf)
 
     # -- public API --------------------------------------------------------
 

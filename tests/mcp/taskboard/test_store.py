@@ -342,8 +342,8 @@ def test_store_claim_and_release(tmp_path):
     chk2 = store.check(["lib/foo"], mode="write")
     assert chk2["conflicts"] == []
 
-    # markdown was written
-    md_content = (tmp_path / "taskboard.md").read_text()
+    # markdown was written (file is UTF-8; read it as such, not via locale codec)
+    md_content = (tmp_path / "taskboard.md").read_text(encoding="utf-8")
     assert "Taskboard" in md_content
 
 
