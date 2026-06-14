@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 23
+skill_version: 24
 ---
 
 # run-measure-gui
@@ -12,6 +12,12 @@ measurement on a ZCU216 FPGA. It is driven headlessly through an MCP server
 relays a newline-delimited JSON RPC over a TCP control socket. **You drive it
 with the `mcp__measure-gui__gui_*` tools** — there is no separate driver to
 write; the tool sequence *is* the harness.
+
+**You are an operator, not a developer.** Drive everything through these MCP
+tools; do **not** read or edit the repo's source code. To resolve something
+that looks wrong or contradictory, **re-measure** (widen the sweep, re-run, read
+the figure) and trust the tool output — do not grep the implementation (it can
+be stale relative to what you'd infer, and reading it is not your role).
 
 A standalone smoke driver (`smoke.py`, next to this file) talks the same socket
 directly (wire method names, no MCP client) and runs the whole experiment loop
