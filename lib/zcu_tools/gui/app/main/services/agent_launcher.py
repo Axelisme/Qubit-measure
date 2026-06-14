@@ -489,15 +489,19 @@ def build_python_launcher_source(repo_root: str, argv: list[str]) -> str:
         "    )\n"
         # The fresh CREATE_NEW_CONSOLE window can receive a phantom first line:
         # when it steals focus, an IME composition gets committed into its input
-        # buffer (observed as a typed "are" first message every launch). Drain the
-        # console input buffer a few times over ~250ms so that focus/IME input has
-        # landed and is discarded before claude starts reading. Best-effort.
+        # buffer (observed as a typed "are" first message every launch). The
+        # commit lands a few hundred ms AFTER the window appears (focus transfer +
+        # IME finalize), so drain the console input buffer repeatedly over ~1.2s,
+        # right up to the exec, to discard it before claude starts reading. The
+        # GetStdHandle restype is set to a pointer so the 64-bit handle is not
+        # truncated. Best-effort + Windows-only.
         "if sys.platform == 'win32':\n"
         "    try:\n"
         "        import ctypes, time as _t\n"
         "        _k32 = ctypes.windll.kernel32\n"
-        "        _h = _k32.GetStdHandle(-10)\n"
-        "        for _ in range(5):\n"
+        "        _k32.GetStdHandle.restype = ctypes.c_void_p\n"
+        "        _h = ctypes.c_void_p(_k32.GetStdHandle(-10))\n"
+        "        for _ in range(30):\n"
         "            _t.sleep(0.05)\n"
         "            _k32.FlushConsoleInputBuffer(_h)\n"
         "    except Exception:\n"
