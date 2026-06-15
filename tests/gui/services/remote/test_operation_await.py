@@ -2,12 +2,13 @@
 
 The handler is off_main_thread (blocks the IO worker). It calls
 ctrl.await_operation(operation_id, timeout) and shapes the AwaitResult into
-a wire result, turning failed/cancelled/timeout into RemoteError (ADR-0019).
-
-ADR-0023 extension: when the ctrl returns reason='user_feedback', the handler
-returns {"reason": "user_feedback", "feedback": <str>} to the caller instead
-of raising. reason='completed' with a success outcome returns
-{"reason": "completed", "status": <str>}.
+a wire result (ADR-0025 §cancelled-wire):
+  - completed/cancelled → structured {reason:'completed', status:'cancelled',
+    feedback?} (NOT a raise; feedback present only when a Stop reason was latched).
+  - completed/failed → RemoteError(PRECONDITION_FAILED, reason='failed').
+  - timeout → RemoteError(TIMEOUT).
+  - user_feedback → {reason:'user_feedback', feedback:<str>} (non-terminal).
+  - completed/finished → {reason:'completed', status:'finished'}.
 """
 
 from __future__ import annotations
@@ -62,15 +63,53 @@ def test_failed_raises_precondition():
     assert "hardware boom" in ei.value.message
 
 
-def test_cancelled_raises_precondition():
+# ---------------------------------------------------------------------------
+# cancelled path (ADR-0025 §cancelled-wire) — structured result, NOT a raise
+# ---------------------------------------------------------------------------
+
+
+def test_cancelled_with_feedback_returns_structured():
+    # Settled-cancelled with a Stop reason (Send & Stop scenario):
+    # the feedback is folded by _make_completed and must reach the wire payload.
     ctrl = _ctrl(
         AwaitResult(
-            reason="completed", outcome=OperationOutcome("cancelled", "user cancelled")
+            reason="completed",
+            outcome=OperationOutcome("cancelled"),
+            feedback="stop reason from user",
         )
     )
-    with pytest.raises(RemoteError) as ei:
-        _HANDLER(ctrl, {"operation_id": 7, "timeout": 5.0})
-    assert ei.value.reason == "cancelled"
+    out = _HANDLER(ctrl, {"operation_id": 7, "timeout": 5.0})
+    assert out["reason"] == "completed"
+    assert out["status"] == "cancelled"
+    assert out["feedback"] == "stop reason from user"
+
+
+def test_cancelled_without_feedback_no_raise():
+    # Plain cancel (no Stop reason): status='cancelled', no feedback key.
+    ctrl = _ctrl(
+        AwaitResult(
+            reason="completed",
+            outcome=OperationOutcome("cancelled"),
+            feedback=None,
+        )
+    )
+    out = _HANDLER(ctrl, {"operation_id": 7, "timeout": 5.0})
+    assert out["reason"] == "completed"
+    assert out["status"] == "cancelled"
+    assert "feedback" not in out
+
+
+def test_cancelled_does_not_raise():
+    # Regression guard: a cancelled outcome must never raise (pre-fix behavior).
+    ctrl = _ctrl(
+        AwaitResult(
+            reason="completed",
+            outcome=OperationOutcome("cancelled"),
+            feedback=None,
+        )
+    )
+    out = _HANDLER(ctrl, {"operation_id": 7, "timeout": 5.0})  # must not raise
+    assert out["status"] == "cancelled"
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +125,7 @@ def test_timeout_raises_timeout():
 
 
 # ---------------------------------------------------------------------------
-# user_feedback path (ADR-0023)
+# user_feedback path (ADR-0025)
 # ---------------------------------------------------------------------------
 
 
@@ -103,3 +142,23 @@ def test_user_feedback_multiple_messages_forwarded():
     assert out["reason"] == "user_feedback"
     assert "line 1" in str(out["feedback"])
     assert "line 2" in str(out["feedback"])
+
+
+# ---------------------------------------------------------------------------
+# non-regression: finished / failed still work as before
+# ---------------------------------------------------------------------------
+
+
+def test_finished_not_affected_by_cancelled_change():
+    ctrl = _ctrl(AwaitResult(reason="completed", outcome=OperationOutcome("finished")))
+    out = _HANDLER(ctrl, {"operation_id": 42, "timeout": 1.0})
+    assert out["status"] == "finished"
+    assert "feedback" not in out
+
+
+def test_failed_still_raises_not_structured():
+    ctrl = _ctrl(
+        AwaitResult(reason="completed", outcome=OperationOutcome("failed", "boom"))
+    )
+    with pytest.raises(RemoteError):
+        _HANDLER(ctrl, {"operation_id": 42, "timeout": 1.0})

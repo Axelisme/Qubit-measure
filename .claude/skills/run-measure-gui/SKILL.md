@@ -178,7 +178,7 @@ a handle, never by subscribing to a push stream:
 | fast run / fast fit | the call returns `{status:finished}` (`gui_run_start` / `gui_analyze` when it settles within `wait_seconds`, default 1.0) |
 | `gui_run_start` / `gui_analyze` returned `{status:pending}` | wait (`gui_run_wait` / `gui_analyze_wait`, blocks) or poll (`gui_run_poll` / `gui_analyze_poll`, non-blocking) |
 | want live progress bars | already in the `gui_run_poll` reply while `status:running` (active + bars); no separate progress tool |
-| a poll says `status:cancelled` | a user/agent cancel (distinct from `failed`); not an error to recover from |
+| a poll or wait says `status:cancelled` | a user/agent cancel (distinct from `failed`); **not a raise, not an error** — read optional `feedback` for the Stop reason (present when user clicked "Send & Stop"), then re-plan |
 
 **Interactive analysis (e.g. `onetone`/`twotone flux_dep`).** Some adapters have no
 automatic fit — the analysis is a 2D map the **user picks on**. `gui_adapter_guide`

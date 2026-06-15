@@ -1102,8 +1102,9 @@ def _h_operation_await(
     # off_main_thread handler: blocks the IO worker thread on the handle's
     # thread-safe registry (never touches main-thread-owned state). Returns a
     # structured payload with reason in {'completed', 'user_feedback', 'timeout'}
-    # (ADR-0025). failed/cancelled are still raised as PRECONDITION_FAILED so
-    # existing callers see an error; other reasons are returned as wire data.
+    # (ADR-0025). 'cancelled' is returned as structured data (status='cancelled',
+    # optional feedback from the Stop reason); 'failed' is still raised as
+    # PRECONDITION_FAILED so the agent sees it as an error.
     operation_id = int(params["operation_id"])  # type: ignore[arg-type]
     timeout = float(params["timeout"])  # type: ignore[arg-type]
     result = adapter.ctrl.await_operation(operation_id, timeout)
@@ -1127,11 +1128,20 @@ def _h_operation_await(
     # reason == 'completed'
     outcome = result.outcome
     assert outcome is not None  # invariant: completed always has outcome
-    if outcome.status in ("failed", "cancelled"):
+    if outcome.status == "cancelled":
+        # Structured cancellation: return status + optional Stop reason so the
+        # agent gets the full picture in one reply (ADR-0025 §cancelled-wire).
+        # The feedback field is only present when a Stop reason was latched
+        # (i.e. "Send & Stop" was used); a plain cancel has no feedback.
+        payload: dict[str, object] = {"reason": "completed", "status": "cancelled"}
+        if result.feedback:
+            payload["feedback"] = result.feedback
+        return payload
+    if outcome.status == "failed":
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
-            outcome.error or f"operation {outcome.status}",
-            reason=outcome.status,
+            outcome.error or "operation failed",
+            reason="failed",
         )
     return {"reason": "completed", "status": outcome.status}
 

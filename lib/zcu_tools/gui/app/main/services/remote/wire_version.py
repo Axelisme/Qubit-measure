@@ -134,7 +134,15 @@ from __future__ import annotations
 #      replies, dismisses, or the dialog's QTimer fires. The MCP-facing surface is
 #      the hand-written gui_notify_user tool (not raw notify.*). New methods =
 #      contract change.
-WIRE_VERSION = 30
+# v31: operation.await cancelled → structured data (ADR-0025 §cancelled-wire).
+#      When an operation is cancelled, operation.await now returns
+#      {reason:'completed', status:'cancelled', feedback?} instead of raising
+#      PRECONDITION_FAILED(reason='cancelled'). 'feedback' carries the Stop reason
+#      folded by _make_completed when a Stop event was latched before the Settled
+#      event (Send & Stop semantic); absent on a plain cancel. 'failed' is still
+#      raised as PRECONDITION_FAILED. Wire contract change (new legal status on
+#      completed replies).
+WIRE_VERSION = 31
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -292,4 +300,8 @@ WIRE_VERSION = 30
 #      (independent event vocabulary: Reply/Dismiss/Timeout); NotifyUserDialog
 #      (non-modal, QTimer SSOT); controller notify façade (open/reply/dismiss/
 #      timeout/await); dispatch handlers; RenderView.open_notify_prompt protocol entry.
-GUI_VERSION = 37
+# v38: operation.await cancelled → structured reply (WIRE 31). _h_operation_await
+#      splits 'cancelled' from 'failed': cancelled returns {reason:'completed',
+#      status:'cancelled', feedback?} (the Stop reason from _make_completed is
+#      propagated); failed still raises PRECONDITION_FAILED. No new RPC method.
+GUI_VERSION = 38

@@ -178,9 +178,9 @@ def test_wait_timeout_returns_timed_out_not_raises(monkeypatch):
     mcp_server._OP_BY_KEY.pop("tab:t", None)
 
 
-def test_wait_genuine_failure_still_raises(monkeypatch):
-    # A failed/cancelled outcome is NOT a timeout — it must still raise so the
-    # agent sees it as an error (distinct from timed_out).
+def test_wait_failed_outcome_still_raises(monkeypatch):
+    # A 'failed' outcome must still raise as an error (distinct from cancelled
+    # which is now a structured result, and from timed_out which is non-raising).
     mcp_server._OP_BY_KEY["tab:t"] = 5
 
     def fail(method, params, timeout_seconds=30.0):
@@ -192,6 +192,44 @@ def test_wait_genuine_failure_still_raises(monkeypatch):
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fail)
     with pytest.raises(RuntimeError):
         mcp_server.TOOLS["gui_run_wait"]["handler"]({"tab_id": "t", "timeout": 0.05})
+    mcp_server._OP_BY_KEY.pop("tab:t", None)
+
+
+def test_wait_cancelled_returns_structured_not_raises(wired):
+    # ADR-0025 §cancelled-wire: a cancelled operation returns {status:'cancelled'}
+    # — NOT a raise — so the agent can read the feedback and re-plan gracefully.
+    mcp_server._OP_BY_KEY["tab:t"] = 5
+    wired["operation.await"] = {
+        "ok": True,
+        "result": {
+            "reason": "completed",
+            "status": "cancelled",
+            "feedback": "user pressed Stop",
+        },
+    }
+    wired["resources.versions"] = _versions({})
+
+    out = mcp_server.TOOLS["gui_run_wait"]["handler"]({"tab_id": "t", "timeout": 5.0})
+
+    assert out["status"] == "cancelled"
+    assert out["feedback"] == "user pressed Stop"
+    assert "waited_seconds" in out
+    mcp_server._OP_BY_KEY.pop("tab:t", None)
+
+
+def test_wait_cancelled_without_feedback_no_feedback_key(wired):
+    # Plain cancel (no Stop reason): status='cancelled', feedback key absent.
+    mcp_server._OP_BY_KEY["tab:t"] = 5
+    wired["operation.await"] = {
+        "ok": True,
+        "result": {"reason": "completed", "status": "cancelled"},
+    }
+    wired["resources.versions"] = _versions({})
+
+    out = mcp_server.TOOLS["gui_run_wait"]["handler"]({"tab_id": "t", "timeout": 5.0})
+
+    assert out["status"] == "cancelled"
+    assert "feedback" not in out
     mcp_server._OP_BY_KEY.pop("tab:t", None)
 
 

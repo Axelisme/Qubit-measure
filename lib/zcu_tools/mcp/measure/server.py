@@ -257,7 +257,15 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
 #      Returns {reason:'reply'|'dismiss'|'timeout', reply?}. BLOCKS the turn;
 #      never raises on timeout or dismiss. notify.open / notify.await are
 #      excluded from auto-generation via _NON_GENERATED_METHODS.
-MCP_VERSION = 37
+# MCP 38: cancelled _wait returns structured data instead of raising (WIRE 31).
+#      gui_run_wait / gui_analyze_wait / gui_post_analyze_wait /
+#      gui_device_wait_operation / gui_connect_wait now return
+#      {status:'cancelled', feedback?} on a cancelled operation instead of
+#      raising precondition_failed. 'feedback' is present only when the user
+#      clicked "Send & Stop" (carries the Stop reason); absent on a plain cancel.
+#      'failed' still raises. _SERVER_INSTRUCTIONS and tool descriptions updated
+#      to reflect the new contract.
+MCP_VERSION = 38
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -308,14 +316,15 @@ Completion is detected by wait/poll on a handle, NOT events (nothing is pushed):
     'no_operation'. 'cancelled' (user/agent cancel) is distinct from 'failed'.
     While 'running' the reply folds the live progress bars
     (active, bars[token/format/percent]) — no separate progress tool.
-  - _wait BLOCKS your whole turn until the op ends and RAISES on failure/
-    cancellation; on success returns {status:'finished', waited_seconds[, ...]};
-    'timed_out' (still running after the bounded wait) is NOT a failure — re-wait
-    or switch to _poll. Because a _wait holds the turn and nothing pushes a
-    completion, reserve inline _wait for ops you expect to finish quickly; for a
-    long op (a big sweep, a slow ramp) either _poll (non-blocking — you check back)
-    or call the _wait from a BACKGROUND agent so your main loop stays free and the
-    harness re-invokes you with the result.
+  - _wait BLOCKS your whole turn until the op ends and RAISES only on genuine
+    failure; returns {status, waited_seconds[, ...]}:
+    'finished' (success), 'cancelled' (user/agent cancel — NOT a raise; read
+    optional 'feedback' for the Stop reason), 'timed_out' (still running — NOT
+    a failure — re-wait or switch to _poll). Because a _wait holds the turn and
+    nothing pushes a completion, reserve inline _wait for ops you expect to finish
+    quickly; for a long op (a big sweep, a slow ramp) either _poll (non-blocking
+    — you check back) or call the _wait from a BACKGROUND agent so your main loop
+    stays free and the harness re-invokes you with the result.
   - USER FEEDBACK WAKEUP (ADR-0023): any _wait can return early with
     status='user_feedback' and a 'feedback' string while the op is STILL running.
     Treat the feedback as a HIGH-PRIORITY instruction and re-plan; you still hold
@@ -976,14 +985,18 @@ def _await_operation_by_key(key: str, what: str, timeout: float) -> dict[str, An
 
     Returns ``{status, waited_seconds[, message[, feedback]]}``:
     - 'finished': settled OK.
+    - 'cancelled': user/agent cancelled the op. ``feedback`` carries the Stop
+      reason when "Send & Stop" was used; absent on a plain cancel. NOT a raise
+      (ADR-0025 §cancelled-wire — cancelled is a normal terminal outcome, not a
+      crash; the agent reads feedback and re-plans).
     - 'user_feedback': a user-feedback string arrived before the op settled
-      (ADR-0023). ``feedback`` carries the text; ``reason`` is 'user_feedback'.
+      (ADR-0025). ``feedback`` carries the text; ``reason`` is 'user_feedback'.
       The operation is still running; the agent holds the key and can re-await
       or cancel via gui_run_cancel.
     - 'timed_out': still running after the bounded wait — NOT a crash, no raise.
     - 'no_operation': nothing tracked.
     ``waited_seconds`` is how long the wait actually blocked. A genuine
-    failed/cancelled outcome still raises (the agent must see it as an error).
+    ``failed`` outcome still raises (the agent must see it as an error).
     """
     operation_id = _OP_BY_KEY.get(key)
     if operation_id is None:
@@ -1017,8 +1030,8 @@ def _await_operation_by_key(key: str, what: str, timeout: float) -> dict[str, An
                 "waited_seconds": round(time.monotonic() - start, 3),
                 "message": f"{what} still in progress after {timeout}s.",
             }
-        raise  # genuine failure/cancellation — surfaces to the agent as an error
-    # Unwrap the structured reason from the wire payload (ADR-0023).
+        raise  # genuine failure — surfaces to the agent as an error
+    # Unwrap the structured reason from the wire payload (ADR-0025).
     reason = res.get("reason", "completed")
     waited = round(time.monotonic() - start, 3)
     if reason == "user_feedback":
@@ -1034,8 +1047,21 @@ def _await_operation_by_key(key: str, what: str, timeout: float) -> dict[str, An
                 "The operation is still running — you may gui_run_cancel or re-await."
             ),
         }
+    status = res.get("status", "finished")
+    if status == "cancelled":
+        # Structured cancellation: return status + optional Stop reason. Not a
+        # raise — cancelled is a normal terminal outcome (ADR-0025 §cancelled-wire).
+        out: dict[str, Any] = {
+            "status": "cancelled",
+            "waited_seconds": waited,
+            "message": f"{what} was cancelled.",
+        }
+        feedback = res.get("feedback")
+        if feedback:
+            out["feedback"] = feedback
+        return out
     return {
-        "status": res.get("status", "finished"),
+        "status": status,
         "waited_seconds": waited,
         "message": f"{what} completed.",
     }
@@ -1172,8 +1198,9 @@ def tool_gui_device_wait_operation(arguments: dict[str, Any]) -> dict[str, Any]:
     """Block until the named device's current operation completes (semantic).
 
     Covers connect / disconnect / setup — whichever is the latest operation for
-    the device. Returns status='finished' on success; raises on failure/
-    cancellation; status='no_operation' if nothing is in flight for that device.
+    the device. Returns status='finished' on success; status='cancelled' (with
+    optional 'feedback') on cancellation (NOT a raise); raises only on genuine
+    failure; status='no_operation' if nothing is in flight for that device.
     """
     name = str(arguments["name"])
     timeout = float(arguments.get("timeout", 120.0))
@@ -1224,8 +1251,10 @@ def tool_gui_run_start(arguments: dict[str, Any]) -> dict[str, Any]:
 
 def tool_gui_run_wait(arguments: dict[str, Any]) -> dict[str, Any]:
     """Block until the run on ``tab_id`` completes (semantic wait, mirrors
-    gui_device_wait_operation). Raises on failure/cancellation. To see the plot
-    once finished, call gui_tab_get_current_figure(tab_id)."""
+    gui_device_wait_operation). Raises only on genuine failure. A cancelled run
+    returns {status:'cancelled', feedback?} — read 'feedback' for the Stop reason
+    (present when the user used "Send & Stop", absent on a plain cancel). To see
+    the plot once finished, call gui_tab_get_current_figure(tab_id)."""
     tab_id = str(arguments["tab_id"])
     timeout = float(arguments.get("timeout", 600.0))
     return _await_operation_by_key(f"tab:{tab_id}", f"Run on tab {tab_id!r}", timeout)
@@ -1290,12 +1319,13 @@ def tool_gui_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
 
 def tool_gui_analyze_wait(arguments: dict[str, Any]) -> dict[str, Any]:
     """Block until the analyze on ``tab_id`` completes (mirrors gui_run_wait).
-    Returns {status, waited_seconds}: 'finished' / 'timed_out' (re-wait or
-    gui_analyze_poll) / 'no_operation'. Raises only on a genuine failure. Use
-    after gui_analyze returned status='pending'. NOTE: for an INTERACTIVE pick
-    this blocks until the USER clicks Done — prefer gui_analyze_poll (non-blocking)
-    so you can prompt and check back, or run this from a background agent. See the
-    fit plot with gui_tab_get_current_figure(tab_id)."""
+    Returns {status, waited_seconds}: 'finished' / 'cancelled' (read optional
+    'feedback' for the Stop reason) / 'timed_out' (re-wait or gui_analyze_poll)
+    / 'no_operation'. Raises only on a genuine failure. Use after gui_analyze
+    returned status='pending'. NOTE: for an INTERACTIVE pick this blocks until
+    the USER clicks Done — prefer gui_analyze_poll (non-blocking) so you can
+    prompt and check back, or run this from a background agent. See the fit plot
+    with gui_tab_get_current_figure(tab_id)."""
     tab_id = str(arguments["tab_id"])
     timeout = float(arguments.get("timeout", 600.0))
     return _await_operation_by_key(
@@ -1347,10 +1377,11 @@ def tool_gui_post_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
 
 def tool_gui_post_analyze_wait(arguments: dict[str, Any]) -> dict[str, Any]:
     """Block until the post-analysis on ``tab_id`` completes (mirrors
-    gui_analyze_wait). Returns {status, waited_seconds}: 'finished' / 'timed_out'
-    (re-wait or gui_post_analyze_poll) / 'no_operation'. Raises only on a genuine
-    failure. Use after gui_post_analyze returned status='pending'. Read the scalar
-    result with gui_tab_get_post_analyze_result."""
+    gui_analyze_wait). Returns {status, waited_seconds}: 'finished' / 'cancelled'
+    (read optional 'feedback' for the Stop reason) / 'timed_out' (re-wait or
+    gui_post_analyze_poll) / 'no_operation'. Raises only on a genuine failure.
+    Use after gui_post_analyze returned status='pending'. Read the scalar result
+    with gui_tab_get_post_analyze_result."""
     tab_id = str(arguments["tab_id"])
     timeout = float(arguments.get("timeout", 600.0))
     return _await_operation_by_key(
@@ -1411,8 +1442,8 @@ def tool_gui_connect_start(arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 def tool_gui_connect_wait(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Block until the SoC connect completes (semantic wait). Raises on failure.
-
+    """Block until the SoC connect completes (semantic wait). Raises only on
+    genuine failure; returns status='cancelled' (NOT a raise) on cancellation.
     On success also returns the SoC hardware summary (same as gui_soc_info)."""
     timeout = float(arguments.get("timeout", 120.0))
     result = _await_operation_by_key("soc", "SoC connect", timeout)
