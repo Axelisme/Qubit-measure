@@ -1,7 +1,14 @@
-"""PredictorDialog — load FluxoniumPredictor from params.json and predict frequencies.
+"""PredictorDialog — load/define a FluxoniumPredictor and predict frequencies.
 
-Layout: left control column (load / tracked-transitions table / status) + right
-QTabWidget with two PredictorCurveCanvas tabs:
+Two ways to get a predictor: load a params.json (path + flux_bias → Load), or
+type/load the model params directly (EJ/EC/EL + flux_half/flux_period editable
+fields → Apply, which builds+installs in-memory via set_predictor_model_params).
+"Load params.json → fields" populates those fields from a file's fluxdep_fit
+without installing, so the user can tweak then Apply. An active-model read-back
+shows the currently installed EJ/EC/EL/flux_half/flux_period.
+
+Layout: left control column (load / model params / tracked-transitions table /
+status) + right QTabWidget with two PredictorCurveCanvas tabs:
   - "Frequency"       : f_ij transition-frequency curves (MHz)
   - "Matrix element"  : |<i|op|j>| curves (dimensionless)
 
@@ -137,6 +144,44 @@ class PredictorDialog(QDialog):
 
         left_layout.addWidget(load_group)
 
+        # ── Model params (editable EJ/EC/EL + flux anchors) ───────────────
+        # Lets a user type the model directly OR load a params.json into these
+        # fields, tweak, then Apply (build+install via set_predictor_model_params).
+        model_group = QGroupBox("Model params")
+        model_form = QFormLayout(model_group)
+
+        # Energies in GHz; flux anchors in device-value units. Wide ranges +
+        # many decimals so exploratory inputs (e.g. EJ:EC:EL = 4:1:1) are allowed.
+        self._ej_spin = self._make_param_spin()
+        model_form.addRow("EJ (GHz):", self._ej_spin)
+        self._ec_spin = self._make_param_spin()
+        model_form.addRow("EC (GHz):", self._ec_spin)
+        self._el_spin = self._make_param_spin()
+        model_form.addRow("EL (GHz):", self._el_spin)
+        self._flux_half_spin = self._make_param_spin()
+        model_form.addRow("flux_half:", self._flux_half_spin)
+        self._flux_period_spin = self._make_param_spin()
+        # A zero period makes the value<->flux affine singular; default to 1.0 so a
+        # fresh dialog (no predictor) is already non-singular.
+        self._flux_period_spin.setValue(1.0)
+        model_form.addRow("flux_period:", self._flux_period_spin)
+
+        model_btn_row = QHBoxLayout()
+        apply_btn = QPushButton("Apply")
+        apply_btn.clicked.connect(self._on_apply_model_params)
+        model_btn_row.addWidget(apply_btn)
+        load_fields_btn = QPushButton("Load params.json → fields")
+        load_fields_btn.clicked.connect(self._on_load_params_into_fields)
+        model_btn_row.addWidget(load_fields_btn)
+        model_form.addRow("", model_btn_row)
+
+        # Read-back of the currently active model (None until a predictor exists).
+        self._active_model_label = QLabel("Active model: (none)")
+        self._active_model_label.setWordWrap(True)
+        model_form.addRow(self._active_model_label)
+
+        left_layout.addWidget(model_group)
+
         # ── Predict / marker ─────────────────────────────────────────────
         marker_group = QGroupBox("Predict frequency")
         marker_form = QFormLayout(marker_group)
@@ -245,12 +290,20 @@ class PredictorDialog(QDialog):
 
         # Pre-fill with current predictor state.
         info = controller.get_predictor_info()
+        self._update_active_model_label(info)
         if info is not None:
             if info["path"] is not None:
                 self._path_edit.setText(info["path"])
             self._flux_bias_spin.setValue(info["flux_bias"])
             self._flux_half = info["flux_half"]
             self._flux_period = info["flux_period"]
+            self._populate_model_fields(
+                info["EJ"],
+                info["EC"],
+                info["EL"],
+                info["flux_half"],
+                info["flux_period"],
+            )
             self._set_status("Currently loaded", error=False)
             self._refresh_curves()
 
@@ -263,6 +316,45 @@ class PredictorDialog(QDialog):
         self._bus_subscribed = True
         self.finished.connect(self._cleanup_bus)
         self.destroyed.connect(self._cleanup_bus)
+
+    # ------------------------------------------------------------------
+    # Model-param widgets / helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _make_param_spin() -> QDoubleSpinBox:
+        """A wide-range, high-precision spinbox for an editable model param.
+
+        Range is intentionally permissive so exploratory inputs (any positive
+        energy ratio, arbitrary flux anchors) are accepted; the only hard guard
+        (flux_period != 0) lives in _on_apply_model_params, not here.
+        """
+        spin = QDoubleSpinBox()
+        spin.setRange(-1e6, 1e6)
+        spin.setDecimals(6)
+        spin.setValue(0.0)
+        return spin
+
+    def _populate_model_fields(
+        self, ej: float, ec: float, el: float, flux_half: float, flux_period: float
+    ) -> None:
+        """Set the five editable model spinboxes (no install side effect)."""
+        self._ej_spin.setValue(ej)
+        self._ec_spin.setValue(ec)
+        self._el_spin.setValue(el)
+        self._flux_half_spin.setValue(flux_half)
+        self._flux_period_spin.setValue(flux_period)
+
+    def _update_active_model_label(self, info: dict | None) -> None:
+        """Refresh the active-model read-back from a get_predictor_info() dict."""
+        if info is None:
+            self._active_model_label.setText("Active model: (none)")
+            return
+        self._active_model_label.setText(
+            "Active model: "
+            f"EJ={info['EJ']:.4f}, EC={info['EC']:.4f}, EL={info['EL']:.4f} GHz; "
+            f"flux_half={info['flux_half']:.4f}, flux_period={info['flux_period']:.4f}"
+        )
 
     # ------------------------------------------------------------------
     # Affine helpers (value ↔ flux)
@@ -593,6 +685,67 @@ class PredictorDialog(QDialog):
         self._set_status("Predictor loaded", error=False)
         logger.info("PredictorDialog: loaded path=%r", path)
 
+    def _on_apply_model_params(self) -> None:
+        """Build+install a predictor from the current editable fields.
+
+        Only flux_period==0 is guarded (it makes the value<->flux affine
+        singular); everything else is allowed so trial ratios work. The bus
+        PredictorChangedPayload that install emits drives the read-back refresh.
+        """
+        from zcu_tools.gui.session.services.predictor import (
+            PredictorLoadError,
+            SetModelParamsRequest,
+        )
+
+        flux_period = self._flux_period_spin.value()
+        if flux_period == 0.0:
+            self._set_status(
+                "flux_period must be non-zero (value↔flux mapping).", error=True
+            )
+            return
+        req = SetModelParamsRequest(
+            EJ=self._ej_spin.value(),
+            EC=self._ec_spin.value(),
+            EL=self._el_spin.value(),
+            flux_half=self._flux_half_spin.value(),
+            flux_period=flux_period,
+            flux_bias=self._flux_bias_spin.value(),
+        )
+        try:
+            self._ctrl.set_predictor_model_params(req)
+        except PredictorLoadError as exc:
+            self._set_status(str(exc), error=True)
+            return
+        self._set_status("Model params applied", error=False)
+        logger.info("PredictorDialog: applied model params %r", req)
+
+    def _on_load_params_into_fields(self) -> None:
+        """Parse a chosen params.json's fluxdep_fit into the fields (no install).
+
+        Populates the editable spinboxes so the user can tweak before Apply; it
+        deliberately does NOT install a predictor.
+        """
+        from zcu_tools.gui.session.services.predictor import (
+            PredictorLoadError,
+            read_fluxdep_fit_params,
+        )
+
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select params.json", "", "JSON files (*.json);;All files (*)"
+        )
+        if not path:
+            return
+        try:
+            params = read_fluxdep_fit_params(path)
+        except PredictorLoadError as exc:
+            self._set_status(str(exc), error=True)
+            return
+        self._populate_model_fields(
+            params.EJ, params.EC, params.EL, params.flux_half, params.flux_period
+        )
+        self._set_status("Loaded params into fields — click Apply to use", error=False)
+        logger.info("PredictorDialog: loaded params into fields from %r", path)
+
     def _on_clear(self) -> None:
         self._ctrl.clear_predictor()
         self._set_status("Predictor cleared")
@@ -627,12 +780,20 @@ class PredictorDialog(QDialog):
     def _on_predictor_changed(self, payload: object) -> None:
         del payload
         info = self._ctrl.get_predictor_info()
+        self._update_active_model_label(info)
         if info is not None:
             if info["path"] is not None:
                 self._path_edit.setText(info["path"])
             self._flux_bias_spin.setValue(info["flux_bias"])
             self._flux_half = info["flux_half"]
             self._flux_period = info["flux_period"]
+            self._populate_model_fields(
+                info["EJ"],
+                info["EC"],
+                info["EL"],
+                info["flux_half"],
+                info["flux_period"],
+            )
             self._set_status("Currently loaded", error=False)
             self._refresh_curves()
         else:

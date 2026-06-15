@@ -57,6 +57,9 @@ def _make_ctrl(
     flux_half: float = 0.5,
     flux_period: float = 1.0,
     flux_bias: float = 0.0,
+    ej: float = 4.0,
+    ec: float = 1.0,
+    el: float = 1.0,
     path: str | None = None,
 ) -> MagicMock:
     """Build a MagicMock controller pre-configured for dialog tests."""
@@ -67,6 +70,9 @@ def _make_ctrl(
             "flux_bias": flux_bias,
             "flux_half": flux_half,
             "flux_period": flux_period,
+            "EJ": ej,
+            "EC": ec,
+            "EL": el,
         }
     else:
         ctrl.get_predictor_info.return_value = None
@@ -95,6 +101,9 @@ def test_predictor_dialog_init_and_load_dispatches_request(qapp):
         "flux_bias": 0.5,
         "flux_half": 0.5,
         "flux_period": 1.0,
+        "EJ": 4.0,
+        "EC": 1.0,
+        "EL": 1.0,
     }
     ctrl.predict_freq.return_value = 1234.5
 
@@ -475,6 +484,9 @@ def test_predictor_dialog_on_predictor_changed_bus_event_refreshes_curves(qapp):
         "flux_bias": 0.0,
         "flux_half": 0.5,
         "flux_period": 1.0,
+        "EJ": 4.0,
+        "EC": 1.0,
+        "EL": 1.0,
     }
     dialog._on_predictor_changed(object())
 
@@ -516,3 +528,148 @@ def test_predictor_dialog_predict_curve_error_shown_in_status(qapp):
     dialog = PredictorDialog(ctrl)
 
     assert "oops" in dialog._status_label.text()
+
+
+# ---------------------------------------------------------------------------
+# Model params: editable fields, Apply, Load→fields, read-back
+# ---------------------------------------------------------------------------
+
+
+def test_predictor_dialog_init_populates_model_fields(qapp):
+    """With a predictor loaded at init, the EJ/EC/EL/flux spinboxes read it back."""
+    ctrl = _make_ctrl(
+        has_predictor=True,
+        path="/p.json",
+        ej=4.2,
+        ec=1.1,
+        el=0.7,
+        flux_half=0.3,
+        flux_period=0.8,
+    )
+    dialog = PredictorDialog(ctrl)
+
+    assert dialog._ej_spin.value() == pytest.approx(4.2)
+    assert dialog._ec_spin.value() == pytest.approx(1.1)
+    assert dialog._el_spin.value() == pytest.approx(0.7)
+    assert dialog._flux_half_spin.value() == pytest.approx(0.3)
+    assert dialog._flux_period_spin.value() == pytest.approx(0.8)
+    # Active-model read-back reflects the installed model.
+    assert "EJ=4.2" in dialog._active_model_label.text()
+
+
+def test_predictor_dialog_apply_installs_from_fields(qapp):
+    """Apply builds a SetModelParamsRequest from the fields and installs it."""
+    from zcu_tools.gui.session.services.predictor import SetModelParamsRequest
+
+    ctrl = _make_ctrl(has_predictor=False)
+    dialog = PredictorDialog(ctrl)
+
+    dialog._ej_spin.setValue(4.0)
+    dialog._ec_spin.setValue(1.0)
+    dialog._el_spin.setValue(1.0)
+    dialog._flux_half_spin.setValue(0.25)
+    dialog._flux_period_spin.setValue(0.9)
+    dialog._flux_bias_spin.setValue(0.05)
+
+    dialog._on_apply_model_params()
+
+    ctrl.set_predictor_model_params.assert_called_once()
+    (req,) = ctrl.set_predictor_model_params.call_args.args
+    assert isinstance(req, SetModelParamsRequest)
+    assert req.EJ == pytest.approx(4.0)
+    assert req.EC == pytest.approx(1.0)
+    assert req.EL == pytest.approx(1.0)
+    assert req.flux_half == pytest.approx(0.25)
+    assert req.flux_period == pytest.approx(0.9)
+    assert req.flux_bias == pytest.approx(0.05)
+
+
+def test_predictor_dialog_apply_zero_period_guarded(qapp):
+    """flux_period == 0 must NOT install — the dialog fast-fails with a message."""
+    ctrl = _make_ctrl(has_predictor=False)
+    dialog = PredictorDialog(ctrl)
+
+    dialog._flux_period_spin.setValue(0.0)
+    dialog._on_apply_model_params()
+
+    ctrl.set_predictor_model_params.assert_not_called()
+    assert "flux_period" in dialog._status_label.text()
+
+
+def test_predictor_dialog_apply_surfaces_service_error(qapp):
+    """A PredictorLoadError from the controller is shown in the status label."""
+    ctrl = _make_ctrl(has_predictor=False)
+    ctrl.set_predictor_model_params.side_effect = PredictorLoadError("bad model")
+    dialog = PredictorDialog(ctrl)
+
+    dialog._flux_period_spin.setValue(1.0)
+    dialog._on_apply_model_params()
+
+    assert "bad model" in dialog._status_label.text()
+
+
+def test_predictor_dialog_load_into_fields_populates_without_install(qapp):
+    """Load params.json → fields fills the spinboxes but does NOT install."""
+    from zcu_tools.gui.session.services.predictor import SetModelParamsRequest
+
+    ctrl = _make_ctrl(has_predictor=False)
+    dialog = PredictorDialog(ctrl)
+
+    fake_req = SetModelParamsRequest(
+        EJ=5.5, EC=1.3, EL=0.6, flux_half=0.4, flux_period=0.7
+    )
+    with (
+        patch(
+            "zcu_tools.gui.session.ui.predictor_dialog.QFileDialog.getOpenFileName",
+            return_value=("/chosen/params.json", ""),
+        ),
+        patch(
+            "zcu_tools.gui.session.services.predictor.read_fluxdep_fit_params",
+            return_value=fake_req,
+        ),
+    ):
+        dialog._on_load_params_into_fields()
+
+    assert dialog._ej_spin.value() == pytest.approx(5.5)
+    assert dialog._ec_spin.value() == pytest.approx(1.3)
+    assert dialog._el_spin.value() == pytest.approx(0.6)
+    assert dialog._flux_half_spin.value() == pytest.approx(0.4)
+    assert dialog._flux_period_spin.value() == pytest.approx(0.7)
+    # Populating fields must NOT install a predictor.
+    ctrl.set_predictor_model_params.assert_not_called()
+
+
+def test_predictor_dialog_load_into_fields_cancel_is_noop(qapp):
+    """Cancelling the file dialog (empty path) leaves the fields unchanged."""
+    ctrl = _make_ctrl(has_predictor=False)
+    dialog = PredictorDialog(ctrl)
+    before = dialog._ej_spin.value()
+
+    with patch(
+        "zcu_tools.gui.session.ui.predictor_dialog.QFileDialog.getOpenFileName",
+        return_value=("", ""),
+    ):
+        dialog._on_load_params_into_fields()
+
+    assert dialog._ej_spin.value() == before
+    ctrl.set_predictor_model_params.assert_not_called()
+
+
+def test_predictor_dialog_load_into_fields_error_shown(qapp):
+    """A read error is surfaced in the status label, fields untouched."""
+    ctrl = _make_ctrl(has_predictor=False)
+    dialog = PredictorDialog(ctrl)
+
+    with (
+        patch(
+            "zcu_tools.gui.session.ui.predictor_dialog.QFileDialog.getOpenFileName",
+            return_value=("/bad/params.json", ""),
+        ),
+        patch(
+            "zcu_tools.gui.session.services.predictor.read_fluxdep_fit_params",
+            side_effect=PredictorLoadError("no fluxdep_fit"),
+        ),
+    ):
+        dialog._on_load_params_into_fields()
+
+    assert "no fluxdep_fit" in dialog._status_label.text()

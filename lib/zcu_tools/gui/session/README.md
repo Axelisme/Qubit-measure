@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-15 — operation abstraction（OperationRunner + scope helpers）+ interaction channel（OperationChannel / NotifyChannel）
+**Last updated:** 2026-06-15 — predictor set_model_params（typed EJ/EC/EL model install + dialog editable fields）
 
 # gui/session/ — 量測 session core（measure + autofluxdep 共用）
 
@@ -16,13 +16,13 @@ session/
 ├── operation_runner.py — OperationRunner（唯一 kind-agnostic operation 生命週期機制，ADR-0026 §1：ensure_can_start→create→register→progress factory→submit→終局 settle）+ OperationSpec（各 op 把領域 policy 交給 runner）；run/analyze/device/SoC-connect 都是它的 client，runner 只認 port 不認行為
 ├── scopes.py           — progress_ambient（session 層：pbar ContextVar，無 Qt；ADR-0026 §2，取代舊 BackgroundService._entered/OffMainScopes 的 pbar 欄位）。figure_ambient（Qt）住 app 層 `gui/app/main/services/scopes.py`
 ├── notify_handles.py   — NotifyChannel/NotifyHandles（agent→user prompt 的跨線程 channel，事件集 Reply/Dismiss/Timeout，獨立於 operation 的 Settled/Message/Stop；鏡像 OperationChannel 四不變式，ADR-0025）
-├── controller_port.py  — SessionControllerPort：共用 dialog 依賴的窄 Controller 面（setup/context/connection + device lifecycle/queries/progress + predictor load/clear/predict/curve + inspect md/ml）；回傳宣告對 BaseEventBus 故 app EventBus covariant 滿足
+├── controller_port.py  — SessionControllerPort：共用 dialog 依賴的窄 Controller 面（setup/context/connection + device lifecycle/queries/progress + predictor load/set_model_params/clear/predict/curve + inspect md/ml）；回傳宣告對 BaseEventBus 故 app EventBus covariant 滿足
 ├── pbar_host.py        — ProgressBar(worker)/ProgressBarModel(主線程 SSOT)，Qt-free
 ├── adapters/
 │   └── qt_progress_transport.py — QtProgressTransport（worker→主線程 progress marshal，queued signal；app-agnostic）
 ├── services/
 │   ├── connection.py   — SoCConnectionService（SoC connect op；硬體 facet、OperationRunner client、cancel_hook=None 無 cancellation point；終局經 connection_finished/connection_failed signal，typed requests/failures）
-│   ├── predictor.py    — PredictorService（predictor load/clear/install + predict_freq + 批次曲線計算 predict_freq_curve/predict_matrix_element_curve；純計算，無 Qt signal/runner/gate，擁有 exp_context.predictor 寫 seam，ADR-0026 §5 自 connection.py 拆出）
+│   ├── predictor.py    — PredictorService（predictor load/set_model_params〔typed EJ/EC/EL→FluxoniumPredictor，走 install_predictor in-memory seam〕/clear/install + predict_freq + 批次曲線計算 predict_freq_curve/predict_matrix_element_curve；get_predictor_info 含 EJ/EC/EL；純函式 read_fluxdep_fit_params〔params.json→typed model query〕；純計算，無 Qt signal/runner/gate，擁有 exp_context.predictor 寫 seam，ADR-0026 §5 自 connection.py 拆出）
 │   ├── context.py      — ContextService（context-switch + md ops + ml del/rename + 單一寫入 primitive apply_ml_writes，CfgSchema lowering 經 callback 注入；MdValueError/MlEntryValidationError）
 │   ├── device.py       — DeviceService（connect/disconnect/setup off-main，**全 port 注入**：gate/bg/progress 必傳）；`_mode_dependent_unit(dev)` module-level helper 集中 YOKOGS200 voltage/current→V/A 判斷（`get_device_unit` + `get_device_unit_strict` 共用，消除逐字重複）；`poll_device_info(name)` = best-effort off-main live-read（worker 純讀 driver、on_done 主線做 cache 比對+bump+DEVICE_CHANGED；memory-only/mutating skip、單次讀失敗吞掉，不寫 State 於 worker）
 │   ├── startup.py      — StartupService + PersistedStartup/PersistedDeviceEntry memento + requests + derive_project_paths
@@ -35,7 +35,7 @@ session/
     ├── progress_stack.py — ProgressStack widget（唯一拉 Qt 的 progress 件）
     ├── setup_dialog.py   — Project + Context + Connection 合併（QSplitter）
     ├── device_dialog.py  — 設備管理；per-device panel lazy-import zcu_tools.device.*；dialog-scoped + selection-scoped QTimer（1s）對當前選取 device 呼 `poll_device_info`，結果經 DEVICE_CHANGED 流回（repaint 由 Phase 1 保留選取路徑接住）；timer 僅可見+有選取時跑，hide/close/無選取即停（不常駐、不全 device 輪詢）
-    ├── predictor_dialog.py — FluxoniumPredictor 載入 + 頻率預測（左控制 / 右繪圖兩欄；load/clear/predict + PREDICTOR_CHANGED 訂閱）；右欄 PredictorCurveCanvas 與 Flux value spinbox 雙向連動（debounce）
+    ├── predictor_dialog.py — FluxoniumPredictor 載入/定義 + 頻率預測（左控制 / 右繪圖兩欄；load/clear/predict + 可編輯 EJ/EC/EL/flux_half/flux_period 欄位 + Apply〔set_predictor_model_params 建+裝〕+「Load params.json→fields」填欄位〔不自動裝〕+ active-model 讀回；PREDICTOR_CHANGED 訂閱）；右欄 PredictorCurveCanvas 與 Flux value spinbox 雙向連動（debounce）
     ├── predictor_canvas.py — PredictorCurveCanvas：f_ij 曲線 over device value（雙 x 軸 flux/value）+ 可拖動 flux 垂線（方案 B：marker 不折、出窗平移）；主線程同步繪圖不需 marshal
     └── inspect_base.py   — InspectDialogBase：md tab + ml view/rename/del；hook _build_extra_ml_buttons/_on_ml_selection_changed 讓子類加 ml create/modify。**consumers**：measure subclass（InspectDialog，加 CfgEditor create/modify）；autofluxdep **直接用不 subclass**（不要 create/modify）
 ```

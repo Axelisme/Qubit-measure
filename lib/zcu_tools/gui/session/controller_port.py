@@ -15,8 +15,9 @@ The port is the union of exactly the methods the two dialogs call:
   ``bind_connection_outcome`` / ``remember_startup_connection`` /
   ``get_soccfg``), device unit lookup.
 - **predictor dialog**: FluxoniumPredictor load / clear / frequency predict
-  (``load_predictor`` / ``clear_predictor`` / ``predict_freq`` /
-  ``get_predictor_info``).
+  (``load_predictor`` / ``set_predictor_model_params`` / ``clear_predictor`` /
+  ``predict_freq`` / ``get_predictor_info``). ``set_predictor_model_params``
+  builds+installs a predictor straight from typed EJ/EC/EL + flux params.
 - **device dialog**: device lifecycle (``start_connect_device`` /
   ``start_disconnect_device`` / ``start_reconnect_device`` /
   ``start_setup_device`` / ``forget_device`` / ``cancel_device_operation``),
@@ -62,6 +63,7 @@ if TYPE_CHECKING:
         PredictFreqRequest,
         PredictMatrixCurveRequest,
         PredictMatrixCurveResult,
+        SetModelParamsRequest,
     )
     from zcu_tools.gui.session.services.startup import (
         PersistedStartup,
@@ -106,6 +108,7 @@ class SessionControllerPort(Protocol):
 
     # --- predictor dialog: load / clear / predict --------------------------
     def load_predictor(self, req: LoadPredictorRequest) -> None: ...
+    def set_predictor_model_params(self, req: SetModelParamsRequest) -> None: ...
     def clear_predictor(self) -> None: ...
     def predict_freq(self, req: PredictFreqRequest) -> float: ...
     def predict_freq_curve(self, req: PredictCurveRequest) -> PredictCurveResult: ...

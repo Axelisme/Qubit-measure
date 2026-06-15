@@ -265,7 +265,11 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
 #      clicked "Send & Stop" (carries the Stop reason); absent on a plain cancel.
 #      'failed' still raises. _SERVER_INSTRUCTIONS and tool descriptions updated
 #      to reflect the new contract.
-MCP_VERSION = 38
+# MCP 39: predictor.set_model_params wire method (WIRE 32) yields the new
+#      auto-generated gui_predictor_set_model_params MCP tool — builds and
+#      installs a FluxoniumPredictor directly from typed EJ/EC/EL + flux params,
+#      bypassing params.json. Observable MCP surface change after MCP reconnect.
+MCP_VERSION = 39
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)

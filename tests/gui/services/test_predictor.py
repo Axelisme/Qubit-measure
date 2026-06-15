@@ -16,6 +16,8 @@ from zcu_tools.gui.session.services.predictor import (
     PredictorLoadError,
     PredictorNotLoaded,
     PredictorService,
+    SetModelParamsRequest,
+    read_fluxdep_fit_params,
 )
 
 
@@ -220,6 +222,133 @@ def test_get_predictor_info_includes_flux_half_period():
     assert info["flux_period"] == pytest.approx(1.23)
     assert info["flux_bias"] == pytest.approx(0.05)
     assert info["path"] == "/fake/path.json"
+
+
+def test_get_predictor_info_includes_energies():
+    """get_predictor_info exposes EJ/EC/EL from predictor.params for read-back."""
+    svc = _make_svc()
+    fake = _inject_fake_predictor(svc)
+    fake.params = (4.2, 1.1, 0.7)
+
+    info = svc.get_predictor_info()
+    assert info is not None
+    assert info["EJ"] == pytest.approx(4.2)
+    assert info["EC"] == pytest.approx(1.1)
+    assert info["EL"] == pytest.approx(0.7)
+
+
+# ---------------------------------------------------------------------------
+# set_model_params: in-memory build+install (no file)
+# ---------------------------------------------------------------------------
+
+
+def test_set_model_params_builds_and_installs_predictor():
+    """set_model_params installs a real FluxoniumPredictor; info reads it back.
+
+    Exercises the in-memory install seam (no params.json): the predictor object
+    is constructed straight from typed energies, so path stays None.
+    """
+    svc = _make_svc()
+    req = SetModelParamsRequest(
+        EJ=4.0,
+        EC=1.0,
+        EL=1.0,
+        flux_half=0.3,
+        flux_period=0.8,
+        flux_bias=0.1,
+    )
+    svc.set_model_params(req)
+
+    predictor = svc.get_predictor()
+    assert predictor is not None
+    assert predictor.params == (4.0, 1.0, 1.0)
+
+    info = svc.get_predictor_info()
+    assert info is not None
+    assert info["EJ"] == pytest.approx(4.0)
+    assert info["EC"] == pytest.approx(1.0)
+    assert info["EL"] == pytest.approx(1.0)
+    assert info["flux_half"] == pytest.approx(0.3)
+    assert info["flux_period"] == pytest.approx(0.8)
+    assert info["flux_bias"] == pytest.approx(0.1)
+    # In-memory install has no backing file.
+    assert info["path"] is None
+
+
+def test_set_model_params_emits_predictor_changed():
+    """Installing via set_model_params must fan a PredictorChangedPayload."""
+    from zcu_tools.gui.session.events import PredictorChangedPayload
+
+    svc = _make_svc()
+    seen: list[object] = []
+    svc._bus.subscribe(PredictorChangedPayload, lambda p: seen.append(p))
+
+    svc.set_model_params(
+        SetModelParamsRequest(EJ=4.0, EC=1.0, EL=1.0, flux_half=0.3, flux_period=0.8)
+    )
+    assert len(seen) == 1
+
+
+def test_set_model_params_zero_period_raises():
+    """flux_period == 0 makes the value<->flux affine singular — fast-fail."""
+    svc = _make_svc()
+    with pytest.raises(PredictorLoadError, match="flux_period"):
+        svc.set_model_params(
+            SetModelParamsRequest(
+                EJ=4.0, EC=1.0, EL=1.0, flux_half=0.3, flux_period=0.0
+            )
+        )
+    # Nothing installed on the failure path.
+    assert svc.get_predictor() is None
+
+
+# ---------------------------------------------------------------------------
+# read_fluxdep_fit_params: pure params.json -> typed request query
+# ---------------------------------------------------------------------------
+
+
+def _write_params_json(path, *, with_fluxdep: bool = True) -> None:
+    import json
+
+    payload: dict = {"name": "fake_qubit"}
+    if with_fluxdep:
+        payload["fluxdep_fit"] = {
+            "params": {"EJ": 4.5, "EC": 1.2, "EL": 0.9},
+            "flux_half": 0.31,
+            "flux_int": 0.71,
+            "flux_period": 0.8,
+            "plot_transitions": {},
+        }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_read_fluxdep_fit_params_returns_request(tmp_path):
+    """read_fluxdep_fit_params parses fluxdep_fit into a SetModelParamsRequest."""
+    p = tmp_path / "params.json"
+    _write_params_json(p)
+
+    req = read_fluxdep_fit_params(str(p))
+    assert isinstance(req, SetModelParamsRequest)
+    assert req.EJ == pytest.approx(4.5)
+    assert req.EC == pytest.approx(1.2)
+    assert req.EL == pytest.approx(0.9)
+    assert req.flux_half == pytest.approx(0.31)
+    assert req.flux_period == pytest.approx(0.8)
+    # flux_int is alignment-only and must NOT leak into the model request;
+    # flux_bias defaults to 0.0 (the file carries no per-measurement bias).
+    assert req.flux_bias == 0.0
+
+
+def test_read_fluxdep_fit_params_missing_file_raises(tmp_path):
+    with pytest.raises(PredictorLoadError, match="Failed to read params file"):
+        read_fluxdep_fit_params(str(tmp_path / "missing.json"))
+
+
+def test_read_fluxdep_fit_params_no_fluxdep_section_raises(tmp_path):
+    p = tmp_path / "params.json"
+    _write_params_json(p, with_fluxdep=False)
+    with pytest.raises(PredictorLoadError, match="fluxdep_fit"):
+        read_fluxdep_fit_params(str(p))
 
 
 # ---------------------------------------------------------------------------

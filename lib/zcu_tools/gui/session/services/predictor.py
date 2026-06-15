@@ -33,8 +33,30 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class LoadPredictorRequest:
-    path: str
+    # path is Optional so the same request type can represent both the file-load
+    # path (a concrete params.json) and the in-memory install path (None — the
+    # predictor is built from typed params, no backing file). load_predictor
+    # itself still requires a concrete path; None is rejected fast there.
+    path: str | None
     flux_bias: float
+
+
+@dataclass(frozen=True)
+class SetModelParamsRequest:
+    """Build a FluxoniumPredictor straight from typed model params (no file).
+
+    EJ/EC/EL are the Fluxonium energies in GHz; flux_half/flux_period are the
+    value->flux affine anchors (device-value units); flux_bias is the predictor
+    bias correction. Routes through install_predictor (the in-memory seam) so a
+    user/agent can plug in trial energies (e.g. EJ:EC:EL = 4:1:1) directly.
+    """
+
+    EJ: float
+    EC: float
+    EL: float
+    flux_half: float
+    flux_period: float
+    flux_bias: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -96,6 +118,46 @@ class PredictorNotLoaded(RuntimeError):
 
 
 # ---------------------------------------------------------------------------
+# Pure query: read fluxdep_fit model params from a params.json
+# ---------------------------------------------------------------------------
+
+
+def read_fluxdep_fit_params(path: str) -> SetModelParamsRequest:
+    """Read a params.json and return its fluxdep_fit model params.
+
+    Pure query (no state/bus) for the dialog's "Load -> fields" action: it parses
+    the file but does NOT install a predictor, so the user can tweak the populated
+    fields before applying. flux_bias defaults to 0.0 (the file's fluxdep_fit
+    carries no bias — that is a per-measurement correction). flux_int is read by
+    the fit but deliberately omitted here: it is alignment-only, not part of the
+    predictor's value<->flux affine.
+
+    Reuses load_result (the same loader FluxoniumPredictor.from_file uses).
+    Raises PredictorLoadError on any IO / missing-key problem.
+    """
+    from zcu_tools.notebook.persistance import load_result
+
+    try:
+        result = load_result(path)
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        raise PredictorLoadError(f"Failed to read params file: {exc}") from exc
+    fluxdep_fit = result.get("fluxdep_fit")
+    if fluxdep_fit is None:
+        raise PredictorLoadError("params file has no 'fluxdep_fit' section")
+    try:
+        params = fluxdep_fit["params"]
+        return SetModelParamsRequest(
+            EJ=params["EJ"],
+            EC=params["EC"],
+            EL=params["EL"],
+            flux_half=fluxdep_fit["flux_half"],
+            flux_period=fluxdep_fit["flux_period"],
+        )
+    except KeyError as exc:
+        raise PredictorLoadError(f"fluxdep_fit is missing key {exc}") from exc
+
+
+# ---------------------------------------------------------------------------
 # Service
 # ---------------------------------------------------------------------------
 
@@ -127,18 +189,24 @@ class PredictorService:
     def get_predictor_info(self) -> dict | None:
         """Return metadata about the current predictor, or None if not loaded.
 
-        Keys: path, flux_bias, flux_half, flux_period.
-        Adding flux_half / flux_period here (vs predictor's attributes) lets
-        the dialog build the affine conversions without importing FluxoniumPredictor.
+        Keys: path, flux_bias, flux_half, flux_period, EJ, EC, EL.
+        Exposing flux_half / flux_period lets the dialog build the affine
+        conversions without importing FluxoniumPredictor; the EJ/EC/EL energies
+        (predictor.params is the (EJ, EC, EL) GHz tuple) let the dialog read the
+        active model back into its editable fields.
         """
         predictor = self._state.exp_context.predictor
         if predictor is None:
             return None
+        ej, ec, el = predictor.params
         return {
             "path": self._predictor_path,
             "flux_bias": predictor.flux_bias,
             "flux_half": predictor.flux_half,
             "flux_period": predictor.flux_period,
+            "EJ": ej,
+            "EC": ec,
+            "EL": el,
         }
 
     # ------------------------------------------------------------------
@@ -147,6 +215,10 @@ class PredictorService:
 
     def load_predictor(self, req: LoadPredictorRequest) -> None:
         logger.info("load_predictor: path=%r flux_bias=%r", req.path, req.flux_bias)
+        # path is Optional on the request (shared with the in-memory install path),
+        # but the file-load path needs a concrete file — fail fast on None.
+        if req.path is None:
+            raise PredictorLoadError("load_predictor requires a file path, got None")
         try:
             predictor = FluxoniumPredictor.from_file(req.path, flux_bias=req.flux_bias)
         except (FileNotFoundError, OSError, ValueError, KeyError) as exc:
@@ -155,6 +227,35 @@ class PredictorService:
         new_ctx = dataclasses.replace(self._state.exp_context, predictor=predictor)
         self._state.set_context(new_ctx)
         self._bus.emit(PredictorChangedPayload())
+
+    def set_model_params(self, req: SetModelParamsRequest) -> None:
+        """Build a FluxoniumPredictor from typed model params and install it.
+
+        Routes through install_predictor (the in-memory seam) — NOT a file load —
+        so a user/agent can plug trial energies directly. flux_period must be
+        non-zero: the value<->flux affine divides by it (a zero period would make
+        the mapping singular), so reject it fast with a clear message.
+        """
+        logger.info(
+            "set_model_params: EJ=%r EC=%r EL=%r flux_half=%r flux_period=%r flux_bias=%r",
+            req.EJ,
+            req.EC,
+            req.EL,
+            req.flux_half,
+            req.flux_period,
+            req.flux_bias,
+        )
+        if req.flux_period == 0.0:
+            raise PredictorLoadError(
+                "flux_period must be non-zero (value<->flux affine)"
+            )
+        predictor = FluxoniumPredictor(
+            (req.EJ, req.EC, req.EL),
+            req.flux_half,
+            req.flux_period,
+            req.flux_bias,
+        )
+        self.install_predictor(predictor)
 
     def install_predictor(self, predictor: FluxoniumPredictor) -> None:
         """Install a ready-made predictor object (no file load).

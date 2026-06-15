@@ -488,6 +488,22 @@ METHOD_SPECS: dict[str, MethodSpec] = {
             _num_default("flux_bias", 0.0, "Flux bias"),
         ),
     ),
+    "predictor.set_model_params": MethodSpec(
+        10.0,
+        "Build+install a FluxoniumPredictor directly from typed model params "
+        "(no params.json). EJ/EC/EL are the Fluxonium energies in GHz "
+        "(e.g. 4:1:1); flux_half/flux_period are the value->flux affine anchors "
+        "in device-value units; flux_bias is the bias correction. Replaces any "
+        "currently loaded predictor.",
+        (
+            _num("EJ", "Josephson energy E_J (GHz)"),
+            _num("EC", "Charging energy E_C (GHz)"),
+            _num("EL", "Inductive energy E_L (GHz)"),
+            _num("flux_half", "Half-flux (Phi0/2) value->flux anchor (device units)"),
+            _num("flux_period", "Flux period (device units); must be non-zero"),
+            _num_default("flux_bias", 0.0, "Flux bias correction (device units)"),
+        ),
+    ),
     "predictor.clear": MethodSpec(5.0, "Clear predictor"),
     "predictor.predict": MethodSpec(
         10.0,

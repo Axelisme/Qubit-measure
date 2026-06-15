@@ -142,7 +142,14 @@ from __future__ import annotations
 #      event (Send & Stop semantic); absent on a plain cancel. 'failed' is still
 #      raised as PRECONDITION_FAILED. Wire contract change (new legal status on
 #      completed replies).
-WIRE_VERSION = 31
+# v32: added predictor.set_model_params — build+install a FluxoniumPredictor
+#      directly from typed model params (EJ/EC/EL in GHz + flux_half/flux_period/
+#      flux_bias) through the in-memory install_predictor seam, no params.json.
+#      Lets a user/agent plug trial energies (e.g. EJ:EC:EL = 4:1:1) and predict.
+#      New RPC method = contract change. The MCP tool gui_predictor_set_model_params
+#      is auto-generated from the spec. predictor.info reply gains EJ/EC/EL so the
+#      active model reads back (additive field; no shape break).
+WIRE_VERSION = 32
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -304,4 +311,11 @@ WIRE_VERSION = 31
 #      splits 'cancelled' from 'failed': cancelled returns {reason:'completed',
 #      status:'cancelled', feedback?} (the Stop reason from _make_completed is
 #      propagated); failed still raises PRECONDITION_FAILED. No new RPC method.
-GUI_VERSION = 38
+# v39: predictor.set_model_params dual-end (WIRE 32). New service seam
+#      PredictorService.set_model_params (builds FluxoniumPredictor from typed
+#      EJ/EC/EL + flux params, routes through install_predictor) + controller
+#      delegate (measure + autofluxdep) + dispatch handler. predictor.info gains
+#      EJ/EC/EL. PredictorDialog grows editable EJ/EC/EL/flux_half/flux_period
+#      spinboxes, an Apply button, a "Load params.json -> fields" action, and an
+#      active-model read-back.
+GUI_VERSION = 39

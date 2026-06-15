@@ -1795,6 +1795,33 @@ def _h_predictor_load(
     return {}
 
 
+def _h_predictor_set_model_params(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    from zcu_tools.gui.session.services.predictor import (
+        PredictorLoadError,
+        SetModelParamsRequest,
+    )
+
+    req = SetModelParamsRequest(
+        EJ=float(params["EJ"]),  # type: ignore[arg-type]
+        EC=float(params["EC"]),  # type: ignore[arg-type]
+        EL=float(params["EL"]),  # type: ignore[arg-type]
+        flux_half=float(params["flux_half"]),  # type: ignore[arg-type]
+        flux_period=float(params["flux_period"]),  # type: ignore[arg-type]
+        flux_bias=float(params["flux_bias"]),  # type: ignore[arg-type]
+    )
+    try:
+        adapter.ctrl.set_predictor_model_params(req)
+    except PredictorLoadError as exc:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
+    return {}
+
+
 def _h_predictor_clear(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
@@ -1907,6 +1934,7 @@ _HANDLERS: dict[str, Handler] = {
     "view.snapshot": _h_view_snapshot,
     "tab.get_current_figure": _h_tab_get_current_figure,
     "predictor.load": _h_predictor_load,
+    "predictor.set_model_params": _h_predictor_set_model_params,
     "predictor.clear": _h_predictor_clear,
     "predictor.predict": _h_predictor_predict,
     "predictor.info": _h_predictor_info,

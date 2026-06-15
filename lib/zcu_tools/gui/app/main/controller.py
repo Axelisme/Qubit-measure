@@ -34,6 +34,7 @@ from zcu_tools.gui.session.services.predictor import (
     PredictFreqRequest,
     PredictMatrixCurveRequest,
     PredictMatrixCurveResult,
+    SetModelParamsRequest,
 )
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
@@ -1389,6 +1390,9 @@ class Controller:
 
     def load_predictor(self, req: LoadPredictorRequest) -> None:
         self._pred_svc.load_predictor(req)
+
+    def set_predictor_model_params(self, req: SetModelParamsRequest) -> None:
+        self._pred_svc.set_model_params(req)
 
     def clear_predictor(self) -> None:
         self._pred_svc.clear_predictor()

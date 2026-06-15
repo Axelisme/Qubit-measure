@@ -78,6 +78,7 @@ if TYPE_CHECKING:
         PredictFreqRequest,
         PredictMatrixCurveRequest,
         PredictMatrixCurveResult,
+        SetModelParamsRequest,
     )
     from zcu_tools.gui.session.services.startup import (
         PersistedStartup,
@@ -289,6 +290,9 @@ class Controller:
     # -- predictor dialog: load / clear / predict (the shared PredictorDialog) --
     def load_predictor(self, req: LoadPredictorRequest) -> None:
         self._pred_svc.load_predictor(req)
+
+    def set_predictor_model_params(self, req: SetModelParamsRequest) -> None:
+        self._pred_svc.set_model_params(req)
 
     def clear_predictor(self) -> None:
         self._pred_svc.clear_predictor()
