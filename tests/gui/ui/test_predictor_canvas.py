@@ -97,6 +97,14 @@ def test_canvas_render_curves_no_error(canvas):
     assert len(canvas.figure.get_axes()) > 0
 
 
+def test_canvas_primary_xaxis_label_device_value_no_unit(canvas):
+    """The primary x-axis is labelled 'Device value' with no Ampere/'(A)' unit."""
+    canvas.render_curves(**_make_render_kwargs())
+    ax = canvas._get_ax()
+    assert ax is not None
+    assert ax.get_xlabel() == "Device value"
+
+
 def test_canvas_render_creates_four_curves(canvas):
     """render_curves must draw exactly four data lines (one per transition)."""
     canvas.render_curves(**_make_render_kwargs(n_transitions=4))
@@ -126,50 +134,175 @@ def test_canvas_clear_no_error(canvas):
     assert canvas._marker_value is None
 
 
-def test_canvas_drag_callback_fires(canvas):
-    """on_drag callback is called when _on_move fires while dragging."""
+class _FakeAxesEvent:
+    """Lightweight in-axes event for driving the canvas handlers headlessly."""
+
+    def __init__(self, ax, x: float) -> None:
+        self.inaxes = ax
+        self.xdata = x
+
+
+def test_canvas_follow_engages_on_first_click(canvas):
+    """A first click near the marker engages follow mode (no lock callback yet)."""
     canvas.render_curves(**_make_render_kwargs())
+    ax = canvas._get_ax()
+    assert ax is not None
+
+    locks: list[float] = []
+    canvas.bind_callbacks(on_follow=lambda _v: None, on_lock=locks.append)
+
+    canvas._on_press(_FakeAxesEvent(ax, 0.5))  # click on the marker → engage
+    assert canvas._following is True
+    assert locks == []  # engaging click does not lock
+
+
+def test_canvas_follow_callback_fires_on_motion_without_button(canvas):
+    """While following, motion (button NOT held) fires on_follow with the cursor x."""
+    canvas.render_curves(**_make_render_kwargs())
+    ax = canvas._get_ax()
+    assert ax is not None
 
     received: list[float] = []
-    canvas.bind_callbacks(on_drag=received.append, on_drop=lambda _v: None)
+    canvas.bind_callbacks(on_follow=received.append, on_lock=lambda _v: None)
 
+    canvas._on_press(_FakeAxesEvent(ax, 0.5))  # engage follow
+    canvas._on_move(_FakeAxesEvent(ax, 0.6))  # cursor moves while following
+    canvas._on_move(_FakeAxesEvent(ax, 0.65))
+
+    assert received == pytest.approx([0.6, 0.65])
+
+
+def test_canvas_no_follow_motion_before_engage(canvas):
+    """Motion without an engaging click must NOT fire on_follow."""
+    canvas.render_curves(**_make_render_kwargs())
     ax = canvas._get_ax()
     assert ax is not None
 
-    class FakeEvent:
-        def __init__(self, x: float) -> None:
-            self.inaxes = ax
-            self.xdata = x
+    received: list[float] = []
+    canvas.bind_callbacks(on_follow=received.append, on_lock=lambda _v: None)
 
-    canvas._on_press(FakeEvent(0.5))  # grab the marker (within tol)
-    canvas._on_move(FakeEvent(0.6))  # drag to 0.6
-    canvas._on_release(FakeEvent(0.6))  # release
-
-    assert len(received) >= 1
-    assert received[-1] == pytest.approx(0.6)
+    canvas._on_move(_FakeAxesEvent(ax, 0.6))  # not following yet
+    assert received == []
 
 
-def test_canvas_drop_callback_fires(canvas):
-    """on_drop callback is called on release after an actual drag."""
+def test_canvas_second_click_locks_and_disengages(canvas):
+    """A second click disengages follow and fires on_lock at the current marker."""
+    canvas.render_curves(**_make_render_kwargs())
+    ax = canvas._get_ax()
+    assert ax is not None
+
+    locks: list[float] = []
+    canvas.bind_callbacks(on_follow=lambda _v: None, on_lock=locks.append)
+
+    canvas._on_press(_FakeAxesEvent(ax, 0.5))  # engage
+    canvas._on_move(_FakeAxesEvent(ax, 0.7))  # follow → marker at 0.7
+    canvas._on_press(_FakeAxesEvent(ax, 0.7))  # second click → lock + disengage
+
+    assert canvas._following is False
+    assert len(locks) == 1
+    assert locks[0] == pytest.approx(0.7)
+
+
+def test_canvas_motion_after_lock_does_not_follow(canvas):
+    """After locking, further motion must NOT fire on_follow."""
+    canvas.render_curves(**_make_render_kwargs())
+    ax = canvas._get_ax()
+    assert ax is not None
+
+    received: list[float] = []
+    canvas.bind_callbacks(on_follow=received.append, on_lock=lambda _v: None)
+
+    canvas._on_press(_FakeAxesEvent(ax, 0.5))  # engage
+    canvas._on_move(_FakeAxesEvent(ax, 0.7))  # follow
+    canvas._on_press(_FakeAxesEvent(ax, 0.7))  # lock
+    received.clear()
+    canvas._on_move(_FakeAxesEvent(ax, 0.9))  # motion after lock → ignored
+
+    assert received == []
+
+
+# ---------------------------------------------------------------------------
+# Auto-untrack: leaving the axes while following disengages without a click
+# ---------------------------------------------------------------------------
+
+
+class _FakeLeaveEvent:
+    """Lightweight leave event (no xdata / inaxes) for driving _on_axes_leave."""
+
+    # axes_leave_event / figure_leave_event carry no meaningful xdata.
+    pass
+
+
+def test_canvas_leave_event_while_following_disengages(canvas):
+    """axes_leave_event while following disengages and fires on_lock at last position."""
+    canvas.render_curves(**_make_render_kwargs())
+    ax = canvas._get_ax()
+    assert ax is not None
+
+    locks: list[float] = []
+    canvas.bind_callbacks(on_follow=lambda _v: None, on_lock=locks.append)
+
+    canvas._on_press(_FakeAxesEvent(ax, 0.5))  # engage follow
+    canvas._on_move(_FakeAxesEvent(ax, 0.65))  # move → marker at 0.65
+    canvas._on_axes_leave(_FakeLeaveEvent())  # cursor leaves axes
+
+    assert canvas._following is False
+    assert len(locks) == 1
+    assert locks[0] == pytest.approx(0.65)  # locked at last in-range position
+
+
+def test_canvas_out_of_range_motion_while_following_disengages(canvas):
+    """motion_notify_event with inaxes=None while following auto-untracks."""
+    canvas.render_curves(**_make_render_kwargs())
+    ax = canvas._get_ax()
+    assert ax is not None
+
+    locks: list[float] = []
+    canvas.bind_callbacks(on_follow=lambda _v: None, on_lock=locks.append)
+
+    canvas._on_press(_FakeAxesEvent(ax, 0.5))  # engage follow
+    canvas._on_move(_FakeAxesEvent(ax, 0.7))  # follow → marker at 0.7
+
+    # Out-of-range motion: inaxes is None, xdata is None.
+    class _OutOfRangeEvent:
+        inaxes = None
+        xdata = None
+
+    canvas._on_move(_OutOfRangeEvent())  # backstop path
+
+    assert canvas._following is False
+    assert len(locks) == 1
+    assert locks[0] == pytest.approx(0.7)
+
+
+def test_canvas_motion_after_leave_disengage_does_not_follow(canvas):
+    """After auto-untrack via leave, in-range motion must NOT move marker or call on_follow."""
+    canvas.render_curves(**_make_render_kwargs())
+    ax = canvas._get_ax()
+    assert ax is not None
+
+    received: list[float] = []
+    canvas.bind_callbacks(on_follow=received.append, on_lock=lambda _v: None)
+
+    canvas._on_press(_FakeAxesEvent(ax, 0.5))  # engage
+    canvas._on_move(_FakeAxesEvent(ax, 0.6))  # follow
+    canvas._on_axes_leave(_FakeLeaveEvent())  # leave → disengage
+    received.clear()
+
+    canvas._on_move(_FakeAxesEvent(ax, 0.8))  # in-range motion after disengage
+    assert received == []
+    assert canvas._marker_value == pytest.approx(0.6)  # marker stays at 0.6
+
+
+def test_canvas_leave_event_when_not_following_is_noop(canvas):
+    """axes_leave_event while NOT following must not fire on_lock."""
     canvas.render_curves(**_make_render_kwargs())
 
-    drops: list[float] = []
-    canvas.bind_callbacks(on_drag=lambda _v: None, on_drop=drops.append)
+    locks: list[float] = []
+    canvas.bind_callbacks(on_follow=lambda _v: None, on_lock=locks.append)
 
-    ax = canvas._get_ax()
-    assert ax is not None
-
-    class FakeEvent:
-        def __init__(self, x: float) -> None:
-            self.inaxes = ax
-            self.xdata = x
-
-    canvas._on_press(FakeEvent(0.5))
-    canvas._on_move(FakeEvent(0.7))
-    canvas._on_release(FakeEvent(0.7))
-
-    assert len(drops) == 1
-    assert drops[0] == pytest.approx(0.7)
+    canvas._on_axes_leave(_FakeLeaveEvent())  # not following — no-op
+    assert locks == []
 
 
 # ---------------------------------------------------------------------------

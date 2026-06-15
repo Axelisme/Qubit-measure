@@ -1,8 +1,13 @@
 """PredictorCurveCanvas — interactive matplotlib canvas for the PredictorDialog.
 
-Draws f_ij transition-frequency curves vs device value (A) with a draggable
-flux-position marker. Designed for main-thread synchronous drawing only
-(FigureCanvasQTAgg + draw_idle), so no cross-thread marshalling is needed.
+Draws f_ij transition-frequency curves vs device value with a click-follow-click
+marker. Designed for main-thread synchronous drawing only (FigureCanvasQTAgg +
+draw_idle), so no cross-thread marshalling is needed.
+
+Marker interaction is click-follow-click (not press-drag-release): a single click
+near the marker engages "follow" mode in which the marker tracks the cursor's
+x-position on motion WITHOUT any button held; a second click anywhere in the axes
+disengages and locks the marker at its current position.
 """
 
 from __future__ import annotations
@@ -65,11 +70,11 @@ class PredictorCurveCanvas(QWidget):
     2. Call ``set_marker(value)`` to reposition the marker without recomputing curves.
     3. Call ``clear()`` to blank the canvas (predictor cleared).
 
-    Drag callbacks (injected by the dialog):
-    - ``on_drag(value)``  — called on each motion event while dragging the marker
-                            (use to update a spinbox without triggering a recompute).
-    - ``on_drop(value)``  — called once on button-release after an actual drag
-                            (use to trigger the single-point prediction label).
+    Follow callbacks (injected by the dialog):
+    - ``on_follow(value)`` — called on each motion event while in follow mode
+                             (use to update a spinbox / schedule a debounced recompute).
+    - ``on_lock(value)``   — called once when follow mode disengages (second click)
+                             (use to trigger a final immediate recompute).
     """
 
     def __init__(
@@ -84,13 +89,12 @@ class PredictorCurveCanvas(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.canvas)
 
-        # Drag-state fields.
-        self._dragging: bool = False
-        self._dragged: bool = False  # did the mouse actually move while held?
+        # Follow-state field: True between the engaging click and the locking click.
+        self._following: bool = False
 
-        # Injected drag callbacks; set to no-ops so we never check for None.
-        self._on_drag: Callable[[float], None] = lambda _v: None
-        self._on_drop: Callable[[float], None] = lambda _v: None
+        # Injected follow callbacks; set to no-ops so we never check for None.
+        self._on_follow: Callable[[float], None] = lambda _v: None
+        self._on_lock: Callable[[float], None] = lambda _v: None
 
         # Live rendering state (populated by render_curves / set_marker).
         self._marker_line: Line2D | None = None
@@ -102,18 +106,23 @@ class PredictorCurveCanvas(QWidget):
         self._curve_lines: dict[tuple[int, int], Line2D] = {}
         self._current_highlight: tuple[int, int] | None = None
 
+        # Click-follow-click only needs press (toggle) + motion (follow); the
+        # button is never held, so no release handler is wired.
+        # axes_leave_event is the canonical mpl signal for cursor leaving axes bounds;
+        # _on_move also covers the backstop case where inaxes/xdata is None.
         self.canvas.mpl_connect("button_press_event", self._on_press)
         self.canvas.mpl_connect("motion_notify_event", self._on_move)
-        self.canvas.mpl_connect("button_release_event", self._on_release)
+        self.canvas.mpl_connect("axes_leave_event", self._on_axes_leave)
+        self.canvas.mpl_connect("figure_leave_event", self._on_axes_leave)
 
     def bind_callbacks(
         self,
-        on_drag: Callable[[float], None],
-        on_drop: Callable[[float], None],
+        on_follow: Callable[[float], None],
+        on_lock: Callable[[float], None],
     ) -> None:
-        """Inject the dialog's drag/drop handlers."""
-        self._on_drag = on_drag
-        self._on_drop = on_drop
+        """Inject the dialog's follow/lock handlers."""
+        self._on_follow = on_follow
+        self._on_lock = on_lock
 
     # ------------------------------------------------------------------
     # Public rendering API
@@ -138,7 +147,7 @@ class PredictorCurveCanvas(QWidget):
         ``labels`` are the per-curve legend labels (e.g. "0→1"), ``series`` is
         shape (n_transitions, n_values), and ``ylabel`` is the y-axis label.
 
-        The primary x-axis is device value (A).  A secondary top x-axis shows
+        The primary x-axis is device value (no unit).  A secondary top x-axis shows
         flux (Φ/Φ₀) using the affine callables ``value_to_flux`` / ``flux_to_value``.
         ``highlight=None`` renders all curves in normal style (no curve highlighted).
         """
@@ -172,7 +181,10 @@ class PredictorCurveCanvas(QWidget):
             )
             self._curve_lines[key] = line
 
-        ax.set_xlabel("Device value (A)")
+        # No unit on the device-value axis: the bound device is not necessarily a
+        # current source. The secondary top axis below carries the reduced flux
+        # Φ/Φ₀ (a genuinely different physical quantity, not a relabel).
+        ax.set_xlabel("Device value")
         ax.set_ylabel(ylabel)
         ax.legend(fontsize=8, loc="best")
 
@@ -203,7 +215,7 @@ class PredictorCurveCanvas(QWidget):
         self.canvas.draw_idle()
 
     def set_marker(self, value: float) -> None:
-        """Move the marker line to ``value`` (device A) and pan the window if needed.
+        """Move the marker line to ``value`` (device value) and pan the window if needed.
 
         Does NOT trigger a curve recompute.
         """
@@ -283,26 +295,55 @@ class PredictorCurveCanvas(QWidget):
             return None
         return float(xdata)
 
-    def _on_press(self, event: Event) -> None:
-        x = self._event_xdata(event)
-        if x is not None and self._pick_marker(x):
-            self._dragging = True
-            self._dragged = False
+    def _disengage(self) -> None:
+        """Disengage follow mode and fire on_lock at the last valid marker position.
 
-    def _on_move(self, event: Event) -> None:
-        if not self._dragging:
-            return
+        Shared by the second-click path and the auto-untrack path (cursor leaves axes).
+        The marker stays at its last in-range value; no visual jump occurs.
+        """
+        self._following = False
+        if self._marker_value is not None:
+            self._on_lock(self._marker_value)
+
+    def _on_press(self, event: Event) -> None:
+        """Click toggles follow mode.
+
+        First click (near the marker) engages follow; the next click anywhere in
+        the axes disengages and locks the marker at its current position, firing
+        on_lock so the dialog can do a final immediate recompute.
+        """
         x = self._event_xdata(event)
         if x is None:
             return
-        self._dragged = True
-        # Move the visual marker immediately (no recompute).
-        self.set_marker(x)
-        self._on_drag(x)
+        if self._following:
+            # Second click → lock at the current marker value and disengage.
+            self._disengage()
+        elif self._pick_marker(x):
+            # First click on the marker → engage follow mode.
+            self._following = True
 
-    def _on_release(self, event: Event) -> None:
-        del event
-        if self._dragging and self._dragged and self._marker_value is not None:
-            self._on_drop(self._marker_value)
-        self._dragging = False
-        self._dragged = False
+    def _on_move(self, event: Event) -> None:
+        if not self._following:
+            return
+        x = self._event_xdata(event)
+        if x is None:
+            # Backstop: motion event with no in-axes position while following means
+            # the cursor has left the display area.  Auto-untrack at the last valid
+            # position so the user does not need to click again.
+            self._disengage()
+            return
+        # Track the cursor: move the visual marker immediately (no recompute);
+        # the dialog debounces the actual recompute behind on_follow.
+        self.set_marker(x)
+        self._on_follow(x)
+
+    def _on_axes_leave(self, event: Event) -> None:  # noqa: ARG002
+        """Auto-untrack when the cursor leaves the axes (axes_leave_event / figure_leave_event).
+
+        This is the canonical mpl path; _on_move's inaxes-None backstop handles
+        the case where mpl fires a motion event outside the axes instead of (or
+        before) the leave event.
+        """
+        if not self._following:
+            return
+        self._disengage()
