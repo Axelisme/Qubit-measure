@@ -1,5 +1,7 @@
 # ADR-0023 — Cooperative interrupt：user feedback 喚醒 pending wait
 
+> **狀態：已被 [[0025]] 取代。** 本案的「feedback inbox 作 `await_outcome` 第二喚醒源」屬「多 channel + 時序敏感 combine」形狀，會生 race（Send & Stop 的 post→cancel ordering、無 `stop_event` 的 interactive 結構洞）。[[0025]] 改以**單一 per-interaction 有序事件 channel** 取代，race/deadlock by construction 消除。下文為原始記錄。
+
 ## 脈絡
 
 要讓使用者**委派一個 Claude agent 操作 GUI**（經 `gui_*` MCP 工具）並能**即時插話糾正**，且限定在**訂閱認證 + CLI subprocess**（非 API key）下。查證結論：乾淨的 turn-中途 `interrupt()`（Agent SDK）只能 API key（訂閱 OAuth 用於 SDK 被官方禁止）；CLI subprocess 只能做 turn-之間打斷或粗暴 SIGINT。

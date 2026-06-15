@@ -10,6 +10,8 @@
 - [0002 — 版本表 + async handle + off-main handler](0002-version-table-async-handle-off-main.md)：並發感知＝資源版本表 guard（非追 origin）+ RPC-as-proxy operation handle + off-main blocking handler + 三層分工。（併入舊 origin-tracking 與 change-buffer 的演化）
 - [0003 — 統一 async cancel + ShutdownCoordinator](0003-shutdown-coordinator-and-registry-cancel.md)：Registry 持 stop_event（cancel/poll/await 三動詞齊備）+ Qt-free 輪詢關閉。（§一「綁死」被 [[0019]] 取代）
 - [0019 — Operation = token + opt-in facets + 可插 execution strategy](0019-operation-facets-and-execution-strategy.md)：Exclusion/Handle/Progress/Cancel 四 facet 任意組合 + strategy（OffMain-thread/pool、Main-thread-user-paced、Blocking）多型；拆 Handle 出 gate、抽 BackgroundService、「async in main thread」。取代 [[0003]] §一綁死。
+- [0025 — 跨線程互動 channel](0025-cross-thread-interaction-channel.md)：GUI↔agent 跨線程互動改用**單一 per-interaction 有序事件 channel**（typed `Settled`/`Message`/`Stop(reason)`，consumer 依到達序折疊）取代「completion Event + feedback inbox + stop_event」三 channel 的時序敏感 combine；producer 不阻塞、consumer 限時阻塞 → race-free（全序）+ deadlock-free（單向有界等待）by construction；「Send & Stop」視為單一 `Stop(reason)` 意圖；含 run/analyze/device/connect/notify_user 的適用性分析（save 因同步無 handle 不適用）。取代 [[0023]]，關聯 [[0019]]/[[0017]]/[[0026]]。
+- [0026 — operation abstraction：OperationRunner + scope-as-adapter + State write ports](0026-operation-abstraction-runner-scope-ports.md)：抽 kind-agnostic `OperationRunner`（唯一生命週期機制，組合非繼承）+ 各 op 交 `OperationSpec` policy（領域邏輯 interpret/on_terminal 留各 op）；`BackgroundService` 退化純執行器、scope-wiring 進 adapter（`ActiveTask` 不再外洩 bg）；State→窄 write port；gate/progress 維持 port 兄弟不併入；`ConnectionService` 拆 SoC+Predictor、DeviceService 保留+`DeviceRegistryPort`、save 留抽象外。關聯 [[0019]]/[[0025]]/[[0004]]/[[0005]]/[[0017]]/[[0007]]。
 
 ## II. Service 架構
 
@@ -52,5 +54,5 @@
 ## IX. 多 agent 協作
 
 - [0022 — taskboard 為主協調層、worktree 為輔](0022-agent-coordination-taskboard.md)：多 agent 共享 checkout 的協調＝stdio MCP taskboard（file-backed JSON+flock、path 衝突偵測、read/write 鎖、資源 token、pending/wait、TTL 自動回收、md 視圖）；worktree 解不了 singleton 資源爭用故僅為輔。
-- [0023 — Cooperative interrupt：feedback 喚醒 pending wait](0023-cooperative-interrupt-feedback-wakeup.md)：給單一共用 await（`await_outcome`）加第二喚醒源（thread-safe feedback inbox），pending wait 提早返回帶判別 payload `{reason,result?,feedback?}`；feedback 入口為 `mcp/measure/server.py` feedback passthrough（GUI 端 feedback bar 已移除）；擴展 [[0002]]。
+- [0023 — Cooperative interrupt：feedback 喚醒 pending wait](0023-cooperative-interrupt-feedback-wakeup.md)：**（已被 [[0025]] 取代）** 原設計給單一共用 await 加 thread-safe feedback inbox 作第二喚醒源；其「多 channel + 時序敏感 combine」形狀會生 race，由 [[0025]] 的單一有序 channel 取代。
 - [0024 — 外部終端 agent launch 架構](0024-embedded-agent-session-architecture.md)：measure-gui「Agent」按鈕 spawn 系統終端跑真互動式 claude，經 loopback mcp.json 操作 GUI；GUI 狀態烤進 `--append-system-prompt`；`--resume` 持久（last session id 存 cache 檔）；跨平台終端 spawn + `ZCU_AGENT_CMD`；lazy auto-connect 靠既有 mcp server；Ctrl-C 原生中斷。取代原內嵌 stream-json 設計。
