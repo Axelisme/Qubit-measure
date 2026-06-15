@@ -49,7 +49,12 @@ def run_qt_app(
 
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
 
-    from zcu_tools.gui.plotting import ensure_host, set_shutting_down
+    from zcu_tools.gui.plotting import (
+        ensure_host,
+        install_mathtext_lock,
+        prewarm_mathtext,
+        set_shutting_down,
+    )
 
     app = QApplication.instance() or QApplication(sys.argv)
 
@@ -57,6 +62,11 @@ def run_qt_app(
     # matplotlib backend marshals worker-thread figure work through it, and it
     # must be built on the GUI thread before any worker plots.
     ensure_host()
+    # Serialize matplotlib mathtext parsing across threads and prewarm it on this
+    # (main) thread, so off-main worker $...$ title parsing never races the
+    # singleton parser (BUG-1 / ADR-0017).
+    install_mathtext_lock()
+    prewarm_mathtext()
     # On teardown, mark the plot host down BEFORE Qt deletes its widgets, so the
     # matplotlib atexit hook (Gcf.destroy_all → backend destroy → remove_canvas)
     # becomes a no-op instead of touching a deleted container.

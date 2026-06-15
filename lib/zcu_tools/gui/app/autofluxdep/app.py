@@ -67,6 +67,16 @@ def run_app(
     repo_root = str(Path(__file__).resolve().parents[5])
 
     app = QApplication.instance() or QApplication(sys.argv)
+
+    # Serialize matplotlib mathtext parsing across threads and prewarm it on this
+    # (main) thread, so off-main worker $...$ title parsing never races the
+    # singleton parser (BUG-1 / ADR-0017). autofluxdep uses Agg and does not run
+    # through run_qt_app, so it installs the lock here itself (defense-in-depth).
+    from zcu_tools.gui.plotting import install_mathtext_lock, prewarm_mathtext
+
+    install_mathtext_lock()
+    prewarm_mathtext()
+
     ctrl = build_core(project, project_root=repo_root)
     window = MainWindow(ctrl)
     window.show()

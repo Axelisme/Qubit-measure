@@ -36,6 +36,10 @@ if TYPE_CHECKING:
         remove_canvas,
         set_shutting_down,
     )
+    from .mathtext_lock import (
+        install_mathtext_lock,
+        prewarm_mathtext,
+    )
     from .routing import (
         require_current_container,
         routing_scope,
@@ -55,7 +59,9 @@ _LAZY: dict[str, str] = {
     "dump_plot_state": "host",
     "ensure_host": "host",
     "get_figure_container": "host",
+    "install_mathtext_lock": "mathtext_lock",
     "is_main_thread": "host",
+    "prewarm_mathtext": "mathtext_lock",
     "refresh_figure_in_main_thread": "host",
     "remove_canvas": "host",
     "set_shutting_down": "host",
@@ -74,7 +80,9 @@ __all__ = [
     "dump_plot_state",
     "ensure_host",
     "get_figure_container",
+    "install_mathtext_lock",
     "is_main_thread",
+    "prewarm_mathtext",
     "refresh_figure_in_main_thread",
     "remove_canvas",
     "require_current_container",

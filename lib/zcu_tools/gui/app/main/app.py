@@ -76,6 +76,14 @@ def run_app(
 
     app = QApplication.instance() or QApplication(sys.argv)
 
+    # Serialize matplotlib mathtext parsing across threads and prewarm it on this
+    # (main) thread, so off-main AnalyzeWorker $...$ title parsing never races the
+    # singleton parser (BUG-1 / ADR-0017). Must run on the main thread.
+    from zcu_tools.gui.plotting import install_mathtext_lock, prewarm_mathtext
+
+    install_mathtext_lock()
+    prewarm_mathtext()
+
     # --- wire up components ---
     state = State(_make_empty_ctx())
     io_manager = IOManager()
