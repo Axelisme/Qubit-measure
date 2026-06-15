@@ -19,6 +19,17 @@ def _mock_ctrl() -> MagicMock:
     return ctrl
 
 
+def _apply_window_defaults(ctrl: MagicMock) -> MagicMock:
+    """Set the minimal return values required by MainWindow.__init__ on a mock ctrl.
+
+    MainWindow now calls active_operation_count() during bus-event handlers
+    (FloatingFeedbackWidget visibility, Stage 4a); tests that emit bus events
+    must stub this to an int or the comparison fails.
+    """
+    ctrl.active_operation_count.return_value = 0
+    return ctrl
+
+
 # Distinguishes "caller did not specify analyze_params" (default to a MagicMock)
 # from "caller explicitly wants None" (a non-analysis adapter's snapshot).
 _DEFAULT_PARAMS = object()
@@ -368,7 +379,7 @@ def test_main_window_run_lock_disables_only_new_tab_and_run(qapp):
 def test_main_window_soc_changed_refreshes_run_lock(qapp):
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
-    ctrl = MagicMock()
+    ctrl = _apply_window_defaults(MagicMock())
     bus = EventBus()
     ctrl.get_bus.return_value = bus
     ctrl.get_running_tab_id.return_value = None
@@ -388,7 +399,7 @@ def test_main_window_content_event_queries_single_tab_snapshot(qapp):
     from zcu_tools.gui.app.main.events.tab import TabContentChangedPayload
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
-    ctrl = MagicMock()
+    ctrl = _apply_window_defaults(MagicMock())
     bus = EventBus()
     ctrl.get_bus.return_value = bus
     ctrl.get_tab_snapshot.return_value = _snapshot("tab-1")
@@ -411,7 +422,7 @@ def test_finished_run_auto_switches_to_analysis_tab(qapp):
     decision reads the outcome straight off the RUN_FINISHED payload."""
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
-    ctrl = MagicMock()
+    ctrl = _apply_window_defaults(MagicMock())
     bus = EventBus()
     ctrl.get_bus.return_value = bus
     ctrl.get_running_tab_id.return_value = None
@@ -430,7 +441,7 @@ def test_stopped_run_does_not_auto_switch_to_analysis_tab(qapp):
     interrupted on purpose — must not yank them to the Analysis tab."""
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
-    ctrl = MagicMock()
+    ctrl = _apply_window_defaults(MagicMock())
     bus = EventBus()
     ctrl.get_bus.return_value = bus
     ctrl.get_running_tab_id.return_value = None
@@ -452,7 +463,7 @@ def test_non_analysis_adapter_run_auto_switches_to_second_tab(qapp):
     whole tab was hidden so the user could not save at all."""
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
-    ctrl = MagicMock()
+    ctrl = _apply_window_defaults(MagicMock())
     bus = EventBus()
     ctrl.get_bus.return_value = bus
     ctrl.get_running_tab_id.return_value = None
@@ -474,7 +485,7 @@ def test_refresh_analyze_form_skips_non_analysis_adapter_without_raising(qapp):
     guard that demands initialized params (regression: it used to raise)."""
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
-    ctrl = MagicMock()
+    ctrl = _apply_window_defaults(MagicMock())
     bus = EventBus()
     ctrl.get_bus.return_value = bus
     ctrl.get_running_tab_id.return_value = None
@@ -500,6 +511,8 @@ def _editor_wiring_ctrl() -> MagicMock:
     ctrl.get_current_ml.return_value = MagicMock()
     ctrl.list_device_names.return_value = []
     ctrl.has_soc.return_value = False
+    # Stage 4a: MainWindow.__init__ reads active_operation_count() during init.
+    ctrl.active_operation_count.return_value = 0
 
     # populate_cfg now opens a service-owned (gc=False) seeded session and
     # attaches the widget to the service-owned model (ADR-0008). Build a real

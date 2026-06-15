@@ -568,6 +568,30 @@ class Controller:
             host.unmount_interactive_analysis(tab_id)
         return self._analyze_svc.cancel_interactive(tab_id)
 
+    def _active_operation(self) -> tuple[int | None, str | None]:
+        """Return (token, tag) for the single foreground in-flight operation.
+
+        Applies the same taxonomy as cancel_active_operation / send_feedback:
+        run > interactive analyze > device (measure-gui drives one foreground
+        op at a time). Returns (None, None) when no operation is active.
+
+        token is sourced from the respective service's active-token accessor;
+        it may itself be None if the service is active but the token was not
+        captured (edge case during startup races) — callers must tolerate
+        token=None paired with a non-None tag.
+        """
+        running = self._state.running_tab_id
+        if running is not None:
+            return self._run_svc.active_token, "run"
+        tab = self._analyze_svc.active_interactive_tab()
+        if tab is not None:
+            return self._analyze_svc.active_interactive_token(), f"analyze:{tab}"
+        ops = self.get_active_device_operations()
+        if ops:
+            name = ops[0].device_name
+            return self._dev_svc.active_operation_token(name), f"device:{name}"
+        return None, None
+
     def cancel_active_operation(self) -> str | None:
         """Cancel the single in-flight operation the floating feedback widget
         represents; returns a short tag of what was cancelled (or None for a
@@ -589,12 +613,24 @@ class Controller:
             return f"device:{name}"
         return None
 
+    def can_cancel_active_operation(self) -> bool:
+        """True when the active foreground operation has a cancel hook.
+
+        Used by FloatingFeedbackWidget to gate the 'Send & Stop' button: ops
+        without a cancel hook (connect / FIT-analyze / device connect-
+        disconnect) should not show Stop (ADR-0025 §Stop-gating, ADR-0019).
+        Returns False when no operation is active.
+        """
+        token, _tag = self._active_operation()
+        if token is None:
+            return False
+        return self._operation_handles.has_cancel_hook(token)
+
     def send_feedback(self, message: str, *, stop: bool = False) -> str | None:
         """User->agent feedback from the GUI (ADR-0025).
 
         Routes the message to the active operation's OperationChannel using
-        the same taxonomy as ``cancel_active_operation`` (run > interactive >
-        device):
+        the taxonomy from _active_operation() (run > interactive > device):
         - ``stop=False``: ``handles.message(token, text)`` — pure nudge, op
           continues running; agent receives user_feedback (non-terminal).
         - ``stop=True``: UI teardown first (unmount view for interactive), then
@@ -603,52 +639,26 @@ class Controller:
 
         Returns the taxonomy tag of what was cancelled (stop=True only), or None.
         """
-        running = self._state.running_tab_id
-        if running is not None:
-            token = self._run_svc.active_token
-            if stop:
-                if token is not None:
-                    self._operation_handles.stop(token, reason=message)
-                # run has no UI unmount step; cancel_hook (stop_event.set) handles it.
-                return "run"
-            else:
-                if token is not None:
-                    self._operation_handles.message(token, message)
-                return None
+        token, tag = self._active_operation()
+        if tag is None:
+            return None
 
-        tab = self._analyze_svc.active_interactive_tab()
-        if tab is not None:
-            token = self._analyze_svc.active_interactive_token()
-            if stop:
-                # Unmount the interactive view BEFORE triggering the hook, so the
-                # View is clean regardless of hook timing.
-                host = self._render_host
-                if host is not None:
-                    host.unmount_interactive_analysis(tab)
-                if token is not None:
-                    self._operation_handles.stop(token, reason=message)
-                # Note: handles.stop() triggers the cancel_hook (cancel_interactive),
-                # which clears is_analyzing + settles the handle as cancelled.
-                return f"analyze:{tab}"
-            else:
-                if token is not None:
-                    self._operation_handles.message(token, message)
-                return None
+        # Interactive analyze requires View teardown before the hook fires;
+        # run and device have no UI unmount step.
+        if stop and tag.startswith("analyze:"):
+            tab = tag[len("analyze:") :]
+            host = self._render_host
+            if host is not None:
+                host.unmount_interactive_analysis(tab)
 
-        ops = self.get_active_device_operations()
-        if ops:
-            name = ops[0].device_name
-            token = self._dev_svc.active_operation_token(name)
-            if stop:
-                if token is not None:
-                    self._operation_handles.stop(token, reason=message)
-                return f"device:{name}"
-            else:
-                if token is not None:
-                    self._operation_handles.message(token, message)
-                return None
-
-        return None
+        if stop:
+            if token is not None:
+                self._operation_handles.stop(token, reason=message)
+            return tag
+        else:
+            if token is not None:
+                self._operation_handles.message(token, message)
+            return None
 
     # ------------------------------------------------------------------
     # Shutdown coordination (cancel-all + wait, ADR-0003)

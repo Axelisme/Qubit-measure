@@ -297,6 +297,74 @@ def test_send_feedback_stop_cancels_interactive_analyze(cf):
 
 
 # ---------------------------------------------------------------------------
+# can_cancel_active_operation (Stage 4a, ADR-0025 §Stop-gating)
+# ---------------------------------------------------------------------------
+
+
+def test_can_cancel_active_operation_false_when_no_op(cf):
+    """No active operation → returns False."""
+    assert cf.ctrl.can_cancel_active_operation() is False
+
+
+def test_can_cancel_active_operation_true_for_interactive_analyze(cf):
+    """Interactive analyze registers a cancel hook → returns True."""
+    from zcu_tools.gui.app.main.services.guard import AnalyzePermit
+
+    tab_id = cf.ctrl.new_tab("fake")
+    cf.state.update_tab_result(tab_id, object())
+    cf.ctrl._analyze_svc.start_interactive(AnalyzePermit(tab_id=tab_id))
+    assert cf.state.is_tab_analyzing(tab_id) is True
+
+    result = cf.ctrl.can_cancel_active_operation()
+
+    assert result is True
+    # Cleanup.
+    cf.ctrl.cancel_analyze(tab_id)
+
+
+def test_can_cancel_active_operation_false_for_soc_connect(cf):
+    """SoC connect has no cancel hook → returns False when it is the active op.
+
+    Injects a fake live operation token with no cancel hook to simulate a
+    connect op being in-flight (the actual connect needs QICK hardware, so
+    we mock the op state directly).
+    """
+    # Mint an op without a cancel hook (simulates connect: cancel_hook=None).
+    token = cf.ctrl._operation_handles.create(cancel_hook=None)
+    # Force the controller's run taxonomy to skip run/analyze and reach
+    # "device" via get_active_device_operations() — instead, directly inject
+    # a live operation and verify has_cancel_hook on the handles.
+    # Since _active_operation() checks running_tab_id first, and we have none,
+    # we test the handles layer directly here to avoid needing a real SoC.
+    assert cf.ctrl._operation_handles.has_cancel_hook(token) is False
+    # Cleanup: settle the injected op.
+    from zcu_tools.gui.session.operation_handles import OperationOutcome
+
+    cf.ctrl._operation_handles.settle(token, OperationOutcome("finished"))
+
+
+def test_active_operation_helper_returns_none_none_when_idle(cf):
+    """_active_operation() returns (None, None) when no op is active."""
+    token, tag = cf.ctrl._active_operation()
+    assert token is None
+    assert tag is None
+
+
+def test_active_operation_helper_returns_tag_for_interactive(cf):
+    """_active_operation() returns the correct tag for an interactive analyze."""
+    from zcu_tools.gui.app.main.services.guard import AnalyzePermit
+
+    tab_id = cf.ctrl.new_tab("fake")
+    cf.state.update_tab_result(tab_id, object())
+    cf.ctrl._analyze_svc.start_interactive(AnalyzePermit(tab_id=tab_id))
+
+    _token, tag = cf.ctrl._active_operation()
+    assert tag == f"analyze:{tab_id}"
+    # Cleanup.
+    cf.ctrl.cancel_analyze(tab_id)
+
+
+# ---------------------------------------------------------------------------
 # start_run / run_finished flow
 # ---------------------------------------------------------------------------
 

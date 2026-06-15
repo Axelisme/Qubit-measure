@@ -25,12 +25,18 @@ from zcu_tools.gui.plotting import (
 )
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
+    DeviceChangedPayload,
+    DeviceSetupFinishedPayload,
+    DeviceSetupStartedPayload,
     MlChangedPayload,
     PredictorChangedPayload,
     SocChangedPayload,
 )
 
 logger = logging.getLogger(__name__)
+
+# Gap (px) between the feedback widget and the MainWindow's right/bottom edges.
+_FEEDBACK_MARGIN = 12
 
 from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
 from qtpy.QtGui import (  # type: ignore[attr-defined]
@@ -954,6 +960,20 @@ class MainWindow(QMainWindow):
         bus.subscribe(TabContentChangedPayload, self._on_bus_tab_content_changed)
         bus.subscribe(PredictorChangedPayload, self._on_bus_predictor_changed)
         bus.subscribe(SocChangedPayload, self._on_bus_soc_changed)
+        # Device setup ops: bus events let us track op start/finish for the
+        # feedback widget (B1 approach — refresh at every op count change).
+        bus.subscribe(DeviceSetupStartedPayload, self._on_bus_device_setup_started)
+        bus.subscribe(DeviceSetupFinishedPayload, self._on_bus_device_setup_finished)
+        # Device connect/disconnect ops: DeviceChangedPayload fires when the
+        # device state changes (after op start and after op finish), covering
+        # both starts and completions of connect/disconnect ops.
+        bus.subscribe(DeviceChangedPayload, self._on_bus_device_changed)
+
+        # Floating feedback widget (built after bus wiring; initially hidden).
+        from .feedback_widget import FloatingFeedbackWidget
+
+        self._feedback_widget = FloatingFeedbackWidget(self._ctrl, parent=self)
+        self._feedback_widget.hide()
 
         # Cleanup on destroy
         self.destroyed.connect(self._cleanup_bus_subscriptions)
@@ -972,6 +992,9 @@ class MainWindow(QMainWindow):
         bus.unsubscribe(TabContentChangedPayload, self._on_bus_tab_content_changed)
         bus.unsubscribe(PredictorChangedPayload, self._on_bus_predictor_changed)
         bus.unsubscribe(SocChangedPayload, self._on_bus_soc_changed)
+        bus.unsubscribe(DeviceSetupStartedPayload, self._on_bus_device_setup_started)
+        bus.unsubscribe(DeviceSetupFinishedPayload, self._on_bus_device_setup_finished)
+        bus.unsubscribe(DeviceChangedPayload, self._on_bus_device_changed)
 
     def _on_bus_tab_interaction_changed(
         self, payload: TabInteractionChangedPayload
@@ -979,14 +1002,19 @@ class MainWindow(QMainWindow):
         snapshot = self._ctrl.get_tab_snapshot(payload.tab_id)
         self.refresh_tab_writeback(payload.tab_id, snapshot)
         self.refresh_tab_interaction(payload.tab_id, snapshot)
+        # Interactive analyze start/finish both emit TabInteractionChangedPayload;
+        # refresh widget visibility and stop-gating on every change.
+        self._refresh_feedback_widget()
 
     def _on_bus_run_started(self, payload: RunStartedPayload) -> None:
         # Run lock now held by this tab.
         self.refresh_run_lock(payload.tab_id)
+        self._refresh_feedback_widget()
 
     def _on_bus_run_finished(self, payload: RunFinishedPayload) -> None:
         # Run lock released.
         self.refresh_run_lock(None)
+        self._refresh_feedback_widget()
         # Auto-switch to the second tab on a normal finish — RUN_FINISHED carries
         # the outcome directly, so the decision lives here. A stopped run
         # (outcome=cancelled) may leave a partial result, but the user interrupted
@@ -1074,6 +1102,8 @@ class MainWindow(QMainWindow):
         # The auto-switch to Analysis lives in _on_bus_run_finished (it needs the
         # run outcome); content refresh here is outcome-agnostic.
         self.refresh_tab_interaction(tab_id, snapshot)
+        # FIT analyze finish emits TabContentChangedPayload; refresh widget.
+        self._refresh_feedback_widget()
 
     def _on_bus_predictor_changed(self, payload: PredictorChangedPayload) -> None:
         del payload
@@ -1082,6 +1112,71 @@ class MainWindow(QMainWindow):
     def _on_bus_soc_changed(self, payload: SocChangedPayload) -> None:
         del payload
         self.refresh_run_lock(self._ctrl.get_running_tab_id())
+        # SoC connect succeeds → op count drops; refresh widget visibility.
+        self._refresh_feedback_widget()
+
+    def _on_bus_device_setup_started(self, payload: DeviceSetupStartedPayload) -> None:
+        del payload
+        self._refresh_feedback_widget()
+
+    def _on_bus_device_setup_finished(
+        self, payload: DeviceSetupFinishedPayload
+    ) -> None:
+        del payload
+        self._refresh_feedback_widget()
+
+    def _on_bus_device_changed(self, payload: DeviceChangedPayload) -> None:
+        # Fires on device connect/disconnect start and on completion (state
+        # change after op finish). Refreshes the widget on every op boundary.
+        del payload
+        self._refresh_feedback_widget()
+
+    # ------------------------------------------------------------------
+    # Floating feedback widget (Stage 4a)
+    # ------------------------------------------------------------------
+
+    def resizeEvent(self, a0) -> None:  # type: ignore[override]
+        super().resizeEvent(a0)
+        # Re-position the feedback widget after window resize.
+        QTimer.singleShot(0, self._layout_feedback_widget)
+
+    def _layout_feedback_widget(self) -> None:
+        """Position the feedback widget in the bottom-right corner.
+
+        Uses the same QTimer.singleShot(0, ...) deferred layout technique as
+        _PanelEdgeHandle._schedule_handle_layout, ensuring the geometry is
+        read after the Qt layout pass has completed.
+        """
+        widget = self._feedback_widget
+        if not widget.isVisible():
+            return
+        widget.adjustSize()
+        w = widget.width()
+        h = widget.height()
+        x = self.width() - w - _FEEDBACK_MARGIN
+        y = self.height() - h - _FEEDBACK_MARGIN
+        widget.move(max(0, x), max(0, y))
+
+    def _refresh_feedback_widget(self) -> None:
+        """Show/hide the floating feedback widget based on live op count.
+
+        Called at the end of every op-start / op-finish bus handler so the
+        widget tracks the live operation count in real time (B1 approach).
+        Centralises all show/hide/gating logic in one place (ADR-0025 C1:
+        always show when any op is live; future gate on agent connected).
+        """
+        count = self._ctrl.active_operation_count()
+        if count > 0:
+            self._feedback_widget.refresh_gating()
+            if not self._feedback_widget.isVisible():
+                self._feedback_widget.show()
+                self._feedback_widget.raise_()
+                QTimer.singleShot(0, self._layout_feedback_widget)
+            else:
+                QTimer.singleShot(0, self._layout_feedback_widget)
+        else:
+            self._feedback_widget.hide()
+            self._feedback_widget.clear_input()
 
     # ------------------------------------------------------------------
     # ViewProtocol implementation

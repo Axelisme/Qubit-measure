@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-15（D1b/D1c：新增 `project.info` wire getter（WIRE 27，回 chip/qub/res + result_dir/database_path，無 project 時 fast-fail no_project）+ `_assemble_overview` 折入 `project` 欄位（has_project guard，否則 null）；agent launch 不再 bake GUI 快照——`build_agent_state_context` 改名 `build_agent_bootstrap_prompt` 只發常數 bootstrap 指令（指示 agent 先呼 `gui_overview` 讀 live 狀態、勿假設），`agent_launcher` 的 `state_context` kwarg 改名 `bootstrap_prompt`；`_SERVER_INSTRUCTIONS` 加 orient 段（GUI 34））
+**Last updated:** 2026-06-15（Stage 4a：FloatingFeedbackWidget — 右下角浮動 overlay，parent=MainWindow，由 live op 數驅動顯隱（B1：訂閱所有 op start/finish bus events），Stop 鈕依 active op 是否有 cancel hook gating（`Controller.can_cancel_active_operation`→`OperationHandles.has_cancel_hook`→`OperationChannel.can_cancel`）；`controller._active_operation()` 抽出 taxonomy helper 供 send_feedback/cancel/can_cancel 共用）
 
 # `zcu_tools/gui/app/main/` — measure-gui Framework AI Note
 

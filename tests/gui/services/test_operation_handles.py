@@ -543,6 +543,79 @@ def test_settle_window_keeps_token_reachable() -> None:
     assert r2.outcome is not None and r2.outcome.status == "cancelled"
 
 
+# ---------------------------------------------------------------------------
+# OperationChannel.can_cancel (ADR-0025 §Stop-gating)
+# ---------------------------------------------------------------------------
+
+
+def test_channel_can_cancel_true_when_hook_registered() -> None:
+    """A channel with a cancel hook reports can_cancel=True."""
+    ch = OperationChannel(cancel_hook=lambda: None)
+    assert ch.can_cancel is True
+
+
+def test_channel_can_cancel_false_when_no_hook() -> None:
+    """A channel with no cancel hook (e.g. connect) reports can_cancel=False."""
+    ch = OperationChannel(cancel_hook=None)
+    assert ch.can_cancel is False
+
+
+# ---------------------------------------------------------------------------
+# OperationHandles.has_cancel_hook (ADR-0025 §Stop-gating)
+# ---------------------------------------------------------------------------
+
+
+def test_has_cancel_hook_live_token_with_hook() -> None:
+    """A live token with a cancel hook returns True."""
+    handles = OperationHandles()
+    token = handles.create(cancel_hook=lambda: None)
+    assert handles.has_cancel_hook(token) is True
+
+
+def test_has_cancel_hook_live_token_without_hook() -> None:
+    """A live token without a cancel hook (e.g. connect) returns False."""
+    handles = OperationHandles()
+    token = handles.create(cancel_hook=None)
+    assert handles.has_cancel_hook(token) is False
+
+
+def test_has_cancel_hook_settled_token_with_hook() -> None:
+    """A settled (done) token with a hook is still reachable via _done."""
+    handles = OperationHandles()
+    token = handles.create(cancel_hook=lambda: None)
+    handles.settle(token, OperationOutcome("finished"))
+    # Token moved to _done but must still be queryable.
+    assert handles.has_cancel_hook(token) is True
+
+
+def test_has_cancel_hook_settled_token_without_hook() -> None:
+    """A settled token without a hook returns False."""
+    handles = OperationHandles()
+    token = handles.create(cancel_hook=None)
+    handles.settle(token, OperationOutcome("finished"))
+    assert handles.has_cancel_hook(token) is False
+
+
+def test_has_cancel_hook_unknown_token_returns_false() -> None:
+    """Unknown token (never created) returns False — no hook by definition."""
+    handles = OperationHandles()
+    assert handles.has_cancel_hook(99999) is False
+
+
+def test_has_cancel_hook_is_pure_read_does_not_trigger_hook() -> None:
+    """has_cancel_hook must never call the cancel hook."""
+    fired: list[bool] = []
+
+    def hook() -> None:
+        fired.append(True)
+
+    handles = OperationHandles()
+    token = handles.create(cancel_hook=hook)
+    result = handles.has_cancel_hook(token)
+    assert result is True
+    assert fired == []  # hook must NOT have been called
+
+
 def test_pure_nudge_between_awaits_is_delivered_not_dropped() -> None:
     """A pure nudge enqueued while the op is settling (or between awaits) is
     delivered as user_feedback on the next consume, not silently folded away

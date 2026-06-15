@@ -160,6 +160,16 @@ class OperationChannel:
         # Consumer-private latch: accumulated Stop reasons from past Stop events.
         self._pending_stop_reason: str | None = None
 
+    @property
+    def can_cancel(self) -> bool:
+        """True when a cancel hook is registered (this op is cancellable).
+
+        Pure read — never triggers the hook; used by
+        OperationHandles.has_cancel_hook() to gate the 'Send & Stop' button
+        without any op-kind knowledge in this layer (ADR-0025 §Stop-gating).
+        """
+        return self._cancel_hook is not None
+
     # ------------------------------------------------------------------
     # Producer interface (non-blocking)
     # ------------------------------------------------------------------
@@ -430,6 +440,24 @@ class OperationHandles:
         if ch is None:
             return OperationOutcome("finished")
         return ch.settled_outcome()
+
+    def has_cancel_hook(self, token: int) -> bool:
+        """Return True when the token's channel has a cancel hook registered.
+
+        Checks _live first, then _done (a token settling between the caller
+        reading the active token and this call is still reachable). Returns
+        False for unknown tokens — they have no hook by definition.
+
+        Used by Controller.can_cancel_active_operation() to gate the
+        'Send & Stop' button without any op-kind knowledge in this layer
+        (ADR-0025 §Stop-gating). Pure read — never triggers the hook.
+        """
+        ch = self._live.get(token)
+        if ch is None:
+            ch = self._done.get(token)
+        if ch is None:
+            return False
+        return ch.can_cancel
 
     def live_count(self) -> int:
         """How many operations are live (pending) right now, of any facet —
