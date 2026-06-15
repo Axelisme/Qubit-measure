@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 26
+skill_version: 27
 ---
 
 # run-measure-gui
@@ -197,6 +197,15 @@ flags these (its writeback describes a hand-pick). The flow:
    **The picking is the user's judgement — you set up, prompt, observe, and write
    back; you never decide the line positions.**
 
+To **abort** a mounted interactive picker without a result — you set it up but no
+human will pick, or you need to re-plan — call `gui_analyze_cancel(tab_id)`. It
+settles the interactive handle (`{ok:true, cancelled:true}` when one was in
+flight; `cancelled:false` is a graceful no-op when nothing is mounted) and
+unmounts the picker so the tab is free again. The cancel outcome rides
+`gui_analyze_cancel`'s own reply — **after a cancel, `gui_analyze_poll` reports
+`status:finished`, not `cancelled`** (only `gui_run_*` surfaces a cancelled status
+through poll/wait).
+
 **Post-analysis (second layer, e.g. single-shot `ge` discrimination).** Some
 adapters offer a second analysis on top of the primary fit. After a primary
 `gui_analyze` settles, `gui_post_analyze(tab_id)` runs it — FIT-only, so it
@@ -349,6 +358,24 @@ Steps 7–12 (Rabi/T2/recalibrate/Rabi/T1) are the per-point qubit
 characterization. Reset characterization (single/dual/bath, in the notebook) is
 a separate sub-procedure layered on top once a π pulse exists.
 
+**Estimate `q_f` before `twotone/freq` — sweep the right window or you see only
+noise.** At a fresh bias point `q_f` is unknown, and a narrow or mis-centered
+twotone window returns pure noise that *looks* like "no qubit". After step 4 (at
+the integer / sweet-spot bias) predict `q_f` from the fluxonium model first:
+- Set the model in the predictor — `gui_predictor_set_model_params(EJ, EC, EL,
+  flux_half, flux_period)` (energies in GHz; a typical fluxonium is roughly
+  `EJ:EC:EL ≈ 4:1:1`), or `gui_predictor_load(path)` from a `params.json`
+  `fluxdep_fit`. Then `gui_predictor_predict(value)` at the current flux returns
+  the predicted `q_f` (`gui_predictor_info` reads back the active EJ/EC/EL + flux
+  alignment).
+- Then run `twotone/freq` with a **wide** sweep bracketing that estimate (e.g. a
+  ~2 GHz span such as 4000–6000 MHz) to actually catch the peak; narrow only once
+  you see it. **A twotone scan that looks like noise almost always means the
+  window missed `q_f`, not that there is no qubit** — widen and re-centre before
+  giving up. `q_f` also moves strongly with flux (a fluxonium sits low at the
+  half-flux sweet spot and much higher at the integer point), so confirm which
+  bias you are at before trusting a window.
+
 ## Decision boundaries — act vs. ask
 
 Separate what you may infer automatically from what needs the user. The
@@ -494,7 +521,10 @@ hardware) — the smoke harness uses it.
 - **`run` success is not `analyze` success.** A completed acquisition can still
   produce a bad or misleading fit. On real data, open the figure and verify the
   model visually before you trust `gui_tab_get_analyze_result`, especially for
-  lookback timing, narrow resonator windows, and overlapping dips.
+  lookback timing, narrow resonator windows, and overlapping dips. **A small fit
+  error bar does not prove the fit is right** — a noisy Rabi/freq fit can converge
+  to a confident-looking value with a tiny uncertainty; only the figure tells you
+  whether the model actually matches the data.
 - **Minimum writeback bar: inspect the analysis figure first.** Do not write fit
   results into the context or module library unless the plotted fit matches the
   feature you intended to measure.
