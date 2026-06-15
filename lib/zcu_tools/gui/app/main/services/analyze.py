@@ -128,6 +128,12 @@ class AnalyzeService(_StagedAnalyzeService):
         (opened by ``start_interactive``, not yet settled by Done / cancel)."""
         return tab_id in self._interactive_tabs
 
+    def active_interactive_tab(self) -> str | None:
+        """A tab with an in-flight interactive analyze, or None — the foreground
+        op for ``Controller.cancel_active_operation`` to settle. Arbitrary if more
+        than one (measure-gui drives one interactive picker at a time)."""
+        return next(iter(self._interactive_tabs), None)
+
     def cancel_interactive(self, tab_id: str) -> bool:
         """Cancel an in-flight INTERACTIVE analyze: settle its handle as cancelled
         and clear ``is_analyzing`` so the tab can close.

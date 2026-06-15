@@ -393,3 +393,76 @@ def test_live_count_tracks_pending_operations() -> None:
     assert handles.live_count() == 1
     handles.settle(t2, OperationOutcome("finished"))
     assert handles.live_count() == 0
+
+
+# ---------------------------------------------------------------------------
+# await_outcome — "Send & Stop": feedback folded into a cancelled outcome
+# (single {status:cancelled, feedback} signal; message channel + cancel stay
+# separate mechanisms, await_outcome is the only combiner).
+# ---------------------------------------------------------------------------
+
+
+def test_cancelled_settle_folds_pending_feedback() -> None:
+    inbox = FeedbackInbox()
+    handles = OperationHandles(inbox)
+    token = handles.create(threading.Event())
+    inbox.post("stop - wrong resonator")
+    handles.settle(token, OperationOutcome("cancelled"))
+
+    r = handles.await_outcome(token, timeout=1.0)
+    assert r is not None
+    assert r.reason == "completed"
+    assert r.outcome == OperationOutcome("cancelled")
+    assert r.feedback == "stop - wrong resonator"
+
+
+def test_cancelled_settle_without_feedback_has_none() -> None:
+    inbox = FeedbackInbox()
+    handles = OperationHandles(inbox)
+    token = handles.create(threading.Event())
+    handles.settle(token, OperationOutcome("cancelled"))
+
+    r = handles.await_outcome(token, timeout=1.0)
+    assert r is not None
+    assert r.reason == "completed"
+    assert r.outcome == OperationOutcome("cancelled")
+    assert r.feedback is None
+
+
+def test_feedback_held_while_cancel_in_progress_then_folded() -> None:
+    # While a cancel is in progress (stop_event set) but the op has not settled,
+    # a posted message must NOT return early as a user_feedback nudge — it is held
+    # and folded into the imminent cancelled settle.
+    inbox = FeedbackInbox()
+    handles = OperationHandles(inbox)
+    stop = threading.Event()
+    token = handles.create(stop)
+
+    stop.set()  # cancel requested
+    inbox.post("stop now")
+
+    r1 = handles.await_outcome(token, timeout=0.05)  # not settled yet
+    assert r1 is not None
+    assert r1.reason == "timeout"  # NOT user_feedback
+    assert inbox.has_pending()  # message retained, not drained
+
+    handles.settle(token, OperationOutcome("cancelled"))
+    r2 = handles.await_outcome(token, timeout=1.0)
+    assert r2 is not None
+    assert r2.reason == "completed"
+    assert r2.outcome == OperationOutcome("cancelled")
+    assert r2.feedback == "stop now"
+
+
+def test_feedback_nudge_without_cancel_returns_user_feedback() -> None:
+    # A message with NO cancel in progress is a plain nudge (op keeps running).
+    inbox = FeedbackInbox()
+    handles = OperationHandles(inbox)
+    token = handles.create(threading.Event())  # stop_event present but NOT set
+    inbox.post("look at R2")
+
+    r = handles.await_outcome(token, timeout=1.0)
+    assert r is not None
+    assert r.reason == "user_feedback"
+    assert r.feedback == "look at R2"
+    assert handles.poll(token) is None  # non-terminal: handle still live

@@ -567,6 +567,39 @@ class Controller:
             host.unmount_interactive_analysis(tab_id)
         return self._analyze_svc.cancel_interactive(tab_id)
 
+    def cancel_active_operation(self) -> str | None:
+        """Cancel the single in-flight operation the floating feedback widget
+        represents; returns a short tag of what was cancelled (or None for a
+        no-op). The ONLY place that maps "the active op" to the right cancel —
+        op-taxonomy lives here, not in the View. Priority run > interactive
+        analyze > device (measure-gui drives one foreground op at a time)."""
+        running = self._state.running_tab_id
+        if running is not None:
+            self.cancel_run()
+            return "run"
+        tab = self._analyze_svc.active_interactive_tab()
+        if tab is not None:
+            self.cancel_analyze(tab)
+            return f"analyze:{tab}"
+        ops = self.get_active_device_operations()
+        if ops:
+            name = ops[0].device_name
+            self.cancel_device_operation(name)
+            return f"device:{name}"
+        return None
+
+    def send_feedback(self, message: str, *, stop: bool = False) -> str | None:
+        """User->agent feedback from the GUI (ADR-0023). ALWAYS posts ``message``
+        to the feedback inbox (wakes / piggybacks to the waiting agent); when
+        ``stop`` is True, ALSO cancels the active operation so the message surfaces
+        as the cancellation reason ({status:cancelled, feedback}). The message
+        channel (inbox) and the cancel are separate single-responsibility
+        mechanisms — this façade only composes them. Returns what was cancelled."""
+        self._feedback_inbox.post(message)
+        if stop:
+            return self.cancel_active_operation()
+        return None
+
     # ------------------------------------------------------------------
     # Shutdown coordination (cancel-all + wait, ADR-0003)
     # ------------------------------------------------------------------

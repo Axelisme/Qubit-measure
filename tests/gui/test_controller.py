@@ -233,6 +233,41 @@ def test_cancel_analyze_without_interactive_is_graceful(cf):
 
 
 # ---------------------------------------------------------------------------
+# send_feedback / cancel_active_operation — user->agent feedback channel
+# (ADR-0023): the façade posts the message to the inbox and, on stop, routes to
+# the right cancel (op-taxonomy lives here, not in the View).
+# ---------------------------------------------------------------------------
+
+
+def test_send_feedback_posts_without_stop(cf):
+    # stop=False is a nudge: message goes to the inbox, nothing is cancelled.
+    assert cf.ctrl.send_feedback("look at R2", stop=False) is None
+    assert cf.ctrl._feedback_inbox.has_pending() is True
+
+
+def test_cancel_active_operation_noop_when_idle(cf):
+    assert cf.ctrl.cancel_active_operation() is None
+
+
+def test_send_feedback_stop_cancels_interactive_analyze(cf):
+    from zcu_tools.gui.app.main.services.guard import AnalyzePermit
+
+    tab_id = cf.ctrl.new_tab("fake")
+    cf.state.update_tab_result(tab_id, object())
+    cf.ctrl._analyze_svc.start_interactive(AnalyzePermit(tab_id=tab_id))
+    assert cf.state.is_tab_analyzing(tab_id) is True
+
+    cancelled = cf.ctrl.send_feedback("stop - wrong feature", stop=True)
+
+    # Routed to the interactive analyze (no run in flight); message also posted so
+    # await_outcome folds it into the cancelled outcome.
+    assert cancelled == f"analyze:{tab_id}"
+    assert cf.state.is_tab_analyzing(tab_id) is False
+    cf.view.unmount_interactive_analysis.assert_called_once_with(tab_id)
+    assert cf.ctrl._feedback_inbox.has_pending() is True
+
+
+# ---------------------------------------------------------------------------
 # start_run / run_finished flow
 # ---------------------------------------------------------------------------
 

@@ -72,7 +72,9 @@ class AwaitResult:
     """The result of one ``await_outcome`` call (ADR-0023).
 
     ``reason`` distinguishes the three return paths:
-    - ``'completed'``: the operation settled (terminal). ``outcome`` is set.
+    - ``'completed'``: the operation settled (terminal). ``outcome`` is set; a
+      cancelled outcome may also carry ``feedback`` (a user "Send & Stop" message
+      folded into the cancellation, so the agent gets one {cancelled, feedback}).
     - ``'user_feedback'``: a feedback string arrived before the op settled (non-
       terminal). ``feedback`` is set; the operation is still running and the handle
       can be awaited again.
@@ -225,6 +227,20 @@ class OperationHandles:
             self.cancel(token)
         return tokens
 
+    def _completed_with_feedback(self, outcome: OperationOutcome) -> AwaitResult:
+        """Build a 'completed' AwaitResult, folding any pending user feedback into
+        a CANCELLED outcome so a "Send & Stop" surfaces as a single
+        {status:cancelled, feedback} rather than two events. Feedback is attached
+        ONLY for a cancelled outcome — a finished op leaves nudges in the inbox for
+        the next await to deliver as a standalone user_feedback."""
+        feedback: str | None = None
+        inbox = self._feedback_inbox
+        if outcome.status == "cancelled" and inbox is not None and inbox.has_pending():
+            msgs = inbox.drain()
+            if msgs:
+                feedback = "\n".join(msgs)
+        return AwaitResult(reason="completed", outcome=outcome, feedback=feedback)
+
     def await_outcome(self, token: int, timeout: float) -> AwaitResult | None:
         """Block until the token settles or a wakeup condition fires.
 
@@ -251,19 +267,26 @@ class OperationHandles:
         live = self._events.get(token)
         if live is None:
             retained = self._done.get(token)
-            if retained is not None:
-                return AwaitResult(reason="completed", outcome=retained[1])
-            # Unknown / evicted: treat as already finished.
-            return AwaitResult(reason="completed", outcome=OperationOutcome("finished"))
+            outcome = (
+                retained[1] if retained is not None else OperationOutcome("finished")
+            )
+            # Folds pending feedback into a cancelled outcome (Send & Stop).
+            return self._completed_with_feedback(outcome)
 
         inbox = self._feedback_inbox
+        stop_event = self._stop_events.get(token)
+
+        def _cancel_in_progress() -> bool:
+            # A cancel was requested (stop_event set): hold any feedback so it
+            # folds into the imminent cancelled settle (one {cancelled, feedback})
+            # instead of returning early as a standalone user_feedback nudge.
+            return stop_event is not None and stop_event.is_set()
 
         # --- pre-enter check: drain feedback accumulated between waits --------
-        # If feedback arrived while no await was active (inbox-to-next-wait
-        # residual), return it immediately without blocking. This guarantees
-        # that feedback sent between two awaits is delivered on the very next
-        # await entry rather than waiting a full tick.
-        if inbox is not None and inbox.has_pending():
+        # Feedback sent between two awaits is delivered on the very next entry
+        # rather than waiting a full tick — UNLESS a cancel is in progress, in
+        # which case it belongs to the cancellation (folded in on settle below).
+        if inbox is not None and inbox.has_pending() and not _cancel_in_progress():
             msgs = inbox.drain()
             if msgs:
                 feedback_text = "\n".join(msgs)
@@ -275,10 +298,8 @@ class OperationHandles:
                 return AwaitResult(reason="user_feedback", feedback=feedback_text)
 
         # --- poll-loop: check operation + feedback each tick ------------------
-        # Using a short-tick poll rather than two parallel threads avoids the
-        # complexity of safely joining a companion thread that may outlive the
-        # caller. Tick granularity is _AWAIT_TICK_SECONDS; the outer timeout is
-        # honoured to within one tick.
+        # Short-tick poll (not two parallel threads) avoids joining a companion
+        # thread that may outlive the caller; outer timeout honoured to one tick.
         import time
 
         deadline = time.monotonic() + timeout
@@ -290,22 +311,22 @@ class OperationHandles:
 
             tick = min(_AWAIT_TICK_SECONDS, remaining)
 
-            # Wait on the operation event; wake early when the operation settles
-            # OR when the tick elapses (whichever comes first).
+            # Wake early when the operation settles OR when the tick elapses.
             settled = live.wait(timeout=tick)
 
             if settled:
-                # Operation completed — terminal return.
                 retained = self._done.get(token)
                 outcome = (
                     retained[1]
                     if retained is not None
                     else OperationOutcome("finished")
                 )
-                return AwaitResult(reason="completed", outcome=outcome)
+                # Folds pending feedback into a cancelled outcome (Send & Stop).
+                return self._completed_with_feedback(outcome)
 
-            # Check feedback inbox on every tick (including after the tick timeout).
-            if inbox is not None and inbox.has_pending():
+            # Feedback nudge — only when NOT cancelling (a cancel-in-progress
+            # holds the feedback for the cancelled settle handled above).
+            if inbox is not None and inbox.has_pending() and not _cancel_in_progress():
                 msgs = inbox.drain()
                 if msgs:
                     feedback_text = "\n".join(msgs)
@@ -316,7 +337,7 @@ class OperationHandles:
                     )
                     return AwaitResult(reason="user_feedback", feedback=feedback_text)
 
-            # Neither settled nor feedback — continue loop until outer deadline.
+            # Neither settled nor feedback (or a cancel is pending) — continue.
 
     def poll(self, token: int) -> OperationOutcome | None:
         """Non-blocking: outcome if settled (or unknown), None if still pending."""
