@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib
 import logging
 import threading
-from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import (
     TYPE_CHECKING,
@@ -22,6 +21,13 @@ from zcu_tools.gui.session.events import (
     DeviceSetupStartedPayload,
 )
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
+from zcu_tools.gui.session.operation_runner import (
+    BgResult,
+    ExclusionRequest,
+    OperationRunner,
+    OperationSpec,
+    SettleFn,
+)
 from zcu_tools.gui.session.ports import (
     BackgroundExecutor,
     DeviceMemoryInfo,
@@ -29,7 +35,6 @@ from zcu_tools.gui.session.ports import (
     ExclusionGate,
     OperationConflictError,
     OperationKind,
-    ProgressHub,
 )
 from zcu_tools.gui.session.scopes import progress_ambient
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
@@ -230,9 +235,9 @@ class DeviceService(QObject):
         state: SessionState,
         gate: ExclusionGate,
         bg: BackgroundExecutor,
-        progress: ProgressHub,
+        runner: OperationRunner,
+        handles: OperationHandles,
         *,
-        handles: OperationHandles | None = None,
         driver_factory: DriverFactoryPort | None = None,
         parent: QObject | None = None,
     ) -> None:
@@ -241,17 +246,16 @@ class DeviceService(QObject):
         self._state = state
         # Device composes both leaves (ADR-0019): Exclusion (device mutation vs
         # run / another mutation of the same device) + a Handle (operation_id +
-        # await + cancel for setup). The app injects the exclusion gate, the
-        # off-main executor and the progress hub via their session ports — this
-        # session service never constructs app/Qt infrastructure itself.
+        # await + cancel for setup). OperationRunner owns the mechanism (ADR-0026 §1);
+        # gate is kept directly for is_device_mutating / _reject_mutating_read;
+        # bg is kept directly for poll_device_info (best-effort read, not a runner op).
         self._gate = gate
-        self._handles = handles or OperationHandles()
-        # Device execution is the OffMain-thread strategy (ADR-0019): connect /
-        # disconnect carry no scopes; setup carries the progress scope + a
-        # directly-polled stop_event (not an ActiveTask scope).
         self._bg = bg
+        self._runner = runner
+        # handles is kept for cancel_device_operation (handles.cancel) — the same
+        # instance that runner holds internally.
+        self._handles = handles
         self._driver_factory = driver_factory or _default_driver_factory
-        self._progress: ProgressHub = progress
         # Device state lives in State (the SSOT). This service holds only the
         # live driver (in GlobalDeviceManager), the worker threads, and the
         # in-flight operation transients below. Setup progress lives in the
@@ -275,16 +279,80 @@ class DeviceService(QObject):
             status=DeviceStatus.MEMORY_ONLY,
             remember=req.remember,
         )
-        token = self._begin_operation(
-            OperationKind.DEVICE_CONNECT,
-            req.name,
-            replace(initial, status=DeviceStatus.CONNECTING, error=None),
+        prior = current  # capture before any State write (pre-open)
+        name = req.name
+
+        def work(factory: Any) -> Any:  # factory is None (wants_progress=False)
+            return self._connect(req)
+
+        def on_terminal(bg: BgResult, settle: SettleFn) -> None:
+            if bg.ok:
+                _on_connect_succeeded(cast(BaseDeviceInfo, bg.result), settle)
+            else:
+                assert bg.error is not None
+                _on_operation_failed(str(bg.error), settle)
+
+        def _on_connect_succeeded(info: BaseDeviceInfo, settle: SettleFn) -> None:
+            self._state.put_device(
+                DeviceState(
+                    name=name,
+                    type_name=req.type_name,
+                    address=req.address,
+                    status=DeviceStatus.CONNECTED,
+                    remember=req.remember,
+                    info=info,
+                )
+            )
+            logger.info(
+                "device connect succeeded: name=%r type=%r", name, req.type_name
+            )
+            self._inflight.pop(name, None)
+            # State is observable before settle (invariant 1).
+            settle(OperationOutcome("finished"))
+            self._emit_device_changed(name)
+            self.device_connected.emit(req)
+
+        def _on_operation_failed(message: str, settle: SettleFn) -> None:
+            logger.warning("device operation failed: name=%r error=%s", name, message)
+            op = self._inflight.pop(name, None)
+            # first-connect fail (no prior) → remove; mutation fail → restore prior
+            if (
+                op is not None
+                and op.kind is OperationKind.DEVICE_CONNECT
+                and prior is None
+            ):
+                self._state.remove_device(name)
+            else:
+                self._restore_prior_device_from(name, prior, message)
+            # State is observable before settle.
+            settle(OperationOutcome("failed", message))
+            self._emit_device_changed(name)
+            self.operation_failed.emit(name, message)
+
+        spec = OperationSpec(
+            exclusion=ExclusionRequest(
+                kind=OperationKind.DEVICE_CONNECT,
+                owner_id=name,
+                resource_id=name,
+            ),
+            owner_id=name,
+            wants_progress=False,
+            cancel_hook=None,
+            work=work,
+            run_in_pool=False,
+            on_terminal=on_terminal,
         )
-        self._submit_command(
-            req.name,
-            lambda: self._connect(req),
-            on_done=lambda info: self._on_connect_succeeded(req, info),
+
+        token = self._runner.begin(spec)
+
+        # POST-BEGIN: register _inflight, write optimistic pending state, announce.
+        self._inflight[name] = _InflightOp(
+            token=token, kind=OperationKind.DEVICE_CONNECT, prior=prior
         )
+        self._state.put_device(
+            replace(initial, status=DeviceStatus.CONNECTING, error=None)
+        )
+        self._emit_device_changed(name)
         return token
 
     def start_reconnect_device(self, name: str) -> None:
@@ -302,16 +370,72 @@ class DeviceService(QObject):
 
     def start_disconnect_device(self, req: DisconnectDeviceRequest) -> int:
         current = self._require_connected_device(req.name)
-        token = self._begin_operation(
-            OperationKind.DEVICE_DISCONNECT,
-            req.name,
-            replace(current, status=DeviceStatus.DISCONNECTING, error=None),
+        prior = current  # capture before any State write (pre-open)
+        name = req.name
+
+        def work(factory: Any) -> Any:  # factory is None (wants_progress=False)
+            return self._disconnect(name)
+
+        def on_terminal(bg: BgResult, settle: SettleFn) -> None:
+            if bg.ok:
+                _on_disconnect_succeeded(settle)
+            else:
+                assert bg.error is not None
+                _on_operation_failed(str(bg.error), settle)
+
+        def _on_disconnect_succeeded(settle: SettleFn) -> None:
+            if req.remember:
+                self._state.put_device(
+                    replace(
+                        current,
+                        status=DeviceStatus.MEMORY_ONLY,
+                        info=None,
+                        error=None,
+                        remember=True,
+                    )
+                )
+            else:
+                self._state.remove_device(name)
+            logger.info("device disconnect succeeded: name=%r", name)
+            self._inflight.pop(name, None)
+            # State is observable before settle.
+            settle(OperationOutcome("finished"))
+            self._emit_device_changed(name)
+            self.device_disconnected.emit(req)
+
+        def _on_operation_failed(message: str, settle: SettleFn) -> None:
+            logger.warning("device operation failed: name=%r error=%s", name, message)
+            self._inflight.pop(name, None)
+            self._restore_prior_device_from(name, prior, message)
+            # State is observable before settle.
+            settle(OperationOutcome("failed", message))
+            self._emit_device_changed(name)
+            self.operation_failed.emit(name, message)
+
+        spec = OperationSpec(
+            exclusion=ExclusionRequest(
+                kind=OperationKind.DEVICE_DISCONNECT,
+                owner_id=name,
+                resource_id=name,
+            ),
+            owner_id=name,
+            wants_progress=False,
+            cancel_hook=None,
+            work=work,
+            run_in_pool=False,
+            on_terminal=on_terminal,
         )
-        self._submit_command(
-            req.name,
-            lambda: self._disconnect(req.name),
-            on_done=lambda _result: self._on_disconnect_succeeded(req),
+
+        token = self._runner.begin(spec)
+
+        # POST-BEGIN: register _inflight, write optimistic pending state, announce.
+        self._inflight[name] = _InflightOp(
+            token=token, kind=OperationKind.DEVICE_DISCONNECT, prior=prior
         )
+        self._state.put_device(
+            replace(current, status=DeviceStatus.DISCONNECTING, error=None)
+        )
+        self._emit_device_changed(name)
         return token
 
     def start_setup_device(self, req: SetupDeviceRequest) -> int:
@@ -322,38 +446,99 @@ class DeviceService(QObject):
         # Single owner of the cancellation flag: passed to both the gate (set on
         # cancel) and the worker (polls it / self-judges 'cancelled').
         stop_event = threading.Event()
-        token = self._begin_operation(
-            OperationKind.DEVICE_SETUP,
-            req.name,
-            replace(current, status=DeviceStatus.SETTING_UP, error=None),
-            stop_event=stop_event,
-        )
-        # Setup is the OffMain-thread strategy with the progress scope only (no
-        # figure routing, no ActiveTask — the driver's setup() polls stop_event
-        # directly).  progress_ambient is session-layer (no Qt) so device.py
-        # can import it without crossing the session→app boundary (ADR-0026 §2).
-        pbar_factory = self._progress.make_factory(token, owner_id=req.name)
+        prior = current  # capture before any State write (pre-open)
         name = req.name
         info = req.info
 
-        def setup_work() -> object:
-            with progress_ambient(pbar_factory):
+        def work(factory: Any) -> Any:
+            # Setup is the OffMain-thread strategy with the progress scope only (no
+            # figure routing, no ActiveTask — the driver's setup() polls stop_event
+            # directly). progress_ambient is session-layer (no Qt) so device.py
+            # can import it without crossing the session→app boundary (ADR-0026 §2).
+            with progress_ambient(factory):
                 driver.setup(info, stop_event=stop_event)
                 return driver.get_info()
 
-        try:
-            self._bg.submit(
-                setup_work,
-                run_in_pool=False,
-                on_done=lambda result: self._on_setup_done(name, stop_event, result),
-                on_error=lambda exc: self._on_setup_failed(name, str(exc)),
+        def on_terminal(bg: BgResult, settle: SettleFn) -> None:
+            # bg reports outcome; we own stop_event, so we interpret cancellation
+            # (ADR-0019): normal return + stop_event set = cancelled.
+            if bg.ok:
+                if stop_event.is_set():
+                    _on_setup_cancelled(settle)
+                else:
+                    _on_setup_finished(cast(BaseDeviceInfo, bg.result), settle)
+            else:
+                assert bg.error is not None
+                _on_setup_failed(str(bg.error), settle)
+
+        def _on_setup_finished(info: BaseDeviceInfo, settle: SettleFn) -> None:
+            logger.info("device setup finished: name=%r", name)
+            current_dev = self._require_device(name)
+            self._state.put_device(
+                replace(
+                    current_dev,
+                    status=DeviceStatus.CONNECTED,
+                    info=info,
+                    error=None,
+                )
             )
+            self._inflight.pop(name, None)
+            # State is observable before settle (invariant 1).
+            settle(OperationOutcome("finished"))
+            self._emit_device_changed(name)
+            self._bus.emit(DeviceSetupFinishedPayload(name=name, outcome="finished"))
+            self.setup_finished.emit(name)
+
+        def _on_setup_failed(error: str, settle: SettleFn) -> None:
+            logger.warning("device setup failed: name=%r error=%s", name, error)
+            self._inflight.pop(name, None)
+            self._restore_prior_device_from(name, prior, error)
+            # State is observable before settle.
+            settle(OperationOutcome("failed", error))
+            self._emit_device_changed(name)
             self._bus.emit(
-                DeviceSetupStartedPayload(name=req.name),
+                DeviceSetupFinishedPayload(
+                    name=name, outcome="failed", error_message=error
+                )
             )
-        except Exception:
-            self._abort_unstarted_operation(req.name)
-            raise
+            self.setup_failed.emit(name, error)
+
+        def _on_setup_cancelled(settle: SettleFn) -> None:
+            self._inflight.pop(name, None)
+            self._restore_prior_device_from(name, prior, None)
+            # State is observable before settle.
+            settle(
+                OperationOutcome("cancelled", f"device {name!r} setup was cancelled")
+            )
+            self._emit_device_changed(name)
+            self._bus.emit(DeviceSetupFinishedPayload(name=name, outcome="cancelled"))
+            self.setup_cancelled.emit(name)
+
+        spec = OperationSpec(
+            exclusion=ExclusionRequest(
+                kind=OperationKind.DEVICE_SETUP,
+                owner_id=name,
+                resource_id=name,
+            ),
+            owner_id=name,
+            wants_progress=True,
+            cancel_hook=stop_event.set,
+            work=work,
+            run_in_pool=False,
+            on_terminal=on_terminal,
+        )
+
+        token = self._runner.begin(spec)
+
+        # POST-BEGIN: register _inflight, write optimistic pending state, announce.
+        self._inflight[name] = _InflightOp(
+            token=token, kind=OperationKind.DEVICE_SETUP, prior=prior
+        )
+        self._state.put_device(
+            replace(current, status=DeviceStatus.SETTING_UP, error=None)
+        )
+        self._emit_device_changed(name)
+        self._bus.emit(DeviceSetupStartedPayload(name=name))
         return token
 
     def cancel_device_operation(self, name: str) -> None:
@@ -637,205 +822,19 @@ class DeviceService(QObject):
         GlobalDeviceManager.drop_device(name)
         return None
 
-    def _begin_operation(
-        self,
-        kind: OperationKind,
-        name: str,
-        pending: DeviceState,
-        stop_event: threading.Event | None = None,
-    ) -> int:
-        # Symmetric release: this device's _inflight entry + its gate lease are
-        # cleared exactly-once on the terminal path via _finish_operation, called
-        # from every _on_*_finished/_failed/_cancelled and _on_operation_failed.
-        # stop_event is set only for cancellable operations (setup); connect /
-        # disconnect have no cancellation point, so cancel is a no-op for them.
-        # Compose both leaves (ADR-0019): fail-fast on conflict before the handle,
-        # then mint the handle (holding stop_event) and register the exclusion
-        # under the same token. The kind is recorded in the _InflightOp because
-        # outcome handling (_on_operation_failed) branches on it.
-        #
-        # Phase C: pass resource_id=name so the gate only blocks a *same-device*
-        # in-flight mutation; mutations of different devices start concurrently
-        # and each owns its own _inflight[name] entry.
-        self._gate.ensure_can_start(kind, resource_id=name)
-        # ADR-0025: cancel_hook = stop_event.set (None for non-cancellable ops).
-        cancel_hook = stop_event.set if stop_event is not None else None
-        token = self._handles.create(cancel_hook=cancel_hook)
-        self._gate.register(token, kind, owner_id=name, resource_id=name)
-        prior = self._state.get_device(name)
-        self._inflight[name] = _InflightOp(token=token, kind=kind, prior=prior)
-        self._state.put_device(pending)
-        # Announce the optimistic state. A DEVICE_CHANGED subscriber (e.g. a View
-        # redraw) raising here is swallowed + logged by the EventBus and does NOT
-        # abort the operation or roll back the optimistic write — the lease is
-        # released at the real terminal (_finish_operation), never on a
-        # subscriber's failure (one bad subscriber must not break the publisher).
-        self._emit_device_changed(name)
-        return token
-
-    def _finish_operation(self, name: str, outcome: OperationOutcome) -> None:
-        op = self._inflight.pop(name, None)
-        if op is None:
-            raise RuntimeError(f"Device operation for {name!r} has no active operation")
-        token = op.token
-        # Destroy this operation's progress container (a no-op for connect/
-        # disconnect, which never minted one; setup's leave=True bars never emit
-        # CLOSE, so the terminal path must clear them), settle the handle, free
-        # the exclusion.
-        self._progress.discard_operation(token)
-        self._handles.settle(token, outcome)
-        self._gate.release(token)
-
-    def _submit_command(
-        self,
-        name: str,
-        work: Callable[[], object],
-        on_done: Callable[[object], None],
+    def _restore_prior_device_from(
+        self, name: str, prior: DeviceState | None, error: str | None
     ) -> None:
-        """Submit a connect/disconnect command off-main (OffMain-thread strategy,
-        no scopes — no progress, no cancellation point). Aborts the in-flight
-        transition if the submit fails to start."""
-        try:
-            self._bg.submit(
-                work,
-                run_in_pool=False,
-                on_done=on_done,
-                on_error=lambda exc: self._on_operation_failed(name, exc),
-            )
-        except Exception:
-            self._abort_unstarted_operation(name)
-            raise
+        """Rollback device State to ``prior`` (or a memory-only stub if None).
 
-    def _abort_unstarted_operation(self, name: str) -> None:
-        op = self._inflight.get(name)
-        prior = op.prior if op is not None else None
+        Replaces the old ``_restore_prior_device`` which read prior from _inflight;
+        this version receives prior directly so it works whether or not the inflight
+        entry is still present (it may already be popped by the caller).
+        """
         if prior is None:
-            if self._state.has_device(name):
-                self._state.remove_device(name)
-        else:
-            self._state.put_device(prior)
-        self._finish_operation(
-            name, OperationOutcome("failed", "operation failed to start")
-        )
-        self._emit_device_changed(name)
-
-    def _on_connect_succeeded(self, req: ConnectDeviceRequest, info: object) -> None:
-        self._state.put_device(
-            DeviceState(
-                name=req.name,
-                type_name=req.type_name,
-                address=req.address,
-                status=DeviceStatus.CONNECTED,
-                remember=req.remember,
-                info=cast(BaseDeviceInfo, info),
-            )
-        )
-        logger.info(
-            "device connect succeeded: name=%r type=%r", req.name, req.type_name
-        )
-        self._finish_operation(req.name, OperationOutcome("finished"))
-        self._emit_device_changed(req.name)
-        self.device_connected.emit(req)
-
-    def _on_disconnect_succeeded(self, req: DisconnectDeviceRequest) -> None:
-        current = self._require_device(req.name)
-        if req.remember:
-            self._state.put_device(
-                replace(
-                    current,
-                    status=DeviceStatus.MEMORY_ONLY,
-                    info=None,
-                    error=None,
-                    remember=True,
-                )
-            )
-        else:
-            self._state.remove_device(req.name)
-        logger.info("device disconnect succeeded: name=%r", req.name)
-        self._finish_operation(req.name, OperationOutcome("finished"))
-        self._emit_device_changed(req.name)
-        self.device_disconnected.emit(req)
-
-    def _on_setup_done(
-        self, name: str, stop_event: threading.Event, result: object
-    ) -> None:
-        # bg reports a normal return; we own the stop_event, so we interpret
-        # cancellation here (ADR-0019): the driver's setup() returns normally even
-        # when cancelled, so a set stop_event on a normal return is 'cancelled',
-        # otherwise 'finished'. A raise goes straight to _on_setup_failed.
-        if stop_event.is_set():
-            self._on_setup_cancelled(name)
-        else:
-            self._on_setup_finished(name, result)
-
-    def _on_setup_finished(self, name: str, info: object) -> None:
-        logger.info("device setup finished: name=%r", name)
-        current = self._require_device(name)
-        self._state.put_device(
-            replace(
-                current,
-                status=DeviceStatus.CONNECTED,
-                info=cast(BaseDeviceInfo, info),
-                error=None,
-            )
-        )
-        # release() settles the operation handle (sets the token Event and stores
-        # the outcome) — may wake an off-main operation.await waiter.
-        self._finish_operation(name, OperationOutcome("finished"))
-        self._emit_device_changed(name)
-        self._bus.emit(
-            DeviceSetupFinishedPayload(name=name, outcome="finished"),
-        )
-        self.setup_finished.emit(name)
-
-    def _on_setup_failed(self, name: str, error: str) -> None:
-        # ``error`` is a pre-formatted message (the exception was already consumed
-        # into a string by the worker), so no exc_info is available here.
-        logger.warning("device setup failed: name=%r error=%s", name, error)
-        self._restore_prior_device(name, error)
-        self._finish_operation(name, OperationOutcome("failed", error))
-        self._emit_device_changed(name)
-        self._bus.emit(
-            DeviceSetupFinishedPayload(
-                name=name, outcome="failed", error_message=error
-            ),
-        )
-        self.setup_failed.emit(name, error)
-
-    def _on_setup_cancelled(self, name: str) -> None:
-        self._restore_prior_device(name, None)
-        self._finish_operation(
-            name, OperationOutcome("cancelled", f"device {name!r} setup was cancelled")
-        )
-        self._emit_device_changed(name)
-        self._bus.emit(
-            DeviceSetupFinishedPayload(name=name, outcome="cancelled"),
-        )
-        self.setup_cancelled.emit(name)
-
-    def _on_operation_failed(self, name: str, error: object) -> None:
-        message = str(error)
-        # The real traceback is logged at the worker (background.py); ``error`` is
-        # the marshalled value, so log the message at WARNING here.
-        logger.warning("device operation failed: name=%r error=%s", name, message)
-        op = self._inflight.get(name)
-        if (
-            op is not None
-            and op.kind is OperationKind.DEVICE_CONNECT
-            and op.prior is None
-        ):
-            self._state.remove_device(name)
-        else:
-            self._restore_prior_device(name, message)
-        self._finish_operation(name, OperationOutcome("failed", message))
-        self._emit_device_changed(name)
-        self.operation_failed.emit(name, message)
-
-    def _restore_prior_device(self, name: str, error: str | None) -> None:
-        op = self._inflight.get(name)
-        prior = op.prior if op is not None else None
-        if prior is None:
-            pending = self._require_device(name)
+            pending = self._state.get_device(name)
+            if pending is None:
+                return
             prior = replace(
                 pending,
                 status=DeviceStatus.MEMORY_ONLY,

@@ -14,6 +14,8 @@ from zcu_tools.gui.app.main.services.operation_gate import OperationGate
 from zcu_tools.gui.app.main.state import State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
+from zcu_tools.gui.session.operation_handles import OperationHandles
+from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.device import ConnectDeviceRequest, DeviceService
 from zcu_tools.gui.session.services.progress import ProgressService
 
@@ -47,12 +49,18 @@ def _clean_devices():
 
 def _make_svc(driver: object | None = None) -> DeviceService:
     fake = driver if driver is not None else FakeDevice()
+    gate = OperationGate()
+    bg = _bg()
+    handles = OperationHandles()
+    progress = ProgressService(QtProgressTransport())
+    runner = OperationRunner(gate, handles, progress, bg)
     return DeviceService(
         EventBus(),
         State(MagicMock()),
-        OperationGate(),
-        _bg(),
-        ProgressService(QtProgressTransport()),
+        gate,
+        bg,
+        runner,
+        handles,
         driver_factory=lambda _type, _address: fake,  # type: ignore[arg-type]
     )
 

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.session.operation_handles import OperationHandles
+from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.build import build_session_services
 from zcu_tools.gui.session.services.connection import ConnectionService
 from zcu_tools.gui.session.services.context import ContextService
@@ -44,6 +45,8 @@ class AppServices:
     so hardware exclusion is global; a single OperationHandles (the async
     Handle / Cancel facet) is shared across those plus analyze (handle-only, no
     exclusion) so operation_id / await / cancel are uniform (ADR-0019).
+    A single OperationRunner (the kind-agnostic lifecycle mechanism, ADR-0026 §1)
+    is shared by run / analyze / post-analyze / device-setup operations.
     """
 
     operation_gate: OperationGate
@@ -85,6 +88,10 @@ def build_app_services(
     handles = OperationHandles()
     background = BackgroundService()
     progress = ProgressService(progress_transport)
+    # OperationRunner: the kind-agnostic lifecycle mechanism (ADR-0026 §1).
+    # Shared by run / FIT-analyze / post-analyze / device ops. Interactive analyze
+    # does not use runner (main-thread-user-paced, stage2c_spec.md).
+    runner = OperationRunner(operation_gate, handles, progress, background)
     session = build_session_services(
         state=state,
         bus=bus,
@@ -93,6 +100,7 @@ def build_app_services(
         background=background,
         progress=progress,
         io_manager=io_manager,
+        runner=runner,
     )
     context = session.context
     device = session.device
@@ -121,13 +129,11 @@ def build_app_services(
         connection=session.connection,
         context=context,
         tab=tab,
-        run=RunService(
-            state, background, bus, operation_gate, handles, writeback, progress
-        ),
-        analyze=AnalyzeService(state, background, bus, writeback, handles),
+        run=RunService(state, runner, bus, handles, writeback),
+        analyze=AnalyzeService(state, runner, bus, writeback, handles),
         # Second analysis layer (post_analysis cap) — handle-only off-main worker,
-        # same background/handles as the primary analyze (ADR-0019).
-        post_analyze=PostAnalyzeService(state, background, bus, handles),
+        # same runner/handles as the primary analyze (ADR-0019, ADR-0026 §1).
+        post_analyze=PostAnalyzeService(state, runner, bus, handles),
         save=SaveService(state, background, bus),
         writeback=writeback,
         workspace=WorkspaceService(state, tab, bus),

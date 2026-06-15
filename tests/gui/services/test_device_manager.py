@@ -22,6 +22,8 @@ from zcu_tools.gui.session.events import (
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
 )
+from zcu_tools.gui.session.operation_handles import OperationHandles
+from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.device import (
     ConnectDeviceRequest,
     DeviceRegistrationError,
@@ -62,12 +64,18 @@ def _clean_devices():
 def _make_svc(driver: MagicMock | None = None) -> tuple[DeviceService, MagicMock]:
     device = driver or MagicMock()
     device.get_info.return_value = FakeDeviceInfo(address="none")
+    gate = OperationGate()
+    bg = _bg()
+    handles = OperationHandles()
+    progress = ProgressService(QtProgressTransport())
+    runner = OperationRunner(gate, handles, progress, bg)
     svc = DeviceService(
         EventBus(),
         State(MagicMock()),
-        OperationGate(),
-        _bg(),
-        ProgressService(QtProgressTransport()),
+        gate,
+        bg,
+        runner,
+        handles,
         driver_factory=lambda _type, _address: device,  # type: ignore[arg-type]
     )
     return svc, device
@@ -147,12 +155,18 @@ def test_device_service_emits_started_and_finished_events(qapp):
 
 def _make_real_svc(driver: object | None = None) -> tuple[DeviceService, object]:
     fake_device = driver if driver is not None else FakeDevice()
+    gate = OperationGate()
+    bg = _bg()
+    handles = OperationHandles()
+    progress = ProgressService(QtProgressTransport())
+    runner = OperationRunner(gate, handles, progress, bg)
     svc = DeviceService(
         EventBus(),
         State(MagicMock()),
-        OperationGate(),
-        _bg(),
-        ProgressService(QtProgressTransport()),
+        gate,
+        bg,
+        runner,
+        handles,
         driver_factory=lambda _type, _address: fake_device,  # type: ignore[arg-type]
     )
     return svc, fake_device

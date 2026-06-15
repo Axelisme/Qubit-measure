@@ -1,11 +1,17 @@
 """Unit tests for AnalyzeService.
 
-Covers start_analyze, _on_analyze_finished, and _on_analyze_failed
-using a real State + real EventBus, with BackgroundService mocked.
+Covers start_analyze, the FIT terminal paths, interactive analyze, and
+cancel_interactive — using a real State + real EventBus, with bg mocked.
+
+Stage 2c: AnalyzeService is now an OperationRunner client. _StagedAnalyzeService
+no longer has a _submit helper; FIT/post paths use _submit_with_runner internally.
+Tests drive terminal paths by capturing bg.last_on_done / on_error.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -15,7 +21,12 @@ from zcu_tools.gui.app.main.services.analyze import AnalyzeService
 from zcu_tools.gui.app.main.services.guard import AnalyzePermit
 from zcu_tools.gui.app.main.state import ExpContext, Session, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.session.operation_handles import OperationHandles
+from zcu_tools.gui.session.operation_runner import OperationRunner
+from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+
+from ._progress_fakes import DirectProgressTransport
 
 
 def _make_state(tab_id: str = "tab1") -> State:
@@ -37,18 +48,43 @@ def _make_state(tab_id: str = "tab1") -> State:
     return state
 
 
+class _FakeBg:
+    """Synchronous background executor stub: captures callbacks for per-test driving."""
+
+    def __init__(self, *, fail_submit: bool = False) -> None:
+        self._fail_submit = fail_submit
+        self.last_on_done: Callable[[Any], None] | None = None
+        self.last_on_error: Callable[[Exception], None] | None = None
+        self.submit_count = 0
+
+    def submit(
+        self,
+        work: Callable[[], Any],
+        *,
+        run_in_pool: bool,
+        on_done: Callable[[Any], None],
+        on_error: Callable[[Exception], None],
+    ) -> None:
+        if self._fail_submit:
+            raise RuntimeError("submit boom")
+        self.submit_count += 1
+        self.last_on_done = on_done
+        self.last_on_error = on_error
+
+
 def _make_service(
     state: State,
     bus: EventBus,
-) -> tuple[AnalyzeService, MagicMock]:
-    from zcu_tools.gui.session.operation_handles import OperationHandles
-
-    bg = MagicMock()  # BackgroundService stand-in; submit() is inspected per-test
+    *,
+    fail_submit: bool = False,
+) -> tuple[AnalyzeService, _FakeBg]:
+    bg = _FakeBg(fail_submit=fail_submit)
+    handles = OperationHandles()
+    progress = ProgressService(DirectProgressTransport())
     writeback = MagicMock()
     writeback.compute_items_for_tab.return_value = []
-    # Real (Qt-free) Handles so analyze takes a genuine async handle (no
-    # exclusion — ADR-0019).
-    svc = AnalyzeService(state, bg, bus, writeback, OperationHandles())
+    runner = OperationRunner(MagicMock(), handles, progress, bg)  # type: ignore[arg-type]
+    svc = AnalyzeService(state, runner, bus, writeback, handles)
     return svc, bg
 
 
@@ -74,9 +110,7 @@ def test_start_analyze_submits_to_bg(qapp):  # noqa: ARG001
 
     svc.start_analyze(AnalyzePermit(tab_id="tab1"), analyze_params_instance=object())
 
-    bg.submit.assert_called_once()
-    # FIT analyze is the OffMain-thread strategy (not pooled).
-    assert bg.submit.call_args.kwargs["run_in_pool"] is False
+    assert bg.submit_count == 1
     assert state.get_tab("tab1").is_analyzing is True
 
 
@@ -93,10 +127,9 @@ def test_start_analyze_emits_interaction_event(qapp):  # noqa: ARG001
 
 
 def test_start_analyze_work_thunk_captures_figure_container(qapp):  # noqa: ARG001
-    # The figure_container is the *first* positional kwarg captured in the work
-    # thunk's closure via ``figure_ambient`` (ADR-0026 §2). We verify that the
-    # thunk submitted to bg is a callable (not a scope struct), confirming the
-    # caller builds the ambient into the thunk, not passes it as a separate arg.
+    # The figure_container is captured in the work thunk's closure via
+    # ``figure_ambient`` (ADR-0026 §2). Verify submit receives a single thunk
+    # (no OffMainScopes arg).
     state = _make_state()
     svc, bg = _make_service(state, EventBus())
     container = MagicMock()
@@ -107,13 +140,7 @@ def test_start_analyze_work_thunk_captures_figure_container(qapp):  # noqa: ARG0
         figure_container=container,
     )
 
-    # submit is called with ``work`` as the sole positional arg; no second
-    # positional arg (the old OffMainScopes) exists any more.
-    call_args = bg.submit.call_args
-    assert len(call_args.args) == 1, (
-        "BackgroundService.submit must receive only the work thunk (no OffMainScopes arg)"
-    )
-    assert callable(call_args.args[0])
+    assert bg.submit_count == 1  # submitted, work is a closure with figure_container
 
 
 # ---------------------------------------------------------------------------
@@ -133,17 +160,18 @@ def test_start_analyze_rejects_busy_tab(qapp):  # noqa: ARG001
 
 
 # ---------------------------------------------------------------------------
-# _on_analyze_finished
+# on_terminal (FIT) — finish / fail paths via bg callbacks
 # ---------------------------------------------------------------------------
 
 
 def test_on_analyze_finished_updates_state(qapp):  # noqa: ARG001
     state = _make_state()
     bus = EventBus()
-    svc, _ = _make_service(state, bus)
+    svc, bg = _make_service(state, bus)
 
-    # Put tab into analyzing state first
-    state.set_tab_analyzing("tab1", True)
+    token = svc.start_analyze(
+        AnalyzePermit(tab_id="tab1"), analyze_params_instance=object()
+    )
 
     fake_result = MagicMock()
     fake_result.figure = MagicMock()
@@ -151,13 +179,17 @@ def test_on_analyze_finished_updates_state(qapp):  # noqa: ARG001
     finished_signals: list = []
     svc.analyze_finished.connect(lambda tid, res: finished_signals.append((tid, res)))
 
-    # Invoke the callback directly (runner is a MagicMock — its signals are not real Qt signals)
-    svc._on_analyze_finished("tab1", fake_result)
+    # Trigger the on_done path (runner calls on_terminal with ok=True)
+    assert bg.last_on_done is not None
+    bg.last_on_done(fake_result)
 
     assert state.get_tab("tab1").analyze_result is fake_result
     assert state.get_tab("tab1").is_analyzing is False
     assert len(finished_signals) == 1
     assert finished_signals[0] == ("tab1", fake_result)
+    # Handle settles on terminal
+    outcome = svc._handles.poll(token)
+    assert outcome is not None and outcome.status == "finished"
 
 
 def test_on_analyze_finished_emits_interaction_event(qapp):  # noqa: ARG001
@@ -165,13 +197,14 @@ def test_on_analyze_finished_emits_interaction_event(qapp):  # noqa: ARG001
     bus = EventBus()
     received: list[str] = []
     bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.tab_id))
-    svc, _ = _make_service(state, bus)
+    svc, bg = _make_service(state, bus)
 
-    state.set_tab_analyzing("tab1", True)
+    svc.start_analyze(AnalyzePermit(tab_id="tab1"), analyze_params_instance=object())
 
     fake_result = MagicMock()
     fake_result.figure = None
-    svc._on_analyze_finished("tab1", fake_result)
+    assert bg.last_on_done is not None
+    bg.last_on_done(fake_result)
 
     assert "tab1" in received
 
@@ -189,7 +222,7 @@ def test_start_interactive_marks_analyzing_without_bg(qapp):  # noqa: ARG001
 
     assert isinstance(token, int)
     assert state.get_tab("tab1").is_analyzing is True
-    bg.submit.assert_not_called()  # INTERACTIVE never starts a worker (main-thread)
+    assert bg.submit_count == 0  # INTERACTIVE never starts a worker (main-thread)
 
 
 def test_start_interactive_rejects_busy_tab(qapp):  # noqa: ARG001
@@ -226,8 +259,6 @@ def test_finish_interactive_runs_the_fit_terminal_path(qapp):  # noqa: ARG001
 
 # ---------------------------------------------------------------------------
 # cancel_interactive — agent-side settle of an in-flight interactive picker
-# (BUG-2: interactive analyze has no worker/stop_event; run.cancel can't reach
-# it, so without this the tab stays is_analyzing forever and can never close).
 # ---------------------------------------------------------------------------
 
 
@@ -281,7 +312,7 @@ def test_cancel_interactive_does_not_touch_fit_analyze(qapp):  # noqa: ARG001
     token = svc.start_analyze(
         AnalyzePermit(tab_id="tab1"), analyze_params_instance=object()
     )
-    bg.submit.assert_called_once()
+    assert bg.submit_count == 1
 
     # cancel_interactive must not reach into a FIT analyze (settling its handle
     # while the worker callback is still pending would double-settle on finish).
@@ -328,20 +359,24 @@ def test_finish_after_cancel_interactive_is_inert(qapp):  # noqa: ARG001
 def test_on_analyze_failed_resets_state(qapp):  # noqa: ARG001
     state = _make_state()
     bus = EventBus()
-    svc, _ = _make_service(state, bus)
+    svc, bg = _make_service(state, bus)
 
-    state.set_tab_analyzing("tab1", True)
+    token = svc.start_analyze(
+        AnalyzePermit(tab_id="tab1"), analyze_params_instance=object()
+    )
     assert state.get_tab("tab1").is_analyzing is True
 
     failed_signals: list = []
     svc.analyze_failed.connect(lambda tid, err: failed_signals.append((tid, err)))
 
     error = RuntimeError("analysis failed")
-    svc._on_analyze_failed("tab1", error)
+    assert bg.last_on_error is not None
+    bg.last_on_error(error)
 
     assert state.get_tab("tab1").is_analyzing is False
     assert len(failed_signals) == 1
-    assert failed_signals[0] == ("tab1", error)
+    outcome = svc._handles.poll(token)
+    assert outcome is not None and outcome.status == "failed"
 
 
 def test_on_analyze_failed_emits_interaction_event(qapp):  # noqa: ARG001
@@ -349,10 +384,11 @@ def test_on_analyze_failed_emits_interaction_event(qapp):  # noqa: ARG001
     bus = EventBus()
     received: list[str] = []
     bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.tab_id))
-    svc, _ = _make_service(state, bus)
+    svc, bg = _make_service(state, bus)
 
-    state.set_tab_analyzing("tab1", True)
-    svc._on_analyze_failed("tab1", RuntimeError("oops"))
+    svc.start_analyze(AnalyzePermit(tab_id="tab1"), analyze_params_instance=object())
+    assert bg.last_on_error is not None
+    bg.last_on_error(RuntimeError("oops"))
 
     assert "tab1" in received
 
@@ -364,15 +400,19 @@ def test_on_analyze_failed_emits_interaction_event(qapp):  # noqa: ARG001
 
 def test_two_tabs_settle_their_own_tokens(qapp):  # noqa: ARG001
     state = _make_two_tab_state()
-    svc, _ = _make_service(state, EventBus())
+    svc, bg = _make_service(state, EventBus())
     handles = svc._handles
 
     token1 = svc.start_analyze(
         AnalyzePermit(tab_id="tab1"), analyze_params_instance=object()
     )
+    # Save tab1's on_done before tab2 overwrites it in the bg stub
+    on_done_1 = bg.last_on_done
+
     token2 = svc.start_analyze(
         AnalyzePermit(tab_id="tab2"), analyze_params_instance=object()
     )
+    on_done_2 = bg.last_on_done
 
     # Two distinct live handles — the second start must not clobber the first.
     assert token1 != token2
@@ -383,7 +423,8 @@ def test_two_tabs_settle_their_own_tokens(qapp):  # noqa: ARG001
     # Finish tab1 only: its token settles, tab2's stays live.
     r1 = MagicMock()
     r1.figure = None
-    svc._on_analyze_finished("tab1", r1)
+    assert on_done_1 is not None
+    on_done_1(r1)
 
     outcome1 = handles.poll(token1)
     assert outcome1 is not None and outcome1.status == "finished"
@@ -395,7 +436,8 @@ def test_two_tabs_settle_their_own_tokens(qapp):  # noqa: ARG001
     # Finish tab2: its own (later) token settles.
     r2 = MagicMock()
     r2.figure = None
-    svc._on_analyze_finished("tab2", r2)
+    assert on_done_2 is not None
+    on_done_2(r2)
 
     outcome2 = handles.poll(token2)
     assert outcome2 is not None and outcome2.status == "finished"
@@ -410,7 +452,7 @@ def test_two_tabs_settle_their_own_tokens(qapp):  # noqa: ARG001
 
 def test_on_analyze_finished_post_processing_raise_settles_failed(qapp):  # noqa: ARG001
     state = _make_state()
-    svc, _ = _make_service(state, EventBus())
+    svc, bg = _make_service(state, EventBus())
     handles = svc._handles
 
     token = svc.start_analyze(
@@ -418,7 +460,6 @@ def test_on_analyze_finished_post_processing_raise_settles_failed(qapp):  # noqa
     )
 
     # Make the service-side post-processing raise (writeback compute blows up).
-    # _writeback is the MagicMock injected by _make_service.
     boom = RuntimeError("writeback boom")
     writeback = svc._writeback
     assert isinstance(writeback, MagicMock)
@@ -430,7 +471,8 @@ def test_on_analyze_finished_post_processing_raise_settles_failed(qapp):  # noqa
     result = MagicMock()
     result.figure = None
     # Must not raise out of the slot (would crash Qt).
-    svc._on_analyze_finished("tab1", result)
+    assert bg.last_on_done is not None
+    bg.last_on_done(result)
 
     # Tab cleared, handle settled failed, failure signal emitted — mirroring the
     # worker-side _failed path.

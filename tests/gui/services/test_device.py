@@ -61,15 +61,24 @@ def _clean_devices():
 def _make_svc(
     driver: MagicMock | None = None, gate: OperationGate | None = None
 ) -> tuple[DeviceService, MagicMock]:
+    from zcu_tools.gui.session.operation_handles import OperationHandles
+    from zcu_tools.gui.session.operation_runner import OperationRunner
+
     device = driver or MagicMock()
     device.get_info.return_value = FakeDeviceInfo(address="addr", value=0.0)
+    bg = _bg()
+    resolved_gate = gate or OperationGate()
+    handles = OperationHandles()
+    progress = ProgressService(QtProgressTransport())
+    runner = OperationRunner(resolved_gate, handles, progress, bg)
     return (
         DeviceService(
             EventBus(),
             State(MagicMock()),
-            gate or OperationGate(),
-            _bg(),
-            ProgressService(QtProgressTransport()),
+            resolved_gate,
+            bg,
+            runner,
+            handles,
             driver_factory=lambda _type, _address: device,  # type: ignore[arg-type]
         ),
         device,
@@ -196,12 +205,21 @@ def test_active_device_setups_enumerates_concurrent_setups(qapp):
         dev.get_info.return_value = FakeDeviceInfo(address="addr", value=0.0)
         return dev
 
+    from zcu_tools.gui.session.operation_handles import OperationHandles
+    from zcu_tools.gui.session.operation_runner import OperationRunner
+
+    bg_svc = _bg()
+    resolved_gate = OperationGate()
+    handles = OperationHandles()
+    progress = ProgressService(QtProgressTransport())
+    runner = OperationRunner(resolved_gate, handles, progress, bg_svc)
     svc = DeviceService(
         EventBus(),
         State(MagicMock()),
-        OperationGate(),
-        _bg(),
-        ProgressService(QtProgressTransport()),
+        resolved_gate,
+        bg_svc,
+        runner,
+        handles,
         driver_factory=factory,  # type: ignore[arg-type]
     )
 
@@ -369,13 +387,22 @@ def test_disconnect_close_failure_retains_connected_device_and_releases_gate(qap
 
 
 def test_failing_device_changed_subscriber_does_not_abort_connect(qapp):
+    from zcu_tools.gui.session.operation_handles import OperationHandles
+    from zcu_tools.gui.session.operation_runner import OperationRunner
+
     bus = EventBus()
+    bg_svc = _bg()
+    resolved_gate = OperationGate()
+    handles = OperationHandles()
+    progress = ProgressService(QtProgressTransport())
+    runner = OperationRunner(resolved_gate, handles, progress, bg_svc)
     svc = DeviceService(
         bus,
         State(MagicMock()),
-        OperationGate(),
-        _bg(),
-        ProgressService(QtProgressTransport()),
+        resolved_gate,
+        bg_svc,
+        runner,
+        handles,
         driver_factory=lambda _type, _address: MagicMock(),  # type: ignore[arg-type]
     )
     # A DEVICE_CHANGED subscriber raising (e.g. a View redraw bug) is swallowed +
@@ -570,6 +597,9 @@ def _make_multi_svc(
     """A DeviceService whose driver_factory mints a distinct mock driver per
     device name, so two devices can be set up concurrently with independent
     setup() / get_info() behaviour. Returns (svc, drivers-by-name)."""
+    from zcu_tools.gui.session.operation_handles import OperationHandles
+    from zcu_tools.gui.session.operation_runner import OperationRunner
+
     drivers: dict[str, MagicMock] = {}
 
     def factory(_type: str, address: str) -> MagicMock:
@@ -579,12 +609,18 @@ def _make_multi_svc(
         drivers[address] = device
         return device
 
+    bg = _bg()
+    resolved_gate = gate or OperationGate()
+    handles = OperationHandles()
+    progress = ProgressService(QtProgressTransport())
+    runner = OperationRunner(resolved_gate, handles, progress, bg)
     svc = DeviceService(
         EventBus(),
         State(MagicMock()),
-        gate or OperationGate(),
-        _bg(),
-        ProgressService(QtProgressTransport()),
+        resolved_gate,
+        bg,
+        runner,
+        handles,
         driver_factory=factory,  # type: ignore[arg-type]
     )
     return svc, drivers

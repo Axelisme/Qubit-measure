@@ -163,6 +163,14 @@ class Controller:
         self._operation_handles = OperationHandles()
         self._background_svc = BackgroundService()
         self._progress_svc = ProgressService(transport)
+        from zcu_tools.gui.session.operation_runner import OperationRunner
+
+        self._runner = OperationRunner(
+            self._operation_gate,
+            self._operation_handles,
+            self._progress_svc,
+            self._background_svc,
+        )
         session = build_session_services(
             state=state,
             bus=bus,
@@ -171,6 +179,7 @@ class Controller:
             background=self._background_svc,
             progress=self._progress_svc,
             io_manager=self._io_manager,
+            runner=self._runner,
         )
         self._session = session
         self._conn_svc = session.connection

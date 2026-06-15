@@ -75,36 +75,22 @@ class PostAnalyzeService(_StagedAnalyzeService):
             tab_id,
             type(post_analyze_params_instance).__name__,
         )
-        token = self._open_token(tab_id)
         adapter = tab.adapter
 
-        def work() -> Any:
+        def work(factory: Any) -> Any:  # factory is None (wants_progress=False)
             # Post-analyze uses only figure_ambient (no pbar, no ActiveTask — ADR-0026 §2).
             with figure_ambient(figure_container):
                 return adapter.post_analyze(req)
 
         # The tab is marked analyzing for the duration so concurrent run/analyze is
-        # gated out (is_tab_busy covers analyzing) — done by _submit's _begin tail.
-        self._submit(
+        # gated out (is_tab_busy covers analyzing) — done by _submit_with_runner's
+        # _begin tail (post-begin invariant from stage2c_spec.md).
+        return self._submit_with_runner(
             tab_id,
             work,
-            self._on_post_analyze_finished,
+            self._record,
             "post-analyze failed to start",
         )
-        return token
-
-    def _on_post_analyze_finished(self, tab_id: str, post_result: Any) -> None:
-        logger.info(
-            "_on_post_analyze_finished: tab_id=%r result_type=%s",
-            tab_id,
-            type(post_result).__name__,
-        )
-        self._finish(tab_id, post_result, self._record)
-
-    def _on_post_analyze_failed(self, tab_id: str, error: Exception) -> None:
-        # Named worker-failure slot kept as the public entry point (the on_error
-        # callback target); delegates to the shared failure terminal path.
-        self._on_failed(tab_id, error)
 
     def _record(self, tab_id: str, post_result: Any) -> None:
         # Record result + figure through the single State mutator (bumps the

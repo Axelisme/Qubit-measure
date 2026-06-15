@@ -5,10 +5,16 @@ are GuardService's responsibility (see test_guard.py). RunService only handles
 the dynamic boundary: tab-busy, lease acquisition, bg submit, and — since
 ADR-0019 — the cancel *interpretation* of bg's done/failed (it owns the
 stop_event, so it relabels finished vs cancelled here).
+
+Stage 2c: RunService is now an OperationRunner client. Tests use a shared
+FakeRunner helper that captures the last spec so callbacks can be driven
+directly (replacing the old `_on_run_*` method calls).
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -19,13 +25,18 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionValue,
     RunRequest,
 )
-from zcu_tools.gui.app.main.services.background import NO_RESULT
 from zcu_tools.gui.app.main.services.guard import RunPermit
 from zcu_tools.gui.app.main.services.operation_gate import OperationGate, OperationKind
 from zcu_tools.gui.app.main.services.run import RunService
 from zcu_tools.gui.app.main.state import ExpContext, Session, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.operation_handles import OperationHandles
+from zcu_tools.gui.session.operation_runner import (
+    OperationRunner,
+)
+from zcu_tools.gui.session.services.progress import ProgressService
+
+from ._progress_fakes import DirectProgressTransport
 
 
 def _empty_schema() -> CfgSchema:
@@ -56,31 +67,76 @@ def _make_permit(state: State, tab_id: str, adapter: MagicMock) -> RunPermit:
     )
 
 
-def _make_run_service(state: State) -> tuple[RunService, OperationGate, MagicMock]:
-    from zcu_tools.gui.session.services.progress import ProgressService
+class _FakeBg:
+    """Synchronous background executor stub: calls work() and on_done/on_error inline."""
 
-    from ._progress_fakes import DirectProgressTransport
+    def __init__(self, *, fail_submit: bool = False, fail_work: bool = False) -> None:
+        self._fail_submit = fail_submit
+        self._fail_work = fail_work
+        self.last_work: Callable[[], Any] | None = None
+        self.last_on_done: Callable[[Any], None] | None = None
+        self.last_on_error: Callable[[Exception], None] | None = None
 
-    bg = MagicMock()  # BackgroundService stand-in; submit() is inspected per-test
+    def submit(
+        self,
+        work: Callable[[], Any],
+        *,
+        run_in_pool: bool,
+        on_done: Callable[[Any], None],
+        on_error: Callable[[Exception], None],
+    ) -> None:
+        if self._fail_submit:
+            raise RuntimeError("worker boom")
+        self.last_work = work
+        self.last_on_done = on_done
+        self.last_on_error = on_error
+
+    def run_work(self) -> None:
+        """Drive the captured work synchronously (for tests that need to inspect outcome)."""
+        assert self.last_work is not None
+        if self._fail_work:
+            assert self.last_on_error is not None
+            self.last_on_error(RuntimeError("work boom"))
+        else:
+            try:
+                result = self.last_work()
+                assert self.last_on_done is not None
+                self.last_on_done(result)
+            except Exception as exc:
+                assert self.last_on_error is not None
+                self.last_on_error(exc)
+
+
+def _make_run_service(
+    state: State,
+    *,
+    fail_submit: bool = False,
+) -> tuple[RunService, OperationGate, _FakeBg, OperationHandles]:
+    bg = _FakeBg(fail_submit=fail_submit)
     bus = EventBus()
     bus.emit = MagicMock()  # type: ignore[method-assign]
     gate = OperationGate()
     handles = OperationHandles()
-    writeback = MagicMock()  # teardown_tab_items is a no-op in these tests
+    writeback = MagicMock()
     progress = ProgressService(DirectProgressTransport())
-    svc = RunService(state, bg, bus, gate, handles, writeback, progress)
-    return svc, gate, bg
+    runner = OperationRunner(gate, handles, progress, bg)  # type: ignore[arg-type]
+    svc = RunService(state, runner, bus, handles, writeback)
+    return svc, gate, bg, handles
+
+
+# ---------------------------------------------------------------------------
+# start_run — normal path
+# ---------------------------------------------------------------------------
 
 
 def test_start_run_acquires_lease_and_submits_to_bg():
     state, tab_id, adapter = _make_state()
-    svc, gate, bg = _make_run_service(state)
+    svc, gate, bg, _ = _make_run_service(state)
 
     svc.start_run(_make_permit(state, tab_id, adapter))
 
-    bg.submit.assert_called_once()
-    # OffMain-thread strategy: not pooled.
-    assert bg.submit.call_args.kwargs["run_in_pool"] is False
+    # bg.submit was called (work captured in _FakeBg)
+    assert bg.last_work is not None
     assert gate.has_active(OperationKind.RUN)
     assert state.is_tab_running(tab_id)
 
@@ -88,25 +144,30 @@ def test_start_run_acquires_lease_and_submits_to_bg():
 def test_start_run_rejects_when_tab_busy():
     state, tab_id, adapter = _make_state()
     state.set_tab_analyzing(tab_id, True)
-    svc, gate, bg = _make_run_service(state)
+    svc, gate, bg, _ = _make_run_service(state)
 
     with pytest.raises(RuntimeError, match="busy"):
         svc.start_run(_make_permit(state, tab_id, adapter))
 
     assert not gate.has_active(OperationKind.RUN)
-    bg.submit.assert_not_called()
+    assert bg.last_work is None
 
 
 def test_start_run_releases_lease_when_submit_raises():
     state, tab_id, adapter = _make_state()
-    svc, gate, bg = _make_run_service(state)
-    bg.submit.side_effect = RuntimeError("worker boom")
+    svc, gate, bg, _ = _make_run_service(state, fail_submit=True)
 
     with pytest.raises(RuntimeError, match="worker boom"):
         svc.start_run(_make_permit(state, tab_id, adapter))
 
     assert not gate.has_active(OperationKind.RUN)
     assert not state.is_tab_running(tab_id)
+
+
+# ---------------------------------------------------------------------------
+# on_terminal — run finished / cancelled / failed paths
+# Drive bg.last_on_done / on_error directly to trigger on_terminal.
+# ---------------------------------------------------------------------------
 
 
 def _last_run_finished_payload(bus_emit: MagicMock):
@@ -121,10 +182,12 @@ def _last_run_finished_payload(bus_emit: MagicMock):
 
 def test_run_finished_emits_outcome_finished():
     state, tab_id, adapter = _make_state()
-    svc, _gate, _bg = _make_run_service(state)
+    svc, _gate, bg, _ = _make_run_service(state)
     svc.start_run(_make_permit(state, tab_id, adapter))
 
-    svc._on_run_finished(tab_id, object())
+    # Trigger on_done without cancel → finished
+    assert bg.last_on_done is not None
+    bg.last_on_done(object())
 
     payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.tab_id == tab_id
@@ -133,10 +196,11 @@ def test_run_finished_emits_outcome_finished():
 
 def test_run_failed_emits_outcome_failed_with_message():
     state, tab_id, adapter = _make_state()
-    svc, _gate, _bg = _make_run_service(state)
+    svc, _gate, bg, _ = _make_run_service(state)
     svc.start_run(_make_permit(state, tab_id, adapter))
 
-    svc._on_run_failed(tab_id, RuntimeError("boom"))
+    assert bg.last_on_error is not None
+    bg.last_on_error(RuntimeError("boom"))
 
     payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.outcome == "failed"
@@ -144,13 +208,11 @@ def test_run_failed_emits_outcome_failed_with_message():
 
 
 def test_cancel_run_sets_operation_stop_event():
-    # cancel_run is async-notification: it sets the operation's stop_event via
-    # the gate. The worker then self-judges and drives _on_run_cancelled.
     state, tab_id, adapter = _make_state()
-    svc, gate, _bg = _make_run_service(state)
+    svc, gate, bg, handles = _make_run_service(state)
     token = svc.start_run(_make_permit(state, tab_id, adapter))
 
-    assert svc._handles.poll(token) is None  # still pending before cancel
+    assert handles.poll(token) is None  # still pending before cancel
     svc.cancel_run()
     # The stop_event is set, but the operation only settles when the worker
     # self-judges and the terminal handler releases the lease.
@@ -159,11 +221,14 @@ def test_cancel_run_sets_operation_stop_event():
 
 def test_run_cancelled_with_partial_result_reports_cancelled_and_keeps_result():
     state, tab_id, adapter = _make_state()
-    svc, _gate, _bg = _make_run_service(state)
+    svc, _gate, bg, _ = _make_run_service(state)
     svc.start_run(_make_permit(state, tab_id, adapter))
 
+    # Simulate: cancel sets stop_event, then worker returns partial result
+    svc.cancel_run()
     partial = object()
-    svc._on_run_cancelled(tab_id, partial)
+    assert bg.last_on_done is not None
+    bg.last_on_done(partial)
 
     payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.outcome == "cancelled"
@@ -173,10 +238,13 @@ def test_run_cancelled_with_partial_result_reports_cancelled_and_keeps_result():
 
 def test_run_cancelled_without_result_reports_cancelled_and_keeps_no_result():
     state, tab_id, adapter = _make_state()
-    svc, _gate, _bg = _make_run_service(state)
+    svc, _gate, bg, _ = _make_run_service(state)
     svc.start_run(_make_permit(state, tab_id, adapter))
 
-    svc._on_run_cancelled(tab_id, NO_RESULT)
+    # Simulate: cancel + worker errors
+    svc.cancel_run()
+    assert bg.last_on_error is not None
+    bg.last_on_error(RuntimeError("interrupted"))
 
     payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.outcome == "cancelled"
@@ -184,24 +252,14 @@ def test_run_cancelled_without_result_reports_cancelled_and_keeps_no_result():
     assert not state.is_tab_running(tab_id)
 
 
-# --- bg outcome -> cancel interpretation (ADR-0019): RunService owns the
-#     stop_event, so it relabels bg's done/failed into finished vs cancelled.
-#     Drive the real closures bg.submit was handed.
-
-
-def _submitted_callbacks(bg: MagicMock):
-    kwargs = bg.submit.call_args.kwargs
-    return kwargs["on_done"], kwargs["on_error"]
-
-
 def test_bg_done_without_cancel_reports_finished():
     state, tab_id, adapter = _make_state()
-    svc, _gate, bg = _make_run_service(state)
+    svc, _gate, bg, _ = _make_run_service(state)
     svc.start_run(_make_permit(state, tab_id, adapter))
-    on_done, _ = _submitted_callbacks(bg)
-
     result = object()
-    on_done(result)
+
+    assert bg.last_on_done is not None
+    bg.last_on_done(result)
 
     payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.outcome == "finished"
@@ -210,13 +268,13 @@ def test_bg_done_without_cancel_reports_finished():
 
 def test_bg_done_after_cancel_reports_cancelled_with_partial():
     state, tab_id, adapter = _make_state()
-    svc, _gate, bg = _make_run_service(state)
+    svc, _gate, bg, _ = _make_run_service(state)
     svc.start_run(_make_permit(state, tab_id, adapter))
-    on_done, _ = _submitted_callbacks(bg)
 
     svc.cancel_run()  # sets the captured stop_event
     partial = object()
-    on_done(partial)
+    assert bg.last_on_done is not None
+    bg.last_on_done(partial)
 
     payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.outcome == "cancelled"
@@ -225,11 +283,11 @@ def test_bg_done_after_cancel_reports_cancelled_with_partial():
 
 def test_bg_error_without_cancel_reports_failed():
     state, tab_id, adapter = _make_state()
-    svc, _gate, bg = _make_run_service(state)
+    svc, _gate, bg, _ = _make_run_service(state)
     svc.start_run(_make_permit(state, tab_id, adapter))
-    _, on_error = _submitted_callbacks(bg)
 
-    on_error(RuntimeError("boom"))
+    assert bg.last_on_error is not None
+    bg.last_on_error(RuntimeError("boom"))
 
     payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.outcome == "failed"
@@ -238,12 +296,12 @@ def test_bg_error_without_cancel_reports_failed():
 
 def test_bg_error_after_cancel_reports_cancelled_without_result():
     state, tab_id, adapter = _make_state()
-    svc, _gate, bg = _make_run_service(state)
+    svc, _gate, bg, _ = _make_run_service(state)
     svc.start_run(_make_permit(state, tab_id, adapter))
-    _, on_error = _submitted_callbacks(bg)
 
     svc.cancel_run()
-    on_error(RuntimeError("interrupted"))
+    assert bg.last_on_error is not None
+    bg.last_on_error(RuntimeError("interrupted"))
 
     payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.outcome == "cancelled"

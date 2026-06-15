@@ -16,6 +16,8 @@ from zcu_tools.gui.app.main.state import State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
 from zcu_tools.gui.session.events import DeviceChangedPayload, SessionEvent
+from zcu_tools.gui.session.operation_handles import OperationHandles
+from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.device import (
     ConnectDeviceRequest,
     DeviceService,
@@ -68,13 +70,19 @@ def _make_field(
 
 def _make_service(device: MagicMock) -> tuple[DeviceService, EventBus]:
     bus = EventBus()
+    gate = OperationGate()
+    bg = _bg()
+    handles = OperationHandles()
+    progress = ProgressService(QtProgressTransport())
+    runner = OperationRunner(gate, handles, progress, bg)
     return (
         DeviceService(
             bus,
             State(MagicMock()),
-            OperationGate(),
-            _bg(),
-            ProgressService(QtProgressTransport()),
+            gate,
+            bg,
+            runner,
+            handles,
             driver_factory=lambda _type, _address: device,  # type: ignore[arg-type]
         ),
         bus,

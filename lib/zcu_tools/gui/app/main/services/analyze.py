@@ -9,7 +9,7 @@ from zcu_tools.gui.app.main.adapter import AnalyzeRequest
 from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
-from zcu_tools.gui.session.ports import BackgroundExecutor
+from zcu_tools.gui.session.operation_runner import OperationRunner
 
 from .guard import AnalyzePermit
 from .scopes import figure_ambient
@@ -32,7 +32,7 @@ class AnalyzeService(_StagedAnalyzeService):
     def __init__(
         self,
         state: State,
-        bg: BackgroundExecutor,
+        runner: OperationRunner,
         bus: EventBus,
         writeback: WritebackLifecyclePort,
         handles: OperationHandles,
@@ -43,7 +43,7 @@ class AnalyzeService(_StagedAnalyzeService):
         # an exclusion lease just to obtain the async handle (operation_id + await).
         # The handle is settled exactly once on the terminal slot (_finish /
         # _fail), the per-tab token map of which lives in the base.
-        super().__init__(state, bg, bus, handles)
+        super().__init__(state, runner, bus, handles)
         self._writeback = writeback
         # Tabs whose active token is an INTERACTIVE picker (no worker; settles only
         # on Done / cancel). FIT analyze shares the base's per-tab token map but is
@@ -87,24 +87,19 @@ class AnalyzeService(_StagedAnalyzeService):
             tab_id,
             type(analyze_params_instance).__name__,
         )
-        # Handle only — no exclusion, no stop_event (analyze never conflicts and
-        # is not cancellable in this minimal integration). Settled exactly once on
-        # the terminal slot, or here (in _submit) if the worker fails to start.
-        token = self._open_token(tab_id)
         adapter = tab.adapter
 
-        def work() -> Any:
+        def work(factory: Any) -> Any:  # factory is None (wants_progress=False)
             # Analyze uses only figure_ambient (no pbar, no ActiveTask — ADR-0026 §2).
             with figure_ambient(figure_container):
                 return adapter.analyze(req)
 
-        self._submit(
+        return self._submit_with_runner(
             tab_id,
             work,
-            self._on_analyze_finished,
+            self._record,
             "analyze failed to start",
         )
-        return token
 
     def start_interactive(self, permit: AnalyzePermit) -> int:
         """Begin an INTERACTIVE analysis: open the async handle and mark the tab
@@ -116,6 +111,8 @@ class AnalyzeService(_StagedAnalyzeService):
         ADR-0025: cancel_hook triggers cancel_interactive so handles.stop(token)
         causes the channel to directly settle-cancelled, allowing an awaiter's
         Stop event to fold reason correctly before Settled arrives.
+
+        INTERACTIVE does NOT go through OperationRunner (stage2c_spec.md §interactive).
         """
         tab_id = permit.tab_id
         if self._state.is_tab_busy(tab_id):
@@ -181,17 +178,41 @@ class AnalyzeService(_StagedAnalyzeService):
         return True
 
     def _on_analyze_finished(self, tab_id: str, analyze_result: Any) -> None:
+        """Terminal path used by finish_interactive (interactive → same FIT terminal).
+
+        FIT analyze uses _submit_with_runner's internal _finish directly.
+        Interactive calls here, which runs record + clears analyzing + settles
+        via _release.
+        """
         logger.info(
             "_on_analyze_finished: tab_id=%r result_type=%s",
             tab_id,
             type(analyze_result).__name__,
         )
-        self._finish(tab_id, analyze_result, self._record)
+        # Interactive uses _release (not runner settle) — the token is in
+        # _active_tokens from _open_token.
+        try:
+            self._record(tab_id, analyze_result)
+        except Exception as exc:
+            logger.exception("%s finished post-processing failed: %r", tab_id, exc)
+            self._state.set_tab_analyzing(tab_id, False)
+            self._release(tab_id, OperationOutcome("failed", str(exc)))
+            self._bus.emit(TabInteractionChangedPayload(tab_id=tab_id))
+            self._failed_signal.emit(tab_id, exc)
+            return
+        self._state.set_tab_analyzing(tab_id, False)
+        self._release(tab_id, OperationOutcome("finished"))
+        self._bus.emit(TabInteractionChangedPayload(tab_id=tab_id))
+        self._finished_signal.emit(tab_id, analyze_result)
 
     def _on_analyze_failed(self, tab_id: str, error: Exception) -> None:
-        # Named worker-failure slot kept as the public entry point (the on_error
-        # callback target); delegates to the shared failure terminal path.
-        self._on_failed(tab_id, error)
+        # Named worker-failure slot kept as the public entry point for interactive;
+        # delegates to the single failure terminal path via _release.
+        logger.warning("analyze failed: tab_id=%r error=%r", tab_id, error)
+        self._state.set_tab_analyzing(tab_id, False)
+        self._release(tab_id, OperationOutcome("failed", str(error)))
+        self._bus.emit(TabInteractionChangedPayload(tab_id=tab_id))
+        self._failed_signal.emit(tab_id, error)
 
     def _record(self, tab_id: str, analyze_result: Any) -> None:
         # Tear down the previous analyze's writeback editor models before the new

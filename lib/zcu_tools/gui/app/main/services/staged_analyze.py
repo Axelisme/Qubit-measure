@@ -9,6 +9,11 @@ things differ between them — the gate + request assembly that starts the work,
 finish/fail. This base owns the lifecycle skeleton; each subclass fills the three
 seams.
 
+Stage 2c: FIT/post analyze changed from inline bg.submit to OperationRunner
+(ADR-0026 §1). Interactive analyze (no worker, user-paced main-thread strategy)
+still uses the direct _open_token path — it is explicitly excluded from runner
+(stage2c_spec.md).
+
 The base deliberately holds NO operation-kind knowledge beyond "off-main work that
 settles a per-tab handle": the INTERACTIVE branch (no worker, user-paced) and the
 distinct gates (run_result vs analyze_result) live in the subclasses, not here.
@@ -28,13 +33,18 @@ from zcu_tools.gui.session.operation_handles import (
     OperationHandles,
     OperationOutcome,
 )
+from zcu_tools.gui.session.operation_runner import (
+    BgResult,
+    OperationRunner,
+    OperationSpec,
+    SettleFn,
+)
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.state import State
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
-    from zcu_tools.gui.session.ports import BackgroundExecutor
 
 
 class _StagedAnalyzeService(QObject):
@@ -43,20 +53,22 @@ class _StagedAnalyzeService(QObject):
     Subclasses declare their own ``finished``/``failed`` Qt signals (a signal must
     be bound on the concrete class) and expose them through ``_finished_signal`` /
     ``_failed_signal`` so the base can emit the right one. The per-tab token map,
-    ``_release``, the failure terminal path, and the start/finish templates are
-    owned here.
+    the failure terminal path, and the start/finish templates are owned here.
+
+    FIT/post analyze delegate bg submission to OperationRunner (_submit_with_runner).
+    Interactive analyze still uses _open_token + _release directly (no runner).
     """
 
     def __init__(
         self,
         state: State,
-        bg: BackgroundExecutor,
+        runner: OperationRunner,
         bus: EventBus,
         handles: OperationHandles,
     ) -> None:
         super().__init__()
         self._state = state
-        self._bg = bg
+        self._runner = runner
         self._bus = bus
         self._handles = handles
         # Per-tab token map: analyze has NO exclusion gate (ADR-0019), so two
@@ -82,6 +94,11 @@ class _StagedAnalyzeService(QObject):
     # -- shared handle bookkeeping -----------------------------------------
 
     def _release(self, tab_id: str, outcome: OperationOutcome) -> None:
+        """Settle and remove the per-tab handle (interactive path only).
+
+        FIT/post use the runner-injected settle function; only interactive
+        analyze settles via this method (no runner, direct _open_token).
+        """
         token = self._active_tokens.pop(tab_id, None)
         if token is not None:
             self._handles.settle(token, outcome)
@@ -89,6 +106,8 @@ class _StagedAnalyzeService(QObject):
     def _open_token(self, tab_id: str, cancel_hook: CancelHook | None = None) -> int:
         """Mint and register the per-tab operation handle (pending).
 
+        Used ONLY by the INTERACTIVE analyze path (no worker, user-paced). FIT
+        and post-analyze handles are minted by OperationRunner._make_settle.
         ``cancel_hook`` is forwarded to OperationChannel.create; pass None for
         FIT-analyze (not cancellable) or a teardown callable for interactive.
         """
@@ -105,68 +124,81 @@ class _StagedAnalyzeService(QObject):
         self._state.set_tab_analyzing(tab_id, True)
         self._bus.emit(TabInteractionChangedPayload(tab_id=tab_id))
 
-    def _submit(
+    def _submit_with_runner(
         self,
         tab_id: str,
-        work: Callable[[], Any],
-        on_finished: Callable[[str, Any], None],
-        start_fail_message: str,
-    ) -> None:
-        """Submit ``work`` off-main, releasing the already-open token if it fails
-        to start, then mark the tab analyzing. The token must already be open
-        (``_open_token``) so a synchronous submit failure settles the right one.
-
-        All ambient scopes must be built into ``work`` by the caller (ADR-0026
-        §2): the work thunk owns its own ``figure_ambient`` context manager.
-        """
-        try:
-            self._bg.submit(
-                work,
-                run_in_pool=False,
-                on_done=lambda result: on_finished(tab_id, result),
-                on_error=lambda exc: self._on_failed(tab_id, exc),
-            )
-        except Exception:
-            self._release(tab_id, OperationOutcome("failed", start_fail_message))
-            raise
-        self._begin(tab_id)
-
-    def _finish(
-        self,
-        tab_id: str,
-        result: Any,
+        work: Callable[[Any], Any],
         record: Callable[[str, Any], None],
-    ) -> None:
-        """The shared finished terminal path: record into State, then settle.
+        start_fail_message: str,
+    ) -> int:
+        """Submit ``work`` via OperationRunner (FIT/post analyze path).
 
-        ``record`` performs the subclass-specific State write (writeback compute +
-        ``update_tab_analyze`` for primary; ``update_tab_post_analyze`` for post).
-        On a recording failure the handle would otherwise never settle and the tab
-        would stay analyzing forever — so route it through the single ``_fail``
-        path. On success: clear analyzing, settle the handle only after State is
-        observable (an awaiter that wakes sees a ready figure), then emit.
+        No exclusion (analyze never conflicts with hardware — ADR-0019), no
+        progress, no cancel hook. begin() registers the token in _active_tokens
+        so the interactive accessor (cancel_interactive, active_interactive_token)
+        cannot see it (it is not in _interactive_tabs). Marks the tab analyzing
+        AFTER begin() succeeds (post-begin, stage2c_spec.md).
+
+        Returns the operation token.
         """
-        try:
-            record(tab_id, result)
-        except Exception as exc:
-            logger.exception("%s finished post-processing failed: %r", tab_id, exc)
-            self._fail(tab_id, exc)
-            return
-        self._state.set_tab_analyzing(tab_id, False)
-        self._release(tab_id, OperationOutcome("finished"))
-        self._bus.emit(TabInteractionChangedPayload(tab_id=tab_id))
-        self._finished_signal.emit(tab_id, result)
 
-    def _on_failed(self, tab_id: str, error: Exception) -> None:
-        logger.warning("staged-analyze failed: tab_id=%r error=%r", tab_id, error)
-        self._fail(tab_id, error)
+        def on_terminal(bg: BgResult, settle: SettleFn) -> None:
+            # Store token for _active_tokens consistency before terminal logic.
+            # (Token is already in _active_tokens from runner.begin, but we need
+            # settle to replace _release in the terminal paths.)
+            if bg.ok:
+                _finish(bg.result, settle)
+            else:
+                assert bg.error is not None
+                _fail(bg.error, settle)
 
-    def _fail(self, tab_id: str, error: Exception) -> None:
-        """The single failure terminal path: clear analyzing, settle the tab's
-        handle failed, emit the interaction + failed signals. Shared by the
-        worker-side failure and a slot-internal failure during finish, so both
-        leave identical observable state."""
-        self._state.set_tab_analyzing(tab_id, False)
-        self._release(tab_id, OperationOutcome("failed", str(error)))
-        self._bus.emit(TabInteractionChangedPayload(tab_id=tab_id))
-        self._failed_signal.emit(tab_id, error)
+        def _finish(result: Any, settle: SettleFn) -> None:
+            """The shared finished terminal path: record into State, then settle.
+
+            ``record`` performs the subclass-specific State write. On a recording
+            failure route through _fail so the handle never stays live. On success:
+            clear analyzing, settle (State already observable — invariant 1),
+            then emit signals/events.
+            """
+            try:
+                record(tab_id, result)
+            except Exception as exc:
+                logger.exception("%s finished post-processing failed: %r", tab_id, exc)
+                _fail(exc, settle)
+                return
+            self._active_tokens.pop(tab_id, None)
+            self._state.set_tab_analyzing(tab_id, False)
+            # settle before signals — State visible to awaiter on wake.
+            settle(OperationOutcome("finished"))
+            self._bus.emit(TabInteractionChangedPayload(tab_id=tab_id))
+            self._finished_signal.emit(tab_id, result)
+
+        def _fail(error: Exception, settle: SettleFn) -> None:
+            """The single failure terminal path: clear analyzing, settle failed, emit."""
+            logger.warning("staged-analyze failed: tab_id=%r error=%r", tab_id, error)
+            self._active_tokens.pop(tab_id, None)
+            self._state.set_tab_analyzing(tab_id, False)
+            # settle before signals — State visible to awaiter on wake.
+            settle(OperationOutcome("failed", str(error)))
+            self._bus.emit(TabInteractionChangedPayload(tab_id=tab_id))
+            self._failed_signal.emit(tab_id, error)
+
+        spec = OperationSpec(
+            exclusion=None,  # analyze has no exclusion facet (ADR-0019)
+            owner_id=tab_id,
+            wants_progress=False,
+            cancel_hook=None,
+            work=work,
+            run_in_pool=False,
+            on_terminal=on_terminal,
+        )
+
+        token = self._runner.begin(spec)
+        # runner.begin mints and registers the token internally; we record it in
+        # _active_tokens so the interactive accessors cannot see it (they check
+        # _interactive_tabs, not _active_tokens, but _release uses _active_tokens).
+        self._active_tokens[tab_id] = token
+
+        # POST-BEGIN: mark analyzing after submit succeeds (begin-raise = no worker).
+        self._begin(tab_id)
+        return token

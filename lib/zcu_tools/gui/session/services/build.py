@@ -26,6 +26,7 @@ from zcu_tools.gui.session.services.startup import StartupService
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus
     from zcu_tools.gui.session.operation_handles import OperationHandles
+    from zcu_tools.gui.session.operation_runner import OperationRunner
     from zcu_tools.gui.session.ports import (
         BackgroundExecutor,
         DriverFactoryPort,
@@ -55,22 +56,25 @@ def build_session_services(
     background: BackgroundExecutor,
     progress: ProgressHub,
     io_manager: ProjectIOPort,
+    runner: OperationRunner,
     driver_factory: DriverFactoryPort | None = None,
 ) -> SessionServices:
     """Construct the session services from the app-provided infrastructure.
 
     ``gate`` / ``background`` / ``progress`` are the app's concrete exclusion gate,
     off-main executor and progress hub (injected via their session ports);
-    ``io_manager`` is the project-IO adapter; ``driver_factory`` defaults to the
-    device service's built-in hardware factory when omitted.
+    ``io_manager`` is the project-IO adapter; ``runner`` is the shared
+    OperationRunner (ADR-0026 §1) used by DeviceService for operation lifecycle;
+    ``driver_factory`` defaults to the device service's built-in hardware factory
+    when omitted.
     """
     device = DeviceService(
         bus,
         state,
         gate,
         background,
-        progress,
-        handles=handles,
+        runner,
+        handles,
         driver_factory=driver_factory,
     )
     connection = ConnectionService(state, bus, gate, handles)
