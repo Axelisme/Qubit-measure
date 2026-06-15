@@ -253,31 +253,29 @@ class TestSimParamsParamsJsonRoundTrip:
 
 
 class TestDefaultSimParamFluxPeriod:
-    """DEFAULT_SIMPARAM.flux_period must match the onetone/twotone guide sweep range.
+    """DEFAULT_SIMPARAM.flux_period must sit within the onetone/twotone guide sweep.
 
     The guide default flux sweep is ~[-4e-3, 4e-3].  With flux_half=0 and
-    flux_bias=0, the formula value_to_flux(v) = v/flux_period + 0.5 must map
-    that sweep to a full period [0.0, 1.0] so the mock 2D flux_dep plot shows
-    visible dispersion.  A flux_period >> 8e-3 would make the sweep cover a
-    tiny fraction of a period → flat colour map (the bug we are fixing).
+    flux_bias=0, the formula value_to_flux(v) = v/flux_period + 0.5 must map that
+    sweep across at least one full period so the mock 2D flux_dep plot shows
+    visible dispersion.  A flux_period >> the sweep span (e.g. the old 1.0) would
+    cover only a tiny fraction of a period → flat colour map (the bug we fix).
     """
 
     def test_flux_period_is_realistic(self) -> None:
-        # 8e-3 is the calibrated value that makes the guide sweep cover one full
-        # period.  Assert the exact value so an accidental reversion is caught.
-        assert DEFAULT_SIMPARAM.flux_period == pytest.approx(8e-3)
+        # 5e-3 sits inside the guide sweep so it covers >1 period.  Assert the
+        # exact value so an accidental reversion is caught.
+        assert DEFAULT_SIMPARAM.flux_period == pytest.approx(5e-3)
 
-    def test_guide_sweep_covers_one_full_period(self) -> None:
+    def test_guide_sweep_covers_at_least_one_period(self) -> None:
         # value_to_flux(v) = (v + flux_bias - flux_half) / flux_period + 0.5
-        # With DEFAULT_SIMPARAM's flux_half=0, flux_bias=0, flux_period=8e-3:
-        #   v = -4e-3 → reduced_flux = 0.0
-        #   v =  4e-3 → reduced_flux = 1.0
-        # Span must be ≥ 0.99 (≈ one complete period) to produce visible dispersion.
+        # With flux_half=0, flux_bias=0, flux_period=5e-3 the guide sweep
+        # [-4e-3, 4e-3] spans 8e-3/5e-3 = 1.6 periods (>= 1 -> visible dispersion).
         p = DEFAULT_SIMPARAM
         flux_lo = (-4e-3 + p.flux_bias - p.flux_half) / p.flux_period + 0.5
         flux_hi = (+4e-3 + p.flux_bias - p.flux_half) / p.flux_period + 0.5
         span = flux_hi - flux_lo
-        assert span == pytest.approx(1.0, abs=0.01), (
+        assert span >= 1.0, (
             f"guide sweep [-4e-3, 4e-3] covers only {span:.3f} periods "
-            f"(expected ~1.0); flux_period={p.flux_period}"
+            f"(need >= 1.0 for visible dispersion); flux_period={p.flux_period}"
         )

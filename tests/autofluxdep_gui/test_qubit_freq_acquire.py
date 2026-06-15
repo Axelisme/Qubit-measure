@@ -73,9 +73,12 @@ def test_qubit_freq_acquire_fit_varies_with_flux():
         }
     )
 
-    # Flux device values placing f01 sub-Nyquist and clearly separated:
-    #   value 0.0 -> f01 ~582 MHz, 0.06 -> ~1673 MHz, 0.1 -> ~2640 MHz.
-    flux_values = [0.0, 0.06, 0.1]
+    # Flux device values within the realistic range that map to DISTINCT reduced
+    # flux under DEFAULT_SIMPARAM (flux_period=5e-3, flux_half=0):
+    #   0.0 -> 0.5 (sweet spot), 1.5e-3 -> 0.8, 2.5e-3 -> 1.0 (integer flux).
+    # f01 rises from the sweet-spot minimum, sub-Nyquist and clearly separated.
+    # (Avoid exact multiples of flux_period, which alias back to the same flux.)
+    flux_values = [0.0, 1.5e-3, 2.5e-3]
     ctrl.set_flux_values(flux_values)
     ctrl.start_run()
 
