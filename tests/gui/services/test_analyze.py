@@ -217,6 +217,102 @@ def test_finish_interactive_runs_the_fit_terminal_path(qapp):  # noqa: ARG001
 
 
 # ---------------------------------------------------------------------------
+# cancel_interactive — agent-side settle of an in-flight interactive picker
+# (BUG-2: interactive analyze has no worker/stop_event; run.cancel can't reach
+# it, so without this the tab stays is_analyzing forever and can never close).
+# ---------------------------------------------------------------------------
+
+
+def test_cancel_interactive_clears_analyzing_and_settles_cancelled(qapp):  # noqa: ARG001
+    state = _make_state()
+    bus = EventBus()
+    svc, _ = _make_service(state, bus)
+    handles = svc._handles
+
+    token = svc.start_interactive(AnalyzePermit(tab_id="tab1"))
+    assert state.get_tab("tab1").is_analyzing is True
+
+    received: list[str] = []
+    bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.tab_id))
+    # A cancel is not a failure: analyze_failed must NOT fire (no error dialog).
+    failed: list = []
+    svc.analyze_failed.connect(lambda tid, err: failed.append((tid, err)))
+
+    cancelled = svc.cancel_interactive("tab1")
+
+    assert cancelled is True
+    # is_analyzing cleared -> the tab is no longer busy, so it can be closed.
+    assert state.get_tab("tab1").is_analyzing is False
+    assert state.is_tab_busy("tab1") is False
+    # The handle settles cancelled (the agent's analyze-poll resolves), exactly once.
+    outcome = handles.poll(token)
+    assert outcome is not None and outcome.status == "cancelled"
+    assert handles.live_count() == 0
+    assert "tab1" not in svc._active_tokens
+    # Interaction event fired; no failure signal.
+    assert "tab1" in received
+    assert failed == []
+
+
+def test_cancel_interactive_no_inflight_is_graceful_noop(qapp):  # noqa: ARG001
+    state = _make_state()
+    svc, _ = _make_service(state, EventBus())
+
+    # No analyze started at all -> graceful no-op, no raise, no state change.
+    assert svc.cancel_interactive("tab1") is False
+    assert state.get_tab("tab1").is_analyzing is False
+    assert svc._handles.live_count() == 0
+
+
+def test_cancel_interactive_does_not_touch_fit_analyze(qapp):  # noqa: ARG001
+    state = _make_state()
+    svc, bg = _make_service(state, EventBus())
+    handles = svc._handles
+
+    # A worker-backed FIT analyze is in flight (its callback will settle it later).
+    token = svc.start_analyze(
+        AnalyzePermit(tab_id="tab1"), analyze_params_instance=object()
+    )
+    bg.submit.assert_called_once()
+
+    # cancel_interactive must not reach into a FIT analyze (settling its handle
+    # while the worker callback is still pending would double-settle on finish).
+    assert svc.cancel_interactive("tab1") is False
+    assert state.get_tab("tab1").is_analyzing is True  # FIT analyze untouched
+    assert handles.poll(token) is None  # still live, settles via its own callback
+
+
+def test_cancel_interactive_is_idempotent(qapp):  # noqa: ARG001
+    state = _make_state()
+    svc, _ = _make_service(state, EventBus())
+    svc.start_interactive(AnalyzePermit(tab_id="tab1"))
+
+    assert svc.cancel_interactive("tab1") is True
+    # A second cancel finds nothing in flight -> graceful no-op.
+    assert svc.cancel_interactive("tab1") is False
+
+
+def test_finish_after_cancel_interactive_is_inert(qapp):  # noqa: ARG001
+    # Defensive: if a late Done arrives after a cancel, the already-settled token
+    # is gone, so finish_interactive must not resurrect the tab into analyzing.
+    state = _make_state()
+    svc, _ = _make_service(state, EventBus())
+    svc.start_interactive(AnalyzePermit(tab_id="tab1"))
+    svc.cancel_interactive("tab1")
+
+    session = MagicMock()
+    result = MagicMock()
+    result.figure = None
+    session.finish.return_value = result
+    svc.finish_interactive("tab1", session)
+
+    # State was updated by the (inert) finish path but the tab is not analyzing and
+    # no second handle leaked.
+    assert state.get_tab("tab1").is_analyzing is False
+    assert svc._handles.live_count() == 0
+
+
+# ---------------------------------------------------------------------------
 # _on_analyze_failed
 # ---------------------------------------------------------------------------
 

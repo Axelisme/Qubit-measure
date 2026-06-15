@@ -151,6 +151,16 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "run.cancel": MethodSpec(5.0, "Cancel current run"),
     "run.running_tab": MethodSpec(5.0, "Current running tab"),
+    "analyze.cancel": MethodSpec(
+        5.0,
+        "Cancel the tab's in-flight (interactive) analyze: settle its handle as "
+        "cancelled and clear is_analyzing so the tab can then be closed. This is "
+        "the agent-side counterpart of the GUI 'Done' button for an interactive "
+        "picker — interactive analyze is a separate operation from run, so "
+        "run.cancel does NOT settle it. A graceful no-op (ok=False) when the tab "
+        "has no interactive analyze in flight.",
+        (_str("tab_id"),),
+    ),
     # Save
     "save.data": MethodSpec(
         30.0,

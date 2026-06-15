@@ -1277,6 +1277,29 @@ class MainWindow(QMainWindow):
         tab_w._plot_stack.addWidget(widget)
         tab_w._plot_stack.setCurrentWidget(widget)
 
+    def unmount_interactive_analysis(self, tab_id: str) -> None:
+        """RenderHost impl: remove the tab's mounted interactive picker (dual of
+        ``mount_interactive_analysis``). The picker widget is added straight to the
+        plot stack (it is not a FigureContainer canvas), so ``reset_plot`` cannot
+        reach it — this is the only teardown path for a cancelled interactive
+        analyze. A no-op when no picker is mounted, and idempotent."""
+        from zcu_tools.gui.app.main.ui.interactive_analysis import (
+            InteractiveAnalysisWidget,
+        )
+
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return
+        stack = tab_w._plot_stack
+        for i in range(stack.count()):
+            widget = stack.widget(i)
+            if isinstance(widget, InteractiveAnalysisWidget):
+                stack.removeWidget(widget)
+                widget.deleteLater()
+        # Revert the visible pane to the placeholder; the cancelled analyze leaves
+        # no figure of its own behind.
+        stack.setCurrentWidget(tab_w._plot_placeholder)
+
     def current_left_panel_width(self) -> int:
         """RenderHost impl: the active tab's left-panel width (the single
         persistence value sourced from the View). Falls back to the default when

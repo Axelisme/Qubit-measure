@@ -131,6 +131,13 @@ class RenderHost(Protocol):
         ``on_finish(session)``. The View knows nothing of the interaction."""
         ...
 
+    def unmount_interactive_analysis(self, tab_id: str) -> None:
+        """Tear down a tab's mounted interactive picker (the dual of
+        ``mount_interactive_analysis``). Called when an interactive analyze is
+        cancelled — the picker widget has no settle path of its own, so the
+        Controller drives its removal. A no-op when nothing is mounted."""
+        ...
+
     # The View's current left-panel width — the only persistence value sourced
     # from the View (the splitter widget); captured at flush time.
     def current_left_panel_width(self) -> int: ...
@@ -540,6 +547,25 @@ class Controller:
 
     def cancel_run(self) -> None:
         self._run_svc.cancel_run()
+
+    def cancel_analyze(self, tab_id: str) -> bool:
+        """Cancel an in-flight INTERACTIVE analyze on ``tab_id``.
+
+        Interactive analyze and run are separate operations (ADR-0019): cancel_run
+        only trips the run's stop_event and never touches the analyze handle or
+        ``is_analyzing``. The interactive picker has no worker / stop_event, so its
+        only non-Done settle path is here — tear down the mounted picker widget,
+        then settle the analyze handle as cancelled (clears ``is_analyzing`` so the
+        tab can close). Returns False (graceful no-op) when the tab has no
+        in-flight interactive analyze.
+
+        The View teardown runs unconditionally first so a stale mounted widget
+        never lingers, even if the service side is already settled.
+        """
+        host = self._render_host
+        if host is not None:
+            host.unmount_interactive_analysis(tab_id)
+        return self._analyze_svc.cancel_interactive(tab_id)
 
     # ------------------------------------------------------------------
     # Shutdown coordination (cancel-all + wait, ADR-0003)

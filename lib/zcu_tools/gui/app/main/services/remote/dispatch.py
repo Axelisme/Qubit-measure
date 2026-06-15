@@ -259,6 +259,18 @@ def _h_run_cancel(
     return {"ok": True}
 
 
+def _h_analyze_cancel(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    tab_id = str(params["tab_id"])
+    if not adapter.ctrl.has_tab(tab_id):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    # Graceful by contract (no interactive analyze in flight is not an error): the
+    # cancelled flag tells the agent whether anything was actually settled.
+    cancelled = adapter.ctrl.cancel_analyze(tab_id)
+    return {"ok": True, "cancelled": cancelled}
+
+
 def _h_run_running_tab(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
@@ -1793,6 +1805,7 @@ _HANDLERS: dict[str, Handler] = {
     "tab.update_cfg": _h_tab_update_cfg,
     "run.start": _h_run_start,
     "run.cancel": _h_run_cancel,
+    "analyze.cancel": _h_analyze_cancel,
     "run.running_tab": _h_run_running_tab,
     "save.data": _h_save_data,
     "save.image": _h_save_image,

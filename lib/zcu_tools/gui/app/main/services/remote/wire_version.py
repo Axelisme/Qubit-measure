@@ -124,7 +124,11 @@ from __future__ import annotations
 # v28: dialog.screenshot's ParamSpec renamed dialog_name -> name, aligning it with
 #      dialog.open / dialog.close (which already take 'name'); the handler reads
 #      params["name"]. Wire param-name contract change.
-WIRE_VERSION = 28
+# v29: added analyze.cancel(tab_id) — settle an in-flight (interactive) analyze as
+#      cancelled and clear is_analyzing so the tab can be closed; the agent-side
+#      counterpart of the GUI 'Done' button (interactive analyze is a separate op
+#      from run, so run.cancel does not settle it). New method = contract change.
+WIRE_VERSION = 29
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -272,4 +276,10 @@ WIRE_VERSION = 28
 #      match. WIRE bumped for (a) only.
 # v35: dialog.screenshot handler reads params["name"] (was params["dialog_name"]),
 #      tracking the WIRE 28 param-name alignment with dialog.open / dialog.close.
-GUI_VERSION = 35
+# v36: (a) mathtext parser thread-safety fix — a process-wide lock wraps
+#      matplotlib's MathTextParser.parse (+ main-thread prewarm) installed at each
+#      GUI startup, so off-main analyze plotting ($-titles via tight_layout) can no
+#      longer corrupt the shared singleton parser (the recurring ParseException).
+#      (b) analyze.cancel wiring (WIRE 29): interactive-analyze teardown
+#      (cancel_interactive + RenderHost.unmount_interactive_analysis).
+GUI_VERSION = 36

@@ -6,8 +6,9 @@ from typing import TYPE_CHECKING, Any
 from qtpy.QtCore import Signal  # type: ignore[attr-defined]
 
 from zcu_tools.gui.app.main.adapter import AnalyzeRequest
+from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
 from zcu_tools.gui.plotting import FigureContainer
-from zcu_tools.gui.session.operation_handles import OperationHandles
+from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
 from zcu_tools.gui.session.ports import BackgroundExecutor
 
 from .background import OffMainScopes
@@ -44,6 +45,12 @@ class AnalyzeService(_StagedAnalyzeService):
         # _fail), the per-tab token map of which lives in the base.
         super().__init__(state, bg, bus, handles)
         self._writeback = writeback
+        # Tabs whose active token is an INTERACTIVE picker (no worker; settles only
+        # on Done / cancel). FIT analyze shares the base's per-tab token map but is
+        # NOT tracked here, so cancel_interactive cannot reach into a worker-backed
+        # analyze (which would settle the handle while the worker callback is still
+        # in flight). Entries are removed by every interactive terminal path.
+        self._interactive_tabs: set[str] = set()
 
     @property
     def _finished_signal(self) -> Any:
@@ -105,6 +112,7 @@ class AnalyzeService(_StagedAnalyzeService):
         if self._state.is_tab_busy(tab_id):
             raise RuntimeError(f"Tab {tab_id!r} is busy")
         token = self._open_token(tab_id)
+        self._interactive_tabs.add(tab_id)
         self._begin(tab_id)
         return token
 
@@ -112,7 +120,33 @@ class AnalyzeService(_StagedAnalyzeService):
         """The user finished the interactive pick (Done): build the result and run
         the SAME terminal path as a FIT analyze (writeback compute + State update +
         lease release + events), so the agent's analyze-result poll resolves."""
+        self._interactive_tabs.discard(tab_id)
         self._on_analyze_finished(tab_id, session.finish())
+
+    def is_interactive_active(self, tab_id: str) -> bool:
+        """Whether ``tab_id`` currently holds an in-flight INTERACTIVE picker
+        (opened by ``start_interactive``, not yet settled by Done / cancel)."""
+        return tab_id in self._interactive_tabs
+
+    def cancel_interactive(self, tab_id: str) -> bool:
+        """Cancel an in-flight INTERACTIVE analyze: settle its handle as cancelled
+        and clear ``is_analyzing`` so the tab can close.
+
+        Mirrors the ``_fail`` terminal (set_tab_analyzing(False) + _release +
+        interaction event) but with a ``cancelled`` outcome and WITHOUT emitting
+        ``analyze_failed`` — a user/agent cancel is not an error, so it must not
+        pop the "Analyze failed" diagnostic. Returns False (no-op) when the tab has
+        no in-flight interactive picker, so the caller can report a graceful
+        message instead of raising.
+        """
+        if tab_id not in self._interactive_tabs:
+            return False
+        self._interactive_tabs.discard(tab_id)
+        logger.info("cancel_interactive: tab_id=%r", tab_id)
+        self._state.set_tab_analyzing(tab_id, False)
+        self._release(tab_id, OperationOutcome("cancelled"))
+        self._bus.emit(TabInteractionChangedPayload(tab_id=tab_id))
+        return True
 
     def _on_analyze_finished(self, tab_id: str, analyze_result: Any) -> None:
         logger.info(

@@ -196,6 +196,43 @@ def test_close_tab_removes_from_state(cf):
 
 
 # ---------------------------------------------------------------------------
+# cancel_analyze — agent-side teardown of an in-flight interactive analyze
+# (BUG-2: without it, an interactive picker leaves is_analyzing set and the tab
+# can never be closed; run.cancel can't reach the separate analyze handle).
+# ---------------------------------------------------------------------------
+
+
+def test_cancel_analyze_tears_down_picker_and_lets_tab_close(cf):
+    from zcu_tools.gui.app.main.services.guard import AnalyzePermit
+
+    tab_id = cf.ctrl.new_tab("fake")
+    cf.state.update_tab_result(tab_id, object())  # a result exists to analyze
+    # Drive an interactive picker into flight (the View's mount is a MagicMock).
+    cf.ctrl._analyze_svc.start_interactive(AnalyzePermit(tab_id=tab_id))
+    assert cf.state.is_tab_analyzing(tab_id) is True
+    # is_analyzing makes the tab busy, so closing it is rejected up front.
+    with pytest.raises(RuntimeError, match="busy"):
+        cf.ctrl.close_tab(tab_id)
+
+    cancelled = cf.ctrl.cancel_analyze(tab_id)
+
+    assert cancelled is True
+    # The View's interactive host is torn down (dual of mount_interactive_analysis).
+    cf.view.unmount_interactive_analysis.assert_called_once_with(tab_id)
+    # is_analyzing cleared -> the tab is no longer busy and can be closed.
+    assert cf.state.is_tab_analyzing(tab_id) is False
+    cf.ctrl.close_tab(tab_id)
+    assert tab_id not in cf.state.tabs
+
+
+def test_cancel_analyze_without_interactive_is_graceful(cf):
+    tab_id = cf.ctrl.new_tab("fake")
+    # No interactive analyze in flight -> graceful no-op (still unmounts defensively).
+    assert cf.ctrl.cancel_analyze(tab_id) is False
+    cf.view.unmount_interactive_analysis.assert_called_once_with(tab_id)
+
+
+# ---------------------------------------------------------------------------
 # start_run / run_finished flow
 # ---------------------------------------------------------------------------
 
