@@ -546,7 +546,7 @@ class Controller:
         """Build the sweep's adaptive predictor from the active context.
 
         ``exp_context.predictor`` holds the raw ``FluxoniumPredictor`` (loaded at
-        setup / by ConnectionService) or None. A real predictor is wrapped into
+        setup / by PredictorService) or None. A real predictor is wrapped into
         the adaptive ``FluxoniumPredictorAdapter``; with none loaded we fall back
         to the ``SimplePredictor`` stand-in, so a mock / unconfigured run still
         drives the same calibrate loop.

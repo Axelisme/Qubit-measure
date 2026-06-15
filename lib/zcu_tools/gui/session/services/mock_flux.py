@@ -15,7 +15,7 @@ the session ``EventBus`` and wants the exact same behaviour; promoting it here
 makes the provisioning a single shared implementation both apps reuse via
 ``build_session_services`` (the apps subscribe nothing extra). It depends on the
 session ``DeviceService`` (for register / reconnect / setup + state queries), the
-``ConnectionService`` (for installing the sim predictor through the existing
+``PredictorService`` (for installing the sim predictor through the existing
 predictor seam), and ``SocChangedPayload`` on the bus — all session-layer concepts.
 
 Two Use-Mock effects share one owner and one ``SOC_CHANGED`` handler:
@@ -84,7 +84,7 @@ class MockFluxProvisioner:
         # SocChangedPayload is the right hook: it fires on every *successful*
         # connect (never on disconnect — that path emits nothing), carries
         # ``is_mock`` and the concrete ``soc`` handle, and is emitted on the Qt
-        # main thread (ConnectionService._apply_connection), so this honours the
+        # main thread (SoCConnectionService._apply_connection), so this honours the
         # State main-thread invariant and routes through DeviceService.
         bus.subscribe(SocChangedPayload, self._on_soc_changed)
         # The initial-value ramp is chained off connect-success (connect carries

@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-13 — predictor dialog 互動視覺化（右側 f_ij 曲線 + 可拖動 flux 垂線）
+**Last updated:** 2026-06-15 — operation abstraction（OperationRunner + scope helpers）+ interaction channel（OperationChannel / NotifyChannel）
 
 # gui/session/ — 量測 session core（measure + autofluxdep 共用）
 
@@ -11,14 +11,18 @@ session/
 ├── types.py            — SocProtocol/SocCfgProtocol/SocHandle/SocCfgHandle/ContextReadiness/ExpContext（P-a 值型別）
 ├── events.py           — SessionEvent enum + SessionPayload base + 8 payload（Md/Ml/ContextSwitched/Soc/Predictor/Device{Changed,SetupStarted,SetupFinished}）
 ├── state.py            — SessionState（exp_context+devices/DeviceState+startup_prefs/StartupPrefs+shared VersionTable+device mutators）；DeviceStatus
-├── ports.py            — session service 依賴的 driven-adapter/seam ports：ExclusionGate(+OperationKind/OperationConflictError)、OffMainScopes、BackgroundExecutor、ProgressHub、ProgressEvent/Kind/Transport、DriverFactoryPort、RememberedDevicePort、ProjectIOPort、ContextReadPort、StartupContextPort
-├── operation_handles.py— OperationHandles/OperationOutcome/OperationStatus（async Handle/Cancel facet，零 kind）
+├── ports.py            — session service 依賴的 driven-adapter/seam ports：ExclusionGate(+OperationKind/OperationConflictError)、BackgroundExecutor（純 off-main 執行器，`submit(work,*,run_in_pool,on_done,on_error)` 無 scopes 參數）、ProgressHub、ProgressEvent/Kind/Transport、DriverFactoryPort、RememberedDevicePort、DeviceRegistryPort（GlobalDeviceManager classmethod 面的 instance 化，DeviceService 依契約存取、測試注 in-memory fake，ADR-0026 §6）、ProjectIOPort、ContextReadPort、StartupContextPort
+├── operation_handles.py— OperationHandles（async Handle/Cancel facet，零 kind）+ per-op OperationChannel（單一有序事件 FIFO Settled/Message/Stop，取代舊 FeedbackInbox + poll-loop，ADR-0025）+ OperationOutcome/OperationStatus/AwaitResult/CancelHook；`create(cancel_hook=)`、`has_cancel_hook`/channel.`can_cancel`（gate 'Send & Stop' 鈕，無 op-kind 知識）
+├── operation_runner.py — OperationRunner（唯一 kind-agnostic operation 生命週期機制，ADR-0026 §1：ensure_can_start→create→register→progress factory→submit→終局 settle）+ OperationSpec（各 op 把領域 policy 交給 runner）；run/analyze/device/SoC-connect 都是它的 client，runner 只認 port 不認行為
+├── scopes.py           — progress_ambient（session 層：pbar ContextVar，無 Qt；ADR-0026 §2，取代舊 BackgroundService._entered/OffMainScopes 的 pbar 欄位）。figure_ambient（Qt）住 app 層 `gui/app/main/services/scopes.py`
+├── notify_handles.py   — NotifyChannel/NotifyHandles（agent→user prompt 的跨線程 channel，事件集 Reply/Dismiss/Timeout，獨立於 operation 的 Settled/Message/Stop；鏡像 OperationChannel 四不變式，ADR-0025）
 ├── controller_port.py  — SessionControllerPort：共用 dialog 依賴的窄 Controller 面（setup/context/connection + device lifecycle/queries/progress + predictor load/clear/predict/curve + inspect md/ml）；回傳宣告對 BaseEventBus 故 app EventBus covariant 滿足
 ├── pbar_host.py        — ProgressBar(worker)/ProgressBarModel(主線程 SSOT)，Qt-free
 ├── adapters/
 │   └── qt_progress_transport.py — QtProgressTransport（worker→主線程 progress marshal，queued signal；app-agnostic）
 ├── services/
-│   ├── connection.py   — ConnectionService（SoC connect worker、predictor IO + 批次曲線計算 predict_freq_curve、typed requests）
+│   ├── connection.py   — SoCConnectionService（SoC connect op；硬體 facet、OperationRunner client、cancel_hook=None 無 cancellation point；終局經 connection_finished/connection_failed signal，typed requests/failures）
+│   ├── predictor.py    — PredictorService（predictor load/clear/install + predict_freq + 批次曲線計算 predict_freq_curve/predict_matrix_element_curve；純計算，無 Qt signal/runner/gate，擁有 exp_context.predictor 寫 seam，ADR-0026 §5 自 connection.py 拆出）
 │   ├── context.py      — ContextService（context-switch + md ops + ml del/rename + 單一寫入 primitive apply_ml_writes，CfgSchema lowering 經 callback 注入；MdValueError/MlEntryValidationError）
 │   ├── device.py       — DeviceService（connect/disconnect/setup off-main，**全 port 注入**：gate/bg/progress 必傳）；`_mode_dependent_unit(dev)` module-level helper 集中 YOKOGS200 voltage/current→V/A 判斷（`get_device_unit` + `get_device_unit_strict` 共用，消除逐字重複）；`poll_device_info(name)` = best-effort off-main live-read（worker 純讀 driver、on_done 主線做 cache 比對+bump+DEVICE_CHANGED；memory-only/mutating skip、單次讀失敗吞掉，不寫 State 於 worker）
 │   ├── startup.py      — StartupService + PersistedStartup/PersistedDeviceEntry memento + requests + derive_project_paths
@@ -26,7 +30,7 @@ session/
 │   ├── io_manager.py   — IOManager（ExperimentManager 包裝，實作 ProjectIOPort；**共用**）
 │   ├── mock_flux.py    — MockFluxProvisioner（FLUX-AWARE-MOCK：訂閱 SOC_CHANGED，mock connect 時 ① 綁定/provision fake_flux 源 ② 從 mock soc 自身 SimParams 建 FluxoniumPredictor 經 connection seam 安裝——不蓋使用者已載入的 predictor）
 │   ├── predictor_from_sim.py — build_predictor_from_simparams(SimParams)→FluxoniumPredictor（純函式；橋接兩個彼此獨立的 lib leaf，放 session 層避免在 program/simulate 間造新跨依賴；測試共用）
-│   └── build.py        — SessionServices bundle + build_session_services(state,bus,gate,handles,background,progress,io_manager,driver_factory?)
+│   └── build.py        — SessionServices bundle（soc_connection/predictor/context/device/startup）+ build_session_services(state,bus,gate,handles,background,progress,io_manager,runner,driver_factory?,device_registry?)
 └── ui/                 — 共用 dialog（吃 SessionControllerPort）
     ├── progress_stack.py — ProgressStack widget（唯一拉 Qt 的 progress 件）
     ├── setup_dialog.py   — Project + Context + Connection 合併（QSplitter）
@@ -44,4 +48,4 @@ session/
 - **import-clean leaf**（不得拉 Qt/matplotlib/gui.app.*，`tests/gui/test_shared_layer.py` 守）：types/events/operation_handles/ports/state/pbar_host/controller_port。`adapters/` + `ui/*` + `services/*` 是 Qt/重，不列。
 - **wire name 來源**：`SessionEvent.X` 的字串值即 wire event name；measure-gui 的 wire-name lock 測試（`test_remote_event_dialog_view.py`）鎖全集，搬移/改名 payload 不得動字串值。
 
-跨模組設計見 ADR-0002/0004/0005/0006/0019/0020/0021（0021：event ownership——domain module 擁有 enum+payload、app 組裝）。**autofluxdep 已完整複用**（session-core extraction S1–S5：組 session services + 實作 SessionControllerPort + run 讀 exp_context + 用共用 setup/device/predictor dialog；見 ADR-0020 + autofluxdep/README）。
+跨模組設計見 ADR-0002/0004/0005/0006/0019/0020/0021/0025/0026（0021：event ownership——domain module 擁有 enum+payload、app 組裝；0025：跨線程互動 channel——OperationChannel/NotifyChannel；0026：operation abstraction——OperationRunner + scope-as-adapter-input + State write port + ConnectionService 拆 SoC/Predictor + DeviceRegistryPort）。**autofluxdep 已完整複用**（session-core extraction S1–S5：組 session services + 實作 SessionControllerPort + run 讀 exp_context + 用共用 setup/device/predictor dialog；見 ADR-0020 + autofluxdep/README）。

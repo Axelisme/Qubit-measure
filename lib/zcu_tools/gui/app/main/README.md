@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-15（Stage 4a：FloatingFeedbackWidget — 右下角浮動 overlay，parent=MainWindow，由 live op 數驅動顯隱（B1：訂閱所有 op start/finish bus events），Stop 鈕依 active op 是否有 cancel hook gating（`Controller.can_cancel_active_operation`→`OperationHandles.has_cancel_hook`→`OperationChannel.can_cancel`）；`controller._active_operation()` 抽出 taxonomy helper 供 send_feedback/cancel/can_cancel 共用）
+**Last updated:** 2026-06-15（operation abstraction + interaction channel：OperationRunner（唯一 kind-agnostic 生命週期機制，run/analyze/device/SoC-connect 皆其 client，ADR-0026 §1）+ OperationSpec policy；BackgroundService 退化純 off-main 執行器（`submit` 無 scopes）、scope 改由 work-thunk closure（`figure_ambient` app 層 / `progress_ambient` session 層）；TabResultWritePort/TabAnalyzeWritePort 窄 State write 契約；ConnectionService 拆 SoCConnectionService（runner client、`_ConnectWorker` QThread 已刪）+ PredictorService（純計算）；OperationChannel/NotifyChannel 跨線程互動（ADR-0025）；FloatingFeedbackWidget（user→agent nudge / Send & Stop，依 live op 顯隱、Stop 鈕依 cancel-hook gating）+ NotifyUserDialog（`gui_notify_user` prompt）；wire notify.open/notify.await，WIRE 30 / GUI 37 / MCP 37）
 
 # `zcu_tools/gui/app/main/` — measure-gui Framework AI Note
 
@@ -22,7 +22,7 @@ gui/
 ├── specs/           — fresh spec factory functions（對應 program/v2/modules/ 結構）
 ├── state.py         — State (被動容器 + 主線 mutator/version bump) + aggregate roots TabState/DeviceState (帶自己的查詢謂詞 is_busy/has_*/is_connected/is_live/effective_save_paths)
 ├── registry.py      — name → Adapter class 映射
-│   （off-main 執行 = `services/background.py` `BackgroundService`：`submit(work, scopes, run_in_pool, on_done/on_error)`，OffMain strategy；run/analyze/save/interactive/**device(connect/disconnect/setup)** 共用，ADR-0019。runner.py 已刪。**executor 機制本身已下放共用** `gui/background.py` `BackgroundRunner`（generic worker + pool + `submit(work,*,on_done,on_error,run_in_pool,enter=CM|None)`，三 app 共用）；`BackgroundService` **組合**它 + 保留 `OffMainScopes`/`_entered`，把 scopes 翻成 `enter=` CM 委派——main call site 全不動）
+│   （off-main 執行 = `services/background.py` `BackgroundService`：**純 off-main 執行器**（ADR-0026 §2）`submit(work, *, run_in_pool, on_done, on_error)`——只把無參 thunk 丟 worker/pool、結果 marshal 回主線程，**無 scopes 參數、不認 figure/stop facet**（舊 `OffMainScopes`/`_entered` 已退役）。scope wiring 改由 op policy 的 work thunk 自己用 closure 套（`figure_ambient`/`progress_ambient`/`ActiveTask`）。生命週期編排移到 `OperationRunner`（見「Hardware Operation Gate」/ADR-0026），BackgroundService 只剩執行。**executor 機制本身已下放共用** `gui/background.py` `BackgroundRunner`（generic worker + pool + `submit(work,*,on_done,on_error,run_in_pool)`，三 app 共用）；`BackgroundService` 組合它）
 ├── controller.py    — 薄 Façade，委託邏輯給 services/
 ├── live_model.py    — LiveField / LiveModel：反應式資料層 (Observable Proxy)
 ├── sweep_model.py   — SweepEditor：無 Qt dependency 的 sweep canonical transform
@@ -34,18 +34,19 @@ gui/
 │   ├── app_services.py   — AppServices frozen bundle + build_app_services()：集中 service 建構/接線
 │   ├── guard.py          — GuardService + 型別化 Permit (Run/Save/Analyze/Writeback)：domain guard 單一所有者
 │   ├── operation_gate.py — OperationGate（純 Exclusion，ADR-0019）：run/SoC connect/device mutation 的 hardware 互斥（ensure_can_start/register/release/has_active/is_device_mutating），keyed by token
-│   （OperationHandles 已移共用層 `gui/session/operation_handles.py`：async Handle/Cancel facet，mint token + settle/await_outcome/poll/cancel/cancel_all/live_count；run/device/connect/analyze 共用、零 kind）
+│   （OperationHandles + OperationRunner + OperationChannel 在共用層 `gui/session/`：`operation_handles.py` = async Handle/Cancel facet（mint token + `create(cancel_hook=)`/settle/await_outcome/poll/cancel/message/stop/cancel_all/live_count/has_cancel_hook）+ per-op OperationChannel（單一有序事件 FIFO Settled/Message/Stop，取代舊 FeedbackInbox + poll-loop，ADR-0025）；`operation_runner.py` = OperationRunner（唯一 kind-agnostic 生命週期機制，ADR-0026 §1）+ OperationSpec policy。run/device/connect/analyze 共用、零 kind）
 │   ├── shutdown.py       — ShutdownCoordinator（Qt-free：cancel-all + 輪詢等停 + timeout，begin/tick→state，ADR-0003）
-│   ├── connection.py     — ConnectionService (SoC connect worker, predictor IO, typed requests/failures)；只暴露 `get_soccfg()`/`has_soc()`，硬體摘要 `get_soc_info()`（describe_soc + `soc.info` RPC）是 Controller façade method（controller.py）讓 agent 讀
+│   （SoC connect / predictor / device 等 session-core service 住共用層 `gui/session/services/`：`connection.py` `SoCConnectionService`（SoC connect op、OperationRunner client、`_ConnectWorker` QThread 已刪，ADR-0026 §5）+ `predictor.py` `PredictorService`（純計算，predictor load/predict/批次曲線）。measure 經 `get_soccfg()`/`has_soc()` 讀；硬體摘要 `get_soc_info()`（describe_soc + `soc.info` RPC）是 Controller façade method（controller.py）讓 agent 讀）
+│   ├── scopes.py         — `figure_ambient`（app 層 ambient scope helper，ADR-0026 §2）：把 matplotlib routing ContextVar + `QtLivePlotBackend` 一起裝進 worker thunk（co-dependent facet，Qt-specific 故留 app 層；session 層的 `progress_ambient` 在 `gui/session/scopes.py`）
 │   ├── context.py        — ContextService (專案與 md/ml 狀態；from_raw 反序列化；coerce_md_value)
-│   ├── device.py         — DeviceService (connect/disconnect/setup off-main via BackgroundService, driver factory, cached DeviceSnapshot, registry boundary)
+│   （DeviceService 住共用層 `gui/session/services/device.py`：connect/disconnect/setup 經 OperationRunner client、driver factory、cached DeviceSnapshot、registry boundary（DeviceRegistryPort）；領域 policy（rollback/簿記/snapshot）保留為領域 service，ADR-0026 §6）
 │   ├── workspace.py      — WorkspaceService (tab lifecycle + capture_session/apply_session + RestoreReport；session_codec 為其內部 raw↔live 實作)
 │   ├── caretaker.py      — PersistenceCaretaker (Driven Adapter：單檔 gui_state_v1.json disk I/O + load/flush 時機；ADR-0015)
 │   ├── persistence_types.py — AppPersistedState memento (pydantic v2 frozen) + APP_STATE_VERSION
 │   ├── session_codec.py  — tabs raw↔live codec (Workspace 內部，Caretaker 只見不透明 cfg_raw)
 │   ├── startup.py        — StartupService (typed startup requests + capture_startup/restore_startup；無狀態)
-│   ├── run.py            — RunService (執行與進度條)
-│   ├── staged_analyze.py — _StagedAnalyzeService (analyze/post-analyze 共用基底：handle-only off-main worker + 主線程 record result/figure + 失敗路徑)
+│   ├── run.py            — RunService (執行與進度條；OperationRunner client：組 OperationSpec、cancel-partial 判讀在 on_terminal、寫 State 經 TabResultWritePort)
+│   ├── staged_analyze.py — _StagedAnalyzeService (analyze/post-analyze 共用基底：OperationRunner client（exclusion=None，handle-only）+ 主線程 record result/figure 經 TabAnalyzeWritePort + 失敗路徑)
 │   ├── analyze.py        — AnalyzeService (主分析層：FIT worker + INTERACTIVE finish；算 writeback items)
 │   ├── post_analyze.py   — PostAnalyzeService (第二分析層，鏡像 AnalyzeService：FIT-only、在 primary analyze 結果之上重算、gate on primary 已存在；State 平行 post_* 欄位)
 │   ├── agent_launcher.py — Qt-free 外部終端 agent launch 服務：`build_loopback_mcp_config`（暫存 mcp.json，repo_root cwd + uv run measure/server.py loopback）、`_EMBEDDED_SYSTEM_PROMPT`（告知 agent「gui_* 工具已自動 attach、勿自呼 connect、需要狀態自呼 gui_state_check」）、`build_claude_argv`（互動模式不帶 -p、`--mcp-config` / `--allowedTools "mcp__measure-gui__*"` / `--append-system-prompt` / `--resume <id>` 或 `--session-id <uuid>`）、`new_session_id`、`record_launched_session`/`list_resumable_sessions`/`claude_project_dir`（追蹤我們 launch 過的 session 於 `~/.cache/zcu-tools/agent_sessions.json`，列表時從 claude `~/.claude/projects/<slug>/*.jsonl` 補 last-active + 首則訊息 label）、`launch_agent_terminal(repo_root, *, resume_session_id=None, bootstrap_prompt=None)`（跨平台 spawn：Linux gnome-terminal/konsole/xterm/x-terminal-emulator 或 `ZCU_AGENT_TERMINAL` 覆寫、macOS `open -a Terminal`、Windows **直接 `subprocess.Popen([claude, *args])` + `CREATE_NEW_CONSOLE`**（**不經** launcher 的 `os.execv` —— execv 在 Windows 把多行 `--append-system-prompt` 重新引號時拆裂、漏一個 prompt 字成 phantom 首訊息「are」；subprocess 正確引號 list。**不用** Store 版 `wt`/`cmd start`；`ZCU_AGENT_TERMINAL` 可覆寫，覆寫與 POSIX 才走 launcher，launcher 在 win32 改用 `subprocess.run` 同避此 bug）；剝除父進程的 Claude Code 編排 env（`ANTHROPIC_API_KEY` + `CLAUDE_CODE_*` / `CLAUDECODE` / `CLAUDE_AGENT_SDK*`，見 `_strip_orchestration_env`，讓子 claude 是乾淨 cli 而非 Desktop-embedded）；argv[0] 由 `resolve_agent_command()` 解析：`ZCU_AGENT_CMD` 覆寫（任何平台，如換 codex）> **PATH 上的獨立 `claude` 優先**（如 `claude install` 裝的）> Windows 退 Claude Desktop 內建 CLI（`_find_desktop_bundled_claude` 找最新版 `%APPDATA%\Claude\claude-code\*\claude.exe`）> 裸 `claude`（fast-fail）。Windows 解析序＝PATH `claude` → Desktop 內建 → fast-fail）
@@ -54,7 +55,7 @@ gui/
 │   ├── save.py           — SaveService (資料/圖片儲存 pipeline)
 │   ├── writeback.py      — WritebackService (分析結果寫回 md/ml)
 │   ├── cfg_editor.py     — CfgEditorSession (aggregate root：set_field/commit_schema 行為上身，只到 CfgSchema 快照) + CfgEditorService (Repository：lifecycle/LRU/變更流)；commit 把 CfgSchema 交 ContextWritePort 寫 (ADR-0006，session 不再 lower/register)
-│   ├── ports.py          — driven-adapter / sibling-service ports (Protocol)：PersistOriginator(Caretaker↔Controller 窄介面)/ProjectIO/DriverFactory/ContextRead/ContextWrite(+ContextWrites batch)/WritebackQuery/TabLifecycle/StartupContext/RememberedDevice。app service 依賴 port 而非具體 infra/sibling (ADR-0005/0006)
+│   ├── ports.py          — driven-adapter / sibling-service ports (Protocol)：PersistOriginator(Caretaker↔Controller 窄介面)/ProjectIO/DriverFactory/ContextRead/ContextWrite(+ContextWrites batch)/WritebackQuery/TabLifecycle/StartupContext/RememberedDevice/**TabResultWritePort**(run policy 對 State 的窄 write：clear_tab_results/set_tab_running/update_tab_result)/**TabAnalyzeWritePort**(analyze/post policy 的窄 write：set_tab_analyzing/update_tab_analyze/update_tab_post_analyze)。app service / op policy 依賴 port 而非具體 infra/sibling/`State` (ADR-0005/0006/0026 §3，`State` 是唯一 implementer)
 │   └── remote/           — RemoteControlAdapter：第二個 driving View，是共用 NdjsonRpcEndpoint 上的 router；socket/NDJSON-over-TCP transport 住在共用層 zcu_tools.gui.remote（見下「共用 transport 層」）
 │       ├── method_specs.py — METHOD_SPECS 契約表 (wire 參數型別 SSOT)；MethodSpec 型別來自 gui.remote
 │       └── dispatch.py     — BoundMethod 綁 handler→METHOD_SPECS；METHOD_REGISTRY
@@ -64,7 +65,9 @@ gui/
     ├── fields/             — 渲染邏輯：registry.py / common.py / containers.py
     ├── inspect_dialog.py   — InspectDialog(InspectDialogBase 子類)：只補 ml create/modify（_MlCreateDialog/_MlModifyDialog 拖 CfgEditor）；md tab + ml view/rename/del 在 base（session）
     ├── agent_launch_dialog.py — AgentLaunchDialog(QDialog)：可選 resumable session 清單（`list_resumable_sessions`：我們 launch 過的 session + claude jsonl 補 label/last-active、最近在上）+ Resume selected / **Remove**（`remove_recorded_session`：把選中的從 Resume 清單移除，不動 claude transcript）/ New session / Refresh；直接呼 `agent_launcher.launch_agent_terminal(resume_session_id=…|None, bootstrap_prompt=ctrl.build_agent_bootstrap_prompt())`。
-    ├── main_window.py      — MainWindow(QMainWindow) 實作 ViewProtocol；toolbar 有 Agent… 按鈕（開 AgentLaunchDialog）
+    ├── main_window.py      — MainWindow(QMainWindow) 實作 ViewProtocol；toolbar 有 Agent… 按鈕（開 AgentLaunchDialog）；持 FloatingFeedbackWidget（`_refresh_feedback_widget` 依 live op 數顯隱）+ `open_notify_prompt` 開 NotifyUserDialog
+    ├── feedback_widget.py  — FloatingFeedbackWidget（右下角浮動 overlay，parent=MainWindow，跨 tab 持久；user→agent nudge / Send & Stop；Stop 鈕依 active op 是否有 cancel hook gating，`Controller.can_cancel_active_operation`→`OperationHandles.has_cancel_hook`→`OperationChannel.can_cancel`，無 op-kind 知識，ADR-0025 §Stop-gating）
+    ├── notify_dialog.py    — NotifyUserDialog（`gui_notify_user` 的 non-modal prompt；dialog 是 timeout SSOT，QTimer fire→`ctrl.timeout_notify`；Reply/Dismiss/window-X/timeout 各呼一次 NotifyChannel producer，ADR-0025）
     └── analyze_form.py     — AnalyzeFormWidget：扁平 analysis 參數表單
 （共用件已下放 session：setup_dialog/device_dialog/predictor_dialog/inspect_base 在 `gui/session/ui/`（吃 `SessionControllerPort`）、ProgressService/IOManager 在 `gui/session/services/`、QtProgressTransport 在 `gui/session/adapters/`、TrimDoubleSpinBox 在 `gui/widgets/spinbox.py`。measure 保留 app-local OperationGate/BackgroundService（policy/Qt facet）+ 自己的 cfg-editor/role-catalog/inspect ml-edit）
 ```
@@ -78,15 +81,15 @@ gui/
 - **Permit = 靜態前置**（context readiness、committed-cfg validity、SoC capability）；純憑證、無需釋放。`RunPermit` 攜 `RunRequest` + committed `CfgSchema` + adapter，validity 在 acquire 時 lower 一次 fail-fast。
 - **Operation = token + opt-in facets（ADR-0019）= 動態互斥/handle 拆兩個 sibling leaf**（取代舊 `OperationGate` 統合 façade + `OperationLease`）：
   - **`OperationGate` = 純 Exclusion**（hardware 排斥；`is_tab_busy` 仍歸此語意但在 service 查）：`ensure_can_start(kind)`（fail-fast guard，conflict raise，**在開 handle 前**呼叫，故衝突不留半成品）+ `register(token, kind, owner_id, resource_id)` + `release(token)` + `has_active`/`is_device_mutating`，keyed by token。只 run/device/connect 用。
-  - **`OperationHandles` = async Handle/Cancel facet**：`create(stop_event=None) -> token`（mint operation_id）+ `settle(token, OperationOutcome)` + 三動詞 `await_outcome`（off-main 阻塞）/`poll`（非阻塞）/`cancel`（set stop_event，異步通知）+ `cancel_all() -> list[token]` + `live_count()`。run/device/connect **和** analyze/interactive 共用（**analyze 只拿 handle、不拿 exclusion** —— 消除舊「lease only for the async handle」假象）。
+  - **`OperationHandles` = async Handle/Cancel facet（per-op `OperationChannel`，ADR-0025）**：`create(cancel_hook=None) -> token`（mint operation_id + 開該 op 的 channel）+ `settle(token, OperationOutcome)` + 動詞 `await_outcome`（off-main 阻塞、消費 channel）/`poll`（非阻塞）/`cancel`/`message`（nudge）/`stop(reason)`（Send & Stop）/`cancel_all() -> list[token]`/`live_count()`/`has_cancel_hook()`。run/device/connect **和** analyze/interactive 共用（**analyze 只拿 handle、不拿 exclusion**）。
   - 終端：domain → `handles.settle(token, outcome)`（喚醒 awaiter）→ `gate.release(token)`（放 hardware，若有）。token = 上 wire 的 `operation_id`。
-  - **cancel 是純信號**：`stop_event` 由 service 建、同時傳給 `handles.create`（cancel 端 set）與 worker（poll + 自判 cancelled outcome），非 callback。connect 無 stop_event → cancel no-op（靠 shutdown timeout 兜底）。見 `docs/adr/0019`（承 `0002`/`0003`）。
+  - **跨線程互動走單一有序 channel（ADR-0025，取代舊「多 channel + 時序敏感 combine」）**：一個 op 一條 `OperationChannel`（thread-safe FIFO，承載 typed 事件 Settled/Message/Stop，consumer 依到達序消費，race-free + deadlock-free by construction）。**cancel 經 channel 的 cancel hook 觸發**（`create(cancel_hook=)` 時註冊，封裝 op 間差異：run/device = `stop_event.set`、interactive = 直接 settle、connect/FIT-analyze = `None`）；`stop(reason)` 是「enqueue Stop + 觸發 hook」一次原子操作。無 cancel hook 的 op（connect）→ stop no-op（靠 shutdown timeout 兜底）。`OperationChannel.can_cancel` 讓 floating widget 的 Stop 鈕依 cancel-hook gating，**不看 `stop_event.is_set()`**（互動 analyze 的結構洞消失）。見 `docs/adr/0025`/`0019`（承 `0002`/`0003`）。
 - Permit 模式只涵蓋 run / save / analyze / writeback；device mutation 前置幾乎全是動態 hardware 互斥，續用 OperationGate，不套空殼 Permit。
 - 決策脈絡見 `docs/adr/0001-permit-lease-typed-guard.md`、`docs/adr/0002-version-table-async-handle-off-main.md`；術語見 `CONTEXT.md`。
 
 ### Service 接線與 Remote View 投影
 
-- `build_app_services()` 集中建構/接線**所有** domain service（含 `CfgEditorService`），回傳 frozen `AppServices` bundle；Controller 持 bundle 並 alias 到 `self._xxx_svc` 供 façade 呼叫。單一 `OperationGate`（Exclusion）+ 單一 `OperationHandles`（Handle）共享（ADR-0019）。是唯一的 composition root：在此把具體 driven adapter / sibling service 注入給依賴 **port** 的 app service（structural Protocol，零 runtime 包裝）。`CfgEditorService(cfg_editor_ctrl=self, read_port=self, write_port=self, version_bump=self.bump_editor_version)`——`CfgEditorHost` 組合 facet（reactive env + `ContextReadPort` + `ContextWritePort` + bump），Controller 全部實作。`WritebackService` 也注入 `write_port=self`（ADR-0006 batch apply）。
+- `build_app_services()` 集中建構/接線**所有** domain service（含 `CfgEditorService`），回傳 frozen `AppServices` bundle；Controller 持 bundle 並 alias 到 `self._xxx_svc` 供 façade 呼叫。單一 `OperationGate`（Exclusion）+ 單一 `OperationHandles`（Handle）+ 單一 `OperationRunner`（kind-agnostic 生命週期機制，ADR-0026 §1）共享（ADR-0019/0026）；session-core service 經 `build_session_services(..., runner=..., device_registry=...)` 組（soc_connection/predictor/context/device/startup）。是唯一的 composition root：在此把具體 driven adapter / sibling service 注入給依賴 **port** 的 app service（structural Protocol，零 runtime 包裝）。`CfgEditorService(cfg_editor_ctrl=self, read_port=self, write_port=self, version_bump=self.bump_editor_version)`——`CfgEditorHost` 組合 facet（reactive env + `ContextReadPort` + `ContextWritePort` + bump），Controller 全部實作。`WritebackService` 也注入 `write_port=self`（ADR-0006 batch apply）。
 
 ### Service 角色（DDD/Hexagonal，見 `docs/adr/0005`）
 
@@ -125,8 +128,8 @@ GUI 上的「Agent」按鈕觸發 `AgentLaunchDialog`（可選 resumable session
 - bootstrap 指令以 `--append-system-prompt` 接在 `_EMBEDDED_SYSTEM_PROMPT` 之後——指示 agent 第一步呼 `gui_overview` 讀 live 狀態（含 `project` 欄位），**不烤入會過時的快照資料**。
 - **New**：生成新 `session_id`（`--session-id <uuid>`）並 `record_launched_session` 進 `~/.cache/zcu-tools/agent_sessions.json`。
 - **Resume**：從清單（`list_resumable_sessions`：我們 launch 過的 session、依 claude jsonl 補 last-active + 首則訊息 label、最近在上）選一個，帶 `--resume <id>` 接回。
-- **中斷**：終端原生 Ctrl-C / Esc（無 GUI 插話）。
-- 關係：cooperative-interrupt 的 wait early-return wire（`OperationHandles.await_outcome` 第二喚醒源 + `FeedbackInbox`）仍在，但**只由 `mcp/measure/server.py` 的 feedback passthrough 驅動**；GUI 端無 feedback bar / nudge 入口（見 ADR-0023）。
+- **中斷**：終端原生 Ctrl-C / Esc。
+- **跨線程互動（user↔agent，ADR-0025）**：cooperative-interrupt 走 per-op `OperationChannel`（取代舊 ADR-0023 `FeedbackInbox` + poll-loop）。GUI 端的 `FloatingFeedbackWidget`（右下角浮動 overlay）讓 user 在 op 進行中對 active op 注入 nudge（`Message`，op 續跑、agent 收 `user_feedback`）或 Send & Stop（`Stop(reason)`，依 cancel-hook gating）；`await_outcome` 消費 channel 依到達序折疊成 AwaitResult。反向（agent→user）走獨立的 `NotifyChannel`（`gui_notify_user` → notify.open/await wire → `NotifyUserDialog` prompt，事件 Reply/Dismiss/Timeout）。
 
 - **Run / Device-setup 生命週期（對齊，wire v10）**：`RUN_STARTED{tab_id}`+`RUN_FINISHED{tab_id,outcome,error_message}` 與 `DEVICE_SETUP_STARTED{name}`+`DEVICE_SETUP_FINISHED{name,outcome,error_message}` 同構（一事件一語義+outcome，拆自舊 RUN_LOCK_CHANGED / DEVICE_SETUP_CHANGED）。進度走 `operation.progress(operation_id)`（run+device 通用，按 id 查；`{active,bars}` 形狀，主線程 `ProgressBarModel` 實時算 format/percent + raw n/total；折進 `gui_*_poll` running 回傳）；進度純拉不發 event（高頻），完成才發 *_finished。**progress 由唯一 `ProgressService` 持有**（Phase 111，見下「Progress 子系統」）：container 生死綁 operation（discard_operation 於終局），View 經 owner_id（tab_id/device_name）attach 一次、跟隨 operation 輪替 → 關 dialog 不銷毀進度（container 在 service 仍活，重開 re-attach 即見）。
 - **可讀 id**：`tab_id` = `<adapter-slug>-<hash>`（如 `twotone-freq-1a2b3c4d`），owner-keyed `editor_id` = `<tab_id>-ed`（agent 不必查 snapshot 即知 editor 屬哪 tab）；仍是不透明唯一 string key。
@@ -235,7 +238,8 @@ GUI 上的「Agent」按鈕觸發 `AgentLaunchDialog`（可選 resumable session
 
 ### Hardware Operation Gate
 
-- `Controller` 將單一 `OperationGate`（Exclusion）+ 單一 `OperationHandles`（Handle）注入 `RunService`/`ConnectionService`/`DeviceService`（兩者都拿）；`AnalyzeService` 只拿 `OperationHandles`（handle-only）。`active_operation_count`/`begin_shutdown` 走 `OperationHandles`（`live_count`/`cancel_all`/`poll`，含 analyze）；conflict 判定走 `OperationGate`
+- **`OperationRunner` = 唯一 kind-agnostic 生命週期機制（ADR-0026 §1）**：抽出 run/analyze/device/SoC-connect 各自重抄的生命週期骨架（ensure_can_start → `create` 開 handle（註冊 cancel hook）→ register exclusion lease → mint per-op progress factory → `bg.submit` → 終局：discard progress → settle handle → release lease）。每個 op 不再自己編排，而是把一份 `OperationSpec`（exclusion/owner_id/wants_progress/cancel_hook/work/run_in_pool/on_terminal）交給 runner；不可化約的領域 policy（run 的 cancel-partial 判讀、analyze 的 set_tab_analyzing、device rollback、writeback compute）留在各 op 的 `on_terminal` callback。runner 只認 port（`ExclusionGate`/`ProgressHub`/`BackgroundExecutor`/`OperationHandles`），不認行為——可注 fake 單元測試。`work` 只收 runner 注入的 progress factory；figure_container / stop_event 是 op policy 的 closure 細節，不進 spec（runner 真正 figure/stop-agnostic）。
+- `Controller` 經 `app_services.build_app_services` 建單一 `OperationGate`（Exclusion）+ 單一 `OperationHandles`（Handle）+ 單一 `OperationRunner`，注入需要的 service。`SoCConnectionService`/`RunService`/`DeviceService` 是 runner client（拿 exclusion + handle）；`AnalyzeService`/`PostAnalyzeService` 也是 runner client 但 exclusion=None（handle-only）。`active_operation_count`/`begin_shutdown` 走 `OperationHandles`（`live_count`/`cancel_all`/`poll`，含 analyze）；conflict 判定走 `OperationGate`
 - 方案 A：`RUN` 排斥 SoC connect / 全部 device mutations；任意 device mutation 全域互斥
 - terminal path（success / expected failure / unexpected failure / cancel）exactly-once release lease
 - UI enable/disable 僅 mirror snapshot，不作為安全 guard
@@ -268,9 +272,10 @@ GUI 上的「Agent」按鈕觸發 `AgentLaunchDialog`（可選 resumable session
 
 ### Connection Lifecycle
 
-- `ConnectionService.start_connect(req)`：單一進入點；mock 走 sync + `QTimer.singleShot(0, ...)` 派發 signal，remote 走 `_ConnectWorker(QThread)`
+- **`ConnectionService` 已拆成兩個獨立職責（ADR-0026 §5）**：`SoCConnectionService`（SoC 連線 op）+ `PredictorService`（predictor load/predict 純計算）。兩者都住共用層 `gui/session/services/`。
+- `SoCConnectionService.start_connect(req)`：單一進入點，是 `OperationRunner` 的 client（exclusion=SOC_CONNECT、cancel_hook=None——connect 無 cancellation point）。mock 與 remote **都**經 `bg.submit` off-main（舊 `_ConnectWorker(QThread)` 已刪），結果在下個 event-loop tick 經 signal 回報。
 - 對 View 永遠以 `connection_finished` / `connection_failed` 回報；View 經 `Controller.bind_connection_outcome()` 綁定 signal，不取得 concrete service
-- `LoadPredictorRequest` / `PredictFreqRequest` 同步 API；IO 失敗轉 `PredictorLoadError`，未載入轉 `PredictorNotLoaded`
+- `PredictorService`（純 class、非 QObject）：`LoadPredictorRequest` / `PredictFreqRequest` 同步 API + 批次曲線（`predict_freq_curve` / `predict_matrix_element_curve`）；擁有 `exp_context.predictor` 寫 seam（set_context + `PredictorChangedPayload`）。IO 失敗轉 `PredictorLoadError`，未載入轉 `PredictorNotLoaded`。**不**進 runner / channel（非硬體 op）。
 
 ### Context Readiness 語義
 
@@ -342,12 +347,13 @@ plot substrate 已抽到頂層共用套件 `lib/zcu_tools/gui/plotting/`（measu
 
 | Registry | Owner Service | View API |
 | --- | --- | --- |
-| `GlobalDeviceManager` | `DeviceService` | `list_device_names()`、`list_devices()`、`get_device_snapshot()`、`get_device_unit()`、`get_device_value_for_new_context()` |
+| `GlobalDeviceManager`（經 `DeviceRegistryPort`，ADR-0026 §6） | `DeviceService` | `list_device_names()`、`list_devices()`、`get_device_snapshot()`、`get_device_unit()`、`get_device_value_for_new_context()` |
 | `ModuleLibrary` (live) | `ContextService` | `get_current_ml()`、`set_ml_module_from_schema`、`set_ml_waveform_from_schema`、`apply_writes`、`del_ml_module`、`del_ml_waveform`（ADR-0006 唯一寫入權威） |
 | `MetaDict` (live) | `ContextService` | `get_current_md()`、`set_md_attr`、`del_md_attr`、`coerce_md_value` |
 | `ExperimentManager` (file IO) | `ContextService` via `IOManager` | `use_context`、`new_context`、`setup_project`、`get_context_labels`、`get_active_context_label` |
 
 - LiveFields 透過 `ControllerProtocol` 取得 reactive environment，不直接 import singleton
+- `DeviceService` 不直接用 `GlobalDeviceManager` singleton，改經 `DeviceRegistryPort`（5 個 instance method 鏡像 classmethod 面）；production 預設 `GlobalDeviceRegistryAdapter`，測試注 in-memory fake（ADR-0026 §6）
 
 ### MetaDict Text Coercion
 
@@ -375,7 +381,7 @@ save_image 與 figure-screenshot 出圖**與視窗無關**：兩者都用嵌進 
 
 ### Run Cancellation
 
-- GUI `BackgroundService` 以 `OffMainScopes.stop_event`→`ActiveTask(stop_event)` scope 把取消訊號傳給 `experiment/v2.runner.run_task()`；bg 只回 done/failed，**cancel 判讀（finished vs cancelled+partial）在 `RunService`**（持 stop_event 者自判，ADR-0019）
+- **scope wiring 由 run policy 的 work thunk closure 負責（ADR-0026 §2，取代舊 `OffMainScopes`）**：run policy 建的 thunk 套 `figure_ambient(live_container)`（app 層 routing + liveplot）→ `progress_ambient(pbar_factory)`（session 層 pbar）→ `ActiveTask(stop_event)`（op 專屬：把取消訊號傳給 `experiment/v2.runner.run_task()`）→ `adapter.run(request, schema)`（experiment adapter 簽名不動）。`ActiveTask`（runner library 語義）只留在 run policy 一處，不再外洩進泛用執行器。bg 只回 done/failed，**cancel 判讀（finished vs cancelled+partial）在 `RunService` 的 `on_terminal`**（持 stop_event 者自判，ADR-0019/0026）；cancel 觸發走 channel 的 cancel hook = `stop_event.set`
 - 真實 experiment 內呼叫 `ModularProgramV2.acquire()` / `acquire_decimated()` 時必須把 `ctx.is_stop` 傳入 `stop_checkers`
 
 ### Progress 子系統（Phase 111，GUI v7）
