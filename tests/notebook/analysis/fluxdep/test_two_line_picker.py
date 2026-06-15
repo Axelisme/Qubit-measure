@@ -10,6 +10,7 @@ mutated state (positions, loss-view axes).
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from zcu_tools.notebook.analysis.fluxdep.interactive.two_line_picker import (
@@ -52,6 +53,29 @@ def test_find_best_mirror_position_in_range():
         devs, np.abs(sig), current_pos=1.0, search_width=2.0
     )
     assert devs[0] <= pos <= devs[-1]
+
+
+def test_find_best_mirror_position_perfect_symmetry_returns_zero_loss():
+    # Regression for: when the search center is the true symmetry axis, every
+    # in-bounds diff_mirror value is exactly 0 (perfect symmetry).  The old
+    # code filtered ``diff_amps[diff_amps != 0.0]`` which then had length 0 and
+    # triggered ``continue``, skipping the best candidate.  The fixed code uses
+    # the in-bounds mask instead and correctly yields loss = 0.0 (not NaN) so
+    # the symmetric center wins.
+    n = 51  # odd -> dev[25] is the exact center
+    devs = np.linspace(-5.0, 5.0, n, dtype=np.float64)
+    center = float(devs[n // 2])  # exact grid symmetry axis: 0.0
+
+    # Construct a perfectly left–right symmetric 1-D signal (shape (n,1) so
+    # diff_mirror shape matches real_signals expectations).
+    col = np.abs(devs).reshape(n, 1).astype(np.float64)  # symmetric about 0
+
+    # Run with a search window that includes the true center.
+    pos = find_best_mirror_position(devs, col, current_pos=center, search_width=1.0)
+
+    # The symmetric center must be chosen (loss = 0.0, strictly less than any
+    # asymmetric candidate).
+    assert pos == pytest.approx(center, abs=0.5 * (devs[1] - devs[0]))
 
 
 # --- core construction + queries -------------------------------------------

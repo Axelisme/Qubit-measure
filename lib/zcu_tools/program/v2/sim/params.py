@@ -250,7 +250,7 @@ DEFAULT_SIMPARAM: SimParams = SimParams(
     T2_star=8.0,  # Ramsey T2*; 8 <= T2=15 ✓ — non-zero inhomogeneous rate
     bare_rf=6.0,
     g=0.08,
-    Ql=5000.0,
+    Ql=1000.0,
     Qi=50000.0,
     snr=300.0,
     pi_gain_len=0.4,

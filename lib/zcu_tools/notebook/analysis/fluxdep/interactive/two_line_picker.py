@@ -40,6 +40,26 @@ from zcu_tools.notebook.analysis.fluxdep.processing import (
 # Throttle interval (ms) for the live mirror-loss refresh during a drag: the
 # timer fires at most this often at the latest line position, so diff_mirror is
 # not recomputed on every motion event but the view still follows the line.
+
+
+def _mirror_inbounds_mask(
+    dev_values: NDArray[np.float64], center: float
+) -> NDArray[np.bool_]:
+    """Boolean mask of rows whose mirror counterpart lies within [0, n).
+
+    Replicates diff_mirror's valid-index formula exactly so callers can
+    restrict loss to in-bounds rows — distinguishing "0 because perfectly
+    symmetric" (in-bounds, real data) from "0 because no counterpart" (out-
+    of-bounds placeholder filled by diff_mirror with zeros_like).
+    """
+    n = len(dev_values)
+    # Identical to diff_mirror's c_idx computation.
+    c_idx = (n - 1) * (center - dev_values[0]) / (dev_values[-1] - dev_values[0])
+    idxs = np.arange(n)
+    mirror_idxs = np.round(2 * c_idx - idxs).astype(int)
+    return (mirror_idxs >= 0) & (mirror_idxs < n)
+
+
 _LOSS_REFRESH_MS = 120
 
 
@@ -75,10 +95,14 @@ def find_best_mirror_position(
 ) -> float:
     """Position with minimal mean mirror loss within ``current_pos ± width/2``.
 
-    Candidates are spaced at a half-grid precision; for each, the mean of the
-    non-zero ``diff_mirror`` amplitudes is the loss, and the candidate with the
-    smallest finite loss wins. Falls back to ``current_pos`` when no valid
-    candidate / loss exists. Pure (numpy only) — safe to run off the main thread.
+    Candidates are spaced at a half-grid precision; for each, the mean
+    diff_mirror amplitude over IN-BOUNDS rows is the loss.  Using the in-
+    bounds mask (rather than filtering non-zero values) correctly handles the
+    edge case where a perfectly-symmetric center produces all-zero in-bounds
+    diffs: that loss is 0.0 — the best possible value — and must not be
+    skipped.  Falls back to ``current_pos`` when no candidate has any in-
+    bounds counterpart rows. Pure (numpy only) — safe to run off the main
+    thread.
     """
     lo = float(dev_values.min())
     hi = float(dev_values.max())
@@ -103,10 +127,14 @@ def find_best_mirror_position(
     min_loss = float("inf")
     for candidate in candidates:
         diff_amps = diff_mirror(dev_values, real_signals, candidate)
-        valid_amps = diff_amps[diff_amps != 0.0]
-        if len(valid_amps) == 0:
+        # Restrict to rows that have a valid (in-bounds) mirror counterpart.
+        # diff_mirror fills out-of-bounds rows with 0.0 (zeros_like); filtering
+        # by != 0.0 would also drop in-bounds rows that are genuinely zero
+        # (perfect symmetry), falsely skipping the best candidate.
+        inbounds = _mirror_inbounds_mask(dev_values, candidate)
+        if not inbounds.any():
             continue
-        loss = float(np.mean(valid_amps))
+        loss = float(np.mean(diff_amps[inbounds]))
         if not np.isnan(loss) and loss < min_loss:
             min_loss = loss
             best_pos = candidate
@@ -253,8 +281,11 @@ class TwoLinePicker:
         loss = diff_mirror(self._dev_values, self._real_signals, x)
         self._loss_im.set_data(loss.T)
         self._loss_im.autoscale()
-        valid = loss[loss != 0.0]
-        mean_loss = float(np.mean(valid)) if len(valid) > 0 else float("nan")
+        # Use the in-bounds mask (same logic as _mirror_inbounds_mask) so that a
+        # perfectly-symmetric center (all in-bounds diffs = 0) displays 0.0 rather
+        # than nan — the != 0.0 filter would also exclude genuine zero-diff rows.
+        inbounds = _mirror_inbounds_mask(self._dev_values, x)
+        mean_loss = float(np.mean(loss[inbounds])) if inbounds.any() else float("nan")
 
         dev = self._dev_values
         freqs = self._freqs
