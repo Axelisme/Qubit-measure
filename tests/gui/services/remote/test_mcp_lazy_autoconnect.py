@@ -41,6 +41,9 @@ def test_auto_connects_then_forwards_when_gui_discoverable(disconnected, monkeyp
     fake.replies["resources.versions"] = _versions_reply({})
 
     monkeypatch.setattr(mcp_server, "resolve_connect_port", lambda _cfg, _req: 9911)
+    # The pre-connect listener probe (cold-start fast-fail) must see the
+    # discovered port as open so auto-connect proceeds to the mocked connect.
+    monkeypatch.setattr(mcp_server, "_port_is_open", lambda _port: True)
 
     connected: dict[str, Any] = {}
 
@@ -67,6 +70,7 @@ def test_does_not_auto_start_soc(disconnected, monkeypatch):
     fake = FakeTransport()
     fake.replies["resources.versions"] = _versions_reply({})
     monkeypatch.setattr(mcp_server, "resolve_connect_port", lambda _cfg, _req: 9911)
+    monkeypatch.setattr(mcp_server, "_port_is_open", lambda _port: True)
     monkeypatch.setattr(
         mcp_server._BRIDGE,
         "connect",

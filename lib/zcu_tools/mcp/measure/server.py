@@ -73,6 +73,7 @@ from zcu_tools.gui.app.main.services.remote.wire_version import (  # noqa: E402
 from zcu_tools.mcp.core.bridge import (  # noqa: E402
     McpBridge,
     MCPBridgeConfig,
+    _port_is_open,
     assemble_tools,
     generate_tools,
     resolve_connect_port,
@@ -245,7 +246,12 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
 #      matching the project.info wire shape and all other tool-GUIs (fluxdep /
 #      dispersive / autofluxdep); the short-key remap ({chip,qub,res}) is removed.
 #      (c) gui_connect reply is {note, overview} — no wire change (already correct).
-MCP_VERSION = 35
+# MCP 36: _ensure_connected fast-fail on cold start (no WIRE change). A port probe
+#      (_port_is_open, 0.5s) is run before the full TCP connect so that calling any
+#      gui_* tool when no GUI is listening returns the actionable
+#      "no running measure-gui found…" error immediately instead of hanging ~30s
+#      until the socket timeout fires.
+MCP_VERSION = 36
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -580,6 +586,15 @@ def _ensure_connected() -> None:
     if _BRIDGE.is_connected:
         return
     port = resolve_connect_port(_CONFIG, None)
+    # Fast-fail: probe the port before attempting a full TCP connect so a cold
+    # start (no GUI listening) returns an actionable error immediately instead
+    # of hanging ~30s until the socket timeout fires.  _port_is_open uses a
+    # 0.5s timeout and is the same probe used by the bridge's launch path.
+    if not _port_is_open(port):
+        raise RuntimeError(
+            "no running measure-gui found to attach to "
+            f"(tried 127.0.0.1:{port}); start one with gui_launch."
+        )
     try:
         _BRIDGE.connect(port)
     except RuntimeError as exc:

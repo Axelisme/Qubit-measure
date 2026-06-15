@@ -1,17 +1,24 @@
-"""Tests for ``McpBridge.launched_gui`` — the cleanup-on-exit ownership guard.
+"""Tests for McpBridge internals.
 
+``launched_gui`` — the cleanup-on-exit ownership guard.
 ``launched_gui`` distinguishes a GUI this bridge *launched* (``gui_launch`` sets
 ``_proc``) from one it merely *attached* to (lazy auto-connect leaves ``_proc``
 None). The exit-cleanup path guards on it so an attach-only server never stops a
 GUI another process owns — the bug being that closing the external-terminal
 agent killed the user's GUI via the shared pid-file fallback in ``stop()``.
+
+``_port_is_open`` — the fast-fail probe used by ``_ensure_connected``.
+Used before a full TCP connect in ``_ensure_connected`` so that a cold start
+(no GUI listening) returns an actionable error in ~0.5s instead of hanging
+~30s until the socket timeout fires.
 """
 
 from __future__ import annotations
 
+import socket
 from pathlib import Path
 
-from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
+from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig, _port_is_open
 
 
 def _config(tmp_path: Path) -> MCPBridgeConfig:
@@ -70,3 +77,36 @@ def test_launched_gui_ignores_shared_pid_file(tmp_path: Path) -> None:
     bridge = McpBridge(cfg)
     assert bridge._read_pid_file() == 4242  # pid file is readable...
     assert bridge.launched_gui is False  # ...but launched_gui ignores it
+
+
+# ---------------------------------------------------------------------------
+# _port_is_open — fast-fail probe for _ensure_connected (BUG-3 fix)
+# ---------------------------------------------------------------------------
+
+
+def _find_free_port() -> int:
+    """Bind to port 0 to get a free port number, then release it.
+
+    There is a brief TOCTOU window between release and the test assertion, but
+    for a loopback-only test this is acceptable (no service binds the port in CI).
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return int(s.getsockname()[1])
+
+
+def test_port_is_open_returns_false_for_closed_port() -> None:
+    # _ensure_connected calls _port_is_open before the full TCP connect so a
+    # cold start (no GUI on the port) fails fast (~0.5s) instead of hanging ~30s.
+    port = _find_free_port()
+    # Nothing is listening on the port — probe must return False immediately.
+    assert _port_is_open(port) is False
+
+
+def test_port_is_open_returns_true_for_listening_port() -> None:
+    # Sanity-check the positive path: a real listening socket is detected.
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as srv:
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        port = int(srv.getsockname()[1])
+        assert _port_is_open(port) is True
