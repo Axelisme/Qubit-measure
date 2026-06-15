@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.operation_runner import OperationRunner
     from zcu_tools.gui.session.ports import (
         BackgroundExecutor,
+        DeviceRegistryPort,
         DriverFactoryPort,
         ExclusionGate,
         ProgressHub,
@@ -60,6 +61,7 @@ def build_session_services(
     io_manager: ProjectIOPort,
     runner: OperationRunner,
     driver_factory: DriverFactoryPort | None = None,
+    device_registry: DeviceRegistryPort | None = None,
 ) -> SessionServices:
     """Construct the session services from the app-provided infrastructure.
 
@@ -68,7 +70,8 @@ def build_session_services(
     ``io_manager`` is the project-IO adapter; ``runner`` is the shared
     OperationRunner (ADR-0026 §1) used by DeviceService for operation lifecycle;
     ``driver_factory`` defaults to the device service's built-in hardware factory
-    when omitted.
+    when omitted; ``device_registry`` defaults to the ``GlobalDeviceRegistryAdapter``
+    (production singleton) when omitted — tests inject an in-memory fake.
     """
     device = DeviceService(
         bus,
@@ -78,6 +81,7 @@ def build_session_services(
         runner,
         handles,
         driver_factory=driver_factory,
+        device_registry=device_registry,
     )
     soc_connection = SoCConnectionService(state, bus, gate, handles, runner)
     predictor = PredictorService(state, bus)

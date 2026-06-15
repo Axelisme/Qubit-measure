@@ -766,6 +766,155 @@ def test_concurrent_setups_cancel_independently(qapp):
     assert svc.get_device_snapshot("devB").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
 
 
+# ---------------------------------------------------------------------------
+# DeviceRegistryPort injection: fake in-memory registry replaces the real
+# GlobalDeviceManager singleton so these tests never touch it.
+# ---------------------------------------------------------------------------
+
+
+class _FakeRegistry:
+    """In-memory ``DeviceRegistryPort`` implementation for unit tests.
+
+    Mirrors the ``GlobalDeviceManager`` semantics (ValueError on unknown name,
+    warn-overwrite on re-register) but is entirely in-memory and instance-scoped
+    so test cases are isolated from each other and from the real singleton.
+    """
+
+    def __init__(self) -> None:
+        self._devices: dict[str, Any] = {}
+
+    def register_device(self, name: str, device: Any) -> None:
+        self._devices[name] = device
+
+    def drop_device(self, name: str, ignore_error: bool = False) -> None:
+        if name not in self._devices:
+            if ignore_error:
+                return
+            raise ValueError(f"Device {name} not found")
+        del self._devices[name]
+
+    def get_device(self, name: str) -> Any:
+        if name not in self._devices:
+            raise ValueError(f"Device {name} not found")
+        return self._devices[name]
+
+    def get_all_devices(self) -> dict[str, Any]:
+        return dict(self._devices)
+
+    def get_info(self, name: str) -> Any:
+        return self.get_device(name).get_info()
+
+
+def _make_svc_with_fake_registry(
+    driver: MagicMock | None = None,
+    gate: OperationGate | None = None,
+) -> tuple[DeviceService, MagicMock, _FakeRegistry]:
+    """Like ``_make_svc`` but injects a ``_FakeRegistry`` instead of the real singleton."""
+    from zcu_tools.gui.session.operation_handles import OperationHandles
+    from zcu_tools.gui.session.operation_runner import OperationRunner
+
+    device = driver or MagicMock()
+    device.get_info.return_value = FakeDeviceInfo(address="addr", value=0.0)
+    bg = _bg()
+    resolved_gate = gate or OperationGate()
+    handles = OperationHandles()
+    progress = ProgressService(QtProgressTransport())
+    runner = OperationRunner(resolved_gate, handles, progress, bg)
+    registry = _FakeRegistry()
+    svc = DeviceService(
+        EventBus(),
+        State(MagicMock()),
+        resolved_gate,
+        bg,
+        runner,
+        handles,
+        driver_factory=lambda _type, _address: device,  # type: ignore[arg-type]
+        device_registry=registry,
+    )
+    return svc, device, registry
+
+
+def test_registry_port_connect_registers_in_fake_not_global(qapp):
+    """connect goes through the injected port; the real GlobalDeviceManager stays clean."""
+    svc, device, registry = _make_svc_with_fake_registry()
+    _connect(svc, _req())
+
+    # Device registered in the fake registry.
+    assert "dev1" in registry.get_all_devices()
+    # Real singleton untouched.
+    assert "dev1" not in GlobalDeviceManager.get_all_devices()
+    assert svc.get_device_snapshot("dev1").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
+
+
+def test_registry_port_disconnect_drops_from_fake(qapp):
+    """disconnect calls drop_device on the port; device.close() is still called."""
+    svc, device, registry = _make_svc_with_fake_registry()
+    _connect(svc, _req())
+    assert "dev1" in registry.get_all_devices()
+
+    drop_loop = QEventLoop()
+    svc.device_disconnected.connect(lambda _r: drop_loop.quit())
+    svc.start_disconnect_device(DisconnectDeviceRequest(name="dev1"))
+    drop_loop.exec()
+
+    device.close.assert_called_once_with()
+    assert "dev1" not in registry.get_all_devices()
+    assert svc.get_device_snapshot("dev1").status is DeviceStatus.MEMORY_ONLY  # type: ignore[union-attr]
+
+
+def test_registry_port_get_info_reads_from_fake(qapp):
+    """get_device_info reads through the port (fake.get_info → driver.get_info)."""
+    svc, device, _registry = _make_svc_with_fake_registry()
+    _connect(svc, _req())
+    device.get_info.return_value = FakeDeviceInfo(address="addr", value=7.0)
+
+    info = svc.get_device_info("dev1")
+
+    assert info is not None
+    assert getattr(info, "value", None) == 7.0
+    device.get_info.assert_called()
+
+
+def test_registry_port_connect_failure_rollback_still_correct(qapp):
+    """_cleanup_failed_connection (now instance method) drops via port on failure."""
+    svc, device, registry = _make_svc_with_fake_registry()
+    device.get_info.side_effect = RuntimeError("boom")
+    errors: list[str] = []
+    loop = QEventLoop()
+    svc.operation_failed.connect(
+        lambda _name, error: errors.append(error) or loop.quit()
+    )
+
+    svc.start_connect_device(_req())
+    loop.exec()
+
+    assert errors and "boom" in errors[0]
+    # Fake registry must be clean after rollback (drop_device was called).
+    assert "dev1" not in registry.get_all_devices()
+    # Real singleton untouched throughout.
+    assert "dev1" not in GlobalDeviceManager.get_all_devices()
+    device.close.assert_called_once_with()
+
+
+def test_registry_port_setup_reads_driver_from_fake(qapp):
+    """start_setup_device fetches the driver from the port (get_device → fake), not the real singleton."""
+    svc, device, registry = _make_svc_with_fake_registry()
+    _connect(svc, _req())
+    device.get_info.return_value = FakeDeviceInfo(address="addr", value=5.0)
+
+    setup_loop = QEventLoop()
+    svc.setup_finished.connect(lambda _name: setup_loop.quit())
+    svc.start_setup_device(
+        SetupDeviceRequest(name="dev1", info=FakeDeviceInfo(address="addr", value=5.0))
+    )
+    setup_loop.exec()
+
+    device.setup.assert_called_once()
+    assert svc.get_device_snapshot("dev1").info.value == 5.0  # type: ignore[union-attr]
+    # The driver in the registry is still the mock (not replaced by setup).
+    assert registry.get_device("dev1") is device
+
+
 def test_concurrent_setup_failure_does_not_affect_other(qapp):
     """A failed setup of one device rolls back only that device; the other
     device's concurrent setup is unaffected."""

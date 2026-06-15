@@ -31,6 +31,7 @@ from zcu_tools.gui.session.operation_runner import (
 from zcu_tools.gui.session.ports import (
     BackgroundExecutor,
     DeviceMemoryInfo,
+    DeviceRegistryPort,
     DriverFactoryPort,
     ExclusionGate,
     OperationConflictError,
@@ -206,6 +207,44 @@ def list_supported_device_types() -> list[str]:
     return list(_DEVICE_TYPE_REGISTRY.keys())
 
 
+class GlobalDeviceRegistryAdapter:
+    """Thin instance adapter over ``GlobalDeviceManager``'s classmethods.
+
+    ``GlobalDeviceManager`` is a classmethod-only singleton; this adapter wraps
+    its five registry methods as instance methods so ``DeviceService`` can satisfy
+    the instance-method ``DeviceRegistryPort`` Protocol without touching the
+    singleton directly (ADR-0026 §D.2).  The wrapper adds no logic of its own.
+    """
+
+    def register_device(self, name: str, device: object) -> None:
+        from zcu_tools.device import GlobalDeviceManager
+
+        GlobalDeviceManager.register_device(name, device)
+
+    def drop_device(self, name: str, ignore_error: bool = False) -> None:
+        from zcu_tools.device import GlobalDeviceManager
+
+        GlobalDeviceManager.drop_device(name, ignore_error=ignore_error)
+
+    def get_device(self, name: str) -> object:
+        from zcu_tools.device import GlobalDeviceManager
+
+        return GlobalDeviceManager.get_device(name)
+
+    def get_all_devices(self) -> dict[str, object]:
+        from zcu_tools.device import GlobalDeviceManager
+
+        # Cast: GlobalDeviceManager returns dict[str, BaseDevice[Unknown]]; the
+        # port contract uses dict[str, object] (covariance not expressible with
+        # dict directly).  The values are never mutated through this view.
+        return cast(dict[str, object], GlobalDeviceManager.get_all_devices())
+
+    def get_info(self, name: str) -> object:
+        from zcu_tools.device import GlobalDeviceManager
+
+        return GlobalDeviceManager.get_info(name)
+
+
 def _default_driver_factory(type_name: str, address: str) -> DeviceProtocol:
     if type_name not in _DEVICE_TYPE_REGISTRY:
         raise DeviceRegistrationError(f"Unknown device type: {type_name!r}")
@@ -239,6 +278,7 @@ class DeviceService(QObject):
         handles: OperationHandles,
         *,
         driver_factory: DriverFactoryPort | None = None,
+        device_registry: DeviceRegistryPort | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -256,10 +296,18 @@ class DeviceService(QObject):
         # instance that runner holds internally.
         self._handles = handles
         self._driver_factory = driver_factory or _default_driver_factory
+        # Registry port: hides the GlobalDeviceManager singleton behind an
+        # instance-method interface so tests can inject an in-memory fake without
+        # touching the real singleton (ADR-0026 §D).
+        self._registry: DeviceRegistryPort = (
+            device_registry
+            if device_registry is not None
+            else GlobalDeviceRegistryAdapter()
+        )
         # Device state lives in State (the SSOT). This service holds only the
-        # live driver (in GlobalDeviceManager), the worker threads, and the
-        # in-flight operation transients below. Setup progress lives in the
-        # shared ProgressService, keyed by each operation's token (owner = name).
+        # live driver (in the registry), the worker threads, and the in-flight
+        # operation transients below. Setup progress lives in the shared
+        # ProgressService, keyed by each operation's token (owner = name).
         #
         # Phase C: per-device concurrency. Connect / disconnect / setup of
         # different devices run in parallel, so the in-flight bookkeeping is a
@@ -439,10 +487,8 @@ class DeviceService(QObject):
         return token
 
     def start_setup_device(self, req: SetupDeviceRequest) -> int:
-        from zcu_tools.device import GlobalDeviceManager
-
         current = self._require_connected_device(req.name)
-        driver = cast(DeviceProtocol, GlobalDeviceManager.get_device(req.name))
+        driver = cast(DeviceProtocol, self._registry.get_device(req.name))
         # Single owner of the cancellation flag: passed to both the gate (set on
         # cancel) and the worker (polls it / self-judges 'cancelled').
         stop_event = threading.Event()
@@ -700,14 +746,12 @@ class DeviceService(QObject):
         return _DEVICE_DEFAULT_UNITS[dev.type_name]
 
     def get_device_info(self, name: str) -> BaseDeviceInfo | None:
-        from zcu_tools.device.manager import GlobalDeviceManager
-
         self._reject_mutating_read(name)
         dev = self._state.get_device(name)
         if dev is None or dev.is_memory_only():
             return None
         try:
-            info = GlobalDeviceManager.get_info(name)
+            info = cast(BaseDeviceInfo, self._registry.get_info(name))
         except ValueError:
             return None
         # Read-time cache refresh: silent when unchanged (no bump), but if the
@@ -733,8 +777,6 @@ class DeviceService(QObject):
         and swallowed so the next tick still runs — this is the best-effort
         core, not a Fast-Fail path.
         """
-        from zcu_tools.device.manager import GlobalDeviceManager
-
         dev = self._state.get_device(name)
         if dev is None or dev.is_memory_only():
             return
@@ -743,7 +785,7 @@ class DeviceService(QObject):
 
         def read_work() -> BaseDeviceInfo:
             # Worker thread: pure driver read, no State touch, no emit.
-            return GlobalDeviceManager.get_info(name)
+            return cast(BaseDeviceInfo, self._registry.get_info(name))
 
         def on_read(info: object) -> None:
             # Main thread: the device may have gone away or started mutating
@@ -777,15 +819,13 @@ class DeviceService(QObject):
         return None if raw is None else float(raw)
 
     def _connect(self, req: ConnectDeviceRequest) -> BaseDeviceInfo:
-        from zcu_tools.device import GlobalDeviceManager
-
-        if req.name in GlobalDeviceManager.get_all_devices():
+        if req.name in self._registry.get_all_devices():
             raise DeviceRegistrationError(f"Device {req.name!r} is already registered")
         device: DeviceProtocol | None = None
         registered = False
         try:
             device = self._driver_factory(req.type_name, req.address)
-            GlobalDeviceManager.register_device(req.name, device)
+            self._registry.register_device(req.name, device)
             registered = True
             return device.get_info()
         except DeviceRegistrationError:
@@ -797,14 +837,12 @@ class DeviceService(QObject):
                 f"Failed to connect {req.type_name} {req.name!r}: {exc}"
             ) from exc
 
-    @staticmethod
     def _cleanup_failed_connection(
-        name: str, device: DeviceProtocol | None, registered: bool
+        self, name: str, device: DeviceProtocol | None, registered: bool
     ) -> None:
-        from zcu_tools.device import GlobalDeviceManager
-
+        # Was @staticmethod; now instance method so it can use self._registry.
         if registered:
-            GlobalDeviceManager.drop_device(name, ignore_error=True)
+            self._registry.drop_device(name, ignore_error=True)
         if device is not None:
             try:
                 device.close()
@@ -813,13 +851,11 @@ class DeviceService(QObject):
                     "Failed to close device %r after connect failure", name
                 )
 
-    @staticmethod
-    def _disconnect(name: str) -> object:
-        from zcu_tools.device.manager import GlobalDeviceManager
-
-        device = cast(DeviceProtocol, GlobalDeviceManager.get_device(name))
+    def _disconnect(self, name: str) -> object:
+        # Was @staticmethod; now instance method so it can use self._registry.
+        device = cast(DeviceProtocol, self._registry.get_device(name))
         device.close()
-        GlobalDeviceManager.drop_device(name)
+        self._registry.drop_device(name)
         return None
 
     def _restore_prior_device_from(
