@@ -1,7 +1,7 @@
 """Services encapsulating domain logic, decoupled from the Controller Façade."""
 
 from zcu_tools.gui.session.ports import OperationConflictError
-from zcu_tools.gui.session.services.connection import ConnectionService
+from zcu_tools.gui.session.services.connection import SoCConnectionService
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.device import (
     ConnectDeviceRequest,
@@ -52,7 +52,7 @@ __all__ = [
     "AnalyzeService",
     "AppServices",
     "build_app_services",
-    "ConnectionService",
+    "SoCConnectionService",
     "PredictorService",
     "ContextService",
     "DeviceService",

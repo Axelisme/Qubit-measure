@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from zcu_tools.gui.session.services.connection import ConnectionService
+from zcu_tools.gui.session.services.connection import SoCConnectionService
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.device import DeviceService
 from zcu_tools.gui.session.services.mock_flux import MockFluxProvisioner
@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 class SessionServices:
     """The session-core services every measurement-session app builds on."""
 
-    connection: ConnectionService
+    soc_connection: SoCConnectionService
     predictor: PredictorService
     context: ContextService
     device: DeviceService
@@ -79,7 +79,7 @@ def build_session_services(
         handles,
         driver_factory=driver_factory,
     )
-    connection = ConnectionService(state, bus, gate, handles)
+    soc_connection = SoCConnectionService(state, bus, gate, handles, runner)
     predictor = PredictorService(state, bus)
     context = ContextService(state, io_manager, bus)
     # StartupService bridges the two session services it commands through their
@@ -93,7 +93,7 @@ def build_session_services(
     # provisioner survives despite not being a field here.
     MockFluxProvisioner(bus, device, predictor)
     return SessionServices(
-        connection=connection,
+        soc_connection=soc_connection,
         predictor=predictor,
         context=context,
         device=device,

@@ -182,7 +182,7 @@ class Controller:
             runner=self._runner,
         )
         self._session = session
-        self._conn_svc = session.connection
+        self._soc_svc = session.soc_connection
         self._pred_svc = session.predictor
         self._ctx_svc = session.context
         self._dev_svc = session.device
@@ -255,7 +255,7 @@ class Controller:
 
     # -- setup dialog: connection --
     def start_connect(self, req: ConnectRequest) -> int:
-        return self._conn_svc.start_connect(req)
+        return self._soc_svc.start_connect(req)
 
     def bind_connection_outcome(
         self,
@@ -267,21 +267,21 @@ class Controller:
         does not leak the previous observer (a no-arg ``disconnect()`` clears
         every connection)."""
         for signal in (
-            self._conn_svc.connection_finished,
-            self._conn_svc.connection_failed,
+            self._soc_svc.connection_finished,
+            self._soc_svc.connection_failed,
         ):
             try:
                 signal.disconnect()
             except (TypeError, RuntimeError):
                 pass  # no existing connections
-        self._conn_svc.connection_finished.connect(on_finished)
-        self._conn_svc.connection_failed.connect(on_failed)
+        self._soc_svc.connection_finished.connect(on_finished)
+        self._soc_svc.connection_failed.connect(on_failed)
 
     def remember_startup_connection(self, req: StartupConnectionRequest) -> None:
         self._startup_svc.remember_connection(req)
 
     def get_soccfg(self) -> SocCfgHandle | None:
-        return self._conn_svc.get_soccfg()
+        return self._soc_svc.get_soccfg()
 
     def get_device_unit(self, name: str) -> str:
         return self._dev_svc.get_device_unit(name)

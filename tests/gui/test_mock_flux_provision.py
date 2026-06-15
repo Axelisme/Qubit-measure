@@ -171,7 +171,7 @@ def test_reconnect_does_not_double_register_fake_flux(fx):
     # soc allows re-connect; the SocChangedPayload fires again.
     fx.ctrl.start_connect(ConnectMockRequest())
     # Let the singleShot + any (unwanted) background ops run.
-    assert _pump_until(lambda: not fx.ctrl._conn_svc.is_connect_active())
+    assert _pump_until(lambda: not fx.ctrl._soc_svc.is_connect_active())
     fx.quiesce()
     _process_events()
 
@@ -239,7 +239,7 @@ def test_mock_connect_skips_reconnect_when_already_connected(fx):
 
     # Use MockSoc a second time while fake_flux is still CONNECTED.
     fx.ctrl.start_connect(ConnectMockRequest())
-    assert _pump_until(lambda: not fx.ctrl._conn_svc.is_connect_active())
+    assert _pump_until(lambda: not fx.ctrl._soc_svc.is_connect_active())
     fx.quiesce()
     _process_events()
 

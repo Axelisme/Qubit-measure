@@ -87,7 +87,7 @@ def test_reconnect_does_not_double_register_fake_flux(ctrl):
     dev.set_value(0.123)
 
     ctrl.start_connect(ConnectMockRequest())
-    assert _pump_until(lambda: not ctrl._conn_svc.is_connect_active())
+    assert _pump_until(lambda: not ctrl._soc_svc.is_connect_active())
     ctrl._background_svc.quiesce()
     QCoreApplication.instance().processEvents()  # type: ignore[union-attr]
 

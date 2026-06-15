@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.build import build_session_services
-from zcu_tools.gui.session.services.connection import ConnectionService
+from zcu_tools.gui.session.services.connection import SoCConnectionService
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.device import DeviceService
 from zcu_tools.gui.session.services.predictor import PredictorService
@@ -56,7 +56,7 @@ class AppServices:
     progress: ProgressService
     guard: GuardService
     device: DeviceService
-    connection: ConnectionService
+    soc_connection: SoCConnectionService
     predictor: PredictorService
     context: ContextService
     tab: TabService
@@ -128,7 +128,7 @@ def build_app_services(
         progress=progress,
         guard=GuardService(state),
         device=device,
-        connection=session.connection,
+        soc_connection=session.soc_connection,
         predictor=session.predictor,
         context=context,
         tab=tab,

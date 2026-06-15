@@ -12,7 +12,10 @@ from zcu_tools.device.base import BaseDeviceInfo
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.operation_handles import AwaitResult
-from zcu_tools.gui.session.services.connection import ConnectRequest
+from zcu_tools.gui.session.services.connection import (
+    ConnectRequest,
+    SoCConnectionService,
+)
 from zcu_tools.gui.session.services.device import (
     ActiveDeviceOperation,
     DeviceEntry,
@@ -232,7 +235,7 @@ class Controller:
         self._progress_svc = services.progress
         self._guard_svc = services.guard
         self._dev_svc = services.device
-        self._conn_svc = services.connection
+        self._soc_svc: SoCConnectionService = services.soc_connection
         self._pred_svc = services.predictor
         self._ctx_svc = services.context
         self._tab_svc = services.tab
@@ -500,7 +503,7 @@ class Controller:
         return self._state.running_tab_id
 
     def has_soc(self) -> bool:
-        return self._conn_svc.has_soc()
+        return self._soc_svc.has_soc()
 
     def get_soc_info(self) -> dict[str, object]:
         """Hardware summary of the connected SoC (QICK soccfg): a compact
@@ -511,13 +514,13 @@ class Controller:
 
         from zcu_tools.program import describe_soc
 
-        soccfg = self._conn_svc.get_soccfg()
+        soccfg = self._soc_svc.get_soccfg()
         if soccfg is None:
             raise RuntimeError("No SoC connected")
         return {
             "description": describe_soc(soccfg),
             "cfg": json.loads(soccfg.dump_cfg()),
-            "is_mock": self._conn_svc.is_mock_soc(),
+            "is_mock": self._soc_svc.is_mock_soc(),
         }
 
     def resources_versions(self) -> dict[str, int]:
@@ -1257,11 +1260,11 @@ class Controller:
         self._startup_svc.remember_connection(req)
 
     # ------------------------------------------------------------------
-    # Connection / Predictor (ConnectionService)
+    # Connection / Predictor (SoCConnectionService + PredictorService)
     # ------------------------------------------------------------------
 
     def start_connect(self, req: ConnectRequest) -> int:
-        return self._conn_svc.start_connect(req)
+        return self._soc_svc.start_connect(req)
 
     def bind_connection_outcome(
         self,
@@ -1279,15 +1282,15 @@ class Controller:
         removes every connection — guaranteeing exactly the latest observer.
         """
         for signal in (
-            self._conn_svc.connection_finished,
-            self._conn_svc.connection_failed,
+            self._soc_svc.connection_finished,
+            self._soc_svc.connection_failed,
         ):
             try:
                 signal.disconnect()
             except (TypeError, RuntimeError):
                 pass  # no existing connections
-        self._conn_svc.connection_finished.connect(on_finished)
-        self._conn_svc.connection_failed.connect(on_failed)
+        self._soc_svc.connection_finished.connect(on_finished)
+        self._soc_svc.connection_failed.connect(on_failed)
 
     def load_predictor(self, req: LoadPredictorRequest) -> None:
         self._pred_svc.load_predictor(req)
@@ -1307,7 +1310,7 @@ class Controller:
         return self._pred_svc.predict_matrix_element_curve(req)
 
     def get_soccfg(self) -> SocCfgHandle | None:
-        return self._conn_svc.get_soccfg()
+        return self._soc_svc.get_soccfg()
 
     def get_predictor(self) -> FluxoniumPredictor | None:
         return self._pred_svc.get_predictor()

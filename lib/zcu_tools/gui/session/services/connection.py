@@ -2,21 +2,28 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 logger = logging.getLogger(__name__)
 
-from qtpy.QtCore import QObject, QThread, QTimer, Signal  # type: ignore[attr-defined]
+from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
 from zcu_tools.gui.session.events import SocChangedPayload
-from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
+from zcu_tools.gui.session.operation_handles import OperationOutcome
+from zcu_tools.gui.session.operation_runner import (
+    BgResult,
+    ExclusionRequest,
+    OperationSpec,
+    SettleFn,
+)
 from zcu_tools.gui.session.ports import ExclusionGate, OperationKind
 from zcu_tools.gui.session.types import SocCfgHandle, SocHandle
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus
+    from zcu_tools.gui.session.operation_handles import OperationHandles
+    from zcu_tools.gui.session.operation_runner import OperationRunner
     from zcu_tools.gui.session.state import SessionState
 
 
@@ -60,57 +67,17 @@ class SoCConnectionError(RuntimeError):
 
 
 # ---------------------------------------------------------------------------
-# Background connect worker (remote only)
-# ---------------------------------------------------------------------------
-
-
-class _ConnectWorker(QThread):
-    """Run remote SoC connect on a background thread; mock connect bypasses this."""
-
-    connected: Signal = Signal(object, object)  # soc, soccfg
-    failed: Signal = Signal(str)  # error message
-
-    def __init__(
-        self,
-        connect_callable: Callable[[], tuple[SocHandle, SocCfgHandle]],
-        parent: QObject | None = None,
-    ) -> None:
-        super().__init__(parent)
-        self._connect_callable = connect_callable
-        self._result: tuple[SocHandle, SocCfgHandle] | None = None
-        self._error: str | None = None
-        self.finished.connect(self._emit_outcome)
-
-    def run(self) -> None:
-        try:
-            self._result = self._connect_callable()
-        except (ConnectionRefusedError, TimeoutError, OSError) as exc:
-            self._error = f"Connection failed: {exc}"
-        except Exception as exc:
-            self._error = f"Connection error: {exc}"
-
-    def _emit_outcome(self) -> None:
-        if self._error is not None:
-            self.failed.emit(self._error)
-        elif self._result is not None:
-            soc, soccfg = self._result
-            self.connected.emit(soc, soccfg)
-        else:
-            raise RuntimeError("Connect worker stopped without outcome")
-
-
-# ---------------------------------------------------------------------------
 # Service
 # ---------------------------------------------------------------------------
 
 
-class ConnectionService(QObject):
-    """Owns SoC connect lifecycle only (predictor moved to PredictorService, 3a).
+class SoCConnectionService(QObject):
+    """Owns SoC connect lifecycle, delegating async work to OperationRunner.
 
     Connect work is always reported via Qt signals (connection_finished /
-    connection_failed) so the View has a single non-blocking contract. Mock
-    connects complete synchronously and dispatch the signal on the next event
-    loop tick; remote connects run on a background QThread.
+    connection_failed) so the View has a single non-blocking contract. Both mock
+    and remote connects run via bg.submit, so signals arrive on the next
+    event-loop tick after the bg work finishes — preserving the async contract.
     """
 
     connection_finished: Signal = Signal()
@@ -122,6 +89,7 @@ class ConnectionService(QObject):
         bus: BaseEventBus,
         gate: ExclusionGate,
         handles: OperationHandles,
+        runner: OperationRunner,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -129,10 +97,11 @@ class ConnectionService(QObject):
         self._bus = bus
         # Connect composes both leaves (ADR-0019): an Exclusion lease
         # (SOC_CONNECT vs run / another connect) + a Handle. A connect has no
-        # cancellation point, so the handle carries no stop_event.
+        # cancellation point, so cancel_hook=None (§B.3 equivalence).
         self._gate = gate
         self._handles = handles
-        self._active_worker: _ConnectWorker | None = None
+        self._runner = runner
+        # _active_token: POST-BEGIN set, on_terminal cleared (run.py pattern).
         self._active_token: int | None = None
         self._pending_is_mock: bool = False
 
@@ -155,60 +124,44 @@ class ConnectionService(QObject):
         return self._pending_is_mock
 
     def is_connect_active(self) -> bool:
+        # _active_token is POST-BEGIN set and cleared in on_terminal (§B.4 option A,
+        # mirrors run.py _active_token pattern).
         return self._active_token is not None
 
     # ------------------------------------------------------------------
-    # Connect (async-shaped API)
+    # Connect (async-shaped API, OperationRunner client)
     # ------------------------------------------------------------------
 
     def start_connect(self, req: ConnectRequest) -> int:
         """Start a SoC connect; outcome always arrives via signals.
 
-        Mock connects complete synchronously and dispatch their signal via
-        QTimer.singleShot(0, ...) so the View sees a consistent async flow.
-        Remote connects run on a background _ConnectWorker. Returns the
-        operation token (handle).
+        Delegates to OperationRunner with cancel_hook=None (connect has no
+        cancellation point — §B.3 equivalence with old _ConnectWorker). Returns
+        the operation token minted by runner.begin.
         """
         if not isinstance(req, (ConnectMockRequest, ConnectRemoteRequest)):
             raise TypeError(f"Unsupported connect request: {type(req).__name__}")
 
-        # Symmetric release: settled/freed exactly-once on the terminal path via
-        # _release_lease, called from _finish_success / _finish_failure (mock
-        # dispatches them synchronously, remote from the worker slot). Fail-fast
-        # on conflict before opening the handle (ADR-0019); no stop_event (connect
-        # has no cancellation point).
-        self._gate.ensure_can_start(OperationKind.SOC_CONNECT)
-        token = self._handles.create()
-        self._gate.register(token, OperationKind.SOC_CONNECT, owner_id="soc")
-        self._active_token = token
-        self._pending_is_mock = isinstance(req, ConnectMockRequest)
+        is_mock = isinstance(req, ConnectMockRequest)
+        # Capture the mock sim_params outside the closure so pyright can narrow the
+        # type: req is ConnectMockRequest here, so .sim_params is unambiguous.
+        mock_sim_params: Any = req.sim_params if is_mock else None
+        # Capture remote fields outside the closure for the same reason.
+        remote_ip: str = req.ip if isinstance(req, ConnectRemoteRequest) else ""
+        remote_port: int = req.port if isinstance(req, ConnectRemoteRequest) else 0
 
-        if isinstance(req, ConnectMockRequest):
-            logger.info("start_connect: mock")
-            try:
+        def work(factory: Any) -> tuple[SocHandle, SocCfgHandle]:
+            # factory is None (wants_progress=False). Both branches run off-main via
+            # bg.submit, preserving the async signal contract for mock and remote.
+            if is_mock:
                 from zcu_tools.program.v2.mocksoc import make_mock_soc
                 from zcu_tools.program.v2.sim import DEFAULT_SIMPARAM
 
-                # Inject the dev-only default SimParams so mock-connect yields
-                # physically-realistic data (not white noise).  The make_mock_soc
-                # signature default stays sim=None so all direct test callers are
-                # unaffected (D1 guarantee). A request-supplied override (tests
-                # only) replaces the default — e.g. a high-snr params.
-                sim = req.sim_params if req.sim_params is not None else DEFAULT_SIMPARAM
-                soc, soccfg = make_mock_soc(sim=sim)
-            except Exception as exc:
-                error = f"Mock SoC initialisation failed: {exc}"
-                QTimer.singleShot(0, lambda err=error: self._finish_failure(err))
-                return token
-            QTimer.singleShot(0, lambda: self._finish_success(soc, soccfg))
-            return token
-
-        # ConnectRemoteRequest
-        ip = req.ip
-        port = req.port
-        logger.info("start_connect: remote %s:%d", ip, port)
-
-        def connect_callable() -> tuple[SocHandle, SocCfgHandle]:
+                sim = (
+                    mock_sim_params if mock_sim_params is not None else DEFAULT_SIMPARAM
+                )
+                return make_mock_soc(sim=sim)
+            # remote
             try:
                 from zcu_tools.remote import make_soc_proxy
             except ImportError as exc:
@@ -216,51 +169,47 @@ class ConnectionService(QObject):
                     f"Cannot import ZCU client libraries: {exc}. "
                     "Use MockSoc for offline testing."
                 ) from exc
-            return make_soc_proxy(ip, port)
+            return make_soc_proxy(remote_ip, remote_port)
 
-        try:
-            worker = _ConnectWorker(connect_callable, parent=self)
-            self._active_worker = worker
-            worker.connected.connect(self._on_remote_connected)
-            worker.failed.connect(self._on_remote_failed)
-            worker.finished.connect(worker.deleteLater)
-            worker.start()
-        except Exception:
-            self._active_worker = None
-            self._release_lease(OperationOutcome("failed", "connect failed to start"))
-            raise
+        def on_terminal(bg: BgResult, settle: SettleFn) -> None:
+            # Runs on main thread (bg marshal). _apply_connection writes State and
+            # calls version.bump("soc") — main-thread invariant preserved (§B.2).
+            self._active_token = None
+            if bg.ok:
+                soc, soccfg = bg.result
+                self._apply_connection(soc, soccfg, is_mock)
+                settle(OperationOutcome("finished"))
+                self.connection_finished.emit()
+            else:
+                assert bg.error is not None
+                msg = _format_error(bg.error)
+                settle(OperationOutcome("failed", msg))
+                self.connection_failed.emit(msg)
+
+        spec = OperationSpec(
+            exclusion=ExclusionRequest(
+                kind=OperationKind.SOC_CONNECT,
+                owner_id="soc",
+            ),
+            owner_id="soc",
+            wants_progress=False,
+            cancel_hook=None,
+            work=work,
+            run_in_pool=False,  # dedicated thread, matching old _ConnectWorker
+            on_terminal=on_terminal,
+        )
+
+        token = self._runner.begin(spec)
+        # POST-BEGIN: set bookkeeping only after begin() succeeds (never written
+        # on conflict, mirrors run.py _active_token pattern).
+        self._active_token = token
+        self._pending_is_mock = is_mock
         return token
 
-    def _on_remote_connected(self, soc: object, soccfg: object) -> None:
-        self._active_worker = None
-        self._finish_success(soc, soccfg)  # type: ignore[arg-type]
-
-    def _on_remote_failed(self, error: str) -> None:
-        self._active_worker = None
-        self._finish_failure(error)
-
-    def _finish_success(self, soc: SocHandle, soccfg: SocCfgHandle) -> None:
-        logger.info("connect succeeded: mock=%s", self._pending_is_mock)
-        try:
-            self._apply_connection(soc, soccfg)
-        finally:
-            self._release_lease(OperationOutcome("finished"))
-        self.connection_finished.emit()
-
-    def _finish_failure(self, error: str) -> None:
-        logger.warning("connect failed: %s", error)
-        self._release_lease(OperationOutcome("failed", error))
-        self.connection_failed.emit(error)
-
-    def _release_lease(self, outcome: OperationOutcome) -> None:
-        token = self._active_token
-        if token is None:
-            raise RuntimeError("Connection completed without an active operation token")
-        self._active_token = None
-        self._handles.settle(token, outcome)
-        self._gate.release(token)
-
-    def _apply_connection(self, soc: SocHandle, soccfg: SocCfgHandle) -> None:
+    def _apply_connection(
+        self, soc: SocHandle, soccfg: SocCfgHandle, is_mock: bool
+    ) -> None:
+        logger.info("connect succeeded: mock=%s", is_mock)
         new_ctx = dataclasses.replace(self._state.exp_context, soc=soc, soccfg=soccfg)
         self._state.set_context(new_ctx)
         # soc is its own resource (a run depends on it independently of context);
@@ -270,5 +219,16 @@ class ConnectionService(QObject):
         # dependent ops (run / editor.commit / writeback) stale.
         self._state.version.bump("soc")
         self._bus.emit(
-            SocChangedPayload(soc=soc, soccfg=soccfg, is_mock=self._pending_is_mock),
+            SocChangedPayload(soc=soc, soccfg=soccfg, is_mock=is_mock),
         )
+
+
+def _format_error(exc: Exception) -> str:
+    """Classify connection exceptions to user-facing prefixes (§B.5).
+
+    Mirrors the old _ConnectWorker.run error classification so MCP / View error
+    messages stay stable after the runner migration.
+    """
+    if isinstance(exc, (ConnectionRefusedError, TimeoutError, OSError)):
+        return f"Connection failed: {exc}"
+    return f"Connection error: {exc}"
