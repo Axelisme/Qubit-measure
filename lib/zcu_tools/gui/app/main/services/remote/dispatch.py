@@ -1198,7 +1198,7 @@ def _h_dialog_screenshot(
 
     from .dialogs import parse_dialog_name
 
-    name_str = str(params["dialog_name"])
+    name_str = str(params["name"])
     try:
         dialog_name = parse_dialog_name(name_str)
         png = _render_view(adapter).take_dialog_screenshot(dialog_name)

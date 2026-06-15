@@ -121,7 +121,10 @@ from __future__ import annotations
 #      in-process ExpContext (fast-fails no_project when none is applied). It is
 #      the sole wire query exposing the project identity; _assemble_overview now
 #      folds {chip, qub, res} from it. New method = contract change.
-WIRE_VERSION = 27
+# v28: dialog.screenshot's ParamSpec renamed dialog_name -> name, aligning it with
+#      dialog.open / dialog.close (which already take 'name'); the handler reads
+#      params["name"]. Wire param-name contract change.
+WIRE_VERSION = 28
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -267,4 +270,6 @@ WIRE_VERSION = 27
 #      constant directive telling the agent to read live state via gui_overview
 #      first. agent_launcher's state_context kwarg renamed bootstrap_prompt to
 #      match. WIRE bumped for (a) only.
-GUI_VERSION = 34
+# v35: dialog.screenshot handler reads params["name"] (was params["dialog_name"]),
+#      tracking the WIRE 28 param-name alignment with dialog.open / dialog.close.
+GUI_VERSION = 35

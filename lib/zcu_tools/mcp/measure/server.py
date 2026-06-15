@@ -238,7 +238,14 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
 #      ``project`` field ({chip, qub, res} via project.info, guarded by
 #      has_project, else null). _SERVER_INSTRUCTIONS gains an orient paragraph
 #      (call gui_overview first, do not assume state).
-MCP_VERSION = 34
+# MCP 35: (a) gui_dialog_screenshot override tracks the WIRE 28 param rename
+#      (dialog_name -> name): the tool's inputSchema, the forwarded wire param, and
+#      the temp-file name all use 'name', matching gui_dialog_open / gui_dialog_close.
+#      (b) gui_overview.project now uses long keys {chip_name, qub_name, res_name},
+#      matching the project.info wire shape and all other tool-GUIs (fluxdep /
+#      dispersive / autofluxdep); the short-key remap ({chip,qub,res}) is removed.
+#      (c) gui_connect reply is {note, overview} — no wire change (already correct).
+MCP_VERSION = 35
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -726,8 +733,10 @@ def _assemble_overview() -> dict[str, Any]:
     always the explicit tab_id the agent passes.
 
     ``project`` is read from project.info only while a project is applied
-    (project.info fast-fails no_project otherwise), folded to {chip, qub, res};
-    ``null`` when no project. ``is_mock`` is likewise read from soc.info only
+    (project.info fast-fails no_project otherwise); long keys {chip_name,
+    qub_name, res_name} matching the wire shape (result_dir/database_path
+    omitted for conciseness); ``null`` when no project. ``is_mock`` is
+    likewise read from soc.info only
     while connected (soc.info fast-fails without a SoC), so a not-yet-set-up GUI
     still yields a well-formed overview.
     """
@@ -739,10 +748,13 @@ def _assemble_overview() -> dict[str, Any]:
     project: dict[str, Any] | None = None
     if has_proj:
         info = send_gui_rpc("project.info", {})
+        # Use long keys to match project.info wire shape and other tool-GUIs
+        # (fluxdep/dispersive/autofluxdep all use chip_name/qub_name/res_name).
+        # result_dir/database_path are omitted here — overview stays concise.
         project = {
-            "chip": info.get("chip_name"),
-            "qub": info.get("qub_name"),
-            "res": info.get("res_name"),
+            "chip_name": info.get("chip_name"),
+            "qub_name": info.get("qub_name"),
+            "res_name": info.get("res_name"),
         }
 
     soc: dict[str, Any] = {"connected": has_soc, "is_mock": None}
@@ -1394,14 +1406,14 @@ def tool_gui_dialog_screenshot(arguments: dict[str, Any]) -> dict[str, Any]:
     """
     import base64
 
-    dialog_name = str(arguments["dialog_name"])
+    name = str(arguments["name"])
     out_path_arg = arguments.get("out_path")
     out_path = (
         str(out_path_arg)
         if out_path_arg is not None
-        else str(Path(gettempdir()) / f"measure_dialog_{dialog_name}.png")
+        else str(Path(gettempdir()) / f"measure_dialog_{name}.png")
     )
-    res = send_gui_rpc("dialog.screenshot", {"dialog_name": dialog_name})
+    res = send_gui_rpc("dialog.screenshot", {"name": name})
     png = base64.b64decode(res["png_b64"])
     Path(out_path).write_bytes(png)
     return {"bytes": res.get("bytes", len(png)), "saved_to": out_path}
@@ -1662,12 +1674,12 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
         "description": (
             "One-shot SITUATIONAL OVERVIEW of the live GUI — call any time to "
             "re-orient. Packs (from existing read RPCs): state (the four readiness "
-            "flags), context (active context label), soc ({connected, is_mock}), "
+            "flags), project ({chip_name,qub_name,res_name} or null when none applied), "
+            "context (active context label), soc ({connected, is_mock}), "
             "tabs ([{tab_id, adapter, is_running}]), running_tab, and active_tab. "
             "active_tab is where the USER is currently focused — a collaboration "
             "cue, NOT your operation target (you always act on an explicit tab_id). "
-            "There is no project (chip/qub/res) field: no read RPC exposes the "
-            "project identity. The same overview is folded into gui_connect's reply, "
+            "The same overview is folded into gui_connect's reply, "
             "so right after connecting you already have it."
         ),
         "inputSchema": {"type": "object", "properties": {}},
@@ -2091,7 +2103,8 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
         "handler": tool_gui_dialog_screenshot,
         "description": (
             "Capture a currently-open dialog to a PNG FILE and return its path. "
-            "dialog_name must be one of: setup, device, predictor, inspect, startup. "
+            "name must be one of: setup, device, predictor, inspect, startup "
+            "(same dialog names as gui_dialog_open / gui_dialog_close). "
             "Fails with PRECONDITION_FAILED if the named dialog is not currently open. "
             "The PNG is ALWAYS written to disk and the reply is {saved_to, bytes} — "
             "Read the saved_to path to view it (never inline base64, so it cannot "
@@ -2102,7 +2115,7 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
         "inputSchema": {
             "type": "object",
             "properties": {
-                "dialog_name": {
+                "name": {
                     "type": "string",
                     "description": "One of: setup, device, predictor, inspect, startup",
                 },
@@ -2114,7 +2127,7 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
                     ),
                 },
             },
-            "required": ["dialog_name"],
+            "required": ["name"],
         },
     },
     "gui_device_connect": {

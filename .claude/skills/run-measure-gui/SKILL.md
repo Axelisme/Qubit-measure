@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 24
+skill_version: 25
 ---
 
 # run-measure-gui
@@ -85,7 +85,7 @@ auto-launches the GUI; you call tools.
 
 ```
 gui_overview         # standalone "current state" summary — returns:
-                     #   {state, project:{chip,qub,res}, context, soc,
+                     #   {state, project:{chip_name,qub_name,res_name} or null, context, soc,
                      #    tabs:[{tab_id,adapter,is_running}],
                      #    running_tab, active_tab}
                      # Auto-connects if not already connected (pure read, no side effects).
@@ -94,7 +94,7 @@ gui_overview         # standalone "current state" summary — returns:
                      # FIRST CALL when attaching to a running session: call gui_overview
                      # to load current state before assuming anything — the user may be
                      # actively operating the same GUI.
-                     # gui_connect also folds the same overview into its reply ({soc, overview}).
+                     # gui_connect also folds the same overview into its reply ({note, overview}).
 
 gui_tab_set_active(tab_id)   # push a tab to the user's foreground (user↔agent collaboration).
                              # Agent operations all take an explicit tab_id and are independent
@@ -104,8 +104,10 @@ gui_tab_set_active(tab_id)   # push a tab to the user's foreground (user↔agent
                              # gui_overview's active_tab field.
 
 gui_project_info     # current project identity:
-                     #   {chip, qub, res [, result_dir, database_path]}
+                     #   {chip_name, qub_name, res_name, result_dir, database_path}
                      # Fast-fails with precondition_failed: no_project when no project is applied.
+                     # gui_overview.project also uses these long keys ({chip_name,qub_name,res_name},
+                     # result_dir/database_path omitted for conciseness).
 ```
 
 ### Startup (fresh session)
@@ -117,8 +119,10 @@ gui_launch                                      # spawns the GUI, connects; bann
 gui_connect_start(kind="mock")                  # mock SoC (or kind="remote", ip, port for hardware)
 gui_startup_apply(chip_name="Q1_Chip",          # apply the project; omit result_dir/database_path
                   qub_name="Q1", res_name="R1")  # to scope them under chip/qub (notebook layout)
-gui_context_new(bind_device="flux")             # create a context bound to a flux device (reads its
+gui_context_new(bind_device="fake_flux")        # create a context bound to a flux device (reads its
                                                 # current value/unit; FakeDevice->none, YOKOGS200->A).
+                                                # Mock sessions use "fake_flux" (FAKE_FLUX_DEVICE_NAME);
+                                                # real hardware: use the device name you connected with.
                                                 # Omit bind_device for an unbound context; clone_from=<label>
                                                 # clones an existing one. Or gui_context_use(label) for an existing one.
 gui_state_check                                 # global readiness: four flags (has_project/has_context/has_active_context/has_soc)
@@ -152,8 +156,9 @@ gui_tab_get_current_figure(tab_id)                # writes the CURRENT plot (run
                                                   # non-analysis 2D scans (flux_dep / power_dep): Read the saved_to path.
                                                   # Always a file (fixed 640×480), never inline base64. Omit out_path to
                                                   # write a per-tab temp file; pass out_path="<abs path>" to choose where.
-                                                  # gui_dialog_screenshot follows the same contract: always writes a file
-                                                  # and replies {saved_to, bytes} — never inline base64.
+                                                  # gui_dialog_screenshot(name, out_path?) follows the same contract: always
+                                                  # writes a file and replies {saved_to, bytes} — never inline base64.
+                                                  # 'name' matches gui_dialog_open / gui_dialog_close (e.g. "device").
 gui_analyze(tab_id)                               # degrades like a run: a FIT settles -> {status:finished, summary:{...}}
                                                   # with the fit summary inline (same shape as gui_tab_get_analyze_result);
                                                   # an INTERACTIVE pick (flux_dep) -> {status:pending} → see below

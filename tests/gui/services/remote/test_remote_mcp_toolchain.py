@@ -932,14 +932,15 @@ def test_dialog_screenshot_omitted_out_path_writes_temp_file(monkeypatch):
         return {"png_b64": base64.b64encode(raw).decode("ascii"), "bytes": len(raw)}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    out = mcp_server.TOOLS["gui_dialog_screenshot"]["handler"]({"dialog_name": "setup"})
+    out = mcp_server.TOOLS["gui_dialog_screenshot"]["handler"]({"name": "setup"})
 
     expected_path = str(Path(gettempdir()) / "measure_dialog_setup.png")
     assert out == {"bytes": len(raw), "saved_to": expected_path}
     assert "png_b64" not in out
     assert Path(expected_path).read_bytes() == raw
-    # The wire dialog.screenshot has no out_path mode — only dialog_name forwarded.
-    assert calls == [("dialog.screenshot", {"dialog_name": "setup"})]
+    # The wire dialog.screenshot has no out_path mode — only 'name' forwarded
+    # (aligned with dialog.open / dialog.close).
+    assert calls == [("dialog.screenshot", {"name": "setup"})]
 
 
 def test_dialog_screenshot_explicit_out_path(monkeypatch, tmp_path):
@@ -956,7 +957,7 @@ def test_dialog_screenshot_explicit_out_path(monkeypatch, tmp_path):
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
     out = mcp_server.TOOLS["gui_dialog_screenshot"]["handler"](
-        {"dialog_name": "device", "out_path": str(target)}
+        {"name": "device", "out_path": str(target)}
     )
 
     assert out == {"bytes": len(raw), "saved_to": str(target)}
@@ -1009,8 +1010,8 @@ def _overview_fake_send(*, has_soc: bool):
 
 def test_overview_assembles_from_read_rpcs_with_project(monkeypatch):
     """gui_overview packs state / project / context / soc / tabs / running_tab /
-    active_tab from existing reads; with a project applied, project folds
-    {chip, qub, res} from project.info."""
+    active_tab from existing reads; with a project applied, project uses
+    long keys {chip_name, qub_name, res_name} matching the wire shape."""
     from zcu_tools.mcp.measure import server as mcp_server
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", _overview_fake_send(has_soc=True))
@@ -1023,7 +1024,7 @@ def test_overview_assembles_from_read_rpcs_with_project(monkeypatch):
             "has_active_context": False,
             "has_soc": True,
         },
-        "project": {"chip": "Q5_2D", "qub": "Q1", "res": "R1"},
+        "project": {"chip_name": "Q5_2D", "qub_name": "Q1", "res_name": "R1"},
         "context": "default",
         "soc": {"connected": True, "is_mock": True},
         "tabs": [

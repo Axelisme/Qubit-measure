@@ -455,7 +455,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "dialog.screenshot": MethodSpec(
         10.0,
         "Capture a named dialog as base64 PNG",
-        (_str("dialog_name", "Dialog name"),),
+        (_str("name", "Dialog name"),),
     ),
     "view.snapshot": MethodSpec(5.0, "Capture view state summary"),
     "tab.get_current_figure": MethodSpec(
