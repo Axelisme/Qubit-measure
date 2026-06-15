@@ -214,3 +214,41 @@ class CfgEditorPort(Protocol):
     def teardown(self, editor_id: str, *, reason: str = ...) -> None: ...
 
     def get_root(self, editor_id: str) -> SectionLiveField: ...
+
+
+@runtime_checkable
+class TabResultWritePort(Protocol):
+    """The narrow State-write contract a run policy depends on (ADR-0026 §3).
+
+    Run's lifecycle writes only these three tab-result mutations; depending on
+    this port instead of the concrete ``State`` keeps the policy bound to a
+    contract, not behaviour (ADR-0005). ``State`` is the only implementer and
+    satisfies it structurally (no inheritance change). Reads (``is_tab_busy``
+    etc.) deliberately stay off the port — only writes are narrowed."""
+
+    def clear_tab_results(self, tab_id: str) -> None: ...
+    def set_tab_running(self, tab_id: str, running: bool) -> None: ...
+    def update_tab_result(self, tab_id: str, result: object) -> None: ...
+
+
+@runtime_checkable
+class TabAnalyzeWritePort(Protocol):
+    """The narrow State-write contract an analyze / post-analyze policy depends
+    on (ADR-0026 §3). Same rationale as ``TabResultWritePort``; ``State`` is the
+    only implementer. ``update_tab_analyze``'s ``writeback_items`` keyword
+    mirrors State exactly so the structural match holds."""
+
+    def set_tab_analyzing(self, tab_id: str, analyzing: bool) -> None: ...
+    def update_tab_analyze(
+        self,
+        tab_id: str,
+        analyze_result: object,
+        figure: Figure | None,
+        writeback_items: list[WritebackItem] | None = None,
+    ) -> None: ...
+    def update_tab_post_analyze(
+        self,
+        tab_id: str,
+        post_analyze_result: object,
+        figure: Figure | None,
+    ) -> None: ...
