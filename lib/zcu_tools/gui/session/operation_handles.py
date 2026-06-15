@@ -4,24 +4,23 @@ Owns the operation *lifecycle*, independent of how the work executes
 (BackgroundService) and of hardware *exclusion* (OperationGate). It mints the
 operation token (= ``operation_id``) and exposes the three async verbs over it:
 ``await_outcome`` (off-main blocking wait), ``poll`` (non-blocking), ``cancel``
-(async stop request — sets the worker's ``stop_event``). Settled tokens are
-retained briefly (LRU) so a late waiter still returns.
+(async stop request). Settled tokens are retained briefly (LRU) so a late
+waiter still returns.
+
+Cross-thread interaction uses a per-operation ``OperationChannel`` (ADR-0025):
+a single ordered FIFO carrying typed events (Settled / Message / Stop).
+This replaces the ADR-0023 FeedbackInbox + poll-loop await-combine: signal
+ordering is guaranteed by the single queue (race-free by construction), and
+``Queue.get(timeout)`` wakes immediately on enqueue (no 2s poll delay).
 
 Composition (ADR-0019): a hardware op (run / device / connect) takes a handle
 here AND registers an ``OperationGate`` exclusion under the *same* token; an
-analyze / interactive op takes only a handle (no exclusion) — it no longer fakes
-a never-conflicting lease just to get an async handle. The terminal path settles
-the handle here, then frees the exclusion (if any).
+analyze / interactive op takes only a handle (no exclusion). The terminal path
+settles the handle here, then frees the exclusion (if any).
 
-Session-core (``gui/session``): the handle lifecycle carries zero operation-kind
-knowledge, so it is shared verbatim by every session-driving app; each app keeps
-its own ``OperationGate`` exclusion policy.
-
-ADR-0023 extension: ``await_outcome`` supports a second wakeup source via
-``FeedbackInbox`` — a thread-safe queue of user-feedback strings. A pending wait
-returns early with reason='user_feedback' when a feedback arrives; the operation
-handle is left unsettled (the operation keeps running). This is a non-terminal
-return; the same handle can be awaited again.
+Session-core (``gui/session``): the handle lifecycle carries zero
+operation-kind knowledge, so it is shared verbatim by every session-driving
+app; each app keeps its own ``OperationGate`` exclusion policy.
 """
 
 from __future__ import annotations
@@ -29,7 +28,9 @@ from __future__ import annotations
 import logging
 import queue
 import threading
+import time
 from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -41,11 +42,6 @@ logger = logging.getLogger(__name__)
 # late waiter to "treat as already-done" (still correct, just non-blocking and
 # losing the recorded outcome, which then reads as a default 'finished').
 _DONE_EVENT_LIMIT = 32
-
-# Poll-tick duration for the feedback-aware wait. Short enough for responsive
-# feedback delivery; long enough not to busy-spin. The outer timeout is honoured
-# with resolution at this granularity.
-_AWAIT_TICK_SECONDS: float = 2.0
 
 OperationStatus = Literal["pending", "finished", "failed", "cancelled"]
 
@@ -69,7 +65,7 @@ class OperationOutcome:
 
 @dataclass(frozen=True)
 class AwaitResult:
-    """The result of one ``await_outcome`` call (ADR-0023).
+    """The result of one ``await_outcome`` call (ADR-0025).
 
     ``reason`` distinguishes the three return paths:
     - ``'completed'``: the operation settled (terminal). ``outcome`` is set; a
@@ -95,103 +91,249 @@ class AwaitResult:
             )
 
 
-class FeedbackInbox:
-    """Thread-safe inbox for user-feedback strings (ADR-0023).
+# ---------------------------------------------------------------------------
+# OperationChannel — per-operation single ordered event queue (ADR-0025)
+# ---------------------------------------------------------------------------
 
-    Written on the Qt main thread (GUI widget); read/drained on an IO worker
-    thread (``await_outcome``). The ``notify_event`` fires on every ``post``
-    so that a blocked ``await_outcome`` poll-tick is woken early.
+# Cancel hook: called by stop() after enqueueing Stop; encapsulates how
+# cancellation actually interrupts the work (run/device = stop_event.set;
+# interactive = cancel_interactive; uncancellable = None).
+CancelHook = Callable[[], None]
 
-    Session-scoped: inbox is never persisted; cleared on a new session context.
-    Not stored in State (State main-thread write invariant).
+
+@dataclass(frozen=True)
+class Settled:
+    """The operation reached its terminal state (set by the worker)."""
+
+    outcome: OperationOutcome
+
+
+@dataclass(frozen=True)
+class Message:
+    """A user nudge: op continues running; agent receives user_feedback."""
+
+    text: str
+
+
+@dataclass(frozen=True)
+class Stop:
+    """A cancel request with an optional reason string."""
+
+    reason: str | None
+
+
+ChannelEvent = Settled | Message | Stop
+
+
+def _join_reasons(a: str | None, b: str | None) -> str | None:
+    """None-safe newline join; returns None when both are None."""
+    if a is None and b is None:
+        return None
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return f"{a}\n{b}"
+
+
+class OperationChannel:
+    """Per-operation ordered event FIFO (ADR-0025).
+
+    Producer interface (non-blocking, any thread):
+    - ``settle(outcome)`` — set-once terminal; idempotent.
+    - ``message(text)`` — nudge; ignored when text is blank.
+    - ``stop(reason)`` — enqueue Stop FIRST, then invoke cancel_hook.
+      Order is critical: the Settled event from the hook lands after Stop,
+      so the consumer folds reason correctly (see ADR-0025 §stop ordering).
+
+    Consumer interface (single consumer, blocking with timeout):
+    - ``consume(timeout)`` — fold events into an AwaitResult.
+    - ``settled_outcome()`` — non-blocking poll (returns _settled or None).
     """
 
-    def __init__(self) -> None:
-        self._q: queue.SimpleQueue[str] = queue.SimpleQueue()
-        # Set by post(), cleared by drain(); allows await to detect new feedback
-        # without draining prematurely (notify_event is level-triggered: stays set
-        # until drained).
-        self.notify_event: threading.Event = threading.Event()
+    def __init__(self, cancel_hook: CancelHook | None = None) -> None:
+        self._q: queue.Queue[ChannelEvent] = queue.Queue()
+        self._cancel_hook = cancel_hook
+        # Set-once terminal outcome; guarded by _lock for producer idempotency.
+        self._settled: OperationOutcome | None = None
+        self._lock: threading.Lock = threading.Lock()
+        # Consumer-private latch: accumulated Stop reasons from past Stop events.
+        self._pending_stop_reason: str | None = None
 
-    def post(self, text: str) -> None:
-        """Enqueue a feedback string and wake any pending await. Main-thread only."""
+    # ------------------------------------------------------------------
+    # Producer interface (non-blocking)
+    # ------------------------------------------------------------------
+
+    def settle(self, outcome: OperationOutcome) -> None:
+        """Mark the channel terminal (set-once, idempotent).
+
+        Lock is held only for the set-once guard; the enqueue happens outside
+        so the lock is never held while blocking.
+        """
+        with self._lock:
+            if self._settled is not None:
+                return  # idempotent: already settled
+            self._settled = outcome
+        self._q.put(Settled(outcome))
+
+    def message(self, text: str) -> None:
+        """Enqueue a nudge; blank text is ignored (same rule as old FeedbackInbox)."""
         if not text.strip():
-            return  # ignore whitespace-only feedback
-        self._q.put(text)
-        self.notify_event.set()
+            return
+        self._q.put(Message(text))
 
-    def drain(self) -> list[str]:
-        """Drain all pending feedback strings; clear the notify_event. Thread-safe."""
-        msgs: list[str] = []
+    def stop(self, reason: str | None) -> None:
+        """Request cancellation: enqueue Stop BEFORE invoking cancel_hook.
+
+        The ordering guarantee ensures that if the cancel_hook causes the
+        worker to settle immediately (interactive direct-settle), the Settled
+        event arrives *after* Stop in the queue, so consume() sees Stop first
+        and latches the reason before folding the Settled.
+        """
+        self._q.put(Stop(reason))
+        if self._cancel_hook is not None:
+            self._cancel_hook()
+
+    # ------------------------------------------------------------------
+    # Consumer interface (single consumer assumed)
+    # ------------------------------------------------------------------
+
+    def settled_outcome(self) -> OperationOutcome | None:
+        """Non-blocking poll: return the settled outcome if known, else None."""
+        return self._settled
+
+    def consume(self, timeout: float) -> AwaitResult:
+        """Block until a returnable event arrives or ``timeout`` elapses.
+
+        Events are consumed in strict arrival order — the queue's total order IS
+        the resolution of every race (ADR-0025). One call returns at the first
+        returnable event:
+        - ``Settled`` → completed (feedback only when status=='cancelled' and a
+          Stop reason was latched).
+        - ``Stop(reason)`` → latch reason into _pending_stop_reason, keep going.
+        - ``Message(text)`` → if a cancel is in progress (_pending_stop_reason
+          set): fold into the reason, keep going; else return user_feedback
+          (non-terminal — a pure nudge, op continues, agent may re-await).
+        - timeout → return timeout.
+
+        Already-drained events are processed non-blockingly first, so a nudge
+        queued *between* two awaits is delivered (not silently dropped), and a
+        terminally-settled channel returns idempotently without blocking.
+        """
+        deadline = time.monotonic() + timeout
+
         while True:
+            # 1) Drain immediately-available events in arrival order. A pending
+            #    nudge (enqueued between awaits) surfaces here rather than being
+            #    eaten by the terminal fast-path below.
             try:
-                msgs.append(self._q.get_nowait())
+                event = self._q.get_nowait()
             except queue.Empty:
-                break
-        # Clear only after draining; a concurrent post between the loop and here
-        # would re-set the event, which is correct (the next poll tick picks it up).
-        self.notify_event.clear()
-        return msgs
+                event = None
+            if event is not None:
+                result = self._process_event(event)
+                if result is not None:
+                    return result
+                continue
 
-    def has_pending(self) -> bool:
-        """True if at least one feedback string is waiting. Thread-safe best-effort."""
-        return not self._q.empty()
+            # 2) Queue momentarily empty. If terminally settled, return now —
+            #    idempotent re-consume of a finished op never blocks.
+            if self._settled is not None:
+                return self._make_completed(self._settled)
+
+            # 3) Not settled and nothing queued: block for the next event.
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return AwaitResult(reason="timeout")
+            try:
+                event = self._q.get(timeout=remaining)
+            except queue.Empty:
+                return AwaitResult(reason="timeout")
+            result = self._process_event(event)
+            if result is not None:
+                return result
+            # else: latched a Stop / folded a Message — loop.
+
+    def _process_event(self, event: ChannelEvent) -> AwaitResult | None:
+        """Fold one event. Returns an AwaitResult to return now, or None to keep
+        consuming (a latched Stop or a folded-in Message)."""
+        if isinstance(event, Settled):
+            return self._make_completed(event.outcome)
+        if isinstance(event, Stop):
+            self._pending_stop_reason = _join_reasons(
+                self._pending_stop_reason, event.reason
+            )
+            return None
+        # Message: fold into the reason while a cancel is in progress, else a
+        # pure non-terminal nudge.
+        if self._pending_stop_reason is not None:
+            self._pending_stop_reason = _join_reasons(
+                self._pending_stop_reason, event.text
+            )
+            return None
+        return AwaitResult(reason="user_feedback", feedback=event.text)
+
+    def _make_completed(self, outcome: OperationOutcome) -> AwaitResult:
+        """Build a completed AwaitResult; attach pending_stop_reason only for
+        cancelled outcomes (a 'Send & Stop' surfaces as {cancelled, feedback})."""
+        feedback: str | None = None
+        if outcome.status == "cancelled" and self._pending_stop_reason is not None:
+            feedback = self._pending_stop_reason
+        return AwaitResult(reason="completed", outcome=outcome, feedback=feedback)
+
+
+# ---------------------------------------------------------------------------
+# OperationHandles — channel registry (ADR-0019 / ADR-0025)
+# ---------------------------------------------------------------------------
 
 
 class OperationHandles:
     """Async-operation handles keyed by token: create / settle / await / poll /
-    cancel (ADR-0019). The completion ``Event`` lets a blocking off-main handler
-    (``operation.await``) wait thread-safely without touching main-thread-owned
-    state. The optional ``stop_event`` is the worker's own cancellation flag,
-    passed at ``create`` time: ``cancel`` sets it (a pure data handle, never a
-    callback), and the worker self-translates "stopped" into a ``cancelled``
-    outcome."""
+    cancel (ADR-0019). Each operation gets its own ``OperationChannel`` (ADR-0025)
+    for cross-thread interaction; no shared FeedbackInbox or poll-loop."""
 
-    def __init__(self, feedback_inbox: FeedbackInbox | None = None) -> None:
+    def __init__(self) -> None:
         self._next_token = 1
-        # Live (pending) operations: token -> not-yet-set completion Event.
-        self._events: dict[int, threading.Event] = {}
-        # Live operations' worker stop_event (None when the operation has no
-        # cancellation point, e.g. a blocking connect — cancel is a no-op there).
-        self._stop_events: dict[int, threading.Event | None] = {}
+        # Live (pending) operations: token -> OperationChannel.
+        self._live: dict[int, OperationChannel] = {}
         # Settled operations, retained briefly (LRU) so a caller awaiting after
-        # settle still returns the outcome immediately. The Event stays set.
-        self._done: OrderedDict[int, tuple[threading.Event, OperationOutcome]] = (
-            OrderedDict()
-        )
-        # Optional shared feedback inbox (ADR-0023). When set, await_outcome
-        # returns early with reason='user_feedback' on the next poll tick where
-        # feedback is present. None disables the second wakeup source (for tests
-        # or apps that do not use feedback).
-        self._feedback_inbox: FeedbackInbox | None = feedback_inbox
+        # settle still returns the outcome immediately.
+        self._done: OrderedDict[int, OperationChannel] = OrderedDict()
 
-    def set_feedback_inbox(self, inbox: FeedbackInbox) -> None:
-        """Wire the shared feedback inbox (called by app wiring after construction)."""
-        self._feedback_inbox = inbox
+    def create(self, cancel_hook: CancelHook | None = None) -> int:
+        """Mint an operation token and open its channel (pending).
 
-    def create(self, stop_event: threading.Event | None = None) -> int:
-        """Mint an operation token and open its handle (pending). ``stop_event``
-        is the worker's own cancellation flag (None when the op has no
-        cancellation point); ``cancel`` sets it. Returns the token (operation_id).
+        ``cancel_hook`` is the callable invoked by ``stop()`` after enqueueing
+        the Stop event; it encapsulates how cancellation interrupts the work:
+        - run / device setup: ``stop_event.set``
+        - interactive analyze: ``cancel_interactive`` direct-settle callable
+        - uncancellable (connect, FIT-analyze): ``None``
+
+        Returns the token (operation_id).
         """
         token = self._next_token
         self._next_token += 1
-        self._events[token] = threading.Event()
-        self._stop_events[token] = stop_event
-        # DEBUG: high-frequency bookkeeping — every async op (run/device/connect/
-        # analyze) mints a token here, so this is the canonical "op opened" marker.
+        self._live[token] = OperationChannel(cancel_hook)
         logger.debug("operation create: token=%d", token)
         return token
 
     def settle(self, token: int, outcome: OperationOutcome) -> None:
-        """Mark the operation terminal: store outcome, set Event, retain (LRU)."""
-        evt = self._events.pop(token, None)
-        self._stop_events.pop(token, None)
-        if evt is None:
-            return  # never created, or already settled
-        # INFO: terminal lifecycle marker. A non-finished outcome carries the
-        # error, so log it at WARNING with the message to make failures visible
-        # without trawling DEBUG.
+        """Mark the operation terminal: settle its channel and retain (LRU).
+
+        The channel is published to ``_done`` BEFORE being retracted from
+        ``_live`` so the token is always reachable in at least one dict — there
+        is no window where a concurrent ``await_outcome`` / ``poll`` sees it in
+        neither and falls through to the default 'finished' (which would
+        misreport a cancelled/failed terminal). See ADR-0025.
+        """
+        ch = self._live.get(token)
+        if ch is None:
+            # Already settled (idempotent) or never created — still delegate
+            # to the retained channel if present (idempotent settle on channel).
+            ch = self._done.get(token)
+            if ch is not None:
+                ch.settle(outcome)
+            return
         if outcome.status == "finished":
             logger.info("operation settle: token=%d status=%s", token, outcome.status)
         else:
@@ -201,45 +343,54 @@ class OperationHandles:
                 outcome.status,
                 outcome.error,
             )
-        evt.set()
-        self._done[token] = (evt, outcome)
+        ch.settle(outcome)
+        # Publish to _done first, then retract from _live (never "neither").
+        self._done[token] = ch
+        self._live.pop(token, None)
+        # The just-settled token is most-recent, so LRU eviction never drops it.
         while len(self._done) > _DONE_EVENT_LIMIT:
             self._done.popitem(last=False)
 
     def cancel(self, token: int) -> None:
-        """Request the operation stop (set its stop_event); returns immediately.
+        """Request the operation stop (via its cancel hook); returns immediately.
 
         Async notification, not a wait: the caller polls/awaits for the actual
         terminal outcome. A no-op for an unknown/settled token or one with no
-        stop_event (a connect has no cancellation point — it runs to completion
-        and shutdown falls back to a timeout force-close).
+        cancel_hook (e.g. connect has no cancellation point).
         """
-        stop_event = self._stop_events.get(token)
-        if stop_event is not None:
+        ch = self._live.get(token)
+        if ch is not None:
             logger.info("operation cancel: token=%d", token)
-            stop_event.set()
+            ch.stop(None)
+
+    def message(self, token: int, text: str) -> None:
+        """Deliver a nudge message to the operation's awaiter (non-terminal).
+
+        A no-op for an unknown/settled token — the message has nowhere to go.
+        """
+        ch = self._live.get(token)
+        if ch is not None:
+            ch.message(text)
+
+    def stop(self, token: int, reason: str | None = None) -> None:
+        """Request cancel with an optional reason string.
+
+        The reason string surfaces in the AwaitResult.feedback of the
+        subsequent completed(cancelled) result (Send & Stop semantic).
+        A no-op for an unknown/settled token.
+        """
+        ch = self._live.get(token)
+        if ch is not None:
+            logger.info("operation stop: token=%d reason=%r", token, reason)
+            ch.stop(reason)
 
     def cancel_all(self) -> list[int]:
         """Cancel every live operation; return their tokens (for poll/await)."""
-        tokens = list(self._events.keys())
+        tokens = list(self._live.keys())
         logger.info("operation cancel_all: %d live ops", len(tokens))
         for token in tokens:
             self.cancel(token)
         return tokens
-
-    def _completed_with_feedback(self, outcome: OperationOutcome) -> AwaitResult:
-        """Build a 'completed' AwaitResult, folding any pending user feedback into
-        a CANCELLED outcome so a "Send & Stop" surfaces as a single
-        {status:cancelled, feedback} rather than two events. Feedback is attached
-        ONLY for a cancelled outcome — a finished op leaves nudges in the inbox for
-        the next await to deliver as a standalone user_feedback."""
-        feedback: str | None = None
-        inbox = self._feedback_inbox
-        if outcome.status == "cancelled" and inbox is not None and inbox.has_pending():
-            msgs = inbox.drain()
-            if msgs:
-                feedback = "\n".join(msgs)
-        return AwaitResult(reason="completed", outcome=outcome, feedback=feedback)
 
     def await_outcome(self, token: int, timeout: float) -> AwaitResult | None:
         """Block until the token settles or a wakeup condition fires.
@@ -252,101 +403,33 @@ class OperationHandles:
           operation is still running; the caller may re-await the same token.
         - ``AwaitResult(reason='timeout', ...)`` when the bounded ``timeout``
           elapses without completion or feedback (non-terminal).
-        - ``None`` is never returned (kept as a contract break to distinguish from
-          the old API during the migration; all callers must handle AwaitResult).
+        - ``None`` is never returned (kept as a contract break note; all callers
+          must handle AwaitResult).
 
-        ADR-0023: the feedback wakeup path is intentionally non-terminal — it
-        does NOT settle the handle. The operation continues running and the caller
-        (agent) decides whether to cancel or continue awaiting.
-
-        A token with no live or retained Event is treated as already-done
-        (returns a completed 'finished' outcome) so callers never hang on an
-        operation that finished before they began waiting.
+        ADR-0025: the channel's consume() method handles all folding logic.
+        A token with no live or retained channel is treated as already-done.
         """
-        # Fast-path: already settled before this call.
-        live = self._events.get(token)
-        if live is None:
-            retained = self._done.get(token)
-            outcome = (
-                retained[1] if retained is not None else OperationOutcome("finished")
-            )
-            # Folds pending feedback into a cancelled outcome (Send & Stop).
-            return self._completed_with_feedback(outcome)
-
-        inbox = self._feedback_inbox
-        stop_event = self._stop_events.get(token)
-
-        def _cancel_in_progress() -> bool:
-            # A cancel was requested (stop_event set): hold any feedback so it
-            # folds into the imminent cancelled settle (one {cancelled, feedback})
-            # instead of returning early as a standalone user_feedback nudge.
-            return stop_event is not None and stop_event.is_set()
-
-        # --- pre-enter check: drain feedback accumulated between waits --------
-        # Feedback sent between two awaits is delivered on the very next entry
-        # rather than waiting a full tick — UNLESS a cancel is in progress, in
-        # which case it belongs to the cancellation (folded in on settle below).
-        if inbox is not None and inbox.has_pending() and not _cancel_in_progress():
-            msgs = inbox.drain()
-            if msgs:
-                feedback_text = "\n".join(msgs)
-                logger.debug(
-                    "await_outcome: pre-enter feedback for token=%d: %r",
-                    token,
-                    feedback_text,
-                )
-                return AwaitResult(reason="user_feedback", feedback=feedback_text)
-
-        # --- poll-loop: check operation + feedback each tick ------------------
-        # Short-tick poll (not two parallel threads) avoids joining a companion
-        # thread that may outlive the caller; outer timeout honoured to one tick.
-        import time
-
-        deadline = time.monotonic() + timeout
-
-        while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                return AwaitResult(reason="timeout")
-
-            tick = min(_AWAIT_TICK_SECONDS, remaining)
-
-            # Wake early when the operation settles OR when the tick elapses.
-            settled = live.wait(timeout=tick)
-
-            if settled:
-                retained = self._done.get(token)
-                outcome = (
-                    retained[1]
-                    if retained is not None
-                    else OperationOutcome("finished")
-                )
-                # Folds pending feedback into a cancelled outcome (Send & Stop).
-                return self._completed_with_feedback(outcome)
-
-            # Feedback nudge — only when NOT cancelling (a cancel-in-progress
-            # holds the feedback for the cancelled settle handled above).
-            if inbox is not None and inbox.has_pending() and not _cancel_in_progress():
-                msgs = inbox.drain()
-                if msgs:
-                    feedback_text = "\n".join(msgs)
-                    logger.debug(
-                        "await_outcome: feedback wakeup for token=%d: %r",
-                        token,
-                        feedback_text,
-                    )
-                    return AwaitResult(reason="user_feedback", feedback=feedback_text)
-
-            # Neither settled nor feedback (or a cancel is pending) — continue.
+        # Check live first, then retained.
+        ch = self._live.get(token)
+        if ch is None:
+            ch = self._done.get(token)
+        if ch is None:
+            # Unknown token: treat as already-done (finished).
+            return AwaitResult(reason="completed", outcome=OperationOutcome("finished"))
+        return ch.consume(timeout)
 
     def poll(self, token: int) -> OperationOutcome | None:
-        """Non-blocking: outcome if settled (or unknown), None if still pending."""
-        if token in self._events:
-            return None
-        retained = self._done.get(token)
-        if retained is not None:
-            return retained[1]
-        return OperationOutcome("finished")
+        """Non-blocking: outcome if settled, None if still pending, default
+        'finished' if unknown. Reads the channel's set-once ``_settled`` (the
+        source of truth) rather than dict membership, so the brief settle window
+        where the token is in both ``_live`` and ``_done`` still reports the
+        true outcome instead of a stale 'pending'."""
+        ch = self._live.get(token)
+        if ch is None:
+            ch = self._done.get(token)
+        if ch is None:
+            return OperationOutcome("finished")
+        return ch.settled_outcome()
 
     def live_count(self) -> int:
         """How many operations are live (pending) right now, of any facet —
@@ -354,4 +437,4 @@ class OperationHandles:
         reads this to decide whether closing will interrupt work (Handles owns
         the lifecycle, so it is the authority on "is anything in progress",
         unlike the gate which only knows hardware exclusions)."""
-        return len(self._events)
+        return len(self._live)

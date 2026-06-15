@@ -6,7 +6,6 @@ are modelled directly as OperationHandles tokens (ADR-0019)."""
 
 from __future__ import annotations
 
-import threading
 import time
 
 from qtpy.QtCore import QCoreApplication
@@ -45,13 +44,13 @@ def test_begin_closes_immediately_when_idle(qapp) -> None:
 def test_begin_waits_then_closes_when_operation_settles(qapp) -> None:
     del qapp
     handles = OperationHandles()
-    stop_event = threading.Event()
-    token = handles.create(stop_event=stop_event)
+    hook_called: list[bool] = []
+    token = handles.create(cancel_hook=lambda: hook_called.append(True))
     driver = QtShutdownDriver(handles)
     closed: list[bool] = []
 
     driver.begin(lambda: closed.append(True))
-    assert stop_event.is_set()  # cancelled
+    assert hook_called == [True]  # cancel_hook invoked on cancel_all
     assert closed == []  # still waiting — handle not settled
 
     handles.settle(token, OperationOutcome("cancelled"))

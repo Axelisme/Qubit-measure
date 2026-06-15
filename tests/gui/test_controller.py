@@ -234,15 +234,37 @@ def test_cancel_analyze_without_interactive_is_graceful(cf):
 
 # ---------------------------------------------------------------------------
 # send_feedback / cancel_active_operation — user->agent feedback channel
-# (ADR-0023): the façade posts the message to the inbox and, on stop, routes to
-# the right cancel (op-taxonomy lives here, not in the View).
+# (ADR-0025): routes to the active op's OperationChannel; on stop, also
+# runs op-taxonomy cancel teardown (op-taxonomy lives here, not in the View).
 # ---------------------------------------------------------------------------
 
 
 def test_send_feedback_posts_without_stop(cf):
-    # stop=False is a nudge: message goes to the inbox, nothing is cancelled.
+    # stop=False with no active op: no-op (no channel to deliver to), returns None.
     assert cf.ctrl.send_feedback("look at R2", stop=False) is None
-    assert cf.ctrl._feedback_inbox.has_pending() is True
+
+
+def test_send_feedback_nudge_delivers_to_interactive_channel(cf):
+    # stop=False while an interactive analyze is active: message arrives on
+    # the channel's consume() as user_feedback (non-terminal).
+    from zcu_tools.gui.app.main.services.guard import AnalyzePermit
+
+    tab_id = cf.ctrl.new_tab("fake")
+    cf.state.update_tab_result(tab_id, object())
+    token = cf.ctrl._analyze_svc.start_interactive(AnalyzePermit(tab_id=tab_id))
+    assert cf.state.is_tab_analyzing(tab_id) is True
+
+    cf.ctrl.send_feedback("nudge text", stop=False)
+
+    # Consume the channel: must surface as user_feedback (non-terminal).
+    result = cf.ctrl.await_operation(token, timeout=1.0)
+    assert result is not None
+    assert result.reason == "user_feedback"
+    assert result.feedback == "nudge text"
+    # Handle still live (non-terminal).
+    assert cf.ctrl._operation_handles.poll(token) is None
+    # Cleanup: cancel the interactive analyze.
+    cf.ctrl.cancel_analyze(tab_id)
 
 
 def test_cancel_active_operation_noop_when_idle(cf):
@@ -254,17 +276,24 @@ def test_send_feedback_stop_cancels_interactive_analyze(cf):
 
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.update_tab_result(tab_id, object())
-    cf.ctrl._analyze_svc.start_interactive(AnalyzePermit(tab_id=tab_id))
+    token = cf.ctrl._analyze_svc.start_interactive(AnalyzePermit(tab_id=tab_id))
     assert cf.state.is_tab_analyzing(tab_id) is True
 
     cancelled = cf.ctrl.send_feedback("stop - wrong feature", stop=True)
 
-    # Routed to the interactive analyze (no run in flight); message also posted so
-    # await_outcome folds it into the cancelled outcome.
+    # Routed to the interactive analyze (no run in flight); stop=True causes
+    # the channel to receive Stop(reason) then Settled(cancelled), so
+    # await_outcome returns completed(cancelled, feedback=reason).
     assert cancelled == f"analyze:{tab_id}"
     assert cf.state.is_tab_analyzing(tab_id) is False
     cf.view.unmount_interactive_analysis.assert_called_once_with(tab_id)
-    assert cf.ctrl._feedback_inbox.has_pending() is True
+    # The channel is now settled; consume it to verify feedback is folded.
+    result = cf.ctrl.await_operation(token, timeout=1.0)
+    assert result is not None
+    assert result.reason == "completed"
+    assert result.outcome is not None
+    assert result.outcome.status == "cancelled"
+    assert result.feedback == "stop - wrong feature"
 
 
 # ---------------------------------------------------------------------------

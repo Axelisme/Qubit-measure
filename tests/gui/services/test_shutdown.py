@@ -5,7 +5,6 @@ drives OperationHandles (cancel_all / poll), not the exclusion gate (ADR-0019)."
 
 from __future__ import annotations
 
-import threading
 
 import pytest
 from zcu_tools.gui.app.main.services.shutdown import ShutdownCoordinator, ShutdownState
@@ -40,12 +39,12 @@ def test_settles_immediately_when_no_operations_active() -> None:
 def test_waits_until_a_cancellable_operation_self_settles() -> None:
     handles = OperationHandles()
     clock = _FakeClock()
-    stop_event = threading.Event()
-    token = handles.create(stop_event=stop_event)
+    hook_called: list[bool] = []
+    token = handles.create(cancel_hook=lambda: hook_called.append(True))
     coord = _coordinator(handles, clock)
 
     coord.begin()
-    assert stop_event.is_set()  # begin cancelled it
+    assert hook_called == [True]  # cancel_hook invoked via cancel_all
     assert coord.tick() is ShutdownState.WAITING  # worker has not settled yet
 
     # Worker self-judged cancelled and settled the handle.
@@ -72,7 +71,7 @@ def test_times_out_when_an_operation_never_settles() -> None:
 def test_begin_is_idempotent_while_active() -> None:
     handles = OperationHandles()
     clock = _FakeClock()
-    handles.create(stop_event=threading.Event())
+    handles.create(cancel_hook=lambda: None)
     coord = _coordinator(handles, clock)
 
     coord.begin()

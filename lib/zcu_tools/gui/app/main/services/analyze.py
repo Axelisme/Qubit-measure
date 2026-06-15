@@ -107,11 +107,26 @@ class AnalyzeService(_StagedAnalyzeService):
         analyzing. There is NO worker — the View mounts the interactive canvas on
         the main thread and the user paces the work (Main-thread-user-paced
         strategy, ADR-0019); the handle is held until ``finish_interactive``
-        (Done). Returns the operation token (handle)."""
+        (Done). Returns the operation token (handle).
+
+        ADR-0025: cancel_hook triggers cancel_interactive so handles.stop(token)
+        causes the channel to directly settle-cancelled, allowing an awaiter's
+        Stop event to fold reason correctly before Settled arrives.
+        """
         tab_id = permit.tab_id
         if self._state.is_tab_busy(tab_id):
             raise RuntimeError(f"Tab {tab_id!r} is busy")
-        token = self._open_token(tab_id)
+
+        # Open the token with a cancel_hook that executes the interactive teardown.
+        # The hook runs *after* Stop is enqueued, so Settled(cancelled) from the
+        # hook's _release lands after Stop — the consumer folds reason correctly.
+        # Wrap cancel_interactive (returns bool) so the hook matches CancelHook
+        # signature (returns None). The bool return is irrelevant here — stop()
+        # already knows this is an interactive op.
+        def _hook() -> None:
+            self.cancel_interactive(tab_id)
+
+        token = self._open_token(tab_id, cancel_hook=_hook)
         self._interactive_tabs.add(tab_id)
         self._begin(tab_id)
         return token
@@ -133,6 +148,13 @@ class AnalyzeService(_StagedAnalyzeService):
         op for ``Controller.cancel_active_operation`` to settle. Arbitrary if more
         than one (measure-gui drives one interactive picker at a time)."""
         return next(iter(self._interactive_tabs), None)
+
+    def active_interactive_token(self) -> int | None:
+        """The handle token of the active interactive analyze, or None."""
+        tab = self.active_interactive_tab()
+        if tab is None:
+            return None
+        return self._active_tokens.get(tab)
 
     def cancel_interactive(self, tab_id: str) -> bool:
         """Cancel an in-flight INTERACTIVE analyze: settle its handle as cancelled

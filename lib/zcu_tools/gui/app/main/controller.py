@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 from zcu_tools.device.base import BaseDeviceInfo
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.plotting import FigureContainer
-from zcu_tools.gui.session.operation_handles import AwaitResult, FeedbackInbox
+from zcu_tools.gui.session.operation_handles import AwaitResult
 from zcu_tools.gui.session.services.connection import (
     ConnectRequest,
     LoadPredictorRequest,
@@ -226,11 +226,8 @@ class Controller:
         self._services = services
         self._operation_gate = services.operation_gate
         self._operation_handles = services.handles
-        # ADR-0023: session-scoped feedback inbox (thread-safe; not in State).
-        # Wired into OperationHandles so await_outcome can deliver feedback as a
-        # second wakeup source without touching main-thread-owned State.
-        self._feedback_inbox = FeedbackInbox()
-        self._operation_handles.set_feedback_inbox(self._feedback_inbox)
+        # ADR-0025: cross-thread interaction now uses per-op OperationChannel;
+        # FeedbackInbox and set_feedback_inbox are removed.
         self._background_svc = services.background
         self._progress_svc = services.progress
         self._guard_svc = services.guard
@@ -589,15 +586,64 @@ class Controller:
         return None
 
     def send_feedback(self, message: str, *, stop: bool = False) -> str | None:
-        """User->agent feedback from the GUI (ADR-0023). ALWAYS posts ``message``
-        to the feedback inbox (wakes / piggybacks to the waiting agent); when
-        ``stop`` is True, ALSO cancels the active operation so the message surfaces
-        as the cancellation reason ({status:cancelled, feedback}). The message
-        channel (inbox) and the cancel are separate single-responsibility
-        mechanisms — this façade only composes them. Returns what was cancelled."""
-        self._feedback_inbox.post(message)
-        if stop:
-            return self.cancel_active_operation()
+        """User->agent feedback from the GUI (ADR-0025).
+
+        Routes the message to the active operation's OperationChannel using
+        the same taxonomy as ``cancel_active_operation`` (run > interactive >
+        device):
+        - ``stop=False``: ``handles.message(token, text)`` — pure nudge, op
+          continues running; agent receives user_feedback (non-terminal).
+        - ``stop=True``: UI teardown first (unmount view for interactive), then
+          ``handles.stop(token, reason=text)`` — enqueues Stop BEFORE triggering
+          the cancel hook (ADR-0025 ordering invariant preserved).
+
+        Returns the taxonomy tag of what was cancelled (stop=True only), or None.
+        """
+        running = self._state.running_tab_id
+        if running is not None:
+            token = self._run_svc.active_token
+            if stop:
+                if token is not None:
+                    self._operation_handles.stop(token, reason=message)
+                # run has no UI unmount step; cancel_hook (stop_event.set) handles it.
+                return "run"
+            else:
+                if token is not None:
+                    self._operation_handles.message(token, message)
+                return None
+
+        tab = self._analyze_svc.active_interactive_tab()
+        if tab is not None:
+            token = self._analyze_svc.active_interactive_token()
+            if stop:
+                # Unmount the interactive view BEFORE triggering the hook, so the
+                # View is clean regardless of hook timing.
+                host = self._render_host
+                if host is not None:
+                    host.unmount_interactive_analysis(tab)
+                if token is not None:
+                    self._operation_handles.stop(token, reason=message)
+                # Note: handles.stop() triggers the cancel_hook (cancel_interactive),
+                # which clears is_analyzing + settles the handle as cancelled.
+                return f"analyze:{tab}"
+            else:
+                if token is not None:
+                    self._operation_handles.message(token, message)
+                return None
+
+        ops = self.get_active_device_operations()
+        if ops:
+            name = ops[0].device_name
+            token = self._dev_svc.active_operation_token(name)
+            if stop:
+                if token is not None:
+                    self._operation_handles.stop(token, reason=message)
+                return f"device:{name}"
+            else:
+                if token is not None:
+                    self._operation_handles.message(token, message)
+                return None
+
         return None
 
     # ------------------------------------------------------------------
@@ -1166,7 +1212,7 @@ class Controller:
         Returns an AwaitResult with reason in {'completed', 'user_feedback',
         'timeout'}. Never returns None (kept for type-checker clarity during
         migration). Runs on an off-main IO thread — only touches the thread-safe
-        OperationHandles and FeedbackInbox, no main-thread-owned state. (ADR-0023)
+        OperationHandles / OperationChannel, no main-thread-owned state. (ADR-0025)
         """
         return self._operation_handles.await_outcome(operation_id, timeout)
 

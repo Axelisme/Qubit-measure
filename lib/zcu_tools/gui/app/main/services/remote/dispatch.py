@@ -1102,7 +1102,7 @@ def _h_operation_await(
     # off_main_thread handler: blocks the IO worker thread on the handle's
     # thread-safe registry (never touches main-thread-owned state). Returns a
     # structured payload with reason in {'completed', 'user_feedback', 'timeout'}
-    # (ADR-0023). failed/cancelled are still raised as PRECONDITION_FAILED so
+    # (ADR-0025). failed/cancelled are still raised as PRECONDITION_FAILED so
     # existing callers see an error; other reasons are returned as wire data.
     operation_id = int(params["operation_id"])  # type: ignore[arg-type]
     timeout = float(params["timeout"])  # type: ignore[arg-type]

@@ -88,7 +88,9 @@ class RunService(QObject):
         # (single owner): the handle sets it on cancel, the worker self-judges.
         self._gate.ensure_can_start(OperationKind.RUN)
         stop_event = threading.Event()
-        token = self._handles.create(stop_event=stop_event)
+        # ADR-0025: cancel_hook = stop_event.set so handles.cancel(token) triggers
+        # the worker's own stop flag without the channel knowing about stop_event.
+        token = self._handles.create(cancel_hook=stop_event.set)
         self._gate.register(token, OperationKind.RUN, owner_id=tab_id)
         self._active_token = token
         # Progress factory is bound to this operation (owner = tab_id) only after
@@ -130,6 +132,11 @@ class RunService(QObject):
         )
         self._bus.emit(RunStartedPayload(tab_id=tab_id))
         return token
+
+    @property
+    def active_token(self) -> int | None:
+        """The token of the currently running operation, or None."""
+        return self._active_token
 
     def cancel_run(self) -> None:
         logger.info("cancel_run")

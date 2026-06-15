@@ -23,7 +23,11 @@ from typing import TYPE_CHECKING, Any
 from qtpy.QtCore import QObject  # type: ignore[attr-defined]
 
 from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
-from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
+from zcu_tools.gui.session.operation_handles import (
+    CancelHook,
+    OperationHandles,
+    OperationOutcome,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -82,9 +86,13 @@ class _StagedAnalyzeService(QObject):
         if token is not None:
             self._handles.settle(token, outcome)
 
-    def _open_token(self, tab_id: str) -> int:
-        """Mint and register the per-tab operation handle (pending)."""
-        token = self._handles.create()
+    def _open_token(self, tab_id: str, cancel_hook: CancelHook | None = None) -> int:
+        """Mint and register the per-tab operation handle (pending).
+
+        ``cancel_hook`` is forwarded to OperationChannel.create; pass None for
+        FIT-analyze (not cancellable) or a teardown callable for interactive.
+        """
+        token = self._handles.create(cancel_hook=cancel_hook)
         self._active_tokens[tab_id] = token
         return token
 

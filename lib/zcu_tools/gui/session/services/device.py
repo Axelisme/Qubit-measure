@@ -413,6 +413,12 @@ class DeviceService(QObject):
         dev = self._state.get_device(name)
         return None if dev is None else self._project(dev)
 
+    def active_operation_token(self, device_name: str) -> int | None:
+        """Return the handle token for the first in-flight op on ``device_name``,
+        or None if no op is in progress for that device."""
+        op = self._inflight.get(device_name)
+        return op.token if op is not None else None
+
     def get_active_device_operations(self) -> tuple[ActiveDeviceOperation, ...]:
         """Enumerate *all* in-flight device operations (Phase C concurrency).
 
@@ -655,7 +661,9 @@ class DeviceService(QObject):
         # in-flight mutation; mutations of different devices start concurrently
         # and each owns its own _inflight[name] entry.
         self._gate.ensure_can_start(kind, resource_id=name)
-        token = self._handles.create(stop_event=stop_event)
+        # ADR-0025: cancel_hook = stop_event.set (None for non-cancellable ops).
+        cancel_hook = stop_event.set if stop_event is not None else None
+        token = self._handles.create(cancel_hook=cancel_hook)
         self._gate.register(token, kind, owner_id=name, resource_id=name)
         prior = self._state.get_device(name)
         self._inflight[name] = _InflightOp(token=token, kind=kind, prior=prior)
