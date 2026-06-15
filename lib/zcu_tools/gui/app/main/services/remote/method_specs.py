@@ -157,8 +157,9 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "cancelled and clear is_analyzing so the tab can then be closed. This is "
         "the agent-side counterpart of the GUI 'Done' button for an interactive "
         "picker — interactive analyze is a separate operation from run, so "
-        "run.cancel does NOT settle it. A graceful no-op (ok=False) when the tab "
-        "has no interactive analyze in flight.",
+        "run.cancel does NOT settle it. Returns {ok, cancelled}: ok is always "
+        "true (the call succeeded); cancelled is true when an interactive analyze "
+        "was settled, or false (a graceful no-op) when none was in flight.",
         (_str("tab_id"),),
     ),
     # Save
