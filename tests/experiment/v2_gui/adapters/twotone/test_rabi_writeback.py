@@ -1,8 +1,10 @@
-"""Tests for rabi adapter module writeback items.
+"""Tests for rabi adapter module writeback items and default-value seed.
 
 Verifies that AmpRabiAdapter and LenRabiAdapter emit ModuleWriteback items
 (in addition to the existing MetaDictWriteback items) when a cfg_snapshot is
 available, and that the module value trees have the correct field overrides.
+Also verifies that AmpRabiAdapter.make_default_value seeds the gain sweep
+upper bound from md key 'pi_gain' (not the old 'pi_amp').
 """
 
 from __future__ import annotations
@@ -28,10 +30,13 @@ from zcu_tools.experiment.v2_gui.adapters.twotone.rabi.len_rabi import (
 )
 from zcu_tools.gui.app.main.adapter import (
     DirectValue,
+    EvalValue,
     MetaDictWriteback,
     ModuleWriteback,
+    SweepValue,
     WritebackRequest,
 )
+from zcu_tools.meta_tool import MetaDict
 from zcu_tools.program.v2 import PulseCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.twotone import TwoToneModuleCfg
@@ -121,10 +126,12 @@ class TestAmpRabiWriteback:
         items = self._items(pi_amp=0.4, pi2_amp=0.2)
         md_items = [it for it in items if isinstance(it, MetaDictWriteback)]
         by_name = {it.target_name: it for it in md_items}
-        assert "pi_amp" in by_name
-        assert by_name["pi_amp"].proposed_value == pytest.approx(0.4)
-        assert "pi2_amp" in by_name
-        assert by_name["pi2_amp"].proposed_value == pytest.approx(0.2)
+        # Scalar gains write back as 'pi_gain'/'pi2_gain' (single_qubit.md);
+        # the module items keep the 'pi_amp'/'pi2_amp' names.
+        assert "pi_gain" in by_name
+        assert by_name["pi_gain"].proposed_value == pytest.approx(0.4)
+        assert "pi2_gain" in by_name
+        assert by_name["pi2_gain"].proposed_value == pytest.approx(0.2)
 
     def test_module_items_present(self) -> None:
         items = self._items()
@@ -244,6 +251,8 @@ class TestLenRabiWriteback:
         mod_items = [it for it in items if isinstance(it, ModuleWriteback)]
         assert len(mod_items) == 2
         names = {it.target_name for it in mod_items}
+        # len_rabi produces length-calibrated modules 'pi_len'/'pi2_len'
+        # (single_qubit.md); amp_rabi produces the separate 'pi_amp'/'pi2_amp'.
         assert names == {"pi_len", "pi2_len"}
 
     def test_pi_len_module_length_overridden(self) -> None:
@@ -307,3 +316,102 @@ class TestLenRabiWriteback:
         items = list(LenRabiAdapter().get_writeback_items(req))
         assert len(items) == 3
         assert all(isinstance(it, MetaDictWriteback) for it in items)
+
+
+# ---------------------------------------------------------------------------
+# AmpRabiAdapter — make_default_value gain-sweep seed
+# ---------------------------------------------------------------------------
+
+
+def _make_ctx_with_md(**md_values: float) -> MagicMock:
+    """A ctx whose md is a real MetaDict seeded with md_values.
+
+    md_has_key uses ctx.md.get() internally, so a real MetaDict is required;
+    a bare MagicMock would make every key appear present.
+    """
+    ctx = MagicMock()
+    md = MetaDict()
+    for key, value in md_values.items():
+        setattr(md, key, value)
+    ctx.md = md
+    ctx.ml = MagicMock()
+    ctx.qub_name = "Q1"
+    return ctx
+
+
+def _gain_sweep_stop(ctx: MagicMock) -> float | EvalValue:
+    """Extract the gain sweep stop edge from AmpRabiAdapter.make_default_value."""
+    val = AmpRabiAdapter().make_default_value(ctx)
+    sweep_section = val.fields["sweep"]
+    assert isinstance(sweep_section, type(val)), (
+        f"Expected CfgSectionValue, got {type(sweep_section)}"
+    )
+    gain_sweep = sweep_section.fields["gain"]
+    assert isinstance(gain_sweep, SweepValue), (
+        f"Expected SweepValue, got {type(gain_sweep)}"
+    )
+    return gain_sweep.stop
+
+
+class TestAmpRabiDefaultValueGainSeed:
+    def test_pi_gain_present_yields_eval_expr(self) -> None:
+        # When md has pi_gain, the stop edge must be an EvalValue referencing
+        # "2.0 * pi_gain" so the GUI keeps the live md-linked expression.
+        ctx = _make_ctx_with_md(pi_gain=0.4)
+        stop = _gain_sweep_stop(ctx)
+        assert isinstance(stop, EvalValue)
+        assert stop.expr == "2.0 * pi_gain"
+
+    def test_pi_gain_absent_yields_fallback_float(self) -> None:
+        # When md has no pi_gain, fall back to 2.0 * 0.5 = 1.0.
+        ctx = _make_ctx_with_md()
+        stop = _gain_sweep_stop(ctx)
+        assert isinstance(stop, float)
+        assert stop == pytest.approx(1.0)
+
+    def test_pi_amp_does_not_seed_gain_sweep(self) -> None:
+        # Old md key 'pi_amp' is now reserved for pulse MODULE names; it must
+        # not trigger the md-linked eval expression.  With only pi_amp present
+        # the stop must be the plain fallback float, not an EvalValue.
+        ctx = _make_ctx_with_md(pi_amp=0.9)
+        stop = _gain_sweep_stop(ctx)
+        assert isinstance(stop, float), (
+            "pi_amp must not seed the gain sweep; expected plain fallback float"
+        )
+
+
+# ---------------------------------------------------------------------------
+# LenRabiAdapter — make_default_value length-sweep seed
+# ---------------------------------------------------------------------------
+
+
+def _length_sweep_stop(ctx: MagicMock) -> float | EvalValue:
+    """Extract the length sweep stop edge from LenRabiAdapter.make_default_value."""
+    val = LenRabiAdapter().make_default_value(ctx)
+    sweep_section = val.fields["sweep"]
+    assert isinstance(sweep_section, type(val)), (
+        f"Expected CfgSectionValue, got {type(sweep_section)}"
+    )
+    length_sweep = sweep_section.fields["length"]
+    assert isinstance(length_sweep, SweepValue), (
+        f"Expected SweepValue, got {type(length_sweep)}"
+    )
+    return length_sweep.stop
+
+
+class TestLenRabiDefaultValueLengthSeed:
+    def test_pi_len_present_yields_eval_expr(self) -> None:
+        # When md has pi_len, the stop edge must be an EvalValue referencing
+        # "4.0 * pi_len" so the GUI keeps the live md-linked expression.
+        ctx = _make_ctx_with_md(pi_len=0.05)
+        stop = _length_sweep_stop(ctx)
+        assert isinstance(stop, EvalValue)
+        assert stop.expr == "4.0 * pi_len"
+
+    def test_pi_len_absent_yields_fallback_float(self) -> None:
+        # When md has no pi_len, md_eval_scaled returns 4.0 * 0.1 = 0.4
+        # (factor * fallback, where fallback=0.1 from the adapter).
+        ctx = _make_ctx_with_md()
+        stop = _length_sweep_stop(ctx)
+        assert isinstance(stop, float)
+        assert stop == pytest.approx(0.4)

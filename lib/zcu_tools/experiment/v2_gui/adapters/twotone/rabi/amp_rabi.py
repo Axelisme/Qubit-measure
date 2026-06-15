@@ -78,8 +78,8 @@ class AmpRabiAdapter(
             expects_md=(
                 "Reads from the MetaDict (all optional, seeding defaults): 'q_f' — "
                 "qubit frequency feeding the drive pulse (~2000–6000 MHz); "
-                "'qub_ch' — qubit-drive channel; 'pi_amp' — prior pi-pulse gain, "
-                "the gain sweep spans up to 2*pi_amp (fallback ~0.5). Readout "
+                "'qub_ch' — qubit-drive channel; 'pi_gain' — prior pi-pulse gain, "
+                "the gain sweep spans up to 2*pi_gain (fallback ~0.5). Readout "
                 "defaults pull 'r_f' (~4000–8000 MHz), 'res_ch' / 'ro_ch', and "
                 "'timeFly' for the readout trigger offset (~0–1 us)."
             ),
@@ -93,11 +93,12 @@ class AmpRabiAdapter(
                 "'reset_120') when present, else stays disabled."
             ),
             typical_writeback=(
-                "Proposes MetaDict scalars 'pi_amp' and 'pi2_amp' (fitted gains). "
-                "Also proposes ModuleLibrary modules 'pi_amp' and 'pi2_amp' — "
-                "copies of the qubit drive module with gain overridden to the "
-                "fitted pi / pi/2 value. Module items are skipped when no "
-                "cfg_snapshot is available (e.g. loaded from file)."
+                "Proposes MetaDict scalars 'pi_gain' and 'pi2_gain' (fitted "
+                "gains). Also proposes ModuleLibrary modules 'pi_amp' and "
+                "'pi2_amp' — copies of the qubit drive module with gain "
+                "overridden to the fitted pi / pi/2 value. Module items are "
+                "skipped when no cfg_snapshot is available (e.g. loaded from "
+                "file)."
             ),
             recommended=(
                 "Analysis takes a 'Skip points' count (default 0) to drop leading "
@@ -123,9 +124,9 @@ class AmpRabiAdapter(
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        # gain sweep spans up to 2*pi_amp (md-linked) → an EvalValue stop edge,
+        # gain sweep spans up to 2*pi_gain (md-linked) → an EvalValue stop edge,
         # so the sweep is pre-built and mounted via set_sweep.
-        sweep_stop = md_eval_scaled(ctx, "pi_amp", factor=2.0, fallback=0.5)
+        sweep_stop = md_eval_scaled(ctx, "pi_gain", factor=2.0, fallback=0.5)
         return (
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(reps=100, rounds=100, relax_delay=10.5)
@@ -157,13 +158,16 @@ class AmpRabiAdapter(
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         items: list[WritebackItem] = [
+            # Scalar gains write back as 'pi_gain'/'pi2_gain' per the naming
+            # convention (single_qubit.md); the 'pi_amp'/'pi2_amp' names below
+            # belong to the pi-pulse MODULES, not these scalars.
             MetaDictWriteback(
-                target_name="pi_amp",
+                target_name="pi_gain",
                 description="Pi pulse gain (a.u.)",
                 proposed_value=result.pi_amp,
             ),
             MetaDictWriteback(
-                target_name="pi2_amp",
+                target_name="pi2_gain",
                 description="Pi/2 pulse gain (a.u.)",
                 proposed_value=result.pi2_amp,
             ),

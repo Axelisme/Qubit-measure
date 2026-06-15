@@ -98,10 +98,12 @@ class LenRabiAdapter(
             typical_writeback=(
                 "Proposes MetaDict scalars 'pi_len', 'pi2_len' (fitted lengths), "
                 "and 'rabi_f' (Rabi oscillation frequency in MHz). Also proposes "
-                "ModuleLibrary modules 'pi_len' and 'pi2_len' — copies of the "
-                "qubit drive module with waveform length overridden to the fitted "
-                "pi / pi/2 value. Module items are skipped when no cfg_snapshot "
-                "is available (e.g. loaded from file)."
+                "ModuleLibrary modules 'pi_len' and 'pi2_len' — length-calibrated "
+                "pi-pulse modules produced by this adapter — with waveform length "
+                "overridden to the fitted pi / pi/2 value. amp_rabi produces the "
+                "separate 'pi_amp'/'pi2_amp' gain-calibrated modules and seeds its "
+                "gain sweep from the 'pi_len' scalar written here. Module items are "
+                "skipped when no cfg_snapshot is available (e.g. loaded from file)."
             ),
             recommended=(
                 "Analysis defaults to fitting a decay envelope on the oscillation; "
@@ -181,6 +183,10 @@ class LenRabiAdapter(
         # Each item is a copy of qub_pulse with waveform.length overridden to
         # the fitted pi / pi/2 value, registered as a library module for
         # subsequent experiments that reference the calibrated pulse by name.
+        # These are the LENGTH-calibrated modules 'pi_len'/'pi2_len' produced
+        # by this adapter (single_qubit.md); amp_rabi produces the separate
+        # gain-calibrated 'pi_amp'/'pi2_amp' modules and reads the 'pi_len'
+        # SCALAR (also written above) as its gain-sweep default-value seed.
         snapshot = req.run_result.cfg_snapshot
         if snapshot is not None:
             qub_pulse_cfg = snapshot.modules.qub_pulse
