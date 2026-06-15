@@ -1,13 +1,11 @@
 """PredictorDialog — load/define a FluxoniumPredictor and predict frequencies.
 
-Two ways to get a predictor: load a params.json (path + flux_bias → Load), or
-type/load the model params directly (EJ/EC/EL + flux_half/flux_period editable
-fields → Apply, which builds+installs in-memory via set_predictor_model_params).
-"Load params.json → fields" populates those fields from a file's fluxdep_fit
-without installing, so the user can tweak then Apply. An active-model read-back
-shows the currently installed EJ/EC/EL/flux_half/flux_period.
+Two ways to supply model parameters:
+  1. Browse a params.json → populates the six editable spinboxes (no install).
+  2. Type or tweak the spinboxes directly, then Apply → builds+installs in-memory
+     via set_predictor_model_params.
 
-Layout: left control column (load / model params / tracked-transitions table /
+Layout: left control column (model params group / tracked-transitions group /
 status) + right QTabWidget with two PredictorCurveCanvas tabs:
   - "Frequency"       : f_ij transition-frequency curves (MHz)
   - "Matrix element"  : |<i|op|j>| curves (dimensionless)
@@ -31,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+    QAbstractItemView,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -40,7 +39,6 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPushButton,
     QSpinBox,
     QTableWidget,
@@ -70,11 +68,18 @@ _DEFAULT_TRANSITIONS: list[tuple[int, int]] = [
     (1, 3),
 ]
 
-# Column indices for the 4-column tracked-transitions table.
+# Default spinbox values when no predictor is installed.
+_DEFAULT_EJ: float = 4.0
+_DEFAULT_EC: float = 1.0
+_DEFAULT_EL: float = 1.0
+_DEFAULT_FLUX_HALF: float = 0.0
+_DEFAULT_FLUX_PERIOD: float = 0.005
+_DEFAULT_FLUX_BIAS: float = 0.0
+
+# Column indices for the 3-column tracked-transitions table.
 _COL_TRANSITION = 0
 _COL_FREQ = 1
 _COL_MAG = 2
-_COL_DELETE = 3
 
 
 class PredictorDialog(QDialog):
@@ -95,7 +100,7 @@ class PredictorDialog(QDialog):
         self.setMinimumHeight(480)
 
         # Mutable list of currently tracked (from, to) transition pairs.
-        # Modified only by _add_transition / _delete_transition.
+        # Modified only by _add_transition / _delete_transition / _on_remove_selected.
         self._tracked: list[tuple[int, int]] = list(_DEFAULT_TRANSITIONS)
 
         # Currently selected matrix-element operator ("n" or "phi").
@@ -114,110 +119,95 @@ class PredictorDialog(QDialog):
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(0, 0, 0, 0)
 
-        # ── Load predictor ────────────────────────────────────────────────
-        load_group = QGroupBox("Load predictor")
-        load_form = QFormLayout(load_group)
-
-        path_row = QHBoxLayout()
-        self._path_edit = QLineEdit()
-        self._path_edit.setPlaceholderText("/path/to/params.json")
-        path_row.addWidget(self._path_edit)
-        browse_btn = QPushButton("Browse…")
-        browse_btn.clicked.connect(self._on_browse_file)
-        path_row.addWidget(browse_btn)
-        load_form.addRow("params.json:", path_row)
-
-        self._flux_bias_spin = QDoubleSpinBox()
-        self._flux_bias_spin.setRange(-1e6, 1e6)
-        self._flux_bias_spin.setDecimals(6)
-        self._flux_bias_spin.setValue(0.0)
-        load_form.addRow("flux_bias:", self._flux_bias_spin)
-
-        load_btn_row = QHBoxLayout()
-        load_btn = QPushButton("Load")
-        load_btn.clicked.connect(self._on_accepted)
-        load_btn_row.addWidget(load_btn)
-        clear_btn = QPushButton("Clear")
-        clear_btn.clicked.connect(self._on_clear)
-        load_btn_row.addWidget(clear_btn)
-        load_form.addRow("", load_btn_row)
-
-        left_layout.addWidget(load_group)
-
-        # ── Model params (editable EJ/EC/EL + flux anchors) ───────────────
-        # Lets a user type the model directly OR load a params.json into these
-        # fields, tweak, then Apply (build+install via set_predictor_model_params).
+        # ── Model params (editable EJ/EC/EL/flux anchors/flux_bias) ───────
+        # Browse opens a file dialog and populates the six spinboxes (no install).
+        # Apply builds+installs via set_predictor_model_params.
         model_group = QGroupBox("Model params")
         model_form = QFormLayout(model_group)
 
-        # Energies in GHz; flux anchors in device-value units. Wide ranges +
-        # many decimals so exploratory inputs (e.g. EJ:EC:EL = 4:1:1) are allowed.
-        self._ej_spin = self._make_param_spin()
+        # Energies in GHz; flux anchors and bias in device-value units. Wide
+        # ranges + many decimals so exploratory inputs are accepted; the only hard
+        # guard (flux_period != 0) lives in _on_apply_model_params.
+        self._ej_spin = self._make_param_spin(_DEFAULT_EJ)
         model_form.addRow("EJ (GHz):", self._ej_spin)
-        self._ec_spin = self._make_param_spin()
+        self._ec_spin = self._make_param_spin(_DEFAULT_EC)
         model_form.addRow("EC (GHz):", self._ec_spin)
-        self._el_spin = self._make_param_spin()
+        self._el_spin = self._make_param_spin(_DEFAULT_EL)
         model_form.addRow("EL (GHz):", self._el_spin)
-        self._flux_half_spin = self._make_param_spin()
+        self._flux_half_spin = self._make_param_spin(_DEFAULT_FLUX_HALF)
         model_form.addRow("flux_half:", self._flux_half_spin)
-        self._flux_period_spin = self._make_param_spin()
-        # A zero period makes the value<->flux affine singular; default to 1.0 so a
-        # fresh dialog (no predictor) is already non-singular.
-        self._flux_period_spin.setValue(1.0)
+        self._flux_period_spin = self._make_param_spin(_DEFAULT_FLUX_PERIOD)
         model_form.addRow("flux_period:", self._flux_period_spin)
+        # flux_bias lives here (was in the old "Load predictor" group).
+        self._flux_bias_spin = self._make_param_spin(_DEFAULT_FLUX_BIAS)
+        model_form.addRow("flux_bias:", self._flux_bias_spin)
 
         model_btn_row = QHBoxLayout()
+        browse_btn = QPushButton("Browse")
+        browse_btn.clicked.connect(self._on_browse_file)
+        model_btn_row.addWidget(browse_btn)
         apply_btn = QPushButton("Apply")
         apply_btn.clicked.connect(self._on_apply_model_params)
         model_btn_row.addWidget(apply_btn)
-        load_fields_btn = QPushButton("Load params.json → fields")
-        load_fields_btn.clicked.connect(self._on_load_params_into_fields)
-        model_btn_row.addWidget(load_fields_btn)
         model_form.addRow("", model_btn_row)
-
-        # Read-back of the currently active model (None until a predictor exists).
-        self._active_model_label = QLabel("Active model: (none)")
-        self._active_model_label.setWordWrap(True)
-        model_form.addRow(self._active_model_label)
 
         left_layout.addWidget(model_group)
 
-        # ── Predict / marker ─────────────────────────────────────────────
-        marker_group = QGroupBox("Predict frequency")
-        marker_form = QFormLayout(marker_group)
+        # ── Tracked transitions group (predict controls + table + remove) ──
+        transitions_group = QGroupBox("Tracked transitions")
+        transitions_layout = QVBoxLayout(transitions_group)
 
+        # Controls row above the table: flux value spinbox + operator selector
+        # + add-transition controls.  All in a single horizontal bar so the
+        # table can take the remaining vertical space.
+        controls_row = QHBoxLayout()
+
+        controls_row.addWidget(QLabel("Flux value (A):"))
         self._predict_value_spin = QDoubleSpinBox()
         self._predict_value_spin.setRange(-1e6, 1e6)
         self._predict_value_spin.setDecimals(6)
         self._predict_value_spin.setValue(0.0)
         self._predict_value_spin.valueChanged.connect(self._on_spinbox_changed)
-        marker_form.addRow("Flux value (A):", self._predict_value_spin)
+        controls_row.addWidget(self._predict_value_spin)
 
-        left_layout.addWidget(marker_group)
-
-        # ── Tracked transitions table ─────────────────────────────────────
-        transitions_group = QGroupBox("Tracked transitions")
-        transitions_layout = QVBoxLayout(transitions_group)
-
-        # Operator selector (affects matrix element tab and |M| column).
-        operator_row = QHBoxLayout()
-        operator_row.addWidget(QLabel("operator:"))
+        controls_row.addSpacing(12)
+        controls_row.addWidget(QLabel("operator:"))
         self._operator_combo = QComboBox()
         self._operator_combo.addItems(["n", "phi"])
         self._operator_combo.setCurrentText("n")
         self._operator_combo.currentTextChanged.connect(self._on_operator_changed)
-        operator_row.addWidget(self._operator_combo)
-        operator_row.addStretch()
-        transitions_layout.addLayout(operator_row)
+        controls_row.addWidget(self._operator_combo)
 
-        # 4-column table: Transition | f (MHz) | |M| | (delete button)
-        self._table = QTableWidget(0, 4)
-        self._table.setHorizontalHeaderLabels(["Transition", "f (MHz)", "|M|", ""])
+        controls_row.addSpacing(12)
+        controls_row.addWidget(QLabel("from"))
+        self._add_from_spin = QSpinBox()
+        self._add_from_spin.setRange(0, 20)
+        self._add_from_spin.setValue(0)
+        controls_row.addWidget(self._add_from_spin)
+        controls_row.addWidget(QLabel("to"))
+        self._add_to_spin = QSpinBox()
+        self._add_to_spin.setRange(0, 20)
+        self._add_to_spin.setValue(1)
+        controls_row.addWidget(self._add_to_spin)
+        add_btn = QPushButton("Add")
+        add_btn.clicked.connect(self._on_add_clicked)
+        controls_row.addWidget(add_btn)
+
+        controls_row.addStretch()
+        transitions_layout.addLayout(controls_row)
+
+        # 3-column table: Transition | f (MHz) | |M|
+        # Multi-row selection enabled; individual delete buttons are gone.
+        self._table = QTableWidget(0, 3)
+        self._table.setHorizontalHeaderLabels(["Transition", "f (MHz)", "|M|"])
         header = self._table.horizontalHeader()
         if header is not None:
-            header.setStretchLastSection(False)
+            header.setStretchLastSection(True)
         self._table.setSelectionBehavior(
-            QTableWidget.SelectRows  # type: ignore[attr-defined]
+            QAbstractItemView.SelectRows  # type: ignore[attr-defined]
+        )
+        self._table.setSelectionMode(
+            QAbstractItemView.ExtendedSelection  # type: ignore[attr-defined]
         )
         self._table.setEditTriggers(
             QTableWidget.NoEditTriggers  # type: ignore[attr-defined]
@@ -225,22 +215,13 @@ class PredictorDialog(QDialog):
         self._table.itemSelectionChanged.connect(self._on_selection_changed)
         transitions_layout.addWidget(self._table)
 
-        # Add-transition controls row below the table.
-        add_row = QHBoxLayout()
-        add_row.addWidget(QLabel("from"))
-        self._add_from_spin = QSpinBox()
-        self._add_from_spin.setRange(0, 20)
-        self._add_from_spin.setValue(0)
-        add_row.addWidget(self._add_from_spin)
-        add_row.addWidget(QLabel("to"))
-        self._add_to_spin = QSpinBox()
-        self._add_to_spin.setRange(0, 20)
-        self._add_to_spin.setValue(1)
-        add_row.addWidget(self._add_to_spin)
-        add_btn = QPushButton("Add")
-        add_btn.clicked.connect(self._on_add_clicked)
-        add_row.addWidget(add_btn)
-        transitions_layout.addLayout(add_row)
+        # Remove button below the table — removes ALL currently selected rows.
+        remove_row = QHBoxLayout()
+        self._remove_btn = QPushButton("Remove")
+        self._remove_btn.clicked.connect(self._on_remove_selected)
+        remove_row.addWidget(self._remove_btn)
+        remove_row.addStretch()
+        transitions_layout.addLayout(remove_row)
 
         left_layout.addWidget(transitions_group)
 
@@ -290,10 +271,7 @@ class PredictorDialog(QDialog):
 
         # Pre-fill with current predictor state.
         info = controller.get_predictor_info()
-        self._update_active_model_label(info)
         if info is not None:
-            if info["path"] is not None:
-                self._path_edit.setText(info["path"])
             self._flux_bias_spin.setValue(info["flux_bias"])
             self._flux_half = info["flux_half"]
             self._flux_period = info["flux_period"]
@@ -322,7 +300,7 @@ class PredictorDialog(QDialog):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _make_param_spin() -> QDoubleSpinBox:
+    def _make_param_spin(default: float = 0.0) -> QDoubleSpinBox:
         """A wide-range, high-precision spinbox for an editable model param.
 
         Range is intentionally permissive so exploratory inputs (any positive
@@ -332,29 +310,18 @@ class PredictorDialog(QDialog):
         spin = QDoubleSpinBox()
         spin.setRange(-1e6, 1e6)
         spin.setDecimals(6)
-        spin.setValue(0.0)
+        spin.setValue(default)
         return spin
 
     def _populate_model_fields(
         self, ej: float, ec: float, el: float, flux_half: float, flux_period: float
     ) -> None:
-        """Set the five editable model spinboxes (no install side effect)."""
+        """Set the five energy/flux-anchor spinboxes (no install side effect)."""
         self._ej_spin.setValue(ej)
         self._ec_spin.setValue(ec)
         self._el_spin.setValue(el)
         self._flux_half_spin.setValue(flux_half)
         self._flux_period_spin.setValue(flux_period)
-
-    def _update_active_model_label(self, info: dict | None) -> None:
-        """Refresh the active-model read-back from a get_predictor_info() dict."""
-        if info is None:
-            self._active_model_label.setText("Active model: (none)")
-            return
-        self._active_model_label.setText(
-            "Active model: "
-            f"EJ={info['EJ']:.4f}, EC={info['EC']:.4f}, EL={info['EL']:.4f} GHz; "
-            f"flux_half={info['flux_half']:.4f}, flux_period={info['flux_period']:.4f}"
-        )
 
     # ------------------------------------------------------------------
     # Affine helpers (value ↔ flux)
@@ -396,8 +363,8 @@ class PredictorDialog(QDialog):
         Called after any add/delete/operator-change operation.  Preserves the
         previous row selection if the transition is still present.
         """
-        # Remember the currently selected transition so we can restore it.
-        selected = self._selected_transition()
+        # Remember the currently selected transitions so we can restore them.
+        selected = self._selected_transitions()
 
         # Disconnect selection signal while rebuilding to avoid spurious events.
         self._table.itemSelectionChanged.disconnect(self._on_selection_changed)
@@ -418,31 +385,31 @@ class PredictorDialog(QDialog):
             mag_item = QTableWidgetItem("—")
             self._table.setItem(row_idx, _COL_MAG, mag_item)
 
-            # Column 3: Delete button
-            del_btn = QPushButton("✕")
-            # Capture (frm, to) in the lambda closure explicitly.
-            del_btn.clicked.connect(
-                lambda _checked, t=(frm, to): self._delete_transition(t)
-            )
-            self._table.setCellWidget(row_idx, _COL_DELETE, del_btn)
-
         self._table.resizeColumnsToContents()
         self._table.itemSelectionChanged.connect(self._on_selection_changed)
 
-        # Restore selection if the transition is still present.
-        if selected is not None and selected in self._tracked:
-            row = self._tracked.index(selected)
-            self._table.selectRow(row)
+        # Restore selection for transitions still present.
+        for transition in selected:
+            if transition in self._tracked:
+                row = self._tracked.index(transition)
+                self._table.selectRow(row)
+
+    def _selected_transitions(self) -> list[tuple[int, int]]:
+        """Return the (from, to) tuples for all currently selected table rows."""
+        selected_rows = {idx.row() for idx in self._table.selectedIndexes()}
+        return [
+            self._tracked[row]
+            for row in sorted(selected_rows)
+            if 0 <= row < len(self._tracked)
+        ]
 
     def _selected_transition(self) -> tuple[int, int] | None:
-        """Return the (from, to) tuple for the currently selected table row, or None."""
-        rows = self._table.selectedItems()
-        if not rows:
-            return None
-        row = self._table.currentRow()
-        if row < 0 or row >= len(self._tracked):
-            return None
-        return self._tracked[row]
+        """Return the (from, to) tuple for the first selected row, or None.
+
+        Used for single-transition highlight on the canvas.
+        """
+        transitions = self._selected_transitions()
+        return transitions[0] if transitions else None
 
     def _update_value_columns(self) -> None:
         """Fill Freq and |M| columns for every tracked transition at the current marker.
@@ -607,6 +574,17 @@ class PredictorDialog(QDialog):
             self._rebuild_table()
             self._refresh_curves()
 
+    def _on_remove_selected(self) -> None:
+        """Remove ALL currently selected transitions and refresh."""
+        to_remove = self._selected_transitions()
+        if not to_remove:
+            return
+        for transition in to_remove:
+            if transition in self._tracked:
+                self._tracked.remove(transition)
+        self._rebuild_table()
+        self._refresh_curves()
+
     # ------------------------------------------------------------------
     # Operator change
     # ------------------------------------------------------------------
@@ -657,40 +635,41 @@ class PredictorDialog(QDialog):
         self._mat_canvas.set_highlight(transition)
 
     # ------------------------------------------------------------------
-    # File / load / clear handlers
+    # Browse / Apply handlers
     # ------------------------------------------------------------------
 
     def _on_browse_file(self) -> None:
+        """Open a file dialog to pick a params.json and populate the six spinboxes.
+
+        Does NOT install a predictor — the user tweaks then clicks Apply.
+        """
+        from zcu_tools.gui.session.services.predictor import (
+            PredictorLoadError,
+            read_fluxdep_fit_params,
+        )
+
         path, _ = QFileDialog.getOpenFileName(
             self, "Select params.json", "", "JSON files (*.json);;All files (*)"
         )
-        if path:
-            self._path_edit.setText(path)
-
-    def _on_accepted(self) -> None:
-        from zcu_tools.gui.session.services.predictor import (
-            LoadPredictorRequest,
-            PredictorLoadError,
-        )
-
-        path = self._path_edit.text().strip()
-        flux_bias = self._flux_bias_spin.value()
+        if not path:
+            return
         try:
-            self._ctrl.load_predictor(
-                LoadPredictorRequest(path=path, flux_bias=flux_bias)
-            )
+            params = read_fluxdep_fit_params(path)
         except PredictorLoadError as exc:
             self._set_status(str(exc), error=True)
             return
-        self._set_status("Predictor loaded", error=False)
-        logger.info("PredictorDialog: loaded path=%r", path)
+        self._populate_model_fields(
+            params.EJ, params.EC, params.EL, params.flux_half, params.flux_period
+        )
+        self._set_status("Loaded params into fields — click Apply to use", error=False)
+        logger.info("PredictorDialog: loaded params into fields from %r", path)
 
     def _on_apply_model_params(self) -> None:
         """Build+install a predictor from the current editable fields.
 
         Only flux_period==0 is guarded (it makes the value<->flux affine
         singular); everything else is allowed so trial ratios work. The bus
-        PredictorChangedPayload that install emits drives the read-back refresh.
+        PredictorChangedPayload that install emits drives the state refresh.
         """
         from zcu_tools.gui.session.services.predictor import (
             PredictorLoadError,
@@ -719,50 +698,6 @@ class PredictorDialog(QDialog):
         self._set_status("Model params applied", error=False)
         logger.info("PredictorDialog: applied model params %r", req)
 
-    def _on_load_params_into_fields(self) -> None:
-        """Parse a chosen params.json's fluxdep_fit into the fields (no install).
-
-        Populates the editable spinboxes so the user can tweak before Apply; it
-        deliberately does NOT install a predictor.
-        """
-        from zcu_tools.gui.session.services.predictor import (
-            PredictorLoadError,
-            read_fluxdep_fit_params,
-        )
-
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Select params.json", "", "JSON files (*.json);;All files (*)"
-        )
-        if not path:
-            return
-        try:
-            params = read_fluxdep_fit_params(path)
-        except PredictorLoadError as exc:
-            self._set_status(str(exc), error=True)
-            return
-        self._populate_model_fields(
-            params.EJ, params.EC, params.EL, params.flux_half, params.flux_period
-        )
-        self._set_status("Loaded params into fields — click Apply to use", error=False)
-        logger.info("PredictorDialog: loaded params into fields from %r", path)
-
-    def _on_clear(self) -> None:
-        self._ctrl.clear_predictor()
-        self._set_status("Predictor cleared")
-        self._flux_half = None
-        self._flux_period = None
-        self._freq_canvas.clear()
-        self._mat_canvas.clear()
-        # Reset both value columns to "—" without rebuilding rows.
-        for row_idx in range(self._table.rowCount()):
-            freq_item = self._table.item(row_idx, _COL_FREQ)
-            if freq_item is not None:
-                freq_item.setText("—")
-            mag_item = self._table.item(row_idx, _COL_MAG)
-            if mag_item is not None:
-                mag_item.setText("—")
-        logger.info("PredictorDialog: predictor cleared")
-
     # ------------------------------------------------------------------
     # Bus subscription
     # ------------------------------------------------------------------
@@ -780,10 +715,7 @@ class PredictorDialog(QDialog):
     def _on_predictor_changed(self, payload: object) -> None:
         del payload
         info = self._ctrl.get_predictor_info()
-        self._update_active_model_label(info)
         if info is not None:
-            if info["path"] is not None:
-                self._path_edit.setText(info["path"])
             self._flux_bias_spin.setValue(info["flux_bias"])
             self._flux_half = info["flux_half"]
             self._flux_period = info["flux_period"]
