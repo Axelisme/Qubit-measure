@@ -102,7 +102,10 @@ def test_start_post_analyze_rejects_busy_tab(qapp):  # noqa: ARG001
         svc.start_post_analyze("tab1", post_analyze_params_instance=object())
 
 
-def test_start_post_analyze_passes_figure_container(qapp):  # noqa: ARG001
+def test_start_post_analyze_work_thunk_captures_figure_container(qapp):  # noqa: ARG001
+    # The figure_container is captured in the work thunk's closure via
+    # ``figure_ambient`` (ADR-0026 §2).  Verify submit receives only the thunk
+    # (no second positional OffMainScopes arg).
     state = _make_state()
     svc, bg = _make_service(state, EventBus())
     container = MagicMock()
@@ -111,8 +114,11 @@ def test_start_post_analyze_passes_figure_container(qapp):  # noqa: ARG001
         "tab1", post_analyze_params_instance=object(), figure_container=container
     )
 
-    scopes = bg.submit.call_args.args[1]
-    assert scopes.figure_container is container
+    call_args = bg.submit.call_args
+    assert len(call_args.args) == 1, (
+        "BackgroundService.submit must receive only the work thunk (no OffMainScopes arg)"
+    )
+    assert callable(call_args.args[0])
 
 
 def test_on_post_analyze_finished_updates_state(qapp):  # noqa: ARG001

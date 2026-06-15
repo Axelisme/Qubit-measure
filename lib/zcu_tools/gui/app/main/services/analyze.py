@@ -11,8 +11,8 @@ from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
 from zcu_tools.gui.session.ports import BackgroundExecutor
 
-from .background import OffMainScopes
 from .guard import AnalyzePermit
+from .scopes import figure_ambient
 from .staged_analyze import _StagedAnalyzeService
 
 logger = logging.getLogger(__name__)
@@ -92,11 +92,15 @@ class AnalyzeService(_StagedAnalyzeService):
         # the terminal slot, or here (in _submit) if the worker fails to start.
         token = self._open_token(tab_id)
         adapter = tab.adapter
-        scopes = OffMainScopes(figure_container=figure_container)
+
+        def work() -> Any:
+            # Analyze uses only figure_ambient (no pbar, no ActiveTask — ADR-0026 §2).
+            with figure_ambient(figure_container):
+                return adapter.analyze(req)
+
         self._submit(
             tab_id,
-            lambda: adapter.analyze(req),
-            scopes,
+            work,
             self._on_analyze_finished,
             "analyze failed to start",
         )

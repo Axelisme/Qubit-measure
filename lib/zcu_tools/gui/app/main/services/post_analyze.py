@@ -8,7 +8,7 @@ from qtpy.QtCore import Signal  # type: ignore[attr-defined]
 from zcu_tools.gui.app.main.adapter import PostAnalyzeRequest
 from zcu_tools.gui.plotting import FigureContainer
 
-from .background import OffMainScopes
+from .scopes import figure_ambient
 from .staged_analyze import _StagedAnalyzeService
 
 logger = logging.getLogger(__name__)
@@ -77,13 +77,17 @@ class PostAnalyzeService(_StagedAnalyzeService):
         )
         token = self._open_token(tab_id)
         adapter = tab.adapter
-        scopes = OffMainScopes(figure_container=figure_container)
+
+        def work() -> Any:
+            # Post-analyze uses only figure_ambient (no pbar, no ActiveTask — ADR-0026 §2).
+            with figure_ambient(figure_container):
+                return adapter.post_analyze(req)
+
         # The tab is marked analyzing for the duration so concurrent run/analyze is
         # gated out (is_tab_busy covers analyzing) — done by _submit's _begin tail.
         self._submit(
             tab_id,
-            lambda: adapter.post_analyze(req),
-            scopes,
+            work,
             self._on_post_analyze_finished,
             "post-analyze failed to start",
         )

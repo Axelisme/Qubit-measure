@@ -109,17 +109,19 @@ class _StagedAnalyzeService(QObject):
         self,
         tab_id: str,
         work: Callable[[], Any],
-        scopes: Any,
         on_finished: Callable[[str, Any], None],
         start_fail_message: str,
     ) -> None:
         """Submit ``work`` off-main, releasing the already-open token if it fails
         to start, then mark the tab analyzing. The token must already be open
-        (``_open_token``) so a synchronous submit failure settles the right one."""
+        (``_open_token``) so a synchronous submit failure settles the right one.
+
+        All ambient scopes must be built into ``work`` by the caller (ADR-0026
+        §2): the work thunk owns its own ``figure_ambient`` context manager.
+        """
         try:
             self._bg.submit(
                 work,
-                scopes,
                 run_in_pool=False,
                 on_done=lambda result: on_finished(tab_id, result),
                 on_error=lambda exc: self._on_failed(tab_id, exc),

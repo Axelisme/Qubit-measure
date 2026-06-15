@@ -6,15 +6,18 @@ from typing import TYPE_CHECKING, Any
 
 from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
+from zcu_tools.experiment.v2.runner.base import ActiveTask
 from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
 from zcu_tools.gui.session.ports import BackgroundExecutor, ExclusionGate, ProgressHub
+from zcu_tools.gui.session.scopes import progress_ambient
 
-from .background import NO_RESULT, OffMainScopes
+from .background import NO_RESULT
 from .guard import RunPermit
 from .operation_gate import OperationKind
+from .scopes import figure_ambient
 
 logger = logging.getLogger(__name__)
 
@@ -96,22 +99,26 @@ class RunService(QObject):
         # Progress factory is bound to this operation (owner = tab_id) only after
         # the token is minted; the worker gets it via the pbar ContextVar.
         pbar_factory = self._progress.make_factory(token, owner_id=tab_id)
-        # Run is the OffMain-thread strategy with all three scopes (ADR-0019):
-        # figure routing+liveplot, progress, and cancel (ActiveTask). bg only
-        # reports done/failed; cancellation is *interpreted* here (we own the
-        # stop_event) — see _on_bg_done / _on_bg_error.
+        # Run is the OffMain-thread strategy with all three scopes (ADR-0026 §2):
+        # figure routing+liveplot (figure_ambient), progress (progress_ambient),
+        # and cancel (ActiveTask).  Ambient entering order: figure (routing+liveplot)
+        # outermost, then progress (pbar ContextVar), then ActiveTask innermost.
+        # Note: original _entered ordered ActiveTask before pbar; the new order puts
+        # pbar before ActiveTask — these three context managers are mutually
+        # independent so the swap has no semantic effect (ADR-0026 §2 invariant note).
         adapter = permit.adapter
         request = permit.request
         schema = permit.schema
-        scopes = OffMainScopes(
-            figure_container=live_container,
-            pbar_factory=pbar_factory,
-            stop_event=stop_event,
-        )
+
+        def work() -> Any:
+            with figure_ambient(live_container):
+                with progress_ambient(pbar_factory):
+                    with ActiveTask(stop_event):
+                        return adapter.run(request, schema)
+
         try:
             self._bg.submit(
-                lambda: adapter.run(request, schema),
-                scopes,
+                work,
                 run_in_pool=False,
                 on_done=lambda result: self._on_bg_done(tab_id, stop_event, result),
                 on_error=lambda exc: self._on_bg_error(tab_id, stop_event, exc),

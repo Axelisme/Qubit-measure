@@ -27,11 +27,11 @@ from zcu_tools.gui.session.ports import (
     DeviceMemoryInfo,
     DriverFactoryPort,
     ExclusionGate,
-    OffMainScopes,
     OperationConflictError,
     OperationKind,
     ProgressHub,
 )
+from zcu_tools.gui.session.scopes import progress_ambient
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 
 if TYPE_CHECKING:
@@ -328,25 +328,22 @@ class DeviceService(QObject):
             replace(current, status=DeviceStatus.SETTING_UP, error=None),
             stop_event=stop_event,
         )
-        # Setup is the OffMain-thread strategy with the progress scope (no figure
-        # routing). The stop_event is NOT an ActiveTask scope — the driver's
-        # setup() polls it directly — so it is captured by the work closure, not
-        # OffMainScopes. Cancellation is interpreted in _on_setup_done (we own the
-        # stop_event); bg only reports done/failed.
-        scopes = OffMainScopes(
-            pbar_factory=self._progress.make_factory(token, owner_id=req.name)
-        )
+        # Setup is the OffMain-thread strategy with the progress scope only (no
+        # figure routing, no ActiveTask — the driver's setup() polls stop_event
+        # directly).  progress_ambient is session-layer (no Qt) so device.py
+        # can import it without crossing the session→app boundary (ADR-0026 §2).
+        pbar_factory = self._progress.make_factory(token, owner_id=req.name)
         name = req.name
         info = req.info
 
         def setup_work() -> object:
-            driver.setup(info, stop_event=stop_event)
-            return driver.get_info()
+            with progress_ambient(pbar_factory):
+                driver.setup(info, stop_event=stop_event)
+                return driver.get_info()
 
         try:
             self._bg.submit(
                 setup_work,
-                scopes,
                 run_in_pool=False,
                 on_done=lambda result: self._on_setup_done(name, stop_event, result),
                 on_error=lambda exc: self._on_setup_failed(name, str(exc)),

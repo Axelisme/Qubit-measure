@@ -19,14 +19,12 @@ this module as the session services move in.
 
 from __future__ import annotations
 
-import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.plotting import FigureContainer
     from zcu_tools.gui.session.services.device import DeviceProtocol
     from zcu_tools.gui.session.types import ExpContext
     from zcu_tools.meta_tool import ModuleLibrary
@@ -92,45 +90,19 @@ class ExclusionGate(Protocol):
         ...
 
 
-@dataclass(frozen=True)
-class OffMainScopes:
-    """The opt-in ambient scopes a thunk runs inside (ADR-0019). Each is
-    independently ``None``-able; only non-``None`` ones are entered, on the
-    worker thread.
-
-    - ``figure_container``: GUI matplotlib routing — sets the routing ContextVar
-      *and* installs ``QtLivePlotBackend`` together (one facet: both direct
-      ``plt.subplots`` and liveplot calls land in this container on the main
-      thread; the liveplot backend requires the routing container, so they are
-      co-dependent and driven by this single field).
-    - ``pbar_factory``: progress — the per-operation pbar factory (the Progress
-      facet's injection point; the owner mints it bound to the operation token).
-    - ``stop_event``: cancel — installs ``ActiveTask`` so the work can self-
-      interrupt cooperatively (the Cancel facet's off-main realisation).
-
-    The value lives here (session seam) so the ``BackgroundExecutor`` port and the
-    session services can name it; the *entering* logic (which pulls in the Qt
-    liveplot backend) stays in the app's concrete ``BackgroundService``.
-    """
-
-    figure_container: FigureContainer | None = None
-    pbar_factory: Callable[..., Any] | None = None
-    stop_event: threading.Event | None = None
-
-
 class BackgroundExecutor(Protocol):
     """Off-main execution seam a session service depends on. The app injects its
     concrete ``BackgroundService``; the session service never constructs one.
 
-    Mirrors ``BackgroundService.submit``: run ``work`` off-main inside ``scopes``,
-    delivering its result to ``on_done`` or its exception to ``on_error`` on the
-    main thread. ``run_in_pool`` picks the shared pool vs a dedicated thread.
+    ``submit`` runs ``work`` off-main, delivering its result to ``on_done`` or
+    its exception to ``on_error`` on the main thread. ``run_in_pool`` picks the
+    shared pool vs a dedicated thread.  All ambient scopes must be built into
+    ``work`` by the caller before this call (ADR-0026 §2).
     """
 
     def submit(
         self,
         work: Callable[[], Any],
-        scopes: OffMainScopes | None = None,
         *,
         run_in_pool: bool,
         on_done: Callable[[Any], None],
@@ -142,9 +114,9 @@ class ProgressHub(Protocol):
     """Per-operation progress seam a session service depends on. The app injects
     its concrete ``ProgressService``.
 
-    ``make_factory`` mints the per-operation pbar factory (placed into
-    ``OffMainScopes.pbar_factory``); ``discard_operation`` drops the operation's
-    progress container at the terminal path.
+    ``make_factory`` mints the per-operation pbar factory (the op policy's work
+    thunk feeds it to ``progress_ambient``); ``discard_operation`` drops the
+    operation's progress container at the terminal path.
     """
 
     def make_factory(self, operation_id: int, owner_id: str) -> Callable[..., Any]: ...

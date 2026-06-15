@@ -92,7 +92,11 @@ def test_start_analyze_emits_interaction_event(qapp):  # noqa: ARG001
     assert "tab1" in received
 
 
-def test_start_analyze_passes_figure_container_in_scopes(qapp):  # noqa: ARG001
+def test_start_analyze_work_thunk_captures_figure_container(qapp):  # noqa: ARG001
+    # The figure_container is the *first* positional kwarg captured in the work
+    # thunk's closure via ``figure_ambient`` (ADR-0026 §2). We verify that the
+    # thunk submitted to bg is a callable (not a scope struct), confirming the
+    # caller builds the ambient into the thunk, not passes it as a separate arg.
     state = _make_state()
     svc, bg = _make_service(state, EventBus())
     container = MagicMock()
@@ -103,9 +107,13 @@ def test_start_analyze_passes_figure_container_in_scopes(qapp):  # noqa: ARG001
         figure_container=container,
     )
 
-    # The container is carried by the OffMainScopes (2nd positional arg to submit).
-    scopes = bg.submit.call_args.args[1]
-    assert scopes.figure_container is container
+    # submit is called with ``work`` as the sole positional arg; no second
+    # positional arg (the old OffMainScopes) exists any more.
+    call_args = bg.submit.call_args
+    assert len(call_args.args) == 1, (
+        "BackgroundService.submit must receive only the work thunk (no OffMainScopes arg)"
+    )
+    assert callable(call_args.args[0])
 
 
 # ---------------------------------------------------------------------------
