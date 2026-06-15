@@ -165,6 +165,13 @@ class RemoteControlServiceBase:
         """Reclaim extra per-connection resources on drop (e.g. editors). Default: none."""
         del ctx, on_main_thread
 
+    def _on_client_count_changed(self) -> None:
+        """Called on the Qt main thread whenever a client connects or disconnects.
+
+        Override to react to the live-client count changing (e.g. to refresh
+        a widget gate). Default: no-op. Always runs on the Qt main thread.
+        """
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -213,11 +220,26 @@ class RemoteControlServiceBase:
     # EndpointRouter seam
     # ------------------------------------------------------------------
 
+    def has_live_client(self) -> bool:
+        """Return True if at least one control client is currently connected.
+
+        Delegates to the endpoint; safe to call from any thread.
+        """
+        return self._endpoint.has_live_client()
+
     def on_client_open(self, link: ClientLink) -> None:
         link.app_ctx = self._new_client_ctx()
+        # Marshal a count-change notification onto the Qt main thread so that
+        # show/hide logic that reads has_live_client() runs where Qt state lives.
+        self._dispatcher.invoke.emit(self._on_client_count_changed)
 
     def on_client_close(self, link: ClientLink, *, on_main_thread: bool) -> None:
         self._on_client_close_extra(_ctx(link), on_main_thread=on_main_thread)
+        # Notify the main thread on both IO-thread drops and main-thread stops.
+        if on_main_thread:
+            self._on_client_count_changed()
+        else:
+            self._dispatcher.invoke.emit(self._on_client_count_changed)
 
     def route(self, link: ClientLink, request: object) -> None:
         """Handle one parsed, authenticated request on the IO thread."""

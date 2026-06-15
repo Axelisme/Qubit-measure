@@ -22,11 +22,12 @@ def _mock_ctrl() -> MagicMock:
 def _apply_window_defaults(ctrl: MagicMock) -> MagicMock:
     """Set the minimal return values required by MainWindow.__init__ on a mock ctrl.
 
-    MainWindow now calls active_operation_count() during bus-event handlers
-    (FloatingFeedbackWidget visibility, Stage 4a); tests that emit bus events
-    must stub this to an int or the comparison fails.
+    MainWindow calls active_operation_count() and has_agent_connected() during
+    bus-event handlers (FloatingFeedbackWidget visibility, ADR-0025 C3); tests
+    that emit bus events must stub both to deterministic values.
     """
     ctrl.active_operation_count.return_value = 0
+    ctrl.has_agent_connected.return_value = False
     return ctrl
 
 
@@ -511,8 +512,9 @@ def _editor_wiring_ctrl() -> MagicMock:
     ctrl.get_current_ml.return_value = MagicMock()
     ctrl.list_device_names.return_value = []
     ctrl.has_soc.return_value = False
-    # Stage 4a: MainWindow.__init__ reads active_operation_count() during init.
+    # MainWindow reads both during bus-event handlers (ADR-0025 C3 gate).
     ctrl.active_operation_count.return_value = 0
+    ctrl.has_agent_connected.return_value = False
 
     # populate_cfg now opens a service-owned (gc=False) seeded session and
     # attaches the widget to the service-owned model (ADR-0008). Build a real
@@ -883,3 +885,91 @@ def test_show_analysis_figure_keeps_two_figures_coexisting(qapp):
     tab.show_analysis_figure(fig1)
     assert stack.currentWidget() is first_canvas
     assert stack.count() == 3
+
+
+# ---------------------------------------------------------------------------
+# FloatingFeedbackWidget gate (ADR-0025 C3): op-count AND agent-connected
+# ---------------------------------------------------------------------------
+
+
+def _window_for_gate_tests(
+    qapp,
+    *,
+    op_count: int,
+    agent_connected: bool,
+) -> MainWindow:  # type: ignore[name-defined]  # noqa: F821
+    """Build a MainWindow with ctrl stubs for the C3 gate tests."""
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+
+    del qapp
+    ctrl = MagicMock()
+    ctrl.get_bus.return_value = EventBus()
+    ctrl.active_operation_count.return_value = op_count
+    ctrl.has_agent_connected.return_value = agent_connected
+    ctrl.can_cancel_active_operation.return_value = False
+    window = MainWindow(ctrl)
+    return window
+
+
+def test_feedback_widget_hidden_when_op_active_but_no_agent(qapp):
+    """C3 gate: active op alone is not enough — agent must also be connected."""
+    window = _window_for_gate_tests(qapp, op_count=1, agent_connected=False)
+    window.refresh_feedback_widget()
+    assert not window._feedback_widget.isVisible()
+
+
+def test_feedback_widget_hidden_when_agent_connected_but_no_op(qapp):
+    """C3 gate: agent connected alone is not enough — op must also be live."""
+    window = _window_for_gate_tests(qapp, op_count=0, agent_connected=True)
+    window.refresh_feedback_widget()
+    assert not window._feedback_widget.isVisible()
+
+
+def test_feedback_widget_hidden_when_no_op_and_no_agent(qapp):
+    """Both conditions false: widget stays hidden."""
+    window = _window_for_gate_tests(qapp, op_count=0, agent_connected=False)
+    window.refresh_feedback_widget()
+    assert not window._feedback_widget.isVisible()
+
+
+def test_feedback_widget_show_called_when_op_active_and_agent_connected(qapp):
+    """C3 gate satisfied: widget.show() is called when op live AND agent
+    connected. isVisible() is not reliable for a non-shown parent in tests."""
+    from unittest.mock import patch
+
+    window = _window_for_gate_tests(qapp, op_count=1, agent_connected=True)
+    # Patch the widget's show/hide so we can assert calls without needing
+    # the parent window to be visible (Qt hides children of hidden parents).
+    with (
+        patch.object(window._feedback_widget, "show") as mock_show,
+        patch.object(window._feedback_widget, "hide") as mock_hide,
+    ):
+        window.refresh_feedback_widget()
+    mock_show.assert_called_once()
+    mock_hide.assert_not_called()
+
+
+def test_feedback_widget_hide_called_when_last_client_disconnects(qapp):
+    """Client disconnect (agent_connected flips False) triggers hide() even
+    while an op is still live (refresh_feedback_widget is idempotent)."""
+    from unittest.mock import patch
+
+    ctrl = MagicMock()
+    ctrl.get_bus.return_value = EventBus()
+    ctrl.active_operation_count.return_value = 1
+    ctrl.has_agent_connected.return_value = True
+    ctrl.can_cancel_active_operation.return_value = False
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+
+    window = MainWindow(ctrl)
+
+    # First call with agent connected: show() fires.
+    with patch.object(window._feedback_widget, "show") as mock_show:
+        window.refresh_feedback_widget()
+    mock_show.assert_called_once()
+
+    # Simulate client disconnect: agent_connected becomes False → hide() fires.
+    ctrl.has_agent_connected.return_value = False
+    with patch.object(window._feedback_widget, "hide") as mock_hide:
+        window.refresh_feedback_widget()
+    mock_hide.assert_called_once()

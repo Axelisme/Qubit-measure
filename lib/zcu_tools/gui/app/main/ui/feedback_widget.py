@@ -1,8 +1,12 @@
 """FloatingFeedbackWidget — corner overlay for user→agent feedback during ops.
 
 Floats in the MainWindow's bottom-right corner (absolute positioning, no
-layout manager). Visible only while at least one live operation is in progress
-(MainWindow drives show/hide via _refresh_feedback_widget()).
+layout manager). Visible only when at least one live operation is in progress
+AND at least one MCP control client is connected (ADR-0025 C3 gate).
+
+MainWindow drives show/hide via refresh_feedback_widget(), called from both
+op-start/finish bus handlers and RemoteControlAdapter._on_client_count_changed()
+so both triggers converge on the same idempotent decision.
 
 The widget is app-level (parent = MainWindow), not tab-level, so it persists
 across tab switches and represents the single foreground operation.
@@ -10,10 +14,6 @@ across tab switches and represents the single foreground operation.
 Stop-gating: 'Send & Stop' is enabled only when the active operation has a
 cancel hook registered (ADR-0025 §Stop-gating). Gating is refreshed by
 MainWindow each time the op count or op type changes.
-
-NOTE: future enhancement — could gate display further on 'MCP client
-connected' (i.e. an agent is driving), but Stage 4a uses C1 (always visible
-when any op is live) because the GUI has no reliable agent-session signal.
 """
 
 from __future__ import annotations

@@ -1158,15 +1158,25 @@ class MainWindow(QMainWindow):
         widget.move(max(0, x), max(0, y))
 
     def _refresh_feedback_widget(self) -> None:
-        """Show/hide the floating feedback widget based on live op count.
+        """Show/hide the floating feedback widget (internal bus-handler trampoline).
 
-        Called at the end of every op-start / op-finish bus handler so the
-        widget tracks the live operation count in real time (B1 approach).
-        Centralises all show/hide/gating logic in one place (ADR-0025 C1:
-        always show when any op is live; future gate on agent connected).
+        Idempotent: all bus handlers that may change op-count or agent-presence
+        call this; the decision is centralised in refresh_feedback_widget().
+        """
+        self.refresh_feedback_widget()
+
+    def refresh_feedback_widget(self) -> None:
+        """Show/hide the floating feedback widget based on op count + agent presence.
+
+        ADR-0025 C3 gate: show only when at least one op is live AND at least
+        one MCP control client is connected. Either condition going false hides
+        the widget. Called by both bus handlers (op count change) and
+        RemoteControlAdapter._on_client_count_changed() (agent presence change).
+        Both callers run on the Qt main thread — no thread guard needed.
         """
         count = self._ctrl.active_operation_count()
-        if count > 0:
+        agent = self._ctrl.has_agent_connected()
+        if count > 0 and agent:
             self._feedback_widget.refresh_gating()
             if not self._feedback_widget.isVisible():
                 self._feedback_widget.show()

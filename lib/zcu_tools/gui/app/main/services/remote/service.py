@@ -120,10 +120,23 @@ class RemoteControlAdapter(RemoteControlServiceBase):
         # Become a diagnostic-only View (ADR-0013): receive ctrl error/info
         # fan-out and push it to clients out-of-band of EventBus.
         self.ctrl.add_diagnostic_sink(self)
+        # Inject has_live_client so the Controller (and via it, MainWindow) can
+        # gate the feedback widget on agent presence (ADR-0025 C3).
+        self.ctrl.set_agent_connected_query(self.has_live_client)
 
     def _extra_stop(self) -> None:
         self._unwire_editor_change_listener()
         self.ctrl.remove_diagnostic_sink(self)
+        # Remove the predicate so has_agent_connected() returns False after stop.
+        self.ctrl.set_agent_connected_query(None)
+
+    def _on_client_count_changed(self) -> None:
+        # Called on the Qt main thread whenever a client connects or disconnects.
+        # Re-evaluate widget visibility (ADR-0025 C3: show only when op live AND
+        # agent connected). Delegated through the RenderView Protocol so the
+        # adapter is not coupled to MainWindow's private layout methods.
+        if self.render_view is not None:
+            self.render_view.refresh_feedback_widget()
 
     def _route_extra(self, link: ClientLink, req: Request) -> bool:
         # editor.subscribe/unsubscribe are state-owning (per-connection editor

@@ -377,6 +377,16 @@ class NdjsonRpcEndpoint:
             raise RuntimeError("NdjsonRpcEndpoint.start() was not called")
         return port
 
+    def has_live_client(self) -> bool:
+        """Return True if at least one control client is currently connected.
+
+        Thread-safe: reads _clients under the lock so it is safe to call from
+        any thread (the router calls this on the IO thread; the main-thread
+        _refresh_feedback_widget reads it via the adapter façade).
+        """
+        with self._clients_lock:
+            return bool(self._clients)
+
     # ------------------------------------------------------------------
     # Outbound: reply (to one link) + broadcast (push fan-out)
     # ------------------------------------------------------------------

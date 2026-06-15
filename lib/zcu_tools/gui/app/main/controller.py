@@ -168,6 +168,15 @@ class RenderView(Protocol):
         """
         ...
 
+    def refresh_feedback_widget(self) -> None:
+        """Re-evaluate and show/hide the floating feedback widget.
+
+        Called by RemoteControlAdapter._on_client_count_changed() on the Qt
+        main thread when a control client connects or disconnects, so the
+        widget tracks both op-count changes and agent-presence changes.
+        """
+        ...
+
 
 class ViewProtocol(DiagnosticSink, RenderHost, RenderView, Protocol):
     """A full Qt View (``MainWindow``) implements all three channels."""
@@ -266,6 +275,10 @@ class Controller:
         # without a Qt event loop (tests construct a bare Controller). The driver
         # is a Qt adapter owning the QTimer that pumps the Qt-free coordinator.
         self._shutdown_driver: QtShutdownDriver | None = None
+        # Injected by RemoteControlAdapter on start()/stop() so the View can
+        # gate widgets on whether an MCP control client is connected (ADR-0025).
+        # None means no control socket is running → treat as no client connected.
+        self._agent_connected_query: Callable[[], bool] | None = None
 
         self._run_svc.run_finished.connect(self._on_run_finished)
         self._run_svc.run_failed.connect(self._on_run_failed)
@@ -684,6 +697,25 @@ class Controller:
         Counts all live operations (run / device / connect AND analyze /
         interactive) — Handles owns the lifecycle (ADR-0019)."""
         return self._operation_handles.live_count()
+
+    def set_agent_connected_query(self, query: Callable[[], bool] | None) -> None:
+        """Inject or clear the has-live-control-client predicate.
+
+        Called by RemoteControlAdapter.start() / stop() so the View can gate
+        the feedback widget on agent presence (ADR-0025 C3). None means the
+        control socket is not running; the predicate then returns False.
+        """
+        self._agent_connected_query = query
+
+    def has_agent_connected(self) -> bool:
+        """Return True if at least one MCP control client is connected.
+
+        The View calls this inside _refresh_feedback_widget() to gate display
+        (ADR-0025 C3: show only when op live AND agent connected). Always
+        returns False when no RemoteControlAdapter has been started.
+        """
+        q = self._agent_connected_query
+        return q() if q is not None else False
 
     def begin_shutdown(self, on_closed: Callable[[], None]) -> None:
         """Cancel every live operation, wait (with a timeout) for them to stop,
