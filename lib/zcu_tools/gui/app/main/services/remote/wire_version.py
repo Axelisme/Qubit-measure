@@ -128,7 +128,13 @@ from __future__ import annotations
 #      cancelled and clear is_analyzing so the tab can be closed; the agent-side
 #      counterpart of the GUI 'Done' button (interactive analyze is a separate op
 #      from run, so run.cancel does not settle it). New method = contract change.
-WIRE_VERSION = 29
+# v30: added notify.open + notify.await (Stage 4b, ADR-0025 two-RPC design) —
+#      agent-initiated user prompt. notify.open (main thread) mints a token and
+#      opens a non-modal dialog; notify.await (off-main) blocks until the user
+#      replies, dismisses, or the dialog's QTimer fires. The MCP-facing surface is
+#      the hand-written gui_notify_user tool (not raw notify.*). New methods =
+#      contract change.
+WIRE_VERSION = 30
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -282,4 +288,8 @@ WIRE_VERSION = 29
 #      longer corrupt the shared singleton parser (the recurring ParseException).
 #      (b) analyze.cancel wiring (WIRE 29): interactive-analyze teardown
 #      (cancel_interactive + RenderHost.unmount_interactive_analysis).
-GUI_VERSION = 36
+# v37: notify prompt (Stage 4b, WIRE 30). NotifyHandles + NotifyChannel
+#      (independent event vocabulary: Reply/Dismiss/Timeout); NotifyUserDialog
+#      (non-modal, QTimer SSOT); controller notify façade (open/reply/dismiss/
+#      timeout/await); dispatch handlers; RenderView.open_notify_prompt protocol entry.
+GUI_VERSION = 37

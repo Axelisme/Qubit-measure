@@ -1811,6 +1811,18 @@ class MainWindow(QMainWindow):
             )
         return bytes(buf.data().data())  # type: ignore[arg-type]
 
+    def open_notify_prompt(self, token: int, message: str, timeout: float) -> None:
+        """Open a non-modal NotifyUserDialog for an agent-initiated prompt.
+
+        Called on the main thread by Controller.open_notify_prompt (via the
+        notify.open RPC handler). The dialog is the timeout SSOT: its QTimer
+        fires ctrl.timeout_notify rather than the consumer backstop.
+        """
+        from .notify_dialog import NotifyUserDialog
+
+        dlg = NotifyUserDialog(token, message, timeout, self._ctrl, parent=self)
+        dlg.open()  # non-modal — does not stall the event loop
+
     def request_shutdown(self) -> None:
         """Programmatic close (the app.shutdown RPC). Runs on the Qt main thread
         via the remote dispatch marshal. Does the same work as a user's

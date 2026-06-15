@@ -1672,6 +1672,43 @@ def _h_editor_discard(
 
 
 # ---------------------------------------------------------------------------
+# Notify prompt handlers (Stage 4b, ADR-0025 two-RPC design)
+#
+# notify.open runs on the main thread: it mints a token inside NotifyHandles
+# and opens a non-modal dialog via the controller's open_notify_prompt façade,
+# which reaches the RenderHost (MainWindow) through _render_host. Returns
+# {token} immediately so the off-main notify.await knows which channel to wait on.
+#
+# notify.await is off_main_thread=True: it blocks the IO worker until the dialog
+# fires reply/dismiss/timeout, then folds the result into {reason, reply?}.
+# Neither method is in _OP_KEY_OF (not a start-op; no operation_id to capture).
+# ---------------------------------------------------------------------------
+
+
+def _h_notify_open(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    message = str(params["message"])
+    timeout = float(params["timeout"])  # type: ignore[arg-type]
+    token = adapter.ctrl.open_notify_prompt(message, timeout)
+    return {"token": token}
+
+
+def _h_notify_await(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    # off_main_thread handler: blocks the IO worker on the thread-safe
+    # NotifyChannel.consume(). Never touches main-thread-owned state.
+    token = int(params["token"])  # type: ignore[arg-type]
+    timeout = float(params["timeout"])  # type: ignore[arg-type]
+    result = adapter.ctrl.await_notify(token, timeout)
+    wire: dict[str, object] = {"reason": result.reason}
+    if result.reply is not None:
+        wire["reply"] = result.reply
+    return wire
+
+
+# ---------------------------------------------------------------------------
 # Run progress handler
 # ---------------------------------------------------------------------------
 
@@ -1878,6 +1915,8 @@ _HANDLERS: dict[str, Handler] = {
     "editor.get": _h_editor_get,
     "editor.commit": _h_editor_commit,
     "editor.discard": _h_editor_discard,
+    "notify.open": _h_notify_open,
+    "notify.await": _h_notify_await,
 }
 
 METHOD_REGISTRY: dict[str, BoundMethod] = build_method_registry(_HANDLERS, METHOD_SPECS)

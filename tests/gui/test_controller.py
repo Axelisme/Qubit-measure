@@ -787,3 +787,67 @@ def test_restore_invalid_tab_is_rejected_and_reported(cf):
 # Connection / predictor — handled by ConnectionService.
 # (Direct controller setters are removed in Phase 62.2.)
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Notify façade (Stage 4b) — pure-Python, no Qt fixture needed
+# ---------------------------------------------------------------------------
+
+
+def test_open_notify_prompt_returns_token_and_calls_host() -> None:
+    """open_notify_prompt mints a token and forwards to render_host."""
+
+    cf = ControllerFixture()
+    host = MagicMock()
+    cf.ctrl._render_host = host
+
+    token = cf.ctrl.open_notify_prompt("hello", 60.0)
+    assert isinstance(token, int)
+    assert token >= 1
+    host.open_notify_prompt.assert_called_once_with(token, "hello", 60.0)
+    cf.quiesce()
+
+
+def test_open_notify_prompt_no_host_does_not_raise() -> None:
+    """open_notify_prompt is safe when no render_host is attached."""
+    cf = ControllerFixture()
+    cf.ctrl._render_host = None
+    token = cf.ctrl.open_notify_prompt("msg", 30.0)
+    assert isinstance(token, int)
+    cf.quiesce()
+
+
+def test_reply_notify_delivers_to_channel() -> None:
+    cf = ControllerFixture()
+    token = cf.ctrl.open_notify_prompt("prompt", 60.0)
+    cf.ctrl.reply_notify(token, "the answer")
+    result = cf.ctrl.await_notify(token, timeout=1.0)
+    assert result.reason == "reply"
+    assert result.reply == "the answer"
+    cf.quiesce()
+
+
+def test_dismiss_notify_delivers_to_channel() -> None:
+    cf = ControllerFixture()
+    token = cf.ctrl.open_notify_prompt("prompt", 60.0)
+    cf.ctrl.dismiss_notify(token)
+    result = cf.ctrl.await_notify(token, timeout=1.0)
+    assert result.reason == "dismiss"
+    cf.quiesce()
+
+
+def test_timeout_notify_delivers_to_channel() -> None:
+    cf = ControllerFixture()
+    token = cf.ctrl.open_notify_prompt("prompt", 60.0)
+    cf.ctrl.timeout_notify(token)
+    result = cf.ctrl.await_notify(token, timeout=1.0)
+    assert result.reason == "timeout"
+    cf.quiesce()
+
+
+def test_await_notify_unknown_token_returns_dismiss() -> None:
+    """Unknown token is treated as already-dismissed (ADR-0025)."""
+    cf = ControllerFixture()
+    result = cf.ctrl.await_notify(99999, timeout=0.1)
+    assert result.reason == "dismiss"
+    cf.quiesce()

@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 from zcu_tools.device.base import BaseDeviceInfo
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.plotting import FigureContainer
+from zcu_tools.gui.session.notify_handles import NotifyHandles, NotifyResult
 from zcu_tools.gui.session.operation_handles import AwaitResult
 from zcu_tools.gui.session.services.connection import (
     ConnectRequest,
@@ -158,6 +159,14 @@ class RenderView(Protocol):
     def list_open_dialogs(self) -> list[DialogName]: ...
     def register_dialog(self, name: DialogName, dialog: Any) -> None: ...
     def request_shutdown(self) -> None: ...
+    def open_notify_prompt(self, token: int, message: str, timeout: float) -> None:
+        """Open a non-modal NotifyUserDialog for the given token / message.
+
+        Called from the main thread (notify.open handler). The dialog mints no
+        token — it receives one so reply/dismiss/timeout route back correctly.
+        timeout is the display timeout in seconds (QTimer in the dialog).
+        """
+        ...
 
 
 class ViewProtocol(DiagnosticSink, RenderHost, RenderView, Protocol):
@@ -247,6 +256,9 @@ class Controller:
         self._workspace_svc = services.workspace
         self._startup_svc = services.startup
         self._cfg_editor_svc = services.cfg_editor
+        # Notify prompt registry (Stage 4b): independent of OperationHandles;
+        # tokens minted on the main thread, consumed off-main (ADR-0025).
+        self._notify_handles: NotifyHandles = NotifyHandles()
         # App-level PersistenceCaretaker, injected by run_app via attach_caretaker
         # (None in bare-Controller tests that don't exercise persistence).
         self._caretaker: PersistenceCaretaker | None = None
@@ -1229,6 +1241,47 @@ class Controller:
         OperationHandles / OperationChannel, no main-thread-owned state. (ADR-0025)
         """
         return self._operation_handles.await_outcome(operation_id, timeout)
+
+    # ------------------------------------------------------------------
+    # Notify-user prompt (Stage 4b, ADR-0025 two-RPC design)
+    #
+    # Producer side (main thread): open_notify_prompt / reply_notify /
+    #   dismiss_notify / timeout_notify
+    # Consumer side (off-main IO worker): await_notify
+    # ------------------------------------------------------------------
+
+    def open_notify_prompt(self, message: str, timeout: float) -> int:
+        """Mint a notify token and open a non-modal prompt dialog. Main thread.
+
+        Returns the token the caller must pass to await_notify and to the
+        dialog so its reply/dismiss/timeout callbacks route correctly.
+        """
+        token = self._notify_handles.open()
+        host = self._render_host
+        if host is not None and hasattr(host, "open_notify_prompt"):
+            host.open_notify_prompt(token, message, timeout)  # type: ignore[union-attr]
+        return token
+
+    def reply_notify(self, token: int, text: str) -> None:
+        """Deliver a user reply to the notify channel. Main thread (dialog callback)."""
+        self._notify_handles.reply(token, text)
+
+    def dismiss_notify(self, token: int) -> None:
+        """Deliver a dismiss signal to the notify channel. Main thread (dialog callback)."""
+        self._notify_handles.dismiss(token)
+
+    def timeout_notify(self, token: int) -> None:
+        """Deliver a timeout signal to the notify channel. Main thread (QTimer callback)."""
+        self._notify_handles.timeout(token)
+
+    def await_notify(self, token: int, timeout: float) -> NotifyResult:
+        """Block until the notify prompt settles. Off-main IO thread only.
+
+        timeout is the backstop: longer than the dialog's QTimer so the dialog
+        fires first. Returns NotifyResult with reason in {'reply', 'dismiss',
+        'timeout'} — never raises on timeout/dismiss (ADR-0025 §6).
+        """
+        return self._notify_handles.await_result(token, timeout)
 
     def build_agent_bootstrap_prompt(self) -> str:
         """Render the bootstrap directive injected into a launched agent's prompt.

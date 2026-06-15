@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 25
+skill_version: 26
 ---
 
 # run-measure-gui
@@ -243,6 +243,41 @@ non-blocking status checks.
 A `diagnostic{severity}` push (errors / info the GUI would show in a dialog) rides
 along in the *next* tool reply's notifications — you get it without asking. Don't
 busy-poll `gui_run_running_tab` in a sleep loop.
+
+### Agent-to-user prompt (`gui_notify_user` — BLOCKS your turn)
+
+When you need the user to make a decision mid-workflow, call:
+
+```
+gui_notify_user(message, timeout=600)
+```
+
+This opens a **non-modal dialog** in the GUI and **BLOCKS your entire MCP turn**
+until the user replies, dismisses, or the dialog times out. Plan accordingly —
+do not call it casually from inside a larger automated sequence.
+
+The call returns one of three outcomes:
+
+| `reason` | meaning | `reply` field |
+|---|---|---|
+| `"reply"` | user typed a response and clicked Reply | the text they entered |
+| `"dismiss"` | user clicked Dismiss (or closed the dialog) | absent |
+| `"timeout"` | dialog auto-closed after `timeout` seconds | absent |
+
+`gui_notify_user` **never raises** on dismiss or timeout — those are normal
+outcomes. Check `reason` before reading `reply`.
+
+**When to use proactively** (representative cases):
+
+- A coarse scan shows multiple candidate features and you cannot pick without
+  physics context: display the figure, describe what you see, and ask which
+  feature to pursue.
+- A critical fit result is borderline or visually suspicious: show the figure
+  and ask whether to write it back or re-run.
+- A writeback would overwrite a key value (`r_f`, `q_f`, `pi_gain`, …) with
+  something significantly different from the current value.
+- Before ramping a real YOKOGS200 to a new flux point if you are uncertain the
+  value is within safe range.
 
 The full, authoritative tool reference is the **MCP server instructions block**
 (shown by the client when the server connects, defined in

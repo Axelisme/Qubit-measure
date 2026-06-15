@@ -251,7 +251,13 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
 #      gui_* tool when no GUI is listening returns the actionable
 #      "no running measure-gui found…" error immediately instead of hanging ~30s
 #      until the socket timeout fires.
-MCP_VERSION = 36
+# MCP 37: gui_notify_user — agent-initiated user prompt (WIRE 30, Stage 4b).
+#      Serially composes notify.open (main thread: mint token + open non-modal
+#      dialog) and notify.await (off-main: block until Reply/Dismiss/QTimer).
+#      Returns {reason:'reply'|'dismiss'|'timeout', reply?}. BLOCKS the turn;
+#      never raises on timeout or dismiss. notify.open / notify.await are
+#      excluded from auto-generation via _NON_GENERATED_METHODS.
+MCP_VERSION = 37
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -338,6 +344,13 @@ Call contract — read before issuing defensive/duplicate calls:
     (a duplicate starts a SECOND run), gui_editor_set_field, gui_tab_new /
     gui_tab_close, gui_save_*, gui_device_connect / _disconnect / _setup,
     gui_context_set_* / _del_* / _rename_*, gui_editor_save_as_module.
+
+Agent-to-user prompting: gui_notify_user(message, timeout=600) opens a prompt
+dialog for the user and BLOCKS your entire turn until the user replies, dismisses,
+or the dialog times out. Returns {reason:'reply'|'dismiss'|'timeout', reply?}:
+  - 'reply': user answered; read the reply string and act on it.
+  - 'dismiss': user explicitly closed the prompt — do NOT ask again immediately.
+  - 'timeout': no one was watching the GUI — do NOT wait again, continue or poll.
 """
 
 # ---------------------------------------------------------------------------
@@ -1512,6 +1525,52 @@ def tool_gui_device_setup(arguments: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+# Seconds the off-main consumer backstop outlasts the dialog's QTimer so the
+# dialog is the timeout SSOT (ADR-0025 §dialog-timeout): the QTimer fires at
+# `timeout`, enqueues a Timeout event, and the consumer (waiting `timeout+slack`)
+# reads it instead of pre-empting — closing the lost-reply gap at the boundary.
+_NOTIFY_CONSUMER_SLACK: float = 10.0
+
+
+def tool_gui_notify_user(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Agent-initiated user prompt. BLOCKS the turn until user responds.
+
+    Serially composes notify.open (main thread: mint token + open dialog) and
+    notify.await (off-main: block until Reply/Dismiss/QTimer). Neither method
+    uses _OP_KEY_OF — not a start-op, no operation_id captured.
+
+    Returns {reason: 'reply'|'dismiss'|'timeout', reply?}. Never raises on
+    timeout or dismiss — those are expected outcomes (ADR-0025 §6).
+    """
+    message = str(arguments["message"])
+    # Clamp to a sane minimum so the dialog always arms its QTimer (timeout<=0
+    # would leave a never-auto-closing dialog with a fast consumer timeout — a
+    # lost-reply window).
+    timeout = max(float(arguments.get("timeout", 600.0)), 1.0)
+    # Step 1: main-thread open — mints token + opens dialog (QTimer fires at
+    # `timeout`; the dialog is the timeout SSOT, ADR-0025).
+    open_result = send_gui_rpc(
+        "notify.open", {"message": message, "timeout": timeout}, 30.0
+    )
+    token = int(open_result["token"])
+    # Step 2: off-main await — blocks the IO worker until the dialog settles.
+    # The consumer backstop MUST outlast the dialog's QTimer (timeout + slack) so
+    # the dialog fires first and enqueues Timeout; a reply landing in the gap
+    # would otherwise be lost.
+    await_timeout = timeout + _NOTIFY_CONSUMER_SLACK
+    await_result = send_gui_rpc(
+        "notify.await",
+        {"token": token, "timeout": await_timeout},
+        await_timeout + 5.0,
+    )
+    # Forward the structured reason (reply/dismiss/timeout) verbatim; never raise.
+    out: dict[str, Any] = {"reason": await_result.get("reason", "timeout")}
+    reply = await_result.get("reply")
+    if reply is not None:
+        out["reply"] = reply
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Generated tools — derived from dispatch.METHOD_REGISTRY (the wire SSOT)
 # ---------------------------------------------------------------------------
@@ -1560,6 +1619,10 @@ _NON_GENERATED_METHODS = frozenset(
         "analyze.start",
         # hand-written short-wait degrade (FIT-only worker, mirrors analyze).
         "post_analyze.start",
+        # notify.open / notify.await are the two-RPC internals of gui_notify_user;
+        # the agent never calls them directly — only the hand-written tool is exposed.
+        "notify.open",
+        "notify.await",
     }
 )
 
@@ -2267,6 +2330,41 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "required": ["tab_id"],
         },
     },
+    "gui_notify_user": {
+        "handler": tool_gui_notify_user,
+        "description": (
+            "Ask the user a question and BLOCK your entire turn until they respond "
+            "(or the timeout expires). Opens a non-modal prompt dialog in the GUI "
+            "showing 'message'. Returns {reason, reply?}:\n"
+            "  - reason='reply': user answered; read 'reply' (a string, possibly "
+            "empty) and act on it.\n"
+            "  - reason='dismiss': user explicitly closed the prompt — do NOT ask "
+            "again immediately; respect the user's choice.\n"
+            "  - reason='timeout': no one responded within 'timeout' seconds — the "
+            "user is probably not watching; do NOT keep blocking, continue or poll.\n"
+            "timeout (default 600s) is the dialog auto-close timer. The RPC call "
+            "blocks the whole turn for up to timeout+15s; use only when you genuinely "
+            "need a human decision before continuing."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "description": "Question or message to display to the user",
+                },
+                "timeout": {
+                    "type": "number",
+                    "default": 600,
+                    "description": (
+                        "Seconds before the dialog auto-closes with reason='timeout' "
+                        "(default 600). Set shorter for time-sensitive prompts."
+                    ),
+                },
+            },
+            "required": ["message"],
+        },
+    },
 }
 
 
@@ -2303,6 +2401,7 @@ _OVERRIDE_NAMES = frozenset(
         "gui_connect_wait",
         "gui_connect_poll",
         "gui_device_poll",
+        "gui_notify_user",
     }
 )
 
