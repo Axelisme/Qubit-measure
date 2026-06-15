@@ -1728,7 +1728,7 @@ def _h_tab_get_current_figure(
 def _h_predictor_load(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from zcu_tools.gui.session.services.connection import (
+    from zcu_tools.gui.session.services.predictor import (
         LoadPredictorRequest,
         PredictorLoadError,
     )
@@ -1759,7 +1759,7 @@ def _h_predictor_clear(
 def _h_predictor_predict(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from zcu_tools.gui.session.services.connection import (
+    from zcu_tools.gui.session.services.predictor import (
         PredictFreqRequest,
         PredictorNotLoaded,
     )

@@ -263,7 +263,7 @@ def test_mock_connect_installs_sim_predictor(fx):
 
     _connect_mock(fx)
 
-    predictor = fx.ctrl._conn_svc.get_predictor()
+    predictor = fx.ctrl._pred_svc.get_predictor()
     assert predictor is not None
 
     # The installed predictor predicts the same f01 as one built directly from the
@@ -286,12 +286,12 @@ def test_mock_connect_does_not_overwrite_user_predictor(fx):
     user_predictor = FluxoniumPredictor(
         params=(5.0, 1.2, 0.9), flux_half=0.1, flux_period=2.0, flux_bias=0.05
     )
-    fx.ctrl._conn_svc.install_predictor(user_predictor)
+    fx.ctrl._pred_svc.install_predictor(user_predictor)
 
     _connect_mock(fx)
 
     # The user's predictor is untouched (identity preserved).
-    assert fx.ctrl._conn_svc.get_predictor() is user_predictor
+    assert fx.ctrl._pred_svc.get_predictor() is user_predictor
 
 
 # ---------------------------------------------------------------------------

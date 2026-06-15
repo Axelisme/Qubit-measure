@@ -47,21 +47,21 @@ if TYPE_CHECKING:
     from zcu_tools.device.base import BaseDeviceInfo
     from zcu_tools.gui.event_bus import BaseEventBus
     from zcu_tools.gui.session.pbar_host import ProgressBarModel
-    from zcu_tools.gui.session.services.connection import (
-        ConnectRequest,
-        LoadPredictorRequest,
-        PredictCurveRequest,
-        PredictCurveResult,
-        PredictFreqRequest,
-        PredictMatrixCurveRequest,
-        PredictMatrixCurveResult,
-    )
+    from zcu_tools.gui.session.services.connection import ConnectRequest
     from zcu_tools.gui.session.services.device import (
         ConnectDeviceRequest,
         DeviceEntry,
         DeviceSnapshot,
         DisconnectDeviceRequest,
         SetupDeviceRequest,
+    )
+    from zcu_tools.gui.session.services.predictor import (
+        LoadPredictorRequest,
+        PredictCurveRequest,
+        PredictCurveResult,
+        PredictFreqRequest,
+        PredictMatrixCurveRequest,
+        PredictMatrixCurveResult,
     )
     from zcu_tools.gui.session.services.startup import (
         PersistedStartup,

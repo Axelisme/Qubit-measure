@@ -358,7 +358,7 @@ class PredictorDialog(QDialog):
         Called by the debounce timer.  Uses point-predict for each row so each value
         is as accurate as possible.  Any failure per-row shows "—".
         """
-        from zcu_tools.gui.session.services.connection import (
+        from zcu_tools.gui.session.services.predictor import (
             PredictFreqRequest,
             PredictMatrixCurveRequest,
             PredictorNotLoaded,
@@ -400,7 +400,7 @@ class PredictorDialog(QDialog):
 
     def _refresh_curves(self) -> None:
         """Recompute and redraw both freq and matrix-element curves."""
-        from zcu_tools.gui.session.services.connection import (
+        from zcu_tools.gui.session.services.predictor import (
             PredictCurveRequest,
             PredictMatrixCurveRequest,
             PredictorNotLoaded,
@@ -576,7 +576,7 @@ class PredictorDialog(QDialog):
             self._path_edit.setText(path)
 
     def _on_accepted(self) -> None:
-        from zcu_tools.gui.session.services.connection import (
+        from zcu_tools.gui.session.services.predictor import (
             LoadPredictorRequest,
             PredictorLoadError,
         )

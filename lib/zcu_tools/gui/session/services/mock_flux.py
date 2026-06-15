@@ -39,8 +39,8 @@ from zcu_tools.gui.session.state import DeviceStatus
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus
-    from zcu_tools.gui.session.services.connection import ConnectionService
     from zcu_tools.gui.session.services.device import DeviceService
+    from zcu_tools.gui.session.services.predictor import PredictorService
 
 logger = logging.getLogger(__name__)
 
@@ -67,15 +67,15 @@ class MockFluxProvisioner:
         self,
         bus: BaseEventBus,
         device: DeviceService,
-        connection: ConnectionService,
+        predictor: PredictorService,
     ) -> None:
         self._bus = bus
         self._dev_svc = device
-        # ConnectionService owns the predictor seam (exp_context.predictor +
+        # PredictorService owns the predictor seam (exp_context.predictor +
         # PredictorChangedPayload). The provisioner installs the sim predictor
         # through it rather than poking exp_context directly, so the one write path
         # (set_context + event emit) stays unduplicated.
-        self._conn_svc = connection
+        self._pred_svc = predictor
         # FLUX-AWARE-MOCK: set while our auto-provisioned fake_flux connect is in
         # flight, so the connect-success handler ramps it to the default operating
         # point exactly once (and never touches a user's own FakeDevice).
@@ -194,7 +194,7 @@ class MockFluxProvisioner:
             )
             return
 
-        if self._conn_svc.get_predictor() is not None:
+        if self._pred_svc.get_predictor() is not None:
             logger.info(
                 "MockFluxProvisioner: predictor already present; "
                 "leaving the user's predictor untouched"
@@ -202,7 +202,7 @@ class MockFluxProvisioner:
             return
 
         predictor = build_predictor_from_simparams(sim_params)
-        self._conn_svc.install_predictor(predictor)
+        self._pred_svc.install_predictor(predictor)
         logger.info(
             "MockFluxProvisioner: installed sim predictor from mock SimParams "
             "(EJ=%r EC=%r EL=%r)",

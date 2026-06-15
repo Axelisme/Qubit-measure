@@ -21,6 +21,7 @@ from zcu_tools.gui.session.services.connection import ConnectionService
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.device import DeviceService
 from zcu_tools.gui.session.services.mock_flux import MockFluxProvisioner
+from zcu_tools.gui.session.services.predictor import PredictorService
 from zcu_tools.gui.session.services.startup import StartupService
 
 if TYPE_CHECKING:
@@ -42,6 +43,7 @@ class SessionServices:
     """The session-core services every measurement-session app builds on."""
 
     connection: ConnectionService
+    predictor: PredictorService
     context: ContextService
     device: DeviceService
     startup: StartupService
@@ -78,6 +80,7 @@ def build_session_services(
         driver_factory=driver_factory,
     )
     connection = ConnectionService(state, bus, gate, handles)
+    predictor = PredictorService(state, bus)
     context = ContextService(state, io_manager, bus)
     # StartupService bridges the two session services it commands through their
     # ports (context bootstrap + remembered-device registration) + State prefs.
@@ -88,9 +91,10 @@ def build_session_services(
     # by the strong reference the EventBus holds to its bound subscriber (and the
     # device_connected signal connection), both of which outlive the bundle, so the
     # provisioner survives despite not being a field here.
-    MockFluxProvisioner(bus, device, connection)
+    MockFluxProvisioner(bus, device, predictor)
     return SessionServices(
         connection=connection,
+        predictor=predictor,
         context=context,
         device=device,
         startup=startup,

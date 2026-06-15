@@ -9,6 +9,7 @@ from zcu_tools.gui.session.services.build import build_session_services
 from zcu_tools.gui.session.services.connection import ConnectionService
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.device import DeviceService
+from zcu_tools.gui.session.services.predictor import PredictorService
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.services.startup import StartupService
 
@@ -56,6 +57,7 @@ class AppServices:
     guard: GuardService
     device: DeviceService
     connection: ConnectionService
+    predictor: PredictorService
     context: ContextService
     tab: TabService
     run: RunService
@@ -127,6 +129,7 @@ def build_app_services(
         guard=GuardService(state),
         device=device,
         connection=session.connection,
+        predictor=session.predictor,
         context=context,
         tab=tab,
         run=RunService(state, runner, bus, handles, writeback),

@@ -12,15 +12,7 @@ from zcu_tools.device.base import BaseDeviceInfo
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.operation_handles import AwaitResult
-from zcu_tools.gui.session.services.connection import (
-    ConnectRequest,
-    LoadPredictorRequest,
-    PredictCurveRequest,
-    PredictCurveResult,
-    PredictFreqRequest,
-    PredictMatrixCurveRequest,
-    PredictMatrixCurveResult,
-)
+from zcu_tools.gui.session.services.connection import ConnectRequest
 from zcu_tools.gui.session.services.device import (
     ActiveDeviceOperation,
     DeviceEntry,
@@ -30,6 +22,14 @@ from zcu_tools.gui.session.services.io_manager import IOManager
 from zcu_tools.gui.session.services.mock_flux import (
     FAKE_FLUX_DEVICE_NAME,
     FAKE_FLUX_INITIAL_VALUE,
+)
+from zcu_tools.gui.session.services.predictor import (
+    LoadPredictorRequest,
+    PredictCurveRequest,
+    PredictCurveResult,
+    PredictFreqRequest,
+    PredictMatrixCurveRequest,
+    PredictMatrixCurveResult,
 )
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
@@ -233,6 +233,7 @@ class Controller:
         self._guard_svc = services.guard
         self._dev_svc = services.device
         self._conn_svc = services.connection
+        self._pred_svc = services.predictor
         self._ctx_svc = services.context
         self._tab_svc = services.tab
         self._run_svc = services.run
@@ -1289,30 +1290,30 @@ class Controller:
         self._conn_svc.connection_failed.connect(on_failed)
 
     def load_predictor(self, req: LoadPredictorRequest) -> None:
-        self._conn_svc.load_predictor(req)
+        self._pred_svc.load_predictor(req)
 
     def clear_predictor(self) -> None:
-        self._conn_svc.clear_predictor()
+        self._pred_svc.clear_predictor()
 
     def predict_freq(self, req: PredictFreqRequest) -> float:
-        return self._conn_svc.predict_freq(req)
+        return self._pred_svc.predict_freq(req)
 
     def predict_freq_curve(self, req: PredictCurveRequest) -> PredictCurveResult:
-        return self._conn_svc.predict_freq_curve(req)
+        return self._pred_svc.predict_freq_curve(req)
 
     def predict_matrix_element_curve(
         self, req: PredictMatrixCurveRequest
     ) -> PredictMatrixCurveResult:
-        return self._conn_svc.predict_matrix_element_curve(req)
+        return self._pred_svc.predict_matrix_element_curve(req)
 
     def get_soccfg(self) -> SocCfgHandle | None:
         return self._conn_svc.get_soccfg()
 
     def get_predictor(self) -> FluxoniumPredictor | None:
-        return self._conn_svc.get_predictor()
+        return self._pred_svc.get_predictor()
 
     def get_predictor_info(self) -> dict | None:
-        return self._conn_svc.get_predictor_info()
+        return self._pred_svc.get_predictor_info()
 
     # ------------------------------------------------------------------
     # View query interface (TabService) — strict APIs; callers must check

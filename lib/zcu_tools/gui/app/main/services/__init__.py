@@ -11,6 +11,7 @@ from zcu_tools.gui.session.services.device import (
     DisconnectDeviceRequest,
     SetupDeviceRequest,
 )
+from zcu_tools.gui.session.services.predictor import PredictorService
 from zcu_tools.gui.session.services.startup import (
     StartupConnectionRequest,
     StartupProjectRequest,
@@ -52,6 +53,7 @@ __all__ = [
     "AppServices",
     "build_app_services",
     "ConnectionService",
+    "PredictorService",
     "ContextService",
     "DeviceService",
     "ConnectDeviceRequest",

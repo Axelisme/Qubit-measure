@@ -63,21 +63,21 @@ if TYPE_CHECKING:
     from zcu_tools.device.base import BaseDeviceInfo
     from zcu_tools.gui.session.pbar_host import ProgressBarModel
     from zcu_tools.gui.session.ports import ProgressTransport
-    from zcu_tools.gui.session.services.connection import (
-        ConnectRequest,
-        LoadPredictorRequest,
-        PredictCurveRequest,
-        PredictCurveResult,
-        PredictFreqRequest,
-        PredictMatrixCurveRequest,
-        PredictMatrixCurveResult,
-    )
+    from zcu_tools.gui.session.services.connection import ConnectRequest
     from zcu_tools.gui.session.services.device import (
         ConnectDeviceRequest,
         DeviceEntry,
         DeviceSnapshot,
         DisconnectDeviceRequest,
         SetupDeviceRequest,
+    )
+    from zcu_tools.gui.session.services.predictor import (
+        LoadPredictorRequest,
+        PredictCurveRequest,
+        PredictCurveResult,
+        PredictFreqRequest,
+        PredictMatrixCurveRequest,
+        PredictMatrixCurveResult,
     )
     from zcu_tools.gui.session.services.startup import (
         PersistedStartup,
@@ -183,6 +183,7 @@ class Controller:
         )
         self._session = session
         self._conn_svc = session.connection
+        self._pred_svc = session.predictor
         self._ctx_svc = session.context
         self._dev_svc = session.device
         self._startup_svc = session.startup
@@ -287,24 +288,24 @@ class Controller:
 
     # -- predictor dialog: load / clear / predict (the shared PredictorDialog) --
     def load_predictor(self, req: LoadPredictorRequest) -> None:
-        self._conn_svc.load_predictor(req)
+        self._pred_svc.load_predictor(req)
 
     def clear_predictor(self) -> None:
-        self._conn_svc.clear_predictor()
+        self._pred_svc.clear_predictor()
 
     def predict_freq(self, req: PredictFreqRequest) -> float:
-        return self._conn_svc.predict_freq(req)
+        return self._pred_svc.predict_freq(req)
 
     def predict_freq_curve(self, req: PredictCurveRequest) -> PredictCurveResult:
-        return self._conn_svc.predict_freq_curve(req)
+        return self._pred_svc.predict_freq_curve(req)
 
     def predict_matrix_element_curve(
         self, req: PredictMatrixCurveRequest
     ) -> PredictMatrixCurveResult:
-        return self._conn_svc.predict_matrix_element_curve(req)
+        return self._pred_svc.predict_matrix_element_curve(req)
 
     def get_predictor_info(self) -> dict | None:
-        return self._conn_svc.get_predictor_info()
+        return self._pred_svc.get_predictor_info()
 
     # -- device dialog: lifecycle --
     def start_connect_device(self, req: ConnectDeviceRequest) -> int:

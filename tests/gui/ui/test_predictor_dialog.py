@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
-from zcu_tools.gui.session.services.connection import (
+from zcu_tools.gui.session.services.predictor import (
     LoadPredictorRequest,
     PredictCurveResult,
     PredictMatrixCurveResult,
