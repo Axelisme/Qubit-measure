@@ -236,7 +236,13 @@ DEFAULT_SIMPARAM: SimParams = SimParams(
     EJ=4.0,
     EC=1.0,
     EL=1.0,
-    flux_period=1.0,
+    # flux_period=8e-3 matches the onetone/twotone flux_dep guide default sweep
+    # range (~±4e-3).  With flux_half=0.0 and flux_bias=0.0, sweeping v in
+    # [-4e-3, 4e-3] maps reduced_flux from 0.0 to 1.0 (one full period, sweet
+    # spot at v=0 = reduced_flux 0.5), producing a visible flux-dependent
+    # dispersion in the mock 2D plot.  The previous value (1.0) made the sweep
+    # range cover only ~0.8% of a period → flat colour map.
+    flux_period=8e-3,
     flux_half=0.0,
     flux_bias=0.0,
     T1=20.0,
