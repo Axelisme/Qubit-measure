@@ -973,3 +973,40 @@ def test_feedback_widget_hide_called_when_last_client_disconnects(qapp):
     with patch.object(window._feedback_widget, "hide") as mock_hide:
         window.refresh_feedback_widget()
     mock_hide.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# FloatingFeedbackWidget layout: bottom-left anchor
+# ---------------------------------------------------------------------------
+
+
+def test_feedback_widget_positioned_at_bottom_left(qapp):
+    """_layout_feedback_widget places the widget at x=_FEEDBACK_MARGIN (left),
+    not at x=width-w-margin (right), so it does not overlap the flux_dep
+    Done button in the right-side controls column."""
+    from qtpy.QtCore import QCoreApplication
+    from qtpy.QtWidgets import QApplication
+    from zcu_tools.gui.app.main.ui.main_window import _FEEDBACK_MARGIN, MainWindow
+
+    ctrl = MagicMock()
+    ctrl.get_bus.return_value = EventBus()
+    # Both C3 conditions true so the widget is shown and laid out.
+    ctrl.active_operation_count.return_value = 1
+    ctrl.has_agent_connected.return_value = True
+    ctrl.can_cancel_active_operation.return_value = False
+
+    window = MainWindow(ctrl)
+    window.resize(900, 600)
+    window.show()
+    QApplication.processEvents()
+
+    # Trigger show() + deferred layout via refresh_feedback_widget.
+    window.refresh_feedback_widget()
+    # Drain the QTimer.singleShot(0) that _layout_feedback_widget is queued on.
+    QCoreApplication.processEvents()
+
+    x = window._feedback_widget.x()
+    # x must equal _FEEDBACK_MARGIN (left anchor), NOT near the right edge.
+    assert x == _FEEDBACK_MARGIN, (
+        f"Expected feedback widget at x={_FEEDBACK_MARGIN} (left), got x={x}"
+    )

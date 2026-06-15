@@ -1141,7 +1141,12 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._layout_feedback_widget)
 
     def _layout_feedback_widget(self) -> None:
-        """Position the feedback widget in the bottom-right corner.
+        """Position the feedback widget in the bottom-left corner.
+
+        Bottom-left avoids overlapping the flux_dep interactive-analysis
+        "Finish/Done" button, which sits at the bottom of the 220px right-side
+        controls column.  The left panel's collapse/expand handle is vertically
+        centred, so it does not conflict with a bottom-left widget.
 
         Uses the same QTimer.singleShot(0, ...) deferred layout technique as
         _PanelEdgeHandle._schedule_handle_layout, ensuring the geometry is
@@ -1151,9 +1156,8 @@ class MainWindow(QMainWindow):
         if not widget.isVisible():
             return
         widget.adjustSize()
-        w = widget.width()
         h = widget.height()
-        x = self.width() - w - _FEEDBACK_MARGIN
+        x = _FEEDBACK_MARGIN
         y = self.height() - h - _FEEDBACK_MARGIN
         widget.move(max(0, x), max(0, y))
 
