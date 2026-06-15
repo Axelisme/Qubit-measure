@@ -25,8 +25,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from zcu_tools.gui.background import NO_RESULT
 from zcu_tools.gui.session.operation_handles import (
+    NO_RESULT,
     CancelHook,
     OperationHandles,
     OperationOutcome,

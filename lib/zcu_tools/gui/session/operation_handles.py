@@ -32,9 +32,16 @@ import time
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
+
+# Sentinel for "the background work produced no result value" (distinct from a
+# real ``None`` result). Lives here (session-core, Qt-free) so OperationRunner /
+# run-policy terminal interpretation can compare against it without importing the
+# Qt-coupled shared executor (``gui.background`` re-exports this same object, so
+# its identity is shared across the executor and the operation layer).
+NO_RESULT: Any = object()
 
 # Upper bound on how many settled operations are retained so that
 # ``await_outcome`` can return immediately for an operation that finished before

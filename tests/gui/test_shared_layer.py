@@ -28,6 +28,11 @@ _SHARED_MODULES = [
     "zcu_tools.gui.session.types",
     "zcu_tools.gui.session.events",
     "zcu_tools.gui.session.operation_handles",
+    # The kind-agnostic operation lifecycle runner and the agent-prompt notify
+    # channel are session-core too: pure orchestration / queues, no Qt/app (the
+    # NO_RESULT sentinel lives in operation_handles, not the Qt executor).
+    "zcu_tools.gui.session.operation_runner",
+    "zcu_tools.gui.session.notify_handles",
     "zcu_tools.gui.session.ports",
     "zcu_tools.gui.session.state",
     # The Controller port the shared dialogs depend on — pure Protocol, all

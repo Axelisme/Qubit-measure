@@ -41,9 +41,11 @@ from qtpy.QtCore import (  # type: ignore[attr-defined]
 )
 
 # Sentinel distinguishing "the thunk never produced a value" from "the thunk
-# returned None" (a legitimate result, e.g. save). The dedicated worker also
-# uses it to assert it never settles without an outcome.
-NO_RESULT: Any = object()
+# returned None" (a legitimate result, e.g. save). Defined in the Qt-free
+# session-core (``operation_handles``) and re-exported here so the executor and
+# the operation layer share one sentinel identity; importing it does not make
+# ``operation_handles`` (or ``operation_runner``) pull Qt.
+from zcu_tools.gui.session.operation_handles import NO_RESULT
 
 
 class _OpSignals(QObject):
