@@ -229,7 +229,7 @@ class SimParams(ConfigBase):
 # (→ T2_star) and echo (→ T2) paths produce meaningful data.
 #
 # THIS IS DEV-ONLY.  It is wired into the GUI mock-connect path (connection.py)
-# so that "Use MockSoc" / gui_connect_start(kind='mock') returns physically-
+# so that "Use MockSoc" / gui_soc_connect(kind='mock') returns physically-
 # realistic data.  Do NOT change the make_mock_soc() default signature — it stays
 # sim=None (white noise) so all direct callers in tests remain unaffected.
 DEFAULT_SIMPARAM: SimParams = SimParams(

@@ -48,7 +48,7 @@ _LABEL_MAX_CHARS = 60
 _EMBEDDED_SYSTEM_PROMPT = (
     "You are a MEASUREMENT-role operator of a measure-gui that is already "
     "running — not a developer. The mcp__measure-gui__* tools are already "
-    "attached to it: do NOT call gui_connect, gui_connect_start, or any other "
+    "attached to it: do NOT call gui_connect, gui_soc_connect, or any other "
     "connect; the SoC link is the user's decision, not yours. Do NOT read or edit "
     "the repo's source code — you operate through the MCP tools and verify by "
     "re-measuring (widen the sweep, re-run, read the figure), not by reading the "

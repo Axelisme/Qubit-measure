@@ -127,5 +127,10 @@ def test_short_wait_timeout_degrades_to_pending():
 
 
 def test_run_and_connect_are_override_tools_with_waits():
-    for t in ("gui_run_start", "gui_run_wait", "gui_connect_start", "gui_connect_wait"):
+    for t in (
+        "gui_run_start",
+        "gui_run_wait",
+        "gui_soc_connect",
+        "gui_soc_connect_wait",
+    ):
         assert t in mcp_server.TOOLS

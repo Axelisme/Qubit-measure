@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 27
+skill_version: 28
 ---
 
 # run-measure-gui
@@ -45,7 +45,7 @@ user first**, and you **must respect device safety limits**.
   QICK soccfg: a compact human-readable `description` table (per-channel
   **generator/readout type, converter port, sample rate (`fs`), max pulse/buffer
   length**) plus a structured `cfg` carrying the full detail (DDS frequency
-  ranges, tile layout, …). `gui_connect_start` / `gui_connect_wait` also fold
+  ranges, tile layout, …). `gui_soc_connect` / `gui_soc_connect_wait` also fold
   this description into their reply. This is the hardware you *can* see in software.
 - **Ask the user for what soccfg does NOT tell you** (the wiring/physics):
   - Which DAC/ADC **channels** are wired to the readout transmission line, and
@@ -116,7 +116,7 @@ gui_project_info     # current project identity:
 gui_launch                                      # spawns the GUI, connects; banner shows the
                                                 # handshake: "wire vN (mcp==gui); gui code vX, mcp code vY"
 # Same startup path a GUI user takes (no mock shortcut):
-gui_connect_start(kind="mock")                  # mock SoC (or kind="remote", ip, port for hardware)
+gui_soc_connect(kind="mock")                    # mock SoC (or kind="remote", ip, port for hardware)
 gui_startup_apply(chip_name="Q1_Chip",          # apply the project; omit result_dir/database_path
                   qub_name="Q1", res_name="R1")  # to scope them under chip/qub (notebook layout)
 gui_context_new(bind_device="fake_flux")        # create a context bound to a flux device (reads its
@@ -229,7 +229,7 @@ you. So for a long run, pick by who should wait:
   progress bars).
 
 Reserve inline `gui_run_wait` for runs you expect to finish quickly. The same
-choice applies to `gui_connect_wait` / `gui_device_wait_operation`, though those
+choice applies to `gui_soc_connect_wait` / `gui_device_wait_operation`, though those
 ops are usually short.
 
 ### User feedback wakeup (cooperative interrupt — ADR-0023)

@@ -395,7 +395,7 @@ def test_save_post_image_delegates_to_controller(fx):
 def test_mcp_tool_schemas_include_required_discovery_tools():
     expected = {
         "gui_adapter_list",
-        "gui_connect_start",
+        "gui_soc_connect",
         "gui_context_labels",
         "gui_context_active",
         "gui_context_use",

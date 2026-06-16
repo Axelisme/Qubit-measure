@@ -269,7 +269,13 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
 #      auto-generated gui_predictor_set_model_params MCP tool — builds and
 #      installs a FluxoniumPredictor directly from typed EJ/EC/EL + flux params,
 #      bypassing params.json. Observable MCP surface change after MCP reconnect.
-MCP_VERSION = 39
+# MCP 40: SoC-connect tool rename (no wire change). gui_connect_start /
+#      gui_connect_wait / gui_connect_poll renamed to gui_soc_connect /
+#      gui_soc_connect_wait / gui_soc_connect_poll — disambiguates the SoC-board
+#      connect family from gui_connect (the MCP bridge attach). The underlying
+#      wire RPCs (connect.start / operation.await / operation.poll keyed by "soc")
+#      are unchanged; only the agent-facing MCP tool names changed.
+MCP_VERSION = 40
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -288,7 +294,7 @@ driving the same GUI alongside you.
 
 Tool families:
   - Lifecycle: gui_launch / gui_connect / gui_stop / gui_app_shutdown.
-  - Startup: gui_connect_start (kind='mock'|'remote'), gui_startup_apply,
+  - Startup: gui_soc_connect (kind='mock'|'remote'), gui_startup_apply,
     gui_context_use / gui_context_new, gui_state_check (the four readiness flags
     has_project / has_context / has_active_context / has_soc).
   - Tabs + cfg: gui_adapter_list / gui_tab_new / gui_tab_snapshot;
@@ -313,7 +319,7 @@ the per-tool descriptions only name what each waits on; the mechanics live here.
 Completion is detected by wait/poll on a handle, NOT events (nothing is pushed):
   - A short-wait START (gui_*_start, gui_analyze, gui_post_analyze, gui_device_*)
     waits up to wait_seconds (default 1.0): settles in time -> {status:'finished',
-    <product>} (gui_run_start -> tab; gui_connect_start -> soc; gui_analyze /
+    <product>} (gui_run_start -> tab; gui_soc_connect -> soc; gui_analyze /
     gui_post_analyze -> summary; gui_device_* -> snapshot); a slow one degrades to
     {status:'pending'}, which you then drive with the matching _wait / _poll.
   - _poll returns immediately: 'finished' | 'running' | 'cancelled' | 'failed' |
@@ -1220,7 +1226,7 @@ def tool_gui_device_poll(arguments: dict[str, Any]) -> dict[str, Any]:
     return _poll_operation_by_key(f"device:{name}", f"Device {name!r} operation")
 
 
-def tool_gui_connect_poll(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_soc_connect_poll(arguments: dict[str, Any]) -> dict[str, Any]:
     """Non-blocking status of the SoC connect: finished / running / failed /
     no_operation. On finished, also returns the SoC hardware summary."""
     del arguments
@@ -1416,11 +1422,11 @@ def _connect_soc_summary() -> dict[str, Any]:
     }
 
 
-def tool_gui_connect_start(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_soc_connect(arguments: dict[str, Any]) -> dict[str, Any]:
     """Connect the SoC, waiting briefly for the (usually fast) connect to land.
 
     Degrades like device ops: settles -> {status:'finished', soc:<summary>};
-    still running -> {status:'pending'} (await with gui_connect_wait). kind='mock'
+    still running -> {status:'pending'} (await with gui_soc_connect_wait). kind='mock'
     or kind='remote' with ip+port. The settled reply folds in only the SoC
     *description* + is_mock; call gui_soc_info for the structured cfg.
     """
@@ -1441,11 +1447,11 @@ def tool_gui_connect_start(arguments: dict[str, Any]) -> dict[str, Any]:
         "SoC connect",
         wait_seconds,
         lambda: {"soc": _connect_soc_summary()},
-        "await it with gui_connect_wait() or poll gui_connect_poll().",
+        "await it with gui_soc_connect_wait() or poll gui_soc_connect_poll().",
     )
 
 
-def tool_gui_connect_wait(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_soc_connect_wait(arguments: dict[str, Any]) -> dict[str, Any]:
     """Block until the SoC connect completes (semantic wait). Raises only on
     genuine failure; returns status='cancelled' (NOT a raise) on cancellation.
     On success also returns the SoC hardware summary (same as gui_soc_info)."""
@@ -1645,7 +1651,7 @@ _NON_GENERATED_METHODS = frozenset(
         "operation.progress",
         # hand-written short-wait degrade (like device ops): a fast run / connect
         # returns its product, a slow one degrades to a handle (gui_run_wait /
-        # gui_connect_wait).
+        # gui_soc_connect_wait).
         "run.start",
         "connect.start",
         # hand-written short-wait degrade (analyze is an async worker / interactive
@@ -2162,14 +2168,14 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "required": ["tab_id"],
         },
     },
-    "gui_connect_start": {
-        "handler": tool_gui_connect_start,
+    "gui_soc_connect": {
+        "handler": tool_gui_soc_connect,
         "description": (
             "Connect the SoC (shared short-wait START contract — see server "
             "instructions). kind='mock' (offline) or kind='remote' with ip+port. "
             "Settles -> {status:'finished', soc:{description, is_mock}} (call "
             "gui_soc_info for the structured cfg); slow -> {status:'pending'} "
-            "(gui_connect_wait / gui_connect_poll)."
+            "(gui_soc_connect_wait / gui_soc_connect_poll)."
         ),
         "inputSchema": {
             "type": "object",
@@ -2185,11 +2191,11 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "required": ["kind"],
         },
     },
-    "gui_connect_wait": {
-        "handler": tool_gui_connect_wait,
+    "gui_soc_connect_wait": {
+        "handler": tool_gui_soc_connect_wait,
         "description": (
             "Block until the SoC connect completes (shared async _wait contract — "
-            "see server instructions). Use after gui_connect_start returned "
+            "see server instructions). Use after gui_soc_connect returned "
             "status='pending'. On 'finished' also returns the SoC summary (same as "
             "gui_soc_info)."
         ),
@@ -2203,8 +2209,8 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             },
         },
     },
-    "gui_connect_poll": {
-        "handler": tool_gui_connect_poll,
+    "gui_soc_connect_poll": {
+        "handler": tool_gui_soc_connect_poll,
         "description": (
             "Non-blocking status of the SoC connect (shared async _poll contract — "
             "see server instructions). On 'finished', also returns the SoC hardware "
@@ -2432,9 +2438,9 @@ _OVERRIDE_NAMES = frozenset(
         "gui_post_analyze",
         "gui_post_analyze_wait",
         "gui_post_analyze_poll",
-        "gui_connect_start",
-        "gui_connect_wait",
-        "gui_connect_poll",
+        "gui_soc_connect",
+        "gui_soc_connect_wait",
+        "gui_soc_connect_poll",
         "gui_device_poll",
         "gui_notify_user",
     }

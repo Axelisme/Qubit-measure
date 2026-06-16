@@ -4,7 +4,7 @@ it as the MockSoc's SimEngine flux source.
 These tests drive the *real* Controller connect path (real EventBus + real
 ConnectionService / DeviceService) so the SocChangedPayload hook, the
 DeviceService registration, and the soc.set_flux_device binding are all exercised
-together — the same path "Use MockSoc" and gui_connect_start(kind='mock') take.
+together — the same path "Use MockSoc" and gui_soc_connect(kind='mock') take.
 """
 
 from __future__ import annotations

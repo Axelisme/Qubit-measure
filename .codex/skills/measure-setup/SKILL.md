@@ -91,7 +91,7 @@ devices:                # instruments to connect; delete any block you do not us
 
 5. **Apply, in this order** (order matters: a context binds a flux device, so the device
    must exist first):
-   - `gui_connect_start(kind, ip, port)` with `kind` from `connection` (`gui_connect_wait` if it returns pending).
+   - `gui_soc_connect(kind, ip, port)` with `kind` from `connection` (`gui_soc_connect_wait` if it returns pending).
    - `gui_startup_apply(chip_name, qub_name, res_name)` — add result_dir/database_path only if the user set them.
    - For each `devices` block: configure it (`gui_device_setup_spec` shows the fields, then `gui_device_setup`).
    - `gui_context_new(bind_device=<the flux device name>)`, or `gui_context_use(label)` to reuse an existing context.
