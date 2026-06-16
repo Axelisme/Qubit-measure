@@ -1362,6 +1362,15 @@ class Controller:
     def start_connect(self, req: ConnectRequest) -> int:
         return self._soc_svc.start_connect(req)
 
+    def connect_sync(self, req: ConnectRequest) -> None:
+        """Connect the SoC synchronously (blocks until connected + side effects
+        applied). The wire ``soc.connect`` path uses this so the handler can return
+        the SoC summary directly; the GUI's connect button keeps using the async
+        start_connect + signals. Both share SoCConnectionService._apply_connection,
+        so the post-connect side effects (State write, soc version bump,
+        SocChangedPayload → FLUX-AWARE-MOCK provisioning) are identical."""
+        self._soc_svc.connect_sync(req)
+
     def bind_connection_outcome(
         self,
         on_finished: Callable[[], None],

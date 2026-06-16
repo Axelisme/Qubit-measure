@@ -226,6 +226,78 @@ def test_connect_bumps_soc_not_context_version(qapp):
 
 
 # ---------------------------------------------------------------------------
+# Synchronous connect (the soc.connect wire path) — connect_sync
+# ---------------------------------------------------------------------------
+
+
+def test_connect_sync_mock_sets_soc_and_emits_payload(qapp):
+    """connect_sync runs inline (no bg), sets the soc, and emits SocChangedPayload
+    synchronously (the hook the MockFluxProvisioner rides). It returns the handles
+    directly and releases the SOC_CONNECT lease."""
+    gate = OperationGate()
+    svc, _bg, _handles = _make_svc(gate=gate)
+    state = svc._state  # type: ignore[attr-defined]
+    bus = svc._bus  # type: ignore[attr-defined]
+
+    payloads: list[SocChangedPayload] = []
+    bus.subscribe(SocChangedPayload, lambda p: payloads.append(p))
+
+    soc_before = state.version.get("soc")
+    soc, soccfg = svc.connect_sync(ConnectMockRequest())
+
+    assert soc is not None and soccfg is not None
+    assert svc.has_soc()
+    assert state.exp_context.soc is soc
+    # The shared _apply_connection side effects fired synchronously.
+    assert state.version.get("soc") == soc_before + 1
+    assert len(payloads) == 1
+    assert payloads[0].is_mock is True
+    # Lease released, no lingering active token.
+    assert not gate.has_active(OperationKind.SOC_CONNECT)
+    assert not svc.is_connect_active()
+
+
+def test_connect_sync_rejects_concurrent_calls(qapp):
+    """connect_sync holds the same SOC_CONNECT lease as the async path, so a
+    concurrent connect (or the GUI button) fast-fails."""
+    gate = OperationGate()
+    svc, _bg, _handles = _make_svc(gate=gate)
+    gate.register(1, OperationKind.SOC_CONNECT, owner_id="existing")
+    with pytest.raises(OperationConflictError, match="soc_connect is active"):
+        svc.connect_sync(ConnectMockRequest())
+
+
+def test_connect_sync_remote_failure_releases_lease_and_raises(qapp, monkeypatch):
+    """A failed remote connect re-raises and still releases the lease (finally)."""
+    gate = OperationGate()
+    svc, _bg, _handles = _make_svc(gate=gate)
+
+    import zcu_tools.remote as remote
+
+    def fail(ip: str, port: int) -> None:
+        raise ConnectionRefusedError("nope")
+
+    monkeypatch.setattr(remote, "make_soc_proxy", fail, raising=False)
+
+    with pytest.raises(ConnectionRefusedError, match="nope"):
+        svc.connect_sync(ConnectRemoteRequest(ip="127.0.0.1", port=7000))
+
+    assert not gate.has_active(OperationKind.SOC_CONNECT)
+    assert not svc.is_connect_active()
+    assert not svc.has_soc()
+
+
+def test_connect_sync_rejects_unsupported_request(qapp):
+    svc, _bg, _handles = _make_svc()
+
+    class Other:
+        pass
+
+    with pytest.raises(TypeError, match="Unsupported connect request"):
+        svc.connect_sync(Other())  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
 # Reject concurrent / conflicting ops — synchronous gate check
 # ---------------------------------------------------------------------------
 

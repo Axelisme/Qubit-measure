@@ -149,7 +149,15 @@ from __future__ import annotations
 #      New RPC method = contract change. The MCP tool gui_predictor_set_model_params
 #      is auto-generated from the spec. predictor.info reply gains EJ/EC/EL so the
 #      active model reads back (additive field; no shape break).
-WIRE_VERSION = 32
+# v33: SoC connect is now a SYNCHRONOUS RPC. connect.start (which returned an
+#      operation_id awaited via the "soc"-keyed operation handle) is replaced by
+#      soc.connect, which performs the connect on the main thread and returns
+#      {soc:{description, is_mock}} directly. The soc operation-handle wiring is
+#      removed (no more "soc" key in operation.await/poll). The GUI's async
+#      connect button (SoCConnectionService.start_connect + signals) is untouched;
+#      only the wire surface changes. Method-set + reply-shape change = contract
+#      change.
+WIRE_VERSION = 33
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -318,4 +326,14 @@ WIRE_VERSION = 32
 #      EJ/EC/EL. PredictorDialog grows editable EJ/EC/EL/flux_half/flux_period
 #      spinboxes, an Apply button, a "Load params.json -> fields" action, and an
 #      active-model read-back.
-GUI_VERSION = 39
+# v40: synchronous soc.connect (WIRE 33). SoCConnectionService gains a
+#      connect_sync(req) that holds the same SOC_CONNECT exclusion lease as the
+#      async path but runs the connect inline on the main thread and calls the
+#      SHARED _apply_connection (State write + soc version bump + SocChangedPayload
+#      → FLUX-AWARE-MOCK provisioning), so the sync wire path and the async connect
+#      button produce identical side effects. The dispatch handler (_h_soc_connect)
+#      calls Controller.connect_sync then returns the soc summary. make_soc_proxy
+#      sets Pyro4 COMMTIMEOUT=1.0 (fail-fast for an unreachable board). The async
+#      start_connect + connection_finished/failed signals (measure SetupDialog +
+#      autofluxdep GUI depend on them) are untouched.
+GUI_VERSION = 40

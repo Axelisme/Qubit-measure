@@ -91,10 +91,30 @@ def make_soc_proxy(
     remote_traceback: bool = True,
     lookup_name: str = "myqick",
 ) -> tuple[Any, QickConfig]:
-    ns = Pyro4.locateNS(host=ns_host, port=ns_port)
-
-    soc = Pyro4.Proxy(ns.lookup(lookup_name))
-    soccfg = QickConfig(soc.get_cfg())
+    # CONNECT-TIME FAIL-FAST: scope the 1s cap to this function only.
+    #
+    # Two independent pieces must both be undone after connect:
+    #   1. Pyro4.config.COMMTIMEOUT is process-global — it must be restored so that
+    #      *other* proxies created later (or the same proxy reused) are not affected.
+    #   2. Pyro4.Proxy.__init__ SNAPSHOTS the current COMMTIMEOUT into _pyroTimeout
+    #      at construction time.  That means the returned `soc` would permanently carry
+    #      a 1s cap even after the global is restored — killing any measurement RPC
+    #      that takes more than 1s (program.acquire, sweeps, etc. can take minutes).
+    #      We must therefore explicitly reset soc._pyroTimeout after restoring the
+    #      global so the returned proxy is uncapped.
+    prev_timeout: float | None = Pyro4.config.COMMTIMEOUT  # type: ignore[attr-defined]
+    Pyro4.config.COMMTIMEOUT = 1.0  # type: ignore[attr-defined]
+    soc: Any = None
+    try:
+        ns = Pyro4.locateNS(host=ns_host, port=ns_port)
+        soc = Pyro4.Proxy(ns.lookup(lookup_name))  # snapshots 1.0 into _pyroTimeout
+        soccfg = QickConfig(soc.get_cfg())  # first call is under the 1s fail-fast cap
+    finally:
+        # Restore process-global so nothing outside this function sees the cap.
+        Pyro4.config.COMMTIMEOUT = prev_timeout  # type: ignore[attr-defined]
+        if soc is not None:
+            # Drop the 1s snapshot on the returned proxy; None means "no cap" (default).
+            soc._pyroTimeout = prev_timeout or None
 
     # adapted from https://pyro4.readthedocs.io/en/stable/errors.html and https://stackoverflow.com/a/70433500
     if remote_traceback:

@@ -126,11 +126,15 @@ def test_short_wait_timeout_degrades_to_pending():
     mcp_server._OP_BY_KEY.pop("tab:t2", None)
 
 
-def test_run_and_connect_are_override_tools_with_waits():
-    for t in (
-        "gui_run_start",
-        "gui_run_wait",
-        "gui_soc_connect",
-        "gui_soc_connect_wait",
-    ):
+def test_run_override_tools_with_waits():
+    # run keeps its async start/wait pair.
+    for t in ("gui_run_start", "gui_run_wait"):
         assert t in mcp_server.TOOLS
+
+
+def test_soc_connect_is_synchronous_no_wait_or_poll():
+    # soc.connect is synchronous now: the single gui_soc_connect override remains,
+    # but the async _wait / _poll tools are gone.
+    assert "gui_soc_connect" in mcp_server.TOOLS
+    assert "gui_soc_connect_wait" not in mcp_server.TOOLS
+    assert "gui_soc_connect_poll" not in mcp_server.TOOLS

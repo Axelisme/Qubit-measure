@@ -697,23 +697,39 @@ def test_startup_apply_missing_required_rejected(fx):
         sock.close()
 
 
-def test_connect_start_remote_missing_ip_rejected(fx):
+def test_soc_connect_remote_missing_ip_rejected(fx):
     sock = open_client(fx.service.port)
     try:
-        resp = call(sock, "connect.start", {"kind": "remote"})
+        resp = call(sock, "soc.connect", {"kind": "remote"})
         assert resp["ok"] is False
         assert resp["error"]["code"] == "invalid_params"
     finally:
         sock.close()
 
 
-def test_connect_start_mock_ok(fx):
-    fx.ctrl.start_connect = MagicMock(return_value=3)  # type: ignore[method-assign]
+def test_soc_connect_mock_returns_summary_directly(fx):
+    # soc.connect is synchronous: the handler calls Controller.connect_sync then
+    # reads back the SoC summary via get_soc_info — no operation_id / handle.
+    fx.ctrl.connect_sync = MagicMock()  # type: ignore[method-assign]
+    fx.ctrl.get_soc_info = MagicMock(  # type: ignore[method-assign]
+        return_value={
+            "description": "QICK mock board",
+            "cfg": {},
+            "is_mock": True,
+        }
+    )
     sock = open_client(fx.service.port)
     try:
-        resp = call(sock, "connect.start", {"kind": "mock"})
+        resp = call(sock, "soc.connect", {"kind": "mock"})
         assert resp["ok"] is True
-        fx.ctrl.start_connect.assert_called_once()
+        fx.ctrl.connect_sync.assert_called_once()
+        # The reply carries the soc summary directly (description + is_mock), with
+        # no operation_id (connect is no longer an async handle).
+        assert resp["result"]["soc"] == {
+            "description": "QICK mock board",
+            "is_mock": True,
+        }
+        assert "operation_id" not in resp["result"]
     finally:
         sock.close()
 

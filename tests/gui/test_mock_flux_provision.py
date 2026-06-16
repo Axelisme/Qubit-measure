@@ -121,6 +121,25 @@ def _connect_mock(fx: _Fixture) -> None:
     ), "fake_flux was not provisioned to the default operating value"
 
 
+def _connect_mock_sync(fx: _Fixture) -> None:
+    """Drive the SYNCHRONOUS connect path (the soc.connect wire RPC uses this).
+
+    connect_sync runs the connect inline on the calling thread and emits
+    SocChangedPayload synchronously, so the MockFluxProvisioner's SOC_CHANGED hook
+    fires before connect_sync returns; the fake_flux device connect + value setup
+    are still async background ops, so pump until CONNECTED at the default value —
+    the SAME terminal state the async _connect_mock asserts (parity proof)."""
+    fx.ctrl.connect_sync(ConnectMockRequest())
+    assert _pump_until(
+        lambda: (
+            (dev := fx.state.get_device(_FAKE_FLUX_DEVICE_NAME)) is not None
+            and dev.status is DeviceStatus.CONNECTED
+            and dev.info is not None
+            and getattr(dev.info, "value", None) == _FAKE_FLUX_INITIAL_VALUE
+        )
+    ), "sync connect did not provision fake_flux to the default operating value"
+
+
 # ---------------------------------------------------------------------------
 # Mock connect provisions fake_flux + binds it on the soc.
 # ---------------------------------------------------------------------------
@@ -155,6 +174,39 @@ def test_mock_connect_initial_value_is_reduced_flux_one(fx):
     assert dev is not None and dev.info is not None
     assert getattr(dev.info, "value") == _FAKE_FLUX_INITIAL_VALUE
     assert _FAKE_FLUX_INITIAL_VALUE == 0.5
+
+
+# ---------------------------------------------------------------------------
+# FLUX-AWARE-MOCK parity: the SYNCHRONOUS connect path (the soc.connect wire RPC)
+# must provision fake_flux + bind it identically to the async connect button.
+# ---------------------------------------------------------------------------
+
+
+def test_sync_connect_provisions_fake_flux_and_binds_soc(fx):
+    """connect_sync (the soc.connect path) auto-provisions fake_flux, ramps it to
+    the default operating value, and binds it on the soc — byte-for-byte the same
+    side effects the async start_connect produces (both share _apply_connection ->
+    SocChangedPayload -> MockFluxProvisioner)."""
+    _connect_mock_sync(fx)
+
+    dev = fx.state.get_device(_FAKE_FLUX_DEVICE_NAME)
+    assert dev is not None
+    assert dev.type_name == "FakeDevice"
+    assert dev.status is DeviceStatus.CONNECTED
+    assert dev.info is not None
+    assert getattr(dev.info, "value") == _FAKE_FLUX_INITIAL_VALUE
+
+    soc = fx.state.exp_context.soc
+    assert soc is not None
+    assert getattr(soc, "_sim_params").flux_device == _FAKE_FLUX_DEVICE_NAME
+
+
+def test_sync_connect_bumps_soc_version(fx):
+    """connect_sync bumps the soc resource version (the shared _apply_connection
+    side effect), so a version-guarded op sees the new SoC."""
+    soc_before = fx.state.version.get("soc")
+    _connect_mock_sync(fx)
+    assert fx.state.version.get("soc") == soc_before + 1
 
 
 # ---------------------------------------------------------------------------

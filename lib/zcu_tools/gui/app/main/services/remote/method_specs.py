@@ -300,11 +300,17 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     # integers are mcp/RPC bookkeeping and are never surfaced to the agent.
     "resources.versions": MethodSpec(5.0, "Snapshot of all resource versions"),
     # Connection / startup
-    "connect.start": MethodSpec(
-        30.0,
-        "Connect the SoC. kind='mock' for an offline mock board, or "
-        "kind='remote' with ip + port for a real board (ip/port required only "
-        "when kind='remote').",
+    "soc.connect": MethodSpec(
+        # Synchronous connect (runs on the main thread; the IO worker blocks on it).
+        # Bounded by make_soc_proxy's 1s COMMTIMEOUT for a remote board (mock is
+        # instant); a small margin above that keeps the timeout from firing before
+        # make_soc_proxy's own clean error does.
+        3.0,
+        "Connect the SoC SYNCHRONOUSLY and return its summary. kind='mock' for an "
+        "offline mock board, or kind='remote' with ip + port for a real board "
+        "(ip/port required only when kind='remote'). Returns {soc: {description, "
+        "is_mock}} once connected (the structured cfg is read on demand via "
+        "soc.info). A remote connect fails fast (~1s) if the board is unreachable.",
         (
             _str("kind", "'mock' or 'remote'"),
             _str_opt("ip", "Board IP (required when kind='remote')"),
@@ -395,9 +401,9 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "track each one.",
     ),
     # Async operation handle: block until an operation (device.connect /
-    # device.disconnect / device.setup / run.start / connect.start, identified by
-    # the operation_id they return) settles. mcp bookkeeping only — agents drive
-    # it via semantic wait tools, never raw.
+    # device.disconnect / device.setup / run.start, identified by the operation_id
+    # they return) settles. mcp bookkeeping only — agents drive it via semantic
+    # wait tools, never raw. (soc.connect is NOT here: it is a synchronous RPC.)
     "operation.await": MethodSpec(
         130.0,
         "Block until an async operation settles (by operation_id)",

@@ -231,7 +231,7 @@ def test_invalid_typed_request_rejected(fx):
     sock = _open_client(fx.service.port)
     try:
         # missing 'kind'
-        _send(sock, {"id": "1", "method": "connect.start", "params": {}})
+        _send(sock, {"id": "1", "method": "soc.connect", "params": {}})
         resp = _recv_response(sock)
         assert resp["ok"] is False
         assert resp["error"]["code"] == "invalid_params"

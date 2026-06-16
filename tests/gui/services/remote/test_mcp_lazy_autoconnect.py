@@ -66,7 +66,7 @@ def test_auto_connects_then_forwards_when_gui_discoverable(disconnected, monkeyp
 
 def test_does_not_auto_start_soc(disconnected, monkeypatch):
     # Auto-connect attaches the control channel only — it must never trigger a
-    # connect.start (SoC choice is the user's, not an attach side effect).
+    # soc.connect (SoC choice is the user's, not an attach side effect).
     fake = FakeTransport()
     fake.replies["resources.versions"] = _versions_reply({})
     monkeypatch.setattr(mcp_server, "resolve_connect_port", lambda _cfg, _req: 9911)
@@ -80,7 +80,7 @@ def test_does_not_auto_start_soc(disconnected, monkeypatch):
     mcp_server.send_gui_rpc("tab.snapshot", {"tab_id": "t"})
 
     sent_methods = [m for (m, _p) in fake.sent]
-    assert "connect.start" not in sent_methods
+    assert "soc.connect" not in sent_methods
 
 
 def test_raises_clear_error_when_no_gui(disconnected, monkeypatch):

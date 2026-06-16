@@ -7,7 +7,7 @@ xvfb), then speaks the *same* newline-delimited JSON RPC the bridge speaks —
 so it verifies the whole experiment loop without needing an MCP client.
 
 What it proves (mock SoC, no hardware):
-  connect.start(mock) -> startup.apply -> context -> tab.new(fake/freq)
+  soc.connect(mock) -> startup.apply -> context -> tab.new(fake/freq)
   -> editor.set_field(reps/rounds) -> run.start -> operation.progress (live)
   -> wait for run_finished event -> analyze.start -> save.data
   -> tab.close -> clean shutdown.
@@ -93,8 +93,12 @@ def main() -> int:
         rpc = Rpc(sock)
 
         # 2. Mock SoC + project + context — the same RPC path a GUI user takes
-        #    (connect.start + startup.apply + context), no mock-only shortcut.
-        rpc.call("connect.start", {"kind": "mock"})
+        #    (soc.connect + startup.apply + context), no mock-only shortcut.
+        #    soc.connect is synchronous: it returns once the SoC is connected
+        #    (and the FLUX-AWARE-MOCK fake_flux provisioning has been kicked off),
+        #    so the state.has_soc poll below settles immediately.
+        soc_reply = rpc.call("soc.connect", {"kind": "mock"})
+        assert soc_reply["soc"]["is_mock"] is True, soc_reply
         rpc.call(
             "startup.apply",
             {

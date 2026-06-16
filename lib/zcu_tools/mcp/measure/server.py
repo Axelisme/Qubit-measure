@@ -275,7 +275,16 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
 #      connect family from gui_connect (the MCP bridge attach). The underlying
 #      wire RPCs (connect.start / operation.await / operation.poll keyed by "soc")
 #      are unchanged; only the agent-facing MCP tool names changed.
-MCP_VERSION = 40
+# MCP 41: SoC connect is now synchronous (WIRE 33). The async connect.start +
+#      "soc" operation-handle is replaced by a synchronous soc.connect RPC;
+#      gui_soc_connect makes one blocking call (explicit ~2s timeout so the
+#      board-side 1s COMMTIMEOUT fires first) and returns {status:'finished',
+#      soc:{description, is_mock}} directly. Removed gui_soc_connect_wait /
+#      gui_soc_connect_poll and the "soc" key from _OP_KEY_OF; soc.connect is
+#      hand-written (in _NON_GENERATED_METHODS). run / analyze / device keep their
+#      async-handle contract. _SERVER_INSTRUCTIONS no longer lists connect among
+#      the degrading async ops.
+MCP_VERSION = 41
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -314,14 +323,18 @@ running experiments. Run/save require an active file-backed context; save/analyz
 require an existing run result. A precondition violation returns
 precondition_failed; editing cfg while a tab is running likewise.
 
-Async ops (run / connect / analyze / post_analyze / device) share ONE contract —
+gui_soc_connect is SYNCHRONOUS — NOT part of the async-handle family: it blocks
+until the SoC is connected and returns {status:'finished', soc:{...}} in one call
+(no _wait / _poll). A remote board that is unreachable fails fast (~1s).
+
+The other async ops (run / analyze / post_analyze / device) share ONE contract —
 the per-tool descriptions only name what each waits on; the mechanics live here.
 Completion is detected by wait/poll on a handle, NOT events (nothing is pushed):
-  - A short-wait START (gui_*_start, gui_analyze, gui_post_analyze, gui_device_*)
+  - A short-wait START (gui_run_start, gui_analyze, gui_post_analyze, gui_device_*)
     waits up to wait_seconds (default 1.0): settles in time -> {status:'finished',
-    <product>} (gui_run_start -> tab; gui_soc_connect -> soc; gui_analyze /
-    gui_post_analyze -> summary; gui_device_* -> snapshot); a slow one degrades to
-    {status:'pending'}, which you then drive with the matching _wait / _poll.
+    <product>} (gui_run_start -> tab; gui_analyze / gui_post_analyze -> summary;
+    gui_device_* -> snapshot); a slow one degrades to {status:'pending'}, which you
+    then drive with the matching _wait / _poll.
   - _poll returns immediately: 'finished' | 'running' | 'cancelled' | 'failed' |
     'no_operation'. 'cancelled' (user/agent cancel) is distinct from 'failed'.
     While 'running' the reply folds the live progress bars
@@ -435,7 +448,7 @@ _GUARD_DEPS: dict[str, tuple[str, ...]] = {
 
 # --- Async-operation handle bookkeeping (operation_id <-> semantic name) ------
 #
-# Start ops (device.setup / run.start / connect.start) return an ``operation_id``
+# Start ops (device.setup / run.start) return an ``operation_id``
 # the agent never sees (mcp/RPC bookkeeping, like version numbers). The agent
 # refers to an in-flight operation by a name it understands; mcp maps that
 # semantic key to the latest operation_id for it. ``operation.await`` then
@@ -451,7 +464,6 @@ _OP_KEY_OF: dict[str, Callable[[dict[str, Any]], str]] = {
     "device.disconnect": lambda p: f"device:{p.get('name', '')}",
     "device.setup": lambda p: f"device:{p.get('name', '')}",
     "run.start": lambda p: f"tab:{p.get('tab_id', '')}",
-    "connect.start": lambda p: "soc",  # noqa: ARG005 — uniform signature
     "analyze.start": lambda p: f"analyze:{p.get('tab_id', '')}",
     "post_analyze.start": lambda p: f"post_analyze:{p.get('tab_id', '')}",
 }
@@ -609,7 +621,7 @@ def _ensure_connected() -> None:
     resolve_connect_port), so it stays here rather than in the shared bridge,
     whose send_rpc_raw also serves the read-only apps.
 
-    Only the control channel is attached — never connect.start: choosing the SoC
+    Only the control channel is attached — never soc.connect: choosing the SoC
     (mock vs remote) is the user's decision, not an auto-connect side effect.
 
     Fail-fast when no GUI is discoverable, with a message that no longer tells
@@ -1165,8 +1177,9 @@ def _start_op_with_short_wait(
     - still running -> ``{status:'pending', message:<hint>}`` so the caller can
       use the matching wait tool. operation.await still raises on failure/cancel.
 
-    Shared by device connect/disconnect/setup, run.start, and connect.start —
-    every op that has both a fast and a slow mode gets the same degrade.
+    Shared by device connect/disconnect/setup and run.start — every op that has
+    both a fast and a slow mode gets the same degrade. (soc.connect is excluded:
+    it is synchronous now and returns its product directly.)
     """
     operation_id = _OP_BY_KEY.get(key)
     if operation_id is None:
@@ -1224,16 +1237,6 @@ def tool_gui_device_poll(arguments: dict[str, Any]) -> dict[str, Any]:
     disconnect / setup): finished / running / failed / no_operation."""
     name = str(arguments["name"])
     return _poll_operation_by_key(f"device:{name}", f"Device {name!r} operation")
-
-
-def tool_gui_soc_connect_poll(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Non-blocking status of the SoC connect: finished / running / failed /
-    no_operation. On finished, also returns the SoC hardware summary."""
-    del arguments
-    result = _poll_operation_by_key("soc", "SoC connect")
-    if result.get("status") == "finished":
-        result["soc"] = _connect_soc_summary()
-    return result
 
 
 def tool_gui_run_start(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -1409,57 +1412,27 @@ def tool_gui_post_analyze_poll(arguments: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def _connect_soc_summary() -> dict[str, Any]:
-    """The SoC summary folded into a settled connect reply: only the human-
-    readable ``description`` (the compact describe_soc per-channel table) +
-    ``is_mock``. The structured ``cfg`` (full per-channel detail incl. DDS / freq
-    ranges — ~2 KB) is NOT folded here; it is rarely needed at connect time. Fetch
-    it on demand with gui_soc_info."""
-    info = send_gui_rpc("soc.info", {})
-    return {
-        "description": info.get("description"),
-        "is_mock": info.get("is_mock"),
-    }
-
-
 def tool_gui_soc_connect(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Connect the SoC, waiting briefly for the (usually fast) connect to land.
+    """Connect the SoC SYNCHRONOUSLY and return its hardware summary.
 
-    Degrades like device ops: settles -> {status:'finished', soc:<summary>};
-    still running -> {status:'pending'} (await with gui_soc_connect_wait). kind='mock'
-    or kind='remote' with ip+port. The settled reply folds in only the SoC
-    *description* + is_mock; call gui_soc_info for the structured cfg.
+    Unlike run / analyze / device ops, connect is no longer a degrading async
+    handle: the soc.connect RPC runs the connect on the GUI's main thread and
+    returns once the board is connected and all post-connect side effects are
+    applied, so this is one blocking call with no _wait / _poll follow-up.
+    kind='mock' (offline) or kind='remote' with ip+port. Returns
+    {soc:{description, is_mock}}; call gui_soc_info for the structured cfg. A
+    remote connect to an unreachable board fails fast (~1s).
     """
     params: dict[str, Any] = {"kind": str(arguments["kind"])}
     if "ip" in arguments:
         params["ip"] = str(arguments["ip"])
     if "port" in arguments:
         params["port"] = int(arguments["port"])
-    wait_seconds = float(arguments.get("wait_seconds", 1.0))
-    send_gui_rpc("connect.start", params)
-    # On a settled connect, fold in only the SoC hardware summary so the agent
-    # sees the board (per-channel type / sample rate / port / max length) in the
-    # same reply, without a separate gui_soc_info round-trip. The view snapshot is
-    # NOT folded here — at connect time (before a project is applied) it is mostly
-    # empty / about to go stale; use gui_overview + gui_state_check for that.
-    return _start_op_with_short_wait(
-        "soc",
-        "SoC connect",
-        wait_seconds,
-        lambda: {"soc": _connect_soc_summary()},
-        "await it with gui_soc_connect_wait() or poll gui_soc_connect_poll().",
-    )
-
-
-def tool_gui_soc_connect_wait(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Block until the SoC connect completes (semantic wait). Raises only on
-    genuine failure; returns status='cancelled' (NOT a raise) on cancellation.
-    On success also returns the SoC hardware summary (same as gui_soc_info)."""
-    timeout = float(arguments.get("timeout", 120.0))
-    result = _await_operation_by_key("soc", "SoC connect", timeout)
-    if result.get("status") == "finished":
-        result["soc"] = _connect_soc_summary()
-    return result
+    # Explicit per-call timeout ~2.0s: a small margin above make_soc_proxy's 1s
+    # COMMTIMEOUT so the board-side 1s cap fires first with a clean error, rather
+    # than this socket round-trip being cut. Do NOT rely on the 30s default here.
+    result = send_gui_rpc("soc.connect", params, 2.0)
+    return {"status": "finished", "soc": result.get("soc")}
 
 
 def tool_gui_dialog_screenshot(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -1649,11 +1622,13 @@ _NON_GENERATED_METHODS = frozenset(
         # operation progress by id: internal — the poll tools fold its bars into
         # their reply, so the agent never calls it directly.
         "operation.progress",
-        # hand-written short-wait degrade (like device ops): a fast run / connect
-        # returns its product, a slow one degrades to a handle (gui_run_wait /
-        # gui_soc_connect_wait).
+        # hand-written short-wait degrade (like device ops): a fast run returns its
+        # product, a slow one degrades to a handle (gui_run_wait).
         "run.start",
-        "connect.start",
+        # hand-written synchronous wrapper (passes an explicit ~2s timeout so the
+        # board-side 1s COMMTIMEOUT fires first); not auto-generated so the override
+        # gui_soc_connect tool is the only soc-connect surface.
+        "soc.connect",
         # hand-written short-wait degrade (analyze is an async worker / interactive
         # pick; mirrors run.start). To see the fit plot the agent calls
         # gui_tab_get_current_figure.
@@ -2171,11 +2146,12 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
     "gui_soc_connect": {
         "handler": tool_gui_soc_connect,
         "description": (
-            "Connect the SoC (shared short-wait START contract — see server "
-            "instructions). kind='mock' (offline) or kind='remote' with ip+port. "
-            "Settles -> {status:'finished', soc:{description, is_mock}} (call "
-            "gui_soc_info for the structured cfg); slow -> {status:'pending'} "
-            "(gui_soc_connect_wait / gui_soc_connect_poll)."
+            "Connect the SoC SYNCHRONOUSLY (NOT a degrading async handle — there is "
+            "no gui_soc_connect_wait / _poll). One blocking call returns "
+            "{status:'finished', soc:{description, is_mock}} once the board is "
+            "connected (call gui_soc_info for the structured cfg). kind='mock' "
+            "(offline) or kind='remote' with ip+port. A remote connect to an "
+            "unreachable board fails fast (~1s)."
         ),
         "inputSchema": {
             "type": "object",
@@ -2183,40 +2159,9 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
                 "kind": {"type": "string", "description": "'mock' or 'remote'"},
                 "ip": {"type": "string", "description": "Board IP (remote)"},
                 "port": {"type": "integer", "description": "Board port (remote)"},
-                "wait_seconds": {
-                    "type": "number",
-                    "description": "Seconds to wait before degrading to a handle (default 1.0)",
-                },
             },
             "required": ["kind"],
         },
-    },
-    "gui_soc_connect_wait": {
-        "handler": tool_gui_soc_connect_wait,
-        "description": (
-            "Block until the SoC connect completes (shared async _wait contract — "
-            "see server instructions). Use after gui_soc_connect returned "
-            "status='pending'. On 'finished' also returns the SoC summary (same as "
-            "gui_soc_info)."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "timeout": {
-                    "type": "number",
-                    "description": "Seconds to wait (default 120)",
-                },
-            },
-        },
-    },
-    "gui_soc_connect_poll": {
-        "handler": tool_gui_soc_connect_poll,
-        "description": (
-            "Non-blocking status of the SoC connect (shared async _poll contract — "
-            "see server instructions). On 'finished', also returns the SoC hardware "
-            "summary (same as gui_soc_info)."
-        ),
-        "inputSchema": {"type": "object", "properties": {}},
     },
     "gui_dialog_screenshot": {
         "handler": tool_gui_dialog_screenshot,
@@ -2439,8 +2384,6 @@ _OVERRIDE_NAMES = frozenset(
         "gui_post_analyze_wait",
         "gui_post_analyze_poll",
         "gui_soc_connect",
-        "gui_soc_connect_wait",
-        "gui_soc_connect_poll",
         "gui_device_poll",
         "gui_notify_user",
     }

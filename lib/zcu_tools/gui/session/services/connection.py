@@ -132,6 +132,71 @@ class SoCConnectionService(QObject):
     # Connect (async-shaped API, OperationRunner client)
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _run_connect_work(req: ConnectRequest) -> tuple[SocHandle, SocCfgHandle]:
+        """Do the actual SoC connect, returning the (soc, soccfg) handles.
+
+        The single source of truth for "how a connect is performed", shared by the
+        async ``start_connect`` (off-main via the runner) and the synchronous
+        ``connect_sync`` (on-main via the wire). It does only the connect itself —
+        no State writes, no version bump, no event emit (those are the caller's job
+        via ``_apply_connection``), so neither caller's threading model leaks in.
+        """
+        if isinstance(req, ConnectMockRequest):
+            from zcu_tools.program.v2.mocksoc import make_mock_soc
+            from zcu_tools.program.v2.sim import DEFAULT_SIMPARAM
+
+            sim = req.sim_params if req.sim_params is not None else DEFAULT_SIMPARAM
+            return make_mock_soc(sim=sim)
+        # remote
+        try:
+            from zcu_tools.remote import make_soc_proxy
+        except ImportError as exc:
+            raise SoCConnectionError(
+                f"Cannot import ZCU client libraries: {exc}. "
+                "Use MockSoc for offline testing."
+            ) from exc
+        return make_soc_proxy(req.ip, req.port)
+
+    def connect_sync(self, req: ConnectRequest) -> tuple[SocHandle, SocCfgHandle]:
+        """Connect synchronously on the calling (Qt main) thread.
+
+        The wire path (``soc.connect``) wants a single blocking call that returns
+        the connected SoC directly, with all post-connect side effects applied
+        before it returns — so it runs on-main and the IO worker blocks on it. It
+        still holds the same SOC_CONNECT exclusion lease as the async path (so the
+        wire connect and the GUI's connect button cannot race), minting a token
+        purely as the lease handle (no async await: the work runs inline here, not
+        on a bg thread). On success it calls the shared ``_apply_connection`` — the
+        identical side-effect routine the async finished-handler uses — so the
+        FLUX-AWARE-MOCK provisioning (driven off the emitted SocChangedPayload),
+        the State write and the soc version bump are byte-for-byte the same.
+        """
+        if not isinstance(req, (ConnectMockRequest, ConnectRemoteRequest)):
+            raise TypeError(f"Unsupported connect request: {type(req).__name__}")
+
+        is_mock = isinstance(req, ConnectMockRequest)
+        # Hold the SOC_CONNECT lease for the whole synchronous connect so it cannot
+        # race the GUI's connect button (or an async start_connect). A connect has
+        # no cancellation point, so the token is a lease handle only (cancel_hook
+        # None); it is settled + released in the finally regardless of outcome.
+        self._gate.ensure_can_start(OperationKind.SOC_CONNECT, resource_id=None)
+        token = self._handles.create(cancel_hook=None)
+        self._gate.register(token, OperationKind.SOC_CONNECT, owner_id="soc")
+        self._active_token = token
+        self._pending_is_mock = is_mock
+        try:
+            soc, soccfg = self._run_connect_work(req)
+            self._apply_connection(soc, soccfg, is_mock)
+            self._handles.settle(token, OperationOutcome("finished"))
+            return soc, soccfg
+        except Exception as exc:
+            self._handles.settle(token, OperationOutcome("failed", _format_error(exc)))
+            raise
+        finally:
+            self._active_token = None
+            self._gate.release(token)
+
     def start_connect(self, req: ConnectRequest) -> int:
         """Start a SoC connect; outcome always arrives via signals.
 
@@ -143,33 +208,11 @@ class SoCConnectionService(QObject):
             raise TypeError(f"Unsupported connect request: {type(req).__name__}")
 
         is_mock = isinstance(req, ConnectMockRequest)
-        # Capture the mock sim_params outside the closure so pyright can narrow the
-        # type: req is ConnectMockRequest here, so .sim_params is unambiguous.
-        mock_sim_params: Any = req.sim_params if is_mock else None
-        # Capture remote fields outside the closure for the same reason.
-        remote_ip: str = req.ip if isinstance(req, ConnectRemoteRequest) else ""
-        remote_port: int = req.port if isinstance(req, ConnectRemoteRequest) else 0
 
         def work(factory: Any) -> tuple[SocHandle, SocCfgHandle]:
             # factory is None (wants_progress=False). Both branches run off-main via
             # bg.submit, preserving the async signal contract for mock and remote.
-            if is_mock:
-                from zcu_tools.program.v2.mocksoc import make_mock_soc
-                from zcu_tools.program.v2.sim import DEFAULT_SIMPARAM
-
-                sim = (
-                    mock_sim_params if mock_sim_params is not None else DEFAULT_SIMPARAM
-                )
-                return make_mock_soc(sim=sim)
-            # remote
-            try:
-                from zcu_tools.remote import make_soc_proxy
-            except ImportError as exc:
-                raise SoCConnectionError(
-                    f"Cannot import ZCU client libraries: {exc}. "
-                    "Use MockSoc for offline testing."
-                ) from exc
-            return make_soc_proxy(remote_ip, remote_port)
+            return self._run_connect_work(req)
 
         def on_terminal(bg: BgResult, settle: SettleFn) -> None:
             # Runs on main thread (bg marshal). _apply_connection writes State and

@@ -753,12 +753,29 @@ def coerce_disconnect_device_request(
     )
 
 
-def _h_connect_start(
+def _h_soc_connect(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
+    # Synchronous connect: runs on the Qt main thread (the IO worker blocks on the
+    # _dispatch_on_main marshal), so the connect work + ALL post-connect side
+    # effects (State write, soc version bump, SocChangedPayload → FLUX-AWARE-MOCK
+    # provisioning) complete before this returns. A connect failure raises a typed
+    # RemoteError. The worst-case main-thread block is bounded by make_soc_proxy's
+    # 1s COMMTIMEOUT for a remote board (mock is instant). Connect is no longer an
+    # async operation handle — run / analyze / device keep theirs.
     req = coerce_connect_request(params)
-    operation_id = adapter.ctrl.start_connect(req)
-    return {"operation_id": operation_id}
+    try:
+        adapter.ctrl.connect_sync(req)
+    except Exception as exc:
+        raise RemoteError(
+            ErrorCode.CONTROLLER_ERROR,
+            f"SoC connect failed: {exc}",
+        ) from exc
+    # Return the SoC summary directly — the same {description, is_mock} the old
+    # finished short-wait reply folded in. The structured cfg is fetched on demand
+    # via soc.info (it is ~2 KB and rarely needed at connect time).
+    info = adapter.ctrl.get_soc_info()
+    return {"soc": {"description": info["description"], "is_mock": info["is_mock"]}}
 
 
 def _h_startup_apply(
@@ -1908,7 +1925,7 @@ _HANDLERS: dict[str, Handler] = {
     "soc.info": _h_soc_info,
     "project.info": _h_project_info,
     "resources.versions": _h_resources_versions,
-    "connect.start": _h_connect_start,
+    "soc.connect": _h_soc_connect,
     "startup.apply": _h_startup_apply,
     "device.connect": _h_device_connect,
     "device.disconnect": _h_device_disconnect,
