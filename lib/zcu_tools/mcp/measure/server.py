@@ -349,7 +349,21 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
 #      stops before analyze); stage3 = analyze (folds summary+figure+writeback_
 #      preview, pending on INTERACTIVE); stage4 = writeback+save (apply, optional
 #      save_data folds data_path).
-MCP_VERSION = 45
+# MCP 46: figure fold re-added to the four plot-producing base ops (no wire change).
+#      The FIGURE is each op's OWN visual result, so folding it into a FINISHED
+#      reply is "pure" by the same logic as the inline summary. The NON-plot folds
+#      (writeback_preview, save, cfg reads, guide) remain ONLY in the stageN bundles.
+#        - gui_run_start: FINISHED reply includes 'figure' (same path as before
+#          MCP 45). Pending remains pure (no figure).
+#        - gui_run_wait: FINISHED reply includes 'figure'. Non-finished unchanged.
+#        - gui_run_poll: FINISHED branch includes 'figure'. Running/cancelled unchanged.
+#        - gui_analyze: FINISHED (FIT) reply includes 'figure'. INTERACTIVE 'pending'
+#          (no settled plot) does NOT. writeback_preview stays in gui_run_stage3 only.
+#      gui_run_stage2 and gui_run_stage3 no longer double-fold the figure — they
+#      inherit it from the underlying run/analyze reply they wrap.
+#      gui_tab_get_current_figure description updated: marked rarely-needed (normally
+#      read the folded figure from the run/analyze finished reply instead).
+MCP_VERSION = 46
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -376,10 +390,12 @@ Tool families:
     (a tab's cfg form is the editor session keyed by its tab_id — pass tab_id or
     an explicit editor_id).
   - Run + analyze: gui_run_start, gui_analyze, gui_post_analyze (each waits briefly
-    then degrades to a handle). gui_tab_get_analyze_result /
-    gui_tab_get_post_analyze_result read the fit summary; gui_tab_get_current_figure
-    renders a small PNG of the current plot. gui_save_data / _image / _result /
-    _post_image persist and return the resolved written path.
+    then degrades to a handle). A FINISHED run/analyze reply already carries 'figure'
+    — the plot rendered to a temp PNG — so a separate gui_tab_get_current_figure call
+    is rarely needed (use it only for a re-render, mid-flight plot, or custom
+    out_path). gui_tab_get_analyze_result / gui_tab_get_post_analyze_result re-read
+    the fit summary; gui_save_data / _image / _result / _post_image persist and
+    return the resolved written path.
   - Async handles: every degrading op exposes a _wait (blocking) and a _poll
     (non-blocking) tool keyed by name/tab_id.
 
@@ -397,9 +413,10 @@ the per-tool descriptions only name what each waits on; the mechanics live here.
 Completion is detected by wait/poll on a handle, NOT events (nothing is pushed):
   - A short-wait START (gui_run_start, gui_analyze, gui_post_analyze, gui_device_*)
     waits up to wait_seconds (default 1.0): settles in time -> {status:'finished',
-    <product>} (gui_run_start -> tab; gui_analyze / gui_post_analyze -> summary;
-    gui_device_* -> snapshot); a slow one degrades to {status:'pending'}, which you
-    then drive with the matching _wait / _poll.
+    <product>} (gui_run_start -> {tab, figure}; gui_analyze -> {summary, figure};
+    gui_post_analyze -> {summary}; gui_device_* -> {snapshot}); a slow one degrades
+    to {status:'pending'}, which you then drive with the matching _wait / _poll.
+    gui_run_wait and gui_run_poll also fold 'figure' on 'finished'.
   - _poll returns immediately: 'finished' | 'running' | 'cancelled' | 'failed' |
     'no_operation'. 'cancelled' (user/agent cancel) is distinct from 'failed'.
     While 'running' the reply folds the live progress bars
@@ -1328,23 +1345,26 @@ def tool_gui_run_start(arguments: dict[str, Any]) -> dict[str, Any]:
 
     A run has both modes — a tiny sweep finishes in well under a second, a big
     one takes minutes — so it degrades like device ops: settles in time ->
-    {status:'finished', tab:<tab.snapshot>} (has_run_result reflects the result);
-    still running -> {status:'pending'} (await with gui_run_wait or poll with
-    gui_run_poll). send_gui_rpc attaches the version guard + captures the
-    operation_id under tab:<tab_id>. To look at the plot, call
-    gui_tab_get_current_figure (the figure is NOT folded here — this tool returns
-    only the run's own result; the figure fold lives in gui_run_stage2).
+    {status:'finished', tab:<tab.snapshot>, figure:<path>} (has_run_result set;
+    figure is the run plot rendered to a temp PNG, the op's OWN visual result);
+    still running -> {status:'pending'} (no figure yet; await with gui_run_wait or
+    poll with gui_run_poll). send_gui_rpc attaches the version guard + captures
+    the operation_id under tab:<tab_id>.
     """
     tab_id = str(arguments["tab_id"])
     wait_seconds = float(arguments.get("wait_seconds", 1.0))
     send_gui_rpc("run.start", {"tab_id": tab_id})
-    return _start_op_with_short_wait(
+    reply = _start_op_with_short_wait(
         f"tab:{tab_id}",
         f"Run on tab {tab_id!r}",
         wait_seconds,
         lambda: {"tab": _run_tab_summary(tab_id)},
         f"await it with gui_run_wait(tab_id={tab_id!r}).",
     )
+    # The figure is this op's OWN visual result — fold it on FINISHED only
+    # (a pending run has no settled plot yet). Failure is swallowed so a
+    # plotting hiccup never masks an otherwise-good run reply.
+    return _fold_finished_figure(tab_id, reply)
 
 
 def tool_gui_run_wait(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -1352,21 +1372,23 @@ def tool_gui_run_wait(arguments: dict[str, Any]) -> dict[str, Any]:
     gui_device_wait_operation). Raises only on genuine failure. A cancelled run
     returns {status:'cancelled', feedback?} — read 'feedback' for the Stop reason
     (present when the user used "Send & Stop", absent on a plain cancel). On
-    status='finished' look at the plot with gui_tab_get_current_figure(tab_id)
-    (the figure is NOT folded here)."""
+    status='finished' the reply carries 'figure' — the run plot rendered to a
+    temp PNG (the op's OWN visual result)."""
     tab_id = str(arguments["tab_id"])
     timeout = float(arguments.get("timeout", 600.0))
-    return _await_operation_by_key(f"tab:{tab_id}", f"Run on tab {tab_id!r}", timeout)
+    reply = _await_operation_by_key(f"tab:{tab_id}", f"Run on tab {tab_id!r}", timeout)
+    return _fold_finished_figure(tab_id, reply)
 
 
 def tool_gui_run_poll(arguments: dict[str, Any]) -> dict[str, Any]:
     """Non-blocking status of the run on ``tab_id``: finished / running / failed
     / no_operation. Lets the agent start a slow run, do other work, then check
-    back without blocking (replaces watching the run_finished event). Returns just
-    the poll status (no figure fold); look at the plot with
-    gui_tab_get_current_figure(tab_id)."""
+    back without blocking. On 'finished' the reply carries 'figure' — the run
+    plot rendered to a temp PNG (the op's OWN visual result). Running / cancelled
+    / failed / no_operation replies are unchanged."""
     tab_id = str(arguments["tab_id"])
-    return _poll_operation_by_key(f"tab:{tab_id}", f"Run on tab {tab_id!r}")
+    reply = _poll_operation_by_key(f"tab:{tab_id}", f"Run on tab {tab_id!r}")
+    return _fold_finished_figure(tab_id, reply)
 
 
 def _fold_analyze_params(tab_id: str, reply: dict[str, Any]) -> dict[str, Any]:
@@ -1411,16 +1433,16 @@ def tool_gui_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
     Analyze has both modes — a FIT computes on a worker (usually finishes in well
     under a second), an INTERACTIVE pick waits for the USER to mark the plot and
     click Done (never settles in the short wait). So it degrades like gui_run_start:
-    settles -> {status:'finished', summary}; still running -> {status:'pending'}
-    (await with gui_analyze_wait or gui_analyze_poll). For an INTERACTIVE adapter
-    (see gui_adapter_guide) a 'pending' is expected — prompt the user to do the
-    pick, then poll. 'updates' optionally overrides analyze params. A finished FIT
-    reply carries the fit 'summary' (same shape as gui_tab_get_analyze_result —
-    analyze's OWN result, the *_err fields included); look at the fit plot with
-    gui_tab_get_current_figure and review the proposed writeback with
-    gui_writeback_preview (neither is folded here — this tool returns only the
-    analyze result; the figure + writeback-preview folds live in gui_run_stage3).
-    'summary' is None on an INTERACTIVE 'pending' (nothing settled yet).
+    settles -> {status:'finished', summary, figure}; still running ->
+    {status:'pending'} (await with gui_analyze_wait or gui_analyze_poll). For an
+    INTERACTIVE adapter (see gui_adapter_guide) a 'pending' is expected — prompt
+    the user to do the pick, then poll. 'updates' optionally overrides analyze
+    params. A finished FIT reply carries the fit 'summary' (same shape as
+    gui_tab_get_analyze_result — analyze's OWN result, the *_err fields included)
+    AND 'figure' — the fit plot rendered to a temp PNG (analyze's OWN visual
+    result). Review the proposed writeback with gui_writeback_preview (not folded
+    here; that fold lives in gui_run_stage3). 'summary' is None and no 'figure'
+    on an INTERACTIVE 'pending' (nothing settled yet).
     """
     tab_id = str(arguments["tab_id"])
     wait_seconds = float(arguments.get("wait_seconds", 1.0))
@@ -1431,7 +1453,7 @@ def tool_gui_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
     # then wait briefly. A FIT usually finishes here; an INTERACTIVE pick degrades
     # to a handle the user/agent then drives to completion.
     send_gui_rpc("analyze.start", params)
-    return _start_op_with_short_wait(
+    reply = _start_op_with_short_wait(
         f"analyze:{tab_id}",
         f"Analyze on tab {tab_id!r}",
         wait_seconds,
@@ -1439,6 +1461,10 @@ def tool_gui_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
         f"poll with gui_analyze_poll(tab_id={tab_id!r}); for an INTERACTIVE pick, "
         "prompt the user to mark the lines + click Done first.",
     )
+    # The figure is analyze's OWN visual result — fold it on a FINISHED FIT reply.
+    # An INTERACTIVE 'pending' has no settled plot yet (_fold_finished_figure is a
+    # no-op on any non-finished status). writeback_preview stays in gui_run_stage3.
+    return _fold_finished_figure(tab_id, reply)
 
 
 def tool_gui_analyze_wait(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -1688,10 +1714,10 @@ def tool_gui_run_stage2(arguments: dict[str, Any]) -> dict[str, Any]:
             }
         )
     reply = tool_gui_run_start({"tab_id": tab_id})
-    # On a FINISHED run only: fold the run figure + the analyze-params spec. A
-    # 'pending' run has nothing settled, so both folds are skipped (they no-op on
-    # a non-finished reply).
-    reply = _fold_finished_figure(tab_id, reply)
+    # The figure is already folded by tool_gui_run_start (MCP 46); do NOT
+    # double-fold it here. Only add analyze_params (the stage-specific fold).
+    # _fold_analyze_params is a no-op on a non-finished reply, so the pending
+    # path is safe.
     return _fold_analyze_params(tab_id, reply)
 
 
@@ -1707,7 +1733,8 @@ def tool_gui_run_stage3(arguments: dict[str, Any]) -> dict[str, Any]:
     """
     tab_id = str(arguments["tab_id"])
     reply = tool_gui_analyze({"tab_id": tab_id})
-    reply = _fold_finished_figure(tab_id, reply)
+    # The figure is already folded by tool_gui_analyze (MCP 46); do NOT
+    # double-fold it here. Only add writeback_preview (the stage-specific fold).
     return _fold_writeback_preview(tab_id, reply)
 
 
@@ -2231,10 +2258,11 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
         "handler": tool_gui_run_start,
         "description": (
             "Start a run on tab_id (shared short-wait START contract — see server "
-            "instructions). A fast run (small reps/rounds) settles -> "
-            "{status:'finished', tab:{...}} (tab snapshot, has_run_result set); a "
-            "slow run degrades to {status:'pending'} (drive with gui_run_wait / "
-            "gui_run_poll)."
+            "instructions). A fast run settles -> {status:'finished', tab:{...}, "
+            "figure:<path>} — the tab snapshot (has_run_result set) AND the run "
+            "plot rendered to a temp PNG (the run's OWN visual result). A slow run "
+            "degrades to {status:'pending'} (no figure yet; drive with gui_run_wait "
+            "/ gui_run_poll)."
         ),
         "inputSchema": {
             "type": "object",
@@ -2254,8 +2282,8 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "Block until the run on tab_id completes (the shared async _wait "
             "contract — see the server instructions for blocking / background / "
             "user-feedback / timed_out semantics). Use after gui_run_start returned "
-            "status='pending'. On 'finished', see the plot with "
-            "gui_tab_get_current_figure(tab_id)."
+            "status='pending'. On 'finished', the reply carries 'figure' — the run "
+            "plot rendered to a temp PNG (the run's OWN visual result)."
         ),
         "inputSchema": {
             "type": "object",
@@ -2274,8 +2302,9 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
         "description": (
             "Non-blocking status of the run on tab_id (shared async _poll contract "
             "— see server instructions for the status enum + folded progress bars). "
-            "Returns just the poll status (no figure fold); on 'finished' look at "
-            "the plot with gui_tab_get_current_figure(tab_id)."
+            "On 'finished' the reply carries 'figure' — the run plot rendered to a "
+            "temp PNG (the run's OWN visual result). Running/cancelled/failed replies "
+            "are unchanged (no figure)."
         ),
         "inputSchema": {
             "type": "object",
@@ -2317,12 +2346,13 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "is an OPTIONAL {path: value} map (dotted paths, see gui_tab_list_paths); "
             "it goes through the plural set_fields path so numbers stay numbers (not "
             "stringified). Omit/empty 'edits' to run the tab's current cfg. A fast "
-            "run returns {status:'finished', tab, figure, analyze_params} — figure = "
-            "the run plot rendered to a temp PNG; analyze_params = the analyze knobs "
-            "for this tab, so you see them next to the figure. A slow run degrades to "
-            "{status:'pending'} (drive it with gui_run_wait / gui_run_poll; no folds "
-            "yet). STOPS before analyze on purpose: a successful run is NOT a "
-            "successful analyze — look at the figure, then gui_run_stage3."
+            "run returns {status:'finished', tab, figure, analyze_params} — 'figure' "
+            "comes from gui_run_start's own FINISHED reply (the run plot rendered to "
+            "a temp PNG); 'analyze_params' is the stage-specific fold (the analyze "
+            "knobs for this tab). A slow run degrades to {status:'pending'} (drive "
+            "it with gui_run_wait / gui_run_poll; 'figure' arrives in the wait/poll "
+            "finished reply). STOPS before analyze on purpose: a successful run is "
+            "NOT a successful analyze — look at the figure, then gui_run_stage3."
         ),
         "inputSchema": {
             "type": "object",
@@ -2347,15 +2377,16 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
         "handler": tool_gui_run_stage3,
         "description": (
             "Phase ③ of the recommended flow — analyze. Analyze 'tab_id' and fold "
-            "the fit review into ONE reply. Bundles gui_analyze + the figure + the "
-            "writeback preview. A finished FIT returns {status:'finished', summary, "
-            "figure, writeback_preview} — the fit summary (same shape as "
-            "gui_tab_get_analyze_result), the fit plot rendered to a temp PNG, AND "
-            "the proposed writeback values/targets the fit produced (same list as "
-            "gui_writeback_preview) — so you review the fit + the proposed writeback "
-            "in one call before gui_run_stage4. An INTERACTIVE analysis (e.g. "
-            "flux_dep) degrades to {status:'pending'} (no folds) — prompt the user, "
-            "then gui_analyze_poll."
+            "the writeback review into ONE reply. Bundles gui_analyze + the writeback "
+            "preview. A finished FIT returns {status:'finished', summary, figure, "
+            "writeback_preview} — 'summary' is the fit result (same shape as "
+            "gui_tab_get_analyze_result), 'figure' comes from gui_analyze's own "
+            "FINISHED reply (the fit plot rendered to a temp PNG), and "
+            "'writeback_preview' is the stage-specific fold (the proposed writeback "
+            "values/targets) — so you review the fit + the proposed writeback in one "
+            "call before gui_run_stage4. An INTERACTIVE analysis (e.g. flux_dep) "
+            "degrades to {status:'pending'} (no folds) — prompt the user, then "
+            "gui_analyze_poll."
         ),
         "inputSchema": {
             "type": "object",
@@ -2406,15 +2437,15 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
         "description": (
             "Start analyze on tab_id (shared short-wait START contract — see server "
             "instructions, incl. the INTERACTIVE-analyze note). A FIT settles -> "
-            "{status:'finished', summary} — the fit summary (same shape as "
-            "gui_tab_get_analyze_result, the *_err fields included). This tool "
-            "returns ONLY the analyze result: look at the fit plot with "
-            "gui_tab_get_current_figure and review the proposed writeback with "
-            "gui_writeback_preview (the figure + writeback-preview folds live in "
-            "gui_run_stage3). An INTERACTIVE analysis (e.g. flux_dep) degrades to "
-            "{status:'pending', summary:None} — prompt the user to mark the plot + "
-            "click Done, then gui_analyze_poll. 'updates' optionally overrides "
-            "analyze params (see gui_adapter_analyze_spec)."
+            "{status:'finished', summary, figure} — the fit summary (same shape as "
+            "gui_tab_get_analyze_result, the *_err fields included) AND the fit plot "
+            "rendered to a temp PNG (analyze's OWN visual result). Review the "
+            "proposed writeback with gui_writeback_preview (not folded here; that "
+            "fold lives in gui_run_stage3). An INTERACTIVE analysis (e.g. flux_dep) "
+            "degrades to {status:'pending', summary:None} — no figure (nothing "
+            "settled yet); prompt the user to mark the plot + click Done, then "
+            "gui_analyze_poll. 'updates' optionally overrides analyze params (see "
+            "gui_adapter_analyze_spec)."
         ),
         "inputSchema": {
             "type": "object",
@@ -2675,20 +2706,20 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
     "gui_tab_get_current_figure": {
         "handler": tool_gui_tab_get_current_figure,
         "description": (
-            "Render the tab's CURRENT figure to a PNG FILE and return its path — "
-            "whatever is on top of the tab's plot stack: the run's 2D map "
-            "while/after a run, the analysis fit once you have analyzed, or a "
-            "post-analysis figure (the post sub-tab shares this container). This is "
-            "how you look at ANY plot, including non-analysis 2D scans (onetone/"
-            "twotone flux_dep, power_dep). The PNG is rendered at a fixed small "
-            "geometry (~640x480), independent of the GUI window size; the live "
-            "on-screen figure is never permanently resized. The figure is ALWAYS "
-            "written to disk and the reply is {saved_to, bytes} — Read the saved_to "
-            "path to view the plot (never inline base64, so it cannot blow the token "
-            "budget). Omit out_path to write a per-tab file under the temp dir "
-            "(overwritten each call); pass out_path to choose the location. "
-            "Fails with PRECONDITION_FAILED if the tab has no figure yet "
-            "(run has not completed)."
+            "RARELY NEEDED: run/analyze FINISHED replies ALREADY fold the figure "
+            "(including 2D scans via gui_run_start/_wait/_poll and gui_analyze). "
+            "Call this only when you genuinely need it — a re-render, a mid-flight "
+            "(non-finished) plot you must inspect, or you want to choose out_path. "
+            "Normally read the 'figure' field from the finished run/analyze reply. "
+            "Renders the tab's CURRENT figure to a PNG FILE — whatever is on top "
+            "of the tab's plot stack: the run's 2D map while/after a run, the "
+            "analysis fit once analyzed, or a post-analysis figure. The PNG is "
+            "rendered at a fixed small geometry (~640x480), independent of the GUI "
+            "window size. The reply is {saved_to, bytes} — Read the saved_to path "
+            "to view the plot (never inline base64). Omit out_path to write a "
+            "per-tab file under the temp dir (overwritten each call); pass out_path "
+            "to choose the location. Fails with PRECONDITION_FAILED if the tab has "
+            "no figure yet (run has not completed)."
         ),
         "inputSchema": {
             "type": "object",

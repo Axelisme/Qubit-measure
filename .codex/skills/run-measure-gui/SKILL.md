@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 33
+skill_version: 34
 ---
 
 # run-measure-gui
@@ -157,9 +157,11 @@ gui_editor_set_field(tab_id, "rounds", 30)        # convenience: tab_id resolves
 #   gui_run_stage3(tab_id)                  -> {summary, figure, writeback_preview}   # ③ analyze
 #   gui_run_stage4(tab_id, save_data=False) -> {applied_ids[, data_path]}   # ④ writeback (+ optional save)
 # The PURE base tools below are for fine-grained control:
-gui_run_start(tab_id)                             # PURE: waits ~1s; finished -> {status:finished,...}, slow -> {status:pending}
+gui_run_start(tab_id)                             # waits ~1s; finished -> {status:finished, figure:<png>,...}, slow -> {status:pending}
 gui_run_wait(tab_id)                              # block until done (only after pending; blocks your turn — for a long run background it, see "Detecting completion")
-gui_tab_get_current_figure(tab_id)                # writes the CURRENT plot (run's 2D map, analysis fit, or post-analysis
+gui_tab_get_current_figure(tab_id)                # RARELY NEEDED (run/analyze finished already fold the figure, incl 2D
+                                                  # scans via run; use only for a re-render / mid-flight plot / chosen out_path).
+                                                  # Writes the CURRENT plot (run's 2D map, analysis fit, or post-analysis
                                                   # figure — whatever is on the tab's plot stack) to a PNG FILE and
                                                   # replies {saved_to, bytes}. THE ONLY way to look at any plot, including
                                                   # non-analysis 2D scans (flux_dep / power_dep): Read the saved_to path.
@@ -168,9 +170,9 @@ gui_tab_get_current_figure(tab_id)                # writes the CURRENT plot (run
                                                   # gui_dialog_screenshot(name, out_path?) follows the same contract: always
                                                   # writes a file and replies {saved_to, bytes} — never inline base64.
                                                   # 'name' matches gui_dialog_open / gui_dialog_close (e.g. "device").
-gui_analyze(tab_id)                               # PURE: a FIT settles -> {status:finished, summary:{...}} (its own fit
-                                                  # result, same shape as gui_tab_get_analyze_result); an INTERACTIVE
-                                                  # pick (flux_dep) -> {status:pending} → see below
+gui_analyze(tab_id)                               # a FIT settles -> {status:finished, summary:{...}, figure:<png>} (its own
+                                                  # fit result + plot; same summary as gui_tab_get_analyze_result); an
+                                                  # INTERACTIVE pick (flux_dep) -> {status:pending} → see below
 gui_post_analyze(tab_id)                          # second analysis layer on top of the primary fit (e.g. single-shot ge);
                                                   # FIT-only, settles -> {status:finished, summary:{...}} inline;
                                                   # slow -> {pending} then gui_post_analyze_wait/poll; needs primary analyze first
@@ -441,10 +443,9 @@ the options, and let the user choose.
   the stronger readout drive so the signal-to-noise ratio is good enough to
   judge timing and resonator features cleanly.
 - **After every important `run`, look at the figure before trusting any number.**
-  The `gui_run_stage2`/`gui_run_stage3` bundles fold a `figure` (PNG path; `None`
-  if the render failed) into their reply — Read that. With the pure base tools
-  (`gui_run_start`/`gui_analyze`), call `gui_tab_get_current_figure(tab_id)` and
-  Read the `saved_to` PNG. It returns the current plot
+  Finished `gui_run_start`/`gui_run_wait`/`gui_run_poll`/`gui_analyze` replies FOLD a
+  `figure` (PNG path; `None` if the render failed) — Read that. `gui_tab_get_current_figure`
+  is rarely needed (a re-render, a mid-flight plot, or a chosen `out_path`). It returns the current plot
   whether or not the adapter does analysis, so for a **2D scan with no fit**
   (`onetone/twotone flux_dep`, `power_dep`) it is the 2D map itself.
   Judge: is the feature clean, the window right (too wide / too narrow), the SNR
