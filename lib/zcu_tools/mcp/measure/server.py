@@ -284,7 +284,21 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
 #      hand-written (in _NON_GENERATED_METHODS). run / analyze / device keep their
 #      async-handle contract. _SERVER_INSTRUCTIONS no longer lists connect among
 #      the degrading async ops.
-MCP_VERSION = 41
+# MCP 42: convenience-layer bug fix + two fan-outs (no wire change). (1) JsonType
+#      .JSON now renders an UNTYPED MCP schema (no "type" key) instead of a union
+#      that listed "string"; gui_editor_set_field's hand-written 'value' schema
+#      dropped its "type" union to match. The string member let the MCP client
+#      coerce a number (0.2) to "0.2", failing a downstream float-field check —
+#      an untyped schema passes numbers through. Same fix covers set_field value /
+#      writeback.set proposed_value / context.set_md_attr value. (2) gui_tab_new is
+#      now a fan-out override: its reply folds editor_id + settable paths +
+#      cfg_summary (tab.snapshot + tab.list_paths + tab.get_cfg_summary), ~4 calls
+#      collapse to 1. (3) gui_run_start / gui_run_wait / gui_analyze fold the
+#      tab's current figure (rendered to a temp PNG, path in 'figure') into a
+#      FINISHED reply (never on a pending/interactive analyze). All three are
+#      mcp-side only — wire validation still accepts any JSON, so WIRE/GUI do not
+#      bump.
+MCP_VERSION = 42
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -903,6 +917,34 @@ def _resolve_editor_id(arguments: dict[str, Any]) -> str:
     return str(resolved)
 
 
+def tool_gui_tab_new(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Create a tab and fold its initial editing context into the one reply.
+
+    Convenience fan-out over tab.new: after creating the tab the agent always
+    follows up with tab.snapshot (for the editor_id), tab.list_paths (settable
+    dotted paths), and tab.get_cfg_summary (current values) before it can edit
+    cfg. Folding those reads here collapses ~4 calls into one. Pure mcp-side
+    fan-out over EXISTING wire reads — no wire change.
+
+    Returns {tab_id, editor_id, paths, cfg_summary}:
+    - editor_id: the tab cfg form's editor session id (None until a live model
+      exists — set_field can still address the form by tab_id);
+    - paths: tab.list_paths compact entries (the editor.set_field path source);
+    - cfg_summary: tab.get_cfg_summary nested values view (read-only).
+    """
+    adapter_name = str(arguments["adapter_name"])
+    tab_id = str(send_gui_rpc("tab.new", {"adapter_name": adapter_name})["tab_id"])
+    snap = send_gui_rpc("tab.snapshot", {"tab_id": tab_id})
+    paths = send_gui_rpc("tab.list_paths", {"tab_id": tab_id}).get("paths")
+    cfg_summary = send_gui_rpc("tab.get_cfg_summary", {"tab_id": tab_id}).get("summary")
+    return {
+        "tab_id": tab_id,
+        "editor_id": snap.get("editor_id"),
+        "paths": paths,
+        "cfg_summary": cfg_summary,
+    }
+
+
 def tool_gui_editor_set_field(arguments: dict[str, Any]) -> dict[str, Any]:
     """Set one cfg field, addressing the editor by ``editor_id`` OR ``tab_id``.
 
@@ -1244,33 +1286,38 @@ def tool_gui_run_start(arguments: dict[str, Any]) -> dict[str, Any]:
 
     A run has both modes — a tiny sweep finishes in well under a second, a big
     one takes minutes — so it degrades like device ops: settles in time ->
-    {status:'finished', tab:<tab.snapshot>} (has_run_result reflects the result);
-    still running -> {status:'pending'} (await with gui_run_wait or poll with
+    {status:'finished', tab:<tab.snapshot>, figure:<saved PNG path>} (has_run_result
+    reflects the result; the current plot is rendered to a temp PNG and its path
+    folded in so the common "look at the plot" step needs no extra call); still
+    running -> {status:'pending'} (await with gui_run_wait or poll with
     gui_run_poll). send_gui_rpc attaches the version guard + captures the
     operation_id under tab:<tab_id>.
     """
     tab_id = str(arguments["tab_id"])
     wait_seconds = float(arguments.get("wait_seconds", 1.0))
     send_gui_rpc("run.start", {"tab_id": tab_id})
-    # To see the plot once finished, call gui_tab_get_current_figure(tab_id).
-    return _start_op_with_short_wait(
+    reply = _start_op_with_short_wait(
         f"tab:{tab_id}",
         f"Run on tab {tab_id!r}",
         wait_seconds,
         lambda: {"tab": _run_tab_summary(tab_id)},
         f"await it with gui_run_wait(tab_id={tab_id!r}).",
     )
+    return _fold_finished_figure(tab_id, reply)
 
 
 def tool_gui_run_wait(arguments: dict[str, Any]) -> dict[str, Any]:
     """Block until the run on ``tab_id`` completes (semantic wait, mirrors
     gui_device_wait_operation). Raises only on genuine failure. A cancelled run
     returns {status:'cancelled', feedback?} — read 'feedback' for the Stop reason
-    (present when the user used "Send & Stop", absent on a plain cancel). To see
-    the plot once finished, call gui_tab_get_current_figure(tab_id)."""
+    (present when the user used "Send & Stop", absent on a plain cancel). On
+    status='finished' the tab's current plot is rendered to a temp PNG and its
+    path folded in as 'figure', so the common "look at the plot" step needs no
+    extra call."""
     tab_id = str(arguments["tab_id"])
     timeout = float(arguments.get("timeout", 600.0))
-    return _await_operation_by_key(f"tab:{tab_id}", f"Run on tab {tab_id!r}", timeout)
+    reply = _await_operation_by_key(f"tab:{tab_id}", f"Run on tab {tab_id!r}", timeout)
+    return _fold_finished_figure(tab_id, reply)
 
 
 def tool_gui_run_poll(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -1306,10 +1353,11 @@ def tool_gui_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
     with gui_analyze_wait or gui_analyze_poll). For an INTERACTIVE adapter (see
     gui_adapter_guide) a 'pending' is expected — prompt the user to do the pick,
     then poll. 'updates' optionally overrides analyze params. A finished reply
-    folds in the fit 'summary' (same shape as gui_tab_get_analyze_result) so the
-    common read happens in one call; gui_tab_get_analyze_result stays for re-fetch
-    and for the wait/poll path. See the fit plot with
-    gui_tab_get_current_figure(tab_id).
+    folds in the fit 'summary' (same shape as gui_tab_get_analyze_result) AND the
+    fit plot rendered to a temp PNG ('figure'), so the common read + look happen
+    in one call; gui_tab_get_analyze_result stays for re-fetch and for the
+    wait/poll path. The figure is folded only on a finished FIT, never on an
+    INTERACTIVE 'pending' (nothing settled to render yet).
     """
     tab_id = str(arguments["tab_id"])
     wait_seconds = float(arguments.get("wait_seconds", 1.0))
@@ -1320,7 +1368,7 @@ def tool_gui_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
     # then wait briefly. A FIT usually finishes here; an INTERACTIVE pick degrades
     # to a handle the user/agent then drives to completion.
     send_gui_rpc("analyze.start", params)
-    return _start_op_with_short_wait(
+    reply = _start_op_with_short_wait(
         f"analyze:{tab_id}",
         f"Analyze on tab {tab_id!r}",
         wait_seconds,
@@ -1328,6 +1376,7 @@ def tool_gui_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
         f"poll with gui_analyze_poll(tab_id={tab_id!r}); for an INTERACTIVE pick, "
         "prompt the user to mark the lines + click Done first.",
     )
+    return _fold_finished_figure(tab_id, reply)
 
 
 def tool_gui_analyze_wait(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -1461,6 +1510,39 @@ def tool_gui_dialog_screenshot(arguments: dict[str, Any]) -> dict[str, Any]:
     return {"bytes": res.get("bytes", len(png)), "saved_to": out_path}
 
 
+def _render_tab_figure(tab_id: str, out_path: str | None = None) -> dict[str, Any]:
+    """Render ``tab_id``'s current figure to a PNG FILE (never inline base64).
+
+    Drives the wire in out_path mode; synthesises a per-tab temp path under
+    gettempdir() (overwriting the previous render of the same tab) when no path
+    is given. Returns the wire reply ({saved_to, bytes}).
+    """
+    resolved = out_path or str(Path(gettempdir()) / f"measure_fig_{tab_id}.png")
+    return send_gui_rpc(
+        "tab.get_current_figure", {"tab_id": tab_id, "out_path": resolved}
+    )
+
+
+def _fold_finished_figure(tab_id: str, reply: dict[str, Any]) -> dict[str, Any]:
+    """Fold the tab's current figure into a FINISHED run/analyze reply, in place.
+
+    The operator looks at the plot after nearly every run/analyze, so saving the
+    figure here collapses the separate gui_tab_get_current_figure call. Only acts
+    when ``reply['status'] == 'finished'`` (a pending/cancelled/timed_out op has no
+    settled figure to render). Renders to the per-tab temp PNG and adds
+    ``figure: <saved_to>``. A render failure is swallowed (recorded as
+    ``figure: None``) so a plotting hiccup never masks an otherwise-good result —
+    the agent can still re-request the figure explicitly.
+    """
+    if reply.get("status") != "finished":
+        return reply
+    try:
+        reply["figure"] = _render_tab_figure(tab_id).get("saved_to")
+    except Exception:
+        reply["figure"] = None
+    return reply
+
+
 def tool_gui_tab_get_current_figure(arguments: dict[str, Any]) -> dict[str, Any]:
     """Render the tab's current figure to a PNG FILE and return its path.
 
@@ -1472,13 +1554,8 @@ def tool_gui_tab_get_current_figure(arguments: dict[str, Any]) -> dict[str, Any]
     """
     tab_id = str(arguments["tab_id"])
     out_path_arg = arguments.get("out_path")
-    out_path = (
-        str(out_path_arg)
-        if out_path_arg is not None
-        else str(Path(gettempdir()) / f"measure_fig_{tab_id}.png")
-    )
-    return send_gui_rpc(
-        "tab.get_current_figure", {"tab_id": tab_id, "out_path": out_path}
+    return _render_tab_figure(
+        tab_id, str(out_path_arg) if out_path_arg is not None else None
     )
 
 
@@ -1607,6 +1684,10 @@ _NON_GENERATED_METHODS = frozenset(
         # editor.set_field RPC (a tab's cfg form is the editor session keyed by its
         # tab_id), so the generator must not also emit gui_editor_set_field.
         "editor.set_field",
+        # hand-written fan-out: after tab.new the agent always reads tab.snapshot +
+        # tab.list_paths + tab.get_cfg_summary; the override folds those into one
+        # reply, so the generator must not also emit a bare gui_tab_new.
+        "tab.new",
         # fan-out / MCP-side queue (handled at the service, not the registry)
         "state.has_project",
         "state.has_context",
@@ -1778,6 +1859,32 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
         ),
         "inputSchema": {"type": "object", "properties": {}},
     },
+    "gui_tab_new": {
+        "handler": tool_gui_tab_new,
+        "description": (
+            "Create a new tab for 'adapter_name' (see gui_adapter_list) and fold "
+            "its initial editing context into one reply. Convenience fan-out over "
+            "the tab.new + tab.snapshot + tab.list_paths + tab.get_cfg_summary "
+            "calls the agent always makes back-to-back before editing cfg — pure "
+            "mcp-side fan-out over existing wire reads, no wire change. Returns "
+            "{tab_id, editor_id, paths, cfg_summary}: 'editor_id' is the tab cfg "
+            "form's editor session id (target gui_editor_set_field by tab_id too); "
+            "'paths' are the settable dotted paths (the gui_editor_set_field path "
+            "source, compact shape, same as gui_tab_list_paths); 'cfg_summary' is "
+            "the read-only nested values view (same as gui_tab_get_cfg_summary). "
+            "Re-fetch any of them later with their dedicated tools."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "adapter_name": {
+                    "type": "string",
+                    "description": "Adapter to instantiate (see gui_adapter_list)",
+                },
+            },
+            "required": ["adapter_name"],
+        },
+    },
     "gui_editor_set_field": {
         "handler": tool_gui_editor_set_field,
         "description": (
@@ -1811,10 +1918,11 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
                 },
                 "path": {"type": "string", "description": "Dotted field path"},
                 "value": {
-                    # Any JSON value (scalar leaf) or an md-ref {__kind:eval, expr};
-                    # mirror the generator's JsonType.JSON union so the schema shape
-                    # matches the sibling editor.* generated tools.
-                    "type": ["number", "string", "boolean", "object", "array", "null"],
+                    # Untyped schema = "any JSON value", matching the generator's
+                    # JsonType.JSON rendering (schema_property). A 'type' union that
+                    # listed "string" let the MCP client coerce a number (0.2) to
+                    # the string "0.2", which then failed the float-field check; an
+                    # untyped schema passes a number through unchanged.
                     "description": "JSON scalar or {__kind:eval, expr}",
                 },
             },
@@ -2367,6 +2475,7 @@ _OVERRIDE_NAMES = frozenset(
         "gui_device_setup",
         "gui_dialog_screenshot",
         "gui_tab_get_current_figure",
+        "gui_tab_new",
         "gui_state_check",
         "gui_overview",
         "gui_editor_set_field",

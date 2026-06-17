@@ -43,7 +43,9 @@ class FreqAnalyzeParams:
 @dataclass
 class FreqAnalyzeResult(AnalyzeResultBase):
     freq: float
+    freq_err: float
     fwhm: float
+    fwhm_err: float
     params: dict[str, Any]
     figure: Figure
 
@@ -129,12 +131,19 @@ class FreqAdapter(
         self, req: AnalyzeRequest[FreqRunResult, FreqAnalyzeParams]
     ) -> FreqAnalyzeResult:
         params = req.analyze_params
-        freq, fwhm, fig = FreqExp().analyze(
+        freq, freq_err, fwhm, fwhm_err, fig = FreqExp().analyze(
             req.run_result,
             model_type=params.model_type,
             plot_fit=params.plot_fit,
         )
-        return FreqAnalyzeResult(freq=freq, fwhm=fwhm, params={}, figure=fig)
+        return FreqAnalyzeResult(
+            freq=freq,
+            freq_err=freq_err,
+            fwhm=fwhm,
+            fwhm_err=fwhm_err,
+            params={},
+            figure=fig,
+        )
 
     def get_writeback_items(
         self, req: WritebackRequest[FreqRunResult, FreqAnalyzeResult]

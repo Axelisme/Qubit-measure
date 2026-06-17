@@ -49,8 +49,13 @@ class AmpRabiAnalyzeParams:
 
 @dataclass
 class AmpRabiAnalyzeResult(AnalyzeResultBase):
-    pi_amp: float
-    pi2_amp: float
+    # Summary keys are the GAIN scalars (pi_gain / pi2_gain) to match the glossary
+    # (single_qubit.md) and the MetaDict writeback target; the 'pi_amp'/'pi2_amp'
+    # names belong to the pi-pulse MODULES, not these scalars.
+    pi_gain: float
+    pi_gain_err: float
+    pi2_gain: float
+    pi2_gain_err: float
     figure: Figure
 
 
@@ -147,11 +152,17 @@ class AmpRabiAdapter(
         self, req: AnalyzeRequest[AmpRabiRunResult, AmpRabiAnalyzeParams]
     ) -> AmpRabiAnalyzeResult:
         params = req.analyze_params
-        pi_amp, pi2_amp, fig = AmpRabiExp().analyze(
+        pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, fig = AmpRabiExp().analyze(
             req.run_result,
             skip=params.skip,
         )
-        return AmpRabiAnalyzeResult(pi_amp=pi_amp, pi2_amp=pi2_amp, figure=fig)
+        return AmpRabiAnalyzeResult(
+            pi_gain=pi_amp,
+            pi_gain_err=pi_amp_err,
+            pi2_gain=pi2_amp,
+            pi2_gain_err=pi2_amp_err,
+            figure=fig,
+        )
 
     def get_writeback_items(
         self, req: WritebackRequest[AmpRabiRunResult, AmpRabiAnalyzeResult]
@@ -164,12 +175,12 @@ class AmpRabiAdapter(
             MetaDictWriteback(
                 target_name="pi_gain",
                 description="Pi pulse gain (a.u.)",
-                proposed_value=result.pi_amp,
+                proposed_value=result.pi_gain,
             ),
             MetaDictWriteback(
                 target_name="pi2_gain",
                 description="Pi/2 pulse gain (a.u.)",
-                proposed_value=result.pi2_amp,
+                proposed_value=result.pi2_gain,
             ),
         ]
 
@@ -180,9 +191,11 @@ class AmpRabiAdapter(
         snapshot = req.run_result.cfg_snapshot
         if snapshot is not None:
             qub_pulse_cfg = snapshot.modules.qub_pulse
+            # Module targets keep the 'pi_amp'/'pi2_amp' names; the gain values come
+            # from the renamed pi_gain / pi2_gain scalar fields.
             for target, gain, desc in [
-                ("pi_amp", result.pi_amp, "amp pi pulse"),
-                ("pi2_amp", result.pi2_amp, "amp pi/2 pulse"),
+                ("pi_amp", result.pi_gain, "amp pi pulse"),
+                ("pi2_amp", result.pi2_gain, "amp pi/2 pulse"),
             ]:
                 spec, value = module_cfg_to_value(qub_pulse_cfg)
                 value.with_field("gain", gain)

@@ -124,20 +124,25 @@ def validate_params(
     return out
 
 
-_ANY_JSON_TYPE = ["number", "string", "boolean", "object", "array", "null"]
-
-
 def schema_property(spec: ParamSpec) -> dict[str, object]:
-    """Render one ParamSpec as a JSON-schema property (for MCP inputSchema)."""
-    json_schema_type: object = {
-        JsonType.STRING: "string",
-        JsonType.INTEGER: "integer",
-        JsonType.NUMBER: "number",
-        JsonType.BOOLEAN: "boolean",
-        JsonType.OBJECT: "object",
-        JsonType.JSON: _ANY_JSON_TYPE,  # any JSON value
-    }[spec.json_type]
-    prop: dict[str, object] = {"type": json_schema_type}
+    """Render one ParamSpec as a JSON-schema property (for MCP inputSchema).
+
+    ``JsonType.JSON`` renders with NO ``type`` key at all — an untyped schema is
+    the correct JSON-schema spelling of "any JSON value". A ``type`` union that
+    lists ``"string"`` lets the MCP client coerce a number (e.g. ``0.2``) against
+    the string member and send ``"0.2"``, which then fails a downstream float
+    field check. Omitting ``type`` means the client passes the value through
+    untouched (a number stays a number), so a JSON param never gets stringified.
+    """
+    prop: dict[str, object] = {}
+    if spec.json_type is not JsonType.JSON:
+        prop["type"] = {
+            JsonType.STRING: "string",
+            JsonType.INTEGER: "integer",
+            JsonType.NUMBER: "number",
+            JsonType.BOOLEAN: "boolean",
+            JsonType.OBJECT: "object",
+        }[spec.json_type]
     if spec.description:
         prop["description"] = spec.description
     return prop

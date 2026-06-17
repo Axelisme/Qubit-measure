@@ -106,8 +106,10 @@ class TestAmpRabiWriteback:
     def _items(self, pi_amp: float = 0.4, pi2_amp: float = 0.2) -> list:
         run_result = _make_amp_rabi_run_result(gain=0.5)
         analyze_result = AmpRabiAnalyzeResult(
-            pi_amp=pi_amp,
-            pi2_amp=pi2_amp,
+            pi_gain=pi_amp,
+            pi_gain_err=0.01,
+            pi2_gain=pi2_amp,
+            pi2_gain_err=0.01,
             figure=MagicMock(),
         )
         req = WritebackRequest(
@@ -189,7 +191,11 @@ class TestAmpRabiWriteback:
             cfg_snapshot=None,
         )
         analyze_result = AmpRabiAnalyzeResult(
-            pi_amp=0.4, pi2_amp=0.2, figure=MagicMock()
+            pi_gain=0.4,
+            pi_gain_err=0.01,
+            pi2_gain=0.2,
+            pi2_gain_err=0.01,
+            figure=MagicMock(),
         )
         req = WritebackRequest(
             run_result=run_result,
@@ -213,8 +219,11 @@ class TestLenRabiWriteback:
         run_result = _make_len_rabi_run_result(length=0.1)
         analyze_result = LenRabiAnalyzeResult(
             pi_len=pi_len,
+            pi_len_err=0.001,
             pi2_len=pi2_len,
+            pi2_len_err=0.001,
             rabi_f=rabi_f,
+            rabi_f_err=0.1,
             figure=MagicMock(),
         )
         req = WritebackRequest(
@@ -306,7 +315,13 @@ class TestLenRabiWriteback:
             cfg_snapshot=None,
         )
         analyze_result = LenRabiAnalyzeResult(
-            pi_len=0.05, pi2_len=0.025, rabi_f=10.0, figure=MagicMock()
+            pi_len=0.05,
+            pi_len_err=0.001,
+            pi2_len=0.025,
+            pi2_len_err=0.001,
+            rabi_f=10.0,
+            rabi_f_err=0.1,
+            figure=MagicMock(),
         )
         req = WritebackRequest(
             run_result=run_result,

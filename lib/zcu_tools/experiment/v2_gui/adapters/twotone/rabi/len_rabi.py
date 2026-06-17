@@ -50,10 +50,13 @@ class LenRabiAnalyzeParams:
 @dataclass
 class LenRabiAnalyzeResult(AnalyzeResultBase):
     pi_len: float
+    pi_len_err: float
     pi2_len: float
+    pi2_len_err: float
     # Rabi oscillation frequency in MHz (1/us), captured from the fit but
     # previously discarded; now preserved for writeback as 'rabi_f'.
     rabi_f: float
+    rabi_f_err: float
     figure: Figure
 
 
@@ -149,12 +152,20 @@ class LenRabiAdapter(
         self, req: AnalyzeRequest[LenRabiRunResult, LenRabiAnalyzeParams]
     ) -> LenRabiAnalyzeResult:
         params = req.analyze_params
-        pi_len, pi2_len, rabi_f, fig = LenRabiExp().analyze(
-            req.run_result,
-            decay=params.decay,
+        pi_len, pi_len_err, pi2_len, pi2_len_err, rabi_f, rabi_f_err, fig = (
+            LenRabiExp().analyze(
+                req.run_result,
+                decay=params.decay,
+            )
         )
         return LenRabiAnalyzeResult(
-            pi_len=pi_len, pi2_len=pi2_len, rabi_f=rabi_f, figure=fig
+            pi_len=pi_len,
+            pi_len_err=pi_len_err,
+            pi2_len=pi2_len,
+            pi2_len_err=pi2_len_err,
+            rabi_f=rabi_f,
+            rabi_f_err=rabi_f_err,
+            figure=fig,
         )
 
     def get_writeback_items(

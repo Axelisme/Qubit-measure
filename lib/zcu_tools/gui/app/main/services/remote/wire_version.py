@@ -157,7 +157,14 @@ from __future__ import annotations
 #      connect button (SoCConnectionService.start_connect + signals) is untouched;
 #      only the wire surface changes. Method-set + reply-shape change = contract
 #      change.
-WIRE_VERSION = 33
+# v34: analyze-summary shapes standardized (Proposal 3). twotone/freq adds
+#      freq_err + fwhm_err; twotone/rabi/len_rabi adds pi_len_err + pi2_len_err +
+#      rabi_f_err; twotone/rabi/amp_rabi renames its summary scalar keys
+#      pi_amp -> pi_gain / pi2_amp -> pi2_gain (matching the writeback target +
+#      glossary; the pi-pulse MODULE writeback names stay pi_amp/pi2_amp) and adds
+#      pi_gain_err + pi2_gain_err. The analyze-result summary is a wire/mcp-facing
+#      reply (tab.get_analyze_result), so a key add/rename = contract change.
+WIRE_VERSION = 34
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -336,4 +343,11 @@ WIRE_VERSION = 33
 #      sets Pyro4 COMMTIMEOUT=1.0 (fail-fast for an unreachable board). The async
 #      start_connect + connection_finished/failed signals (measure SetupDialog +
 #      autofluxdep GUI depend on them) are untouched.
-GUI_VERSION = 40
+# v41: analyze-summary standardization (WIRE 34). The twotone freq / len_rabi /
+#      amp_rabi domain analyze() returns now carry the fit uncertainties they
+#      already computed (freq_err/fwhm_err; pi_len_err/pi2_len_err/rabi_f_err;
+#      pi_amp_err/pi2_amp_err), surfaced on the adapters' AnalyzeResult dataclasses
+#      (auto-folded into to_summary_dict). amp_rabi's summary scalar fields are
+#      renamed pi_amp/pi2_amp -> pi_gain/pi2_gain to match the MetaDict writeback
+#      target; the module writeback target names stay pi_amp/pi2_amp.
+GUI_VERSION = 41

@@ -87,10 +87,24 @@ def test_cfg_editor_tools_generated():
     assert "discriminator" not in props
     assert "from_name" in props
 
-    # 'value' is a JSON kind (scalar OR the tagged eval object) — its schema
-    # must not pin a single type.
+    # 'value' is a JSON kind (scalar OR the tagged eval object): its schema is
+    # UNTYPED (no "type" key) so the MCP client never coerces a number against a
+    # "string" member and stringifies it (e.g. 0.2 -> "0.2", which then fails the
+    # downstream float-field check).
     value_schema = m.TOOLS["gui_editor_set_field"]["inputSchema"]["properties"]["value"]
-    assert "type" not in value_schema or isinstance(value_schema.get("type"), list)
+    assert "type" not in value_schema
+
+
+def test_tab_new_is_a_fanout_override():
+    """gui_tab_new is now served by the hand-written fan-out override (it folds
+    editor_id + paths + cfg_summary into the reply), so tab.new must be excluded
+    from generation and the tool's handler must be the override function."""
+    assert "tab.new" in m._NON_GENERATED_METHODS
+    assert m.TOOLS["gui_tab_new"]["handler"] is m.tool_gui_tab_new
+    # The schema keeps the single required 'adapter_name' string param.
+    schema = m.TOOLS["gui_tab_new"]["inputSchema"]
+    assert schema["required"] == ["adapter_name"]
+    assert schema["properties"]["adapter_name"]["type"] == "string"
 
 
 def test_writeback_set_selected_is_boolean_schema():

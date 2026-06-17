@@ -394,6 +394,17 @@ def _validate_scalar(spec: ScalarSpec, node_val: DirectValue, full_path: str) ->
     else:
         ok = isinstance(val, spec.type)
     if not ok:
+        # A string standing in for a numeric/bool field almost always means the
+        # value arrived un-coerced (e.g. an MCP client stringified a number
+        # against a schema's "string" member): the literal is a valid value, it
+        # just kept the wrong type. Call that out specifically so the cause is
+        # "coercion", not "wrong value".
+        if isinstance(val, str) and spec.type in (int, float, bool):
+            raise RuntimeError(
+                f"Config field '{full_path}' received string {val!r} where a "
+                f"{spec.type.__name__} was expected (the numeric value was not "
+                f"coerced — it arrived as a string)"
+            )
         raise RuntimeError(
             f"Config field '{full_path}' value {val!r} is not compatible with "
             f"spec type {spec.type.__name__}"

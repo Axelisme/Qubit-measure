@@ -212,7 +212,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
 
     def analyze(
         self, result: LenRabiResult | None = None, *, decay: bool = True
-    ) -> tuple[float, float, float, Figure]:
+    ) -> tuple[float, float, float, float, float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -259,7 +259,10 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
 
         fig.tight_layout()
 
-        return pi_len, pi2_len, freq, fig
+        # fit_rabi computes the per-quantity fit uncertainties; surface them so the
+        # GUI summary carries pi_len_err / pi2_len_err / rabi_f_err (the figure
+        # labels already show pi/pi2 errors and the title shows the freq error).
+        return pi_len, pi_len_err, pi2_len, pi2_len_err, freq, freq_err, fig
 
     def save(
         self,

@@ -14,6 +14,7 @@ from zcu_tools.gui.remote.param_spec import (
     JsonType,
     ParamSpec,
     build_input_schema,
+    schema_property,
     validate_params,
 )
 
@@ -108,13 +109,21 @@ def test_build_input_schema_marks_required_and_types():
     props = cast("dict[str, dict]", schema["properties"])
     assert props["tab_id"] == {"type": "string"}
     assert props["flag"] == {"type": "boolean"}
-    # JSON => a type-union covering any JSON value.
-    assert props["payload"]["type"] == [
-        "number",
-        "string",
-        "boolean",
-        "object",
-        "array",
-        "null",
-    ]
+    # JSON => an UNTYPED schema (no "type" key) so the MCP client never coerces a
+    # value against a string member (which would stringify a number e.g. 0.2).
+    assert "type" not in props["payload"]
     assert set(cast("list", schema["required"])) == {"tab_id", "payload"}
+
+
+def test_json_schema_property_is_untyped_but_keeps_description():
+    # A JsonType.JSON property carries NO "type" key (untyped = any JSON value),
+    # but a description, when present, is still rendered.
+    prop = schema_property(ParamSpec("v", JsonType.JSON, description="any value"))
+    assert "type" not in prop
+    assert prop["description"] == "any value"
+
+
+def test_non_json_schema_property_keeps_its_type():
+    # The other kinds still render a concrete "type" (only JSON goes untyped).
+    assert schema_property(ParamSpec("n", JsonType.NUMBER))["type"] == "number"
+    assert schema_property(ParamSpec("b", JsonType.BOOLEAN))["type"] == "boolean"

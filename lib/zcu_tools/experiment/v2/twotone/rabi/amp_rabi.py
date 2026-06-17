@@ -106,7 +106,7 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
 
     def analyze(
         self, result: AmpRabiResult | None = None, skip: int = 0
-    ) -> tuple[float, float, Figure]:
+    ) -> tuple[float, float, float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -150,7 +150,9 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
 
         fig.tight_layout()
 
-        return pi_amp, pi2_amp, fig
+        # fit_rabi computes the per-gain fit uncertainties; surface them so the GUI
+        # summary carries the gain errors (the figure labels already show them).
+        return pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, fig
 
     def save(
         self,

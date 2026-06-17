@@ -222,7 +222,7 @@ def test_freq_recovers_f_qubit() -> None:
 
     exp = FreqExp()
     result = exp.run(soc, soccfg, cfg)
-    fit_freq, _fwhm, _fig = exp.analyze(result, model_type="lor")
+    fit_freq, _freq_err, _fwhm, _fwhm_err, _fig = exp.analyze(result, model_type="lor")
 
     # f_qubit < f_dds so the analyzer axis is un-folded: the recovered peak must
     # land on the true injected f_qubit to within a few sweep steps (step = 5 MHz).
@@ -265,7 +265,7 @@ def test_amp_rabi_recovers_pi_gain() -> None:
 
     exp = AmpRabiExp()
     result = exp.run(soc, soccfg, cfg)
-    pi_gain, _pi2_gain, _fig = exp.analyze(result)
+    pi_gain, _pi_gain_err, _pi2_gain, _pi2_gain_err, _fig = exp.analyze(result)
 
     # Recovered pi gain == pi_gain_len / length.
     assert pi_gain == pytest.approx(expected_pi_gain, rel=0.05)
@@ -308,7 +308,9 @@ def test_len_rabi_recovers_gain_scaling() -> None:
         )
         exp = LenRabiExp()
         result = exp.run(soc, soccfg, cfg)
-        pi_len, _pi2_len, rabi_freq, _fig = exp.analyze(result, decay=False)
+        pi_len, _pi_len_err, _pi2_len, _pi2_len_err, rabi_freq, _rabi_f_err, _fig = (
+            exp.analyze(result, decay=False)
+        )
         return pi_len, rabi_freq
 
     pi_len_lo, freq_lo = _run(0.4)

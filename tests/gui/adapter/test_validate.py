@@ -130,6 +130,33 @@ def test_str_type_mismatch_raises():
         schema.validate(_ml())
 
 
+def test_string_on_float_field_reports_not_coerced():
+    # A string standing in for a numeric field is the un-coerced-MCP-value case:
+    # the literal "0.2" is a valid float value, it just kept the wrong type. The
+    # message must call out the missing coercion, not "incompatible value".
+    spec = CfgSectionSpec(fields={"x": ScalarSpec("X", float)})
+    schema = CfgSchema(
+        spec=spec, value=CfgSectionValue(fields={"x": DirectValue("0.2")})
+    )
+    with pytest.raises(RuntimeError, match="received string '0.2' where a float"):
+        schema.validate(_ml())
+
+
+def test_string_on_int_field_reports_not_coerced():
+    spec = CfgSectionSpec(fields={"x": ScalarSpec("X", int)})
+    schema = CfgSchema(spec=spec, value=CfgSectionValue(fields={"x": DirectValue("5")}))
+    with pytest.raises(RuntimeError, match="not coerced"):
+        schema.validate(_ml())
+
+
+def test_real_float_on_float_field_passes():
+    # The counterpart to the above: a real float (the value an UNTYPED JSON schema
+    # lets the MCP client send through unchanged) validates without complaint.
+    spec = CfgSectionSpec(fields={"x": ScalarSpec("X", float)})
+    schema = CfgSchema(spec=spec, value=CfgSectionValue(fields={"x": DirectValue(0.2)}))
+    schema.validate(_ml())
+
+
 def test_unset_scalar_none_passes():
     # A None DirectValue is "unset" — legal static state (required-has-value is
     # a dynamic check, enforced by lowering, not validate).

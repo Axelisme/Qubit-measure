@@ -103,7 +103,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         *,
         model_type: Literal["lor", "sinc"] = "lor",
         plot_fit: bool = True,
-    ) -> tuple[float, float, Figure]:
+    ) -> tuple[float, float, float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -118,7 +118,9 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
         real_signals = qubfreq_signal2real(signals)
 
-        freq, freq_err, fwhm, _, y_fit, _ = fit_qubit_freq(
+        # fit_qubit_freq computes both fit uncertainties; surface them so the GUI
+        # summary carries freq_err / fwhm_err (the figure title already shows them).
+        freq, freq_err, fwhm, fwhm_err, y_fit, _ = fit_qubit_freq(
             freqs, real_signals, model_type
         )
 
@@ -137,7 +139,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
         fig.tight_layout()
 
-        return freq, fwhm, fig
+        return freq, freq_err, fwhm, fwhm_err, fig
 
     def save(
         self,
