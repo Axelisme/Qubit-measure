@@ -1164,7 +1164,7 @@ def _h_operation_await(
 
 
 # ---------------------------------------------------------------------------
-# Dialog / view-query handlers (Phase 81a)
+# Dialog / view-query handlers
 # ---------------------------------------------------------------------------
 
 
@@ -1719,7 +1719,7 @@ def _h_editor_discard(
 
 
 # ---------------------------------------------------------------------------
-# Notify prompt handlers (Stage 4b, ADR-0025 two-RPC design)
+# Notify prompt handlers (ADR-0025 two-RPC design)
 #
 # notify.open runs on the main thread: it mints a token inside NotifyHandles
 # and opens a non-modal dialog via the controller's open_notify_prompt façade,

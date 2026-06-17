@@ -80,308 +80,14 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
     run_stdio_loop,
 )
 
-# This MCP server's own code revision — reported (not compared) in the version
-# note so an agent can confirm a reconnect picked up its bridge-side edits. Bump
-# on a meaningful mcp_server change you want to be able to spot a reload of.
-# v2: piggyback/diagnostic-split + default-subscribe now includes run_started /
-#     run_finished (was run_lock_changed).
-# v3: default-subscribe device_setup_started/finished (was device_setup_changed).
-# v4: gui_run_start / gui_connect_start now short-wait degrade like device ops
-#     (a fast run/connect returns its product, slow degrades to a handle); new
-#     gui_run_wait / gui_connect_wait semantic waits.
-# v7: batch convenience tools gui_editor_set_fields / gui_context_set_md_attrs —
-#     bridge-side fan-out over the existing editor.set_field / context.set_md_attr
-#     RPCs (fail-fast, set_fields returns the whole draft cfg). No wire change, so
-#     WIRE_VERSION stays put.
-# v8: adapter.guide generated tool (gui_adapter_guide) rides the WIRE 12 bump —
-#     read an adapter's orientation guide before running it.
-# v9: removed gui_connect_mock — agent now walks the same startup path as a GUI
-#     user (gui_connect_start kind=mock + gui_startup_apply + gui_context_use),
-#     eliminating the mock-only shortcut that diverged (caused a save-path bug).
-#     Pure mcp-side tool removal; no wire change (WIRE stays 12).
-# v10: startup.apply omitting result_dir/database_path now fills the default
-#      per-qubit roots (<cwd>/result|Database/<chip>/<qub>) so the project is
-#      runnable, instead of leaving a DRAFT context. Handler-side default only;
-#      wire contract unchanged.
-# v11: gui_launch uses sys.executable (cross-platform, was hardcoded
-#      .venv/bin/python) + Windows process-group flag; gui_stop closes via the
-#      app.shutdown RPC (graceful, no OS kill) and only force-kills when
-#      timeout_kill=true (replaces the old 'force' SIGKILL param). gui_app_shutdown
-#      tool rides WIRE 13.
-# v12: cfg introspection slimming (WIRE 14, Phase 120b). gui_tab_list_paths /
-#      gui_editor_get gain under (sub-tree scope) + verbosity (compact default =
-#      {path,kind,choices?}; full adds value/type; paths = bare list[str]).
-#      gui_editor_set_fields returns {applied, valid} (no longer the whole cfg);
-#      gui_analyze (was gui_analyze_start, v? sync) unchanged here. cfg_spec is
-#      ref-only. Token-noise + WYSIWYG read split: edit returns success, read via
-#      list_paths.
-# v13: run/analyze replies fold in figure_path (Phase 120c-⑧). On a finished
-#      run / completed analyze that produced a figure, the reply carries
-#      figure_path — a PNG rendered to the cross-platform temp dir (gettempdir,
-#      keyed by tab_id), NOT base64 — so the agent opens the file instead of a
-#      separate gui_tab_get_current_figure call. gui_analyze becomes a hand-written
-#      override (was a generated forwarder) to attach it.
-# v14: gui_analyze awaits the analyze operation (WIRE 15, Phase 120c). analyze is
-#      an async worker; gui_analyze starts it (analyze.start now returns an
-#      operation_id, captured under analyze:<tab_id>) then awaits via
-#      _await_operation_by_key, so it stays synchronous to the agent AND the
-#      figure is rendered (has_figure true) by the time figure_path is attached.
-# v15: non-blocking per-domain poll (Phase 120c-1) — gui_run_poll / gui_device_poll
-#      / gui_connect_poll map a zero-timeout operation.await onto finished /
-#      running / failed / no_operation, keyed on the semantic name (tab_id /
-#      device name / soc), no operation_id exposed (ADR-0002 kept). Lets an agent
-#      check a slow op without blocking, replacing the run_finished event watch.
-# v16: agent not exposed to events (Phase 120c-2). The GUI still emits its full
-#      EventBus stream on the wire (RPC-side registration unchanged), but the
-#      bridge drops every non-diagnostic event in _deliver_event and removes the
-#      agent tools gui_events_subscribe/poll/list/unsubscribe +
-#      gui_editor_subscribe/unsubscribe. Only diagnostics (GUI error/info push)
-#      still piggyback tool replies. Resource-change awareness = the version
-#      guard; async completion = gui_*_poll / gui_*_wait. No wire change.
-# v17: stale-guard error names changed resources (WIRE 16, Phase 120c-3). The
-#      version-guard PRECONDITION_FAILED carries data.stale (resource keys);
-#      _describe_stale_keys translates them into agent language and folds them
-#      into the error message ("… changed (the active context, this tab's cfg) …")
-#      so the agent knows what to re-read. Version numbers stay mcp bookkeeping.
-# v18: wait returns structured timeout (Phase 120c-4). gui_run_wait /
-#      gui_device_wait_operation / gui_connect_wait no longer raise on timeout (a
-#      bounded wait elapsing is expected, not a crash) — they return
-#      {status:'finished'|'timed_out'|'no_operation', waited_seconds}. Both
-#      timeout flavors (bridge socket TimeoutError, GUI-side "(timeout)") map to
-#      timed_out; a genuine failed/cancelled still raises. No wire change.
-# MCP 21: gui_launch gains a 'clean' arg (passes --clean to run_measure_gui → skip
-#      restoring the persisted session at startup); tab.get_cfg_summary
-#      description now warns its key shape (the '.value.' nesting) is read-only
-#      and differs from the editable list_paths shape. No wire change.
-# MCP 22: poll replies fold in progress + distinguish cancel (WIRE 20, Phase 129).
-#      A 'running' gui_*_poll reply now carries the live bars (operation.progress
-#      folded in) — gui_run_progress / gui_device_setup_progress tools are gone.
-#      gui_*_poll reports user cancel as status:'cancelled' (was 'failed'), read
-#      structurally from the wire reason via GuiRpcError.
-# MCP 23: tool errors append the machine-readable reason tag (Phase 130) — a
-#      precondition failure (no_run_result / no_project / …) now ends with
-#      "reason: <tag>" so the agent can branch without parsing the prose. No wire
-#      change (reason already on the wire envelope; only surfaced at mcp now).
-# MCP 24: wait-tool guidance only — gui_run_wait / gui_connect_wait /
-#      gui_device_wait_operation descriptions + _SERVER_INSTRUCTIONS now spell out
-#      that a wait BLOCKS the whole turn and that a long op should either poll or
-#      be run from a background agent (the only way to free the main loop and be
-#      re-invoked on completion — there is no server push). Text only, no behavior
-#      or wire change.
-# MCP 25: gui_tab_figure_screenshot renamed to gui_tab_get_current_figure
-#      (mirrors WIRE 21 tab.figure_screenshot -> tab.get_current_figure) — same
-#      tool, clearer name: "the figure currently shown" (run 2D map or analysis
-#      fit). gui_save_data / gui_save_image / gui_save_result now return the
-#      resolved written path(s) ({data_path[, image_path]}) instead of {ok}/{}
-#      (WIRE 21).
-# MCP 26: gui_analyze degrades like a run instead of blocking — short-wait then
-#      {status:'finished'|'pending'}; added gui_analyze_wait / gui_analyze_poll
-#      (mirror gui_run_wait/poll). A FIT usually settles in the wait; an
-#      INTERACTIVE analysis (AnalysisMode.INTERACTIVE — the user picks on the plot
-#      and clicks Done) never settles, so it degrades to pending and the agent
-#      prompts + polls. No wire change (analyze.start + operation.await/poll
-#      already exist; this is mcp-side degrade + two new poll/wait tools).
-# MCP 27: post-analysis tools (WIRE 22). gui_post_analyze degrades like gui_analyze
-#      (short-wait then {status:'finished'|'pending'}; FIT-only, no INTERACTIVE
-#      mode) + gui_post_analyze_wait / gui_post_analyze_poll; gui_tab_get_post_
-#      analyze_params / gui_tab_get_post_analyze_result auto-generate from the new
-#      method_specs. Unlike gui_analyze, gui_post_analyze folds NO figure_path (the
-#      post figure lives in the tab's separate post container, which the render
-#      view does not screenshot).
-# MCP 28: complex writeback scalars (WIRE 23). gui_writeback_preview /
-#      gui_writeback_set descriptions now document the {"__complex__": [re, im]}
-#      encoding for a complex metadict proposed_value (the GE adapter proposes
-#      g_center / e_center as complex). Tool descriptions auto-generate from the
-#      updated method_specs; the mcp forwards the tagged value verbatim.
-# MCP 29: figure/screenshot consolidation (WIRE 24). Removed gui_view_screenshot
-#      (whole-window grab) and the figure_path folding into run/analyze replies
-#      (_figure_path_if_any / _with_figure gone) — looking at a plot is now ONLY
-#      gui_tab_get_current_figure, which renders a small fixed-size PNG (token-light)
-#      and also covers the post-analysis figure. Added gui_save_post_image
-#      (auto-generated from the new save.post_image method_spec; mirrors
-#      gui_save_image). gui_save_image keeps full save quality.
-# MCP 30: device active-op enumeration (WIRE 25). gui_device_active_operations
-#      returns the full list of in-flight device ops (sorted by device name); each
-#      entry carries 'kind' + 'device_name'. Concurrent setups are observable in
-#      one call.
-# MCP 31: convenience-layer batch (no wire change). gui_analyze / gui_post_analyze
-#      fold the fit summary into a finished short-wait reply (one fewer round-trip;
-#      the getters stay for re-fetch + the wait/poll path). New
-#      gui_context_get_md_attrs (batch read, fan-out over context.get_md_attr) —
-#      the symmetric counterpart of gui_context_set_md_attrs. gui_editor_set_field
-#      / _set_fields accept 'tab_id' and resolve the editor_id from the tab
-#      snapshot (editor_id still works for non-tab editors). The 'running' poll
-#      reply slims each progress bar to {token, format, percent}. gui_editor_commit
-#      renamed to gui_editor_save_as_module (wire key stays editor.commit). Removed
-#      gui_device_active_setups (the device.active_setups wire method was dropped;
-#      gui_device_active_operations covers it).
-# MCP 32: gui_tab_get_current_figure always returns a written file path
-#      ({saved_to, bytes}), never inline base64 — out_path when given, else a
-#      per-tab temp file (gettempdir()/measure_fig_<tab_id>.png). Removes the
-#      base64 reply that overran the tool-output token limit. Wire unchanged (the
-#      wire tab.get_current_figure still supports png_b64 for raw consumers).
-# MCP 33: convenience-layer slimming (no wire change). gui_dialog_screenshot now
-#      always writes a file ({saved_to, bytes}) like gui_tab_get_current_figure —
-#      out_path when given, else gettempdir()/measure_dialog_<dialog_name>.png; the
-#      base64 reply branch is gone (the wire dialog.screenshot still returns base64
-#      for raw consumers). Piggyback diagnostics render as a compact one-line-per-
-#      diagnostic list ('severity: title — message') instead of indented JSON. The
-#      shared async contract (short-wait degrade / blocking-vs-background / timed_out
-#      / user-feedback wakeup / INTERACTIVE analyze) is consolidated into
-#      _SERVER_INSTRUCTIONS once; the 15 async tool descriptions (run / connect /
-#      analyze / post_analyze _start/_wait/_poll + device wait/poll) keep only their
-#      per-op difference. New gui_overview: a one-shot situational picture (state /
-#      context / soc / tabs / running_tab / active_tab) fanned out over existing read
-#      RPCs — also folded into gui_connect's reply ({note, overview}). gui_connect_start
-#      no longer folds the view snapshot (kept the soc fold).
-# v34: gui_project_info generated tool rides the WIRE 27 bump (read the project
-#      identity chip/qub/res + result_dir/database_path). gui_overview now folds a
-#      ``project`` field ({chip, qub, res} via project.info, guarded by
-#      has_project, else null). _SERVER_INSTRUCTIONS gains an orient paragraph
-#      (call gui_overview first, do not assume state).
-# MCP 35: (a) gui_dialog_screenshot override tracks the WIRE 28 param rename
-#      (dialog_name -> name): the tool's inputSchema, the forwarded wire param, and
-#      the temp-file name all use 'name', matching gui_dialog_open / gui_dialog_close.
-#      (b) gui_overview.project now uses long keys {chip_name, qub_name, res_name},
-#      matching the project.info wire shape and all other tool-GUIs (fluxdep /
-#      dispersive / autofluxdep); the short-key remap ({chip,qub,res}) is removed.
-#      (c) gui_connect reply is {note, overview} — no wire change (already correct).
-# MCP 36: _ensure_connected fast-fail on cold start (no WIRE change). A port probe
-#      (_port_is_open, 0.5s) is run before the full TCP connect so that calling any
-#      gui_* tool when no GUI is listening returns the actionable
-#      "no running measure-gui found…" error immediately instead of hanging ~30s
-#      until the socket timeout fires.
-# MCP 37: gui_notify_user — agent-initiated user prompt (WIRE 30, Stage 4b).
-#      Serially composes notify.open (main thread: mint token + open non-modal
-#      dialog) and notify.await (off-main: block until Reply/Dismiss/QTimer).
-#      Returns {reason:'reply'|'dismiss'|'timeout', reply?}. BLOCKS the turn;
-#      never raises on timeout or dismiss. notify.open / notify.await are
-#      excluded from auto-generation via _NON_GENERATED_METHODS.
-# MCP 38: cancelled _wait returns structured data instead of raising (WIRE 31).
-#      gui_run_wait / gui_analyze_wait / gui_post_analyze_wait /
-#      gui_device_wait_operation / gui_connect_wait now return
-#      {status:'cancelled', feedback?} on a cancelled operation instead of
-#      raising precondition_failed. 'feedback' is present only when the user
-#      clicked "Send & Stop" (carries the Stop reason); absent on a plain cancel.
-#      'failed' still raises. _SERVER_INSTRUCTIONS and tool descriptions updated
-#      to reflect the new contract.
-# MCP 39: predictor.set_model_params wire method (WIRE 32) yields the new
-#      auto-generated gui_predictor_set_model_params MCP tool — builds and
-#      installs a FluxoniumPredictor directly from typed EJ/EC/EL + flux params,
-#      bypassing params.json. Observable MCP surface change after MCP reconnect.
-# MCP 40: SoC-connect tool rename (no wire change). gui_connect_start /
-#      gui_connect_wait / gui_connect_poll renamed to gui_soc_connect /
-#      gui_soc_connect_wait / gui_soc_connect_poll — disambiguates the SoC-board
-#      connect family from gui_connect (the MCP bridge attach). The underlying
-#      wire RPCs (connect.start / operation.await / operation.poll keyed by "soc")
-#      are unchanged; only the agent-facing MCP tool names changed.
-# MCP 41: SoC connect is now synchronous (WIRE 33). The async connect.start +
-#      "soc" operation-handle is replaced by a synchronous soc.connect RPC;
-#      gui_soc_connect makes one blocking call (explicit ~2s timeout so the
-#      board-side 1s COMMTIMEOUT fires first) and returns {status:'finished',
-#      soc:{description, is_mock}} directly. Removed gui_soc_connect_wait /
-#      gui_soc_connect_poll and the "soc" key from _OP_KEY_OF; soc.connect is
-#      hand-written (in _NON_GENERATED_METHODS). run / analyze / device keep their
-#      async-handle contract. _SERVER_INSTRUCTIONS no longer lists connect among
-#      the degrading async ops.
-# MCP 42: convenience-layer bug fix + two fan-outs (no wire change). (1) JsonType
-#      .JSON now renders an UNTYPED MCP schema (no "type" key) instead of a union
-#      that listed "string"; gui_editor_set_field's hand-written 'value' schema
-#      dropped its "type" union to match. The string member let the MCP client
-#      coerce a number (0.2) to "0.2", failing a downstream float-field check —
-#      an untyped schema passes numbers through. Same fix covers set_field value /
-#      writeback.set proposed_value / context.set_md_attr value. (2) gui_tab_new is
-#      now a fan-out override: its reply folds editor_id + settable paths +
-#      cfg_summary (tab.snapshot + tab.list_paths + tab.get_cfg_summary), ~4 calls
-#      collapse to 1. (3) gui_run_start / gui_run_wait / gui_analyze fold the
-#      tab's current figure (rendered to a temp PNG, path in 'figure') into a
-#      FINISHED reply (never on a pending/interactive analyze). All three are
-#      mcp-side only — wire validation still accepts any JSON, so WIRE/GUI do not
-#      bump.
-# MCP 43: convenience-layer "run a stage" macro + first-use guide fold (no wire
-#      change). (1) gui_run_stage(adapter_name, edits?) folds create-tab +
-#      configure + run into one call: the gui_tab_new fan-out, then edits via the
-#      plural set_fields path (numbers stay numbers — the singular-coerce bug is
-#      not on this path), then gui_run_start. It STOPS before analyze (run success
-#      != analyze success); the reply is the run's finished reply (with the folded
-#      'figure') plus tab_id/editor_id, or a 'pending' handle if the run is slow.
-#      (2) First-use adapter-guide fold: a per-process set tracks which
-#      adapter_names had their guide returned this session; the FIRST gui_tab_new /
-#      gui_run_stage for an adapter folds the adapter.guide reply in as 'guide' and
-#      marks it seen, later calls omit it. gui_adapter_guide stays for an explicit
-#      re-read. Both are mcp-side only.
-# MCP 44: four-phase convenience redesign aligned to the agent's decision points +
-#      a run_poll figure fix (no wire change). Phase ① (gui_tab_new) unchanged — it
-#      already folds guide+editor_id+paths+cfg_summary. Phase ② gui_run_stage now
-#      takes tab_id (NOT adapter_name): it operates on an ALREADY-CREATED tab (from
-#      gui_tab_new, so the agent has seen the cfg), does set_fields + gui_run_start,
-#      and a FINISHED reply folds the analyze-params spec (tab.get_analyze_params)
-#      as 'analyze_params' next to the figure; it no longer creates a tab or folds
-#      the guide (that rides gui_tab_new). Phase ③ gui_analyze's FINISHED reply ALSO
-#      folds the writeback preview (writeback.preview) as 'writeback_preview' — the
-#      fit + the proposed writeback values/targets in one call (swallowed on
-#      failure, omitted on INTERACTIVE pending). Phase ④ gui_writeback_apply becomes
-#      a hand-written override gaining save_data:bool=false — when true it chains
-#      save.data after the apply and folds the resolved 'data_path' (apply runs
-#      first, committed even if the save fails); default false = apply-only,
-#      behavior unchanged. Consistency fix: gui_run_poll's FINISHED branch now folds
-#      the figure (_fold_finished_figure) like run_start/_wait/_stage, so the
-#      pending->poll path also gets the plot.
-# MCP 45: base-tools-pure + gui_run_stage1..4 restructure (no wire change). The
-#      base tools now return ONLY their own operation's result (least-surprise —
-#      the name describes the function); cross-tool folding moves into four
-#      explicit bundle tools that the docs recommend as the primary flow:
-#        - gui_tab_new reverts to the auto-generated tab.new forwarder (returns
-#          just {tab_id}); the fan-out + guide fold moves to gui_run_stage1.
-#        - gui_run_start / _wait / _poll drop the figure fold (keep the short-wait
-#          degrade contract — that is the tool's own async contract, not a fold);
-#          look at the plot via gui_tab_get_current_figure.
-#        - gui_analyze drops the figure + writeback-preview folds (keeps its own
-#          inline 'summary' incl. *_err + the degrade contract).
-#        - gui_writeback_apply reverts to the auto-generated writeback.apply
-#          forwarder (returns just {applied_ids}); the save_data chaining moves to
-#          gui_run_stage4.
-#        - removed gui_run_stage and the now-unused _GUIDE_RETURNED seen-set.
-#      The four bundle tools reuse the existing fold helpers (_fold_finished_figure
-#      / _fold_analyze_params / _fold_writeback_preview / the tab_new fan-out reads,
-#      now _fold_tab_editing_context): stage1 = new+guide (always returns guide);
-#      stage2 = configure+run (set_fields + run_start, folds figure+analyze_params,
-#      stops before analyze); stage3 = analyze (folds summary+figure+writeback_
-#      preview, pending on INTERACTIVE); stage4 = writeback+save (apply, optional
-#      save_data folds data_path).
-# MCP 46: figure fold re-added to the four plot-producing base ops (no wire change).
-#      The FIGURE is each op's OWN visual result, so folding it into a FINISHED
-#      reply is "pure" by the same logic as the inline summary. The NON-plot folds
-#      (writeback_preview, save, cfg reads, guide) remain ONLY in the stageN bundles.
-#        - gui_run_start: FINISHED reply includes 'figure' (same path as before
-#          MCP 45). Pending remains pure (no figure).
-#        - gui_run_wait: FINISHED reply includes 'figure'. Non-finished unchanged.
-#        - gui_run_poll: FINISHED branch includes 'figure'. Running/cancelled unchanged.
-#        - gui_analyze: FINISHED (FIT) reply includes 'figure'. INTERACTIVE 'pending'
-#          (no settled plot) does NOT. writeback_preview stays in gui_run_stage3 only.
-#      gui_run_stage2 and gui_run_stage3 no longer double-fold the figure — they
-#      inherit it from the underlying run/analyze reply they wrap.
-#      gui_tab_get_current_figure description updated: marked rarely-needed (normally
-#      read the folded figure from the run/analyze finished reply instead).
-# MCP 47: dev/debug tools + 3-tier classification (WIRE 35 for the one new wire
-#      method). (a) gui_dialog_screenshot is MERGED into gui_debug_screenshot(target,
-#      out_path?): target='window' grabs the WHOLE main window via the new
-#      view.screenshot wire method (captures the non-dialog floating widgets a
-#      per-dialog grab cannot see), any other target grabs that named dialog (the
-#      old behaviour). Same contract — ALWAYS writes a PNG file, returns
-#      {saved_to, bytes}, never inline base64; the default temp path is
-#      measure_window.png for the window, measure_dialog_<name>.png for a dialog.
-#      (b) gui_debug_versions dumps the full resources.versions table (the
-#      optimistic-concurrency version numbers normally kept as mcp bookkeeping) —
-#      for debugging the stale-guard. (c) gui_debug_operations dumps the mcp-side
-#      _OP_BY_KEY map (semantic key -> operation_id, the only view of
-#      run/analyze/post_analyze handles) plus the wire device.active_operations
-#      list — for debugging no_operation / stuck waits. Neither (b) nor (c) needs a
-#      new wire method. (d) _SERVER_INSTRUCTIONS is restructured into three tiers —
-#      RECOMMENDED (the gui_run_stage1..4 bundle + essential lifecycle/startup),
-#      ON-DEMAND (the fine-grained base tools), DEV (gui_debug_screenshot +
-#      gui_debug_versions + gui_debug_operations). No hard env gate — all tools stay
-#      registered; the tiers are guidance.
+# ``MCP_VERSION`` is this MCP bridge's own code revision (the mcp_server / tool
+# layer, NOT the wire contract). It is REPORTED — never compared — in the version
+# banner so an agent can confirm a reconnect picked up the bridge-side edits. Bump
+# it on a meaningful bridge change you want to be able to spot a reload of,
+# including pure mcp-side convenience changes (new override tools, fold tweaks,
+# tool renames) that leave the wire contract untouched. A wire-contract change is
+# tracked separately by WIRE_VERSION (see ``wire_version.py``); the two are
+# independent. (Git history holds the per-version evolution.)
 MCP_VERSION = 47
 
 # ---------------------------------------------------------------------------
@@ -514,8 +220,8 @@ or the dialog times out. Returns {reason:'reply'|'dismiss'|'timeout', reply?}:
 # full EventBus stream + diagnostics on the wire, but the agent is exposed only
 # to diagnostics — user-facing error/info feedback ("Data saved to …", a run
 # failure reason) that no version-guard or poll could surface. Resource-change
-# events are dropped in _deliver_event (Phase 120c-2). Diagnostics piggyback on
-# the next tool reply; _DIAGNOSTIC_COND guards the queue (notified on append).
+# events are dropped in _deliver_event. Diagnostics piggyback on the next tool
+# reply; _DIAGNOSTIC_COND guards the queue (notified on append).
 _DIAGNOSTIC_QUEUE_MAX = 1024
 _DIAGNOSTIC_QUEUE: deque[dict[str, Any]] = deque(maxlen=_DIAGNOSTIC_QUEUE_MAX)
 _DIAGNOSTIC_COND = threading.Condition()
@@ -1806,10 +1512,9 @@ def tool_gui_run_stage2(arguments: dict[str, Any]) -> dict[str, Any]:
             }
         )
     reply = tool_gui_run_start({"tab_id": tab_id})
-    # The figure is already folded by tool_gui_run_start (MCP 46); do NOT
-    # double-fold it here. Only add analyze_params (the stage-specific fold).
-    # _fold_analyze_params is a no-op on a non-finished reply, so the pending
-    # path is safe.
+    # The figure is already folded by tool_gui_run_start; do NOT double-fold it
+    # here. Only add analyze_params (the stage-specific fold). _fold_analyze_params
+    # is a no-op on a non-finished reply, so the pending path is safe.
     return _fold_analyze_params(tab_id, reply)
 
 
@@ -1825,8 +1530,8 @@ def tool_gui_run_stage3(arguments: dict[str, Any]) -> dict[str, Any]:
     """
     tab_id = str(arguments["tab_id"])
     reply = tool_gui_analyze({"tab_id": tab_id})
-    # The figure is already folded by tool_gui_analyze (MCP 46); do NOT
-    # double-fold it here. Only add writeback_preview (the stage-specific fold).
+    # The figure is already folded by tool_gui_analyze; do NOT double-fold it
+    # here. Only add writeback_preview (the stage-specific fold).
     return _fold_writeback_preview(tab_id, reply)
 
 
@@ -1868,7 +1573,7 @@ def tool_gui_tab_get_current_figure(arguments: dict[str, Any]) -> dict[str, Any]
 
 
 # ---------------------------------------------------------------------------
-# Phase 81b tools — context queries / device queries
+# Context-query / device-query tools
 # ---------------------------------------------------------------------------
 
 
@@ -2978,7 +2683,7 @@ def _cleanup_on_exit() -> None:
 
 
 def _setup_logging() -> None:
-    """Attach the MCP server process's per-session file logging (Phase 157).
+    """Attach the MCP server process's per-session file logging.
 
     stdout is the JSON-RPC transport, so logging must never touch it — the shared
     helper only adds a stderr (WARNING) handler plus a DEBUG file handler. Attach
@@ -3018,10 +2723,10 @@ def _piggyback_blocks() -> list[dict[str, Any]]:
 
     Piggyback (ADR-0013): drain GUI diagnostics onto every successful tool reply
     so the agent gets the GUI's error/info feedback ("Data saved to …", a
-    run-failure reason) without a dedicated poll. Only diagnostics ride here now —
-    resource-change events are not exposed to the agent (Phase 120c-2). Rendered
-    as a compact one-line-per-diagnostic list (no indented JSON) to keep the
-    piggyback token-light.
+    run-failure reason) without a dedicated poll. Only diagnostics ride here —
+    resource-change events are not exposed to the agent. Rendered as a compact
+    one-line-per-diagnostic list (no indented JSON) to keep the piggyback
+    token-light.
     """
     pending = _drain_pending()
     diagnostics = pending["diagnostics"]

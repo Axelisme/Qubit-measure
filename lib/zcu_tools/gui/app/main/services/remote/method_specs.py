@@ -691,7 +691,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "Discard an editing session without writing to the ModuleLibrary.",
         (_str("editor_id"),),
     ),
-    # Notify prompt — agent-initiated user question (Stage 4b, ADR-0025).
+    # Notify prompt — agent-initiated user question (ADR-0025).
     # Two-RPC design: notify.open mints the token + opens the dialog on the
     # main thread; notify.await blocks the off-main worker until the user replies,
     # dismisses, or the dialog's QTimer fires. Both are excluded from
