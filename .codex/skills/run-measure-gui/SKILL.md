@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 35
+skill_version: 36
 ---
 
 # run-measure-gui
@@ -80,6 +80,21 @@ the moment a real `YOKOGS200`/`SGS100A` is involved, it does.
 
 This is the path you use when asked to "drive measure-gui". The MCP server
 auto-launches the GUI; you call tools.
+
+### Lab notebook discipline (`agent-memory` MCP — no hook enforces it)
+
+A separate `agent-memory` MCP server is your persistent, human-readable lab
+notebook across sessions. It has three functions: **records** (one measurement per
+folder — the verdict, the numbers, the figures; immutable), **troubleshooting**
+(context-free symptom → fix, reusable across qubits), and **checklists** (one
+acceptance list per experiment type). Two non-negotiable touch points:
+
+- **BEFORE an experiment** call `memory_recall(chip, qub, exp_type)`. It returns
+  three buckets: the acceptance `checklist` for this experiment, the `gotchas`
+  (known fixes) for it, and the `recent` records for this chip/qub. Read all three
+  before configuring — past you already learned things this session would repeat.
+  Hit a symptom mid-run? `memory_search(query=<symptom>)` before improvising.
+- **AFTER analyze** run the acceptance gate (below) and `memory_record_measurement`.
 
 ### Overview and project-identity tools
 
@@ -193,6 +208,34 @@ a handle, never by subscribing to a push stream:
 | `gui_run_start` / `gui_analyze` returned `{status:pending}` | wait (`gui_run_wait` / `gui_analyze_wait`, blocks) or poll (`gui_run_poll` / `gui_analyze_poll`, non-blocking) |
 | want live progress bars | already in the `gui_run_poll` reply while `status:running` (active + bars); no separate progress tool |
 | a poll or wait says `status:cancelled` | a user/agent cancel (distinct from `failed`); **not a raise, not an error** — read optional `feedback` for the Stop reason (present when user clicked "Send & Stop"), then re-plan |
+
+### Acceptance gate (after analyze, before writeback)
+
+Once `gui_analyze` has settled, before you write anything back, run the gate. It is
+**self-grading, not a blocker** — an imperfect run is acceptable, but you must
+record *why* honestly.
+
+1. **Re-read the checklist** from the `memory_recall(chip, qub, exp_type)` you did
+   before the run (the `checklist` bucket). If it is empty, grade against the
+   experiment's `gui_adapter_guide` expectations and the figure instead, and
+   consider seeding one with `memory_checklist_set(exp_type, items)` for next time.
+2. **Grade each item with evidence.** Look at the analysis figure (the finished
+   `gui_analyze` reply folds it) and the summary; for every checklist item write a
+   one-line pass/fail with the number or the visual fact that justifies it. The
+   figure is the evidence — a small fit error bar alone does not pass an item.
+3. **`memory_record_measurement`** the run: `decision=accept|reject`, a one-line
+   `reason` (the verdict), the per-item pass/fail in `body`, `figure_paths` to copy
+   the plot(s) into the record folder (pass the PNG path the run/analyze reply
+   gave you; omit `figure_paths` if there is no figure — a record with no figure
+   is still valid), and `data_ref` if you saved the data.
+4. **Then writeback as usual** — the gate does not block it (`gui_run_stage4` /
+   `gui_writeback_apply`). If an item failed, prefer the partial-writeback rules in
+   "Gotchas" (write the safe subset, leave the dubious one unset) and say so in the
+   record's `reason`.
+5. **If you learned a reusable rule** (a symptom→fix that generalizes beyond this
+   qubit): `memory_search` the symptom; update the matching solution
+   (`memory_update_solution`, add this record id to `seen_in`) or add a new one
+   (`memory_add_solution`). Keep records for the instance, solutions for the rule.
 
 **Interactive analysis (e.g. `onetone`/`twotone flux_dep`).** Some adapters have no
 automatic fit — the analysis is a 2D map the **user picks on**. `gui_adapter_guide`
