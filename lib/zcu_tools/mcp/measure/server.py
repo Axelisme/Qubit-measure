@@ -88,7 +88,7 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
 # tool renames) that leave the wire contract untouched. A wire-contract change is
 # tracked separately by WIRE_VERSION (see ``wire_version.py``); the two are
 # independent. (Git history holds the per-version evolution.)
-MCP_VERSION = 47
+MCP_VERSION = 48  # view.screenshot removed from generated tools (leaked raw base64)
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -1690,8 +1690,12 @@ _NON_GENERATED_METHODS = frozenset(
         "device.connect",
         "device.disconnect",
         "device.setup",
-        # client-side file write of base64 PNG
+        # client-side file write of base64 PNG — both raw-base64 wire methods are
+        # excluded: dialog.screenshot and view.screenshot are only reachable via
+        # the gui_debug_screenshot override, which decodes + writes the PNG file
+        # (never returning inline base64 to the agent).
         "dialog.screenshot",
+        "view.screenshot",
         "tab.get_current_figure",
         # hand-written override: adds tab_id -> editor_id resolution on top of the
         # editor.set_field RPC (a tab's cfg form is the editor session keyed by its
@@ -2443,7 +2447,12 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "operation_id that the _wait/_poll tools resolve names through (the only "
             "view of run/analyze/post_analyze handles); 'device_active_operations' "
             "is the wire device.active_operations list. Use when debugging "
-            "no_operation / a stuck wait."
+            "no_operation / a stuck wait. "
+            "Lifecycle of by_key entries: a key is written when the matching start "
+            "RPC fires (run.start / analyze.start / post_analyze.start / "
+            "device.connect/disconnect/setup) with 'latest wins', and persists "
+            "until the tab is closed — so a stale key for a completed op is normal "
+            "and does not indicate an active operation."
         ),
         "inputSchema": {"type": "object", "properties": {}},
     },

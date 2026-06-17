@@ -125,3 +125,16 @@ def test_writeback_set_selected_is_boolean_schema():
     ``bool("false")`` wrongly reads as True (selection never clears)."""
     props = m.TOOLS["gui_writeback_set"]["inputSchema"]["properties"]
     assert props["selected"]["type"] == "boolean"
+
+
+def test_view_screenshot_not_generated():
+    """view.screenshot returns raw base64 PNG — it must NOT be auto-generated into
+    a gui_view_screenshot agent tool. The only entry point is gui_debug_screenshot
+    (which decodes + writes a file). Mirrors the dialog.screenshot invariant."""
+    # Must be in the exclusion set so the generator skips it.
+    assert "view.screenshot" in m._NON_GENERATED_METHODS
+    # The leaked tool must not appear in the assembled tool table.
+    assert "gui_view_screenshot" not in m.TOOLS
+    # dialog.screenshot is the existing precedent — verify it is still excluded too.
+    assert "dialog.screenshot" in m._NON_GENERATED_METHODS
+    assert "gui_dialog_screenshot" not in m.TOOLS
