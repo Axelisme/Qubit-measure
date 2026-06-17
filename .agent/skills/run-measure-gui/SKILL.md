@@ -144,6 +144,7 @@ gui_tab_new(adapter_name="fake/freq")             # PURE: just creates a tab -> 
                                                   # editor_id/paths/cfg_summary/guide in one call.) id e.g. fake-freq-1a2b3c4d
 gui_tab_snapshot(tab_id) -> editor_id             # per-tab progress + the cfg-editing session handle
 gui_tab_list_paths(tab_id)                        # dotted cfg paths (compact: path+kind+choices)
+                                                  # pass prefix="modules.readout" to list only that subtree (no match → empty list)
 gui_tab_get_cfg_summary(tab_id)                   # current values/expressions, nested (ref nodes wrap {chosen,value} → not a path source; see list_paths)
 gui_editor_set_field(tab_id, "rounds", 30)        # convenience: tab_id resolves the tab's cfg-editor automatically;
                                                   # explicit editor_id (from gui_tab_snapshot) also accepted

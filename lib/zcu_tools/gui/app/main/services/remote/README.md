@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-17 (per-version changelog history trimmed to present-tense; WIRE 35, GUI 42, MCP 48)
+**Last updated:** 2026-06-17 (WIRE 36: tab.list_paths adds optional prefix; GUI 43, MCP 49)
 
 # `zcu_tools/gui/services/remote/` — RemoteControlAdapter
 
@@ -78,11 +78,11 @@ Client 用 `id` 區分 reply（有 id）vs push（有 event、無 id）。Error 
 
 no-auth 的 `wire.version` 回 `{"wire_version": N, "gui_version": M}`(auth 閘門**之前**可探);mcp 端另持自己的 `MCP_VERSION`。三個都給 agent 看，但只有 wire 被**比較**：
 
-- **`WIRE_VERSION`(=35,`wire_version.py`)**:mcp↔RPC **接口契約**(method 集合 / params / event 序列化)。mcp **pin 並比較**;不符 = 兩端講不同協議 → **硬 MISMATCH**。**只在契約變更時 bump**。本 app 自持(`wire_version.py`)而非共用 wire 層——每個 GUI app 各自演化其 wire 契約。
-- **`GUI_VERSION`(=42,`wire_version.py`)**:GUI 進程**代碼版本**。**只顯示、不比較**(代碼版本是該進程自己的屬性,mcp 不該 pin)。bump 任何想能看出 reload 的 GUI 變更,**含不動 wire 的純內部變更**(拆分用意:內部變更 bump 它而非 WIRE_VERSION,契約版本不動)。
+- **`WIRE_VERSION`(=36,`wire_version.py`)**:mcp↔RPC **接口契約**(method 集合 / params / event 序列化)。mcp **pin 並比較**;不符 = 兩端講不同協議 → **硬 MISMATCH**。**只在契約變更時 bump**。本 app 自持(`wire_version.py`)而非共用 wire 層——每個 GUI app 各自演化其 wire 契約。WIRE 36：`tab.list_paths` 新增 optional `prefix`（dotted-path 前缀過濾，不命中回空）。
+- **`GUI_VERSION`(=43,`wire_version.py`)**:GUI 進程**代碼版本**。**只顯示、不比較**(代碼版本是該進程自己的屬性,mcp 不該 pin)。bump 任何想能看出 reload 的 GUI 變更,**含不動 wire 的純內部變更**(拆分用意:內部變更 bump 它而非 WIRE_VERSION,契約版本不動)。
 - **`MCP_VERSION`(=48,`mcp/measure/server.py`)**:mcp bridge 自己的**代碼版本**。只顯示;bump 想能看出 reconnect 是否載入了 bridge 端修改的變更(**含純 mcp-side convenience 工具**,如 batch fan-out 不動 wire 但 bump MCP_VERSION)。
 
-mcp `_wire_version_note()` 只比 wire(硬 MISMATCH),gui/mcp 版本純顯示——一致→` wire v35 (mcp==gui); gui code v42, mcp code v48.`；pre-split GUI 缺 gui_version 顯示 `v?`。**用途**:agent 改完碼 reconnect/launch 後直接看三個數字對不對,自己判斷有沒有 reload，不靠 bridge 斷言（注意 ToolSearch 顯示的 schema 是 reconnect 當下快照，可能滯後；以 banner 版本 + 實際行為為準）。**mcp tool error 末尾附 `reason: <tag>`**——precondition 失敗的 `GuiRpcError.reason`（no_run_result/no_project…，已在 wire envelope）透到 agent text，免 parse 句子分支。三個版本號的逐版演化以 git history 為準（`wire_version.py` / `mcp/measure/server.py` 不再保留 per-version 列）。
+mcp `_wire_version_note()` 只比 wire(硬 MISMATCH),gui/mcp 版本純顯示——一致→` wire v36 (mcp==gui); gui code v43, mcp code v49.`；pre-split GUI 缺 gui_version 顯示 `v?`。**用途**:agent 改完碼 reconnect/launch 後直接看三個數字對不對,自己判斷有沒有 reload，不靠 bridge 斷言（注意 ToolSearch 顯示的 schema 是 reconnect 當下快照，可能滯後；以 banner 版本 + 實際行為為準）。**mcp tool error 末尾附 `reason: <tag>`**——precondition 失敗的 `GuiRpcError.reason`（no_run_result/no_project…，已在 wire envelope）透到 agent text，免 parse 句子分支。三個版本號的逐版演化以 git history 為準（`wire_version.py` / `mcp/measure/server.py` 不再保留 per-version 列）。
 
 **改 wire 層後的標準驗證流程**:改完碼 → `/mcp reconnect measure-gui`(重啟 MCP server)→ 重新 `gui_launch`(拿到新 GUI 子進程)→ 看回傳的 `wire vN (mcp==gui); gui code vX, mcp code vY` —— wire 不符=MISMATCH(契約)；gui/mcp code 數字對不對自己判斷有沒有 reload(改 GUI 內部記得 bump GUI_VERSION、改 bridge 記得 bump MCP_VERSION,才看得出 reload)。注意 reconnect 會連帶讓舊 GUI 子進程失聯但**不殺它**——舊進程仍佔著 port。**`gui_launch` 有 pre-flight：port 已被佔(舊 GUI 還在)直接 fail-fast**（MCP_VERSION 6 起），明說「port 已佔，先 gui_stop / kill 舊 run_measure_gui.py，或換 port」——避免舊版的「靜默連到殘留舊進程(舊碼、卻回新 pid)」陷阱（握手版本若同版看不出，只有實際效果能分辨）。launch 預設 port 8765 期望**空閒**（起新的）；`gui_connect` 預設 8765 期望**已有 GUI 在聽**（連現有的），無 GUI 時報 `No GUI is listening on 127.0.0.1:<port>`。兩者預設對稱、語義相反。
 

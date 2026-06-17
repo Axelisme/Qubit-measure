@@ -196,10 +196,10 @@ def _h_tab_list_paths(
             ErrorCode.PRECONDITION_FAILED,
             f"tab {tab_id!r} cfg form has no live model yet",
         )
-    under, verbosity = _path_view_args(params)
+    under, verbosity, prefix = _path_view_args(params)
     return {
         "paths": adapter.ctrl.cfg_editor_get(
-            editor_id, under=under, verbosity=verbosity
+            editor_id, under=under, verbosity=verbosity, prefix=prefix
         )
     }
 
@@ -1654,16 +1654,22 @@ def _h_editor_set_field(
         ) from exc
 
 
-def _path_view_args(params: Mapping[str, object]) -> tuple[str | None, str]:
-    """Extract optional ``under`` (sub-tree root) + ``verbosity`` from params.
+def _path_view_args(
+    params: Mapping[str, object],
+) -> tuple[str | None, str, str | None]:
+    """Extract optional ``under`` + ``verbosity`` + ``prefix`` from params.
 
     ``verbosity`` defaults to ``full`` at the wire layer (mechanism fidelity);
-    the agent-facing compact default is applied by the mcp tool.
+    the agent-facing compact default is applied by the mcp tool. ``prefix`` is an
+    optional dotted-path filter (omit → None, no filtering); methods that do not
+    declare it simply never carry it, so this helper stays shared with editor.get.
     """
     raw_under = params.get("under")
     under = str(raw_under) if raw_under else None
     verbosity = str(params.get("verbosity") or "full")
-    return under, verbosity
+    raw_prefix = params.get("prefix")
+    prefix = str(raw_prefix) if raw_prefix else None
+    return under, verbosity, prefix
 
 
 def _h_editor_get(
@@ -1672,11 +1678,14 @@ def _h_editor_get(
     from zcu_tools.gui.app.main.services.cfg_editor import CfgEditorError
 
     editor_id = str(params["editor_id"])
-    under, verbosity = _path_view_args(params)
+    # editor.get declares no 'prefix' param, so prefix is always None here (the
+    # dotted-path filter is a tab.list_paths-only knob); kept in the shared
+    # unpacking for symmetry with _h_tab_list_paths.
+    under, verbosity, prefix = _path_view_args(params)
     try:
         return {
             "paths": adapter.ctrl.cfg_editor_get(
-                editor_id, under=under, verbosity=verbosity
+                editor_id, under=under, verbosity=verbosity, prefix=prefix
             )
         }
     except CfgEditorError as exc:

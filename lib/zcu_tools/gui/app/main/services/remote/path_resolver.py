@@ -385,10 +385,31 @@ def _project(
     )
 
 
+def _filter_by_prefix(
+    entries: list[dict[str, object]], prefix: str
+) -> list[dict[str, object]]:
+    """Keep entries whose dotted path equals ``prefix`` or is below it.
+
+    Dotted-path prefix semantics (NOT fnmatch glob): ``modules.readout`` matches
+    ``modules.readout`` itself and every ``modules.readout.*`` descendant, but
+    NOT a sibling like ``modules.readout_extra`` (the boundary is a dotted
+    segment, hence the ``prefix + "."`` test). Paths are returned as full dotted
+    strings (no re-rooting). A prefix matching nothing yields an empty list —
+    not an error — so an over-narrow prefix is a graceful no-result, not a
+    fast-fail.
+    """
+    return [
+        e
+        for e in entries
+        if (p := str(e["path"])) == prefix or p.startswith(prefix + ".")
+    ]
+
+
 def list_settable_paths(
     root: SectionLiveField,
     under: str | None = None,
     verbosity: str = "full",
+    prefix: str | None = None,
 ) -> list[dict[str, object]] | list[str]:
     """Enumerate the dotted paths that ``resolve_and_set`` can mutate.
 
@@ -397,18 +418,25 @@ def list_settable_paths(
     omitted.
 
     ``under`` restricts the listing to the sub-tree rooted at that dotted path
-    (same navigation as a ModuleRef key switch's re-list); omit it for the whole
-    draft. ``verbosity`` controls the per-entry shape: ``full`` (default, the
-    mechanism layer's full fidelity) = ``{path, kind, value, type[, choices]}``;
-    ``compact`` drops ``value``/``type`` but keeps ``kind``/``choices``;
-    ``paths`` = bare ``list[str]``. The agent-facing default (compact) is chosen
-    by the mcp/RPC layer, not here.
+    and validates the path (unknown field → INVALID_PARAMS; ModuleRef ref
+    receives special handling); omit it for the whole draft. ``prefix`` is a
+    pure flat string-prefix filter applied after full-path listing: it keeps only
+    the paths equal to or below that dotted prefix (dotted-segment boundary, not
+    glob), does not validate the prefix, and returns an empty list on no match.
+    Both ``under`` and ``prefix`` output full dotted path strings. ``verbosity``
+    controls the per-entry shape: ``full`` (default, the mechanism layer's full
+    fidelity) = ``{path, kind, value, type[, choices]}``; ``compact`` drops
+    ``value``/``type`` but keeps ``kind``/``choices``; ``paths`` = bare
+    ``list[str]``. The agent-facing default (compact) is chosen by the mcp/RPC
+    layer, not here.
     """
     if under:
         field, base_path = _navigate(root, under.split("."))
         entries = _list_field(base_path, field)
     else:
         entries = _list_field("", root)
+    if prefix:
+        entries = _filter_by_prefix(entries, prefix)
     return _project(entries, verbosity)
 
 

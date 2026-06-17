@@ -130,12 +130,21 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "instead. (A scalar leaf, by contrast, also accepts an eval reference.) "
         "'under' restricts to the sub-tree at that "
         "dotted path (e.g. 'modules.readout'); omit for the whole cfg. "
+        "'prefix' is a flat string-prefix filter (dotted-segment boundary, not "
+        "glob): 'modules.readout' matches 'modules.readout' and every "
+        "'modules.readout.*' descendant. Paths are returned as full dotted "
+        "strings. A prefix matching nothing returns an empty list. "
         "'verbosity' shapes each entry: 'compact' (default) = {path, kind, "
         "choices?}; 'full' adds current value + type; 'paths' = a bare list of "
         "path strings (smallest).",
         (
             _str("tab_id"),
             _str_opt("under", "Restrict to the sub-tree at this dotted path"),
+            _str_opt(
+                "prefix",
+                "Keep only paths equal to or below this dotted prefix "
+                "(dotted-segment match, not glob; no match → empty list)",
+            ),
             _str_default("verbosity", "compact", "compact (default) / full / paths"),
         ),
     ),

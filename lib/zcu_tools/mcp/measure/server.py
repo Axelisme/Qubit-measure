@@ -88,7 +88,7 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
 # tool renames) that leave the wire contract untouched. A wire-contract change is
 # tracked separately by WIRE_VERSION (see ``wire_version.py``); the two are
 # independent. (Git history holds the per-version evolution.)
-MCP_VERSION = 48  # view.screenshot removed from generated tools (leaked raw base64)
+MCP_VERSION = 49  # compact tool-reply JSON (W1); prefix filter on tab.list_paths (W3)
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -740,6 +740,8 @@ def _fold_tab_editing_context(tab_id: str, reply: dict[str, Any]) -> dict[str, A
     """
     snap = send_gui_rpc("tab.snapshot", {"tab_id": tab_id})
     reply["editor_id"] = snap.get("editor_id")
+    # server-side validate_params already injects the spec default 'compact' for
+    # verbosity when omitted, so no explicit value is needed here.
     reply["paths"] = send_gui_rpc("tab.list_paths", {"tab_id": tab_id}).get("paths")
     reply["cfg_summary"] = send_gui_rpc("tab.get_cfg_summary", {"tab_id": tab_id}).get(
         "summary"

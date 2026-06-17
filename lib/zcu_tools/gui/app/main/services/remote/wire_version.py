@@ -27,10 +27,10 @@ from __future__ import annotations
 #     contract version put). A wire-contract change bumps BOTH.
 #
 # (Git history holds the per-version evolution of both constants.)
-WIRE_VERSION = 35
+WIRE_VERSION = 36
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION (a wire-contract change
 # bumps both; a pure-internal GUI change bumps only this). Git history holds the
 # per-version evolution.
-GUI_VERSION = 42
+GUI_VERSION = 43

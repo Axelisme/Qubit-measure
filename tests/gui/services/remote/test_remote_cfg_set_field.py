@@ -333,6 +333,97 @@ def test_list_paths_under_restricts_to_subtree(lf):
         sock.close()
 
 
+def test_list_paths_prefix_keeps_subtree_full_paths(lf):
+    # 'prefix' is a flat string-prefix filter: full path strings are kept and
+    # only entries outside the dotted prefix are dropped.
+    sock = open_client(lf.service.port)
+    try:
+        full = call(
+            sock, "tab.list_paths", {"tab_id": lf._tab_id, "verbosity": "paths"}
+        )["result"]["paths"]
+        prefixes = {p.split(".")[0] for p in full if "." in p}
+        assert prefixes, "expected at least one nested path"
+        root = sorted(prefixes)[0]
+        scoped = call(
+            sock,
+            "tab.list_paths",
+            {"tab_id": lf._tab_id, "prefix": root, "verbosity": "paths"},
+        )["result"]["paths"]
+        assert scoped, f"expected paths with prefix {root!r}"
+        # Full path strings kept (not re-rooted) and confined to the prefix subtree.
+        assert all(p == root or p.startswith(root + ".") for p in scoped)
+        assert set(scoped) == {p for p in full if p == root or p.startswith(root + ".")}
+        assert len(scoped) < len(full)
+    finally:
+        sock.close()
+
+
+def test_list_paths_prefix_exact_match_keeps_self(lf):
+    sock = open_client(lf.service.port)
+    try:
+        # 'reps' is a scalar leaf (no children); an exact prefix keeps just it.
+        resp = call(
+            sock,
+            "tab.list_paths",
+            {"tab_id": lf._tab_id, "prefix": "reps", "verbosity": "paths"},
+        )
+        assert resp["result"]["paths"] == ["reps"]
+    finally:
+        sock.close()
+
+
+def test_list_paths_prefix_no_match_returns_empty(lf):
+    # A prefix matching nothing yields an empty list (graceful, not a fast-fail);
+    # 'rep' must NOT match 'reps' (dotted-segment boundary, not a string prefix).
+    sock = open_client(lf.service.port)
+    try:
+        for verbosity in ("compact", "full", "paths"):
+            resp = call(
+                sock,
+                "tab.list_paths",
+                {
+                    "tab_id": lf._tab_id,
+                    "prefix": "rep",
+                    "verbosity": verbosity,
+                },
+            )
+            assert resp["ok"] is True, verbosity
+            assert resp["result"]["paths"] == [], verbosity
+    finally:
+        sock.close()
+
+
+def test_list_paths_prefix_works_across_verbosity(lf):
+    # All three verbosity shapes honour the prefix filter (it runs before the
+    # verbosity projection).
+    sock = open_client(lf.service.port)
+    try:
+        compact = call(
+            sock,
+            "tab.list_paths",
+            {"tab_id": lf._tab_id, "prefix": "reps", "verbosity": "compact"},
+        )["result"]["paths"]
+        assert [e["path"] for e in compact] == ["reps"]
+        assert all("value" not in e and "type" not in e for e in compact)
+
+        full = call(
+            sock,
+            "tab.list_paths",
+            {"tab_id": lf._tab_id, "prefix": "reps", "verbosity": "full"},
+        )["result"]["paths"]
+        assert [e["path"] for e in full] == ["reps"]
+        assert "value" in full[0] and "type" in full[0]
+
+        paths = call(
+            sock,
+            "tab.list_paths",
+            {"tab_id": lf._tab_id, "prefix": "reps", "verbosity": "paths"},
+        )["result"]["paths"]
+        assert paths == ["reps"]
+    finally:
+        sock.close()
+
+
 def test_list_paths_bad_verbosity_rejected(lf):
     sock = open_client(lf.service.port)
     try:

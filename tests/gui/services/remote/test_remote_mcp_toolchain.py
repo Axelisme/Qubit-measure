@@ -1841,6 +1841,8 @@ def test_run_stage1_creates_tab_and_folds_context_and_guide(monkeypatch):
 
     # tab.new first (adapter_name verbatim), then the three reads keyed by the new
     # tab_id, then the adapter.guide fetch (always — no first-use gating).
+    # tab.list_paths omits verbosity: server-side validate_params injects the
+    # spec default 'compact', so no explicit value is needed in this direct call.
     assert calls == [
         ("tab.new", {"adapter_name": "fake/freq"}),
         ("tab.snapshot", {"tab_id": "tw-1"}),

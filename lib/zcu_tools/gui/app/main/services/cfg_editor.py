@@ -158,15 +158,21 @@ class CfgEditorSession:
         return list_settable_paths_full(self.root)
 
     def paths_view(
-        self, under: str | None = None, verbosity: str = "full"
+        self,
+        under: str | None = None,
+        verbosity: str = "full",
+        prefix: str | None = None,
     ) -> list[dict[str, object]] | list[str]:
-        """Settable-path list scoped by ``under`` and shaped by ``verbosity``.
+        """Settable-path list scoped by ``under``/``prefix`` and shaped by
+        ``verbosity``.
 
         Mechanism layer: defaults to full fidelity over the whole draft. The
         agent-facing compact default is the mcp layer's policy, not this
         aggregate's.
         """
-        return list_settable_paths(self.root, under=under, verbosity=verbosity)
+        return list_settable_paths(
+            self.root, under=under, verbosity=verbosity, prefix=prefix
+        )
 
     def set_field(self, path: str, value: object) -> dict[str, object]:
         """Mutate one field; return draft validity + which paths a ref switch
@@ -380,8 +386,11 @@ class CfgEditorService:
         editor_id: str,
         under: str | None = None,
         verbosity: str = "full",
+        prefix: str | None = None,
     ) -> list[dict[str, object]] | list[str]:
-        return self._require(editor_id).paths_view(under=under, verbosity=verbosity)
+        return self._require(editor_id).paths_view(
+            under=under, verbosity=verbosity, prefix=prefix
+        )
 
     def commit(self, editor_id: str, name: str) -> None:
         # ADR-0006: the aggregate yields its un-lowered CfgSchema; ContextService

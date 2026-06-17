@@ -908,8 +908,14 @@ def run_stdio_loop(
                     try:
                         handler: Callable[[dict[str, Any]], Any] = tool["handler"]
                         res = handler(arguments)
+                        # Compact separators (no indent, no spaces) keep the tool
+                        # reply token-light. ensure_ascii stays default (True): the
+                        # outer JSON-RPC envelope re-escapes non-ASCII anyway, so
+                        # turning it off here buys nothing.
                         text = (
-                            res if isinstance(res, str) else json.dumps(res, indent=2)
+                            res
+                            if isinstance(res, str)
+                            else json.dumps(res, separators=(",", ":"))
                         )
                         content = [{"type": "text", "text": text}]
                         if on_each_reply is not None:
