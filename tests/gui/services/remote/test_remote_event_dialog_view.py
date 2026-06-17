@@ -317,6 +317,23 @@ def test_view_snapshot_roundtrip(fx):
         sock.close()
 
 
+def test_view_screenshot_roundtrip(fx):
+    """view.screenshot grabs the whole window and returns base64 PNG + bytes (the
+    raw consumer shape; the mcp gui_screenshot tool decodes + writes the file)."""
+    import base64
+
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "view.screenshot")
+        assert resp["ok"] is True
+        result = resp["result"]
+        png = base64.b64decode(result["png_b64"])
+        assert png.startswith(b"\x89PNG")
+        assert result["bytes"] == len(png)
+    finally:
+        sock.close()
+
+
 # ---------------------------------------------------------------------------
 # Run lifecycle push (integration)
 # ---------------------------------------------------------------------------

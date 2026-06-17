@@ -363,7 +363,26 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
 #      inherit it from the underlying run/analyze reply they wrap.
 #      gui_tab_get_current_figure description updated: marked rarely-needed (normally
 #      read the folded figure from the run/analyze finished reply instead).
-MCP_VERSION = 46
+# MCP 47: dev/debug tools + 3-tier classification (WIRE 35 for the one new wire
+#      method). (a) gui_dialog_screenshot is MERGED into gui_debug_screenshot(target,
+#      out_path?): target='window' grabs the WHOLE main window via the new
+#      view.screenshot wire method (captures the non-dialog floating widgets a
+#      per-dialog grab cannot see), any other target grabs that named dialog (the
+#      old behaviour). Same contract — ALWAYS writes a PNG file, returns
+#      {saved_to, bytes}, never inline base64; the default temp path is
+#      measure_window.png for the window, measure_dialog_<name>.png for a dialog.
+#      (b) gui_debug_versions dumps the full resources.versions table (the
+#      optimistic-concurrency version numbers normally kept as mcp bookkeeping) —
+#      for debugging the stale-guard. (c) gui_debug_operations dumps the mcp-side
+#      _OP_BY_KEY map (semantic key -> operation_id, the only view of
+#      run/analyze/post_analyze handles) plus the wire device.active_operations
+#      list — for debugging no_operation / stuck waits. Neither (b) nor (c) needs a
+#      new wire method. (d) _SERVER_INSTRUCTIONS is restructured into three tiers —
+#      RECOMMENDED (the gui_run_stage1..4 bundle + essential lifecycle/startup),
+#      ON-DEMAND (the fine-grained base tools), DEV (gui_debug_screenshot +
+#      gui_debug_versions + gui_debug_operations). No hard env gate — all tools stay
+#      registered; the tiers are guidance.
+MCP_VERSION = 47
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -380,11 +399,20 @@ context / soc / open tabs / what is running), and re-read it (or gui_state_check
 whenever you need the current state. Do NOT assume any state — the user may be
 driving the same GUI alongside you.
 
-Tool families:
-  - Lifecycle: gui_launch / gui_connect / gui_stop / gui_app_shutdown.
-  - Startup: gui_soc_connect (kind='mock'|'remote'), gui_startup_apply,
-    gui_context_use / gui_context_new, gui_state_check (the four readiness flags
+Tools are tiered: prefer RECOMMENDED; reach for ON-DEMAND when the bundles don't
+fit; DEV tools are for debugging the GUI/MCP itself, not for measuring.
+
+RECOMMENDED — the primary flow:
+  - The 4-phase bundle: gui_run_stage1 (new tab + adapter guide) -> gui_run_stage2
+    (configure + run) -> gui_run_stage3 (analyze + writeback preview) ->
+    gui_run_stage4 (writeback + optional save). Each folds the cross-tool reads you
+    would otherwise chain by hand.
+  - Lifecycle / startup the bundles depend on: gui_overview (orient), gui_launch /
+    gui_connect, gui_soc_connect (kind='mock'|'remote'), gui_startup_apply,
+    gui_context_new / gui_context_use, gui_state_check (the four readiness flags
     has_project / has_context / has_active_context / has_soc).
+
+ON-DEMAND — the fine-grained base tools, when a bundle doesn't fit:
   - Tabs + cfg: gui_adapter_list / gui_tab_new / gui_tab_snapshot;
     gui_tab_get_cfg / gui_tab_list_paths; gui_editor_set_field / _set_fields
     (a tab's cfg form is the editor session keyed by its tab_id — pass tab_id or
@@ -395,9 +423,18 @@ Tool families:
     is rarely needed (use it only for a re-render, mid-flight plot, or custom
     out_path). gui_tab_get_analyze_result / gui_tab_get_post_analyze_result re-read
     the fit summary; gui_save_data / _image / _result / _post_image persist and
-    return the resolved written path.
+    return the resolved written path; gui_writeback_apply commits the draft.
   - Async handles: every degrading op exposes a _wait (blocking) and a _poll
     (non-blocking) tool keyed by name/tab_id.
+  - Devices / context / predictor / adapters / dialogs: gui_device_*,
+    gui_context_*, gui_predictor_*, gui_adapter_*, gui_dialog_*.
+DEV — debugging the GUI/MCP itself (the version table + in-flight handles are
+normally hidden from the operator; do NOT use these for measurement):
+  - gui_debug_screenshot(target): 'window' grabs the whole main window, a dialog
+    name grabs that dialog; always writes a PNG file (never inline base64).
+    Screenshotting is a debugging activity — not part of the measurement flow.
+  - gui_debug_versions (the optimistic-concurrency resource version table),
+    gui_debug_operations (the in-flight operation handles, semantic key -> id).
 
 Startup precondition: gui_state_check must report all four flags true before
 running experiments. Run/save require an active file-backed context; save/analyze
@@ -1572,30 +1609,85 @@ def tool_gui_soc_connect(arguments: dict[str, Any]) -> dict[str, Any]:
     return {"status": "finished", "soc": result.get("soc")}
 
 
-def tool_gui_dialog_screenshot(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Capture a currently-open dialog as a PNG FILE and return its path.
+def tool_gui_debug_screenshot(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Capture the main window OR a named dialog as a PNG FILE; return its path.
 
-    Mirrors gui_tab_get_current_figure: the convenience layer never returns
-    inline base64 (a dialog grab would blow the tool-output token budget — the
-    footgun this override removes). The wire dialog.screenshot has no out_path
-    mode, so we decode the base64 here and write it; when out_path is omitted we
-    synthesise a per-dialog temp path under gettempdir() (overwriting the previous
-    grab of the same dialog). The raw wire method still returns base64 for non-MCP
-    consumers.
+    ``target`` switches what is grabbed:
+      - target='window' → the WHOLE main window (client area + non-dialog floating
+        widgets) via the view.screenshot wire method.
+      - any other target → that named dialog via dialog.screenshot (the previous
+        gui_dialog_screenshot behaviour).
+
+    Mirrors gui_tab_get_current_figure / the old dialog grab: the convenience
+    layer never returns inline base64 (a full-window grab would blow the
+    tool-output token budget — the footgun this override removes). Both wire
+    methods return base64 for raw consumers; we decode + write here. When out_path
+    is omitted we synthesise a per-target temp path under gettempdir() (a single
+    measure_window.png for the window — there is only one — and a per-dialog
+    measure_dialog_<name>.png for a dialog), overwriting the previous grab.
     """
     import base64
 
-    name = str(arguments["name"])
+    target = str(arguments["target"])
     out_path_arg = arguments.get("out_path")
+    if target == "window":
+        method, params = "view.screenshot", {}
+        default_name = "measure_window.png"
+    else:
+        method, params = "dialog.screenshot", {"name": target}
+        default_name = f"measure_dialog_{target}.png"
     out_path = (
         str(out_path_arg)
         if out_path_arg is not None
-        else str(Path(gettempdir()) / f"measure_dialog_{name}.png")
+        else str(Path(gettempdir()) / default_name)
     )
-    res = send_gui_rpc("dialog.screenshot", {"name": name})
+    res = send_gui_rpc(method, params)
     png = base64.b64decode(res["png_b64"])
     Path(out_path).write_bytes(png)
     return {"bytes": res.get("bytes", len(png)), "saved_to": out_path}
+
+
+# ---------------------------------------------------------------------------
+# Dev / debug tools — for debugging the GUI/MCP itself, NOT the measurement
+# workflow. They surface internals the operator face deliberately hides (the
+# optimistic-concurrency version table, the in-flight operation handles). Pure
+# reads, no mutation.
+# ---------------------------------------------------------------------------
+
+
+def tool_gui_debug_versions(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Dump the full per-resource version table (DEV — debugging stale-guard).
+
+    Reads resources.versions verbatim — the same table _refresh_versions consumes
+    for the optimistic-concurrency guard, but here the version numbers are
+    returned as-is instead of being kept as mcp<->RPC bookkeeping hidden from the
+    operator. The only window into why a guarded op rejected (or did not reject)
+    on a stale dependency. Returns {versions: {resource_key: version_int}}.
+    """
+    del arguments
+    res = send_gui_rpc("resources.versions", {})
+    return {"versions": res.get("versions", {})}
+
+
+def tool_gui_debug_operations(arguments: dict[str, Any]) -> dict[str, Any]:
+    """List the in-flight operations the agent normally cannot see (DEV).
+
+    Two sources, both internals the operator face hides:
+      - by_key: the mcp-side _OP_BY_KEY map (semantic key -> operation_id) — what
+        a _wait/_poll tool resolves a name to. The raw operation_id is mcp<->RPC
+        bookkeeping; surfacing it here helps debug "why did gui_run_poll return
+        no_operation / why is wait stuck".
+      - device_active_operations: the wire device.active_operations list (the only
+        operation enumerator currently on the wire; run/analyze/post_analyze have
+        no wire enumerator — they are observable only through by_key here).
+    Returns {by_key: {...}, device_active_operations: [...]}.
+    """
+    del arguments
+    by_key = dict(_OP_BY_KEY)
+    device_ops = send_gui_rpc("device.active_operations", {}).get(
+        "active_operations", []
+    )
+    return {"by_key": by_key, "device_active_operations": device_ops}
 
 
 def _render_tab_figure(tab_id: str, out_path: str | None = None) -> dict[str, Any]:
@@ -2583,36 +2675,72 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "required": ["kind"],
         },
     },
-    "gui_dialog_screenshot": {
-        "handler": tool_gui_dialog_screenshot,
+    "gui_debug_screenshot": {
+        "handler": tool_gui_debug_screenshot,
         "description": (
-            "Capture a currently-open dialog to a PNG FILE and return its path. "
-            "name must be one of: setup, device, predictor, inspect, startup "
-            "(same dialog names as gui_dialog_open / gui_dialog_close). "
-            "Fails with PRECONDITION_FAILED if the named dialog is not currently open. "
+            "Capture the GUI to a PNG FILE and return its path. 'target' selects "
+            "what to grab:\n"
+            "  - target='window': the WHOLE main window — its client area AND the "
+            "non-dialog floating widgets (the feedback widget, the left-edge "
+            "handle) that a per-dialog grab cannot see.\n"
+            "  - target=<dialog name> (one of: setup, device, predictor, inspect, "
+            "startup — same names as gui_dialog_open / gui_dialog_close): that "
+            "dialog; fails PRECONDITION_FAILED if it is not currently open.\n"
             "The PNG is ALWAYS written to disk and the reply is {saved_to, bytes} — "
             "Read the saved_to path to view it (never inline base64, so it cannot "
-            "blow the token budget). Omit out_path to write a per-dialog file under "
-            "the temp dir (overwritten each call); pass out_path (absolute) to choose "
-            "the location."
+            "blow the token budget). Omit out_path to write a per-target file under "
+            "the temp dir (overwritten each call); pass out_path (absolute) to "
+            "choose the location.\n"
+            "Timing note: a floating widget repositions via QTimer.singleShot, so a "
+            "screenshot taken in the same turn as a UI change may catch a "
+            "pre-reposition frame — do a wire round-trip (any read tool) first, or "
+            "re-grab, if a widget looks mislaid."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "name": {
+                "target": {
                     "type": "string",
-                    "description": "One of: setup, device, predictor, inspect, startup",
+                    "description": (
+                        "'window' for the whole main window, or a dialog name "
+                        "(setup, device, predictor, inspect, startup)"
+                    ),
                 },
                 "out_path": {
                     "type": "string",
                     "description": (
                         "Optional absolute path to write the PNG; omit to use a "
-                        "per-dialog file under the temp dir"
+                        "per-target file under the temp dir"
                     ),
                 },
             },
-            "required": ["name"],
+            "required": ["target"],
         },
+    },
+    "gui_debug_versions": {
+        "handler": tool_gui_debug_versions,
+        "description": (
+            "DEV TOOL (debugging the GUI/MCP itself, not the measurement): dump the "
+            "full per-resource version table {versions: {resource_key: int}}. These "
+            "optimistic-concurrency version numbers are normally hidden from the "
+            "operator (mcp<->RPC bookkeeping); read them only when debugging why a "
+            "guarded op rejected (or failed to reject) on a stale dependency."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    "gui_debug_operations": {
+        "handler": tool_gui_debug_operations,
+        "description": (
+            "DEV TOOL (debugging the GUI/MCP itself, not the measurement): list the "
+            "in-flight operations normally hidden from the operator. Returns "
+            "{by_key, device_active_operations}: 'by_key' is the mcp-side map of "
+            "semantic key (e.g. 'tab:<id>', 'analyze:<id>', 'device:<name>') -> "
+            "operation_id that the _wait/_poll tools resolve names through (the only "
+            "view of run/analyze/post_analyze handles); 'device_active_operations' "
+            "is the wire device.active_operations list. Use when debugging "
+            "no_operation / a stuck wait."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
     },
     "gui_device_connect": {
         "handler": tool_gui_device_connect,
@@ -2785,7 +2913,9 @@ _OVERRIDE_NAMES = frozenset(
         "gui_device_connect",
         "gui_device_disconnect",
         "gui_device_setup",
-        "gui_dialog_screenshot",
+        "gui_debug_screenshot",
+        "gui_debug_versions",
+        "gui_debug_operations",
         "gui_tab_get_current_figure",
         "gui_state_check",
         "gui_overview",

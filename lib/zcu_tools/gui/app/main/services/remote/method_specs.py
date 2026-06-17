@@ -475,6 +475,12 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         (_str("name", "Dialog name"),),
     ),
     "view.snapshot": MethodSpec(5.0, "Capture view state summary"),
+    "view.screenshot": MethodSpec(
+        10.0,
+        "Capture the WHOLE main window (client area + floating widgets) as base64 "
+        "PNG. Runs MainWindow.grab() on the main thread (auto-marshalled, like "
+        "dialog.screenshot).",
+    ),
     "tab.get_current_figure": MethodSpec(
         10.0,
         "Get the tab's current figure (run 2D map, or analysis fit) as PNG. The "

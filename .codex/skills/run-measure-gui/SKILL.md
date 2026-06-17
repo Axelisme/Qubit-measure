@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 34
+skill_version: 35
 ---
 
 # run-measure-gui
@@ -156,7 +156,8 @@ gui_editor_set_field(tab_id, "rounds", 30)        # convenience: tab_id resolves
 #   gui_run_stage2(tab_id, edits={path:v})  -> {..run.., figure, analyze_params}   # ② configure+run; STOPS before analyze
 #   gui_run_stage3(tab_id)                  -> {summary, figure, writeback_preview}   # ③ analyze
 #   gui_run_stage4(tab_id, save_data=False) -> {applied_ids[, data_path]}   # ④ writeback (+ optional save)
-# The PURE base tools below are for fine-grained control:
+# The base tools below = ON-DEMAND (fine-grained control). DEV tools (gui_debug_screenshot/_versions/_operations —
+#   debugging the GUI/MCP itself, NOT the measurement flow) are a separate tier in the server instructions:
 gui_run_start(tab_id)                             # waits ~1s; finished -> {status:finished, figure:<png>,...}, slow -> {status:pending}
 gui_run_wait(tab_id)                              # block until done (only after pending; blocks your turn — for a long run background it, see "Detecting completion")
 gui_tab_get_current_figure(tab_id)                # RARELY NEEDED (run/analyze finished already fold the figure, incl 2D
@@ -167,9 +168,9 @@ gui_tab_get_current_figure(tab_id)                # RARELY NEEDED (run/analyze f
                                                   # non-analysis 2D scans (flux_dep / power_dep): Read the saved_to path.
                                                   # Always a file (fixed 640×480), never inline base64. Omit out_path to
                                                   # write a per-tab temp file; pass out_path="<abs path>" to choose where.
-                                                  # gui_dialog_screenshot(name, out_path?) follows the same contract: always
-                                                  # writes a file and replies {saved_to, bytes} — never inline base64.
-                                                  # 'name' matches gui_dialog_open / gui_dialog_close (e.g. "device").
+                                                  # gui_debug_screenshot(target, out_path?) [DEV tier] same contract: always
+                                                  # writes a file, replies {saved_to, bytes}, never base64. target="window"
+                                                  # grabs the main window; target=<dialog name> a dialog (gui_dialog_open/close).
 gui_analyze(tab_id)                               # a FIT settles -> {status:finished, summary:{...}, figure:<png>} (its own
                                                   # fit result + plot; same summary as gui_tab_get_analyze_result); an
                                                   # INTERACTIVE pick (flux_dep) -> {status:pending} → see below

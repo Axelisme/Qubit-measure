@@ -164,7 +164,12 @@ from __future__ import annotations
 #      glossary; the pi-pulse MODULE writeback names stay pi_amp/pi2_amp) and adds
 #      pi_gain_err + pi2_gain_err. The analyze-result summary is a wire/mcp-facing
 #      reply (tab.get_analyze_result), so a key add/rename = contract change.
-WIRE_VERSION = 34
+# v35: added view.screenshot — capture the WHOLE main window (client area +
+#      non-dialog floating widgets) as base64 PNG via MainWindow.grab(). Mirrors
+#      dialog.screenshot but takes no params (the window always exists); not
+#      off_main_thread, so it auto-marshals to the Qt main thread. The dev tool
+#      gui_screenshot(target="window") drives it. New method = contract change.
+WIRE_VERSION = 35
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -350,4 +355,8 @@ WIRE_VERSION = 34
 #      (auto-folded into to_summary_dict). amp_rabi's summary scalar fields are
 #      renamed pi_amp/pi2_amp -> pi_gain/pi2_gain to match the MetaDict writeback
 #      target; the module writeback target names stay pi_amp/pi2_amp.
-GUI_VERSION = 41
+# v42: view.screenshot dispatch + RenderView.take_window_screenshot (WIRE 35) —
+#      MainWindow.grab() of the whole window (mirrors take_dialog_screenshot's Qt
+#      buffer encode). Lets the dev tool capture floating widgets the per-dialog
+#      grab cannot see.
+GUI_VERSION = 42

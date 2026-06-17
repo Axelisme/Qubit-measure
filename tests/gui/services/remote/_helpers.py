@@ -79,6 +79,8 @@ def make_view() -> MagicMock:
         b"\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
     )
     view.take_figure_screenshot = MagicMock(return_value=_PNG)
+    view.take_dialog_screenshot = MagicMock(return_value=_PNG)
+    view.take_window_screenshot = MagicMock(return_value=_PNG)
     return view
 
 

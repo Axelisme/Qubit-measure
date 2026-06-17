@@ -1256,6 +1256,26 @@ def _h_dialog_screenshot(
     return {"png_b64": payload, "bytes": len(png)}
 
 
+def _h_view_screenshot(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    import base64
+
+    del params
+    # Not off_main_thread → MainWindow.grab() is auto-marshalled to the Qt main
+    # thread, the same path as dialog.screenshot. The whole window always exists
+    # (headless is already fast-failed by _render_view), so there is no
+    # PRECONDITION branch like the per-dialog grab.
+    png = _render_view(adapter).take_window_screenshot()
+    if not isinstance(png, (bytes, bytearray)):
+        raise RemoteError(
+            ErrorCode.INTERNAL,
+            f"window screenshot returned non-bytes {type(png).__name__}",
+        )
+    payload = base64.b64encode(bytes(png)).decode("ascii")
+    return {"png_b64": payload, "bytes": len(png)}
+
+
 # ---------------------------------------------------------------------------
 # Tab analyze result + analyze start + cfg summary handlers
 # ---------------------------------------------------------------------------
@@ -1949,6 +1969,7 @@ _HANDLERS: dict[str, Handler] = {
     "dialog.list_open": _h_dialog_list_open,
     "dialog.screenshot": _h_dialog_screenshot,
     "view.snapshot": _h_view_snapshot,
+    "view.screenshot": _h_view_screenshot,
     "tab.get_current_figure": _h_tab_get_current_figure,
     "predictor.load": _h_predictor_load,
     "predictor.set_model_params": _h_predictor_set_model_params,

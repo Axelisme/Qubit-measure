@@ -936,9 +936,9 @@ def test_get_current_figure_explicit_out_path_is_forwarded(monkeypatch):
     ]
 
 
-def test_dialog_screenshot_omitted_out_path_writes_temp_file(monkeypatch):
-    """Omitting out_path must decode + write a per-dialog temp PNG and return
-    {saved_to, bytes} with NO inline base64 (mirrors gui_tab_get_current_figure)."""
+def test_screenshot_dialog_omitted_out_path_writes_temp_file(monkeypatch):
+    """target=<dialog name> still works: decode + write a per-dialog temp PNG and
+    return {saved_to, bytes} with NO inline base64 (the old dialog behaviour)."""
     import base64
     from tempfile import gettempdir
 
@@ -953,18 +953,17 @@ def test_dialog_screenshot_omitted_out_path_writes_temp_file(monkeypatch):
         return {"png_b64": base64.b64encode(raw).decode("ascii"), "bytes": len(raw)}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    out = mcp_server.TOOLS["gui_dialog_screenshot"]["handler"]({"name": "setup"})
+    out = mcp_server.TOOLS["gui_debug_screenshot"]["handler"]({"target": "setup"})
 
     expected_path = str(Path(gettempdir()) / "measure_dialog_setup.png")
     assert out == {"bytes": len(raw), "saved_to": expected_path}
     assert "png_b64" not in out
     assert Path(expected_path).read_bytes() == raw
-    # The wire dialog.screenshot has no out_path mode — only 'name' forwarded
-    # (aligned with dialog.open / dialog.close).
+    # A dialog target forwards dialog.screenshot with only 'name'.
     assert calls == [("dialog.screenshot", {"name": "setup"})]
 
 
-def test_dialog_screenshot_explicit_out_path(monkeypatch, tmp_path):
+def test_screenshot_dialog_explicit_out_path(monkeypatch, tmp_path):
     import base64
 
     from zcu_tools.mcp.measure import server as mcp_server
@@ -977,12 +976,90 @@ def test_dialog_screenshot_explicit_out_path(monkeypatch, tmp_path):
         return {"png_b64": base64.b64encode(raw).decode("ascii"), "bytes": len(raw)}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    out = mcp_server.TOOLS["gui_dialog_screenshot"]["handler"](
-        {"name": "device", "out_path": str(target)}
+    out = mcp_server.TOOLS["gui_debug_screenshot"]["handler"](
+        {"target": "device", "out_path": str(target)}
     )
 
     assert out == {"bytes": len(raw), "saved_to": str(target)}
     assert target.read_bytes() == raw
+
+
+def test_screenshot_window_writes_window_png(monkeypatch):
+    """target='window' drives the view.screenshot wire method and writes the single
+    measure_window.png temp file (the whole-window grab; no per-name)."""
+    import base64
+    from tempfile import gettempdir
+
+    from zcu_tools.mcp.measure import server as mcp_server
+
+    raw = b"WINDOWPNG"
+    calls: list[tuple[str, dict]] = []
+
+    def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
+        del timeout_seconds
+        calls.append((method, params))
+        return {"png_b64": base64.b64encode(raw).decode("ascii"), "bytes": len(raw)}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
+    out = mcp_server.TOOLS["gui_debug_screenshot"]["handler"]({"target": "window"})
+
+    expected_path = str(Path(gettempdir()) / "measure_window.png")
+    assert out == {"bytes": len(raw), "saved_to": expected_path}
+    assert "png_b64" not in out
+    assert Path(expected_path).read_bytes() == raw
+    # The window target forwards view.screenshot with NO params.
+    assert calls == [("view.screenshot", {})]
+
+
+def test_debug_versions_dumps_resource_table(monkeypatch):
+    """gui_debug_versions returns the full resources.versions table verbatim."""
+    from zcu_tools.mcp.measure import server as mcp_server
+
+    table = {"context": 3, "tab:t1:cfg": 7, "soc": 1}
+
+    def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
+        del params, timeout_seconds
+        assert method == "resources.versions"
+        return {"versions": table}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
+    out = mcp_server.TOOLS["gui_debug_versions"]["handler"]({})
+    assert out == {"versions": table}
+
+
+def test_debug_operations_dumps_op_map_and_device_ops(monkeypatch):
+    """gui_debug_operations returns the mcp-side _OP_BY_KEY map plus the wire
+    device.active_operations list."""
+    from zcu_tools.mcp.measure import server as mcp_server
+
+    device_ops = [{"device_name": "flux", "kind": "device_setup", "name": "flux"}]
+
+    def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
+        del params, timeout_seconds
+        assert method == "device.active_operations"
+        return {"active_operations": device_ops}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
+    monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {"tab:t1": 42, "device:flux": 7})
+    out = mcp_server.TOOLS["gui_debug_operations"]["handler"]({})
+    assert out == {
+        "by_key": {"tab:t1": 42, "device:flux": 7},
+        "device_active_operations": device_ops,
+    }
+
+
+def test_server_instructions_present_three_tiers():
+    """_SERVER_INSTRUCTIONS groups the tools under the three tiers (light check)."""
+    from zcu_tools.mcp.measure import server as mcp_server
+
+    text = mcp_server._SERVER_INSTRUCTIONS
+    assert "RECOMMENDED" in text
+    assert "ON-DEMAND" in text
+    assert "DEV" in text
+    # All three DEV tools are named in the instructions.
+    assert "gui_debug_screenshot" in text
+    assert "gui_debug_versions" in text
+    assert "gui_debug_operations" in text
 
 
 def _overview_fake_send(*, has_soc: bool):
