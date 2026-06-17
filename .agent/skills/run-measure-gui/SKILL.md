@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 36
+skill_version: 37
 ---
 
 # run-measure-gui
@@ -87,7 +87,9 @@ A separate `agent-memory` MCP server is your persistent, human-readable lab
 notebook across sessions. It has three functions: **records** (one measurement per
 folder — the verdict, the numbers, the figures; immutable), **troubleshooting**
 (context-free symptom → fix, reusable across qubits), and **checklists** (one
-acceptance list per experiment type). Two non-negotiable touch points:
+acceptance list per experiment type). **This is your only notebook — keep all
+measurement knowledge here, never in any other or built-in memory store, so it
+stays recallable per chip/qub/experiment.** Two non-negotiable touch points:
 
 - **BEFORE an experiment** call `memory_recall(chip, qub, exp_type)`. It returns
   three buckets: the acceptance `checklist` for this experiment, the `gotchas`
@@ -218,7 +220,8 @@ record *why* honestly.
 1. **Re-read the checklist** from the `memory_recall(chip, qub, exp_type)` you did
    before the run (the `checklist` bucket). If it is empty, grade against the
    experiment's `gui_adapter_guide` expectations and the figure instead, and
-   consider seeding one with `memory_checklist_set(exp_type, items)` for next time.
+   consider *proposing* one — apply `memory_checklist_set` only with the user's
+   agreement (see *Checklist is user-owned* below).
 2. **Grade each item with evidence.** Look at the analysis figure (the finished
    `gui_analyze` reply folds it) and the summary; for every checklist item write a
    one-line pass/fail with the number or the visual fact that justifies it. The
@@ -236,6 +239,13 @@ record *why* honestly.
    qubit): `memory_search` the symptom; update the matching solution
    (`memory_update_solution`, add this record id to `seen_in`) or add a new one
    (`memory_add_solution`). Keep records for the instance, solutions for the rule.
+
+**Checklist is user-owned.** Records (`memory_record_measurement`) and troubleshooting
+solutions (`memory_add_solution`/`memory_update_solution`) are yours to write freely.
+The acceptance checklist is the user's curated rubric: when a run or user feedback
+suggests a new or changed acceptance criterion, *propose* it and call
+`memory_checklist_set` **only after the user explicitly agrees** — never edit a
+checklist on your own.
 
 **Interactive analysis (e.g. `onetone`/`twotone flux_dep`).** Some adapters have no
 automatic fit — the analysis is a 2D map the **user picks on**. `gui_adapter_guide`

@@ -5,7 +5,8 @@
 本 repo 的 agent 分兩種角色，先判定自己屬於哪一種：
 
 - **MEASUREMENT（操作儀器跑量測）**：任務是透過 `measure-gui` MCP 工具（`mcp__measure-gui__gui_*`）驅動量測。
-  → 遵循 `run-measure-gui` skill 與該 MCP server 的 instructions；你是 **operator 不是 developer**，
+  → 遵循 `run-measure-gui` skill 與該 MCP server 的 instructions；持久量測知識（記錄/疑難排解/驗收清單）
+  寫入 `agent-memory`（你的筆記本），不用其它或內建 memory 機制；你是 **operator 不是 developer**，
   **不要讀或改 `lib/` 原始碼**（要驗證就放寬參數重跑量測、看圖判斷，不要 grep 實作——引用實作細節有過時風險）；
   下方「## 使用者規則」起的開發守則**不適用**，只有「語言」規則照常（中文回應）。GUI「Agent」按鈕啟動的
   session 一律是此角色。
