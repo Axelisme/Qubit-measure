@@ -1316,9 +1316,12 @@ def test_stale_error_message_names_changed_resources(monkeypatch):
 
 def test_tab_new_fans_out_snapshot_paths_and_cfg_summary(monkeypatch):
     """gui_tab_new creates the tab then folds the three follow-up reads (snapshot
-    for editor_id, list_paths, cfg_summary) into one reply — no wire change."""
+    for editor_id, list_paths, cfg_summary) into one reply, plus the first-use
+    adapter guide — no wire change."""
     from zcu_tools.mcp.measure import server as mcp_server
 
+    # First use of this adapter this session -> the guide is fetched + folded.
+    mcp_server._GUIDE_RETURNED.clear()
     calls: list[tuple[str, dict]] = []
 
     def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
@@ -1329,24 +1332,27 @@ def test_tab_new_fans_out_snapshot_paths_and_cfg_summary(monkeypatch):
             "tab.snapshot": {"editor_id": "ed-tw-1", "interaction": {}},
             "tab.list_paths": {"paths": [{"path": "reps", "kind": "scalar"}]},
             "tab.get_cfg_summary": {"summary": {"reps": 100}},
+            "adapter.guide": {"guide": {"behavior": "measures X"}},
         }[method]
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
     out = mcp_server.TOOLS["gui_tab_new"]["handler"]({"adapter_name": "fake/freq"})
 
     # tab.new first (with the adapter_name verbatim), then the three reads keyed
-    # by the new tab_id.
+    # by the new tab_id, then the first-use adapter.guide fetch.
     assert calls == [
         ("tab.new", {"adapter_name": "fake/freq"}),
         ("tab.snapshot", {"tab_id": "tw-1"}),
         ("tab.list_paths", {"tab_id": "tw-1"}),
         ("tab.get_cfg_summary", {"tab_id": "tw-1"}),
+        ("adapter.guide", {"adapter_name": "fake/freq"}),
     ]
     assert out == {
         "tab_id": "tw-1",
         "editor_id": "ed-tw-1",
         "paths": [{"path": "reps", "kind": "scalar"}],
         "cfg_summary": {"reps": 100},
+        "guide": {"behavior": "measures X"},
     }
 
 
@@ -1430,3 +1436,174 @@ def test_fold_finished_figure_swallows_render_error(monkeypatch):
     out = mcp_server._fold_finished_figure("x-1", {"status": "finished"})
     assert out["status"] == "finished"
     assert out["figure"] is None
+
+
+# ---------------------------------------------------------------------------
+# MCP 43: gui_run_stage macro + first-use adapter-guide fold
+# ---------------------------------------------------------------------------
+
+
+def _run_stage_fake_send(calls: list[tuple[str, dict]]):
+    """A send_gui_rpc stub covering every RPC gui_run_stage fans out over.
+
+    Records (method, params) in call order so a test can assert the sequence and
+    the exact values forwarded. run.start captures no operation_id here (the real
+    send_gui_rpc does, but it is monkeypatched out), so _start_op_with_short_wait
+    sees no handle and settles synchronously — exactly the fast-run path.
+    """
+
+    def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
+        del timeout_seconds
+        calls.append((method, dict(params)))
+        if method == "tab.new":
+            return {"tab_id": "stage-tab"}
+        if method == "tab.snapshot":
+            return {"editor_id": "stage-ed", "interaction": {"is_running": False}}
+        if method == "tab.list_paths":
+            return {"paths": ["reps", "sweep.gain.expts"]}
+        if method == "tab.get_cfg_summary":
+            return {"summary": {"reps": 1}}
+        if method == "adapter.guide":
+            return {"guide": {"behavior": "measures X"}}
+        if method == "editor.set_field":
+            return {"valid": True, "removed": [], "added": []}
+        if method == "tab.get_current_figure":
+            return {"bytes": 9, "saved_to": params["out_path"]}
+        # run.start, anything else
+        return {}
+
+    return fake_send
+
+
+def test_run_stage_creates_configures_runs_and_stops_before_analyze(monkeypatch):
+    """gui_run_stage folds tab_new + set_fields + run_start into one finished
+    reply (tab_id/editor_id + figure), and NEVER calls analyze."""
+    from zcu_tools.mcp.measure import server as mcp_server
+
+    mcp_server._GUIDE_RETURNED.clear()
+    calls: list[tuple[str, dict]] = []
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", _run_stage_fake_send(calls))
+
+    out = mcp_server.TOOLS["gui_run_stage"]["handler"](
+        {
+            "adapter_name": "amp_rabi",
+            "edits": {"reps": 100, "sweep.gain.expts": 5},
+        }
+    )
+
+    methods = [m for m, _ in calls]
+    # tab.new precedes the editor edits, which precede run.start; no analyze.start.
+    assert methods.index("tab.new") < methods.index("editor.set_field")
+    assert methods.index("editor.set_field") < methods.index("run.start")
+    assert "analyze.start" not in methods
+
+    # Finished run reply carries the tab/editor identifiers + folded figure.
+    assert out["status"] == "finished"
+    assert out["tab_id"] == "stage-tab"
+    assert out["editor_id"] == "stage-ed"
+    assert "figure" in out
+    assert out["figure"].endswith("measure_fig_stage-tab.png")
+
+
+def test_run_stage_edits_numbers_stay_numbers(monkeypatch):
+    """The {path: value} map is forwarded through the plural set_fields path, so
+    numeric values reach editor.set_field as numbers (NOT stringified)."""
+    from zcu_tools.mcp.measure import server as mcp_server
+
+    mcp_server._GUIDE_RETURNED.clear()
+    calls: list[tuple[str, dict]] = []
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", _run_stage_fake_send(calls))
+
+    mcp_server.TOOLS["gui_run_stage"]["handler"](
+        {"adapter_name": "amp_rabi", "edits": {"reps": 100, "gain": 0.2}}
+    )
+
+    set_field_values = {
+        params["path"]: params["value"]
+        for method, params in calls
+        if method == "editor.set_field"
+    }
+    assert set_field_values == {"reps": 100, "gain": 0.2}
+    assert isinstance(set_field_values["reps"], int)
+    assert isinstance(set_field_values["gain"], float)
+
+
+def test_run_stage_without_edits_runs_defaults(monkeypatch):
+    """Omitting 'edits' runs the adapter defaults — no editor.set_field fires."""
+    from zcu_tools.mcp.measure import server as mcp_server
+
+    mcp_server._GUIDE_RETURNED.clear()
+    calls: list[tuple[str, dict]] = []
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", _run_stage_fake_send(calls))
+
+    out = mcp_server.TOOLS["gui_run_stage"]["handler"]({"adapter_name": "amp_rabi"})
+
+    assert "editor.set_field" not in [m for m, _ in calls]
+    assert out["status"] == "finished"
+    assert out["tab_id"] == "stage-tab"
+
+
+def test_guide_folded_on_first_use_absent_on_second(monkeypatch):
+    """The adapter guide rides the FIRST gui_tab_new for an adapter this session
+    and is OMITTED on the second."""
+    from zcu_tools.mcp.measure import server as mcp_server
+
+    mcp_server._GUIDE_RETURNED.clear()
+    calls: list[tuple[str, dict]] = []
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", _run_stage_fake_send(calls))
+
+    first = mcp_server.TOOLS["gui_tab_new"]["handler"]({"adapter_name": "amp_rabi"})
+    assert "guide" in first
+    assert first["guide"] == {"behavior": "measures X"}
+    assert ("adapter.guide", {"adapter_name": "amp_rabi"}) in calls
+
+    calls.clear()
+    second = mcp_server.TOOLS["gui_tab_new"]["handler"]({"adapter_name": "amp_rabi"})
+    assert "guide" not in second
+    # No second adapter.guide fetch for an already-seen adapter.
+    assert "adapter.guide" not in [m for m, _ in calls]
+
+
+def test_guide_folded_on_first_run_stage_absent_on_second(monkeypatch):
+    """run_stage surfaces the guide on the first stage for a fresh adapter and
+    omits it on the second (the seen-set is shared with gui_tab_new)."""
+    from zcu_tools.mcp.measure import server as mcp_server
+
+    mcp_server._GUIDE_RETURNED.clear()
+    calls: list[tuple[str, dict]] = []
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", _run_stage_fake_send(calls))
+
+    first = mcp_server.TOOLS["gui_run_stage"]["handler"]({"adapter_name": "t1"})
+    assert first.get("guide") == {"behavior": "measures X"}
+
+    second = mcp_server.TOOLS["gui_run_stage"]["handler"]({"adapter_name": "t1"})
+    assert "guide" not in second
+
+
+def test_explicit_adapter_guide_tool_still_works():
+    """gui_adapter_guide stays a generated forwarder mapping to adapter.guide —
+    an explicit re-read that the first-use fold does not remove or alter.
+
+    Like test_mcp_wrappers_map_to_expected_rpc, generated forwarders capture the
+    guarded send_gui_rpc as a closure at import time, so monkeypatching the module
+    attribute does not reach them. Re-generate with a recording send_fn (the same
+    projection the real bridge builds) to assert the wrapper -> (method, params)
+    mapping is intact.
+    """
+    from zcu_tools.gui.app.main.services.remote.method_specs import METHOD_SPECS
+    from zcu_tools.mcp.core.bridge import generate_tools
+    from zcu_tools.mcp.measure import server as mcp_server
+
+    calls: list[tuple[str, dict]] = []
+
+    def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
+        del timeout_seconds
+        calls.append((method, params))
+        return {"guide": {"behavior": "measures X"}}
+
+    tools = generate_tools(
+        mcp_server._CONFIG, METHOD_SPECS, mcp_server._NON_GENERATED_METHODS, fake_send
+    )
+    out = tools["gui_adapter_guide"]["handler"]({"adapter_name": "amp_rabi"})
+    assert out == {"guide": {"behavior": "measures X"}}
+    assert calls == [("adapter.guide", {"adapter_name": "amp_rabi"})]

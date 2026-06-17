@@ -298,7 +298,19 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
 #      FINISHED reply (never on a pending/interactive analyze). All three are
 #      mcp-side only — wire validation still accepts any JSON, so WIRE/GUI do not
 #      bump.
-MCP_VERSION = 42
+# MCP 43: convenience-layer "run a stage" macro + first-use guide fold (no wire
+#      change). (1) gui_run_stage(adapter_name, edits?) folds create-tab +
+#      configure + run into one call: the gui_tab_new fan-out, then edits via the
+#      plural set_fields path (numbers stay numbers — the singular-coerce bug is
+#      not on this path), then gui_run_start. It STOPS before analyze (run success
+#      != analyze success); the reply is the run's finished reply (with the folded
+#      'figure') plus tab_id/editor_id, or a 'pending' handle if the run is slow.
+#      (2) First-use adapter-guide fold: a per-process set tracks which
+#      adapter_names had their guide returned this session; the FIRST gui_tab_new /
+#      gui_run_stage for an adapter folds the adapter.guide reply in as 'guide' and
+#      marks it seen, later calls omit it. gui_adapter_guide stays for an explicit
+#      re-read. Both are mcp-side only.
+MCP_VERSION = 43
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -414,6 +426,15 @@ or the dialog times out. Returns {reason:'reply'|'dismiss'|'timeout', reply?}:
 _DIAGNOSTIC_QUEUE_MAX = 1024
 _DIAGNOSTIC_QUEUE: deque[dict[str, Any]] = deque(maxlen=_DIAGNOSTIC_QUEUE_MAX)
 _DIAGNOSTIC_COND = threading.Condition()
+
+# --- First-use adapter-guide fold (per-session) ------------------------------
+#
+# The MCP server is a per-session process. The FIRST time an adapter is touched
+# (gui_tab_new / gui_run_stage) we fold its adapter.guide into the reply so the
+# agent skips the explicit gui_adapter_guide round-trip; on later calls for the
+# same adapter we omit it (it has already been seen). The set is per-process —
+# resetting on an MCP-server restart is fine (the agent simply re-reads it once).
+_GUIDE_RETURNED: set[str] = set()
 
 # --- Optimistic-concurrency bookkeeping (policy lives here, mcp side) --------
 #
@@ -917,6 +938,31 @@ def _resolve_editor_id(arguments: dict[str, Any]) -> str:
     return str(resolved)
 
 
+def _fold_first_use_guide(adapter_name: str, reply: dict[str, Any]) -> dict[str, Any]:
+    """Fold the adapter's guide into ``reply`` the FIRST time it is used this
+    session, in place; omit it on later calls for the same adapter.
+
+    The agent normally reads gui_adapter_guide before running an adapter; folding
+    it onto the first gui_tab_new / gui_run_stage for that adapter saves that
+    round-trip. ``_GUIDE_RETURNED`` is the per-process seen-set (see its comment).
+    The wire adapter.guide reply is {guide: <AdapterGuide-as-dict>}; we surface
+    that dict under 'guide'. A guide-fetch failure is swallowed (the guide is a
+    convenience, not load-bearing — the agent can still call gui_adapter_guide
+    explicitly), and the adapter is still marked seen so we do not retry every call.
+    """
+    if adapter_name in _GUIDE_RETURNED:
+        return reply
+    _GUIDE_RETURNED.add(adapter_name)
+    try:
+        guide = send_gui_rpc("adapter.guide", {"adapter_name": adapter_name}).get(
+            "guide"
+        )
+    except Exception:
+        return reply
+    reply["guide"] = guide
+    return reply
+
+
 def tool_gui_tab_new(arguments: dict[str, Any]) -> dict[str, Any]:
     """Create a tab and fold its initial editing context into the one reply.
 
@@ -926,23 +972,27 @@ def tool_gui_tab_new(arguments: dict[str, Any]) -> dict[str, Any]:
     cfg. Folding those reads here collapses ~4 calls into one. Pure mcp-side
     fan-out over EXISTING wire reads — no wire change.
 
-    Returns {tab_id, editor_id, paths, cfg_summary}:
+    Returns {tab_id, editor_id, paths, cfg_summary[, guide]}:
     - editor_id: the tab cfg form's editor session id (None until a live model
       exists — set_field can still address the form by tab_id);
     - paths: tab.list_paths compact entries (the editor.set_field path source);
-    - cfg_summary: tab.get_cfg_summary nested values view (read-only).
+    - cfg_summary: tab.get_cfg_summary nested values view (read-only);
+    - guide: the adapter's orientation guide, folded in ONLY on the first
+      gui_tab_new / gui_run_stage for this adapter this session (see
+      _fold_first_use_guide); omitted on later calls.
     """
     adapter_name = str(arguments["adapter_name"])
     tab_id = str(send_gui_rpc("tab.new", {"adapter_name": adapter_name})["tab_id"])
     snap = send_gui_rpc("tab.snapshot", {"tab_id": tab_id})
     paths = send_gui_rpc("tab.list_paths", {"tab_id": tab_id}).get("paths")
     cfg_summary = send_gui_rpc("tab.get_cfg_summary", {"tab_id": tab_id}).get("summary")
-    return {
+    reply = {
         "tab_id": tab_id,
         "editor_id": snap.get("editor_id"),
         "paths": paths,
         "cfg_summary": cfg_summary,
     }
+    return _fold_first_use_guide(adapter_name, reply)
 
 
 def tool_gui_editor_set_field(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -1327,6 +1377,54 @@ def tool_gui_run_poll(arguments: dict[str, Any]) -> dict[str, Any]:
     plot once finished, call gui_tab_get_current_figure(tab_id)."""
     tab_id = str(arguments["tab_id"])
     return _poll_operation_by_key(f"tab:{tab_id}", f"Run on tab {tab_id!r}")
+
+
+def tool_gui_run_stage(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Create + configure + run a stage in ONE call, STOPPING before analyze.
+
+    Composes three EXISTING convenience tools so the agent does not have to wire
+    them by hand: gui_tab_new (the fan-out that also folds the first-use adapter
+    guide), then — when ``edits`` is given — the PLURAL set_fields path (numbers
+    stay numbers; the singular set_field coercion bug is not on this path), then
+    gui_run_start. The reply is gui_run_start's finished reply (status / tab /
+    folded 'figure') plus tab_id + editor_id; a slow run degrades to the same
+    'pending' handle gui_run_start returns (the agent then drives it with
+    gui_run_wait / gui_run_poll). ``edits`` is a {path: value} map (optional —
+    omit/empty runs with the adapter defaults).
+
+    It deliberately STOPS before analyze: a successful run is not a successful
+    analyze, so the agent must look at the folded run figure and then call
+    gui_analyze itself.
+    """
+    adapter_name = str(arguments["adapter_name"])
+    new_reply = tool_gui_tab_new({"adapter_name": adapter_name})
+    tab_id = str(new_reply["tab_id"])
+    editor_id = new_reply.get("editor_id")
+
+    # Apply edits through the plural set_fields handler (addressed by tab_id) so
+    # the numbers-stay-numbers guarantee is inherited rather than re-implemented.
+    # The handler wants a list[{path, value}]; convert the {path: value} map here.
+    edits = arguments.get("edits") or {}
+    if not isinstance(edits, dict):
+        raise ValueError("'edits' must be an object mapping path -> value")
+    if edits:
+        tool_gui_editor_set_fields(
+            {
+                "tab_id": tab_id,
+                "edits": [{"path": str(p), "value": v} for p, v in edits.items()],
+            }
+        )
+
+    # Run (short-wait degrade + figure fold inherited from gui_run_start), then
+    # attach the identifiers the agent needs for the follow-up gui_analyze. The
+    # first-use guide already rode in on tool_gui_tab_new above (if applicable),
+    # so it surfaces here on a fresh adapter and is omitted on later stages.
+    reply = tool_gui_run_start({"tab_id": tab_id})
+    reply["tab_id"] = tab_id
+    reply["editor_id"] = editor_id
+    if "guide" in new_reply:
+        reply["guide"] = new_reply["guide"]
+    return reply
 
 
 def _analyze_summary_product(result_method: str, tab_id: str) -> dict[str, Any]:
@@ -2123,6 +2221,42 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "required": ["tab_id"],
         },
     },
+    "gui_run_stage": {
+        "handler": tool_gui_run_stage,
+        "description": (
+            "Run a stage in ONE call: create the adapter's tab, apply 'edits', and "
+            "start the run — then STOP before analyze. Folds gui_tab_new + "
+            "gui_editor_set_fields + gui_run_start. 'edits' is an OPTIONAL "
+            "{path: value} map (dotted paths, see gui_tab_list_paths); it goes "
+            "through the plural set_fields path so numbers stay numbers (not "
+            "stringified). Omit/empty 'edits' to run with the adapter defaults. "
+            "Returns gui_run_start's reply — {status, tab, figure} on a fast run "
+            "(the figure is the run plot rendered to a temp PNG), or {status:"
+            "'pending'} on a slow run (drive it with gui_run_wait / gui_run_poll) — "
+            "plus tab_id + editor_id (and 'guide' on the first stage for a fresh "
+            "adapter this session). It STOPS before analyze on purpose: a successful "
+            "run is NOT a successful analyze — LOOK at the run figure, then call "
+            "gui_analyze yourself."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "adapter_name": {
+                    "type": "string",
+                    "description": "Adapter to instantiate (see gui_adapter_list)",
+                },
+                "edits": {
+                    "type": "object",
+                    "description": (
+                        "Optional {path: value} cfg edits applied before the run "
+                        "(dotted paths, see gui_tab_list_paths). Numbers stay "
+                        "numbers. Omit/empty to use the adapter defaults."
+                    ),
+                },
+            },
+            "required": ["adapter_name"],
+        },
+    },
     "gui_analyze": {
         "handler": tool_gui_analyze,
         "description": (
@@ -2486,6 +2620,7 @@ _OVERRIDE_NAMES = frozenset(
         "gui_run_start",
         "gui_run_wait",
         "gui_run_poll",
+        "gui_run_stage",
         "gui_analyze",
         "gui_analyze_wait",
         "gui_analyze_poll",

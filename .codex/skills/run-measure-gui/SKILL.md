@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 30
+skill_version: 31
 ---
 
 # run-measure-gui
@@ -137,12 +137,13 @@ Then the experiment loop (per tab):
 
 ```
 gui_adapter_list                                  # available experiments
-gui_adapter_guide(adapter_name="onetone/flux_dep")# READ FIRST (before configuring/running an experiment you
-                                                  # haven't run this session): per-experiment behavior, expected
-                                                  # md/ml, recommended ranges + gotchas live here, not in this skill
+gui_adapter_guide(adapter_name="onetone/flux_dep")# per-experiment behavior, expected md/ml, recommended ranges +
+                                                  # gotchas — live here, not in this skill. AUTO-FOLDED into the FIRST
+                                                  # gui_tab_new / gui_run_stage for an adapter each session (`guide` field),
+                                                  # so you rarely call this explicitly — only to re-read.
 gui_tab_new(adapter_name="fake/freq")             # NOW folds the open+learn-cfg dance: replies
-                                                  # {tab_id, editor_id, paths, cfg_summary} in ONE call
-                                                  # (the next 3 reads are optional re-reads). id e.g. fake-freq-1a2b3c4d
+                                                  # {tab_id, editor_id, paths, cfg_summary} in ONE call (+ `guide` on the
+                                                  # FIRST use of an adapter this session). next 3 reads = optional re-reads.
 gui_tab_snapshot(tab_id) -> editor_id             # per-tab progress + the cfg-editing session handle
 gui_tab_list_paths(tab_id)                        # dotted cfg paths (compact: path+kind+choices)
 gui_tab_get_cfg_summary(tab_id)                   # current values/expressions, nested (ref nodes wrap {chosen,value} → not a path source; see list_paths)
@@ -152,6 +153,10 @@ gui_editor_set_field(tab_id, "rounds", 30)        # convenience: tab_id resolves
                                                   # eval/ref expressions are not accepted there (use scalar leaf fields
                                                   # for eval). If an adapter pre-wires an eval edge, override it by
                                                   # passing a numeric value directly.
+gui_run_stage(adapter_name, edits={path: val})    # MACRO: tab_new + set_fields(edits) + run in ONE call. reply = run
+                                                  # finished reply (+ figure, tab_id, editor_id, first-use guide). STOPS
+                                                  # before analyze — look at the figure, then call gui_analyze yourself.
+                                                  # Slow run degrades to {status:pending} like gui_run_start. Optional fast path.
 gui_run_start(tab_id)                             # waits ~1s; finished -> {status:finished, figure:<png path>,...}, slow -> {status:pending}
 gui_run_wait(tab_id)                              # block until done (only after pending; blocks your turn — for a long run background it, see "Detecting completion")
 gui_tab_get_current_figure(tab_id)                # writes the CURRENT plot (run's 2D map, analysis fit, or post-analysis

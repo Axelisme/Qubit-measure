@@ -792,7 +792,7 @@ _ = qub_freq_exp.run(soc, soccfg, cfg)
 
 ```python
 %matplotlib inline
-f, kappa, fig = qub_freq_exp.analyze()
+f, _, kappa, _, fig = qub_freq_exp.analyze()
 f
 ```
 
@@ -862,7 +862,7 @@ _ = qub_lenrabi_exp.run(soc, soccfg, cfg)
 
 ```python
 %matplotlib inline
-md.pi_len, md.pi2_len, md.rabi_f, fig = qub_lenrabi_exp.analyze(decay=True)
+md.pi_len, _, md.pi2_len, _, md.rabi_f, _, fig = qub_lenrabi_exp.analyze(decay=True)
 md.pi_len, md.pi2_len, md.rabi_f
 ```
 
@@ -929,7 +929,7 @@ _ = qub_amprabi_exp.run(soc, soccfg, cfg)
 
 ```python
 %matplotlib inline
-md.pi_gain, md.pi2_gain, fig = qub_amprabi_exp.analyze(skip=1)
+md.pi_gain, _, md.pi2_gain, _, fig = qub_amprabi_exp.analyze(skip=1)
 md.pi_gain, md.pi2_gain
 ```
 
@@ -1178,7 +1178,7 @@ _ = dualreset_freq1_exp.run(soc, soccfg, cfg)
 
 ```python
 %matplotlib inline
-f, kappa, fig = dualreset_freq1_exp.analyze()
+f, _, kappa, _, fig = dualreset_freq1_exp.analyze()
 f
 ```
 
@@ -1468,7 +1468,7 @@ _ = rabifreq_exp.run(soc, soccfg, cfg)
 
 ```python
 %matplotlib inline
-*_, md.rabi_f, fig = rabifreq_exp.analyze(decay=True)
+*_, md.rabi_f, _, fig = rabifreq_exp.analyze(decay=True)
 ```
 
 ```python
