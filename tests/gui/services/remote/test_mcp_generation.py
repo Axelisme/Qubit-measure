@@ -95,16 +95,28 @@ def test_cfg_editor_tools_generated():
     assert "type" not in value_schema
 
 
-def test_tab_new_is_a_fanout_override():
-    """gui_tab_new is now served by the hand-written fan-out override (it folds
-    editor_id + paths + cfg_summary into the reply), so tab.new must be excluded
-    from generation and the tool's handler must be the override function."""
-    assert "tab.new" in m._NON_GENERATED_METHODS
-    assert m.TOOLS["gui_tab_new"]["handler"] is m.tool_gui_tab_new
-    # The schema keeps the single required 'adapter_name' string param.
+def test_tab_new_is_a_pure_generated_forwarder():
+    """gui_tab_new is the auto-generated tab.new forwarder (MCP 45): it returns
+    just {tab_id}; the fan-out + guide fold moved to gui_run_stage1. So tab.new
+    must NOT be excluded from generation nor served by an override."""
+    assert "tab.new" not in m._NON_GENERATED_METHODS
+    assert "gui_tab_new" not in m._OVERRIDE_NAMES
+    # The generated schema keeps the single required 'adapter_name' string param.
     schema = m.TOOLS["gui_tab_new"]["inputSchema"]
     assert schema["required"] == ["adapter_name"]
     assert schema["properties"]["adapter_name"]["type"] == "string"
+
+
+def test_writeback_apply_is_a_pure_generated_forwarder():
+    """gui_writeback_apply is the auto-generated writeback.apply forwarder (MCP
+    45): it returns just {applied_ids}; the save_data chaining moved to
+    gui_run_stage4. So writeback.apply must NOT be excluded from generation nor
+    served by an override, and the agent schema exposes only 'tab_id'."""
+    assert "writeback.apply" not in m._NON_GENERATED_METHODS
+    assert "gui_writeback_apply" not in m._OVERRIDE_NAMES
+    schema = m.TOOLS["gui_writeback_apply"]["inputSchema"]
+    # expected_versions is mcp_hidden; save_data is gone.
+    assert set(schema["properties"]) == {"tab_id"}
 
 
 def test_writeback_set_selected_is_boolean_schema():

@@ -1109,13 +1109,10 @@ def test_connect_folds_overview_into_reply(monkeypatch):
     assert out == {"note": "ok", "overview": {"sentinel": True}}
 
 
-def test_analyze_settled_folds_summary_figure_and_writeback(monkeypatch):
-    """A FINISHED analyze folds the fit summary (tab.get_analyze_result), the
-    current figure rendered to a temp PNG ('figure'), AND the writeback preview
-    ('writeback_preview', writeback.preview items) — the common read + look +
-    preview in one call (MCP 44 Phase ③)."""
-    from tempfile import gettempdir
-
+def test_analyze_settled_returns_only_summary(monkeypatch):
+    """gui_analyze is PURE — a FINISHED analyze returns ONLY its own result, the
+    fit summary (tab.get_analyze_result). It does NOT fold the figure or the
+    writeback preview (those folds live in gui_run_stage3)."""
     from zcu_tools.mcp.measure import server as mcp_server
 
     # No tracked op for this key -> _start_op_with_short_wait settles synchronously.
@@ -1127,10 +1124,6 @@ def test_analyze_settled_folds_summary_figure_and_writeback(monkeypatch):
         calls.append((method, params))
         if method == "tab.get_analyze_result":
             return {"summary": {"t1": 5.0}}
-        if method == "tab.get_current_figure":
-            return {"bytes": 9, "saved_to": params["out_path"]}
-        if method == "writeback.preview":
-            return {"items": [{"id": "md-0", "target_name": "q_f"}]}
         return {}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
@@ -1138,11 +1131,12 @@ def test_analyze_settled_folds_summary_figure_and_writeback(monkeypatch):
 
     assert out["status"] == "finished"
     assert out["summary"] == {"t1": 5.0}
-    assert out["figure"] == str(Path(gettempdir()) / "measure_fig_fake-freq-1.png")
-    assert out["writeback_preview"] == [{"id": "md-0", "target_name": "q_f"}]
+    assert "figure" not in out
+    assert "writeback_preview" not in out
     assert ("analyze.start", {"tab_id": "fake-freq-1"}) in calls
-    assert any(c[0] == "tab.get_current_figure" for c in calls)
-    assert ("writeback.preview", {"tab_id": "fake-freq-1"}) in calls
+    # The base tool fans out over NO other operation's read.
+    assert not any(c[0] == "tab.get_current_figure" for c in calls)
+    assert not any(c[0] == "writeback.preview" for c in calls)
 
 
 def test_analyze_degrades_to_pending_when_not_settled(monkeypatch):
@@ -1293,116 +1287,101 @@ def test_stale_error_message_names_changed_resources(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# gui_tab_new fan-out (MCP 42): one reply folds editor_id + paths + cfg_summary
+# MCP 45: gui_tab_new is PURE — reverted to the auto-generated tab.new forwarder
+# (returns just {tab_id}); the fan-out + guide fold moved to gui_run_stage1.
 # ---------------------------------------------------------------------------
 
 
-def test_tab_new_fans_out_snapshot_paths_and_cfg_summary(monkeypatch):
-    """gui_tab_new creates the tab then folds the three follow-up reads (snapshot
-    for editor_id, list_paths, cfg_summary) into one reply, plus the first-use
-    adapter guide — no wire change."""
+def test_tab_new_is_pure_generated_forwarder():
+    """gui_tab_new forwards tab.new and returns ONLY its result ({tab_id}) — it no
+    longer fans out over tab.snapshot / list_paths / cfg_summary nor folds a guide.
+
+    Like test_mcp_wrappers_map_to_expected_rpc, the generated forwarder captures
+    the guarded send_gui_rpc as a closure at import time, so monkeypatching the
+    module attribute does not reach it. Re-generate with a recording send_fn (the
+    same projection the real bridge builds) to assert it forwards ONLY tab.new.
+    """
+    from zcu_tools.gui.app.main.services.remote.method_specs import METHOD_SPECS
+    from zcu_tools.mcp.core.bridge import generate_tools
     from zcu_tools.mcp.measure import server as mcp_server
 
-    # First use of this adapter this session -> the guide is fetched + folded.
-    mcp_server._GUIDE_RETURNED.clear()
     calls: list[tuple[str, dict]] = []
 
     def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
         del timeout_seconds
         calls.append((method, params))
-        return {
-            "tab.new": {"tab_id": "tw-1"},
-            "tab.snapshot": {"editor_id": "ed-tw-1", "interaction": {}},
-            "tab.list_paths": {"paths": [{"path": "reps", "kind": "scalar"}]},
-            "tab.get_cfg_summary": {"summary": {"reps": 100}},
-            "adapter.guide": {"guide": {"behavior": "measures X"}},
-        }[method]
+        return {"tab_id": "tw-1"}
 
-    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    out = mcp_server.TOOLS["gui_tab_new"]["handler"]({"adapter_name": "fake/freq"})
+    tools = generate_tools(
+        mcp_server._CONFIG, METHOD_SPECS, mcp_server._NON_GENERATED_METHODS, fake_send
+    )
+    out = tools["gui_tab_new"]["handler"]({"adapter_name": "fake/freq"})
 
-    # tab.new first (with the adapter_name verbatim), then the three reads keyed
-    # by the new tab_id, then the first-use adapter.guide fetch.
-    assert calls == [
-        ("tab.new", {"adapter_name": "fake/freq"}),
-        ("tab.snapshot", {"tab_id": "tw-1"}),
-        ("tab.list_paths", {"tab_id": "tw-1"}),
-        ("tab.get_cfg_summary", {"tab_id": "tw-1"}),
-        ("adapter.guide", {"adapter_name": "fake/freq"}),
-    ]
-    assert out == {
-        "tab_id": "tw-1",
-        "editor_id": "ed-tw-1",
-        "paths": [{"path": "reps", "kind": "scalar"}],
-        "cfg_summary": {"reps": 100},
-        "guide": {"behavior": "measures X"},
-    }
+    assert out == {"tab_id": "tw-1"}
+    # Exactly one RPC — tab.new — and no fan-out reads or guide fetch.
+    assert calls == [("tab.new", {"adapter_name": "fake/freq"})]
 
 
 # ---------------------------------------------------------------------------
-# Figure fold (MCP 42): a FINISHED run/analyze reply carries the current figure
+# MCP 45: gui_run_start is PURE — no figure fold; the figure-fold helper is now
+# exercised only via the stage tools + directly.
 # ---------------------------------------------------------------------------
 
 
-def test_run_start_finished_folds_current_figure(monkeypatch):
-    """When the short wait settles, gui_run_start renders the tab's current figure
-    to a temp PNG and folds its path in as 'figure'."""
-    from tempfile import gettempdir
-
+def test_run_start_is_pure_no_figure_fold(monkeypatch):
+    """gui_run_start returns ONLY its own result ({status, tab}) — it no longer
+    renders or folds the current figure (the figure fold moved to gui_run_stage2).
+    Look at the plot via gui_tab_get_current_figure instead."""
     from zcu_tools.mcp.measure import server as mcp_server
 
     # No tracked op for this key -> _start_op_with_short_wait takes the
     # "settled synchronously" branch (status='finished', runs the product).
     mcp_server._OP_BY_KEY.pop("tab:rt-1", None)
+    calls: list[str] = []
 
     def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
-        del timeout_seconds
+        del params, timeout_seconds
+        calls.append(method)
         if method == "tab.snapshot":
             return {"interaction": {"has_run_result": True}}
-        if method == "tab.get_current_figure":
-            return {"bytes": 9, "saved_to": params["out_path"]}
         return {}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
     out = mcp_server.TOOLS["gui_run_start"]["handler"]({"tab_id": "rt-1"})
 
     assert out["status"] == "finished"
-    assert out["figure"] == str(Path(gettempdir()) / "measure_fig_rt-1.png")
+    assert "figure" not in out
+    assert "tab.get_current_figure" not in calls
 
 
-def test_analyze_finished_folds_figure_pending_does_not(monkeypatch):
-    """A finished analyze folds the figure; a still-pending (interactive) one,
-    which never settles in the short wait, does NOT carry a 'figure' key."""
+def test_fold_finished_figure_finished_folds_pending_does_not(monkeypatch):
+    """The figure-fold helper renders + folds 'figure' on a FINISHED reply and is
+    a no-op on a pending one (used by gui_run_stage2 / gui_run_stage3)."""
+    from tempfile import gettempdir
+
     from zcu_tools.mcp.measure import server as mcp_server
-
-    mcp_server._OP_BY_KEY.pop("analyze:az-1", None)
 
     rendered: list[str] = []
 
     def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
         del timeout_seconds
-        if method == "tab.get_analyze_result":
-            return {"summary": {"t1": 12.3}}
         if method == "tab.get_current_figure":
             rendered.append(params["out_path"])
             return {"bytes": 9, "saved_to": params["out_path"]}
-        if method == "writeback.preview":
-            return {"items": []}
         return {}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    out = mcp_server.TOOLS["gui_analyze"]["handler"]({"tab_id": "az-1"})
-    assert out["status"] == "finished"
-    assert out["summary"] == {"t1": 12.3}
-    assert "figure" in out
+
+    # FINISHED -> renders + folds the figure path.
+    finished = mcp_server._fold_finished_figure("az-1", {"status": "finished"})
+    assert finished["figure"] == str(Path(gettempdir()) / "measure_fig_az-1.png")
     assert len(rendered) == 1
 
-    # A pending reply (status != finished) must NOT trigger a figure render.
+    # A pending reply (status != finished) must NOT trigger a render.
     pending = {"status": "pending", "message": "still running"}
     folded = mcp_server._fold_finished_figure("az-1", pending)
     assert folded == {"status": "pending", "message": "still running"}
     assert "figure" not in folded
-    # No additional render happened for the pending fold.
     assert len(rendered) == 1
 
 
@@ -1470,91 +1449,77 @@ def test_fold_writeback_preview_swallows_failure(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_writeback_apply_default_applies_only(monkeypatch):
-    """save_data defaults false: apply runs, save.data does NOT, no data_path."""
+def test_writeback_apply_is_pure_generated_forwarder():
+    """gui_writeback_apply forwards writeback.apply and returns ONLY its result
+    ({applied_ids}) — it no longer takes save_data nor chains save.data (that moved
+    to gui_run_stage4).
+
+    Generated forwarder captures send_gui_rpc as a closure at import time, so a
+    module-attr monkeypatch does not reach it — re-generate with a recording
+    send_fn (the same projection the real bridge builds) to assert it forwards ONLY
+    writeback.apply. The MCP schema must not expose save_data.
+    """
+    from zcu_tools.gui.app.main.services.remote.method_specs import METHOD_SPECS
+    from zcu_tools.mcp.core.bridge import generate_tools
     from zcu_tools.mcp.measure import server as mcp_server
 
+    # The agent-facing schema carries only tab_id (expected_versions is mcp_hidden;
+    # save_data is gone).
+    assert set(
+        mcp_server.TOOLS["gui_writeback_apply"]["inputSchema"]["properties"]
+    ) == {"tab_id"}
+
+    calls: list[tuple[str, dict]] = []
+
+    def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
+        del timeout_seconds
+        calls.append((method, params))
+        return {"applied_ids": ["md-0", "ml-1"]}
+
+    tools = generate_tools(
+        mcp_server._CONFIG, METHOD_SPECS, mcp_server._NON_GENERATED_METHODS, fake_send
+    )
+    out = tools["gui_writeback_apply"]["handler"]({"tab_id": "t1"})
+
+    assert out == {"applied_ids": ["md-0", "ml-1"]}
+    assert calls == [("writeback.apply", {"tab_id": "t1"})]
+
+
+# ---------------------------------------------------------------------------
+# MCP 45: gui_run_poll is PURE — no figure fold; returns just the poll status.
+# ---------------------------------------------------------------------------
+
+
+def test_run_poll_finished_is_pure_no_figure(monkeypatch):
+    """A 'finished' gui_run_poll returns just the poll status — it no longer
+    renders or folds the figure. Look at the plot via gui_tab_get_current_figure."""
+    from zcu_tools.mcp.measure import server as mcp_server
+
+    monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {"tab:t1": 7})
     calls: list[str] = []
 
     def fake_send(method, params, timeout_seconds=30.0):
         del params, timeout_seconds
         calls.append(method)
-        if method == "writeback.apply":
-            return {"applied_ids": ["md-0", "ml-1"]}
-        return {}
-
-    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    out = mcp_server.TOOLS["gui_writeback_apply"]["handler"]({"tab_id": "t1"})
-
-    assert out == {"applied_ids": ["md-0", "ml-1"]}
-    assert "save.data" not in calls
-    assert "data_path" not in out
-
-
-def test_writeback_apply_save_data_chains_save_and_folds_path(monkeypatch):
-    """save_data=true: apply then save.data, folding the resolved data_path."""
-    from zcu_tools.mcp.measure import server as mcp_server
-
-    calls: list[tuple[str, dict]] = []
-
-    def fake_send(method, params, timeout_seconds=30.0):
-        del timeout_seconds
-        calls.append((method, dict(params)))
-        if method == "writeback.apply":
-            return {"applied_ids": ["md-0"]}
-        if method == "save.data":
-            return {"data_path": "/results/Q1/data_0001.hdf5"}
-        return {}
-
-    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    out = mcp_server.TOOLS["gui_writeback_apply"]["handler"](
-        {"tab_id": "t1", "save_data": True}
-    )
-
-    methods = [m for m, _ in calls]
-    # apply runs first, save.data second (apply is committed before the save).
-    assert methods.index("writeback.apply") < methods.index("save.data")
-    assert out["applied_ids"] == ["md-0"]
-    assert out["data_path"] == "/results/Q1/data_0001.hdf5"
-    assert ("save.data", {"tab_id": "t1"}) in calls
-
-
-# ---------------------------------------------------------------------------
-# MCP 44 consistency fix: gui_run_poll's finished branch folds the figure
-# ---------------------------------------------------------------------------
-
-
-def test_run_poll_finished_folds_figure(monkeypatch):
-    """A 'finished' gui_run_poll now renders + folds the figure (same as
-    gui_run_start / gui_run_wait), so the pending->poll path gets the plot."""
-    from tempfile import gettempdir
-
-    from zcu_tools.mcp.measure import server as mcp_server
-
-    monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {"tab:t1": 7})
-
-    def fake_send(method, params, timeout_seconds=30.0):
-        del timeout_seconds
         if method == "operation.await":
             return {"status": "finished"}
-        if method == "tab.get_current_figure":
-            return {"bytes": 9, "saved_to": params["out_path"]}
         return {}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
     out = mcp_server.TOOLS["gui_run_poll"]["handler"]({"tab_id": "t1"})
     assert out["status"] == "finished"
-    assert out["figure"] == str(Path(gettempdir()) / "measure_fig_t1.png")
+    assert "figure" not in out
+    assert "tab.get_current_figure" not in calls
 
 
 # ---------------------------------------------------------------------------
-# MCP 44 Phase ②: gui_run_stage(tab_id, edits) configures + runs an existing tab
-# (no tab creation, no guide fold) and folds the analyze-params next to the figure
+# MCP 45 Phase ②: gui_run_stage2(tab_id, edits) configures + runs an existing tab
+# (no tab creation, no guide fold) and folds the figure + analyze-params
 # ---------------------------------------------------------------------------
 
 
 def _run_stage_fake_send(calls: list[tuple[str, dict]]):
-    """A send_gui_rpc stub covering every RPC gui_run_stage fans out over.
+    """A send_gui_rpc stub covering every RPC gui_run_stage2 fans out over.
 
     Records (method, params) in call order so a test can assert the sequence and
     the exact values forwarded. run.start captures no operation_id here (the real
@@ -1584,8 +1549,8 @@ def _run_stage_fake_send(calls: list[tuple[str, dict]]):
     return fake_send
 
 
-def test_run_stage_configures_runs_and_stops_before_analyze(monkeypatch):
-    """gui_run_stage operates on the given tab_id: set_fields then run_start, NEVER
+def test_run_stage2_configures_runs_and_stops_before_analyze(monkeypatch):
+    """gui_run_stage2 operates on the given tab_id: set_fields then run_start, NEVER
     creating a tab and NEVER calling analyze. A finished reply folds the figure +
     the analyze-params spec next to it."""
     from zcu_tools.mcp.measure import server as mcp_server
@@ -1594,7 +1559,7 @@ def test_run_stage_configures_runs_and_stops_before_analyze(monkeypatch):
     calls: list[tuple[str, dict]] = []
     monkeypatch.setattr(mcp_server, "send_gui_rpc", _run_stage_fake_send(calls))
 
-    out = mcp_server.TOOLS["gui_run_stage"]["handler"](
+    out = mcp_server.TOOLS["gui_run_stage2"]["handler"](
         {
             "tab_id": "stage-tab",
             "edits": {"reps": 100, "sweep.gain.expts": 5},
@@ -1615,7 +1580,7 @@ def test_run_stage_configures_runs_and_stops_before_analyze(monkeypatch):
     assert ("tab.get_analyze_params", {"tab_id": "stage-tab"}) in calls
 
 
-def test_run_stage_edits_numbers_stay_numbers(monkeypatch):
+def test_run_stage2_edits_numbers_stay_numbers(monkeypatch):
     """The {path: value} map is forwarded through the plural set_fields path, so
     numeric values reach editor.set_field as numbers (NOT stringified)."""
     from zcu_tools.mcp.measure import server as mcp_server
@@ -1624,7 +1589,7 @@ def test_run_stage_edits_numbers_stay_numbers(monkeypatch):
     calls: list[tuple[str, dict]] = []
     monkeypatch.setattr(mcp_server, "send_gui_rpc", _run_stage_fake_send(calls))
 
-    mcp_server.TOOLS["gui_run_stage"]["handler"](
+    mcp_server.TOOLS["gui_run_stage2"]["handler"](
         {"tab_id": "stage-tab", "edits": {"reps": 100, "gain": 0.2}}
     )
 
@@ -1638,7 +1603,7 @@ def test_run_stage_edits_numbers_stay_numbers(monkeypatch):
     assert isinstance(set_field_values["gain"], float)
 
 
-def test_run_stage_without_edits_runs_current_cfg(monkeypatch):
+def test_run_stage2_without_edits_runs_current_cfg(monkeypatch):
     """Omitting 'edits' runs the tab's current cfg — no editor.set_field fires."""
     from zcu_tools.mcp.measure import server as mcp_server
 
@@ -1646,14 +1611,14 @@ def test_run_stage_without_edits_runs_current_cfg(monkeypatch):
     calls: list[tuple[str, dict]] = []
     monkeypatch.setattr(mcp_server, "send_gui_rpc", _run_stage_fake_send(calls))
 
-    out = mcp_server.TOOLS["gui_run_stage"]["handler"]({"tab_id": "stage-tab"})
+    out = mcp_server.TOOLS["gui_run_stage2"]["handler"]({"tab_id": "stage-tab"})
 
     assert "editor.set_field" not in [m for m, _ in calls]
     assert out["status"] == "finished"
     assert out["analyze_params"] == {"smooth": 1}
 
 
-def test_run_stage_pending_run_omits_analyze_params(monkeypatch):
+def test_run_stage2_pending_run_omits_analyze_params(monkeypatch):
     """A slow run degrades to {status:'pending'} and must NOT fold analyze_params
     (nothing settled to analyze yet)."""
     from zcu_tools.mcp.measure import server as mcp_server
@@ -1669,14 +1634,14 @@ def test_run_stage_pending_run_omits_analyze_params(monkeypatch):
         return {}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    out = mcp_server.TOOLS["gui_run_stage"]["handler"]({"tab_id": "stage-tab"})
+    out = mcp_server.TOOLS["gui_run_stage2"]["handler"]({"tab_id": "stage-tab"})
 
     assert out["status"] == "pending"
     assert "analyze_params" not in out
     assert "tab.get_analyze_params" not in calls
 
 
-def test_run_stage_analyze_params_fetch_failure_is_swallowed(monkeypatch):
+def test_fold_analyze_params_fetch_failure_is_swallowed(monkeypatch):
     """A tab.get_analyze_params failure must not mask an otherwise-good finished
     run reply: the reply settles, with analyze_params=None."""
     from zcu_tools.mcp.measure import server as mcp_server
@@ -1687,17 +1652,61 @@ def test_run_stage_analyze_params_fetch_failure_is_swallowed(monkeypatch):
     assert out["analyze_params"] is None
 
 
-def test_guide_folded_on_first_tab_new_absent_on_second(monkeypatch):
-    """The adapter guide rides the FIRST gui_tab_new for an adapter this session
-    and is OMITTED on the second (run_stage no longer participates)."""
+# ---------------------------------------------------------------------------
+# MCP 45 Phase ①: gui_run_stage1 creates a tab + ALWAYS folds the editing context
+# + the adapter guide (no first-use gating — you call stage1 to get a tab + guide)
+# ---------------------------------------------------------------------------
+
+
+def test_run_stage1_creates_tab_and_folds_context_and_guide(monkeypatch):
+    """gui_run_stage1 creates the tab, fans out the three editing-context reads
+    (snapshot for editor_id, list_paths, cfg_summary) and ALWAYS folds the adapter
+    guide into one reply."""
     from zcu_tools.mcp.measure import server as mcp_server
 
-    mcp_server._GUIDE_RETURNED.clear()
     calls: list[tuple[str, dict]] = []
 
     def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
         del timeout_seconds
         calls.append((method, dict(params)))
+        return {
+            "tab.new": {"tab_id": "tw-1"},
+            "tab.snapshot": {"editor_id": "ed-tw-1", "interaction": {}},
+            "tab.list_paths": {"paths": [{"path": "reps", "kind": "scalar"}]},
+            "tab.get_cfg_summary": {"summary": {"reps": 100}},
+            "adapter.guide": {"guide": {"behavior": "measures X"}},
+        }[method]
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
+    out = mcp_server.TOOLS["gui_run_stage1"]["handler"]({"adapter_name": "fake/freq"})
+
+    # tab.new first (adapter_name verbatim), then the three reads keyed by the new
+    # tab_id, then the adapter.guide fetch (always — no first-use gating).
+    assert calls == [
+        ("tab.new", {"adapter_name": "fake/freq"}),
+        ("tab.snapshot", {"tab_id": "tw-1"}),
+        ("tab.list_paths", {"tab_id": "tw-1"}),
+        ("tab.get_cfg_summary", {"tab_id": "tw-1"}),
+        ("adapter.guide", {"adapter_name": "fake/freq"}),
+    ]
+    assert out == {
+        "tab_id": "tw-1",
+        "adapter": "fake/freq",
+        "editor_id": "ed-tw-1",
+        "paths": [{"path": "reps", "kind": "scalar"}],
+        "cfg_summary": {"reps": 100},
+        "guide": {"behavior": "measures X"},
+    }
+
+
+def test_run_stage1_always_folds_guide_on_every_call(monkeypatch):
+    """The guide rides EVERY gui_run_stage1 call (no per-session first-use gating
+    that the old gui_tab_new fold had) — you call stage1 precisely to get a fresh
+    tab + its guide."""
+    from zcu_tools.mcp.measure import server as mcp_server
+
+    def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
+        del params, timeout_seconds
         return {
             "tab.new": {"tab_id": "tw-1"},
             "tab.snapshot": {"editor_id": "ed-1", "interaction": {}},
@@ -1708,14 +1717,126 @@ def test_guide_folded_on_first_tab_new_absent_on_second(monkeypatch):
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
 
-    first = mcp_server.TOOLS["gui_tab_new"]["handler"]({"adapter_name": "amp_rabi"})
+    first = mcp_server.TOOLS["gui_run_stage1"]["handler"]({"adapter_name": "amp_rabi"})
+    second = mcp_server.TOOLS["gui_run_stage1"]["handler"]({"adapter_name": "amp_rabi"})
     assert first["guide"] == {"behavior": "measures X"}
-    assert ("adapter.guide", {"adapter_name": "amp_rabi"}) in calls
+    assert second["guide"] == {"behavior": "measures X"}
 
-    calls.clear()
-    second = mcp_server.TOOLS["gui_tab_new"]["handler"]({"adapter_name": "amp_rabi"})
-    assert "guide" not in second
-    assert "adapter.guide" not in [m for m, _ in calls]
+
+# ---------------------------------------------------------------------------
+# MCP 45 Phase ③: gui_run_stage3 analyzes + folds summary + figure + writeback
+# ---------------------------------------------------------------------------
+
+
+def test_run_stage3_analyzes_and_folds_figure_and_writeback(monkeypatch):
+    """gui_run_stage3 runs gui_analyze, then folds the figure + the writeback
+    preview onto a FINISHED FIT reply (summary stays analyze's own result)."""
+    from tempfile import gettempdir
+
+    from zcu_tools.mcp.measure import server as mcp_server
+
+    # No tracked op -> the analyze short-wait settles synchronously (fast FIT).
+    mcp_server._OP_BY_KEY.pop("analyze:az-1", None)
+    calls: list[tuple[str, dict]] = []
+
+    def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
+        del timeout_seconds
+        calls.append((method, dict(params)))
+        if method == "tab.get_analyze_result":
+            return {"summary": {"t1": 12.3}}
+        if method == "tab.get_current_figure":
+            return {"bytes": 9, "saved_to": params["out_path"]}
+        if method == "writeback.preview":
+            return {"items": [{"id": "md-0", "target_name": "q_f"}]}
+        return {}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
+    out = mcp_server.TOOLS["gui_run_stage3"]["handler"]({"tab_id": "az-1"})
+
+    assert out["status"] == "finished"
+    assert out["summary"] == {"t1": 12.3}
+    assert out["figure"] == str(Path(gettempdir()) / "measure_fig_az-1.png")
+    assert out["writeback_preview"] == [{"id": "md-0", "target_name": "q_f"}]
+    assert ("analyze.start", {"tab_id": "az-1"}) in calls
+
+
+def test_run_stage3_pending_interactive_omits_folds(monkeypatch):
+    """An INTERACTIVE analyze degrades to pending -> gui_run_stage3 folds NOTHING
+    (no figure, no writeback preview)."""
+    from zcu_tools.mcp.measure import server as mcp_server
+
+    monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {"analyze:az-1": 9})
+    calls: list[str] = []
+
+    def fake_send(method, params, timeout_seconds=30.0):
+        del params, timeout_seconds
+        calls.append(method)
+        if method == "operation.await":
+            raise RuntimeError("GUI Error (timeout): user still picking")
+        return {}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
+    out = mcp_server.TOOLS["gui_run_stage3"]["handler"]({"tab_id": "az-1"})
+
+    assert out["status"] == "pending"
+    assert "figure" not in out
+    assert "writeback_preview" not in out
+    assert "tab.get_current_figure" not in calls
+    assert "writeback.preview" not in calls
+
+
+# ---------------------------------------------------------------------------
+# MCP 45 Phase ④: gui_run_stage4 applies the writeback, optionally saving the data
+# ---------------------------------------------------------------------------
+
+
+def test_run_stage4_default_applies_only(monkeypatch):
+    """save_data defaults false: apply runs, save.data does NOT, no data_path."""
+    from zcu_tools.mcp.measure import server as mcp_server
+
+    calls: list[str] = []
+
+    def fake_send(method, params, timeout_seconds=30.0):
+        del params, timeout_seconds
+        calls.append(method)
+        if method == "writeback.apply":
+            return {"applied_ids": ["md-0", "ml-1"]}
+        return {}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
+    out = mcp_server.TOOLS["gui_run_stage4"]["handler"]({"tab_id": "t1"})
+
+    assert out == {"applied_ids": ["md-0", "ml-1"]}
+    assert "save.data" not in calls
+    assert "data_path" not in out
+
+
+def test_run_stage4_save_data_chains_save_and_folds_path(monkeypatch):
+    """save_data=true: apply then save.data, folding the resolved data_path."""
+    from zcu_tools.mcp.measure import server as mcp_server
+
+    calls: list[tuple[str, dict]] = []
+
+    def fake_send(method, params, timeout_seconds=30.0):
+        del timeout_seconds
+        calls.append((method, dict(params)))
+        if method == "writeback.apply":
+            return {"applied_ids": ["md-0"]}
+        if method == "save.data":
+            return {"data_path": "/results/Q1/data_0001.hdf5"}
+        return {}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
+    out = mcp_server.TOOLS["gui_run_stage4"]["handler"](
+        {"tab_id": "t1", "save_data": True}
+    )
+
+    methods = [m for m, _ in calls]
+    # apply runs first, save.data second (apply is committed before the save).
+    assert methods.index("writeback.apply") < methods.index("save.data")
+    assert out["applied_ids"] == ["md-0"]
+    assert out["data_path"] == "/results/Q1/data_0001.hdf5"
+    assert ("save.data", {"tab_id": "t1"}) in calls
 
 
 def test_explicit_adapter_guide_tool_still_works():

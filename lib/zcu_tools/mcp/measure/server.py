@@ -327,7 +327,29 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
 #      behavior unchanged. Consistency fix: gui_run_poll's FINISHED branch now folds
 #      the figure (_fold_finished_figure) like run_start/_wait/_stage, so the
 #      pending->poll path also gets the plot.
-MCP_VERSION = 44
+# MCP 45: base-tools-pure + gui_run_stage1..4 restructure (no wire change). The
+#      base tools now return ONLY their own operation's result (least-surprise —
+#      the name describes the function); cross-tool folding moves into four
+#      explicit bundle tools that the docs recommend as the primary flow:
+#        - gui_tab_new reverts to the auto-generated tab.new forwarder (returns
+#          just {tab_id}); the fan-out + guide fold moves to gui_run_stage1.
+#        - gui_run_start / _wait / _poll drop the figure fold (keep the short-wait
+#          degrade contract — that is the tool's own async contract, not a fold);
+#          look at the plot via gui_tab_get_current_figure.
+#        - gui_analyze drops the figure + writeback-preview folds (keeps its own
+#          inline 'summary' incl. *_err + the degrade contract).
+#        - gui_writeback_apply reverts to the auto-generated writeback.apply
+#          forwarder (returns just {applied_ids}); the save_data chaining moves to
+#          gui_run_stage4.
+#        - removed gui_run_stage and the now-unused _GUIDE_RETURNED seen-set.
+#      The four bundle tools reuse the existing fold helpers (_fold_finished_figure
+#      / _fold_analyze_params / _fold_writeback_preview / the tab_new fan-out reads,
+#      now _fold_tab_editing_context): stage1 = new+guide (always returns guide);
+#      stage2 = configure+run (set_fields + run_start, folds figure+analyze_params,
+#      stops before analyze); stage3 = analyze (folds summary+figure+writeback_
+#      preview, pending on INTERACTIVE); stage4 = writeback+save (apply, optional
+#      save_data folds data_path).
+MCP_VERSION = 45
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -443,16 +465,6 @@ or the dialog times out. Returns {reason:'reply'|'dismiss'|'timeout', reply?}:
 _DIAGNOSTIC_QUEUE_MAX = 1024
 _DIAGNOSTIC_QUEUE: deque[dict[str, Any]] = deque(maxlen=_DIAGNOSTIC_QUEUE_MAX)
 _DIAGNOSTIC_COND = threading.Condition()
-
-# --- First-use adapter-guide fold (per-session) ------------------------------
-#
-# The MCP server is a per-session process. The FIRST time an adapter is touched
-# (gui_tab_new — Phase ①) we fold its adapter.guide into the reply so the agent
-# skips the explicit gui_adapter_guide round-trip; on later calls for the same
-# adapter we omit it (it has already been seen). gui_run_stage operates on an
-# already-created tab so it never re-folds the guide. The set is per-process —
-# resetting on an MCP-server restart is fine (the agent simply re-reads it once).
-_GUIDE_RETURNED: set[str] = set()
 
 # --- Optimistic-concurrency bookkeeping (policy lives here, mcp side) --------
 #
@@ -956,61 +968,23 @@ def _resolve_editor_id(arguments: dict[str, Any]) -> str:
     return str(resolved)
 
 
-def _fold_first_use_guide(adapter_name: str, reply: dict[str, Any]) -> dict[str, Any]:
-    """Fold the adapter's guide into ``reply`` the FIRST time it is used this
-    session, in place; omit it on later calls for the same adapter.
+def _fold_tab_editing_context(tab_id: str, reply: dict[str, Any]) -> dict[str, Any]:
+    """Fold a fresh tab's editing context into ``reply``, in place.
 
-    The agent normally reads gui_adapter_guide before running an adapter; folding
-    it onto the first gui_tab_new for that adapter saves that round-trip.
-    ``_GUIDE_RETURNED`` is the per-process seen-set (see its comment).
-    The wire adapter.guide reply is {guide: <AdapterGuide-as-dict>}; we surface
-    that dict under 'guide'. A guide-fetch failure is swallowed (the guide is a
-    convenience, not load-bearing — the agent can still call gui_adapter_guide
-    explicitly), and the adapter is still marked seen so we do not retry every call.
+    After tab.new the agent always reads tab.snapshot (for the editor_id),
+    tab.list_paths (the settable dotted paths) and tab.get_cfg_summary (the
+    current values) before it can edit cfg. Folding those reads collapses ~4
+    calls into one. Pure mcp-side fan-out over EXISTING wire reads — no wire
+    change. Reused by gui_run_stage1 (Phase ①). Adds {editor_id, paths,
+    cfg_summary}; the caller owns ``tab_id`` and ``adapter`` in ``reply``.
     """
-    if adapter_name in _GUIDE_RETURNED:
-        return reply
-    _GUIDE_RETURNED.add(adapter_name)
-    try:
-        guide = send_gui_rpc("adapter.guide", {"adapter_name": adapter_name}).get(
-            "guide"
-        )
-    except Exception:
-        return reply
-    reply["guide"] = guide
-    return reply
-
-
-def tool_gui_tab_new(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Create a tab and fold its initial editing context into the one reply.
-
-    Convenience fan-out over tab.new: after creating the tab the agent always
-    follows up with tab.snapshot (for the editor_id), tab.list_paths (settable
-    dotted paths), and tab.get_cfg_summary (current values) before it can edit
-    cfg. Folding those reads here collapses ~4 calls into one. Pure mcp-side
-    fan-out over EXISTING wire reads — no wire change.
-
-    Returns {tab_id, editor_id, paths, cfg_summary[, guide]}:
-    - editor_id: the tab cfg form's editor session id (None until a live model
-      exists — set_field can still address the form by tab_id);
-    - paths: tab.list_paths compact entries (the editor.set_field path source);
-    - cfg_summary: tab.get_cfg_summary nested values view (read-only);
-    - guide: the adapter's orientation guide, folded in ONLY on the first
-      gui_tab_new for this adapter this session (see _fold_first_use_guide);
-      omitted on later calls.
-    """
-    adapter_name = str(arguments["adapter_name"])
-    tab_id = str(send_gui_rpc("tab.new", {"adapter_name": adapter_name})["tab_id"])
     snap = send_gui_rpc("tab.snapshot", {"tab_id": tab_id})
-    paths = send_gui_rpc("tab.list_paths", {"tab_id": tab_id}).get("paths")
-    cfg_summary = send_gui_rpc("tab.get_cfg_summary", {"tab_id": tab_id}).get("summary")
-    reply = {
-        "tab_id": tab_id,
-        "editor_id": snap.get("editor_id"),
-        "paths": paths,
-        "cfg_summary": cfg_summary,
-    }
-    return _fold_first_use_guide(adapter_name, reply)
+    reply["editor_id"] = snap.get("editor_id")
+    reply["paths"] = send_gui_rpc("tab.list_paths", {"tab_id": tab_id}).get("paths")
+    reply["cfg_summary"] = send_gui_rpc("tab.get_cfg_summary", {"tab_id": tab_id}).get(
+        "summary"
+    )
+    return reply
 
 
 def tool_gui_editor_set_field(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -1354,24 +1328,23 @@ def tool_gui_run_start(arguments: dict[str, Any]) -> dict[str, Any]:
 
     A run has both modes — a tiny sweep finishes in well under a second, a big
     one takes minutes — so it degrades like device ops: settles in time ->
-    {status:'finished', tab:<tab.snapshot>, figure:<saved PNG path>} (has_run_result
-    reflects the result; the current plot is rendered to a temp PNG and its path
-    folded in so the common "look at the plot" step needs no extra call); still
-    running -> {status:'pending'} (await with gui_run_wait or poll with
+    {status:'finished', tab:<tab.snapshot>} (has_run_result reflects the result);
+    still running -> {status:'pending'} (await with gui_run_wait or poll with
     gui_run_poll). send_gui_rpc attaches the version guard + captures the
-    operation_id under tab:<tab_id>.
+    operation_id under tab:<tab_id>. To look at the plot, call
+    gui_tab_get_current_figure (the figure is NOT folded here — this tool returns
+    only the run's own result; the figure fold lives in gui_run_stage2).
     """
     tab_id = str(arguments["tab_id"])
     wait_seconds = float(arguments.get("wait_seconds", 1.0))
     send_gui_rpc("run.start", {"tab_id": tab_id})
-    reply = _start_op_with_short_wait(
+    return _start_op_with_short_wait(
         f"tab:{tab_id}",
         f"Run on tab {tab_id!r}",
         wait_seconds,
         lambda: {"tab": _run_tab_summary(tab_id)},
         f"await it with gui_run_wait(tab_id={tab_id!r}).",
     )
-    return _fold_finished_figure(tab_id, reply)
 
 
 def tool_gui_run_wait(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -1379,71 +1352,21 @@ def tool_gui_run_wait(arguments: dict[str, Any]) -> dict[str, Any]:
     gui_device_wait_operation). Raises only on genuine failure. A cancelled run
     returns {status:'cancelled', feedback?} — read 'feedback' for the Stop reason
     (present when the user used "Send & Stop", absent on a plain cancel). On
-    status='finished' the tab's current plot is rendered to a temp PNG and its
-    path folded in as 'figure', so the common "look at the plot" step needs no
-    extra call."""
+    status='finished' look at the plot with gui_tab_get_current_figure(tab_id)
+    (the figure is NOT folded here)."""
     tab_id = str(arguments["tab_id"])
     timeout = float(arguments.get("timeout", 600.0))
-    reply = _await_operation_by_key(f"tab:{tab_id}", f"Run on tab {tab_id!r}", timeout)
-    return _fold_finished_figure(tab_id, reply)
+    return _await_operation_by_key(f"tab:{tab_id}", f"Run on tab {tab_id!r}", timeout)
 
 
 def tool_gui_run_poll(arguments: dict[str, Any]) -> dict[str, Any]:
     """Non-blocking status of the run on ``tab_id``: finished / running / failed
     / no_operation. Lets the agent start a slow run, do other work, then check
-    back without blocking (replaces watching the run_finished event). On a
-    'finished' poll the tab's current plot is rendered to a temp PNG and folded in
-    as 'figure' (same as gui_run_start / gui_run_wait), so the pending->poll path
-    gets the figure without a separate gui_tab_get_current_figure call."""
+    back without blocking (replaces watching the run_finished event). Returns just
+    the poll status (no figure fold); look at the plot with
+    gui_tab_get_current_figure(tab_id)."""
     tab_id = str(arguments["tab_id"])
-    reply = _poll_operation_by_key(f"tab:{tab_id}", f"Run on tab {tab_id!r}")
-    return _fold_finished_figure(tab_id, reply)
-
-
-def tool_gui_run_stage(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Configure + run an ALREADY-CREATED tab in ONE call, STOPPING before analyze.
-
-    Phase ② of the four-phase agent flow: the tab already exists (from gui_tab_new,
-    where the agent has SEEN the cfg + the first-use adapter guide), so this never
-    creates a tab or re-folds the guide — it operates on the given ``tab_id``.
-    Composes the PLURAL set_fields path (numbers stay numbers; the singular
-    set_field coercion bug is not on this path) when ``edits`` is given, then
-    gui_run_start. ``edits`` is a {path: value} map (optional — omit/empty runs
-    with the tab's current cfg).
-
-    A finished reply is gui_run_start's finished reply (status / tab / folded
-    'figure') PLUS the analyze-params spec for this tab folded in as
-    ``analyze_params`` (tab.get_analyze_params), so the agent sees the analyze
-    knobs next to the run figure. A slow run degrades to the same 'pending' handle
-    gui_run_start returns (no analyze_params fold — nothing settled yet); the agent
-    then drives it with gui_run_wait / gui_run_poll.
-
-    It deliberately STOPS before analyze: a successful run is not a successful
-    analyze, so the agent must look at the folded run figure (and the
-    analyze_params) and then call gui_analyze itself.
-    """
-    tab_id = str(arguments["tab_id"])
-
-    # Apply edits through the plural set_fields handler (addressed by tab_id) so
-    # the numbers-stay-numbers guarantee is inherited rather than re-implemented.
-    # The handler wants a list[{path, value}]; convert the {path: value} map here.
-    edits = arguments.get("edits") or {}
-    if not isinstance(edits, dict):
-        raise ValueError("'edits' must be an object mapping path -> value")
-    if edits:
-        tool_gui_editor_set_fields(
-            {
-                "tab_id": tab_id,
-                "edits": [{"path": str(p), "value": v} for p, v in edits.items()],
-            }
-        )
-
-    # Run (short-wait degrade + figure fold inherited from gui_run_start), then —
-    # on a FINISHED run only — fold the analyze-params spec so the agent has the
-    # analyze knobs in the same reply as the run figure. A 'pending' run has no
-    # settled result to analyze, so the fold is skipped there.
-    reply = tool_gui_run_start({"tab_id": tab_id})
-    return _fold_analyze_params(tab_id, reply)
+    return _poll_operation_by_key(f"tab:{tab_id}", f"Run on tab {tab_id!r}")
 
 
 def _fold_analyze_params(tab_id: str, reply: dict[str, Any]) -> dict[str, Any]:
@@ -1488,17 +1411,16 @@ def tool_gui_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
     Analyze has both modes — a FIT computes on a worker (usually finishes in well
     under a second), an INTERACTIVE pick waits for the USER to mark the plot and
     click Done (never settles in the short wait). So it degrades like gui_run_start:
-    settles -> {status:'finished', ...}; still running -> {status:'pending'} (await
-    with gui_analyze_wait or gui_analyze_poll). For an INTERACTIVE adapter (see
-    gui_adapter_guide) a 'pending' is expected — prompt the user to do the pick,
-    then poll. 'updates' optionally overrides analyze params. A finished reply
-    folds in the fit 'summary' (same shape as gui_tab_get_analyze_result), the
-    fit plot rendered to a temp PNG ('figure'), AND the writeback preview
-    ('writeback_preview', the proposed values/targets the fit produced — Phase ③),
-    so the common read + look + preview happen in one call;
-    gui_tab_get_analyze_result / gui_writeback_preview stay for re-fetch and for
-    the wait/poll path. All three are folded only on a finished FIT, never on an
-    INTERACTIVE 'pending' (nothing settled to render/preview yet).
+    settles -> {status:'finished', summary}; still running -> {status:'pending'}
+    (await with gui_analyze_wait or gui_analyze_poll). For an INTERACTIVE adapter
+    (see gui_adapter_guide) a 'pending' is expected — prompt the user to do the
+    pick, then poll. 'updates' optionally overrides analyze params. A finished FIT
+    reply carries the fit 'summary' (same shape as gui_tab_get_analyze_result —
+    analyze's OWN result, the *_err fields included); look at the fit plot with
+    gui_tab_get_current_figure and review the proposed writeback with
+    gui_writeback_preview (neither is folded here — this tool returns only the
+    analyze result; the figure + writeback-preview folds live in gui_run_stage3).
+    'summary' is None on an INTERACTIVE 'pending' (nothing settled yet).
     """
     tab_id = str(arguments["tab_id"])
     wait_seconds = float(arguments.get("wait_seconds", 1.0))
@@ -1509,7 +1431,7 @@ def tool_gui_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
     # then wait briefly. A FIT usually finishes here; an INTERACTIVE pick degrades
     # to a handle the user/agent then drives to completion.
     send_gui_rpc("analyze.start", params)
-    reply = _start_op_with_short_wait(
+    return _start_op_with_short_wait(
         f"analyze:{tab_id}",
         f"Analyze on tab {tab_id!r}",
         wait_seconds,
@@ -1517,8 +1439,6 @@ def tool_gui_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
         f"poll with gui_analyze_poll(tab_id={tab_id!r}); for an INTERACTIVE pick, "
         "prompt the user to mark the lines + click Done first.",
     )
-    reply = _fold_finished_figure(tab_id, reply)
-    return _fold_writeback_preview(tab_id, reply)
 
 
 def tool_gui_analyze_wait(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -1708,17 +1628,98 @@ def _fold_writeback_preview(tab_id: str, reply: dict[str, Any]) -> dict[str, Any
     return reply
 
 
-def tool_gui_writeback_apply(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Apply the tab's writeback draft, optionally saving the data afterwards.
+# ---------------------------------------------------------------------------
+# Bundle tools — the four-phase recommended flow (gui_run_stage1..4)
+#
+# Each bundle composes several BASE operations into the agent's natural decision
+# points and folds in the OTHER operations' outputs (the cross-tool folds the
+# base tools deliberately do NOT carry). The base tools stay pure (each returns
+# only its own result, least-surprise); the folding lives only here.
+# ---------------------------------------------------------------------------
 
-    Phase ④ of the four-phase agent flow. Forwards writeback.apply (applies the
-    currently-selected draft items; returns {applied_ids}), then — when
-    ``save_data`` is true — chains save.data for the same tab and folds the
-    resolved ``data_path`` into the reply. ``save_data`` defaults false (apply
-    only): the apply behavior is unchanged in that case. The two steps are
-    deliberately NOT atomic — apply runs first and its result is preserved even if
-    the follow-up save fails (the save error propagates so the agent sees it, but
-    the writeback is already committed).
+
+def tool_gui_run_stage1(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Phase ① new+guide: create a tab for ``adapter_name`` and fold its editing
+    context + the adapter guide into one reply.
+
+    Composes tab.new with the fan-out reads the agent always makes before editing
+    cfg (tab.snapshot for editor_id, tab.list_paths, tab.get_cfg_summary) plus the
+    adapter's orientation guide (adapter.guide). The guide is ALWAYS returned (you
+    call stage1 precisely to get a tab + its guide — no first-use gating). Returns
+    {tab_id, adapter, editor_id, paths, cfg_summary, guide}; edit cfg + run with
+    gui_run_stage2(tab_id, edits).
+    """
+    adapter_name = str(arguments["adapter_name"])
+    tab_id = str(send_gui_rpc("tab.new", {"adapter_name": adapter_name})["tab_id"])
+    reply: dict[str, Any] = {"tab_id": tab_id, "adapter": adapter_name}
+    _fold_tab_editing_context(tab_id, reply)
+    reply["guide"] = send_gui_rpc("adapter.guide", {"adapter_name": adapter_name}).get(
+        "guide"
+    )
+    return reply
+
+
+def tool_gui_run_stage2(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Phase ② configure+run: apply ``edits`` then run the existing ``tab_id``,
+    STOPPING before analyze.
+
+    Composes gui_editor_set_fields (the PLURAL path, so numeric values stay
+    numbers) when ``edits`` is given, then gui_run_start. ``edits`` is an OPTIONAL
+    {path: value} map (omit/empty runs the tab's current cfg). A finished reply is
+    gui_run_start's reply ({status, tab}) with {figure, analyze_params} folded in —
+    the run plot rendered to a temp PNG and the analyze knobs for this tab — so the
+    agent sees them together. A slow run degrades to {status:'pending'} (no folds;
+    drive it with gui_run_wait / gui_run_poll).
+
+    It deliberately STOPS before analyze: a successful run is NOT a successful
+    analyze — look at the figure, then gui_run_stage3.
+    """
+    tab_id = str(arguments["tab_id"])
+    edits = arguments.get("edits") or {}
+    if not isinstance(edits, dict):
+        raise ValueError("'edits' must be an object mapping path -> value")
+    # Apply edits through the plural set_fields handler (addressed by tab_id) so
+    # the numbers-stay-numbers guarantee is inherited rather than re-implemented.
+    if edits:
+        tool_gui_editor_set_fields(
+            {
+                "tab_id": tab_id,
+                "edits": [{"path": str(p), "value": v} for p, v in edits.items()],
+            }
+        )
+    reply = tool_gui_run_start({"tab_id": tab_id})
+    # On a FINISHED run only: fold the run figure + the analyze-params spec. A
+    # 'pending' run has nothing settled, so both folds are skipped (they no-op on
+    # a non-finished reply).
+    reply = _fold_finished_figure(tab_id, reply)
+    return _fold_analyze_params(tab_id, reply)
+
+
+def tool_gui_run_stage3(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Phase ③ analyze: analyze ``tab_id`` and fold the fit review into one reply.
+
+    Composes gui_analyze; a finished FIT reply ({status, summary}) gains
+    {figure, writeback_preview} — the fit plot rendered to a temp PNG and the
+    proposed writeback values/targets the fit produced — so the agent reviews the
+    fit AND the proposed writeback in one call before gui_run_stage4. An
+    INTERACTIVE analysis degrades to {status:'pending'} (no folds — nothing
+    settled to render/preview); prompt the user, then gui_analyze_poll.
+    """
+    tab_id = str(arguments["tab_id"])
+    reply = tool_gui_analyze({"tab_id": tab_id})
+    reply = _fold_finished_figure(tab_id, reply)
+    return _fold_writeback_preview(tab_id, reply)
+
+
+def tool_gui_run_stage4(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Phase ④ writeback+save: apply the tab's writeback draft, optionally saving.
+
+    Composes writeback.apply (applies the currently-selected draft items; returns
+    {applied_ids}); when ``save_data`` is true it ALSO chains save.data for the
+    same tab and folds the resolved {data_path}. ``save_data`` defaults false
+    (apply only). The two steps are deliberately NOT atomic — apply runs first and
+    is committed even if the follow-up save fails (the save error propagates so the
+    agent sees it, but the writeback is already applied).
     """
     tab_id = str(arguments["tab_id"])
     reply = dict(send_gui_rpc("writeback.apply", {"tab_id": tab_id}))
@@ -1872,10 +1873,6 @@ _NON_GENERATED_METHODS = frozenset(
         # editor.set_field RPC (a tab's cfg form is the editor session keyed by its
         # tab_id), so the generator must not also emit gui_editor_set_field.
         "editor.set_field",
-        # hand-written fan-out: after tab.new the agent always reads tab.snapshot +
-        # tab.list_paths + tab.get_cfg_summary; the override folds those into one
-        # reply, so the generator must not also emit a bare gui_tab_new.
-        "tab.new",
         # fan-out / MCP-side queue (handled at the service, not the registry)
         "state.has_project",
         "state.has_context",
@@ -1908,10 +1905,6 @@ _NON_GENERATED_METHODS = frozenset(
         # the agent never calls them directly — only the hand-written tool is exposed.
         "notify.open",
         "notify.await",
-        # hand-written override: gains an optional save_data that chains save.data
-        # after the apply (Phase ④), so the generator must not also emit a bare
-        # gui_writeback_apply.
-        "writeback.apply",
     }
 )
 
@@ -2050,32 +2043,6 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "so right after connecting you already have it."
         ),
         "inputSchema": {"type": "object", "properties": {}},
-    },
-    "gui_tab_new": {
-        "handler": tool_gui_tab_new,
-        "description": (
-            "Create a new tab for 'adapter_name' (see gui_adapter_list) and fold "
-            "its initial editing context into one reply. Convenience fan-out over "
-            "the tab.new + tab.snapshot + tab.list_paths + tab.get_cfg_summary "
-            "calls the agent always makes back-to-back before editing cfg — pure "
-            "mcp-side fan-out over existing wire reads, no wire change. Returns "
-            "{tab_id, editor_id, paths, cfg_summary}: 'editor_id' is the tab cfg "
-            "form's editor session id (target gui_editor_set_field by tab_id too); "
-            "'paths' are the settable dotted paths (the gui_editor_set_field path "
-            "source, compact shape, same as gui_tab_list_paths); 'cfg_summary' is "
-            "the read-only nested values view (same as gui_tab_get_cfg_summary). "
-            "Re-fetch any of them later with their dedicated tools."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "adapter_name": {
-                    "type": "string",
-                    "description": "Adapter to instantiate (see gui_adapter_list)",
-                },
-            },
-            "required": ["adapter_name"],
-        },
     },
     "gui_editor_set_field": {
         "handler": tool_gui_editor_set_field,
@@ -2307,9 +2274,8 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
         "description": (
             "Non-blocking status of the run on tab_id (shared async _poll contract "
             "— see server instructions for the status enum + folded progress bars). "
-            "On 'finished' the run plot is rendered to a temp PNG and folded in as "
-            "'figure' (same as gui_run_start / gui_run_wait), so the pending->poll "
-            "path gets the figure without a separate gui_tab_get_current_figure call."
+            "Returns just the poll status (no figure fold); on 'finished' look at "
+            "the plot with gui_tab_get_current_figure(tab_id)."
         ),
         "inputSchema": {
             "type": "object",
@@ -2317,30 +2283,53 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "required": ["tab_id"],
         },
     },
-    "gui_run_stage": {
-        "handler": tool_gui_run_stage,
+    "gui_run_stage1": {
+        "handler": tool_gui_run_stage1,
         "description": (
-            "Configure + run an ALREADY-CREATED tab in ONE call, then STOP before "
-            "analyze (Phase ② of the agent flow). Operates on 'tab_id' (from "
-            "gui_tab_new, where you already saw the cfg + the first-use adapter "
-            "guide) — it does NOT create a tab. Folds gui_editor_set_fields + "
-            "gui_run_start. 'edits' is an OPTIONAL {path: value} map (dotted paths, "
-            "see gui_tab_list_paths); it goes through the plural set_fields path so "
-            "numbers stay numbers (not stringified). Omit/empty 'edits' to run with "
-            "the tab's current cfg. Returns gui_run_start's reply — {status, tab, "
-            "figure, analyze_params} on a fast run (figure = the run plot rendered "
-            "to a temp PNG; analyze_params = the analyze knobs for this tab, so you "
-            "see them next to the figure), or {status:'pending'} on a slow run "
-            "(drive it with gui_run_wait / gui_run_poll; no analyze_params yet). It "
-            "STOPS before analyze on purpose: a successful run is NOT a successful "
-            "analyze — LOOK at the run figure, then call gui_analyze yourself."
+            "Phase ① of the recommended flow — new+guide. Create a tab for "
+            "'adapter_name' (see gui_adapter_list) and fold its editing context + "
+            "the adapter guide into ONE reply. Bundles tab.new + the fan-out reads "
+            "the agent always makes before editing cfg (tab.snapshot for editor_id, "
+            "tab.list_paths, tab.get_cfg_summary) + adapter.guide. Returns "
+            "{tab_id, adapter, editor_id, paths, cfg_summary, guide}: 'guide' is the "
+            "adapter's orientation guide (ALWAYS returned here); 'paths' are the "
+            "settable dotted paths (the gui_editor_set_field path source); "
+            "'cfg_summary' is the read-only nested values view. Then configure + run "
+            "with gui_run_stage2(tab_id, edits)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "adapter_name": {
+                    "type": "string",
+                    "description": "Adapter to instantiate (see gui_adapter_list)",
+                },
+            },
+            "required": ["adapter_name"],
+        },
+    },
+    "gui_run_stage2": {
+        "handler": tool_gui_run_stage2,
+        "description": (
+            "Phase ② of the recommended flow — configure+run. Apply 'edits' then "
+            "run the already-created 'tab_id' (from gui_run_stage1), then STOP "
+            "before analyze. Bundles gui_editor_set_fields + gui_run_start. 'edits' "
+            "is an OPTIONAL {path: value} map (dotted paths, see gui_tab_list_paths); "
+            "it goes through the plural set_fields path so numbers stay numbers (not "
+            "stringified). Omit/empty 'edits' to run the tab's current cfg. A fast "
+            "run returns {status:'finished', tab, figure, analyze_params} — figure = "
+            "the run plot rendered to a temp PNG; analyze_params = the analyze knobs "
+            "for this tab, so you see them next to the figure. A slow run degrades to "
+            "{status:'pending'} (drive it with gui_run_wait / gui_run_poll; no folds "
+            "yet). STOPS before analyze on purpose: a successful run is NOT a "
+            "successful analyze — look at the figure, then gui_run_stage3."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "tab_id": {
                     "type": "string",
-                    "description": "Tab to configure + run (from gui_tab_new)",
+                    "description": "Tab to configure + run (from gui_run_stage1)",
                 },
                 "edits": {
                     "type": "object",
@@ -2354,20 +2343,78 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "required": ["tab_id"],
         },
     },
+    "gui_run_stage3": {
+        "handler": tool_gui_run_stage3,
+        "description": (
+            "Phase ③ of the recommended flow — analyze. Analyze 'tab_id' and fold "
+            "the fit review into ONE reply. Bundles gui_analyze + the figure + the "
+            "writeback preview. A finished FIT returns {status:'finished', summary, "
+            "figure, writeback_preview} — the fit summary (same shape as "
+            "gui_tab_get_analyze_result), the fit plot rendered to a temp PNG, AND "
+            "the proposed writeback values/targets the fit produced (same list as "
+            "gui_writeback_preview) — so you review the fit + the proposed writeback "
+            "in one call before gui_run_stage4. An INTERACTIVE analysis (e.g. "
+            "flux_dep) degrades to {status:'pending'} (no folds) — prompt the user, "
+            "then gui_analyze_poll."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "tab_id": {
+                    "type": "string",
+                    "description": "Tab to analyze (from gui_run_stage2)",
+                },
+            },
+            "required": ["tab_id"],
+        },
+    },
+    "gui_run_stage4": {
+        "handler": tool_gui_run_stage4,
+        "description": (
+            "Phase ④ of the recommended flow — writeback+save. Apply the tab's "
+            "writeback draft (edit it first via gui_writeback_set / gui_editor_*), "
+            "optionally saving the data afterwards. Bundles writeback.apply + "
+            "(optionally) save.data. Applies the items currently selected; returns "
+            "{applied_ids}. OPTIONAL save_data (default false): when true, ALSO saves "
+            "the run data after applying and folds the resolved {data_path} into the "
+            "reply (apply + save in one call). The apply runs first and is committed "
+            "even if the follow-up save fails; with save_data=false the behavior is "
+            "apply-only."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "tab_id": {
+                    "type": "string",
+                    "description": "Tab whose writeback draft to apply (from gui_run_stage3)",
+                },
+                "save_data": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "When true, save the run data after applying the writeback "
+                        "and fold the resolved data_path into the reply. Default "
+                        "false (apply only)."
+                    ),
+                },
+            },
+            "required": ["tab_id"],
+        },
+    },
     "gui_analyze": {
         "handler": tool_gui_analyze,
         "description": (
             "Start analyze on tab_id (shared short-wait START contract — see server "
             "instructions, incl. the INTERACTIVE-analyze note). A FIT settles -> "
-            "{status:'finished', summary, figure, writeback_preview} — the fit "
-            "summary (same shape as gui_tab_get_analyze_result), the fit plot "
-            "rendered to a temp PNG, AND the writeback preview (the proposed "
-            "values/targets the fit produced; same list as gui_writeback_preview) "
-            "so you review the fit + the proposed writeback in one call before "
-            "gui_writeback_apply (Phase ③). An INTERACTIVE analysis (e.g. flux_dep) "
-            "degrades to {status:'pending'} (no folds yet) — then read flx_* via "
-            "gui_tab_get_analyze_result + gui_writeback_apply. 'updates' optionally "
-            "overrides analyze params (see gui_adapter_analyze_spec)."
+            "{status:'finished', summary} — the fit summary (same shape as "
+            "gui_tab_get_analyze_result, the *_err fields included). This tool "
+            "returns ONLY the analyze result: look at the fit plot with "
+            "gui_tab_get_current_figure and review the proposed writeback with "
+            "gui_writeback_preview (the figure + writeback-preview folds live in "
+            "gui_run_stage3). An INTERACTIVE analysis (e.g. flux_dep) degrades to "
+            "{status:'pending', summary:None} — prompt the user to mark the plot + "
+            "click Done, then gui_analyze_poll. 'updates' optionally overrides "
+            "analyze params (see gui_adapter_analyze_spec)."
         ),
         "inputSchema": {
             "type": "object",
@@ -2693,34 +2740,6 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "required": ["message"],
         },
     },
-    "gui_writeback_apply": {
-        "handler": tool_gui_writeback_apply,
-        "description": (
-            "Apply the tab's persistent writeback draft as-is (edit it first via "
-            "gui_writeback_set / gui_editor_*). Applies the items currently "
-            "selected; returns {applied_ids}. OPTIONAL save_data (default false): "
-            "when true, ALSO saves the run data after applying and folds the "
-            "resolved {data_path} into the reply (Phase ④ — apply + save in one "
-            "call). The apply runs first and is committed even if the follow-up "
-            "save fails; with save_data=false the behavior is apply-only."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "tab_id": {"type": "string"},
-                "save_data": {
-                    "type": "boolean",
-                    "default": False,
-                    "description": (
-                        "When true, save the run data after applying the writeback "
-                        "and fold the resolved data_path into the reply. Default "
-                        "false (apply only)."
-                    ),
-                },
-            },
-            "required": ["tab_id"],
-        },
-    },
 }
 
 
@@ -2737,7 +2756,6 @@ _OVERRIDE_NAMES = frozenset(
         "gui_device_setup",
         "gui_dialog_screenshot",
         "gui_tab_get_current_figure",
-        "gui_tab_new",
         "gui_state_check",
         "gui_overview",
         "gui_editor_set_field",
@@ -2748,7 +2766,10 @@ _OVERRIDE_NAMES = frozenset(
         "gui_run_start",
         "gui_run_wait",
         "gui_run_poll",
-        "gui_run_stage",
+        "gui_run_stage1",
+        "gui_run_stage2",
+        "gui_run_stage3",
+        "gui_run_stage4",
         "gui_analyze",
         "gui_analyze_wait",
         "gui_analyze_poll",
@@ -2758,7 +2779,6 @@ _OVERRIDE_NAMES = frozenset(
         "gui_soc_connect",
         "gui_device_poll",
         "gui_notify_user",
-        "gui_writeback_apply",
     }
 )
 
