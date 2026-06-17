@@ -715,6 +715,9 @@ class TaskboardStore:
         storing.  Mode must be ``"read"`` or ``"write"``.
         """
         _validate_mode(mode)
+        # Guard before iterating: a stringified list would silently char-split.
+        if not isinstance(paths, list):
+            raise TypeError(f"expected list of paths, got {type(paths).__name__!r}")
         if not paths:
             raise ValueError("paths must be non-empty")
         norm_paths = [normalize_path(p) for p in paths]
@@ -775,6 +778,9 @@ class TaskboardStore:
         Returns ``{conflicts: [{owner, paths, mode}]}``.
         """
         _validate_mode(mode)
+        # Guard before iterating: a stringified list would silently char-split.
+        if not isinstance(paths, list):
+            raise TypeError(f"expected list of paths, got {type(paths).__name__!r}")
         if not paths:
             raise ValueError("paths must be non-empty")
         norm_paths = [normalize_path(p) for p in paths]

@@ -46,7 +46,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
                     "re-claim of an already-held scope is ignored."
                 ),
             ),
-            P("paths", J.JSON, description=_PATHS_DOC),
+            P("paths", J.ARRAY, description=_PATHS_DOC),
             P(
                 "task",
                 J.STRING,
@@ -95,7 +95,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "Returns {conflicts:[{owner, paths, mode}]}.  "
         "Use before taskboard_claim to decide whether to proceed or wait.",
         params=(
-            P("paths", J.JSON, description=_PATHS_DOC),
+            P("paths", J.ARRAY, description=_PATHS_DOC),
             P(
                 "mode",
                 J.STRING,

@@ -70,7 +70,7 @@ METHOD_SPECS = {
             P("date", J.STRING, description="ISO date, e.g. 2026-06-08"),
             P(
                 "exp_type",
-                J.JSON,
+                J.ARRAY,
                 description="list of experiment types, e.g. ['reset/bath']",
             ),
             P(
@@ -87,7 +87,7 @@ METHOD_SPECS = {
             ),
             P(
                 "solutions",
-                J.JSON,
+                J.ARRAY,
                 required=False,
                 description="list of solution ids this record confirms",
             ),
@@ -109,7 +109,7 @@ METHOD_SPECS = {
             P("body", J.STRING, description="現象 / 原因 / 怎麼做 — the reusable rule"),
             P(
                 "seen_in",
-                J.JSON,
+                J.ARRAY,
                 required=False,
                 description="list of record ids evidencing it",
             ),
@@ -130,7 +130,7 @@ METHOD_SPECS = {
             ),
             P(
                 "add_seen_in",
-                J.JSON,
+                J.ARRAY,
                 required=False,
                 description="record ids to append to seen_in",
             ),

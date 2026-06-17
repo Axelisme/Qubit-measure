@@ -739,6 +739,15 @@ def coerce_arg(value: object, json_type: JsonType) -> object:
         return bool(value)
     if json_type is JsonType.OBJECT:
         return dict(value)  # type: ignore[call-overload]
+    if json_type is JsonType.ARRAY:
+        # Require a list; param_spec.validate_params already enforces this on the
+        # wire path, but the forwarder goes directly through coerce_arg, so we
+        # guard here too (mirrors the OBJECT guard above).
+        if not isinstance(value, list):
+            raise TypeError(
+                f"expected list for ARRAY param, got {type(value).__name__!r}"
+            )
+        return list(value)
     return value  # JSON: pass through
 
 

@@ -35,6 +35,7 @@ class JsonType(str, Enum):
     BOOLEAN = "boolean"
     OBJECT = "object"
     JSON = "json"  # any JSON-serializable value
+    ARRAY = "array"  # homogeneous string list; emits {"type":"array","items":{"type":"string"}}
 
 
 @dataclass(frozen=True)
@@ -94,6 +95,13 @@ class ParamSpec:
                     f"'{self.name}' must be an object, got {type(value).__name__}",
                 )
             return value
+        if jt is JsonType.ARRAY:
+            if not isinstance(value, list):
+                raise RemoteError(
+                    ErrorCode.INVALID_PARAMS,
+                    f"'{self.name}' must be a list, got {type(value).__name__}",
+                )
+            return value
         if jt is JsonType.JSON:
             try:
                 json.dumps(value)
@@ -135,7 +143,13 @@ def schema_property(spec: ParamSpec) -> dict[str, object]:
     untouched (a number stays a number), so a JSON param never gets stringified.
     """
     prop: dict[str, object] = {}
-    if spec.json_type is not JsonType.JSON:
+    if spec.json_type is JsonType.ARRAY:
+        # Emit typed array schema with string items; all current ARRAY params are
+        # string lists.  A concrete "type" is required so the MCP client does not
+        # stringify the whole array (the failure mode of the old J.JSON spelling).
+        prop["type"] = "array"
+        prop["items"] = {"type": "string"}
+    elif spec.json_type is not JsonType.JSON:
         prop["type"] = {
             JsonType.STRING: "string",
             JsonType.INTEGER: "integer",
