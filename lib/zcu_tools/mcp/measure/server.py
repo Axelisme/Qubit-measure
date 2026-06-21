@@ -89,7 +89,7 @@ from zcu_tools.mcp.core.call_log import wrap_handler  # noqa: E402
 # tool renames) that leave the wire contract untouched. A wire-contract change is
 # tracked separately by WIRE_VERSION (see ``wire_version.py``); the two are
 # independent. (Git history holds the per-version evolution.)
-MCP_VERSION = 50  # tab.list_paths returns a nested value tree (WIRE 37); stage1 folds 'tree', drops cfg_summary
+MCP_VERSION = 51  # tab.list_paths returns a nested value tree (WIRE 37); stage1 folds 'tree', drops cfg_summary; stage1 guide deduped per adapter per session
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -281,6 +281,18 @@ _GUARD_DEPS: dict[str, tuple[str, ...]] = {
 # blocks on that id. "Latest wins": starting overwrites the key, since the agent
 # semantically means "the current operation for this resource".
 _OP_BY_KEY: dict[str, int] = {}
+
+# --- Session-scoped guide deduplication (mcp-side policy) --------------------
+#
+# adapter.guide returns static text (classmethod, no instance/cfg state). Sending
+# it on every stage1 call wastes tokens (~7.8 KB per call; Phase 167 analysis).
+# Track which adapter names have received their guide in this MCP server process;
+# once sent, subsequent stage1 calls for the same adapter omit 'guide' and carry
+# 'guide_omitted: True' so the agent knows the omission is intentional.
+# Keyed by adapter_name string; cleared on nothing (session = process lifetime).
+# Exposed as a module-level variable so tests can monkeypatch or .clear() it
+# without reloading the module.
+_GUIDE_SENT: set[str] = set()
 
 # Which semantic key a start RPC's operation_id belongs to (param -> key).
 # Device connect/disconnect/setup all key on the device name: "latest wins" means
@@ -1467,18 +1479,29 @@ def tool_gui_run_stage1(arguments: dict[str, Any]) -> dict[str, Any]:
 
     Composes tab.new with the fan-out reads the agent always makes before editing
     cfg (tab.snapshot for editor_id, tab.list_paths for the settable cfg tree)
-    plus the adapter's orientation guide (adapter.guide). The guide is ALWAYS
-    returned (you call stage1 precisely to get a tab + its guide — no first-use
-    gating). Returns {tab_id, adapter, editor_id, tree, guide}; edit cfg + run
-    with gui_run_stage2(tab_id, edits).
+    plus the adapter's orientation guide (adapter.guide). The guide is returned
+    on the FIRST call per adapter in this MCP server session; subsequent calls for
+    the same adapter omit 'guide' and carry 'guide_omitted: True' instead (the
+    guide is static — classmethod, no per-cfg content — so re-sending it wastes
+    tokens; Phase 167). Returns {tab_id, adapter, editor_id, tree, guide} on first
+    call; {tab_id, adapter, editor_id, tree, guide_omitted: True} on repeat calls.
+    Edit cfg + run with gui_run_stage2(tab_id, edits).
     """
     adapter_name = str(arguments["adapter_name"])
     tab_id = str(send_gui_rpc("tab.new", {"adapter_name": adapter_name})["tab_id"])
     reply: dict[str, Any] = {"tab_id": tab_id, "adapter": adapter_name}
     _fold_tab_editing_context(tab_id, reply)
-    reply["guide"] = send_gui_rpc("adapter.guide", {"adapter_name": adapter_name}).get(
-        "guide"
-    )
+    if adapter_name not in _GUIDE_SENT:
+        # First call for this adapter in this session: fetch and include the full
+        # guide, then mark it as sent so subsequent calls skip the fetch entirely.
+        reply["guide"] = send_gui_rpc(
+            "adapter.guide", {"adapter_name": adapter_name}
+        ).get("guide")
+        _GUIDE_SENT.add(adapter_name)
+    else:
+        # Guide already sent this session; omit it and signal the intentional
+        # omission so the agent does not mistake its absence for a missing field.
+        reply["guide_omitted"] = True
     return reply
 
 
@@ -2120,8 +2143,10 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "the adapter guide into ONE reply. Bundles tab.new + the fan-out reads "
             "the agent always makes before editing cfg (tab.snapshot for editor_id, "
             "tab.list_paths for the settable cfg tree) + adapter.guide. Returns "
-            "{tab_id, adapter, editor_id, tree, guide}: 'guide' is the adapter's "
-            "orientation guide (ALWAYS returned here); 'tree' is the nested "
+            "{tab_id, adapter, editor_id, tree, guide} on the FIRST call for an "
+            "adapter in this MCP session; on repeat calls for the SAME adapter "
+            "'guide' is omitted and 'guide_omitted: True' is set instead (the "
+            "guide is static and re-sending it wastes tokens). 'tree' is the nested "
             "current-value cfg tree (the gui_editor_set_field path source AND the "
             "read-only values view, in one — see gui_tab_list_paths for the node "
             "shape with $value/$choices/$ref). Then configure + run with "
