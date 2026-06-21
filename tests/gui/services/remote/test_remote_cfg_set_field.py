@@ -13,6 +13,8 @@ cases (sweep edges, literal rejection, unknown paths) each get a focused case.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from ._helpers import Fixture, call, open_client
@@ -259,193 +261,74 @@ def test_device_list_and_snapshot(lf):
 
 
 # ---------------------------------------------------------------------------
-# tab.list_paths — now reads the tab's cfg-editor session (ADR-0013 F11)
+# tab.list_paths — returns a NESTED current-value tree built off the tab's
+# cfg-editor session (ADR-0013 F11). Reserved '$'-keys: a dict with $value is
+# an enum leaf, a dict with $ref is a ref node, any other dict is a sub-tree,
+# a non-dict is a bare scalar value (null = unset, ADR-0010).
 # ---------------------------------------------------------------------------
 
 
-def test_list_paths_enumerates_settable_leaves(lf):
+def test_list_paths_returns_nested_tree_with_scalar_values(lf):
     sock = open_client(lf.service.port)
     try:
-        # Default verbosity is 'compact': keeps path/kind/choices, drops
-        # value/type.
         resp = call(sock, "tab.list_paths", {"tab_id": lf._tab_id})
         assert resp["ok"] is True
-        paths = resp["result"]["paths"]
-        by_path = {p["path"]: p for p in paths}
-
-        assert "reps" in by_path
-        assert by_path["reps"]["kind"] == "scalar"
-        assert "value" not in by_path["reps"]
-        assert "type" not in by_path["reps"]
-
-        # A sweep edge is exposed as <path>.expts etc.
-        sweep_edges = [p for p in paths if p["kind"] == "sweep_edge"]
-        assert sweep_edges, "expected at least one sweep edge"
-        assert any(p["path"].endswith(".expts") for p in sweep_edges)
-        assert all(p["path"] for p in paths)
+        tree = resp["result"]["tree"]
+        assert isinstance(tree, dict)
+        # A scalar leaf is its bare current value (not a {path, kind, ...} entry).
+        assert "reps" in tree
+        assert not isinstance(tree["reps"], dict)
     finally:
         sock.close()
 
 
-def test_list_paths_verbosity_full_adds_value_and_type(lf):
+def test_list_paths_sweep_is_subtree_of_bare_edges(lf):
     sock = open_client(lf.service.port)
     try:
-        resp = call(sock, "tab.list_paths", {"tab_id": lf._tab_id, "verbosity": "full"})
-        by_path = {p["path"]: p for p in resp["result"]["paths"]}
-        assert by_path["reps"]["type"] in ("int", "float")
-        assert "value" in by_path["reps"]
+        tree = call(sock, "tab.list_paths", {"tab_id": lf._tab_id})["result"]["tree"]
+        # The fake adapter's sweep is exposed as a sub-tree of bare edges.
+        assert "sweep" in tree
+        sweep = tree["sweep"]
+        assert isinstance(sweep, dict)
+        assert set(sweep) == {"start", "stop", "expts", "step"}
+        assert all(not isinstance(v, dict) for v in sweep.values())
     finally:
         sock.close()
 
 
-def test_list_paths_verbosity_paths_is_bare_string_list(lf):
+def test_list_paths_prefix_returns_subtree(lf):
     sock = open_client(lf.service.port)
     try:
-        resp = call(
-            sock, "tab.list_paths", {"tab_id": lf._tab_id, "verbosity": "paths"}
-        )
-        paths = resp["result"]["paths"]
-        assert all(isinstance(p, str) for p in paths)
-        assert "reps" in paths
-    finally:
-        sock.close()
-
-
-def test_list_paths_under_restricts_to_subtree(lf):
-    sock = open_client(lf.service.port)
-    try:
-        full = call(
-            sock, "tab.list_paths", {"tab_id": lf._tab_id, "verbosity": "paths"}
-        )["result"]["paths"]
-        # Pick a dotted prefix that has children (e.g. a sweep or module path).
-        prefixes = {p.split(".")[0] for p in full if "." in p}
-        assert prefixes, "expected at least one nested path"
-        root = sorted(prefixes)[0]
+        full = call(sock, "tab.list_paths", {"tab_id": lf._tab_id})["result"]["tree"]
         scoped = call(
-            sock,
-            "tab.list_paths",
-            {"tab_id": lf._tab_id, "under": root, "verbosity": "paths"},
-        )["result"]["paths"]
-        assert scoped, f"expected paths under {root!r}"
-        assert all(p == root or p.startswith(root + ".") for p in scoped)
-        assert len(scoped) < len(full)
+            sock, "tab.list_paths", {"tab_id": lf._tab_id, "prefix": "sweep"}
+        )["result"]["tree"]
+        # The prefix sub-tree equals the corresponding sub-dict of the full tree.
+        assert scoped == full["sweep"]
     finally:
         sock.close()
 
 
-def test_list_paths_prefix_keeps_subtree_full_paths(lf):
-    # 'prefix' is a flat string-prefix filter: full path strings are kept and
-    # only entries outside the dotted prefix are dropped.
+def test_list_paths_prefix_scalar_leaf_wrapped_under_its_name(lf):
     sock = open_client(lf.service.port)
     try:
-        full = call(
-            sock, "tab.list_paths", {"tab_id": lf._tab_id, "verbosity": "paths"}
-        )["result"]["paths"]
-        prefixes = {p.split(".")[0] for p in full if "." in p}
-        assert prefixes, "expected at least one nested path"
-        root = sorted(prefixes)[0]
-        scoped = call(
-            sock,
-            "tab.list_paths",
-            {"tab_id": lf._tab_id, "prefix": root, "verbosity": "paths"},
-        )["result"]["paths"]
-        assert scoped, f"expected paths with prefix {root!r}"
-        # Full path strings kept (not re-rooted) and confined to the prefix subtree.
-        assert all(p == root or p.startswith(root + ".") for p in scoped)
-        assert set(scoped) == {p for p in full if p == root or p.startswith(root + ".")}
-        assert len(scoped) < len(full)
+        # 'reps' is a scalar leaf; the prefix reply wraps it so the result is
+        # always a dict keyed by the leaf name.
+        resp = call(sock, "tab.list_paths", {"tab_id": lf._tab_id, "prefix": "reps"})
+        tree = resp["result"]["tree"]
+        assert set(tree) == {"reps"}
+        assert not isinstance(tree["reps"], dict)
     finally:
         sock.close()
 
 
-def test_list_paths_prefix_exact_match_keeps_self(lf):
+def test_list_paths_prefix_no_match_returns_empty_dict(lf):
+    # A prefix matching nothing yields {} (graceful, not a fast-fail).
     sock = open_client(lf.service.port)
     try:
-        # 'reps' is a scalar leaf (no children); an exact prefix keeps just it.
-        resp = call(
-            sock,
-            "tab.list_paths",
-            {"tab_id": lf._tab_id, "prefix": "reps", "verbosity": "paths"},
-        )
-        assert resp["result"]["paths"] == ["reps"]
-    finally:
-        sock.close()
-
-
-def test_list_paths_prefix_no_match_returns_empty(lf):
-    # A prefix matching nothing yields an empty list (graceful, not a fast-fail);
-    # 'rep' must NOT match 'reps' (dotted-segment boundary, not a string prefix).
-    sock = open_client(lf.service.port)
-    try:
-        for verbosity in ("compact", "full", "paths"):
-            resp = call(
-                sock,
-                "tab.list_paths",
-                {
-                    "tab_id": lf._tab_id,
-                    "prefix": "rep",
-                    "verbosity": verbosity,
-                },
-            )
-            assert resp["ok"] is True, verbosity
-            assert resp["result"]["paths"] == [], verbosity
-    finally:
-        sock.close()
-
-
-def test_list_paths_prefix_works_across_verbosity(lf):
-    # All three verbosity shapes honour the prefix filter (it runs before the
-    # verbosity projection).
-    sock = open_client(lf.service.port)
-    try:
-        compact = call(
-            sock,
-            "tab.list_paths",
-            {"tab_id": lf._tab_id, "prefix": "reps", "verbosity": "compact"},
-        )["result"]["paths"]
-        assert [e["path"] for e in compact] == ["reps"]
-        assert all("value" not in e and "type" not in e for e in compact)
-
-        full = call(
-            sock,
-            "tab.list_paths",
-            {"tab_id": lf._tab_id, "prefix": "reps", "verbosity": "full"},
-        )["result"]["paths"]
-        assert [e["path"] for e in full] == ["reps"]
-        assert "value" in full[0] and "type" in full[0]
-
-        paths = call(
-            sock,
-            "tab.list_paths",
-            {"tab_id": lf._tab_id, "prefix": "reps", "verbosity": "paths"},
-        )["result"]["paths"]
-        assert paths == ["reps"]
-    finally:
-        sock.close()
-
-
-def test_list_paths_bad_verbosity_rejected(lf):
-    sock = open_client(lf.service.port)
-    try:
-        resp = call(sock, "tab.list_paths", {"tab_id": lf._tab_id, "verbosity": "nope"})
-        assert resp["ok"] is False
-        assert resp["error"]["code"] == "invalid_params"
-    finally:
-        sock.close()
-
-
-def test_list_paths_round_trips_through_set_field(lf):
-    sock = open_client(lf.service.port)
-    try:
-        resp = call(sock, "tab.list_paths", {"tab_id": lf._tab_id, "verbosity": "full"})
-        scalar = next(
-            p
-            for p in resp["result"]["paths"]
-            if p["kind"] == "scalar" and p["type"] in ("int", "float")
-        )
-        new_value = 7 if scalar["type"] == "int" else 0.5
-        set_resp = _set_field(sock, lf, scalar["path"], new_value)
-        assert set_resp["ok"] is True, scalar["path"]
+        resp = call(sock, "tab.list_paths", {"tab_id": lf._tab_id, "prefix": "nope.x"})
+        assert resp["ok"] is True
+        assert resp["result"]["tree"] == {}
     finally:
         sock.close()
 
@@ -482,6 +365,90 @@ def test_list_paths_form_not_populated_rejected(qapp):  # noqa: ARG001
             sock.close()
     finally:
         f.stop()
+
+
+# ---------------------------------------------------------------------------
+# build_settable_tree — direct unit tests for the tree node shapes (enum leaf,
+# ref node with current+options+chosen-variant-only sub-tree). These use the
+# fakefreq root (which has Module/Waveform refs + an enum scalar) so the $ref /
+# $value / $choices shapes are exercised without a socket.
+# ---------------------------------------------------------------------------
+
+
+def _node(tree: dict[str, object], dotted: str) -> Any:
+    """Walk a nested tree by a dotted path, returning the node (typed Any).
+
+    The tree value type is ``object`` (a JSON-ish nested dict), so chained
+    indexing trips the type checker; this helper narrows once at the boundary so
+    the assertions stay readable.
+    """
+    node: Any = tree
+    for seg in dotted.split("."):
+        node = node[seg]
+    return node
+
+
+def test_tree_enum_scalar_leaf_has_value_and_choices(qapp):  # noqa: ARG001
+    from zcu_tools.gui.app.main.services.remote.path_resolver import build_settable_tree
+
+    root = _fakefreq_root()
+    tree = build_settable_tree(root)
+    # 'nqz' is an enum scalar (choices [1, 2]) under the readout pulse cfg.
+    nqz = _node(tree, "modules.readout.pulse_cfg.nqz")
+    assert nqz == {"$value": 2, "$choices": [1, 2]}
+
+
+def test_tree_moduleref_node_current_options_and_variant_subtree(qapp):  # noqa: ARG001
+    from zcu_tools.gui.app.main.services.remote.path_resolver import build_settable_tree
+
+    root = _fakefreq_root()
+    readout = _node(build_settable_tree(root), "modules.readout")
+    # A ref node carries $ref {current, options} plus the chosen variant's
+    # settable sub-tree (siblings of $ref).
+    assert readout["$ref"]["current"] == "<Custom:Pulse Readout>"
+    assert readout["$ref"]["options"] == ["Direct Readout", "Pulse Readout"]
+    # Only the chosen ('Pulse Readout') variant is expanded — it has pulse_cfg.
+    assert "pulse_cfg" in readout
+    assert "ro_cfg" in readout
+
+
+def test_tree_moduleref_only_chosen_variant_expanded(qapp):  # noqa: ARG001
+    from zcu_tools.gui.app.main.services.remote.path_resolver import (
+        build_settable_tree,
+        resolve_and_set,
+    )
+
+    root = _fakefreq_root()
+    # Switch to the 'Direct Readout' variant; the tree must now expand THAT
+    # variant's sub-tree, not the previous one.
+    resolve_and_set(root, "modules.readout.ref", "Direct Readout")
+    readout = _node(build_settable_tree(root), "modules.readout")
+    assert readout["$ref"]["current"] == "<Custom:Direct Readout>"
+    # Direct Readout has no pulse_cfg sub-section (it is a different shape).
+    assert "pulse_cfg" not in readout
+
+
+def test_tree_omits_immutable_literal_fields(qapp):  # noqa: ARG001
+    from zcu_tools.gui.app.main.services.remote.path_resolver import build_settable_tree
+
+    root = _fakefreq_root()
+    pulse_cfg = _node(build_settable_tree(root), "modules.readout.pulse_cfg")
+    # 'type'/'freq' are literal (immutable) fields — not settable, so omitted
+    # (they must NOT read as a settable null scalar).
+    assert "type" not in pulse_cfg
+    assert "freq" not in pulse_cfg
+
+
+def test_tree_deviceref_node_current_and_options(qapp):  # noqa: ARG001
+    from zcu_tools.gui.app.main.services.remote.path_resolver import build_settable_tree
+
+    root = _fluxdep_root(["flux_yoko", "flux_yoko_2"])
+    flux_dev = _node(build_settable_tree(root, "dev"), "flux_dev")
+    # A device ref is a leaf selector: $ref with current + the live device list,
+    # no settable sub-tree.
+    assert flux_dev["$ref"]["current"] == "flux_yoko"
+    assert flux_dev["$ref"]["options"] == ["flux_yoko", "flux_yoko_2"]
+    assert set(flux_dev) == {"$ref"}
 
 
 # ---------------------------------------------------------------------------

@@ -121,31 +121,30 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "tab.list_paths": MethodSpec(
         5.0,
-        "List the settable cfg dotted paths — the path source for "
-        "editor.set_field (edit a path with editor.set_field on the tab's "
-        "editor_id, from tab.snapshot). kind ∈ scalar / sweep_edge "
-        "/ moduleref_key / deviceref. A sweep_edge (a sweep's start/stop/expts/"
-        "step) accepts ONLY a number/int — NOT an eval/ref; an adapter's default "
-        "eval edge cannot be overwritten through this path, pass a numeric value "
-        "instead. (A scalar leaf, by contrast, also accepts an eval reference.) "
-        "'under' restricts to the sub-tree at that "
-        "dotted path (e.g. 'modules.readout'); omit for the whole cfg. "
-        "'prefix' is a flat string-prefix filter (dotted-segment boundary, not "
-        "glob): 'modules.readout' matches 'modules.readout' and every "
-        "'modules.readout.*' descendant. Paths are returned as full dotted "
-        "strings. A prefix matching nothing returns an empty list. "
-        "'verbosity' shapes each entry: 'compact' (default) = {path, kind, "
-        "choices?}; 'full' adds current value + type; 'paths' = a bare list of "
-        "path strings (smallest).",
+        "Read the tab's settable cfg as a NESTED tree of current values (the "
+        "read-only view; edit a leaf with editor.set_field on the tab's "
+        "editor_id from tab.snapshot, using the leaf's dotted path). Node "
+        "shape, distinguished by '$'-prefixed reserved keys: a SCALAR leaf is "
+        "its bare current value (null = unset); an ENUM scalar leaf is "
+        "{'$value': current, '$choices': [...]}; a SWEEP is a sub-tree of bare "
+        "edges {start, stop, expts, step} (each edge accepts ONLY a number/int "
+        "via editor.set_field — NOT an eval/ref); a REF node "
+        "(module/waveform/device selector) is {'$ref': {'current': <chosen>, "
+        "'options': [<names>]}, <chosen variant's settable sub-tree>} — only the "
+        "CURRENTLY-CHOSEN variant is expanded; 'options' lists bare names while "
+        "'current' may be a tagged internal key — switch by passing a bare "
+        "'options' name to editor.set_field on the ref's dotted path. "
+        "Any other dict is a plain section sub-tree (its keys are child fields). "
+        "'prefix' (optional, dotted) returns just the sub-tree rooted at that "
+        "node (a prefix at a sweep edge returns the whole sweep node); a prefix "
+        "matching nothing returns {}.",
         (
             _str("tab_id"),
-            _str_opt("under", "Restrict to the sub-tree at this dotted path"),
             _str_opt(
                 "prefix",
-                "Keep only paths equal to or below this dotted prefix "
-                "(dotted-segment match, not glob; no match → empty list)",
+                "Return only the sub-tree rooted at this dotted path "
+                "(e.g. 'modules.readout'); omit for the whole cfg. No match → {}",
             ),
-            _str_default("verbosity", "compact", "compact (default) / full / paths"),
         ),
     ),
     "tab.update_cfg": MethodSpec(

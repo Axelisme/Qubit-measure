@@ -183,25 +183,28 @@ def _h_tab_get_cfg(
 def _h_tab_list_paths(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
+    from .path_resolver import build_settable_tree
+
     tab_id = str(params["tab_id"])
     if not adapter.ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     # A tab's cfg draft is a CfgEditorService session keyed by its tab_id (the
-    # same draft the open form attaches to). List its settable paths from that
-    # session — the one ``editor.set_field`` mutates — so listed paths are
-    # guaranteed settable and agent+user share one model (ADR-0013 F11).
+    # same draft the open form attaches to). Build the settable tree off that
+    # session's live root — the one ``editor.set_field`` mutates — so the tree
+    # mirrors exactly what can be edited and agent+user share one model
+    # (ADR-0013 F11). The tree is built directly from the live LiveField root
+    # (NOT via cfg_editor_get, which is the flat editor.get path); leaf values
+    # come straight off the live tree (ADR-0010: None = unset).
     editor_id = adapter.ctrl.editor_id_for_owner(tab_id)
     if editor_id is None:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
             f"tab {tab_id!r} cfg form has no live model yet",
         )
-    under, verbosity, prefix = _path_view_args(params)
-    return {
-        "paths": adapter.ctrl.cfg_editor_get(
-            editor_id, under=under, verbosity=verbosity, prefix=prefix
-        )
-    }
+    raw_prefix = params.get("prefix")
+    prefix = str(raw_prefix) if raw_prefix else None
+    root = adapter.ctrl.get_cfg_editor_root(editor_id)
+    return {"tree": build_settable_tree(root, prefix=prefix)}
 
 
 def _h_tab_update_cfg(
@@ -1679,8 +1682,8 @@ def _h_editor_get(
 
     editor_id = str(params["editor_id"])
     # editor.get declares no 'prefix' param, so prefix is always None here (the
-    # dotted-path filter is a tab.list_paths-only knob); kept in the shared
-    # unpacking for symmetry with _h_tab_list_paths.
+    # dotted-path filter was a tab.list_paths knob; tab.list_paths now builds its
+    # tree directly and no longer routes through _path_view_args).
     under, verbosity, prefix = _path_view_args(params)
     try:
         return {

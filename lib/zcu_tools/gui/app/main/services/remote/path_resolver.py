@@ -453,6 +453,136 @@ def list_settable_paths_full(
 
 
 # ---------------------------------------------------------------------------
+# Nested-tree path discovery — a value tree shaped like the cfg, where each
+# leaf carries its current live value. The structural inverse of the flat
+# ``list_settable_paths`` (which stays for set_field's before/after diff +
+# adapter.cfg_spec): this one is the read-only view tab.list_paths returns.
+#
+# Reserved ``$``-prefixed keys distinguish a leaf's metadata from a sub-tree:
+#   - a dict carrying ``$value`` (enum scalar) or ``$ref`` (ref node) is a
+#     SPECIAL node, not a sub-tree;
+#   - any other dict is a sub-tree (its keys are child field names);
+#   - a non-dict is a bare scalar current value (None = unset, ADR-0010).
+# Only the currently-chosen ref variant is expanded; ``options`` lists names.
+# Values come straight off the live tree (the same ``_scalar_wire_value`` /
+# sweep-edge logic the flat lister uses), NOT via the cfg_summary codec.
+# ---------------------------------------------------------------------------
+
+
+def _tree_sweep(field: SweepLiveField) -> dict[str, object]:
+    """A sweep node as a sub-tree of bare scalar edges (start/stop/expts/step)."""
+    sweep = field.get_value()
+    edges = {
+        "start": sweep.start,
+        "stop": sweep.stop,
+        "expts": sweep.expts,
+        "step": sweep.step,
+    }
+    return {
+        edge: (raw.expr if isinstance(raw, EvalValue) else raw)
+        for edge, raw in edges.items()
+    }
+
+
+# Sentinel: a field that has no settable tree node (a literal / unsupported
+# field). Section/ref recursion drops such children, mirroring the flat lister
+# which omits immutable leaves entirely — so the tree shows only what set_field
+# can actually mutate (a literal must NOT read as a settable ``null`` scalar).
+_NO_NODE = object()
+
+
+def _tree_field(field: LiveField) -> object:
+    """Build the nested value tree for one LiveField (see module section header).
+
+    Returns the node that represents ``field``: a bare scalar value, an enum
+    ``{$value, $choices}`` leaf, a sweep sub-tree, a ``$ref`` node (with the
+    chosen variant's sub-tree merged in), or a plain section sub-tree. Returns
+    the ``_NO_NODE`` sentinel for an immutable/unsupported field so the parent
+    drops it.
+    """
+    if isinstance(field, LiteralLiveField):
+        return _NO_NODE  # immutable — not a settable path (flat lister drops it)
+    if isinstance(field, ScalarLiveField):
+        value = _scalar_wire_value(field)
+        if field.spec.choices is not None:
+            return {"$value": value, "$choices": list(field.spec.choices)}
+        return value
+    if isinstance(field, SweepLiveField):
+        return _tree_sweep(field)
+    if isinstance(field, DeviceRefLiveField):
+        # A device ref is a leaf selector (no settable sub-tree); ``options`` is
+        # the live registered-device list, not a static spec list.
+        return {
+            "$ref": {
+                "current": field.get_chosen_name(),
+                "options": list(field.env.ctrl.list_device_names()),
+            }
+        }
+    if isinstance(field, ModuleRefLiveField):
+        # Only the currently-bound variant is expanded; ``options`` lists the
+        # allowed variant labels (bare), while ``current`` is the chosen key (a
+        # built-in variant reads as the tagged ``<Custom:label>`` form, mirroring
+        # the flat lister's value/choices split).
+        node: dict[str, object] = {
+            "$ref": {
+                "current": field.get_chosen_key(),
+                "options": [s.label for s in field.spec.allowed],
+            }
+        }
+        sub = field.sub_field
+        if sub is not None:
+            node.update(_tree_section_children(sub))
+        return node
+    if isinstance(field, SectionLiveField):
+        return _tree_section_children(field)
+    return _NO_NODE
+
+
+def _tree_section_children(section: SectionLiveField) -> dict[str, object]:
+    """Recurse a section's fields into a sub-tree, dropping ``_NO_NODE`` ones."""
+    out: dict[str, object] = {}
+    for key, child in section.fields.items():
+        node = _tree_field(child)
+        if node is not _NO_NODE:
+            out[key] = node
+    return out
+
+
+def build_settable_tree(
+    root: SectionLiveField, prefix: str | None = None
+) -> dict[str, object]:
+    """Build the nested current-value tree for the live cfg draft.
+
+    Without ``prefix`` returns the whole draft as a nested dict. With ``prefix``
+    (a dotted path) returns the sub-tree rooted at that node — reusing the same
+    ``_navigate`` walk as the flat lister's ``under`` scoping (ModuleRef ref
+    navigation included). A prefix that resolves to a leaf/special node is
+    wrapped so the result is always a dict; a prefix matching nothing returns
+    ``{}`` (graceful, not a fast-fail).
+    """
+    if not prefix:
+        tree = _tree_field(root)
+        # ``root`` is a SectionLiveField, so _tree_field always returns a dict.
+        return cast("dict[str, object]", tree)
+    try:
+        field, _ = _navigate(root, prefix.split("."))
+    except RemoteError:
+        # An unresolvable prefix yields an empty sub-tree, matching the flat
+        # lister's "no match → empty" contract rather than raising.
+        return {}
+    node = _tree_field(field)
+    if node is _NO_NODE:
+        # The prefix addresses an immutable/unsupported field — no settable node.
+        return {}
+    if isinstance(node, dict):
+        return node
+    # A scalar / enum prefix node is not itself a dict; wrap it under its leaf
+    # segment so the reply is always a dict (the caller indexes by name).
+    leaf = prefix.split(".")[-1]
+    return {leaf: node}
+
+
+# ---------------------------------------------------------------------------
 # Static spec-tree path discovery — no context, no values (for adapter.cfg_spec)
 # ---------------------------------------------------------------------------
 

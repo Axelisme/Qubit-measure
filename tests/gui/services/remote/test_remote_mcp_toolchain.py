@@ -1818,12 +1818,14 @@ def test_fold_analyze_params_fetch_failure_is_swallowed(monkeypatch):
 
 
 def test_run_stage1_creates_tab_and_folds_context_and_guide(monkeypatch):
-    """gui_run_stage1 creates the tab, fans out the three editing-context reads
-    (snapshot for editor_id, list_paths, cfg_summary) and ALWAYS folds the adapter
-    guide into one reply."""
+    """gui_run_stage1 creates the tab, fans out the two editing-context reads
+    (snapshot for editor_id, list_paths for the settable cfg tree) and ALWAYS
+    folds the adapter guide into one reply. The cfg_summary fold is gone — the
+    tree already carries the current values."""
     from zcu_tools.mcp.measure import server as mcp_server
 
     calls: list[tuple[str, dict]] = []
+    tree = {"reps": 100, "sweep": {"freq": {"start": 1.0}}}
 
     def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
         del timeout_seconds
@@ -1831,31 +1833,27 @@ def test_run_stage1_creates_tab_and_folds_context_and_guide(monkeypatch):
         return {
             "tab.new": {"tab_id": "tw-1"},
             "tab.snapshot": {"editor_id": "ed-tw-1", "interaction": {}},
-            "tab.list_paths": {"paths": [{"path": "reps", "kind": "scalar"}]},
-            "tab.get_cfg_summary": {"summary": {"reps": 100}},
+            "tab.list_paths": {"tree": tree},
             "adapter.guide": {"guide": {"behavior": "measures X"}},
         }[method]
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
     out = mcp_server.TOOLS["gui_run_stage1"]["handler"]({"adapter_name": "fake/freq"})
 
-    # tab.new first (adapter_name verbatim), then the three reads keyed by the new
-    # tab_id, then the adapter.guide fetch (always — no first-use gating).
-    # tab.list_paths omits verbosity: server-side validate_params injects the
-    # spec default 'compact', so no explicit value is needed in this direct call.
+    # tab.new first (adapter_name verbatim), then the two reads keyed by the new
+    # tab_id, then the adapter.guide fetch (always — no first-use gating). No
+    # tab.get_cfg_summary call any more.
     assert calls == [
         ("tab.new", {"adapter_name": "fake/freq"}),
         ("tab.snapshot", {"tab_id": "tw-1"}),
         ("tab.list_paths", {"tab_id": "tw-1"}),
-        ("tab.get_cfg_summary", {"tab_id": "tw-1"}),
         ("adapter.guide", {"adapter_name": "fake/freq"}),
     ]
     assert out == {
         "tab_id": "tw-1",
         "adapter": "fake/freq",
         "editor_id": "ed-tw-1",
-        "paths": [{"path": "reps", "kind": "scalar"}],
-        "cfg_summary": {"reps": 100},
+        "tree": tree,
         "guide": {"behavior": "measures X"},
     }
 
@@ -1871,8 +1869,7 @@ def test_run_stage1_always_folds_guide_on_every_call(monkeypatch):
         return {
             "tab.new": {"tab_id": "tw-1"},
             "tab.snapshot": {"editor_id": "ed-1", "interaction": {}},
-            "tab.list_paths": {"paths": ["reps"]},
-            "tab.get_cfg_summary": {"summary": {"reps": 1}},
+            "tab.list_paths": {"tree": {"reps": 1}},
             "adapter.guide": {"guide": {"behavior": "measures X"}},
         }[method]
 

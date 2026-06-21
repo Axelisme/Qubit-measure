@@ -89,7 +89,7 @@ from zcu_tools.mcp.core.call_log import wrap_handler  # noqa: E402
 # tool renames) that leave the wire contract untouched. A wire-contract change is
 # tracked separately by WIRE_VERSION (see ``wire_version.py``); the two are
 # independent. (Git history holds the per-version evolution.)
-MCP_VERSION = 49  # compact tool-reply JSON (W1); prefix filter on tab.list_paths (W3)
+MCP_VERSION = 50  # tab.list_paths returns a nested value tree (WIRE 37); stage1 folds 'tree', drops cfg_summary
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -732,21 +732,17 @@ def _resolve_editor_id(arguments: dict[str, Any]) -> str:
 def _fold_tab_editing_context(tab_id: str, reply: dict[str, Any]) -> dict[str, Any]:
     """Fold a fresh tab's editing context into ``reply``, in place.
 
-    After tab.new the agent always reads tab.snapshot (for the editor_id),
-    tab.list_paths (the settable dotted paths) and tab.get_cfg_summary (the
-    current values) before it can edit cfg. Folding those reads collapses ~4
-    calls into one. Pure mcp-side fan-out over EXISTING wire reads — no wire
-    change. Reused by gui_run_stage1 (Phase ①). Adds {editor_id, paths,
-    cfg_summary}; the caller owns ``tab_id`` and ``adapter`` in ``reply``.
+    After tab.new the agent always reads tab.snapshot (for the editor_id) and
+    tab.list_paths (the settable cfg tree) before it can edit cfg. Folding those
+    reads collapses the calls into one. Pure mcp-side fan-out over EXISTING wire
+    reads. Reused by gui_run_stage1 (Phase ①). Adds {editor_id, tree}; the
+    caller owns ``tab_id`` and ``adapter`` in ``reply``. The cfg_summary fold is
+    gone: tab.list_paths now returns a nested current-value tree, so the
+    settable paths and their current values arrive in one ``tree``.
     """
     snap = send_gui_rpc("tab.snapshot", {"tab_id": tab_id})
     reply["editor_id"] = snap.get("editor_id")
-    # server-side validate_params already injects the spec default 'compact' for
-    # verbosity when omitted, so no explicit value is needed here.
-    reply["paths"] = send_gui_rpc("tab.list_paths", {"tab_id": tab_id}).get("paths")
-    reply["cfg_summary"] = send_gui_rpc("tab.get_cfg_summary", {"tab_id": tab_id}).get(
-        "summary"
-    )
+    reply["tree"] = send_gui_rpc("tab.list_paths", {"tab_id": tab_id}).get("tree")
     return reply
 
 
@@ -1470,11 +1466,11 @@ def tool_gui_run_stage1(arguments: dict[str, Any]) -> dict[str, Any]:
     context + the adapter guide into one reply.
 
     Composes tab.new with the fan-out reads the agent always makes before editing
-    cfg (tab.snapshot for editor_id, tab.list_paths, tab.get_cfg_summary) plus the
-    adapter's orientation guide (adapter.guide). The guide is ALWAYS returned (you
-    call stage1 precisely to get a tab + its guide — no first-use gating). Returns
-    {tab_id, adapter, editor_id, paths, cfg_summary, guide}; edit cfg + run with
-    gui_run_stage2(tab_id, edits).
+    cfg (tab.snapshot for editor_id, tab.list_paths for the settable cfg tree)
+    plus the adapter's orientation guide (adapter.guide). The guide is ALWAYS
+    returned (you call stage1 precisely to get a tab + its guide — no first-use
+    gating). Returns {tab_id, adapter, editor_id, tree, guide}; edit cfg + run
+    with gui_run_stage2(tab_id, edits).
     """
     adapter_name = str(arguments["adapter_name"])
     tab_id = str(send_gui_rpc("tab.new", {"adapter_name": adapter_name})["tab_id"])
@@ -2123,12 +2119,13 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "'adapter_name' (see gui_adapter_list) and fold its editing context + "
             "the adapter guide into ONE reply. Bundles tab.new + the fan-out reads "
             "the agent always makes before editing cfg (tab.snapshot for editor_id, "
-            "tab.list_paths, tab.get_cfg_summary) + adapter.guide. Returns "
-            "{tab_id, adapter, editor_id, paths, cfg_summary, guide}: 'guide' is the "
-            "adapter's orientation guide (ALWAYS returned here); 'paths' are the "
-            "settable dotted paths (the gui_editor_set_field path source); "
-            "'cfg_summary' is the read-only nested values view. Then configure + run "
-            "with gui_run_stage2(tab_id, edits)."
+            "tab.list_paths for the settable cfg tree) + adapter.guide. Returns "
+            "{tab_id, adapter, editor_id, tree, guide}: 'guide' is the adapter's "
+            "orientation guide (ALWAYS returned here); 'tree' is the nested "
+            "current-value cfg tree (the gui_editor_set_field path source AND the "
+            "read-only values view, in one — see gui_tab_list_paths for the node "
+            "shape with $value/$choices/$ref). Then configure + run with "
+            "gui_run_stage2(tab_id, edits)."
         ),
         "inputSchema": {
             "type": "object",
