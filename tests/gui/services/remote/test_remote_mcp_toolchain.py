@@ -1858,11 +1858,14 @@ def test_run_stage1_creates_tab_and_folds_context_and_guide(monkeypatch):
     }
 
 
-def test_run_stage1_always_folds_guide_on_every_call(monkeypatch):
-    """The guide rides EVERY gui_run_stage1 call (no per-session first-use gating
-    that the old gui_tab_new fold had) — you call stage1 precisely to get a fresh
-    tab + its guide."""
+def test_run_stage1_dedupes_guide_per_adapter(monkeypatch):
+    """The adapter guide rides the FIRST gui_run_stage1 for an adapter in a
+    session; a repeat call for the same adapter omits it and sets
+    guide_omitted=True instead (the guide is static, so re-sending it each call
+    is wasted tokens)."""
     from zcu_tools.mcp.measure import server as mcp_server
+
+    monkeypatch.setattr(mcp_server, "_GUIDE_SENT", set())
 
     def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
         del params, timeout_seconds
@@ -1878,7 +1881,9 @@ def test_run_stage1_always_folds_guide_on_every_call(monkeypatch):
     first = mcp_server.TOOLS["gui_run_stage1"]["handler"]({"adapter_name": "amp_rabi"})
     second = mcp_server.TOOLS["gui_run_stage1"]["handler"]({"adapter_name": "amp_rabi"})
     assert first["guide"] == {"behavior": "measures X"}
-    assert second["guide"] == {"behavior": "measures X"}
+    assert "guide_omitted" not in first
+    assert "guide" not in second
+    assert second["guide_omitted"] is True
 
 
 # ---------------------------------------------------------------------------
