@@ -79,6 +79,7 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
     resolve_connect_port,
     run_stdio_loop,
 )
+from zcu_tools.mcp.core.call_log import wrap_handler  # noqa: E402
 
 # ``MCP_VERSION`` is this MCP bridge's own code revision (the mcp_server / tool
 # layer, NOT the wire contract). It is REPORTED — never compared — in the version
@@ -2668,6 +2669,13 @@ TOOLS: dict[str, dict[str, Any]] = assemble_tools(
     _OVERRIDE_TOOLS,
     _OVERRIDE_NAMES,
 )
+
+# Wrap every top-level handler for call logging (Phase 166).  Transparent
+# side-effect only: same args in, same result out (or re-raised exception);
+# only writes one JSONL line per invocation.  Applied after assemble_tools so
+# generated + override + bundle tools are all covered in a single pass.
+for _tool_name, _tool_entry in TOOLS.items():
+    _tool_entry["handler"] = wrap_handler(_tool_name, _tool_entry["handler"])
 
 
 # ---------------------------------------------------------------------------
