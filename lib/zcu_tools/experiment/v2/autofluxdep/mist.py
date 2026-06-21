@@ -233,7 +233,11 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
         _filepath = Path(filepath)
         data = np.load(filepath)
 
-        flux_values = data["flux_values"]
+        raw_signals = data["raw_signals"]
+        try:
+            flux_values = data["flux_values"]
+        except KeyError:
+            flux_values = data["flx_values"] # support old format
         gains = data["gains"]
         raw_signals = data["raw_signals"]
         success = data["success"]
@@ -241,18 +245,10 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
         assert raw_signals.shape == (len(flux_values), len(gains))
         assert success.shape == (len(flux_values),)
 
-        raw_signals = raw_signals.astype(np.complex128)
-        success = np.asarray(success, dtype=np.bool_)
-        signal_path = str(_filepath.with_name(_filepath.name + "_signals"))
-        _, _, _, comment = load_data(signal_path, return_comment=True, **kwargs)
-        last_cfg = None
-        if comment is not None:
-            last_cfg, _, _ = parse_comment(comment)
-
         return {
             "raw_signals": raw_signals,
             "success": success,
             "flux_values": flux_values,
             "gains": gains,
-            "last_cfg": last_cfg,
+            "last_cfg": None,
         }

@@ -456,6 +456,11 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         else:
             xs = ac_coeff * xs**2
 
+        # default the rate-panel x-label to the photon-number symbol when xs is in
+        # photon units (matches the MIST overnight plot's r"$\bar n$" axis)
+        if not xlabel:
+            xlabel = r"$\bar n$" if ac_coeff is not None else "probe gain (a.u.)"
+
         fig = plt.figure(figsize=(12, 8))
         grid_spec = fig.add_gridspec(3, 3)
         ax_gg = fig.add_subplot(grid_spec[0, 0])
@@ -506,14 +511,22 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
             Rerr_eo[i] = np.nan
             Rerr_eg[i] = np.nan
 
-        ax_Tg.errorbar(xs, R_go, yerr=Rerr_go, label="Γ_go", color="dodgerblue")
-        ax_Tg.errorbar(xs, R_ge, yerr=Rerr_ge, label="Γ_ge", color="blue")
+        ax_Tg.errorbar(
+            xs, R_go, yerr=Rerr_go, label=r"$\Gamma_{0L}$", color="dodgerblue"
+        )
+        ax_Tg.errorbar(xs, R_ge, yerr=Rerr_ge, label=r"$\Gamma_{01}$", color="blue")
 
-        ax_Te.errorbar(xs, R_eo, yerr=Rerr_eo, label="Γ_eo", color="darkorange")
-        ax_Te.errorbar(xs, R_eg, yerr=Rerr_eg, label="Γ_eg", color="red")
+        ax_Te.errorbar(
+            xs, R_eo, yerr=Rerr_eo, label=r"$\Gamma_{1L}$", color="darkorange"
+        )
+        ax_Te.errorbar(xs, R_eg, yerr=Rerr_eg, label=r"$\Gamma_{10}$", color="red")
 
-        ax_To.errorbar(xs, R_eo, yerr=Rerr_eo, label="Γ_eo", color="darkorange")
-        ax_To.errorbar(xs, R_go, yerr=Rerr_go, label="Γ_go", color="dodgerblue")
+        ax_To.errorbar(
+            xs, R_eo, yerr=Rerr_eo, label=r"$\Gamma_{1L}$", color="darkorange"
+        )
+        ax_To.errorbar(
+            xs, R_go, yerr=Rerr_go, label=r"$\Gamma_{0L}$", color="dodgerblue"
+        )
 
         max_rate = np.nanmax([R_go, R_ge, R_eo, R_eg]).item()
         for ax in (ax_Tg, ax_Te, ax_To):
