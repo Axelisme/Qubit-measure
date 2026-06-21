@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 37
+skill_version: 38
 ---
 
 # run-measure-gui
@@ -158,11 +158,22 @@ gui_adapter_guide(adapter_name="onetone/flux_dep")# READ FIRST: per-experiment b
                                                   # ranges + gotchas — live here, not in this skill. (gui_run_stage1
                                                   # folds this guide in, so the recommended flow rarely calls it directly.)
 gui_tab_new(adapter_name="fake/freq")             # PURE: just creates a tab -> {tab_id}. (gui_run_stage1 creates + folds
-                                                  # editor_id/paths/cfg_summary/guide in one call.) id e.g. fake-freq-1a2b3c4d
+                                                  # editor_id/tree/guide in one call.) id e.g. fake-freq-1a2b3c4d
 gui_tab_snapshot(tab_id) -> editor_id             # per-tab progress + the cfg-editing session handle
-gui_tab_list_paths(tab_id)                        # dotted cfg paths (compact: path+kind+choices)
-                                                  # pass prefix="modules.readout" to list only that subtree (no match → empty list)
-gui_tab_get_cfg_summary(tab_id)                   # current values/expressions, nested (ref nodes wrap {chosen,value} → not a path source; see list_paths)
+gui_tab_list_paths(tab_id)                        # returns a nested value tree (not a flat list). Leaf conventions:
+                                                  #   scalar leaf    → bare value (null = unset)
+                                                  #   enum leaf      → {"$value": v, "$choices": [...]}
+                                                  #   sweep node     → {"start":..., "stop":..., "expts":..., "step":...}
+                                                  #   ref node       → {"$ref":{"current":"key","options":[...]}, ...current-variant subtree...}
+                                                  #                    options are bare names; set_field accepts a bare name
+                                                  # $-prefixed keys mark leaf metadata; plain keys are subtree nodes.
+                                                  # pass prefix="modules.readout" to return only that subtree (no match → {});
+                                                  # pointing prefix at a sweep edge returns the whole sweep node.
+                                                  # EDIT via dotted path (gui_editor_set_field) — path syntax unchanged.
+                                                  # DO NOT lift paths from gui_tab_get_cfg_summary: it wraps refs as
+                                                  # {chosen, value:{...}}, adding a spurious .value. segment.
+gui_tab_get_cfg_summary(tab_id)                   # current values/expressions, nested (ref nodes wrap {chosen,value} → not a path source; see list_paths).
+                                                  # stage1 no longer folds this — use gui_tab_list_paths (tree) for discovery.
 gui_editor_set_field(tab_id, "rounds", 30)        # convenience: tab_id resolves the tab's cfg-editor automatically;
                                                   # explicit editor_id (from gui_tab_snapshot) also accepted
                                                   # Sweep edge fields (start/stop/expts/step) only accept plain numbers;
@@ -170,7 +181,11 @@ gui_editor_set_field(tab_id, "rounds", 30)        # convenience: tab_id resolves
                                                   # for eval). If an adapter pre-wires an eval edge, override it by
                                                   # passing a numeric value directly.
 # RECOMMENDED FLOW = the 4 bundle tools (each folds the NEXT decision's input, stops at a decision point):
-#   gui_run_stage1(adapter_name)            -> {tab_id, editor_id, paths, cfg_summary, guide}   # ① new+guide
+#   gui_run_stage1(adapter_name)            -> {tab_id, editor_id, tree, guide}   # ① new+guide
+#                                              tree = nested value tree (same shape as gui_tab_list_paths — see above).
+#                                              guide = adapter guide (full prose) on FIRST call for this adapter in the
+#                                              current MCP session; subsequent calls for the SAME adapter return
+#                                              guide_omitted: true instead (guide already in session context, not resent).
 #   gui_run_stage2(tab_id, edits={path:v})  -> {..run.., figure, analyze_params}   # ② configure+run; STOPS before analyze
 #   gui_run_stage3(tab_id)                  -> {summary, figure, writeback_preview}   # ③ analyze
 #   gui_run_stage4(tab_id, save_data=False) -> {applied_ids[, data_path]}   # ④ writeback (+ optional save)
@@ -605,11 +620,13 @@ hardware) — the smoke harness uses it.
 - **cfg paths have no `value` segment.** Module sub-fields are
   `modules.qub_pulse.freq`, not `...qub_pulse.value.freq`; an unknown path
   fails `invalid_params` rather than silently no-op'ing. Always confirm against
-  `gui_tab_list_paths`. **Do NOT lift paths out of `gui_tab_get_cfg_summary`:**
+  `gui_tab_list_paths` (the nested tree). **Do NOT lift paths out of `gui_tab_get_cfg_summary`:**
   that view deliberately wraps each module/waveform ref as `{chosen, value:{...}}`
   (so it can keep EvalValue expressions and the chosen variant, which lowering
   would drop) — so its keys carry the extra `.value.` segment. It is a values/
-  expressions view, not a path source; get editable paths from `list_paths`.
+  expressions view, not a path source; get editable paths from `list_paths`
+  (tree — `$`-prefixed keys mark leaf metadata; plain keys are subtree nodes).
+  `stage1`'s `tree` field is the same tree as `list_paths` — use it directly.
 - **`gui_editor_set_field` / `gui_editor_set_fields` accept either a `tab_id`
   (convenience — the server resolves that tab's cfg-editor automatically) or an
   explicit `editor_id` from `gui_tab_snapshot`.** Both edit the same live draft
