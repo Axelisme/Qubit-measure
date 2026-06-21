@@ -35,14 +35,22 @@ METHOD_SPECS = {
                 required=False,
                 description="experiment type, e.g. 'reset/bath'",
             ),
-            P("limit", J.INTEGER, required=False, default=10),
+            P(
+                "limit",
+                J.INTEGER,
+                required=False,
+                default=10,
+                description="max items per bucket (default 10)",
+            ),
         ),
     ),
     "search": MethodSpec(
         5.0,
         "Keyword search over symptom + body (mainly hits troubleshooting "
         "solutions). Use it to find a prior fix for a symptom, and to check for "
-        "duplicates before adding one.",
+        "duplicates before adding one. Each result carries a 'score' (total "
+        "query-term hit count over symptom+body+exp_type+reason); results are "
+        "ranked highest-score first.",
         params=(
             P("query", J.STRING, description="symptom / keywords"),
             P(
@@ -58,7 +66,13 @@ METHOD_SPECS = {
                 required=False,
                 description="solution category, e.g. failure-fix / analysis-heuristic",
             ),
-            P("limit", J.INTEGER, required=False, default=10),
+            P(
+                "limit",
+                J.INTEGER,
+                required=False,
+                default=10,
+                description="max results (default 10)",
+            ),
         ),
     ),
     "get": MethodSpec(
@@ -77,8 +91,10 @@ METHOD_SPECS = {
         10.0,
         "Record one measurement as a FOLDER (record.md + copied figures). Records "
         "are immutable: a same-day same-experiment collision auto-suffixes rather "
-        "than overwriting. Body holds the per-item pass/fail with evidence and the "
-        "numbers; reason is the one-line verdict.",
+        "than overwriting. On disk, record.md frontmatter carries "
+        "type/chip/qub/date/exp_type/decision/figures; its body opens with the "
+        "one-line reason verdict, then the per-item pass/fail with evidence and "
+        "numbers (reason lives in the body, not a frontmatter field).",
         params=(
             P("chip", J.STRING),
             P("qub", J.STRING),
@@ -111,7 +127,8 @@ METHOD_SPECS = {
     ),
     "checklist_set": MethodSpec(
         10.0,
-        "Replace the acceptance checklist for an experiment type wholesale. Items "
+        "Replace the acceptance checklist for an experiment type wholesale (NOT "
+        "append — pass the full list; checklist_get first if extending). Items "
         "are stored as a hand-editable markdown bullet list.",
         params=(
             P("exp_type", J.STRING, description="experiment type or 'general'"),
