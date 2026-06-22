@@ -506,7 +506,13 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         10.0,
         "Predict transition frequency",
         (
-            _num("value", "Flux value"),
+            _num(
+                "value",
+                "Device-value setpoint in the instrument's native unit (e.g. "
+                "current in A for YOKOGS200) — NOT a flux quantum. The predictor "
+                "applies an internal value-to-flux affine conversion; passing a "
+                "flux quantum (e.g. 0.5) will silently yield a wrong frequency.",
+            ),
             _int_default("from_lvl", 0, "From level"),
             _int_default("to_lvl", 1, "To level"),
         ),

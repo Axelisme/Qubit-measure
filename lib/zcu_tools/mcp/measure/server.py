@@ -285,6 +285,10 @@ _GUARD_DEPS: dict[str, tuple[str, ...]] = {
 # semantic key to the latest operation_id for it. ``operation.await`` then
 # blocks on that id. "Latest wins": starting overwrites the key, since the agent
 # semantically means "the current operation for this resource".
+#
+# Lifecycle: entries are written on each START RPC (latest-wins) and are NEVER
+# removed — they persist for the entire MCP server process lifetime. A stale key
+# for a completed operation is expected and does not indicate an active operation.
 _OP_BY_KEY: dict[str, int] = {}
 
 # --- Session-scoped guide deduplication (mcp-side policy) --------------------
@@ -2510,9 +2514,10 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "no_operation / a stuck wait. "
             "Lifecycle of by_key entries: a key is written when the matching start "
             "RPC fires (tab.run_start / tab.analyze / tab.post_analyze / "
-            "device.connect/disconnect/setup) with 'latest wins', and persists "
-            "until the tab is closed — so a stale key for a completed op is normal "
-            "and does not indicate an active operation."
+            "device.connect/disconnect/setup) with 'latest wins', and is NEVER "
+            "removed — entries persist for the entire MCP server process lifetime. "
+            "A stale key for a completed operation is normal and does not indicate "
+            "an active operation."
         ),
         "inputSchema": {"type": "object", "properties": {}},
     },

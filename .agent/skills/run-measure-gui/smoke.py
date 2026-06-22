@@ -8,15 +8,15 @@ so it verifies the whole experiment loop without needing an MCP client.
 
 What it proves (mock SoC, no hardware):
   soc.connect(mock) -> startup.apply -> context -> tab.new(fake/freq)
-  -> editor.set_field(reps/rounds) -> run.start -> operation.progress (live)
-  -> wait for run_finished event -> analyze.start -> save.data
+  -> editor.set_field(reps/rounds) -> tab.run_start -> operation.progress (live)
+  -> wait for run_finished event -> tab.analyze -> tab.save_data
   -> tab.close -> clean shutdown.
 
 Run it (from the repo root):
     xvfb-run -a .venv/bin/python .claude/skills/run-measure-gui/smoke.py
 
-The RPC method names here are the *wire* names (dotted: 'run.start'), not the
-MCP tool aliases ('gui_run_start'). An agent driving via MCP uses the aliases;
+The RPC method names here are the *wire* names (dotted: 'tab.run_start'), not the
+MCP tool aliases ('gui_tab_run_start'). An agent driving via MCP uses the aliases;
 this script talks the socket directly.
 """
 
@@ -119,7 +119,7 @@ def main() -> int:
         if labels:
             rpc.call("context.use", {"label": labels[0]})
         else:
-            rpc.call("context.new", {"value": 1.0, "unit": "A"})
+            rpc.call("context.new", {})
         flags = {
             k: rpc.call(f"state.has_{k}").get("value")
             for k in ("project", "context", "active_context", "soc")
@@ -148,7 +148,7 @@ def main() -> int:
 
         # 6. Start the run, then read live progress at least once (progress is
         # queried by the run's operation_id — the unified operation.progress).
-        op = rpc.call("run.start", {"tab_id": tab_id})
+        op = rpc.call("tab.run_start", {"tab_id": tab_id})
         operation_id = op.get("operation_id")
         saw_progress = False
         for _ in range(60):
@@ -176,7 +176,7 @@ def main() -> int:
         # 8. Analyze, wait for it to settle (it is its own operation — saving
         # while the tab is still analyzing returns precondition_failed/busy),
         # then save.
-        rpc.call("analyze.start", {"tab_id": tab_id})
+        rpc.call("tab.analyze", {"tab_id": tab_id})
         for _ in range(300):
             if not rpc.call("tab.snapshot", {"tab_id": tab_id})["interaction"][
                 "is_analyzing"
@@ -185,7 +185,7 @@ def main() -> int:
             time.sleep(0.2)
         else:
             raise RuntimeError("analyze never finished")
-        rpc.call("save.data", {"tab_id": tab_id})
+        rpc.call("tab.save_data", {"tab_id": tab_id})
         log("analyzed + saved data")
 
         # 8b. Screenshot the tab's current figure (base64 PNG over the socket) to
