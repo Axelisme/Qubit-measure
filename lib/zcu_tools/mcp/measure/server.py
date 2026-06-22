@@ -89,7 +89,7 @@ from zcu_tools.mcp.core.call_log import wrap_handler  # noqa: E402
 # tool renames) that leave the wire contract untouched. A wire-contract change is
 # tracked separately by WIRE_VERSION (see ``wire_version.py``); the two are
 # independent. (Git history holds the per-version evolution.)
-MCP_VERSION = 52  # adapter.cfg_spec returns a nested $type skeleton tree + prefix (WIRE 38), replacing the flat path list
+MCP_VERSION = 53  # dropped 9 redundant agent tools (WIRE 39): removed cfg_summary/cfg_spec/analyze_spec/update_cfg/dialog open|close|list_open; app.shutdown + view.snapshot now non-generated (wire kept)
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -748,9 +748,9 @@ def _fold_tab_editing_context(tab_id: str, reply: dict[str, Any]) -> dict[str, A
     tab.list_paths (the settable cfg tree) before it can edit cfg. Folding those
     reads collapses the calls into one. Pure mcp-side fan-out over EXISTING wire
     reads. Reused by gui_run_stage1 (Phase ①). Adds {editor_id, tree}; the
-    caller owns ``tab_id`` and ``adapter`` in ``reply``. The cfg_summary fold is
-    gone: tab.list_paths now returns a nested current-value tree, so the
-    settable paths and their current values arrive in one ``tree``.
+    caller owns ``tab_id`` and ``adapter`` in ``reply``. tab.list_paths returns a
+    nested current-value tree, so the settable paths and their current values
+    arrive in one ``tree``.
     """
     snap = send_gui_rpc("tab.snapshot", {"tab_id": tab_id})
     reply["editor_id"] = snap.get("editor_id")
@@ -1755,6 +1755,12 @@ _NON_GENERATED_METHODS = frozenset(
         # the agent never calls them directly — only the hand-written tool is exposed.
         "notify.open",
         "notify.await",
+        # internal-only wire methods (no agent tool): the spec + handler stay (the
+        # dispatch key-match needs the spec) but no agent tool is generated.
+        #   app.shutdown — gui_stop drives it via _BRIDGE.stop(shutdown_rpc=...).
+        #   view.snapshot — _assemble_overview reads its active_tab_id for overview.
+        "app.shutdown",
+        "view.snapshot",
     }
 )
 
@@ -2271,7 +2277,7 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "degrades to {status:'pending', summary:None} — no figure (nothing "
             "settled yet); prompt the user to mark the plot + click Done, then "
             "gui_analyze_poll. 'updates' optionally overrides analyze params (see "
-            "gui_adapter_analyze_spec)."
+            "gui_tab_get_analyze_params for the current params)."
         ),
         "inputSchema": {
             "type": "object",
@@ -2418,8 +2424,8 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "non-dialog floating widgets (the feedback widget, the left-edge "
             "handle) that a per-dialog grab cannot see.\n"
             "  - target=<dialog name> (one of: setup, device, predictor, inspect, "
-            "startup — same names as gui_dialog_open / gui_dialog_close): that "
-            "dialog; fails PRECONDITION_FAILED if it is not currently open.\n"
+            "startup): that dialog; fails PRECONDITION_FAILED if it is not "
+            "currently open.\n"
             "The PNG is ALWAYS written to disk and the reply is {saved_to, bytes} — "
             "Read the saved_to path to view it (never inline base64, so it cannot "
             "blow the token budget). Omit out_path to write a per-target file under "

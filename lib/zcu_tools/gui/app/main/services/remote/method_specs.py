@@ -141,12 +141,6 @@ METHOD_SPECS: dict[str, MethodSpec] = {
             ),
         ),
     ),
-    "tab.update_cfg": MethodSpec(
-        10.0,
-        "Replace tab cfg from a full tagged form (missing keys reset to spec "
-        "defaults, not preserved; use editor.set_field for single-field edits)",
-        (_str("tab_id"), _obj("raw", "Full tagged cfg form")),
-    ),
     # Run
     "run.start": MethodSpec(
         5.0, "Start a run (fire-and-forget)", (_str("tab_id"), _expected_versions())
@@ -429,38 +423,6 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         5.0, "Read one device cached snapshot", (_str("name", "Device name"),)
     ),
     "adapter.list": MethodSpec(5.0, "List available adapters"),
-    "adapter.cfg_spec": MethodSpec(
-        5.0,
-        "Read an adapter's static cfg as a NESTED skeleton tree — its SHAPE, "
-        "without building a tab and WITHOUT any live values (the structural twin "
-        "of tab.list_paths). Node shape, distinguished by '$'-prefixed reserved "
-        "keys: a SCALAR leaf is {'$type': '<python type>'} (e.g. 'int'/'float'/"
-        "'bool'/'str'), plus '$choices': [...] when it is an enum; a SWEEP is a "
-        "sub-tree of typed edges {start, stop, step: {'$type':'number'}, expts: "
-        "{'$type':'integer'}}; a REF node (module/waveform/device selector) is "
-        "{'$ref': {'options': [<allowed labels>]}} — NO variant sub-tree (a "
-        "static spec can't know which variant is the live default) and NO "
-        "'current' (no live chosen key); a device ref's 'options' is empty (no "
-        "live device list without a tab). Literal (immutable) fields are "
-        "omitted. Any other dict is a plain section sub-tree (its keys are child "
-        "fields). 'prefix' (optional, dotted) returns just the sub-tree rooted "
-        "at that node; a prefix matching nothing returns {}. To read a chosen "
-        "variant's fields or any live value, build a tab and use tab.list_paths.",
-        (
-            _str("adapter_name", "Adapter to introspect"),
-            _str_opt(
-                "prefix",
-                "Return only the sub-tree rooted at this dotted path "
-                "(e.g. 'modules.readout'); omit for the whole spec. No match → {}",
-            ),
-        ),
-    ),
-    "adapter.analyze_spec": MethodSpec(
-        5.0,
-        "Describe an adapter's analyze params (name/type/choices/label/default). "
-        "Returns empty params when the adapter has no analysis.",
-        (_str("adapter_name", "Adapter to introspect"),),
-    ),
     "adapter.guide": MethodSpec(
         5.0,
         "Read an adapter's human-facing orientation guide BEFORE running it: "
@@ -472,13 +434,6 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         (_str("adapter_name", "Adapter to introspect"),),
     ),
     # Dialog / view
-    "dialog.open": MethodSpec(
-        10.0, "Open a named dialog", (_str("name", "Dialog name"),)
-    ),
-    "dialog.close": MethodSpec(
-        5.0, "Close a named dialog", (_str("name", "Dialog name"),)
-    ),
-    "dialog.list_open": MethodSpec(5.0, "List open dialogs"),
     "app.shutdown": MethodSpec(
         5.0,
         "Gracefully close the GUI: runs the normal window-close path (persist "
@@ -584,23 +539,6 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "fit summary with gui_tab_get_post_analyze_result.",
         (_str("tab_id"), _obj_default("updates", "Post-analysis param updates")),
         tool_name="gui_post_analyze",
-    ),
-    "tab.get_cfg_summary": MethodSpec(
-        5.0,
-        "Read the tab cfg as a nested values view (read-only). NOT a set_field "
-        "path source (use tab.list_paths for editable dotted paths). Mirrors the "
-        "cfg tree and KEEPS info lowering would drop — EvalValue fields stay as "
-        "their "
-        "expression string (e.g. 'r_f - 0.1', not the evaluated number) and each "
-        "module/waveform ref node is shown as {chosen, value:{...}}. That ref "
-        "wrapper means its key shape is NOT the editable path shape: a field reads "
-        "as modules.readout.value.pulse_cfg.freq here but edits (editor.set_field) "
-        "use the no-'value' form modules.readout.pulse_cfg.freq. A sweep's derived "
-        "'step' reads null here when an edge is an unresolved eval expression (the "
-        "stored step cannot be trusted against an expr edge; it is recomputed only "
-        "for numeric edges). Use this to read values/expressions; for editable "
-        "paths use list_paths.",
-        (_str("tab_id"),),
     ),
     # Writeback workflow — a persistent draft computed once at analyze time.
     "writeback.preview": MethodSpec(

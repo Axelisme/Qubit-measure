@@ -27,10 +27,12 @@ from __future__ import annotations
 #     contract version put). A wire-contract change bumps BOTH.
 #
 # (Git history holds the per-version evolution of both constants.)
-WIRE_VERSION = 38
+# v39: removed redundant wire methods (tab.get_cfg_summary, adapter.cfg_spec,
+# adapter.analyze_spec, tab.update_cfg, dialog.open/close/list_open).
+WIRE_VERSION = 39
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION (a wire-contract change
 # bumps both; a pure-internal GUI change bumps only this). Git history holds the
 # per-version evolution.
-GUI_VERSION = 45
+GUI_VERSION = 46

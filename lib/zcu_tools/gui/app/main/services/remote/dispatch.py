@@ -19,7 +19,6 @@ from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, cast
 
 from zcu_tools.gui.app.main.adapter import (
-    CfgSchema,
     MetaDictWriteback,
     ModuleWriteback,
     WaveformWriteback,
@@ -34,7 +33,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.main.controller import RenderView
 
     from .service import RemoteControlAdapter
-from zcu_tools.gui.app.main.services.session_codec import raw_to_schema, schema_to_raw
+from zcu_tools.gui.app.main.services.session_codec import schema_to_raw
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.method_spec import BoundMethod, build_method_registry
 from zcu_tools.gui.remote.wire import optional_bool, require_int, require_str
@@ -205,31 +204,6 @@ def _h_tab_list_paths(
     prefix = str(raw_prefix) if raw_prefix else None
     root = adapter.ctrl.get_cfg_editor_root(editor_id)
     return {"tree": build_settable_tree(root, prefix=prefix)}
-
-
-def _h_tab_update_cfg(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    tab_id = str(params["tab_id"])
-    if not adapter.ctrl.has_tab(tab_id):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    if adapter.ctrl.get_running_tab_id() == tab_id:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            f"tab {tab_id!r} is currently running; cancel the run before editing cfg",
-        )
-    # ParamSpec(_obj) already validated this is a dict at the wire boundary; cast
-    # to narrow for the type checker without a redundant runtime re-check.
-    raw = cast(dict, params["raw"])
-    base = adapter.ctrl.get_tab_cfg_schema(tab_id)
-    try:
-        schema: CfgSchema = raw_to_schema(base, dict(raw))
-    except Exception as exc:
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS, f"invalid cfg payload: {exc}"
-        ) from exc
-    adapter.ctrl.update_tab_cfg(tab_id, schema)
-    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -1004,29 +978,6 @@ def _h_adapter_list(
     return {"adapters": list(adapter.ctrl.get_adapter_names())}
 
 
-def _h_adapter_cfg_spec(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    from .path_resolver import build_spec_tree
-
-    name = str(params["adapter_name"])
-    if name not in adapter.ctrl.get_adapter_names():
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown adapter: {name!r}")
-    raw_prefix = params.get("prefix")
-    prefix = str(raw_prefix) if raw_prefix else None
-    spec = adapter.ctrl.get_adapter_cfg_spec(name)
-    return {"tree": build_spec_tree(spec, prefix=prefix)}
-
-
-def _h_adapter_analyze_spec(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    name = str(params["adapter_name"])
-    if name not in adapter.ctrl.get_adapter_names():
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown adapter: {name!r}")
-    return {"params": adapter.ctrl.get_adapter_analyze_params(name)}
-
-
 def _h_adapter_guide(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
@@ -1171,42 +1122,6 @@ def _h_operation_await(
 # ---------------------------------------------------------------------------
 # Dialog / view-query handlers
 # ---------------------------------------------------------------------------
-
-
-def _h_dialog_open(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    from .dialogs import DialogName, parse_dialog_name
-
-    name_raw = str(params["name"])
-    try:
-        name: DialogName = parse_dialog_name(name_raw)
-    except ValueError as exc:
-        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
-    _render_view(adapter).open_dialog(name)
-    return {"opened": name.value}
-
-
-def _h_dialog_close(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    from .dialogs import DialogName, parse_dialog_name
-
-    name_raw = str(params["name"])
-    try:
-        name: DialogName = parse_dialog_name(name_raw)
-    except ValueError as exc:
-        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
-    _render_view(adapter).close_dialog(name)
-    return {"closed": name.value}
-
-
-def _h_dialog_list_open(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    del params
-    open_names = [n.value for n in _render_view(adapter).list_open_dialogs()]
-    return {"open": open_names}
 
 
 def _h_app_shutdown(
@@ -1450,69 +1365,6 @@ def _h_post_analyze_start(
             reason=getattr(exc, "reason_code", ""),
         ) from exc
     return {"operation_id": operation_id}
-
-
-def _strip_cfg_tags(raw: object) -> object:
-    if isinstance(raw, dict):
-        kind = raw.get("__kind")
-        if kind == "direct":
-            return raw.get("value")  # None means unset (ADR-0010)
-        elif kind == "disabled":
-            return None  # disabled optional ref (ADR-0010)
-        elif kind == "eval":
-            return raw.get("expr")
-        elif kind in ("module_ref", "waveform_ref"):
-            return {
-                "chosen": raw.get("chosen_key"),
-                "value": _strip_cfg_tags(raw.get("value", {})),
-            }
-        else:
-            return {k: _strip_cfg_tags(v) for k, v in raw.items()}
-    return raw
-
-
-def _is_number(value: object) -> bool:
-    """A real (non-bool) numeric scalar. In a stripped summary, a sweep edge is
-    either a number (resolved) or an expr string (an unresolved EvalValue, whose
-    ``{"__kind": "eval"}`` tag _strip_cfg_tags collapsed to the bare expr)."""
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
-
-
-def _null_step_on_unresolved_sweeps(summary: object) -> None:
-    """Blank out ``step`` on any sweep node whose start/stop is unresolved.
-
-    ``step`` is the derived span/expts value the codec wrote against the lowered
-    numeric edges. When an edge is shown as an expr string (an unresolved
-    EvalValue in this read-only summary view), that step is stale relative to the
-    expression the user actually sees — so it would contradict the start/stop
-    span. Report ``None`` there rather than a misleading number; a numeric-edge
-    sweep keeps its correct derived step. Mutates the stripped summary in place."""
-    if isinstance(summary, dict):
-        is_sweep = set(summary) == {"start", "stop", "expts", "step"}
-        if is_sweep and not (
-            _is_number(summary["start"]) and _is_number(summary["stop"])
-        ):
-            summary["step"] = None
-        for child in summary.values():
-            _null_step_on_unresolved_sweeps(child)
-    elif isinstance(summary, list):
-        for child in summary:
-            _null_step_on_unresolved_sweeps(child)
-
-
-def _h_tab_get_cfg_summary(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    tab_id = str(params["tab_id"])
-    if not adapter.ctrl.has_tab(tab_id):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    schema = adapter.ctrl.get_tab_cfg_schema(tab_id)
-    raw = schema_to_raw(schema)
-    summary = _strip_cfg_tags(raw)
-    # Projection-layer post-pass (does not touch session_codec, the persistence
-    # SSOT): a sweep node with an unresolved (expr-string) edge gets step=None.
-    _null_step_on_unresolved_sweeps(summary)
-    return {"summary": summary}
 
 
 # ---------------------------------------------------------------------------
@@ -1917,7 +1769,6 @@ _HANDLERS: dict[str, Handler] = {
     "tab.snapshot": _h_tab_snapshot,
     "tab.get_cfg": _h_tab_get_cfg,
     "tab.list_paths": _h_tab_list_paths,
-    "tab.update_cfg": _h_tab_update_cfg,
     "run.start": _h_run_start,
     "run.cancel": _h_run_cancel,
     "analyze.cancel": _h_analyze_cancel,
@@ -1964,13 +1815,8 @@ _HANDLERS: dict[str, Handler] = {
     "device.list": _h_device_list,
     "device.snapshot": _h_device_snapshot,
     "adapter.list": _h_adapter_list,
-    "adapter.cfg_spec": _h_adapter_cfg_spec,
-    "adapter.analyze_spec": _h_adapter_analyze_spec,
     "adapter.guide": _h_adapter_guide,
-    "dialog.open": _h_dialog_open,
-    "dialog.close": _h_dialog_close,
     "app.shutdown": _h_app_shutdown,
-    "dialog.list_open": _h_dialog_list_open,
     "dialog.screenshot": _h_dialog_screenshot,
     "view.snapshot": _h_view_snapshot,
     "view.screenshot": _h_view_screenshot,
@@ -1986,7 +1832,6 @@ _HANDLERS: dict[str, Handler] = {
     "tab.get_post_analyze_result": _h_tab_get_post_analyze_result,
     "tab.get_post_analyze_params": _h_tab_get_post_analyze_params,
     "post_analyze.start": _h_post_analyze_start,
-    "tab.get_cfg_summary": _h_tab_get_cfg_summary,
     "writeback.preview": _h_writeback_preview,
     "writeback.set": _h_writeback_set,
     "writeback.apply": _h_writeback_apply,

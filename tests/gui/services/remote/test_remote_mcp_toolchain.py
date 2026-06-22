@@ -459,19 +459,6 @@ def test_editor_set_field_blocked_while_owning_tab_runs(fx):
         sock.close()
 
 
-def test_tab_update_cfg_blocked_while_running(fx):
-    tab_id = "tab-run"
-    _add_fake_tab(fx, tab_id)
-    sock = open_client(fx.service.port)
-    try:
-        with patch.object(fx.ctrl, "get_running_tab_id", return_value=tab_id):
-            resp = call(sock, "tab.update_cfg", {"tab_id": tab_id, "raw": {}})
-        assert resp["ok"] is False
-        assert resp["error"]["code"] == "precondition_failed"
-    finally:
-        sock.close()
-
-
 def test_mcp_wrappers_map_to_expected_rpc():
     # These three are GENERATED forwarders (not in _OVERRIDE_TOOLS): post-E4 they
     # capture the guarded send_gui_rpc as a closure (send_fn) at import time, so
@@ -742,105 +729,6 @@ def test_soc_connect_mock_returns_summary_directly(fx):
 # ---------------------------------------------------------------------------
 # Adapter spec queries (no tab needed)
 # ---------------------------------------------------------------------------
-
-
-def test_adapter_cfg_spec_returns_skeleton_tree_without_tab(fx):
-    sock = open_client(fx.service.port)
-    try:
-        resp = call(sock, "adapter.cfg_spec", {"adapter_name": "fake/freq"})
-        assert resp["ok"] is True
-        tree = resp["result"]["tree"]
-        # Scalar leaves carry $type (no live value); a sweep is a typed-edge
-        # sub-tree (expts integer, others number).
-        assert tree["reps"] == {"$type": "int"}
-        assert tree["sweep"]["freq"]["expts"] == {"$type": "integer"}
-        assert tree["sweep"]["freq"]["start"] == {"$type": "number"}
-        # The simulated resonance moved to the adapter __init__ — not a cfg path.
-        assert "model" not in tree
-    finally:
-        sock.close()
-
-
-def test_adapter_cfg_spec_ref_node_options_only_no_variant_subtree(fx):
-    """cfg_spec emits each ModuleRef as a {$ref: {options}} node carrying its
-    allowed variant labels, and does NOT expand any variant's inner fields (no
-    Cartesian-product blowup, no guessing the live default variant) and no
-    live 'current' chosen key."""
-    sock = open_client(fx.service.port)
-    try:
-        resp = call(sock, "adapter.cfg_spec", {"adapter_name": "fake/freq"})
-        readout = resp["result"]["tree"]["modules"]["readout"]
-        # The ref node advertises only its allowed variant labels.
-        assert set(readout) == {"$ref"}
-        assert set(readout["$ref"]) == {"options"}
-        assert readout["$ref"]["options"] == ["Direct Readout", "Pulse Readout"]
-    finally:
-        sock.close()
-
-
-def test_adapter_cfg_spec_prefix_returns_variant_subtree(fx):
-    """A prefix duck-types into a ModuleRef variant and returns that sub-tree
-    (the only way to read variant inner fields from the static spec)."""
-    sock = open_client(fx.service.port)
-    try:
-        resp = call(
-            sock,
-            "adapter.cfg_spec",
-            {"adapter_name": "fake/freq", "prefix": "modules.readout.pulse_cfg"},
-        )
-        sub = resp["result"]["tree"]
-        # 'nqz' is an enum scalar → $type + $choices; locked/literal fields drop.
-        assert sub["nqz"] == {"$type": "int", "$choices": [1, 2]}
-        assert "type" not in sub  # LiteralSpec — immutable, omitted
-    finally:
-        sock.close()
-
-
-def test_adapter_cfg_spec_prefix_no_match_returns_empty(fx):
-    sock = open_client(fx.service.port)
-    try:
-        resp = call(
-            sock,
-            "adapter.cfg_spec",
-            {"adapter_name": "fake/freq", "prefix": "modules.nope"},
-        )
-        assert resp["ok"] is True
-        assert resp["result"]["tree"] == {}
-    finally:
-        sock.close()
-
-
-def test_adapter_cfg_spec_unknown_rejected(fx):
-    sock = open_client(fx.service.port)
-    try:
-        resp = call(sock, "adapter.cfg_spec", {"adapter_name": "nope/nope"})
-        assert resp["ok"] is False
-        assert resp["error"]["code"] == "invalid_params"
-    finally:
-        sock.close()
-
-
-def test_adapter_analyze_spec_reflects_params(fx):
-    sock = open_client(fx.service.port)
-    try:
-        resp = call(sock, "adapter.analyze_spec", {"adapter_name": "fake/freq"})
-        assert resp["ok"] is True
-        params = {p["name"]: p for p in resp["result"]["params"]}
-        assert params["model_type"]["choices"] == ["hm", "t", "auto"]
-        assert params["fit_bg_slope"]["type"] == "bool"
-    finally:
-        sock.close()
-
-
-def test_adapter_analyze_spec_empty_for_no_analysis(fx):
-    # onetone/power_dep declares analysis=NONE.
-    sock = open_client(fx.service.port)
-    try:
-        resp = call(sock, "adapter.analyze_spec", {"adapter_name": "onetone/power_dep"})
-        assert resp["ok"] is True
-        assert resp["result"]["params"] == []
-    finally:
-        sock.close()
 
 
 def test_adapter_guide_returns_five_fields(fx):
@@ -1403,7 +1291,7 @@ def test_stale_error_message_names_changed_resources(monkeypatch):
 
 def test_tab_new_is_pure_generated_forwarder():
     """gui_tab_new forwards tab.new and returns ONLY its result ({tab_id}) — it no
-    longer fans out over tab.snapshot / list_paths / cfg_summary nor folds a guide.
+    longer fans out over tab.snapshot / list_paths nor folds a guide.
 
     Like test_mcp_wrappers_map_to_expected_rpc, the generated forwarder captures
     the guarded send_gui_rpc as a closure at import time, so monkeypatching the
@@ -1844,8 +1732,8 @@ def test_fold_analyze_params_fetch_failure_is_swallowed(monkeypatch):
 def test_run_stage1_creates_tab_and_folds_context_and_guide(monkeypatch):
     """gui_run_stage1 creates the tab, fans out the two editing-context reads
     (snapshot for editor_id, list_paths for the settable cfg tree) and ALWAYS
-    folds the adapter guide into one reply. The cfg_summary fold is gone — the
-    tree already carries the current values."""
+    folds the adapter guide into one reply. The list_paths tree already carries
+    the current values."""
     from zcu_tools.mcp.measure import server as mcp_server
 
     calls: list[tuple[str, dict]] = []
@@ -1865,8 +1753,7 @@ def test_run_stage1_creates_tab_and_folds_context_and_guide(monkeypatch):
     out = mcp_server.TOOLS["gui_run_stage1"]["handler"]({"adapter_name": "fake/freq"})
 
     # tab.new first (adapter_name verbatim), then the two reads keyed by the new
-    # tab_id, then the adapter.guide fetch (always — no first-use gating). No
-    # tab.get_cfg_summary call any more.
+    # tab_id, then the adapter.guide fetch (always — no first-use gating).
     assert calls == [
         ("tab.new", {"adapter_name": "fake/freq"}),
         ("tab.snapshot", {"tab_id": "tw-1"}),

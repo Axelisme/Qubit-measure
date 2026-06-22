@@ -6,9 +6,8 @@ Each test spins up a real TCP socket on an ephemeral loopback port via
   - ``events.subscribe`` / ``events.unsubscribe`` / ``events.list``;
   - server-pushed events with the requery-hint schema;
   - per-client writer thread + outbound queue overflow behaviour;
-  - the Dialog API (``dialog.open`` / ``dialog.close`` / ``dialog.list_open``)
-    against a mock ``ViewProtocol``;
-  - ``view.snapshot``;
+  - ``app.shutdown`` and ``view.snapshot`` (internal-only wire methods kept for
+    gui_stop / overview, with no agent tool) against a mock ``ViewProtocol``;
   - clean teardown that unsubscribes from EventBus.
 """
 
@@ -241,28 +240,8 @@ def test_stop_unsubscribes_event_bus(qapp):  # noqa: ARG001
 
 
 # ---------------------------------------------------------------------------
-# Dialog API
+# app.shutdown (internal wire — no agent tool; gui_stop drives it)
 # ---------------------------------------------------------------------------
-
-
-def test_dialog_open_close_via_remote(fx):
-    sock = open_client(fx.service.port)
-    try:
-        resp = call(sock, "dialog.open", {"name": "setup"})
-        assert resp["ok"] is True
-        assert resp["result"]["opened"] == "setup"
-        assert fx.view.open_dialog.called
-
-        resp = call(sock, "dialog.list_open")
-        assert "setup" in resp["result"]["open"]
-
-        resp = call(sock, "dialog.close", {"name": "setup"})
-        assert resp["ok"] is True
-        assert resp["result"]["closed"] == "setup"
-        resp = call(sock, "dialog.list_open")
-        assert resp["result"]["open"] == []
-    finally:
-        sock.close()
 
 
 def test_app_shutdown_triggers_request_shutdown(fx):
@@ -278,29 +257,8 @@ def test_app_shutdown_triggers_request_shutdown(fx):
         sock.close()
 
 
-def test_dialog_open_unknown_name_rejected(fx):
-    sock = open_client(fx.service.port)
-    try:
-        resp = call(sock, "dialog.open", {"name": "no_such_dialog"})
-        assert resp["ok"] is False
-        assert resp["error"]["code"] == "invalid_params"
-    finally:
-        sock.close()
-
-
-def test_dialog_open_accepts_upper_or_lower(fx):
-    sock = open_client(fx.service.port)
-    try:
-        for value in ("SETUP", "setup"):
-            resp = call(sock, "dialog.open", {"name": value}, rid=f"r-{value}")
-            assert resp["ok"] is True, value
-            assert resp["result"]["opened"] == "setup"
-    finally:
-        sock.close()
-
-
 # ---------------------------------------------------------------------------
-# view.snapshot
+# view.snapshot (internal wire — no agent tool; _assemble_overview reads it)
 # ---------------------------------------------------------------------------
 
 

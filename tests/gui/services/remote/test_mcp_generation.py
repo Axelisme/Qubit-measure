@@ -147,3 +147,41 @@ def test_view_screenshot_not_generated():
     # dialog.screenshot is the existing precedent — verify it is still excluded too.
     assert "dialog.screenshot" in m._NON_GENERATED_METHODS
     assert "gui_dialog_screenshot" not in m.TOOLS
+
+
+def test_phase169_removed_tools_absent():
+    """Phase 169 dropped 9 redundant agent tools. The 7 A-class wire methods are
+    gone from the contract entirely; app.shutdown / view.snapshot are kept as
+    internal-only wire methods (gui_stop / overview consume them) but exposed as
+    NO agent tool — so none of the 9 tools appears in the assembled table."""
+    removed_tools = {
+        "gui_tab_get_cfg_summary",
+        "gui_adapter_cfg_spec",
+        "gui_adapter_analyze_spec",
+        "gui_tab_update_cfg",
+        "gui_dialog_open",
+        "gui_dialog_close",
+        "gui_dialog_list_open",
+        "gui_app_shutdown",
+        "gui_view_snapshot",
+    }
+    assert removed_tools.isdisjoint(set(m.TOOLS))
+
+    # A-class: the wire method is gone from the contract entirely.
+    a_class = {
+        "tab.get_cfg_summary",
+        "adapter.cfg_spec",
+        "adapter.analyze_spec",
+        "tab.update_cfg",
+        "dialog.open",
+        "dialog.close",
+        "dialog.list_open",
+    }
+    assert a_class.isdisjoint(set(METHOD_SPECS))
+
+    # B-class: the wire method + handler stay (the dispatch key-match needs the
+    # spec), but generation is suppressed via _NON_GENERATED_METHODS.
+    assert "app.shutdown" in METHOD_SPECS
+    assert "view.snapshot" in METHOD_SPECS
+    assert "app.shutdown" in m._NON_GENERATED_METHODS
+    assert "view.snapshot" in m._NON_GENERATED_METHODS

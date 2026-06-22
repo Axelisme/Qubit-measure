@@ -26,15 +26,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from zcu_tools.gui.app.main.adapter import (
-    CfgSectionSpec,
-    DeviceRefSpec,
     DirectValue,
     EvalValue,
-    LiteralSpec,
-    ModuleRefSpec,
-    ScalarSpec,
-    SweepSpec,
-    WaveformRefSpec,
 )
 from zcu_tools.gui.app.main.live_model import (
     DeviceRefLiveField,
@@ -48,7 +41,6 @@ from zcu_tools.gui.app.main.sweep_model import SweepEditor
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.adapter import CfgNodeSpec
     from zcu_tools.gui.app.main.live_model import LiveField
 
 _SWEEP_EDGES = {"start", "stop", "expts", "step"}
@@ -552,145 +544,6 @@ def build_settable_tree(
     # segment so the reply is always a dict (the caller indexes by name).
     leaf = prefix.split(".")[-1]
     return {leaf: node}
-
-
-# ---------------------------------------------------------------------------
-# Static spec-tree path discovery — no context, no values (for adapter.cfg_spec).
-# The structural skeleton analogue of build_settable_tree: same nested $-keyed
-# shape, but a leaf carries its *type* ($type) instead of its live value, since
-# a static CfgSectionSpec has no context/tab to read a value from. Recursion is
-# kept independent of the live ``_tree_field`` family — the node types differ
-# (CfgNodeSpec vs LiveField) so a shared walk would just be two unioned branches.
-#
-# Node shapes:
-#   - scalar (no choices) → {"$type": "<python type name>"}
-#   - scalar (choices)    → {"$type": ..., "$choices": [...]}
-#   - sweep               → {start/stop/step: {"$type":"number"},
-#                            expts: {"$type":"integer"}}  (edges as $type leaves)
-#   - module/waveform ref → {"$ref": {"options": [<allowed labels>]}}  — NO
-#                           variant sub-tree (static can't pick a default
-#                           variant) and NO ``current`` (no live chosen key)
-#   - device ref          → {"$ref": {"options": []}}  (no live device list)
-#   - literal             → dropped (the _NO_NODE sentinel, as in the live tree)
-#   - section             → a plain sub-tree of its child nodes
-# ---------------------------------------------------------------------------
-
-
-def _tree_spec_sweep() -> dict[str, object]:
-    """A static sweep node: four typed edges (expts integer, others number)."""
-    return {
-        edge: {"$type": "integer" if edge == "expts" else "number"}
-        for edge in ("start", "stop", "expts", "step")
-    }
-
-
-def _tree_spec_field(node: CfgNodeSpec) -> object:
-    """Build the static spec skeleton node for one spec node.
-
-    Returns the node representing ``node``: a ``{$type[, $choices]}`` scalar
-    leaf, a sweep sub-tree of typed edges, a ``{$ref:{options}}`` ref node (no
-    variant sub-tree — see module section header), or a plain section sub-tree.
-    Returns ``_NO_NODE`` for a literal (immutable) field so the parent drops it.
-    """
-    if isinstance(node, LiteralSpec):
-        return _NO_NODE  # immutable — not a settable path (mirrors live tree)
-    if isinstance(node, ScalarSpec):
-        leaf: dict[str, object] = {"$type": node.type.__name__}
-        if node.choices is not None:
-            leaf["$choices"] = list(node.choices)
-        return leaf
-    if isinstance(node, SweepSpec):
-        return _tree_spec_sweep()
-    if isinstance(node, DeviceRefSpec):
-        # No live device registry in a static walk — options is empty.
-        return {"$ref": {"options": []}}
-    if isinstance(node, (ModuleRefSpec, WaveformRefSpec)):
-        # Only the allowed variant labels are advertised; the variant sub-tree is
-        # NOT expanded (a static spec has no default variant — that is the
-        # context-dependent value layer's call). No ``current`` for the same
-        # reason. Read a chosen variant's fields via a live ``tab.list_paths``.
-        return {"$ref": {"options": [s.label for s in node.allowed]}}
-    if isinstance(node, CfgSectionSpec):
-        return _tree_spec_section_children(node)
-    return _NO_NODE
-
-
-def _tree_spec_section_children(section: CfgSectionSpec) -> dict[str, object]:
-    """Recurse a spec section's fields into a sub-tree, dropping ``_NO_NODE``."""
-    out: dict[str, object] = {}
-    for key, child in section.fields.items():
-        node = _tree_spec_field(child)
-        if node is not _NO_NODE:
-            out[key] = node
-    return out
-
-
-def _navigate_spec(spec: CfgSectionSpec, segments: list[str]) -> CfgNodeSpec | None:
-    """Walk a dotted path through a static spec to the node it addresses.
-
-    The static analogue of ``_navigate`` (over CfgNodeSpec, no live model):
-    descend ``CfgSectionSpec.fields``; for a ModuleRef/WaveformRef, a trailing
-    ``ref`` (no rest) resolves to the ref node itself, while any other segment
-    duck-types down its ``allowed`` shapes (returning the first match, mirroring
-    ``_path_exists`` in ``adapter/types.py``). Returns ``None`` when the path
-    does not resolve — the caller turns that into an empty sub-tree.
-    """
-    node: CfgNodeSpec = spec
-    i = 0
-    while i < len(segments):
-        head = segments[i]
-        rest = segments[i + 1 :]
-        if isinstance(node, CfgSectionSpec):
-            child = node.fields.get(head)
-            if child is None:
-                return None
-            node = child
-            i += 1
-            continue
-        if isinstance(node, (ModuleRefSpec, WaveformRefSpec)):
-            if head == "ref" and not rest:
-                # The key segment maps back to the ref node itself.
-                return node
-            # Any other segment descends into a variant shape; pick the first
-            # allowed shape that contains the remaining path (duck-type descent).
-            for shape in node.allowed:
-                resolved = _navigate_spec(shape, segments[i:])
-                if resolved is not None:
-                    return resolved
-            return None
-        # A scalar / sweep / device ref leaf cannot be descended further.
-        return None
-    return node
-
-
-def build_spec_tree(
-    spec: CfgSectionSpec, prefix: str | None = None
-) -> dict[str, object]:
-    """Build the static cfg skeleton tree for an adapter spec (no live values).
-
-    Without ``prefix`` returns the whole spec as a nested dict (the structural
-    twin of ``build_settable_tree`` but with ``$type`` leaves instead of live
-    values). With ``prefix`` (a dotted path) returns the sub-tree rooted at that
-    node, navigating via ``_navigate_spec`` (ModuleRef/WaveformRef ``ref`` +
-    duck-typed variant descent included). A prefix matching nothing — or one
-    addressing a literal (no settable node) — returns ``{}`` (graceful, not a
-    fast-fail), matching ``build_settable_tree``'s contract.
-    """
-    if not prefix:
-        return _tree_spec_section_children(spec)
-    node = _navigate_spec(spec, prefix.split("."))
-    if node is None:
-        return {}
-    built = _tree_spec_field(node)
-    if built is _NO_NODE:
-        # The prefix addresses an immutable/unsupported field — no spec node.
-        return {}
-    if isinstance(built, dict):
-        return built
-    # A scalar / enum prefix node is not itself a dict; wrap it under its leaf
-    # segment so the reply is always a dict (the caller indexes by name).
-    leaf = prefix.split(".")[-1]
-    return {leaf: built}
 
 
 # ---------------------------------------------------------------------------

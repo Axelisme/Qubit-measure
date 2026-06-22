@@ -192,7 +192,7 @@ def test_tab_new_list_close_roundtrip(fx):
         sock.close()
 
 
-def test_tab_get_then_update_cfg_roundtrip(fx):
+def test_tab_get_cfg_returns_tagged_raw(fx):
     sock = _open_client(fx.service.port)
     try:
         _send(
@@ -204,25 +204,10 @@ def test_tab_get_then_update_cfg_roundtrip(fx):
         resp = _recv_response(sock)
         assert resp["ok"] is True
         raw = resp["result"]["raw"]
+        # `schema_to_raw` emits scalars in tagged form (``{__kind: direct,
+        # value: ...}``; value=None means unset, ADR-0010).
         assert "reps" in raw
-
-        # Mutate one scalar then send back. `schema_to_raw` emits scalars in
-        # tagged form (``{__kind: direct, value: ...}``; value=None means unset,
-        # ADR-0010), so mutate the inner ``value`` field.
-        raw["reps"]["value"] = 7
-        _send(
-            sock,
-            {
-                "id": "3",
-                "method": "tab.update_cfg",
-                "params": {"tab_id": tab_id, "raw": raw},
-            },
-        )
-        assert _recv_response(sock)["ok"] is True
-
-        _send(sock, {"id": "4", "method": "tab.get_cfg", "params": {"tab_id": tab_id}})
-        resp = _recv_response(sock)
-        assert resp["result"]["raw"]["reps"]["value"] == 7
+        assert raw["reps"]["__kind"] == "direct"
     finally:
         sock.close()
 

@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 38
+skill_version: 39
 ---
 
 # run-measure-gui
@@ -170,10 +170,6 @@ gui_tab_list_paths(tab_id)                        # returns a nested value tree 
                                                   # pass prefix="modules.readout" to return only that subtree (no match → {});
                                                   # pointing prefix at a sweep edge returns the whole sweep node.
                                                   # EDIT via dotted path (gui_editor_set_field) — path syntax unchanged.
-                                                  # DO NOT lift paths from gui_tab_get_cfg_summary: it wraps refs as
-                                                  # {chosen, value:{...}}, adding a spurious .value. segment.
-gui_tab_get_cfg_summary(tab_id)                   # current values/expressions, nested (ref nodes wrap {chosen,value} → not a path source; see list_paths).
-                                                  # stage1 no longer folds this — use gui_tab_list_paths (tree) for discovery.
 gui_editor_set_field(tab_id, "rounds", 30)        # convenience: tab_id resolves the tab's cfg-editor automatically;
                                                   # explicit editor_id (from gui_tab_snapshot) also accepted
                                                   # Sweep edge fields (start/stop/expts/step) only accept plain numbers;
@@ -203,7 +199,8 @@ gui_tab_get_current_figure(tab_id)                # RARELY NEEDED (run/analyze f
                                                   # write a per-tab temp file; pass out_path="<abs path>" to choose where.
                                                   # gui_debug_screenshot(target, out_path?) [DEV tier] same contract: always
                                                   # writes a file, replies {saved_to, bytes}, never base64. target="window"
-                                                  # grabs the main window; target=<dialog name> a dialog (gui_dialog_open/close).
+                                                  # grabs the main window; target=<dialog name> (setup/device/predictor/inspect/startup)
+                                                  # grabs that dialog if open.
 gui_analyze(tab_id)                               # a FIT settles -> {status:finished, summary:{...}, figure:<png>} (its own
                                                   # fit result + plot; same summary as gui_tab_get_analyze_result); an
                                                   # INTERACTIVE pick (flux_dep) -> {status:pending} → see below
@@ -619,14 +616,10 @@ hardware) — the smoke harness uses it.
   passed in. (The tab's `save_paths` and the diagnostic also carry it.)
 - **cfg paths have no `value` segment.** Module sub-fields are
   `modules.qub_pulse.freq`, not `...qub_pulse.value.freq`; an unknown path
-  fails `invalid_params` rather than silently no-op'ing. Always confirm against
-  `gui_tab_list_paths` (the nested tree). **Do NOT lift paths out of `gui_tab_get_cfg_summary`:**
-  that view deliberately wraps each module/waveform ref as `{chosen, value:{...}}`
-  (so it can keep EvalValue expressions and the chosen variant, which lowering
-  would drop) — so its keys carry the extra `.value.` segment. It is a values/
-  expressions view, not a path source; get editable paths from `list_paths`
-  (tree — `$`-prefixed keys mark leaf metadata; plain keys are subtree nodes).
-  `stage1`'s `tree` field is the same tree as `list_paths` — use it directly.
+  fails `invalid_params` rather than silently no-op'ing. Get editable paths from
+  `gui_tab_list_paths` (the nested tree — `$`-prefixed keys mark leaf metadata;
+  plain keys are subtree nodes). `stage1`'s `tree` field is the same tree as
+  `list_paths` — use it directly.
 - **`gui_editor_set_field` / `gui_editor_set_fields` accept either a `tab_id`
   (convenience — the server resolves that tab's cfg-editor automatically) or an
   explicit `editor_id` from `gui_tab_snapshot`.** Both edit the same live draft
