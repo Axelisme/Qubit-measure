@@ -80,7 +80,7 @@ agent enqueue 一條 diagnostic wire 行。
 **修法（純收斂，零新機制，正路現成）**：
 - 刪 `cfg.set_field` RPC + `gui_cfg_set_field` tool + `Controller.set_tab_field` + `ViewQueryService.set_field`。
   agent 改 tab cfg 改走已存在的 `editor.set_field(editor_id, ...)`（editor_id 由 tab snapshot 取）。
-- `tab.list_paths`（方案 α）：**wire 形狀不變**（agent 仍 `gui_tab_list_paths(tab_id)`），內部數據源從 View model
+- `tab.list_paths`（方案 α；Phase 170 後此 wire method 已更名為 `tab.get_cfg`、agent 工具為 `gui_tab_get_cfg`）：**wire 形狀不變**，內部數據源從 View model
   修正為該 tab 的 **editor session model**（經 `editor_id_for_owner`）。便利查詢定位保留（[[rpc-vs-mcp-layering]]），
   agent 無感、違規消除。
 - 兩用途遷走後 `get_tab_live_model_root`（經 View）整刪 → View 那棵 model 無人讀寫 path。

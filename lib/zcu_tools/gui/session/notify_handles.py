@@ -66,7 +66,7 @@ NotifyEvent = Reply | Dismiss | Timeout
 
 @dataclass(frozen=True)
 class NotifyResult:
-    """The result of one gui_notify_user prompt, structured for wire folding."""
+    """The result of one gui_prompt_user prompt, structured for wire folding."""
 
     reason: Literal["reply", "dismiss", "timeout"]
     reply: str | None = None

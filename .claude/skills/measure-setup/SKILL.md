@@ -92,11 +92,11 @@ devices:                # instruments to connect; delete any block you do not us
 5. **Apply, in this order** (order matters: a context binds a flux device, so the device
    must exist first):
    - `gui_soc_connect(kind, ip, port)` with `kind` from `connection` (a synchronous call — returns once the board is connected).
-   - `gui_startup_apply(chip_name, qub_name, res_name)` — add result_dir/database_path only if the user set them.
-   - For each `devices` block: configure it (`gui_device_setup_spec` shows the fields, then `gui_device_setup`).
-   - `gui_context_new(bind_device=<the flux device name>)`, or `gui_context_use(label)` to reuse an existing context.
-   - `gui_context_md_set_attrs(<the channels mapping>)`.
-   - Confirm with `gui_state_check`: has_project / has_context / has_active_context / has_soc all true.
+   - `gui_project_apply(chip_name, qub_name, res_name)` — add result_dir/database_path only if the user set them.
+   - For each `devices` block: configure it (`gui_device_fields` shows the fields, then `gui_device_apply`).
+   - `gui_context_create(bind_device=<the flux device name>)`, or `gui_context_switch(label)` to reuse an existing context.
+   - `gui_context_md_write(<the channels mapping>)`.
+   - Confirm via `gui_overview`'s `state` field: has_project / has_context / has_active_context / has_soc all true.
 
 ## Notes
 

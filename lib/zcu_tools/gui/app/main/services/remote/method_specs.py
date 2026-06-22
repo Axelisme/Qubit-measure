@@ -653,10 +653,10 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         30.0,
         "Start analyzing the tab's run result. Analyze runs on a worker thread "
         "and returns an operation_id (like run/connect/device); the mcp "
-        "gui_tab_analyze tool awaits it so the agent sees one synchronous call. "
-        "'updates' optionally overrides analyze params (see "
-        "gui_adapter_analyze_spec). Makes the tab busy while it runs; a "
-        "concurrent save/edit returns precondition_failed until it settles. "
+        "gui_tab_analyze_start tool awaits it so the agent sees one synchronous "
+        "call. 'updates' optionally overrides analyze params (read the current "
+        "ones with gui_tab_get_analyze_params). Makes the tab busy while it runs; "
+        "a concurrent save/edit returns precondition_failed until it settles. "
         "Read the fit summary with gui_tab_get_analyze_result.",
         (_str("tab_id"), _obj_default("updates", "Analyze param updates")),
     ),
@@ -674,8 +674,8 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         30.0,
         "Start the second-layer (post) analysis on the tab's PRIMARY analyze "
         "result. Runs on a worker thread and returns an operation_id (like "
-        "tab.analyze); the mcp gui_tab_post_analyze tool awaits it so the agent "
-        "sees one synchronous call. Fast-fails with precondition_failed when the "
+        "tab.analyze); the mcp gui_tab_post_analyze_start tool awaits it so the "
+        "agent sees one synchronous call. Fast-fails with precondition_failed when the "
         "tab has no primary analyze result to build on. 'updates' optionally "
         "overrides post params (see gui_tab_get_post_analyze_params). Read the "
         "fit summary with gui_tab_get_post_analyze_result.",
@@ -836,7 +836,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     # main thread; notify.await blocks the off-main worker until the user replies,
     # dismisses, or the dialog's QTimer fires. Both are excluded from
     # auto-generation via _NON_GENERATED_METHODS in the MCP server so that only
-    # the hand-written gui_notify_user tool is exposed to the agent.
+    # the hand-written gui_prompt_user tool is exposed to the agent.
     "notify.open": MethodSpec(
         30.0,
         "Open a non-modal agent-prompt dialog on the main thread. Returns {token}.",

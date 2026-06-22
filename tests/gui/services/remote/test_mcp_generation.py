@@ -154,7 +154,7 @@ def test_writeback_set_item_selected_is_boolean_schema():
 
 def test_view_screenshot_not_generated():
     """view.screenshot returns raw base64 PNG — it must NOT be auto-generated into
-    a gui_view_screenshot agent tool. The only entry point is gui_debug_screenshot
+    a gui_view_screenshot agent tool. The only entry point is gui_screenshot
     (which decodes + writes a file). Mirrors the dialog.screenshot invariant."""
     # Must be in the exclusion set so the generator skips it.
     assert "view.screenshot" in m._NON_GENERATED_METHODS

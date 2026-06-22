@@ -26,12 +26,12 @@ dialog 直接委 `services/agent_launcher.py` 的 `launch_agent_terminal()`；la
 
 ### 狀態注入
 
-`Controller.build_agent_state_context()` 組 `[measure-gui current state] project / context / SoC / open tabs [end state]` 字串，烤進 `--append-system-prompt`。agent 啟動即知 GUI 狀態，免呼 `gui_state_check` 定位。
+`Controller.build_agent_state_context()` 組 `[measure-gui current state] project / context / SoC / open tabs [end state]` 字串，烤進 `--append-system-prompt`。agent 啟動即知 GUI 狀態，免呼 `gui_overview` 定位。
 
 ### `services/agent_launcher.py`（Qt-free）
 
 - `build_loopback_mcp_config(repo_root)` → 暫存 mcp.json（entry = `uv run zcu_tools/mcp/measure/server.py`，cwd = repo_root）。
-- `_EMBEDDED_SYSTEM_PROMPT`：告知 agent「gui_* 工具已自動 attach、勿自呼 connect、需要狀態自呼 gui_state_check」。
+- `_EMBEDDED_SYSTEM_PROMPT`：告知 agent「gui_* 工具已自動 attach、勿自呼 gui_bridge_connect、需要狀態自呼 gui_overview」。
 - `build_claude_argv(session_id, *, resume, mcp_config_path, system_prompt)` → 互動模式不帶 `-p`；帶 `--mcp-config` / `--allowedTools "mcp__measure-gui__*"` / `--append-system-prompt` / `--resume <id>`（Resume）或 `--session-id <uuid>`（New）。
 - `new_session_id()` → uuid4 string。
 - `record_launched_session(id)` / `list_resumable_sessions(repo_root)` / `claude_project_dir(repo_root)`：追蹤我們 launch 過的 session 於 `~/.cache/zcu-tools/agent_sessions.json`；列表時對每個 id 查 claude 的 `<slug>/<id>.jsonl`（slug = abspath 非 `[A-Za-z0-9-]` 換 `-`），補 last-active mtime + 首則 user 訊息 label，依 last-active 排序。
@@ -49,7 +49,7 @@ dialog 直接委 `services/agent_launcher.py` 的 `launch_agent_terminal()`；la
 
 ### 自動連線
 
-靠 `mcp/measure/server.py` 既有的 **lazy auto-connect** policy：首次 `gui_*` 呼叫時自動經 session-discovery 解析 control-socket port 並 attach。agent 無需顯式呼 `gui_connect`。
+靠 `mcp/measure/server.py` 既有的 **lazy auto-connect** policy：首次 `gui_*` 呼叫時自動經 session-discovery 解析 control-socket port 並 attach。agent 無需顯式呼 `gui_bridge_connect`。
 
 ### Session 持久
 

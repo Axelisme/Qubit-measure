@@ -128,14 +128,18 @@ def main() -> int:
         log(f"ready: {flags}")
 
         # 3b. SoC hardware summary (soc.info) — the agent's window into the board.
-        info = rpc.call("soc.info")
+        #     include_cfg=True is required to receive the full QICK cfg: soc.info
+        #     omits the ~2 KB cfg unless explicitly asked (default false).
+        info = rpc.call("soc.info", {"include_cfg": True})
         assert "QICK" in info["description"] and info["cfg"]["gens"], info
         log(f"soc: mock={info['is_mock']}, gens={len(info['cfg']['gens'])}")
 
         # 4. New tab on the mock-friendly fake/freq adapter.
         tab_id = rpc.call("tab.new", {"adapter_name": "fake/freq"})["tab_id"]
         log(f"tab: {tab_id}")
-        editor_id = rpc.call("tab.snapshot", {"tab_id": tab_id})["editor_id"]
+        # tab.snapshot always returns {tabs: [...]} (a single tab_id yields a
+        # one-element list); index reply["tabs"][0] uniformly.
+        editor_id = rpc.call("tab.snapshot", {"tab_id": tab_id})["tabs"][0]["editor_id"]
 
         # 5. Edit a couple of fields through the cfg-editor session.
         rpc.call(
@@ -169,7 +173,7 @@ def main() -> int:
             time.sleep(0.2)
         else:
             raise RuntimeError("run never finished")
-        snap = rpc.call("tab.snapshot", {"tab_id": tab_id})
+        snap = rpc.call("tab.snapshot", {"tab_id": tab_id})["tabs"][0]
         assert snap["interaction"]["has_run_result"], "no run result after finish"
         log(f"run finished (saw_live_progress={saw_progress})")
 
@@ -178,9 +182,9 @@ def main() -> int:
         # then save.
         rpc.call("tab.analyze", {"tab_id": tab_id})
         for _ in range(300):
-            if not rpc.call("tab.snapshot", {"tab_id": tab_id})["interaction"][
-                "is_analyzing"
-            ]:
+            if not rpc.call("tab.snapshot", {"tab_id": tab_id})["tabs"][0][
+                "interaction"
+            ]["is_analyzing"]:
                 break
             time.sleep(0.2)
         else:

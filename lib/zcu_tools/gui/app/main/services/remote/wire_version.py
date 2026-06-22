@@ -45,10 +45,31 @@ from __future__ import annotations
 # rename_ml_module/rename_ml_waveform renamed to context.ml_get/ml_del_module/
 # ml_del_waveform/ml_rename_module/ml_rename_waveform; ml.list_roles/create_from_role
 # moved to context.ml_list_roles/ml_create_from_role; editor.open->editor.new.
-WIRE_VERSION = 43
+# v44: Phase 171 measure-gui interface redesign — the MCP tool *aliases* were
+# renamed via method_specs.tool_name / server overrides (those are NOT wire
+# changes; the wire dotted method names are unchanged). This bump tracks the
+# genuine wire-contract changes (reply shapes + params) made across P1-P4:
+#   - startup.apply: returns the resolved project dict
+#     {chip_name, qub_name, res_name, result_dir, database_path} instead of bool.
+#   - tab.list_all: returns a named dict
+#     {tabs:[{tab_id, adapter_name, is_running}], active_tab_id, running_tab_id}
+#     instead of the positional 2-tuple [tabs, running_tab_id].
+#   - soc.info: new optional param include_cfg (default false) — the ~2 KB QICK
+#     cfg is omitted unless requested.
+#   - device.list: each entry carries the fine-grained status enum
+#     (DeviceStatus value) instead of is_connected:bool.
+#   - device.reconnect: returns {operation_id} (now a tracked async op) instead
+#     of {}.
+#   - predictor.predict: params renamed value->device_value,
+#     from_lvl->from_level, to_lvl->to_level.
+#   - tab.run_start / tab.analyze / tab.post_analyze / device start ops: START
+#     replies surface the operation handle (operation_id) instead of stripping it.
+#   - tab.writeback_apply: enriched echo
+#     {applied_ids, written, context_version}.
+WIRE_VERSION = 44
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION (a wire-contract change
 # bumps both; a pure-internal GUI change bumps only this). Git history holds the
 # per-version evolution.
-GUI_VERSION = 50
+GUI_VERSION = 51

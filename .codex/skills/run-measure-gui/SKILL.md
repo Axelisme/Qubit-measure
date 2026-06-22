@@ -38,7 +38,7 @@ fridge. So on a real (non-mock) session you **must get hardware facts from the
 user first**, and you **must respect device safety limits**.
 
 - **⚠️ YOKOGS200 in current mode: keep the value within ±7e-3 A.** Exceeding it
-  can **physically destroy the instrument**. `gui_device_setup(name,
+  can **physically destroy the instrument**. `gui_device_apply(name,
   updates={"value": ...})` and any flux-sweep edge must stay in range. When in
   doubt, ask — do not guess a flux value.
 - **Read the board first with `gui_soc_info`** (after connect). It returns the
@@ -101,17 +101,22 @@ stays recallable per chip/qub/experiment.** Two non-negotiable touch points:
 ### Overview and project-identity tools
 
 ```
-gui_overview         # standalone "current state" summary — returns:
-                     #   {state, project:{chip_name,qub_name,res_name} or null, context, soc,
-                     #    tabs:[{tab_id,adapter,is_running}],
+gui_overview         # standalone "current state" summary — the SINGLE orientation read.
+                     # Returns:
+                     #   {state:{has_project,has_context,has_active_context,has_soc},
+                     #    project:{chip_name,qub_name,res_name,result_dir,database_path} or null,
+                     #    context, soc, tabs:[{tab_id,adapter,is_running}],
                      #    running_tab, active_tab}
-                     # Auto-connects if not already connected (pure read, no side effects).
+                     # The 'state' field carries the four readiness flags (no separate
+                     # state-check tool); 'project' carries the project identity + paths
+                     # (no separate project-info tool). Auto-connects if not already
+                     # connected (pure read, no side effects).
                      # active_tab is the USER's current focus (collaboration only —
                      # not an operation target; agent ops always take an explicit tab_id).
                      # FIRST CALL when attaching to a running session: call gui_overview
                      # to load current state before assuming anything — the user may be
                      # actively operating the same GUI.
-                     # gui_connect also folds the same overview into its reply ({note, overview}).
+                     # gui_bridge_connect also folds the same overview into its reply ({note, overview}).
 
 gui_tab_set_active(tab_id)   # push a tab to the user's foreground (user↔agent collaboration).
                              # Agent operations all take an explicit tab_id and are independent
@@ -119,12 +124,6 @@ gui_tab_set_active(tab_id)   # push a tab to the user's foreground (user↔agent
                              # user's attention — e.g. ask them to drag flux lines on a specific
                              # tab — or to read back which tab they are currently looking at via
                              # gui_overview's active_tab field.
-
-gui_project_info     # current project identity:
-                     #   {chip_name, qub_name, res_name, result_dir, database_path}
-                     # Fast-fails with precondition_failed: no_project when no project is applied.
-                     # gui_overview.project also uses these long keys ({chip_name,qub_name,res_name},
-                     # result_dir/database_path omitted for conciseness).
 ```
 
 ### Startup (fresh session)
@@ -136,18 +135,20 @@ gui_launch                                      # spawns the GUI, connects; bann
 gui_soc_connect(kind="mock")                    # mock SoC (or kind="remote", ip, port). SYNCHRONOUS:
                                                 # returns the SoC summary directly, no wait/poll; a
                                                 # remote connect fail-fasts at ~1s if unreachable.
-gui_startup_apply(chip_name="Q1_Chip",          # apply the project; omit result_dir/database_path
+gui_project_apply(chip_name="Q1_Chip",          # apply the project; omit result_dir/database_path
                   qub_name="Q1", res_name="R1")  # to scope them under chip/qub (notebook layout)
-gui_context_new(bind_device="fake_flux")        # create a context bound to a flux device (reads its
+gui_context_create(bind_device="fake_flux")     # create a context bound to a flux device (reads its
                                                 # current value/unit; FakeDevice->none, YOKOGS200->A).
                                                 # Mock sessions use "fake_flux" (FAKE_FLUX_DEVICE_NAME);
                                                 # real hardware: use the device name you connected with.
                                                 # Omit bind_device for an unbound context; clone_from=<label>
-                                                # clones an existing one. Or gui_context_use(label) for an existing one.
-gui_state_check                                 # global readiness: four flags (has_project/has_context/has_active_context/has_soc)
-                                                # — all must be true before running; use gui_tab_snapshot for per-tab
+                                                # clones an existing one. Or gui_context_switch(label) for an existing one.
+gui_overview                                    # global readiness: gui_overview.state has the four flags
+                                                # (has_project/has_context/has_active_context/has_soc) — all must
+                                                # be true before running; use gui_tab_snapshot for per-tab
                                                 # progress (is_running/is_analyzing/has_run_result/…)
-gui_soc_info                                    # the board: per-channel type, sample rate, port, max length (+ full cfg)
+gui_soc_info                                    # the board: per-channel type, sample rate, port, max length.
+                                                # cfg is opt-in: pass include_cfg=true for the full structured cfg.
 ```
 
 Then the experiment loop (per tab):
@@ -155,9 +156,9 @@ Then the experiment loop (per tab):
 ```
 gui_adapter_list                                  # available experiments
 gui_adapter_guide(adapter_name="onetone/flux_dep")# READ FIRST: per-experiment behavior, expected md/ml, recommended
-                                                  # ranges + gotchas — live here, not in this skill. (gui_tab_stage1
+                                                  # ranges + gotchas — live here, not in this skill. (gui_tab_open
                                                   # folds this guide in, so the recommended flow rarely calls it directly.)
-gui_tab_new(adapter_name="fake/freq")             # PURE: just creates a tab -> {tab_id}. (gui_tab_stage1 creates + folds
+gui_tab_new(adapter_name="fake/freq")             # PURE: just creates a tab -> {tab_id}. (gui_tab_open creates + folds
                                                   # editor_id/tree/guide in one call.) id e.g. fake-freq-1a2b3c4d
 gui_tab_snapshot(tab_id) -> editor_id             # per-tab progress + the cfg-editing session handle
 gui_tab_get_cfg(tab_id)                           # returns a nested value tree (not a flat list). Leaf conventions:
@@ -165,30 +166,35 @@ gui_tab_get_cfg(tab_id)                           # returns a nested value tree 
                                                   #   enum leaf      → {"$value": v, "$choices": [...]}
                                                   #   sweep node     → {"start":..., "stop":..., "expts":..., "step":...}
                                                   #   ref node       → {"$ref":{"current":"key","options":[...]}, ...current-variant subtree...}
-                                                  #                    options are bare names; set_field accepts a bare name
+                                                  #                    options are bare names; a ref edit accepts a bare name
                                                   # $-prefixed keys mark leaf metadata; plain keys are subtree nodes.
                                                   # pass prefix="modules.readout" to return only that subtree (no match → {});
                                                   # pointing prefix at a sweep edge returns the whole sweep node.
-                                                  # EDIT via dotted path (gui_editor_set_field) — path syntax unchanged.
-gui_editor_set_field(tab_id, "rounds", 30)        # convenience: tab_id resolves the tab's cfg-editor automatically;
-                                                  # explicit editor_id (from gui_tab_snapshot) also accepted
-                                                  # Sweep edge fields (start/stop/expts/step) only accept plain numbers;
-                                                  # eval/ref expressions are not accepted there (use scalar leaf fields
-                                                  # for eval). If an adapter pre-wires an eval edge, override it by
-                                                  # passing a numeric value directly.
-# RECOMMENDED FLOW = the 4 bundle tools (each folds the NEXT decision's input, stops at a decision point):
-#   gui_tab_stage1(adapter_name)            -> {tab_id, editor_id, tree, guide}   # ① new+guide
-#                                              tree = nested value tree (same shape as gui_tab_get_cfg — see above).
-#                                              guide = adapter guide (full prose) on FIRST call for this adapter in the
-#                                              current MCP session; subsequent calls for the SAME adapter return
-#                                              guide_omitted: true instead (guide already in session context, not resent).
-#   gui_tab_stage2(tab_id, edits={path:v})  -> {..run.., figure, analyze_params}   # ② configure+run; STOPS before analyze
-#   gui_tab_stage3(tab_id)                  -> {summary, figure, writeback_preview}   # ③ analyze
-#   gui_tab_stage4(tab_id, save_data=False) -> {applied_ids[, data_path]}   # ④ writeback (+ optional save)
-# The base tools below = ON-DEMAND (fine-grained control). DEV tools (gui_debug_screenshot/_versions/_operations —
+                                                  # EDIT via dotted path (gui_tab_set_cfg) — path syntax unchanged.
+gui_tab_set_cfg(tab_id, edits=[{path,value},…])   # batch-set tab cfg fields in order (non-atomic; first failure RAISES,
+                                                  # edits before it stay applied). Apply a ref-switch edit BEFORE the inner
+                                                  # paths it unlocks. Sweep edge fields (start/stop/expts/step) only accept
+                                                  # plain numbers; eval/ref expressions are not accepted there (use scalar
+                                                  # leaf fields for eval). If an adapter pre-wires an eval edge, override it
+                                                  # by passing a numeric value directly.
+                                                  # (gui_editor_set edits a NON-tab editor draft instead, addressed by editor_id.)
+# RECOMMENDED FLOW = the 4 bundle tools (breadcrumb open -> run -> analyze_review -> commit;
+#   each folds the NEXT decision's input, stops at a decision point):
+#   gui_tab_open(adapter_name)                  -> {tab_id, editor_id, tree, guide}   # ① open: new+guide
+#                                                  tree = nested value tree (same shape as gui_tab_get_cfg — see above).
+#                                                  guide = adapter guide (full prose) on FIRST call for this adapter in the
+#                                                  current MCP session; subsequent calls for the SAME adapter return
+#                                                  guide_omitted: true instead (guide already in session context, not resent).
+#   gui_tab_run(tab_id, edits=[{path,value},…]) -> {..run.., figure, analyze_params}   # ② run: configure+run; STOPS before analyze
+#                                                  edits is an ORDERED list (ref-switch before the paths it unlocks).
+#   gui_tab_analyze_review(tab_id)              -> {summary, figure, writeback_preview}   # ③ analyze_review: analyze + preview writeback
+#   gui_tab_commit(tab_id, save_data=False)     -> {status, applied_ids, saved[, save_error]}   # ④ commit: writeback (+ optional save)
+# The base tools below = ON-DEMAND (fine-grained control). DEV tools (gui_debug_versions/_operations —
 #   debugging the GUI/MCP itself, NOT the measurement flow) are a separate tier in the server instructions:
-gui_tab_run_start(tab_id)                         # waits ~1s; finished -> {status:finished, figure:<png>,...}, slow -> {status:pending}
-gui_tab_run_wait(tab_id)                          # block until done (only after pending; blocks your turn — for a long run background it, see "Detecting completion")
+gui_tab_run_start(tab_id)                         # waits ~1s; finished -> {status:finished, handle, figure:<png>,...}, slow -> {status:pending, handle}
+gui_op_wait(handle)                               # block until the op (by handle) ends (only after pending; blocks your turn —
+                                                  # for a long run background it, see "Detecting completion"). Generic: drives ANY handle.
+gui_op_poll(handle)                               # non-blocking status of the op (by handle); NEVER raises. Generic: drives ANY handle.
 gui_tab_get_current_figure(tab_id)                # RARELY NEEDED (run/analyze finished already fold the figure, incl 2D
                                                   # scans via run; use only for a re-render / mid-flight plot / chosen out_path).
                                                   # Writes the CURRENT plot (run's 2D map, analysis fit, or post-analysis
@@ -197,20 +203,21 @@ gui_tab_get_current_figure(tab_id)                # RARELY NEEDED (run/analyze f
                                                   # non-analysis 2D scans (flux_dep / power_dep): Read the saved_to path.
                                                   # Always a file (fixed 640×480), never inline base64. Omit out_path to
                                                   # write a per-tab temp file; pass out_path="<abs path>" to choose where.
-                                                  # gui_debug_screenshot(target, out_path?) [DEV tier] same contract: always
+                                                  # gui_screenshot(target, out_path?) [ON-DEMAND] same contract: always
                                                   # writes a file, replies {saved_to, bytes}, never base64. target="window"
                                                   # grabs the main window; target=<dialog name> (setup/device/predictor/inspect/startup)
                                                   # grabs that dialog if open.
-gui_tab_analyze(tab_id)                           # a FIT settles -> {status:finished, summary:{...}, figure:<png>} (its own
+gui_tab_analyze_start(tab_id)                     # a FIT settles -> {status:finished, handle, summary:{...}, figure:<png>} (its own
                                                   # fit result + plot; same summary as gui_tab_get_analyze_result); an
-                                                  # INTERACTIVE pick (flux_dep) -> {status:pending} → see below
-gui_tab_post_analyze(tab_id)                      # second analysis layer on top of the primary fit (e.g. single-shot ge);
-                                                  # FIT-only, settles -> {status:finished, summary:{...}} inline;
-                                                  # slow -> {pending} then gui_tab_post_analyze_wait/poll; needs primary analyze first
+                                                  # INTERACTIVE pick (flux_dep) -> {status:pending, handle} → see below
+gui_tab_post_analyze_start(tab_id)                # second analysis layer on top of the primary fit (e.g. single-shot ge);
+                                                  # FIT-only, settles -> {status:finished, handle, summary:{...}} inline;
+                                                  # slow -> {pending, handle} then gui_op_wait/gui_op_poll; needs primary analyze first
 gui_tab_get_post_analyze_result(tab_id)           # re-fetch post-analysis summary (params: gui_tab_get_post_analyze_params)
-gui_tab_save_data(tab_id) / gui_tab_save_image / gui_tab_save_result   # each returns the resolved written path ({data_path[, image_path]})
-gui_tab_writeback_apply(tab_id)                   # PURE: apply the writeback -> {applied_ids}. (gui_tab_stage4 also folds an optional save.)
-gui_tab_save_post_image(tab_id)                   # save the post-analysis figure (mirrors gui_tab_save_image)
+gui_tab_save(tab_id)                              # save data and/or figure -> {data_path, image_path, data_async, image_error}.
+                                                  # artifact='data'|'image'|'both' (default both); figure='primary'|'post'
+                                                  # (default primary) selects which plot the 'image' targets.
+gui_tab_writeback_apply(tab_id)                   # PURE: apply the writeback -> {applied_ids}. (gui_tab_commit also folds an optional save.)
 ```
 
 Detecting completion — completion is observed synchronously or by waiting/polling
@@ -218,14 +225,15 @@ a handle, never by subscribing to a push stream:
 
 | situation | what to do |
 |---|---|
-| fast run / fast fit | the call returns `{status:finished}` (`gui_tab_run_start` / `gui_tab_analyze` when it settles within `wait_seconds`, default 1.0) |
-| `gui_tab_run_start` / `gui_tab_analyze` returned `{status:pending}` | wait (`gui_tab_run_wait` / `gui_tab_analyze_wait`, blocks) or poll (`gui_tab_run_poll` / `gui_tab_analyze_poll`, non-blocking) |
-| want live progress bars | already in the `gui_tab_run_poll` reply while `status:running` (active + bars); no separate progress tool |
+| fast run / fast fit | the call returns `{status:finished}` (`gui_tab_run_start` / `gui_tab_analyze_start` when it settles within `wait_seconds`, default 1.0) |
+| a START returned `{status:pending, handle}` | wait (`gui_op_wait(handle)`, blocks) or poll (`gui_op_poll(handle)`, non-blocking) — the SAME generic drains for run / analyze / post-analyze / device handles |
+| want live progress bars | already in the `gui_op_poll(handle)` reply while `status:running` (active + bars); no separate progress tool |
 | a poll or wait says `status:cancelled` | a user/agent cancel (distinct from `failed`); **not a raise, not an error** — read optional `feedback` for the Stop reason (present when user clicked "Send & Stop"), then re-plan |
+| after a `pending`->`finished` run/analyze | `gui_op_wait`/`gui_op_poll` report ONLY status — read the figure with `gui_tab_get_current_figure` and the fit summary with `gui_tab_get_analyze_result` (they are NOT auto-folded after a degrade) |
 
 ### Acceptance gate (after analyze, before writeback)
 
-Once `gui_tab_analyze` has settled, before you write anything back, run the gate. It is
+Once `gui_tab_analyze_start` has settled, before you write anything back, run the gate. It is
 **self-grading, not a blocker** — an imperfect run is acceptable, but you must
 record *why* honestly.
 
@@ -235,7 +243,7 @@ record *why* honestly.
    consider *proposing* one — apply `memory_checklist_set` only with the user's
    agreement (see *Checklist is user-owned* below).
 2. **Grade each item with evidence.** Look at the analysis figure (the finished
-   `gui_tab_analyze` reply folds it) and the summary; for every checklist item write a
+   `gui_tab_analyze_start` reply folds it) and the summary; for every checklist item write a
    one-line pass/fail with the number or the visual fact that justifies it. The
    figure is the evidence — a small fit error bar alone does not pass an item.
 3. **`memory_record_measurement`** the run: `decision=accept|reject`, a one-line
@@ -243,7 +251,7 @@ record *why* honestly.
    the plot(s) into the record folder (pass the PNG path the run/analyze reply
    gave you; omit `figure_paths` if there is no figure — a record with no figure
    is still valid), and `data_ref` if you saved the data.
-4. **Then writeback as usual** — the gate does not block it (`gui_tab_stage4` /
+4. **Then writeback as usual** — the gate does not block it (`gui_tab_commit` /
    `gui_tab_writeback_apply`). If an item failed, prefer the partial-writeback rules in
    "Gotchas" (write the safe subset, leave the dubious one unset) and say so in the
    record's `reason`.
@@ -263,16 +271,17 @@ checklist on your own.
 automatic fit — the analysis is a 2D map the **user picks on**. `gui_adapter_guide`
 flags these (its writeback describes a hand-pick). The flow:
 
-1. Run as usual, then call `gui_tab_analyze(tab_id)`. It returns **`{status:pending}`** —
+1. Run as usual, then call `gui_tab_analyze_start(tab_id)`. It returns **`{status:pending, handle}`** —
    that is expected, *not* an error: a live picker is now mounted in the tab.
 2. **Tell the user what to do** — e.g. "drag the red (half-flux) and blue
    (integer-flux) lines to the sweet spots on the 2D map and click **Done**" — then
-   `gui_tab_analyze_poll(tab_id)` until `{status:finished}` (it stays `running` until the
-   user clicks Done). Don't `gui_tab_analyze_wait` inline — it blocks your turn on a
+   `gui_op_poll(handle)` until `{status:finished}` (it stays `running` until the
+   user clicks Done). Don't `gui_op_wait` inline — it blocks your turn on a
    human; poll and check back (or wait from a background agent).
-3. On finished, the `summary` in the `{status:finished}` reply (or
-   `gui_tab_get_analyze_result(tab_id)` to re-fetch) contains the picked values
-   (`flx_half` / `flx_int` / `flx_period`); apply them with `gui_tab_writeback_apply`.
+3. On finished, read the picked values with `gui_tab_get_analyze_result(tab_id)`
+   (`flx_half` / `flx_int` / `flx_period`) — after a `pending`->`finished` analyze the
+   generic poll/wait reports only status, so fetch the summary explicitly; apply them
+   with `gui_tab_writeback_apply`.
    **The picking is the user's judgement — you set up, prompt, observe, and write
    back; you never decide the line positions.**
 
@@ -280,36 +289,37 @@ To **abort** a mounted interactive picker without a result — you set it up but
 human will pick, or you need to re-plan — call `gui_tab_analyze_cancel(tab_id)`. It
 settles the interactive handle (`{ok:true, cancelled:true}` when one was in
 flight; `cancelled:false` is a graceful no-op when nothing is mounted) and
-unmounts the picker so the tab is free again. The cancel outcome rides
-`gui_tab_analyze_cancel`'s own reply — **after a cancel, `gui_tab_analyze_poll` reports
-`status:finished`, not `cancelled`** (only `gui_tab_run_*` surfaces a cancelled status
-through poll/wait).
+unmounts the picker so the tab is free again. Cancel stays op-specific (the generic
+`gui_op_*` family has no cancel). The cancel outcome rides `gui_tab_analyze_cancel`'s
+own reply — **after a cancel, `gui_op_poll` reports `status:finished`, not
+`cancelled`** (only a run handle surfaces a cancelled status through poll/wait).
 
 **Post-analysis (second layer, e.g. single-shot `ge` discrimination).** Some
 adapters offer a second analysis on top of the primary fit. After a primary
-`gui_tab_analyze` settles, `gui_tab_post_analyze(tab_id)` runs it — FIT-only, so it
-degrades exactly like `gui_tab_analyze` (settles → `{status:finished}`, slow →
-`{status:pending}` then `gui_tab_post_analyze_wait` / `gui_tab_post_analyze_poll`). It
+`gui_tab_analyze_start` settles, `gui_tab_post_analyze_start(tab_id)` runs it — FIT-only, so it
+degrades exactly like `gui_tab_analyze_start` (settles → `{status:finished}`, slow →
+`{status:pending, handle}` then `gui_op_wait` / `gui_op_poll`). It
 fast-fails with `precondition_failed` until a primary analyze result exists, so
-run `gui_tab_analyze` first. Read its summary with `gui_tab_get_post_analyze_result`
-(its params come from `gui_tab_get_post_analyze_params`). The post figure shares
-the tab's plot container — view it with `gui_tab_get_current_figure` and persist
-it with `gui_tab_save_post_image`.
+run `gui_tab_analyze_start` first. There is NO cancel for post-analysis (pure CPU
+recompute). Read its summary with `gui_tab_get_post_analyze_result` (its params come
+from `gui_tab_get_post_analyze_params`). The post figure shares the tab's plot
+container — view it with `gui_tab_get_current_figure` and persist it with
+`gui_tab_save(tab_id, figure="post")`.
 
-**`gui_tab_run_wait` blocks your whole turn until the run ends** (a big sweep is
+**`gui_op_wait` blocks your whole turn until the op ends** (a big sweep is
 minutes), and nothing pushes a completion event — the MCP server cannot wake
 you. So for a long run, pick by who should wait:
 
-- **Free your main loop, auto-continue when done** → call `gui_tab_run_wait` from a
+- **Free your main loop, auto-continue when done** → call `gui_op_wait(handle)` from a
   *background agent*. The block lives in the sub-agent; your main loop stays free
   and the harness re-invokes you with the run's result when it finishes.
 - **Just don't block, you'll check back yourself** → `gui_tab_run_start`, then
-  `gui_tab_run_poll(tab_id)` when you choose (the `running` reply carries live
+  `gui_op_poll(handle)` when you choose (the `running` reply carries live
   progress bars).
 
-Reserve inline `gui_tab_run_wait` for runs you expect to finish quickly. The same
-choice applies to `gui_device_wait_operation`, though those
-ops are usually short.
+Reserve inline `gui_op_wait` for ops you expect to finish quickly. The same generic
+handle drains drive device ops too (`gui_device_*` START → `gui_op_wait` /
+`gui_op_poll`), though those ops are usually short.
 
 ### User feedback wakeup (cooperative interrupt — ADR-0023)
 
@@ -325,19 +335,19 @@ The operation is **not cancelled** — it keeps running. You should:
 1. Read and act on `feedback` (re-plan, adjust parameters, ask a follow-up).
 2. Re-call the same `*_wait` with a fresh timeout to keep observing.
 
-If you never re-await, `gui_tab_run_poll` / `gui_tab_list_all` still work for
+If you never re-await, `gui_op_poll(handle)` / `gui_tab_list` still work for
 non-blocking status checks.
 
 A `diagnostic{severity}` push (errors / info the GUI would show in a dialog) rides
 along in the *next* tool reply's notifications — you get it without asking. Don't
-busy-poll `gui_tab_list_all` in a sleep loop.
+busy-poll `gui_tab_list` in a sleep loop.
 
-### Agent-to-user prompt (`gui_notify_user` — BLOCKS your turn)
+### Agent-to-user prompt (`gui_prompt_user` — BLOCKS your turn)
 
 When you need the user to make a decision mid-workflow, call:
 
 ```
-gui_notify_user(message, timeout=600)
+gui_prompt_user(message, timeout=600)
 ```
 
 This opens a **non-modal dialog** in the GUI and **BLOCKS your entire MCP turn**
@@ -352,7 +362,7 @@ The call returns one of three outcomes:
 | `"dismiss"` | user clicked Dismiss (or closed the dialog) | absent |
 | `"timeout"` | dialog auto-closed after `timeout` seconds | absent |
 
-`gui_notify_user` **never raises** on dismiss or timeout — those are normal
+`gui_prompt_user` **never raises** on dismiss or timeout — those are normal
 outcomes. Check `reason` before reading `reply`.
 
 **When to use proactively** (representative cases):
@@ -441,12 +451,13 @@ a separate sub-procedure layered on top once a π pulse exists.
 noise.** At a fresh bias point `q_f` is unknown, and a narrow or mis-centered
 twotone window returns pure noise that *looks* like "no qubit". After step 4 (at
 the integer / sweet-spot bias) predict `q_f` from the fluxonium model first:
-- Set the model in the predictor — `gui_predictor_set_model_params(EJ, EC, EL,
+- Set the model in the predictor — `gui_predictor_install_params(EJ, EC, EL,
   flux_half, flux_period)` (energies in GHz; a typical fluxonium is roughly
-  `EJ:EC:EL ≈ 4:1:1`), or `gui_predictor_load(path)` from a `params.json`
-  `fluxdep_fit`. Then `gui_predictor_predict(value)` at the current flux returns
-  the predicted `q_f` (`gui_predictor_info` reads back the active EJ/EC/EL + flux
-  alignment).
+  `EJ:EC:EL ≈ 4:1:1`), or `gui_predictor_install_from_file(path)` from a
+  `params.json` `fluxdep_fit`. Then `gui_predictor_predict(device_value)` — where
+  `device_value` is the instrument's native setpoint (e.g. current in A for a
+  YOKOGS200, NOT a flux quantum) — at the current flux returns the predicted `q_f`
+  (`gui_predictor_info` reads back the active EJ/EC/EL + flux alignment).
 - Then run `twotone/freq` with a **wide** sweep bracketing that estimate (e.g. a
   ~2 GHz span such as 4000–6000 MHz) to actually catch the peak; narrow only once
   you see it. **A twotone scan that looks like noise almost always means the
@@ -510,8 +521,10 @@ the options, and let the user choose.
   the stronger readout drive so the signal-to-noise ratio is good enough to
   judge timing and resonator features cleanly.
 - **After every important `run`, look at the figure before trusting any number.**
-  Finished `gui_tab_run_start`/`gui_tab_run_wait`/`gui_tab_run_poll`/`gui_tab_analyze` replies FOLD a
-  `figure` (PNG path; `None` if the render failed) — Read that. `gui_tab_get_current_figure`
+  A finished `gui_tab_run_start` / `gui_tab_analyze_start` reply (settled in the short
+  wait) FOLDS a `figure` (PNG path; `None` if the render failed) — Read that. After a
+  `pending`->`finished` op the generic `gui_op_wait`/`gui_op_poll` report only status, so
+  fetch the plot with `gui_tab_get_current_figure`. `gui_tab_get_current_figure`
   is rarely needed (a re-render, a mid-flight plot, or a chosen `out_path`). It returns the current plot
   whether or not the adapter does analysis, so for a **2D scan with no fit**
   (`onetone/twotone flux_dep`, `power_dep`) it is the 2D map itself.
@@ -542,25 +555,30 @@ the options, and let the user choose.
   result to become the canonical default.
 
 Flux/RF sources (YOKOGS200, SGS100A) are driven as **devices**:
-`gui_device_connect(type_name, name, address)` → `gui_device_setup(name,
-updates={"value": ...})` ramps an output (cancellable; a slow setup degrades to
-a handle, and its progress bars ride the `gui_device_poll` reply while running).
-`gui_device_setup_spec(name)` lists the settable fields. Sweeping a device across an experiment is done in the adapter cfg's
+`gui_device_connect(type_name, name, address)` → `gui_device_apply(name,
+updates={"value": ...})` ramps an output (a slow apply degrades to a handle; drive
+it with `gui_op_wait(handle)` / `gui_op_poll(handle)`, and its progress bars ride the
+`gui_op_poll` reply while running). Cancel a device op with `gui_device_cancel(name)`
+(only an apply is cancellable). Omit type_name/address to reconnect a known device
+by name. `gui_device_fields(name)` lists the settable fields; `gui_device_list`
+shows each device's status (memory_only / connecting / connected / disconnecting /
+setting_up). Sweeping a device across an experiment is done in the adapter cfg's
 `dev` / sweep section, not by manual per-point setup. Different devices set up
-**concurrently**: `gui_device_active_operations` lists every in-flight device op
-in one call (each entry has `device_name` + `kind`, where kind is
-device_connect / device_disconnect / device_setup) — then poll/wait each device
-by name.
+**concurrently**: `gui_device_list_operations` lists every in-flight device op
+in one call (each entry has its `handle` + `kind`, where kind is
+device_connect / device_disconnect / device_apply) — then drive each handle with
+`gui_op_wait` / `gui_op_poll`.
 
 **Stash reusable constants in the context (md/ml), then reference them by name
 in cfg.** Channel numbers, `res_probe_len`, probe-pulse lengths etc. go into the
-MetaDict (`gui_context_md_set_attr` for a single key, `gui_context_md_set_attrs`
-for a batch); to read multiple keys at once use `gui_context_md_get_attrs([keys])`
-which returns `{values: {key: value}}`. Named waveforms/modules go into the
-ModuleLibrary (`gui_context_ml_create_from_role`/role tools). A cfg field can then reference
-`md.<attr>` (e.g. a pulse `freq: r_f`) or a module/waveform by its library key,
-instead of hard-coding — the notebook does exactly this (`md.res_ch`,
-`ro_waveform`, `readout_rf`, `pi_amp`).
+MetaDict (`gui_context_md_write` — a batch `attrs=[{key,value},…]`); to read keys
+use `gui_context_md_read(keys=[…])` (omit `keys` for the whole tree), which returns
+`{values: {key: value}}`; delete with `gui_context_md_delete(keys=[…])`. Named
+waveforms/modules go into the ModuleLibrary (`gui_context_ml_create_from_role` /
+role tools; list with `gui_context_ml_list`, inspect one with
+`gui_context_ml_inspect`). A cfg field can then reference `md.<attr>` (e.g. a pulse
+`freq: r_f`) or a module/waveform by its library key, instead of hard-coding — the
+notebook does exactly this (`md.res_ch`, `ro_waveform`, `readout_rf`, `pi_amp`).
 
 For mock/offline practice use `fake/freq` (resonator-spectroscopy fake, no
 hardware) — the smoke harness uses it.
@@ -581,23 +599,23 @@ hardware) — the smoke harness uses it.
   process reports whatever version it was built at, so if it happens to match,
   `gui code vN` looks fine while you're on old behaviour. Confirm a relaunch by
   an *observable effect of your change*, not just the version banner.
-- **`gui_launch` vs `gui_connect` (both default port 8765, opposite
+- **`gui_launch` vs `gui_bridge_connect` (both default port 8765, opposite
   expectations).** launch starts a NEW GUI and needs the port FREE; connect
   attaches to an EXISTING GUI and needs the port LISTENING (errors "No GUI is
   listening on 127.0.0.1:8765" otherwise). Use launch to start, connect only to
   re-attach to one already up.
 - **A run starts by clearing its tab's prior run/analyze/writeback result.** So
   while a run is in flight — and after it fails — the tab has no result:
-  `gui_tab_analyze` / `gui_tab_save_*` fail-fast with `no_run_result` (the true reason:
-  this run hasn't produced one yet), not a "busy" message. `gui_editor_set_field`
+  `gui_tab_analyze_start` / `gui_tab_save` fail-fast with `no_run_result` (the true reason:
+  this run hasn't produced one yet), not a "busy" message. `gui_editor_set`
   while running is the one that returns `precondition_failed: ... is currently running`.
-  Wait for the run to settle (`tab.snapshot.interaction.is_running` false, or
-  `gui_tab_run_wait` / `gui_tab_run_poll`) before analyzing/saving. **Cancelled runs are
+  Wait for the run to settle (`tab.snapshot.interaction.is_running` false, or drive
+  the run handle with `gui_op_wait` / `gui_op_poll`) before analyzing/saving. **Cancelled runs are
   the exception:** if the worker produced a partial result before observing the
   stop signal, the tab intentionally keeps that partial result (`has_run_result`
   true) and analysis/save may proceed; if no partial result exists, analyze/save
   still fail with `no_run_result`. (The smoke harness waits on `is_analyzing`
-  before `tab.save_data`.)
+  before saving.)
 - **`run` success is not `analyze` success.** A completed acquisition can still
   produce a bad or misleading fit. On real data, open the figure and verify the
   model visually before you trust `gui_tab_get_analyze_result`, especially for
@@ -608,8 +626,8 @@ hardware) — the smoke harness uses it.
 - **Minimum writeback bar: inspect the analysis figure first.** Do not write fit
   results into the context or module library unless the plotted fit matches the
   feature you intended to measure.
-- **Saved data is always `.hdf5`, with a uniqueness suffix.** `gui_tab_save_data` /
-  `gui_tab_save_result` force the `.hdf5` extension and append `_N` (e.g. a
+- **Saved data is always `.hdf5`, with a uniqueness suffix.** `gui_tab_save` /
+  `gui_tab_save` force the `.hdf5` extension and append `_N` (e.g. a
   `data_path` of `foo` or `foo.h5` lands as `foo_1.hdf5`). **The save reply
   returns the resolved path directly** (`{data_path}` / `{image_path}` /
   `{data_path, image_path}`) — read the file back by that, not by the path you
@@ -620,14 +638,14 @@ hardware) — the smoke harness uses it.
   `gui_tab_get_cfg` (the nested tree — `$`-prefixed keys mark leaf metadata;
   plain keys are subtree nodes). `stage1`'s `tree` field is the same tree as
   `get_cfg` — use it directly.
-- **`gui_editor_set_field` / `gui_editor_set_fields` accept either a `tab_id`
+- **`gui_editor_set` / `gui_editor_set` accept either a `tab_id`
   (convenience — the server resolves that tab's cfg-editor automatically) or an
   explicit `editor_id` from `gui_tab_snapshot`.** Both edit the same live draft
   the form shows (WYSIWYG — no separate commit step is needed to run). Switching
   a ModuleRef key (`<path>.ref`) returns `removed`/`added` settable paths so you
   needn't re-list.
 - **Tab cfg edits are live — no commit needed before `gui_tab_run_start`.** Changes
-  made via `gui_editor_set_field` / `gui_editor_set_fields` take effect on the
+  made via `gui_editor_set` / `gui_editor_set` take effect on the
   tab immediately (WYSIWYG). `gui_editor_save(name=...)` is a separate
   operation that saves the current draft as a *named ModuleLibrary module/waveform*
   — it has nothing to do with applying the tab's cfg edits, and you never need it
@@ -653,12 +671,12 @@ hardware) — the smoke harness uses it.
 | Symptom | Fix |
 |---|---|
 | `gui_launch` → `Port 8765 is already in use` | A previous GUI is still running on the port; `gui_stop` it (or kill the stale `run_measure_gui.py`), then relaunch — or launch on another port. |
-| `gui_connect` → `No GUI is listening on 127.0.0.1:8765` | Nothing running there; `gui_launch` first (connect only re-attaches to a running GUI). |
-| `precondition_failed: ... is currently running` on `gui_editor_set_field` | The tab is running; wait for it to finish (run clears prior results, so editing mid-run is blocked). |
-| `no_run_result` on `gui_tab_analyze` / `gui_tab_save_*` | No result for *this* run yet — the run is still in flight, failed, or was cancelled before producing a partial result (a run clears the previous result on start). Wait for it to finish, or re-run. |
-| `precondition_failed: no_project` on `gui_context_new` | No project applied; `gui_startup_apply` first. |
-| `precondition_failed` on run/save with no busy tab | Missing active file-backed context — `gui_state_check`, then `gui_startup_apply` + `gui_context_new`/`gui_context_use` if a context is missing. |
-| `invalid_params` on `gui_editor_set_field` | Path wrong (often a stray `value` segment); re-check `gui_tab_get_cfg`. |
+| `gui_bridge_connect` → `No GUI is listening on 127.0.0.1:8765` | Nothing running there; `gui_launch` first (connect only re-attaches to a running GUI). |
+| `precondition_failed: ... is currently running` on `gui_editor_set` | The tab is running; wait for it to finish (run clears prior results, so editing mid-run is blocked). |
+| `no_run_result` on `gui_tab_analyze_start` / `gui_tab_save` | No result for *this* run yet — the run is still in flight, failed, or was cancelled before producing a partial result (a run clears the previous result on start). Wait for it to finish, or re-run. |
+| `precondition_failed: no_project` on `gui_context_create` | No project applied; `gui_project_apply` first. |
+| `precondition_failed` on run/save with no busy tab | Missing active file-backed context — check the readiness flags in `gui_overview`'s `state` field, then `gui_project_apply` + `gui_context_create`/`gui_context_switch` if a context is missing. |
+| `invalid_params` on `gui_editor_set` | Path wrong (often a stray `value` segment); re-check `gui_tab_get_cfg`. |
 | `Could not locate a VISA implementation` | Real device driver with no VISA backend; use `FakeDevice` or install `pyvisa-py`. |
 | GUI never renders / launch times out | No X display; set `DISPLAY` or run under `xvfb-run -a`. |
 | Stale GUI behaviour after a code change | `gui_stop`, `/mcp reconnect measure-gui`, then `gui_launch`; confirm the change via an observable effect (the version banner can match a stale process). |

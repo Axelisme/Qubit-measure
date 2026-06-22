@@ -1,6 +1,6 @@
 """NotifyUserDialog — non-modal prompt for agent-initiated user questions.
 
-The agent calls gui_notify_user(message, timeout); the dispatch layer opens
+The agent calls gui_prompt_user(message, timeout); the dispatch layer opens
 this dialog on the main thread via MainWindow.open_notify_prompt. The dialog
 is the timeout SSOT (ADR-0025 §dialog-timeout): a QTimer fires here and calls
 ctrl.timeout_notify so the notify channel records Timeout rather than relying

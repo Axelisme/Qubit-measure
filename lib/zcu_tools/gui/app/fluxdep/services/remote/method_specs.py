@@ -53,7 +53,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     # snapshot the mcp layer reads to track last-seen versions; the version
     # integers are mcp/RPC bookkeeping and are never surfaced to the agent.
     "resources.versions": MethodSpec(5.0, "Snapshot of all resource versions"),
-    # State readiness (fan-out at MCP into one gui_state_check reply).
+    # State readiness (fan-out at MCP into one fluxdep_state_check reply).
     "state.check": MethodSpec(
         5.0,
         "Read readiness flags at once: {has_project, spectrum_count, has_active}.",

@@ -89,7 +89,7 @@ from zcu_tools.mcp.core.call_log import wrap_handler  # noqa: E402
 # tool renames) that leave the wire contract untouched. A wire-contract change is
 # tracked separately by WIRE_VERSION (see ``wire_version.py``); the two are
 # independent. (Git history holds the per-version evolution.)
-MCP_VERSION = 58  # Phase 170f: context md_attrs batch tools renamed to gui_context_md_get_attrs/md_set_attrs; stale old wire name references updated in docstrings + descriptions
+MCP_VERSION = 59  # Phase 171: measure-gui MCP interface redesign (P1-P5) — ~29 tool renames via tool_name/server overrides, retire state_check/project_info/device_reconnect + per-op poll/wait, new gui_op_poll/gui_op_wait, semantic stage bundles
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -102,50 +102,56 @@ wait/poll/background, hardware-safety, when to act vs ask the user) lives in the
 run-measure-gui SKILL — follow it for workflow.
 
 First, orient: call gui_overview once to read the live picture (project /
-context / soc / open tabs / what is running), and re-read it (or gui_state_check)
-whenever you need the current state. Do NOT assume any state — the user may be
-driving the same GUI alongside you.
+context / soc / open tabs / what is running), and re-read it whenever you need
+the current state (gui_overview is the single orientation read — its 'state' field
+carries the four readiness flags; there is no separate state-check tool). Do NOT
+assume any state — the user may be driving the same GUI alongside you.
 
 Tools are tiered: prefer RECOMMENDED; reach for ON-DEMAND when the bundles don't
 fit; DEV tools are for debugging the GUI/MCP itself, not for measuring.
 
 RECOMMENDED — the primary flow:
-  - The 4-phase bundle: gui_tab_stage1 (new tab + adapter guide) -> gui_tab_stage2
-    (configure + run) -> gui_tab_stage3 (analyze + writeback preview) ->
-    gui_tab_stage4 (writeback + optional save). Each folds the cross-tool reads you
-    would otherwise chain by hand.
-  - Lifecycle / startup the bundles depend on: gui_overview (orient), gui_launch /
-    gui_connect, gui_soc_connect (kind='mock'|'remote'), gui_startup_apply,
-    gui_context_new / gui_context_use, gui_state_check (the four readiness flags
-    has_project / has_context / has_active_context / has_soc).
+  - The 4-phase bundle (breadcrumb open -> run -> analyze_review -> commit):
+    gui_tab_open (new tab + adapter guide) -> gui_tab_run (configure + run) ->
+    gui_tab_analyze_review (analyze + writeback preview) -> gui_tab_commit
+    (writeback + optional save). Each folds the cross-tool reads you would
+    otherwise chain by hand.
+  - Lifecycle / startup the bundles depend on: gui_overview (orient — its 'state'
+    field has the four readiness flags has_project / has_context /
+    has_active_context / has_soc), gui_launch / gui_bridge_connect, gui_soc_connect
+    (kind='mock'|'remote'), gui_project_apply, gui_context_create /
+    gui_context_switch.
 
 ON-DEMAND — the fine-grained base tools, when a bundle doesn't fit:
   - Tabs + cfg: gui_adapter_list / gui_tab_new / gui_tab_snapshot;
     gui_tab_get_cfg (read tree) / gui_tab_set_cfg (batch write);
-    gui_editor_set_field / _set_fields for non-tab editors (require editor_id).
+    gui_editor_open / gui_editor_get_cfg / gui_editor_set (batch) for non-tab
+    editors (addressed by editor_id).
   - Run + analyze: gui_tab_run_start, gui_tab_analyze_start, gui_tab_post_analyze_start
     (each waits briefly then degrades to a handle). A FINISHED run/analyze reply
     (settled in the short wait) already carries 'figure' — the plot rendered to a
     temp PNG. After a pending->finished op, read the figure with
     gui_tab_get_current_figure and the fit summary with gui_tab_get_analyze_result /
     gui_tab_get_post_analyze_result (the generic wait/poll report only status).
-    gui_tab_save_data / _image / _result / _post_image persist and return the
-    resolved written path; gui_tab_writeback_apply commits the draft.
+    gui_tab_save (artifact + figure selectors) persists data and/or the figure and
+    returns the resolved destinations; gui_tab_writeback_apply commits the draft.
   - Async handles: every degrading op returns a 'handle' in its START reply; drive
     it with the generic gui_op_poll(handle) / gui_op_wait(handle).
-  - Devices / context / predictor / adapters / dialogs: gui_device_*,
-    gui_context_*, gui_predictor_*, gui_adapter_*, gui_dialog_*.
+  - Devices / context / predictor / adapters: gui_device_*, gui_context_*,
+    gui_predictor_*, gui_adapter_*.
+ON-DEMAND — screenshot (a window/dialog grab; useful to show the user what the GUI
+looks like, not part of the measurement loop):
+  - gui_screenshot(target): 'window' grabs the whole main window, a dialog name
+    (setup/device/predictor/inspect/startup) grabs that dialog; always writes a PNG
+    file (never inline base64).
 DEV — debugging the GUI/MCP itself (the version table + in-flight handles are
 normally hidden from the operator; do NOT use these for measurement):
-  - gui_debug_screenshot(target): 'window' grabs the whole main window, a dialog
-    name grabs that dialog; always writes a PNG file (never inline base64).
-    Screenshotting is a debugging activity — not part of the measurement flow.
   - gui_debug_versions (the optimistic-concurrency resource version table),
     gui_debug_operations (the in-flight operation handles, semantic key -> id).
 
-Startup precondition: gui_state_check must report all four flags true before
-running experiments. Run/save require an active file-backed context; save/analyze
-require an existing run result. A precondition violation returns
+Startup precondition: gui_overview's 'state' field must report all four flags true
+before running experiments. Run/save require an active file-backed context;
+save/analyze require an existing run result. A precondition violation returns
 precondition_failed; editing cfg while a tab is running likewise.
 
 gui_soc_connect is SYNCHRONOUS — NOT part of the async-handle family: it blocks
@@ -204,15 +210,15 @@ then retry.
 Call contract — read before issuing defensive/duplicate calls:
   - A failed call always raises; it never returns stale or partial data. One call
     is enough — never fire a backup copy of the same tool in the same turn.
-  - Query tools (gui_*_list / _get* / _snapshot / _check / _active* / _poll) are
+  - Query tools (gui_*_list / _get* / _snapshot / _read / _inspect / _poll) are
     read-only and side-effect-free: safe to retry across turns, wasteful to
     duplicate within one.
   - Mutating tools have side effects and must be sent exactly once: gui_tab_run_start
-    (a duplicate starts a SECOND run), gui_editor_set_field, gui_tab_new /
-    gui_tab_close, gui_tab_save_*, gui_device_connect / _disconnect / _setup,
-    gui_context_set_* / _del_* / _rename_*, gui_editor_save.
+    (a duplicate starts a SECOND run), gui_editor_set, gui_tab_new /
+    gui_tab_close, gui_tab_save, gui_device_connect / _disconnect / _apply,
+    gui_context_md_write / _md_delete / _ml_delete_* / _ml_rename_*, gui_editor_save.
 
-Agent-to-user prompting: gui_notify_user(message, timeout=600) opens a prompt
+Agent-to-user prompting: gui_prompt_user(message, timeout=600) opens a prompt
 dialog for the user and BLOCKS your entire turn until the user replies, dismisses,
 or the dialog times out. Returns {reason:'reply'|'dismiss'|'timeout', reply?}:
   - 'reply': user answered; read the reply string and act on it.
@@ -474,9 +480,9 @@ class GuiRpcError(RuntimeError):
 def _ensure_connected() -> None:
     """Lazily attach to the running GUI before the first guarded RPC.
 
-    An agent should not have to call gui_connect by hand: the first time any
-    gui_* tool reaches send_gui_rpc with no live socket, we resolve the running
-    GUI's port via session discovery (the SAME path gui_connect takes) and
+    An agent should not have to call gui_bridge_connect by hand: the first time
+    any gui_* tool reaches send_gui_rpc with no live socket, we resolve the running
+    GUI's port via session discovery (the SAME path gui_bridge_connect takes) and
     attach. This is a measure-specific attach policy (session-discovery slug +
     resolve_connect_port), so it stays here rather than in the shared bridge,
     whose send_rpc_raw also serves the read-only apps.
@@ -485,7 +491,7 @@ def _ensure_connected() -> None:
     (mock vs remote) is the user's decision, not an auto-connect side effect.
 
     Fail-fast when no GUI is discoverable, with a message that no longer tells
-    the agent to "call gui_connect first" (it is automatic now).
+    the agent to "call gui_bridge_connect first" (it is automatic now).
     """
     if _BRIDGE.is_connected:
         return
@@ -516,7 +522,7 @@ def send_gui_rpc(
     """Issue one RPC against the GUI; raises on error or timeout.
 
     If no socket is live yet, lazily attaches to the running GUI first
-    (:func:`_ensure_connected`) so an agent never has to call gui_connect by
+    (:func:`_ensure_connected`) so an agent never has to call gui_bridge_connect by
     hand. For guarded methods (run/save/commit) attaches ``expected_versions``
     from the mcp-side bookkeeping so the server can reject stale operations. On
     a stale rejection the version table is re-read so the agent's retry is fresh.
@@ -1301,7 +1307,7 @@ def tool_gui_tab_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
     carries the fit 'summary' (same shape as gui_tab_get_analyze_result — analyze's
     OWN result, the *_err fields included) AND 'figure' — the fit plot rendered to
     a temp PNG (analyze's OWN visual result). Review the proposed writeback with
-    gui_tab_writeback_preview (not folded here; that fold lives in gui_tab_analyze_review).
+    gui_tab_writeback_list (not folded here; that fold lives in gui_tab_analyze_review).
     The reply always carries 'handle'; 'summary'/'figure' appear only on a finished
     FIT. After a pending->finished analyze read gui_tab_get_analyze_result and the
     plot with gui_tab_get_current_figure (a generic gui_op_wait/poll only reports
@@ -1637,7 +1643,7 @@ def _fold_writeback_preview(tab_id: str, reply: dict[str, Any]) -> dict[str, Any
     verbatim under 'writeback_preview' (has_draft is false when no draft exists
     yet). Mirrors the figure/guide folds: a fetch failure is swallowed (omitted)
     so a preview hiccup never breaks the analyze reply — the agent can still call
-    gui_tab_writeback_preview.
+    gui_tab_writeback_list.
     """
     if reply.get("status") != "finished":
         return reply
@@ -1777,7 +1783,7 @@ def tool_gui_tab_analyze_review(arguments: dict[str, Any]) -> dict[str, Any]:
         reply["owed"] = (
             "summary (gui_tab_get_analyze_result), figure "
             "(gui_tab_get_current_figure), writeback_preview "
-            "(gui_tab_writeback_preview) after the handle finishes"
+            "(gui_tab_writeback_list) after the handle finishes"
         )
         return reply
     # The figure is already folded by tool_gui_tab_analyze; do NOT double-fold it
@@ -1963,8 +1969,8 @@ def tool_gui_prompt_user(arguments: dict[str, Any]) -> dict[str, Any]:
 
 # Methods that must NOT be auto-generated: they need extra client-side work
 # (file writes, fan-out, MCP-side queues) or multi-field coercion, and are
-# hand-written in _OVERRIDE_TOOLS below. Lifecycle tools (gui_connect/launch/
-# stop/disconnect) have no RPC method and are hand-written too.
+# hand-written in _OVERRIDE_TOOLS below. Lifecycle tools (gui_bridge_connect/
+# launch/stop/gui_bridge_detach) have no RPC method and are hand-written too.
 _NON_GENERATED_METHODS = frozenset(
     {
         # coerce_* → frozen request (multi-field) + mcp-side short-wait degrade
@@ -2633,7 +2639,7 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
         "description": (
             "Phase ③ of the recommended flow (open -> run -> analyze_review -> "
             "commit) — analyze_review. = gui_tab_analyze_start + "
-            "gui_tab_writeback_preview. Analyze 'tab_id' and fold the writeback "
+            "gui_tab_writeback_list. Analyze 'tab_id' and fold the writeback "
             "review into ONE reply. A finished FIT returns {status:'finished', "
             "handle, summary, figure, writeback_preview} — 'summary' is the fit "
             "result (same shape as gui_tab_get_analyze_result), 'figure' comes from "
@@ -2674,7 +2680,7 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "Phase ④ of the recommended flow (open -> run -> analyze_review -> "
             "commit) — commit. = gui_tab_writeback_apply + (optionally) gui_tab_save. "
             "Apply the tab's writeback draft (edit it first via "
-            "gui_tab_writeback_set / gui_editor_*), optionally saving afterwards. "
+            "gui_tab_writeback_set_item / gui_editor_*), optionally saving afterwards. "
             "Applies the items currently selected; returns {status, applied_ids, "
             "written, context_version, saved, save_error?}. 'save' selects the "
             "follow-up save artifacts (same vocabulary as gui_tab_save): 'none' "
@@ -2717,7 +2723,7 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "{status:'finished', handle, summary, figure} — the fit summary (same "
             "shape as gui_tab_get_analyze_result, the *_err fields included) AND the "
             "fit plot rendered to a temp PNG (analyze's OWN visual result). Review "
-            "the proposed writeback with gui_tab_writeback_preview (not folded here; "
+            "the proposed writeback with gui_tab_writeback_list (not folded here; "
             "that fold lives in gui_tab_analyze_review). An INTERACTIVE analysis (e.g. "
             "flux_dep) degrades to {status:'pending', handle, summary:None} — no "
             "figure (nothing settled yet); prompt the user to mark the plot + click "
@@ -2759,7 +2765,7 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "gui_tab_analyze_start first. 'updates' optionally overrides post params "
             "(see gui_tab_get_post_analyze_params). The post figure shares the tab's "
             "plot container; see it with gui_tab_get_current_figure and persist it "
-            "with gui_tab_save_post_image."
+            "with gui_tab_save."
         ),
         "inputSchema": {
             "type": "object",

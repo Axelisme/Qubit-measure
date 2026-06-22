@@ -998,8 +998,9 @@ def test_server_instructions_present_three_tiers():
     assert "RECOMMENDED" in text
     assert "ON-DEMAND" in text
     assert "DEV" in text
-    # All three DEV tools are named in the instructions.
-    assert "gui_debug_screenshot" in text
+    # All three DEV tools are named in the instructions (gui_debug_screenshot was
+    # renamed to gui_screenshot in Phase 171 P1).
+    assert "gui_screenshot" in text
     assert "gui_debug_versions" in text
     assert "gui_debug_operations" in text
 
