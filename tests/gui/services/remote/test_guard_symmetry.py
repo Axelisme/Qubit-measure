@@ -82,7 +82,7 @@ def test_run_start_draft_context_symmetry(qapp):  # noqa: ARG001
 
     # Remote path — same precondition, mapped to a typed wire error.
     with pytest.raises(RemoteError) as excinfo:
-        _dispatch(ctrl, "run.start", {"tab_id": tab_id})
+        _dispatch(ctrl, "tab.run_start", {"tab_id": tab_id})
     assert excinfo.value.code is ErrorCode.PRECONDITION_FAILED
     assert "active file-backed context" in excinfo.value.message
 
@@ -109,11 +109,11 @@ def test_analyze_without_run_result_symmetry(qapp):  # noqa: ARG001
     with pytest.raises(GuardError, match="No run result"):
         ctrl.analyze(tab_id, object())
 
-    # The wire path (analyze.start) checks run-result presence first too, so the
+    # The wire path (tab.analyze) checks run-result presence first too, so the
     # agent gets the true reason 'no_run_result' rather than the downstream
     # 'no analyze params available' (params only exist once a run produced one).
     with pytest.raises(RemoteError) as excinfo:
-        _dispatch(ctrl, "analyze.start", {"tab_id": tab_id, "updates": {}})
+        _dispatch(ctrl, "tab.analyze", {"tab_id": tab_id, "updates": {}})
     assert excinfo.value.code is ErrorCode.PRECONDITION_FAILED
     assert excinfo.value.reason == "no_run_result"
 

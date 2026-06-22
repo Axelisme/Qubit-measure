@@ -103,7 +103,13 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "tab.close": MethodSpec(5.0, "Close a tab", (_str("tab_id"),)),
     "tab.set_active": MethodSpec(5.0, "Activate a tab", (_str("tab_id"),)),
-    "tab.list": MethodSpec(5.0, "List tabs"),
+    "tab.list_all": MethodSpec(
+        5.0,
+        "List all open tabs together with the currently-running tab id. "
+        "Returns a 2-tuple-as-array [tabs, running_tab_id]: tabs is a list of "
+        "[tab_id, adapter_name] 2-element arrays; running_tab_id is the tab_id of "
+        "the tab currently running (or null when nothing is running).",
+    ),
     "tab.snapshot": MethodSpec(
         5.0, "Tab summary", (_str_opt("tab_id", "Tab to inspect; omit for all tabs"),)
     ),
@@ -149,10 +155,10 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         ),
     ),
     # Run
-    "run.start": MethodSpec(
+    "tab.run_start": MethodSpec(
         5.0, "Start a run (fire-and-forget)", (_str("tab_id"), _expected_versions())
     ),
-    "run.cancel": MethodSpec(5.0, "Cancel current run"),
+    "tab.run_cancel": MethodSpec(5.0, "Cancel current run"),
     "run.running_tab": MethodSpec(5.0, "Current running tab"),
     "analyze.cancel": MethodSpec(
         5.0,
@@ -513,17 +519,17 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "tab.get_analyze_params": MethodSpec(
         5.0, "Read current analyze params", (_str("tab_id"),)
     ),
-    "analyze.start": MethodSpec(
+    "tab.analyze": MethodSpec(
         30.0,
         "Start analyzing the tab's run result. Analyze runs on a worker thread "
         "and returns an operation_id (like run/connect/device); the mcp "
-        "gui_analyze tool awaits it so the agent sees one synchronous call. "
+        "gui_tab_analyze tool awaits it so the agent sees one synchronous call. "
         "'updates' optionally overrides analyze params (see "
         "gui_adapter_analyze_spec). Makes the tab busy while it runs; a "
         "concurrent save/edit returns precondition_failed until it settles. "
         "Read the fit summary with gui_tab_get_analyze_result.",
         (_str("tab_id"), _obj_default("updates", "Analyze param updates")),
-        tool_name="gui_analyze",
+        tool_name="gui_tab_analyze",
     ),
     # Post-analysis (second analysis layer; mirrors the analyze trio above). It
     # runs on top of an existing primary analyze result, so every entry gates
@@ -535,17 +541,17 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "tab.get_post_analyze_params": MethodSpec(
         5.0, "Read current post-analysis params", (_str("tab_id"),)
     ),
-    "post_analyze.start": MethodSpec(
+    "tab.post_analyze": MethodSpec(
         30.0,
         "Start the second-layer (post) analysis on the tab's PRIMARY analyze "
         "result. Runs on a worker thread and returns an operation_id (like "
-        "analyze.start); the mcp gui_post_analyze tool awaits it so the agent "
+        "tab.analyze); the mcp gui_tab_post_analyze tool awaits it so the agent "
         "sees one synchronous call. Fast-fails with precondition_failed when the "
         "tab has no primary analyze result to build on. 'updates' optionally "
         "overrides post params (see gui_tab_get_post_analyze_params). Read the "
         "fit summary with gui_tab_get_post_analyze_result.",
         (_str("tab_id"), _obj_default("updates", "Post-analysis param updates")),
-        tool_name="gui_post_analyze",
+        tool_name="gui_tab_post_analyze",
     ),
     # Writeback workflow — a persistent draft computed once at analyze time.
     "writeback.preview": MethodSpec(

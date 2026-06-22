@@ -1,6 +1,6 @@
 """Post-analysis dispatch handlers (Phase 4 dual-end RPC).
 
-Drives the post_analyze.start / tab.get_post_analyze_params /
+Drives the tab.post_analyze / tab.get_post_analyze_params /
 tab.get_post_analyze_result handlers against a mock Controller, mirroring the
 analyze trio. The success path spies start_post_analyze without a full
 run+analyze pipeline; the gate path asserts the same fast-fail the carrier layer
@@ -45,7 +45,7 @@ def _ctrl(*, has_analyze_result: bool = True, post_params: object = _DEFAULT):
 
 
 # ---------------------------------------------------------------------------
-# post_analyze.start
+# tab.post_analyze
 # ---------------------------------------------------------------------------
 
 
@@ -54,7 +54,7 @@ def test_start_with_primary_result_starts_op():
     operation_id returned; updates are applied onto the param instance."""
     ctrl = _ctrl()
     res = _dispatch(
-        ctrl, "post_analyze.start", {"tab_id": "t", "updates": {"backend": "center"}}
+        ctrl, "tab.post_analyze", {"tab_id": "t", "updates": {"backend": "center"}}
     )
     assert res == {"operation_id": 77}
     ctrl.start_post_analyze.assert_called_once()
@@ -66,7 +66,7 @@ def test_start_with_primary_result_starts_op():
 
 def test_start_without_updates_uses_snapshot_params():
     ctrl = _ctrl()
-    res = _dispatch(ctrl, "post_analyze.start", {"tab_id": "t", "updates": {}})
+    res = _dispatch(ctrl, "tab.post_analyze", {"tab_id": "t", "updates": {}})
     assert res == {"operation_id": 77}
     args, _ = ctrl.start_post_analyze.call_args
     assert args[1] == GEPostAnalyzeParams(backend="pca", angle=None)
@@ -77,7 +77,7 @@ def test_start_without_primary_result_fast_fails():
     before the downstream 'no post params' check (mirrors analyze.start)."""
     ctrl = _ctrl(has_analyze_result=False)
     with pytest.raises(RemoteError) as excinfo:
-        _dispatch(ctrl, "post_analyze.start", {"tab_id": "t", "updates": {}})
+        _dispatch(ctrl, "tab.post_analyze", {"tab_id": "t", "updates": {}})
     assert excinfo.value.code is ErrorCode.PRECONDITION_FAILED
     assert excinfo.value.reason == "no_analyze_result"
     ctrl.start_post_analyze.assert_not_called()
@@ -87,7 +87,7 @@ def test_start_unknown_tab_rejected():
     ctrl = _ctrl()
     ctrl.has_tab.return_value = False
     with pytest.raises(RemoteError) as excinfo:
-        _dispatch(ctrl, "post_analyze.start", {"tab_id": "nope", "updates": {}})
+        _dispatch(ctrl, "tab.post_analyze", {"tab_id": "nope", "updates": {}})
     assert excinfo.value.code is ErrorCode.INVALID_PARAMS
 
 
@@ -96,7 +96,7 @@ def test_start_invalid_update_field_rejected():
     dataclasses.replace TypeError is translated, not leaked)."""
     ctrl = _ctrl()
     with pytest.raises(RemoteError) as excinfo:
-        _dispatch(ctrl, "post_analyze.start", {"tab_id": "t", "updates": {"nope": 1}})
+        _dispatch(ctrl, "tab.post_analyze", {"tab_id": "t", "updates": {"nope": 1}})
     assert excinfo.value.code is ErrorCode.INVALID_PARAMS
     ctrl.start_post_analyze.assert_not_called()
 

@@ -106,7 +106,7 @@ def test_cfg_editor_tools_generated():
 
 def test_tab_new_is_a_pure_generated_forwarder():
     """gui_tab_new is the auto-generated tab.new forwarder (MCP 45): it returns
-    just {tab_id}; the fan-out + guide fold moved to gui_run_stage1. So tab.new
+    just {tab_id}; the fan-out + guide fold moved to gui_tab_stage1. So tab.new
     must NOT be excluded from generation nor served by an override."""
     assert "tab.new" not in m._NON_GENERATED_METHODS
     assert "gui_tab_new" not in m._OVERRIDE_NAMES
@@ -119,7 +119,7 @@ def test_tab_new_is_a_pure_generated_forwarder():
 def test_writeback_apply_is_a_pure_generated_forwarder():
     """gui_writeback_apply is the auto-generated writeback.apply forwarder (MCP
     45): it returns just {applied_ids}; the save_data chaining moved to
-    gui_run_stage4. So writeback.apply must NOT be excluded from generation nor
+    gui_tab_stage4. So writeback.apply must NOT be excluded from generation nor
     served by an override, and the agent schema exposes only 'tab_id'."""
     assert "writeback.apply" not in m._NON_GENERATED_METHODS
     assert "gui_writeback_apply" not in m._OVERRIDE_NAMES
@@ -223,3 +223,88 @@ def test_phase170a_tab_cfg_io_tools():
         props = m.TOOLS[tool_name]["inputSchema"]["properties"]
         assert "tab_id" not in props, f"{tool_name} must not expose 'tab_id' anymore"
         assert "editor_id" in props
+
+
+def test_phase170b_tab_run_analyze_tools():
+    """Phase 170b tab listing/run/analyze normalization:
+    - tab.list renamed to tab.list_all (auto-generated as gui_tab_list_all).
+    - run.start renamed to tab.run_start; tab.run_cancel auto-generated.
+    - analyze.start renamed to tab.analyze; post_analyze.start renamed to
+      tab.post_analyze. Both are non-generated (short-wait degrade overrides).
+    - Stage bundles renamed: gui_run_stage* -> gui_tab_stage*.
+    - run/analyze/post_analyze tools renamed accordingly.
+    - run.running_tab stays as internal-only (no agent tool generated).
+    - Old names (gui_run_start, gui_run_stage1, gui_analyze, ...) are absent.
+    """
+    # tab.list_all: auto-generated (no special exclusion, no override).
+    assert "tab.list_all" in METHOD_SPECS
+    assert "tab.list_all" not in m._NON_GENERATED_METHODS
+    assert "gui_tab_list_all" in m.TOOLS
+    assert "gui_tab_list_all" not in m._OVERRIDE_NAMES
+
+    # tab.list is gone from the wire contract entirely.
+    assert "tab.list" not in METHOD_SPECS
+    assert "gui_tab_list" not in m.TOOLS
+
+    # run.running_tab: internal-only — wire method + spec stay but no agent tool.
+    assert "run.running_tab" in METHOD_SPECS
+    assert "run.running_tab" in m._NON_GENERATED_METHODS
+    assert "gui_run_running_tab" not in m.TOOLS
+
+    # tab.run_start: non-generated hand-written override.
+    assert "tab.run_start" in METHOD_SPECS
+    assert "tab.run_start" in m._NON_GENERATED_METHODS
+    assert "gui_tab_run_start" in m.TOOLS
+    assert "gui_tab_run_start" in m._OVERRIDE_NAMES
+
+    # tab.run_cancel: auto-generated (no override needed).
+    assert "tab.run_cancel" in METHOD_SPECS
+    assert "tab.run_cancel" not in m._NON_GENERATED_METHODS
+    assert "gui_tab_run_cancel" in m.TOOLS
+    assert "gui_tab_run_cancel" not in m._OVERRIDE_NAMES
+
+    # tab.analyze and tab.post_analyze: non-generated hand-written overrides.
+    assert "tab.analyze" in METHOD_SPECS
+    assert "tab.analyze" in m._NON_GENERATED_METHODS
+    assert "gui_tab_analyze" in m.TOOLS
+    assert "gui_tab_analyze" in m._OVERRIDE_NAMES
+
+    assert "tab.post_analyze" in METHOD_SPECS
+    assert "tab.post_analyze" in m._NON_GENERATED_METHODS
+    assert "gui_tab_post_analyze" in m.TOOLS
+    assert "gui_tab_post_analyze" in m._OVERRIDE_NAMES
+
+    # Stage bundles: all present under new names, all old names absent.
+    for stage in ("1", "2", "3", "4"):
+        assert f"gui_tab_stage{stage}" in m.TOOLS, f"gui_tab_stage{stage} missing"
+        assert f"gui_run_stage{stage}" not in m.TOOLS, (
+            f"old gui_run_stage{stage} leaked"
+        )
+
+    # Wait/poll tools present under new names.
+    for tool in (
+        "gui_tab_run_wait",
+        "gui_tab_run_poll",
+        "gui_tab_analyze_wait",
+        "gui_tab_analyze_poll",
+        "gui_tab_post_analyze_wait",
+        "gui_tab_post_analyze_poll",
+    ):
+        assert tool in m.TOOLS, f"{tool} missing"
+
+    # Old names must be absent from the assembled tool table.
+    old_names = {
+        "gui_run_start",
+        "gui_run_wait",
+        "gui_run_poll",
+        "gui_run_running_tab",
+        "gui_analyze",
+        "gui_analyze_wait",
+        "gui_analyze_poll",
+        "gui_post_analyze",
+        "gui_post_analyze_wait",
+        "gui_post_analyze_poll",
+    }
+    assert old_names.isdisjoint(set(m.TOOLS)), (
+        f"old tool names leaked: {old_names & set(m.TOOLS)}"
+    )

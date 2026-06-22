@@ -32,10 +32,14 @@ from __future__ import annotations
 # v40: Phase 170a tab cfg I/O normalization — removed old raw tab.get_cfg;
 # renamed tab.list_paths -> tab.get_cfg (value tree); added tab.set_cfg
 # (tab-keyed batch setter).
-WIRE_VERSION = 40
+# v41: Phase 170b tab listing + run + analyze under tab.* — renamed tab.list ->
+# tab.list_all (new 2-tuple shape [tabs, running_tab_id]); run.start ->
+# tab.run_start, run.cancel -> tab.run_cancel; analyze.start -> tab.analyze;
+# post_analyze.start -> tab.post_analyze; run.running_tab kept as internal-only.
+WIRE_VERSION = 41
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION (a wire-contract change
 # bumps both; a pure-internal GUI change bumps only this). Git history holds the
 # per-version evolution.
-GUI_VERSION = 47
+GUI_VERSION = 48

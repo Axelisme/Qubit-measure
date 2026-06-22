@@ -104,15 +104,18 @@ def _h_tab_set_active(
     return {}
 
 
-def _h_tab_list(
+def _h_tab_list_all(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
+    # Returns [tabs, running_tab_id] as a 2-tuple-encoded array.
+    # tabs is a list of [tab_id, adapter_name] 2-element arrays.
     del params
     tabs = [
-        {"tab_id": tid, "adapter_name": adapter.ctrl.get_tab_adapter_name(tid)}
+        [tid, adapter.ctrl.get_tab_adapter_name(tid)]
         for tid in adapter.ctrl.list_tab_ids()
     ]
-    return {"tabs": tabs}
+    running_tab_id = adapter.ctrl.get_running_tab_id()
+    return {"result": [tabs, running_tab_id]}
 
 
 def _tab_snapshot_wire(adapter: RemoteControlAdapter, tab_id: str) -> dict[str, object]:
@@ -259,7 +262,7 @@ def _h_tab_set_cfg(
 # ---------------------------------------------------------------------------
 
 
-def _h_run_start(
+def _h_tab_run_start(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
@@ -276,7 +279,7 @@ def _h_run_start(
     return {"operation_id": operation_id}
 
 
-def _h_run_cancel(
+def _h_tab_run_cancel(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
@@ -1284,7 +1287,7 @@ def _h_tab_get_analyze_params(
     return {"analyze_params": dataclasses.asdict(ap)}
 
 
-def _h_analyze_start(
+def _h_tab_analyze(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     import dataclasses
@@ -1370,7 +1373,7 @@ def _h_tab_get_post_analyze_params(
     return {"post_analyze_params": dataclasses.asdict(pp)}
 
 
-def _h_post_analyze_start(
+def _h_tab_post_analyze(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     import dataclasses
@@ -1813,12 +1816,12 @@ _HANDLERS: dict[str, Handler] = {
     "tab.new": _h_tab_new,
     "tab.close": _h_tab_close,
     "tab.set_active": _h_tab_set_active,
-    "tab.list": _h_tab_list,
+    "tab.list_all": _h_tab_list_all,
     "tab.snapshot": _h_tab_snapshot,
     "tab.get_cfg": _h_tab_get_cfg,
     "tab.set_cfg": _h_tab_set_cfg,
-    "run.start": _h_run_start,
-    "run.cancel": _h_run_cancel,
+    "tab.run_start": _h_tab_run_start,
+    "tab.run_cancel": _h_tab_run_cancel,
     "analyze.cancel": _h_analyze_cancel,
     "run.running_tab": _h_run_running_tab,
     "save.data": _h_save_data,
@@ -1876,10 +1879,10 @@ _HANDLERS: dict[str, Handler] = {
     "predictor.info": _h_predictor_info,
     "tab.get_analyze_result": _h_tab_get_analyze_result,
     "tab.get_analyze_params": _h_tab_get_analyze_params,
-    "analyze.start": _h_analyze_start,
+    "tab.analyze": _h_tab_analyze,
     "tab.get_post_analyze_result": _h_tab_get_post_analyze_result,
     "tab.get_post_analyze_params": _h_tab_get_post_analyze_params,
-    "post_analyze.start": _h_post_analyze_start,
+    "tab.post_analyze": _h_tab_post_analyze,
     "writeback.preview": _h_writeback_preview,
     "writeback.set": _h_writeback_set,
     "writeback.apply": _h_writeback_apply,

@@ -140,7 +140,9 @@ def test_await_operation_refreshes_last_seen_via_rpc(wired):
     wired["operation.await"] = {"ok": True, "result": {"status": "finished"}}
     wired["resources.versions"] = _versions({"tab:t:result": 9})
 
-    out = mcp_server.TOOLS["gui_run_wait"]["handler"]({"tab_id": "t", "timeout": 0.1})
+    out = mcp_server.TOOLS["gui_tab_run_wait"]["handler"](
+        {"tab_id": "t", "timeout": 0.1}
+    )
 
     assert out["status"] == "finished"
     assert "waited_seconds" in out  # how long the wait blocked (Phase 120c-4)
@@ -162,7 +164,9 @@ def test_wait_timeout_returns_timed_out_not_raises(monkeypatch):
         return {}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", bridge_timeout)
-    out = mcp_server.TOOLS["gui_run_wait"]["handler"]({"tab_id": "t", "timeout": 0.05})
+    out = mcp_server.TOOLS["gui_tab_run_wait"]["handler"](
+        {"tab_id": "t", "timeout": 0.05}
+    )
     assert out["status"] == "timed_out"
     assert isinstance(out["waited_seconds"], float)
 
@@ -173,7 +177,9 @@ def test_wait_timeout_returns_timed_out_not_raises(monkeypatch):
         return {}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", gui_timeout)
-    out2 = mcp_server.TOOLS["gui_run_wait"]["handler"]({"tab_id": "t", "timeout": 0.05})
+    out2 = mcp_server.TOOLS["gui_tab_run_wait"]["handler"](
+        {"tab_id": "t", "timeout": 0.05}
+    )
     assert out2["status"] == "timed_out"
     mcp_server._OP_BY_KEY.pop("tab:t", None)
 
@@ -191,7 +197,9 @@ def test_wait_failed_outcome_still_raises(monkeypatch):
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fail)
     with pytest.raises(RuntimeError):
-        mcp_server.TOOLS["gui_run_wait"]["handler"]({"tab_id": "t", "timeout": 0.05})
+        mcp_server.TOOLS["gui_tab_run_wait"]["handler"](
+            {"tab_id": "t", "timeout": 0.05}
+        )
     mcp_server._OP_BY_KEY.pop("tab:t", None)
 
 
@@ -209,7 +217,9 @@ def test_wait_cancelled_returns_structured_not_raises(wired):
     }
     wired["resources.versions"] = _versions({})
 
-    out = mcp_server.TOOLS["gui_run_wait"]["handler"]({"tab_id": "t", "timeout": 5.0})
+    out = mcp_server.TOOLS["gui_tab_run_wait"]["handler"](
+        {"tab_id": "t", "timeout": 5.0}
+    )
 
     assert out["status"] == "cancelled"
     assert out["feedback"] == "user pressed Stop"
@@ -226,7 +236,9 @@ def test_wait_cancelled_without_feedback_no_feedback_key(wired):
     }
     wired["resources.versions"] = _versions({})
 
-    out = mcp_server.TOOLS["gui_run_wait"]["handler"]({"tab_id": "t", "timeout": 5.0})
+    out = mcp_server.TOOLS["gui_tab_run_wait"]["handler"](
+        {"tab_id": "t", "timeout": 5.0}
+    )
 
     assert out["status"] == "cancelled"
     assert "feedback" not in out
@@ -234,12 +246,12 @@ def test_wait_cancelled_without_feedback_no_feedback_key(wired):
 
 
 def test_run_start_captures_operation_id_under_tab_key(wired):
-    # run.start is also a guarded op; expected_versions ride along, and the
+    # tab.run_start is also a guarded op; expected_versions ride along, and the
     # returned operation_id is captured under the tab key.
     mcp_server._LAST_SEEN.update({"tab:t:cfg": 1, "tab:t": 1, "soc": 1, "context": 1})
-    wired["run.start"] = {"ok": True, "result": {"operation_id": 5}}
+    wired["tab.run_start"] = {"ok": True, "result": {"operation_id": 5}}
     wired["resources.versions"] = _versions(dict(mcp_server._LAST_SEEN))
 
-    mcp_server.send_gui_rpc("run.start", {"tab_id": "t"})
+    mcp_server.send_gui_rpc("tab.run_start", {"tab_id": "t"})
 
     assert mcp_server._OP_BY_KEY["tab:t"] == 5

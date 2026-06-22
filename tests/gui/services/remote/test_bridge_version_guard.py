@@ -55,12 +55,12 @@ def test_guarded_op_attaches_expected_versions(wired):
             "devices:__set__": 6,
         }
     )
-    wired["run.start"] = {"ok": True, "result": {}}
+    wired["tab.run_start"] = {"ok": True, "result": {}}
     wired["resources.versions"] = _versions_reply(dict(mcp_server._LAST_SEEN))
 
-    mcp_server.send_gui_rpc("run.start", {"tab_id": "t"})
+    mcp_server.send_gui_rpc("tab.run_start", {"tab_id": "t"})
 
-    run_params = next(p for (m, p) in sent if m == "run.start")
+    run_params = next(p for (m, p) in sent if m == "tab.run_start")
     assert run_params["expected_versions"] == {
         "tab:t:cfg": 3,
         "tab:t": 1,
@@ -72,17 +72,17 @@ def test_guarded_op_attaches_expected_versions(wired):
 
 
 def test_run_start_declares_device_set_cardinality_key(wired):
-    """run.start must declare devices:__set__ so a concurrently-added device
+    """tab.run_start must declare devices:__set__ so a concurrently-added device
     (which device:* glob cannot reveal) is caught by the guard."""
     sent = wired["sent"]
     # Agent observed an empty device set (cardinality key unseen → 0).
     mcp_server._LAST_SEEN.update({"tab:t:cfg": 1, "tab:t": 1, "soc": 1, "context": 1})
-    wired["run.start"] = {"ok": True, "result": {}}
+    wired["tab.run_start"] = {"ok": True, "result": {}}
     wired["resources.versions"] = _versions_reply(dict(mcp_server._LAST_SEEN))
 
-    mcp_server.send_gui_rpc("run.start", {"tab_id": "t"})
+    mcp_server.send_gui_rpc("tab.run_start", {"tab_id": "t"})
 
-    expected = next(p for (m, p) in sent if m == "run.start")["expected_versions"]
+    expected = next(p for (m, p) in sent if m == "tab.run_start")["expected_versions"]
     # Declared at its last-seen baseline of 0; the server rejects if a device was
     # added since (cardinality now ≥ 1).
     assert expected["devices:__set__"] == 0
@@ -136,7 +136,7 @@ def test_unguarded_op_attaches_nothing(wired):
 
 def test_stale_rejection_translated_and_refreshes(wired):
     mcp_server._LAST_SEEN.update({"tab:t:cfg": 3, "tab:t": 1, "soc": 1, "context": 1})
-    wired["run.start"] = {
+    wired["tab.run_start"] = {
         "ok": False,
         "error": {
             "code": "precondition_failed",
@@ -148,7 +148,7 @@ def test_stale_rejection_translated_and_refreshes(wired):
     wired["resources.versions"] = _versions_reply({"tab:t:cfg": 4})
 
     with pytest.raises(RuntimeError) as ei:
-        mcp_server.send_gui_rpc("run.start", {"tab_id": "t"})
+        mcp_server.send_gui_rpc("tab.run_start", {"tab_id": "t"})
 
     msg = str(ei.value)
     assert "PRECONDITION_FAILED" in msg
@@ -179,11 +179,11 @@ def test_device_glob_expands_to_all_device_keys(wired):
             "device:sgs": 3,
         }
     )
-    wired["run.start"] = {"ok": True, "result": {}}
+    wired["tab.run_start"] = {"ok": True, "result": {}}
     wired["resources.versions"] = _versions_reply(dict(mcp_server._LAST_SEEN))
 
-    mcp_server.send_gui_rpc("run.start", {"tab_id": "t"})
+    mcp_server.send_gui_rpc("tab.run_start", {"tab_id": "t"})
 
-    expected = next(p for (m, p) in sent if m == "run.start")["expected_versions"]
+    expected = next(p for (m, p) in sent if m == "tab.run_start")["expected_versions"]
     assert expected["device:yoko"] == 2
     assert expected["device:sgs"] == 3

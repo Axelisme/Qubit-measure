@@ -175,19 +175,24 @@ def test_tab_new_list_close_roundtrip(fx):
         tab_id = resp["result"]["tab_id"]
         assert tab_id
 
-        _send(sock, {"id": "2", "method": "tab.list", "params": {}})
+        # tab.list_all returns {"result": [tabs, running_tab_id]} where tabs is a
+        # list of [tab_id, adapter_name] pairs (Phase 170b wire shape).
+        _send(sock, {"id": "2", "method": "tab.list_all", "params": {}})
         resp = _recv_response(sock)
         assert resp["ok"] is True
-        ids = [t["tab_id"] for t in resp["result"]["tabs"]]
+        result_pair = resp["result"]["result"]  # [tabs, running_tab_id]
+        tabs_list = result_pair[0]  # list of [tab_id, adapter_name] pairs
+        ids = [pair[0] for pair in tabs_list]
         assert tab_id in ids
 
         _send(sock, {"id": "3", "method": "tab.close", "params": {"tab_id": tab_id}})
         resp = _recv_response(sock)
         assert resp["ok"] is True
 
-        _send(sock, {"id": "4", "method": "tab.list", "params": {}})
+        _send(sock, {"id": "4", "method": "tab.list_all", "params": {}})
         resp = _recv_response(sock)
-        assert resp["result"]["tabs"] == []
+        result_pair = resp["result"]["result"]
+        assert result_pair[0] == []  # no tabs open
     finally:
         sock.close()
 
@@ -326,7 +331,9 @@ def test_run_start_then_running_tab_then_finishes(fx):
         )
         tab_id = _recv_response(sock)["result"]["tab_id"]
 
-        _send(sock, {"id": "2", "method": "run.start", "params": {"tab_id": tab_id}})
+        _send(
+            sock, {"id": "2", "method": "tab.run_start", "params": {"tab_id": tab_id}}
+        )
         assert _recv_response(sock)["ok"] is True
 
         # Poll until run finishes (FakeAdapter completes very quickly).

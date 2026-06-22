@@ -302,7 +302,7 @@ def test_run_lifecycle_pushes_run_started_then_finished(fx):
     try:
         call(sock, "events.subscribe", {"events": ["run_started", "run_finished"]})
         tab_id = call(sock, "tab.new", {"adapter_name": "fake"})["result"]["tab_id"]
-        call(sock, "run.start", {"tab_id": tab_id})
+        call(sock, "tab.run_start", {"tab_id": tab_id})
         # One run_started, then one run_finished with outcome='finished'.
         started = recv_push(sock, "run_started")
         assert started["payload"]["tab_id"] == tab_id
