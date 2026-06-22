@@ -31,7 +31,11 @@ agent（MCP RPC）與 user（Qt View）都要編輯三類 cfg：tab 的 cfg、Mo
 
 ## writeback persistent items（建立在 service-owned 上）
 
-analyze 後一次算出 items 存 `TabState.writeback_items`；每個 module/waveform item 建一棵 `gc=False` headless model（種子 = item 的 `edit_schema`），item 持 `editor_id`。agent 經 `editor.set_field` 改該 model；user 點開 Edit dialog 時 widget attach 同一 model（WYSIWYG）。`writeback.apply` 讀持久草稿（snapshot 各 item model → 交 ContextService batch 寫入，見 [[0006]]）、不收 selections；rerun / reanalyze teardown 舊 model。「只算一次、持久 draft」由此成為不變式。
+analyze 後一次算出 items 存 `TabState.writeback_items`；每個 module/waveform item 建一棵 `gc=False` headless model（種子 = item 的 `edit_schema`），item 持 `editor_id`。user 點開 Edit dialog 時 widget attach 同一 model（WYSIWYG）。`writeback.apply` 讀持久草稿（snapshot 各 item model → 交 ContextService batch 寫入，見 [[0006]]）、不收 selections；rerun / reanalyze teardown 舊 model。「只算一次、持久 draft」由此成為不變式。
+
+**agent 編 writeback 草稿的入口統一在 writeback 面（`editor_id` 內部化）：** agent 改一個 module/waveform writeback item 的 cfg，走 `tab.writeback_set`（單一 writeback 編輯面，`edits=[{path,value}]`），**不**外露該 item 的 `editor_id`、不要求 agent 先持 editor handle。handler 由 `(tab_id, session_id)` 找到 item，在 service 層解析 item 持有的 `editor_id`，逐筆呼 `CfgEditorPort.set_field`；`editor_id` 是純內部 seam、不上 wire。`edits` 的語義對齊 tab cfg 的 batch 寫入（ordered、fail-fast、ref-switch 先行），回傳折 `{valid, removed?, added?}`。metadict item 仍走同一面的 `value` facet（`value` 與 `edits` 互斥，以 None 區辨 kind）。**界線**：此收斂只涵蓋 writeback 的 module/waveform 草稿；`editor.*` RPC 對 ModuleLibrary ml-entry 的編輯仍外露 `editor_id`（agent 先 `editor.open` 取得 handle 再 `editor.set`），不受影響——ml-entry 編輯沒有「外層 item 持 editor_id」的封裝層可內部化。
+
+此收斂依賴在 `CfgEditorPort` 上新增 `set_field(editor_id, path, value) -> dict` port 方法（簽名對齊 concrete `CfgEditorService.set_field`）：`WritebackService` 原僅依賴 port 的 `open_seeded`/`teardown`/`get_root`，要在 service 層替 agent 改草稿就需把寫入也納入 port，維持「依賴 port 而非 concrete service」的耦合界線（[[0005]]）。底層仍是同一棵 service-owned model，故 WYSIWYG 安全保證不變——user 的 Edit dialog 與 agent 寫的是同一棵 model。
 
 ## 安全保證（核心動機）
 

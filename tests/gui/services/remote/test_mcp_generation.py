@@ -128,10 +128,11 @@ def test_tab_new_is_a_pure_generated_forwarder():
 
 
 def test_writeback_apply_is_a_pure_generated_forwarder():
-    """gui_tab_writeback_apply is the auto-generated tab.writeback_apply forwarder
-    (MCP 45 / Phase 170c): it returns just {applied_ids}; the save_data chaining
-    moved to gui_tab_stage4. So tab.writeback_apply must NOT be excluded from
-    generation nor served by an override, and the agent schema exposes only 'tab_id'."""
+    """gui_tab_writeback_apply is the auto-generated tab.writeback_apply forwarder:
+    its reply is enriched in P3 ({applied_ids, written, context_version}) but the
+    save_data chaining still lives in gui_tab_stage4. So tab.writeback_apply must
+    NOT be excluded from generation nor served by an override, and the agent schema
+    exposes only 'tab_id'."""
     assert "tab.writeback_apply" not in m._NON_GENERATED_METHODS
     assert "gui_tab_writeback_apply" not in m._OVERRIDE_NAMES
     schema = m.TOOLS["gui_tab_writeback_apply"]["inputSchema"]
@@ -139,12 +140,16 @@ def test_writeback_apply_is_a_pure_generated_forwarder():
     assert set(schema["properties"]) == {"tab_id"}
 
 
-def test_writeback_set_selected_is_boolean_schema():
+def test_writeback_set_item_selected_is_boolean_schema():
     """``selected`` must render as a boolean schema so the client sends a real
     boolean. A JSON-any schema lets the client send the string "false", which
-    ``bool("false")`` wrongly reads as True (selection never clears)."""
-    props = m.TOOLS["gui_tab_writeback_set"]["inputSchema"]["properties"]
+    ``bool("false")`` wrongly reads as True (selection never clears). The tool is
+    renamed gui_tab_writeback_set_item in P3 (E6 editing-surface unification)."""
+    props = m.TOOLS["gui_tab_writeback_set_item"]["inputSchema"]["properties"]
     assert props["selected"]["type"] == "boolean"
+    # The unified surface carries both facet params (mutually exclusive at runtime).
+    assert "proposed_value" in props
+    assert "edits" in props
 
 
 def test_view_screenshot_not_generated():
@@ -287,13 +292,19 @@ def test_phase170c_save_writeback_tools():
     assert "gui_tab_set_save_paths" in m.TOOLS
     assert "gui_tab_save_set_paths" not in m.TOOLS
 
-    # Writeback tools are untouched in P1: still auto-generated under tab.* names.
+    # Writeback tools after P3 (E6 editing-surface unification): preview->list,
+    # set->set_item via tool_name overrides; wire methods unchanged, still
+    # auto-generated (not in _NON_GENERATED_METHODS).
     writeback_tools = {
-        "gui_tab_writeback_preview",
-        "gui_tab_writeback_set",
+        "gui_tab_writeback_list",
+        "gui_tab_writeback_set_item",
         "gui_tab_writeback_apply",
     }
     assert writeback_tools.issubset(set(m.TOOLS))
+    # The pre-P3 writeback tool names are gone.
+    assert {"gui_tab_writeback_preview", "gui_tab_writeback_set"}.isdisjoint(
+        set(m.TOOLS)
+    )
     for method in ("tab.writeback_preview", "tab.writeback_set", "tab.writeback_apply"):
         assert method not in m._NON_GENERATED_METHODS
 

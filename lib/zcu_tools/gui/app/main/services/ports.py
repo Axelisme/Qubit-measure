@@ -215,6 +215,14 @@ class CfgEditorPort(Protocol):
 
     def get_root(self, editor_id: str) -> SectionLiveField: ...
 
+    # On the port so WritebackService can apply an agent's module/waveform draft
+    # edit through the item's editor session (ADR-0008): the writeback editing
+    # surface internalizes editor_id, so the service writes via the port rather
+    # than re-exposing the handle. Signature mirrors CfgEditorService.set_field.
+    def set_field(
+        self, editor_id: str, path: str, value: object
+    ) -> dict[str, object]: ...
+
 
 @runtime_checkable
 class TabResultWritePort(Protocol):

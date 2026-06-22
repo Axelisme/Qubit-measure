@@ -23,7 +23,7 @@
 
 ## III. CfgEditor session
 
-- [0008 — CfgEditor session](0008-cfg-editor-session.md)：service-owned headless LiveModel + 可插拔 widget viewer。（併入 headless-only / delegated 的演化）
+- [0008 — CfgEditor session](0008-cfg-editor-session.md)：service-owned headless LiveModel + 可插拔 widget viewer；writeback 草稿的 agent 編輯入口統一在 writeback 面（`editor_id` 內部化、新增 `CfgEditorPort.set_field`），ml-entry 編輯仍走外露 editor_id 的 `editor.*`。（併入 headless-only / delegated 的演化）
 
 ## IV. Spec / Value 設定模型
 

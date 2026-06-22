@@ -2,7 +2,10 @@
 
 Drives the handlers against a mock Controller whose get_tab_writeback_items
 returns crafted persistent items, so we can assert preview serialization, the
-tab.writeback_set edit path, and the apply path without a full run+analyze pipeline.
+tab.writeback_set edit path (the single editing surface — selected/target_name,
+the metadict ``proposed_value`` facet and the module/waveform ``edits`` facet with
+its internalized editor_id), and the enriched apply path, without a full
+run+analyze pipeline.
 """
 
 from __future__ import annotations
@@ -31,7 +34,15 @@ def _ctrl() -> MagicMock:
     ctrl = MagicMock()
     ctrl.has_tab.return_value = True
     ctrl.get_tab_writeback_items.side_effect = lambda tab_id: _items()
-    ctrl.apply_writeback.return_value = ["md-1"]
+    # apply now echoes {applied_ids, written}; the handler folds context_version
+    # from resources_versions() read after apply.
+    ctrl.apply_writeback.return_value = {
+        "applied_ids": ["md-1"],
+        "written": {"md": ["r_f"], "ml_modules": [], "ml_waveforms": []},
+    }
+    ctrl.resources_versions.return_value = {"context": 7}
+    # set_writeback_item echoes the aggregated {valid, removed, added} on edits.
+    ctrl.set_writeback_item.return_value = {"valid": True, "removed": [], "added": []}
     return ctrl
 
 
@@ -62,12 +73,15 @@ def test_apply_reads_persistent_draft():
     ctrl = _ctrl()
     res = _dispatch(ctrl, "tab.writeback_apply", {"tab_id": "t"})
     assert res["applied_ids"] == ["md-1"]
+    # apply now enriches: written (by kind) + post-apply context version.
+    assert res["written"] == {"md": ["r_f"], "ml_modules": [], "ml_waveforms": []}
+    assert res["context_version"] == 7
     ctrl.apply_writeback.assert_called_once_with("t")
 
 
 def test_set_edits_metadict_item():
     ctrl = _ctrl()
-    _dispatch(
+    res = _dispatch(
         ctrl,
         "tab.writeback_set",
         {"tab_id": "t", "id": "md-1", "selected": False, "proposed_value": 6015.0},
@@ -77,6 +91,62 @@ def test_set_edits_metadict_item():
     assert args[:2] == ("t", "md-1")
     assert kwargs["selected"] is False
     assert kwargs["proposed_value"] == 6015.0
+    # The reply echoes the (re-read) edited item.
+    assert res["item"]["id"] == "md-1"  # type: ignore[index]
+
+
+def test_set_module_cfg_edits_facet():
+    """The module/waveform-only ``edits`` facet forwards an ordered {path,value}
+    list to the service and folds the aggregated {valid, removed, added}; the
+    agent never supplies an editor_id (it is resolved internally, ADR-0008)."""
+    ctrl = _ctrl()
+    ctrl.set_writeback_item.return_value = {
+        "valid": True,
+        "removed": ["readout_rf.old"],
+        "added": ["readout_rf.new"],
+    }
+    edits = [{"path": "readout_rf.freq", "value": 6012.3}]
+    res = _dispatch(
+        ctrl,
+        "tab.writeback_set",
+        {"tab_id": "t", "id": "ml-1", "edits": edits},
+    )
+    _, kwargs = ctrl.set_writeback_item.call_args
+    assert kwargs["edits"] == edits
+    assert "editor_id" not in kwargs  # internalized — never on the wire
+    # The aggregate is folded into the reply alongside the echoed item.
+    assert res["item"]["id"] == "ml-1"  # type: ignore[index]
+    assert res["valid"] is True
+    assert res["removed"] == ["readout_rf.old"]
+    assert res["added"] == ["readout_rf.new"]
+
+
+def test_set_proposed_value_and_edits_mutually_exclusive():
+    ctrl = _ctrl()
+    with pytest.raises(RemoteError) as exc:
+        _dispatch(
+            ctrl,
+            "tab.writeback_set",
+            {
+                "tab_id": "t",
+                "id": "md-1",
+                "proposed_value": 1.0,
+                "edits": [{"path": "p", "value": 1}],
+            },
+        )
+    assert exc.value.code is ErrorCode.INVALID_PARAMS
+    ctrl.set_writeback_item.assert_not_called()
+
+
+def test_set_edits_malformed_entry_rejected():
+    ctrl = _ctrl()
+    with pytest.raises(RemoteError) as exc:
+        _dispatch(
+            ctrl,
+            "tab.writeback_set",
+            {"tab_id": "t", "id": "ml-1", "edits": [{"path": "p"}]},
+        )
+    assert exc.value.code is ErrorCode.INVALID_PARAMS
 
 
 def test_set_target_name_override():
@@ -100,7 +170,7 @@ def test_set_deselect_flows_through():
     _dispatch(
         ctrl,
         "tab.writeback_set",
-        {"tab_id": "t", "id": "md-2", "selected": False},
+        {"tab_id": "t", "id": "md-1", "selected": False},
     )
     _, kwargs = ctrl.set_writeback_item.call_args
     assert kwargs == {"selected": False}

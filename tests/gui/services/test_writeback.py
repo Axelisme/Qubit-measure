@@ -76,11 +76,15 @@ def _make_write_port(state: State, bus: EventBus):
     return port
 
 
-def _svc(state: State, bus: EventBus | None = None) -> WritebackService:
+def _svc(
+    state: State, bus: EventBus | None = None, cfg_editor: MagicMock | None = None
+) -> WritebackService:
     """Build a WritebackService with a MagicMock CfgEditorService + a write port
     that reproduces ContextService's observable effects."""
     bus = bus or EventBus()
-    return WritebackService(state, bus, MagicMock(), _make_write_port(state, bus))
+    return WritebackService(
+        state, bus, cfg_editor or MagicMock(), _make_write_port(state, bus)
+    )
 
 
 def _put_items(state: State, *items, tab_id: str = "t1") -> None:
@@ -106,7 +110,8 @@ def test_apply_md_writeback_bumps_context_version():
 
     applied = svc.apply_tab_writeback(WritebackPermit(tab_id="t1"))
 
-    assert applied == ["md-1"]
+    assert applied["applied_ids"] == ["md-1"]
+    assert applied["written"] == {"md": ["r_f"], "ml_modules": [], "ml_waveforms": []}
     assert state.exp_context.md.r_f == 6100.0
     assert state.version.get("context") == before + 1
 
@@ -125,7 +130,8 @@ def test_apply_nothing_selected_does_not_bump_context():
 
     applied = svc.apply_tab_writeback(WritebackPermit(tab_id="t1"))
 
-    assert applied == []
+    assert applied["applied_ids"] == []
+    assert applied["written"] == {"md": [], "ml_modules": [], "ml_waveforms": []}
     assert state.version.get("context") == before
 
 
@@ -159,8 +165,60 @@ def test_apply_non_scalar_md_value_lands_verbatim():
 
     applied = svc.apply_tab_writeback(WritebackPermit(tab_id="t1"))
 
-    assert applied == ["md-1"]
+    assert applied["applied_ids"] == ["md-1"]
     assert state.exp_context.md.confusion_matrix == matrix
+
+
+# ---------------------------------------------------------------------------
+# set_item_field — the editing surface (selected / target_name / proposed_value
+# metadict facet / edits module-waveform facet)
+# ---------------------------------------------------------------------------
+
+
+def test_set_item_field_edits_route_through_item_editor():
+    """The ``edits`` facet resolves the item's editor_id internally and applies
+    each edit via CfgEditorPort.set_field, returning the aggregated result."""
+    state = _make_state_with_tab()
+    cfg_editor = MagicMock()
+    cfg_editor.set_field.return_value = {
+        "valid": True,
+        "removed": ["qub.old"],
+        "added": ["qub.new"],
+    }
+    svc = _svc(state, cfg_editor=cfg_editor)
+
+    item = ModuleWriteback(target_name="qub", description="d", edit_schema=MagicMock())
+    item.session_id = "ml-1"
+    item.editor_id = "editor-7"
+    _put_items(state, item)
+
+    agg = svc.set_item_field(
+        "t1", "ml-1", edits=[{"path": "qub.freq", "value": 5000.0}]
+    )
+
+    cfg_editor.set_field.assert_called_once_with("editor-7", "qub.freq", 5000.0)
+    assert agg == {"valid": True, "removed": ["qub.old"], "added": ["qub.new"]}
+
+
+def test_set_item_field_edits_on_metadict_item_raises():
+    state = _make_state_with_tab()
+    svc = _svc(state)
+    item = MetaDictWriteback(target_name="r_f", description="d", proposed_value=1.0)
+    item.session_id = "md-1"
+    _put_items(state, item)
+    with pytest.raises(RuntimeError, match="not a module/waveform item"):
+        svc.set_item_field("t1", "md-1", edits=[{"path": "p", "value": 1}])
+
+
+def test_set_item_field_metadict_value_returns_empty_aggregate():
+    state = _make_state_with_tab()
+    svc = _svc(state)
+    item = MetaDictWriteback(target_name="r_f", description="d", proposed_value=1.0)
+    item.session_id = "md-1"
+    _put_items(state, item)
+    agg = svc.set_item_field("t1", "md-1", proposed_value=6100.0)
+    assert item.proposed_value == 6100.0
+    assert agg == {"valid": True, "removed": [], "added": []}
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +278,8 @@ def test_apply_module_writeback_registers_and_emits():
 
     applied = svc.apply_tab_writeback(WritebackPermit(tab_id="t1"))
 
-    assert applied == ["ml-1"]
+    assert applied["applied_ids"] == ["ml-1"]
+    assert applied["written"]["ml_modules"] == ["qub"]
     assert state.version.get("context") == before + 1
     assert len(received) == 1
 
@@ -236,7 +295,8 @@ def test_apply_waveform_writeback_registers():
     _put_items(state, item)
 
     applied = svc.apply_tab_writeback(WritebackPermit(tab_id="t1"))
-    assert applied == ["wf-1"]
+    assert applied["applied_ids"] == ["wf-1"]
+    assert applied["written"]["ml_waveforms"] == ["gauss"]
 
 
 def test_apply_ml_writeback_calls_dump_when_has_persistence():
