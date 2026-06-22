@@ -380,7 +380,7 @@ def list_settable_paths(
     """Enumerate the dotted paths that ``resolve_and_set`` can mutate.
 
     DIFF-ONLY / INTERNAL: this flat lister is NOT an agent-facing view (agents
-    read the nested ``build_settable_tree`` via editor.get / tab.list_paths). Its
+    read the nested ``build_settable_tree`` via editor.get / tab.get_cfg). Its
     only caller is ``set_field``'s before/after diff (which paths a ref switch
     added/removed), reached via the ``list_settable_paths_full`` wrapper — it
     needs the flat ``{path, kind, value, type[, choices]}`` entry list.
@@ -420,7 +420,7 @@ def list_settable_paths_full(
 # Nested-tree path discovery — a value tree shaped like the cfg, where each
 # leaf carries its current live value. The structural inverse of the flat
 # ``list_settable_paths`` (which stays for set_field's before/after diff only):
-# this one is the read-only view tab.list_paths returns.
+# this one is the read-only view tab.get_cfg returns.
 #
 # Reserved ``$``-prefixed keys distinguish a leaf's metadata from a sub-tree:
 #   - a dict carrying ``$value`` (enum scalar) or ``$ref`` (ref node) is a

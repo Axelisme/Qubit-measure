@@ -185,3 +185,41 @@ def test_phase169_removed_tools_absent():
     assert "view.snapshot" in METHOD_SPECS
     assert "app.shutdown" in m._NON_GENERATED_METHODS
     assert "view.snapshot" in m._NON_GENERATED_METHODS
+
+
+def test_phase170a_tab_cfg_io_tools():
+    """Phase 170a tab cfg I/O normalization:
+    - OLD raw tab.get_cfg wire method is removed entirely (A-class removal).
+    - tab.list_paths is renamed to tab.get_cfg (now the value tree).
+    - tab.set_cfg is a new wire method (edits param = array-of-objects, so
+      it is non-generated; the override is gui_tab_set_cfg).
+    - gui_tab_get_cfg is auto-generated from the renamed wire method.
+    - gui_tab_list_paths no longer exists (the wire method is gone).
+    """
+    # Old raw tab.get_cfg wire method is gone from the contract.
+    # (It was replaced by the renamed tree-returning method.)
+    # The old raw shape {"raw": ...} is no longer a wire method at all.
+
+    # tab.get_cfg now exists and maps to the value-tree handler.
+    assert "tab.get_cfg" in METHOD_SPECS
+    assert "tab.get_cfg" not in m._NON_GENERATED_METHODS
+    # Auto-generated tool is present.
+    assert "gui_tab_get_cfg" in m.TOOLS
+    assert "gui_tab_get_cfg" not in m._OVERRIDE_NAMES
+
+    # tab.list_paths is gone from the wire contract.
+    assert "tab.list_paths" not in METHOD_SPECS
+    assert "gui_tab_list_paths" not in m.TOOLS
+
+    # tab.set_cfg is a new wire method (non-generated: edits is array-of-objects).
+    assert "tab.set_cfg" in METHOD_SPECS
+    assert "tab.set_cfg" in m._NON_GENERATED_METHODS
+    # Hand-written override is present.
+    assert "gui_tab_set_cfg" in m.TOOLS
+    assert "gui_tab_set_cfg" in m._OVERRIDE_NAMES
+
+    # Editor tools now require editor_id only (no tab_id branch).
+    for tool_name in ("gui_editor_set_field", "gui_editor_set_fields"):
+        props = m.TOOLS[tool_name]["inputSchema"]["properties"]
+        assert "tab_id" not in props, f"{tool_name} must not expose 'tab_id' anymore"
+        assert "editor_id" in props

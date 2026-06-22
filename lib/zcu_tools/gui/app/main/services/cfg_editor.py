@@ -157,7 +157,7 @@ class CfgEditorSession:
 
         Internal use only: the change-push payload (``_attach_change_stream``)
         and ``editor.open``'s session-create return. Agent-facing reads of the
-        draft go through the nested tree (``editor.get`` / ``tab.list_paths``),
+        draft go through the nested tree (``editor.get`` / ``tab.get_cfg``),
         not this flat list.
         """
         return list_settable_paths_full(self.root)
@@ -169,7 +169,7 @@ class CfgEditorSession:
         Does NOT echo cfg content back — reading it would force a lowering pass
         that eagerly evaluates EvalValue (e.g. ``r_f - 0.1`` → a concrete
         number), an unwanted side effect for a plain edit. To see the cfg, read
-        the nested tree via ``editor.get`` / ``tab.list_paths``. A ModuleRef key
+        the nested tree via ``editor.get`` / ``tab.get_cfg``. A ModuleRef key
         switch rebuilds its sub-tree, so ``removed`` / ``added`` (diffed over the
         whole draft) tell the agent exactly which paths disappeared / appeared,
         so it need not re-list the whole tab after a variant switch.

@@ -1,13 +1,14 @@
 """RemoteControlAdapter tab-cfg editing via the CfgEditorService session.
 
 A tab's cfg draft is a service-owned ``CfgEditorSession`` keyed by the tab_id
-(the same draft the open form attaches to). Agents edit it with
-``editor.set_field`` on the tab's ``editor_id`` (from ``tab.snapshot``) — the
-same path the GUI form uses, so user + agent share one model (ADR-0013 F11).
+(the same draft the open form attaches to). Agents read it with
+``tab.get_cfg`` and edit it with ``tab.set_cfg`` or ``editor.set_field`` on the
+tab's ``editor_id`` (from ``tab.snapshot``) — the same draft the GUI form uses,
+so user + agent share one model (ADR-0013 F11).
 
 Here the fixture opens a real seeded session owned by the tab on the real
 Controller, then drives edits through ``editor.set_field`` and discovery
-through ``tab.list_paths`` (which reads that same session). Path-resolver edge
+through ``tab.get_cfg`` (which reads that same session). Path-resolver edge
 cases (sweep edges, literal rejection, unknown paths) each get a focused case.
 """
 
@@ -45,7 +46,7 @@ class _LiveFixture(Fixture):
         )
         # Open the tab's cfg-editor session keyed by tab_id — exactly what
         # MainWindow.populate_cfg does. editor_id_for_owner(tab_id) now resolves
-        # it, so tab.list_paths reads it and editor.set_field mutates it.
+        # it, so tab.get_cfg reads it and tab.set_cfg/editor.set_field mutates it.
         self.editor_id, _ = self.ctrl.open_seeded_cfg_editor(
             cfg, gc=False, owner_key=self._tab_id
         )
@@ -261,17 +262,17 @@ def test_device_list_and_snapshot(lf):
 
 
 # ---------------------------------------------------------------------------
-# tab.list_paths — returns a NESTED current-value tree built off the tab's
+# tab.get_cfg — returns a NESTED current-value tree built off the tab's
 # cfg-editor session (ADR-0013 F11). Reserved '$'-keys: a dict with $value is
 # an enum leaf, a dict with $ref is a ref node, any other dict is a sub-tree,
 # a non-dict is a bare scalar value (null = unset, ADR-0010).
 # ---------------------------------------------------------------------------
 
 
-def test_list_paths_returns_nested_tree_with_scalar_values(lf):
+def test_tab_get_cfg_returns_nested_tree_with_scalar_values(lf):
     sock = open_client(lf.service.port)
     try:
-        resp = call(sock, "tab.list_paths", {"tab_id": lf._tab_id})
+        resp = call(sock, "tab.get_cfg", {"tab_id": lf._tab_id})
         assert resp["ok"] is True
         tree = resp["result"]["tree"]
         assert isinstance(tree, dict)
@@ -282,10 +283,10 @@ def test_list_paths_returns_nested_tree_with_scalar_values(lf):
         sock.close()
 
 
-def test_list_paths_sweep_is_subtree_of_bare_edges(lf):
+def test_tab_get_cfg_sweep_is_subtree_of_bare_edges(lf):
     sock = open_client(lf.service.port)
     try:
-        tree = call(sock, "tab.list_paths", {"tab_id": lf._tab_id})["result"]["tree"]
+        tree = call(sock, "tab.get_cfg", {"tab_id": lf._tab_id})["result"]["tree"]
         # The fake adapter's sweep is exposed as a sub-tree of bare edges.
         assert "sweep" in tree
         sweep = tree["sweep"]
@@ -296,25 +297,25 @@ def test_list_paths_sweep_is_subtree_of_bare_edges(lf):
         sock.close()
 
 
-def test_list_paths_prefix_returns_subtree(lf):
+def test_tab_get_cfg_prefix_returns_subtree(lf):
     sock = open_client(lf.service.port)
     try:
-        full = call(sock, "tab.list_paths", {"tab_id": lf._tab_id})["result"]["tree"]
-        scoped = call(
-            sock, "tab.list_paths", {"tab_id": lf._tab_id, "prefix": "sweep"}
-        )["result"]["tree"]
+        full = call(sock, "tab.get_cfg", {"tab_id": lf._tab_id})["result"]["tree"]
+        scoped = call(sock, "tab.get_cfg", {"tab_id": lf._tab_id, "prefix": "sweep"})[
+            "result"
+        ]["tree"]
         # The prefix sub-tree equals the corresponding sub-dict of the full tree.
         assert scoped == full["sweep"]
     finally:
         sock.close()
 
 
-def test_list_paths_prefix_scalar_leaf_wrapped_under_its_name(lf):
+def test_tab_get_cfg_prefix_scalar_leaf_wrapped_under_its_name(lf):
     sock = open_client(lf.service.port)
     try:
         # 'reps' is a scalar leaf; the prefix reply wraps it so the result is
         # always a dict keyed by the leaf name.
-        resp = call(sock, "tab.list_paths", {"tab_id": lf._tab_id, "prefix": "reps"})
+        resp = call(sock, "tab.get_cfg", {"tab_id": lf._tab_id, "prefix": "reps"})
         tree = resp["result"]["tree"]
         assert set(tree) == {"reps"}
         assert not isinstance(tree["reps"], dict)
@@ -322,28 +323,28 @@ def test_list_paths_prefix_scalar_leaf_wrapped_under_its_name(lf):
         sock.close()
 
 
-def test_list_paths_prefix_no_match_returns_empty_dict(lf):
+def test_tab_get_cfg_prefix_no_match_returns_empty_dict(lf):
     # A prefix matching nothing yields {} (graceful, not a fast-fail).
     sock = open_client(lf.service.port)
     try:
-        resp = call(sock, "tab.list_paths", {"tab_id": lf._tab_id, "prefix": "nope.x"})
+        resp = call(sock, "tab.get_cfg", {"tab_id": lf._tab_id, "prefix": "nope.x"})
         assert resp["ok"] is True
         assert resp["result"]["tree"] == {}
     finally:
         sock.close()
 
 
-def test_list_paths_unknown_tab_rejected(lf):
+def test_tab_get_cfg_unknown_tab_rejected(lf):
     sock = open_client(lf.service.port)
     try:
-        resp = call(sock, "tab.list_paths", {"tab_id": "nope"})
+        resp = call(sock, "tab.get_cfg", {"tab_id": "nope"})
         assert resp["ok"] is False
         assert resp["error"]["code"] == "invalid_params"
     finally:
         sock.close()
 
 
-def test_list_paths_form_not_populated_rejected(qapp):  # noqa: ARG001
+def test_tab_get_cfg_form_not_populated_rejected(qapp):  # noqa: ARG001
     """A tab with no cfg-editor session yet → precondition_failed."""
     from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
     from zcu_tools.gui.app.main.state import Session
@@ -358,13 +359,97 @@ def test_list_paths_form_not_populated_rejected(qapp):  # noqa: ARG001
         )
         sock = open_client(f.service.port)
         try:
-            resp = call(sock, "tab.list_paths", {"tab_id": "bare"})
+            resp = call(sock, "tab.get_cfg", {"tab_id": "bare"})
             assert resp["ok"] is False
             assert resp["error"]["code"] == "precondition_failed"
         finally:
             sock.close()
     finally:
         f.stop()
+
+
+# ---------------------------------------------------------------------------
+# tab.set_cfg — batch setter; applies ordered {path, value} edits to the tab's
+# cfg-editor session via the same controller path as editor.set_field.
+# ---------------------------------------------------------------------------
+
+
+def test_tab_set_cfg_scalar(lf):
+    sock = open_client(lf.service.port)
+    try:
+        resp = call(
+            sock,
+            "tab.set_cfg",
+            {"tab_id": lf._tab_id, "edits": [{"path": "reps", "value": 77}]},
+        )
+        assert resp["ok"] is True
+        assert resp["result"]["valid"] is True
+        assert lf.get_value("reps") == 77
+    finally:
+        sock.close()
+
+
+def test_tab_set_cfg_sweep_edge(lf):
+    sock = open_client(lf.service.port)
+    try:
+        resp = call(
+            sock,
+            "tab.set_cfg",
+            {"tab_id": lf._tab_id, "edits": [{"path": "sweep.expts", "value": 9}]},
+        )
+        assert resp["ok"] is True
+        assert lf.get_value("sweep.expts") == 9
+    finally:
+        sock.close()
+
+
+def test_tab_set_cfg_batch_applies_in_order(lf):
+    """Multiple edits in one call; result aggregates removed/added across them."""
+    sock = open_client(lf.service.port)
+    try:
+        resp = call(
+            sock,
+            "tab.set_cfg",
+            {
+                "tab_id": lf._tab_id,
+                "edits": [
+                    {"path": "reps", "value": 10},
+                    {"path": "sweep.expts", "value": 3},
+                ],
+            },
+        )
+        assert resp["ok"] is True
+        assert lf.get_value("reps") == 10
+        assert lf.get_value("sweep.expts") == 3
+    finally:
+        sock.close()
+
+
+def test_tab_set_cfg_unknown_tab_rejected(lf):
+    sock = open_client(lf.service.port)
+    try:
+        resp = call(
+            sock,
+            "tab.set_cfg",
+            {"tab_id": "no-such-tab", "edits": [{"path": "reps", "value": 1}]},
+        )
+        assert resp["ok"] is False
+        assert resp["error"]["code"] == "invalid_params"
+    finally:
+        sock.close()
+
+
+def test_tab_set_cfg_bad_path_rejected(lf):
+    sock = open_client(lf.service.port)
+    try:
+        resp = call(
+            sock,
+            "tab.set_cfg",
+            {"tab_id": lf._tab_id, "edits": [{"path": "no.such.path", "value": 1}]},
+        )
+        assert resp["ok"] is False
+    finally:
+        sock.close()
 
 
 # ---------------------------------------------------------------------------
@@ -485,7 +570,7 @@ def test_moduleref_bare_label_normalized_to_custom_tag(qapp):  # noqa: ARG001
     )
 
     root = _fakefreq_root()
-    # Bare label, exactly as tab.list_paths advertises in 'choices'.
+    # Bare label, exactly as tab.get_cfg advertises in 'choices'.
     resolve_and_set(root, "modules.readout.ref", "Direct Readout")
 
     entry = next(

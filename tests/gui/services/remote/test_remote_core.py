@@ -192,26 +192,6 @@ def test_tab_new_list_close_roundtrip(fx):
         sock.close()
 
 
-def test_tab_get_cfg_returns_tagged_raw(fx):
-    sock = _open_client(fx.service.port)
-    try:
-        _send(
-            sock, {"id": "1", "method": "tab.new", "params": {"adapter_name": "fake"}}
-        )
-        tab_id = _recv_response(sock)["result"]["tab_id"]
-
-        _send(sock, {"id": "2", "method": "tab.get_cfg", "params": {"tab_id": tab_id}})
-        resp = _recv_response(sock)
-        assert resp["ok"] is True
-        raw = resp["result"]["raw"]
-        # `schema_to_raw` emits scalars in tagged form (``{__kind: direct,
-        # value: ...}``; value=None means unset, ADR-0010).
-        assert "reps" in raw
-        assert raw["reps"]["__kind"] == "direct"
-    finally:
-        sock.close()
-
-
 def test_invalid_typed_request_rejected(fx):
     sock = _open_client(fx.service.port)
     try:

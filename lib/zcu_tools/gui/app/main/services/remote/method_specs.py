@@ -109,25 +109,19 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "tab.get_cfg": MethodSpec(
         5.0,
-        "Read tab cfg as the raw tagged form (not a set_field path source — use "
-        "tab.list_paths for editable dotted paths).",
-        (_str("tab_id"),),
-    ),
-    "tab.list_paths": MethodSpec(
-        5.0,
         "Read the tab's settable cfg as a NESTED tree of current values (the "
-        "read-only view; edit a leaf with editor.set_field on the tab's "
-        "editor_id from tab.snapshot, using the leaf's dotted path). Node "
+        "read-only view; edit a leaf with tab.set_cfg or editor.set_field on the "
+        "tab's editor_id from tab.snapshot, using the leaf's dotted path). Node "
         "shape, distinguished by '$'-prefixed reserved keys: a SCALAR leaf is "
         "its bare current value (null = unset); an ENUM scalar leaf is "
         "{'$value': current, '$choices': [...]}; a SWEEP is a sub-tree of bare "
         "edges {start, stop, expts, step} (each edge accepts ONLY a number/int "
-        "via editor.set_field — NOT an eval/ref); a REF node "
+        "via tab.set_cfg — NOT an eval/ref); a REF node "
         "(module/waveform/device selector) is {'$ref': {'current': <chosen>, "
         "'options': [<names>]}, <chosen variant's settable sub-tree>} — only the "
         "CURRENTLY-CHOSEN variant is expanded; 'options' lists bare names while "
         "'current' may be a tagged internal key — switch by passing a bare "
-        "'options' name to editor.set_field on the ref's dotted path. "
+        "'options' name to tab.set_cfg on the ref's dotted path. "
         "Any other dict is a plain section sub-tree (its keys are child fields). "
         "'prefix' (optional, dotted) returns just the sub-tree rooted at that "
         "node (a prefix at a sweep edge returns the whole sweep node); a prefix "
@@ -139,6 +133,19 @@ METHOD_SPECS: dict[str, MethodSpec] = {
                 "Return only the sub-tree rooted at this dotted path "
                 "(e.g. 'modules.readout'); omit for the whole cfg. No match → {}",
             ),
+        ),
+    ),
+    "tab.set_cfg": MethodSpec(
+        5.0,
+        "Batch-set cfg fields on a tab in order (fail-fast, non-atomic). 'edits' "
+        "is an ORDERED list of {path, value} objects. Apply ref-switch edits "
+        "before dependent inner-path edits (a ref switch removes child paths). "
+        "Returns {valid, removed, added} aggregated across the batch — the same "
+        "shape as editor.set_field. A tab that is currently running is rejected "
+        "(cancel the run first). Use tab.get_cfg to read the current tree.",
+        (
+            _str("tab_id"),
+            _json("edits", "Ordered list of {path, value} edits"),
         ),
     ),
     # Run

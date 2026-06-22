@@ -33,7 +33,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.main.controller import RenderView
 
     from .service import RemoteControlAdapter
-from zcu_tools.gui.app.main.services.session_codec import schema_to_raw
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.method_spec import BoundMethod, build_method_registry
 from zcu_tools.gui.remote.wire import optional_bool, require_int, require_str
@@ -171,17 +170,6 @@ def _save_paths_wire(paths) -> dict[str, str] | None:
 def _h_tab_get_cfg(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    tab_id = str(params["tab_id"])
-    if not adapter.ctrl.has_tab(tab_id):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    schema = adapter.ctrl.get_tab_cfg_schema(tab_id)
-    raw = schema_to_raw(schema)
-    return {"raw": raw}
-
-
-def _h_tab_list_paths(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
     from .path_resolver import build_settable_tree
 
     tab_id = str(params["tab_id"])
@@ -189,11 +177,10 @@ def _h_tab_list_paths(
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     # A tab's cfg draft is a CfgEditorService session keyed by its tab_id (the
     # same draft the open form attaches to). Build the settable tree off that
-    # session's live root — the one ``editor.set_field`` mutates — so the tree
-    # mirrors exactly what can be edited and agent+user share one model
-    # (ADR-0013 F11). The tree is built directly from the live LiveField root
-    # via build_settable_tree (the same path editor.get takes); leaf values come
-    # straight off the live tree (ADR-0010: None = unset).
+    # session's live root — the one tab.set_cfg/editor.set_field mutates — so
+    # the tree mirrors exactly what can be edited and agent+user share one model
+    # (ADR-0013 F11). Leaf values come straight off the live tree
+    # (ADR-0010: None = unset).
     editor_id = adapter.ctrl.editor_id_for_owner(tab_id)
     if editor_id is None:
         raise RemoteError(
@@ -204,6 +191,67 @@ def _h_tab_list_paths(
     prefix = str(raw_prefix) if raw_prefix else None
     root = adapter.ctrl.get_cfg_editor_root(editor_id)
     return {"tree": build_settable_tree(root, prefix=prefix)}
+
+
+def _h_tab_set_cfg(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    from zcu_tools.gui.app.main.services.cfg_editor import CfgEditorError
+
+    tab_id = str(params["tab_id"])
+    if not adapter.ctrl.has_tab(tab_id):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    # Block edits while the tab is running — same guard the human gets via the
+    # disabled form (ADR-0013 F11).
+    if adapter.ctrl.get_running_tab_id() == tab_id:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            f"tab {tab_id!r} is currently running; cancel the run before editing cfg",
+        )
+    editor_id = adapter.ctrl.editor_id_for_owner(tab_id)
+    if editor_id is None:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            f"tab {tab_id!r} cfg form has no live model yet",
+        )
+    raw_edits = params.get("edits")
+    if not isinstance(raw_edits, list):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "'edits' must be a list")
+    # Apply edits sequentially (fail-fast, non-atomic); caller orders ref-switch
+    # edits before dependent inner-path edits. Delegate to cfg_editor_set_field
+    # — the same path the editor.set_field handler uses — to avoid duplicating
+    # path resolution and validation logic.
+    all_removed: list[str] = []
+    all_added: list[str] = []
+    valid = True
+    for i, edit in enumerate(raw_edits):
+        if not isinstance(edit, dict) or "path" not in edit or "value" not in edit:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"edits[{i}] must be an object with 'path' and 'value'",
+            )
+        path = str(edit["path"])
+        value = edit["value"]
+        try:
+            result = adapter.ctrl.cfg_editor_set_field(editor_id, path, value)
+        except CfgEditorError as exc:
+            raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+        except RemoteError:
+            raise
+        except (KeyError, RuntimeError) as exc:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                str(exc),
+                reason=getattr(exc, "reason_code", ""),
+            ) from exc
+        valid = bool(result.get("valid", True))
+        removed = result.get("removed", [])
+        added = result.get("added", [])
+        if isinstance(removed, list):
+            all_removed.extend(str(p) for p in removed)
+        if isinstance(added, list):
+            all_added.extend(str(p) for p in added)
+    return {"valid": valid, "removed": all_removed, "added": all_added}
 
 
 # ---------------------------------------------------------------------------
@@ -1480,7 +1528,7 @@ def _h_editor_open(
     except CfgEditorError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     # The agent reads every cfg view as a nested tree (same shape as
-    # tab.list_paths / editor.get), so the open reply carries the freshly-opened
+    # tab.get_cfg / editor.get), so the open reply carries the freshly-opened
     # draft as {tree} rather than the flat current_paths the session also tracks
     # internally for change-push / set_field diffing.
     root = adapter.ctrl.get_cfg_editor_root(editor_id)
@@ -1529,8 +1577,8 @@ def _h_editor_get(
     raw_prefix = params.get("prefix")
     prefix = str(raw_prefix) if raw_prefix else None
     # Build the nested current-value tree off the session's live root — the same
-    # tree shape tab.list_paths returns, so the agent reads every cfg view as a
-    # tree and edits leaves via editor.set_field (dotted paths). An unknown
+    # tree shape tab.get_cfg returns, so the agent reads every cfg view as a tree
+    # and edits leaves via editor.set_field (dotted paths). An unknown
     # editor_id raises CfgEditorError from get_cfg_editor_root → INVALID_PARAMS.
     try:
         root = adapter.ctrl.get_cfg_editor_root(editor_id)
@@ -1768,7 +1816,7 @@ _HANDLERS: dict[str, Handler] = {
     "tab.list": _h_tab_list,
     "tab.snapshot": _h_tab_snapshot,
     "tab.get_cfg": _h_tab_get_cfg,
-    "tab.list_paths": _h_tab_list_paths,
+    "tab.set_cfg": _h_tab_set_cfg,
     "run.start": _h_run_start,
     "run.cancel": _h_run_cancel,
     "analyze.cancel": _h_analyze_cancel,

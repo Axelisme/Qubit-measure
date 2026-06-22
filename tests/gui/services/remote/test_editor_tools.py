@@ -18,7 +18,7 @@ from ._helpers import dispatch_handler as _dispatch  # noqa: E402
 
 def test_open_returns_editor_id_and_tree(monkeypatch):
     # editor.open now returns the freshly-opened draft as a nested {tree} (same
-    # shape as editor.get / tab.list_paths); build_settable_tree is patched so
+    # shape as editor.get / tab.get_cfg); build_settable_tree is patched so
     # this stays a mock-only wire-shape test (deep tree building is covered by
     # test_remote_cfg_set_field against a live session).
     import zcu_tools.gui.app.main.services.remote.path_resolver as pr

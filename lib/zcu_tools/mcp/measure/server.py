@@ -89,7 +89,7 @@ from zcu_tools.mcp.core.call_log import wrap_handler  # noqa: E402
 # tool renames) that leave the wire contract untouched. A wire-contract change is
 # tracked separately by WIRE_VERSION (see ``wire_version.py``); the two are
 # independent. (Git history holds the per-version evolution.)
-MCP_VERSION = 53  # dropped 9 redundant agent tools (WIRE 39): removed cfg_summary/cfg_spec/analyze_spec/update_cfg/dialog open|close|list_open; app.shutdown + view.snapshot now non-generated (wire kept)
+MCP_VERSION = 54  # Phase 170a (WIRE 40): tab cfg I/O normalized — gui_tab_get_cfg (tree), gui_tab_set_cfg (batch); editor tools now editor_id-only; stage2 uses tab.set_cfg
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -121,9 +121,8 @@ RECOMMENDED — the primary flow:
 
 ON-DEMAND — the fine-grained base tools, when a bundle doesn't fit:
   - Tabs + cfg: gui_adapter_list / gui_tab_new / gui_tab_snapshot;
-    gui_tab_get_cfg / gui_tab_list_paths; gui_editor_set_field / _set_fields
-    (a tab's cfg form is the editor session keyed by its tab_id — pass tab_id or
-    an explicit editor_id).
+    gui_tab_get_cfg (read tree) / gui_tab_set_cfg (batch write);
+    gui_editor_set_field / _set_fields for non-tab editors (require editor_id).
   - Run + analyze: gui_run_start, gui_analyze, gui_post_analyze (each waits briefly
     then degrades to a handle). A FINISHED run/analyze reply already carries 'figure'
     — the plot rendered to a temp PNG — so a separate gui_tab_get_current_figure call
@@ -716,56 +715,46 @@ def _coerce_pairs(
 
 
 def _resolve_editor_id(arguments: dict[str, Any]) -> str:
-    """Resolve the editor session id from either an explicit ``editor_id`` or a
-    ``tab_id`` (mutually exclusive, fail-fast).
+    """Return the ``editor_id`` from arguments (required, fail-fast).
 
-    A tab's cfg form is a CfgEditorService session keyed by its tab_id; the agent
-    can address it by tab_id without first running gui_tab_snapshot to pluck out
-    the editor_id. The explicit editor_id path stays for non-tab editors (e.g.
-    gui_editor_open on an ml entry). Fails fast on: neither / both supplied, or a
-    tab whose form has no live model yet (editor_id is None on the snapshot).
+    Tab cfg editing now goes through gui_tab_set_cfg / gui_tab_get_cfg. The
+    editor tools (gui_editor_get / _set_field / _set_fields) operate on
+    non-tab editors (e.g. gui_editor_open on an ml entry) and require an
+    explicit editor_id — tab_id is no longer accepted here.
     """
     editor_id = arguments.get("editor_id")
-    tab_id = arguments.get("tab_id")
-    if (editor_id is None) == (tab_id is None):
-        raise ValueError("supply exactly one of 'editor_id' or 'tab_id'")
-    if editor_id is not None:
-        return str(editor_id)
-    snap = send_gui_rpc("tab.snapshot", {"tab_id": str(tab_id)})
-    resolved = snap.get("editor_id")
-    if resolved is None:
+    if editor_id is None:
         raise ValueError(
-            f"tab {tab_id!r} cfg form has no live editor session yet "
-            "(no editor_id on its snapshot)"
+            "supply 'editor_id' (tab cfg editing uses gui_tab_set_cfg / "
+            "gui_tab_get_cfg; editor tools require an explicit editor_id)"
         )
-    return str(resolved)
+    return str(editor_id)
 
 
 def _fold_tab_editing_context(tab_id: str, reply: dict[str, Any]) -> dict[str, Any]:
     """Fold a fresh tab's editing context into ``reply``, in place.
 
     After tab.new the agent always reads tab.snapshot (for the editor_id) and
-    tab.list_paths (the settable cfg tree) before it can edit cfg. Folding those
+    tab.get_cfg (the settable cfg tree) before it can edit cfg. Folding those
     reads collapses the calls into one. Pure mcp-side fan-out over EXISTING wire
     reads. Reused by gui_run_stage1 (Phase ①). Adds {editor_id, tree}; the
-    caller owns ``tab_id`` and ``adapter`` in ``reply``. tab.list_paths returns a
+    caller owns ``tab_id`` and ``adapter`` in ``reply``. tab.get_cfg returns a
     nested current-value tree, so the settable paths and their current values
     arrive in one ``tree``.
     """
     snap = send_gui_rpc("tab.snapshot", {"tab_id": tab_id})
     reply["editor_id"] = snap.get("editor_id")
-    reply["tree"] = send_gui_rpc("tab.list_paths", {"tab_id": tab_id}).get("tree")
+    reply["tree"] = send_gui_rpc("tab.get_cfg", {"tab_id": tab_id}).get("tree")
     return reply
 
 
 def tool_gui_editor_set_field(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Set one cfg field, addressing the editor by ``editor_id`` OR ``tab_id``.
+    """Set one field in a cfg-editor session, addressed by ``editor_id``.
 
-    Thin override over the editor.set_field RPC that adds tab_id resolution: a
-    tab's cfg form is the editor session keyed by its tab_id, so the agent can
-    edit it without first running gui_tab_snapshot to find the editor_id. Returns
-    the RPC reply unchanged ({valid, removed, added}). See gui_editor_set_fields
-    for the batch form and the value/path semantics.
+    Thin override over the editor.set_field RPC. Use gui_tab_set_cfg for tab
+    cfg editing (which resolves the editor internally). Returns the RPC reply
+    unchanged ({valid, removed, added}). See gui_editor_set_fields for the
+    batch form and the value/path semantics.
     """
     editor_id = _resolve_editor_id(arguments)
     return send_gui_rpc(
@@ -781,15 +770,14 @@ def tool_gui_editor_set_field(arguments: dict[str, Any]) -> dict[str, Any]:
 def tool_gui_editor_set_fields(arguments: dict[str, Any]) -> dict[str, Any]:
     """Apply several editor.set_field edits to ONE editor, fail-fast in order.
 
-    The editor is addressed by ``editor_id`` OR ``tab_id`` (a tab's cfg form is
-    the editor session keyed by its tab_id). Convenience fan-out (a for-loop over
-    the single-field RPC) — there is no atomicity: edits before the failing one
-    stay applied and are NOT rolled back. On the first error this raises, reporting
-    how many succeeded and which path failed so the agent can reconcile. On success
-    returns ``{applied, valid}`` — the count applied and whether the resulting
-    draft is valid. It does NOT echo cfg content (that would force a lowering pass
-    which eagerly evaluates EvalValue); read the cfg with gui_tab_list_paths if
-    needed.
+    The editor is addressed by ``editor_id``. For tab cfg editing use
+    gui_tab_set_cfg instead. Convenience fan-out (a for-loop over the single-field
+    RPC) — there is no atomicity: edits before the failing one stay applied and
+    are NOT rolled back. On the first error this raises, reporting how many
+    succeeded and which path failed so the agent can reconcile. On success returns
+    ``{applied, valid}`` — the count applied and whether the resulting draft is
+    valid. It does NOT echo cfg content (that would force a lowering pass which
+    eagerly evaluates EvalValue); read the cfg with gui_tab_get_cfg if needed.
     """
     editor_id = _resolve_editor_id(arguments)
     edits = _coerce_pairs(arguments.get("edits"), field="edits", keys=("path", "value"))
@@ -1478,7 +1466,7 @@ def tool_gui_run_stage1(arguments: dict[str, Any]) -> dict[str, Any]:
     context + the adapter guide into one reply.
 
     Composes tab.new with the fan-out reads the agent always makes before editing
-    cfg (tab.snapshot for editor_id, tab.list_paths for the settable cfg tree)
+    cfg (tab.snapshot for editor_id, tab.get_cfg for the settable cfg tree)
     plus the adapter's orientation guide (adapter.guide). The guide is returned
     on the FIRST call per adapter in this MCP server session; subsequent calls for
     the same adapter omit 'guide' and carry 'guide_omitted: True' instead (the
@@ -1509,9 +1497,9 @@ def tool_gui_run_stage2(arguments: dict[str, Any]) -> dict[str, Any]:
     """Phase ② configure+run: apply ``edits`` then run the existing ``tab_id``,
     STOPPING before analyze.
 
-    Composes gui_editor_set_fields (the PLURAL path, so numeric values stay
-    numbers) when ``edits`` is given, then gui_run_start. ``edits`` is an OPTIONAL
-    {path: value} map (omit/empty runs the tab's current cfg). A finished reply is
+    Applies ``edits`` via gui_tab_set_cfg (single wire call carrying the whole
+    batch) when given, then gui_run_start. ``edits`` is an OPTIONAL {path: value}
+    map (omit/empty runs the tab's current cfg). A finished reply is
     gui_run_start's reply ({status, tab}) with {figure, analyze_params} folded in —
     the run plot rendered to a temp PNG and the analyze knobs for this tab — so the
     agent sees them together. A slow run degrades to {status:'pending'} (no folds;
@@ -1524,14 +1512,15 @@ def tool_gui_run_stage2(arguments: dict[str, Any]) -> dict[str, Any]:
     edits = arguments.get("edits") or {}
     if not isinstance(edits, dict):
         raise ValueError("'edits' must be an object mapping path -> value")
-    # Apply edits through the plural set_fields handler (addressed by tab_id) so
-    # the numbers-stay-numbers guarantee is inherited rather than re-implemented.
+    # Apply edits via tab.set_cfg (tab-keyed batch; editor tools are now
+    # editor_id-only). Single wire call carries the whole batch.
     if edits:
-        tool_gui_editor_set_fields(
+        send_gui_rpc(
+            "tab.set_cfg",
             {
                 "tab_id": tab_id,
                 "edits": [{"path": str(p), "value": v} for p, v in edits.items()],
-            }
+            },
         )
     reply = tool_gui_run_start({"tab_id": tab_id})
     # The figure is already folded by tool_gui_run_start; do NOT double-fold it
@@ -1719,10 +1708,11 @@ _NON_GENERATED_METHODS = frozenset(
         "dialog.screenshot",
         "view.screenshot",
         "tab.get_current_figure",
-        # hand-written override: adds tab_id -> editor_id resolution on top of the
-        # editor.set_field RPC (a tab's cfg form is the editor session keyed by its
-        # tab_id), so the generator must not also emit gui_editor_set_field.
+        # hand-written override: the edits param is array-of-objects (not a plain
+        # ARRAY); the generator cannot express that schema, so the override takes over.
         "editor.set_field",
+        # same reason as editor.set_field: edits is array-of-{path,value} objects.
+        "tab.set_cfg",
         # fan-out / MCP-side queue (handled at the service, not the registry)
         "state.has_project",
         "state.has_context",
@@ -1903,16 +1893,13 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
     "gui_editor_set_field": {
         "handler": tool_gui_editor_set_field,
         "description": (
-            "Set ONE field in a cfg-editor session, addressing it by 'editor_id' "
-            "OR 'tab_id' (supply exactly one). A tab's cfg form is the editor "
-            "session keyed by its tab_id, so passing 'tab_id' edits the tab "
-            "directly without first running gui_tab_snapshot to find the "
-            "editor_id; 'editor_id' still works for non-tab editors (gui_editor_open "
-            "on an ml entry). 'path' is dotted (see gui_tab_list_paths); 'value' is "
-            "a JSON scalar or an md-ref {__kind:eval, expr} (the eval form is "
-            "accepted only on a scalar leaf, never a sweep edge). Returns "
-            "{valid, removed, added} — does NOT echo cfg content (read it with "
-            "gui_tab_list_paths). A tab whose form has no live model yet fails fast."
+            "Set ONE field in a cfg-editor session, addressed by 'editor_id' "
+            "(from gui_editor_open). For tab cfg editing use gui_tab_set_cfg or "
+            "gui_tab_get_cfg instead — editor tools now require an explicit "
+            "editor_id. 'path' is dotted (see gui_tab_get_cfg); 'value' is a JSON "
+            "scalar or an md-ref {__kind:eval, expr} (the eval form is accepted "
+            "only on a scalar leaf, never a sweep edge). Returns {valid, removed, "
+            "added} — does NOT echo cfg content (read it with gui_editor_get)."
         ),
         "inputSchema": {
             "type": "object",
@@ -1920,15 +1907,8 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
                 "editor_id": {
                     "type": "string",
                     "description": (
-                        "Editor session id (from gui_tab_snapshot or "
-                        "gui_editor_open). Supply this OR 'tab_id'."
-                    ),
-                },
-                "tab_id": {
-                    "type": "string",
-                    "description": (
-                        "Edit the tab's cfg form directly (resolves its editor_id). "
-                        "Supply this OR 'editor_id'."
+                        "Editor session id (from gui_editor_open). "
+                        "Tab cfg editing uses gui_tab_set_cfg."
                     ),
                 },
                 "path": {"type": "string", "description": "Dotted field path"},
@@ -1941,25 +1921,24 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
                     "description": "JSON scalar or {__kind:eval, expr}",
                 },
             },
-            "required": ["path", "value"],
+            "required": ["editor_id", "path", "value"],
         },
     },
     "gui_editor_set_fields": {
         "handler": tool_gui_editor_set_fields,
         "description": (
             "Batch-apply several field edits to ONE cfg-editor session in order, "
-            "addressing it by 'editor_id' OR 'tab_id' (supply exactly one; a tab's "
-            "cfg form is the editor session keyed by its tab_id). Convenience "
-            "fan-out over gui_editor_set_field — NOT atomic: it stops "
-            "at the first failure (fail-fast) and edits applied before it are NOT "
-            "rolled back; the error names the failing path and how many already "
-            "applied. On success returns {applied, valid} — the count applied "
-            "and whether the resulting draft is valid. It does NOT echo cfg "
-            "content (reading it would force a lowering pass that eagerly "
-            "evaluates EvalValue); read the cfg with gui_tab_list_paths if "
-            "needed. Each edit's 'path' is dotted (see gui_tab_list_paths) and "
-            "'value' is a JSON scalar or an md-ref {__kind:eval, expr}, exactly "
-            "as gui_editor_set_field."
+            "addressed by 'editor_id' (from gui_editor_open). For tab cfg editing "
+            "use gui_tab_set_cfg instead — editor tools now require an explicit "
+            "editor_id. Convenience fan-out over gui_editor_set_field — NOT atomic: "
+            "it stops at the first failure (fail-fast) and edits applied before it "
+            "are NOT rolled back; the error names the failing path and how many "
+            "already applied. On success returns {applied, valid} — the count "
+            "applied and whether the resulting draft is valid. It does NOT echo cfg "
+            "content (reading it would force a lowering pass that eagerly evaluates "
+            "EvalValue); read the cfg with gui_editor_get if needed. Each edit's "
+            "'path' is dotted (see gui_tab_get_cfg) and 'value' is a JSON scalar "
+            "or an md-ref {__kind:eval, expr}, exactly as gui_editor_set_field."
         ),
         "inputSchema": {
             "type": "object",
@@ -1967,15 +1946,8 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
                 "editor_id": {
                     "type": "string",
                     "description": (
-                        "Editor session id (from gui_tab_snapshot or "
-                        "gui_editor_open). Supply this OR 'tab_id'."
-                    ),
-                },
-                "tab_id": {
-                    "type": "string",
-                    "description": (
-                        "Edit the tab's cfg form directly (resolves its editor_id). "
-                        "Supply this OR 'editor_id'."
+                        "Editor session id (from gui_editor_open). "
+                        "Tab cfg editing uses gui_tab_set_cfg."
                     ),
                 },
                 "edits": {
@@ -1996,7 +1968,54 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
                     },
                 },
             },
-            "required": ["edits"],
+            "required": ["editor_id", "edits"],
+        },
+    },
+    "gui_tab_set_cfg": {
+        "handler": lambda arguments: send_gui_rpc(
+            "tab.set_cfg",
+            {
+                "tab_id": str(arguments["tab_id"]),
+                "edits": _coerce_pairs(
+                    arguments.get("edits"), field="edits", keys=("path", "value")
+                ),
+            },
+        ),
+        "description": (
+            "Batch-set cfg fields on a tab in order (fail-fast, non-atomic). "
+            "Apply ref-switch edits BEFORE dependent inner-path edits — a ref "
+            "switch removes child paths and a stale inner-path edit after it "
+            "will fail. Returns {valid, removed, added} aggregated across the "
+            "batch. A running tab is rejected (cancel the run first). Read the "
+            "current tree with gui_tab_get_cfg."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "tab_id": {
+                    "type": "string",
+                    "description": "Tab to edit",
+                },
+                "edits": {
+                    "type": "array",
+                    "description": "Ordered list of edits; each {path, value}",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "Dotted field path (from gui_tab_get_cfg)",
+                            },
+                            "value": {
+                                # Untyped: numbers must not be coerced to strings.
+                                "description": "JSON scalar or {__kind:eval, expr}",
+                            },
+                        },
+                        "required": ["path", "value"],
+                    },
+                },
+            },
+            "required": ["tab_id", "edits"],
         },
     },
     "gui_context_set_md_attrs": {
@@ -2148,13 +2167,13 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "'adapter_name' (see gui_adapter_list) and fold its editing context + "
             "the adapter guide into ONE reply. Bundles tab.new + the fan-out reads "
             "the agent always makes before editing cfg (tab.snapshot for editor_id, "
-            "tab.list_paths for the settable cfg tree) + adapter.guide. Returns "
+            "tab.get_cfg for the settable cfg tree) + adapter.guide. Returns "
             "{tab_id, adapter, editor_id, tree, guide} on the FIRST call for an "
             "adapter in this MCP session; on repeat calls for the SAME adapter "
             "'guide' is omitted and 'guide_omitted: True' is set instead (the "
             "guide is static and re-sending it wastes tokens). 'tree' is the nested "
-            "current-value cfg tree (the gui_editor_set_field path source AND the "
-            "read-only values view, in one — see gui_tab_list_paths for the node "
+            "current-value cfg tree (the gui_tab_set_cfg path source AND the "
+            "read-only values view, in one — see gui_tab_get_cfg for the node "
             "shape with $value/$choices/$ref). Then configure + run with "
             "gui_run_stage2(tab_id, edits)."
         ),
@@ -2174,17 +2193,17 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
         "description": (
             "Phase ② of the recommended flow — configure+run. Apply 'edits' then "
             "run the already-created 'tab_id' (from gui_run_stage1), then STOP "
-            "before analyze. Bundles gui_editor_set_fields + gui_run_start. 'edits' "
-            "is an OPTIONAL {path: value} map (dotted paths, see gui_tab_list_paths); "
-            "it goes through the plural set_fields path so numbers stay numbers (not "
-            "stringified). Omit/empty 'edits' to run the tab's current cfg. A fast "
-            "run returns {status:'finished', tab, figure, analyze_params} — 'figure' "
-            "comes from gui_run_start's own FINISHED reply (the run plot rendered to "
-            "a temp PNG); 'analyze_params' is the stage-specific fold (the analyze "
-            "knobs for this tab). A slow run degrades to {status:'pending'} (drive "
-            "it with gui_run_wait / gui_run_poll; 'figure' arrives in the wait/poll "
-            "finished reply). STOPS before analyze on purpose: a successful run is "
-            "NOT a successful analyze — look at the figure, then gui_run_stage3."
+            "before analyze. Applies 'edits' via gui_tab_set_cfg (single wire call). "
+            "'edits' is an OPTIONAL {path: value} map (dotted paths, see "
+            "gui_tab_get_cfg); numbers stay numbers (not stringified). Omit/empty "
+            "'edits' to run the tab's current cfg. A fast run returns "
+            "{status:'finished', tab, figure, analyze_params} — 'figure' comes from "
+            "gui_run_start's own FINISHED reply (the run plot rendered to a temp "
+            "PNG); 'analyze_params' is the stage-specific fold (the analyze knobs "
+            "for this tab). A slow run degrades to {status:'pending'} (drive it with "
+            "gui_run_wait / gui_run_poll; 'figure' arrives in the wait/poll finished "
+            "reply). STOPS before analyze on purpose: a successful run is NOT a "
+            "successful analyze — look at the figure, then gui_run_stage3."
         ),
         "inputSchema": {
             "type": "object",
@@ -2197,7 +2216,7 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
                     "type": "object",
                     "description": (
                         "Optional {path: value} cfg edits applied before the run "
-                        "(dotted paths, see gui_tab_list_paths). Numbers stay "
+                        "(dotted paths, see gui_tab_get_cfg). Numbers stay "
                         "numbers. Omit/empty to run with the tab's current cfg."
                     ),
                 },
@@ -2666,6 +2685,7 @@ _OVERRIDE_NAMES = frozenset(
         "gui_overview",
         "gui_editor_set_field",
         "gui_editor_set_fields",
+        "gui_tab_set_cfg",
         "gui_context_set_md_attrs",
         "gui_context_get_md_attrs",
         "gui_device_wait_operation",

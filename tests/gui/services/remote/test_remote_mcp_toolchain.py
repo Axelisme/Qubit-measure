@@ -1583,13 +1583,13 @@ def _run_stage_fake_send(calls: list[tuple[str, dict]]):
         del timeout_seconds
         calls.append((method, dict(params)))
         if method == "tab.snapshot":
-            # editor_id is needed by gui_editor_set_fields' tab_id -> editor_id
-            # resolution; has_run_result drives the run-finished tab summary.
+            # has_run_result drives the run-finished tab summary.
             return {
                 "editor_id": "stage-ed",
                 "interaction": {"is_running": False, "has_run_result": True},
             }
-        if method == "editor.set_field":
+        if method == "tab.set_cfg":
+            # Stage2 batch setter: aggregate result across all edits.
             return {"valid": True, "removed": [], "added": []}
         if method == "tab.get_current_figure":
             return {"bytes": 9, "saved_to": params["out_path"]}
@@ -1602,7 +1602,7 @@ def _run_stage_fake_send(calls: list[tuple[str, dict]]):
 
 
 def test_run_stage2_configures_runs_and_stops_before_analyze(monkeypatch):
-    """gui_run_stage2 operates on the given tab_id: set_fields then run_start, NEVER
+    """gui_run_stage2 operates on the given tab_id: tab.set_cfg then run_start, NEVER
     creating a tab and NEVER calling analyze. A finished reply carries the figure (from
     gui_run_start's own FINISHED fold) + the stage-specific analyze-params spec."""
     from zcu_tools.mcp.measure import server as mcp_server
@@ -1619,10 +1619,12 @@ def test_run_stage2_configures_runs_and_stops_before_analyze(monkeypatch):
     )
 
     methods = [m for m, _ in calls]
-    # No tab creation (the tab already exists); edits precede run.start; no analyze.
+    # No tab creation (the tab already exists); edits via tab.set_cfg precede run.start.
     assert "tab.new" not in methods
-    assert methods.index("editor.set_field") < methods.index("run.start")
+    assert methods.index("tab.set_cfg") < methods.index("run.start")
     assert "analyze.start" not in methods
+    # tab.snapshot is still called by gui_run_start's finished-reply fold
+    # (_run_tab_summary); stage2 no longer calls it for editor_id resolution.
 
     # Finished run reply carries the folded figure AND the analyze-params spec.
     assert out["status"] == "finished"
@@ -1652,8 +1654,8 @@ def test_run_stage2_does_not_double_fold_figure(monkeypatch):
 
 
 def test_run_stage2_edits_numbers_stay_numbers(monkeypatch):
-    """The {path: value} map is forwarded through the plural set_fields path, so
-    numeric values reach editor.set_field as numbers (NOT stringified)."""
+    """The {path: value} map is forwarded to tab.set_cfg as a list of {path, value}
+    objects; numeric values reach the wire as numbers (NOT stringified)."""
     from zcu_tools.mcp.measure import server as mcp_server
 
     mcp_server._OP_BY_KEY.pop("tab:stage-tab", None)
@@ -1664,14 +1666,13 @@ def test_run_stage2_edits_numbers_stay_numbers(monkeypatch):
         {"tab_id": "stage-tab", "edits": {"reps": 100, "gain": 0.2}}
     )
 
-    set_field_values = {
-        params["path"]: params["value"]
-        for method, params in calls
-        if method == "editor.set_field"
-    }
-    assert set_field_values == {"reps": 100, "gain": 0.2}
-    assert isinstance(set_field_values["reps"], int)
-    assert isinstance(set_field_values["gain"], float)
+    # Stage2 sends one tab.set_cfg call with the batch edits.
+    set_cfg_calls = [params for method, params in calls if method == "tab.set_cfg"]
+    assert len(set_cfg_calls) == 1
+    edits = {e["path"]: e["value"] for e in set_cfg_calls[0]["edits"]}
+    assert edits == {"reps": 100, "gain": 0.2}
+    assert isinstance(edits["reps"], int)
+    assert isinstance(edits["gain"], float)
 
 
 def test_run_stage2_without_edits_runs_current_cfg(monkeypatch):
@@ -1684,7 +1685,7 @@ def test_run_stage2_without_edits_runs_current_cfg(monkeypatch):
 
     out = mcp_server.TOOLS["gui_run_stage2"]["handler"]({"tab_id": "stage-tab"})
 
-    assert "editor.set_field" not in [m for m, _ in calls]
+    assert "tab.set_cfg" not in [m for m, _ in calls]
     assert out["status"] == "finished"
     assert out["analyze_params"] == {"smooth": 1}
 
@@ -1745,7 +1746,7 @@ def test_run_stage1_creates_tab_and_folds_context_and_guide(monkeypatch):
         return {
             "tab.new": {"tab_id": "tw-1"},
             "tab.snapshot": {"editor_id": "ed-tw-1", "interaction": {}},
-            "tab.list_paths": {"tree": tree},
+            "tab.get_cfg": {"tree": tree},
             "adapter.guide": {"guide": {"behavior": "measures X"}},
         }[method]
 
@@ -1757,7 +1758,7 @@ def test_run_stage1_creates_tab_and_folds_context_and_guide(monkeypatch):
     assert calls == [
         ("tab.new", {"adapter_name": "fake/freq"}),
         ("tab.snapshot", {"tab_id": "tw-1"}),
-        ("tab.list_paths", {"tab_id": "tw-1"}),
+        ("tab.get_cfg", {"tab_id": "tw-1"}),
         ("adapter.guide", {"adapter_name": "fake/freq"}),
     ]
     assert out == {
@@ -1783,7 +1784,7 @@ def test_run_stage1_dedupes_guide_per_adapter(monkeypatch):
         return {
             "tab.new": {"tab_id": "tw-1"},
             "tab.snapshot": {"editor_id": "ed-1", "interaction": {}},
-            "tab.list_paths": {"tree": {"reps": 1}},
+            "tab.get_cfg": {"tree": {"reps": 1}},
             "adapter.guide": {"guide": {"behavior": "measures X"}},
         }[method]
 

@@ -29,10 +29,13 @@ from __future__ import annotations
 # (Git history holds the per-version evolution of both constants.)
 # v39: removed redundant wire methods (tab.get_cfg_summary, adapter.cfg_spec,
 # adapter.analyze_spec, tab.update_cfg, dialog.open/close/list_open).
-WIRE_VERSION = 39
+# v40: Phase 170a tab cfg I/O normalization — removed old raw tab.get_cfg;
+# renamed tab.list_paths -> tab.get_cfg (value tree); added tab.set_cfg
+# (tab-keyed batch setter).
+WIRE_VERSION = 40
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION (a wire-contract change
 # bumps both; a pure-internal GUI change bumps only this). Git history holds the
 # per-version evolution.
-GUI_VERSION = 46
+GUI_VERSION = 47
