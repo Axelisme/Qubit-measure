@@ -25,12 +25,6 @@ def _str_opt(name: str, desc: str = "") -> ParamSpec:
     return ParamSpec(name, JsonType.STRING, required=False, description=desc)
 
 
-def _str_default(name: str, default: str, desc: str = "") -> ParamSpec:
-    return ParamSpec(
-        name, JsonType.STRING, required=False, default=default, description=desc
-    )
-
-
 def _obj(name: str, desc: str = "") -> ParamSpec:
     return ParamSpec(name, JsonType.OBJECT, required=True, description=desc)
 
@@ -653,8 +647,8 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "module/waveform (by 'from_name'). To create a new blank/shaped entry, "
         "use ml.create_from_role (e.g. role_id='pulse:blank' or a named role) "
         "then editor.open(from_name=name) to edit it. item_kind is 'module' or "
-        "'waveform'. Returns {editor_id, paths} (paths = settable dotted paths "
-        "with current values, same shape as tab.list_paths).",
+        "'waveform'. Returns {editor_id, tree} (tree = the nested current-value "
+        "view, same shape as editor.get / tab.list_paths).",
         (
             _str("item_kind", "'module' or 'waveform'"),
             _str("from_name", "Existing ml entry name to load for editing"),
@@ -675,7 +669,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "'valid' is whether the whole draft is currently valid; 'removed'/'added' "
         "list settable paths a ModuleRef key switch ('<path>.ref') dropped/"
         "created so you need not re-list after a variant switch. To read cfg use "
-        "tab.list_paths / editor.get (which have under/verbosity).",
+        "tab.list_paths / editor.get (the nested current-value tree).",
         (
             _str("editor_id"),
             _str("path", "Dotted field path"),
@@ -684,14 +678,29 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "editor.get": MethodSpec(
         5.0,
-        "List the settable paths of an editing session. 'under' restricts to the "
-        "sub-tree at that dotted path; omit for the whole draft. 'verbosity': "
-        "'compact' (default) = {path, kind, choices?}; 'full' adds value + type; "
-        "'paths' = a bare list of path strings.",
+        "Read an editing session's settable cfg as a NESTED tree of current "
+        "values (the read-only view; edit a leaf with editor.set_field using the "
+        "leaf's dotted path). Node shape, distinguished by '$'-prefixed reserved "
+        "keys: a SCALAR leaf is its bare current value (null = unset); an ENUM "
+        "scalar leaf is {'$value': current, '$choices': [...]}; a SWEEP is a "
+        "sub-tree of bare edges {start, stop, expts, step} (each edge accepts "
+        "ONLY a number/int via editor.set_field — NOT an eval/ref); a REF node "
+        "(module/waveform/device selector) is {'$ref': {'current': <chosen>, "
+        "'options': [<names>]}, <chosen variant's settable sub-tree>} — only the "
+        "CURRENTLY-CHOSEN variant is expanded; 'options' lists bare names while "
+        "'current' may be a tagged internal key — switch by passing a bare "
+        "'options' name to editor.set_field on the ref's dotted path. "
+        "Any other dict is a plain section sub-tree (its keys are child fields). "
+        "'prefix' (optional, dotted) returns just the sub-tree rooted at that "
+        "node (a prefix at a sweep edge returns the whole sweep node); a prefix "
+        "matching nothing returns {}.",
         (
             _str("editor_id"),
-            _str_opt("under", "Restrict to the sub-tree at this dotted path"),
-            _str_default("verbosity", "compact", "compact (default) / full / paths"),
+            _str_opt(
+                "prefix",
+                "Return only the sub-tree rooted at this dotted path "
+                "(e.g. 'modules.readout'); omit for the whole draft. No match → {}",
+            ),
         ),
     ),
     "editor.commit": MethodSpec(

@@ -87,6 +87,15 @@ def test_cfg_editor_tools_generated():
     assert "discriminator" not in props
     assert "from_name" in props
 
+    # editor.get is a tree view keyed by editor_id with an optional dotted prefix;
+    # the old flat-serving knobs (verbosity / under) are gone.
+    get_tool = m.TOOLS["gui_editor_get"]
+    assert get_tool["inputSchema"]["required"] == ["editor_id"]
+    get_props = get_tool["inputSchema"]["properties"]
+    assert "prefix" in get_props
+    assert "verbosity" not in get_props
+    assert "under" not in get_props
+
     # 'value' is a JSON kind (scalar OR the tagged eval object): its schema is
     # UNTYPED (no "type" key) so the MCP client never coerces a number against a
     # "string" member and stringifies it (e.g. 0.2 -> "0.2", which then fails the

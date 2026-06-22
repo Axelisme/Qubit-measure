@@ -221,8 +221,15 @@ def test_ref_switch_returns_new_subtree_and_diff(service):
     # The diff names the appeared path explicitly so the agent need not re-list.
     assert "waveform.sigma" in res["added"]
     assert "waveform.sigma" not in res["removed"]
-    # And the rebuilt structure is observable via the session's path view.
-    assert "waveform.sigma" in _paths(service.get(editor_id, verbosity="full"))
+    # And the rebuilt structure is observable on the live root via the flat
+    # settable-path lister (the diff-only/internal API editor.set_field uses).
+    from zcu_tools.gui.app.main.services.remote.path_resolver import (
+        list_settable_paths_full,
+    )
+
+    assert "waveform.sigma" in _paths(
+        list_settable_paths_full(service.get_root(editor_id))
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -243,7 +250,7 @@ def test_discard_removes_session(service):
     editor_id, _ = service.open("module", discriminator="pulse")
     service.discard(editor_id)
     with pytest.raises(CfgEditorError):
-        service.get(editor_id)
+        service.get_root(editor_id)
 
 
 def test_discard_for_client_batch_ignores_unknown(service):
@@ -251,9 +258,9 @@ def test_discard_for_client_batch_ignores_unknown(service):
     id2, _ = service.open("waveform", discriminator="const")
     service.discard_for_client([id1, id2, "editor-unknown"])
     with pytest.raises(CfgEditorError):
-        service.get(id1)
+        service.get_root(id1)
     with pytest.raises(CfgEditorError):
-        service.get(id2)
+        service.get_root(id2)
 
 
 def test_commit_failure_keeps_session(service, ctrl):
@@ -262,7 +269,7 @@ def test_commit_failure_keeps_session(service, ctrl):
     with pytest.raises(RuntimeError):
         service.commit(editor_id, "bad")
     # session survives so the agent can fix and retry.
-    assert service.get(editor_id)
+    assert service.get_root(editor_id)
 
 
 # ---------------------------------------------------------------------------
@@ -298,7 +305,7 @@ def test_teardown_seeded_session_drops_it(service):
     service.teardown(editor_id)
     assert service.editor_id_for_owner("tab-1") is None
     with pytest.raises(CfgEditorError):
-        service.get(editor_id)
+        service.get_root(editor_id)
 
 
 def test_reopen_same_owner_tears_down_previous(service):
@@ -329,7 +336,7 @@ def test_discard_for_client_skips_gc_false_sessions(service):
     service.discard_for_client([tab_id, gc_id])
     # gc=True reclaimed, gc=False (UI-owned) session untouched.
     with pytest.raises(CfgEditorError):
-        service.get(gc_id)
+        service.get_root(gc_id)
     assert service.editor_id_for_owner("tab-1") == tab_id
 
 
@@ -348,9 +355,9 @@ def test_gc_lru_evicts_oldest(service):
     # Oldest 3 evicted; newest cap survive.
     for evicted in ids[:3]:
         with pytest.raises(CfgEditorError):
-            service.get(evicted)
+            service.get_root(evicted)
     for alive in ids[3:]:
-        assert service.get(alive) is not None
+        assert service.get_root(alive) is not None
 
 
 def test_lru_does_not_count_gc_false_sessions(service):
@@ -360,7 +367,7 @@ def test_lru_does_not_count_gc_false_sessions(service):
     for i in range(_MAX_HEADLESS_EDITORS + 5):
         service.open_seeded(_make_tab_seed(), gc=False, owner_key=f"tab-{i}")
     gc_id, _ = service.open("module", discriminator="pulse")
-    assert service.get(gc_id) is not None
+    assert service.get_root(gc_id) is not None
 
 
 # ---------------------------------------------------------------------------

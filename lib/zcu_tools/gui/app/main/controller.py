@@ -1175,17 +1175,6 @@ class Controller:
         """The owner_key a cfg-editor session is keyed to (tab_id for tab cfg)."""
         return self._cfg_editor_svc.owner_of_editor(editor_id)
 
-    def cfg_editor_get(
-        self,
-        editor_id: str,
-        under: str | None = None,
-        verbosity: str = "full",
-        prefix: str | None = None,
-    ) -> list[dict[str, object]] | list[str]:
-        return self._cfg_editor_svc.get(
-            editor_id, under=under, verbosity=verbosity, prefix=prefix
-        )
-
     def commit_cfg_editor(self, editor_id: str, name: str) -> None:
         self._cfg_editor_svc.commit(editor_id, name)
 

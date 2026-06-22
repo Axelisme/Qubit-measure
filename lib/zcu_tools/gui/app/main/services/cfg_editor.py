@@ -65,7 +65,6 @@ from zcu_tools.gui.session.ports import ContextReadPort
 
 from .ports import ContextWritePort
 from .remote.path_resolver import (
-    list_settable_paths,
     list_settable_paths_full,
     resolve_and_set,
 )
@@ -154,25 +153,14 @@ class CfgEditorSession:
     # -- behaviour (the aggregate operates its own draft) ------------------
 
     def current_paths(self) -> list[dict[str, object]]:
-        """Full settable-path list of the draft (the ``get`` projection)."""
-        return list_settable_paths_full(self.root)
+        """Full flat settable-path list of the draft.
 
-    def paths_view(
-        self,
-        under: str | None = None,
-        verbosity: str = "full",
-        prefix: str | None = None,
-    ) -> list[dict[str, object]] | list[str]:
-        """Settable-path list scoped by ``under``/``prefix`` and shaped by
-        ``verbosity``.
-
-        Mechanism layer: defaults to full fidelity over the whole draft. The
-        agent-facing compact default is the mcp layer's policy, not this
-        aggregate's.
+        Internal use only: the change-push payload (``_attach_change_stream``)
+        and ``editor.open``'s session-create return. Agent-facing reads of the
+        draft go through the nested tree (``editor.get`` / ``tab.list_paths``),
+        not this flat list.
         """
-        return list_settable_paths(
-            self.root, under=under, verbosity=verbosity, prefix=prefix
-        )
+        return list_settable_paths_full(self.root)
 
     def set_field(self, path: str, value: object) -> dict[str, object]:
         """Mutate one field; return draft validity + which paths a ref switch
@@ -180,11 +168,11 @@ class CfgEditorSession:
 
         Does NOT echo cfg content back — reading it would force a lowering pass
         that eagerly evaluates EvalValue (e.g. ``r_f - 0.1`` → a concrete
-        number), an unwanted side effect for a plain edit. To see the cfg, call
-        ``list_paths`` (which has under/verbosity). A ModuleRef key switch
-        rebuilds its sub-tree, so ``removed`` / ``added`` (diffed over the whole
-        draft) tell the agent exactly which paths disappeared / appeared, so it
-        need not re-list the whole tab after a variant switch.
+        number), an unwanted side effect for a plain edit. To see the cfg, read
+        the nested tree via ``editor.get`` / ``tab.list_paths``. A ModuleRef key
+        switch rebuilds its sub-tree, so ``removed`` / ``added`` (diffed over the
+        whole draft) tell the agent exactly which paths disappeared / appeared,
+        so it need not re-list the whole tab after a variant switch.
         """
         before = {str(e["path"]) for e in list_settable_paths_full(self.root)}
         resolve_and_set(self.root, path, _decode_value(value))
@@ -380,17 +368,6 @@ class CfgEditorService:
 
     def set_field(self, editor_id: str, path: str, value: object) -> dict[str, object]:
         return self._require(editor_id).set_field(path, value)
-
-    def get(
-        self,
-        editor_id: str,
-        under: str | None = None,
-        verbosity: str = "full",
-        prefix: str | None = None,
-    ) -> list[dict[str, object]] | list[str]:
-        return self._require(editor_id).paths_view(
-            under=under, verbosity=verbosity, prefix=prefix
-        )
 
     def commit(self, editor_id: str, name: str) -> None:
         # ADR-0006: the aggregate yields its un-lowered CfgSchema; ContextService

@@ -360,31 +360,6 @@ def _list_field(path: str, field: LiveField) -> list[dict[str, object]]:
     return []
 
 
-# Fields dropped at each verbosity level (lower = less token noise). 'full'
-# keeps everything; 'compact' drops the current value + python type (re-readable
-# elsewhere) but KEEPS kind + choices (Fast-Fail semantics: agent needs the enum
-# choices to validate before commit, and 'kind' to know a ref-switch point);
-# 'paths' is a bare list[str].
-_VERBOSITY_DROP = {"compact": ("value", "type")}
-
-
-def _project(
-    entries: list[dict[str, object]], verbosity: str
-) -> list[dict[str, object]] | list[str]:
-    """Project full path entries down to the requested verbosity."""
-    if verbosity == "full":
-        return entries
-    if verbosity == "paths":
-        return [str(e["path"]) for e in entries]
-    if verbosity == "compact":
-        drop = _VERBOSITY_DROP["compact"]
-        return [{k: v for k, v in e.items() if k not in drop} for e in entries]
-    raise RemoteError(
-        ErrorCode.INVALID_PARAMS,
-        f"unknown verbosity {verbosity!r}; expected one of full/compact/paths",
-    )
-
-
 def _filter_by_prefix(
     entries: list[dict[str, object]], prefix: str
 ) -> list[dict[str, object]]:
@@ -408,27 +383,25 @@ def _filter_by_prefix(
 def list_settable_paths(
     root: SectionLiveField,
     under: str | None = None,
-    verbosity: str = "full",
     prefix: str | None = None,
-) -> list[dict[str, object]] | list[str]:
+) -> list[dict[str, object]]:
     """Enumerate the dotted paths that ``resolve_and_set`` can mutate.
+
+    DIFF-ONLY / INTERNAL: this flat lister is NOT an agent-facing view (agents
+    read the nested ``build_settable_tree`` via editor.get / tab.list_paths). Its
+    only caller is ``set_field``'s before/after diff (which paths a ref switch
+    added/removed), reached via the ``list_settable_paths_full`` wrapper — it
+    needs the flat ``{path, kind, value, type[, choices]}`` entry list.
 
     The path grammar is identical to resolve_and_set's, so every listed path
     round-trips through ``cfg.set_field``. Literal (immutable) leaves are
-    omitted.
-
-    ``under`` restricts the listing to the sub-tree rooted at that dotted path
-    and validates the path (unknown field → INVALID_PARAMS; ModuleRef ref
-    receives special handling); omit it for the whole draft. ``prefix`` is a
+    omitted. ``under`` restricts the listing to the sub-tree rooted at that
+    dotted path and validates the path (unknown field → INVALID_PARAMS; ModuleRef
+    ref receives special handling); omit it for the whole draft. ``prefix`` is a
     pure flat string-prefix filter applied after full-path listing: it keeps only
     the paths equal to or below that dotted prefix (dotted-segment boundary, not
     glob), does not validate the prefix, and returns an empty list on no match.
-    Both ``under`` and ``prefix`` output full dotted path strings. ``verbosity``
-    controls the per-entry shape: ``full`` (default, the mechanism layer's full
-    fidelity) = ``{path, kind, value, type[, choices]}``; ``compact`` drops
-    ``value``/``type`` but keeps ``kind``/``choices``; ``paths`` = bare
-    ``list[str]``. The agent-facing default (compact) is chosen by the mcp/RPC
-    layer, not here.
+    Both ``under`` and ``prefix`` output full dotted path strings.
     """
     if under:
         field, base_path = _navigate(root, under.split("."))
@@ -437,26 +410,25 @@ def list_settable_paths(
         entries = _list_field("", root)
     if prefix:
         entries = _filter_by_prefix(entries, prefix)
-    return _project(entries, verbosity)
+    return entries
 
 
 def list_settable_paths_full(
     root: SectionLiveField, under: str | None = None
 ) -> list[dict[str, object]]:
-    """``list_settable_paths`` at full verbosity, typed as the dict-entry list.
+    """``list_settable_paths`` typed as the dict-entry list.
 
-    Internal callers (diffing, sub-tree re-list) need the dict form and a
-    non-union return type; this thin wrapper gives them that without casts.
+    Internal callers (diffing, sub-tree re-list) want a non-union return type;
+    this thin wrapper preserves that call-site stability.
     """
-    result = list_settable_paths(root, under=under, verbosity="full")
-    return cast("list[dict[str, object]]", result)
+    return list_settable_paths(root, under=under)
 
 
 # ---------------------------------------------------------------------------
 # Nested-tree path discovery — a value tree shaped like the cfg, where each
 # leaf carries its current live value. The structural inverse of the flat
-# ``list_settable_paths`` (which stays for set_field's before/after diff +
-# adapter.cfg_spec): this one is the read-only view tab.list_paths returns.
+# ``list_settable_paths`` (which stays for set_field's before/after diff only):
+# this one is the read-only view tab.list_paths returns.
 #
 # Reserved ``$``-prefixed keys distinguish a leaf's metadata from a sub-tree:
 #   - a dict carrying ``$value`` (enum scalar) or ``$ref`` (ref node) is a

@@ -193,8 +193,8 @@ def _h_tab_list_paths(
     # session's live root — the one ``editor.set_field`` mutates — so the tree
     # mirrors exactly what can be edited and agent+user share one model
     # (ADR-0013 F11). The tree is built directly from the live LiveField root
-    # (NOT via cfg_editor_get, which is the flat editor.get path); leaf values
-    # come straight off the live tree (ADR-0010: None = unset).
+    # via build_settable_tree (the same path editor.get takes); leaf values come
+    # straight off the live tree (ADR-0010: None = unset).
     editor_id = adapter.ctrl.editor_id_for_owner(tab_id)
     if editor_id is None:
         raise RemoteError(
@@ -1615,17 +1615,24 @@ def _h_editor_open(
 ) -> Mapping[str, object]:
     from zcu_tools.gui.app.main.services.cfg_editor import CfgEditorError
 
+    from .path_resolver import build_settable_tree
+
     item_kind = str(params["item_kind"])
     from_name = str(params["from_name"])
     # editor.open is modify-only: it edits an existing ml entry. Creating a blank
     # entry goes through ml.create_from_role (role_id='<disc>:blank').
     try:
-        editor_id, paths = adapter.ctrl.open_cfg_editor(
+        editor_id, _ = adapter.ctrl.open_cfg_editor(
             item_kind, discriminator=None, from_name=from_name
         )
     except CfgEditorError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
-    return {"editor_id": editor_id, "paths": paths}
+    # The agent reads every cfg view as a nested tree (same shape as
+    # tab.list_paths / editor.get), so the open reply carries the freshly-opened
+    # draft as {tree} rather than the flat current_paths the session also tracks
+    # internally for change-push / set_field diffing.
+    root = adapter.ctrl.get_cfg_editor_root(editor_id)
+    return {"editor_id": editor_id, "tree": build_settable_tree(root)}
 
 
 def _h_editor_set_field(
@@ -1659,42 +1666,25 @@ def _h_editor_set_field(
         ) from exc
 
 
-def _path_view_args(
-    params: Mapping[str, object],
-) -> tuple[str | None, str, str | None]:
-    """Extract optional ``under`` + ``verbosity`` + ``prefix`` from params.
-
-    ``verbosity`` defaults to ``full`` at the wire layer (mechanism fidelity);
-    the agent-facing compact default is applied by the mcp tool. ``prefix`` is an
-    optional dotted-path filter (omit → None, no filtering); methods that do not
-    declare it simply never carry it, so this helper stays shared with editor.get.
-    """
-    raw_under = params.get("under")
-    under = str(raw_under) if raw_under else None
-    verbosity = str(params.get("verbosity") or "full")
-    raw_prefix = params.get("prefix")
-    prefix = str(raw_prefix) if raw_prefix else None
-    return under, verbosity, prefix
-
-
 def _h_editor_get(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     from zcu_tools.gui.app.main.services.cfg_editor import CfgEditorError
 
+    from .path_resolver import build_settable_tree
+
     editor_id = str(params["editor_id"])
-    # editor.get declares no 'prefix' param, so prefix is always None here (the
-    # dotted-path filter was a tab.list_paths knob; tab.list_paths now builds its
-    # tree directly and no longer routes through _path_view_args).
-    under, verbosity, prefix = _path_view_args(params)
+    raw_prefix = params.get("prefix")
+    prefix = str(raw_prefix) if raw_prefix else None
+    # Build the nested current-value tree off the session's live root — the same
+    # tree shape tab.list_paths returns, so the agent reads every cfg view as a
+    # tree and edits leaves via editor.set_field (dotted paths). An unknown
+    # editor_id raises CfgEditorError from get_cfg_editor_root → INVALID_PARAMS.
     try:
-        return {
-            "paths": adapter.ctrl.cfg_editor_get(
-                editor_id, under=under, verbosity=verbosity, prefix=prefix
-            )
-        }
+        root = adapter.ctrl.get_cfg_editor_root(editor_id)
     except CfgEditorError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+    return {"tree": build_settable_tree(root, prefix=prefix)}
 
 
 def _h_editor_commit(
