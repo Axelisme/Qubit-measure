@@ -90,7 +90,7 @@ def test_apply_ml_writes_registers_waveform():
 
 
 def test_md_write_bumps_context_version():
-    # Concurrency guards on ``context`` (run.start / editor.commit / writeback)
+    # Concurrency guards on ``context`` (tab.run_start / editor.commit / tab.writeback_apply)
     # must detect md edits: a semantic md write bumps the context version.
     svc, state = _make_svc_with_state()
     before = state.version.get("context")

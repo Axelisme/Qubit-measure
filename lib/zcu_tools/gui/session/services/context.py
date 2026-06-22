@@ -217,7 +217,7 @@ class ContextService:
         md = self._state.exp_context.md
         setattr(md, key, value)
         # Semantic context content change: bump so concurrency guards on
-        # ``context`` (run.start / editor.commit / writeback.apply) detect this edit.
+        # ``context`` (tab.run_start / editor.commit / tab.writeback_apply) detect this edit.
         #
         # CANONICAL ANCHOR — "writing md/ml must bump context" has TWO physical
         # paths (ADR-0006 collapsed writeback's direct write into path 1):

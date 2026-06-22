@@ -1024,7 +1024,7 @@ class Controller:
     # ------------------------------------------------------------------
     # Role templates — one-shot "create blank ml entry from a named role"
     # (shared by inspect UI and ml.create_from_role RPC). Editing afterwards
-    # goes through the normal modify path (inspect / editor.open(from_name)).
+    # goes through the normal modify path (inspect / editor.new(from_name)).
     # ------------------------------------------------------------------
 
     def get_role_catalog(self) -> RoleCatalog:
@@ -1113,7 +1113,7 @@ class Controller:
         gc: bool = True,
         owner_key: str | None = None,
     ) -> tuple[str, list[dict[str, object]]]:
-        """Open a CfgEditor session. The ``editor.open`` RPC only uses
+        """Open a CfgEditor session. The ``editor.new`` RPC only uses
         ``from_name`` (edit an existing entry); ``discriminator`` (blank seed)
         remains an internal seam — creating a blank goes through
         ``create_from_role`` (``<disc>:blank`` roles), not the RPC.

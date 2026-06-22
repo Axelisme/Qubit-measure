@@ -74,7 +74,7 @@ def test_start_without_updates_uses_snapshot_params():
 
 def test_start_without_primary_result_fast_fails():
     """No primary analyze result -> precondition_failed with the true reason,
-    before the downstream 'no post params' check (mirrors analyze.start)."""
+    before the downstream 'no post params' check (mirrors tab.analyze)."""
     ctrl = _ctrl(has_analyze_result=False)
     with pytest.raises(RemoteError) as excinfo:
         _dispatch(ctrl, "tab.post_analyze", {"tab_id": "t", "updates": {}})

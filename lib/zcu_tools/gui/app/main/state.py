@@ -355,7 +355,7 @@ class State(SessionState):
             self.running_tab_id = tab_id
         elif self.running_tab_id == tab_id:
             self.running_tab_id = None
-        # Run-lock transition affects whether a run.start may proceed; the tab's
+        # Run-lock transition affects whether a tab.run_start may proceed; the tab's
         # own existence/run-state resource version moves with it.
         self.version.bump(f"tab:{tab_id}")
 

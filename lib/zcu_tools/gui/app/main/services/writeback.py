@@ -120,7 +120,7 @@ class WritebackService:
         return list(self._state.get_tab(tab_id).writeback_items)
 
     # ------------------------------------------------------------------
-    # Edit a persistent item (agent / UI writeback.set)
+    # Edit a persistent item (agent / UI tab.writeback_set)
     # ------------------------------------------------------------------
 
     def set_item_field(

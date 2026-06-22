@@ -89,7 +89,7 @@ from zcu_tools.mcp.core.call_log import wrap_handler  # noqa: E402
 # tool renames) that leave the wire contract untouched. A wire-contract change is
 # tracked separately by WIRE_VERSION (see ``wire_version.py``); the two are
 # independent. (Git history holds the per-version evolution.)
-MCP_VERSION = 57  # Phase 170d (WIRE 43): context md/ml prefix + editor open->new/save — context.get_md*/set_md*/del_md*/get_ml*/del_ml*/rename_ml* renamed to context.md_*/ml_*; ml.list_roles/create_from_role moved to context.ml_*; editor.open->editor.new; editor.commit tool_name->gui_editor_save
+MCP_VERSION = 58  # Phase 170f: context md_attrs batch tools renamed to gui_context_md_get_attrs/md_set_attrs; stale old wire name references updated in docstrings + descriptions
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -242,10 +242,10 @@ _LAST_SEEN: dict[str, int] = {}
 # Dependency map (the single place that knows what each guarded op depends on).
 # Patterns use {tab_id}/{editor_id} placeholders and a literal ``device:*`` that
 # expands to every current device:* key. save.* does NOT depend on cfg — the
-# saved content comes from the run result's own cfg_snapshot. writeback.apply
+# saved content comes from the run result's own cfg_snapshot. tab.writeback_apply
 # depends on the run+analyze results it recomputes from, plus context (it writes
 # md/ml). Note: md/ml content edits bump the ``context`` version, so any op
-# depending on ``context`` (run.start / editor.commit / writeback.apply) detects
+# depending on ``context`` (tab.run_start / editor.commit / tab.writeback_apply) detects
 # a concurrent md/ml change.
 _GUARD_DEPS: dict[str, tuple[str, ...]] = {
     # ``device:*`` guards mutations of *existing* devices; ``devices:__set__``
@@ -279,7 +279,7 @@ _GUARD_DEPS: dict[str, tuple[str, ...]] = {
 
 # --- Async-operation handle bookkeeping (operation_id <-> semantic name) ------
 #
-# Start ops (device.setup / run.start) return an ``operation_id``
+# Start ops (device.setup / tab.run_start) return an ``operation_id``
 # the agent never sees (mcp/RPC bookkeeping, like version numbers). The agent
 # refers to an in-flight operation by a name it understands; mcp maps that
 # semantic key to the latest operation_id for it. ``operation.await`` then
@@ -807,7 +807,7 @@ def tool_gui_editor_set_fields(arguments: dict[str, Any]) -> dict[str, Any]:
     return {"applied": len(edits), "valid": valid}
 
 
-def tool_gui_context_set_md_attrs(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_context_md_set_attrs(arguments: dict[str, Any]) -> dict[str, Any]:
     """Set several MetaDict attributes, fail-fast in order.
 
     Convenience fan-out over context.md_set_attr (no atomicity: attrs before the
@@ -829,11 +829,11 @@ def tool_gui_context_set_md_attrs(arguments: dict[str, Any]) -> dict[str, Any]:
     return {"applied": len(attrs)}
 
 
-def tool_gui_context_get_md_attrs(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_context_md_get_attrs(arguments: dict[str, Any]) -> dict[str, Any]:
     """Read several MetaDict attributes at once, fail-fast on any missing key.
 
     Convenience fan-out over context.md_get_attr (the read counterpart of
-    gui_context_set_md_attrs). Returns ``{values: {key: value}}`` — a map keyed by
+    gui_context_md_set_attrs). Returns ``{values: {key: value}}`` — a map keyed by
     the requested key (the natural shape for a batch read; the agent indexes
     straight in). Reads are side-effect-free, so there is no partial-state concern:
     an unknown key fails fast (the underlying RPC raises invalid_params), never
@@ -1026,7 +1026,7 @@ def _start_op_with_short_wait(
     - still running -> ``{status:'pending', message:<hint>}`` so the caller can
       use the matching wait tool. operation.await still raises on failure/cancel.
 
-    Shared by device connect/disconnect/setup and run.start — every op that has
+    Shared by device connect/disconnect/setup and tab.run_start — every op that has
     both a fast and a slow mode gets the same degrade. (soc.connect is excluded:
     it is synchronous now and returns its product directly.)
     """
@@ -1556,8 +1556,8 @@ def tool_gui_tab_stage3(arguments: dict[str, Any]) -> dict[str, Any]:
 def tool_gui_tab_stage4(arguments: dict[str, Any]) -> dict[str, Any]:
     """Phase ④ writeback+save: apply the tab's writeback draft, optionally saving.
 
-    Composes writeback.apply (applies the currently-selected draft items; returns
-    {applied_ids}); when ``save_data`` is true it ALSO chains save.data for the
+    Composes tab.writeback_apply (applies the currently-selected draft items; returns
+    {applied_ids}); when ``save_data`` is true it ALSO chains tab.save_data for the
     same tab and folds the resolved {data_path}. ``save_data`` defaults false
     (apply only). The two steps are deliberately NOT atomic — apply runs first and
     is committed even if the follow-up save fails (the save error propagates so the
@@ -2028,8 +2028,8 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "required": ["tab_id", "edits"],
         },
     },
-    "gui_context_set_md_attrs": {
-        "handler": tool_gui_context_set_md_attrs,
+    "gui_context_md_set_attrs": {
+        "handler": tool_gui_context_md_set_attrs,
         "description": (
             "Batch-set several MetaDict attributes in order. Convenience fan-out "
             "over gui_context_md_set_attr — NOT atomic: stops at the first failure "
@@ -2056,11 +2056,11 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "required": ["attrs"],
         },
     },
-    "gui_context_get_md_attrs": {
-        "handler": tool_gui_context_get_md_attrs,
+    "gui_context_md_get_attrs": {
+        "handler": tool_gui_context_md_get_attrs,
         "description": (
             "Batch-read several MetaDict attributes at once — the read counterpart "
-            "of gui_context_set_md_attrs. Convenience fan-out over "
+            "of gui_context_md_set_attrs. Convenience fan-out over "
             "gui_context_md_get_attr. Returns {values: {key: value}} keyed by the "
             "requested key. An unknown key fails fast (invalid_params) — keys are "
             "never silently skipped. Reads are side-effect-free."
@@ -2696,8 +2696,8 @@ _OVERRIDE_NAMES = frozenset(
         "gui_editor_set_field",
         "gui_editor_set_fields",
         "gui_tab_set_cfg",
-        "gui_context_set_md_attrs",
-        "gui_context_get_md_attrs",
+        "gui_context_md_set_attrs",
+        "gui_context_md_get_attrs",
         "gui_device_wait_operation",
         "gui_tab_run_start",
         "gui_tab_run_wait",

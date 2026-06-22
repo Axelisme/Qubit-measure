@@ -3,7 +3,7 @@
 A per-device ``device:<name>`` version cannot reveal a *newly added* device to
 an opt-in concurrency check (the agent never declared a key for a device that
 did not exist when it read versions). ``devices:__set__`` advances on set
-grow / shrink so a whole-set dependant (run.start) detects it.
+grow / shrink so a whole-set dependant (tab.run_start) detects it.
 """
 
 from __future__ import annotations

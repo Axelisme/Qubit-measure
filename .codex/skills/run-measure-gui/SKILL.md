@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 40
+skill_version: 41
 ---
 
 # run-measure-gui
@@ -155,9 +155,9 @@ Then the experiment loop (per tab):
 ```
 gui_adapter_list                                  # available experiments
 gui_adapter_guide(adapter_name="onetone/flux_dep")# READ FIRST: per-experiment behavior, expected md/ml, recommended
-                                                  # ranges + gotchas — live here, not in this skill. (gui_run_stage1
+                                                  # ranges + gotchas — live here, not in this skill. (gui_tab_stage1
                                                   # folds this guide in, so the recommended flow rarely calls it directly.)
-gui_tab_new(adapter_name="fake/freq")             # PURE: just creates a tab -> {tab_id}. (gui_run_stage1 creates + folds
+gui_tab_new(adapter_name="fake/freq")             # PURE: just creates a tab -> {tab_id}. (gui_tab_stage1 creates + folds
                                                   # editor_id/tree/guide in one call.) id e.g. fake-freq-1a2b3c4d
 gui_tab_snapshot(tab_id) -> editor_id             # per-tab progress + the cfg-editing session handle
 gui_tab_get_cfg(tab_id)                           # returns a nested value tree (not a flat list). Leaf conventions:
@@ -177,14 +177,14 @@ gui_editor_set_field(tab_id, "rounds", 30)        # convenience: tab_id resolves
                                                   # for eval). If an adapter pre-wires an eval edge, override it by
                                                   # passing a numeric value directly.
 # RECOMMENDED FLOW = the 4 bundle tools (each folds the NEXT decision's input, stops at a decision point):
-#   gui_run_stage1(adapter_name)            -> {tab_id, editor_id, tree, guide}   # ① new+guide
+#   gui_tab_stage1(adapter_name)            -> {tab_id, editor_id, tree, guide}   # ① new+guide
 #                                              tree = nested value tree (same shape as gui_tab_get_cfg — see above).
 #                                              guide = adapter guide (full prose) on FIRST call for this adapter in the
 #                                              current MCP session; subsequent calls for the SAME adapter return
 #                                              guide_omitted: true instead (guide already in session context, not resent).
-#   gui_run_stage2(tab_id, edits={path:v})  -> {..run.., figure, analyze_params}   # ② configure+run; STOPS before analyze
-#   gui_run_stage3(tab_id)                  -> {summary, figure, writeback_preview}   # ③ analyze
-#   gui_run_stage4(tab_id, save_data=False) -> {applied_ids[, data_path]}   # ④ writeback (+ optional save)
+#   gui_tab_stage2(tab_id, edits={path:v})  -> {..run.., figure, analyze_params}   # ② configure+run; STOPS before analyze
+#   gui_tab_stage3(tab_id)                  -> {summary, figure, writeback_preview}   # ③ analyze
+#   gui_tab_stage4(tab_id, save_data=False) -> {applied_ids[, data_path]}   # ④ writeback (+ optional save)
 # The base tools below = ON-DEMAND (fine-grained control). DEV tools (gui_debug_screenshot/_versions/_operations —
 #   debugging the GUI/MCP itself, NOT the measurement flow) are a separate tier in the server instructions:
 gui_tab_run_start(tab_id)                         # waits ~1s; finished -> {status:finished, figure:<png>,...}, slow -> {status:pending}
@@ -209,7 +209,7 @@ gui_tab_post_analyze(tab_id)                      # second analysis layer on top
                                                   # slow -> {pending} then gui_tab_post_analyze_wait/poll; needs primary analyze first
 gui_tab_get_post_analyze_result(tab_id)           # re-fetch post-analysis summary (params: gui_tab_get_post_analyze_params)
 gui_tab_save_data(tab_id) / gui_tab_save_image / gui_tab_save_result   # each returns the resolved written path ({data_path[, image_path]})
-gui_tab_writeback_apply(tab_id)                   # PURE: apply the writeback -> {applied_ids}. (gui_run_stage4 also folds an optional save.)
+gui_tab_writeback_apply(tab_id)                   # PURE: apply the writeback -> {applied_ids}. (gui_tab_stage4 also folds an optional save.)
 gui_tab_save_post_image(tab_id)                   # save the post-analysis figure (mirrors gui_tab_save_image)
 ```
 
@@ -243,7 +243,7 @@ record *why* honestly.
    the plot(s) into the record folder (pass the PNG path the run/analyze reply
    gave you; omit `figure_paths` if there is no figure — a record with no figure
    is still valid), and `data_ref` if you saved the data.
-4. **Then writeback as usual** — the gate does not block it (`gui_run_stage4` /
+4. **Then writeback as usual** — the gate does not block it (`gui_tab_stage4` /
    `gui_tab_writeback_apply`). If an item failed, prefer the partial-writeback rules in
    "Gotchas" (write the safe subset, leave the dubious one unset) and say so in the
    record's `reason`.

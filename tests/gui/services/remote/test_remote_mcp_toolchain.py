@@ -599,7 +599,7 @@ def test_set_md_attrs_fans_out_in_order(monkeypatch):
         return {}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    out = mcp_server.TOOLS["gui_context_set_md_attrs"]["handler"](
+    out = mcp_server.TOOLS["gui_context_md_set_attrs"]["handler"](
         {"attrs": [{"key": "r_f", "value": 5000.0}, {"key": "q_f", "value": 200.0}]}
     )
 
@@ -628,7 +628,7 @@ def test_batch_tools_reject_malformed_items_before_any_rpc(monkeypatch):
             {"editor_id": "ed1", "edits": [{"path": "reps"}]}
         )
     with pytest.raises(ValueError):
-        mcp_server.TOOLS["gui_context_set_md_attrs"]["handler"]({"attrs": []})
+        mcp_server.TOOLS["gui_context_md_set_attrs"]["handler"]({"attrs": []})
     assert calls == []
 
 
@@ -1496,7 +1496,7 @@ def test_fold_writeback_preview_swallows_failure(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# MCP 44 Phase ④: gui_writeback_apply gains optional save_data
+# MCP 44 Phase ④: gui_tab_writeback_apply gains optional save_data (save_data now in gui_tab_stage4)
 # ---------------------------------------------------------------------------
 
 

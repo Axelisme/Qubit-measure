@@ -9,7 +9,7 @@ correct (gui must not import the adapters package).
 Picking a role and a name seeds a blank ml module/waveform whose defaults are
 "the thing to define" (md-linked values) rather than structural zero-values. It
 is a one-shot create: editing the entry afterwards goes through the normal
-modify path (inspect modify / ``editor.open(from_name=...)``).
+modify path (inspect modify / ``editor.new(from_name=...)``).
 """
 
 from __future__ import annotations

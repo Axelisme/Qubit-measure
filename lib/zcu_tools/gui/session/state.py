@@ -88,7 +88,7 @@ class DeviceState:
 # Set-cardinality version key for the whole device collection. Bumped only when
 # the device *set* gains or loses a member (not on status/info edits of an
 # existing member — those move that member's own ``device:<name>`` key). A
-# guarded op depending on the whole set (run.start) declares this key so a
+# guarded op depending on the whole set (tab.run_start) declares this key so a
 # concurrently-added device is detected, which a per-member glob cannot reveal.
 DEVICE_SET_VERSION_KEY = "devices:__set__"
 
@@ -170,7 +170,7 @@ class SessionState:
         # to an opt-in concurrency check (the agent never declared a key for a
         # device that did not exist when it read versions). The set-cardinality
         # key advances whenever the device set grows or shrinks, so an op that
-        # depends on the whole set (run.start) detects a concurrently-added
+        # depends on the whole set (tab.run_start) detects a concurrently-added
         # device. Status transitions reuse an existing entry → set unchanged →
         # no bump here (the per-device key already moves).
         if is_new:

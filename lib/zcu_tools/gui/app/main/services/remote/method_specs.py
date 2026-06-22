@@ -166,7 +166,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "cancelled and clear is_analyzing so the tab can then be closed. This is "
         "the agent-side counterpart of the GUI 'Done' button for an interactive "
         "picker — interactive analyze is a separate operation from run, so "
-        "run.cancel does NOT settle it. Returns {ok, cancelled}: ok is always "
+        "tab.run_cancel does NOT settle it. Returns {ok, cancelled}: ok is always "
         "true (the call succeeded); cancelled is true when an interactive analyze "
         "was settled, or false (a graceful no-op) when none was in flight.",
         (_str("tab_id"),),
@@ -410,7 +410,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "track each one.",
     ),
     # Async operation handle: block until an operation (device.connect /
-    # device.disconnect / device.setup / run.start, identified by the operation_id
+    # device.disconnect / device.setup / tab.run_start, identified by the operation_id
     # they return) settles. mcp bookkeeping only — agents drive it via semantic
     # wait tools, never raw. (soc.connect is NOT here: it is a synchronous RPC.)
     "operation.await": MethodSpec(
@@ -534,7 +534,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     # Post-analysis (second analysis layer; mirrors the analyze trio above). It
     # runs on top of an existing primary analyze result, so every entry gates
     # server-side on that result existing (no version guard — same as
-    # analyze.start, which gates on has_run_result rather than expected_versions).
+    # tab.analyze, which gates on has_run_result rather than expected_versions).
     "tab.get_post_analyze_result": MethodSpec(
         5.0, "Read tab post-analysis result scalar summary", (_str("tab_id"),)
     ),
@@ -609,7 +609,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "editor.set_field": MethodSpec(
         5.0,
         "Set one field in an editing session. 'path' is a dotted path from "
-        "editor.open/get (ModuleRef sub-fields descend directly, no 'value' "
+        "editor.new/get (ModuleRef sub-fields descend directly, no 'value' "
         "segment); 'value' is a JSON scalar, or an md-reference expression as "
         '{"__kind":"eval","expr":"r_f - 0.1"} (resolved against MetaDict at '
         "commit). NOTE: the eval form is accepted ONLY on a scalar leaf — a "

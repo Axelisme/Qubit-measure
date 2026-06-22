@@ -269,7 +269,7 @@ def test_apply_module_no_editable_schema_raises():
 
 
 # ---------------------------------------------------------------------------
-# set_item_field (writeback.set)
+# set_item_field (tab.writeback_set)
 # ---------------------------------------------------------------------------
 
 

@@ -260,7 +260,7 @@ def _is_scalar_md_value(value: Any) -> bool:
 
 
 def _require_target_name(text: str) -> str:
-    """Validate an apply-destination name (mirrors the writeback.set guard)."""
+    """Validate an apply-destination name (mirrors the tab.writeback_set guard)."""
     name = text.strip()
     if not name:
         raise RuntimeError("Apply-as name must not be empty")

@@ -450,8 +450,8 @@ def test_phase170d_context_md_ml_prefix_editor_rename():
     assert new_tool_names.issubset(set(m.TOOLS))
 
     # Old MCP tool names are absent from the assembled table.
-    # Note: gui_context_get_md_attrs / gui_context_set_md_attrs are MCP-side batch
-    # convenience tools (not wire methods); their names are UNCHANGED — excluded here.
+    # Note: gui_context_get_md_attrs / gui_context_set_md_attrs (Phase 170f renamed to
+    # gui_context_md_get_attrs / gui_context_md_set_attrs) are also included here.
     old_tool_names = {
         "gui_context_get_md",
         "gui_context_get_md_attr",
@@ -466,6 +466,9 @@ def test_phase170d_context_md_ml_prefix_editor_rename():
         "gui_ml_create_from_role",
         "gui_editor_open",
         "gui_editor_save_as_module",
+        # Phase 170f: batch fan-out tools renamed
+        "gui_context_get_md_attrs",
+        "gui_context_set_md_attrs",
     }
     assert old_tool_names.isdisjoint(set(m.TOOLS))
 

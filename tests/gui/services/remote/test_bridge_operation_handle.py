@@ -152,7 +152,7 @@ def test_await_operation_refreshes_last_seen_via_rpc(wired):
 
 def test_wait_timeout_returns_timed_out_not_raises(monkeypatch):
     # Phase 120c-4: a bounded wait that elapses is an expected outcome, not a
-    # crash — gui_run_wait returns {status:'timed_out', waited_seconds} instead
+    # crash — gui_tab_run_wait returns {status:'timed_out', waited_seconds} instead
     # of raising. Covers both timeout flavors (bridge socket TimeoutError and the
     # GUI-side "(timeout)" RuntimeError).
     mcp_server._OP_BY_KEY["tab:t"] = 5

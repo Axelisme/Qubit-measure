@@ -156,7 +156,7 @@ class CfgEditorSession:
         """Full flat settable-path list of the draft.
 
         Internal use only: the change-push payload (``_attach_change_stream``)
-        and ``editor.open``'s session-create return. Agent-facing reads of the
+        and ``editor.new``'s session-create return. Agent-facing reads of the
         draft go through the nested tree (``editor.get`` / ``tab.get_cfg``),
         not this flat list.
         """
