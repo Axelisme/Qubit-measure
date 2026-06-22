@@ -1,7 +1,7 @@
 ---
 name: measure-setup
 description: Collect the stable, per-rig measurement setup (board connection, project identity, channel wiring, device addresses) into a single user-filled measure_setup.yaml at the repo root, so the measuring agent reads it instead of re-asking the user every session. Use before driving a measure-gui measurement when setup info (channel wiring, device addresses, chip/qub/res names, board IP/port) is needed and not already in the file.
-skill_version: 2
+skill_version: 3
 ---
 
 # measure-setup
@@ -91,11 +91,11 @@ devices:                # instruments to connect; delete any block you do not us
 
 5. **Apply, in this order** (order matters: a context binds a flux device, so the device
    must exist first):
-   - `gui_soc_connect(kind, ip, port)` with `kind` from `connection` (`gui_soc_connect_wait` if it returns pending).
+   - `gui_soc_connect(kind, ip, port)` with `kind` from `connection` (a synchronous call — returns once the board is connected).
    - `gui_startup_apply(chip_name, qub_name, res_name)` — add result_dir/database_path only if the user set them.
    - For each `devices` block: configure it (`gui_device_setup_spec` shows the fields, then `gui_device_setup`).
    - `gui_context_new(bind_device=<the flux device name>)`, or `gui_context_use(label)` to reuse an existing context.
-   - `gui_context_set_md_attrs(<the channels mapping>)`.
+   - `gui_context_md_set_attrs(<the channels mapping>)`.
    - Confirm with `gui_state_check`: has_project / has_context / has_active_context / has_soc all true.
 
 ## Notes
