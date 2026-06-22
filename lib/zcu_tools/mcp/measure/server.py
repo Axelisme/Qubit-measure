@@ -89,7 +89,7 @@ from zcu_tools.mcp.core.call_log import wrap_handler  # noqa: E402
 # tool renames) that leave the wire contract untouched. A wire-contract change is
 # tracked separately by WIRE_VERSION (see ``wire_version.py``); the two are
 # independent. (Git history holds the per-version evolution.)
-MCP_VERSION = 51  # tab.list_paths returns a nested value tree (WIRE 37); stage1 folds 'tree', drops cfg_summary; stage1 guide deduped per adapter per session
+MCP_VERSION = 52  # adapter.cfg_spec returns a nested $type skeleton tree + prefix (WIRE 38), replacing the flat path list
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)

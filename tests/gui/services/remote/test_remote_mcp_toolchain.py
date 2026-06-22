@@ -744,44 +744,68 @@ def test_soc_connect_mock_returns_summary_directly(fx):
 # ---------------------------------------------------------------------------
 
 
-def test_adapter_cfg_spec_lists_paths_without_tab(fx):
+def test_adapter_cfg_spec_returns_skeleton_tree_without_tab(fx):
     sock = open_client(fx.service.port)
     try:
         resp = call(sock, "adapter.cfg_spec", {"adapter_name": "fake/freq"})
         assert resp["ok"] is True
-        paths = {p["path"] for p in resp["result"]["paths"]}
-        assert "sweep.freq.expts" in paths
-        assert "reps" in paths
+        tree = resp["result"]["tree"]
+        # Scalar leaves carry $type (no live value); a sweep is a typed-edge
+        # sub-tree (expts integer, others number).
+        assert tree["reps"] == {"$type": "int"}
+        assert tree["sweep"]["freq"]["expts"] == {"$type": "integer"}
+        assert tree["sweep"]["freq"]["start"] == {"$type": "number"}
         # The simulated resonance moved to the adapter __init__ — not a cfg path.
-        assert "model.freq" not in paths
-        # a sweep edge carries integer/number type
-        expts = next(
-            p for p in resp["result"]["paths"] if p["path"] == "sweep.freq.expts"
-        )
-        assert expts["kind"] == "sweep_edge"
-        assert expts["type"] == "integer"
+        assert "model" not in tree
     finally:
         sock.close()
 
 
-def test_adapter_cfg_spec_lists_ref_only_not_variant_inner_fields(fx):
-    """cfg_spec emits each ModuleRef's '.ref' selector + allowed choices, and
-    does NOT descend into any variant's inner fields (no Cartesian-product
-    blowup, no guessing the live default variant)."""
+def test_adapter_cfg_spec_ref_node_options_only_no_variant_subtree(fx):
+    """cfg_spec emits each ModuleRef as a {$ref: {options}} node carrying its
+    allowed variant labels, and does NOT expand any variant's inner fields (no
+    Cartesian-product blowup, no guessing the live default variant) and no
+    live 'current' chosen key."""
     sock = open_client(fx.service.port)
     try:
         resp = call(sock, "adapter.cfg_spec", {"adapter_name": "fake/freq"})
-        by_path = {p["path"]: p for p in resp["result"]["paths"]}
-        # The ref selector is present, carrying its allowed variant labels.
-        assert "modules.readout.ref" in by_path
-        ref = by_path["modules.readout.ref"]
-        assert ref["kind"] == "moduleref_key"
-        assert "Pulse Readout" in ref["choices"]
-        assert "Direct Readout" in ref["choices"]
-        # No variant inner fields leak through — neither label-keyed nor
-        # chosen-style. The only modules.readout.* path is the ref itself.
-        readout_paths = [p for p in by_path if p.startswith("modules.readout.")]
-        assert readout_paths == ["modules.readout.ref"]
+        readout = resp["result"]["tree"]["modules"]["readout"]
+        # The ref node advertises only its allowed variant labels.
+        assert set(readout) == {"$ref"}
+        assert set(readout["$ref"]) == {"options"}
+        assert readout["$ref"]["options"] == ["Direct Readout", "Pulse Readout"]
+    finally:
+        sock.close()
+
+
+def test_adapter_cfg_spec_prefix_returns_variant_subtree(fx):
+    """A prefix duck-types into a ModuleRef variant and returns that sub-tree
+    (the only way to read variant inner fields from the static spec)."""
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(
+            sock,
+            "adapter.cfg_spec",
+            {"adapter_name": "fake/freq", "prefix": "modules.readout.pulse_cfg"},
+        )
+        sub = resp["result"]["tree"]
+        # 'nqz' is an enum scalar → $type + $choices; locked/literal fields drop.
+        assert sub["nqz"] == {"$type": "int", "$choices": [1, 2]}
+        assert "type" not in sub  # LiteralSpec — immutable, omitted
+    finally:
+        sock.close()
+
+
+def test_adapter_cfg_spec_prefix_no_match_returns_empty(fx):
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(
+            sock,
+            "adapter.cfg_spec",
+            {"adapter_name": "fake/freq", "prefix": "modules.nope"},
+        )
+        assert resp["ok"] is True
+        assert resp["result"]["tree"] == {}
     finally:
         sock.close()
 

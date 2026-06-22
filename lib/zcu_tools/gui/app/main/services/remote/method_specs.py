@@ -437,14 +437,29 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "adapter.list": MethodSpec(5.0, "List available adapters"),
     "adapter.cfg_spec": MethodSpec(
         5.0,
-        "List an adapter's static cfg paths (path/kind/type/choices/label) "
-        "without building a tab — the shape skeleton. ModuleRef/WaveformRef "
-        "nodes list ONLY their '.ref' selector + allowed choices, NOT any "
-        "variant's inner fields (which variant is the live default is a "
-        "context-dependent value-layer decision a static spec can't know). To "
-        "read a chosen variant's fields, build a tab and use tab.list_paths "
-        "(live, with under/verbosity).",
-        (_str("adapter_name", "Adapter to introspect"),),
+        "Read an adapter's static cfg as a NESTED skeleton tree — its SHAPE, "
+        "without building a tab and WITHOUT any live values (the structural twin "
+        "of tab.list_paths). Node shape, distinguished by '$'-prefixed reserved "
+        "keys: a SCALAR leaf is {'$type': '<python type>'} (e.g. 'int'/'float'/"
+        "'bool'/'str'), plus '$choices': [...] when it is an enum; a SWEEP is a "
+        "sub-tree of typed edges {start, stop, step: {'$type':'number'}, expts: "
+        "{'$type':'integer'}}; a REF node (module/waveform/device selector) is "
+        "{'$ref': {'options': [<allowed labels>]}} — NO variant sub-tree (a "
+        "static spec can't know which variant is the live default) and NO "
+        "'current' (no live chosen key); a device ref's 'options' is empty (no "
+        "live device list without a tab). Literal (immutable) fields are "
+        "omitted. Any other dict is a plain section sub-tree (its keys are child "
+        "fields). 'prefix' (optional, dotted) returns just the sub-tree rooted "
+        "at that node; a prefix matching nothing returns {}. To read a chosen "
+        "variant's fields or any live value, build a tab and use tab.list_paths.",
+        (
+            _str("adapter_name", "Adapter to introspect"),
+            _str_opt(
+                "prefix",
+                "Return only the sub-tree rooted at this dotted path "
+                "(e.g. 'modules.readout'); omit for the whole spec. No match → {}",
+            ),
+        ),
     ),
     "adapter.analyze_spec": MethodSpec(
         5.0,

@@ -1007,13 +1007,15 @@ def _h_adapter_list(
 def _h_adapter_cfg_spec(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from .path_resolver import list_spec_paths
+    from .path_resolver import build_spec_tree
 
     name = str(params["adapter_name"])
     if name not in adapter.ctrl.get_adapter_names():
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown adapter: {name!r}")
+    raw_prefix = params.get("prefix")
+    prefix = str(raw_prefix) if raw_prefix else None
     spec = adapter.ctrl.get_adapter_cfg_spec(name)
-    return {"paths": list_spec_paths(spec)}
+    return {"tree": build_spec_tree(spec, prefix=prefix)}
 
 
 def _h_adapter_analyze_spec(
