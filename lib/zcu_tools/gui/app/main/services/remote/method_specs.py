@@ -99,16 +99,25 @@ def _comment() -> ParamSpec:
 METHOD_SPECS: dict[str, MethodSpec] = {
     # Tab
     "tab.new": MethodSpec(
-        10.0, "Create a new tab", (_str("adapter_name", "Adapter to instantiate"),)
+        10.0,
+        "Create a new tab for the named adapter. Returns {tab_id}.",
+        (_str("adapter_name", "Adapter to instantiate"),),
     ),
-    "tab.close": MethodSpec(5.0, "Close a tab", (_str("tab_id"),)),
-    "tab.set_active": MethodSpec(5.0, "Activate a tab", (_str("tab_id"),)),
+    "tab.close": MethodSpec(5.0, "Close a tab. Returns {ok: true}.", (_str("tab_id"),)),
+    "tab.set_active": MethodSpec(
+        5.0,
+        "Activate a tab. VIEW-ONLY: this changes which tab the user sees, NOT your "
+        "operation target (you always act on an explicit tab_id). Returns {ok: true}.",
+        (_str("tab_id"),),
+    ),
     "tab.list_all": MethodSpec(
         5.0,
-        "List all open tabs together with the currently-running tab id. "
-        "Returns a 2-tuple-as-array [tabs, running_tab_id]: tabs is a list of "
-        "[tab_id, adapter_name] 2-element arrays; running_tab_id is the tab_id of "
-        "the tab currently running (or null when nothing is running).",
+        "List all open tabs. Returns {tabs, active_tab_id, running_tab_id}: tabs "
+        "is a list of {tab_id, adapter_name, is_running} objects; active_tab_id is "
+        "the tab the USER is focused on (a collaboration cue, NOT your operation "
+        "target); running_tab_id is the tab currently running (or null when "
+        "nothing is running).",
+        tool_name="gui_tab_list",
     ),
     "tab.snapshot": MethodSpec(
         5.0, "Tab summary", (_str_opt("tab_id", "Tab to inspect; omit for all tabs"),)
@@ -215,16 +224,30 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "tab.save_set_paths": MethodSpec(
         5.0,
-        "Set tab save path overrides",
-        (_str("tab_id"), _str("data_path"), _str("image_path")),
+        "Set the tab's default save destinations (data + image). Echoes the "
+        "applied {data_path, image_path}. Version-guarded on the tab's save_path: "
+        "rejects with precondition_failed if a concurrent edit moved it.",
+        (
+            _str("tab_id"),
+            _str("data_path"),
+            _str("image_path"),
+            _expected_versions(),
+        ),
+        tool_name="gui_tab_set_save_paths",
     ),
     # Context
     "context.use": MethodSpec(
-        5.0, "Switch context", (_str("label", "Context label to switch to"),)
+        5.0,
+        "Switch the active context to 'label'. Echoes {label, has_active_context}. "
+        "An unknown label fails fast (invalid_params) with the available labels; no "
+        "applied project fails with precondition_failed.",
+        (_str("label", "Context label to switch to"),),
+        tool_name="gui_context_switch",
     ),
     "context.new": MethodSpec(
         10.0,
-        "Create new context",
+        "Create a new context and make it active. Echoes {label, has_active_context} "
+        "— the auto-derived label (the agent cannot name it directly).",
         (
             _str_opt(
                 "bind_device",
@@ -234,55 +257,88 @@ METHOD_SPECS: dict[str, MethodSpec] = {
             ),
             _str_opt("clone_from", "Label of an existing context to clone ml/md from"),
         ),
+        tool_name="gui_context_create",
     ),
+    # context.labels / context.active stay as wire methods (no generated tool):
+    # gui_context_list folds both into {active, has_active_context, labels} at the
+    # MCP layer. Per-label unit/value is NOT available — unit/value are transient
+    # creation metadata consumed by the device + auto-label, never persisted (FC2).
     "context.labels": MethodSpec(5.0, "List context labels"),
     "context.active": MethodSpec(5.0, "Active context label"),
+    # context.md_get / md_get_attr stay as wire methods feeding the merged
+    # gui_context_md_read tool (no generated tool of their own).
     "context.md_get": MethodSpec(5.0, "List MetaDict keys"),
     "context.md_get_attr": MethodSpec(
         5.0, "Read one MetaDict attribute", (_str("key", "MetaDict key"),)
     ),
-    "context.ml_get": MethodSpec(5.0, "List ModuleLibrary module/waveform names"),
+    "context.ml_get": MethodSpec(
+        5.0,
+        "List ModuleLibrary entries with their discriminator: returns "
+        "{modules: [{name, kind}], waveforms: [{name, style}]}, sorted by name. "
+        "'kind' is the module type tag (e.g. 'pulse', 'reset/bath'); 'style' is the "
+        "waveform style (e.g. 'gauss', 'const'). Read one entry's full cfg with "
+        "gui_context_ml_inspect.",
+        tool_name="gui_context_ml_list",
+    ),
+    # context.md_set_attr stays as a wire method feeding gui_context_md_write's
+    # fan-out (no generated tool — the single-attr MCP surface is retired in E5).
     "context.md_set_attr": MethodSpec(
         5.0,
         "Set one MetaDict attribute",
         (_str("key", "MetaDict key"), _json("value", "JSON-safe value")),
     ),
+    # context.md_del_attr stays as a wire method feeding gui_context_md_delete's
+    # batch fan-out (no generated tool).
     "context.md_del_attr": MethodSpec(
         5.0, "Delete one MetaDict attribute", (_str("key", "MetaDict key"),)
     ),
     "context.ml_del_module": MethodSpec(
-        5.0, "Delete one ModuleLibrary module", (_str("name", "Module name"),)
+        5.0,
+        "Delete one ModuleLibrary module. Echoes {deleted: name}. cfg refs pointing "
+        "at this entry degrade to inline Custom (the value is kept inline, not lost); "
+        "to re-link, edit them.",
+        (_str("name", "Module name"),),
+        tool_name="gui_context_ml_delete_module",
     ),
     "context.ml_del_waveform": MethodSpec(
-        5.0, "Delete one ModuleLibrary waveform", (_str("name", "Waveform name"),)
+        5.0,
+        "Delete one ModuleLibrary waveform. Echoes {deleted: name}. cfg refs pointing "
+        "at this entry degrade to inline Custom (the value is kept inline, not lost); "
+        "to re-link, edit them.",
+        (_str("name", "Waveform name"),),
+        tool_name="gui_context_ml_delete_waveform",
     ),
     "context.ml_rename_module": MethodSpec(
         5.0,
-        "Rename a ModuleLibrary module old→new (clash fails fast). cfg refs to "
-        "'old' degrade to inline Custom (value kept); to re-link, edit them.",
+        "Rename a ModuleLibrary module old→new (clash fails fast). Echoes "
+        "{renamed: new}. cfg refs to 'old' degrade to inline Custom (the value is "
+        "kept inline, not lost); to re-link, edit them.",
         (_str("old", "Current module name"), _str("new", "New module name")),
     ),
     "context.ml_rename_waveform": MethodSpec(
         5.0,
-        "Rename a ModuleLibrary waveform old→new (clash fails fast).",
+        "Rename a ModuleLibrary waveform old→new (clash fails fast). Echoes "
+        "{renamed: new}. cfg refs to 'old' degrade to inline Custom (the value is "
+        "kept inline, not lost); to re-link, edit them.",
         (_str("old", "Current waveform name"), _str("new", "New waveform name")),
     ),
     "context.ml_list_roles": MethodSpec(
         5.0,
-        "List experiment-role templates for context.ml_create_from_role. Returns "
-        "{roles: [{role_id, label, item_kind}]}. Each role seeds a blank module/"
-        "waveform with md-linked defaults (e.g. 'res_probe', 'bath_reset').",
+        "List experiment-role templates for gui_context_ml_create_from_role. Returns "
+        "{roles: [{role_id, label, item_kind, default_name}]}. Each role seeds a "
+        "blank module/waveform with md-linked defaults (e.g. 'res_probe', "
+        "'bath_reset'); 'default_name' is the suggested entry name.",
     ),
     "context.ml_create_from_role": MethodSpec(
         10.0,
         "Create a blank ModuleLibrary module/waveform from a named role "
-        "(context.ml_list_roles) and register it under 'name'. One-shot: seeds the "
-        "role's md-linked defaults (lowered to the md's current values) — it does NOT "
-        "open an editing session. To then change the entry use "
-        "editor.new(from_name=name).",
+        "(gui_context_ml_list_roles) and register it under 'name'. The item kind "
+        "(module/waveform) is derived from 'role_id'. One-shot: seeds the role's "
+        "md-linked defaults (lowered to the md's current values) — it does NOT open "
+        "an editing session. Echoes {created: name}. To then change the entry use "
+        "gui_editor_open(from_name=name).",
         (
-            _str("item_kind", "'module' or 'waveform'"),
-            _str("role_id", "role id from context.ml_list_roles"),
+            _str("role_id", "role id from gui_context_ml_list_roles"),
             _str("name", "new ml entry name"),
         ),
     ),
@@ -295,8 +351,12 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         5.0,
         "Read the connected SoC's hardware summary (QICK soccfg): a compact "
         "human-readable 'description' table (per-channel generator/readout type, "
-        "converter port, sample rate, max pulse/buffer length) plus a structured "
-        "'cfg' carrying the full detail, and 'is_mock'. Requires a connected SoC.",
+        "converter port, sample rate, max pulse/buffer length) plus 'is_mock'. "
+        "The structured 'cfg' (the full ~2 KB QICK config) is included only when "
+        "include_cfg=true (default false), so the common case pays nothing for it. "
+        "Requires a connected SoC. The SoC has no teardown (Pyro4-backed): there "
+        "is no disconnect / reconnect / health-check tool (deferred, E3).",
+        (_bool_default("include_cfg", False, "Include the full ~2 KB QICK cfg"),),
     ),
     "project.info": MethodSpec(
         5.0,
@@ -332,7 +392,9 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "result_dir and database_path. Omit them to use the default per-qubit "
         "roots (<cwd>/result/<chip>/<qub> and <cwd>/Database/<chip>/<qub>, the "
         "same the setup dialog pre-fills) — the project is runnable either way. "
-        "Pass explicit paths to override.",
+        "Pass explicit paths to override. Echoes the resolved project: "
+        "{chip_name, qub_name, res_name, result_dir, database_path} (the paths "
+        "are the defaults filled in when omitted).",
         (
             _str("chip_name"),
             _str("qub_name"),
@@ -346,6 +408,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
                 "Database path; omit → default <cwd>/Database/<chip>/<qub>",
             ),
         ),
+        tool_name="gui_project_apply",
     ),
     # Device
     "device.connect": MethodSpec(
@@ -382,7 +445,9 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         30.0, "Reconnect device", (_str("name", "Device name"),)
     ),
     "device.forget": MethodSpec(
-        5.0, "Forget memory-only device", (_str("name", "Device name"),)
+        5.0,
+        "Forget a memory-only device (synchronous). Echoes {forgotten: name}.",
+        (_str("name", "Device name"),),
     ),
     "device.setup": MethodSpec(
         30.0,
@@ -435,7 +500,9 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "device.snapshot": MethodSpec(
         5.0, "Read one device cached snapshot", (_str("name", "Device name"),)
     ),
-    "adapter.list": MethodSpec(5.0, "List available adapters"),
+    "adapter.list": MethodSpec(
+        5.0, "List available adapters. Returns {adapters: [name]}."
+    ),
     "adapter.guide": MethodSpec(
         5.0,
         "Read an adapter's human-facing orientation guide BEFORE running it: "
@@ -479,11 +546,14 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     # Predictor
     "predictor.load": MethodSpec(
         30.0,
-        "Load FluxoniumPredictor",
+        "Install a FluxoniumPredictor from a params.json file (its fluxdep_fit "
+        "section). Replaces any currently loaded predictor. Echoes the installed "
+        "model: {loaded: true, path, flux_bias, flux_half, flux_period, EJ, EC, EL}.",
         (
             _str("path", "Predictor file path"),
             _num_default("flux_bias", 0.0, "Flux bias"),
         ),
+        tool_name="gui_predictor_install_from_file",
     ),
     "predictor.set_model_params": MethodSpec(
         10.0,
@@ -491,7 +561,9 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "(no params.json). EJ/EC/EL are the Fluxonium energies in GHz "
         "(e.g. 4:1:1); flux_half/flux_period are the value->flux affine anchors "
         "in device-value units; flux_bias is the bias correction. Replaces any "
-        "currently loaded predictor.",
+        "currently loaded predictor. Echoes the installed model: {loaded: true, "
+        "path: null, flux_bias, flux_half, flux_period, EJ, EC, EL} (path is null "
+        "because this predictor has no backing file).",
         (
             _num("EJ", "Josephson energy E_J (GHz)"),
             _num("EC", "Charging energy E_C (GHz)"),
@@ -500,24 +572,36 @@ METHOD_SPECS: dict[str, MethodSpec] = {
             _num("flux_period", "Flux period (device units); must be non-zero"),
             _num_default("flux_bias", 0.0, "Flux bias correction (device units)"),
         ),
+        tool_name="gui_predictor_install_params",
     ),
-    "predictor.clear": MethodSpec(5.0, "Clear predictor"),
+    "predictor.clear": MethodSpec(
+        5.0,
+        "Unload the current predictor (idempotent — succeeds with no predictor "
+        "loaded). Returns {loaded: false}.",
+        tool_name="gui_predictor_unload",
+    ),
     "predictor.predict": MethodSpec(
         10.0,
-        "Predict transition frequency",
+        "Predict a transition frequency at a device-value setpoint. Returns "
+        "{freq_mhz}.",
         (
             _num(
-                "value",
+                "device_value",
                 "Device-value setpoint in the instrument's native unit (e.g. "
                 "current in A for YOKOGS200) — NOT a flux quantum. The predictor "
                 "applies an internal value-to-flux affine conversion; passing a "
                 "flux quantum (e.g. 0.5) will silently yield a wrong frequency.",
             ),
-            _int_default("from_lvl", 0, "From level"),
-            _int_default("to_lvl", 1, "To level"),
+            _int_default("from_level", 0, "From level"),
+            _int_default("to_level", 1, "To level"),
         ),
     ),
-    "predictor.info": MethodSpec(5.0, "Get predictor info"),
+    "predictor.info": MethodSpec(
+        5.0,
+        "Read the current predictor's installed model. Returns {loaded: false} "
+        "when none is loaded, else {loaded: true, path, flux_bias, flux_half, "
+        "flux_period, EJ, EC, EL} (path is null for an in-memory install).",
+    ),
     # Analyze
     "tab.get_analyze_result": MethodSpec(
         5.0, "Read tab analyze result scalar summary", (_str("tab_id"),)
@@ -663,12 +747,13 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "editor.commit": MethodSpec(
         10.0,
-        "Save the current draft as a ModuleLibrary module/waveform: lower the "
-        "session (eval expressions resolved against MetaDict to concrete numbers) "
-        "and register it into the ModuleLibrary under 'name'. This is NOT 'apply "
-        "a tab cfg edit' — tab cfg set_field edits are already live (WYSIWYG); "
-        "this persists the draft as a named ml entry. On success the session is "
-        "destroyed; on validation failure it is kept so you can fix and retry.",
+        "Save the editing session (from gui_editor_open) as a ModuleLibrary "
+        "module/waveform: lower the session (eval expressions resolved against "
+        "MetaDict to concrete numbers) and register it into the ModuleLibrary "
+        "under 'name'. This is NOT 'apply a tab cfg edit' — tab cfg edits are "
+        "already live (WYSIWYG); this persists the draft as a named ml entry. "
+        "Returns {}. On success the session is destroyed; on validation failure "
+        "it RAISES and the session is kept so you can fix and retry.",
         (
             _str("editor_id"),
             _str("name", "ml entry name to register under"),
@@ -678,7 +763,8 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "editor.discard": MethodSpec(
         5.0,
-        "Discard an editing session without writing to the ModuleLibrary.",
+        "Discard an editing session (from gui_editor_open) without writing to the "
+        "ModuleLibrary. Returns {}.",
         (_str("editor_id"),),
     ),
     # Notify prompt — agent-initiated user question (ADR-0025).

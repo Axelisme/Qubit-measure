@@ -91,7 +91,7 @@ def _h_tab_close(
     if not adapter.ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     adapter.ctrl.close_tab(tab_id)
-    return {}
+    return {"ok": True}
 
 
 def _h_tab_set_active(
@@ -101,21 +101,30 @@ def _h_tab_set_active(
     if not adapter.ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     adapter.ctrl.set_active_tab(tab_id)
-    return {}
+    return {"ok": True}
 
 
 def _h_tab_list_all(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    # Returns [tabs, running_tab_id] as a 2-tuple-encoded array.
-    # tabs is a list of [tab_id, adapter_name] 2-element arrays.
     del params
+    running_tab_id = adapter.ctrl.get_running_tab_id()
     tabs = [
-        [tid, adapter.ctrl.get_tab_adapter_name(tid)]
+        {
+            "tab_id": tid,
+            "adapter_name": adapter.ctrl.get_tab_adapter_name(tid),
+            "is_running": tid == running_tab_id,
+        }
         for tid in adapter.ctrl.list_tab_ids()
     ]
-    running_tab_id = adapter.ctrl.get_running_tab_id()
-    return {"result": [tabs, running_tab_id]}
+    # active_tab_id is a view projection (which tab the user is focused on),
+    # sourced from the same RenderView snapshot _assemble_overview reads.
+    active_tab_id = _render_view(adapter).get_view_snapshot().get("active_tab_id")
+    return {
+        "tabs": tabs,
+        "active_tab_id": active_tab_id,
+        "running_tab_id": running_tab_id,
+    }
 
 
 def _tab_snapshot_wire(adapter: RemoteControlAdapter, tab_id: str) -> dict[str, object]:
@@ -150,18 +159,17 @@ def _tab_snapshot_wire(adapter: RemoteControlAdapter, tab_id: str) -> dict[str, 
 def _h_tab_snapshot(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
+    # Always returns {tabs: [...]} (a single tab_id yields a one-element list);
+    # no shape-switch, so callers index reply["tabs"] uniformly.
     tab_id_raw = params.get("tab_id")
     if tab_id_raw is None:
-        # batch: return all tabs
-        return {
-            "tabs": [
-                _tab_snapshot_wire(adapter, tid) for tid in adapter.ctrl.list_tab_ids()
-            ]
-        }
-    tab_id = str(tab_id_raw)
-    if not adapter.ctrl.has_tab(tab_id):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    return _tab_snapshot_wire(adapter, tab_id)
+        tab_ids = adapter.ctrl.list_tab_ids()
+    else:
+        tab_id = str(tab_id_raw)
+        if not adapter.ctrl.has_tab(tab_id):
+            raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+        tab_ids = [tab_id]
+    return {"tabs": [_tab_snapshot_wire(adapter, tid) for tid in tab_ids]}
 
 
 def _save_paths_wire(paths) -> dict[str, str] | None:
@@ -399,7 +407,7 @@ def _h_tab_save_set_paths(
     data_path = str(params["data_path"])
     image_path = str(params["image_path"])
     adapter.ctrl.update_tab_save_paths(tab_id, data_path, image_path)
-    return {}
+    return {"data_path": data_path, "image_path": image_path}
 
 
 # ---------------------------------------------------------------------------
@@ -410,8 +418,29 @@ def _h_tab_save_set_paths(
 def _h_context_use(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    adapter.ctrl.use_context(str(params["label"]))
-    return {}
+    # A context lives under a project; without one there are no labels to switch
+    # to. Map that precondition to agent language rather than leaking a controller
+    # error (mirror _h_context_new).
+    if not adapter.ctrl.has_project():
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            "No project applied yet; apply a project first (gui_project_apply).",
+            reason="no_project",
+        )
+    label = str(params["label"])
+    available = list(adapter.ctrl.get_context_labels())
+    if label not in available:
+        # Fast-fail an unknown label with the valid choices so the agent can
+        # correct without a separate gui_context_list round-trip.
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            f"unknown context label: {label!r}; available: {available}",
+        )
+    adapter.ctrl.use_context(label)
+    return {
+        "label": adapter.ctrl.get_active_context_label(),
+        "has_active_context": adapter.ctrl.get_active_context_label() is not None,
+    }
 
 
 def _h_context_new(
@@ -424,7 +453,7 @@ def _h_context_new(
     if not adapter.ctrl.has_project():
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
-            "No project applied yet; apply a project first (gui_startup_apply).",
+            "No project applied yet; apply a project first (gui_project_apply).",
             reason="no_project",
         )
     bind_device = params["bind_device"]
@@ -434,8 +463,9 @@ def _h_context_new(
         clone_from=str(clone_from) if clone_from is not None else None,
     )
     # new_context makes the new context active — return its label so the agent
-    # knows what was created without a follow-up gui_context_active.
-    return {"label": adapter.ctrl.get_active_context_label()}
+    # knows what was created without a follow-up read.
+    label = adapter.ctrl.get_active_context_label()
+    return {"label": label, "has_active_context": label is not None}
 
 
 def _h_context_labels(
@@ -530,9 +560,19 @@ def _h_context_ml_get(
 ) -> Mapping[str, object]:
     del params
     ml = adapter.ctrl.get_current_ml()
+    # Each stored cfg is a pydantic discriminated-union value: modules tag on
+    # 'type' (e.g. 'pulse', 'reset/bath'), waveforms on 'style' (e.g. 'gauss').
+    # Surface the discriminator so the agent can tell entry kinds apart without
+    # opening each one (gui_context_ml_inspect).
     return {
-        "modules": sorted(ml.modules.keys()),
-        "waveforms": sorted(ml.waveforms.keys()),
+        "modules": [
+            {"name": name, "kind": getattr(ml.modules[name], "type")}
+            for name in sorted(ml.modules.keys())
+        ],
+        "waveforms": [
+            {"name": name, "style": getattr(ml.waveforms[name], "style")}
+            for name in sorted(ml.waveforms.keys())
+        ],
     }
 
 
@@ -556,9 +596,18 @@ def _h_context_ml_create_from_role(
     One-shot: seeds md-linked defaults (lowered against the live md), writes ml.
     Edit afterwards via editor.new(from_name=...).
     """
-    item_kind = str(params["item_kind"])
     role_id = str(params["role_id"])
     name = str(params["name"])
+    # The item kind is a property of the role, not an independent agent input —
+    # derive it from role_id so the agent cannot pass a mismatching pair. An
+    # unknown role_id fails fast as invalid_params; a missing catalog (no project)
+    # surfaces as precondition_failed (mirror _h_context_ml_list_roles).
+    try:
+        item_kind = adapter.ctrl.get_role_catalog().get(role_id).item_kind
+    except KeyError as exc:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+    except RuntimeError as exc:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
     try:
         adapter.ctrl.create_from_role(item_kind, role_id, name)
     except KeyError as exc:
@@ -571,7 +620,7 @@ def _h_context_ml_create_from_role(
             str(exc),
             reason=getattr(exc, "reason_code", ""),
         ) from exc
-    return {}
+    return {"created": name}
 
 
 def _h_context_md_set_attr(
@@ -617,7 +666,7 @@ def _h_context_ml_del_module(
             str(exc),
             reason=getattr(exc, "reason_code", ""),
         ) from exc
-    return {}
+    return {"deleted": name}
 
 
 def _h_context_ml_rename_module(
@@ -633,7 +682,7 @@ def _h_context_ml_rename_module(
             str(exc),
             reason=getattr(exc, "reason_code", ""),
         ) from exc
-    return {}
+    return {"renamed": new}
 
 
 def _h_context_ml_rename_waveform(
@@ -649,7 +698,7 @@ def _h_context_ml_rename_waveform(
             str(exc),
             reason=getattr(exc, "reason_code", ""),
         ) from exc
-    return {}
+    return {"renamed": new}
 
 
 def _h_context_ml_del_waveform(
@@ -664,7 +713,7 @@ def _h_context_ml_del_waveform(
             str(exc),
             reason=getattr(exc, "reason_code", ""),
         ) from exc
-    return {}
+    return {"deleted": name}
 
 
 def _h_state_has_project(
@@ -698,9 +747,9 @@ def _h_state_has_soc(
 def _h_soc_info(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    del params
+    include_cfg = bool(params["include_cfg"])  # ParamSpec(_bool_default)-validated
     try:
-        return adapter.ctrl.get_soc_info()
+        return adapter.ctrl.get_soc_info(include_cfg=include_cfg)
     except RuntimeError as exc:
         raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
 
@@ -717,7 +766,7 @@ def _h_project_info(
     if not adapter.ctrl.has_project():
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
-            "No project applied yet; apply a project first (gui_startup_apply).",
+            "No project applied yet; apply a project first (gui_project_apply).",
             reason="no_project",
         )
     ctx = adapter.ctrl.get_exp_context()
@@ -839,8 +888,9 @@ def _h_startup_apply(
         result_dir=result_dir,
         database_path=database_path,
     )
-    ok = adapter.ctrl.apply_startup_project(req)
-    return {"ok": bool(ok)}
+    # Echo the resolved project (apply always mutates and either succeeds or
+    # raises — there is no no-op outcome, so no {applied:false} branch).
+    return adapter.ctrl.apply_startup_project(req)
 
 
 def _h_device_connect(
@@ -900,7 +950,9 @@ def _h_device_forget(
             str(exc),
             reason=getattr(exc, "reason_code", ""),
         ) from exc
-    return {}
+    # Synchronous sync mutation: echo the forgotten name so the reply is
+    # self-verifying (no follow-up read needed to confirm what was dropped).
+    return {"forgotten": name}
 
 
 def _h_device_setup(
@@ -1736,7 +1788,13 @@ def _h_predictor_load(
             str(exc),
             reason=getattr(exc, "reason_code", ""),
         ) from exc
-    return {}
+    # Echo the installed model so the agent verifies the load without a follow-up
+    # read; get_predictor_info() is non-None right after a successful install (a
+    # None here is a broken invariant, so raise rather than echo a half-shape).
+    info = adapter.ctrl.get_predictor_info()
+    if info is None:
+        raise RuntimeError("predictor missing immediately after a successful load")
+    return {"loaded": True, **info}
 
 
 def _h_predictor_set_model_params(
@@ -1763,7 +1821,12 @@ def _h_predictor_set_model_params(
             str(exc),
             reason=getattr(exc, "reason_code", ""),
         ) from exc
-    return {}
+    # Echo the installed model (path is null — in-memory install has no file); a
+    # None right after a successful install is a broken invariant, so raise.
+    info = adapter.ctrl.get_predictor_info()
+    if info is None:
+        raise RuntimeError("predictor missing immediately after a successful install")
+    return {"loaded": True, **info}
 
 
 def _h_predictor_clear(
@@ -1771,7 +1834,7 @@ def _h_predictor_clear(
 ) -> Mapping[str, object]:
     del params
     adapter.ctrl.clear_predictor()
-    return {}
+    return {"loaded": False}
 
 
 def _h_predictor_predict(
@@ -1782,12 +1845,12 @@ def _h_predictor_predict(
         PredictorNotLoaded,
     )
 
-    value = float(params["value"])  # type: ignore[arg-type]
-    from_lvl = int(params["from_lvl"])  # type: ignore[arg-type]
-    to_lvl = int(params["to_lvl"])  # type: ignore[arg-type]
+    device_value = float(params["device_value"])  # type: ignore[arg-type]
+    from_level = int(params["from_level"])  # type: ignore[arg-type]
+    to_level = int(params["to_level"])  # type: ignore[arg-type]
     try:
         freq = adapter.ctrl.predict_freq(
-            PredictFreqRequest(value=value, transition=(from_lvl, to_lvl))
+            PredictFreqRequest(value=device_value, transition=(from_level, to_level))
         )
     except PredictorNotLoaded as exc:
         raise RemoteError(
@@ -1802,7 +1865,12 @@ def _h_predictor_info(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    return {"info": adapter.ctrl.get_predictor_info()}
+    # Flatten the model fields to the top level; the `loaded` flag replaces a null
+    # payload so the agent never has to distinguish {info: null} from a real read.
+    info = adapter.ctrl.get_predictor_info()
+    if info is None:
+        return {"loaded": False}
+    return {"loaded": True, **info}
 
 
 # ---------------------------------------------------------------------------

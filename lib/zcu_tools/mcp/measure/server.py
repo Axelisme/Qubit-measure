@@ -265,6 +265,10 @@ _GUARD_DEPS: dict[str, tuple[str, ...]] = {
     # post-analysis result (not the primary run result) + the save path.
     "tab.save_post_image": ("tab:{tab_id}:post_analyze", "tab:{tab_id}:save_path"),
     "tab.save_result": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
+    # tab.save_set_paths writes the save_path override; guard on that very
+    # resource so a concurrent save-path edit (GUI user / another agent) is
+    # detected (read-modify-write optimistic concurrency).
+    "tab.save_set_paths": ("tab:{tab_id}:save_path",),
     # tab.writeback_set / tab.writeback_apply edit + apply the persistent draft
     # (computed from run+analyze results, write md/ml). A concurrent rerun/
     # reanalyze or context edit must invalidate them.
@@ -570,17 +574,17 @@ def tool_gui_connect(arguments: dict[str, Any]) -> dict[str, Any]:
     return {"note": note, "overview": _assemble_overview()}
 
 
-def tool_gui_disconnect(arguments: dict[str, Any]) -> str:
+def tool_gui_disconnect(arguments: dict[str, Any]) -> dict[str, Any]:
     del arguments
     note = _BRIDGE.disconnect()
     # App-specific housekeeping: drop any buffered diagnostics — they belong to
     # the connection that just closed.
     with _DIAGNOSTIC_COND:
         _DIAGNOSTIC_QUEUE.clear()
-    return note
+    return {"note": note}
 
 
-def tool_gui_launch(arguments: dict[str, Any]) -> str:
+def tool_gui_launch(arguments: dict[str, Any]) -> dict[str, Any]:
     port = int(arguments.get("port", _CONFIG.default_port))
     token: str | None = arguments.get("token")
     auto_connect = bool(arguments.get("auto_connect", True))
@@ -589,43 +593,36 @@ def tool_gui_launch(arguments: dict[str, Any]) -> str:
     repo_root = Path(__file__).parents[4]
     # clean → run_measure_gui --clean (skip restoring the persisted session).
     extra_args = ["--clean"] if clean else None
-    return _BRIDGE.launch(repo_root, port, token, auto_connect, extra_args=extra_args)
+    note = _BRIDGE.launch(repo_root, port, token, auto_connect, extra_args=extra_args)
+    # Fold the situational overview only when auto_connect actually attached the
+    # bridge — the fan-out reads need a live socket. With auto_connect=false the
+    # GUI is up but not yet attached, so there is no live state to read.
+    if _BRIDGE.is_connected:
+        return {"note": note, "overview": _assemble_overview()}
+    return {"note": note}
 
 
-def tool_gui_stop(arguments: dict[str, Any]) -> str:
+def tool_gui_stop(arguments: dict[str, Any]) -> dict[str, Any]:
     # Graceful close over the existing RPC channel (app.shutdown runs the GUI's
     # normal window-close path on its main thread, no OS signal), then await /
     # optionally force-kill. timeout_kill defaults False here (measure-gui prefers
     # leaving a slow-closing GUI alone for a retry rather than killing it).
     timeout = float(arguments.get("timeout", 10.0))
     timeout_kill = bool(arguments.get("timeout_kill", False))
-    note = _BRIDGE.stop(
+    result = _BRIDGE.stop(
         timeout=timeout, timeout_kill=timeout_kill, shutdown_rpc="app.shutdown"
     )
     # The bridge's disconnect does not clear measure-gui's diagnostic queue; do it
     # here so a later session does not see the previous one's buffered messages.
     with _DIAGNOSTIC_COND:
         _DIAGNOSTIC_QUEUE.clear()
-    return note
+    # Branch on the bridge's machine-readable outcome (no prose string-matching).
+    return {"stopped": result["exited"], "note": result["note"]}
 
 
 # ---------------------------------------------------------------------------
 # Workflow tools (thin pass-through wrappers)
 # ---------------------------------------------------------------------------
-
-
-def tool_gui_state_check(arguments: dict[str, Any]) -> dict[str, Any]:
-    del arguments
-    has_proj = send_gui_rpc("state.has_project", {}).get("value", False)
-    has_ctx = send_gui_rpc("state.has_context", {}).get("value", False)
-    has_act = send_gui_rpc("state.has_active_context", {}).get("value", False)
-    has_soc = send_gui_rpc("state.has_soc", {}).get("value", False)
-    return {
-        "has_project": has_proj,
-        "has_context": has_ctx,
-        "has_active_context": has_act,
-        "has_soc": has_soc,
-    }
 
 
 def _assemble_overview() -> dict[str, Any]:
@@ -638,11 +635,14 @@ def _assemble_overview() -> dict[str, Any]:
     eye is (a collaboration cue) — NOT the agent's operation target, which is
     always the explicit tab_id the agent passes.
 
+    This overview is the single orientation SSOT: it folds in the project paths
+    (result_dir/database_path) and the readiness flags, so the retired
+    gui_state_check / gui_project_info tools have no separate surface.
+
     ``project`` is read from project.info only while a project is applied
-    (project.info fast-fails no_project otherwise); long keys {chip_name,
-    qub_name, res_name} matching the wire shape (result_dir/database_path
-    omitted for conciseness); ``null`` when no project. ``is_mock`` is
-    likewise read from soc.info only
+    (project.info fast-fails no_project otherwise); it carries the full wire
+    shape {chip_name, qub_name, res_name, result_dir, database_path}; ``null``
+    when no project. ``is_mock`` is likewise read from soc.info only
     while connected (soc.info fast-fails without a SoC), so a not-yet-set-up GUI
     still yields a well-formed overview.
     """
@@ -654,13 +654,16 @@ def _assemble_overview() -> dict[str, Any]:
     project: dict[str, Any] | None = None
     if has_proj:
         info = send_gui_rpc("project.info", {})
-        # Use long keys to match project.info wire shape and other tool-GUIs
-        # (fluxdep/dispersive/autofluxdep all use chip_name/qub_name/res_name).
-        # result_dir/database_path are omitted here — overview stays concise.
+        # Mirror the full project.info wire shape (long keys also match the other
+        # tool-GUIs: fluxdep/dispersive/autofluxdep). Folding result_dir +
+        # database_path here makes the overview the single orientation SSOT,
+        # superseding the retired gui_project_info tool.
         project = {
             "chip_name": info.get("chip_name"),
             "qub_name": info.get("qub_name"),
             "res_name": info.get("res_name"),
+            "result_dir": info.get("result_dir"),
+            "database_path": info.get("database_path"),
         }
 
     soc: dict[str, Any] = {"connected": has_soc, "is_mock": None}
@@ -727,10 +730,10 @@ def _coerce_pairs(
 def _resolve_editor_id(arguments: dict[str, Any]) -> str:
     """Return the ``editor_id`` from arguments (required, fail-fast).
 
-    Tab cfg editing now goes through gui_tab_set_cfg / gui_tab_get_cfg. The
-    editor tools (gui_editor_get / _set_field / _set_fields) operate on
-    non-tab editors (e.g. gui_editor_new on an ml entry) and require an
-    explicit editor_id — tab_id is no longer accepted here.
+    Tab cfg editing goes through gui_tab_set_cfg / gui_tab_get_cfg. The editor
+    tools (gui_editor_get_cfg / gui_editor_set) operate on non-tab editors
+    (e.g. gui_editor_open on an ml entry) and require an explicit editor_id —
+    tab_id is not accepted here.
     """
     editor_id = arguments.get("editor_id")
     if editor_id is None:
@@ -752,42 +755,60 @@ def _fold_tab_editing_context(tab_id: str, reply: dict[str, Any]) -> dict[str, A
     nested current-value tree, so the settable paths and their current values
     arrive in one ``tree``.
     """
-    snap = send_gui_rpc("tab.snapshot", {"tab_id": tab_id})
+    # tab.snapshot always returns {tabs: [...]}; a single tab_id yields a
+    # one-element list (no shape-switch).
+    snap = send_gui_rpc("tab.snapshot", {"tab_id": tab_id})["tabs"][0]
     reply["editor_id"] = snap.get("editor_id")
     reply["tree"] = send_gui_rpc("tab.get_cfg", {"tab_id": tab_id}).get("tree")
     return reply
 
 
-def tool_gui_editor_set_field(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Set one field in a cfg-editor session, addressed by ``editor_id``.
+def tool_gui_editor_open(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Open a stateful editing session over an EXISTING ml entry, addressed later
+    by ``editor_id``.
 
-    Thin override over the editor.set_field RPC. Use gui_tab_set_cfg for tab
-    cfg editing (which resolves the editor internally). Returns the RPC reply
-    unchanged ({valid, removed, added}). See gui_editor_set_fields for the
-    batch form and the value/path semantics.
+    Thin override over the editor.new RPC: folds the wire ``tree`` key to ``cfg``
+    so every cfg view the agent reads (gui_tab_get_cfg, gui_editor_get_cfg, this
+    open reply) uses the same ``cfg`` key. Returns ``{editor_id, cfg}`` — cfg is
+    the nested current-value tree of the freshly-opened draft.
     """
-    editor_id = _resolve_editor_id(arguments)
-    return send_gui_rpc(
-        "editor.set_field",
+    opened = send_gui_rpc(
+        "editor.new",
         {
-            "editor_id": editor_id,
-            "path": str(arguments["path"]),
-            "value": arguments["value"],
+            "item_kind": str(arguments["item_kind"]),
+            "from_name": str(arguments["from_name"]),
         },
     )
+    return {"editor_id": opened["editor_id"], "cfg": opened.get("tree")}
 
 
-def tool_gui_editor_set_fields(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Apply several editor.set_field edits to ONE editor, fail-fast in order.
+def tool_gui_editor_get_cfg(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Read an editing session's settable cfg as a nested current-value tree.
 
-    The editor is addressed by ``editor_id``. For tab cfg editing use
-    gui_tab_set_cfg instead. Convenience fan-out (a for-loop over the single-field
-    RPC) — there is no atomicity: edits before the failing one stay applied and
-    are NOT rolled back. On the first error this raises, reporting how many
-    succeeded and which path failed so the agent can reconcile. On success returns
-    ``{applied, valid}`` — the count applied and whether the resulting draft is
-    valid. It does NOT echo cfg content (that would force a lowering pass which
-    eagerly evaluates EvalValue); read the cfg with gui_tab_get_cfg if needed.
+    Thin override over the editor.get RPC: folds the wire ``tree`` key to ``cfg``
+    (the same key gui_tab_get_cfg uses). Returns ``{cfg}``.
+    """
+    editor_id = _resolve_editor_id(arguments)
+    params: dict[str, Any] = {"editor_id": editor_id}
+    prefix = arguments.get("prefix")
+    if prefix is not None:
+        params["prefix"] = str(prefix)
+    got = send_gui_rpc("editor.get", params)
+    return {"cfg": got.get("tree")}
+
+
+def tool_gui_editor_set(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Batch-set fields on ONE cfg-editor session, fail-fast in order.
+
+    The editor is addressed by ``editor_id`` (from gui_editor_open). For tab cfg
+    editing use gui_tab_set_cfg instead. Batch-only fan-out (a for-loop over the
+    single-field editor.set_field RPC) — there is no atomicity: edits before the
+    failing one stay applied and are NOT rolled back. On the first error this
+    raises, reporting how many succeeded and which path failed so the agent can
+    reconcile. On success returns ``{applied, valid}`` — the count applied and
+    whether the resulting draft is valid. It does NOT echo cfg content (that would
+    force a lowering pass which eagerly evaluates EvalValue); read the cfg with
+    gui_editor_get_cfg if needed.
     """
     editor_id = _resolve_editor_id(arguments)
     edits = _coerce_pairs(arguments.get("edits"), field="edits", keys=("path", "value"))
@@ -804,19 +825,23 @@ def tool_gui_editor_set_fields(arguments: dict[str, Any]) -> dict[str, Any]:
             )
         except Exception as exc:
             raise RuntimeError(
-                f"batch set_field failed at edits[{i}] (path={edit['path']!r}); "
+                f"batch set failed at edits[{i}] (path={edit['path']!r}); "
                 f"{i} edit(s) already applied and NOT rolled back: {exc}"
             ) from exc
         valid = bool(res.get("valid", True))
     return {"applied": len(edits), "valid": valid}
 
 
-def tool_gui_context_md_set_attrs(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Set several MetaDict attributes, fail-fast in order.
+def tool_gui_context_md_write(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Batch-write MetaDict attributes, fail-fast in order (E5).
 
-    Convenience fan-out over context.md_set_attr (no atomicity: attrs before the
-    failing one stay set, NOT rolled back). On the first error this raises with
-    the failing key and the count already applied.
+    Batch-only fan-out over context.md_set_attr — there is no atomicity: attrs
+    before the failing one stay set and are NOT rolled back. On the first error
+    this raises a message carrying ``applied_count`` (how many succeeded) and
+    ``failed_index`` (the 0-based position of the failing attr) so the agent can
+    reconcile (this surface never returns a structured partial result — across
+    bridges, a failed write always raises). Complex md scalars round-trip via the
+    {"__complex__": [re, im]} tag on the value. On success returns ``{applied}``.
     """
     attrs = _coerce_pairs(arguments.get("attrs"), field="attrs", keys=("key", "value"))
     for i, attr in enumerate(attrs):
@@ -827,31 +852,101 @@ def tool_gui_context_md_set_attrs(arguments: dict[str, Any]) -> dict[str, Any]:
             )
         except Exception as exc:
             raise RuntimeError(
-                f"batch set_md_attr failed at attrs[{i}] (key={attr['key']!r}); "
-                f"{i} attr(s) already set and NOT rolled back: {exc}"
+                f"batch md write failed at attrs[{i}] (key={attr['key']!r}); "
+                f"applied_count={i}, failed_index={i} — attrs before it stay set "
+                f"and are NOT rolled back: {exc}"
             ) from exc
     return {"applied": len(attrs)}
 
 
-def tool_gui_context_md_get_attrs(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Read several MetaDict attributes at once, fail-fast on any missing key.
+def tool_gui_context_md_read(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Read MetaDict attributes — the whole tree, or a named subset.
 
-    Convenience fan-out over context.md_get_attr (the read counterpart of
-    gui_context_md_set_attrs). Returns ``{values: {key: value}}`` — a map keyed by
-    the requested key (the natural shape for a batch read; the agent indexes
-    straight in). Reads are side-effect-free, so there is no partial-state concern:
-    an unknown key fails fast (the underlying RPC raises invalid_params), never
-    silently skipped.
+    Omit ``keys`` to read every attribute (fans out context.md_get for the key
+    list, then context.md_get_attr for each); pass ``keys`` to read only that
+    subset. Returns ``{values: {key: value}}`` — a map keyed by attribute name the
+    agent indexes straight into. Reads are side-effect-free, so there is no
+    partial-state concern; an unknown key in an explicit ``keys`` list fails fast
+    (the underlying RPC raises invalid_params), never silently skipped. Complex md
+    scalars arrive as the {"__complex__": [re, im]} tag (symmetric with write).
     """
-    keys = arguments.get("keys")
-    if not isinstance(keys, list) or not keys:
-        raise ValueError("'keys' must be a non-empty list")
+    raw_keys = arguments.get("keys")
+    if raw_keys is None:
+        keys = [str(k) for k in send_gui_rpc("context.md_get", {}).get("keys", [])]
+    elif isinstance(raw_keys, list):
+        keys = [str(k) for k in raw_keys]
+    else:
+        raise ValueError("'keys' must be a list (or omitted to read the whole tree)")
     values: dict[str, Any] = {}
     for key in keys:
-        key_str = str(key)
-        res = send_gui_rpc("context.md_get_attr", {"key": key_str})
-        values[key_str] = res.get("value")
+        res = send_gui_rpc("context.md_get_attr", {"key": key})
+        values[key] = res.get("value")
     return {"values": values}
+
+
+def tool_gui_context_md_delete(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Batch-delete MetaDict attributes, fail-fast in order.
+
+    Batch-only fan-out over context.md_del_attr. Idempotent per key: deleting a
+    key that does not exist is a no-op (not an error), matching delete semantics.
+    No atomicity — keys before a (non-idempotent) failure stay deleted and are NOT
+    rolled back; on the first such error this raises a message carrying
+    ``applied_count`` and ``failed_index``. On success returns ``{deleted: [key]}``.
+    """
+    raw_keys = arguments.get("keys")
+    if not isinstance(raw_keys, list) or not raw_keys:
+        raise ValueError("'keys' must be a non-empty list")
+    keys = [str(k) for k in raw_keys]
+    for i, key in enumerate(keys):
+        try:
+            send_gui_rpc("context.md_del_attr", {"key": key})
+        except Exception as exc:
+            raise RuntimeError(
+                f"batch md delete failed at keys[{i}] (key={key!r}); "
+                f"applied_count={i}, failed_index={i} — keys before it stay deleted "
+                f"and are NOT rolled back: {exc}"
+            ) from exc
+    return {"deleted": keys}
+
+
+def tool_gui_context_list(arguments: dict[str, Any]) -> dict[str, Any]:
+    """List context labels plus the active one (the orientation read for contexts).
+
+    Folds context.active + context.labels into one reply
+    ``{active, has_active_context, labels: [str]}``. ``labels`` are plain strings:
+    per-label unit/value are NOT available — unit/value are transient creation
+    metadata (consumed by the device + the auto-label), never persisted (FC2). Only
+    the active context's unit could be inferred, and even that is out of scope here.
+    """
+    del arguments
+    active = send_gui_rpc("context.active", {}).get("label")
+    labels = list(send_gui_rpc("context.labels", {}).get("labels", []))
+    return {
+        "active": active,
+        "has_active_context": active is not None,
+        "labels": labels,
+    }
+
+
+def tool_gui_context_ml_inspect(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Read one ModuleLibrary entry's full cfg WITHOUT opening a tab.
+
+    Opens a headless, gc-reclaimable cfg-editor draft on the existing ml entry
+    (editor.new), reads its settable tree, then discards the draft (editor.discard).
+    This is a pure read: opening/discarding a draft bumps no agent-visible resource
+    version (only an *edit* would bump the editor version, and only editor.commit
+    bumps context) — so it never disturbs concurrency guards. Returns ``{cfg}`` (the
+    nested current-value tree, same shape as gui_tab_get_cfg). The draft is always
+    discarded, even if the read raises.
+    """
+    item_kind = str(arguments["item_kind"])
+    name = str(arguments["name"])
+    opened = send_gui_rpc("editor.new", {"item_kind": item_kind, "from_name": name})
+    editor_id = opened["editor_id"]
+    try:
+        return {"cfg": opened.get("tree")}
+    finally:
+        send_gui_rpc("editor.discard", {"editor_id": editor_id})
 
 
 def _await_operation_by_key(key: str, what: str, timeout: float) -> dict[str, Any]:
@@ -1065,7 +1160,7 @@ def _run_tab_summary(tab_id: str) -> dict[str, Any]:
     which change across a run — re-sending them every run is wasted tokens
     (the agent already has them from gui_tab_snapshot). To see the plot, call
     gui_tab_get_current_figure(tab_id)."""
-    snap = send_gui_rpc("tab.snapshot", {"tab_id": tab_id})
+    snap = send_gui_rpc("tab.snapshot", {"tab_id": tab_id})["tabs"][0]
     interaction = snap.get("interaction", {}) if isinstance(snap, dict) else {}
     return {"tab_id": tab_id, "interaction": interaction}
 
@@ -1301,6 +1396,90 @@ def tool_gui_tab_post_analyze_poll(arguments: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+_SAVE_ARTIFACTS = frozenset({"data", "image", "both"})
+_SAVE_FIGURES = frozenset({"primary", "post"})
+
+
+def tool_gui_tab_save(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Save a tab's result data and/or figure; return the resolved destinations.
+
+    Two orthogonal selectors:
+      - artifact='data'|'image'|'both' (default 'both'): which artifacts to save.
+      - figure='primary'|'post' (default 'primary'): which figure the 'image'
+        artifact targets — the primary run/analyze plot or the post-analysis plot.
+
+    Collision policy (NOT uniform across artifacts, by design — it mirrors the
+    underlying savers):
+      - DATA is written async with a uniqueness suffix: the resolved path is
+        ``<stem>.hdf5`` with ``_N`` appended on collision, so a data save NEVER
+        overwrites an existing file. The write itself runs async (data_async=true)
+        — only the resolved path is known synchronously here.
+      - IMAGE is written synchronously and OVERWRITES the destination if it exists
+        (no uniqueness suffix).
+
+    Returns {data_path, image_path, data_async, image_error} (all four keys always
+    present, null when not applicable):
+      - data_path: resolved data path when artifact included 'data', else null.
+      - image_path: written image path when the image save succeeded, else null.
+      - data_async: true when a data save was started (it completes off-turn).
+      - image_error: the image-save error message when the image save FAILED, else
+        null. The image failure is surfaced here rather than raised so a
+        same-call data save is not lost; a precondition failure on the DATA save
+        still raises (there is no data_error field).
+    """
+    tab_id = str(arguments["tab_id"])
+    artifact = str(arguments.get("artifact", "both"))
+    figure = str(arguments.get("figure", "primary"))
+    if artifact not in _SAVE_ARTIFACTS:
+        raise ValueError(
+            f"artifact must be one of {sorted(_SAVE_ARTIFACTS)}, got {artifact!r}"
+        )
+    if figure not in _SAVE_FIGURES:
+        raise ValueError(
+            f"figure must be one of {sorted(_SAVE_FIGURES)}, got {figure!r}"
+        )
+
+    comment = arguments.get("comment")
+    data_path_arg = arguments.get("data_path")
+    image_path_arg = arguments.get("image_path")
+
+    out: dict[str, Any] = {
+        "data_path": None,
+        "image_path": None,
+        "data_async": False,
+        "image_error": None,
+    }
+
+    # DATA (async): a precondition failure here is a real Fast-Fail — let it raise
+    # (there is no data_error field; the data save is the agent's primary intent).
+    if artifact in ("data", "both"):
+        data_params: dict[str, Any] = {"tab_id": tab_id}
+        if data_path_arg is not None:
+            data_params["data_path"] = str(data_path_arg)
+        if comment is not None:
+            data_params["comment"] = str(comment)
+        out["data_path"] = send_gui_rpc("tab.save_data", data_params).get("data_path")
+        out["data_async"] = True
+
+    # IMAGE (sync, overwrites): fold a failure into image_error so a successful
+    # data save above is not lost — do NOT re-raise (honest in-band surfacing).
+    if artifact in ("image", "both"):
+        method = "tab.save_post_image" if figure == "post" else "tab.save_image"
+        image_params: dict[str, Any] = {"tab_id": tab_id}
+        if image_path_arg is not None:
+            image_params["image_path"] = str(image_path_arg)
+        try:
+            out["image_path"] = send_gui_rpc(method, image_params).get("image_path")
+        except GuiRpcError as exc:
+            # A wire-level GUI failure (e.g. no post-analysis result) is folded
+            # in-band so it cannot discard a successful data save. A stale-version
+            # conflict (raised as a plain RuntimeError, not GuiRpcError) still
+            # propagates — it is a concurrency reject the agent must act on.
+            out["image_error"] = str(exc)
+
+    return out
+
+
 def tool_gui_soc_connect(arguments: dict[str, Any]) -> dict[str, Any]:
     """Connect the SoC SYNCHRONOUSLY and return its hardware summary.
 
@@ -1311,6 +1490,9 @@ def tool_gui_soc_connect(arguments: dict[str, Any]) -> dict[str, Any]:
     kind='mock' (offline) or kind='remote' with ip+port. Returns
     {soc:{description, is_mock}}; call gui_soc_info for the structured cfg. A
     remote connect to an unreachable board fails fast (~1s).
+
+    The SoC has no teardown (Pyro4-backed): there is no disconnect / reconnect /
+    health-check tool — those are deferred (E3).
     """
     params: dict[str, Any] = {"kind": str(arguments["kind"])}
     if "ip" in arguments:
@@ -1321,17 +1503,20 @@ def tool_gui_soc_connect(arguments: dict[str, Any]) -> dict[str, Any]:
     # COMMTIMEOUT so the board-side 1s cap fires first with a clean error, rather
     # than this socket round-trip being cut. Do NOT rely on the 30s default here.
     result = send_gui_rpc("soc.connect", params, 2.0)
-    return {"status": "finished", "soc": result.get("soc")}
+    return {"soc": result.get("soc")}
 
 
-def tool_gui_debug_screenshot(arguments: dict[str, Any]) -> dict[str, Any]:
+_SCREENSHOT_DIALOGS = ("setup", "device", "predictor", "inspect", "startup")
+_SCREENSHOT_TARGETS = frozenset({"window", *_SCREENSHOT_DIALOGS})
+
+
+def tool_gui_screenshot(arguments: dict[str, Any]) -> dict[str, Any]:
     """Capture the main window OR a named dialog as a PNG FILE; return its path.
 
     ``target`` switches what is grabbed:
       - target='window' → the WHOLE main window (client area + non-dialog floating
         widgets) via the view.screenshot wire method.
-      - any other target → that named dialog via dialog.screenshot (the previous
-        gui_dialog_screenshot behaviour).
+      - target=<dialog name> → that named dialog via dialog.screenshot.
 
     Mirrors gui_tab_get_current_figure / the old dialog grab: the convenience
     layer never returns inline base64 (a full-window grab would blow the
@@ -1344,6 +1529,12 @@ def tool_gui_debug_screenshot(arguments: dict[str, Any]) -> dict[str, Any]:
     import base64
 
     target = str(arguments["target"])
+    # Client-side validation: reject an unknown target fast with the allowed set
+    # rather than letting an invalid dialog name reach (and fail at) the wire.
+    if target not in _SCREENSHOT_TARGETS:
+        raise ValueError(
+            f"target must be one of {sorted(_SCREENSHOT_TARGETS)}, got {target!r}"
+        )
     out_path_arg = arguments.get("out_path")
     if target == "window":
         method, params = "view.screenshot", {}
@@ -1377,11 +1568,11 @@ def tool_gui_debug_versions(arguments: dict[str, Any]) -> dict[str, Any]:
     for the optimistic-concurrency guard, but here the version numbers are
     returned as-is instead of being kept as mcp<->RPC bookkeeping hidden from the
     operator. The only window into why a guarded op rejected (or did not reject)
-    on a stale dependency. Returns {versions: {resource_key: version_int}}.
+    on a stale dependency. Returns the flat table {resource_key: version_int}.
     """
     del arguments
     res = send_gui_rpc("resources.versions", {})
-    return {"versions": res.get("versions", {})}
+    return res.get("versions", {})
 
 
 def tool_gui_debug_operations(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -1658,15 +1849,17 @@ def tool_gui_device_setup(arguments: dict[str, Any]) -> dict[str, Any]:
 _NOTIFY_CONSUMER_SLACK: float = 10.0
 
 
-def tool_gui_notify_user(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Agent-initiated user prompt. BLOCKS the turn until user responds.
+def tool_gui_prompt_user(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Blocking request-reply prompt to the user. BLOCKS the turn until they respond.
 
     Serially composes notify.open (main thread: mint token + open dialog) and
     notify.await (off-main: block until Reply/Dismiss/QTimer). Neither method
-    uses _OP_KEY_OF — not a start-op, no operation_id captured.
+    uses _OP_KEY_OF — not a start-op, no operation_id captured. There is NO poll
+    or cancel: this is a single blocking request-reply, not an async handle.
 
-    Returns {reason: 'reply'|'dismiss'|'timeout', reply?}. Never raises on
-    timeout or dismiss — those are expected outcomes (ADR-0025 §6).
+    Returns {reason: 'reply'|'dismiss'|'timeout', reply?}: 'reply' carries the
+    user's answer (a possibly-empty string); 'dismiss'/'timeout' carry no reply.
+    Never raises on timeout or dismiss — those are expected outcomes (ADR-0025 §6).
     """
     message = str(arguments["message"])
     # Clamp to a sane minimum so the dialog always arms its QTimer (timeout<=0
@@ -1714,13 +1907,20 @@ _NON_GENERATED_METHODS = frozenset(
         "device.setup",
         # client-side file write of base64 PNG — both raw-base64 wire methods are
         # excluded: dialog.screenshot and view.screenshot are only reachable via
-        # the gui_debug_screenshot override, which decodes + writes the PNG file
+        # the gui_screenshot override, which decodes + writes the PNG file
         # (never returning inline base64 to the agent).
         "dialog.screenshot",
         "view.screenshot",
         "tab.get_current_figure",
-        # hand-written override: the edits param is array-of-objects (not a plain
-        # ARRAY); the generator cannot express that schema, so the override takes over.
+        # editor.new / editor.get are hand-written overrides so the agent sees
+        # the {cfg} reply key (the wire handler returns {tree}; the override folds
+        # the key) and the renamed tools gui_editor_open / gui_editor_get_cfg.
+        "editor.new",
+        "editor.get",
+        # editor.set_field is wire-only now: the agent edits in batches via
+        # gui_editor_set (the override fans out over it); there is no single-field
+        # agent tool. The edits param is also array-of-objects (not a plain ARRAY),
+        # which the generator cannot express.
         "editor.set_field",
         # same reason as editor.set_field: edits is array-of-{path,value} objects.
         "tab.set_cfg",
@@ -1755,7 +1955,11 @@ _NON_GENERATED_METHODS = frozenset(
         # internal-only wire method: _assemble_overview calls it directly to fetch
         # the running tab id; no agent-facing MCP tool is generated (Phase 170b).
         "run.running_tab",
-        # notify.open / notify.await are the two-RPC internals of gui_notify_user;
+        # internal-only wire method: _assemble_overview folds the project identity
+        # + paths into its `project` sub-object (the single orientation SSOT), so
+        # the standalone gui_project_info tool is retired (keep the wire method).
+        "project.info",
+        # notify.open / notify.await are the two-RPC internals of gui_prompt_user;
         # the agent never calls them directly — only the hand-written tool is exposed.
         "notify.open",
         "notify.await",
@@ -1765,6 +1969,28 @@ _NON_GENERATED_METHODS = frozenset(
         #   view.snapshot — _assemble_overview reads its active_tab_id for overview.
         "app.shutdown",
         "view.snapshot",
+        # context.active + context.labels are folded into gui_context_list (one
+        # orientation read); the individual tools are retired (keep the wire
+        # methods — gui_context_list fans out over both).
+        "context.active",
+        "context.labels",
+        # context.md_get / md_get_attr feed gui_context_md_read (whole-tree or
+        # subset); md_set_attr feeds gui_context_md_write (batch); md_del_attr feeds
+        # gui_context_md_delete (batch). The single-attr/list-keys tools are retired
+        # — only the merged batch tools are agent-facing (keep the wire methods).
+        "context.md_get",
+        "context.md_get_attr",
+        "context.md_set_attr",
+        "context.md_del_attr",
+        # The four save wire methods are folded into the single gui_tab_save tool
+        # (artifact + figure selectors); the override fans out over them, so no
+        # per-method agent tool is generated. The wire methods stay — gui_tab_save
+        # and the stage4 bundle both call them directly (each keeps its own
+        # optimistic-concurrency guard).
+        "tab.save_data",
+        "tab.save_image",
+        "tab.save_post_image",
+        "tab.save_result",
     }
 )
 
@@ -1780,10 +2006,12 @@ _NON_GENERATED_METHODS = frozenset(
 
 
 _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
-    "gui_connect": {
+    "gui_bridge_connect": {
         "handler": tool_gui_connect,
         "description": (
-            "Connect the MCP bridge to an ALREADY-RUNNING GUI's TCP control port. "
+            "Attach the MCP control BRIDGE to an already-running GUI — NOT the "
+            "SoC (gui_soc_connect) nor an instrument (gui_device_connect). "
+            "Attaches to an ALREADY-RUNNING GUI's TCP control port. "
             "OPTIONAL: the first gui_* call already auto-attaches to the running "
             "GUI via session discovery — call this only to pin a specific 'port' or "
             "pass a 'token'. Omit 'port' to auto-discover the running GUI via its "
@@ -1810,24 +2038,26 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             },
         },
     },
-    "gui_disconnect": {
+    "gui_bridge_detach": {
         "handler": tool_gui_disconnect,
         "description": (
-            "Disconnect the MCP bridge from the GUI control port. "
-            "Does NOT stop the GUI process — use gui_stop for that."
+            "Detach the MCP control bridge (closes socket only; does NOT stop "
+            "the GUI — use gui_stop)."
         ),
         "inputSchema": {"type": "object", "properties": {}},
     },
     "gui_launch": {
         "handler": tool_gui_launch,
         "description": (
-            "Launch the qubit-measure GUI as a NEW subprocess on a free TCP "
-            "control port (default 8765), wait until it is ready, and optionally "
+            "Launch the qubit-measure GUI as a NEW subprocess on TCP control "
+            "port 'port' (default 8765), wait until it is ready, and optionally "
             "connect. Use this as the first step to start a session. Errors if "
             "the port is already in use (a stale GUI still running) — stop it "
             "first (gui_stop) or pass a different port; this avoids silently "
-            "attaching to old code. By default auto_connect=true so gui_connect "
-            "is called automatically."
+            "attaching to old code. By default auto_connect=true so the bridge "
+            "is attached automatically (gui_bridge_connect). Returns {note} — "
+            "plus 'overview' (the same picture gui_overview returns) when "
+            "auto_connect attached the bridge."
         ),
         "inputSchema": {
             "type": "object",
@@ -1838,12 +2068,12 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
                 },
                 "token": {
                     "type": "string",
-                    "description": "Optional shared auth token (also passed to gui_connect if auto_connect=true)",
+                    "description": "Optional shared auth token (also passed to gui_bridge_connect if auto_connect=true)",
                 },
                 "auto_connect": {
                     "type": "boolean",
                     "default": True,
-                    "description": "Call gui_connect automatically once port is ready (default true)",
+                    "description": "Attach the bridge automatically (gui_bridge_connect) once port is ready (default true)",
                 },
                 "clean": {
                     "type": "boolean",
@@ -1856,12 +2086,15 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
     "gui_stop": {
         "handler": tool_gui_stop,
         "description": (
-            "Stop the GUI started by gui_launch, then disconnect the MCP socket. "
-            "Closes gracefully via the app.shutdown RPC (the GUI's normal "
-            "window-close: persist session, disconnect devices, cleanup) — no OS "
-            "kill, cross-platform. Waits up to 'timeout' s for it to exit. If it "
-            "does not and timeout_kill=false (default), reports it still running "
-            "(re-run to retry); timeout_kill=true force-kills on timeout."
+            "Stops ONLY a GUI this server launched; a connect-only session has "
+            "nothing to stop. Stops the GUI started by gui_launch, then "
+            "disconnects the MCP socket. Closes gracefully via the app.shutdown "
+            "RPC (the GUI's normal window-close: persist session, disconnect "
+            "devices, cleanup) — no OS kill, cross-platform. Waits up to "
+            "'timeout' s for it to exit. Returns {stopped, note}: 'stopped' is "
+            "true once the process is gone (graceful exit or force-kill), false "
+            "when a graceful close timed out and was left running (re-run to "
+            "retry); timeout_kill=true force-kills on timeout."
         ),
         "inputSchema": {
             "type": "object",
@@ -1880,89 +2113,104 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             },
         },
     },
-    "gui_state_check": {
-        "handler": tool_gui_state_check,
-        "description": (
-            "Return all four GUI readiness flags at once: has_project, has_context, "
-            "has_active_context, has_soc. Call this to verify the GUI is ready before "
-            "running experiments. All four should be true for a normal workflow."
-        ),
-        "inputSchema": {"type": "object", "properties": {}},
-    },
     "gui_overview": {
         "handler": tool_gui_overview,
         "description": (
-            "One-shot SITUATIONAL OVERVIEW of the live GUI — call any time to "
-            "re-orient. Packs (from existing read RPCs): state (the four readiness "
-            "flags), project ({chip_name,qub_name,res_name} or null when none applied), "
+            "One-shot SITUATIONAL OVERVIEW of the live GUI and the single "
+            "orientation SSOT — call any time to re-orient (it folds in the "
+            "readiness flags and the project paths, so there is no separate "
+            "state-check or project-info tool). Packs (from existing read RPCs): "
+            "state (the four readiness flags has_project / has_context / "
+            "has_active_context / has_soc), project ({chip_name, qub_name, "
+            "res_name, result_dir, database_path} or null when none applied), "
             "context (active context label), soc ({connected, is_mock}), "
             "tabs ([{tab_id, adapter, is_running}]), running_tab, and active_tab. "
             "active_tab is where the USER is currently focused — a collaboration "
             "cue, NOT your operation target (you always act on an explicit tab_id). "
-            "The same overview is folded into gui_connect's reply, "
-            "so right after connecting you already have it."
+            "The same overview is folded into gui_bridge_connect's reply, "
+            "so right after attaching you already have it."
         ),
         "inputSchema": {"type": "object", "properties": {}},
     },
-    "gui_editor_set_field": {
-        "handler": tool_gui_editor_set_field,
+    "gui_editor_open": {
+        "handler": tool_gui_editor_open,
         "description": (
-            "Set ONE field in a cfg-editor session, addressed by 'editor_id' "
-            "(from gui_editor_new). For tab cfg editing use gui_tab_set_cfg or "
-            "gui_tab_get_cfg instead — editor tools now require an explicit "
-            "editor_id. 'path' is dotted (see gui_tab_get_cfg); 'value' is a JSON "
-            "scalar or an md-ref {__kind:eval, expr} (the eval form is accepted "
-            "only on a scalar leaf, never a sweep edge). Returns {valid, removed, "
-            "added} — does NOT echo cfg content (read it with gui_editor_get)."
+            "Open a stateful editing session over an EXISTING ModuleLibrary "
+            "module/waveform (by 'from_name'). To create a new blank/shaped entry, "
+            "use gui_context_ml_create_from_role then gui_editor_open(from_name=...) "
+            "to edit it. item_kind is 'module' or 'waveform'. Returns "
+            "{editor_id, cfg} — cfg is the nested current-value tree (same shape "
+            "as gui_editor_get_cfg / gui_tab_get_cfg). Address later edits with the "
+            "returned editor_id via gui_editor_set; persist with gui_editor_save."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "editor_id": {
+                "item_kind": {
                     "type": "string",
-                    "description": (
-                        "Editor session id (from gui_editor_new). "
-                        "Tab cfg editing uses gui_tab_set_cfg."
-                    ),
+                    "description": "'module' or 'waveform'",
                 },
-                "path": {"type": "string", "description": "Dotted field path"},
-                "value": {
-                    # Untyped schema = "any JSON value", matching the generator's
-                    # JsonType.JSON rendering (schema_property). A 'type' union that
-                    # listed "string" let the MCP client coerce a number (0.2) to
-                    # the string "0.2", which then failed the float-field check; an
-                    # untyped schema passes a number through unchanged.
-                    "description": "JSON scalar or {__kind:eval, expr}",
+                "from_name": {
+                    "type": "string",
+                    "description": "Existing ml entry name to load for editing",
                 },
             },
-            "required": ["editor_id", "path", "value"],
+            "required": ["item_kind", "from_name"],
         },
     },
-    "gui_editor_set_fields": {
-        "handler": tool_gui_editor_set_fields,
+    "gui_editor_get_cfg": {
+        "handler": tool_gui_editor_get_cfg,
         "description": (
-            "Batch-apply several field edits to ONE cfg-editor session in order, "
-            "addressed by 'editor_id' (from gui_editor_new). For tab cfg editing "
-            "use gui_tab_set_cfg instead — editor tools now require an explicit "
-            "editor_id. Convenience fan-out over gui_editor_set_field — NOT atomic: "
-            "it stops at the first failure (fail-fast) and edits applied before it "
-            "are NOT rolled back; the error names the failing path and how many "
-            "already applied. On success returns {applied, valid} — the count "
-            "applied and whether the resulting draft is valid. It does NOT echo cfg "
-            "content (reading it would force a lowering pass that eagerly evaluates "
-            "EvalValue); read the cfg with gui_editor_get if needed. Each edit's "
-            "'path' is dotted (see gui_tab_get_cfg) and 'value' is a JSON scalar "
-            "or an md-ref {__kind:eval, expr}, exactly as gui_editor_set_field."
+            "Read an editing session's settable cfg as a NESTED tree of current "
+            "values, addressed by 'editor_id' (from gui_editor_open). Returns "
+            "{cfg} — the same tree shape and '$'-prefixed leaf encoding as "
+            "gui_tab_get_cfg (SCALAR / ENUM '$value'+'$choices' / SWEEP edges / "
+            "REF '$ref'). Edit a leaf with gui_editor_set using its dotted path. "
+            "'prefix' (optional, dotted) returns just the sub-tree rooted there; "
+            "a prefix matching nothing returns {}."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "editor_id": {
                     "type": "string",
+                    "description": "Editor session id (from gui_editor_open)",
+                },
+                "prefix": {
+                    "type": "string",
                     "description": (
-                        "Editor session id (from gui_editor_new). "
-                        "Tab cfg editing uses gui_tab_set_cfg."
+                        "Return only the sub-tree rooted at this dotted path "
+                        "(e.g. 'modules.readout'); omit for the whole draft. "
+                        "No match → {}"
                     ),
+                },
+            },
+            "required": ["editor_id"],
+        },
+    },
+    "gui_editor_set": {
+        "handler": tool_gui_editor_set,
+        "description": (
+            "Batch-set fields on ONE cfg-editor session in order (fail-fast, "
+            "non-atomic), addressed by 'editor_id' (from gui_editor_open). For tab "
+            "cfg editing use gui_tab_set_cfg instead. 'edits' is an ORDERED list of "
+            "{path, value}: 'path' is dotted (see gui_editor_get_cfg); 'value' is a "
+            "JSON scalar or an md-ref {__kind:eval, expr} (the eval form is accepted "
+            "only on a scalar leaf, never a sweep edge). Apply ref-switch edits "
+            "before dependent inner-path edits (a ref switch removes child paths). "
+            "Stops at the first failure and edits applied before it are NOT rolled "
+            "back; the error names the failing path and how many already applied. On "
+            "success returns {applied, valid} — the count applied and whether the "
+            "resulting draft is valid. It does NOT echo cfg content (reading it "
+            "would force a lowering pass that eagerly evaluates EvalValue); read the "
+            "cfg with gui_editor_get_cfg if needed."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "editor_id": {
+                    "type": "string",
+                    "description": "Editor session id (from gui_editor_open)",
                 },
                 "edits": {
                     "type": "array",
@@ -1975,6 +2223,10 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
                                 "description": "Dotted field path",
                             },
                             "value": {
+                                # Untyped schema = "any JSON value", matching the
+                                # generator's JsonType.JSON rendering. A 'type' union
+                                # listing "string" would let the client coerce a
+                                # number (0.2) to "0.2" and fail the float check.
                                 "description": "JSON scalar or {__kind:eval, expr}"
                             },
                         },
@@ -1996,12 +2248,14 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             },
         ),
         "description": (
-            "Batch-set cfg fields on a tab in order (fail-fast, non-atomic). "
-            "Apply ref-switch edits BEFORE dependent inner-path edits — a ref "
-            "switch removes child paths and a stale inner-path edit after it "
-            "will fail. Returns {valid, removed, added} aggregated across the "
-            "batch. A running tab is rejected (cancel the run first). Read the "
-            "current tree with gui_tab_get_cfg."
+            "Batch-set cfg fields on a tab in order (non-atomic batch). Apply "
+            "ref-switch edits BEFORE dependent inner-path edits — a ref switch "
+            "removes child paths and a stale inner-path edit after it will fail. "
+            "On the first failing edit the call RAISES (same contract as "
+            "gui_context_md_write): edits applied before it stay applied and are "
+            "NOT rolled back. On success returns {valid, removed, added} "
+            "aggregated across the batch. A running tab is rejected (cancel the "
+            "run first). Read the current tree with gui_tab_get_cfg."
         ),
         "inputSchema": {
             "type": "object",
@@ -2032,14 +2286,47 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "required": ["tab_id", "edits"],
         },
     },
-    "gui_context_md_set_attrs": {
-        "handler": tool_gui_context_md_set_attrs,
+    "gui_context_list": {
+        "handler": tool_gui_context_list,
         "description": (
-            "Batch-set several MetaDict attributes in order. Convenience fan-out "
-            "over gui_context_md_set_attr — NOT atomic: stops at the first failure "
-            "(fail-fast), attrs set before it are NOT rolled back, and the error "
-            "names the failing key plus how many already applied. Returns "
-            "{applied} on success."
+            "List the context labels plus which one is active — the orientation "
+            "read for contexts. Returns {active: str|null, has_active_context: bool, "
+            "labels: [str]}. 'labels' are plain strings: per-label unit/value are "
+            "NOT available (unit/value are transient creation metadata, never "
+            "persisted). Switch with gui_context_switch; create with "
+            "gui_context_create."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    "gui_context_md_read": {
+        "handler": tool_gui_context_md_read,
+        "description": (
+            "Read MetaDict attributes — omit 'keys' to read the WHOLE tree, or pass "
+            "'keys' to read only that subset. Returns {values: {key: value}} keyed "
+            "by attribute name. An unknown key in an explicit 'keys' list fails fast "
+            "(invalid_params) — keys are never silently skipped. Reads are "
+            'side-effect-free. Complex scalars arrive as {"__complex__": [re, im]} '
+            "(symmetric with gui_context_md_write)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "keys": {
+                    "type": "array",
+                    "description": "MetaDict keys to read; omit to read every attribute",
+                    "items": {"type": "string"},
+                },
+            },
+        },
+    },
+    "gui_context_md_write": {
+        "handler": tool_gui_context_md_write,
+        "description": (
+            "Batch-write MetaDict attributes in order. NOT atomic: stops at the "
+            "first failure (fail-fast), attrs set before it are NOT rolled back, and "
+            "the error message carries applied_count + failed_index. Returns "
+            "{applied} on success. Complex scalars round-trip via "
+            '{"__complex__": [re, im]} on the value.'
         ),
         "inputSchema": {
             "type": "object",
@@ -2060,25 +2347,45 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "required": ["attrs"],
         },
     },
-    "gui_context_md_get_attrs": {
-        "handler": tool_gui_context_md_get_attrs,
+    "gui_context_md_delete": {
+        "handler": tool_gui_context_md_delete,
         "description": (
-            "Batch-read several MetaDict attributes at once — the read counterpart "
-            "of gui_context_md_set_attrs. Convenience fan-out over "
-            "gui_context_md_get_attr. Returns {values: {key: value}} keyed by the "
-            "requested key. An unknown key fails fast (invalid_params) — keys are "
-            "never silently skipped. Reads are side-effect-free."
+            "Batch-delete MetaDict attributes by key. Idempotent per key: deleting a "
+            "missing key is a no-op (not an error). NOT atomic across keys: on a "
+            "(non-idempotent) failure the error carries applied_count + failed_index "
+            "and keys before it stay deleted. Returns {deleted: [key]} on success."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "keys": {
                     "type": "array",
-                    "description": "MetaDict keys to read",
+                    "description": "MetaDict keys to delete",
                     "items": {"type": "string"},
                 },
             },
             "required": ["keys"],
+        },
+    },
+    "gui_context_ml_inspect": {
+        "handler": tool_gui_context_ml_inspect,
+        "description": (
+            "Read one ModuleLibrary entry's full cfg WITHOUT opening a tab or a "
+            "lasting editing session. Returns {cfg} — the nested current-value tree "
+            "(same shape as gui_tab_get_cfg). A pure read: it opens a headless draft "
+            "on the entry and discards it, bumping no agent-visible resource "
+            "version. Use gui_context_ml_list first to find names + kinds."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "item_kind": {
+                    "type": "string",
+                    "description": "'module' or 'waveform'",
+                },
+                "name": {"type": "string", "description": "ml entry name"},
+            },
+            "required": ["item_kind", "name"],
         },
     },
     "gui_device_wait_operation": {
@@ -2428,15 +2735,73 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "required": ["tab_id"],
         },
     },
+    "gui_tab_save": {
+        "handler": tool_gui_tab_save,
+        "description": (
+            "Save a tab's result data and/or figure; return the resolved "
+            "destinations. Two orthogonal selectors:\n"
+            "  - artifact='data'|'image'|'both' (default 'both'): which artifacts.\n"
+            "  - figure='primary'|'post' (default 'primary'): which figure the "
+            "'image' artifact targets (the primary run/analyze plot, or the "
+            "post-analysis plot).\n"
+            "Collision policy (NOT uniform — it mirrors the savers): DATA is "
+            "written ASYNC with a uniqueness suffix (<stem>.hdf5, '_N' on "
+            "collision) so it NEVER overwrites; IMAGE is written SYNC and "
+            "OVERWRITES an existing destination.\n"
+            "Returns {data_path, image_path, data_async, image_error} (all keys "
+            "always present, null when N/A): data_path is the resolved data path; "
+            "image_path is the written image path (null if the image save failed); "
+            "data_async is true when a data save was started (it finishes off-turn); "
+            "image_error carries the image-save error message when it FAILED — the "
+            "failure is surfaced here, NOT raised, so a same-call data save is not "
+            "lost. A precondition failure on the DATA save still raises (there is "
+            "no data_error field). Optional data_path / image_path override the "
+            "tab's configured destinations; comment annotates the data file."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "tab_id": {"type": "string", "description": "Tab id"},
+                "artifact": {
+                    "type": "string",
+                    "enum": ["data", "image", "both"],
+                    "default": "both",
+                    "description": "Which artifacts to save (default 'both')",
+                },
+                "figure": {
+                    "type": "string",
+                    "enum": ["primary", "post"],
+                    "default": "primary",
+                    "description": (
+                        "Which figure the 'image' artifact targets (default 'primary')"
+                    ),
+                },
+                "data_path": {
+                    "type": "string",
+                    "description": "Override the data destination path",
+                },
+                "image_path": {
+                    "type": "string",
+                    "description": "Override the image destination path",
+                },
+                "comment": {
+                    "type": "string",
+                    "description": "Optional comment annotating the data file",
+                },
+            },
+            "required": ["tab_id"],
+        },
+    },
     "gui_soc_connect": {
         "handler": tool_gui_soc_connect,
         "description": (
             "Connect the SoC SYNCHRONOUSLY (NOT a degrading async handle — there is "
             "no gui_soc_connect_wait / _poll). One blocking call returns "
-            "{status:'finished', soc:{description, is_mock}} once the board is "
-            "connected (call gui_soc_info for the structured cfg). kind='mock' "
-            "(offline) or kind='remote' with ip+port. A remote connect to an "
-            "unreachable board fails fast (~1s)."
+            "{soc:{description, is_mock}} once the board is connected (call "
+            "gui_soc_info for the structured cfg). kind='mock' (offline) or "
+            "kind='remote' with ip+port. A remote connect to an unreachable board "
+            "fails fast (~1s). The SoC has no teardown (Pyro4-backed): there is no "
+            "disconnect / reconnect / health-check tool — those are deferred (E3)."
         ),
         "inputSchema": {
             "type": "object",
@@ -2448,8 +2813,8 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "required": ["kind"],
         },
     },
-    "gui_debug_screenshot": {
-        "handler": tool_gui_debug_screenshot,
+    "gui_screenshot": {
+        "handler": tool_gui_screenshot,
         "description": (
             "Capture the GUI to a PNG FILE and return its path. 'target' selects "
             "what to grab:\n"
@@ -2474,6 +2839,14 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "properties": {
                 "target": {
                     "type": "string",
+                    "enum": [
+                        "window",
+                        "setup",
+                        "device",
+                        "predictor",
+                        "inspect",
+                        "startup",
+                    ],
                     "description": (
                         "'window' for the whole main window, or a dialog name "
                         "(setup, device, predictor, inspect, startup)"
@@ -2494,8 +2867,8 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
         "handler": tool_gui_debug_versions,
         "description": (
             "DEV TOOL (debugging the GUI/MCP itself, not the measurement): dump the "
-            "full per-resource version table {versions: {resource_key: int}}. These "
-            "optimistic-concurrency version numbers are normally hidden from the "
+            "full per-resource version table as a flat {resource_key: int} map. "
+            "These optimistic-concurrency version numbers are normally hidden from the "
             "operator (mcp<->RPC bookkeeping); read them only when debugging why a "
             "guarded op rejected (or failed to reject) on a stale dependency."
         ),
@@ -2643,19 +3016,23 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "required": ["tab_id"],
         },
     },
-    "gui_notify_user": {
-        "handler": tool_gui_notify_user,
+    "gui_prompt_user": {
+        "handler": tool_gui_prompt_user,
         "description": (
-            "Ask the user a question and BLOCK your entire turn until they respond "
-            "(or the timeout expires). Opens a non-modal prompt dialog in the GUI "
-            "showing 'message'. Returns {reason, reply?}:\n"
-            "  - reason='reply': user answered; read 'reply' (a string, possibly "
-            "empty) and act on it.\n"
-            "  - reason='dismiss': user explicitly closed the prompt — do NOT ask "
-            "again immediately; respect the user's choice.\n"
-            "  - reason='timeout': no one responded within 'timeout' seconds — the "
-            "user is probably not watching; do NOT keep blocking, continue or poll.\n"
-            "timeout (default 600s) is the dialog auto-close timer. The RPC call "
+            "A BLOCKING request-reply prompt: ask the user a question and BLOCK "
+            "your entire turn until they respond (or the timeout expires). Opens a "
+            "non-modal prompt dialog in the GUI showing 'message'. There is NO poll "
+            "or cancel — it is one blocking request-reply, not an async handle. "
+            "Returns {reason, reply?} — switch on 'reason':\n"
+            "  - reason='reply': user answered; 'reply' is present (a string, "
+            "possibly empty) — read and act on it.\n"
+            "  - reason='dismiss': user explicitly closed the prompt; NO 'reply' "
+            "key — do NOT ask again immediately; respect the user's choice.\n"
+            "  - reason='timeout': no one responded within 'timeout' seconds; NO "
+            "'reply' key — the user is probably not watching; do NOT keep blocking, "
+            "continue or poll.\n"
+            "timeout (default 600s) is the dialog auto-close timer; a value <= 0 is "
+            "clamped to 1.0s so the dialog always arms its auto-close. The RPC call "
             "blocks the whole turn for up to timeout+15s; use only when you genuinely "
             "need a human decision before continuing."
         ),
@@ -2671,7 +3048,8 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
                     "default": 600,
                     "description": (
                         "Seconds before the dialog auto-closes with reason='timeout' "
-                        "(default 600). Set shorter for time-sensitive prompts."
+                        "(default 600; a value <= 0 is clamped to 1.0). Set shorter "
+                        "for time-sensitive prompts."
                     ),
                 },
             },
@@ -2685,24 +3063,28 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
 # lifecycle tools (no RPC method) + the convenience/coercion/file-write tools.
 _OVERRIDE_NAMES = frozenset(
     {
-        "gui_connect",
-        "gui_disconnect",
+        "gui_bridge_connect",
+        "gui_bridge_detach",
         "gui_launch",
         "gui_stop",
         "gui_device_connect",
         "gui_device_disconnect",
         "gui_device_setup",
-        "gui_debug_screenshot",
+        "gui_screenshot",
         "gui_debug_versions",
         "gui_debug_operations",
         "gui_tab_get_current_figure",
-        "gui_state_check",
         "gui_overview",
-        "gui_editor_set_field",
-        "gui_editor_set_fields",
+        "gui_editor_open",
+        "gui_editor_get_cfg",
+        "gui_editor_set",
         "gui_tab_set_cfg",
-        "gui_context_md_set_attrs",
-        "gui_context_md_get_attrs",
+        "gui_tab_save",
+        "gui_context_list",
+        "gui_context_md_read",
+        "gui_context_md_write",
+        "gui_context_md_delete",
+        "gui_context_ml_inspect",
         "gui_device_wait_operation",
         "gui_tab_run_start",
         "gui_tab_run_wait",
@@ -2719,7 +3101,7 @@ _OVERRIDE_NAMES = frozenset(
         "gui_tab_post_analyze_poll",
         "gui_soc_connect",
         "gui_device_poll",
-        "gui_notify_user",
+        "gui_prompt_user",
     }
 )
 

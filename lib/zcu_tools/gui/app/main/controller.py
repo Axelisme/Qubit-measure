@@ -532,23 +532,28 @@ class Controller:
     def has_soc(self) -> bool:
         return self._soc_svc.has_soc()
 
-    def get_soc_info(self) -> dict[str, object]:
+    def get_soc_info(self, include_cfg: bool = False) -> dict[str, object]:
         """Hardware summary of the connected SoC (QICK soccfg): a compact
         per-channel description (generator/readout type, converter port, sample
-        rate, max pulse/buffer length) + structured cfg with the full detail.
+        rate, max pulse/buffer length) + ``is_mock``. The structured cfg (the full
+        ~2 KB QICK config) is only computed and included when ``include_cfg`` is
+        true — the common reader (overview assembly) needs only is_mock, so the
+        cfg deserialization is opt-in rather than paid on every call.
         Raises if no SoC is connected (→ precondition_failed)."""
-        import json
-
         from zcu_tools.program import describe_soc
 
         soccfg = self._soc_svc.get_soccfg()
         if soccfg is None:
             raise RuntimeError("No SoC connected")
-        return {
+        info: dict[str, object] = {
             "description": describe_soc(soccfg),
-            "cfg": json.loads(soccfg.dump_cfg()),
             "is_mock": self._soc_svc.is_mock_soc(),
         }
+        if include_cfg:
+            import json
+
+            info["cfg"] = json.loads(soccfg.dump_cfg())
+        return info
 
     def resources_versions(self) -> dict[str, int]:
         """Full resource-version snapshot (the resources.versions RPC payload)."""
@@ -923,11 +928,22 @@ class Controller:
     # Context / IO (ContextService)
     # ------------------------------------------------------------------
 
-    def apply_startup_project(self, req: StartupProjectRequest) -> bool:
+    def apply_startup_project(self, req: StartupProjectRequest) -> dict[str, str]:
         # Applies the project to the active context AND records it as the
         # remembered prefs (in State); persisted to disk only at close.
+        # apply_project always mutates and either succeeds or raises (no no-op
+        # outcome), so we echo the resolved project rather than a bool. req is
+        # already fully resolved (the RPC fills default paths before construction
+        # and apply_project does not re-scope), so its fields are the resolved
+        # project verbatim.
         self._startup_svc.apply_project(req)
-        return True
+        return {
+            "chip_name": req.chip_name,
+            "qub_name": req.qub_name,
+            "res_name": req.res_name,
+            "result_dir": req.result_dir,
+            "database_path": req.database_path,
+        }
 
     def use_context(self, label: str) -> None:
         self._ctx_svc.use_context(label)
@@ -1323,8 +1339,8 @@ class Controller:
         return (
             "Before doing anything else, read the live GUI state with the "
             "gui_overview tool (it returns the current project / context / soc / "
-            "open tabs / what is running) — and re-read it with gui_overview / "
-            "gui_state_check whenever you need to know the state. Do NOT assume "
+            "open tabs / what is running) — and re-read it with gui_overview "
+            "whenever you need to know the state. Do NOT assume "
             "any state; this prompt carries no snapshot."
         )
 

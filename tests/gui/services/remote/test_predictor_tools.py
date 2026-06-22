@@ -48,13 +48,15 @@ def test_set_model_params_then_predict_returns_sane_freq():
             "flux_bias": 0.0,
         },
     )
-    assert res == {}
+    # Echoes the installed model (loaded flag + flattened energies, path=null).
+    assert res["loaded"] is True
+    assert res["EJ"] == pytest.approx(4.0)
 
-    # predict at half-flux (value 0.5 maps to flux 0.5 here) for the 0->1 line.
+    # predict at half-flux (device_value 0.5 maps to flux 0.5 here) for the 0->1 line.
     pred = _dispatch(
         ctrl,
         "predictor.predict",
-        {"value": 0.5, "from_lvl": 0, "to_lvl": 1},
+        {"device_value": 0.5, "from_level": 0, "to_level": 1},
     )
     freq = pred["freq_mhz"]
     assert isinstance(freq, float)
@@ -64,7 +66,11 @@ def test_set_model_params_then_predict_returns_sane_freq():
 
 
 def test_set_model_params_info_reads_back_energies():
-    """After set_model_params, predictor.info reply carries EJ/EC/EL."""
+    """After set_model_params, predictor.info reply carries EJ/EC/EL.
+
+    predictor.info now FLATTENS the model fields to the top level (the `loaded`
+    flag replaces the old {info: ...} wrapper).
+    """
     ctrl = _ctrl_backed_by_real_service()
     _dispatch(
         ctrl,
@@ -78,8 +84,8 @@ def test_set_model_params_info_reads_back_energies():
             "flux_bias": 0.0,
         },
     )
-    info = _dispatch(ctrl, "predictor.info", {})["info"]
-    assert isinstance(info, dict)
+    info = _dispatch(ctrl, "predictor.info", {})
+    assert info["loaded"] is True
     assert info["EJ"] == pytest.approx(4.0)
     assert info["EC"] == pytest.approx(1.0)
     assert info["EL"] == pytest.approx(1.0)
@@ -126,6 +132,6 @@ def test_set_model_params_flux_bias_defaults_to_zero():
             "flux_bias": 0.0,
         },
     )
-    info = _dispatch(ctrl, "predictor.info", {})["info"]
-    assert isinstance(info, dict)
+    info = _dispatch(ctrl, "predictor.info", {})
+    assert info["loaded"] is True
     assert info["flux_bias"] == pytest.approx(0.0)

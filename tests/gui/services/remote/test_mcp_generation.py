@@ -67,44 +67,51 @@ def test_generated_optional_param_not_required():
 
 
 def test_cfg_editor_tools_generated():
-    # editor.commit's MCP tool is named gui_editor_save (tool_name override):
-    # its real semantics are "register the draft as an ml module/waveform",
-    # not "apply a tab cfg edit" (those edits are already live).
+    # P1 renamed the editor surface: editor.new -> gui_editor_open (override folds
+    # the {tree} reply key to {cfg}); editor.get -> gui_editor_get_cfg; the
+    # single-field gui_editor_set_field is retired (E5 batch-only) in favour of
+    # gui_editor_set; editor.commit's tool stays gui_editor_save (tool_name
+    # override); editor.discard stays gui_editor_discard.
     expected = {
-        "gui_editor_new",
-        "gui_editor_set_field",
-        "gui_editor_get",
+        "gui_editor_open",
+        "gui_editor_get_cfg",
+        "gui_editor_set",
         "gui_editor_save",
         "gui_editor_discard",
     }
     assert expected.issubset(set(m.TOOLS))
 
-    # Old tool names must be absent.
-    assert "gui_editor_open" not in m.TOOLS
+    # Old tool names must be absent (retired / renamed in P1).
+    assert "gui_editor_new" not in m.TOOLS
+    assert "gui_editor_get" not in m.TOOLS
+    assert "gui_editor_set_field" not in m.TOOLS
     assert "gui_editor_save_as_module" not in m.TOOLS
 
-    open_tool = m.TOOLS["gui_editor_new"]
-    # editor.new is modify-only (from_name); the blank-by-discriminator surface
+    open_tool = m.TOOLS["gui_editor_open"]
+    # editor.open is modify-only (from_name); the blank-by-discriminator surface
     # was removed (create a blank via context.ml_create_from_role(role_id='<disc>:blank')).
     assert set(open_tool["inputSchema"]["required"]) == {"item_kind", "from_name"}
     props = open_tool["inputSchema"]["properties"]
     assert "discriminator" not in props
     assert "from_name" in props
 
-    # editor.get is a tree view keyed by editor_id with an optional dotted prefix;
-    # the old flat-serving knobs (verbosity / under) are gone.
-    get_tool = m.TOOLS["gui_editor_get"]
+    # gui_editor_get_cfg is a tree view keyed by editor_id with an optional dotted
+    # prefix; the old flat-serving knobs (verbosity / under) are gone.
+    get_tool = m.TOOLS["gui_editor_get_cfg"]
     assert get_tool["inputSchema"]["required"] == ["editor_id"]
     get_props = get_tool["inputSchema"]["properties"]
     assert "prefix" in get_props
     assert "verbosity" not in get_props
     assert "under" not in get_props
 
+    # gui_editor_set is batch-only (edits = list of {path, value}). Each edit's
     # 'value' is a JSON kind (scalar OR the tagged eval object): its schema is
     # UNTYPED (no "type" key) so the MCP client never coerces a number against a
     # "string" member and stringifies it (e.g. 0.2 -> "0.2", which then fails the
     # downstream float-field check).
-    value_schema = m.TOOLS["gui_editor_set_field"]["inputSchema"]["properties"]["value"]
+    set_props = m.TOOLS["gui_editor_set"]["inputSchema"]["properties"]
+    assert "edits" in set_props
+    value_schema = set_props["edits"]["items"]["properties"]["value"]
     assert "type" not in value_schema
 
 
@@ -222,61 +229,75 @@ def test_phase170a_tab_cfg_io_tools():
     assert "gui_tab_set_cfg" in m.TOOLS
     assert "gui_tab_set_cfg" in m._OVERRIDE_NAMES
 
-    # Editor tools now require editor_id only (no tab_id branch).
-    for tool_name in ("gui_editor_set_field", "gui_editor_set_fields"):
+    # Editor tools require editor_id only (no tab_id branch). P1 retired the
+    # single-field gui_editor_set_field; gui_editor_set (batch) + gui_editor_get_cfg
+    # are the editor surface now.
+    for tool_name in ("gui_editor_set", "gui_editor_get_cfg"):
         props = m.TOOLS[tool_name]["inputSchema"]["properties"]
         assert "tab_id" not in props, f"{tool_name} must not expose 'tab_id' anymore"
         assert "editor_id" in props
 
 
 def test_phase170c_save_writeback_tools():
-    """Phase 170c save + writeback under tab.* normalization:
-    - save.{data,image,post_image,result,set_paths} renamed to tab.save_*.
-    - writeback.{preview,set,apply} renamed to tab.writeback_*.
-    - Old MCP tool names (gui_save_*, gui_writeback_*) are absent.
-    - New MCP tool names (gui_tab_save_*, gui_tab_writeback_*) are present.
-    - All new methods are auto-generated (no overrides, no exclusions).
+    """Save + writeback wire methods after P1.
+
+    P1 folds the four save wire methods (tab.save_{data,image,post_image,result})
+    into the single gui_tab_save override (artifact + figure selectors), so they
+    move into _NON_GENERATED_METHODS and lose their per-method agent tool. The wire
+    methods themselves stay (gui_tab_save and the stage4 bundle call them directly).
+    tab.save_set_paths is renamed to gui_tab_set_save_paths (tool_name override,
+    still generated). The writeback methods are untouched in P1 (writeback is P3) —
+    still auto-generated as gui_tab_writeback_*.
     """
-    # New wire methods are present in the contract.
-    new_wire_methods = {
+    # All save + writeback wire methods are present in the contract.
+    save_wire_methods = {
         "tab.save_data",
         "tab.save_image",
         "tab.save_post_image",
         "tab.save_result",
+    }
+    other_wire_methods = {
         "tab.save_set_paths",
         "tab.writeback_preview",
         "tab.writeback_set",
         "tab.writeback_apply",
     }
-    assert new_wire_methods.issubset(set(METHOD_SPECS))
+    assert (save_wire_methods | other_wire_methods).issubset(set(METHOD_SPECS))
 
-    # Old wire methods are gone from the contract entirely.
-    old_wire_methods = {
-        "save.data",
-        "save.image",
-        "save.post_image",
-        "save.result",
-        "save.set_paths",
-        "writeback.preview",
-        "writeback.set",
-        "writeback.apply",
-    }
-    assert old_wire_methods.isdisjoint(set(METHOD_SPECS))
+    # The four save wire methods are now excluded from generation (folded into
+    # gui_tab_save); the single merged save tool is present as an override.
+    for method in save_wire_methods:
+        assert method in m._NON_GENERATED_METHODS, (
+            f"{method} must be excluded from generation (folded into gui_tab_save)"
+        )
+    assert "gui_tab_save" in m.TOOLS
+    assert "gui_tab_save" in m._OVERRIDE_NAMES
 
-    # New MCP tool names are present in the assembled table.
-    new_tool_names = {
+    # The per-method save tools no longer exist (merged into gui_tab_save).
+    merged_away_tools = {
         "gui_tab_save_data",
         "gui_tab_save_image",
         "gui_tab_save_post_image",
         "gui_tab_save_result",
-        "gui_tab_save_set_paths",
+    }
+    assert merged_away_tools.isdisjoint(set(m.TOOLS))
+
+    # tab.save_set_paths is renamed to gui_tab_set_save_paths (still generated).
+    assert "tab.save_set_paths" not in m._NON_GENERATED_METHODS
+    assert "gui_tab_set_save_paths" in m.TOOLS
+    assert "gui_tab_save_set_paths" not in m.TOOLS
+
+    # Writeback tools are untouched in P1: still auto-generated under tab.* names.
+    writeback_tools = {
         "gui_tab_writeback_preview",
         "gui_tab_writeback_set",
         "gui_tab_writeback_apply",
     }
-    assert new_tool_names.issubset(set(m.TOOLS))
+    assert writeback_tools.issubset(set(m.TOOLS))
+    for method in ("tab.writeback_preview", "tab.writeback_set", "tab.writeback_apply"):
+        assert method not in m._NON_GENERATED_METHODS
 
-    # Old MCP tool names are absent from the assembled table.
+    # The pre-170c MCP tool names stay absent.
     old_tool_names = {
         "gui_save_data",
         "gui_save_image",
@@ -288,16 +309,6 @@ def test_phase170c_save_writeback_tools():
         "gui_writeback_apply",
     }
     assert old_tool_names.isdisjoint(set(m.TOOLS))
-
-    # All new methods are auto-generated (no override, no exclusion).
-    for method in new_wire_methods:
-        assert method not in m._NON_GENERATED_METHODS, (
-            f"{method} must not be excluded from generation"
-        )
-    for tool_name in new_tool_names:
-        assert tool_name not in m._OVERRIDE_NAMES, (
-            f"{tool_name} must not be an override"
-        )
 
 
 def test_phase170b_tab_run_analyze_tools():
@@ -311,15 +322,19 @@ def test_phase170b_tab_run_analyze_tools():
     - run.running_tab stays as internal-only (no agent tool generated).
     - Old names (gui_run_start, gui_run_stage1, gui_analyze, ...) are absent.
     """
-    # tab.list_all: auto-generated (no special exclusion, no override).
+    # tab.list_all: still the wire method (unchanged), but P1 exposes it as the
+    # MCP tool gui_tab_list (tool_name override) with the named reply shape; it is
+    # NOT an _OVERRIDE_NAMES entry (the rename is via the spec's tool_name, the
+    # shape change lives in the dispatch handler).
     assert "tab.list_all" in METHOD_SPECS
     assert "tab.list_all" not in m._NON_GENERATED_METHODS
-    assert "gui_tab_list_all" in m.TOOLS
-    assert "gui_tab_list_all" not in m._OVERRIDE_NAMES
+    assert "gui_tab_list" in m.TOOLS
+    assert "gui_tab_list" not in m._OVERRIDE_NAMES
 
+    # The old MCP tool name gui_tab_list_all is gone (renamed to gui_tab_list).
+    assert "gui_tab_list_all" not in m.TOOLS
     # tab.list is gone from the wire contract entirely.
     assert "tab.list" not in METHOD_SPECS
-    assert "gui_tab_list" not in m.TOOLS
 
     # run.running_tab: internal-only — wire method + spec stay but no agent tool.
     assert "run.running_tab" in METHOD_SPECS
@@ -386,19 +401,21 @@ def test_phase170b_tab_run_analyze_tools():
 
 
 def test_phase170d_context_md_ml_prefix_editor_rename():
-    """Phase 170d context md/ml prefix + editor open->new/save_as_module->save:
-    - context.get_md*/set_md*/del_md* renamed to context.md_* wire methods.
-    - context.get_ml*/del_ml*/rename_ml* renamed to context.ml_* wire methods.
-    - ml.list_roles/create_from_role moved to context.ml_* wire methods.
-    - editor.open renamed to editor.new; editor.commit tool_name ->  gui_editor_save.
-    - New MCP tool names (gui_context_md_*/gui_context_ml_*/gui_editor_new/
-      gui_editor_save) are present in the assembled table.
-    - Old MCP tool names (gui_context_get_md*/gui_context_get_ml*,
-      gui_context_del_ml*/gui_context_rename_ml*, gui_ml_*,
-      gui_editor_open/gui_editor_save_as_module) are absent.
+    """context md/ml + editor wire methods after P1.
+
+    The context.md_*/ml_* and editor.* WIRE methods are unchanged by P1 (still the
+    Phase 170d names), but the agent-facing MCP TOOL surface is reshaped:
+    - context.md_get / md_get_attr / md_set_attr / md_del_attr move into
+      _NON_GENERATED_METHODS — they feed the merged gui_context_md_read /
+      gui_context_md_write / gui_context_md_delete overrides, so the single-attr /
+      list-keys per-method tools are retired.
+    - context.ml_get -> gui_context_ml_list (tool_name); ml_del_module/_waveform ->
+      gui_context_ml_delete_module/_waveform (tool_name); ml_rename_*,
+      ml_list_roles, ml_create_from_role keep their auto-generated names.
+    - editor.new -> gui_editor_open (override); editor.commit -> gui_editor_save.
     """
-    # New wire methods are present in the contract.
-    new_wire_methods = {
+    # The Phase 170d wire methods are still present in the contract.
+    wire_methods = {
         "context.md_get",
         "context.md_get_attr",
         "context.ml_get",
@@ -412,9 +429,9 @@ def test_phase170d_context_md_ml_prefix_editor_rename():
         "context.ml_create_from_role",
         "editor.new",
     }
-    assert new_wire_methods.issubset(set(METHOD_SPECS))
+    assert wire_methods.issubset(set(METHOD_SPECS))
 
-    # Old wire methods are gone from the contract entirely.
+    # The pre-170d wire method names stay gone from the contract.
     old_wire_methods = {
         "context.get_md",
         "context.get_md_attr",
@@ -431,28 +448,39 @@ def test_phase170d_context_md_ml_prefix_editor_rename():
     }
     assert old_wire_methods.isdisjoint(set(METHOD_SPECS))
 
-    # New MCP tool names are present in the assembled table.
+    # P1 MCP tool names present in the assembled table.
     new_tool_names = {
-        "gui_context_md_get",
-        "gui_context_md_get_attr",
-        "gui_context_ml_get",
-        "gui_context_md_set_attr",
-        "gui_context_md_del_attr",
-        "gui_context_ml_del_module",
-        "gui_context_ml_del_waveform",
+        "gui_context_md_read",
+        "gui_context_md_write",
+        "gui_context_md_delete",
+        "gui_context_ml_list",
+        "gui_context_ml_inspect",
+        "gui_context_ml_delete_module",
+        "gui_context_ml_delete_waveform",
         "gui_context_ml_rename_module",
         "gui_context_ml_rename_waveform",
         "gui_context_ml_list_roles",
         "gui_context_ml_create_from_role",
-        "gui_editor_new",
+        "gui_editor_open",
         "gui_editor_save",
     }
     assert new_tool_names.issubset(set(m.TOOLS))
 
-    # Old MCP tool names are absent from the assembled table.
-    # Note: gui_context_get_md_attrs / gui_context_set_md_attrs (Phase 170f renamed to
-    # gui_context_md_get_attrs / gui_context_md_set_attrs) are also included here.
+    # The merged-away per-attr md tools + the pre-P1 names are absent.
     old_tool_names = {
+        # P1 merged these into gui_context_md_read/_write/_delete.
+        "gui_context_md_get",
+        "gui_context_md_get_attr",
+        "gui_context_md_set_attr",
+        "gui_context_md_del_attr",
+        "gui_context_md_get_attrs",
+        "gui_context_md_set_attrs",
+        # P1 renamed these.
+        "gui_context_ml_get",
+        "gui_context_ml_del_module",
+        "gui_context_ml_del_waveform",
+        "gui_editor_new",
+        # pre-170d names.
         "gui_context_get_md",
         "gui_context_get_md_attr",
         "gui_context_get_ml",
@@ -464,28 +492,59 @@ def test_phase170d_context_md_ml_prefix_editor_rename():
         "gui_context_rename_ml_waveform",
         "gui_ml_list_roles",
         "gui_ml_create_from_role",
-        "gui_editor_open",
         "gui_editor_save_as_module",
-        # Phase 170f: batch fan-out tools renamed
-        "gui_context_get_md_attrs",
-        "gui_context_set_md_attrs",
     }
     assert old_tool_names.isdisjoint(set(m.TOOLS))
 
-    # All new context md/ml + editor methods are auto-generated (no override, no exclusion).
-    auto_generated_methods = new_wire_methods - {
-        "editor.new"
-    }  # editor.commit uses tool_name
-    for method in auto_generated_methods:
+    # The md read/write/delete wire methods feed the merged overrides — excluded
+    # from generation.
+    for method in (
+        "context.md_get",
+        "context.md_get_attr",
+        "context.md_set_attr",
+        "context.md_del_attr",
+    ):
+        assert method in m._NON_GENERATED_METHODS, (
+            f"{method} must be excluded (feeds a merged md override)"
+        )
+    for tool_name in (
+        "gui_context_md_read",
+        "gui_context_md_write",
+        "gui_context_md_delete",
+        "gui_context_ml_inspect",
+    ):
+        assert tool_name in m._OVERRIDE_NAMES, f"{tool_name} must be an override"
+
+    # The ml rename/list-roles/create-from-role + editor.new wire methods stay
+    # auto-generated (tool_name renames are NOT overrides).
+    for method in (
+        "context.ml_get",
+        "context.ml_del_module",
+        "context.ml_del_waveform",
+        "context.ml_rename_module",
+        "context.ml_rename_waveform",
+        "context.ml_list_roles",
+        "context.ml_create_from_role",
+    ):
         assert method not in m._NON_GENERATED_METHODS, (
             f"{method} must not be excluded from generation"
         )
-    for tool_name in new_tool_names - {"gui_editor_save"}:
+    for tool_name in (
+        "gui_context_ml_list",
+        "gui_context_ml_delete_module",
+        "gui_context_ml_delete_waveform",
+        "gui_context_ml_rename_module",
+        "gui_context_ml_rename_waveform",
+        "gui_context_ml_list_roles",
+        "gui_context_ml_create_from_role",
+    ):
         assert tool_name not in m._OVERRIDE_NAMES, (
             f"{tool_name} must not be an override"
         )
-    # editor.new (mapped from editor.new wire method) is also auto-generated.
-    assert "editor.new" not in m._NON_GENERATED_METHODS
-    assert "gui_editor_new" not in m._OVERRIDE_NAMES
+
+    # editor.new is served by the gui_editor_open OVERRIDE (folds {tree}->{cfg}),
+    # so it IS excluded from generation and gui_editor_open is an override entry.
+    assert "editor.new" in m._NON_GENERATED_METHODS
+    assert "gui_editor_open" in m._OVERRIDE_NAMES
     # editor.commit's tool_name is gui_editor_save (not an override either).
     assert "gui_editor_save" not in m._OVERRIDE_NAMES

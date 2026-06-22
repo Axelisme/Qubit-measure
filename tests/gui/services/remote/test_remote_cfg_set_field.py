@@ -234,15 +234,25 @@ def test_context_get_md_attr_unknown_rejected(lf):
 
 
 def test_context_get_ml_names(lf):
+    # context.ml_get now surfaces each entry's discriminator: modules carry the
+    # 'type' tag, waveforms the 'style' tag — so the stored values need those attrs.
+    from types import SimpleNamespace
+
     ml = lf.state.exp_context.ml
-    ml.modules = {"readout": object(), "pi": object()}
-    ml.waveforms = {"gauss": object()}
+    ml.modules = {
+        "readout": SimpleNamespace(type="pulse"),
+        "pi": SimpleNamespace(type="pulse"),
+    }
+    ml.waveforms = {"gauss": SimpleNamespace(style="gauss")}
     sock = open_client(lf.service.port)
     try:
         resp = call(sock, "context.ml_get")
         assert resp["ok"] is True
-        assert set(resp["result"]["modules"]) == {"readout", "pi"}
-        assert resp["result"]["waveforms"] == ["gauss"]
+        assert resp["result"]["modules"] == [
+            {"name": "pi", "kind": "pulse"},
+            {"name": "readout", "kind": "pulse"},
+        ]
+        assert resp["result"]["waveforms"] == [{"name": "gauss", "style": "gauss"}]
     finally:
         sock.close()
 

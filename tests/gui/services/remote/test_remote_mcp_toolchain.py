@@ -304,7 +304,9 @@ def test_soc_info_returns_description_and_cfg(fx):
     _install_real_mock_soccfg(fx)
     sock = open_client(fx.service.port)
     try:
-        resp = call(sock, "soc.info")
+        # The structured cfg is opt-in now (include_cfg=true); the common path pays
+        # nothing for it.
+        resp = call(sock, "soc.info", {"include_cfg": True})
         assert resp["ok"] is True
         result = resp["result"]
         # compact describe_soc table: header + per-channel generator/readout rows
@@ -395,20 +397,22 @@ def test_save_post_image_delegates_to_controller(fx):
 
 
 def test_mcp_tool_schemas_include_required_discovery_tools():
+    # P1 renamed/merged the context + state surface: context.active + context.labels
+    # fold into gui_context_list; gui_context_new/_use -> gui_context_create/_switch;
+    # gui_state_check is retired (the readiness flags live in gui_overview now). The
+    # save tools merged into the single gui_tab_save (artifact + figure selectors).
     expected = {
         "gui_adapter_list",
         "gui_soc_connect",
-        "gui_context_labels",
-        "gui_context_active",
-        "gui_context_use",
-        "gui_context_new",
-        "gui_tab_save_data",
-        "gui_tab_save_image",
+        "gui_context_list",
+        "gui_context_switch",
+        "gui_context_create",
+        "gui_tab_save",
         "gui_device_connect",
         "gui_device_disconnect",
         "gui_device_setup",
         "gui_device_active_operations",
-        "gui_state_check",
+        "gui_overview",
     }
     assert expected <= set(TOOLS)
     for name, info in TOOLS.items():
@@ -421,7 +425,7 @@ def test_mcp_tool_schemas_include_required_discovery_tools():
             # that a present "type" is a string, allowing the untyped JSON form.
             if "type" in prop_schema:
                 assert isinstance(prop_schema["type"], str), f"{name}.{prop_name}"
-    assert TOOLS["gui_context_use"]["inputSchema"]["required"] == ["label"]
+    assert TOOLS["gui_context_switch"]["inputSchema"]["required"] == ["label"]
     assert TOOLS["gui_device_setup"]["inputSchema"]["required"] == [
         "name",
         "updates",
@@ -483,16 +487,17 @@ def test_mcp_wrappers_map_to_expected_rpc():
         mcp_server._CONFIG, METHOD_SPECS, mcp_server._NON_GENERATED_METHODS, fake_send
     )
 
-    tools["gui_context_use"]["handler"]({"label": "ctx1"})
+    # gui_context_switch / gui_device_reconnect / gui_device_snapshot are GENERATED
+    # forwarders (the save tools merged into the override gui_tab_save, so a save
+    # wrapper is no longer a 1:1 generated forwarder to assert here).
+    tools["gui_context_switch"]["handler"]({"label": "ctx1"})
     tools["gui_device_reconnect"]["handler"]({"name": "bias"})
-    tools["gui_tab_save_image"]["handler"](
-        {"tab_id": "tab1", "image_path": "/tmp/a.png"}
-    )
+    tools["gui_device_snapshot"]["handler"]({"name": "bias"})
 
     assert calls == [
         ("context.use", {"label": "ctx1"}),
         ("device.reconnect", {"name": "bias"}),
-        ("tab.save_image", {"tab_id": "tab1", "image_path": "/tmp/a.png"}),
+        ("device.snapshot", {"name": "bias"}),
     ]
 
 
@@ -533,7 +538,7 @@ def test_set_fields_fans_out_in_order_and_returns_valid(monkeypatch):
         return {"valid": True, "removed": [], "added": []}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    out = mcp_server.TOOLS["gui_editor_set_fields"]["handler"](
+    out = mcp_server.TOOLS["gui_editor_set"]["handler"](
         {
             "editor_id": "ed1",
             "edits": [
@@ -571,7 +576,7 @@ def test_set_fields_fail_fast_stops_and_reports_progress(monkeypatch):
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
     with pytest.raises(RuntimeError) as ei:
-        mcp_server.TOOLS["gui_editor_set_fields"]["handler"](
+        mcp_server.TOOLS["gui_editor_set"]["handler"](
             {
                 "editor_id": "ed1",
                 "edits": [
@@ -599,7 +604,7 @@ def test_set_md_attrs_fans_out_in_order(monkeypatch):
         return {}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    out = mcp_server.TOOLS["gui_context_md_set_attrs"]["handler"](
+    out = mcp_server.TOOLS["gui_context_md_write"]["handler"](
         {"attrs": [{"key": "r_f", "value": 5000.0}, {"key": "q_f", "value": 200.0}]}
     )
 
@@ -624,11 +629,11 @@ def test_batch_tools_reject_malformed_items_before_any_rpc(monkeypatch):
 
     # Missing 'value' in an edit / empty list — validated up front, no RPC fires.
     with pytest.raises(ValueError):
-        mcp_server.TOOLS["gui_editor_set_fields"]["handler"](
+        mcp_server.TOOLS["gui_editor_set"]["handler"](
             {"editor_id": "ed1", "edits": [{"path": "reps"}]}
         )
     with pytest.raises(ValueError):
-        mcp_server.TOOLS["gui_context_md_set_attrs"]["handler"]({"attrs": []})
+        mcp_server.TOOLS["gui_context_md_write"]["handler"]({"attrs": []})
     assert calls == []
 
 
@@ -655,7 +660,15 @@ def test_startup_apply_optional_dirs_default_to_project_root(qapp):  # noqa: ARG
 
         def _apply(req):
             captured["req"] = req
-            return True
+            # apply_startup_project now echoes the resolved project dict (no bool);
+            # the dispatch handler returns it verbatim, so it must be a dict.
+            return {
+                "chip_name": req.chip_name,
+                "qub_name": req.qub_name,
+                "res_name": req.res_name,
+                "result_dir": req.result_dir,
+                "database_path": req.database_path,
+            }
 
         fx.ctrl.apply_startup_project = MagicMock(side_effect=_apply)  # type: ignore[method-assign]
         sock = open_client(fx.service.port)
@@ -869,7 +882,7 @@ def test_screenshot_dialog_omitted_out_path_writes_temp_file(monkeypatch):
         return {"png_b64": base64.b64encode(raw).decode("ascii"), "bytes": len(raw)}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    out = mcp_server.TOOLS["gui_debug_screenshot"]["handler"]({"target": "setup"})
+    out = mcp_server.TOOLS["gui_screenshot"]["handler"]({"target": "setup"})
 
     expected_path = str(Path(gettempdir()) / "measure_dialog_setup.png")
     assert out == {"bytes": len(raw), "saved_to": expected_path}
@@ -892,7 +905,7 @@ def test_screenshot_dialog_explicit_out_path(monkeypatch, tmp_path):
         return {"png_b64": base64.b64encode(raw).decode("ascii"), "bytes": len(raw)}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    out = mcp_server.TOOLS["gui_debug_screenshot"]["handler"](
+    out = mcp_server.TOOLS["gui_screenshot"]["handler"](
         {"target": "device", "out_path": str(target)}
     )
 
@@ -917,7 +930,7 @@ def test_screenshot_window_writes_window_png(monkeypatch):
         return {"png_b64": base64.b64encode(raw).decode("ascii"), "bytes": len(raw)}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    out = mcp_server.TOOLS["gui_debug_screenshot"]["handler"]({"target": "window"})
+    out = mcp_server.TOOLS["gui_screenshot"]["handler"]({"target": "window"})
 
     expected_path = str(Path(gettempdir()) / "measure_window.png")
     assert out == {"bytes": len(raw), "saved_to": expected_path}
@@ -940,7 +953,9 @@ def test_debug_versions_dumps_resource_table(monkeypatch):
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
     out = mcp_server.TOOLS["gui_debug_versions"]["handler"]({})
-    assert out == {"versions": table}
+    # P1 flattened the reply: the {versions: ...} wrapper is dropped, the table is
+    # returned verbatim as a flat {resource_key: int} map.
+    assert out == table
 
 
 def test_debug_operations_dumps_op_map_and_device_ops(monkeypatch):
@@ -1024,8 +1039,10 @@ def _overview_fake_send(*, has_soc: bool):
 
 def test_overview_assembles_from_read_rpcs_with_project(monkeypatch):
     """gui_overview packs state / project / context / soc / tabs / running_tab /
-    active_tab from existing reads; with a project applied, project uses
-    long keys {chip_name, qub_name, res_name} matching the wire shape."""
+    active_tab from existing reads; with a project applied, project uses the full
+    wire shape {chip_name, qub_name, res_name, result_dir, database_path} — the
+    overview is the single orientation SSOT, folding in the project paths so the
+    retired gui_project_info tool has no separate surface."""
     from zcu_tools.mcp.measure import server as mcp_server
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", _overview_fake_send(has_soc=True))
@@ -1038,7 +1055,13 @@ def test_overview_assembles_from_read_rpcs_with_project(monkeypatch):
             "has_active_context": False,
             "has_soc": True,
         },
-        "project": {"chip_name": "Q5_2D", "qub_name": "Q1", "res_name": "R1"},
+        "project": {
+            "chip_name": "Q5_2D",
+            "qub_name": "Q1",
+            "res_name": "R1",
+            "result_dir": "/r",
+            "database_path": "/db",
+        },
         "context": "default",
         "soc": {"connected": True, "is_mock": True},
         "tabs": [
@@ -1091,14 +1114,16 @@ def test_overview_skips_soc_info_when_not_connected(monkeypatch):
 
 
 def test_connect_folds_overview_into_reply(monkeypatch):
-    """gui_connect returns {note, overview} so attaching alone gives the picture."""
+    """gui_bridge_connect returns {note, overview} so attaching alone gives the
+    picture. (gui_connect was renamed to gui_bridge_connect; the handler is the
+    same tool_gui_connect.)"""
     from zcu_tools.mcp.measure import server as mcp_server
 
     monkeypatch.setattr(mcp_server, "resolve_connect_port", lambda cfg, req: 8765)
     monkeypatch.setattr(mcp_server._BRIDGE, "connect", lambda port, token=None: "ok")
     monkeypatch.setattr(mcp_server, "_assemble_overview", lambda: {"sentinel": True})
 
-    out = mcp_server.TOOLS["gui_connect"]["handler"]({})
+    out = mcp_server.TOOLS["gui_bridge_connect"]["handler"]({})
     assert out == {"note": "ok", "overview": {"sentinel": True}}
 
 
@@ -1346,7 +1371,8 @@ def test_run_start_finished_carries_figure(monkeypatch):
         del timeout_seconds
         calls.append(method)
         if method == "tab.snapshot":
-            return {"interaction": {"has_run_result": True}}
+            # tab.snapshot always returns {tabs: [...]} (single tab → one element).
+            return {"tabs": [{"interaction": {"has_run_result": True}}]}
         if method == "tab.get_current_figure":
             return {"bytes": 9, "saved_to": params["out_path"]}
         return {}
@@ -1588,10 +1614,15 @@ def _run_stage_fake_send(calls: list[tuple[str, dict]]):
         del timeout_seconds
         calls.append((method, dict(params)))
         if method == "tab.snapshot":
-            # has_run_result drives the run-finished tab summary.
+            # has_run_result drives the run-finished tab summary. tab.snapshot
+            # always returns {tabs: [...]} (single tab → one-element list).
             return {
-                "editor_id": "stage-ed",
-                "interaction": {"is_running": False, "has_run_result": True},
+                "tabs": [
+                    {
+                        "editor_id": "stage-ed",
+                        "interaction": {"is_running": False, "has_run_result": True},
+                    }
+                ]
             }
         if method == "tab.set_cfg":
             # Stage2 batch setter: aggregate result across all edits.
@@ -1751,7 +1782,8 @@ def test_run_stage1_creates_tab_and_folds_context_and_guide(monkeypatch):
         calls.append((method, dict(params)))
         return {
             "tab.new": {"tab_id": "tw-1"},
-            "tab.snapshot": {"editor_id": "ed-tw-1", "interaction": {}},
+            # tab.snapshot always returns {tabs: [...]} (single tab → one element).
+            "tab.snapshot": {"tabs": [{"editor_id": "ed-tw-1", "interaction": {}}]},
             "tab.get_cfg": {"tree": tree},
             "adapter.guide": {"guide": {"behavior": "measures X"}},
         }[method]
@@ -1789,7 +1821,8 @@ def test_run_stage1_dedupes_guide_per_adapter(monkeypatch):
         del params, timeout_seconds
         return {
             "tab.new": {"tab_id": "tw-1"},
-            "tab.snapshot": {"editor_id": "ed-1", "interaction": {}},
+            # tab.snapshot always returns {tabs: [...]} (single tab → one element).
+            "tab.snapshot": {"tabs": [{"editor_id": "ed-1", "interaction": {}}]},
             "tab.get_cfg": {"tree": {"reps": 1}},
             "adapter.guide": {"guide": {"behavior": "measures X"}},
         }[method]

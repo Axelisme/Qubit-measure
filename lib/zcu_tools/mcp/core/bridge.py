@@ -659,7 +659,7 @@ class McpBridge:
         timeout: float = 10.0,
         timeout_kill: bool = True,
         shutdown_rpc: str | None = None,
-    ) -> str:
+    ) -> dict[str, Any]:
         """Stop the GUI subprocess this bridge launched (own-cleanup use).
 
         ``shutdown_rpc`` (e.g. ``"app.shutdown"``) is tried first for a clean
@@ -667,12 +667,22 @@ class McpBridge:
         that observe a user-driven GUI do NOT expose stop as an agent tool —
         this exists for the MCP server's own exit cleanup so a server-launched
         GUI is not orphaned.
+
+        Returns a machine-readable outcome ``{"exited": bool, "note": str}`` so
+        callers branch on ``exited`` instead of string-matching the prose
+        (Fast-Fail). ``exited`` is true when the process is gone (graceful exit
+        or force-kill), false when a graceful close timed out and was left
+        running.
         """
         pid, proc = self._pid_for_stop()
         if pid is None:
             self._proc = None
             self.disconnect()
-            return "No GUI process managed by this MCP server."
+            # No managed process: nothing to exit, so there is no live GUI left.
+            return {
+                "exited": True,
+                "note": "No GUI process managed by this MCP server.",
+            }
 
         if shutdown_rpc is not None and self.is_connected:
             try:
@@ -705,20 +715,27 @@ class McpBridge:
                 pass
             self._proc = None
             self._clear_pid_file()
-            return (
-                f"GUI process (pid={pid}) force-killed after graceful close timed out."
-            )
+            return {
+                "exited": True,
+                "note": (
+                    f"GUI process (pid={pid}) force-killed after graceful close "
+                    f"timed out."
+                ),
+            }
 
         if not exited:
-            return (
-                f"SIGTERM sent but GUI (pid={pid}) has not exited within "
-                f"{timeout:.0f}s. Re-run stop, or pass timeout_kill=true to "
-                f"force-kill."
-            )
+            return {
+                "exited": False,
+                "note": (
+                    f"SIGTERM sent but GUI (pid={pid}) has not exited within "
+                    f"{timeout:.0f}s. Re-run stop, or pass timeout_kill=true to "
+                    f"force-kill."
+                ),
+            }
 
         self._proc = None
         self._clear_pid_file()
-        return f"GUI process (pid={pid}) closed."
+        return {"exited": True, "note": f"GUI process (pid={pid}) closed."}
 
 
 # ---------------------------------------------------------------------------

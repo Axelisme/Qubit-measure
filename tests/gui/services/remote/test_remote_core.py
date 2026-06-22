@@ -53,6 +53,11 @@ def _make_view() -> MagicMock:
     view = MagicMock()
     view.show_status_message = MagicMock()
     view.make_live_container = MagicMock(return_value=None)
+    # tab.list_all / overview read active_tab_id off the render view; return a real
+    # (JSON-serializable) snapshot so the wire reply encodes cleanly.
+    view.get_view_snapshot = MagicMock(
+        return_value={"active_tab_id": None, "tab_ids": []}
+    )
     return view
 
 
@@ -78,7 +83,11 @@ class _Fixture:
         )
         if opts is None:
             opts = ControlOptions(port=0)
-        self.service = RemoteControlAdapter(controller=self.ctrl, opts=opts)
+        # tab.list_all now reads active_tab_id off the render view (a view
+        # projection), so the fixture must supply one — mirror _helpers.Fixture.
+        self.service = RemoteControlAdapter(
+            controller=self.ctrl, opts=opts, render_view=self.view
+        )
 
     def start(self) -> int:
         return self.service.start()
@@ -175,14 +184,13 @@ def test_tab_new_list_close_roundtrip(fx):
         tab_id = resp["result"]["tab_id"]
         assert tab_id
 
-        # tab.list_all returns {"result": [tabs, running_tab_id]} where tabs is a
-        # list of [tab_id, adapter_name] pairs (Phase 170b wire shape).
+        # tab.list_all returns the named shape {tabs, active_tab_id, running_tab_id}
+        # where tabs is a list of {tab_id, adapter_name, is_running} objects.
         _send(sock, {"id": "2", "method": "tab.list_all", "params": {}})
         resp = _recv_response(sock)
         assert resp["ok"] is True
-        result_pair = resp["result"]["result"]  # [tabs, running_tab_id]
-        tabs_list = result_pair[0]  # list of [tab_id, adapter_name] pairs
-        ids = [pair[0] for pair in tabs_list]
+        tabs_list = resp["result"]["tabs"]
+        ids = [t["tab_id"] for t in tabs_list]
         assert tab_id in ids
 
         _send(sock, {"id": "3", "method": "tab.close", "params": {"tab_id": tab_id}})
@@ -191,8 +199,7 @@ def test_tab_new_list_close_roundtrip(fx):
 
         _send(sock, {"id": "4", "method": "tab.list_all", "params": {}})
         resp = _recv_response(sock)
-        result_pair = resp["result"]["result"]
-        assert result_pair[0] == []  # no tabs open
+        assert resp["result"]["tabs"] == []  # no tabs open
     finally:
         sock.close()
 
@@ -349,6 +356,7 @@ def test_run_start_then_running_tab_then_finishes(fx):
         _send(sock, {"id": "3", "method": "tab.snapshot", "params": {"tab_id": tab_id}})
         snap = _recv_response(sock)
         assert snap["ok"] is True
-        assert snap["result"]["interaction"]["has_run_result"] is True
+        # tab.snapshot always returns {tabs: [...]} (a single tab_id → a one-element list).
+        assert snap["result"]["tabs"][0]["interaction"]["has_run_result"] is True
     finally:
         sock.close()
