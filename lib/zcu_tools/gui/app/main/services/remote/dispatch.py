@@ -505,7 +505,7 @@ def _coerce_wire_value(value: object) -> object:
     return value
 
 
-def _h_context_get_md(
+def _h_context_md_get(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
@@ -513,7 +513,7 @@ def _h_context_get_md(
     return {"keys": sorted(str(k) for k in md.keys())}
 
 
-def _h_context_get_md_attr(
+def _h_context_md_get_attr(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     key = str(params["key"])
@@ -525,7 +525,7 @@ def _h_context_get_md_attr(
     return {"key": key, "value": _json_safe(value)}
 
 
-def _h_context_get_ml(
+def _h_context_ml_get(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
@@ -536,7 +536,7 @@ def _h_context_get_ml(
     }
 
 
-def _h_ml_list_roles(
+def _h_context_ml_list_roles(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     """List the experiment-role templates available for create_from_role."""
@@ -548,13 +548,13 @@ def _h_ml_list_roles(
     return {"roles": list(catalog.list_meta())}
 
 
-def _h_ml_create_from_role(
+def _h_context_ml_create_from_role(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     """Create a blank ml module/waveform from a named role and register it.
 
     One-shot: seeds md-linked defaults (lowered against the live md), writes ml.
-    Edit afterwards via editor.open(from_name=...).
+    Edit afterwards via editor.new(from_name=...).
     """
     item_kind = str(params["item_kind"])
     role_id = str(params["role_id"])
@@ -574,7 +574,7 @@ def _h_ml_create_from_role(
     return {}
 
 
-def _h_context_set_md_attr(
+def _h_context_md_set_attr(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     key = str(params["key"])
@@ -590,7 +590,7 @@ def _h_context_set_md_attr(
     return {}
 
 
-def _h_context_del_md_attr(
+def _h_context_md_del_attr(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     key = str(params["key"])
@@ -605,7 +605,7 @@ def _h_context_del_md_attr(
     return {}
 
 
-def _h_context_del_ml_module(
+def _h_context_ml_del_module(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
@@ -620,7 +620,7 @@ def _h_context_del_ml_module(
     return {}
 
 
-def _h_context_rename_ml_module(
+def _h_context_ml_rename_module(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     old = str(params["old"])
@@ -636,7 +636,7 @@ def _h_context_rename_ml_module(
     return {}
 
 
-def _h_context_rename_ml_waveform(
+def _h_context_ml_rename_waveform(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     old = str(params["old"])
@@ -652,7 +652,7 @@ def _h_context_rename_ml_waveform(
     return {}
 
 
-def _h_context_del_ml_waveform(
+def _h_context_ml_del_waveform(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
@@ -1513,7 +1513,7 @@ def _h_tab_writeback_apply(
 # ---------------------------------------------------------------------------
 
 
-def _h_editor_open(
+def _h_editor_new(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     from zcu_tools.gui.app.main.services.cfg_editor import CfgEditorError
@@ -1522,8 +1522,8 @@ def _h_editor_open(
 
     item_kind = str(params["item_kind"])
     from_name = str(params["from_name"])
-    # editor.open is modify-only: it edits an existing ml entry. Creating a blank
-    # entry goes through ml.create_from_role (role_id='<disc>:blank').
+    # editor.new is modify-only: it edits an existing ml entry. Creating a blank
+    # entry goes through context.ml_create_from_role (role_id='<disc>:blank').
     try:
         editor_id, _ = adapter.ctrl.open_cfg_editor(
             item_kind, discriminator=None, from_name=from_name
@@ -1833,17 +1833,17 @@ _HANDLERS: dict[str, Handler] = {
     "context.new": _h_context_new,
     "context.labels": _h_context_labels,
     "context.active": _h_context_active,
-    "context.get_md": _h_context_get_md,
-    "context.get_md_attr": _h_context_get_md_attr,
-    "context.get_ml": _h_context_get_ml,
-    "context.set_md_attr": _h_context_set_md_attr,
-    "context.del_md_attr": _h_context_del_md_attr,
-    "context.del_ml_module": _h_context_del_ml_module,
-    "context.del_ml_waveform": _h_context_del_ml_waveform,
-    "context.rename_ml_module": _h_context_rename_ml_module,
-    "context.rename_ml_waveform": _h_context_rename_ml_waveform,
-    "ml.list_roles": _h_ml_list_roles,
-    "ml.create_from_role": _h_ml_create_from_role,
+    "context.md_get": _h_context_md_get,
+    "context.md_get_attr": _h_context_md_get_attr,
+    "context.ml_get": _h_context_ml_get,
+    "context.md_set_attr": _h_context_md_set_attr,
+    "context.md_del_attr": _h_context_md_del_attr,
+    "context.ml_del_module": _h_context_ml_del_module,
+    "context.ml_del_waveform": _h_context_ml_del_waveform,
+    "context.ml_rename_module": _h_context_ml_rename_module,
+    "context.ml_rename_waveform": _h_context_ml_rename_waveform,
+    "context.ml_list_roles": _h_context_ml_list_roles,
+    "context.ml_create_from_role": _h_context_ml_create_from_role,
     "state.has_project": _h_state_has_project,
     "state.has_context": _h_state_has_context,
     "state.has_active_context": _h_state_has_active_context,
@@ -1886,7 +1886,7 @@ _HANDLERS: dict[str, Handler] = {
     "tab.writeback_preview": _h_tab_writeback_preview,
     "tab.writeback_set": _h_tab_writeback_set,
     "tab.writeback_apply": _h_tab_writeback_apply,
-    "editor.open": _h_editor_open,
+    "editor.new": _h_editor_new,
     "editor.set_field": _h_editor_set_field,
     "editor.get": _h_editor_get,
     "editor.commit": _h_editor_commit,

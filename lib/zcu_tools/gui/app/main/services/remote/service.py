@@ -267,11 +267,11 @@ class RemoteControlAdapter(RemoteControlServiceBase):
     ) -> None:
         """Record/forget CfgEditor session ids per connection.
 
-        ``editor.open`` binds the returned id to this client so a disconnect
+        ``editor.new`` binds the returned id to this client so a disconnect
         reclaims it; ``commit``/``discard`` forget it (the session is already
         gone server-side). Runs on the IO thread, where ``ctx.editor_ids`` lives.
         """
-        if method == "editor.open":
+        if method == "editor.new":
             editor_id = result.get("editor_id") if isinstance(result, dict) else None
             if isinstance(editor_id, str):
                 ctx.editor_ids.add(editor_id)

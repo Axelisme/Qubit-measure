@@ -197,7 +197,7 @@ def test_md_changed_emits_requery_hint(fx):
         call(sock, "events.subscribe", {"events": ["md_changed"]})
         fx.bus.emit(MdChangedPayload(md=MagicMock()))
         msg = recv_push(sock, "md_changed")
-        assert msg["payload"] == {"requery": ["context.get_md_attr"]}
+        assert msg["payload"] == {"requery": ["context.md_get_attr"]}
     finally:
         sock.close()
 

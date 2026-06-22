@@ -39,10 +39,16 @@ from __future__ import annotations
 # v42: Phase 170c save + writeback under tab.* — save.data/image/post_image/
 # result/set_paths renamed to tab.save_*; writeback.preview/set/apply renamed to
 # tab.writeback_*.
-WIRE_VERSION = 42
+# v43: Phase 170d context md/ml prefix + editor open->new/save_as_module->save —
+# context.get_md/get_md_attr/set_md_attr/del_md_attr renamed to context.md_get/
+# md_get_attr/md_set_attr/md_del_attr; context.get_ml/del_ml_module/del_ml_waveform/
+# rename_ml_module/rename_ml_waveform renamed to context.ml_get/ml_del_module/
+# ml_del_waveform/ml_rename_module/ml_rename_waveform; ml.list_roles/create_from_role
+# moved to context.ml_list_roles/ml_create_from_role; editor.open->editor.new.
+WIRE_VERSION = 43
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION (a wire-contract change
 # bumps both; a pure-internal GUI change bumps only this). Git history holds the
 # per-version evolution.
-GUI_VERSION = 49
+GUI_VERSION = 50

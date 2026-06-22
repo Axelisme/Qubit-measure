@@ -128,13 +128,13 @@ def _ser_context_switched(payload: BasePayload) -> WirePayload:
 def _ser_md_changed(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, MdChangedPayload)
     del payload
-    return {"requery": ["context.get_md_attr"]}
+    return {"requery": ["context.md_get_attr"]}
 
 
 def _ser_ml_changed(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, MlChangedPayload)
     del payload
-    return {"requery": ["context.get_ml"]}
+    return {"requery": ["context.ml_get"]}
 
 
 def _ser_soc_changed(payload: BasePayload) -> WirePayload:

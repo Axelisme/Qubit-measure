@@ -1,6 +1,6 @@
 """Per-connection lifecycle of CfgEditor sessions in RemoteControlAdapter.
 
-editor.open binds the returned id to the connection's per-connection context
+editor.new binds the returned id to the connection's per-connection context
 (``_ClientCtx`` on ``ClientLink.app_ctx``); commit / discard forget it; a dropped
 connection reclaims any leftover sessions via ctrl.discard_cfg_editors. These
 test the bookkeeping (_track_editor_lifecycle / _reclaim_editors) + the per-editor
@@ -50,7 +50,7 @@ def test_open_binds_id_to_client():
     svc, _ = _service()
     ctx = _ctx()
     svc._track_editor_lifecycle(
-        ctx, "editor.open", {"item_kind": "module"}, {"editor_id": "editor-1"}
+        ctx, "editor.new", {"item_kind": "module"}, {"editor_id": "editor-1"}
     )
     assert ctx.editor_ids == {"editor-1"}
 

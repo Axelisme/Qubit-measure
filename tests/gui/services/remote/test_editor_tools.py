@@ -17,7 +17,7 @@ from ._helpers import dispatch_handler as _dispatch  # noqa: E402
 
 
 def test_open_returns_editor_id_and_tree(monkeypatch):
-    # editor.open now returns the freshly-opened draft as a nested {tree} (same
+    # editor.new now returns the freshly-opened draft as a nested {tree} (same
     # shape as editor.get / tab.get_cfg); build_settable_tree is patched so
     # this stays a mock-only wire-shape test (deep tree building is covered by
     # test_remote_cfg_set_field against a live session).
@@ -27,11 +27,11 @@ def test_open_returns_editor_id_and_tree(monkeypatch):
     ctrl = MagicMock()
     ctrl.open_cfg_editor.return_value = ("editor-abc", [{"path": "freq"}])
     res = _dispatch(
-        ctrl, "editor.open", {"item_kind": "module", "from_name": "readout_rf"}
+        ctrl, "editor.new", {"item_kind": "module", "from_name": "readout_rf"}
     )
     assert res["editor_id"] == "editor-abc"
     assert res["tree"] == {"freq": 0.0}
-    # editor.open is modify-only: from_name forwarded, discriminator always None.
+    # editor.new is modify-only: from_name forwarded, discriminator always None.
     ctrl.open_cfg_editor.assert_called_once_with(
         "module", discriminator=None, from_name="readout_rf"
     )
@@ -42,7 +42,7 @@ def test_open_translates_cfg_editor_error():
     ctrl = MagicMock()
     ctrl.open_cfg_editor.side_effect = CfgEditorError("unknown module")
     with pytest.raises(RemoteError) as ei:
-        _dispatch(ctrl, "editor.open", {"item_kind": "module", "from_name": "nope"})
+        _dispatch(ctrl, "editor.new", {"item_kind": "module", "from_name": "nope"})
     assert ei.value.code == ErrorCode.INVALID_PARAMS
 
 

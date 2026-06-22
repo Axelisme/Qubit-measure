@@ -237,52 +237,52 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "context.labels": MethodSpec(5.0, "List context labels"),
     "context.active": MethodSpec(5.0, "Active context label"),
-    "context.get_md": MethodSpec(5.0, "List MetaDict keys"),
-    "context.get_md_attr": MethodSpec(
+    "context.md_get": MethodSpec(5.0, "List MetaDict keys"),
+    "context.md_get_attr": MethodSpec(
         5.0, "Read one MetaDict attribute", (_str("key", "MetaDict key"),)
     ),
-    "context.get_ml": MethodSpec(5.0, "List ModuleLibrary module/waveform names"),
-    "context.set_md_attr": MethodSpec(
+    "context.ml_get": MethodSpec(5.0, "List ModuleLibrary module/waveform names"),
+    "context.md_set_attr": MethodSpec(
         5.0,
         "Set one MetaDict attribute",
         (_str("key", "MetaDict key"), _json("value", "JSON-safe value")),
     ),
-    "context.del_md_attr": MethodSpec(
+    "context.md_del_attr": MethodSpec(
         5.0, "Delete one MetaDict attribute", (_str("key", "MetaDict key"),)
     ),
-    "context.del_ml_module": MethodSpec(
+    "context.ml_del_module": MethodSpec(
         5.0, "Delete one ModuleLibrary module", (_str("name", "Module name"),)
     ),
-    "context.del_ml_waveform": MethodSpec(
+    "context.ml_del_waveform": MethodSpec(
         5.0, "Delete one ModuleLibrary waveform", (_str("name", "Waveform name"),)
     ),
-    "context.rename_ml_module": MethodSpec(
+    "context.ml_rename_module": MethodSpec(
         5.0,
         "Rename a ModuleLibrary module old→new (clash fails fast). cfg refs to "
         "'old' degrade to inline Custom (value kept); to re-link, edit them.",
         (_str("old", "Current module name"), _str("new", "New module name")),
     ),
-    "context.rename_ml_waveform": MethodSpec(
+    "context.ml_rename_waveform": MethodSpec(
         5.0,
         "Rename a ModuleLibrary waveform old→new (clash fails fast).",
         (_str("old", "Current waveform name"), _str("new", "New waveform name")),
     ),
-    "ml.list_roles": MethodSpec(
+    "context.ml_list_roles": MethodSpec(
         5.0,
-        "List experiment-role templates for ml.create_from_role. Returns "
+        "List experiment-role templates for context.ml_create_from_role. Returns "
         "{roles: [{role_id, label, item_kind}]}. Each role seeds a blank module/"
         "waveform with md-linked defaults (e.g. 'res_probe', 'bath_reset').",
     ),
-    "ml.create_from_role": MethodSpec(
+    "context.ml_create_from_role": MethodSpec(
         10.0,
         "Create a blank ModuleLibrary module/waveform from a named role "
-        "(ml.list_roles) and register it under 'name'. One-shot: seeds the role's "
-        "md-linked defaults (lowered to the md's current values) — it does NOT "
+        "(context.ml_list_roles) and register it under 'name'. One-shot: seeds the "
+        "role's md-linked defaults (lowered to the md's current values) — it does NOT "
         "open an editing session. To then change the entry use "
-        "editor.open(from_name=name).",
+        "editor.new(from_name=name).",
         (
             _str("item_kind", "'module' or 'waveform'"),
-            _str("role_id", "role id from ml.list_roles"),
+            _str("role_id", "role id from context.ml_list_roles"),
             _str("name", "new ml entry name"),
         ),
     ),
@@ -593,14 +593,14 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         (_str("tab_id"), _expected_versions()),
     ),
     # CfgEditor sessions — headless, stateful ml-entry editing for the agent.
-    "editor.open": MethodSpec(
+    "editor.new": MethodSpec(
         5.0,
         "Open a stateful editing session over an EXISTING ModuleLibrary "
         "module/waveform (by 'from_name'). To create a new blank/shaped entry, "
-        "use ml.create_from_role (e.g. role_id='pulse:blank' or a named role) "
-        "then editor.open(from_name=name) to edit it. item_kind is 'module' or "
+        "use context.ml_create_from_role (e.g. role_id='pulse:blank' or a named role) "
+        "then editor.new(from_name=name) to edit it. item_kind is 'module' or "
         "'waveform'. Returns {editor_id, tree} (tree = the nested current-value "
-        "view, same shape as editor.get / tab.list_paths).",
+        "view, same shape as editor.get / tab.get_cfg).",
         (
             _str("item_kind", "'module' or 'waveform'"),
             _str("from_name", "Existing ml entry name to load for editing"),
@@ -668,7 +668,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
             _str("name", "ml entry name to register under"),
             _expected_versions(),
         ),
-        tool_name="gui_editor_save_as_module",
+        tool_name="gui_editor_save",
     ),
     "editor.discard": MethodSpec(
         5.0,

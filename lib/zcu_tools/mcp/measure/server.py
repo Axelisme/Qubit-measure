@@ -89,7 +89,7 @@ from zcu_tools.mcp.core.call_log import wrap_handler  # noqa: E402
 # tool renames) that leave the wire contract untouched. A wire-contract change is
 # tracked separately by WIRE_VERSION (see ``wire_version.py``); the two are
 # independent. (Git history holds the per-version evolution.)
-MCP_VERSION = 56  # Phase 170c (WIRE 42): save+writeback under tab.* — save.*/writeback.* renamed to tab.save_*/tab.writeback_*; MCP tools → gui_tab_save_*/gui_tab_writeback_*
+MCP_VERSION = 57  # Phase 170d (WIRE 43): context md/ml prefix + editor open->new/save_as_module->save — context.get_md*/set_md*/del_md*/get_ml*/del_ml*/rename_ml* renamed to context.md_*/ml_*; ml.list_roles/create_from_role moved to context.ml_*; editor.open->editor.new; editor.commit tool_name gui_editor_save_as_module->gui_editor_save
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -202,7 +202,7 @@ Call contract — read before issuing defensive/duplicate calls:
   - Mutating tools have side effects and must be sent exactly once: gui_tab_run_start
     (a duplicate starts a SECOND run), gui_editor_set_field, gui_tab_new /
     gui_tab_close, gui_save_*, gui_device_connect / _disconnect / _setup,
-    gui_context_set_* / _del_* / _rename_*, gui_editor_save_as_module.
+    gui_context_set_* / _del_* / _rename_*, gui_editor_save.
 
 Agent-to-user prompting: gui_notify_user(message, timeout=600) opens a prompt
 dialog for the user and BLOCKS your entire turn until the user replies, dismisses,
@@ -725,7 +725,7 @@ def _resolve_editor_id(arguments: dict[str, Any]) -> str:
 
     Tab cfg editing now goes through gui_tab_set_cfg / gui_tab_get_cfg. The
     editor tools (gui_editor_get / _set_field / _set_fields) operate on
-    non-tab editors (e.g. gui_editor_open on an ml entry) and require an
+    non-tab editors (e.g. gui_editor_new on an ml entry) and require an
     explicit editor_id — tab_id is no longer accepted here.
     """
     editor_id = arguments.get("editor_id")
@@ -810,7 +810,7 @@ def tool_gui_editor_set_fields(arguments: dict[str, Any]) -> dict[str, Any]:
 def tool_gui_context_set_md_attrs(arguments: dict[str, Any]) -> dict[str, Any]:
     """Set several MetaDict attributes, fail-fast in order.
 
-    Convenience fan-out over context.set_md_attr (no atomicity: attrs before the
+    Convenience fan-out over context.md_set_attr (no atomicity: attrs before the
     failing one stay set, NOT rolled back). On the first error this raises with
     the failing key and the count already applied.
     """
@@ -818,7 +818,7 @@ def tool_gui_context_set_md_attrs(arguments: dict[str, Any]) -> dict[str, Any]:
     for i, attr in enumerate(attrs):
         try:
             send_gui_rpc(
-                "context.set_md_attr",
+                "context.md_set_attr",
                 {"key": str(attr["key"]), "value": attr["value"]},
             )
         except Exception as exc:
@@ -832,7 +832,7 @@ def tool_gui_context_set_md_attrs(arguments: dict[str, Any]) -> dict[str, Any]:
 def tool_gui_context_get_md_attrs(arguments: dict[str, Any]) -> dict[str, Any]:
     """Read several MetaDict attributes at once, fail-fast on any missing key.
 
-    Convenience fan-out over context.get_md_attr (the read counterpart of
+    Convenience fan-out over context.md_get_attr (the read counterpart of
     gui_context_set_md_attrs). Returns ``{values: {key: value}}`` — a map keyed by
     the requested key (the natural shape for a batch read; the agent indexes
     straight in). Reads are side-effect-free, so there is no partial-state concern:
@@ -845,7 +845,7 @@ def tool_gui_context_get_md_attrs(arguments: dict[str, Any]) -> dict[str, Any]:
     values: dict[str, Any] = {}
     for key in keys:
         key_str = str(key)
-        res = send_gui_rpc("context.get_md_attr", {"key": key_str})
+        res = send_gui_rpc("context.md_get_attr", {"key": key_str})
         values[key_str] = res.get("value")
     return {"values": values}
 
@@ -1904,7 +1904,7 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
         "handler": tool_gui_editor_set_field,
         "description": (
             "Set ONE field in a cfg-editor session, addressed by 'editor_id' "
-            "(from gui_editor_open). For tab cfg editing use gui_tab_set_cfg or "
+            "(from gui_editor_new). For tab cfg editing use gui_tab_set_cfg or "
             "gui_tab_get_cfg instead — editor tools now require an explicit "
             "editor_id. 'path' is dotted (see gui_tab_get_cfg); 'value' is a JSON "
             "scalar or an md-ref {__kind:eval, expr} (the eval form is accepted "
@@ -1917,7 +1917,7 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
                 "editor_id": {
                     "type": "string",
                     "description": (
-                        "Editor session id (from gui_editor_open). "
+                        "Editor session id (from gui_editor_new). "
                         "Tab cfg editing uses gui_tab_set_cfg."
                     ),
                 },
@@ -1938,7 +1938,7 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
         "handler": tool_gui_editor_set_fields,
         "description": (
             "Batch-apply several field edits to ONE cfg-editor session in order, "
-            "addressed by 'editor_id' (from gui_editor_open). For tab cfg editing "
+            "addressed by 'editor_id' (from gui_editor_new). For tab cfg editing "
             "use gui_tab_set_cfg instead — editor tools now require an explicit "
             "editor_id. Convenience fan-out over gui_editor_set_field — NOT atomic: "
             "it stops at the first failure (fail-fast) and edits applied before it "
@@ -1956,7 +1956,7 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
                 "editor_id": {
                     "type": "string",
                     "description": (
-                        "Editor session id (from gui_editor_open). "
+                        "Editor session id (from gui_editor_new). "
                         "Tab cfg editing uses gui_tab_set_cfg."
                     ),
                 },
@@ -2032,7 +2032,7 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
         "handler": tool_gui_context_set_md_attrs,
         "description": (
             "Batch-set several MetaDict attributes in order. Convenience fan-out "
-            "over gui_context_set_md_attr — NOT atomic: stops at the first failure "
+            "over gui_context_md_set_attr — NOT atomic: stops at the first failure "
             "(fail-fast), attrs set before it are NOT rolled back, and the error "
             "names the failing key plus how many already applied. Returns "
             "{applied} on success."
@@ -2061,7 +2061,7 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
         "description": (
             "Batch-read several MetaDict attributes at once — the read counterpart "
             "of gui_context_set_md_attrs. Convenience fan-out over "
-            "gui_context_get_md_attr. Returns {values: {key: value}} keyed by the "
+            "gui_context_md_get_attr. Returns {values: {key: value}} keyed by the "
             "requested key. An unknown key fails fast (invalid_params) — keys are "
             "never silently skipped. Reads are side-effect-free."
         ),

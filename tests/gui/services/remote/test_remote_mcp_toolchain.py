@@ -35,8 +35,8 @@ def fx(qapp):  # noqa: ARG001
 
 def test_event_requery_hints_point_to_registered_methods():
     assert "device.active_operations" in METHOD_REGISTRY
-    assert "context.get_md_attr" in METHOD_REGISTRY
-    assert "context.get_ml" in METHOD_REGISTRY
+    assert "context.md_get_attr" in METHOD_REGISTRY
+    assert "context.ml_get" in METHOD_REGISTRY
 
 
 def test_device_setup_started_and_finished_push(fx):
@@ -347,11 +347,11 @@ def test_context_md_write_and_delete(fx):
     md = fx.state.exp_context.md
     sock = open_client(fx.service.port)
     try:
-        resp = call(sock, "context.set_md_attr", {"key": "bias", "value": 0.25})
+        resp = call(sock, "context.md_set_attr", {"key": "bias", "value": 0.25})
         assert resp["ok"] is True
         assert getattr(md, "bias") == 0.25
 
-        resp = call(sock, "context.del_md_attr", {"key": "bias"}, rid="2")
+        resp = call(sock, "context.md_del_attr", {"key": "bias"}, rid="2")
         assert resp["ok"] is True
         assert not hasattr(md, "bias")
     finally:
@@ -365,10 +365,10 @@ def test_context_ml_delete_delegates(fx):
     fx.ctrl.del_ml_waveform = MagicMock()  # type: ignore[method-assign]
     sock = open_client(fx.service.port)
     try:
-        assert call(sock, "context.del_ml_module", {"name": "m"})["ok"]
+        assert call(sock, "context.ml_del_module", {"name": "m"})["ok"]
         fx.ctrl.del_ml_module.assert_called_once_with("m")
 
-        assert call(sock, "context.del_ml_waveform", {"name": "w"}, rid="2")["ok"]
+        assert call(sock, "context.ml_del_waveform", {"name": "w"}, rid="2")["ok"]
         fx.ctrl.del_ml_waveform.assert_called_once_with("w")
     finally:
         sock.close()
@@ -604,8 +604,8 @@ def test_set_md_attrs_fans_out_in_order(monkeypatch):
     )
 
     assert calls == [
-        ("context.set_md_attr", {"key": "r_f", "value": 5000.0}),
-        ("context.set_md_attr", {"key": "q_f", "value": 200.0}),
+        ("context.md_set_attr", {"key": "r_f", "value": 5000.0}),
+        ("context.md_set_attr", {"key": "q_f", "value": 200.0}),
     ]
     assert out["applied"] == 2
 

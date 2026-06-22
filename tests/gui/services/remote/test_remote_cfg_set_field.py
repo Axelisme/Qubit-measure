@@ -201,7 +201,7 @@ def test_context_get_md_keys(lf):
     lf.state.exp_context.md.keys = lambda: ["t1", "freq"]
     sock = open_client(lf.service.port)
     try:
-        resp = call(sock, "context.get_md")
+        resp = call(sock, "context.md_get")
         assert resp["ok"] is True
         assert set(resp["result"]["keys"]) == {"t1", "freq"}
     finally:
@@ -214,7 +214,7 @@ def test_context_get_md_attr_roundtrip(lf):
     md.get = lambda key, default=None: store.get(key, default)
     sock = open_client(lf.service.port)
     try:
-        resp = call(sock, "context.get_md_attr", {"key": "t1"})
+        resp = call(sock, "context.md_get_attr", {"key": "t1"})
         assert resp["ok"] is True
         assert resp["result"]["value"] == 12.5
     finally:
@@ -226,7 +226,7 @@ def test_context_get_md_attr_unknown_rejected(lf):
     md.get = lambda key, default=None: default
     sock = open_client(lf.service.port)
     try:
-        resp = call(sock, "context.get_md_attr", {"key": "nope"})
+        resp = call(sock, "context.md_get_attr", {"key": "nope"})
         assert resp["ok"] is False
         assert resp["error"]["code"] == "invalid_params"
     finally:
@@ -239,7 +239,7 @@ def test_context_get_ml_names(lf):
     ml.waveforms = {"gauss": object()}
     sock = open_client(lf.service.port)
     try:
-        resp = call(sock, "context.get_ml")
+        resp = call(sock, "context.ml_get")
         assert resp["ok"] is True
         assert set(resp["result"]["modules"]) == {"readout", "pi"}
         assert resp["result"]["waveforms"] == ["gauss"]

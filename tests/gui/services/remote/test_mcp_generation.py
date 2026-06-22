@@ -67,21 +67,25 @@ def test_generated_optional_param_not_required():
 
 
 def test_cfg_editor_tools_generated():
-    # editor.commit's MCP tool is named gui_editor_save_as_module (tool_name
-    # override): its real semantics are "register the draft as an ml module/
-    # waveform", not "apply a tab cfg edit" (those edits are already live).
+    # editor.commit's MCP tool is named gui_editor_save (tool_name override):
+    # its real semantics are "register the draft as an ml module/waveform",
+    # not "apply a tab cfg edit" (those edits are already live).
     expected = {
-        "gui_editor_open",
+        "gui_editor_new",
         "gui_editor_set_field",
         "gui_editor_get",
-        "gui_editor_save_as_module",
+        "gui_editor_save",
         "gui_editor_discard",
     }
     assert expected.issubset(set(m.TOOLS))
 
-    open_tool = m.TOOLS["gui_editor_open"]
-    # editor.open is modify-only (from_name); the blank-by-discriminator surface
-    # was removed (create a blank via ml.create_from_role(role_id='<disc>:blank')).
+    # Old tool names must be absent.
+    assert "gui_editor_open" not in m.TOOLS
+    assert "gui_editor_save_as_module" not in m.TOOLS
+
+    open_tool = m.TOOLS["gui_editor_new"]
+    # editor.new is modify-only (from_name); the blank-by-discriminator surface
+    # was removed (create a blank via context.ml_create_from_role(role_id='<disc>:blank')).
     assert set(open_tool["inputSchema"]["required"]) == {"item_kind", "from_name"}
     props = open_tool["inputSchema"]["properties"]
     assert "discriminator" not in props
@@ -379,3 +383,106 @@ def test_phase170b_tab_run_analyze_tools():
     assert old_names.isdisjoint(set(m.TOOLS)), (
         f"old tool names leaked: {old_names & set(m.TOOLS)}"
     )
+
+
+def test_phase170d_context_md_ml_prefix_editor_rename():
+    """Phase 170d context md/ml prefix + editor open->new/save_as_module->save:
+    - context.get_md*/set_md*/del_md* renamed to context.md_* wire methods.
+    - context.get_ml*/del_ml*/rename_ml* renamed to context.ml_* wire methods.
+    - ml.list_roles/create_from_role moved to context.ml_* wire methods.
+    - editor.open renamed to editor.new; editor.commit tool_name ->  gui_editor_save.
+    - New MCP tool names (gui_context_md_*/gui_context_ml_*/gui_editor_new/
+      gui_editor_save) are present in the assembled table.
+    - Old MCP tool names (gui_context_get_md*/gui_context_get_ml*,
+      gui_context_del_ml*/gui_context_rename_ml*, gui_ml_*,
+      gui_editor_open/gui_editor_save_as_module) are absent.
+    """
+    # New wire methods are present in the contract.
+    new_wire_methods = {
+        "context.md_get",
+        "context.md_get_attr",
+        "context.ml_get",
+        "context.md_set_attr",
+        "context.md_del_attr",
+        "context.ml_del_module",
+        "context.ml_del_waveform",
+        "context.ml_rename_module",
+        "context.ml_rename_waveform",
+        "context.ml_list_roles",
+        "context.ml_create_from_role",
+        "editor.new",
+    }
+    assert new_wire_methods.issubset(set(METHOD_SPECS))
+
+    # Old wire methods are gone from the contract entirely.
+    old_wire_methods = {
+        "context.get_md",
+        "context.get_md_attr",
+        "context.get_ml",
+        "context.set_md_attr",
+        "context.del_md_attr",
+        "context.del_ml_module",
+        "context.del_ml_waveform",
+        "context.rename_ml_module",
+        "context.rename_ml_waveform",
+        "ml.list_roles",
+        "ml.create_from_role",
+        "editor.open",
+    }
+    assert old_wire_methods.isdisjoint(set(METHOD_SPECS))
+
+    # New MCP tool names are present in the assembled table.
+    new_tool_names = {
+        "gui_context_md_get",
+        "gui_context_md_get_attr",
+        "gui_context_ml_get",
+        "gui_context_md_set_attr",
+        "gui_context_md_del_attr",
+        "gui_context_ml_del_module",
+        "gui_context_ml_del_waveform",
+        "gui_context_ml_rename_module",
+        "gui_context_ml_rename_waveform",
+        "gui_context_ml_list_roles",
+        "gui_context_ml_create_from_role",
+        "gui_editor_new",
+        "gui_editor_save",
+    }
+    assert new_tool_names.issubset(set(m.TOOLS))
+
+    # Old MCP tool names are absent from the assembled table.
+    # Note: gui_context_get_md_attrs / gui_context_set_md_attrs are MCP-side batch
+    # convenience tools (not wire methods); their names are UNCHANGED — excluded here.
+    old_tool_names = {
+        "gui_context_get_md",
+        "gui_context_get_md_attr",
+        "gui_context_get_ml",
+        "gui_context_set_md_attr",
+        "gui_context_del_md_attr",
+        "gui_context_del_ml_module",
+        "gui_context_del_ml_waveform",
+        "gui_context_rename_ml_module",
+        "gui_context_rename_ml_waveform",
+        "gui_ml_list_roles",
+        "gui_ml_create_from_role",
+        "gui_editor_open",
+        "gui_editor_save_as_module",
+    }
+    assert old_tool_names.isdisjoint(set(m.TOOLS))
+
+    # All new context md/ml + editor methods are auto-generated (no override, no exclusion).
+    auto_generated_methods = new_wire_methods - {
+        "editor.new"
+    }  # editor.commit uses tool_name
+    for method in auto_generated_methods:
+        assert method not in m._NON_GENERATED_METHODS, (
+            f"{method} must not be excluded from generation"
+        )
+    for tool_name in new_tool_names - {"gui_editor_save"}:
+        assert tool_name not in m._OVERRIDE_NAMES, (
+            f"{tool_name} must not be an override"
+        )
+    # editor.new (mapped from editor.new wire method) is also auto-generated.
+    assert "editor.new" not in m._NON_GENERATED_METHODS
+    assert "gui_editor_new" not in m._OVERRIDE_NAMES
+    # editor.commit's tool_name is gui_editor_save (not an override either).
+    assert "gui_editor_save" not in m._OVERRIDE_NAMES
