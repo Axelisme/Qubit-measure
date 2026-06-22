@@ -1,11 +1,12 @@
 """mcp_server-side async-operation handle bookkeeping.
 
-Drives send_gui_rpc / the gui_device_wait_operation tool with the socket layer
-mocked, asserting the mcp policy: a start op's operation_id is captured under its
-semantic key (latest wins), and the semantic wait tool translates name ->
-operation_id -> operation.await without the agent ever seeing the raw id. Also
-covers the connect/disconnect/setup short-wait degrade (finished -> snapshot,
-timeout -> pending handle).
+Drives send_gui_rpc / the generic gui_op_wait tool with the socket layer mocked,
+asserting the mcp policy: a start op's operation_id is captured under its semantic
+key (latest wins) AND folded into the START reply as 'handle'; the generic
+gui_op_wait then drives operation.await by that handle directly (P2 / ADR-0026 §8 —
+no per-op by-name wait tool, no name->id translation). Also covers the
+connect/disconnect/setup short-wait degrade (finished -> snapshot, timeout ->
+pending handle).
 """
 
 from __future__ import annotations
@@ -41,14 +42,18 @@ def _versions(table: dict[str, int]) -> dict[str, Any]:
     return {"ok": True, "result": {"versions": table}}
 
 
-def test_device_setup_captures_operation_id_and_strips_from_result(wired):
+def test_device_setup_captures_operation_id_and_renames_to_handle(wired):
     wired["device.setup"] = {"ok": True, "result": {"operation_id": 42}}
     wired["resources.versions"] = _versions({})
 
     out = mcp_server.send_gui_rpc("device.setup", {"name": "flux", "updates": {}})
 
-    assert mcp_server._OP_BY_KEY["device:flux"] == 42  # captured for await-by-name
-    assert "operation_id" not in out  # never surfaced to the agent
+    assert mcp_server._OP_BY_KEY["device:flux"] == 42  # captured under the device key
+    # P2 (ADR-0026 §8): the raw operation_id is renamed to 'handle' and KEPT in the
+    # reply (the agent drives gui_op_wait / gui_op_poll with it) — the raw id key is
+    # gone.
+    assert "operation_id" not in out
+    assert out["handle"] == 42
 
 
 def test_latest_setup_wins_for_same_device(wired):
@@ -97,26 +102,22 @@ def test_connect_degrades_to_pending_on_short_wait_timeout(wired):
     assert "flux" in out["message"]
 
 
-def test_wait_operation_translates_name_to_operation_await(wired):
+def test_op_wait_forwards_handle_to_operation_await(wired):
+    # P2 (ADR-0026 §8): the generic gui_op_wait drives the operation by the handle
+    # the START reply folded — no name->id translation, the agent passes the id
+    # (operation_id) directly. The old by-name wait tool is retired.
     sent = wired["sent"]
-    mcp_server._OP_BY_KEY["device:flux"] = 42
     wired["operation.await"] = {"ok": True, "result": {"status": "finished"}}
     wired["resources.versions"] = _versions({})
 
-    out = mcp_server.TOOLS["gui_device_wait_operation"]["handler"]({"name": "flux"})
+    out = mcp_server.TOOLS["gui_op_wait"]["handler"]({"handle": 42})
 
     await_params = next(p for (m, p) in sent if m == "operation.await")
-    assert await_params["operation_id"] == 42  # name translated to id
+    assert await_params["operation_id"] == 42  # handle forwarded verbatim
     assert out["status"] == "finished"
 
 
-def test_wait_operation_no_operation_when_key_unknown(wired):
-    out = mcp_server.TOOLS["gui_device_wait_operation"]["handler"]({"name": "ghost"})
-    assert out["status"] == "no_operation"
-
-
-def test_wait_operation_propagates_failure(wired):
-    mcp_server._OP_BY_KEY["device:flux"] = 7
+def test_op_wait_propagates_failure(wired):
     wired["operation.await"] = {
         "ok": False,
         "error": {
@@ -128,35 +129,37 @@ def test_wait_operation_propagates_failure(wired):
     wired["resources.versions"] = _versions({})
 
     with pytest.raises(RuntimeError, match="hardware boom"):
-        mcp_server.TOOLS["gui_device_wait_operation"]["handler"]({"name": "flux"})
+        mcp_server.TOOLS["gui_op_wait"]["handler"]({"handle": 7})
+
+
+def test_op_wait_no_operation_when_handle_absent():
+    # no_operation is the by-handle helper's null branch (a missing/already-reaped
+    # handle). The public gui_op_wait always carries a handle, so the branch is
+    # exercised directly on the helper.
+    out = mcp_server._await_operation_by_handle(None, "operation", 1.0)
+    assert out["status"] == "no_operation"
 
 
 def test_await_operation_refreshes_last_seen_via_rpc(wired):
     # Phase 120c-2: no event poll. The version baseline resync now rides every
-    # send_gui_rpc round-trip — so a wait/poll (which calls operation.await)
+    # send_gui_rpc round-trip — so gui_op_wait (which calls operation.await)
     # resyncs the baseline, covering the async-terminal bump that an event poll
     # used to. The async run bumped tab:t:result; awaiting it picks that up.
-    mcp_server._OP_BY_KEY["tab:t"] = 5
     wired["operation.await"] = {"ok": True, "result": {"status": "finished"}}
     wired["resources.versions"] = _versions({"tab:t:result": 9})
 
-    out = mcp_server.TOOLS["gui_tab_run_wait"]["handler"](
-        {"tab_id": "t", "timeout": 0.1}
-    )
+    out = mcp_server.TOOLS["gui_op_wait"]["handler"]({"handle": 5, "timeout": 0.1})
 
     assert out["status"] == "finished"
     assert "waited_seconds" in out  # how long the wait blocked (Phase 120c-4)
     assert mcp_server._LAST_SEEN.get("tab:t:result") == 9  # baseline resynced
-    mcp_server._OP_BY_KEY.pop("tab:t", None)
 
 
 def test_wait_timeout_returns_timed_out_not_raises(monkeypatch):
     # Phase 120c-4: a bounded wait that elapses is an expected outcome, not a
-    # crash — gui_tab_run_wait returns {status:'timed_out', waited_seconds} instead
-    # of raising. Covers both timeout flavors (bridge socket TimeoutError and the
+    # crash — gui_op_wait returns {status:'timed_out', waited_seconds} instead of
+    # raising. Covers both timeout flavors (bridge socket TimeoutError and the
     # GUI-side "(timeout)" RuntimeError).
-    mcp_server._OP_BY_KEY["tab:t"] = 5
-
     def bridge_timeout(method, params, timeout_seconds=30.0):
         del params, timeout_seconds
         if method == "operation.await":
@@ -164,9 +167,7 @@ def test_wait_timeout_returns_timed_out_not_raises(monkeypatch):
         return {}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", bridge_timeout)
-    out = mcp_server.TOOLS["gui_tab_run_wait"]["handler"](
-        {"tab_id": "t", "timeout": 0.05}
-    )
+    out = mcp_server.TOOLS["gui_op_wait"]["handler"]({"handle": 5, "timeout": 0.05})
     assert out["status"] == "timed_out"
     assert isinstance(out["waited_seconds"], float)
 
@@ -177,18 +178,13 @@ def test_wait_timeout_returns_timed_out_not_raises(monkeypatch):
         return {}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", gui_timeout)
-    out2 = mcp_server.TOOLS["gui_tab_run_wait"]["handler"](
-        {"tab_id": "t", "timeout": 0.05}
-    )
+    out2 = mcp_server.TOOLS["gui_op_wait"]["handler"]({"handle": 5, "timeout": 0.05})
     assert out2["status"] == "timed_out"
-    mcp_server._OP_BY_KEY.pop("tab:t", None)
 
 
 def test_wait_failed_outcome_still_raises(monkeypatch):
     # A 'failed' outcome must still raise as an error (distinct from cancelled
     # which is now a structured result, and from timed_out which is non-raising).
-    mcp_server._OP_BY_KEY["tab:t"] = 5
-
     def fail(method, params, timeout_seconds=30.0):
         del params, timeout_seconds
         if method == "operation.await":
@@ -197,16 +193,12 @@ def test_wait_failed_outcome_still_raises(monkeypatch):
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fail)
     with pytest.raises(RuntimeError):
-        mcp_server.TOOLS["gui_tab_run_wait"]["handler"](
-            {"tab_id": "t", "timeout": 0.05}
-        )
-    mcp_server._OP_BY_KEY.pop("tab:t", None)
+        mcp_server.TOOLS["gui_op_wait"]["handler"]({"handle": 5, "timeout": 0.05})
 
 
 def test_wait_cancelled_returns_structured_not_raises(wired):
     # ADR-0025 §cancelled-wire: a cancelled operation returns {status:'cancelled'}
     # — NOT a raise — so the agent can read the feedback and re-plan gracefully.
-    mcp_server._OP_BY_KEY["tab:t"] = 5
     wired["operation.await"] = {
         "ok": True,
         "result": {
@@ -217,32 +209,25 @@ def test_wait_cancelled_returns_structured_not_raises(wired):
     }
     wired["resources.versions"] = _versions({})
 
-    out = mcp_server.TOOLS["gui_tab_run_wait"]["handler"](
-        {"tab_id": "t", "timeout": 5.0}
-    )
+    out = mcp_server.TOOLS["gui_op_wait"]["handler"]({"handle": 5, "timeout": 5.0})
 
     assert out["status"] == "cancelled"
     assert out["feedback"] == "user pressed Stop"
     assert "waited_seconds" in out
-    mcp_server._OP_BY_KEY.pop("tab:t", None)
 
 
 def test_wait_cancelled_without_feedback_no_feedback_key(wired):
     # Plain cancel (no Stop reason): status='cancelled', feedback key absent.
-    mcp_server._OP_BY_KEY["tab:t"] = 5
     wired["operation.await"] = {
         "ok": True,
         "result": {"reason": "completed", "status": "cancelled"},
     }
     wired["resources.versions"] = _versions({})
 
-    out = mcp_server.TOOLS["gui_tab_run_wait"]["handler"](
-        {"tab_id": "t", "timeout": 5.0}
-    )
+    out = mcp_server.TOOLS["gui_op_wait"]["handler"]({"handle": 5, "timeout": 5.0})
 
     assert out["status"] == "cancelled"
     assert "feedback" not in out
-    mcp_server._OP_BY_KEY.pop("tab:t", None)
 
 
 def test_run_start_captures_operation_id_under_tab_key(wired):

@@ -75,6 +75,7 @@ def test_device_active_operations_enumerate_with_kind(fx):
                     address="addr1",
                     status=DeviceStatus.SETTING_UP,
                 ),
+                token=11,
             ),
             ActiveDeviceOperation(
                 device_name="flux",
@@ -85,6 +86,7 @@ def test_device_active_operations_enumerate_with_kind(fx):
                     address="addr2",
                     status=DeviceStatus.CONNECTING,
                 ),
+                token=12,
             ),
         )
     )
@@ -92,20 +94,22 @@ def test_device_active_operations_enumerate_with_kind(fx):
     try:
         resp = call(sock, "device.active_operations")
         assert resp["ok"] is True
-        assert resp["result"]["active_operations"] == [
+        # P2: the reply key is 'operations'; each entry carries its 'handle' (the
+        # op token) and drops the duplicate snapshot.name (device_name is the key).
+        assert resp["result"]["operations"] == [
             {
+                "handle": 11,
                 "device_name": "bias",
                 "kind": "device_setup",
-                "name": "bias",
                 "type_name": "YOKOGS200",
                 "address": "addr1",
                 "status": DeviceStatus.SETTING_UP.value,
                 "error": None,
             },
             {
+                "handle": 12,
                 "device_name": "flux",
                 "kind": "device_connect",
-                "name": "flux",
                 "type_name": "FakeDevice",
                 "address": "addr2",
                 "status": DeviceStatus.CONNECTING.value,
@@ -410,8 +414,10 @@ def test_mcp_tool_schemas_include_required_discovery_tools():
         "gui_tab_save",
         "gui_device_connect",
         "gui_device_disconnect",
-        "gui_device_setup",
-        "gui_device_active_operations",
+        # P2 renamed gui_device_setup -> gui_device_apply and
+        # gui_device_active_operations -> gui_device_list_operations.
+        "gui_device_apply",
+        "gui_device_list_operations",
         "gui_overview",
     }
     assert expected <= set(TOOLS)
@@ -426,7 +432,7 @@ def test_mcp_tool_schemas_include_required_discovery_tools():
             if "type" in prop_schema:
                 assert isinstance(prop_schema["type"], str), f"{name}.{prop_name}"
     assert TOOLS["gui_context_switch"]["inputSchema"]["required"] == ["label"]
-    assert TOOLS["gui_device_setup"]["inputSchema"]["required"] == [
+    assert TOOLS["gui_device_apply"]["inputSchema"]["required"] == [
         "name",
         "updates",
     ]
@@ -487,23 +493,26 @@ def test_mcp_wrappers_map_to_expected_rpc():
         mcp_server._CONFIG, METHOD_SPECS, mcp_server._NON_GENERATED_METHODS, fake_send
     )
 
-    # gui_context_switch / gui_device_reconnect / gui_device_snapshot are GENERATED
-    # forwarders (the save tools merged into the override gui_tab_save, so a save
-    # wrapper is no longer a 1:1 generated forwarder to assert here).
+    # gui_context_switch / gui_device_snapshot are GENERATED forwarders. P2 retired
+    # the standalone gui_device_reconnect tool (reconnect folded into
+    # gui_device_connect, E4), so device.reconnect is wire-only — no generated
+    # forwarder to assert here.
     tools["gui_context_switch"]["handler"]({"label": "ctx1"})
-    tools["gui_device_reconnect"]["handler"]({"name": "bias"})
     tools["gui_device_snapshot"]["handler"]({"name": "bias"})
 
     assert calls == [
         ("context.use", {"label": "ctx1"}),
-        ("device.reconnect", {"name": "bias"}),
         ("device.snapshot", {"name": "bias"}),
     ]
+    # The reconnect tool is gone (folded into gui_device_connect).
+    assert "gui_device_reconnect" not in tools
 
 
 def test_device_setup_wrapper_issues_setup_then_short_wait(monkeypatch):
-    """gui_device_setup is not a 1:1 wrapper: it starts device.setup then waits
-    briefly (operation.await) and reports a snapshot/handle (short-wait degrade)."""
+    """gui_device_apply is not a 1:1 wrapper: it starts device.setup then waits
+    briefly (operation.await) and reports a snapshot/handle (short-wait degrade).
+    P2 renamed gui_device_setup -> gui_device_apply (the wire method stays
+    device.setup)."""
     from zcu_tools.mcp.measure import server as mcp_server
 
     calls: list[tuple[str, dict]] = []
@@ -514,7 +523,7 @@ def test_device_setup_wrapper_issues_setup_then_short_wait(monkeypatch):
         return {}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    mcp_server.TOOLS["gui_device_setup"]["handler"](
+    mcp_server.TOOLS["gui_device_apply"]["handler"](
         {"name": "bias", "updates": {"value": 1.0}}
     )
 
@@ -963,12 +972,13 @@ def test_debug_operations_dumps_op_map_and_device_ops(monkeypatch):
     device.active_operations list."""
     from zcu_tools.mcp.measure import server as mcp_server
 
-    device_ops = [{"device_name": "flux", "kind": "device_setup", "name": "flux"}]
+    device_ops = [{"handle": 7, "device_name": "flux", "kind": "device_setup"}]
 
     def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
         del params, timeout_seconds
         assert method == "device.active_operations"
-        return {"active_operations": device_ops}
+        # P2: the wire reply key is 'operations' (each entry carries its handle).
+        return {"operations": device_ops}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
     monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {"tab:t1": 42, "device:flux": 7})
@@ -1149,7 +1159,9 @@ def test_analyze_settled_returns_summary_and_figure(monkeypatch):
         return {}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    out = mcp_server.TOOLS["gui_tab_analyze"]["handler"]({"tab_id": "fake-freq-1"})
+    out = mcp_server.TOOLS["gui_tab_analyze_start"]["handler"](
+        {"tab_id": "fake-freq-1"}
+    )
 
     assert out["status"] == "finished"
     assert out["summary"] == {"t1": 5.0}
@@ -1176,31 +1188,31 @@ def test_analyze_degrades_to_pending_when_not_settled(monkeypatch):
         return {}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    out = mcp_server.TOOLS["gui_tab_analyze"]["handler"]({"tab_id": "t1"})
+    out = mcp_server.TOOLS["gui_tab_analyze_start"]["handler"]({"tab_id": "t1"})
     assert out["status"] == "pending"
     # _fold_finished_figure is a no-op on non-finished status; figure must be absent.
     assert "figure" not in out
 
 
 def test_analyze_poll_running_then_finished(monkeypatch):
+    # P2 (ADR-0026 §8): the per-op gui_tab_analyze_poll is retired; the agent drives
+    # the generic gui_op_poll with the handle the START reply folded (here handle=9).
     from zcu_tools.mcp.measure import server as mcp_server
-
-    monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {"analyze:t1": 9})
 
     # Still picking -> running.
     def picking(method, params, timeout_seconds=30.0):
         del timeout_seconds, params
         if method == "operation.await":
             raise RuntimeError("GUI Error (timeout): not done")
-        return {}
+        return {"active": False, "bars": []}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", picking)
     assert (
-        mcp_server.TOOLS["gui_tab_analyze_poll"]["handler"]({"tab_id": "t1"})["status"]
-        == "running"
+        mcp_server.TOOLS["gui_op_poll"]["handler"]({"handle": 9})["status"] == "running"
     )
 
-    # User clicked Done -> finished. No figure_path folded (consolidation WIRE 24).
+    # User clicked Done -> finished. The generic poll reports ONLY status — no
+    # figure fold (the product is read from the START finished reply or a getter).
     def done(method, params, timeout_seconds=30.0):
         del timeout_seconds, params
         if method == "operation.await":
@@ -1208,39 +1220,37 @@ def test_analyze_poll_running_then_finished(monkeypatch):
         return {}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", done)
-    out = mcp_server.TOOLS["gui_tab_analyze_poll"]["handler"]({"tab_id": "t1"})
+    out = mcp_server.TOOLS["gui_op_poll"]["handler"]({"handle": 9})
     assert out["status"] == "finished"
+    assert "figure" not in out
     assert "figure_path" not in out
 
 
 # ---------------------------------------------------------------------------
-# Phase 120c-1 — non-blocking per-domain poll (replaces watching events).
-# gui_tab_run_poll maps a zero-timeout await onto finished/running/failed/
-# no_operation, keyed on the semantic name (tab_id), no operation_id exposed.
+# Generic non-blocking poll (P2 / ADR-0026 §8): gui_op_poll(handle) maps a
+# zero-timeout await onto finished/running/failed/cancelled, driven by the handle
+# a START reply folded (the per-op gui_tab_run_poll is retired). no_operation is
+# the helper's null-handle branch (the public tool always carries a handle).
 # ---------------------------------------------------------------------------
 
 
 def test_run_poll_running_when_op_in_flight(monkeypatch):
     from zcu_tools.mcp.measure import server as mcp_server
 
-    monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {"tab:t1": 7})
-
     def fake_send(method, params, timeout_seconds=30.0):
-        del timeout_seconds
+        del timeout_seconds, params
         if method == "operation.await":
             # zero-timeout await of an unfinished op -> wire TIMEOUT
             raise RuntimeError("GUI Error (timeout): not done")
-        return {}
+        return {"active": False, "bars": []}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    out = mcp_server.TOOLS["gui_tab_run_poll"]["handler"]({"tab_id": "t1"})
+    out = mcp_server.TOOLS["gui_op_poll"]["handler"]({"handle": 7})
     assert out["status"] == "running"
 
 
 def test_run_poll_failed_does_not_raise(monkeypatch):
     from zcu_tools.mcp.measure import server as mcp_server
-
-    monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {"tab:t1": 7})
 
     def fake_send(method, params, timeout_seconds=30.0):
         del timeout_seconds, params
@@ -1249,15 +1259,17 @@ def test_run_poll_failed_does_not_raise(monkeypatch):
         return {}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    out = mcp_server.TOOLS["gui_tab_run_poll"]["handler"]({"tab_id": "t1"})
+    out = mcp_server.TOOLS["gui_op_poll"]["handler"]({"handle": 7})
     assert out["status"] == "failed"
 
 
-def test_run_poll_no_operation_when_untracked(monkeypatch):
+def test_run_poll_no_operation_when_handle_absent():
+    # no_operation is the by-handle helper's null branch (a missing/already-reaped
+    # handle); the public gui_op_poll tool always carries a handle, so the branch is
+    # exercised directly on the helper.
     from zcu_tools.mcp.measure import server as mcp_server
 
-    monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {})
-    out = mcp_server.TOOLS["gui_tab_run_poll"]["handler"]({"tab_id": "t1"})
+    out = mcp_server._poll_operation_by_handle(None, "operation")
     assert out["status"] == "no_operation"
 
 
@@ -1406,29 +1418,30 @@ def test_run_start_pending_has_no_figure(monkeypatch):
     assert "figure" not in out
 
 
-def test_run_wait_finished_carries_figure(monkeypatch):
-    """gui_tab_run_wait FINISHED reply includes 'figure' — the run plot rendered to a
-    temp PNG (the run's OWN visual result, MCP 46). Non-finished statuses (timed_out,
-    cancelled, no_operation) must NOT include 'figure'."""
-    from tempfile import gettempdir
-
+def test_op_wait_finished_reports_status_only(monkeypatch):
+    """The generic gui_op_wait FINISHED reply reports ONLY status (+waited_seconds) —
+    NO figure fold (P2 / ADR-0026 §8). The run's visual product is read from the
+    START finished reply or gui_tab_get_current_figure, not from the wait."""
     from zcu_tools.mcp.measure import server as mcp_server
 
-    monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {"tab:wt-1": 3})
+    rendered: list[str] = []
 
     def fake_send(method, params, timeout_seconds=30.0):
-        del timeout_seconds
+        del timeout_seconds, params
         if method == "operation.await":
             return {"status": "finished", "reason": "completed"}
         if method == "tab.get_current_figure":
-            return {"bytes": 9, "saved_to": params["out_path"]}
+            rendered.append("called")
+            return {"bytes": 9}
         return {}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    out = mcp_server.TOOLS["gui_tab_run_wait"]["handler"]({"tab_id": "wt-1"})
+    out = mcp_server.TOOLS["gui_op_wait"]["handler"]({"handle": 3})
 
     assert out["status"] == "finished"
-    assert out["figure"] == str(Path(gettempdir()) / "measure_fig_wt-1.png")
+    assert "figure" not in out
+    # The wait never renders the figure — that is the START reply / getter's job.
+    assert rendered == []
 
 
 def test_fold_finished_figure_finished_folds_pending_does_not(monkeypatch):
@@ -1563,35 +1576,30 @@ def test_writeback_apply_is_pure_generated_forwarder():
 
 
 # ---------------------------------------------------------------------------
-# MCP 45: gui_tab_run_poll is PURE — no figure fold; returns just the poll status.
+# Generic gui_op_poll is PURE status (P2 / ADR-0026 §8) — no figure fold.
 # ---------------------------------------------------------------------------
 
 
-def test_run_poll_finished_carries_figure(monkeypatch):
-    """A 'finished' gui_tab_run_poll reply includes 'figure' — the run plot rendered
-    to a temp PNG (the run's OWN visual result, MCP 46)."""
-    from tempfile import gettempdir
-
+def test_op_poll_finished_reports_status_only(monkeypatch):
+    """A 'finished' gui_op_poll reply reports ONLY status — NO figure fold. The run's
+    visual product is read from the START finished reply or gui_tab_get_current_figure."""
     from zcu_tools.mcp.measure import server as mcp_server
 
-    monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {"tab:t1": 7})
     calls: list[str] = []
 
     def fake_send(method, params, timeout_seconds=30.0):
-        del timeout_seconds
+        del timeout_seconds, params
         calls.append(method)
         if method == "operation.await":
             return {"status": "finished"}
-        if method == "tab.get_current_figure":
-            return {"bytes": 9, "saved_to": params["out_path"]}
         return {}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    out = mcp_server.TOOLS["gui_tab_run_poll"]["handler"]({"tab_id": "t1"})
+    out = mcp_server.TOOLS["gui_op_poll"]["handler"]({"handle": 7})
     assert out["status"] == "finished"
-    # MCP 46: figure is the run's OWN visual result — present on FINISHED poll.
-    assert out["figure"] == str(Path(gettempdir()) / "measure_fig_t1.png")
-    assert "tab.get_current_figure" in calls
+    assert "figure" not in out
+    # The poll never renders the figure — that is the START reply / getter's job.
+    assert "tab.get_current_figure" not in calls
 
 
 # ---------------------------------------------------------------------------

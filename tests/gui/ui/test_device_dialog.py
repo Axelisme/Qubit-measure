@@ -24,7 +24,13 @@ from zcu_tools.gui.session.ui.device_dialog import DeviceDialog, _FakeDevicePane
 def _entry(
     name: str, type_name: str = "FakeDevice", connected: bool = True
 ) -> DeviceEntry:
-    return DeviceEntry(name=name, type_name=type_name, is_connected=connected)
+    # DeviceEntry now carries the fine-grained status string (FC7) instead of a
+    # coarse is_connected bool: a connected device maps to "connected", a
+    # remembered-but-not-live one to "memory_only".
+    status = (
+        DeviceStatus.CONNECTED.value if connected else DeviceStatus.MEMORY_ONLY.value
+    )
+    return DeviceEntry(name=name, type_name=type_name, status=status)
 
 
 def _make_ctrl() -> MagicMock:

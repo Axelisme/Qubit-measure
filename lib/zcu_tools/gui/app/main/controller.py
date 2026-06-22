@@ -578,8 +578,11 @@ class Controller:
         live_container = host.make_live_container(tab_id) if host is not None else None
         return self._run_svc.start_run(permit, live_container)
 
-    def cancel_run(self) -> None:
-        self._run_svc.cancel_run()
+    def cancel_run(self) -> bool:
+        # Best-effort: True when a live run was signalled, False on a no-op
+        # (no run in flight). The worker's true terminal is observed via the
+        # run handle (ADR-0019 / ADR-0026 §8).
+        return self._run_svc.cancel_run()
 
     def cancel_analyze(self, tab_id: str) -> bool:
         """Cancel an in-flight INTERACTIVE analyze on ``tab_id``.
@@ -1246,8 +1249,8 @@ class Controller:
     def cancel_device_operation(self, name: str) -> None:
         self._dev_svc.cancel_device_operation(name)
 
-    def start_reconnect_device(self, name: str) -> None:
-        self._dev_svc.start_reconnect_device(name)
+    def start_reconnect_device(self, name: str) -> int:
+        return self._dev_svc.start_reconnect_device(name)
 
     def forget_device(self, name: str) -> None:
         # Removing the device from State emits DEVICE_CHANGED, which re-projects

@@ -144,8 +144,8 @@ class MockFluxProvisioner:
 
         if existing is not None and existing.status is DeviceStatus.MEMORY_ONLY:
             # Remembered but disconnected (e.g. restored from persistence in a
-            # disconnected state). Auto-reconnect via the same path as
-            # gui_device_reconnect so the device becomes live again. No
+            # disconnected state). Auto-reconnect via start_reconnect_device so the
+            # device becomes live again. No
             # initial-value setup: the user's last-known value is already persisted
             # and is loaded by the driver on connect; we never stomp it.
             # Fire-and-forget (async via BackgroundService).

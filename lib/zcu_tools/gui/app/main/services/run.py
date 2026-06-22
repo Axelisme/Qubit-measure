@@ -200,11 +200,19 @@ class RunService(QObject):
         """The token of the currently running operation, or None."""
         return self._active_token
 
-    def cancel_run(self) -> None:
+    def cancel_run(self) -> bool:
+        """Request cancellation of the active run; best-effort.
+
+        Returns True when a live run token existed and was signalled (the request
+        was issued), False when no run was in flight (a graceful no-op). This is
+        NOT a claim that the worker has stopped: the worker self-judges 'cancelled'
+        and emits its terminal asynchronously (ADR-0019) — the true terminal is
+        observed via gui_op_wait/poll on the run handle.
+        """
         logger.info("cancel_run")
         # Async notification: set the operation's stop_event via the handle.
-        # The worker self-judges 'cancelled' and emits its terminal — no external
-        # "who I cancelled" bookkeeping needed (ADR-0019).
         token = self._active_token
-        if token is not None:
-            self._handles.cancel(token)
+        if token is None:
+            return False
+        self._handles.cancel(token)
+        return True

@@ -212,7 +212,9 @@ def test_devicemanager_register_and_list(qapp):
     entry = next((e for e in entries if e.name == "flux"), None)
     assert entry is not None
     assert entry.type_name == "FakeDevice"
-    assert entry.is_connected is True
+    # DeviceEntry now projects the fine-grained status string (FC7): a live driver
+    # reads "connected" rather than the retired is_connected bool.
+    assert entry.status == "connected"
 
 
 def test_devicemanager_drop_device(qapp):
@@ -223,7 +225,8 @@ def test_devicemanager_drop_device(qapp):
     entries = svc.list_devices()
     flux_entry = next((e for e in entries if e.name == "flux"), None)
     assert flux_entry is not None
-    assert not flux_entry.is_connected
+    # A dropped device becomes memory-only (the retired is_connected==False).
+    assert flux_entry.status == "memory_only"
 
 
 def test_devicemanager_get_value_and_set_via_setup(qapp):

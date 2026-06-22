@@ -291,8 +291,11 @@ def _h_tab_run_cancel(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    adapter.ctrl.cancel_run()
-    return {"ok": True}
+    # cancelled is best-effort: True when a live run was signalled, False on a
+    # no-op. The worker's true terminal is observed via the run handle (ADR-0026
+    # §8) — cancel only requests, it does not wait for the stop.
+    cancelled = adapter.ctrl.cancel_run()
+    return {"ok": True, "cancelled": cancelled}
 
 
 def _h_analyze_cancel(
@@ -928,14 +931,16 @@ def _h_device_reconnect(
 ) -> Mapping[str, object]:
     name = str(params["name"])
     try:
-        adapter.ctrl.start_reconnect_device(name)
+        operation_id = adapter.ctrl.start_reconnect_device(name)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
             str(exc),
             reason=getattr(exc, "reason_code", ""),
         ) from exc
-    return {}
+    # Reconnect runs asynchronously like connect/disconnect/setup; expose the
+    # operation_id so the MCP short-wait/handle path can track it (FC1).
+    return {"operation_id": operation_id}
 
 
 def _h_device_forget(
@@ -1071,7 +1076,9 @@ def _h_device_cancel_operation(
             str(exc),
             reason=getattr(exc, "reason_code", ""),
         ) from exc
-    return {}
+    # Self-verifying echo: cancel succeeded (a non-cancellable / absent op raised
+    # above). The terminal outcome is observed via the operation handle.
+    return {"ok": True, "cancelled": True}
 
 
 def _h_adapter_list(
@@ -1094,11 +1101,13 @@ def _h_device_list(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
+    # Project the fine-grained status (DeviceEntry.status), consistent with the
+    # snapshot/active_operations projections (single-status SSOT, FC7).
     devices = [
         {
             "name": e.name,
             "type_name": e.type_name,
-            "is_connected": bool(e.is_connected),
+            "status": e.status,
         }
         for e in adapter.ctrl.list_devices()
     ]
@@ -1111,7 +1120,7 @@ def _h_device_snapshot(
     name = str(params["name"])
     snap = adapter.ctrl.get_device_snapshot(name)
     if snap is None:
-        return {"snapshot": None}
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown device: {name!r}")
     # ``info`` is a ``BaseDeviceInfo`` (a pydantic ``ConfigBase``); ``to_dict()``
     # yields JSON-safe scalars (address/type/label + driver fields like the
     # source ``value``), so the agent can read the device's live parameters.
@@ -1154,14 +1163,15 @@ def _h_device_active_operations(
 ) -> Mapping[str, object]:
     del params
     # Phase C concurrency: enumerate *every* in-flight device operation (sorted
-    # by name), each tagged with its kind (connect / disconnect / setup) so the
-    # agent knows which device and which operation is live.
+    # by name), each tagged with its kind (connect / disconnect / setup) and its
+    # operation 'handle' so the agent can drive gui_op_poll / gui_op_wait per op.
+    # device_name is the SSOT key; the duplicate snapshot.name field is dropped.
     return {
-        "active_operations": [
+        "operations": [
             {
+                "handle": op.token,
                 "device_name": op.device_name,
                 "kind": op.kind.value,
-                "name": op.snapshot.name,
                 "type_name": op.snapshot.type_name,
                 "address": op.snapshot.address,
                 "status": op.snapshot.status.value,

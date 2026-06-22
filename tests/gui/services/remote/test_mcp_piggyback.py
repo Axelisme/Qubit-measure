@@ -119,17 +119,20 @@ def test_short_wait_timeout_degrades_to_pending():
             "Run on 't2'",
             1.0,
             lambda: {"tab": {}},
-            "await with gui_tab_run_wait.",
+            "await with gui_op_wait.",
         )
     assert out["status"] == "pending"
-    assert "await with gui_tab_run_wait." in out["message"]
+    assert "await with gui_op_wait." in out["message"]
     mcp_server._OP_BY_KEY.pop("tab:t2", None)
 
 
 def test_run_override_tools_with_waits():
-    # run keeps its async start/wait pair (Phase 170b names).
-    for t in ("gui_tab_run_start", "gui_tab_run_wait"):
+    # run keeps its async START tool; the per-op wait is retired in favour of the
+    # generic gui_op_wait / gui_op_poll driven by the handle the START reply folds
+    # (P2 / ADR-0026 §8).
+    for t in ("gui_tab_run_start", "gui_op_wait", "gui_op_poll"):
         assert t in mcp_server.TOOLS
+    assert "gui_tab_run_wait" not in mcp_server.TOOLS
 
 
 def test_soc_connect_is_synchronous_no_wait_or_poll():

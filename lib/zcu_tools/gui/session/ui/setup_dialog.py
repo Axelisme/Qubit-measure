@@ -364,7 +364,10 @@ class SetupDialog(QDialog):
         self._device_combo.clear()
         self._device_combo.addItem("(none)")
         for entry in entries:
-            if entry.is_connected:
+            # Only offer live drivers in the flux-device combo, keeping the prior
+            # is_connected bool semantics (connected / disconnecting / setting_up,
+            # not the transient connecting state; DeviceEntry.status, FC7).
+            if entry.status in ("connected", "disconnecting", "setting_up"):
                 self._device_combo.addItem(
                     f"{entry.name}  [{entry.type_name}]", userData=entry.name
                 )

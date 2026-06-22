@@ -167,7 +167,15 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "tab.run_start": MethodSpec(
         5.0, "Start a run (fire-and-forget)", (_str("tab_id"), _expected_versions())
     ),
-    "tab.run_cancel": MethodSpec(5.0, "Cancel current run"),
+    "tab.run_cancel": MethodSpec(
+        5.0,
+        "Request cancellation of the current run (op-specific cancel; there is no "
+        "generic cancel — see ADR-0026 §8). Returns {ok, cancelled}: ok is always "
+        "true (the call succeeded); cancelled is BEST-EFFORT — true when a live run "
+        "was signalled to stop, false (a graceful no-op) when no run was in flight. "
+        "It does NOT mean the worker has stopped: the run's true terminal "
+        "('cancelled') is observed by gui_op_wait/gui_op_poll on the run handle.",
+    ),
     "run.running_tab": MethodSpec(5.0, "Current running tab"),
     "analyze.cancel": MethodSpec(
         5.0,
@@ -175,10 +183,13 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "cancelled and clear is_analyzing so the tab can then be closed. This is "
         "the agent-side counterpart of the GUI 'Done' button for an interactive "
         "picker — interactive analyze is a separate operation from run, so "
-        "tab.run_cancel does NOT settle it. Returns {ok, cancelled}: ok is always "
-        "true (the call succeeded); cancelled is true when an interactive analyze "
-        "was settled, or false (a graceful no-op) when none was in flight.",
+        "gui_tab_run_cancel does NOT settle it. This cancel is op-specific (an "
+        "interactive analyze needs View teardown that no generic handle cancel can "
+        "do — ADR-0026 §8). Returns {ok, cancelled}: ok is always true (the call "
+        "succeeded); cancelled is true when an interactive analyze was settled, or "
+        "false (a graceful no-op) when none was in flight.",
         (_str("tab_id"),),
+        tool_name="gui_tab_analyze_cancel",
     ),
     # Save (under tab.* namespace — Phase 170c)
     "tab.save_data": MethodSpec(
@@ -442,7 +453,12 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         ),
     ),
     "device.reconnect": MethodSpec(
-        30.0, "Reconnect device", (_str("name", "Device name"),)
+        30.0,
+        "Reconnect a remembered (memory-only) device by name, reusing its stored "
+        "type/address. Returns an operation_id; the reconnection runs "
+        "asynchronously. Wire-only: the MCP layer reaches this via "
+        "gui_device_connect with type_name/address omitted.",
+        (_str("name", "Device name"),),
     ),
     "device.forget": MethodSpec(
         5.0,
@@ -456,23 +472,33 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "device.setup_spec": MethodSpec(
         5.0,
-        "List the fields settable via device.setup's 'updates' for a connected "
-        "device: each field's name, type, choices (for enum/Literal fields like "
-        "output/mode), current value, and whether it is settable (the protected "
-        "type/address are reported settable=false). The device must be connected.",
+        "List the fields settable via gui_device_apply's 'updates' for a connected "
+        "device: {fields: [{name, type, current, settable, choices?}, ...]} — each "
+        "field's name, type, choices (for enum/Literal fields like output/mode), "
+        "current value, and whether it is settable (the protected type/address are "
+        "reported settable=false). This is the input source for gui_device_apply. "
+        "The device must be connected.",
         (_str("name", "Device name"),),
+        tool_name="gui_device_fields",
     ),
     "device.cancel_operation": MethodSpec(
-        5.0, "Cancel active device setup", (_str("name", "Device name"),)
+        5.0,
+        "Request cancellation of the named device's in-flight operation. Returns "
+        "{ok: true, cancelled: true}. Note: only a device APPLY (setup ramp) has a "
+        "cancellation point; a connect/disconnect has none and cannot be "
+        "cancelled (it raises PRECONDITION_FAILED).",
+        (_str("name", "Device name"),),
+        tool_name="gui_device_cancel",
     ),
     "device.active_operations": MethodSpec(
         5.0,
-        "List EVERY in-flight device operation (connect / disconnect / setup run "
-        "concurrently): {active_operations: [{device_name, kind, name, type_name, "
+        "List EVERY in-flight device operation (connect / disconnect / apply run "
+        "concurrently): {operations: [{handle, device_name, kind, type_name, "
         "address, status, error}, ...]} (empty list if none), sorted by device "
-        "name. 'kind' is device_connect / device_disconnect / device_setup. Use "
-        "gui_device_poll(name) / gui_device_wait_operation(name) per device to "
-        "track each one.",
+        "name. 'handle' is the operation handle for gui_op_poll / gui_op_wait; "
+        "'kind' is device_connect / device_disconnect / device_setup. Use "
+        "gui_op_poll(handle) / gui_op_wait(handle) to track each one.",
+        tool_name="gui_device_list_operations",
     ),
     # Async operation handle: block until an operation (device.connect /
     # device.disconnect / device.setup / tab.run_start, identified by the operation_id
@@ -496,9 +522,23 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "Internal: agents read progress folded into the gui_*_poll reply.",
         (_int("operation_id", "Operation handle returned by the start op"),),
     ),
-    "device.list": MethodSpec(5.0, "List registered devices"),
+    "device.list": MethodSpec(
+        5.0,
+        "List registered devices with their current lifecycle status: "
+        "{devices: [{name, type_name, status}, ...]} where status is one of "
+        "memory_only | connecting | connected | disconnecting | setting_up "
+        "(same status vocabulary as gui_device_snapshot and "
+        "gui_device_list_operations). 'memory_only' means remembered but not "
+        "live (no driver).",
+    ),
     "device.snapshot": MethodSpec(
-        5.0, "Read one device cached snapshot", (_str("name", "Device name"),)
+        5.0,
+        "Read one device's full cached snapshot — the richest single-device read: "
+        "{snapshot: {name, type_name, address, status, error, info}} where 'info' "
+        "is the live device parameter dict (or null when not connected) and "
+        "'status' uses the same vocabulary as gui_device_list. An unknown device "
+        "name raises INVALID_PARAMS.",
+        (_str("name", "Device name"),),
     ),
     "adapter.list": MethodSpec(
         5.0, "List available adapters. Returns {adapters: [name]}."
@@ -619,7 +659,6 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "concurrent save/edit returns precondition_failed until it settles. "
         "Read the fit summary with gui_tab_get_analyze_result.",
         (_str("tab_id"), _obj_default("updates", "Analyze param updates")),
-        tool_name="gui_tab_analyze",
     ),
     # Post-analysis (second analysis layer; mirrors the analyze trio above). It
     # runs on top of an existing primary analyze result, so every entry gates
@@ -641,7 +680,6 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "overrides post params (see gui_tab_get_post_analyze_params). Read the "
         "fit summary with gui_tab_get_post_analyze_result.",
         (_str("tab_id"), _obj_default("updates", "Post-analysis param updates")),
-        tool_name="gui_tab_post_analyze",
     ),
     # Writeback workflow (under tab.* namespace — Phase 170c) — a persistent
     # draft computed once at analyze time.

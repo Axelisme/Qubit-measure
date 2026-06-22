@@ -414,7 +414,11 @@ class DeviceDialog(QDialog):
         self._list.clear()
         entries = self._ctrl.list_devices()
         for entry in entries:
-            if entry.is_connected:
+            # "Connected" for the list label keeps the prior is_connected bool
+            # semantics: a settled or in-mutation live driver (connected /
+            # disconnecting / setting_up), NOT the transient connecting state
+            # (DeviceEntry.status, FC7).
+            if entry.status in ("connected", "disconnecting", "setting_up"):
                 item = QListWidgetItem(f"{entry.name} ({entry.type_name})")
             else:
                 item = QListWidgetItem(

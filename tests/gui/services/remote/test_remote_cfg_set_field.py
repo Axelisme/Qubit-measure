@@ -264,9 +264,11 @@ def test_device_list_and_snapshot(lf):
         assert resp["ok"] is True
         assert isinstance(resp["result"]["devices"], list)
 
+        # An unknown device name is now a hard error (INVALID_PARAMS), not a
+        # {snapshot: null} reply (C8: device.snapshot raises on unknown name).
         resp = call(sock, "device.snapshot", {"name": "does-not-exist"})
-        assert resp["ok"] is True
-        assert resp["result"]["snapshot"] is None
+        assert resp["ok"] is False
+        assert resp["error"]["code"] == "invalid_params"
     finally:
         sock.close()
 

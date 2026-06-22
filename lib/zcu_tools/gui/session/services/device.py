@@ -123,7 +123,11 @@ class DeviceSnapshot:
 class DeviceEntry:
     name: str
     type_name: str
-    is_connected: bool
+    # Fine-grained lifecycle status (DeviceStatus.value) rather than a coarse
+    # bool, so the list view matches the snapshot/active-operations projections
+    # (single-status SSOT; FC7). One of: memory_only | connecting | connected |
+    # disconnecting | setting_up.
+    status: str
 
 
 @dataclass(frozen=True)
@@ -149,6 +153,10 @@ class ActiveDeviceOperation:
     device_name: str
     kind: OperationKind
     snapshot: DeviceSnapshot
+    # The operation handle (runner token), so a concurrent-enumeration reader can
+    # drive gui_op_poll / gui_op_wait per in-flight op without re-resolving it by
+    # device name.
+    token: int
 
 
 @dataclass(frozen=True)
@@ -403,11 +411,16 @@ class DeviceService(QObject):
         self._emit_device_changed(name)
         return token
 
-    def start_reconnect_device(self, name: str) -> None:
+    def start_reconnect_device(self, name: str) -> int:
+        # Reconnect is a thin alias for connect of a remembered (memory-only)
+        # device: it reuses the stored type/address. Return the connect
+        # operation's token so the wire/MCP layers can expose it as an async
+        # handle (FC1 — reconnect must produce an operation_id like the other
+        # device starts, otherwise gui_op_wait cannot track a name-only reconnect).
         dev = self._require_device(name)
         if not dev.is_memory_only():
             raise RuntimeError(f"Device {name!r} is not a memory-only device")
-        self.start_connect_device(
+        return self.start_connect_device(
             ConnectDeviceRequest(
                 type_name=dev.type_name,
                 name=dev.name,
@@ -664,6 +677,7 @@ class DeviceService(QObject):
                     device_name=name,
                     kind=self._inflight[name].kind,
                     snapshot=self._project(dev),
+                    token=self._inflight[name].token,
                 )
             )
         return tuple(out)
@@ -687,12 +701,7 @@ class DeviceService(QObject):
             DeviceEntry(
                 name=snapshot.name,
                 type_name=snapshot.type_name,
-                is_connected=snapshot.status
-                in {
-                    DeviceStatus.CONNECTED,
-                    DeviceStatus.DISCONNECTING,
-                    DeviceStatus.SETTING_UP,
-                },
+                status=snapshot.status.value,
             )
             for snapshot in self.list_device_snapshots()
         ]

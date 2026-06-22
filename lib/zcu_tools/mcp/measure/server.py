@@ -123,16 +123,16 @@ ON-DEMAND — the fine-grained base tools, when a bundle doesn't fit:
   - Tabs + cfg: gui_adapter_list / gui_tab_new / gui_tab_snapshot;
     gui_tab_get_cfg (read tree) / gui_tab_set_cfg (batch write);
     gui_editor_set_field / _set_fields for non-tab editors (require editor_id).
-  - Run + analyze: gui_tab_run_start, gui_tab_analyze, gui_tab_post_analyze (each
-    waits briefly then degrades to a handle). A FINISHED run/analyze reply already
-    carries 'figure' — the plot rendered to a temp PNG — so a separate
-    gui_tab_get_current_figure call is rarely needed (use it only for a re-render,
-    mid-flight plot, or custom out_path). gui_tab_get_analyze_result /
-    gui_tab_get_post_analyze_result re-read the fit summary; gui_tab_save_data /
-    _image / _result / _post_image persist and return the resolved written path;
-    gui_tab_writeback_apply commits the draft.
-  - Async handles: every degrading op exposes a _wait (blocking) and a _poll
-    (non-blocking) tool keyed by name/tab_id.
+  - Run + analyze: gui_tab_run_start, gui_tab_analyze_start, gui_tab_post_analyze_start
+    (each waits briefly then degrades to a handle). A FINISHED run/analyze reply
+    (settled in the short wait) already carries 'figure' — the plot rendered to a
+    temp PNG. After a pending->finished op, read the figure with
+    gui_tab_get_current_figure and the fit summary with gui_tab_get_analyze_result /
+    gui_tab_get_post_analyze_result (the generic wait/poll report only status).
+    gui_tab_save_data / _image / _result / _post_image persist and return the
+    resolved written path; gui_tab_writeback_apply commits the draft.
+  - Async handles: every degrading op returns a 'handle' in its START reply; drive
+    it with the generic gui_op_poll(handle) / gui_op_wait(handle).
   - Devices / context / predictor / adapters / dialogs: gui_device_*,
     gui_context_*, gui_predictor_*, gui_adapter_*, gui_dialog_*.
 DEV — debugging the GUI/MCP itself (the version table + in-flight handles are
@@ -150,38 +150,46 @@ precondition_failed; editing cfg while a tab is running likewise.
 
 gui_soc_connect is SYNCHRONOUS — NOT part of the async-handle family: it blocks
 until the SoC is connected and returns {status:'finished', soc:{...}} in one call
-(no _wait / _poll). A remote board that is unreachable fails fast (~1s).
+(no handle). A remote board that is unreachable fails fast (~1s).
 
-The other async ops (run / analyze / post_analyze / device) share ONE contract —
-the per-tool descriptions only name what each waits on; the mechanics live here.
+The async ops (run / analyze / post_analyze / device) share ONE contract — the
+per-tool descriptions only name what each waits on; the mechanics live here.
 Completion is detected by wait/poll on a handle, NOT events (nothing is pushed):
-  - A short-wait START (gui_tab_run_start, gui_tab_analyze, gui_tab_post_analyze,
-    gui_device_*) waits up to wait_seconds (default 1.0): settles in time ->
-    {status:'finished', <product>} (gui_tab_run_start -> {tab, figure};
-    gui_tab_analyze -> {summary, figure}; gui_tab_post_analyze -> {summary};
-    gui_device_* -> {snapshot}); a slow one degrades to {status:'pending'}, which
-    you then drive with the matching _wait / _poll. gui_tab_run_wait and
-    gui_tab_run_poll also fold 'figure' on 'finished'.
-  - _poll returns immediately: 'finished' | 'running' | 'cancelled' | 'failed' |
-    'no_operation'. 'cancelled' (user/agent cancel) is distinct from 'failed'.
-    While 'running' the reply folds the live progress bars
+  - A short-wait START (gui_tab_run_start, gui_tab_analyze_start,
+    gui_tab_post_analyze_start, gui_device_*) waits up to wait_seconds (default
+    1.0): settles in time -> {status:'finished', handle, <product>}
+    (gui_tab_run_start -> {tab, figure}; gui_tab_analyze_start -> {summary, figure};
+    gui_tab_post_analyze_start -> {summary}; gui_device_* -> {snapshot}); a slow one
+    degrades to {status:'pending', handle}. EITHER way the reply carries 'handle' —
+    an opaque token you feed to the two generic drains below.
+  - gui_op_poll(handle) returns immediately, NEVER raises: 'finished' | 'running' |
+    'cancelled' | 'failed' | 'no_operation'. 'cancelled' (user/agent cancel) is
+    distinct from 'failed'. While 'running' the reply folds the live progress bars
     (active, bars[token/format/percent]) — no separate progress tool.
-  - _wait BLOCKS your whole turn until the op ends and RAISES only on genuine
-    failure; returns {status, waited_seconds[, ...]}:
+  - gui_op_wait(handle, timeout=120) BLOCKS your whole turn until the op ends and
+    RAISES only on genuine failure; returns {status, waited_seconds[, ...]}:
     'finished' (success), 'cancelled' (user/agent cancel — NOT a raise; read
-    optional 'feedback' for the Stop reason), 'timed_out' (still running — NOT
-    a failure — re-wait or switch to _poll). Because a _wait holds the turn and
-    nothing pushes a completion, reserve inline _wait for ops you expect to finish
-    quickly; for a long op (a big sweep, a slow ramp) either _poll (non-blocking
-    — you check back) or call the _wait from a BACKGROUND agent so your main loop
-    stays free and the harness re-invokes you with the result.
-  - USER FEEDBACK WAKEUP (ADR-0023): any _wait can return early with
+    optional 'feedback' for the Stop reason), 'timed_out' (still running — NOT a
+    failure — re-wait or switch to gui_op_poll). Because a wait holds the turn and
+    nothing pushes a completion, reserve inline wait for ops you expect to finish
+    quickly; for a long op (a big sweep, a slow ramp) either gui_op_poll
+    (non-blocking — you check back) or call gui_op_wait from a BACKGROUND agent so
+    your main loop stays free and the harness re-invokes you with the result.
+  - gui_op_poll / gui_op_wait report ONLY status (+progress / feedback / cancel
+    reason): they do NOT fold the figure / summary / snapshot. After a
+    pending->finished op, read the product via its typed getter
+    (gui_tab_get_current_figure, gui_tab_get_analyze_result,
+    gui_tab_get_post_analyze_result, gui_device_snapshot).
+  - CANCEL stays op-specific (no generic cancel): gui_tab_run_cancel (the running
+    run), gui_tab_analyze_cancel(tab_id) (an interactive analyze), gui_device_cancel
+    (a device op). Post-analysis has NO cancel (pure CPU recompute).
+  - USER FEEDBACK WAKEUP (ADR-0025): gui_op_wait can return early with
     status='user_feedback' and a 'feedback' string while the op is STILL running.
     Treat the feedback as a HIGH-PRIORITY instruction and re-plan; you still hold
-    the handle, so you may cancel (gui_tab_run_cancel) or re-await.
+    the handle, so you may cancel (the op-specific cancel tool) or re-wait.
   - INTERACTIVE analyze (see gui_adapter_guide): the user marks the plot and
     clicks Done, so it never settles in the short wait — a 'pending' is EXPECTED;
-    prompt the user, then _poll (do not block on _wait).
+    prompt the user, then gui_op_poll (do not block on gui_op_wait).
 
 Diagnostic push: every tool reply piggybacks any {severity:'error'|'info', title,
 message} the GUI surfaced since your last call, under "notifications since last
@@ -281,14 +289,14 @@ _GUARD_DEPS: dict[str, tuple[str, ...]] = {
     "editor.commit": ("editor:{editor_id}", "context"),
 }
 
-# --- Async-operation handle bookkeeping (operation_id <-> semantic name) ------
+# --- Async-operation handle bookkeeping (debug-only projection) ---------------
 #
-# Start ops (device.setup / tab.run_start) return an ``operation_id``
-# the agent never sees (mcp/RPC bookkeeping, like version numbers). The agent
-# refers to an in-flight operation by a name it understands; mcp maps that
-# semantic key to the latest operation_id for it. ``operation.await`` then
-# blocks on that id. "Latest wins": starting overwrites the key, since the agent
-# semantically means "the current operation for this resource".
+# Start ops (device.setup / tab.run_start) return an ``operation_id``; the agent
+# now holds it directly as ``handle`` (exposed in the START reply, ADR-0026 §8)
+# and drives gui_op_poll / gui_op_wait with it. So this map is NO LONGER on the
+# wait/poll path. It survives only as the "latest handle per resource" projection
+# that gui_debug_operations reads: semantic key -> latest operation_id for that
+# resource. "Latest wins": starting overwrites the key.
 #
 # Lifecycle: entries are written on each START RPC (latest-wins) and are NEVER
 # removed — they persist for the entire MCP server process lifetime. A stale key
@@ -312,6 +320,7 @@ _GUIDE_SENT: set[str] = set()
 # the most recent operation for that device is the one a wait tool awaits.
 _OP_KEY_OF: dict[str, Callable[[dict[str, Any]], str]] = {
     "device.connect": lambda p: f"device:{p.get('name', '')}",
+    "device.reconnect": lambda p: f"device:{p.get('name', '')}",
     "device.disconnect": lambda p: f"device:{p.get('name', '')}",
     "device.setup": lambda p: f"device:{p.get('name', '')}",
     "tab.run_start": lambda p: f"tab:{p.get('tab_id', '')}",
@@ -324,7 +333,7 @@ def _deliver_event(msg: dict[str, Any]) -> None:
     # The GUI still emits its full EventBus stream over the wire (RPC-side
     # registration unchanged), but the agent is NOT exposed to resource-change
     # events: stale detection is the version-guard's job, and async completion is
-    # polled via gui_tab_run_poll / gui_*_poll. Only diagnostics (the GUI's own
+    # polled via gui_op_poll / gui_op_wait on the op handle. Only diagnostics (the GUI's own
     # error/info push — "Data saved to …", run-failure reason) reach the agent,
     # piggybacked on the next tool reply. Everything else is dropped here.
     if msg.get("event") != "diagnostic":
@@ -543,12 +552,17 @@ def send_gui_rpc(
     # after this refresh and so is correctly caught by the next guard.
     _refresh_versions()
     result = dict(resp.get("result", {}))
-    # Capture a start op's operation_id under its semantic key (latest wins), so
-    # an agent can later await it by name — then strip it from the result, since
-    # the raw id is mcp<->RPC bookkeeping that must not surface to the agent.
+    # A start op returns an ``operation_id``. The agent now holds it directly: it
+    # is renamed to ``handle`` (an opaque token the agent feeds to gui_op_poll /
+    # gui_op_wait) and KEPT in the reply, so the START tool can fold it in
+    # (ADR-0026 §8). _OP_BY_KEY is still written under the semantic key (latest
+    # wins) but only as the debug-only latest-handle-per-resource projection that
+    # gui_debug_operations reads — it is NO LONGER on the wait/poll main path.
     key_of = _OP_KEY_OF.get(method)
     if key_of is not None and "operation_id" in result:
-        _OP_BY_KEY[key_of(params)] = int(result.pop("operation_id"))
+        handle = int(result.pop("operation_id"))
+        _OP_BY_KEY[key_of(params)] = handle
+        result["handle"] = handle
     return result
 
 
@@ -949,9 +963,11 @@ def tool_gui_context_ml_inspect(arguments: dict[str, Any]) -> dict[str, Any]:
         send_gui_rpc("editor.discard", {"editor_id": editor_id})
 
 
-def _await_operation_by_key(key: str, what: str, timeout: float) -> dict[str, Any]:
-    """Block until the latest operation for ``key`` settles, or ``timeout`` s
-    elapse; semantic result.
+def _await_operation_by_handle(
+    operation_id: int | None, what: str, timeout: float
+) -> dict[str, Any]:
+    """Block on a wire ``operation_id`` until it settles, or ``timeout`` s elapse;
+    semantic result. The op-agnostic core of the generic gui_op_wait (ADR-0026 §8).
 
     Returns ``{status, waited_seconds[, message[, feedback]]}``:
     - 'finished': settled OK.
@@ -961,14 +977,13 @@ def _await_operation_by_key(key: str, what: str, timeout: float) -> dict[str, An
       crash; the agent reads feedback and re-plans).
     - 'user_feedback': a user-feedback string arrived before the op settled
       (ADR-0025). ``feedback`` carries the text; ``reason`` is 'user_feedback'.
-      The operation is still running; the agent holds the key and can re-await
-      or cancel via gui_tab_run_cancel.
+      The operation is still running; the agent holds the handle and can re-await
+      or cancel via the op-specific cancel tool.
     - 'timed_out': still running after the bounded wait — NOT a crash, no raise.
-    - 'no_operation': nothing tracked.
+    - 'no_operation': no handle supplied / nothing tracked.
     ``waited_seconds`` is how long the wait actually blocked. A genuine
     ``failed`` outcome still raises (the agent must see it as an error).
     """
-    operation_id = _OP_BY_KEY.get(key)
     if operation_id is None:
         return {
             "status": "no_operation",
@@ -1060,16 +1075,16 @@ def _slim_progress(progress: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _poll_operation_by_key(key: str, what: str) -> dict[str, Any]:
-    """Non-blocking status of the latest operation for ``key`` (no event needed).
+def _poll_operation_by_handle(operation_id: int | None, what: str) -> dict[str, Any]:
+    """Non-blocking status of a wire ``operation_id`` (no event needed). The
+    op-agnostic core of the generic gui_op_poll (ADR-0026 §8).
 
     Maps a zero-timeout await onto a plain status: 'finished' (settled OK),
     'running' (still in flight), 'failed'/'cancelled' (terminal error — does NOT
     raise here, unlike the blocking wait; poll reports it as a status), or
-    'no_operation' (nothing tracked / already reaped). Lets an agent that
+    'no_operation' (no handle supplied / already reaped). Lets an agent that
     started a slow op go do other work and check back without blocking.
     """
-    operation_id = _OP_BY_KEY.get(key)
     if operation_id is None:
         return {"status": "no_operation", "message": f"No operation for {what}."}
     try:
@@ -1109,6 +1124,37 @@ def _is_timeout_error(exc: RuntimeError) -> bool:
     return "(timeout)" in str(exc)
 
 
+def tool_gui_op_poll(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Non-blocking status of any in-flight operation, by ``handle`` (ADR-0026 §8).
+
+    ``handle`` is the opaque token a START tool (gui_tab_run_start /
+    gui_tab_analyze_start / gui_tab_post_analyze_start / gui_device_*) returned in
+    its reply. Maps a zero-timeout await onto a plain status — NEVER raises:
+    finished | running | cancelled | failed | no_operation. While 'running' the
+    reply folds the live progress bars (active, bars[token/format/percent]).
+    Returns only the status (+progress): the op's product (figure/summary/snapshot)
+    is read from the START finished reply or the matching typed getter.
+    """
+    handle = int(arguments["handle"])
+    return _poll_operation_by_handle(handle, "operation")
+
+
+def tool_gui_op_wait(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Block until any in-flight operation settles, by ``handle`` (ADR-0026 §8).
+
+    ``handle`` is the opaque token a START tool returned. Blocks up to ``timeout``
+    seconds. Returns {status, waited_seconds[, feedback]}: finished | cancelled
+    (read optional 'feedback' for the Stop reason — NOT a raise) | user_feedback
+    (op still running, agent re-plans then re-waits or cancels) | timed_out (still
+    running — re-wait or gui_op_poll) | no_operation. RAISES only on a genuine
+    failure. Returns only the status: the op's product (figure/summary/snapshot)
+    is read from the START finished reply or the matching typed getter.
+    """
+    handle = int(arguments["handle"])
+    timeout = float(arguments.get("timeout", 120.0))
+    return _await_operation_by_handle(handle, "operation", timeout)
+
+
 def _start_op_with_short_wait(
     key: str,
     what: str,
@@ -1118,16 +1164,19 @@ def _start_op_with_short_wait(
 ) -> dict[str, Any]:
     """Wait briefly for a just-started async op, degrading to a handle on timeout.
 
-    The start RPC must already have run (its operation_id captured into _OP_BY_KEY
-    under ``key`` by send_gui_rpc). Awaits up to ``wait_seconds``:
-    - settles in time -> ``{status:'finished', **product()}`` so the caller sees
-      the op's resulting state immediately (device snapshot / tab snapshot / soc);
-    - still running -> ``{status:'pending', message:<hint>}`` so the caller can
-      use the matching wait tool. operation.await still raises on failure/cancel.
+    The start RPC must already have run (its operation_id captured under ``key`` by
+    send_gui_rpc, and also kept in the START reply as ``handle``). Awaits up to
+    ``wait_seconds``:
+    - settles in time -> ``{status:'finished', handle, **product()}`` so the caller
+      sees the op's resulting state immediately (device snapshot / tab snapshot);
+    - still running -> ``{status:'pending', handle, message:<hint>}`` so the caller
+      can poll/wait the handle via gui_op_poll / gui_op_wait (ADR-0026 §8).
+      operation.await still raises on failure/cancel.
 
-    Shared by device connect/disconnect/setup and tab.run_start — every op that has
-    both a fast and a slow mode gets the same degrade. (soc.connect is excluded:
-    it is synchronous now and returns its product directly.)
+    The reply always carries ``handle`` (pending AND finished) when a handle was
+    captured, so the agent has one consistent token to drive gui_op_poll /
+    gui_op_wait. Shared by device connect/disconnect/setup and tab.run_start.
+    (soc.connect is excluded: it is synchronous and returns its product directly.)
     """
     operation_id = _OP_BY_KEY.get(key)
     if operation_id is None:
@@ -1143,10 +1192,11 @@ def _start_op_with_short_wait(
         if _is_timeout_error(exc):
             return {
                 "status": "pending",
+                "handle": operation_id,
                 "message": f"{what} still in progress after {wait_seconds}s; {pending_hint}",
             }
         raise  # genuine failure/cancellation surfaces as an error
-    return {"status": "finished", **product()}
+    return {"status": "finished", "handle": operation_id, **product()}
 
 
 def _device_snapshot(name: str) -> Any:
@@ -1165,28 +1215,6 @@ def _run_tab_summary(tab_id: str) -> dict[str, Any]:
     return {"tab_id": tab_id, "interaction": interaction}
 
 
-def tool_gui_device_wait_operation(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Block until the named device's current operation completes (semantic).
-
-    Covers connect / disconnect / setup — whichever is the latest operation for
-    the device. Returns status='finished' on success; status='cancelled' (with
-    optional 'feedback') on cancellation (NOT a raise); raises only on genuine
-    failure; status='no_operation' if nothing is in flight for that device.
-    """
-    name = str(arguments["name"])
-    timeout = float(arguments.get("timeout", 120.0))
-    return _await_operation_by_key(
-        f"device:{name}", f"Device {name!r} operation", timeout
-    )
-
-
-def tool_gui_device_poll(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Non-blocking status of the named device's latest operation (connect /
-    disconnect / setup): finished / running / failed / no_operation."""
-    name = str(arguments["name"])
-    return _poll_operation_by_key(f"device:{name}", f"Device {name!r} operation")
-
-
 def tool_gui_tab_run_start(arguments: dict[str, Any]) -> dict[str, Any]:
     """Start a run, waiting briefly for a fast (small reps/rounds) run to finish.
 
@@ -1194,9 +1222,11 @@ def tool_gui_tab_run_start(arguments: dict[str, Any]) -> dict[str, Any]:
     one takes minutes — so it degrades like device ops: settles in time ->
     {status:'finished', tab:<tab.snapshot>, figure:<path>} (has_run_result set;
     figure is the run plot rendered to a temp PNG, the op's OWN visual result);
-    still running -> {status:'pending'} (no figure yet; await with gui_tab_run_wait or
-    poll with gui_tab_run_poll). send_gui_rpc attaches the version guard + captures
-    the operation_id under tab:<tab_id>.
+    still running -> {status:'pending', handle} (no figure yet; poll/wait the
+    handle with gui_op_poll(handle=<handle>) / gui_op_wait(handle=<handle>)). The
+    reply always carries 'handle'; send_gui_rpc attaches the version guard.
+    NOTE: a generic gui_op_wait/poll only reports status — to see the plot after a
+    pending->finished run, call gui_tab_get_current_figure(tab_id).
     """
     tab_id = str(arguments["tab_id"])
     wait_seconds = float(arguments.get("wait_seconds", 1.0))
@@ -1206,7 +1236,9 @@ def tool_gui_tab_run_start(arguments: dict[str, Any]) -> dict[str, Any]:
         f"Run on tab {tab_id!r}",
         wait_seconds,
         lambda: {"tab": _run_tab_summary(tab_id)},
-        f"await it with gui_tab_run_wait(tab_id={tab_id!r}).",
+        "poll/wait the returned handle with gui_op_poll / gui_op_wait; "
+        "see the plot when finished with gui_tab_get_current_figure"
+        f"(tab_id={tab_id!r}).",
     )
     # The figure is this op's OWN visual result — fold it on FINISHED only
     # (a pending run has no settled plot yet). Failure is swallowed so a
@@ -1214,28 +1246,9 @@ def tool_gui_tab_run_start(arguments: dict[str, Any]) -> dict[str, Any]:
     return _fold_finished_figure(tab_id, reply)
 
 
-def tool_gui_tab_run_wait(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Block until the run on ``tab_id`` completes (semantic wait, mirrors
-    gui_device_wait_operation). Raises only on genuine failure. A cancelled run
-    returns {status:'cancelled', feedback?} — read 'feedback' for the Stop reason
-    (present when the user used "Send & Stop", absent on a plain cancel). On
-    status='finished' the reply carries 'figure' — the run plot rendered to a
-    temp PNG (the op's OWN visual result)."""
-    tab_id = str(arguments["tab_id"])
-    timeout = float(arguments.get("timeout", 600.0))
-    reply = _await_operation_by_key(f"tab:{tab_id}", f"Run on tab {tab_id!r}", timeout)
-    return _fold_finished_figure(tab_id, reply)
-
-
-def tool_gui_tab_run_poll(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Non-blocking status of the run on ``tab_id``: finished / running / failed
-    / no_operation. Lets the agent start a slow run, do other work, then check
-    back without blocking. On 'finished' the reply carries 'figure' — the run
-    plot rendered to a temp PNG (the op's OWN visual result). Running / cancelled
-    / failed / no_operation replies are unchanged."""
-    tab_id = str(arguments["tab_id"])
-    reply = _poll_operation_by_key(f"tab:{tab_id}", f"Run on tab {tab_id!r}")
-    return _fold_finished_figure(tab_id, reply)
+# Run wait/poll retired (ADR-0026 §8): the generic gui_op_wait / gui_op_poll drive
+# the handle from gui_tab_run_start's reply. The figure that the old wait/poll
+# folded on finished-after-degrade is now read via gui_tab_get_current_figure.
 
 
 def _fold_analyze_params(tab_id: str, reply: dict[str, Any]) -> dict[str, Any]:
@@ -1280,33 +1293,37 @@ def tool_gui_tab_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
     Analyze has both modes — a FIT computes on a worker (usually finishes in well
     under a second), an INTERACTIVE pick waits for the USER to mark the plot and
     click Done (never settles in the short wait). So it degrades like gui_tab_run_start:
-    settles -> {status:'finished', summary, figure}; still running ->
-    {status:'pending'} (await with gui_tab_analyze_wait or gui_tab_analyze_poll). For an
-    INTERACTIVE adapter (see gui_adapter_guide) a 'pending' is expected — prompt
-    the user to do the pick, then poll. 'updates' optionally overrides analyze
-    params. A finished FIT reply carries the fit 'summary' (same shape as
-    gui_tab_get_analyze_result — analyze's OWN result, the *_err fields included)
-    AND 'figure' — the fit plot rendered to a temp PNG (analyze's OWN visual
-    result). Review the proposed writeback with gui_tab_writeback_preview (not
-    folded here; that fold lives in gui_tab_stage3). 'summary' is None and no
-    'figure' on an INTERACTIVE 'pending' (nothing settled yet).
+    settles -> {status:'finished', handle, summary, figure}; still running ->
+    {status:'pending', handle} (poll/wait the handle with gui_op_poll(handle=<handle>)
+    / gui_op_wait(handle=<handle>)). For an INTERACTIVE adapter (see
+    gui_adapter_guide) a 'pending' is expected — prompt the user to do the pick,
+    then poll. 'updates' optionally overrides analyze params. A finished FIT reply
+    carries the fit 'summary' (same shape as gui_tab_get_analyze_result — analyze's
+    OWN result, the *_err fields included) AND 'figure' — the fit plot rendered to
+    a temp PNG (analyze's OWN visual result). Review the proposed writeback with
+    gui_tab_writeback_preview (not folded here; that fold lives in gui_tab_stage3).
+    The reply always carries 'handle'; 'summary'/'figure' appear only on a finished
+    FIT. After a pending->finished analyze read gui_tab_get_analyze_result and the
+    plot with gui_tab_get_current_figure (a generic gui_op_wait/poll only reports
+    status).
     """
     tab_id = str(arguments["tab_id"])
     wait_seconds = float(arguments.get("wait_seconds", 1.0))
     params: dict[str, Any] = {"tab_id": tab_id}
     if "updates" in arguments and arguments["updates"] is not None:
         params["updates"] = arguments["updates"]
-    # Start (captures operation_id under analyze:<tab_id>, strips it from reply),
-    # then wait briefly. A FIT usually finishes here; an INTERACTIVE pick degrades
-    # to a handle the user/agent then drives to completion.
+    # Start (captures operation_id under analyze:<tab_id>, keeps it in the reply as
+    # 'handle'), then wait briefly. A FIT usually finishes here; an INTERACTIVE pick
+    # degrades to a handle the user/agent then drives to completion.
     send_gui_rpc("tab.analyze", params)
     reply = _start_op_with_short_wait(
         f"analyze:{tab_id}",
         f"Analyze on tab {tab_id!r}",
         wait_seconds,
         lambda: _analyze_summary_product("tab.get_analyze_result", tab_id),
-        f"poll with gui_tab_analyze_poll(tab_id={tab_id!r}); for an INTERACTIVE pick, "
-        "prompt the user to mark the lines + click Done first.",
+        "poll/wait the returned handle with gui_op_poll / gui_op_wait; for an "
+        "INTERACTIVE pick, prompt the user to mark the lines + click Done first, "
+        f"then read gui_tab_get_analyze_result(tab_id={tab_id!r}).",
     )
     # The figure is analyze's OWN visual result — fold it on a FINISHED FIT reply.
     # An INTERACTIVE 'pending' has no settled plot yet (_fold_finished_figure is a
@@ -1314,30 +1331,9 @@ def tool_gui_tab_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
     return _fold_finished_figure(tab_id, reply)
 
 
-def tool_gui_tab_analyze_wait(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Block until the analyze on ``tab_id`` completes (mirrors gui_tab_run_wait).
-    Returns {status, waited_seconds}: 'finished' / 'cancelled' (read optional
-    'feedback' for the Stop reason) / 'timed_out' (re-wait or gui_tab_analyze_poll)
-    / 'no_operation'. Raises only on a genuine failure. Use after gui_tab_analyze
-    returned status='pending'. NOTE: for an INTERACTIVE pick this blocks until
-    the USER clicks Done — prefer gui_tab_analyze_poll (non-blocking) so you can
-    prompt and check back, or run this from a background agent. See the fit plot
-    with gui_tab_get_current_figure(tab_id)."""
-    tab_id = str(arguments["tab_id"])
-    timeout = float(arguments.get("timeout", 600.0))
-    return _await_operation_by_key(
-        f"analyze:{tab_id}", f"Analyze on tab {tab_id!r}", timeout
-    )
-
-
-def tool_gui_tab_analyze_poll(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Non-blocking status of the analyze on ``tab_id``: finished / running /
-    failed / no_operation. For an INTERACTIVE pick, 'running' means the user has
-    not clicked Done yet — keep checking back. On a finished analyze, read the
-    scalar result with gui_tab_get_analyze_result and the fit plot with
-    gui_tab_get_current_figure(tab_id)."""
-    tab_id = str(arguments["tab_id"])
-    return _poll_operation_by_key(f"analyze:{tab_id}", f"Analyze on tab {tab_id!r}")
+# Analyze wait/poll retired (ADR-0026 §8): the generic gui_op_wait / gui_op_poll
+# drive the handle from gui_tab_analyze_start's reply. After a pending->finished
+# analyze the agent reads gui_tab_get_analyze_result + gui_tab_get_current_figure.
 
 
 def tool_gui_tab_post_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -1346,54 +1342,39 @@ def tool_gui_tab_post_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
     Post-analysis runs on top of the tab's PRIMARY analyze result (e.g.
     single-shot multi-backend ge discrimination) and is FIT-only — it computes on
     a worker, so it usually settles in the short wait -> {status:'finished',
-    summary:{...}} (the fit summary is folded in, same shape as
+    handle, summary:{...}} (the fit summary is folded in, same shape as
     gui_tab_get_post_analyze_result, so the common read happens in one call). A
-    slow one degrades to {status:'pending'} (await with gui_tab_post_analyze_wait or
-    gui_tab_post_analyze_poll). Fast-fails with precondition_failed when the tab has no
-    primary analyze result yet — run gui_tab_analyze first. 'updates' optionally
-    overrides post params (see gui_tab_get_post_analyze_params). The post figure is
-    kept in the tab's separate post container; gui_tab_get_post_analyze_result
-    stays for re-fetch and for the wait/poll path.
+    slow one degrades to {status:'pending', handle} (poll/wait the handle with
+    gui_op_poll(handle=<handle>) / gui_op_wait(handle=<handle>)). Fast-fails with
+    precondition_failed when the tab has no primary analyze result yet — run
+    gui_tab_analyze_start first. There is NO cancel for post-analysis: it is a pure
+    CPU recompute with no stop point. 'updates' optionally overrides post params
+    (see gui_tab_get_post_analyze_params). The reply always carries 'handle';
+    'summary' appears only on finished. After a pending->finished post-analysis
+    read gui_tab_get_post_analyze_result (a generic gui_op_wait/poll only reports
+    status).
     """
     tab_id = str(arguments["tab_id"])
     wait_seconds = float(arguments.get("wait_seconds", 1.0))
     params: dict[str, Any] = {"tab_id": tab_id}
     if "updates" in arguments and arguments["updates"] is not None:
         params["updates"] = arguments["updates"]
-    # Start (captures operation_id under post_analyze:<tab_id>, strips it from the
-    # reply), then wait briefly. A FIT-only worker usually finishes in the wait.
+    # Start (captures operation_id under post_analyze:<tab_id>, keeps it in the
+    # reply as 'handle'), then wait briefly. A FIT-only worker usually finishes here.
     send_gui_rpc("tab.post_analyze", params)
     return _start_op_with_short_wait(
         f"post_analyze:{tab_id}",
         f"Post-analysis on tab {tab_id!r}",
         wait_seconds,
         lambda: _analyze_summary_product("tab.get_post_analyze_result", tab_id),
-        f"poll with gui_tab_post_analyze_poll(tab_id={tab_id!r}).",
+        "poll/wait the returned handle with gui_op_poll / gui_op_wait, then read "
+        f"gui_tab_get_post_analyze_result(tab_id={tab_id!r}).",
     )
 
 
-def tool_gui_tab_post_analyze_wait(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Block until the post-analysis on ``tab_id`` completes (mirrors
-    gui_tab_analyze_wait). Returns {status, waited_seconds}: 'finished' / 'cancelled'
-    (read optional 'feedback' for the Stop reason) / 'timed_out' (re-wait or
-    gui_tab_post_analyze_poll) / 'no_operation'. Raises only on a genuine failure.
-    Use after gui_tab_post_analyze returned status='pending'. Read the scalar result
-    with gui_tab_get_post_analyze_result."""
-    tab_id = str(arguments["tab_id"])
-    timeout = float(arguments.get("timeout", 600.0))
-    return _await_operation_by_key(
-        f"post_analyze:{tab_id}", f"Post-analysis on tab {tab_id!r}", timeout
-    )
-
-
-def tool_gui_tab_post_analyze_poll(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Non-blocking status of the post-analysis on ``tab_id``: finished / running /
-    failed / no_operation. On a finished post-analysis read the scalar result with
-    gui_tab_get_post_analyze_result."""
-    tab_id = str(arguments["tab_id"])
-    return _poll_operation_by_key(
-        f"post_analyze:{tab_id}", f"Post-analysis on tab {tab_id!r}"
-    )
+# Post-analyze wait/poll retired (ADR-0026 §8): the generic gui_op_wait /
+# gui_op_poll drive the handle from gui_tab_post_analyze_start's reply. After a
+# pending->finished post-analysis the agent reads gui_tab_get_post_analyze_result.
 
 
 _SAVE_ARTIFACTS = frozenset({"data", "image", "both"})
@@ -1579,10 +1560,12 @@ def tool_gui_debug_operations(arguments: dict[str, Any]) -> dict[str, Any]:
     """List the in-flight operations the agent normally cannot see (DEV).
 
     Two sources, both internals the operator face hides:
-      - by_key: the mcp-side _OP_BY_KEY map (semantic key -> operation_id) — what
-        a _wait/_poll tool resolves a name to. The raw operation_id is mcp<->RPC
-        bookkeeping; surfacing it here helps debug "why did gui_tab_run_poll return
-        no_operation / why is wait stuck".
+      - by_key: the mcp-side _OP_BY_KEY map (semantic key -> latest operation_id
+        for that resource) — the debug-only "latest handle per resource"
+        projection (ADR-0026 §8). It is NO LONGER on the wait/poll path (the agent
+        now drives gui_op_poll / gui_op_wait with the handle a START reply gave it);
+        surfacing it here helps debug "what handle did the last run/analyze on this
+        tab get". A stale key for a completed op is normal (never removed).
       - device_active_operations: the wire device.active_operations list (the only
         operation enumerator currently on the wire; run/analyze/post_analyze have
         no wire enumerator — they are observable only through by_key here).
@@ -1590,9 +1573,9 @@ def tool_gui_debug_operations(arguments: dict[str, Any]) -> dict[str, Any]:
     """
     del arguments
     by_key = dict(_OP_BY_KEY)
-    device_ops = send_gui_rpc("device.active_operations", {}).get(
-        "active_operations", []
-    )
+    # The wire device.active_operations reply key is 'operations' (each entry now
+    # carries its 'handle'); the debug-tool field name is left for the P4 reshape.
+    device_ops = send_gui_rpc("device.active_operations", {}).get("operations", [])
     return {"by_key": by_key, "device_active_operations": device_ops}
 
 
@@ -1702,10 +1685,11 @@ def tool_gui_tab_stage2(arguments: dict[str, Any]) -> dict[str, Any]:
     Applies ``edits`` via gui_tab_set_cfg (single wire call carrying the whole
     batch) when given, then gui_tab_run_start. ``edits`` is an OPTIONAL {path: value}
     map (omit/empty runs the tab's current cfg). A finished reply is
-    gui_tab_run_start's reply ({status, tab}) with {figure, analyze_params} folded in —
-    the run plot rendered to a temp PNG and the analyze knobs for this tab — so the
-    agent sees them together. A slow run degrades to {status:'pending'} (no folds;
-    drive it with gui_tab_run_wait / gui_tab_run_poll).
+    gui_tab_run_start's reply ({status, handle, tab}) with {figure, analyze_params}
+    folded in — the run plot rendered to a temp PNG and the analyze knobs for this
+    tab — so the agent sees them together. A slow run degrades to
+    {status:'pending', handle} (no folds; poll/wait the handle with gui_op_poll /
+    gui_op_wait, then read the plot with gui_tab_get_current_figure).
 
     It deliberately STOPS before analyze: a successful run is NOT a successful
     analyze — look at the figure, then gui_tab_stage3.
@@ -1734,12 +1718,13 @@ def tool_gui_tab_stage2(arguments: dict[str, Any]) -> dict[str, Any]:
 def tool_gui_tab_stage3(arguments: dict[str, Any]) -> dict[str, Any]:
     """Phase ③ analyze: analyze ``tab_id`` and fold the fit review into one reply.
 
-    Composes gui_tab_analyze; a finished FIT reply ({status, summary}) gains
-    {figure, writeback_preview} — the fit plot rendered to a temp PNG and the
+    Composes gui_tab_analyze_start; a finished FIT reply ({status, handle, summary})
+    gains {figure, writeback_preview} — the fit plot rendered to a temp PNG and the
     proposed writeback values/targets the fit produced — so the agent reviews the
     fit AND the proposed writeback in one call before gui_tab_stage4. An
-    INTERACTIVE analysis degrades to {status:'pending'} (no folds — nothing
-    settled to render/preview); prompt the user, then gui_tab_analyze_poll.
+    INTERACTIVE analysis degrades to {status:'pending', handle} (no folds — nothing
+    settled to render/preview); prompt the user, then poll/wait the handle with
+    gui_op_poll / gui_op_wait, then read gui_tab_get_analyze_result.
     """
     tab_id = str(arguments["tab_id"])
     reply = tool_gui_tab_analyze({"tab_id": tab_id})
@@ -1792,21 +1777,30 @@ def tool_gui_tab_get_current_figure(arguments: dict[str, Any]) -> dict[str, Any]
 
 def tool_gui_device_connect(arguments: dict[str, Any]) -> dict[str, Any]:
     name = str(arguments["name"])
-    params: dict[str, Any] = {
-        "type_name": str(arguments["type_name"]),
-        "name": name,
-        "address": str(arguments["address"]),
-    }
-    if "remember" in arguments:
-        params["remember"] = bool(arguments["remember"])
+    # type_name/address omitted => reconnect a remembered (memory-only) device,
+    # reusing its stored type/address (E4: reconnect folded into connect). Both
+    # wire methods key on device:{name} in _OP_BY_KEY, so the short-wait/handle
+    # path is identical regardless of which one ran.
+    type_name = arguments.get("type_name")
+    address = arguments.get("address")
+    if type_name is None and address is None:
+        send_gui_rpc("device.reconnect", {"name": name})
+    else:
+        params: dict[str, Any] = {
+            "type_name": str(type_name),
+            "name": name,
+            "address": str(address),
+        }
+        if "remember" in arguments:
+            params["remember"] = bool(arguments["remember"])
+        send_gui_rpc("device.connect", params)  # operation_id captured into _OP_BY_KEY
     wait_seconds = float(arguments.get("wait_seconds", 1.0))
-    send_gui_rpc("device.connect", params)  # operation_id captured into _OP_BY_KEY
     return _start_op_with_short_wait(
         f"device:{name}",
         f"Device {name!r} connect",
         wait_seconds,
         lambda: {"snapshot": _device_snapshot(name)},
-        f"await it with gui_device_wait_operation(name={name!r}) or gui_device_poll(name={name!r}).",
+        "poll/wait the returned handle with gui_op_poll / gui_op_wait.",
     )
 
 
@@ -1822,7 +1816,7 @@ def tool_gui_device_disconnect(arguments: dict[str, Any]) -> dict[str, Any]:
         f"Device {name!r} disconnect",
         wait_seconds,
         lambda: {"snapshot": _device_snapshot(name)},
-        f"await it with gui_device_wait_operation(name={name!r}) or gui_device_poll(name={name!r}).",
+        "poll/wait the returned handle with gui_op_poll / gui_op_wait.",
     )
 
 
@@ -1835,10 +1829,10 @@ def tool_gui_device_setup(arguments: dict[str, Any]) -> dict[str, Any]:
     send_gui_rpc("device.setup", {"name": name, "updates": dict(updates)})
     return _start_op_with_short_wait(
         f"device:{name}",
-        f"Device {name!r} setup",
+        f"Device {name!r} apply",
         wait_seconds,
         lambda: {"snapshot": _device_snapshot(name)},
-        f"await it with gui_device_wait_operation(name={name!r}) or watch 'device_setup_finished'.",
+        "poll/wait the returned handle with gui_op_poll / gui_op_wait.",
     )
 
 
@@ -1905,6 +1899,10 @@ _NON_GENERATED_METHODS = frozenset(
         "device.connect",
         "device.disconnect",
         "device.setup",
+        # device.reconnect is wire-only: gui_device_connect routes here when
+        # type_name/address are omitted (E4 — reconnect folded into connect). No
+        # standalone gui_device_reconnect tool is generated.
+        "device.reconnect",
         # client-side file write of base64 PNG — both raw-base64 wire methods are
         # excluded: dialog.screenshot and view.screenshot are only reachable via
         # the gui_screenshot override, which decodes + writes the PNG file
@@ -1932,15 +1930,16 @@ _NON_GENERATED_METHODS = frozenset(
         # mcp<->RPC bookkeeping only; never an agent-facing tool (version numbers
         # must not surface to the agent — used internally by _refresh_versions).
         "resources.versions",
-        # operation handle await: agent drives it via semantic wait tools (e.g.
-        # gui_device_wait_operation), which translate name -> operation_id; the raw
-        # by-id RPC is never an agent tool.
+        # operation handle await: the generic gui_op_wait override drives it by the
+        # handle a START reply gave the agent (ADR-0026 §8); the raw by-id RPC is
+        # never an agent tool. Device ops use the same generic handle path now.
         "operation.await",
-        # operation progress by id: internal — the poll tools fold its bars into
-        # their reply, so the agent never calls it directly.
+        # operation progress by id: internal — gui_op_poll folds its bars into the
+        # poll reply, so the agent never calls it directly.
         "operation.progress",
         # hand-written short-wait degrade (like device ops): a fast run returns its
-        # product, a slow one degrades to a handle (gui_tab_run_wait).
+        # product, a slow one degrades to a handle (poll/wait via gui_op_poll /
+        # gui_op_wait).
         "tab.run_start",
         # hand-written synchronous wrapper (passes an explicit ~2s timeout so the
         # board-side 1s COMMTIMEOUT fires first); not auto-generated so the override
@@ -2388,50 +2387,16 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "required": ["item_kind", "name"],
         },
     },
-    "gui_device_wait_operation": {
-        "handler": tool_gui_device_wait_operation,
-        "description": (
-            "Block until the named device's current operation — connect / "
-            "disconnect / setup, whichever was started last — completes (shared "
-            "async _wait contract; see server instructions, esp. blocking / "
-            "background for a slow ramp). Use after a gui_device_* tool returned "
-            "status='pending'."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string", "description": "Device name"},
-                "timeout": {
-                    "type": "number",
-                    "description": "Seconds to wait (default 120)",
-                },
-            },
-            "required": ["name"],
-        },
-    },
-    "gui_device_poll": {
-        "handler": tool_gui_device_poll,
-        "description": (
-            "Non-blocking status of the named device's latest operation — connect "
-            "/ disconnect / setup (shared async _poll contract; see server "
-            "instructions). While 'running' the folded progress bars cover e.g. a "
-            "setup ramp."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {"name": {"type": "string", "description": "Device name"}},
-            "required": ["name"],
-        },
-    },
     "gui_tab_run_start": {
         "handler": tool_gui_tab_run_start,
         "description": (
             "Start a run on tab_id (shared short-wait START contract — see server "
-            "instructions). A fast run settles -> {status:'finished', tab:{...}, "
-            "figure:<path>} — the tab snapshot (has_run_result set) AND the run "
-            "plot rendered to a temp PNG (the run's OWN visual result). A slow run "
-            "degrades to {status:'pending'} (no figure yet; drive with gui_tab_run_wait "
-            "/ gui_tab_run_poll)."
+            "instructions). A fast run settles -> {status:'finished', handle, "
+            "tab:{...}, figure:<path>} — the tab snapshot (has_run_result set) AND "
+            "the run plot rendered to a temp PNG (the run's OWN visual result). A "
+            "slow run degrades to {status:'pending', handle} (no figure yet; "
+            "poll/wait the handle with gui_op_poll / gui_op_wait, then read the plot "
+            "with gui_tab_get_current_figure). The reply always carries 'handle'."
         ),
         "inputSchema": {
             "type": "object",
@@ -2445,40 +2410,59 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "required": ["tab_id"],
         },
     },
-    "gui_tab_run_wait": {
-        "handler": tool_gui_tab_run_wait,
+    "gui_op_poll": {
+        "handler": tool_gui_op_poll,
         "description": (
-            "Block until the run on tab_id completes (the shared async _wait "
-            "contract — see the server instructions for blocking / background / "
-            "user-feedback / timed_out semantics). Use after gui_tab_run_start returned "
-            "status='pending'. On 'finished', the reply carries 'figure' — the run "
-            "plot rendered to a temp PNG (the run's OWN visual result)."
+            "Non-blocking status of ANY in-flight operation, by 'handle' (the "
+            "opaque token a START tool — gui_tab_run_start / gui_tab_analyze_start "
+            "/ gui_tab_post_analyze_start / gui_device_* — returned in its reply). "
+            "NEVER raises; returns {status, ...} with status in "
+            "finished|running|cancelled|failed|no_operation. While 'running' the "
+            "reply folds the live progress bars (active, bars[token/format/percent]) "
+            "— no separate progress tool. Reports only the status: the op's product "
+            "(figure/summary/snapshot) comes from the START finished reply or the "
+            "matching typed getter (e.g. gui_tab_get_current_figure, "
+            "gui_tab_get_analyze_result, gui_device_snapshot)."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "tab_id": {"type": "string"},
-                "timeout": {
-                    "type": "number",
-                    "description": "Seconds to wait (default 600)",
-                },
+                "handle": {
+                    "type": "integer",
+                    "description": "Operation handle from a START tool's reply",
+                }
             },
-            "required": ["tab_id"],
+            "required": ["handle"],
         },
     },
-    "gui_tab_run_poll": {
-        "handler": tool_gui_tab_run_poll,
+    "gui_op_wait": {
+        "handler": tool_gui_op_wait,
         "description": (
-            "Non-blocking status of the run on tab_id (shared async _poll contract "
-            "— see server instructions for the status enum + folded progress bars). "
-            "On 'finished' the reply carries 'figure' — the run plot rendered to a "
-            "temp PNG (the run's OWN visual result). Running/cancelled/failed replies "
-            "are unchanged (no figure)."
+            "Block until ANY in-flight operation settles, by 'handle' (the opaque "
+            "token a START tool returned). Blocks up to 'timeout' seconds and holds "
+            "your turn; for a long op prefer gui_op_poll (non-blocking) or run this "
+            "from a background agent. Returns {status, waited_seconds, ...} with "
+            "status in finished|cancelled|user_feedback|timed_out|no_operation: "
+            "'cancelled' (read optional 'feedback' for the Stop reason — NOT a "
+            "raise), 'user_feedback' (op STILL running — treat 'feedback' as a "
+            "high-priority instruction, re-plan, then re-wait or cancel via the "
+            "op-specific cancel tool), 'timed_out' (still running — re-wait or "
+            "gui_op_poll). RAISES only on a genuine failure. Reports only the "
+            "status: read the op's product via the matching typed getter."
         ),
         "inputSchema": {
             "type": "object",
-            "properties": {"tab_id": {"type": "string"}},
-            "required": ["tab_id"],
+            "properties": {
+                "handle": {
+                    "type": "integer",
+                    "description": "Operation handle from a START tool's reply",
+                },
+                "timeout": {
+                    "type": "number",
+                    "description": "Seconds to wait (default 120)",
+                },
+            },
+            "required": ["handle"],
         },
     },
     "gui_tab_stage1": {
@@ -2518,13 +2502,14 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "'edits' is an OPTIONAL {path: value} map (dotted paths, see "
             "gui_tab_get_cfg); numbers stay numbers (not stringified). Omit/empty "
             "'edits' to run the tab's current cfg. A fast run returns "
-            "{status:'finished', tab, figure, analyze_params} — 'figure' comes from "
-            "gui_tab_run_start's own FINISHED reply (the run plot rendered to a temp "
-            "PNG); 'analyze_params' is the stage-specific fold (the analyze knobs "
-            "for this tab). A slow run degrades to {status:'pending'} (drive it with "
-            "gui_tab_run_wait / gui_tab_run_poll; 'figure' arrives in the wait/poll finished "
-            "reply). STOPS before analyze on purpose: a successful run is NOT a "
-            "successful analyze — look at the figure, then gui_tab_stage3."
+            "{status:'finished', handle, tab, figure, analyze_params} — 'figure' "
+            "comes from gui_tab_run_start's own FINISHED reply (the run plot "
+            "rendered to a temp PNG); 'analyze_params' is the stage-specific fold "
+            "(the analyze knobs for this tab). A slow run degrades to "
+            "{status:'pending', handle} (poll/wait the handle with gui_op_poll / "
+            "gui_op_wait, then read the plot with gui_tab_get_current_figure). STOPS "
+            "before analyze on purpose: a successful run is NOT a successful analyze "
+            "— look at the figure, then gui_tab_stage3."
         ),
         "inputSchema": {
             "type": "object",
@@ -2549,16 +2534,17 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
         "handler": tool_gui_tab_stage3,
         "description": (
             "Phase ③ of the recommended flow — analyze. Analyze 'tab_id' and fold "
-            "the writeback review into ONE reply. Bundles gui_tab_analyze + the writeback "
-            "preview. A finished FIT returns {status:'finished', summary, figure, "
-            "writeback_preview} — 'summary' is the fit result (same shape as "
-            "gui_tab_get_analyze_result), 'figure' comes from gui_tab_analyze's own "
-            "FINISHED reply (the fit plot rendered to a temp PNG), and "
-            "'writeback_preview' is the stage-specific fold (the proposed writeback "
-            "values/targets) — so you review the fit + the proposed writeback in one "
-            "call before gui_tab_stage4. An INTERACTIVE analysis (e.g. flux_dep) "
-            "degrades to {status:'pending'} (no folds) — prompt the user, then "
-            "gui_tab_analyze_poll."
+            "the writeback review into ONE reply. Bundles gui_tab_analyze_start + the "
+            "writeback preview. A finished FIT returns {status:'finished', handle, "
+            "summary, figure, writeback_preview} — 'summary' is the fit result (same "
+            "shape as gui_tab_get_analyze_result), 'figure' comes from "
+            "gui_tab_analyze_start's own FINISHED reply (the fit plot rendered to a "
+            "temp PNG), and 'writeback_preview' is the stage-specific fold (the "
+            "proposed writeback values/targets) — so you review the fit + the "
+            "proposed writeback in one call before gui_tab_stage4. An INTERACTIVE "
+            "analysis (e.g. flux_dep) degrades to {status:'pending', handle} (no "
+            "folds) — prompt the user, then poll/wait the handle with gui_op_poll / "
+            "gui_op_wait, then read gui_tab_get_analyze_result."
         ),
         "inputSchema": {
             "type": "object",
@@ -2604,20 +2590,22 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "required": ["tab_id"],
         },
     },
-    "gui_tab_analyze": {
+    "gui_tab_analyze_start": {
         "handler": tool_gui_tab_analyze,
         "description": (
             "Start analyze on tab_id (shared short-wait START contract — see server "
             "instructions, incl. the INTERACTIVE-analyze note). A FIT settles -> "
-            "{status:'finished', summary, figure} — the fit summary (same shape as "
-            "gui_tab_get_analyze_result, the *_err fields included) AND the fit plot "
-            "rendered to a temp PNG (analyze's OWN visual result). Review the "
-            "proposed writeback with gui_tab_writeback_preview (not folded here; "
-            "that fold lives in gui_tab_stage3). An INTERACTIVE analysis (e.g. flux_dep) "
-            "degrades to {status:'pending', summary:None} — no figure (nothing "
-            "settled yet); prompt the user to mark the plot + click Done, then "
-            "gui_tab_analyze_poll. 'updates' optionally overrides analyze params (see "
-            "gui_tab_get_analyze_params for the current params)."
+            "{status:'finished', handle, summary, figure} — the fit summary (same "
+            "shape as gui_tab_get_analyze_result, the *_err fields included) AND the "
+            "fit plot rendered to a temp PNG (analyze's OWN visual result). Review "
+            "the proposed writeback with gui_tab_writeback_preview (not folded here; "
+            "that fold lives in gui_tab_stage3). An INTERACTIVE analysis (e.g. "
+            "flux_dep) degrades to {status:'pending', handle, summary:None} — no "
+            "figure (nothing settled yet); prompt the user to mark the plot + click "
+            "Done, then poll/wait the handle with gui_op_poll / gui_op_wait, then "
+            "read gui_tab_get_analyze_result + gui_tab_get_current_figure. The reply "
+            "always carries 'handle'. 'updates' optionally overrides analyze params "
+            "(see gui_tab_get_analyze_params for the current params)."
         ),
         "inputSchema": {
             "type": "object",
@@ -2635,56 +2623,24 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "required": ["tab_id"],
         },
     },
-    "gui_tab_analyze_wait": {
-        "handler": tool_gui_tab_analyze_wait,
-        "description": (
-            "Block until the analyze on tab_id completes (shared async _wait "
-            "contract — see server instructions). Use after gui_tab_analyze returned "
-            "status='pending'. On 'finished', see the fit plot with "
-            "gui_tab_get_current_figure. For an INTERACTIVE pick this blocks until "
-            "the USER clicks Done — prefer gui_tab_analyze_poll."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "tab_id": {"type": "string"},
-                "timeout": {
-                    "type": "number",
-                    "description": "Seconds to wait (default 600)",
-                },
-            },
-            "required": ["tab_id"],
-        },
-    },
-    "gui_tab_analyze_poll": {
-        "handler": tool_gui_tab_analyze_poll,
-        "description": (
-            "Non-blocking status of the analyze on tab_id (shared async _poll "
-            "contract — see server instructions). For an INTERACTIVE pick, "
-            "'running' means the user has not clicked Done yet — keep checking back. "
-            "On 'finished', read gui_tab_get_analyze_result + the plot with "
-            "gui_tab_get_current_figure."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {"tab_id": {"type": "string"}},
-            "required": ["tab_id"],
-        },
-    },
-    "gui_tab_post_analyze": {
+    "gui_tab_post_analyze_start": {
         "handler": tool_gui_tab_post_analyze,
         "description": (
             "Start the second-layer (post) analysis on tab_id (shared short-wait "
             "START contract — see server instructions). Runs on top of the tab's "
             "PRIMARY analyze result (e.g. single-shot multi-backend ge "
             "discrimination) and is FIT-only (no INTERACTIVE mode), so it usually "
-            "settles -> {status:'finished', summary:{...}} (folded in, same shape as "
-            "gui_tab_get_post_analyze_result). Fast-fails with precondition_failed "
-            "when the tab has no primary analyze result yet — run gui_tab_analyze first. "
-            "'updates' optionally overrides post params (see "
-            "gui_tab_get_post_analyze_params). The post figure shares the tab's plot "
-            "container; see it with gui_tab_get_current_figure and persist it with "
-            "gui_tab_save_post_image."
+            "settles -> {status:'finished', handle, summary:{...}} (folded in, same "
+            "shape as gui_tab_get_post_analyze_result). A slow one degrades to "
+            "{status:'pending', handle}; poll/wait the handle with gui_op_poll / "
+            "gui_op_wait, then read gui_tab_get_post_analyze_result. The reply always "
+            "carries 'handle'. There is NO cancel for post-analysis: it is a pure "
+            "CPU recompute with no stop point. Fast-fails with precondition_failed "
+            "when the tab has no primary analyze result yet — run "
+            "gui_tab_analyze_start first. 'updates' optionally overrides post params "
+            "(see gui_tab_get_post_analyze_params). The post figure shares the tab's "
+            "plot container; see it with gui_tab_get_current_figure and persist it "
+            "with gui_tab_save_post_image."
         ),
         "inputSchema": {
             "type": "object",
@@ -2699,39 +2655,6 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
                     "description": "Seconds to wait before degrading to a handle (default 1.0)",
                 },
             },
-            "required": ["tab_id"],
-        },
-    },
-    "gui_tab_post_analyze_wait": {
-        "handler": tool_gui_tab_post_analyze_wait,
-        "description": (
-            "Block until the post-analysis on tab_id completes (shared async _wait "
-            "contract — see server instructions). Use after gui_tab_post_analyze "
-            "returned status='pending'. On 'finished', read the scalar result with "
-            "gui_tab_get_post_analyze_result."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "tab_id": {"type": "string"},
-                "timeout": {
-                    "type": "number",
-                    "description": "Seconds to wait (default 600)",
-                },
-            },
-            "required": ["tab_id"],
-        },
-    },
-    "gui_tab_post_analyze_poll": {
-        "handler": tool_gui_tab_post_analyze_poll,
-        "description": (
-            "Non-blocking status of the post-analysis on tab_id (shared async _poll "
-            "contract — see server instructions). On 'finished', read the scalar "
-            "result with gui_tab_get_post_analyze_result."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {"tab_id": {"type": "string"}},
             "required": ["tab_id"],
         },
     },
@@ -2897,27 +2820,41 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
     "gui_device_connect": {
         "handler": tool_gui_device_connect,
         "description": (
-            "Register and connect a hardware device. Waits up to wait_seconds "
-            "(default 1.0) for the connection: if it lands in time, returns "
-            "{status:'finished', snapshot:{...}} (snapshot includes the device's "
-            "live info params); otherwise {status:'pending'} — await it with "
-            "gui_device_wait_operation or gui_device_poll. type_name is the "
-            "driver class (e.g. 'YOKOGS200', 'SGS100A'); address is the VISA/GPIB/IP "
-            "address. remember defaults to true (device persists across "
-            "sessions); set remember=false for a memory-only device."
+            "Connect a hardware device. Two modes by which params you pass:\n"
+            "  - FIRST connect / re-register: pass type_name (driver class, e.g. "
+            "'YOKOGS200', 'SGS100A') AND address (VISA/GPIB/IP). remember defaults "
+            "to true (device persists across sessions); set remember=false for a "
+            "memory-only device.\n"
+            "  - RECONNECT a remembered device: pass ONLY name (omit type_name and "
+            "address) — the stored type/address are reused (this also covers a "
+            "memory-only device that was disconnected with remember=true).\n"
+            "Waits up to wait_seconds (default 1.0): if it lands in time returns "
+            "{status:'finished', handle, snapshot:{...}} (snapshot includes the "
+            "device's live info params); otherwise {status:'pending', handle} — "
+            "poll/wait the handle with gui_op_poll / gui_op_wait. The reply always "
+            "carries 'handle'."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "type_name": {
-                    "type": "string",
-                    "description": "Driver class name, e.g. 'YOKOGS200'",
-                },
                 "name": {
                     "type": "string",
                     "description": "Friendly name for this device",
                 },
-                "address": {"type": "string", "description": "VISA or IP address"},
+                "type_name": {
+                    "type": "string",
+                    "description": (
+                        "Driver class name, e.g. 'YOKOGS200'. Omit (with address) "
+                        "to reconnect a remembered device by name."
+                    ),
+                },
+                "address": {
+                    "type": "string",
+                    "description": (
+                        "VISA or IP address. Omit (with type_name) to reconnect a "
+                        "remembered device by name."
+                    ),
+                },
                 "remember": {
                     "type": "boolean",
                     "description": "Persist device across sessions (default true)",
@@ -2927,17 +2864,20 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
                     "description": "Seconds to wait before degrading to a handle (default 1.0)",
                 },
             },
-            "required": ["type_name", "name", "address"],
+            "required": ["name"],
         },
     },
     "gui_device_disconnect": {
         "handler": tool_gui_device_disconnect,
         "description": (
-            "Disconnect a device. Waits up to wait_seconds (default 1.0): returns "
-            "{status:'finished', snapshot:{...}} if it lands in time, else "
-            "{status:'pending'} (await with gui_device_wait_operation or watch "
-            "'device_changed'). Set remember=false to also remove it from "
-            "persistent storage."
+            "Disconnect a device. Waits up to wait_seconds (default 1.0): if it "
+            "lands in time returns {status:'finished', handle, snapshot:{...}}; "
+            "otherwise {status:'pending', handle} — poll/wait the handle with "
+            "gui_op_poll / gui_op_wait. The reply always carries 'handle'. Two "
+            "terminal states by 'remember': remember=true (default) keeps the "
+            "device in persistent storage as memory-only (reconnect later via "
+            "gui_device_connect with name only); remember=false also removes it "
+            "from persistent storage."
         ),
         "inputSchema": {
             "type": "object",
@@ -2955,17 +2895,18 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "required": ["name"],
         },
     },
-    "gui_device_setup": {
+    "gui_device_apply": {
         "handler": tool_gui_device_setup,
         "description": (
-            "Apply a device setup: patch the device's info fields via 'updates' "
-            "(e.g. {'value': 0.5} to ramp a source's output value — this is the way "
-            "to set an output value, ramped/cancellable, no separate set_value). "
-            "Waits up to wait_seconds (default 1.0): returns {status:'finished', "
-            "snapshot:{...}} if it lands in time, else {status:'pending'} (await "
-            "with gui_device_wait_operation or gui_device_poll — a 'running' poll "
-            "reply carries the live progress bars, e.g. a setup ramp). The device "
-            "must already be connected."
+            "Apply device-field updates: patch the device's info fields via "
+            "'updates' (e.g. {'value': 0.5} to ramp a source's output value — this "
+            "is the way to set an output value, ramped/cancellable, no separate "
+            "set_value). Waits up to wait_seconds (default 1.0): if it lands in "
+            "time returns {status:'finished', handle, snapshot:{...}}; otherwise "
+            "{status:'pending', handle} — poll/wait the handle with gui_op_poll / "
+            "gui_op_wait (a 'running' poll reply carries the live progress bars, "
+            "e.g. a ramp). The reply always carries 'handle'. The device must "
+            "already be connected. Read the settable fields with gui_device_fields."
         ),
         "inputSchema": {
             "type": "object",
@@ -2986,11 +2927,12 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
     "gui_tab_get_current_figure": {
         "handler": tool_gui_tab_get_current_figure,
         "description": (
-            "RARELY NEEDED: run/analyze FINISHED replies ALREADY fold the figure "
-            "(including 2D scans via gui_tab_run_start/_wait/_poll and gui_tab_analyze). "
-            "Call this only when you genuinely need it — a re-render, a mid-flight "
-            "(non-finished) plot you must inspect, or you want to choose out_path. "
-            "Normally read the 'figure' field from the finished run/analyze reply. "
+            "A run/analyze START reply that FINISHED in the short wait ALREADY "
+            "folds the figure (gui_tab_run_start / gui_tab_analyze_start, incl. 2D "
+            "scans) — read its 'figure' field then. Call THIS when the figure was "
+            "NOT folded: after a pending->finished op (the generic gui_op_wait / "
+            "gui_op_poll report only status, NOT the figure), a re-render, a "
+            "mid-flight (non-finished) plot you must inspect, or to choose out_path. "
             "Renders the tab's CURRENT figure to a PNG FILE — whatever is on top "
             "of the tab's plot stack: the run's 2D map while/after a run, the "
             "analysis fit once analyzed, or a post-analysis figure. The PNG is "
@@ -3069,7 +3011,7 @@ _OVERRIDE_NAMES = frozenset(
         "gui_stop",
         "gui_device_connect",
         "gui_device_disconnect",
-        "gui_device_setup",
+        "gui_device_apply",
         "gui_screenshot",
         "gui_debug_versions",
         "gui_debug_operations",
@@ -3085,22 +3027,16 @@ _OVERRIDE_NAMES = frozenset(
         "gui_context_md_write",
         "gui_context_md_delete",
         "gui_context_ml_inspect",
-        "gui_device_wait_operation",
+        "gui_op_poll",
+        "gui_op_wait",
         "gui_tab_run_start",
-        "gui_tab_run_wait",
-        "gui_tab_run_poll",
         "gui_tab_stage1",
         "gui_tab_stage2",
         "gui_tab_stage3",
         "gui_tab_stage4",
-        "gui_tab_analyze",
-        "gui_tab_analyze_wait",
-        "gui_tab_analyze_poll",
-        "gui_tab_post_analyze",
-        "gui_tab_post_analyze_wait",
-        "gui_tab_post_analyze_poll",
+        "gui_tab_analyze_start",
+        "gui_tab_post_analyze_start",
         "gui_soc_connect",
-        "gui_device_poll",
         "gui_prompt_user",
     }
 )

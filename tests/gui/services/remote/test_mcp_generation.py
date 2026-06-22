@@ -364,16 +364,18 @@ def test_phase170b_tab_run_analyze_tools():
     assert "gui_tab_run_cancel" in m.TOOLS
     assert "gui_tab_run_cancel" not in m._OVERRIDE_NAMES
 
-    # tab.analyze and tab.post_analyze: non-generated hand-written overrides.
+    # tab.analyze and tab.post_analyze: non-generated hand-written overrides. P2
+    # appends the _start suffix to the START tool names (the wait/poll halves are
+    # retired in favour of the generic gui_op_wait / gui_op_poll, ADR-0026 §8).
     assert "tab.analyze" in METHOD_SPECS
     assert "tab.analyze" in m._NON_GENERATED_METHODS
-    assert "gui_tab_analyze" in m.TOOLS
-    assert "gui_tab_analyze" in m._OVERRIDE_NAMES
+    assert "gui_tab_analyze_start" in m.TOOLS
+    assert "gui_tab_analyze_start" in m._OVERRIDE_NAMES
 
     assert "tab.post_analyze" in METHOD_SPECS
     assert "tab.post_analyze" in m._NON_GENERATED_METHODS
-    assert "gui_tab_post_analyze" in m.TOOLS
-    assert "gui_tab_post_analyze" in m._OVERRIDE_NAMES
+    assert "gui_tab_post_analyze_start" in m.TOOLS
+    assert "gui_tab_post_analyze_start" in m._OVERRIDE_NAMES
 
     # Stage bundles: all present under new names, all old names absent.
     for stage in ("1", "2", "3", "4"):
@@ -382,8 +384,11 @@ def test_phase170b_tab_run_analyze_tools():
             f"old gui_run_stage{stage} leaked"
         )
 
-    # Wait/poll tools present under new names.
-    for tool in (
+    # Per-op wait/poll tools are RETIRED (P2 / ADR-0026 §8): the generic
+    # gui_op_wait / gui_op_poll drive the handle a START reply folds.
+    for tool in ("gui_op_wait", "gui_op_poll"):
+        assert tool in m.TOOLS, f"{tool} missing"
+    for retired in (
         "gui_tab_run_wait",
         "gui_tab_run_poll",
         "gui_tab_analyze_wait",
@@ -391,7 +396,7 @@ def test_phase170b_tab_run_analyze_tools():
         "gui_tab_post_analyze_wait",
         "gui_tab_post_analyze_poll",
     ):
-        assert tool in m.TOOLS, f"{tool} missing"
+        assert retired not in m.TOOLS, f"{retired} should be retired"
 
     # Old names must be absent from the assembled tool table.
     old_names = {
@@ -405,6 +410,9 @@ def test_phase170b_tab_run_analyze_tools():
         "gui_post_analyze",
         "gui_post_analyze_wait",
         "gui_post_analyze_poll",
+        # P2 renamed the analyze/post_analyze START tools.
+        "gui_tab_analyze",
+        "gui_tab_post_analyze",
     }
     assert old_names.isdisjoint(set(m.TOOLS)), (
         f"old tool names leaked: {old_names & set(m.TOOLS)}"

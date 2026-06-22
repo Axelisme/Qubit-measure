@@ -318,8 +318,8 @@ class Controller:
     def start_disconnect_device(self, req: DisconnectDeviceRequest) -> int:
         return self._dev_svc.start_disconnect_device(req)
 
-    def start_reconnect_device(self, name: str) -> None:
-        self._dev_svc.start_reconnect_device(name)
+    def start_reconnect_device(self, name: str) -> int:
+        return self._dev_svc.start_reconnect_device(name)
 
     def start_setup_device(self, req: SetupDeviceRequest) -> int:
         return self._dev_svc.start_setup_device(req)

@@ -91,6 +91,18 @@ device 連線/斷線/設定的領域邏輯（rollback、`ActiveDeviceOperation` 
 
 save 同步、無 handle、不經 `operation.await`（[[0019]] 明示）、無「中途停 save」需求——**不**納入 operation abstraction。未來 save 若改 async/cancellable 再採用。
 
+### 8. agent-facing handle 外露 + 泛型 op wait/poll
+
+mcp 介面層對 agent 揭露 operation 的策略改變（純揭露策略，不動本 ADR §1–§7 的任何機制）：
+
+- **(a) START 顯式回 `handle`**：每個短等 START（run / analyze / post-analyze / device）的 reply 一律帶 `handle`（pending 與 finished 都帶）。`handle` ＝ wire `operation_id`（int），對 agent 是**不透明 token**，唯一用途是餵給泛型 `gui_op_poll` / `gui_op_wait`。wait/poll 路徑改吃 handle 直打 wire `operation.await(operation_id, timeout)` / `operation.progress(operation_id)`——這兩個 wire 入口本就 **op-agnostic**（只吃一個 int id）。`_OP_BY_KEY{semantic-key → id}` 從 wait/poll 主路徑退場，僅留作 `gui_debug_operations` 的 **latest-handle-per-resource 投影**（debug-only）；mcp 端 `send_gui_rpc` 續寫 `_OP_BY_KEY`（debug 用）但不再 strip `operation_id`——改 rename 為 `handle` 保留進 reply。
+
+- **(b) cancel 維持 op-specific（無法泛型化）**：controller 沒有、也不該有 `cancel(operation_id)` wire——三個 cancel 走三條領域路徑：`cancel_run()` 是 keyless singleton（run_svc.stop_event）、`cancel_analyze(tab_id)` 需先 `unmount_interactive_analysis(tab_id)` 做 View teardown 再 settle picker、device cancel 走 device stop_event/rollback（另議，P2-B）。`OperationChannel` 雖有 per-token cancel_hook（[[0025]]），但 interactive 的 **View teardown 不在 hook 內**，故無法用「fire hook by id」統一。因此 cancel 仍按 name/tab_id 定址，START 的 product fold 必須繼續攜帶 resource 身分（tab_id/device name）讓 agent 能 cancel。
+
+- **(c) product fold 歸宿遷移**：泛型 `gui_op_poll` / `gui_op_wait` **只回 status**（外加 progress / feedback / cancelled reason）——單憑 handle 無從得知 op kind，無從 fold figure / summary / snapshot。故 finished product fold 全數移入 **(i) 各 op-specific START 的短等 finished 分支**（既有 `_start_op_with_short_wait` 已是此形）與 **(ii) 既有 typed getter**（`gui_tab_get_analyze_result` / `gui_tab_get_post_analyze_result` / `gui_tab_get_current_figure` / `gui_device_snapshot`）。這是「6 支 per-op wait/poll → 2 支泛型」相對「每 op 各自 wait/poll」唯一真正的**行為遷移**：finished-after-degrade（pending 後才 finished）不再由 wait/poll 自動補 figure，agent 改呼 getter。
+
+wire `operation.await` / `operation.progress` / `operation.cancel` 契約**不動**（仍 op-agnostic 吃 int id）；[[0025]] §適用性表不動（事件集 / channel 不變）——本節僅聲明 wait/poll 仍消費同一 channel，只是定址改由 handle 直達。
+
 ## 後果
 
 - 新增一個長時 op = 寫一份 `OperationSpec` policy，機制零重複。
