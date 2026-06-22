@@ -764,7 +764,7 @@ def _fold_tab_editing_context(tab_id: str, reply: dict[str, Any]) -> dict[str, A
     After tab.new the agent always reads tab.snapshot (for the editor_id) and
     tab.get_cfg (the settable cfg tree) before it can edit cfg. Folding those
     reads collapses the calls into one. Pure mcp-side fan-out over EXISTING wire
-    reads. Reused by gui_tab_stage1 (Phase ①). Adds {editor_id, tree}; the
+    reads. Reused by gui_tab_open (Phase ①). Adds {editor_id, tree}; the
     caller owns ``tab_id`` and ``adapter`` in ``reply``. tab.get_cfg returns a
     nested current-value tree, so the settable paths and their current values
     arrive in one ``tree``.
@@ -1301,7 +1301,7 @@ def tool_gui_tab_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
     carries the fit 'summary' (same shape as gui_tab_get_analyze_result — analyze's
     OWN result, the *_err fields included) AND 'figure' — the fit plot rendered to
     a temp PNG (analyze's OWN visual result). Review the proposed writeback with
-    gui_tab_writeback_preview (not folded here; that fold lives in gui_tab_stage3).
+    gui_tab_writeback_preview (not folded here; that fold lives in gui_tab_analyze_review).
     The reply always carries 'handle'; 'summary'/'figure' appear only on a finished
     FIT. After a pending->finished analyze read gui_tab_get_analyze_result and the
     plot with gui_tab_get_current_figure (a generic gui_op_wait/poll only reports
@@ -1327,7 +1327,7 @@ def tool_gui_tab_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
     )
     # The figure is analyze's OWN visual result — fold it on a FINISHED FIT reply.
     # An INTERACTIVE 'pending' has no settled plot yet (_fold_finished_figure is a
-    # no-op on any non-finished status). writeback_preview stays in gui_tab_stage3.
+    # no-op on any non-finished status). writeback_preview stays in gui_tab_analyze_review.
     return _fold_finished_figure(tab_id, reply)
 
 
@@ -1404,9 +1404,16 @@ def tool_gui_tab_save(arguments: dict[str, Any]) -> dict[str, Any]:
       - image_path: written image path when the image save succeeded, else null.
       - data_async: true when a data save was started (it completes off-turn).
       - image_error: the image-save error message when the image save FAILED, else
-        null. The image failure is surfaced here rather than raised so a
-        same-call data save is not lost; a precondition failure on the DATA save
-        still raises (there is no data_error field).
+        null.
+
+    Error boundary (the image step's policy depends on whether data was saved too):
+      - artifact='both': a data save ran first, so EVERY image failure — a
+        wire-level GuiRpcError AND a stale-version RuntimeError — is folded into
+        image_error and NOT raised, so the already-resolved data_path is never
+        lost (a completed sub-result is never discarded).
+      - artifact='image': nothing to protect, so an image failure RAISES (Fast-Fail).
+      - A precondition failure on the DATA save always raises (there is no
+        data_error field — the data save is the agent's primary intent).
     """
     tab_id = str(arguments["tab_id"])
     artifact = str(arguments.get("artifact", "both"))
@@ -1442,20 +1449,25 @@ def tool_gui_tab_save(arguments: dict[str, Any]) -> dict[str, Any]:
         out["data_path"] = send_gui_rpc("tab.save_data", data_params).get("data_path")
         out["data_async"] = True
 
-    # IMAGE (sync, overwrites): fold a failure into image_error so a successful
-    # data save above is not lost — do NOT re-raise (honest in-band surfacing).
+    # IMAGE (sync, overwrites). The error policy depends on whether a data save
+    # already succeeded in THIS call:
+    #   - artifact in ('data','both'): a data save ran first, so ANY image failure
+    #     (a wire-level GuiRpcError AND a stale-version RuntimeError) folds into
+    #     image_error rather than raising — re-raising would discard the already
+    #     resolved data_path, violating the "a completed sub-result is never lost"
+    #     bundle contract.
+    #   - artifact == 'image': nothing to protect, so a failure RAISES (Fast-Fail).
     if artifact in ("image", "both"):
         method = "tab.save_post_image" if figure == "post" else "tab.save_image"
         image_params: dict[str, Any] = {"tab_id": tab_id}
         if image_path_arg is not None:
             image_params["image_path"] = str(image_path_arg)
+        data_was_saved = artifact == "both"
         try:
             out["image_path"] = send_gui_rpc(method, image_params).get("image_path")
-        except GuiRpcError as exc:
-            # A wire-level GUI failure (e.g. no post-analysis result) is folded
-            # in-band so it cannot discard a successful data save. A stale-version
-            # conflict (raised as a plain RuntimeError, not GuiRpcError) still
-            # propagates — it is a concurrency reject the agent must act on.
+        except Exception as exc:
+            if not data_was_saved:
+                raise
             out["image_error"] = str(exc)
 
     return out
@@ -1557,26 +1569,27 @@ def tool_gui_debug_versions(arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 def tool_gui_debug_operations(arguments: dict[str, Any]) -> dict[str, Any]:
-    """List the in-flight operations the agent normally cannot see (DEV).
+    """Dump the mcp-side per-key operation-handle cache (DEV).
 
-    Two sources, both internals the operator face hides:
-      - by_key: the mcp-side _OP_BY_KEY map (semantic key -> latest operation_id
-        for that resource) — the debug-only "latest handle per resource"
-        projection (ADR-0026 §8). It is NO LONGER on the wait/poll path (the agent
-        now drives gui_op_poll / gui_op_wait with the handle a START reply gave it);
-        surfacing it here helps debug "what handle did the last run/analyze on this
-        tab get". A stale key for a completed op is normal (never removed).
-      - device_active_operations: the wire device.active_operations list (the only
-        operation enumerator currently on the wire; run/analyze/post_analyze have
-        no wire enumerator — they are observable only through by_key here).
-    Returns {by_key: {...}, device_active_operations: [...]}.
+    The ONLY source is the _OP_BY_KEY map (semantic key -> latest operation_id for
+    that resource) — the debug-only "latest handle per resource" projection
+    (ADR-0026 §8). It is NO LONGER on the wait/poll path (the agent drives
+    gui_op_poll / gui_op_wait with the handle a START reply gave it); surfacing it
+    here answers "what handle did the last run/analyze/setup on this tab/device
+    get". 'latest wins' and entries are NEVER removed — a stale key for a completed
+    op is normal, so the cache cannot itself certify liveness (the optional 'live'
+    field is therefore omitted; the cache has no authoritative source for it).
+
+    The live device enumeration is NOT duplicated here — gui_device_list_operations
+    is the dedicated wire enumerator for that.
+
+    Returns {handles: {key: {operation_id: int}}}.
     """
     del arguments
-    by_key = dict(_OP_BY_KEY)
-    # The wire device.active_operations reply key is 'operations' (each entry now
-    # carries its 'handle'); the debug-tool field name is left for the P4 reshape.
-    device_ops = send_gui_rpc("device.active_operations", {}).get("operations", [])
-    return {"by_key": by_key, "device_active_operations": device_ops}
+    # latest-wins, never-removed cache (ADR-0026 §8). No 'live' flag: the cache
+    # has no liveness source — the wire enumerator lives in gui_device_list_operations.
+    handles = {key: {"operation_id": op_id} for key, op_id in _OP_BY_KEY.items()}
+    return {"handles": handles}
 
 
 def _render_tab_figure(tab_id: str, out_path: str | None = None) -> dict[str, Any]:
@@ -1620,34 +1633,39 @@ def _fold_writeback_preview(tab_id: str, reply: dict[str, Any]) -> dict[str, Any
     review the fit AND the proposed writeback in one call before
     gui_tab_writeback_apply (Phase ③). Only acts on ``reply['status'] ==
     'finished'`` (an INTERACTIVE 'pending' has not produced a draft yet). The wire
-    tab.writeback_preview reply is {items: [...]}; we surface that list under
-    'writeback_preview'. Mirrors the figure/guide folds: a fetch failure is swallowed
-    (omitted) so a preview hiccup never breaks the analyze reply — the agent can
-    still call gui_tab_writeback_preview.
+    tab.writeback_preview reply is {has_draft, items}; we surface that object
+    verbatim under 'writeback_preview' (has_draft is false when no draft exists
+    yet). Mirrors the figure/guide folds: a fetch failure is swallowed (omitted)
+    so a preview hiccup never breaks the analyze reply — the agent can still call
+    gui_tab_writeback_preview.
     """
     if reply.get("status") != "finished":
         return reply
     try:
         reply["writeback_preview"] = send_gui_rpc(
             "tab.writeback_preview", {"tab_id": tab_id}
-        ).get("items")
+        )
     except Exception:
         pass
     return reply
 
 
 # ---------------------------------------------------------------------------
-# Bundle tools — the four-phase recommended flow (gui_tab_stage1..4)
+# Bundle tools — the four-phase recommended flow
+# (gui_tab_open -> run -> analyze_review -> commit)
 #
 # Each bundle composes several BASE operations into the agent's natural decision
 # points and folds in the OTHER operations' outputs (the cross-tool folds the
 # base tools deliberately do NOT carry). The base tools stay pure (each returns
-# only its own result, least-surprise); the folding lives only here.
+# only its own result, least-surprise); the folding lives only here. The four
+# names trace the operator's decision path: open (new tab + guide) -> run
+# (configure + run) -> analyze_review (analyze + preview the writeback) ->
+# commit (apply the writeback + optionally save).
 # ---------------------------------------------------------------------------
 
 
-def tool_gui_tab_stage1(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Phase ① new+guide: create a tab for ``adapter_name`` and fold its editing
+def tool_gui_tab_open(arguments: dict[str, Any]) -> dict[str, Any]:
+    """open (Phase ①): create a tab for ``adapter_name`` and fold its editing
     context + the adapter guide into one reply.
 
     Composes tab.new with the fan-out reads the agent always makes before editing
@@ -1656,15 +1674,20 @@ def tool_gui_tab_stage1(arguments: dict[str, Any]) -> dict[str, Any]:
     on the FIRST call per adapter in this MCP server session; subsequent calls for
     the same adapter omit 'guide' and carry 'guide_omitted: True' instead (the
     guide is static — classmethod, no per-cfg content — so re-sending it wastes
-    tokens; Phase 167). Returns {tab_id, adapter, editor_id, tree, guide} on first
-    call; {tab_id, adapter, editor_id, tree, guide_omitted: True} on repeat calls.
-    Edit cfg + run with gui_tab_stage2(tab_id, edits).
+    tokens; Phase 167). ``force_guide`` overrides the dedup and always returns the
+    guide (e.g. after the agent's context was reset mid-session). Returns
+    {tab_id, adapter, editor_id, tree, guide} when the guide is sent;
+    {tab_id, adapter, editor_id, tree, guide_omitted: True} when deduped.
+    Configure + run with gui_tab_run(tab_id, edits).
     """
     adapter_name = str(arguments["adapter_name"])
+    force_guide = bool(arguments.get("force_guide", False))
     tab_id = str(send_gui_rpc("tab.new", {"adapter_name": adapter_name})["tab_id"])
     reply: dict[str, Any] = {"tab_id": tab_id, "adapter": adapter_name}
     _fold_tab_editing_context(tab_id, reply)
-    if adapter_name not in _GUIDE_SENT:
+    # force_guide bypasses the per-session dedup; otherwise send the guide only on
+    # the first open for this adapter this session (it is static — Phase 167).
+    if force_guide or adapter_name not in _GUIDE_SENT:
         # First call for this adapter in this session: fetch and include the full
         # guide, then mark it as sent so subsequent calls skip the fetch entirely.
         reply["guide"] = send_gui_rpc(
@@ -1678,80 +1701,130 @@ def tool_gui_tab_stage1(arguments: dict[str, Any]) -> dict[str, Any]:
     return reply
 
 
-def tool_gui_tab_stage2(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Phase ② configure+run: apply ``edits`` then run the existing ``tab_id``,
-    STOPPING before analyze.
+def tool_gui_tab_run(arguments: dict[str, Any]) -> dict[str, Any]:
+    """run (Phase ②): apply ``edits`` then run the existing ``tab_id``, STOPPING
+    before analyze.
 
     Applies ``edits`` via gui_tab_set_cfg (single wire call carrying the whole
-    batch) when given, then gui_tab_run_start. ``edits`` is an OPTIONAL {path: value}
-    map (omit/empty runs the tab's current cfg). A finished reply is
+    batch) when given, then gui_tab_run_start. ``edits`` is an OPTIONAL ORDERED
+    list of {path, value} (omit/empty runs the tab's current cfg); the order is
+    preserved because a $ref switch must be applied before the paths it unlocks
+    (a {path: value} map would lose that ordering). A finished reply is
     gui_tab_run_start's reply ({status, handle, tab}) with {figure, analyze_params}
     folded in — the run plot rendered to a temp PNG and the analyze knobs for this
     tab — so the agent sees them together. A slow run degrades to
-    {status:'pending', handle} (no folds; poll/wait the handle with gui_op_poll /
-    gui_op_wait, then read the plot with gui_tab_get_current_figure).
+    {status:'pending', handle, owed} where ``owed`` names what is not yet
+    available: drive the handle with gui_op_wait(handle) / gui_op_poll(handle),
+    then read the plot with gui_tab_get_current_figure (a generic wait/poll only
+    reports status, it does not fold the figure). ``wait_seconds`` (default 1.0)
+    bounds the short wait, same as gui_tab_run_start.
 
     It deliberately STOPS before analyze: a successful run is NOT a successful
-    analyze — look at the figure, then gui_tab_stage3.
+    analyze — look at the figure, then gui_tab_analyze_review.
     """
     tab_id = str(arguments["tab_id"])
-    edits = arguments.get("edits") or {}
-    if not isinstance(edits, dict):
-        raise ValueError("'edits' must be an object mapping path -> value")
+    wait_seconds = float(arguments.get("wait_seconds", 1.0))
+    edits = arguments.get("edits") or []
+    if not isinstance(edits, list):
+        raise ValueError("'edits' must be an ordered list of {path, value} objects")
     # Apply edits via tab.set_cfg (tab-keyed batch; editor tools are now
-    # editor_id-only). Single wire call carries the whole batch.
+    # editor_id-only). The ordered list is forwarded verbatim — a single wire call
+    # carries the whole batch, preserving the agent's ref-switch-before-children order.
     if edits:
         send_gui_rpc(
             "tab.set_cfg",
             {
                 "tab_id": tab_id,
-                "edits": [{"path": str(p), "value": v} for p, v in edits.items()],
+                "edits": [{"path": str(e["path"]), "value": e["value"]} for e in edits],
             },
         )
-    reply = tool_gui_tab_run_start({"tab_id": tab_id})
+    reply = tool_gui_tab_run_start({"tab_id": tab_id, "wait_seconds": wait_seconds})
+    # A pending run owes the figure (read it via the getter after the handle
+    # settles) — name it so the agent does not wait for a fold that never comes.
+    if reply.get("status") != "finished":
+        reply["owed"] = "figure (gui_tab_get_current_figure after the handle finishes)"
+        return reply
     # The figure is already folded by tool_gui_tab_run_start; do NOT double-fold it
-    # here. Only add analyze_params (the stage-specific fold). _fold_analyze_params
-    # is a no-op on a non-finished reply, so the pending path is safe.
+    # here. Only add analyze_params (the stage-specific fold).
     return _fold_analyze_params(tab_id, reply)
 
 
-def tool_gui_tab_stage3(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Phase ③ analyze: analyze ``tab_id`` and fold the fit review into one reply.
+def tool_gui_tab_analyze_review(arguments: dict[str, Any]) -> dict[str, Any]:
+    """analyze_review (Phase ③): analyze ``tab_id`` and fold the fit review into
+    one reply.
 
     Composes gui_tab_analyze_start; a finished FIT reply ({status, handle, summary})
     gains {figure, writeback_preview} — the fit plot rendered to a temp PNG and the
-    proposed writeback values/targets the fit produced — so the agent reviews the
-    fit AND the proposed writeback in one call before gui_tab_stage4. An
-    INTERACTIVE analysis degrades to {status:'pending', handle} (no folds — nothing
-    settled to render/preview); prompt the user, then poll/wait the handle with
-    gui_op_poll / gui_op_wait, then read gui_tab_get_analyze_result.
+    proposed writeback {has_draft, items} the fit produced — so the agent reviews
+    the fit AND the proposed writeback in one call before gui_tab_commit. ``updates``
+    optionally overrides the analyze params; ``wait_seconds`` (default 1.0) bounds
+    the short wait. An INTERACTIVE analysis degrades to {status:'pending', handle,
+    owed} (no folds — nothing settled to render/preview); prompt the user, then
+    drive the handle with gui_op_wait(handle) / gui_op_poll(handle), then read
+    gui_tab_get_analyze_result.
     """
     tab_id = str(arguments["tab_id"])
-    reply = tool_gui_tab_analyze({"tab_id": tab_id})
+    analyze_args: dict[str, Any] = {
+        "tab_id": tab_id,
+        "wait_seconds": float(arguments.get("wait_seconds", 1.0)),
+    }
+    if arguments.get("updates") is not None:
+        analyze_args["updates"] = arguments["updates"]
+    reply = tool_gui_tab_analyze(analyze_args)
+    # A pending (INTERACTIVE) analyze owes both folds — read them via the getters
+    # after the handle settles. Name them so the agent does not wait in vain.
+    if reply.get("status") != "finished":
+        reply["owed"] = (
+            "summary (gui_tab_get_analyze_result), figure "
+            "(gui_tab_get_current_figure), writeback_preview "
+            "(gui_tab_writeback_preview) after the handle finishes"
+        )
+        return reply
     # The figure is already folded by tool_gui_tab_analyze; do NOT double-fold it
     # here. Only add writeback_preview (the stage-specific fold).
     return _fold_writeback_preview(tab_id, reply)
 
 
-def tool_gui_tab_stage4(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Phase ④ writeback+save: apply the tab's writeback draft, optionally saving.
+def tool_gui_tab_commit(arguments: dict[str, Any]) -> dict[str, Any]:
+    """commit (Phase ④): apply the tab's writeback draft, optionally saving.
 
-    Composes tab.writeback_apply (applies the currently-selected draft items; returns
-    {applied_ids}); when ``save_data`` is true it ALSO chains tab.save_data for the
-    same tab and folds the resolved {data_path}. ``save_data`` defaults false
-    (apply only). The two steps are deliberately NOT atomic — apply runs first and
-    is committed even if the follow-up save fails (the save error propagates so the
-    agent sees it, but the writeback is already applied).
+    Composes tab.writeback_apply (applies the currently-selected draft items;
+    returns {applied_ids, written, context_version}); ``save`` selects an optional
+    follow-up save of the same artifacts as gui_tab_save: 'none' (default,
+    apply-only), 'data', 'image', or 'both'.
+
+    fail-soft across the two steps (ADR-0026 §5.2): the apply runs first and is
+    committed; if the follow-up save then fails, the applied writeback is NOT lost
+    — the reply carries {status, applied_ids, written, context_version, saved,
+    save_error?} where ``saved`` is the gui_tab_save result (or null) and
+    ``save_error`` is the save failure message. ``status`` is 'committed' when both
+    steps succeed (or save='none'), 'partial' when the apply succeeded but the save
+    failed. This partial-status surface is ONLY for this cross-step bundle — a
+    single wire/tool call (the apply itself, or gui_tab_save invoked on its own)
+    still Fast-Fails by raising.
     """
     tab_id = str(arguments["tab_id"])
-    reply = dict(send_gui_rpc("tab.writeback_apply", {"tab_id": tab_id}))
-    if bool(arguments.get("save_data", False)):
-        # tab.save_data resolves the destination from the tab's save_path; data_path
-        # omitted here so the configured path is used (same as gui_tab_save_data).
-        reply["data_path"] = send_gui_rpc("tab.save_data", {"tab_id": tab_id}).get(
-            "data_path"
+    save = str(arguments.get("save", "none"))
+    if save not in ("none", "data", "image", "both"):
+        raise ValueError(
+            f"save must be one of ['none', 'data', 'image', 'both'], got {save!r}"
         )
-    return reply
+    # The apply is the primary intent — a precondition failure here is a real
+    # Fast-Fail (single wire call), so it raises before any save is attempted.
+    apply_reply = dict(send_gui_rpc("tab.writeback_apply", {"tab_id": tab_id}))
+    out: dict[str, Any] = {"status": "committed", **apply_reply, "saved": None}
+    if save == "none":
+        return out
+    # The apply is already committed; a save failure must NOT discard applied_ids,
+    # so it folds into save_error (status='partial') rather than raising — the
+    # cross-step bundle contract. gui_tab_save itself still surfaces a per-artifact
+    # image failure in-band (image_error) and raises only on a DATA precondition.
+    try:
+        out["saved"] = tool_gui_tab_save({"tab_id": tab_id, "artifact": save})
+    except Exception as exc:
+        out["status"] = "partial"
+        out["save_error"] = str(exc)
+    return out
 
 
 def tool_gui_tab_get_current_figure(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -2465,22 +2538,23 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "required": ["handle"],
         },
     },
-    "gui_tab_stage1": {
-        "handler": tool_gui_tab_stage1,
+    "gui_tab_open": {
+        "handler": tool_gui_tab_open,
         "description": (
-            "Phase ① of the recommended flow — new+guide. Create a tab for "
-            "'adapter_name' (see gui_adapter_list) and fold its editing context + "
-            "the adapter guide into ONE reply. Bundles tab.new + the fan-out reads "
-            "the agent always makes before editing cfg (tab.snapshot for editor_id, "
-            "tab.get_cfg for the settable cfg tree) + adapter.guide. Returns "
+            "Phase ① of the recommended flow (open -> run -> analyze_review -> "
+            "commit) — open. = tab.new + tab.snapshot + tab.get_cfg + adapter.guide. "
+            "Create a tab for 'adapter_name' (see gui_adapter_list) and fold its "
+            "editing context (tab.snapshot for editor_id, tab.get_cfg for the "
+            "settable cfg tree) + the adapter guide into ONE reply. Returns "
             "{tab_id, adapter, editor_id, tree, guide} on the FIRST call for an "
             "adapter in this MCP session; on repeat calls for the SAME adapter "
             "'guide' is omitted and 'guide_omitted: True' is set instead (the "
-            "guide is static and re-sending it wastes tokens). 'tree' is the nested "
-            "current-value cfg tree (the gui_tab_set_cfg path source AND the "
+            "guide is static and re-sending it wastes tokens). Pass force_guide=true "
+            "to always include the guide (e.g. after a context reset). 'tree' is the "
+            "nested current-value cfg tree (the gui_tab_set_cfg path source AND the "
             "read-only values view, in one — see gui_tab_get_cfg for the node "
             "shape with $value/$choices/$ref). Then configure + run with "
-            "gui_tab_stage2(tab_id, edits)."
+            "gui_tab_run(tab_id, edits)."
         ),
         "inputSchema": {
             "type": "object",
@@ -2489,101 +2563,146 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
                     "type": "string",
                     "description": "Adapter to instantiate (see gui_adapter_list)",
                 },
+                "force_guide": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "Always include the adapter guide, bypassing the per-session "
+                        "dedup (use after a context reset). Default false."
+                    ),
+                },
             },
             "required": ["adapter_name"],
         },
     },
-    "gui_tab_stage2": {
-        "handler": tool_gui_tab_stage2,
+    "gui_tab_run": {
+        "handler": tool_gui_tab_run,
         "description": (
-            "Phase ② of the recommended flow — configure+run. Apply 'edits' then "
-            "run the already-created 'tab_id' (from gui_tab_stage1), then STOP "
-            "before analyze. Applies 'edits' via gui_tab_set_cfg (single wire call). "
-            "'edits' is an OPTIONAL {path: value} map (dotted paths, see "
-            "gui_tab_get_cfg); numbers stay numbers (not stringified). Omit/empty "
+            "Phase ② of the recommended flow (open -> run -> analyze_review -> "
+            "commit) — run. = gui_tab_set_cfg + gui_tab_run_start. Apply 'edits' "
+            "then run the already-created 'tab_id' (from gui_tab_open), then STOP "
+            "before analyze. 'edits' is an OPTIONAL ORDERED list of {path, value} "
+            "(dotted paths, see gui_tab_get_cfg; numbers stay numbers). The order is "
+            "preserved — apply a $ref switch BEFORE the paths it unlocks. Omit/empty "
             "'edits' to run the tab's current cfg. A fast run returns "
             "{status:'finished', handle, tab, figure, analyze_params} — 'figure' "
             "comes from gui_tab_run_start's own FINISHED reply (the run plot "
             "rendered to a temp PNG); 'analyze_params' is the stage-specific fold "
             "(the analyze knobs for this tab). A slow run degrades to "
-            "{status:'pending', handle} (poll/wait the handle with gui_op_poll / "
-            "gui_op_wait, then read the plot with gui_tab_get_current_figure). STOPS "
-            "before analyze on purpose: a successful run is NOT a successful analyze "
-            "— look at the figure, then gui_tab_stage3."
+            "{status:'pending', handle, owed} — 'owed' names what is not yet "
+            "available; drive the handle with gui_op_wait(handle) / "
+            "gui_op_poll(handle), then read the plot with gui_tab_get_current_figure. "
+            "STOPS before analyze on purpose: a successful run is NOT a successful "
+            "analyze — look at the figure, then gui_tab_analyze_review."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "tab_id": {
                     "type": "string",
-                    "description": "Tab to configure + run (from gui_tab_stage1)",
+                    "description": "Tab to configure + run (from gui_tab_open)",
                 },
                 "edits": {
-                    "type": "object",
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string"},
+                            "value": {},
+                        },
+                        "required": ["path", "value"],
+                    },
                     "description": (
-                        "Optional {path: value} cfg edits applied before the run "
-                        "(dotted paths, see gui_tab_get_cfg). Numbers stay "
+                        "Optional ORDERED list of {path, value} cfg edits applied "
+                        "before the run (dotted paths, see gui_tab_get_cfg). Order "
+                        "is preserved (ref-switch before its children). Numbers stay "
                         "numbers. Omit/empty to run with the tab's current cfg."
                     ),
                 },
+                "wait_seconds": {
+                    "type": "number",
+                    "default": 1.0,
+                    "description": "Short-wait bound for the run (default 1.0).",
+                },
             },
             "required": ["tab_id"],
         },
     },
-    "gui_tab_stage3": {
-        "handler": tool_gui_tab_stage3,
+    "gui_tab_analyze_review": {
+        "handler": tool_gui_tab_analyze_review,
         "description": (
-            "Phase ③ of the recommended flow — analyze. Analyze 'tab_id' and fold "
-            "the writeback review into ONE reply. Bundles gui_tab_analyze_start + the "
-            "writeback preview. A finished FIT returns {status:'finished', handle, "
-            "summary, figure, writeback_preview} — 'summary' is the fit result (same "
-            "shape as gui_tab_get_analyze_result), 'figure' comes from "
+            "Phase ③ of the recommended flow (open -> run -> analyze_review -> "
+            "commit) — analyze_review. = gui_tab_analyze_start + "
+            "gui_tab_writeback_preview. Analyze 'tab_id' and fold the writeback "
+            "review into ONE reply. A finished FIT returns {status:'finished', "
+            "handle, summary, figure, writeback_preview} — 'summary' is the fit "
+            "result (same shape as gui_tab_get_analyze_result), 'figure' comes from "
             "gui_tab_analyze_start's own FINISHED reply (the fit plot rendered to a "
-            "temp PNG), and 'writeback_preview' is the stage-specific fold (the "
-            "proposed writeback values/targets) — so you review the fit + the "
-            "proposed writeback in one call before gui_tab_stage4. An INTERACTIVE "
-            "analysis (e.g. flux_dep) degrades to {status:'pending', handle} (no "
-            "folds) — prompt the user, then poll/wait the handle with gui_op_poll / "
-            "gui_op_wait, then read gui_tab_get_analyze_result."
+            "temp PNG), and 'writeback_preview' is the stage-specific fold "
+            "({has_draft, items} — the proposed writeback values/targets) — so you "
+            "review the fit + the proposed writeback in one call before "
+            "gui_tab_commit. 'updates' optionally overrides the analyze params; "
+            "'wait_seconds' (default 1.0) bounds the short wait. An INTERACTIVE "
+            "analysis (e.g. flux_dep) degrades to {status:'pending', handle, owed} "
+            "(no folds; 'owed' names the pending reads) — prompt the user, then "
+            "drive the handle with gui_op_wait(handle) / gui_op_poll(handle), then "
+            "read gui_tab_get_analyze_result."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "tab_id": {
                     "type": "string",
-                    "description": "Tab to analyze (from gui_tab_stage2)",
+                    "description": "Tab to analyze (from gui_tab_run)",
+                },
+                "updates": {
+                    "type": "object",
+                    "description": "Optional overrides for the analyze params.",
+                },
+                "wait_seconds": {
+                    "type": "number",
+                    "default": 1.0,
+                    "description": "Short-wait bound for the analyze (default 1.0).",
                 },
             },
             "required": ["tab_id"],
         },
     },
-    "gui_tab_stage4": {
-        "handler": tool_gui_tab_stage4,
+    "gui_tab_commit": {
+        "handler": tool_gui_tab_commit,
         "description": (
-            "Phase ④ of the recommended flow — writeback+save. Apply the tab's "
-            "writeback draft (edit it first via gui_tab_writeback_set / gui_editor_*), "
-            "optionally saving the data afterwards. Bundles tab.writeback_apply + "
-            "(optionally) tab.save_data. Applies the items currently selected; returns "
-            "{applied_ids}. OPTIONAL save_data (default false): when true, ALSO saves "
-            "the run data after applying and folds the resolved {data_path} into the "
-            "reply (apply + save in one call). The apply runs first and is committed "
-            "even if the follow-up save fails; with save_data=false the behavior is "
-            "apply-only."
+            "Phase ④ of the recommended flow (open -> run -> analyze_review -> "
+            "commit) — commit. = gui_tab_writeback_apply + (optionally) gui_tab_save. "
+            "Apply the tab's writeback draft (edit it first via "
+            "gui_tab_writeback_set / gui_editor_*), optionally saving afterwards. "
+            "Applies the items currently selected; returns {status, applied_ids, "
+            "written, context_version, saved, save_error?}. 'save' selects the "
+            "follow-up save artifacts (same vocabulary as gui_tab_save): 'none' "
+            "(default, apply-only), 'data', 'image', or 'both'.\n"
+            "fail-soft across the two steps: the apply runs first and is committed; "
+            "if the follow-up save then fails, the applied writeback is NOT lost — "
+            "'saved' is the gui_tab_save result (or null) and 'save_error' is the "
+            "save failure message. 'status' is 'committed' when both steps succeed "
+            "(or save='none'), 'partial' when the apply succeeded but the save "
+            "failed. This partial-status surface is ONLY for this cross-step bundle "
+            "— a single wire/tool call (the apply, or gui_tab_save on its own) still "
+            "Fast-Fails by raising."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "tab_id": {
                     "type": "string",
-                    "description": "Tab whose writeback draft to apply (from gui_tab_stage3)",
+                    "description": "Tab whose writeback draft to apply (from gui_tab_analyze_review)",
                 },
-                "save_data": {
-                    "type": "boolean",
-                    "default": False,
+                "save": {
+                    "type": "string",
+                    "enum": ["none", "data", "image", "both"],
+                    "default": "none",
                     "description": (
-                        "When true, save the run data after applying the writeback "
-                        "and fold the resolved data_path into the reply. Default "
-                        "false (apply only)."
+                        "Optional follow-up save after applying (same artifacts as "
+                        "gui_tab_save): 'none' (default, apply only), 'data', "
+                        "'image', or 'both'."
                     ),
                 },
             },
@@ -2599,7 +2718,7 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "shape as gui_tab_get_analyze_result, the *_err fields included) AND the "
             "fit plot rendered to a temp PNG (analyze's OWN visual result). Review "
             "the proposed writeback with gui_tab_writeback_preview (not folded here; "
-            "that fold lives in gui_tab_stage3). An INTERACTIVE analysis (e.g. "
+            "that fold lives in gui_tab_analyze_review). An INTERACTIVE analysis (e.g. "
             "flux_dep) degrades to {status:'pending', handle, summary:None} — no "
             "figure (nothing settled yet); prompt the user to mark the plot + click "
             "Done, then poll/wait the handle with gui_op_poll / gui_op_wait, then "
@@ -2675,11 +2794,14 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "always present, null when N/A): data_path is the resolved data path; "
             "image_path is the written image path (null if the image save failed); "
             "data_async is true when a data save was started (it finishes off-turn); "
-            "image_error carries the image-save error message when it FAILED — the "
-            "failure is surfaced here, NOT raised, so a same-call data save is not "
-            "lost. A precondition failure on the DATA save still raises (there is "
-            "no data_error field). Optional data_path / image_path override the "
-            "tab's configured destinations; comment annotates the data file."
+            "image_error carries the image-save error message when it FAILED.\n"
+            "Error boundary: with artifact='both' a data save ran first, so EVERY "
+            "image failure (wire GuiRpcError AND stale-version RuntimeError) folds "
+            "into image_error and is NOT raised — the resolved data_path is never "
+            "lost. With artifact='image' (nothing to protect) an image failure "
+            "RAISES (Fast-Fail). A precondition failure on the DATA save always "
+            "raises (no data_error field). Optional data_path / image_path override "
+            "the tab's configured destinations; comment annotates the data file."
         ),
         "inputSchema": {
             "type": "object",
@@ -2800,20 +2922,21 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
     "gui_debug_operations": {
         "handler": tool_gui_debug_operations,
         "description": (
-            "DEV TOOL (debugging the GUI/MCP itself, not the measurement): list the "
-            "in-flight operations normally hidden from the operator. Returns "
-            "{by_key, device_active_operations}: 'by_key' is the mcp-side map of "
-            "semantic key (e.g. 'tab:<id>', 'analyze:<id>', 'device:<name>') -> "
-            "operation_id that the _wait/_poll tools resolve names through (the only "
-            "view of run/analyze/post_analyze handles); 'device_active_operations' "
-            "is the wire device.active_operations list. Use when debugging "
-            "no_operation / a stuck wait. "
-            "Lifecycle of by_key entries: a key is written when the matching start "
-            "RPC fires (tab.run_start / tab.analyze / tab.post_analyze / "
+            "DEV TOOL (debugging the GUI/MCP itself, not the measurement): dump the "
+            "mcp-side per-key operation-handle cache, normally hidden from the "
+            "operator. Returns {handles: {key: {operation_id}}} keyed by semantic "
+            "key (e.g. 'tab:<id>', 'analyze:<id>', 'post_analyze:<id>', "
+            "'device:<name>') -> the latest operation_id captured for that resource "
+            "— the only view of run/analyze/post_analyze handles. Use when debugging "
+            "no_operation / a stuck wait (e.g. which handle did the last run on this "
+            "tab get). The live DEVICE enumeration is NOT duplicated here — "
+            "gui_device_list_operations is the dedicated wire enumerator. "
+            "Lifecycle: a key is written when the matching start RPC fires "
+            "(tab.run_start / tab.analyze / tab.post_analyze / "
             "device.connect/disconnect/setup) with 'latest wins', and is NEVER "
             "removed — entries persist for the entire MCP server process lifetime. "
-            "A stale key for a completed operation is normal and does not indicate "
-            "an active operation."
+            "A stale key for a completed operation is normal, so the cache cannot "
+            "certify liveness (there is no 'live' field)."
         ),
         "inputSchema": {"type": "object", "properties": {}},
     },
@@ -3030,10 +3153,10 @@ _OVERRIDE_NAMES = frozenset(
         "gui_op_poll",
         "gui_op_wait",
         "gui_tab_run_start",
-        "gui_tab_stage1",
-        "gui_tab_stage2",
-        "gui_tab_stage3",
-        "gui_tab_stage4",
+        "gui_tab_open",
+        "gui_tab_run",
+        "gui_tab_analyze_review",
+        "gui_tab_commit",
         "gui_tab_analyze_start",
         "gui_tab_post_analyze_start",
         "gui_soc_connect",

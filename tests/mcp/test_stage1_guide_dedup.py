@@ -1,8 +1,8 @@
-"""Tests for gui_tab_stage1 guide deduplication — Phase 167 commit 2.
+"""Tests for gui_tab_open guide deduplication — Phase 167 commit 2.
 
 The guide is a static, per-adapter classmethod result (~7.8 KB). Sending it on
-every stage1 call within the same MCP server session wastes tokens. The policy
-(implemented in tool_gui_tab_stage1 + the module-level _GUIDE_SENT set):
+every gui_tab_open call within the same MCP server session wastes tokens. The policy
+(implemented in tool_gui_tab_open + the module-level _GUIDE_SENT set):
   - First call for an adapter_name in this session -> reply includes full 'guide'.
   - Subsequent calls for the SAME adapter -> 'guide' is absent, 'guide_omitted'
     is True.
@@ -88,7 +88,7 @@ import zcu_tools.mcp.measure.server as _srv  # noqa: E402  (after stubs)
 
 @pytest.fixture()
 def guide_dedup_env(monkeypatch: pytest.MonkeyPatch):
-    """Reset _GUIDE_SENT and patch the two I/O functions stage1 calls.
+    """Reset _GUIDE_SENT and patch the two I/O functions gui_tab_open calls.
 
     send_gui_rpc is monkeypatched to a fake that:
       - tab.new        -> {"tab_id": "fake-tab-id"}
@@ -129,8 +129,8 @@ def guide_dedup_env(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_first_call_returns_guide(guide_dedup_env: None) -> None:
-    """First stage1 call for an adapter includes the full 'guide' in the reply."""
-    result = _srv.tool_gui_tab_stage1({"adapter_name": "onetone"})
+    """First gui_tab_open call for an adapter includes the full 'guide' in the reply."""
+    result = _srv.tool_gui_tab_open({"adapter_name": "onetone"})
     assert "guide" in result
     assert result["guide"] == "GUIDE_TEXT_FOR_onetone"
     assert "guide_omitted" not in result
@@ -138,14 +138,14 @@ def test_first_call_returns_guide(guide_dedup_env: None) -> None:
 
 def test_first_call_guide_sent_adds_to_set(guide_dedup_env: None) -> None:
     """After the first call, the adapter name is recorded in _GUIDE_SENT."""
-    _srv.tool_gui_tab_stage1({"adapter_name": "onetone"})
+    _srv.tool_gui_tab_open({"adapter_name": "onetone"})
     assert "onetone" in _srv._GUIDE_SENT
 
 
 def test_second_call_omits_guide(guide_dedup_env: None) -> None:
-    """Second stage1 call for the same adapter: no 'guide', 'guide_omitted' is True."""
-    _srv.tool_gui_tab_stage1({"adapter_name": "onetone"})
-    result2 = _srv.tool_gui_tab_stage1({"adapter_name": "onetone"})
+    """Second gui_tab_open call for the same adapter: no 'guide', 'guide_omitted' is True."""
+    _srv.tool_gui_tab_open({"adapter_name": "onetone"})
+    result2 = _srv.tool_gui_tab_open({"adapter_name": "onetone"})
     assert "guide" not in result2
     assert result2.get("guide_omitted") is True
 
@@ -153,8 +153,8 @@ def test_second_call_omits_guide(guide_dedup_env: None) -> None:
 def test_repeated_call_still_has_other_fields(guide_dedup_env: None) -> None:
     """Even when guide is omitted, the standard fields (tab_id, adapter,
     editor_id, tree) are still present in the reply."""
-    _srv.tool_gui_tab_stage1({"adapter_name": "twotone"})
-    result2 = _srv.tool_gui_tab_stage1({"adapter_name": "twotone"})
+    _srv.tool_gui_tab_open({"adapter_name": "twotone"})
+    result2 = _srv.tool_gui_tab_open({"adapter_name": "twotone"})
     assert result2["tab_id"] == "fake-tab-id"
     assert result2["adapter"] == "twotone"
     assert "editor_id" in result2
@@ -164,8 +164,8 @@ def test_repeated_call_still_has_other_fields(guide_dedup_env: None) -> None:
 def test_different_adapters_each_get_guide(guide_dedup_env: None) -> None:
     """Two different adapter names are tracked independently; each receives its
     own first-use guide."""
-    r1 = _srv.tool_gui_tab_stage1({"adapter_name": "onetone"})
-    r2 = _srv.tool_gui_tab_stage1({"adapter_name": "rabi"})
+    r1 = _srv.tool_gui_tab_open({"adapter_name": "onetone"})
+    r2 = _srv.tool_gui_tab_open({"adapter_name": "rabi"})
     assert "guide" in r1
     assert "guide" in r2
     assert r1["guide"] == "GUIDE_TEXT_FOR_onetone"
@@ -174,10 +174,10 @@ def test_different_adapters_each_get_guide(guide_dedup_env: None) -> None:
 
 def test_different_adapter_repeat_still_omits_for_first(guide_dedup_env: None) -> None:
     """After sending guide for both adapters, repeating either one gives guide_omitted."""
-    _srv.tool_gui_tab_stage1({"adapter_name": "onetone"})
-    _srv.tool_gui_tab_stage1({"adapter_name": "rabi"})
-    r3 = _srv.tool_gui_tab_stage1({"adapter_name": "onetone"})
-    r4 = _srv.tool_gui_tab_stage1({"adapter_name": "rabi"})
+    _srv.tool_gui_tab_open({"adapter_name": "onetone"})
+    _srv.tool_gui_tab_open({"adapter_name": "rabi"})
+    r3 = _srv.tool_gui_tab_open({"adapter_name": "onetone"})
+    r4 = _srv.tool_gui_tab_open({"adapter_name": "rabi"})
     assert "guide" not in r3 and r3.get("guide_omitted") is True
     assert "guide" not in r4 and r4.get("guide_omitted") is True
 

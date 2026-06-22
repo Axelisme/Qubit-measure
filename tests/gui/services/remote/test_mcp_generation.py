@@ -117,7 +117,7 @@ def test_cfg_editor_tools_generated():
 
 def test_tab_new_is_a_pure_generated_forwarder():
     """gui_tab_new is the auto-generated tab.new forwarder (MCP 45): it returns
-    just {tab_id}; the fan-out + guide fold moved to gui_tab_stage1. So tab.new
+    just {tab_id}; the fan-out + guide fold moved to gui_tab_open. So tab.new
     must NOT be excluded from generation nor served by an override."""
     assert "tab.new" not in m._NON_GENERATED_METHODS
     assert "gui_tab_new" not in m._OVERRIDE_NAMES
@@ -130,7 +130,7 @@ def test_tab_new_is_a_pure_generated_forwarder():
 def test_writeback_apply_is_a_pure_generated_forwarder():
     """gui_tab_writeback_apply is the auto-generated tab.writeback_apply forwarder:
     its reply is enriched in P3 ({applied_ids, written, context_version}) but the
-    save_data chaining still lives in gui_tab_stage4. So tab.writeback_apply must
+    save chaining still lives in gui_tab_commit. So tab.writeback_apply must
     NOT be excluded from generation nor served by an override, and the agent schema
     exposes only 'tab_id'."""
     assert "tab.writeback_apply" not in m._NON_GENERATED_METHODS
@@ -249,7 +249,7 @@ def test_phase170c_save_writeback_tools():
     P1 folds the four save wire methods (tab.save_{data,image,post_image,result})
     into the single gui_tab_save override (artifact + figure selectors), so they
     move into _NON_GENERATED_METHODS and lose their per-method agent tool. The wire
-    methods themselves stay (gui_tab_save and the stage4 bundle call them directly).
+    methods themselves stay (gui_tab_save and the gui_tab_commit bundle call them directly).
     tab.save_set_paths is renamed to gui_tab_set_save_paths (tool_name override,
     still generated). The writeback methods are untouched in P1 (writeback is P3) —
     still auto-generated as gui_tab_writeback_*.
@@ -377,9 +377,21 @@ def test_phase170b_tab_run_analyze_tools():
     assert "gui_tab_post_analyze_start" in m.TOOLS
     assert "gui_tab_post_analyze_start" in m._OVERRIDE_NAMES
 
-    # Stage bundles: all present under new names, all old names absent.
+    # Bundle tools: present under the P4 semantic names (open -> run ->
+    # analyze_review -> commit); the old gui_tab_stage{1..4} (and the even older
+    # gui_run_stage{1..4}) names are gone.
+    for bundle in (
+        "gui_tab_open",
+        "gui_tab_run",
+        "gui_tab_analyze_review",
+        "gui_tab_commit",
+    ):
+        assert bundle in m.TOOLS, f"{bundle} missing"
+        assert bundle in m._OVERRIDE_NAMES, f"{bundle} not an override"
     for stage in ("1", "2", "3", "4"):
-        assert f"gui_tab_stage{stage}" in m.TOOLS, f"gui_tab_stage{stage} missing"
+        assert f"gui_tab_stage{stage}" not in m.TOOLS, (
+            f"old gui_tab_stage{stage} leaked"
+        )
         assert f"gui_run_stage{stage}" not in m.TOOLS, (
             f"old gui_run_stage{stage} leaked"
         )
