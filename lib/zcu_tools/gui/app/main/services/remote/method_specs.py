@@ -621,7 +621,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "'valid' is whether the whole draft is currently valid; 'removed'/'added' "
         "list settable paths a ModuleRef key switch ('<path>.ref') dropped/"
         "created so you need not re-list after a variant switch. To read cfg use "
-        "tab.list_paths / editor.get (the nested current-value tree).",
+        "tab.get_cfg / editor.get (the nested current-value tree).",
         (
             _str("editor_id"),
             _str("path", "Dotted field path"),

@@ -89,7 +89,7 @@ from zcu_tools.mcp.core.call_log import wrap_handler  # noqa: E402
 # tool renames) that leave the wire contract untouched. A wire-contract change is
 # tracked separately by WIRE_VERSION (see ``wire_version.py``); the two are
 # independent. (Git history holds the per-version evolution.)
-MCP_VERSION = 57  # Phase 170d (WIRE 43): context md/ml prefix + editor open->new/save_as_module->save — context.get_md*/set_md*/del_md*/get_ml*/del_ml*/rename_ml* renamed to context.md_*/ml_*; ml.list_roles/create_from_role moved to context.ml_*; editor.open->editor.new; editor.commit tool_name gui_editor_save_as_module->gui_editor_save
+MCP_VERSION = 57  # Phase 170d (WIRE 43): context md/ml prefix + editor open->new/save — context.get_md*/set_md*/del_md*/get_ml*/del_ml*/rename_ml* renamed to context.md_*/ml_*; ml.list_roles/create_from_role moved to context.ml_*; editor.open->editor.new; editor.commit tool_name->gui_editor_save
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -188,7 +188,7 @@ message} the GUI surfaced since your last call, under "notifications since last
 call" — UNSOLICITED, including failures not tied to the call you just made.
 Resource-change events are NOT exposed.
 
-Stale model (optimistic concurrency): a guarded op (run / save / save_as_module) rejects
+Stale model (optimistic concurrency): a guarded op (run / save / editor_save) rejects
 with precondition_failed when a dependency a GUI user changed under you moved
 since you last observed it; the error names which resources to re-read. Re-read
 then retry.
@@ -201,7 +201,7 @@ Call contract — read before issuing defensive/duplicate calls:
     duplicate within one.
   - Mutating tools have side effects and must be sent exactly once: gui_tab_run_start
     (a duplicate starts a SECOND run), gui_editor_set_field, gui_tab_new /
-    gui_tab_close, gui_save_*, gui_device_connect / _disconnect / _setup,
+    gui_tab_close, gui_tab_save_*, gui_device_connect / _disconnect / _setup,
     gui_context_set_* / _del_* / _rename_*, gui_editor_save.
 
 Agent-to-user prompting: gui_notify_user(message, timeout=600) opens a prompt
