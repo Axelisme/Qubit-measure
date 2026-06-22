@@ -36,10 +36,13 @@ from __future__ import annotations
 # tab.list_all (new 2-tuple shape [tabs, running_tab_id]); run.start ->
 # tab.run_start, run.cancel -> tab.run_cancel; analyze.start -> tab.analyze;
 # post_analyze.start -> tab.post_analyze; run.running_tab kept as internal-only.
-WIRE_VERSION = 41
+# v42: Phase 170c save + writeback under tab.* — save.data/image/post_image/
+# result/set_paths renamed to tab.save_*; writeback.preview/set/apply renamed to
+# tab.writeback_*.
+WIRE_VERSION = 42
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION (a wire-contract change
 # bumps both; a pure-internal GUI change bumps only this). Git history holds the
 # per-version evolution.
-GUI_VERSION = 48
+GUI_VERSION = 49

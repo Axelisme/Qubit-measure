@@ -306,7 +306,7 @@ def _h_run_running_tab(
     return {"tab_id": adapter.ctrl.get_running_tab_id()}
 
 
-def _h_save_data(
+def _h_tab_save_data(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
@@ -328,7 +328,7 @@ def _h_save_data(
     return {"data_path": written}
 
 
-def _h_save_image(
+def _h_tab_save_image(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
@@ -346,7 +346,7 @@ def _h_save_image(
     return {"image_path": written}
 
 
-def _h_save_post_image(
+def _h_tab_save_post_image(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
@@ -364,7 +364,7 @@ def _h_save_post_image(
     return {"image_path": written}
 
 
-def _h_save_result(
+def _h_tab_save_result(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
@@ -390,7 +390,7 @@ def _h_save_result(
     return {"data_path": written_data, "image_path": written_image}
 
 
-def _h_save_set_paths(
+def _h_tab_save_set_paths(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
@@ -1443,7 +1443,7 @@ def _writeback_item_wire(item) -> dict[str, object]:
     return base
 
 
-def _h_writeback_preview(
+def _h_tab_writeback_preview(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
@@ -1453,7 +1453,7 @@ def _h_writeback_preview(
     return {"items": [_writeback_item_wire(it) for it in items]}
 
 
-def _h_writeback_set(
+def _h_tab_writeback_set(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     """Edit a persistent writeback item by id (selected / target_name /
@@ -1489,11 +1489,11 @@ def _h_writeback_set(
     return {}
 
 
-def _h_writeback_apply(
+def _h_tab_writeback_apply(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     """Apply the tab's persistent writeback draft as-is (edit it first via
-    writeback.set / editor.*)."""
+    tab.writeback_set / editor.*)."""
     tab_id = str(params["tab_id"])
     if not adapter.ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
@@ -1824,11 +1824,11 @@ _HANDLERS: dict[str, Handler] = {
     "tab.run_cancel": _h_tab_run_cancel,
     "analyze.cancel": _h_analyze_cancel,
     "run.running_tab": _h_run_running_tab,
-    "save.data": _h_save_data,
-    "save.image": _h_save_image,
-    "save.post_image": _h_save_post_image,
-    "save.result": _h_save_result,
-    "save.set_paths": _h_save_set_paths,
+    "tab.save_data": _h_tab_save_data,
+    "tab.save_image": _h_tab_save_image,
+    "tab.save_post_image": _h_tab_save_post_image,
+    "tab.save_result": _h_tab_save_result,
+    "tab.save_set_paths": _h_tab_save_set_paths,
     "context.use": _h_context_use,
     "context.new": _h_context_new,
     "context.labels": _h_context_labels,
@@ -1883,9 +1883,9 @@ _HANDLERS: dict[str, Handler] = {
     "tab.get_post_analyze_result": _h_tab_get_post_analyze_result,
     "tab.get_post_analyze_params": _h_tab_get_post_analyze_params,
     "tab.post_analyze": _h_tab_post_analyze,
-    "writeback.preview": _h_writeback_preview,
-    "writeback.set": _h_writeback_set,
-    "writeback.apply": _h_writeback_apply,
+    "tab.writeback_preview": _h_tab_writeback_preview,
+    "tab.writeback_set": _h_tab_writeback_set,
+    "tab.writeback_apply": _h_tab_writeback_apply,
     "editor.open": _h_editor_open,
     "editor.set_field": _h_editor_set_field,
     "editor.get": _h_editor_get,

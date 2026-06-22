@@ -89,7 +89,7 @@ from zcu_tools.mcp.core.call_log import wrap_handler  # noqa: E402
 # tool renames) that leave the wire contract untouched. A wire-contract change is
 # tracked separately by WIRE_VERSION (see ``wire_version.py``); the two are
 # independent. (Git history holds the per-version evolution.)
-MCP_VERSION = 55  # Phase 170b (WIRE 41): tab listing/run/analyze under tab.* — tab.list_all, tab.run_start/cancel, tab.analyze, tab.post_analyze; stage bundles → gui_tab_stage*; run/analyze/post_analyze tools → gui_tab_run_*/gui_tab_analyze*/gui_tab_post_analyze*
+MCP_VERSION = 56  # Phase 170c (WIRE 42): save+writeback under tab.* — save.*/writeback.* renamed to tab.save_*/tab.writeback_*; MCP tools → gui_tab_save_*/gui_tab_writeback_*
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -128,9 +128,9 @@ ON-DEMAND — the fine-grained base tools, when a bundle doesn't fit:
     carries 'figure' — the plot rendered to a temp PNG — so a separate
     gui_tab_get_current_figure call is rarely needed (use it only for a re-render,
     mid-flight plot, or custom out_path). gui_tab_get_analyze_result /
-    gui_tab_get_post_analyze_result re-read the fit summary; gui_save_data /
+    gui_tab_get_post_analyze_result re-read the fit summary; gui_tab_save_data /
     _image / _result / _post_image persist and return the resolved written path;
-    gui_writeback_apply commits the draft.
+    gui_tab_writeback_apply commits the draft.
   - Async handles: every degrading op exposes a _wait (blocking) and a _poll
     (non-blocking) tool keyed by name/tab_id.
   - Devices / context / predictor / adapters / dialogs: gui_device_*,
@@ -259,17 +259,21 @@ _GUARD_DEPS: dict[str, tuple[str, ...]] = {
         "device:*",
         "devices:__set__",
     ),
-    "save.data": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
-    "save.image": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
-    # save.post_image renders the post-analysis figure, so it depends on the
+    "tab.save_data": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
+    "tab.save_image": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
+    # tab.save_post_image renders the post-analysis figure, so it depends on the
     # post-analysis result (not the primary run result) + the save path.
-    "save.post_image": ("tab:{tab_id}:post_analyze", "tab:{tab_id}:save_path"),
-    "save.result": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
-    # writeback.set / writeback.apply edit + apply the persistent draft (computed
-    # from run+analyze results, write md/ml). A concurrent rerun/reanalyze or
-    # context edit must invalidate them.
-    "writeback.set": ("tab:{tab_id}:result", "tab:{tab_id}:analyze", "context"),
-    "writeback.apply": ("tab:{tab_id}:result", "tab:{tab_id}:analyze", "context"),
+    "tab.save_post_image": ("tab:{tab_id}:post_analyze", "tab:{tab_id}:save_path"),
+    "tab.save_result": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
+    # tab.writeback_set / tab.writeback_apply edit + apply the persistent draft
+    # (computed from run+analyze results, write md/ml). A concurrent rerun/
+    # reanalyze or context edit must invalidate them.
+    "tab.writeback_set": ("tab:{tab_id}:result", "tab:{tab_id}:analyze", "context"),
+    "tab.writeback_apply": (
+        "tab:{tab_id}:result",
+        "tab:{tab_id}:analyze",
+        "context",
+    ),
     "editor.commit": ("editor:{editor_id}", "context"),
 }
 
@@ -1184,9 +1188,9 @@ def tool_gui_tab_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
     params. A finished FIT reply carries the fit 'summary' (same shape as
     gui_tab_get_analyze_result — analyze's OWN result, the *_err fields included)
     AND 'figure' — the fit plot rendered to a temp PNG (analyze's OWN visual
-    result). Review the proposed writeback with gui_writeback_preview (not folded
-    here; that fold lives in gui_tab_stage3). 'summary' is None and no 'figure'
-    on an INTERACTIVE 'pending' (nothing settled yet).
+    result). Review the proposed writeback with gui_tab_writeback_preview (not
+    folded here; that fold lives in gui_tab_stage3). 'summary' is None and no
+    'figure' on an INTERACTIVE 'pending' (nothing settled yet).
     """
     tab_id = str(arguments["tab_id"])
     wait_seconds = float(arguments.get("wait_seconds", 1.0))
@@ -1435,18 +1439,19 @@ def _fold_writeback_preview(tab_id: str, reply: dict[str, Any]) -> dict[str, Any
 
     A FIT analyze recomputes the persistent writeback draft (the proposed md/ml/wf
     values + apply targets); surfacing it next to the fit summary lets the agent
-    review the fit AND the proposed writeback in one call before gui_writeback_apply
-    (Phase ③). Only acts on ``reply['status'] == 'finished'`` (an INTERACTIVE
-    'pending' has not produced a draft yet). The wire writeback.preview reply is
-    {items: [...]}; we surface that list under 'writeback_preview'. Mirrors the
-    figure/guide folds: a fetch failure is swallowed (omitted) so a preview hiccup
-    never breaks the analyze reply — the agent can still call gui_writeback_preview.
+    review the fit AND the proposed writeback in one call before
+    gui_tab_writeback_apply (Phase ③). Only acts on ``reply['status'] ==
+    'finished'`` (an INTERACTIVE 'pending' has not produced a draft yet). The wire
+    tab.writeback_preview reply is {items: [...]}; we surface that list under
+    'writeback_preview'. Mirrors the figure/guide folds: a fetch failure is swallowed
+    (omitted) so a preview hiccup never breaks the analyze reply — the agent can
+    still call gui_tab_writeback_preview.
     """
     if reply.get("status") != "finished":
         return reply
     try:
         reply["writeback_preview"] = send_gui_rpc(
-            "writeback.preview", {"tab_id": tab_id}
+            "tab.writeback_preview", {"tab_id": tab_id}
         ).get("items")
     except Exception:
         pass
@@ -1559,11 +1564,11 @@ def tool_gui_tab_stage4(arguments: dict[str, Any]) -> dict[str, Any]:
     agent sees it, but the writeback is already applied).
     """
     tab_id = str(arguments["tab_id"])
-    reply = dict(send_gui_rpc("writeback.apply", {"tab_id": tab_id}))
+    reply = dict(send_gui_rpc("tab.writeback_apply", {"tab_id": tab_id}))
     if bool(arguments.get("save_data", False)):
-        # save.data resolves the destination from the tab's save_path; data_path
-        # omitted here so the configured path is used (same as gui_save_data).
-        reply["data_path"] = send_gui_rpc("save.data", {"tab_id": tab_id}).get(
+        # tab.save_data resolves the destination from the tab's save_path; data_path
+        # omitted here so the configured path is used (same as gui_tab_save_data).
+        reply["data_path"] = send_gui_rpc("tab.save_data", {"tab_id": tab_id}).get(
             "data_path"
         )
     return reply
@@ -2259,9 +2264,9 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
         "handler": tool_gui_tab_stage4,
         "description": (
             "Phase ④ of the recommended flow — writeback+save. Apply the tab's "
-            "writeback draft (edit it first via gui_writeback_set / gui_editor_*), "
-            "optionally saving the data afterwards. Bundles writeback.apply + "
-            "(optionally) save.data. Applies the items currently selected; returns "
+            "writeback draft (edit it first via gui_tab_writeback_set / gui_editor_*), "
+            "optionally saving the data afterwards. Bundles tab.writeback_apply + "
+            "(optionally) tab.save_data. Applies the items currently selected; returns "
             "{applied_ids}. OPTIONAL save_data (default false): when true, ALSO saves "
             "the run data after applying and folds the resolved {data_path} into the "
             "reply (apply + save in one call). The apply runs first and is committed "
@@ -2296,8 +2301,8 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "{status:'finished', summary, figure} — the fit summary (same shape as "
             "gui_tab_get_analyze_result, the *_err fields included) AND the fit plot "
             "rendered to a temp PNG (analyze's OWN visual result). Review the "
-            "proposed writeback with gui_writeback_preview (not folded here; that "
-            "fold lives in gui_tab_stage3). An INTERACTIVE analysis (e.g. flux_dep) "
+            "proposed writeback with gui_tab_writeback_preview (not folded here; "
+            "that fold lives in gui_tab_stage3). An INTERACTIVE analysis (e.g. flux_dep) "
             "degrades to {status:'pending', summary:None} — no figure (nothing "
             "settled yet); prompt the user to mark the plot + click Done, then "
             "gui_tab_analyze_poll. 'updates' optionally overrides analyze params (see "
@@ -2368,7 +2373,7 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "'updates' optionally overrides post params (see "
             "gui_tab_get_post_analyze_params). The post figure shares the tab's plot "
             "container; see it with gui_tab_get_current_figure and persist it with "
-            "gui_save_post_image."
+            "gui_tab_save_post_image."
         ),
         "inputSchema": {
             "type": "object",

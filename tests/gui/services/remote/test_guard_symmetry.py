@@ -95,7 +95,9 @@ def test_save_data_draft_context_symmetry(qapp):  # noqa: ARG001
         ctrl.save_data(tab_id, "/tmp/data.h5")
 
     with pytest.raises(RemoteError) as excinfo:
-        _dispatch(ctrl, "save.data", {"tab_id": tab_id, "data_path": "/tmp/data.h5"})
+        _dispatch(
+            ctrl, "tab.save_data", {"tab_id": tab_id, "data_path": "/tmp/data.h5"}
+        )
     assert excinfo.value.code is ErrorCode.PRECONDITION_FAILED
     # DRAFT context fails the readiness guard before the run-result check.
     assert excinfo.value.reason == "no_active_context"
@@ -124,7 +126,7 @@ def test_save_no_run_result_carries_reason(qapp):  # noqa: ARG001
     tab_id = ctrl.new_tab("fake")
 
     with pytest.raises(RemoteError) as excinfo:
-        _dispatch(ctrl, "save.data", {"tab_id": tab_id, "data_path": "/tmp/d.h5"})
+        _dispatch(ctrl, "tab.save_data", {"tab_id": tab_id, "data_path": "/tmp/d.h5"})
     assert excinfo.value.code is ErrorCode.PRECONDITION_FAILED
     assert excinfo.value.reason == "no_run_result"
 

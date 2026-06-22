@@ -117,13 +117,13 @@ def test_tab_new_is_a_pure_generated_forwarder():
 
 
 def test_writeback_apply_is_a_pure_generated_forwarder():
-    """gui_writeback_apply is the auto-generated writeback.apply forwarder (MCP
-    45): it returns just {applied_ids}; the save_data chaining moved to
-    gui_tab_stage4. So writeback.apply must NOT be excluded from generation nor
-    served by an override, and the agent schema exposes only 'tab_id'."""
-    assert "writeback.apply" not in m._NON_GENERATED_METHODS
-    assert "gui_writeback_apply" not in m._OVERRIDE_NAMES
-    schema = m.TOOLS["gui_writeback_apply"]["inputSchema"]
+    """gui_tab_writeback_apply is the auto-generated tab.writeback_apply forwarder
+    (MCP 45 / Phase 170c): it returns just {applied_ids}; the save_data chaining
+    moved to gui_tab_stage4. So tab.writeback_apply must NOT be excluded from
+    generation nor served by an override, and the agent schema exposes only 'tab_id'."""
+    assert "tab.writeback_apply" not in m._NON_GENERATED_METHODS
+    assert "gui_tab_writeback_apply" not in m._OVERRIDE_NAMES
+    schema = m.TOOLS["gui_tab_writeback_apply"]["inputSchema"]
     # expected_versions is mcp_hidden; save_data is gone.
     assert set(schema["properties"]) == {"tab_id"}
 
@@ -132,7 +132,7 @@ def test_writeback_set_selected_is_boolean_schema():
     """``selected`` must render as a boolean schema so the client sends a real
     boolean. A JSON-any schema lets the client send the string "false", which
     ``bool("false")`` wrongly reads as True (selection never clears)."""
-    props = m.TOOLS["gui_writeback_set"]["inputSchema"]["properties"]
+    props = m.TOOLS["gui_tab_writeback_set"]["inputSchema"]["properties"]
     assert props["selected"]["type"] == "boolean"
 
 
@@ -223,6 +223,77 @@ def test_phase170a_tab_cfg_io_tools():
         props = m.TOOLS[tool_name]["inputSchema"]["properties"]
         assert "tab_id" not in props, f"{tool_name} must not expose 'tab_id' anymore"
         assert "editor_id" in props
+
+
+def test_phase170c_save_writeback_tools():
+    """Phase 170c save + writeback under tab.* normalization:
+    - save.{data,image,post_image,result,set_paths} renamed to tab.save_*.
+    - writeback.{preview,set,apply} renamed to tab.writeback_*.
+    - Old MCP tool names (gui_save_*, gui_writeback_*) are absent.
+    - New MCP tool names (gui_tab_save_*, gui_tab_writeback_*) are present.
+    - All new methods are auto-generated (no overrides, no exclusions).
+    """
+    # New wire methods are present in the contract.
+    new_wire_methods = {
+        "tab.save_data",
+        "tab.save_image",
+        "tab.save_post_image",
+        "tab.save_result",
+        "tab.save_set_paths",
+        "tab.writeback_preview",
+        "tab.writeback_set",
+        "tab.writeback_apply",
+    }
+    assert new_wire_methods.issubset(set(METHOD_SPECS))
+
+    # Old wire methods are gone from the contract entirely.
+    old_wire_methods = {
+        "save.data",
+        "save.image",
+        "save.post_image",
+        "save.result",
+        "save.set_paths",
+        "writeback.preview",
+        "writeback.set",
+        "writeback.apply",
+    }
+    assert old_wire_methods.isdisjoint(set(METHOD_SPECS))
+
+    # New MCP tool names are present in the assembled table.
+    new_tool_names = {
+        "gui_tab_save_data",
+        "gui_tab_save_image",
+        "gui_tab_save_post_image",
+        "gui_tab_save_result",
+        "gui_tab_save_set_paths",
+        "gui_tab_writeback_preview",
+        "gui_tab_writeback_set",
+        "gui_tab_writeback_apply",
+    }
+    assert new_tool_names.issubset(set(m.TOOLS))
+
+    # Old MCP tool names are absent from the assembled table.
+    old_tool_names = {
+        "gui_save_data",
+        "gui_save_image",
+        "gui_save_post_image",
+        "gui_save_result",
+        "gui_save_set_paths",
+        "gui_writeback_preview",
+        "gui_writeback_set",
+        "gui_writeback_apply",
+    }
+    assert old_tool_names.isdisjoint(set(m.TOOLS))
+
+    # All new methods are auto-generated (no override, no exclusion).
+    for method in new_wire_methods:
+        assert method not in m._NON_GENERATED_METHODS, (
+            f"{method} must not be excluded from generation"
+        )
+    for tool_name in new_tool_names:
+        assert tool_name not in m._OVERRIDE_NAMES, (
+            f"{tool_name} must not be an override"
+        )
 
 
 def test_phase170b_tab_run_analyze_tools():

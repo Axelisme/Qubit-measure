@@ -2,7 +2,7 @@
 
 Drives the handlers against a mock Controller whose get_tab_writeback_items
 returns crafted persistent items, so we can assert preview serialization, the
-writeback.set edit path, and the apply path without a full run+analyze pipeline.
+tab.writeback_set edit path, and the apply path without a full run+analyze pipeline.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ from ._helpers import dispatch_handler as _dispatch  # noqa: E402
 
 def test_preview_serializes_metadict_and_module():
     ctrl = _ctrl()
-    res = _dispatch(ctrl, "writeback.preview", {"tab_id": "t"})
+    res = _dispatch(ctrl, "tab.writeback_preview", {"tab_id": "t"})
     item_list = list(res["items"])  # type: ignore[call-overload]
     items = {it["id"]: it for it in item_list}
 
@@ -60,7 +60,7 @@ def test_preview_serializes_metadict_and_module():
 
 def test_apply_reads_persistent_draft():
     ctrl = _ctrl()
-    res = _dispatch(ctrl, "writeback.apply", {"tab_id": "t"})
+    res = _dispatch(ctrl, "tab.writeback_apply", {"tab_id": "t"})
     assert res["applied_ids"] == ["md-1"]
     ctrl.apply_writeback.assert_called_once_with("t")
 
@@ -69,7 +69,7 @@ def test_set_edits_metadict_item():
     ctrl = _ctrl()
     _dispatch(
         ctrl,
-        "writeback.set",
+        "tab.writeback_set",
         {"tab_id": "t", "id": "md-1", "selected": False, "proposed_value": 6015.0},
     )
     ctrl.set_writeback_item.assert_called_once()
@@ -83,7 +83,7 @@ def test_set_target_name_override():
     ctrl = _ctrl()
     _dispatch(
         ctrl,
-        "writeback.set",
+        "tab.writeback_set",
         {"tab_id": "t", "id": "ml-1", "target_name": "readout_v2"},
     )
     _, kwargs = ctrl.set_writeback_item.call_args
@@ -99,7 +99,7 @@ def test_set_deselect_flows_through():
     ctrl = _ctrl()
     _dispatch(
         ctrl,
-        "writeback.set",
+        "tab.writeback_set",
         {"tab_id": "t", "id": "md-2", "selected": False},
     )
     _, kwargs = ctrl.set_writeback_item.call_args
@@ -116,7 +116,7 @@ def test_set_ignores_null_optionals():
     ctrl = _ctrl()
     _dispatch(
         ctrl,
-        "writeback.set",
+        "tab.writeback_set",
         {
             "tab_id": "t",
             "id": "ml-1",
@@ -135,7 +135,7 @@ def test_set_empty_target_name_rejected():
     ctrl = _ctrl()
     with pytest.raises(RemoteError) as exc:
         _dispatch(
-            ctrl, "writeback.set", {"tab_id": "t", "id": "md-1", "target_name": ""}
+            ctrl, "tab.writeback_set", {"tab_id": "t", "id": "md-1", "target_name": ""}
         )
     assert exc.value.code is ErrorCode.INVALID_PARAMS
 
@@ -145,7 +145,7 @@ def test_set_unknown_id_rejected():
     ctrl.set_writeback_item.side_effect = RuntimeError("unknown writeback session_id")
     with pytest.raises(RemoteError) as exc:
         _dispatch(
-            ctrl, "writeback.set", {"tab_id": "t", "id": "md-99", "selected": True}
+            ctrl, "tab.writeback_set", {"tab_id": "t", "id": "md-99", "selected": True}
         )
     assert exc.value.code is ErrorCode.INVALID_PARAMS
 
@@ -153,7 +153,7 @@ def test_set_unknown_id_rejected():
 # ---------------------------------------------------------------------------
 # Complex writeback scalar wire round-trip (WIRE 23). A complex metadict
 # proposed_value serializes losslessly as {"__complex__": [re, im]} and a
-# matching tag on writeback.set coerces back to a Python complex.
+# matching tag on tab.writeback_set coerces back to a Python complex.
 # ---------------------------------------------------------------------------
 
 
@@ -170,7 +170,7 @@ def _complex_items() -> list:
 def test_preview_serializes_complex_as_tag():
     ctrl = _ctrl()
     ctrl.get_tab_writeback_items.side_effect = lambda tab_id: _complex_items()
-    res = _dispatch(ctrl, "writeback.preview", {"tab_id": "t"})
+    res = _dispatch(ctrl, "tab.writeback_preview", {"tab_id": "t"})
     item = list(res["items"])[0]  # type: ignore[call-overload]
     assert item["proposed_value"] == {"__complex__": [1.5, -2.25]}
 
@@ -179,7 +179,7 @@ def test_set_coerces_complex_tag_back_to_complex():
     ctrl = _ctrl()
     _dispatch(
         ctrl,
-        "writeback.set",
+        "tab.writeback_set",
         {
             "tab_id": "t",
             "id": "md-1",
@@ -195,12 +195,12 @@ def test_complex_preview_set_round_trip_is_lossless():
     """preview tag -> set -> the same complex the service would apply."""
     ctrl = _ctrl()
     ctrl.get_tab_writeback_items.side_effect = lambda tab_id: _complex_items()
-    preview = _dispatch(ctrl, "writeback.preview", {"tab_id": "t"})
+    preview = _dispatch(ctrl, "tab.writeback_preview", {"tab_id": "t"})
     wire_value = list(preview["items"])[0]["proposed_value"]  # type: ignore[call-overload]
 
     _dispatch(
         ctrl,
-        "writeback.set",
+        "tab.writeback_set",
         {"tab_id": "t", "id": "md-1", "proposed_value": wire_value},
     )
     _, kwargs = ctrl.set_writeback_item.call_args
@@ -210,7 +210,7 @@ def test_complex_preview_set_round_trip_is_lossless():
 # ---------------------------------------------------------------------------
 # Non-scalar (nested-list) writeback wire round-trip. A confusion matrix is
 # already JSON-safe, so it needs no wire tag: it serializes verbatim through
-# preview and passes through writeback.set untouched (no _coerce_wire_value tag).
+# preview and passes through tab.writeback_set untouched (no _coerce_wire_value tag).
 # ---------------------------------------------------------------------------
 
 
@@ -230,7 +230,7 @@ def _matrix_items() -> list:
 def test_preview_serializes_nested_list_verbatim():
     ctrl = _ctrl()
     ctrl.get_tab_writeback_items.side_effect = lambda tab_id: _matrix_items()
-    res = _dispatch(ctrl, "writeback.preview", {"tab_id": "t"})
+    res = _dispatch(ctrl, "tab.writeback_preview", {"tab_id": "t"})
     item = list(res["items"])[0]  # type: ignore[call-overload]
     assert item["proposed_value"] == _CONFUSION
 
@@ -239,7 +239,7 @@ def test_set_passes_nested_list_through_untouched():
     ctrl = _ctrl()
     _dispatch(
         ctrl,
-        "writeback.set",
+        "tab.writeback_set",
         {"tab_id": "t", "id": "md-1", "proposed_value": _CONFUSION},
     )
     _, kwargs = ctrl.set_writeback_item.call_args
@@ -250,12 +250,12 @@ def test_nested_list_preview_set_round_trip_is_lossless():
     """preview verbatim -> set -> the same nested list the service would apply."""
     ctrl = _ctrl()
     ctrl.get_tab_writeback_items.side_effect = lambda tab_id: _matrix_items()
-    preview = _dispatch(ctrl, "writeback.preview", {"tab_id": "t"})
+    preview = _dispatch(ctrl, "tab.writeback_preview", {"tab_id": "t"})
     wire_value = list(preview["items"])[0]["proposed_value"]  # type: ignore[call-overload]
 
     _dispatch(
         ctrl,
-        "writeback.set",
+        "tab.writeback_set",
         {"tab_id": "t", "id": "md-1", "proposed_value": wire_value},
     )
     _, kwargs = ctrl.set_writeback_item.call_args

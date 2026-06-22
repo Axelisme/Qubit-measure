@@ -93,12 +93,12 @@ def test_save_depends_on_result_and_save_path_not_cfg(wired):
     mcp_server._LAST_SEEN.update(
         {"tab:t:result": 7, "tab:t:save_path": 2, "tab:t:cfg": 9}
     )
-    wired["save.data"] = {"ok": True, "result": {}}
+    wired["tab.save_data"] = {"ok": True, "result": {}}
     wired["resources.versions"] = _versions_reply(dict(mcp_server._LAST_SEEN))
 
-    mcp_server.send_gui_rpc("save.data", {"tab_id": "t"})
+    mcp_server.send_gui_rpc("tab.save_data", {"tab_id": "t"})
 
-    params = next(p for (m, p) in sent if m == "save.data")
+    params = next(p for (m, p) in sent if m == "tab.save_data")
     assert params["expected_versions"] == {"tab:t:result": 7, "tab:t:save_path": 2}
     assert "tab:t:cfg" not in params["expected_versions"]
 
@@ -108,18 +108,18 @@ def test_writeback_apply_depends_on_result_analyze_and_context(wired):
     mcp_server._LAST_SEEN.update(
         {"tab:t:result": 7, "tab:t:analyze": 4, "context": 9, "tab:t:save_path": 2}
     )
-    wired["writeback.apply"] = {"ok": True, "result": {}}
+    wired["tab.writeback_apply"] = {"ok": True, "result": {}}
     wired["resources.versions"] = _versions_reply(dict(mcp_server._LAST_SEEN))
 
-    mcp_server.send_gui_rpc("writeback.apply", {"tab_id": "t", "selections": []})
+    mcp_server.send_gui_rpc("tab.writeback_apply", {"tab_id": "t", "selections": []})
 
-    params = next(p for (m, p) in sent if m == "writeback.apply")
+    params = next(p for (m, p) in sent if m == "tab.writeback_apply")
     assert params["expected_versions"] == {
         "tab:t:result": 7,
         "tab:t:analyze": 4,
         "context": 9,
     }
-    # save_path is irrelevant to writeback.
+    # save_path is irrelevant to tab.writeback_apply.
     assert "tab:t:save_path" not in params["expected_versions"]
 
 

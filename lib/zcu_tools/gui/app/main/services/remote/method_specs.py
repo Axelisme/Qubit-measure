@@ -171,8 +171,8 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "was settled, or false (a graceful no-op) when none was in flight.",
         (_str("tab_id"),),
     ),
-    # Save
-    "save.data": MethodSpec(
+    # Save (under tab.* namespace — Phase 170c)
+    "tab.save_data": MethodSpec(
         30.0,
         "Save data file",
         (
@@ -182,7 +182,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
             _expected_versions(),
         ),
     ),
-    "save.image": MethodSpec(
+    "tab.save_image": MethodSpec(
         30.0,
         "Save image file",
         (
@@ -191,10 +191,10 @@ METHOD_SPECS: dict[str, MethodSpec] = {
             _expected_versions(),
         ),
     ),
-    "save.post_image": MethodSpec(
+    "tab.save_post_image": MethodSpec(
         30.0,
         "Save the post-analysis figure image file (the post sub-tab's own Save "
-        "Image). Mirrors save.image but targets the tab's post-analysis figure; "
+        "Image). Mirrors tab.save_image but targets the tab's post-analysis figure; "
         "requires a post-analysis result.",
         (
             _str("tab_id"),
@@ -202,7 +202,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
             _expected_versions(),
         ),
     ),
-    "save.result": MethodSpec(
+    "tab.save_result": MethodSpec(
         30.0,
         "Save the result's data and image",
         (
@@ -213,7 +213,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
             _expected_versions(),
         ),
     ),
-    "save.set_paths": MethodSpec(
+    "tab.save_set_paths": MethodSpec(
         5.0,
         "Set tab save path overrides",
         (_str("tab_id"), _str("data_path"), _str("image_path")),
@@ -553,8 +553,9 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         (_str("tab_id"), _obj_default("updates", "Post-analysis param updates")),
         tool_name="gui_tab_post_analyze",
     ),
-    # Writeback workflow — a persistent draft computed once at analyze time.
-    "writeback.preview": MethodSpec(
+    # Writeback workflow (under tab.* namespace — Phase 170c) — a persistent
+    # draft computed once at analyze time.
+    "tab.writeback_preview": MethodSpec(
         5.0,
         "List the tab's persistent writeback draft. Each item: id "
         "(<kind>-<n>, kind∈md|ml|wf), target_name (apply destination, editable), "
@@ -565,7 +566,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "editor_id; the user's Edit dialog renders the same model (WYSIWYG).",
         (_str("tab_id"),),
     ),
-    "writeback.set": MethodSpec(
+    "tab.writeback_set": MethodSpec(
         5.0,
         "Edit a persistent writeback item by id: selected? / target_name? / "
         "proposed_value? (metadict only). A complex proposed_value is passed as "
@@ -584,10 +585,10 @@ METHOD_SPECS: dict[str, MethodSpec] = {
             _expected_versions(),
         ),
     ),
-    "writeback.apply": MethodSpec(
+    "tab.writeback_apply": MethodSpec(
         10.0,
         "Apply the tab's persistent writeback draft as-is (edit it first via "
-        "writeback.set / editor.*). Applies items currently selected. Returns "
+        "tab.writeback_set / editor.*). Applies items currently selected. Returns "
         "applied_ids.",
         (_str("tab_id"), _expected_versions()),
     ),

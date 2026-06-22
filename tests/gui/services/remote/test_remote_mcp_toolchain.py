@@ -375,7 +375,7 @@ def test_context_ml_delete_delegates(fx):
 
 
 def test_save_post_image_delegates_to_controller(fx):
-    """save.post_image mirrors save.image but targets the post-analysis figure;
+    """tab.save_post_image mirrors tab.save_image but targets the post-analysis figure;
     it delegates to Controller.save_post_image and returns the written path."""
     fx.ctrl.save_post_image = MagicMock(  # type: ignore[method-assign]
         return_value="/tmp/post.png"
@@ -383,7 +383,9 @@ def test_save_post_image_delegates_to_controller(fx):
     sock = open_client(fx.service.port)
     try:
         resp = call(
-            sock, "save.post_image", {"tab_id": "tab1", "image_path": "/tmp/post.png"}
+            sock,
+            "tab.save_post_image",
+            {"tab_id": "tab1", "image_path": "/tmp/post.png"},
         )
         assert resp["ok"] is True
         assert resp["result"] == {"image_path": "/tmp/post.png"}
@@ -400,8 +402,8 @@ def test_mcp_tool_schemas_include_required_discovery_tools():
         "gui_context_active",
         "gui_context_use",
         "gui_context_new",
-        "gui_save_data",
-        "gui_save_image",
+        "gui_tab_save_data",
+        "gui_tab_save_image",
         "gui_device_connect",
         "gui_device_disconnect",
         "gui_device_setup",
@@ -483,12 +485,14 @@ def test_mcp_wrappers_map_to_expected_rpc():
 
     tools["gui_context_use"]["handler"]({"label": "ctx1"})
     tools["gui_device_reconnect"]["handler"]({"name": "bias"})
-    tools["gui_save_image"]["handler"]({"tab_id": "tab1", "image_path": "/tmp/a.png"})
+    tools["gui_tab_save_image"]["handler"](
+        {"tab_id": "tab1", "image_path": "/tmp/a.png"}
+    )
 
     assert calls == [
         ("context.use", {"label": "ctx1"}),
         ("device.reconnect", {"name": "bias"}),
-        ("save.image", {"tab_id": "tab1", "image_path": "/tmp/a.png"}),
+        ("tab.save_image", {"tab_id": "tab1", "image_path": "/tmp/a.png"}),
     ]
 
 
@@ -1130,7 +1134,7 @@ def test_analyze_settled_returns_summary_and_figure(monkeypatch):
     assert "writeback_preview" not in out
     assert ("tab.analyze", {"tab_id": "fake-freq-1"}) in calls
     assert any(c[0] == "tab.get_current_figure" for c in calls)
-    assert not any(c[0] == "writeback.preview" for c in calls)
+    assert not any(c[0] == "tab.writeback_preview" for c in calls)
 
 
 def test_analyze_degrades_to_pending_when_not_settled(monkeypatch):
@@ -1471,17 +1475,17 @@ def test_fold_writeback_preview_pending_does_not_fold(monkeypatch):
     out = mcp_server._fold_writeback_preview("az-1", pending)
     assert out == {"status": "pending", "message": "still picking"}
     assert "writeback_preview" not in out
-    assert "writeback.preview" not in calls
+    assert "tab.writeback_preview" not in calls
 
 
 def test_fold_writeback_preview_swallows_failure(monkeypatch):
-    """A writeback.preview failure must not break an otherwise-good finished
+    """A tab.writeback_preview failure must not break an otherwise-good finished
     analyze reply — the key is simply omitted (mirrors the figure/guide folds)."""
     from zcu_tools.mcp.measure import server as mcp_server
 
     def fake_send(method, params, timeout_seconds=30.0):
         del params, timeout_seconds
-        if method == "writeback.preview":
+        if method == "tab.writeback_preview":
             raise RuntimeError("preview hiccup")
         return {}
 
@@ -1497,14 +1501,14 @@ def test_fold_writeback_preview_swallows_failure(monkeypatch):
 
 
 def test_writeback_apply_is_pure_generated_forwarder():
-    """gui_writeback_apply forwards writeback.apply and returns ONLY its result
-    ({applied_ids}) — it no longer takes save_data nor chains save.data (that moved
+    """gui_tab_writeback_apply forwards tab.writeback_apply and returns ONLY its result
+    ({applied_ids}) — it no longer takes save_data nor chains tab.save_data (that moved
     to gui_tab_stage4).
 
     Generated forwarder captures send_gui_rpc as a closure at import time, so a
     module-attr monkeypatch does not reach it — re-generate with a recording
     send_fn (the same projection the real bridge builds) to assert it forwards ONLY
-    writeback.apply. The MCP schema must not expose save_data.
+    tab.writeback_apply. The MCP schema must not expose save_data.
     """
     from zcu_tools.gui.app.main.services.remote.method_specs import METHOD_SPECS
     from zcu_tools.mcp.core.bridge import generate_tools
@@ -1513,7 +1517,7 @@ def test_writeback_apply_is_pure_generated_forwarder():
     # The agent-facing schema carries only tab_id (expected_versions is mcp_hidden;
     # save_data is gone).
     assert set(
-        mcp_server.TOOLS["gui_writeback_apply"]["inputSchema"]["properties"]
+        mcp_server.TOOLS["gui_tab_writeback_apply"]["inputSchema"]["properties"]
     ) == {"tab_id"}
 
     calls: list[tuple[str, dict]] = []
@@ -1526,10 +1530,10 @@ def test_writeback_apply_is_pure_generated_forwarder():
     tools = generate_tools(
         mcp_server._CONFIG, METHOD_SPECS, mcp_server._NON_GENERATED_METHODS, fake_send
     )
-    out = tools["gui_writeback_apply"]["handler"]({"tab_id": "t1"})
+    out = tools["gui_tab_writeback_apply"]["handler"]({"tab_id": "t1"})
 
     assert out == {"applied_ids": ["md-0", "ml-1"]}
-    assert calls == [("writeback.apply", {"tab_id": "t1"})]
+    assert calls == [("tab.writeback_apply", {"tab_id": "t1"})]
 
 
 # ---------------------------------------------------------------------------
@@ -1824,7 +1828,7 @@ def test_run_stage3_analyzes_and_folds_figure_and_writeback(monkeypatch):
             return {"summary": {"t1": 12.3}}
         if method == "tab.get_current_figure":
             return {"bytes": 9, "saved_to": params["out_path"]}
-        if method == "writeback.preview":
+        if method == "tab.writeback_preview":
             return {"items": [{"id": "md-0", "target_name": "q_f"}]}
         return {}
 
@@ -1854,7 +1858,7 @@ def test_run_stage3_does_not_double_fold_figure(monkeypatch):
             return {"summary": {"t1": 12.3}}
         if method == "tab.get_current_figure":
             return {"bytes": 9, "saved_to": params["out_path"]}
-        if method == "writeback.preview":
+        if method == "tab.writeback_preview":
             return {"items": []}
         return {}
 
@@ -1890,7 +1894,7 @@ def test_run_stage3_pending_interactive_omits_folds(monkeypatch):
     assert "figure" not in out
     assert "writeback_preview" not in out
     assert "tab.get_current_figure" not in calls
-    assert "writeback.preview" not in calls
+    assert "tab.writeback_preview" not in calls
 
 
 # ---------------------------------------------------------------------------
@@ -1899,7 +1903,7 @@ def test_run_stage3_pending_interactive_omits_folds(monkeypatch):
 
 
 def test_run_stage4_default_applies_only(monkeypatch):
-    """save_data defaults false: apply runs, save.data does NOT, no data_path."""
+    """save_data defaults false: apply runs, tab.save_data does NOT, no data_path."""
     from zcu_tools.mcp.measure import server as mcp_server
 
     calls: list[str] = []
@@ -1907,7 +1911,7 @@ def test_run_stage4_default_applies_only(monkeypatch):
     def fake_send(method, params, timeout_seconds=30.0):
         del params, timeout_seconds
         calls.append(method)
-        if method == "writeback.apply":
+        if method == "tab.writeback_apply":
             return {"applied_ids": ["md-0", "ml-1"]}
         return {}
 
@@ -1915,12 +1919,12 @@ def test_run_stage4_default_applies_only(monkeypatch):
     out = mcp_server.TOOLS["gui_tab_stage4"]["handler"]({"tab_id": "t1"})
 
     assert out == {"applied_ids": ["md-0", "ml-1"]}
-    assert "save.data" not in calls
+    assert "tab.save_data" not in calls
     assert "data_path" not in out
 
 
 def test_run_stage4_save_data_chains_save_and_folds_path(monkeypatch):
-    """save_data=true: apply then save.data, folding the resolved data_path."""
+    """save_data=true: apply then tab.save_data, folding the resolved data_path."""
     from zcu_tools.mcp.measure import server as mcp_server
 
     calls: list[tuple[str, dict]] = []
@@ -1928,9 +1932,9 @@ def test_run_stage4_save_data_chains_save_and_folds_path(monkeypatch):
     def fake_send(method, params, timeout_seconds=30.0):
         del timeout_seconds
         calls.append((method, dict(params)))
-        if method == "writeback.apply":
+        if method == "tab.writeback_apply":
             return {"applied_ids": ["md-0"]}
-        if method == "save.data":
+        if method == "tab.save_data":
             return {"data_path": "/results/Q1/data_0001.hdf5"}
         return {}
 
@@ -1940,11 +1944,11 @@ def test_run_stage4_save_data_chains_save_and_folds_path(monkeypatch):
     )
 
     methods = [m for m, _ in calls]
-    # apply runs first, save.data second (apply is committed before the save).
-    assert methods.index("writeback.apply") < methods.index("save.data")
+    # apply runs first, tab.save_data second (apply is committed before the save).
+    assert methods.index("tab.writeback_apply") < methods.index("tab.save_data")
     assert out["applied_ids"] == ["md-0"]
     assert out["data_path"] == "/results/Q1/data_0001.hdf5"
-    assert ("save.data", {"tab_id": "t1"}) in calls
+    assert ("tab.save_data", {"tab_id": "t1"}) in calls
 
 
 def test_explicit_adapter_guide_tool_still_works():
