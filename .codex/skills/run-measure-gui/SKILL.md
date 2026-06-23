@@ -165,6 +165,8 @@ gui_tab_get_cfg(tab_id)                           # returns a nested value tree 
                                                   #   scalar leaf    → bare value (null = unset)
                                                   #   enum leaf      → {"$value": v, "$choices": [...]}
                                                   #   sweep node     → {"start":..., "stop":..., "expts":..., "step":...}
+                                                  #                    'step' is READ-ONLY (derived from start/stop/expts);
+                                                  #                    set start/stop/expts — never set step directly.
                                                   #   ref node       → {"$ref":{"current":"key","options":[...]}, ...current-variant subtree...}
                                                   #                    options are bare names; a ref edit accepts a bare name
                                                   # $-prefixed keys mark leaf metadata; plain keys are subtree nodes.
@@ -173,10 +175,11 @@ gui_tab_get_cfg(tab_id)                           # returns a nested value tree 
                                                   # EDIT via dotted path (gui_tab_set_cfg) — path syntax unchanged.
 gui_tab_set_cfg(tab_id, edits=[{path,value},…])   # batch-set tab cfg fields in order (non-atomic; first failure RAISES,
                                                   # edits before it stay applied). Apply a ref-switch edit BEFORE the inner
-                                                  # paths it unlocks. Sweep edge fields (start/stop/expts/step) only accept
+                                                  # paths it unlocks. Sweep edge fields (start/stop/expts) only accept
                                                   # plain numbers; eval/ref expressions are not accepted there (use scalar
                                                   # leaf fields for eval). If an adapter pre-wires an eval edge, override it
-                                                  # by passing a numeric value directly.
+                                                  # by passing a numeric value directly. The 'step' field is READ-ONLY
+                                                  # (derived from start/stop/expts) — do not set it; set start/stop/expts.
                                                   # (gui_editor_set edits a NON-tab editor draft instead, addressed by editor_id.)
 # RECOMMENDED FLOW = the 4 bundle tools (breadcrumb open -> run -> analyze_review -> commit;
 #   each folds the NEXT decision's input, stops at a decision point):
@@ -189,7 +192,7 @@ gui_tab_set_cfg(tab_id, edits=[{path,value},…])   # batch-set tab cfg fields i
 #                                                  edits is an ORDERED list (ref-switch before the paths it unlocks).
 #   gui_tab_analyze_review(tab_id)              -> {summary, figure, writeback_preview}   # ③ analyze_review: analyze + preview writeback
 #   gui_tab_commit(tab_id, save_data=False)     -> {status, applied_ids, saved[, save_error]}   # ④ commit: writeback (+ optional save)
-# The base tools below = ON-DEMAND (fine-grained control). DEV tools (gui_debug_versions/_operations —
+# The base tools below = ON-DEMAND (fine-grained control). DEV tools (gui_debug_resource_versions/_operations —
 #   debugging the GUI/MCP itself, NOT the measurement flow) are a separate tier in the server instructions:
 gui_tab_run_start(tab_id)                         # waits ~1s; finished -> {status:finished, handle, figure:<png>,...}, slow -> {status:pending, handle}
 gui_op_wait(handle)                               # block until the op (by handle) ends (only after pending; blocks your turn —

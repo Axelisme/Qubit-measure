@@ -72,4 +72,4 @@ WIRE_VERSION = 44
 # stale-process check to flag; independent of WIRE_VERSION (a wire-contract change
 # bumps both; a pure-internal GUI change bumps only this). Git history holds the
 # per-version evolution.
-GUI_VERSION = 51
+GUI_VERSION = 52  # Phase 171 polish: gui_device_cancel error messages differentiate no-op vs non-cancellable kind

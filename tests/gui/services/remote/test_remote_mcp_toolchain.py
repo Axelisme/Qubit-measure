@@ -950,7 +950,7 @@ def test_screenshot_window_writes_window_png(monkeypatch):
 
 
 def test_debug_versions_dumps_resource_table(monkeypatch):
-    """gui_debug_versions returns the full resources.versions table verbatim."""
+    """gui_debug_resource_versions returns the full resources.versions table verbatim."""
     from zcu_tools.mcp.measure import server as mcp_server
 
     table = {"context": 3, "tab:t1:cfg": 7, "soc": 1}
@@ -961,7 +961,7 @@ def test_debug_versions_dumps_resource_table(monkeypatch):
         return {"versions": table}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    out = mcp_server.TOOLS["gui_debug_versions"]["handler"]({})
+    out = mcp_server.TOOLS["gui_debug_resource_versions"]["handler"]({})
     # P1 flattened the reply: the {versions: ...} wrapper is dropped, the table is
     # returned verbatim as a flat {resource_key: int} map.
     assert out == table
@@ -999,9 +999,10 @@ def test_server_instructions_present_three_tiers():
     assert "ON-DEMAND" in text
     assert "DEV" in text
     # All three DEV tools are named in the instructions (gui_debug_screenshot was
-    # renamed to gui_screenshot in Phase 171 P1).
+    # renamed to gui_screenshot in Phase 171 P1; gui_debug_versions renamed to
+    # gui_debug_resource_versions in Phase 171 polish).
     assert "gui_screenshot" in text
-    assert "gui_debug_versions" in text
+    assert "gui_debug_resource_versions" in text
     assert "gui_debug_operations" in text
 
 

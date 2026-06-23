@@ -602,8 +602,16 @@ class DeviceService(QObject):
 
     def cancel_device_operation(self, name: str) -> None:
         op = self._inflight.get(name)
-        if op is None or op.kind is not OperationKind.DEVICE_SETUP:
-            raise RuntimeError(f"No cancellable device setup is active for {name!r}")
+        if op is None:
+            # No operation at all for this device — not busy.
+            raise RuntimeError(f"No operation in flight for device {name!r}.")
+        if op.kind is not OperationKind.DEVICE_SETUP:
+            # An op is in flight, but connect/disconnect have no cancellation point
+            # (they run to natural completion; only apply/setup polls stop_event).
+            raise RuntimeError(
+                f"Device {name!r} has a {op.kind.value} operation in flight, "
+                f"which has no cancellation point (only apply/setup is cancellable)."
+            )
         # Async notification via the handle: set the operation's stop_event and
         # return. The worker self-judges 'cancelled' and emits its cancelled
         # signal — no direct worker.cancel() coupling.

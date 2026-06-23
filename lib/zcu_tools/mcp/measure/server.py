@@ -89,7 +89,7 @@ from zcu_tools.mcp.core.call_log import wrap_handler  # noqa: E402
 # tool renames) that leave the wire contract untouched. A wire-contract change is
 # tracked separately by WIRE_VERSION (see ``wire_version.py``); the two are
 # independent. (Git history holds the per-version evolution.)
-MCP_VERSION = 59  # Phase 171: measure-gui MCP interface redesign (P1-P5) — ~29 tool renames via tool_name/server overrides, retire state_check/project_info/device_reconnect + per-op poll/wait, new gui_op_poll/gui_op_wait, semantic stage bundles
+MCP_VERSION = 60  # Phase 171 polish: gui_debug_versions renamed to gui_debug_resource_versions (MCP-side rename, WIRE unchanged)
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -146,7 +146,9 @@ looks like, not part of the measurement loop):
     file (never inline base64).
 DEV — debugging the GUI/MCP itself (the version table + in-flight handles are
 normally hidden from the operator; do NOT use these for measurement):
-  - gui_debug_versions (the optimistic-concurrency resource version table),
+  - gui_debug_resource_versions (the per-resource optimistic-concurrency version
+    table, for debugging stale-guard rejections; wire/gui/mcp *code* versions are
+    in the gui_launch / gui_bridge_connect 'note' field, not here),
     gui_debug_operations (the in-flight operation handles, semantic key -> id).
 
 Startup precondition: gui_overview's 'state' field must report all four flags true
@@ -1560,7 +1562,7 @@ def tool_gui_screenshot(arguments: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def tool_gui_debug_versions(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_debug_resource_versions(arguments: dict[str, Any]) -> dict[str, Any]:
     """Dump the full per-resource version table (DEV — debugging stale-guard).
 
     Reads resources.versions verbatim — the same table _refresh_versions consumes
@@ -1568,6 +1570,9 @@ def tool_gui_debug_versions(arguments: dict[str, Any]) -> dict[str, Any]:
     returned as-is instead of being kept as mcp<->RPC bookkeeping hidden from the
     operator. The only window into why a guarded op rejected (or did not reject)
     on a stale dependency. Returns the flat table {resource_key: version_int}.
+
+    Note: wire/gui/mcp *code* version握手 (WIRE_VERSION/GUI_VERSION/MCP_VERSION)
+    lives in gui_launch / gui_bridge_connect's 'note' field — not in this table.
     """
     del arguments
     res = send_gui_rpc("resources.versions", {})
@@ -2914,14 +2919,18 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "required": ["target"],
         },
     },
-    "gui_debug_versions": {
-        "handler": tool_gui_debug_versions,
+    "gui_debug_resource_versions": {
+        "handler": tool_gui_debug_resource_versions,
         "description": (
             "DEV TOOL (debugging the GUI/MCP itself, not the measurement): dump the "
-            "full per-resource version table as a flat {resource_key: int} map. "
-            "These optimistic-concurrency version numbers are normally hidden from the "
-            "operator (mcp<->RPC bookkeeping); read them only when debugging why a "
-            "guarded op rejected (or failed to reject) on a stale dependency."
+            "per-resource optimistic-concurrency version table as a flat "
+            "{resource_key: int} map, for debugging stale-guard rejections. "
+            "These version numbers are normally hidden from the operator "
+            "(mcp<->RPC bookkeeping); read them only when debugging why a "
+            "guarded op rejected (or failed to reject) on a stale dependency. "
+            "NOTE: wire/gui/mcp *code* version握手 (WIRE_VERSION / GUI_VERSION / "
+            "MCP_VERSION) lives in the gui_launch / gui_bridge_connect 'note' field "
+            "— it is not in this table."
         ),
         "inputSchema": {"type": "object", "properties": {}},
     },
@@ -3142,7 +3151,7 @@ _OVERRIDE_NAMES = frozenset(
         "gui_device_disconnect",
         "gui_device_apply",
         "gui_screenshot",
-        "gui_debug_versions",
+        "gui_debug_resource_versions",
         "gui_debug_operations",
         "gui_tab_get_current_figure",
         "gui_overview",
