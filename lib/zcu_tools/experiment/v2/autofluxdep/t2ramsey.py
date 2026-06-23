@@ -31,9 +31,9 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils import deepupdate
-from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_decay_fringe
 from zcu_tools.utils.func_tools import MinIntervalFunc
+from zcu_tools.utils.labber_io import load_labber_data, save_labber_data
 from zcu_tools.utils.process import rotate2real
 
 from .executor import FluxDepCfg, FluxDepInfoDict, MeasurementTask, T_RootResult
@@ -281,56 +281,44 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotDic
 
         np.savez_compressed(filepath, flux_values=flux_values, **result)
 
-        x_info = {"name": "Flux value", "unit": "a.u.", "values": flux_values}
         comment = make_comment(cfg, comment)
 
-        # signals
-        save_data(
-            filepath=str(filepath.with_name(filepath.name + "_signals")),
-            x_info=x_info,
-            y_info={
-                "name": "Time Index",
-                "unit": "a.u.",
-                "values": np.arange(self.num_expts),
-            },
-            z_info={
-                "name": "Signal",
-                "unit": "a.u.",
-                "values": result["raw_signals"].T,
-            },
+        flux_axis = ("Flux value", "a.u.", flux_values)
+        time_axis = ("Time Index", "a.u.", np.arange(self.num_expts))
+
+        # signals: native z is (Ny, Nx) = (num_expts, n_flux), inner axis = flux
+        save_labber_data(
+            str(filepath.with_name(filepath.name + "_signals")),
+            z=("Signal", "a.u.", result["raw_signals"]),
+            axes=[flux_axis, time_axis],
             comment=comment,
-            tag=prefix_tag + "/signals",
+            tags=prefix_tag + "/signals",
         )
 
-        # length
-        save_data(
-            filepath=str(filepath.with_name(filepath.name + "_length")),
-            x_info=x_info,
-            y_info={
-                "name": "Time Index",
-                "unit": "a.u.",
-                "values": np.arange(self.num_expts),
-            },
-            z_info={
-                "name": "Time (us)",
-                "unit": "s",
-                "values": result["length"].T * 1e-6,
-            },
+        # length: 1-D per-time vector broadcast to an explicit (Ny, Nx) grid
+        length_grid = np.broadcast_to(
+            (result["length"] * 1e-6)[:, None],
+            (self.num_expts, len(flux_values)),
+        )
+        save_labber_data(
+            str(filepath.with_name(filepath.name + "_length")),
+            z=("Time (us)", "s", length_grid),
+            axes=[flux_axis, time_axis],
             comment=comment,
-            tag=prefix_tag + "/length",
+            tags=prefix_tag + "/length",
         )
 
-        # t2r
-        save_data(
-            filepath=str(filepath.with_name(filepath.name + "_t2r")),
-            x_info=x_info,
-            z_info={"name": "T2 Ramsey", "unit": "s", "values": result["t2r"] * 1e-6},
+        # t2r: 1-D over flux
+        save_labber_data(
+            str(filepath.with_name(filepath.name + "_t2r")),
+            z=("T2 Ramsey", "s", result["t2r"] * 1e-6),
+            axes=[flux_axis],
             comment=comment,
-            tag=prefix_tag + "/t2r",
+            tags=prefix_tag + "/t2r",
         )
 
     @classmethod
-    def load(cls, filepath: str, **kwargs) -> dict:
+    def load(cls, filepath: str) -> dict:
         _filepath = Path(filepath)
 
         data = np.load(filepath)
@@ -340,36 +328,42 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotDic
         t2r_detune_err = data["t2r_detune_err"]
         success = data["success"]
 
+        # signals: native z is (Ny, Nx) = (num_expts, n_flux), inner axis = flux
         signal_path = str(_filepath.with_name(_filepath.name + "_signals"))
-        signals_stored, flux_sig, len_idxs, comment = load_data(
-            signal_path, return_comment=True, **kwargs
-        )
+        d_sig = load_labber_data(signal_path)
+        signals_stored = np.asarray(d_sig.z)
+        flux_sig = np.asarray(d_sig.axes[0].values)
+        len_idxs = np.asarray(d_sig.axes[1].values)
+        comment = d_sig.comment
 
-        assert flux_sig is not None and len_idxs is not None
         assert np.array_equal(flux_values, flux_sig)
         assert signals_stored.shape == (len(len_idxs), len(flux_values))
 
+        # length: native z is (Ny, Nx) = (num_expts, n_flux), inner axis = flux
         length_path = str(_filepath.with_name(_filepath.name + "_length"))
-        length_stored, flux_len, _ = load_data(length_path, **kwargs)
-        assert flux_len is not None
-        assert length_stored.shape == (len(flux_len), len(len_idxs))
+        d_len = load_labber_data(length_path)
+        length_stored = np.asarray(d_len.z)
+        flux_len = np.asarray(d_len.axes[0].values)
+        assert length_stored.shape == (len(len_idxs), len(flux_len))
         assert np.array_equal(flux_values, flux_len)
 
+        # t2r: 1-D over flux
         t2r_path = str(_filepath.with_name(_filepath.name + "_t2r"))
-        t2r_stored, flux_t2r, _ = load_data(t2r_path, **kwargs)
-        assert flux_t2r is not None
+        d_t2r = load_labber_data(t2r_path)
+        t2r_stored = np.asarray(d_t2r.z)
+        flux_t2r = np.asarray(d_t2r.axes[0].values)
         assert t2r_stored.shape == (len(flux_t2r),)
         assert np.array_equal(flux_values, flux_t2r)
 
         length = length_stored.astype(np.float64) * 1e6
-        raw_signals = signals_stored.T.astype(np.complex128)
+        raw_signals = signals_stored.astype(np.complex128)
         t2r = t2r_stored.astype(np.float64) * 1e6
         t2r_err = t2r_err.astype(np.float64)
         t2r_detune = data["t2r_detune"].astype(np.float64)
         t2r_detune_err = t2r_detune_err.astype(np.float64)
         success = success.astype(np.bool_)
         last_cfg = None
-        if comment is not None:
+        if comment:
             last_cfg, _, _ = parse_comment(comment)
 
         return {
@@ -381,6 +375,6 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotDic
             "t2r_detune_err": t2r_detune_err,
             "success": success,
             "flux_values": flux_values,
-            "lengths": length_stored[0],
+            "lengths": length_stored[:, 0],
             "last_cfg": last_cfg,
         }

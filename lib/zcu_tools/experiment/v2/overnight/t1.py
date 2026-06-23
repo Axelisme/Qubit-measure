@@ -30,9 +30,10 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
+from zcu_tools.utils.datasaver import format_ext, safe_labber_filepath
 from zcu_tools.utils.fitting import fit_decay
 from zcu_tools.utils.func_tools import MinIntervalFunc
+from zcu_tools.utils.labber_io import load_labber_data, save_labber_data
 from zcu_tools.utils.process import rotate2real
 
 from .executor import MeasurementTask, OvernightCfg, T_RootResult
@@ -99,32 +100,34 @@ class T1PlotAndSaveMixin(Generic[T_Cfg]):
     def save(self, filepath, iters, result, comment, prefix_tag) -> None:
         filepath = Path(filepath)
 
-        x_info = {"name": "Iteration", "unit": "a.u.", "values": iters}
         comment = make_comment(self.cfg, comment)
 
         lengths = result["lengths"][0]
 
-        # signals
-        save_data(
-            filepath=str(filepath.with_name(filepath.name + "_signals")),
-            x_info=x_info,
-            y_info={"name": "Time", "unit": "s", "values": 1e-6 * lengths},
-            z_info={"name": "Signal", "unit": "a.u.", "values": result["signals"].T},
+        # signals: z stored native (Ny, Nx) = (Time, Iteration), inner axis last
+        save_labber_data(
+            safe_labber_filepath(str(filepath.with_name(filepath.name + "_signals"))),
+            z=("Signal", "a.u.", result["signals"].T),
+            axes=[
+                ("Iteration", "a.u.", iters),
+                ("Time", "s", 1e-6 * lengths),
+            ],
             comment=comment,
-            tag=prefix_tag + "/signals",
+            tags=prefix_tag + "/signals",
         )
 
-    def load(self, filepath: str, **kwargs) -> T1Result:
-        signals, lengths, _, comment = load_data(
-            filepath, return_comment=True, **kwargs
-        )
-        assert lengths is not None
+    def load(self, filepath: str) -> T1Result:
+        d = load_labber_data(format_ext(filepath))
+        signals = np.asarray(d.z)
+        lengths = np.asarray(d.axes[0].values)
+        comment = d.comment
+
         assert len(lengths.shape) == 1 and len(signals.shape) == 1
         assert lengths.shape == signals.shape
 
         lengths = lengths * 1e-6  # s -> us
 
-        if comment is not None:
+        if comment:
             cfg, _, _ = parse_comment(comment)
             if cfg is not None:
                 self.cfg = cast(

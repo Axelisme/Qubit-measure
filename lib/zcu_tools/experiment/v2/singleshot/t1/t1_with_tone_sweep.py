@@ -37,8 +37,9 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.progress_bar import make_pbar
-from zcu_tools.utils.datasaver import load_data, save_data
+from zcu_tools.utils.datasaver import safe_labber_filepath
 from zcu_tools.utils.fitting.multi_decay import fit_dual_transition_rates
+from zcu_tools.utils.labber_io import load_labber_data, save_labber_data
 
 from .util import measure_with_sweep
 
@@ -552,7 +553,6 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         result: T1WithToneSweepResult | None = None,
         comment: str | None = None,
         tag: str = "singleshot/t1/t1_with_tone_sweep",
-        **kwargs,
     ) -> None:
         if result is None:
             result = self.last_result
@@ -567,84 +567,61 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
 
         _filepath = Path(filepath)
 
-        save_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_gg_pop")),
-            x_info={"name": "sweep value", "unit": "a.u.", "values": xs},
-            y_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
-            z_info={
-                "name": "Ground Populations",
-                "unit": "a.u.",
-                "values": populations[:, 0, :, 0].T,
-            },
+        axes = [
+            ("Time", "s", Ts * 1e-6),
+            ("sweep value", "a.u.", xs),
+        ]
+        save_labber_data(
+            safe_labber_filepath(str(_filepath.with_name(_filepath.name + "_gg_pop"))),
+            z=("Ground Populations", "a.u.", populations[:, 0, :, 0]),
+            axes=axes,
             comment=comment,
-            tag=tag,
-            **kwargs,
+            tags=tag,
         )
-        save_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_ge_pop")),
-            x_info={"name": "sweep value", "unit": "a.u.", "values": xs},
-            y_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
-            z_info={
-                "name": "Ground Populations",
-                "unit": "a.u.",
-                "values": populations[:, 0, :, 1].T,
-            },
+        save_labber_data(
+            safe_labber_filepath(str(_filepath.with_name(_filepath.name + "_ge_pop"))),
+            z=("Ground Populations", "a.u.", populations[:, 0, :, 1]),
+            axes=axes,
             comment=comment,
-            tag=tag,
-            **kwargs,
+            tags=tag,
         )
-        save_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_eg_pop")),
-            x_info={"name": "sweep value", "unit": "a.u.", "values": xs},
-            y_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
-            z_info={
-                "name": "Ground Populations",
-                "unit": "a.u.",
-                "values": populations[:, 1, :, 0].T,
-            },
+        save_labber_data(
+            safe_labber_filepath(str(_filepath.with_name(_filepath.name + "_eg_pop"))),
+            z=("Ground Populations", "a.u.", populations[:, 1, :, 0]),
+            axes=axes,
             comment=comment,
-            tag=tag,
-            **kwargs,
+            tags=tag,
         )
-        save_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_ee_pop")),
-            x_info={"name": "sweep value", "unit": "a.u.", "values": xs},
-            y_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
-            z_info={
-                "name": "Ground Populations",
-                "unit": "a.u.",
-                "values": populations[:, 1, :, 1].T,
-            },
+        save_labber_data(
+            safe_labber_filepath(str(_filepath.with_name(_filepath.name + "_ee_pop"))),
+            z=("Ground Populations", "a.u.", populations[:, 1, :, 1]),
+            axes=axes,
             comment=comment,
-            tag=tag,
-            **kwargs,
+            tags=tag,
         )
 
-    def load(self, filepath: list[str], **kwargs) -> T1WithToneSweepResult:
+    def load(self, filepath: list[str]) -> T1WithToneSweepResult:
         gg_filepath, ge_filepath, eg_filepath, ee_filepath = filepath
 
         # Load ground populations
-        gg_pop, xs, Ts, comment = load_data(gg_filepath, return_comment=True, **kwargs)
-        assert Ts is not None
+        ld = load_labber_data(gg_filepath)
+        gg_pop = ld.z
+        comment = ld.comment
+        Ts = ld.axes[0].values  # Time
+        xs = ld.axes[1].values  # sweep value
         assert len(xs.shape) == 1 and len(Ts.shape) == 1
         assert gg_pop.shape == (len(xs), len(Ts))
 
         # Load ground populations
-        ge_pop, xs, Ts = load_data(ge_filepath, **kwargs)
-        assert Ts is not None
-        assert len(xs.shape) == 1 and len(Ts.shape) == 1
+        ge_pop = load_labber_data(ge_filepath).z
         assert ge_pop.shape == (len(xs), len(Ts))
 
         # Load ground populations
-        eg_pop, xs, Ts = load_data(eg_filepath, **kwargs)
-        assert Ts is not None
-        assert len(xs.shape) == 1 and len(Ts.shape) == 1
+        eg_pop = load_labber_data(eg_filepath).z
         assert eg_pop.shape == (len(xs), len(Ts))
 
         # Load ground populations
-        ee_pop, xs, Ts = load_data(ee_filepath, **kwargs)
-        assert Ts is not None
-        assert len(xs.shape) == 1 and len(Ts.shape) == 1
+        ee_pop = load_labber_data(ee_filepath).z
         assert ee_pop.shape == (len(xs), len(Ts))
 
         # Reconstruct signals shape: (gains, ts, 2)
@@ -661,7 +638,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         populations = np.real(populations).astype(np.float64)
 
         cfg_snapshot = None
-        if comment is not None:
+        if comment:
             cfg, _, _ = parse_comment(comment)
             if cfg is not None:
                 cfg_snapshot = T1WithToneSweepCfg.validate_or_warn(

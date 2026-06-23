@@ -32,8 +32,9 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
+from zcu_tools.utils.datasaver import safe_labber_filepath
 from zcu_tools.utils.func_tools import MinIntervalFunc
+from zcu_tools.utils.labber_io import load_labber_data, save_labber_data
 
 from ..executor import MeasurementTask, OvernightCfg, T_RootResult
 from .util import calc_populations
@@ -254,62 +255,55 @@ class MistOvernightAnalyzer:
 
         comment = make_comment(cfg, comment)
 
-        x_info = {"name": "Iteration", "unit": "a.u.", "values": iters}
-
         gains = result["gains"][0]
         populations = result["populations"]
 
-        # g_populations
-        save_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_g_populations")),
-            x_info=x_info,
-            y_info={"name": "Readout gain", "unit": "a.u.", "values": gains},
-            z_info={
-                "name": "Populations",
-                "unit": "a.u.",
-                "values": populations[..., 0].T,
-            },
-            comment=comment,
-            tag=prefix_tag + "/g_populations",
-        )
+        # native z is (Ny=iters, Nx=gains), inner axis (x) = gains, outer (y) = iters
+        axes = [
+            ("Readout gain", "a.u.", gains),  # inner (x)
+            ("Iteration", "a.u.", iters),  # outer (y)
+        ]
 
         # g_populations
-        save_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_e_populations")),
-            x_info=x_info,
-            y_info={"name": "Readout gain", "unit": "a.u.", "values": gains},
-            z_info={
-                "name": "Populations",
-                "unit": "a.u.",
-                "values": populations[..., 1].T,
-            },
+        save_labber_data(
+            safe_labber_filepath(
+                str(_filepath.with_name(_filepath.name + "_g_populations"))
+            ),
+            z=("Populations", "a.u.", populations[..., 0]),
+            axes=axes,
             comment=comment,
-            tag=prefix_tag + "/e_populations",
+            tags=prefix_tag + "/g_populations",
         )
 
-    def load(self, filepath: list[str], **kwargs) -> MistResult:
+        # e_populations
+        save_labber_data(
+            safe_labber_filepath(
+                str(_filepath.with_name(_filepath.name + "_e_populations"))
+            ),
+            z=("Populations", "a.u.", populations[..., 1]),
+            axes=axes,
+            comment=comment,
+            tags=prefix_tag + "/e_populations",
+        )
+
+    def load(self, filepath: list[str]) -> MistResult:
         g_filepath, e_filepath = filepath
 
-        g_pops, iters, gains, comment = load_data(
-            g_filepath, return_comment=True, **kwargs
-        )
-        assert gains is not None
+        g_ld = load_labber_data(g_filepath)
+        g_pops = np.real(np.asarray(g_ld.z)).astype(np.float64)
+        comment = g_ld.comment
+        gains = np.asarray(g_ld.axes[0].values).astype(np.float64)  # inner (x)
+        iters = np.asarray(g_ld.axes[1].values)  # outer (y)
         assert g_pops.shape == (len(iters), len(gains))
 
-        g_pops = np.real(g_pops).astype(np.float64)
-        gains = gains.astype(np.float64)
-
-        e_pops, iters, gains = load_data(e_filepath, **kwargs)
-        assert gains is not None
+        e_ld = load_labber_data(e_filepath)
+        e_pops = np.real(np.asarray(e_ld.z)).astype(np.float64)
         assert e_pops.shape == (len(iters), len(gains))
-
-        e_pops = np.real(e_pops).astype(np.float64)
-        gains = gains.astype(np.float64)
 
         populations = np.stack([g_pops, e_pops], axis=-1)  # (iters, gains, 2)
         gains = np.tile(gains, reps=(len(iters), 1))
 
-        if comment is not None:
+        if comment:
             cfg, _, _ = parse_comment(comment)
             if cfg is not None:
                 self.cfg = MistCfg.validate_or_warn(cfg, source=g_filepath)

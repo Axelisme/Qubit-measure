@@ -34,9 +34,10 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.progress_bar import make_pbar
-from zcu_tools.utils.datasaver import load_data, save_data
+from zcu_tools.utils.datasaver import format_ext, safe_labber_filepath
 from zcu_tools.utils.fitting.multi_decay import fit_dual_transition_rates
 from zcu_tools.utils.func_tools import MinIntervalFunc
+from zcu_tools.utils.labber_io import load_labber_data, save_labber_data
 
 from ..executor import MeasurementTask, OvernightCfg, T_RootResult
 from .util import calc_populations
@@ -119,83 +120,61 @@ class T1PlotAndSaveMixin(Generic[T_Cfg]):
     def save(self, filepath, iters, result, comment, prefix_tag) -> None:
         filepath = Path(filepath)
 
-        x_info = {"name": "Iteration", "unit": "a.u.", "values": iters}
-
         lengths = result["lengths"][0]
         populations = result["populations"]  # (iters, 2, times, 2)
 
         comment = make_comment(self.cfg, comment)
 
-        # gg_populations
-        save_data(
-            filepath=str(filepath.with_name(filepath.name + "_gg_pop")),
-            x_info=x_info,
-            y_info={"name": "Time", "unit": "s", "values": 1e-6 * lengths},
-            z_info={
-                "name": "Populations",
-                "unit": "a.u.",
-                "values": populations[:, 0, :, 0].T,
-            },
-            comment=comment,
-            tag=prefix_tag + "/gg_populations",
-        )
+        axes = [
+            ("Iteration", "a.u.", iters),
+            ("Time", "s", 1e-6 * lengths),
+        ]
 
-        # ge_populations
-        save_data(
-            filepath=str(filepath.with_name(filepath.name + "_ge_populations")),
-            x_info=x_info,
-            y_info={"name": "Time", "unit": "s", "values": 1e-6 * lengths},
-            z_info={
-                "name": "Populations",
-                "unit": "a.u.",
-                "values": populations[:, 0, :, 1].T,
-            },
-            comment=comment,
-            tag=prefix_tag + "/ge_populations",
-        )
-        # eg_populations
-        save_data(
-            filepath=str(filepath.with_name(filepath.name + "_eg_pop")),
-            x_info=x_info,
-            y_info={"name": "Time", "unit": "s", "values": 1e-6 * lengths},
-            z_info={
-                "name": "Populations",
-                "unit": "a.u.",
-                "values": populations[:, 1, :, 0].T,
-            },
-            comment=comment,
-            tag=prefix_tag + "/eg_populations",
-        )
+        # Each (suffix, sub-tag, z-slice) writes one Labber file. z on disk is
+        # native (Ny, Nx) = (times, iters), so the inner Iteration axis is last;
+        # the slices below are (iters, times) and need a .T to reach (times, iters).
+        for suffix, sub_tag, zslice in (
+            ("_gg_pop", "gg_populations", populations[:, 0, :, 0]),
+            ("_ge_populations", "ge_populations", populations[:, 0, :, 1]),
+            ("_eg_pop", "eg_populations", populations[:, 1, :, 0]),
+            ("_ee_populations", "ee_populations", populations[:, 1, :, 1]),
+        ):
+            save_labber_data(
+                safe_labber_filepath(str(filepath.with_name(filepath.name + suffix))),
+                z=("Populations", "a.u.", zslice.T),
+                axes=axes,
+                comment=comment,
+                tags=prefix_tag + f"/{sub_tag}",
+            )
 
-        # ee_populations
-        save_data(
-            filepath=str(filepath.with_name(filepath.name + "_ee_populations")),
-            x_info=x_info,
-            y_info={"name": "Time", "unit": "s", "values": 1e-6 * lengths},
-            z_info={
-                "name": "Populations",
-                "unit": "a.u.",
-                "values": populations[:, 1, :, 1].T,
-            },
-            comment=comment,
-            tag=prefix_tag + "/ee_populations",
-        )
+    def load(self, filepath: str) -> T1Result:
+        filepath = str(filepath)
 
-    def load(self, filepath: str, **kwargs) -> T1Result:
-        lengths, populations, _, comment = load_data(
-            filepath, return_comment=True, **kwargs
-        )
+        lengths: NDArray[np.float64] | None = None
+        comment: str = ""
+        slices: dict[tuple[int, int], NDArray[np.float64]] = {}
+
+        # Reassemble populations (iters, 2, times, 2) from the four per-state files.
+        for suffix, (j, k) in (
+            ("_gg_pop", (0, 0)),
+            ("_ge_populations", (0, 1)),
+            ("_eg_pop", (1, 0)),
+            ("_ee_populations", (1, 1)),
+        ):
+            ld = load_labber_data(format_ext(filepath + suffix))
+            # native z is (Ny, Nx) = (times, iters); transpose to (iters, times).
+            slices[(j, k)] = np.real(np.asarray(ld.z)).astype(np.float64).T
+            if lengths is None:
+                lengths = (np.asarray(ld.axes[1].values) * 1e6).astype(np.float64)
+                comment = ld.comment
+
         assert lengths is not None
-        assert populations is not None
-        assert lengths.shape == populations.shape[0]
-        assert populations.shape[1] == 2
-        assert populations.shape[2] == 2
-        assert populations.shape[3] == 2
+        n_iters, n_times = slices[(0, 0)].shape
+        populations = np.zeros((n_iters, 2, n_times, 2), dtype=np.float64)
+        for (j, k), zslice in slices.items():
+            populations[:, j, :, k] = zslice
 
-        lengths = lengths.astype(np.float64)
-        populations = np.real(populations).astype(np.float64)
-
-        if comment is not None:
+        if comment:
             cfg, _, _ = parse_comment(comment)
             if cfg is not None:
                 self.cfg = cast(

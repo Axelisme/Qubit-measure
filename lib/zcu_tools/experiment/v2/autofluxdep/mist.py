@@ -29,8 +29,8 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils import deepupdate
-from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.func_tools import MinIntervalFunc
+from zcu_tools.utils.labber_io import save_labber_data
 
 from .executor import FluxDepCfg, MeasurementTask, T_RootResult
 
@@ -211,21 +211,18 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
             filepath, flux_values=flux_values, gains=self.gains, **result
         )
 
-        x_info = {"name": "Flux value", "unit": "a.u.", "values": flux_values}
         comment = make_comment(cfg, comment)
 
-        # raw_signals: (flux, gains)
-        save_data(
-            filepath=str(filepath.with_name(filepath.name + "_signals")),
-            x_info=x_info,
-            y_info={"name": "Readout Gain", "unit": "a.u.", "values": self.gains},
-            z_info={
-                "name": "Signal",
-                "unit": "a.u.",
-                "values": result["raw_signals"].T,
-            },
+        # raw_signals: (flux, gains); native z is (Ngain, Nflux) with inner axis (flux) last
+        save_labber_data(
+            str(filepath.with_name(filepath.name + "_signals")),
+            z=("Signal", "a.u.", result["raw_signals"].T),
+            axes=[
+                ("Flux value", "a.u.", flux_values),
+                ("Readout Gain", "a.u.", self.gains),
+            ],
             comment=comment,
-            tag=prefix_tag + "/signals",
+            tags=prefix_tag + "/signals",
         )
 
     @classmethod

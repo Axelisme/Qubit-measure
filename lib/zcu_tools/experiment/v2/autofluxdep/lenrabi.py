@@ -32,9 +32,9 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils import deepupdate
-from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_rabi
 from zcu_tools.utils.func_tools import MinIntervalFunc
+from zcu_tools.utils.labber_io import load_labber_data, save_labber_data
 from zcu_tools.utils.process import rotate2real
 
 from .executor import FluxDepCfg, FluxDepInfoDict, MeasurementTask
@@ -301,69 +301,48 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
 
         np.savez_compressed(filepath, flux_values=flux_values, **result)
 
-        x_info = {"name": "Flux value", "unit": "a.u.", "values": flux_values}
+        flux_axis = ("Flux value", "a.u.", flux_values)
+        time_axis = ("Time Index", "a.u.", np.arange(self.num_expts))
         comment = make_comment(cfg, comment)
 
-        # signals
-        save_data(
-            filepath=str(filepath.with_name(filepath.name + "_signals")),
-            x_info=x_info,
-            y_info={
-                "name": "Time Index",
-                "unit": "a.u.",
-                "values": np.arange(self.num_expts),
-            },
-            z_info={
-                "name": "Signal",
-                "unit": "a.u.",
-                "values": result["raw_signals"].T,
-            },
+        # signals: native z is (Ny=Time, Nx=Flux) = raw_signals (time, flux)
+        save_labber_data(
+            str(filepath.with_name(filepath.name + "_signals")),
+            z=("Signal", "a.u.", result["raw_signals"]),
+            axes=[flux_axis, time_axis],
             comment=comment,
-            tag=prefix_tag + "/signals",
+            tags=prefix_tag + "/signals",
         )
 
-        # length
-        save_data(
-            filepath=str(filepath.with_name(filepath.name + "_length")),
-            x_info=x_info,
-            y_info={
-                "name": "Time Index",
-                "unit": "a.u.",
-                "values": np.arange(self.num_expts),
-            },
-            z_info={
-                "name": "Time (us)",
-                "unit": "s",
-                "values": result["length"].T * 1e-6,
-            },
+        # length: native z is (Ny=Time, Nx=Flux) = length (time, flux)
+        save_labber_data(
+            str(filepath.with_name(filepath.name + "_length")),
+            z=("Time (us)", "s", result["length"] * 1e-6),
+            axes=[flux_axis, time_axis],
             comment=comment,
-            tag=prefix_tag + "/length",
+            tags=prefix_tag + "/length",
         )
 
-        # pi length
-        save_data(
-            filepath=str(filepath.with_name(filepath.name + "_pi_length")),
-            x_info=x_info,
-            z_info={
-                "name": "Pi length",
-                "unit": "s",
-                "values": result["pi_length"] * 1e-6,
-            },
+        # pi length: 1D over flux
+        save_labber_data(
+            str(filepath.with_name(filepath.name + "_pi_length")),
+            z=("Pi length", "s", result["pi_length"] * 1e-6),
+            axes=[flux_axis],
             comment=comment,
-            tag=prefix_tag + "/pi_length",
+            tags=prefix_tag + "/pi_length",
         )
 
-        # success
-        save_data(
-            filepath=str(filepath.with_name(filepath.name + "_success")),
-            x_info=x_info,
-            z_info={"name": "Success", "unit": "bool", "values": result["success"]},
+        # success: 1D over flux
+        save_labber_data(
+            str(filepath.with_name(filepath.name + "_success")),
+            z=("Success", "bool", result["success"]),
+            axes=[flux_axis],
             comment=comment,
-            tag=prefix_tag + "/success",
+            tags=prefix_tag + "/success",
         )
 
     @classmethod
-    def load(cls, filepath: str, **kwargs) -> dict:
+    def load(cls, filepath: str) -> dict:
         _filepath = Path(filepath)
 
         # main container (has pi2_length and rabi_freq)
@@ -374,33 +353,38 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
         rabi_freq = data["rabi_freq"]
         success_main = data["success"]
 
-        # signals
+        # signals: native z is (Ny=Time, Nx=Flux); axes inner-first [Flux, Time]
         signal_path = str(_filepath.with_name(_filepath.name + "_signals"))
-        signals_stored, flux_sig, len_idxs, comment = load_data(
-            signal_path, return_comment=True, **kwargs
-        )
-        assert flux_sig is not None and len_idxs is not None
+        ld_sig = load_labber_data(signal_path)
+        signals_stored = ld_sig.z
+        flux_sig = ld_sig.axes[0].values
+        len_idxs = ld_sig.axes[1].values
+        comment = ld_sig.comment
         assert np.array_equal(flux_values, flux_sig)
         assert signals_stored.shape == (len(len_idxs), len(flux_sig))
 
+        # length: native z is (Ny=Time, Nx=Flux)
         length_path = str(_filepath.with_name(_filepath.name + "_length"))
-        length_stored, flux_len, _ = load_data(length_path, **kwargs)
-        assert flux_len is not None
-        assert length_stored.shape == (len(flux_len), len(len_idxs))
+        ld_len = load_labber_data(length_path)
+        length_stored = ld_len.z
+        flux_len = ld_len.axes[0].values
+        assert length_stored.shape == (len(len_idxs), len(flux_len))
         assert np.array_equal(flux_values, flux_len)
 
-        # pi_length
+        # pi_length: 1D over flux
         pi_length_path = str(_filepath.with_name(_filepath.name + "_pi_length"))
-        pi_length_data, flux_pi, _ = load_data(pi_length_path, **kwargs)
-        assert flux_pi is not None
-        assert pi_length_data.shape == (len(flux_pi), len(len_idxs))
+        ld_pi = load_labber_data(pi_length_path)
+        pi_length_data = ld_pi.z
+        flux_pi = ld_pi.axes[0].values
+        assert pi_length_data.shape == flux_pi.shape
         assert np.array_equal(flux_values, flux_pi)
 
-        # success
+        # success: 1D over flux
         success_path = str(_filepath.with_name(_filepath.name + "_success"))
-        success_data, flux_succ, _ = load_data(success_path, **kwargs)
-        assert flux_succ is not None
-        assert success_data.shape == (len(flux_succ), len(len_idxs))
+        ld_succ = load_labber_data(success_path)
+        success_data = ld_succ.z
+        flux_succ = ld_succ.axes[0].values
+        assert success_data.shape == flux_succ.shape
         assert np.array_equal(flux_values, flux_succ)
 
         assert (
@@ -410,14 +394,15 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
             == pi_length_data.shape
         )
 
-        length = length_stored.astype(np.float64) * 1e6
+        # native length is (Time, Flux); restore old returned (Flux, Time) orientation
+        length = length_stored.T.astype(np.float64) * 1e6
         raw_signals = signals_stored.T.astype(np.complex128)
         pi_length = pi_length_data.astype(np.float64)
         pi2_length = pi2_length.astype(np.float64)
         rabi_freq = rabi_freq.astype(np.float64)
         success = success_data.astype(np.bool_) & success_main.astype(np.bool_)
         last_cfg = None
-        if comment is not None:
+        if comment:
             last_cfg, _, _ = parse_comment(comment)
 
         return {

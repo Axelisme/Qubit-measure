@@ -31,9 +31,9 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils import deepupdate
-from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_decay, fit_decay_fringe
 from zcu_tools.utils.func_tools import MinIntervalFunc
+from zcu_tools.utils.labber_io import load_labber_data, save_labber_data
 from zcu_tools.utils.process import rotate2real
 
 from .executor import FluxDepCfg, FluxDepInfoDict, MeasurementTask, T_RootResult
@@ -275,56 +275,39 @@ class T2EchoTask(MeasurementTask[T2EchoResult, T_RootResult, T2EchoPlotDict]):
 
         np.savez_compressed(filepath, flux_values=flux_values, **result)
 
-        x_info = {"name": "Flux value", "unit": "a.u.", "values": flux_values}
+        flux_axis = ("Flux value", "a.u.", flux_values)
+        time_axis = ("Time Index", "a.u.", np.arange(self.num_expts))
         comment = make_comment(cfg, comment)
 
         # signals
-        save_data(
-            filepath=str(filepath.with_name(filepath.name + "_signals")),
-            x_info=x_info,
-            y_info={
-                "name": "Time Index",
-                "unit": "a.u.",
-                "values": np.arange(self.num_expts),
-            },
-            z_info={
-                "name": "Signal",
-                "unit": "a.u.",
-                "values": result["raw_signals"].T,
-            },
+        save_labber_data(
+            str(filepath.with_name(filepath.name + "_signals")),
+            z=("Signal", "a.u.", result["raw_signals"].T),
+            axes=[flux_axis, time_axis],
             comment=comment,
-            tag=prefix_tag + "/signals",
+            tags=prefix_tag + "/signals",
         )
 
         # length
-        save_data(
-            filepath=str(filepath.with_name(filepath.name + "_length")),
-            x_info=x_info,
-            y_info={
-                "name": "Time Index",
-                "unit": "a.u.",
-                "values": np.arange(self.num_expts),
-            },
-            z_info={
-                "name": "Time (us)",
-                "unit": "s",
-                "values": result["length"].T * 1e-6,
-            },
+        save_labber_data(
+            str(filepath.with_name(filepath.name + "_length")),
+            z=("Time (us)", "s", result["length"].T * 1e-6),
+            axes=[flux_axis, time_axis],
             comment=comment,
-            tag=prefix_tag + "/length",
+            tags=prefix_tag + "/length",
         )
 
         # t2e
-        save_data(
-            filepath=str(filepath.with_name(filepath.name + "_t2e")),
-            x_info=x_info,
-            z_info={"name": "T2 Echo", "unit": "s", "values": result["t2e"] * 1e-6},
+        save_labber_data(
+            str(filepath.with_name(filepath.name + "_t2e")),
+            z=("T2 Echo", "s", result["t2e"] * 1e-6),
+            axes=[flux_axis],
             comment=comment,
-            tag=prefix_tag + "/t2e",
+            tags=prefix_tag + "/t2e",
         )
 
     @classmethod
-    def load(cls, filepath: str, **kwargs) -> dict:
+    def load(cls, filepath: str) -> dict:
         _filepath = Path(filepath)
 
         data = np.load(filepath)
@@ -334,32 +317,38 @@ class T2EchoTask(MeasurementTask[T2EchoResult, T_RootResult, T2EchoPlotDict]):
         success = data["success"]
 
         signal_path = str(_filepath.with_name(_filepath.name + "_signals"))
-        signals_stored, flux_sig, len_idxs, comment = load_data(
-            signal_path, return_comment=True, **kwargs
-        )
-        assert flux_sig is not None and len_idxs is not None
+        ld_sig = load_labber_data(signal_path)
+        signals_stored = np.asarray(ld_sig.z)
+        flux_sig = np.asarray(ld_sig.axes[0].values)
+        len_idxs = np.asarray(ld_sig.axes[1].values)
+        comment = ld_sig.comment
+        # native load is (Ny, Nx) = (num_expts, n_flux), inner axis (flux) last
         assert np.array_equal(flux_values, flux_sig)
         assert signals_stored.shape == (len(len_idxs), len(flux_values))
 
         length_path = str(_filepath.with_name(_filepath.name + "_length"))
-        length_stored, flux_len, _ = load_data(length_path, **kwargs)
-        assert flux_len is not None
-        assert length_stored.shape == (len(flux_len), len(len_idxs))
+        ld_len = load_labber_data(length_path)
+        length_stored = np.asarray(ld_len.z)
+        flux_len = np.asarray(ld_len.axes[0].values)
+        # native load is (num_expts, n_flux); old dict-API load was flux-major
+        assert length_stored.shape == (len(len_idxs), len(flux_len))
         assert np.array_equal(flux_values, flux_len)
 
         t2e_path = str(_filepath.with_name(_filepath.name + "_t2e"))
-        t2e_stored, flux_t2e, _ = load_data(t2e_path, **kwargs)
-        assert flux_t2e is not None
+        ld_t2e = load_labber_data(t2e_path)
+        t2e_stored = np.asarray(ld_t2e.z)
+        flux_t2e = np.asarray(ld_t2e.axes[0].values)
         assert t2e_stored.shape == (len(flux_t2e),)
         assert np.array_equal(flux_values, flux_t2e)
 
-        length = length_stored[0].astype(np.float64) * 1e6
+        # length trace at flux index 0: a num_expts-long vector
+        length = length_stored[:, 0].astype(np.float64) * 1e6
         raw_signals = signals_stored.T.astype(np.complex128)
         t2e = t2e_stored.astype(np.float64) * 1e6
         t2e_err = t2e_err.astype(np.float64)
         success = success.astype(np.bool_)
         last_cfg = None
-        if comment is not None:
+        if comment:
             last_cfg, _, _ = parse_comment(comment)
 
         return {
@@ -369,6 +358,6 @@ class T2EchoTask(MeasurementTask[T2EchoResult, T_RootResult, T2EchoPlotDict]):
             "t2e_err": t2e_err,
             "success": success,
             "flux_values": flux_values,
-            "lengths": length_stored[0],
+            "lengths": length_stored[:, 0],
             "last_cfg": last_cfg,
         }

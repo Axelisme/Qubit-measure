@@ -31,9 +31,10 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils import deepupdate
-from zcu_tools.utils.datasaver import load_data, save_data
+from zcu_tools.utils.datasaver import safe_labber_filepath
 from zcu_tools.utils.fitting import fit_decay
 from zcu_tools.utils.func_tools import MinIntervalFunc
+from zcu_tools.utils.labber_io import load_labber_data, save_labber_data
 from zcu_tools.utils.process import rotate2real
 
 from .executor import FluxDepCfg, FluxDepInfoDict, MeasurementTask, T_RootResult
@@ -257,55 +258,38 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
 
         np.savez_compressed(filepath, flux_values=flux_values, **result)
 
-        x_info = {"name": "Flux value", "unit": "a.u.", "values": flux_values}
+        flux_axis = ("Flux value", "a.u.", flux_values)
+        time_axis = ("Time Index", "a.u.", np.arange(self.num_expts))
 
-        # signals
-        save_data(
-            filepath=str(filepath.with_name(filepath.name + "_signals")),
-            x_info=x_info,
-            y_info={
-                "name": "Time Index",
-                "unit": "a.u.",
-                "values": np.arange(self.num_expts),
-            },
-            z_info={
-                "name": "Signal",
-                "unit": "a.u.",
-                "values": result["raw_signals"].T,
-            },
+        # signals: native z is (Nflux, Ntime) = (outer, inner), axes inner-first
+        save_labber_data(
+            safe_labber_filepath(str(filepath.with_name(filepath.name + "_signals"))),
+            z=("Signal", "a.u.", result["raw_signals"]),
+            axes=[time_axis, flux_axis],
             comment=comment,
-            tag=prefix_tag + "/signals",
+            tags=prefix_tag + "/signals",
         )
 
-        # length
-        save_data(
-            filepath=str(filepath.with_name(filepath.name + "_length")),
-            x_info=x_info,
-            y_info={
-                "name": "Time Index",
-                "unit": "a.u.",
-                "values": np.arange(self.num_expts),
-            },
-            z_info={
-                "name": "Time (us)",
-                "unit": "s",
-                "values": result["length"].T * 1e-6,
-            },
+        # length: native z is (Nflux, Ntime)
+        save_labber_data(
+            safe_labber_filepath(str(filepath.with_name(filepath.name + "_length"))),
+            z=("Time (us)", "s", result["length"] * 1e-6),
+            axes=[time_axis, flux_axis],
             comment=comment,
-            tag=prefix_tag + "/length",
+            tags=prefix_tag + "/length",
         )
 
-        # t1
-        save_data(
-            filepath=str(filepath.with_name(filepath.name + "_t1")),
-            x_info=x_info,
-            z_info={"name": "T1", "unit": "s", "values": result["t1"] * 1e-6},
+        # t1: 1D over flux only
+        save_labber_data(
+            safe_labber_filepath(str(filepath.with_name(filepath.name + "_t1"))),
+            z=("T1", "s", result["t1"] * 1e-6),
+            axes=[flux_axis],
             comment=comment,
-            tag=prefix_tag + "/t1",
+            tags=prefix_tag + "/t1",
         )
 
     @classmethod
-    def load(cls, filepath: str, **kwargs) -> dict:
+    def load(cls, filepath: str) -> dict:
         _filepath = Path(filepath)
 
         data = np.load(filepath)
@@ -313,33 +297,39 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
         flux_values = data["flux_values"]
         success = data["success"]
 
+        # signals: native z is (Nflux, Ntime), axes inner-first [Time, Flux]
         signal_path = str(_filepath.with_name(_filepath.name + "_signals"))
-        signals_stored, flux_sig, len_idxs, comment = load_data(
-            signal_path, return_comment=True, **kwargs
-        )
-        assert flux_sig is not None and len_idxs is not None
+        sig = load_labber_data(signal_path)
+        signals_stored = sig.z
+        len_idxs = sig.axes[0].values
+        flux_sig = sig.axes[1].values
+        comment = sig.comment
         assert np.array_equal(flux_values, flux_sig)
-        assert signals_stored.shape == (len(len_idxs), len(flux_values))
+        assert signals_stored.shape == (len(flux_values), len(len_idxs))
 
+        # length: native z is (Nflux, Ntime)
         length_path = str(_filepath.with_name(_filepath.name + "_length"))
-        length_stored, flux_len, _ = load_data(length_path, **kwargs)
-        assert flux_len is not None
+        ln = load_labber_data(length_path)
+        length_stored = ln.z
+        flux_len = ln.axes[1].values
         assert length_stored.shape == (len(flux_len), len(len_idxs))
         assert np.array_equal(flux_values, flux_len)
 
+        # t1: 1D over flux only
         t1_path = str(_filepath.with_name(_filepath.name + "_t1"))
-        t1_stored, flux_t1, _ = load_data(t1_path, **kwargs)
-        assert flux_t1 is not None
+        t = load_labber_data(t1_path)
+        t1_stored = t.z
+        flux_t1 = t.axes[0].values
         assert t1_stored.shape == (len(flux_t1),)
         assert np.array_equal(flux_values, flux_t1)
 
-        length = length_stored[0].astype(np.float64) * 1e6  # back to us
-        raw_signals = signals_stored.T.astype(np.complex128)
-        t1 = t1_stored.astype(np.float64) * 1e6  # back to us
+        length = length_stored[0].real.astype(np.float64) * 1e6  # back to us
+        raw_signals = signals_stored.astype(np.complex128)
+        t1 = t1_stored.real.astype(np.float64) * 1e6  # back to us
         t1_err = data["t1_err"].astype(np.float64)
         success = success.astype(np.bool_)
         last_cfg = None
-        if comment is not None:
+        if comment:
             last_cfg, _, _ = parse_comment(comment)
 
         return {
@@ -349,6 +339,6 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
             "t1_err": t1_err,
             "success": success,
             "flux_values": flux_values,
-            "lengths": length_stored[0],
+            "lengths": length_stored[0].real,
             "last_cfg": last_cfg,
         }

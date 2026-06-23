@@ -20,9 +20,9 @@ from zcu_tools.meta_tool import ModuleLibrary
 from zcu_tools.program.v2 import SweepCfg, TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 from zcu_tools.utils import deepupdate
-from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.func_tools import MinIntervalFunc
+from zcu_tools.utils.labber_io import load_labber_data, save_labber_data
 from zcu_tools.utils.math import IDWInterpolation
 from zcu_tools.utils.process import rotate2real
 
@@ -296,60 +296,47 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
             filepath, flux_values=flux_values, detunes=self.detunes, **result
         )
 
-        x_info = {"name": "Flux value", "unit": "a.u.", "values": flux_values}
+        flux_axis = ("Flux value", "a.u.", flux_values)
         comment = make_comment(cfg, comment)
 
         # signals
-        save_data(
-            filepath=str(filepath.with_name(filepath.name + "_signals")),
-            x_info=x_info,
-            y_info={"name": "Detune", "unit": "Hz", "values": 1e6 * self.detunes},
-            z_info={
-                "name": "Signal",
-                "unit": "a.u.",
-                "values": result["raw_signals"].T,
-            },
+        save_labber_data(
+            str(filepath.with_name(filepath.name + "_signals")),
+            z=("Signal", "a.u.", result["raw_signals"].T),
+            axes=[flux_axis, ("Detune", "Hz", 1e6 * self.detunes)],
             comment=comment,
-            tag=prefix_tag + "/signals",
+            tags=prefix_tag + "/signals",
         )
 
         # predict frequency
-        save_data(
-            filepath=str(filepath.with_name(filepath.name + "_predict_freq")),
-            x_info=x_info,
-            z_info={
-                "name": "Predict frequency",
-                "unit": "Hz",
-                "values": result["predict_freq"] * 1e6,
-            },
+        save_labber_data(
+            str(filepath.with_name(filepath.name + "_predict_freq")),
+            z=("Predict frequency", "Hz", result["predict_freq"] * 1e6),
+            axes=[flux_axis],
             comment=comment,
-            tag=prefix_tag + "/predict_freq",
+            tags=prefix_tag + "/predict_freq",
         )
 
         # fit frequency
-        save_data(
-            filepath=str(filepath.with_name(filepath.name + "_fit_freq")),
-            x_info=x_info,
-            z_info={
-                "name": "Fit frequency",
-                "unit": "Hz",
-                "values": result["fit_freq"] * 1e6,
-            },
+        save_labber_data(
+            str(filepath.with_name(filepath.name + "_fit_freq")),
+            z=("Fit frequency", "Hz", result["fit_freq"] * 1e6),
+            axes=[flux_axis],
             comment=comment,
-            tag=prefix_tag + "/fit_freq",
+            tags=prefix_tag + "/fit_freq",
         )
 
         # success
-        save_data(
-            filepath=str(filepath.with_name(filepath.name + "_success")),
-            x_info=x_info,
-            z_info={"name": "Success", "unit": "bool", "values": result["success"]},
+        save_labber_data(
+            str(filepath.with_name(filepath.name + "_success")),
+            z=("Success", "bool", result["success"]),
+            axes=[flux_axis],
             comment=comment,
-            tag=prefix_tag + "/success",
+            tags=prefix_tag + "/success",
         )
 
     @classmethod
-    def load(cls, filepath: str, **kwargs) -> dict:
+    def load(cls, filepath: str) -> dict:
         _filepath = Path(filepath)
 
         data = np.load(filepath)
@@ -362,28 +349,30 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
         fit_kappa_err: NDArray[np.float64] = data["fit_kappa_err"]
 
         signal_path = str(_filepath.with_name(_filepath.name + "_signals"))
-        signals_stored, flux_sig, detunes_sig, comment = load_data(
-            signal_path, return_comment=True, **kwargs
-        )
-        assert flux_sig is not None and detunes_sig is not None
+        signal_ld = load_labber_data(signal_path)
+        signals_stored = signal_ld.z
+        flux_sig = signal_ld.axes[0].values
+        detunes_sig = signal_ld.axes[1].values
+        comment = signal_ld.comment
         assert np.array_equal(flux_values, flux_sig)
         assert np.array_equal(detunes, detunes_sig)
         assert signals_stored.shape == (len(detunes), len(flux_values))
 
         predict_freq_path = str(_filepath.with_name(_filepath.name + "_predict_freq"))
-        predict_freq_data, flux_predict, _ = load_data(predict_freq_path, **kwargs)
+        predict_freq_ld = load_labber_data(predict_freq_path)
+        predict_freq_data = predict_freq_ld.z
+        flux_predict = predict_freq_ld.axes[0].values
 
         fit_freq_path = str(_filepath.with_name(_filepath.name + "_fit_freq"))
-        fit_freq_data, flux_fit, _ = load_data(fit_freq_path, **kwargs)
+        fit_freq_ld = load_labber_data(fit_freq_path)
+        fit_freq_data = fit_freq_ld.z
+        flux_fit = fit_freq_ld.axes[0].values
 
         success_path = str(_filepath.with_name(_filepath.name + "_success"))
-        success_data, flux_success, _ = load_data(success_path, **kwargs)
+        success_ld = load_labber_data(success_path)
+        success_data = success_ld.z
+        flux_success = success_ld.axes[0].values
 
-        assert (
-            flux_predict is not None
-            and flux_fit is not None
-            and flux_success is not None
-        )
         assert (
             predict_freq_data.shape
             == fit_freq_data.shape
@@ -403,7 +392,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
         fit_kappa_err = np.asarray(fit_kappa_err, dtype=np.float64)
         success = success_data.astype(np.bool_)
         last_cfg = None
-        if comment is not None:
+        if comment:
             last_cfg, _, _ = parse_comment(comment)
 
         return {
