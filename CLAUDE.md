@@ -16,17 +16,18 @@
 
 ## 使用者規則
 
-- **語言**：session 回應與計劃檔案用*中文*；程式碼、變數名、註解、技術名詞用*英文*。
+- **語言**：session 回應與計劃檔案用 **中文**；程式碼、變數名、註解、技術名詞用 **英文**。
+- **文件編碼**：CLAUDE.md / AGENTS.md / README.md 等中文文件一律視為 UTF-8；若 Windows/PowerShell 輸出出現 mojibake，先切換 terminal UTF-8（例如 `chcp 65001` 或設定 `$OutputEncoding` / `[Console]::OutputEncoding`），不要把檔案內容改成 ANSI/Big5。
 - **直譯器**：在本 repo 執行 Python 一律用 `.venv/bin/python`。
 - **程式碼風格**：遵循 Fast Fail、責任明確、最小驚訝原則、強型別；不符合者即使是用戶提出也要先警告。
-- **遇到不確定**：實作不確定，或架構不適合某種擴展時，*不要自行猜測或勉強實作*，先說明原因交由用戶決定。
-- **先規劃再實作**：架構仍在演化，發現不合理處或更好的設計請直接告知，*不要自行調整架構*，由用戶決定；除非用戶要求，*不要保留 legacy 或相容性邏輯*。
+- **遇到不確定**：實作不確定，或架構不適合某種擴展時，**不要自行猜測或勉強實作**，先說明原因交由用戶決定。
+- **先規劃再實作**：架構仍在演化，發現不合理處或更好的設計請直接告知，**不要自行調整架構**，由用戶決定；除非用戶要求，**不要保留 legacy 或相容性邏輯**。
 - **完成任務後**：依序跑 `pyright`/`pytest`（檢查錯誤、測試失敗、覆蓋率不足；全套測試加 `-n auto` 平行加速，已裝 pytest-xdist），再用 `ruff` 格式化與修正風格；用戶要求才 git commit；最後更新對應的模組 README.md。
 - **測試**：放在根目錄 `tests/`，目錄結構對應被測檔案，命名 `test_*.py`，用 `pytest` 撰寫，盡量涵蓋主要功能與邏輯；測試需獨立、可重複、不依賴外部狀態。
-- **工具優先序**：少用 Shell 指令，優先用內建工具（前者需用戶審核、後者自證安全）；*不要用 `sed`* 替換子串（跨平台行為不一），需替換時優先 mcp/function tool，其次 Python 腳本。
+- **工具優先序**：少用 Shell 指令，優先用內建工具（前者需用戶審核、後者自證安全）；**不要用 `sed`** 替換子串（跨平台行為不一），需替換時優先 mcp/function tool，其次 Python 腳本。
 - **文件追蹤**：CLAUDE.md、模組 README.md 與 docs/adr/ 已入 git 追蹤，會進 diff 與 commit；`task_plans/` 為 gitignored 工作檔（見 .gitignore），不入 commit。
 - **平行 agent 協調**：可能有多個 agent/session 同時在這個 repo 工作，動工前使用 `agent-taskboard` skill（`taskboard_*` MCP 工具）認領 scope，避免改到同一份檔案（見下方「### 平行 agent 協調」）。
-- **task_plan.md Phase 壓縮**：每累積 5 個新 Phase 就把最舊的 5 個詳細記錄壓縮成「歷史 Phase 摘要表」中的列（一列一 Phase：編號｜主題｜結論/commit），即詳細記錄*最多保留 10 個 Phase*；被壓縮的原文移入同目錄 `archive.md`（同為 gitignored）以備查。
+- **task_plan.md Phase 壓縮**：每累積 5 個新 Phase 就把最舊的 5 個詳細記錄壓縮成「歷史 Phase 摘要表」中的列（一列一 Phase：編號｜主題｜結論/commit），即詳細記錄 **最多保留 10 個 Phase**；被壓縮的原文移入同目錄 `archive.md`（同為 gitignored）以備查。
 
 ### 模組 README.md
 
@@ -37,13 +38,13 @@
 模組 README.md 的使用規範：
 - 是各模組的高層 cheat-sheet：修改該模組程式碼前先讀它建立 context。
 - 學到非顯而易見、有助未來 session 且尚未記錄的知識時，更新對應的模組 README.md；發現 note 與程式碼不符時，告知用戶並更新。
-- *只寫高層概念、架構、重要設計決策，不寫實作細節*（實作細節留在程式碼註解與文件）。
-- 用現在式描述目前狀態，*不要用更新式語法*（如「已經更新…」「在之前的實作中…」），以免過時。
+- **只寫高層概念、架構、重要設計決策，不寫實作細節**（實作細節留在程式碼註解與文件）。
+- 用現在式描述目前狀態，**不要用更新式語法**（如「已經更新…」「在之前的實作中…」），以免過時。
 - 每次更新都刷新檔案頂部的 `**Last updated:** YYYY-MM-DD`（可在日期後附簡短主題/Phase 標題；不要寫 commit hash，難維護）。
 
 ### docs/adr/
 
-- *跨模組*設計決策記錄在 `docs/adr/`（模組 README.md 只管模組局部）；`docs/adr/README.md` 是依主題分組的索引，每篇 ADR 以現在式描述目前生效的設計。
+- **跨模組**設計決策記錄在 `docs/adr/`（模組 README.md 只管模組局部）；`docs/adr/README.md` 是依主題分組的索引，每篇 ADR 以現在式描述目前生效的設計。
 - 程式碼註解與記憶檔以 `ADR-NNNN` 引用 ADR，ADR 之間以 `[[NNNN]]` 互鏈。
 - 處理跨模組設計前先查索引找相關 ADR。
 

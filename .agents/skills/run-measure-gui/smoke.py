@@ -13,7 +13,9 @@ What it proves (mock SoC, no hardware):
   -> tab.close -> clean shutdown.
 
 Run it (from the repo root):
-    xvfb-run -a .venv/bin/python .claude/skills/run-measure-gui/smoke.py
+    xvfb-run -a .venv/bin/python .codex/skills/run-measure-gui/smoke.py
+or:
+    xvfb-run -a .venv/bin/python .agents/skills/run-measure-gui/smoke.py
 
 The RPC method names here are the *wire* names (dotted: 'tab.run_start'), not the
 MCP tool aliases ('gui_tab_run_start'). An agent driving via MCP uses the aliases;
