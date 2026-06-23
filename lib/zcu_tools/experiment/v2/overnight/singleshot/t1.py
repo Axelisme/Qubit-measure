@@ -100,8 +100,8 @@ class T1PlotAndSaveMixin(Generic[T_Cfg]):
         )
 
     def update_plotter(self, plotters, ctx, results) -> None:
-        iters = ctx.env_dict["iters"]
-        i = ctx.env_dict["repeat_idx"]
+        iters = ctx.env["iters"]
+        i = ctx.env["repeat_idx"]
 
         lengths = results["lengths"][0]
         populations = calc_populations(results["populations"])  # (iters, 2, times, 3)

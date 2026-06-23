@@ -89,7 +89,7 @@ class T1PlotAndSaveMixin(Generic[T_Cfg]):
         )
 
     def update_plotter(self, plotters: T1PlotDict, ctx, results) -> None:
-        iters = ctx.env_dict["iters"]
+        iters = ctx.env["iters"]
 
         lengths = results["lengths"][0]
         real_signals = t1_overnight_signal2real(results["signals"])
