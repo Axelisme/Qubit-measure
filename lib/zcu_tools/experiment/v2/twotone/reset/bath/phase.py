@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
@@ -10,9 +11,16 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment import (
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -30,7 +38,6 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting.base import cosfunc, fitcos
 from zcu_tools.utils.process import rotate2real
 
@@ -62,7 +69,16 @@ class PhaseCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: PhaseSweepCfg
 
 
-class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
+class PhaseExp(PersistableExperiment[PhaseResult, PhaseCfg]):
+    AXES_SPEC = AxesSpec(
+        axes=(Axis("phases", "Phase", "deg"),),
+        z=ZSpec("signals", "Signal", "a.u."),
+        result_type=PhaseResult,
+        cfg_type=PhaseCfg,
+        tag="twotone/reset/bath/phase",
+    )
+
+    @record_result
     def run(
         self,
         soc,
@@ -71,6 +87,7 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
         *,
         acquire_kwargs: dict[str, Any] | None = None,
     ) -> PhaseResult:
+        orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -122,14 +139,10 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
                 ),
             )
 
-        # Cache results
-        self.last_result = PhaseResult(phases, signals, cfg_snapshot=cfg)
+        return PhaseResult(phases, signals, cfg_snapshot=orig_cfg)
 
-        return self.last_result
-
+    @retrieve_result
     def analyze(self, result: PhaseResult | None = None) -> tuple[float, float, Figure]:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         phases, signals = result.phases, result.signals
@@ -172,49 +185,3 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
         fig.tight_layout()
 
         return max_phase, min_phase, fig
-
-    def save(
-        self,
-        filepath: str,
-        result: PhaseResult | None = None,
-        comment: str | None = None,
-        tag: str = "twotone/reset/bath/phase",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        phases, signals = result.phases, result.signals
-
-        if result.cfg_snapshot is None:
-            raise ValueError("Cannot save result without configuration snapshot")
-        cfg = result.cfg_snapshot
-        comment = make_comment(cfg, comment)
-
-        save_data(
-            filepath=filepath,
-            x_info={"name": "Phase", "unit": "deg", "values": phases},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-    def load(self, filepath: str, **kwargs) -> PhaseResult:
-        signals, phases, _, comment = load_data(filepath, return_comment=True, **kwargs)
-        assert phases is not None
-        assert len(phases.shape) == 1 and len(signals.shape) == 1
-        assert phases.shape == signals.shape
-
-        phases = phases.astype(np.float64)
-        signals = signals.astype(np.complex128)
-
-        cfg_snapshot = None
-        if comment is not None:
-            cfg, _, _ = parse_comment(comment)
-            if cfg is not None:
-                cfg_snapshot = PhaseCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = PhaseResult(phases, signals, cfg_snapshot=cfg_snapshot)
-
-        return self.last_result

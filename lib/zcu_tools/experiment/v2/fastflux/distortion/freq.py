@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -10,9 +11,19 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import (
+    MHZ_TO_HZ,
+    US_TO_S,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    config,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
@@ -30,7 +41,6 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fitlor
 from zcu_tools.utils.process import rotate2real
 
@@ -84,7 +94,21 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: FreqSweepCfg
 
 
-class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
+class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
+    # inner freqs stores MHz on disk (disk Hz) -> scale=MHZ_TO_HZ;
+    # outer lengths stores us on disk (disk s) -> scale=US_TO_S
+    AXES_SPEC = AxesSpec(
+        axes=(
+            Axis("freqs", "Frequency", "Hz", scale=MHZ_TO_HZ),
+            Axis("lengths", "Wait Time", "s", scale=US_TO_S),
+        ),
+        z=ZSpec("signals", "Signal", "a.u."),
+        result_type=FreqResult,
+        cfg_type=FreqCfg,
+        tag="fastflux/distortion/freq",
+    )
+
+    @record_result
     def run(
         self,
         soc,
@@ -93,6 +117,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         *,
         acquire_kwargs: dict[str, Any] | None = None,
     ) -> FreqResult:
+        orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -160,17 +185,13 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                 ),
             )
 
-        # Cache results
-        self.last_result = FreqResult(lengths, freqs, signals, cfg_snapshot=cfg)
+        return FreqResult(lengths, freqs, signals, cfg_snapshot=orig_cfg)
 
-        return self.last_result
-
+    @retrieve_result
     def analyze(
         self,
         result: FreqResult | None = None,
     ) -> Figure:
-        if result is None:
-            result = self.last_result
         assert result is not None, "No result found"
 
         cfg = result.cfg_snapshot
@@ -229,59 +250,3 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         fig.tight_layout()
 
         return fig
-
-    def save(
-        self,
-        filepath: str,
-        result: FreqResult | None = None,
-        comment: str | None = None,
-        tag: str = "fastflux/distortion/freq",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "No result found"
-
-        lengths, freqs, signals2D = result.lengths, result.freqs, result.signals
-
-        if result.cfg_snapshot is None:
-            raise ValueError("cfg_snapshot is None")
-        cfg = result.cfg_snapshot
-        comment = make_comment(cfg, comment)
-
-        save_data(
-            filepath=filepath,
-            x_info={"name": "Wait Time", "unit": "s", "values": lengths * 1e-6},
-            y_info={"name": "Frequency", "unit": "Hz", "values": freqs * 1e6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals2D.T},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-    def load(self, filepath: str, **kwargs) -> FreqResult:
-        signals2D, lengths, freqs, comment = load_data(
-            filepath, return_comment=True, **kwargs
-        )
-        assert freqs is not None and lengths is not None
-        assert len(freqs.shape) == 1 and len(lengths.shape) == 1
-        assert signals2D.shape == (len(freqs), len(lengths))
-
-        lengths = lengths * 1e6  # s -> us
-        freqs = freqs * 1e-6  # Hz -> MHz
-        signals2D = signals2D.T  # transpose back
-
-        freqs = freqs.astype(np.float64)
-        lengths = lengths.astype(np.float64)
-        signals2D = signals2D.T.astype(np.complex128)
-
-        cfg_snapshot = None
-        if comment is not None:
-            cfg, _, _ = parse_comment(comment)
-            if cfg is not None:
-                cfg_snapshot = FreqCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = FreqResult(
-            lengths, freqs, signals2D, cfg_snapshot=cfg_snapshot
-        )
-
-        return self.last_result

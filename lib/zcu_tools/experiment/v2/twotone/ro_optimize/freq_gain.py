@@ -11,9 +11,19 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import (
+    IDENTITY,
+    MHZ_TO_HZ,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    config,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
@@ -31,7 +41,6 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import SmoothMethod, smooth_signal_nd
 
 
@@ -62,7 +71,19 @@ class FreqGainCfg(ProgramV2Cfg, ExpCfgModel):
 RawResult: TypeAlias = list[MomentTracker]
 
 
-class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
+class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
+    AXES_SPEC = AxesSpec(
+        axes=(
+            Axis("gains", "Gain", "a.u.", scale=IDENTITY),
+            Axis("freqs", "Frequency", "Hz", scale=MHZ_TO_HZ),
+        ),
+        z=ZSpec("signals", "Signal", "a.u.", dtype=np.float64),
+        result_type=FreqGainResult,
+        cfg_type=FreqGainCfg,
+        tag="twotone/ge/ro_optimize/freq",
+    )
+
+    @record_result
     def run(
         self,
         soc,
@@ -139,13 +160,9 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
                 ),
             )
 
-        # record the last cfg and result
-        self.last_result = FreqGainResult(
-            freqs, gains, signals, cfg_snapshot=original_cfg
-        )
+        return FreqGainResult(freqs, gains, signals, cfg_snapshot=original_cfg)
 
-        return self.last_result
-
+    @retrieve_result
     def analyze(
         self,
         result: FreqGainResult | None = None,
@@ -155,8 +172,6 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
         wavelet: str = "sym4",
         wavelet_level: int = 0,
     ) -> tuple[float, float, Figure]:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         freqs, gains, signals = result.freqs, result.gains, result.signals
@@ -195,56 +210,3 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
         ax.legend()
 
         return max_freq, max_gain, fig
-
-    def save(
-        self,
-        filepath: str,
-        result: FreqGainResult | None = None,
-        comment: str | None = None,
-        tag: str = "twotone/ge/ro_optimize/freq",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        freqs, gains, singals = result.freqs, result.gains, result.signals
-
-        if result.cfg_snapshot is None:
-            raise ValueError("Cannot save result without configuration snapshot")
-        cfg = result.cfg_snapshot
-        comment = make_comment(cfg, comment)
-
-        save_data(
-            filepath=filepath,
-            x_info={"name": "Frequency", "unit": "Hz", "values": freqs * 1e6},
-            y_info={"name": "Gain", "unit": "a.u.", "values": gains},
-            z_info={"name": "Signal", "unit": "a.u.", "values": singals.T},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-    def load(self, filepath: str, **kwargs) -> FreqGainResult:
-        signals, freqs, gains, comment = load_data(
-            filepath, return_comment=True, **kwargs
-        )
-        assert gains is not None
-        assert len(freqs.shape) == 1 and len(signals.shape) == 1
-        assert signals.shape == (len(freqs), len(gains))
-
-        freqs = freqs * 1e-6  # Hz -> MHz
-
-        freqs = freqs.astype(np.float64)
-        signals = signals.astype(np.float64).T
-
-        cfg_snapshot = None
-        if comment is not None:
-            cfg, _, _ = parse_comment(comment)
-            if cfg is not None:
-                cfg_snapshot = FreqGainCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = FreqGainResult(
-            freqs, gains, signals, cfg_snapshot=cfg_snapshot
-        )
-
-        return self.last_result

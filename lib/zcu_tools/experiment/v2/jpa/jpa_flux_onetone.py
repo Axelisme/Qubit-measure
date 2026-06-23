@@ -11,11 +11,17 @@ from pydantic import Field
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo
-from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment import (
+    MHZ_TO_HZ,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import (
-    make_comment,
-    parse_comment,
     set_flux_in_dev_cfg,
     setup_devices,
 )
@@ -32,7 +38,6 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
 
 
 @dataclass(frozen=True)
@@ -61,7 +66,20 @@ class OneToneFluxCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: OneToneFluxSweepCfg
 
 
-class OneToneFluxExp(AbsExperiment[OneToneFluxResult, OneToneFluxCfg]):
+class OneToneFluxExp(PersistableExperiment[OneToneFluxResult, OneToneFluxCfg]):
+    # inner axis (fastest-varying) = freqs (MHz on disk); outer = jpa flux (a.u.)
+    AXES_SPEC = AxesSpec(
+        axes=(
+            Axis("fluxes", "JPA Flux value", "a.u."),
+            Axis("freqs", "Readout frequency", "Hz", scale=MHZ_TO_HZ),
+        ),
+        z=ZSpec("signals", "Signal", "a.u."),
+        result_type=OneToneFluxResult,
+        cfg_type=OneToneFluxCfg,
+        tag="jpa/flux_onetone",
+    )
+
+    @record_result
     def run(self, soc, soccfg, cfg: OneToneFluxCfg) -> OneToneFluxResult:
         cfg = deepcopy(cfg)
         modules = cfg.modules
@@ -128,69 +146,11 @@ class OneToneFluxExp(AbsExperiment[OneToneFluxResult, OneToneFluxCfg]):
             )
             signals = np.asarray(signals)
 
-        self.last_result = OneToneFluxResult(
+        return OneToneFluxResult(
             fluxes=jpa_fluxs, freqs=freqs, signals=signals, cfg_snapshot=cfg
         )
-        return self.last_result
 
+    @retrieve_result
     def analyze(self, result: OneToneFluxResult | None = None) -> None:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
         raise NotImplementedError("analysis not implemented yet")
-
-    def save(
-        self,
-        filepath: str,
-        result: OneToneFluxResult | None = None,
-        comment: str | None = None,
-        tag: str = "jpa/flux_onetone",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        jpa_fluxs = result.fluxes
-        freqs = result.freqs
-        signals = result.signals
-
-        cfg = result.cfg_snapshot
-        if cfg is None:
-            raise ValueError("cfg_snapshot is None")
-        comment = make_comment(cfg, comment)
-
-        save_data(
-            filepath=filepath,
-            x_info={"name": "JPA Flux value", "unit": "a.u.", "values": jpa_fluxs},
-            y_info={"name": "Readout frequency", "unit": "Hz", "values": freqs * 1e6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals.T},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-    def load(self, filepath: str, **kwargs) -> OneToneFluxResult:
-        signals, jpa_fluxs, freqs, comment = load_data(
-            filepath, return_comment=True, **kwargs
-        )
-        assert jpa_fluxs is not None and freqs is not None
-        assert len(jpa_fluxs.shape) == 1 and len(freqs.shape) == 1
-        assert signals.shape == (len(freqs), len(jpa_fluxs))
-
-        freqs = freqs * 1e-6  # Hz -> MHz
-        signals = signals.T  # transpose back
-
-        jpa_fluxs = jpa_fluxs.astype(np.float64)
-        freqs = freqs.astype(np.float64)
-        signals = signals.astype(np.complex128)
-
-        cfg_snapshot = None
-        if comment is not None:
-            _cfg, _, _ = parse_comment(comment)
-            if _cfg is not None:
-                cfg_snapshot = OneToneFluxCfg.validate_or_warn(_cfg, source=filepath)
-        self.last_result = OneToneFluxResult(
-            fluxes=jpa_fluxs, freqs=freqs, signals=signals, cfg_snapshot=cfg_snapshot
-        )
-        return self.last_result

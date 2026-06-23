@@ -10,9 +10,17 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import (
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    config,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
@@ -30,7 +38,6 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.program.v2.modules import TwoPulseResetCfg
-from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import SmoothMethod, smooth_signal_nd
 
 
@@ -59,7 +66,20 @@ class PowerCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: PowerSweepCfg
 
 
-class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
+class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
+    # Both axes are gains in a.u. -> scale=IDENTITY (default)
+    AXES_SPEC = AxesSpec(
+        axes=(
+            Axis("gains2", "Power2", "a.u."),  # inner
+            Axis("gains1", "Power1", "a.u."),  # outer
+        ),
+        z=ZSpec("signals", "Signal", "a.u."),
+        result_type=PowerResult,
+        cfg_type=PowerCfg,
+        tag="twotone/reset/dual_tone/power",
+    )
+
+    @record_result
     def run(
         self,
         soc,
@@ -134,11 +154,9 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                 ),
             )
 
-        # Cache results
-        self.last_result = PowerResult(gains1, gains2, signals, cfg_snapshot=cfg)
+        return PowerResult(gains1, gains2, signals, cfg_snapshot=cfg)
 
-        return self.last_result
-
+    @retrieve_result
     def analyze(
         self,
         result: PowerResult | None = None,
@@ -150,8 +168,6 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         xname: str | None = None,
         yname: str | None = None,
     ) -> tuple[float, float, Figure]:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         gains1, gains2, signals = result.gains1, result.gains2, result.signals
@@ -201,57 +217,3 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         fig.tight_layout()
 
         return gain1_opt, gain2_opt, fig
-
-    def save(
-        self,
-        filepath: str,
-        result: PowerResult | None = None,
-        comment: str | None = None,
-        tag: str = "twotone/reset/dual_tone/power",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        gains1, gains2, signals = result.gains1, result.gains2, result.signals
-
-        if result.cfg_snapshot is None:
-            raise ValueError("Cannot save result without configuration snapshot")
-        cfg = result.cfg_snapshot
-        comment = make_comment(cfg, comment)
-
-        save_data(
-            filepath=filepath,
-            x_info={"name": "Power1", "unit": "a.u.", "values": gains1},
-            y_info={"name": "Power2", "unit": "a.u.", "values": gains2},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals.T},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-    def load(self, filepath: str, **kwargs) -> PowerResult:
-        signals, gains1, gains2, comment = load_data(
-            filepath, return_comment=True, **kwargs
-        )
-        assert gains1 is not None and gains2 is not None
-        assert len(gains1.shape) == 1 and len(gains2.shape) == 1
-        assert signals.shape == (len(gains2), len(gains1))
-
-        signals = signals.T  # transpose back
-
-        gains1 = gains1.astype(np.float64)
-        gains2 = gains2.astype(np.float64)
-        signals = signals.astype(np.complex128)
-
-        cfg_snapshot = None
-        if comment is not None:
-            cfg, _, _ = parse_comment(comment)
-            if cfg is not None:
-                cfg_snapshot = PowerCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = PowerResult(
-            gains1, gains2, signals, cfg_snapshot=cfg_snapshot
-        )
-
-        return self.last_result

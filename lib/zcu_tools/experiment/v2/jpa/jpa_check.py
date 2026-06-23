@@ -13,11 +13,18 @@ from pydantic import Field
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import (
+    MHZ_TO_HZ,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    config,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import (
-    make_comment,
-    parse_comment,
     set_output_in_dev_cfg,
     setup_devices,
 )
@@ -34,7 +41,6 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
 
 
 @dataclass(frozen=True)
@@ -66,9 +72,22 @@ class CheckCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: CheckSweepCfg
 
 
-class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
+class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
     OUTPUT_MAP = {0: "off", 1: "on"}
 
+    # freqs stored as Hz on disk -> scale=MHZ_TO_HZ; outputs are int JPA labels.
+    AXES_SPEC = AxesSpec(
+        axes=(
+            Axis("freqs", "Frequency", "Hz", scale=MHZ_TO_HZ),
+            Axis("outputs", "JPA Output", "a.u.", dtype=np.int_),
+        ),
+        z=ZSpec("signals", "Signal", "a.u."),
+        result_type=CheckResult,
+        cfg_type=CheckCfg,
+        tag="jpa/check",
+    )
+
+    @record_result
     def run(self, soc, soccfg, cfg: CheckCfg) -> CheckResult:
         cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
@@ -135,14 +154,12 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
             )
             signals = np.asarray(signals)
 
-        self.last_result = CheckResult(
+        return CheckResult(
             outputs=outputs, freqs=freqs, signals=signals, cfg_snapshot=cfg
         )
-        return self.last_result
 
+    @retrieve_result
     def analyze(self, result: CheckResult | None = None) -> Figure:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         outputs = result.outputs
@@ -166,58 +183,3 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
         ax.legend()
         ax.grid(True)
         return fig
-
-    def save(
-        self,
-        filepath: str,
-        result: CheckResult | None = None,
-        comment: str | None = None,
-        tag: str = "jpa/check",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        outputs = result.outputs
-        freqs = result.freqs
-        signals2D = result.signals
-
-        cfg = result.cfg_snapshot
-        if cfg is None:
-            raise ValueError("cfg_snapshot is None")
-        comment = make_comment(cfg, comment)
-
-        save_data(
-            filepath=filepath,
-            x_info={"name": "Frequency", "unit": "Hz", "values": freqs * 1e6},
-            y_info={"name": "JPA Output", "unit": "a.u.", "values": outputs},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals2D},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-    def load(self, filepath: str, **kwargs) -> CheckResult:
-        signals2D, freqs, outputs, comment = load_data(
-            filepath, return_comment=True, **kwargs
-        )
-        assert freqs is not None and outputs is not None
-        assert len(freqs.shape) == 1 and len(outputs.shape) == 1
-        assert signals2D.shape == (len(outputs), len(freqs))
-
-        freqs = freqs * 1e-6  # Hz -> MHz
-        outputs = outputs.astype(np.float64)
-        freqs = freqs.astype(np.float64)
-        signals2D = signals2D.astype(np.complex128)
-
-        cfg_snapshot = None
-        if comment is not None:
-            _cfg, _, _ = parse_comment(comment)
-            if _cfg is not None:
-                cfg_snapshot = CheckCfg.validate_or_warn(_cfg, source=filepath)
-
-        self.last_result = CheckResult(
-            outputs=outputs, freqs=freqs, signals=signals2D, cfg_snapshot=cfg_snapshot
-        )
-        return self.last_result

@@ -12,9 +12,18 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import (
+    IDENTITY,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    config,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -31,7 +40,6 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     SweepCfg,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_decay
 from zcu_tools.utils.process import rotate2real
 
@@ -228,7 +236,22 @@ class RBCfg(ProgramV2Cfg, ExpCfgModel):
     n_seeds: int
 
 
-class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
+class RB_Exp(PersistableExperiment[RB_Result, RBCfg]):
+    # depths/sub_seeds are integer sweeps on disk -> scale=IDENTITY (1.0).
+    # axes inner-first [depths, sub_seeds] so native z == signals2D
+    # (n_seeds, n_depths) with zero transpose.
+    AXES_SPEC = AxesSpec(
+        axes=(
+            Axis("depths", "Depth", "a.u.", IDENTITY, np.int64),
+            Axis("sub_seeds", "Entropy", "a.u.", IDENTITY, np.int64),
+        ),
+        z=ZSpec("signals2D", "Signal", "a.u."),
+        result_type=RB_Result,
+        cfg_type=RBCfg,
+        tag="twotone/ge/rb",
+    )
+
+    @record_result
     def run(
         self,
         soc,
@@ -387,12 +410,11 @@ class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
 
         return self.last_result
 
+    @retrieve_result
     def analyze(
         self,
         result: RB_Result | None = None,
     ) -> tuple[float, float, Figure]:
-        if result is None:
-            result = self.last_result
         assert result is not None, (
             "No measurement data available. Run experiment first."
         )
@@ -450,73 +472,3 @@ class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
         fig.tight_layout()
 
         return epc, fidelity, fig
-
-    def save(
-        self,
-        filepath: str,
-        result: RB_Result | None = None,
-        comment: str | None = None,
-        tag: str = "twotone/ge/rb",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, (
-            "No measurement data available. Run experiment first."
-        )
-
-        cfg = result.cfg_snapshot
-        if cfg is None:
-            raise ValueError("No config snapshot available in result.")
-
-        sub_seeds = result.sub_seeds
-        depths = result.depths
-        signals2D = result.signals2D
-        comment = make_comment(cfg, comment)
-
-        save_data(
-            filepath=filepath,
-            x_info={
-                "name": "Entropy",
-                "unit": "a.u.",
-                "values": sub_seeds.astype(np.float64),
-            },
-            y_info={
-                "name": "Depth",
-                "unit": "a.u.",
-                "values": depths.astype(np.float64),
-            },
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals2D.T},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-    def load(self, filepath: str, **kwargs) -> RB_Result:
-        signals, entropys, depths, comment = load_data(
-            filepath, return_comment=True, **kwargs
-        )
-        assert depths is not None
-        assert len(entropys.shape) == 1 and len(depths.shape) == 1
-        assert signals.shape == (len(depths), len(entropys))
-
-        signals = signals.T
-
-        sub_seeds = entropys.astype(np.int64)
-        depths = depths.astype(np.int64)
-        signals2D = signals.astype(np.complex128)
-
-        cfg_snapshot = None
-        if comment is not None:
-            cfg, _, _ = parse_comment(comment)
-
-            if cfg is not None:
-                cfg_snapshot = RBCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = RB_Result(
-            sub_seeds=sub_seeds,
-            depths=depths,
-            signals2D=signals2D,
-            cfg_snapshot=cfg_snapshot,
-        )
-
-        return self.last_result

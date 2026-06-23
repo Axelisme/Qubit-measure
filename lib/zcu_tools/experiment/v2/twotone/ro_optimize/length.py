@@ -10,9 +10,18 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import (
+    US_TO_S,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    config,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
@@ -29,7 +38,6 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     SweepCfg,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import SmoothMethod, smooth_signal1d
 
 
@@ -55,7 +63,17 @@ class LengthCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: LengthSweepCfg
 
 
-class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
+class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
+    # lengths stored in seconds on disk -> scale=US_TO_S (disk = memory * 1e-6)
+    AXES_SPEC = AxesSpec(
+        axes=(Axis("lengths", "Readout Length", "s", scale=US_TO_S),),
+        z=ZSpec("signals", "Signal", "a.u.", dtype=np.float64),
+        result_type=LengthResult,
+        cfg_type=LengthCfg,
+        tag="twotone/ge/ro_optimize/length",
+    )
+
+    @record_result
     def run(
         self,
         soc,
@@ -122,11 +140,9 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
             )
             signals = np.asarray(signals)
 
-        # record the last cfg and result
-        self.last_result = LengthResult(lengths, signals, cfg_snapshot=original_cfg)
+        return LengthResult(lengths, signals, cfg_snapshot=original_cfg)
 
-        return self.last_result
-
+    @retrieve_result
     def analyze(
         self,
         result: LengthResult | None = None,
@@ -137,8 +153,6 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         wavelet: str = "sym4",
         wavelet_level: int = 0,
     ) -> tuple[float, Figure]:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         lengths, signals = result.lengths, result.signals
@@ -175,53 +189,3 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         ax.grid(True)
 
         return max_length, fig
-
-    def save(
-        self,
-        filepath: str,
-        result: LengthResult | None = None,
-        comment: str | None = None,
-        tag: str = "twotone/ge/ro_optimize/length",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        lengths, signals = result.lengths, result.signals
-
-        if result.cfg_snapshot is None:
-            raise ValueError("Cannot save result without configuration snapshot")
-        cfg = result.cfg_snapshot
-        comment = make_comment(cfg, comment)
-
-        save_data(
-            filepath=filepath,
-            x_info={"name": "Readout Length", "unit": "s", "values": lengths * 1e-6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-    def load(self, filepath: str, **kwargs) -> LengthResult:
-        signals, lengths, _, comment = load_data(
-            filepath, return_comment=True, **kwargs
-        )
-        assert lengths is not None
-        assert len(lengths.shape) == 1 and len(signals.shape) == 1
-        assert lengths.shape == signals.shape
-
-        lengths = lengths * 1e6  # s -> us
-
-        lengths = lengths.astype(np.float64)
-        signals = signals.astype(np.float64)
-
-        cfg_snapshot = None
-        if comment is not None:
-            cfg, _, _ = parse_comment(comment)
-            if cfg is not None:
-                cfg_snapshot = LengthCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = LengthResult(lengths, signals, cfg_snapshot=cfg_snapshot)
-
-        return self.last_result

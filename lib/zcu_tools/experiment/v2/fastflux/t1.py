@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -11,9 +12,19 @@ from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import (
+    IDENTITY,
+    US_TO_S,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    config,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
@@ -29,7 +40,6 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_decay
 from zcu_tools.utils.process import rotate2real
 
@@ -63,7 +73,21 @@ class T1Cfg(ProgramV2Cfg, ExpCfgModel):
     sweep: T1SweepCfg
 
 
-class T1Exp(AbsExperiment[T1Result, T1Cfg]):
+class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
+    # inner lengths stores memory us on disk (disk seconds) -> scale=US_TO_S;
+    # outer gains -> IDENTITY
+    AXES_SPEC = AxesSpec(
+        axes=(
+            Axis("lengths", "Time", "s", scale=US_TO_S),
+            Axis("gains", "Flux Pulse Gain", "a.u.", scale=IDENTITY),
+        ),
+        z=ZSpec("signals", "Signal", "a.u."),
+        result_type=T1Result,
+        cfg_type=T1Cfg,
+        tag="fastflux/t1",
+    )
+
+    @record_result
     def run(
         self,
         soc,
@@ -72,6 +96,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         *,
         acquire_kwargs: dict[str, Any] | None = None,
     ) -> T1Result:
+        orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -132,14 +157,10 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                 ),
             )
 
-        # Cache results
-        self.last_result = T1Result(gains, lengths, signals, cfg_snapshot=cfg)
+        return T1Result(gains, lengths, signals, cfg_snapshot=orig_cfg)
 
-        return self.last_result
-
+    @retrieve_result
     def analyze(self, result: T1Result | None = None) -> Figure:
-        if result is None:
-            result = self.last_result
         assert result is not None, "No result found"
 
         gains, lengths, signals2D = result.gains, result.lengths, result.signals
@@ -208,57 +229,3 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         fig.tight_layout()
 
         return fig
-
-    def save(
-        self,
-        filepath: str,
-        result: T1Result | None = None,
-        comment: str | None = None,
-        tag: str = "fastflux/t1",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "No result found"
-
-        gains, lengths, signals2D = result.gains, result.lengths, result.signals
-
-        if result.cfg_snapshot is None:
-            raise ValueError("cfg_snapshot is None")
-        cfg = result.cfg_snapshot
-        comment = make_comment(cfg, comment)
-
-        save_data(
-            filepath=filepath,
-            x_info={"name": "Flux Pulse Gain", "unit": "a.u.", "values": gains},
-            y_info={"name": "Time", "unit": "s", "values": lengths * 1e6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals2D.T},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-    def load(self, filepath: str, **kwargs) -> T1Result:
-        signals2D, gains, lengths, comment = load_data(
-            filepath, return_comment=True, **kwargs
-        )
-        assert lengths is not None
-        assert len(gains.shape) == 1 and len(lengths.shape) == 1
-        assert signals2D.shape == (len(gains), len(lengths))
-
-        lengths = lengths * 1e-6  # s -> us
-
-        gains = gains.astype(np.float64)
-        lengths = lengths.astype(np.float64)
-        signals2D = signals2D.astype(np.complex128)
-
-        cfg_snapshot = None
-        if comment is not None:
-            cfg, _, _ = parse_comment(comment)
-            if cfg is not None:
-                cfg_snapshot = T1Cfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = T1Result(
-            gains, lengths, signals2D, cfg_snapshot=cfg_snapshot
-        )
-
-        return self.last_result

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -11,9 +12,18 @@ from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import (
+    IDENTITY,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    config,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
@@ -30,7 +40,6 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
 
@@ -64,7 +73,22 @@ class MistCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: MistSweepCfg
 
 
-class MistExp(AbsExperiment[MistResult, MistCfg]):
+class MistExp(PersistableExperiment[MistResult, MistCfg]):
+    # both axes are gains in a.u. (no MHz/us conversion) -> scale=IDENTITY.
+    # inner-first: signals.shape == (len(flux_gains), len(mist_gains)) ==
+    # reversed(axes) lengths, so mist_gains is the inner axis, flux_gains the outer.
+    AXES_SPEC = AxesSpec(
+        axes=(
+            Axis("mist_gains", "Mist Pulse Gain", "a.u.", scale=IDENTITY),
+            Axis("flux_gains", "Flux Pulse Gain", "a.u.", scale=IDENTITY),
+        ),
+        z=ZSpec("signals", "Signal", "a.u."),
+        result_type=MistResult,
+        cfg_type=MistCfg,
+        tag="fastflux/mist",
+    )
+
+    @record_result
     def run(
         self,
         soc,
@@ -73,6 +97,7 @@ class MistExp(AbsExperiment[MistResult, MistCfg]):
         *,
         acquire_kwargs: dict[str, Any] | None = None,
     ) -> MistResult:
+        orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -142,16 +167,12 @@ class MistExp(AbsExperiment[MistResult, MistCfg]):
                 ),
             )
 
-        # Cache results
-        self.last_result = MistResult(flux_gains, mist_gains, signals, cfg_snapshot=cfg)
+        return MistResult(flux_gains, mist_gains, signals, cfg_snapshot=orig_cfg)
 
-        return self.last_result
-
+    @retrieve_result
     def analyze(
         self, result: MistResult | None = None, ac_coeff: float | None = None
     ) -> Figure:
-        if result is None:
-            result = self.last_result
         assert result is not None, "No result found"
 
         flux_gains, mist_gains, signals2D = (
@@ -183,59 +204,3 @@ class MistExp(AbsExperiment[MistResult, MistCfg]):
         fig.tight_layout()
 
         return fig
-
-    def save(
-        self,
-        filepath: str,
-        result: MistResult | None = None,
-        comment: str | None = None,
-        tag: str = "fastflux/mist",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "No result found"
-
-        flux_gains, mist_gains, signals2D = (
-            result.flux_gains,
-            result.mist_gains,
-            result.signals,
-        )
-
-        if result.cfg_snapshot is None:
-            raise ValueError("cfg_snapshot is None")
-        cfg = result.cfg_snapshot
-        comment = make_comment(cfg, comment)
-
-        save_data(
-            filepath=filepath,
-            x_info={"name": "Flux Pulse Gain", "unit": "a.u.", "values": flux_gains},
-            y_info={"name": "Mist Pulse Gain", "unit": "a.u.", "values": mist_gains},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals2D.T},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-    def load(self, filepath: str, **kwargs) -> MistResult:
-        signals2D, flux_gains, mist_gains, comment = load_data(
-            filepath, return_comment=True, **kwargs
-        )
-        assert mist_gains is not None
-        assert len(flux_gains.shape) == 1 and len(mist_gains.shape) == 1
-        assert signals2D.shape == (len(flux_gains), len(mist_gains))
-
-        flux_gains = flux_gains.astype(np.float64)
-        mist_gains = mist_gains.astype(np.float64)
-        signals2D = signals2D.astype(np.complex128)
-
-        cfg_snapshot = None
-        if comment is not None:
-            cfg, _, _ = parse_comment(comment)
-            if cfg is not None:
-                cfg_snapshot = MistCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = MistResult(
-            flux_gains, mist_gains, signals2D, cfg_snapshot=cfg_snapshot
-        )
-
-        return self.last_result

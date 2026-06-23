@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -13,9 +13,18 @@ from matplotlib.patches import Circle
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment import (
+    IDENTITY,
+    MHZ_TO_HZ,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -32,7 +41,6 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting.resonance import (
     fit_edelay,
     get_proper_model,
@@ -45,6 +53,7 @@ from zcu_tools.utils.fitting.resonance import (
 class DispersiveResult:
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    ge: NDArray[np.int64] = field(default_factory=lambda: np.array([0, 1]))
     cfg_snapshot: DispersiveCfg | None = None
 
 
@@ -68,7 +77,20 @@ class DispersiveCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: DispersiveSweepCfg
 
 
-class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
+class DispersiveExp(PersistableExperiment[DispersiveResult, DispersiveCfg]):
+    # inner freqs stores MHz on disk (disk Hz) -> scale=MHZ_TO_HZ; outer ge index -> IDENTITY
+    AXES_SPEC = AxesSpec(
+        axes=(
+            Axis("freqs", "Frequency", "Hz", scale=MHZ_TO_HZ),
+            Axis("ge", "Amplitude", "None", scale=IDENTITY, dtype=np.int64),
+        ),
+        z=ZSpec("signals", "Signal", "a.u."),
+        result_type=DispersiveResult,
+        cfg_type=DispersiveCfg,
+        tag="twotone/ge/dispersive",
+    )
+
+    @record_result
     def run(
         self,
         soc,
@@ -135,18 +157,12 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
                 ),
             )
 
-        # record result
-        self.last_result = DispersiveResult(
-            freqs=freqs, signals=signals, cfg_snapshot=orig_cfg
-        )
+        return DispersiveResult(freqs=freqs, signals=signals, cfg_snapshot=orig_cfg)
 
-        return self.last_result
-
+    @retrieve_result
     def analyze(
         self, result: DispersiveResult | None = None, fit_bg_slope: bool = False
     ) -> tuple[float, float, Figure]:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         freqs = result.freqs
@@ -238,56 +254,3 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
         # fig.tight_layout()
 
         return chi, avg_fwhm, fig
-
-    def save(
-        self,
-        filepath: str,
-        result: DispersiveResult | None = None,
-        comment: str | None = None,
-        tag: str = "twotone/ge/dispersive",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        cfg = result.cfg_snapshot
-        if cfg is None:
-            raise ValueError("cfg_snapshot is None")
-
-        freqs = result.freqs
-        signals = result.signals
-        comment = make_comment(cfg, comment)
-
-        save_data(
-            filepath=filepath,
-            x_info={"name": "Frequency", "unit": "Hz", "values": freqs * 1e6},
-            y_info={"name": "Amplitude", "unit": "None", "values": np.array([0, 1])},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-    def load(self, filepath: str, **kwargs) -> DispersiveResult:
-        signals, freqs, _, comment = load_data(filepath, return_comment=True, **kwargs)
-        assert len(freqs.shape) == 1
-        assert signals.shape == (len(freqs), 2)
-
-        freqs = freqs * 1e-6  # Hz -> MHz
-        signals = signals.T  # transpose back
-
-        freqs = freqs.astype(np.float64)
-        signals = signals.astype(np.complex128)
-
-        cfg_snapshot = None
-        if comment is not None:
-            cfg, _, _ = parse_comment(comment)
-
-            if cfg is not None:
-                cfg_snapshot = DispersiveCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = DispersiveResult(
-            freqs=freqs, signals=signals, cfg_snapshot=cfg_snapshot
-        )
-
-        return self.last_result

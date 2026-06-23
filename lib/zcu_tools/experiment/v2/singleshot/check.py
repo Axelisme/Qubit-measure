@@ -11,9 +11,16 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment import (
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.program.v2 import (
     ModularProgramV2,
@@ -25,13 +32,13 @@ from zcu_tools.program.v2 import (
     Reset,
     ResetCfg,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
 
 from .util import classify_result, plot_with_classified
 
 
 @dataclass(frozen=True)
 class CheckResult:
+    shots: NDArray[np.int64]
     signals: NDArray[np.complex128]
     cfg_snapshot: CheckCfg | None = None
 
@@ -48,7 +55,16 @@ class CheckCfg(ProgramV2Cfg, ExpCfgModel):
     shots: int
 
 
-class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
+class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
+    AXES_SPEC = AxesSpec(
+        axes=(Axis("shots", "shot", "point", dtype=np.int64),),
+        z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),
+        result_type=CheckResult,
+        cfg_type=CheckCfg,
+        tag="singleshot/check",
+    )
+
+    @record_result
     def run(self, soc, soccfg, cfg: CheckCfg) -> CheckResult:
         cfg = deepcopy(cfg)
         # Validate and setup configuration
@@ -101,10 +117,12 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
         )
 
         # Cache results
-        self.last_result = CheckResult(signals=signals, cfg_snapshot=cfg)
+        shots = np.arange(cfg.shots, dtype=np.int64)
+        self.last_result = CheckResult(shots=shots, signals=signals, cfg_snapshot=cfg)
 
         return self.last_result
 
+    @retrieve_result
     def analyze(
         self,
         g_center: complex,
@@ -113,8 +131,6 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
         result: CheckResult | None = None,
         max_point: int = 5000,
     ) -> Figure:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         signals = result.signals
@@ -135,47 +151,3 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
         )
 
         return fig
-
-    def save(
-        self,
-        filepath: str,
-        result: CheckResult | None = None,
-        comment: str | None = None,
-        tag: str = "singleshot/check",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, (
-            "No measurement data available. Run experiment first."
-        )
-
-        signals = result.signals
-
-        shots = np.arange(signals.shape[0])
-
-        cfg = result.cfg_snapshot
-        if cfg is None:
-            raise ValueError("result.cfg_snapshot is None")
-        comment = make_comment(cfg, comment)
-
-        save_data(
-            filepath=filepath,
-            x_info={"name": "shot", "unit": "point", "values": shots},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-    def load(self, filepath: str, **kwargs) -> CheckResult:
-        signals, _, _, comment = load_data(filepath, return_comment=True, **kwargs)
-        signals = cast(NDArray[np.complex128], signals)
-
-        cfg_snapshot = None
-        if comment is not None:
-            cfg, _, _ = parse_comment(comment)
-            if cfg is not None:
-                cfg_snapshot = CheckCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = CheckResult(signals=signals, cfg_snapshot=cfg_snapshot)
-        return self.last_result

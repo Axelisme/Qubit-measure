@@ -10,9 +10,18 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import (
+    MHZ_TO_HZ,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    config,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D, LivePlot2DwithLine
@@ -30,7 +39,6 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.program.v2.modules import TwoPulseResetCfg
-from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import (
     SmoothMethod,
     minus_background,
@@ -68,7 +76,22 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: FreqSweepCfg
 
 
-class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
+class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
+    # signals memory layout is (Nfreq1, Nfreq2) = (outer, inner); native save/load
+    # expect z == (outer, inner) == reversed(axes lengths), so axes order is
+    # (freqs2 inner, freqs1 outer). both axes store MHz on disk (disk Hz).
+    AXES_SPEC = AxesSpec(
+        axes=(
+            Axis("freqs2", "Frequency2", "Hz", scale=MHZ_TO_HZ),
+            Axis("freqs1", "Frequency1", "Hz", scale=MHZ_TO_HZ),
+        ),
+        z=ZSpec("signals", "Signal", "a.u."),
+        result_type=FreqResult,
+        cfg_type=FreqCfg,
+        tag="twotone/reset/dual_tone/freq",
+    )
+
+    @record_result
     def run_soft(
         self,
         soc,
@@ -146,11 +169,9 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             )
             signals = np.asarray(signals).T
 
-        # Cache results
-        self.last_result = FreqResult(freqs1, freqs2, signals, cfg_snapshot=cfg)
+        return FreqResult(freqs1, freqs2, signals, cfg_snapshot=cfg)
 
-        return self.last_result
-
+    @record_result
     def run_hard(
         self,
         soc,
@@ -218,10 +239,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             )
             signals = np.asarray(signals)
 
-        # Cache results
-        self.last_result = FreqResult(freqs1, freqs2, signals, cfg_snapshot=cfg)
-
-        return self.last_result
+        return FreqResult(freqs1, freqs2, signals, cfg_snapshot=cfg)
 
     def run(
         self,
@@ -237,6 +255,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         else:
             return self.run_hard(soc, soccfg, cfg, acquire_kwargs=acquire_kwargs)
 
+    @retrieve_result
     def analyze(
         self,
         result: FreqResult | None = None,
@@ -249,8 +268,6 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         yname: str | None = None,
         corner_as_background: bool = False,
     ) -> tuple[float, float, Figure]:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         freqs1, freqs2, signals = result.freqs1, result.freqs2, result.signals
@@ -296,59 +313,3 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         fig.tight_layout()
 
         return freq1_opt, freq2_opt, fig
-
-    def save(
-        self,
-        filepath: str,
-        result: FreqResult | None = None,
-        comment: str | None = None,
-        tag: str = "twotone/reset/dual_tone/freq",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        freqs1, freqs2, signals = result.freqs1, result.freqs2, result.signals
-
-        if result.cfg_snapshot is None:
-            raise ValueError("Cannot save result without configuration snapshot")
-        cfg = result.cfg_snapshot
-        comment = make_comment(cfg, comment)
-
-        save_data(
-            filepath=filepath,
-            x_info={"name": "Frequency1", "unit": "Hz", "values": freqs1 * 1e6},
-            y_info={"name": "Frequency2", "unit": "Hz", "values": freqs2 * 1e6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals.T},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-    def load(self, filepath: str, **kwargs) -> FreqResult:
-        signals, freqs1, freqs2, comment = load_data(
-            filepath, return_comment=True, **kwargs
-        )
-        assert freqs1 is not None and freqs2 is not None
-        assert len(freqs1.shape) == 1 and len(freqs2.shape) == 1
-        assert signals.shape == (len(freqs2), len(freqs1))
-
-        freqs1 = freqs1 * 1e-6  # Hz -> MHz
-        freqs2 = freqs2 * 1e-6  # Hz -> MHz
-        signals = signals.T  # transpose back
-
-        freqs1 = freqs1.astype(np.float64)
-        freqs2 = freqs2.astype(np.float64)
-        signals = signals.astype(np.complex128)
-
-        cfg_snapshot = None
-        if comment is not None:
-            cfg, _, _ = parse_comment(comment)
-            if cfg is not None:
-                cfg_snapshot = FreqCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = FreqResult(
-            freqs1, freqs2, signals, cfg_snapshot=cfg_snapshot
-        )
-
-        return self.last_result

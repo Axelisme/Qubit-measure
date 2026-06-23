@@ -12,11 +12,16 @@ from pydantic import Field
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo
-from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment import (
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import (
-    make_comment,
-    parse_comment,
     set_flux_in_dev_cfg,
     setup_devices,
 )
@@ -37,7 +42,6 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.simulate import value2flux
-from zcu_tools.utils.datasaver import load_data, save_data
 
 
 @dataclass(frozen=True)
@@ -83,7 +87,19 @@ class FluxDepCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: FluxDepSweepCfg
 
 
-class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
+class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
+    AXES_SPEC = AxesSpec(
+        axes=(
+            Axis("gains", "Power", "a.u."),
+            Axis("values", "Flux value", "a.u."),
+        ),
+        z=ZSpec("signals", "Signal", "a.u."),
+        result_type=FluxDepResult,
+        cfg_type=FluxDepCfg,
+        tag="mist/flux_dep",
+    )
+
+    @record_result
     def run(
         self,
         soc,
@@ -161,13 +177,11 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
             )
             signals = np.asarray(signals)
 
-        # Cache results
-        self.last_result = FluxDepResult(
+        return FluxDepResult(
             values=values, gains=gains, signals=signals, cfg_snapshot=cfg
         )
 
-        return self.last_result
-
+    @retrieve_result
     def analyze(
         self,
         result: FluxDepResult | None = None,
@@ -180,8 +194,6 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         auto_range: bool = True,
         **fig_kwargs,
     ) -> go.Figure:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         dev_values = result.values
@@ -226,56 +238,3 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
             fig.update_yaxes(range=[ys[0], ys[-1]])
 
         return fig
-
-    def save(
-        self,
-        filepath: str,
-        result: FluxDepResult | None = None,
-        comment: str | None = None,
-        tag: str = "mist/flux_dep",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        values, gains, signals = result.values, result.gains, result.signals
-
-        cfg = result.cfg_snapshot
-        if cfg is None:
-            raise ValueError("No cfg_snapshot found in result")
-        comment = make_comment(cfg, comment)
-
-        save_data(
-            filepath=filepath,
-            x_info={"name": "Flux value", "unit": "a.u.", "values": values},
-            y_info={"name": "Power", "unit": "a.u.", "values": gains},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals.T},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-    def load(self, filepath: str, **kwargs) -> FluxDepResult:
-        signals, values, gains, comment = load_data(
-            filepath, return_comment=True, **kwargs
-        )
-        assert values is not None and gains is not None
-        assert len(values.shape) == 1 and len(gains.shape) == 1
-        assert signals.shape == (len(values), len(gains))
-
-        values = values.astype(np.float64)
-        gains = gains.astype(np.float64)
-        signals = signals.astype(np.complex128)
-
-        cfg_snapshot = None
-        if comment is not None:
-            cfg, _, _ = parse_comment(comment)
-
-            if cfg is not None:
-                cfg_snapshot = FluxDepCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = FluxDepResult(
-            values=values, gains=gains, signals=signals, cfg_snapshot=cfg_snapshot
-        )
-
-        return self.last_result

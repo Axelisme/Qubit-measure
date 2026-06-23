@@ -11,9 +11,18 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import (
+    MHZ_TO_HZ,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    config,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
@@ -31,7 +40,6 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import SmoothMethod, smooth_signal1d
 
 
@@ -60,7 +68,17 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):
 RawResult: TypeAlias = list[MomentTracker]
 
 
-class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
+class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
+    # freq stores Hz on disk -> scale=MHZ_TO_HZ (disk = memory * 1e6)
+    AXES_SPEC = AxesSpec(
+        axes=(Axis("freqs", "Frequency", "Hz", scale=MHZ_TO_HZ),),
+        z=ZSpec("signals", "Signal", "a.u."),
+        result_type=FreqResult,
+        cfg_type=FreqCfg,
+        tag="twotone/ge/ro_optimize/freq",
+    )
+
+    @record_result
     def run(
         self,
         soc,
@@ -126,11 +144,9 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                 on_update=lambda ctx: viewer.update(freqs, np.abs(ctx.root_data)),
             )
 
-        # record the last cfg and result
-        self.last_result = FreqResult(freqs, signals, cfg_snapshot=original_cfg)
+        return FreqResult(freqs, signals, cfg_snapshot=original_cfg)
 
-        return self.last_result
-
+    @retrieve_result
     def analyze(
         self,
         result: FreqResult | None = None,
@@ -140,8 +156,6 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         wavelet: str = "sym4",
         wavelet_level: int = 0,
     ) -> tuple[float, Figure]:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         freqs, signals = result.freqs, result.signals
@@ -174,51 +188,3 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         ax.grid(True)
 
         return max_freq, fig
-
-    def save(
-        self,
-        filepath: str,
-        result: FreqResult | None = None,
-        comment: str | None = None,
-        tag: str = "twotone/ge/ro_optimize/freq",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        freqs, singals = result.freqs, result.signals
-
-        if result.cfg_snapshot is None:
-            raise ValueError("Cannot save result without configuration snapshot")
-        cfg = result.cfg_snapshot
-        comment = make_comment(cfg, comment)
-
-        save_data(
-            filepath=filepath,
-            x_info={"name": "Frequency", "unit": "Hz", "values": freqs * 1e6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": singals},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-    def load(self, filepath: str, **kwargs) -> FreqResult:
-        signals, freqs, _, comment = load_data(filepath, return_comment=True, **kwargs)
-        assert freqs is not None
-        assert len(freqs.shape) == 1 and len(signals.shape) == 1
-        assert freqs.shape == signals.shape
-
-        freqs = freqs * 1e-6  # Hz -> MHz
-
-        freqs = freqs.astype(np.float64)
-        signals = signals.astype(np.float64)
-
-        cfg_snapshot = None
-        if comment is not None:
-            cfg, _, _ = parse_comment(comment)
-            if cfg is not None:
-                cfg_snapshot = FreqCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = FreqResult(freqs, signals, cfg_snapshot=cfg_snapshot)
-
-        return self.last_result
