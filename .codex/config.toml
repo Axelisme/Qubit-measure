@@ -1,13 +1,12 @@
 # Codex project-level config. Mirrors the root .mcp.json (Claude Code) so the
-# same four MCP servers (measure-gui / fluxdep-gui / dispersive-gui /
-# agent-memory) are available in Codex too. stdio is inferred from the presence
+# same MCP servers are available in Codex too. stdio is inferred from the presence
 # of `command` — no transport/type field is needed. `uv run` is invoked from the
 # project root (the trusted-project cwd), matching .mcp.json which sets no cwd;
 # keep this in sync with .mcp.json when a launch command changes.
 #
 # default_tools_approval_mode = "approve" pre-approves every tool on the server
 # without prompting — the Codex analogue of the per-server "mcp__<server>" allow
-# rules in .claude/settings.local.json. The three GUI servers additionally pass
+# rules in .claude/settings.local.json. The GUI servers additionally pass
 # through the Qt/session env vars so a GUI subprocess they launch can reach the
 # user's display; agent-memory has no GUI and needs none.
 
@@ -68,6 +67,25 @@ env_vars = [
 ]
 default_tools_approval_mode = "approve"
 
+[mcp_servers.autofluxdep-gui]
+command = "uv"
+args = [
+  "run",
+  "--extra",
+  "gui",
+  "python",
+  "lib/zcu_tools/mcp/autofluxdep/server.py",
+]
+env_vars = [
+  "QT_QPA_PLATFORM",
+  "DISPLAY",
+  "WAYLAND_DISPLAY",
+  "XDG_RUNTIME_DIR",
+  "DBUS_SESSION_BUS_ADDRESS",
+  "XDG_SESSION_TYPE",
+]
+default_tools_approval_mode = "approve"
+
 [mcp_servers.agent-memory]
 command = "uv"
 args = [
@@ -76,5 +94,16 @@ args = [
   "client",
   "python",
   "lib/zcu_tools/mcp/agent_memory/server.py",
+]
+default_tools_approval_mode = "approve"
+
+[mcp_servers.taskboard]
+command = "uv"
+args = [
+  "run",
+  "--extra",
+  "client",
+  "python",
+  "lib/zcu_tools/mcp/taskboard/server.py",
 ]
 default_tools_approval_mode = "approve"

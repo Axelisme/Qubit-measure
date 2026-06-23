@@ -4,31 +4,29 @@ build/
 dist/
 wheels/
 *.egg-info
-.ipynb_checkpoints
 .env
+.coverage
+
 .vscode
 .github
-.coverage
 .cursor
-.claude/*
+.claude
 !.claude/skills/
 !.claude/settings.json
-agent_memory/
 
+agent_memory/
 Database/
-Database
-result
-test.py
-test.ipynb
+result/
+logs/
 scratch/
 task_plans/
-logs/
-
-notebook_md/plot/*
+test.py
+test.ipynb
 
 qick/
-labber_api/
-qiskit-metal/
+
+client_secret.json
+package-lock.json
 
 *.bak
 *.yaml
@@ -37,12 +35,9 @@ qiskit-metal/
 *.png
 *.csv
 *.log
-*.json
-!.mcp.json
-!.claude/settings.json
-!.gemini/settings.json
 *.npz
 
 # Jupytext generated files
-/notebook/
-backup_ipynb_*/
+notebook/*
+notebook_md/plot/*
+.ipynb_checkpoints
