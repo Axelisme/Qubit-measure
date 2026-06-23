@@ -1569,7 +1569,11 @@ def tool_gui_debug_resource_versions(arguments: dict[str, Any]) -> dict[str, Any
     for the optimistic-concurrency guard, but here the version numbers are
     returned as-is instead of being kept as mcp<->RPC bookkeeping hidden from the
     operator. The only window into why a guarded op rejected (or did not reject)
-    on a stale dependency. Returns the flat table {resource_key: version_int}.
+    on a stale dependency. Returns the flat table {resource_key: version_int} —
+    the GUI's live authoritative versions (a fresh read), NOT the mcp-side
+    ``_LAST_SEEN`` cache. Side effect: like any ``send_gui_rpc`` round-trip the
+    call resyncs ``_LAST_SEEN`` to the current table, but it never bumps a
+    resource version (those move only on a real edit/run/writeback).
 
     Note: wire/gui/mcp *code* version握手 (WIRE_VERSION/GUI_VERSION/MCP_VERSION)
     lives in gui_launch / gui_bridge_connect's 'note' field — not in this table.
@@ -2928,6 +2932,10 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "These version numbers are normally hidden from the operator "
             "(mcp<->RPC bookkeeping); read them only when debugging why a "
             "guarded op rejected (or failed to reject) on a stale dependency. "
+            "Returns the GUI's live (authoritative) table — not the mcp-side "
+            "cache. SIDE EFFECT: like any RPC round-trip this resyncs the mcp "
+            "last-seen baseline to the current table; it does NOT bump any "
+            "resource version (the numbers only move on a real edit/run/writeback). "
             "NOTE: wire/gui/mcp *code* version握手 (WIRE_VERSION / GUI_VERSION / "
             "MCP_VERSION) lives in the gui_launch / gui_bridge_connect 'note' field "
             "— it is not in this table."
