@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -72,6 +72,8 @@ _SESSION_ID_ENV_VARS = (
     "CODEX_THREAD_ID",
     "AGENT_SESSION_ID",
 )
+_SESSION_ID_ENV_VAR_BYTES = tuple(name.encode() for name in _SESSION_ID_ENV_VARS)
+_PROC_ANCESTOR_LIMIT = 16
 
 _CONFIG = McpServerConfig(
     tool_prefix="taskboard_",
@@ -88,14 +90,94 @@ def _session_identity() -> str | None:
     It is the same value for a top-level session and all its sub-agents, and
     differs across top-level sessions.  Reading it from the process env (MCP tool
     calls carry no per-request session context) is what lets an orchestrator and
-    its sub-agents share one coordination identity (ADR-0022).  Returns ``None``
-    when unset, so the store falls back to the per-call ``owner`` label.
+    its sub-agents share one coordination identity (ADR-0022).
+
+    Some hosts expose the id to the top-level agent process but do not forward it
+    into MCP subprocesses.  On Linux, fall back to reading only the allowlisted
+    session-id names from ancestor ``/proc/*/environ`` entries.  Returns ``None``
+    when no source is available, so the store falls back to the per-call
+    ``owner`` label.
     """
+    return (
+        _session_identity_from_env(os.environ) or _session_identity_from_ancestor_env()
+    )
+
+
+def _session_identity_from_env(env: Mapping[str, str]) -> str | None:
     for name in _SESSION_ID_ENV_VARS:
-        value = os.environ.get(name)
+        value = env.get(name)
         if value:
             return value
     return None
+
+
+def _session_identity_from_ancestor_env(
+    *,
+    start_pid: int | None = None,
+    proc_root: Path = Path("/proc"),
+    max_depth: int = _PROC_ANCESTOR_LIMIT,
+) -> str | None:
+    """Best-effort Linux fallback for hosts that do not pass MCP env vars.
+
+    Only the allowlisted session-id variable names are inspected.  Any failure
+    (non-Linux, hidden ``/proc``, permissions, malformed stat data) degrades to
+    ``None`` so claim semantics fall back to per-owner coordination.
+    """
+    pid = start_pid if start_pid is not None else os.getppid()
+    visited: set[int] = set()
+
+    for _ in range(max_depth):
+        if pid <= 0 or pid in visited:
+            return None
+        visited.add(pid)
+        proc_dir = proc_root / str(pid)
+
+        try:
+            value = _session_identity_from_environ_bytes(
+                (proc_dir / "environ").read_bytes()
+            )
+        except OSError:
+            value = None
+        if value:
+            return value
+
+        try:
+            next_pid = _parent_pid_from_proc_stat((proc_dir / "stat").read_text())
+        except (OSError, ValueError):
+            return None
+        if next_pid == pid:
+            return None
+        pid = next_pid
+
+    return None
+
+
+def _session_identity_from_environ_bytes(raw: bytes) -> str | None:
+    values: dict[bytes, bytes] = {}
+    for item in raw.split(b"\0"):
+        key, sep, value = item.partition(b"=")
+        if sep and key in _SESSION_ID_ENV_VAR_BYTES and value:
+            values[key] = value
+
+    for name in _SESSION_ID_ENV_VAR_BYTES:
+        value = values.get(name)
+        if value:
+            return value.decode(errors="replace")
+    return None
+
+
+def _parent_pid_from_proc_stat(stat_text: str) -> int:
+    """Parse PPID from Linux ``/proc/<pid>/stat``.
+
+    The comm field is wrapped in parentheses and may contain spaces, so split
+    after the final ``") "`` before reading the state/ppid fields.
+    """
+    try:
+        rest = stat_text.rsplit(") ", 1)[1]
+        fields = rest.split()
+        return int(fields[1])
+    except (IndexError, ValueError) as exc:
+        raise ValueError("malformed proc stat") from exc
 
 
 def build_dispatch(
@@ -108,15 +190,16 @@ def build_dispatch(
     the caller's ``owner``.  Identity is never a wire parameter; callers do not
     pass it.
     """
-    session_id = _session_identity()
 
     def _claim(p: dict[str, Any]) -> Any:
+        session_id = _session_identity()
         identity = session_id if session_id is not None else p["owner"]
         return store.claim(**p, identity=identity)
 
     def _check(p: dict[str, Any]) -> Any:
         # check has no owner argument; identity is the session id when available,
         # else None (store reports all overlaps for an anonymous dry run).
+        session_id = _session_identity()
         return store.check(**p, identity=session_id)
 
     return {

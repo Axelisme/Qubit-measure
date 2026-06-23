@@ -17,6 +17,13 @@ _EXPECTED_TOOLS = {
 }
 
 
+def _clear_session_identity(monkeypatch):
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
+    monkeypatch.delenv("AGENT_SESSION_ID", raising=False)
+    monkeypatch.setattr(server, "_session_identity_from_ancestor_env", lambda: None)
+
+
 def test_dispatch_covers_every_method_spec(tmp_path):
     store = TaskboardStore(
         json_path=tmp_path / "taskboard.json",
@@ -45,9 +52,7 @@ def test_claim_tool_end_to_end(tmp_path, monkeypatch):
     exercises the deterministic owner-fallback path (check has no owner → reports
     the alien grant as a conflict) regardless of where it runs.
     """
-    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
-    monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
-    monkeypatch.delenv("AGENT_SESSION_ID", raising=False)
+    _clear_session_identity(monkeypatch)
     store = TaskboardStore(
         json_path=tmp_path / "taskboard.json",
         md_path=tmp_path / "taskboard.md",
@@ -116,8 +121,7 @@ def test_force_release_tool(tmp_path):
 def _build_tools_for_session(
     json_path, session_id, monkeypatch, env_name="CLAUDE_CODE_SESSION_ID"
 ):
-    """Build a fresh tool table whose dispatch snapshots ``session_id`` from env,
-    pointing at the shared ``json_path`` (one server process == one session)."""
+    """Build a tool table with ``session_id`` in env, pointing at ``json_path``."""
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
     monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
     monkeypatch.delenv("AGENT_SESSION_ID", raising=False)
@@ -184,12 +188,60 @@ def test_codex_thread_id_is_session_identity(tmp_path, monkeypatch):
     assert r2["warnings"][0]["owner"] == "parent"
 
 
-def test_no_session_id_falls_back_to_owner(tmp_path, monkeypatch):
-    """With session env unset, identity falls back to owner: same owner
-    overlap auto-grants (idempotent), different owner conflicts."""
+def test_ancestor_codex_thread_id_is_session_identity(tmp_path, monkeypatch):
+    """Codex-like hosts may keep CODEX_THREAD_ID on an ancestor process instead
+    of forwarding it into the MCP subprocess env."""
+    _clear_session_identity(monkeypatch)
+    monkeypatch.setattr(
+        server,
+        "_session_identity_from_ancestor_env",
+        lambda: "codex-thread-from-parent",
+    )
+    store = TaskboardStore(
+        json_path=tmp_path / "taskboard.json",
+        md_path=tmp_path / "taskboard.md",
+    )
+    tools = server.build_tools(store)
+
+    r1 = tools["taskboard_claim"]["handler"](
+        {"owner": "parent", "paths": ["lib/foo"], "task": "A"}
+    )
+    r2 = tools["taskboard_claim"]["handler"](
+        {"owner": "sub-agent", "paths": ["lib/foo"], "task": "B"}
+    )
+
+    assert r1["status"] == "granted"
+    assert r2["status"] == "granted"
+    assert r2["warnings"][0]["kind"] == "same_session_overlap"
+
+
+def test_session_identity_reads_fake_proc_ancestors(tmp_path, monkeypatch):
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
     monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
     monkeypatch.delenv("AGENT_SESSION_ID", raising=False)
+    proc = tmp_path / "proc"
+    (proc / "20").mkdir(parents=True)
+    (proc / "10").mkdir()
+    (proc / "1").mkdir()
+    (proc / "20" / "environ").write_bytes(b"")
+    (proc / "20" / "stat").write_text("20 (mcp server) S 10 0 0 0\n")
+    (proc / "10" / "environ").write_bytes(
+        b"USER=test\0CODEX_THREAD_ID=codex-thread-A\0"
+    )
+    (proc / "10" / "stat").write_text("10 (codex) S 1 0 0 0\n")
+    (proc / "1" / "environ").write_bytes(b"")
+    (proc / "1" / "stat").write_text("1 (init) S 1 0 0 0\n")
+
+    assert (
+        server._session_identity_from_ancestor_env(start_pid=20, proc_root=proc)
+        == "codex-thread-A"
+    )
+
+
+def test_no_session_id_falls_back_to_owner(tmp_path, monkeypatch):
+    """With session env unset, identity falls back to owner: same owner
+    overlap auto-grants (idempotent), different owner conflicts."""
+    _clear_session_identity(monkeypatch)
     store = TaskboardStore(
         json_path=tmp_path / "taskboard.json",
         md_path=tmp_path / "taskboard.md",

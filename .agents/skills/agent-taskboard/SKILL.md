@@ -20,7 +20,7 @@ Claim before any `Edit` or `Write` operation whose scope could overlap with **an
 
 ## Session Identity & Same-Session Claims
 
-The conflict identity is **the top-level agent session**, not the `owner` string you pass.  The server reads it from the host session env (`CLAUDE_CODE_SESSION_ID` for Claude Code, `CODEX_THREAD_ID` for Codex, or `AGENT_SESSION_ID` for compatible hosts), which is the *same* value for a top-level session and every sub-agent it spawns, and *different* across top-level sessions.
+The conflict identity is **the top-level agent session**, not the `owner` string you pass.  The server reads it from the host session env (`CLAUDE_CODE_SESSION_ID` for Claude Code, `CODEX_THREAD_ID` for Codex, or `AGENT_SESSION_ID` for compatible hosts), falling back on Linux to the same allowlisted names in ancestor process env when an MCP host does not forward them into the subprocess.  The identity is the *same* value for a top-level session and every sub-agent it spawns, and *different* across top-level sessions.
 
 Consequences:
 
