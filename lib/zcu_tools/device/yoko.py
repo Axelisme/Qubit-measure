@@ -30,6 +30,9 @@ class YOKOGS200Info(BaseDeviceInfo):
     value: float = 0.0
     rampstep: float = DEFAULT_RAMPSTEP["voltage"]
 
+    def set_flux(self, value: float) -> None:
+        self.value = value
+
 
 class YOKOGS200(BaseDevice[YOKOGS200Info]):
     info_model = YOKOGS200Info

@@ -18,6 +18,15 @@ class RohdeSchwarzSGS100AInfo(BaseDeviceInfo):
     freq_Hz: float = 1e9
     power_dBm: float = -120.0
 
+    def set_freq(self, freq_Hz: float) -> None:
+        self.freq_Hz = freq_Hz
+
+    def set_power(self, power_dBm: float) -> None:
+        self.power_dBm = power_dBm
+
+    def set_output(self, output: Literal["on", "off"]) -> None:
+        self.output = output
+
 
 class RohdeSchwarzSGS100A(BaseDevice[RohdeSchwarzSGS100AInfo]):
     info_model = RohdeSchwarzSGS100AInfo

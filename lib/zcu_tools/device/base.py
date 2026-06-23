@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 import threading
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Generic, Self, TypeVar
+from typing import TYPE_CHECKING, Generic, Literal, Self, TypeVar
 
 from zcu_tools.cfg_model import ConfigBase
 
@@ -34,6 +34,32 @@ class BaseDeviceInfo(ConfigBase):
                     f"Unknown field '{key}' for {self.__class__.__name__}."
                 )
         return super().with_updates(**kwargs)
+
+    # ----- experiment-knob setters -----
+    #
+    # The experiment layer drives device configs through these knob setters
+    # instead of reaching into device-specific fields. Each subclass overrides
+    # only the knobs it supports; unsupported knobs fail fast via the base raise.
+
+    def set_flux(self, value: float) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support setting flux"
+        )
+
+    def set_freq(self, freq_Hz: float) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support setting freq"
+        )
+
+    def set_power(self, power_dBm: float) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support setting power"
+        )
+
+    def set_output(self, output: Literal["on", "off"]) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support setting output"
+        )
 
 
 T_DeviceInfo = TypeVar("T_DeviceInfo", bound=BaseDeviceInfo)

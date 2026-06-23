@@ -31,45 +31,21 @@ def set_flux_in_dev_cfg(
     devs_cfg: Mapping[str, DeviceInfo], value: float, label: str = "flux_dev"
 ) -> None:
     """Set the flux value in the device configuration with the given label."""
-
-    flux_cfg = get_labeled_device_cfg(devs_cfg, label)
-
-    if flux_cfg.type == "YOKOGS200":
-        flux_cfg.value = value
-    elif flux_cfg.type == "FakeDevice":
-        flux_cfg.value = value
-    else:
-        raise NotImplementedError(f"Flux device type {flux_cfg.type} not supported yet")
+    get_labeled_device_cfg(devs_cfg, label).set_flux(value)
 
 
 def set_freq_in_dev_cfg(
     devs_cfg: Mapping[str, DeviceInfo], freq_Hz: float, label: str = "rf_dev"
 ) -> None:
     """Set the rf frequency value in the device configuration with the given label."""
-
-    rf_cfg = get_labeled_device_cfg(devs_cfg, label)
-
-    if rf_cfg.type == "RohdeSchwarzSGS100A":
-        rf_cfg.freq_Hz = freq_Hz
-    elif rf_cfg.type == "FakeDevice":
-        rf_cfg.value = freq_Hz
-    else:
-        raise NotImplementedError(f"RF device type {rf_cfg.type} not supported yet")
+    get_labeled_device_cfg(devs_cfg, label).set_freq(freq_Hz)
 
 
 def set_power_in_dev_cfg(
     devs_cfg: Mapping[str, DeviceInfo], power_dBm: float, label: str = "rf_dev"
 ) -> None:
     """Set the rf power value in the device configuration with the given label."""
-
-    rf_cfg = get_labeled_device_cfg(devs_cfg, label)
-
-    if rf_cfg.type == "RohdeSchwarzSGS100A":
-        rf_cfg.power_dBm = power_dBm
-    elif rf_cfg.type == "FakeDevice":
-        rf_cfg.value = power_dBm
-    else:
-        raise NotImplementedError(f"RF device type {rf_cfg.type} not supported yet")
+    get_labeled_device_cfg(devs_cfg, label).set_power(power_dBm)
 
 
 def set_output_in_dev_cfg(
@@ -78,15 +54,7 @@ def set_output_in_dev_cfg(
     label: str = "rf_dev",
 ) -> None:
     """Set the output state in the device configuration with the given label."""
-
-    rf_cfg = get_labeled_device_cfg(devs_cfg, label)
-
-    if rf_cfg.type == "RohdeSchwarzSGS100A":
-        rf_cfg.output = output
-    elif rf_cfg.type == "FakeDevice":
-        rf_cfg.output = output
-    else:
-        raise NotImplementedError(f"RF device type {rf_cfg.type} not supported yet")
+    get_labeled_device_cfg(devs_cfg, label).set_output(output)
 
 
 def setup_devices(cfg: ExpCfgModel, *, progress: bool = False) -> None:

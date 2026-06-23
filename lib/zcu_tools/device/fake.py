@@ -20,6 +20,18 @@ class FakeDeviceInfo(BaseDeviceInfo):
     value: float = 0.0
     rampstep: float = DEFAULT_RAMPSTEP
 
+    def set_flux(self, value: float) -> None:
+        self.value = value
+
+    def set_freq(self, freq_Hz: float) -> None:
+        self.value = freq_Hz
+
+    def set_power(self, power_dBm: float) -> None:
+        self.value = power_dBm
+
+    def set_output(self, output: Literal["on", "off"]) -> None:
+        self.output = output
+
 
 class FakeDevice(BaseDevice[FakeDeviceInfo]):
     info_model = FakeDeviceInfo
