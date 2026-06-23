@@ -11,9 +11,9 @@ from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
-    AbsExperiment,
     AxesSpec,
     Axis,
+    PersistableExperiment,
     ZSpec,
     config,
     record_result,
@@ -48,15 +48,15 @@ class FreqCfg(TwoToneCfg, ExpCfgModel):
     sweep: FreqSweepCfg
 
 
-class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
+class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
     # freq stores MHz on disk -> scale=IDENTITY (1.0)
     AXES_SPEC = AxesSpec(
         axes=(Axis("freqs", "Frequency", "MHz"),),
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=FreqResult,
         cfg_type=FreqCfg,
+        tag="twotone/freq",
     )
-    DEFAULT_TAG = "twotone/freq"
 
     @record_result
     def run(

@@ -34,6 +34,7 @@ from zcu_tools.experiment.cfg_model import ExpCfgModel
 
 __all__ = [
     "AbsExperiment",
+    "PersistableExperiment",
     "ExperimentProtocol",
     "record_result",
     "retrieve_result",
@@ -127,15 +128,22 @@ class ExperimentProtocol(Protocol[T_Result, T_Config_contra]):
 
 
 class AbsExperiment(Generic[T_Result, T_Config]):
-    """Base implementation: native-labber save/load via ``AXES_SPEC``."""
+    """Minimal base: just the ``last_result`` cache.
 
-    #: per-experiment persistence declaration; required for save()/load().
-    AXES_SPEC: ClassVar[AxesSpec[Any, Any] | None] = None
-    #: per-experiment default hierarchical save tag.
-    DEFAULT_TAG: ClassVar[str] = ""
+    Native persistence (``save``/``load`` via ``AXES_SPEC``) is OPT-IN — inherit
+    ``PersistableExperiment`` instead to gain it. Un-migrated experiments keep
+    their own incompatible ``save``/``load`` signatures off this minimal base.
+    """
 
     def __init__(self) -> None:
         self.last_result: T_Result | None = None
+
+
+class PersistableExperiment(AbsExperiment[T_Result, T_Config]):
+    """Opt-in base: native-labber save/load via ``AXES_SPEC``."""
+
+    #: per-experiment persistence declaration; required for save()/load().
+    AXES_SPEC: ClassVar[AxesSpec[Any, Any] | None] = None
 
     def _spec(self) -> AxesSpec[T_Result, T_Config]:
         spec = type(self).AXES_SPEC
@@ -177,7 +185,7 @@ class AbsExperiment(Generic[T_Result, T_Config]):
 
         filepath = safe_labber_filepath(filepath)
         save_labber_data(
-            filepath, z=z, axes=axes, comment=comment, tags=tag or self.DEFAULT_TAG
+            filepath, z=z, axes=axes, comment=comment, tags=tag or spec.tag
         )
         if server_ip is not None:
             if upload_to_server(filepath, server_ip, port):

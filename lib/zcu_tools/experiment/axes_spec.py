@@ -59,6 +59,7 @@ class AxesSpec(Generic[T_Result, T_Config]):
     z: ZSpec
     result_type: type[T_Result]
     cfg_type: type[T_Config]
+    tag: str  # on-disk hierarchical tag, e.g. 'twotone/freq'
 
     def __post_init__(self) -> None:
         # Fast-Fail at declaration time: the spec must reference real Result fields.
