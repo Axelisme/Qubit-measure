@@ -48,9 +48,9 @@ def test_build_tools_exposes_seven_tools(tmp_path):
 def test_claim_tool_end_to_end(tmp_path, monkeypatch):
     """Full round-trip via MCP tool handlers: claim → check → list → release.
 
-    Identity is derived from host session env; delete those variables so this test
-    exercises the deterministic owner-fallback path (check has no owner → reports
-    the alien grant as a conflict) regardless of where it runs.
+    Identity is derived from host session env, ancestor env, or finally the MCP
+    process identity; clear the first two sources so this test exercises the
+    deterministic process fallback regardless of where it runs.
     """
     _clear_session_identity(monkeypatch)
     store = TaskboardStore(
@@ -66,9 +66,10 @@ def test_claim_tool_end_to_end(tmp_path, monkeypatch):
     assert result["status"] == "granted"
     claim_id = result["claim_id"]
 
-    # check — should report conflict
+    # check — same process identity, so the active claim is a warning, not conflict
     chk = tools["taskboard_check"]["handler"]({"paths": ["lib/foo"]})
-    assert len(chk["conflicts"]) == 1
+    assert chk["conflicts"] == []
+    assert chk["warnings"][0]["kind"] == "same_session_overlap"
 
     # list — should appear in active
     lst = tools["taskboard_list"]["handler"]({})
@@ -85,6 +86,7 @@ def test_claim_tool_end_to_end(tmp_path, monkeypatch):
     # check after release — no conflicts
     chk2 = tools["taskboard_check"]["handler"]({"paths": ["lib/foo"]})
     assert chk2["conflicts"] == []
+    assert chk2["warnings"] == []
 
 
 def test_touch_tool(tmp_path):
@@ -238,9 +240,9 @@ def test_session_identity_reads_fake_proc_ancestors(tmp_path, monkeypatch):
     )
 
 
-def test_no_session_id_falls_back_to_owner(tmp_path, monkeypatch):
-    """With session env unset, identity falls back to owner: same owner
-    overlap auto-grants (idempotent), different owner conflicts."""
+def test_no_session_id_uses_process_identity(tmp_path, monkeypatch):
+    """With all host session sources unset, one MCP server process still shares
+    one fallback identity across different owner labels."""
     _clear_session_identity(monkeypatch)
     store = TaskboardStore(
         json_path=tmp_path / "taskboard.json",
@@ -252,12 +254,9 @@ def test_no_session_id_falls_back_to_owner(tmp_path, monkeypatch):
         {"owner": "alice", "paths": ["lib/foo"], "task": "A"}
     )
     r2 = tools["taskboard_claim"]["handler"](
-        {"owner": "alice", "paths": ["lib/foo"], "task": "A2"}
-    )
-    assert r1["status"] == "granted"
-    assert r2["claim_id"] == r1["claim_id"]  # same owner → idempotent re-claim
-
-    r3 = tools["taskboard_claim"]["handler"](
         {"owner": "bob", "paths": ["lib/foo"], "task": "B"}
     )
-    assert r3["status"] == "pending"  # different owner → conflict
+    assert r1["status"] == "granted"
+    assert r2["status"] == "granted"
+    assert r2["claim_id"] == r1["claim_id"]
+    assert r2["warnings"][0]["kind"] == "same_session_overlap"

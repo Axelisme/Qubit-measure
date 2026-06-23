@@ -20,14 +20,15 @@ Claim before any `Edit` or `Write` operation whose scope could overlap with **an
 
 ## Session Identity & Same-Session Claims
 
-The conflict identity is **the top-level agent session**, not the `owner` string you pass.  The server reads it from the host session env (`CLAUDE_CODE_SESSION_ID` for Claude Code, `CODEX_THREAD_ID` for Codex, or `AGENT_SESSION_ID` for compatible hosts), falling back on Linux to the same allowlisted names in ancestor process env when an MCP host does not forward them into the subprocess.  The identity is the *same* value for a top-level session and every sub-agent it spawns, and *different* across top-level sessions.
+The conflict identity is **the top-level agent session**, not the `owner` string you pass.  The server reads it from the host session env (`CLAUDE_CODE_SESSION_ID` for Claude Code, `CODEX_THREAD_ID` for Codex, or `AGENT_SESSION_ID` for compatible hosts), falls back on Linux to the same allowlisted names in ancestor process env when an MCP host does not forward them into the subprocess, and finally falls back to a process-local identity so one stdio MCP process never blocks itself.  The identity is the *same* value for a top-level session and every sub-agent it spawns, and *different* across top-level sessions.
 
 Consequences:
 
 - **An orchestrator and the sub-agents it launches share one session, so their claims never block each other.**  You do **not** need to tell a sub-agent to skip claiming or to claim under the orchestrator — let each agent claim normally; same-session overlap is auto-granted and returned under `warnings` as a reminder.
 - **Re-claiming a scope you already hold is ignored** — it returns the same `claim_id`, still granted, and adds no duplicate.  A held `write` covers a re-claimed `read`/`write` of the same or a narrower path; a held `read` covers a re-claimed `read`.
 - **Only a *different* session contends.**  Cross-session overlapping writes still queue as `pending`, which is exactly what coordination is for.
-- `owner` is just a human-readable label on the board; pick something descriptive (e.g. `'impl-162a'`).  It has no effect on conflict resolution unless no supported session env is available, in which case the server falls back to `owner` as the identity.
+- `owner` is just a human-readable label on the board; pick something descriptive (e.g. `'impl-162a'`).  It has no effect on conflict resolution; when no host session identity is visible, the server uses a process-local fallback identity rather than `owner`.
+- The live taskboard MCP writes identity-resolution diagnostics under `logs/mcp/taskboard/`; check the newest log before guessing why a claim used a given identity.
 
 ---
 

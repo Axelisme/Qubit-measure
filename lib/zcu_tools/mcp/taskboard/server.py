@@ -15,9 +15,11 @@ from __future__ import annotations
 
 import os
 import sys
+import logging
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 # Launched standalone so add the repo ``lib`` dir to sys.path for absolute imports.
 # lib/zcu_tools/mcp/taskboard/server.py -> lib
@@ -33,6 +35,8 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
 )
 from zcu_tools.mcp.taskboard.method_specs import METHOD_SPECS  # noqa: E402
 from zcu_tools.mcp.taskboard.store import TaskboardStore  # noqa: E402
+
+logger = logging.getLogger("zcu_tools.mcp.taskboard.server")
 
 _SERVER_INSTRUCTIONS = """\
 Multi-agent path-coordination taskboard (ADR-0022).
@@ -74,6 +78,7 @@ _SESSION_ID_ENV_VARS = (
 )
 _SESSION_ID_ENV_VAR_BYTES = tuple(name.encode() for name in _SESSION_ID_ENV_VARS)
 _PROC_ANCESTOR_LIMIT = 16
+_PROCESS_SESSION_ID = f"taskboard-process-{uuid4().hex}"
 
 _CONFIG = McpServerConfig(
     tool_prefix="taskboard_",
@@ -94,20 +99,38 @@ def _session_identity() -> str | None:
 
     Some hosts expose the id to the top-level agent process but do not forward it
     into MCP subprocesses.  On Linux, fall back to reading only the allowlisted
-    session-id names from ancestor ``/proc/*/environ`` entries.  Returns ``None``
-    when no source is available, so the store falls back to the per-call
-    ``owner`` label.
+    session-id names from ancestor ``/proc/*/environ`` entries.  As a final
+    fallback, use a process-local identity: stdio MCP servers are scoped to one
+    client session, so calls handled by the same taskboard process should not
+    self-block even when the host exposes no session env at all.
     """
-    return (
-        _session_identity_from_env(os.environ) or _session_identity_from_ancestor_env()
-    )
+    return _session_identity_with_source()[0]
+
+
+def _session_identity_with_source() -> tuple[str, str]:
+    found = _find_session_identity_in_env(os.environ)
+    if found is not None:
+        value, name = found
+        return value, f"env:{name}"
+
+    found = _find_session_identity_in_ancestor_env()
+    if found is not None:
+        value, source = found
+        return value, source
+
+    return _PROCESS_SESSION_ID, "process-local"
 
 
 def _session_identity_from_env(env: Mapping[str, str]) -> str | None:
+    found = _find_session_identity_in_env(env)
+    return found[0] if found is not None else None
+
+
+def _find_session_identity_in_env(env: Mapping[str, str]) -> tuple[str, str] | None:
     for name in _SESSION_ID_ENV_VARS:
         value = env.get(name)
         if value:
-            return value
+            return value, name
     return None
 
 
@@ -117,6 +140,20 @@ def _session_identity_from_ancestor_env(
     proc_root: Path = Path("/proc"),
     max_depth: int = _PROC_ANCESTOR_LIMIT,
 ) -> str | None:
+    found = _find_session_identity_in_ancestor_env(
+        start_pid=start_pid,
+        proc_root=proc_root,
+        max_depth=max_depth,
+    )
+    return found[0] if found is not None else None
+
+
+def _find_session_identity_in_ancestor_env(
+    *,
+    start_pid: int | None = None,
+    proc_root: Path = Path("/proc"),
+    max_depth: int = _PROC_ANCESTOR_LIMIT,
+) -> tuple[str, str] | None:
     """Best-effort Linux fallback for hosts that do not pass MCP env vars.
 
     Only the allowlisted session-id variable names are inspected.  Any failure
@@ -133,13 +170,14 @@ def _session_identity_from_ancestor_env(
         proc_dir = proc_root / str(pid)
 
         try:
-            value = _session_identity_from_environ_bytes(
+            found = _find_session_identity_in_environ_bytes(
                 (proc_dir / "environ").read_bytes()
             )
         except OSError:
-            value = None
-        if value:
-            return value
+            found = None
+        if found is not None:
+            value, name = found
+            return value, f"ancestor-env:pid={pid}:{name}"
 
         try:
             next_pid = _parent_pid_from_proc_stat((proc_dir / "stat").read_text())
@@ -153,6 +191,11 @@ def _session_identity_from_ancestor_env(
 
 
 def _session_identity_from_environ_bytes(raw: bytes) -> str | None:
+    found = _find_session_identity_in_environ_bytes(raw)
+    return found[0] if found is not None else None
+
+
+def _find_session_identity_in_environ_bytes(raw: bytes) -> tuple[str, str] | None:
     values: dict[bytes, bytes] = {}
     for item in raw.split(b"\0"):
         key, sep, value = item.partition(b"=")
@@ -162,7 +205,7 @@ def _session_identity_from_environ_bytes(raw: bytes) -> str | None:
     for name in _SESSION_ID_ENV_VAR_BYTES:
         value = values.get(name)
         if value:
-            return value.decode(errors="replace")
+            return value.decode(errors="replace"), name.decode()
     return None
 
 
@@ -192,15 +235,29 @@ def build_dispatch(
     """
 
     def _claim(p: dict[str, Any]) -> Any:
-        session_id = _session_identity()
-        identity = session_id if session_id is not None else p["owner"]
+        identity, source = _session_identity_with_source()
+        logger.debug(
+            "claim owner=%r paths=%r mode=%r identity=%r source=%s",
+            p.get("owner"),
+            p.get("paths"),
+            p.get("mode", "write"),
+            identity,
+            source,
+        )
         return store.claim(**p, identity=identity)
 
     def _check(p: dict[str, Any]) -> Any:
         # check has no owner argument; identity is the session id when available,
         # else None (store reports all overlaps for an anonymous dry run).
-        session_id = _session_identity()
-        return store.check(**p, identity=session_id)
+        identity, source = _session_identity_with_source()
+        logger.debug(
+            "check paths=%r mode=%r identity=%r source=%s",
+            p.get("paths"),
+            p.get("mode", "write"),
+            identity,
+            source,
+        )
+        return store.check(**p, identity=identity)
 
     return {
         "claim": _claim,
@@ -241,12 +298,30 @@ def _taskboard_root() -> Path:
 
 
 def main() -> None:
+    def _setup_logging() -> None:
+        from zcu_tools.gui.logging_setup import setup_gui_logging
+
+        setup_gui_logging(
+            app_name="taskboard",
+            log_root=Path(__file__).resolve().parents[4],
+            group="mcp",
+            extra_namespaces=("zcu_tools.mcp.taskboard",),
+        )
+        logger.debug(
+            "taskboard MCP startup pid=%s ppid=%s cwd=%s argv=%r process_identity=%s",
+            os.getpid(),
+            os.getppid(),
+            os.getcwd(),
+            sys.argv,
+            _PROCESS_SESSION_ID,
+        )
+
     root = _taskboard_root()
     store = TaskboardStore(
         json_path=root / "taskboard.json",
         md_path=root / "taskboard.md",
     )
-    run_stdio_loop(_CONFIG, build_tools(store))
+    run_stdio_loop(_CONFIG, build_tools(store), on_start=_setup_logging)
 
 
 if __name__ == "__main__":
