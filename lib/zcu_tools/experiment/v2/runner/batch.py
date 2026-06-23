@@ -7,11 +7,12 @@ from typing import TypeVar
 from zcu_tools.progress_bar import BaseProgressBar, make_pbar
 
 from .base import AbsTask
+from .repeat import run_with_retries
 from .state import (
     T_Cfg,
     T_ChildResult,
     T_RootResult,
-    TaskState,  # noqa: F401 — used only in a cast() string literal below
+    TaskState,
     cast,
 )
 
@@ -42,6 +43,13 @@ class BatchTask(AbsTask[dict[T_Key, T_ChildResult], T_RootResult, T_Cfg]):
         for name, task in self.tasks.items():
             task.init(dynamic_pbar=True)
 
+    def _run_child(
+        self,
+        task: AbsTask[T_ChildResult, T_RootResult, T_Cfg],
+        state: TaskState[T_ChildResult, T_RootResult, T_Cfg],
+    ) -> None:
+        task.run(state)
+
     def run(self, state) -> None:
         if self.dynamic_pbar:
             self.task_pbar = self._build_pbar(leave=False)
@@ -59,11 +67,12 @@ class BatchTask(AbsTask[dict[T_Key, T_ChildResult], T_RootResult, T_Cfg]):
             self.task_pbar.set_description(f"Task [{str(name)}]")
             logger.debug("BatchTask.run: starting task '%s'", name)
 
-            task.run(
+            self._run_child(
+                task,
                 cast(
                     "TaskState[T_ChildResult, T_RootResult, T_Cfg]",
                     state.child(name),
-                )
+                ),
             )
 
             self.task_pbar.update()
@@ -82,3 +91,27 @@ class BatchTask(AbsTask[dict[T_Key, T_ChildResult], T_RootResult, T_Cfg]):
 
     def get_default_result(self) -> dict[T_Key, T_ChildResult]:
         return {name: task.get_default_result() for name, task in self.tasks.items()}
+
+
+class RetryBatchTask(BatchTask[T_Key, T_ChildResult, T_RootResult, T_Cfg]):
+    """BatchTask that retries each child task on failure.
+
+    Inherits BatchTask.run() unchanged (so the state.is_stop() check is honored)
+    and only overrides how a single child is executed: each child runs through
+    run_with_retries with the configured retry budget.
+    """
+
+    def __init__(
+        self,
+        tasks: Mapping[T_Key, AbsTask[T_ChildResult, T_RootResult, T_Cfg]],
+        retry_time: int = 0,
+    ) -> None:
+        super().__init__(tasks)
+        self.retry_time = retry_time
+
+    def _run_child(
+        self,
+        task: AbsTask[T_ChildResult, T_RootResult, T_Cfg],
+        state: TaskState[T_ChildResult, T_RootResult, T_Cfg],
+    ) -> None:
+        run_with_retries(task, state, self.retry_time, dynamic_pbar=True)
