@@ -11,9 +11,17 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import (
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    config,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -23,7 +31,6 @@ from zcu_tools.program.v2 import (
     TwoToneProgram,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_rabi
 from zcu_tools.utils.process import rotate2real
 
@@ -47,7 +54,16 @@ class AmpRabiCfg(TwoToneCfg, ExpCfgModel):
     sweep: AmpRabiSweepCfg
 
 
-class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
+class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
+    AXES_SPEC = AxesSpec(
+        axes=(Axis("amps", "Gain", ""),),
+        z=ZSpec("signals", "Signal", "a.u."),
+        result_type=AmpRabiResult,
+        cfg_type=AmpRabiCfg,
+        tag="twotone/ge/rabi_gain",
+    )
+
+    @record_result
     def run(
         self,
         soc,
@@ -97,18 +113,12 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
                 ),
             )
 
-        # record result
-        self.last_result = AmpRabiResult(
-            amps=gains, signals=signals, cfg_snapshot=orig_cfg
-        )
+        return AmpRabiResult(amps=gains, signals=signals, cfg_snapshot=orig_cfg)
 
-        return self.last_result
-
+    @retrieve_result
     def analyze(
         self, result: AmpRabiResult | None = None, skip: int = 0
     ) -> tuple[float, float, float, float, Figure]:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         gains, signals = result.amps, result.signals
@@ -153,51 +163,3 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
         # fit_rabi computes the per-gain fit uncertainties; surface them so the GUI
         # summary carries the gain errors (the figure labels already show them).
         return pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, fig
-
-    def save(
-        self,
-        filepath: str,
-        result: AmpRabiResult | None = None,
-        comment: str | None = None,
-        tag: str = "twotone/ge/rabi_gain",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        gains, signals = result.amps, result.signals
-        cfg = result.cfg_snapshot
-        if cfg is None:
-            raise ValueError("cfg_snapshot is None")
-        comment = make_comment(cfg, comment)
-
-        save_data(
-            filepath=filepath,
-            x_info={"name": "Gain", "unit": "", "values": gains},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-    def load(self, filepath: str, **kwargs) -> AmpRabiResult:
-        signals, gains, _, comment = load_data(filepath, return_comment=True, **kwargs)
-        assert gains is not None
-        assert len(gains.shape) == 1 and len(signals.shape) == 1
-        assert gains.shape == signals.shape
-
-        gains = gains.astype(np.float64)
-        signals = signals.astype(np.complex128)
-
-        cfg_snapshot = None
-        if comment is not None:
-            cfg, _, _ = parse_comment(comment)
-
-            if cfg is not None:
-                cfg_snapshot = AmpRabiCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = AmpRabiResult(
-            amps=gains, signals=signals, cfg_snapshot=cfg_snapshot
-        )
-
-        return self.last_result

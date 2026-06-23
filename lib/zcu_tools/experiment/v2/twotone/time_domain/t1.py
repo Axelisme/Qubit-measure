@@ -14,9 +14,18 @@ from scipy.ndimage import gaussian_filter
 
 import zcu_tools.utils.fitting as ft
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import (
+    US_TO_S,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    config,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, LivePlot2DwithLine
@@ -35,7 +44,6 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_decay, fit_dual_decay
 from zcu_tools.utils.process import rotate2real
 
@@ -66,12 +74,21 @@ class T1Cfg(ProgramV2Cfg, ExpCfgModel):
     sweep: T1SweepCfg
 
 
-class T1Exp(AbsExperiment[T1Result, T1Cfg]):
+class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
     """T1 relaxation time measurement.
 
     Applies a π pulse and then waits for a variable time before readout
     to measure the qubit's energy relaxation.
     """
+
+    # times stored as seconds on disk -> scale=US_TO_S
+    AXES_SPEC = AxesSpec(
+        axes=(Axis("times", "Time", "s", US_TO_S),),
+        z=ZSpec("signals", "Signal", "a.u."),
+        result_type=T1Result,
+        cfg_type=T1Cfg,
+        tag="twotone/ge/t1",
+    )
 
     def _run_non_uniform(
         self,
@@ -146,12 +163,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                 ),
             )
 
-        # record last result
-        self.last_result = T1Result(
-            times=lengths, signals=signals, cfg_snapshot=original_cfg
-        )
-
-        return self.last_result
+        return T1Result(times=lengths, signals=signals, cfg_snapshot=original_cfg)
 
     def _run_uniform(
         self,
@@ -209,13 +221,9 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                 ),
             )
 
-        # record last result
-        self.last_result = T1Result(
-            times=lengths, signals=signals, cfg_snapshot=original_cfg
-        )
+        return T1Result(times=lengths, signals=signals, cfg_snapshot=original_cfg)
 
-        return self.last_result
-
+    @record_result
     def run(
         self,
         soc,
@@ -232,6 +240,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                 soc, soccfg, cfg, acquire_kwargs=acquire_kwargs
             )
 
+    @retrieve_result
     def analyze(
         self,
         result: T1Result | None = None,
@@ -239,8 +248,6 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         dual_exp: bool = False,
         skip: int = 0,
     ) -> tuple[float, float, Figure]:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         xs, signals = result.times, result.signals
@@ -280,55 +287,6 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
 
         return t1, t1err, fig
 
-    def save(
-        self,
-        filepath: str,
-        result: T1Result | None = None,
-        comment: str | None = None,
-        tag: str = "twotone/ge/t1",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        Ts, signals = result.times, result.signals
-        cfg = result.cfg_snapshot
-        if cfg is None:
-            raise ValueError("cfg_snapshot is None")
-        comment = make_comment(cfg, comment)
-
-        save_data(
-            filepath=filepath,
-            x_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-    def load(self, filepath: str, **kwargs) -> T1Result:
-        signals, Ts, _, comment = load_data(filepath, return_comment=True, **kwargs)
-        assert Ts is not None
-        assert len(Ts.shape) == 1 and len(signals.shape) == 1
-        assert Ts.shape == signals.shape
-
-        Ts = Ts * 1e6  # s -> us
-
-        Ts = Ts.astype(np.float64)
-        signals = signals.astype(np.complex128)
-
-        cfg_snapshot = None
-        if comment is not None:
-            _cfg, _, _ = parse_comment(comment)
-            if _cfg is not None:
-                cfg_snapshot = T1Cfg.validate_or_warn(_cfg, source=filepath)
-        self.last_result = T1Result(
-            times=Ts, signals=signals, cfg_snapshot=cfg_snapshot
-        )
-
-        return self.last_result
-
 
 class T1WithToneModuleCfg(ConfigBase):
     reset: ResetCfg | None = None
@@ -346,7 +304,17 @@ class T1WithToneCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: T1WithToneSweepAxisCfg
 
 
-class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
+class T1WithToneExp(PersistableExperiment[T1Result, T1WithToneCfg]):
+    # times stored as seconds on disk -> scale=US_TO_S
+    AXES_SPEC = AxesSpec(
+        axes=(Axis("times", "Time", "s", US_TO_S),),
+        z=ZSpec("signals", "Signal", "a.u."),
+        result_type=T1Result,
+        cfg_type=T1WithToneCfg,
+        tag="twotone/ge/t1_with_tone",
+    )
+
+    @record_result
     def run(
         self,
         soc,
@@ -408,18 +376,12 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
                 ),
             )
 
-        # record last result
-        self.last_result = T1Result(
-            times=lengths, signals=signals, cfg_snapshot=deepcopy(cfg)
-        )
+        return T1Result(times=lengths, signals=signals, cfg_snapshot=deepcopy(cfg))
 
-        return self.last_result
-
+    @retrieve_result
     def analyze(
         self, result: T1Result | None = None, *, dual_exp: bool = False
     ) -> tuple[float, float, Figure]:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         xs, signals = result.times, result.signals
@@ -458,55 +420,6 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
 
         return t1, t1err, fig
 
-    def save(
-        self,
-        filepath: str,
-        result: T1Result | None = None,
-        comment: str | None = None,
-        tag: str = "twotone/ge/t1_with_tone",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        Ts, signals = result.times, result.signals
-        cfg = result.cfg_snapshot
-        if cfg is None:
-            raise ValueError("cfg_snapshot is None")
-        comment = make_comment(cfg, comment)
-
-        save_data(
-            filepath=filepath,
-            x_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-    def load(self, filepath: str, **kwargs) -> T1Result:
-        signals, Ts, _, comment = load_data(filepath, return_comment=True, **kwargs)
-        assert Ts is not None
-        assert len(Ts.shape) == 1 and len(signals.shape) == 1
-        assert Ts.shape == signals.shape
-
-        Ts = Ts * 1e6  # s -> us
-
-        Ts = Ts.astype(np.float64)
-        signals = signals.astype(np.complex128)
-
-        cfg_snapshot = None
-        if comment is not None:
-            _cfg, _, _ = parse_comment(comment)
-            if _cfg is not None:
-                cfg_snapshot = T1WithToneCfg.validate_or_warn(_cfg, source=filepath)
-        self.last_result = T1Result(
-            times=Ts, signals=signals, cfg_snapshot=cfg_snapshot
-        )
-
-        return self.last_result
-
 
 @dataclass(frozen=True)
 class ScanT1WithToneResult:
@@ -530,7 +443,20 @@ class ScanT1WithToneCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: ScanT1WithToneSweepCfg
 
 
-class ScanT1WithToneExp(AbsExperiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
+class ScanT1WithToneExp(PersistableExperiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
+    # inner = times (result_shape, s on disk -> US_TO_S); outer = values (gain, a.u.)
+    AXES_SPEC = AxesSpec(
+        axes=(
+            Axis("times", "Time", "s", US_TO_S),
+            Axis("values", "Readout Gain", "a.u."),
+        ),
+        z=ZSpec("signals", "Signal", "a.u."),
+        result_type=ScanT1WithToneResult,
+        cfg_type=ScanT1WithToneCfg,
+        tag="twotone/ge/t1_with_tone_sweep",
+    )
+
+    @record_result
     def run(
         self,
         soc,
@@ -605,18 +531,14 @@ class ScanT1WithToneExp(AbsExperiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
             )
             signals = np.asarray(signals)
 
-        # record last result
-        self.last_result = ScanT1WithToneResult(
+        return ScanT1WithToneResult(
             values=gains, times=lengths, signals=signals, cfg_snapshot=deepcopy(cfg)
         )
 
-        return self.last_result
-
+    @retrieve_result
     def analyze(
         self, result: ScanT1WithToneResult | None = None
     ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], Figure]:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         gains, ts, signals = result.values, result.times, result.signals
@@ -674,55 +596,3 @@ class ScanT1WithToneExp(AbsExperiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
         ax2.grid()
 
         return gains, t1s, t1errs, fig
-
-    def save(
-        self,
-        filepath: str,
-        result: ScanT1WithToneResult | None = None,
-        comment: str | None = None,
-        tag: str = "twotone/ge/t1_with_tone_sweep",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        gains, Ts, signals = result.values, result.times, result.signals
-        cfg = result.cfg_snapshot
-        if cfg is None:
-            raise ValueError("cfg_snapshot is None")
-        comment = make_comment(cfg, comment)
-
-        save_data(
-            filepath=filepath,
-            x_info={"name": "Readout Gain", "unit": "a.u.", "values": gains},
-            y_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals.T},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-    def load(self, filepath: str, **kwargs) -> ScanT1WithToneResult:
-        signals, gains, Ts, comment = load_data(filepath, return_comment=True, **kwargs)
-        assert gains is not None and Ts is not None
-        assert len(gains.shape) == 1 and len(Ts.shape) == 1
-        assert signals.shape == (len(Ts), len(gains))
-
-        Ts = Ts * 1e6  # s -> us
-        signals = signals.T  # transpose back
-
-        gains = gains.astype(np.float64)
-        Ts = Ts.astype(np.float64)
-        signals = signals.astype(np.complex128)
-
-        cfg_snapshot = None
-        if comment is not None:
-            _cfg, _, _ = parse_comment(comment)
-            if _cfg is not None:
-                cfg_snapshot = ScanT1WithToneCfg.validate_or_warn(_cfg, source=filepath)
-        self.last_result = ScanT1WithToneResult(
-            values=gains, times=Ts, signals=signals, cfg_snapshot=cfg_snapshot
-        )
-
-        return self.last_result

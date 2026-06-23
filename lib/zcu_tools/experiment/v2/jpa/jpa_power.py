@@ -13,11 +13,17 @@ from pydantic import Field
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import (
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    config,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import (
-    make_comment,
-    parse_comment,
     set_power_in_dev_cfg,
     setup_devices,
 )
@@ -37,7 +43,6 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     SweepCfg,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
 
 
 @dataclass(frozen=True)
@@ -65,7 +70,17 @@ class PowerCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: PowerSweepCfg
 
 
-class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
+class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
+    # powers stored in dBm on disk -> scale=IDENTITY (1.0); signals are real -> ZSpec dtype float64
+    AXES_SPEC = AxesSpec(
+        axes=(Axis("powers", "JPA Power", "dBm"),),
+        z=ZSpec("signals", "Signal", "a.u.", dtype=np.float64),
+        result_type=PowerResult,
+        cfg_type=PowerCfg,
+        tag="jpa/power",
+    )
+
+    @record_result
     def run(self, soc, soccfg, cfg: PowerCfg) -> PowerResult:
         cfg = deepcopy(cfg)
         jpa_powers = sweep2array(cfg.sweep.jpa_power, allow_array=True)
@@ -121,14 +136,10 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             )
             signals = np.asarray(signals)
 
-        self.last_result = PowerResult(
-            powers=jpa_powers, signals=signals, cfg_snapshot=cfg
-        )
-        return self.last_result
+        return PowerResult(powers=jpa_powers, signals=signals, cfg_snapshot=cfg)
 
+    @retrieve_result
     def analyze(self, result: PowerResult | None = None) -> tuple[float, Figure]:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         jpa_powers = result.powers
@@ -153,54 +164,3 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         fig.tight_layout()
 
         return float(best_jpa_power), fig
-
-    def save(
-        self,
-        filepath: str,
-        result: PowerResult | None = None,
-        comment: str | None = None,
-        tag: str = "jpa/power",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        jpa_powers = result.powers
-        signals = result.signals
-
-        cfg = result.cfg_snapshot
-        if cfg is None:
-            raise ValueError("cfg_snapshot is None")
-        comment = make_comment(cfg, comment)
-
-        save_data(
-            filepath=filepath,
-            x_info={"name": "JPA Power", "unit": "dBm", "values": jpa_powers},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-    def load(self, filepath: str, **kwargs) -> PowerResult:
-        signals, jpa_powers, _, comment = load_data(
-            filepath, return_comment=True, **kwargs
-        )
-        assert jpa_powers is not None
-        assert len(jpa_powers.shape) == 1 and len(signals.shape) == 1
-        assert jpa_powers.shape == signals.shape
-
-        jpa_powers = jpa_powers.astype(np.float64)
-        signals = signals.astype(np.float64)
-
-        cfg_snapshot = None
-        if comment is not None:
-            _cfg, _, _ = parse_comment(comment)
-            if _cfg is not None:
-                cfg_snapshot = PowerCfg.validate_or_warn(_cfg, source=filepath)
-        self.last_result = PowerResult(
-            powers=jpa_powers, signals=signals, cfg_snapshot=cfg_snapshot
-        )
-
-        return self.last_result

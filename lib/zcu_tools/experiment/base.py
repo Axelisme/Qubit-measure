@@ -217,7 +217,9 @@ class PersistableExperiment(AbsExperiment[T_Result, T_Config]):
                 cfg_snapshot = spec.cfg_type.validate_or_warn(cfg_dict, source=filepath)
 
         kwargs: dict[str, Any] = {
-            ax.field_name: np.asarray(ld.axes[i].values, dtype=np.float64) / ax.scale
+            ax.field_name: (
+                np.asarray(ld.axes[i].values, dtype=np.float64) / ax.scale
+            ).astype(ax.dtype)
             for i, ax in enumerate(spec.axes)
         }
         kwargs[spec.z.field_name] = np.asarray(ld.z).astype(spec.z.dtype)

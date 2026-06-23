@@ -10,14 +10,18 @@ from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo
-from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import (
-    make_comment,
-    parse_comment,
-    set_flux_in_dev_cfg,
-    setup_devices,
+from zcu_tools.experiment import (
+    IDENTITY,
+    MHZ_TO_HZ,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    record_result,
+    retrieve_result,
 )
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.utils import set_flux_in_dev_cfg, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
@@ -26,7 +30,6 @@ from zcu_tools.notebook.analysis.fluxdep.interactive import (
     InteractiveLines,
 )
 from zcu_tools.program.v2 import SweepCfg, TwoToneCfg, TwoToneProgram, sweep2param
-from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import minus_background
 
 
@@ -52,7 +55,20 @@ class FreqFluxCfg(TwoToneCfg, ExpCfgModel):
     sweep: FreqFluxSweepCfg
 
 
-class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
+class FreqFluxExp(PersistableExperiment[FreqFluxResult, FreqFluxCfg]):
+    # inner freqs stores MHz on disk -> scale=MHZ_TO_HZ; outer values raw -> IDENTITY
+    AXES_SPEC = AxesSpec(
+        axes=(
+            Axis("freqs", "Frequency", "Hz", scale=MHZ_TO_HZ),
+            Axis("values", "Flux device value", "a.u.", scale=IDENTITY),
+        ),
+        z=ZSpec("signals", "Signal", "a.u."),
+        result_type=FreqFluxResult,
+        cfg_type=FreqFluxCfg,
+        tag="twotone/flux_dep/freq",
+    )
+
+    @record_result
     def run(
         self,
         soc,
@@ -115,21 +131,17 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
             )
             signals = np.asarray(signals)
 
-        # record result
-        self.last_result = FreqFluxResult(
+        return FreqFluxResult(
             values=dev_values, freqs=freqs, signals=signals, cfg_snapshot=orig_cfg
         )
 
-        return self.last_result
-
+    @retrieve_result
     def analyze(
         self,
         result: FreqFluxResult | None = None,
         flux_half: float | None = None,
         flux_int: float | None = None,
     ) -> InteractiveLines:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         values = result.values
@@ -144,12 +156,11 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
 
         return actline
 
+    @retrieve_result
     def extract_points(
         self,
         result: FreqFluxResult | None = None,
     ) -> InteractiveFindPoints:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         values = result.values
@@ -159,60 +170,3 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
         point_selector = InteractiveFindPoints(signals2D, values, freqs)
 
         return point_selector
-
-    def save(
-        self,
-        filepath: str,
-        result: FreqFluxResult | None = None,
-        comment: str | None = None,
-        tag: str = "twotone/flux_dep/freq",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        cfg = result.cfg_snapshot
-        if cfg is None:
-            raise ValueError("cfg_snapshot is None")
-
-        values = result.values
-        freqs = result.freqs
-        signals2D = result.signals
-        comment = make_comment(cfg, comment)
-
-        save_data(
-            filepath=filepath,
-            x_info={"name": "Flux device value", "unit": "a.u.", "values": values},
-            y_info={"name": "Frequency", "unit": "Hz", "values": freqs * 1e6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals2D.T},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-    def load(self, filepath: str, **kwargs) -> FreqFluxResult:
-        signals2D, values, freqs, comment = load_data(
-            filepath, return_comment=True, **kwargs
-        )
-        assert values is not None and freqs is not None
-        assert len(values.shape) == 1 and len(freqs.shape) == 1
-        assert signals2D.shape == (len(values), len(freqs))
-
-        freqs = freqs * 1e-6  # Hz -> MHz
-
-        values = values.astype(np.float64)
-        freqs = freqs.astype(np.float64)
-        signals2D = signals2D.astype(np.complex128)
-
-        cfg_snapshot = None
-        if comment is not None:
-            cfg, _, _ = parse_comment(comment)
-
-            if cfg is not None:
-                cfg_snapshot = FreqFluxCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = FreqFluxResult(
-            values=values, freqs=freqs, signals=signals2D, cfg_snapshot=cfg_snapshot
-        )
-
-        return self.last_result

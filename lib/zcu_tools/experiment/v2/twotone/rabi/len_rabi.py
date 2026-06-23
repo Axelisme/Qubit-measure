@@ -11,9 +11,18 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import (
+    US_TO_S,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    config,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -23,7 +32,6 @@ from zcu_tools.program.v2 import (
     TwoToneProgram,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_rabi
 from zcu_tools.utils.process import rotate2real
 
@@ -47,7 +55,16 @@ class LenRabiCfg(TwoToneCfg, ExpCfgModel):
     sweep: LenRabiSweepCfg
 
 
-class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
+class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
+    # lengths stored in seconds on disk (mem us) -> scale=US_TO_S; z complex
+    AXES_SPEC = AxesSpec(
+        axes=(Axis("lengths", "Length", "s", US_TO_S),),
+        z=ZSpec("signals", "Signal", "a.u."),
+        result_type=LenRabiResult,
+        cfg_type=LenRabiCfg,
+        tag="twotone/ge/rabi_length",
+    )
+
     def _run_for_flat(
         self,
         soc,
@@ -105,12 +122,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
                 ),
             )
 
-        # record result
-        self.last_result = LenRabiResult(
-            lengths=lengths, signals=signals, cfg_snapshot=orig_cfg
-        )
-
-        return self.last_result
+        return LenRabiResult(lengths=lengths, signals=signals, cfg_snapshot=orig_cfg)
 
     def _run_for_arb(
         self,
@@ -185,13 +197,9 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
             )
             signals = average_round(signals)
 
-        # record result
-        self.last_result = LenRabiResult(
-            lengths=lengths, signals=signals, cfg_snapshot=orig_cfg
-        )
+        return LenRabiResult(lengths=lengths, signals=signals, cfg_snapshot=orig_cfg)
 
-        return self.last_result
-
+    @record_result
     def run(
         self,
         soc,
@@ -210,11 +218,10 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
             # use soft sweep for arb pulse
             return self._run_for_arb(soc, soccfg, cfg, acquire_kwargs=acquire_kwargs)
 
+    @retrieve_result
     def analyze(
         self, result: LenRabiResult | None = None, *, decay: bool = True
     ) -> tuple[float, float, float, float, float, float, Figure]:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         lens, signals = result.lengths, result.signals
@@ -263,53 +270,3 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         # GUI summary carries pi_len_err / pi2_len_err / rabi_f_err (the figure
         # labels already show pi/pi2 errors and the title shows the freq error).
         return pi_len, pi_len_err, pi2_len, pi2_len_err, freq, freq_err, fig
-
-    def save(
-        self,
-        filepath: str,
-        result: LenRabiResult | None = None,
-        comment: str | None = None,
-        tag: str = "twotone/ge/rabi_length",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        lens, signals = result.lengths, result.signals
-        cfg = result.cfg_snapshot
-        if cfg is None:
-            raise ValueError("cfg_snapshot is None")
-        comment = make_comment(cfg, comment)
-
-        save_data(
-            filepath=filepath,
-            x_info={"name": "Length", "unit": "s", "values": lens * 1e-6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-    def load(self, filepath: str, **kwargs) -> LenRabiResult:
-        signals, lens, _, comment = load_data(filepath, return_comment=True, **kwargs)
-        assert lens is not None
-        assert len(lens.shape) == 1 and len(signals.shape) == 1
-        assert lens.shape == signals.shape
-
-        lens = lens * 1e6  # s -> us
-
-        lens = lens.astype(np.float64)
-        signals = signals.astype(np.complex128)
-
-        cfg_snapshot = None
-        if comment is not None:
-            _cfg, _, _ = parse_comment(comment)
-
-            if _cfg is not None:
-                cfg_snapshot = LenRabiCfg.validate_or_warn(_cfg, source=filepath)
-        self.last_result = LenRabiResult(
-            lengths=lens, signals=signals, cfg_snapshot=cfg_snapshot
-        )
-
-        return self.last_result

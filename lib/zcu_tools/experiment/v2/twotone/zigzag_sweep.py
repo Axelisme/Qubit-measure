@@ -12,9 +12,17 @@ from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment import (
+    IDENTITY,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
@@ -32,7 +40,6 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
 
@@ -66,12 +73,25 @@ class ZigZagScanCfg(ProgramV2Cfg, ExpCfgModel):
     n_times: int
 
 
-class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
+class ZigZagScanExp(PersistableExperiment[ZigZagScanResult, ZigZagScanCfg]):
     SWEEP_MAP = {
         "gain": {"name": "Gain (a.u.)", "param_key": "gain"},
         "freq": {"name": "Frequency (MHz)", "param_key": "freq"},
     }
 
+    # inner-first: times (fastest-varying, int64) then values; both a.u. -> IDENTITY
+    AXES_SPEC = AxesSpec(
+        axes=(
+            Axis("times", "Times", "a.u.", IDENTITY, np.int64),
+            Axis("values", "Sweep value", "a.u."),
+        ),
+        z=ZSpec("signals", "Signal", "a.u."),
+        result_type=ZigZagScanResult,
+        cfg_type=ZigZagScanCfg,
+        tag="twotone/ge/zigzag_scan",
+    )
+
+    @record_result
     def run(
         self,
         soc,
@@ -175,20 +195,16 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
             )
             signals = np.asarray(signals, dtype=np.complex128)
 
-        # record result
-        self.last_result = ZigZagScanResult(
+        return ZigZagScanResult(
             times=times, values=values, signals=signals, cfg_snapshot=orig_cfg
         )
 
-        return self.last_result
-
+    @retrieve_result
     def analyze(
         self,
         result: ZigZagScanResult | None = None,
         find_range: tuple[float | None, float | None] = (None, None),
     ) -> tuple[float, Figure]:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         times = result.times
@@ -235,60 +251,3 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
         ax2.set_ylabel("Loss (a.u.)")
 
         return min_value, fig
-
-    def save(
-        self,
-        filepath: str,
-        result: ZigZagScanResult | None = None,
-        comment: str | None = None,
-        tag: str = "twotone/ge/zigzag_scan",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        cfg = result.cfg_snapshot
-        if cfg is None:
-            raise ValueError("cfg_snapshot is None")
-
-        times = result.times.astype(np.float64)
-        values = result.values
-        signals = result.signals
-        comment = make_comment(cfg, comment)
-
-        save_data(
-            filepath=filepath,
-            x_info={"name": "Times", "unit": "a.u.", "values": times},
-            y_info={"name": "Sweep value", "unit": "a.u.", "values": values},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals.T},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-    def load(self, filepath: str, **kwargs) -> ZigZagScanResult:
-        signals, times, values, comment = load_data(
-            filepath, return_comment=True, **kwargs
-        )
-        assert times is not None and values is not None
-        assert len(times.shape) == 1 and len(values.shape) == 1
-        assert signals.shape == (len(values), len(times))
-
-        signals = signals.T  # transpose back
-
-        times = times.astype(np.int64)
-        values = values.astype(np.float64)
-        signals = signals.astype(np.complex128)
-
-        cfg_snapshot = None
-        if comment is not None:
-            cfg, _, _ = parse_comment(comment)
-
-            if cfg is not None:
-                cfg_snapshot = ZigZagScanCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = ZigZagScanResult(
-            times=times, values=values, signals=signals, cfg_snapshot=cfg_snapshot
-        )
-
-        return self.last_result

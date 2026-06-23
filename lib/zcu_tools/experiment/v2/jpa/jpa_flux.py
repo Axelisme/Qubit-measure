@@ -12,14 +12,18 @@ from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import (
-    make_comment,
-    parse_comment,
-    set_flux_in_dev_cfg,
-    setup_devices,
+from zcu_tools.experiment import (
+    IDENTITY,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    config,
+    record_result,
+    retrieve_result,
 )
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.utils import set_flux_in_dev_cfg, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
@@ -36,7 +40,6 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     SweepCfg,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
 
 
 @dataclass(frozen=True)
@@ -61,7 +64,17 @@ class FluxCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: FluxSweepCfg
 
 
-class FluxExp(AbsExperiment[FluxResult, FluxCfg]):
+class FluxExp(PersistableExperiment[FluxResult, FluxCfg]):
+    # jpa_flux stored as-is (a.u.) on disk -> scale=IDENTITY; signals are float64
+    AXES_SPEC = AxesSpec(
+        axes=(Axis("fluxes", "JPA Flux value", "a.u.", scale=IDENTITY),),
+        z=ZSpec("signals", "Signal", "a.u.", dtype=np.float64),
+        result_type=FluxResult,
+        cfg_type=FluxCfg,
+        tag="jpa/flux",
+    )
+
+    @record_result
     def run(self, soc, soccfg, cfg: FluxCfg) -> FluxResult:
         cfg = deepcopy(cfg)
         jpa_fluxs = sweep2array(cfg.sweep.jpa_flux, allow_array=True)
@@ -116,14 +129,10 @@ class FluxExp(AbsExperiment[FluxResult, FluxCfg]):
             )
             signals = np.asarray(signals)
 
-        self.last_result = FluxResult(
-            fluxes=jpa_fluxs, signals=signals, cfg_snapshot=cfg
-        )
-        return self.last_result
+        return FluxResult(fluxes=jpa_fluxs, signals=signals, cfg_snapshot=cfg)
 
+    @retrieve_result
     def analyze(self, result: FluxResult | None = None) -> tuple[float, Figure]:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         jpa_fluxs = result.fluxes
@@ -149,54 +158,3 @@ class FluxExp(AbsExperiment[FluxResult, FluxCfg]):
         fig.tight_layout()
 
         return float(best_jpa_flux), fig
-
-    def save(
-        self,
-        filepath: str,
-        result: FluxResult | None = None,
-        comment: str | None = None,
-        tag: str = "jpa/flux",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        jpa_fluxs = result.fluxes
-        signals = result.signals
-
-        cfg = result.cfg_snapshot
-        if cfg is None:
-            raise ValueError("cfg_snapshot is None")
-        comment = make_comment(cfg, comment)
-
-        save_data(
-            filepath=filepath,
-            x_info={"name": "JPA Flux value", "unit": "a.u.", "values": jpa_fluxs},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-    def load(self, filepath: str, **kwargs) -> FluxResult:
-        signals, jpa_fluxs, _, comment = load_data(
-            filepath, return_comment=True, **kwargs
-        )
-        assert jpa_fluxs is not None
-        assert len(jpa_fluxs.shape) == 1 and len(signals.shape) == 1
-        assert jpa_fluxs.shape == signals.shape
-
-        jpa_fluxs = jpa_fluxs.astype(np.float64)
-        signals = signals.astype(np.float64)
-
-        cfg_snapshot = None
-        if comment is not None:
-            _cfg, _, _ = parse_comment(comment)
-            if _cfg is not None:
-                cfg_snapshot = FluxCfg.validate_or_warn(_cfg, source=filepath)
-        self.last_result = FluxResult(
-            fluxes=jpa_fluxs, signals=signals, cfg_snapshot=cfg_snapshot
-        )
-
-        return self.last_result

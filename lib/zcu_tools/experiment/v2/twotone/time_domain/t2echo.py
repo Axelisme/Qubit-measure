@@ -10,9 +10,17 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import (
+    US_TO_S,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    config,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -29,7 +37,6 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_decay, fit_decay_fringe
 from zcu_tools.utils.process import rotate2real
 
@@ -61,7 +68,16 @@ class T2EchoCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: T2EchoSweepCfg
 
 
-class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
+class T2EchoExp(PersistableExperiment[T2EchoResult, T2EchoCfg]):
+    # times stores us in memory, s on disk -> scale=US_TO_S
+    AXES_SPEC = AxesSpec(
+        axes=(Axis("times", "Time", "s", scale=US_TO_S),),
+        z=ZSpec("signals", "Signal", "a.u."),
+        result_type=T2EchoResult,
+        cfg_type=T2EchoCfg,
+        tag="twotone/ge/t2echo",
+    )
+
     def run(
         self,
         soc,
@@ -156,14 +172,13 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
 
         return self.last_result, true_detune
 
+    @retrieve_result
     def analyze(
         self,
         result: T2EchoResult | None = None,
         *,
         fit_method: Literal["fringe", "decay"] = "decay",
     ) -> tuple[float, float, float, float, Figure]:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         xs, signals = result.times, result.signals
@@ -211,53 +226,3 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
         fig.tight_layout()
 
         return t2e, t2eerr, detune, detune_err, fig
-
-    def save(
-        self,
-        filepath: str,
-        result: T2EchoResult | None = None,
-        comment: str | None = None,
-        tag: str = "twotone/ge/t2echo",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        Ts, signals = result.times, result.signals
-        cfg = result.cfg_snapshot
-        if cfg is None:
-            raise ValueError("cfg_snapshot is None")
-        comment = make_comment(cfg, comment)
-
-        save_data(
-            filepath=filepath,
-            x_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-    def load(self, filepath: str, **kwargs) -> T2EchoResult:
-        signals, Ts, _, comment = load_data(filepath, return_comment=True, **kwargs)
-        assert Ts is not None
-        assert len(Ts.shape) == 1 and len(signals.shape) == 1
-        assert Ts.shape == signals.shape
-
-        Ts = Ts * 1e6  # s -> us
-
-        Ts = Ts.astype(np.float64)
-        signals = signals.astype(np.complex128)
-
-        cfg_snapshot = None
-        if comment is not None:
-            _cfg, _, _ = parse_comment(comment)
-
-            if _cfg is not None:
-                cfg_snapshot = T2EchoCfg.validate_or_warn(_cfg, source=filepath)
-        self.last_result = T2EchoResult(
-            times=Ts, signals=signals, cfg_snapshot=cfg_snapshot
-        )
-
-        return self.last_result

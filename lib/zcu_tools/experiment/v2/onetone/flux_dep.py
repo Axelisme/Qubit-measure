@@ -11,11 +11,17 @@ from pydantic import Field
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo
-from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment import (
+    MHZ_TO_HZ,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import (
-    make_comment,
-    parse_comment,
     set_flux_in_dev_cfg,
     setup_devices,
 )
@@ -33,7 +39,6 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
 
 
 @dataclass(frozen=True)
@@ -66,7 +71,20 @@ class FluxDepCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: FluxDepSweepCfg
 
 
-class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
+class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
+    # inner axis (fastest-varying) = freqs (MHz on disk); outer = flux values (a.u.)
+    AXES_SPEC = AxesSpec(
+        axes=(
+            Axis("values", "Flux device value", "a.u."),
+            Axis("freqs", "Frequency", "Hz", scale=MHZ_TO_HZ),
+        ),
+        z=ZSpec("signals", "Signal", "a.u."),
+        result_type=FluxDepResult,
+        cfg_type=FluxDepCfg,
+        tag="onetone/flux_dep",
+    )
+
+    @record_result
     def run(self, soc, soccfg, cfg: FluxDepCfg) -> FluxDepResult:
         orig_cfg = deepcopy(cfg)
         modules = cfg.modules
@@ -135,21 +153,17 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
             )
             signals = np.asarray(signals)
 
-        # record result
-        self.last_result = FluxDepResult(
+        return FluxDepResult(
             values=dev_values, freqs=freqs, signals=signals, cfg_snapshot=orig_cfg
         )
 
-        return self.last_result
-
+    @retrieve_result
     def analyze(
         self,
         result: FluxDepResult | None = None,
         flux_half: float | None = None,
         flux_int: float | None = None,
     ) -> InteractiveLines:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         values = result.values
@@ -165,60 +179,3 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         )
 
         return actline
-
-    def save(
-        self,
-        filepath: str,
-        result: FluxDepResult | None = None,
-        comment: str | None = None,
-        tag: str = "onetone/flux_dep",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        values = result.values
-        freqs = result.freqs
-        signals2D = result.signals
-
-        cfg = result.cfg_snapshot
-        if cfg is None:
-            raise ValueError("cfg_snapshot is None")
-        comment = make_comment(cfg, comment)
-
-        save_data(
-            filepath=filepath,
-            x_info={"name": "Flux device value", "unit": "a.u.", "values": values},
-            y_info={"name": "Frequency", "unit": "Hz", "values": freqs * 1e6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals2D.T},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-    def load(self, filepath: str, **kwargs) -> FluxDepResult:
-        signals2D, values, freqs, comment = load_data(
-            filepath, return_comment=True, **kwargs
-        )
-        assert freqs is not None
-        assert len(freqs.shape) == 1 and len(values.shape) == 1
-        assert signals2D.shape == (len(values), len(freqs))
-
-        freqs = freqs * 1e-6  # Hz -> MHz
-
-        values = values.astype(np.float64)
-        freqs = freqs.astype(np.float64)
-        signals2D = signals2D.astype(np.complex128)
-
-        cfg_snapshot = None
-        if comment is not None:
-            cfg, _, _ = parse_comment(comment)
-
-            if cfg is not None:
-                cfg_snapshot = FluxDepCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = FluxDepResult(
-            values=values, freqs=freqs, signals=signals2D, cfg_snapshot=cfg_snapshot
-        )
-
-        return self.last_result

@@ -39,6 +39,7 @@ class Axis:
     label: str  # on-disk axis display name
     unit: str  # on-disk unit
     scale: float = IDENTITY  # disk = memory * scale
+    dtype: type = np.float64  # in-memory dtype the loaded axis is cast back to
 
 
 @dataclass(frozen=True)

@@ -11,9 +11,18 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import (
+    MHZ_TO_HZ,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    config,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -27,7 +36,6 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
 
 
 @dataclass(frozen=True)
@@ -55,7 +63,17 @@ def safreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(signals)
 
 
-class SA_FreqExp(AbsExperiment[SA_FreqResult, SA_FreqCfg]):
+class SA_FreqExp(PersistableExperiment[SA_FreqResult, SA_FreqCfg]):
+    # freqs stored as Hz on disk -> scale=MHZ_TO_HZ; signals are complex.
+    AXES_SPEC = AxesSpec(
+        axes=(Axis("freqs", "Frequency", "Hz", scale=MHZ_TO_HZ),),
+        z=ZSpec("signals", "Signal", "a.u."),
+        result_type=SA_FreqResult,
+        cfg_type=SA_FreqCfg,
+        tag="onetone/sa_freq",
+    )
+
+    @record_result
     def run(self, soc, soccfg, cfg: SA_FreqCfg) -> SA_FreqResult:
         orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
@@ -112,16 +130,10 @@ class SA_FreqExp(AbsExperiment[SA_FreqResult, SA_FreqCfg]):
                 ),
             )
 
-        # record result
-        self.last_result = SA_FreqResult(
-            freqs=freqs, signals=signals, cfg_snapshot=orig_cfg
-        )
+        return SA_FreqResult(freqs=freqs, signals=signals, cfg_snapshot=orig_cfg)
 
-        return self.last_result
-
+    @retrieve_result
     def analyze(self, result: SA_FreqResult | None = None) -> Figure:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         freqs = result.freqs
@@ -140,53 +152,3 @@ class SA_FreqExp(AbsExperiment[SA_FreqResult, SA_FreqCfg]):
         fig.tight_layout()
 
         return fig
-
-    def save(
-        self,
-        filepath: str,
-        result: SA_FreqResult | None = None,
-        comment: str | None = None,
-        tag: str = "onetone/sa_freq",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        freqs = result.freqs
-        signals = result.signals
-
-        cfg = result.cfg_snapshot
-        if cfg is None:
-            raise ValueError("cfg_snapshot is None")
-        comment = make_comment(cfg, comment)
-
-        save_data(
-            filepath=filepath,
-            x_info={"name": "Frequency", "unit": "Hz", "values": freqs * 1e6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-    def load(self, filepath: str, **kwargs) -> SA_FreqResult:
-        signals, freqs, _, comment = load_data(filepath, return_comment=True, **kwargs)
-        assert len(freqs.shape) == 1 and len(signals.shape) == 1
-        assert freqs.shape == signals.shape
-
-        freqs = freqs * 1e-6  # Hz -> MHz
-
-        freqs = freqs.astype(np.float64)
-        signals = signals.astype(np.complex128)
-
-        cfg_snapshot = None
-        if comment is not None:
-            cfg, _, _ = parse_comment(comment)
-            if cfg is not None:
-                cfg_snapshot = SA_FreqCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = SA_FreqResult(
-            freqs=freqs, signals=signals, cfg_snapshot=cfg_snapshot
-        )
-
-        return self.last_result
