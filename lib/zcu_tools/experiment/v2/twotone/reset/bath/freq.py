@@ -10,7 +10,6 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from qick.asm_v2 import QickSweep1D
-from scipy.ndimage import gaussian_filter
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -34,6 +33,7 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
+from zcu_tools.utils.process import SmoothMethod, smooth_signal_nd
 
 
 @dataclass(frozen=True)
@@ -151,7 +151,13 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
         return self.last_result
 
     def analyze(
-        self, result: FreqGainResult | None = None, smooth: float = 1.0
+        self,
+        result: FreqGainResult | None = None,
+        smooth: float = 1.0,
+        *,
+        smooth_method: SmoothMethod = "wavelet",
+        wavelet: str = "sym4",
+        wavelet_level: int = 0,
     ) -> tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
@@ -160,9 +166,14 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
         gains, freqs, signals = result.gains, result.freqs, result.signals
 
         # Find peak in amplitude
-        smooth_signals: NDArray[np.complex128] = gaussian_filter(
-            signals, sigma=smooth, axes=(1, 2)
-        )  # type: ignore
+        smooth_signals = smooth_signal_nd(
+            signals,
+            method=smooth_method,
+            sigma=smooth,
+            axes=(1, 2),
+            wavelet=wavelet,
+            wavelet_level=wavelet_level,
+        ).astype(np.complex128)
         real_signals = bathreset_signal2real(smooth_signals)
 
         gain_opt = gains[np.argmax(np.max(real_signals, axis=1))]

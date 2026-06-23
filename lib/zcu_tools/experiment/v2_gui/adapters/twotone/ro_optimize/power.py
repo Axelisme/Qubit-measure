@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Annotated, Any, ClassVar, TypeAlias
+from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
 from matplotlib.figure import Figure
 
@@ -39,6 +39,10 @@ RoOptPowerRunResult: TypeAlias = PowerResult
 
 @dataclass
 class RoOptPowerAnalyzeParams:
+    smooth_method: Annotated[
+        Literal["wavelet", "gaussian"], ParamMeta(label="Smooth method")
+    ]
+    smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)]
     penalty_ratio: Annotated[float, ParamMeta(label="Power penalty ratio", decimals=2)]
 
 
@@ -90,12 +94,11 @@ class RoOptPowerAdapter(
                 "'readout_dpm' role)."
             ),
             recommended=(
-                "Analysis applies a 'power penalty ratio' that down-weights high "
-                "gains (SNR × exp(-gain × ratio)), biasing the choice toward lower "
-                "power to limit measurement-induced effects; ~0.5 is a sensible "
-                "default — raise it to push harder toward low power, set 0 to take "
-                "the raw SNR maximum. Sweep gain from near zero up to where the "
-                "SNR saturates (e.g. ~0.001–0.2)."
+                "Analysis denoises the SNR curve before picking the peak; wavelet "
+                "smoothing is the default. The 'power penalty ratio' down-weights "
+                "high gains (SNR × exp(-gain × ratio)), biasing the choice toward "
+                "lower power to limit measurement-induced effects; ~0.5 is a "
+                "sensible default."
             ),
         )
 
@@ -128,14 +131,19 @@ class RoOptPowerAdapter(
     def get_analyze_params(
         self, result: RoOptPowerRunResult, ctx: ExpContext
     ) -> RoOptPowerAnalyzeParams:
-        return RoOptPowerAnalyzeParams(penalty_ratio=0.5)
+        return RoOptPowerAnalyzeParams(
+            smooth_method="wavelet", smooth=1.0, penalty_ratio=0.5
+        )
 
     def analyze(
         self, req: AnalyzeRequest[RoOptPowerRunResult, RoOptPowerAnalyzeParams]
     ) -> RoOptPowerAnalyzeResult:
         params = req.analyze_params
         best_gain, fig = PowerExp().analyze(
-            req.run_result, penalty_ratio=params.penalty_ratio
+            req.run_result,
+            penalty_ratio=params.penalty_ratio,
+            smooth=params.smooth,
+            smooth_method=params.smooth_method,
         )
         return RoOptPowerAnalyzeResult(best_gain=best_gain, figure=fig)
 

@@ -22,7 +22,6 @@ import logging
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy.ndimage import gaussian_filter1d
 
 from zcu_tools.gui.app.dispersive.services._fast_edelay import fast_edelays
 from zcu_tools.gui.app.dispersive.state import DispersiveState, PreprocessResult
@@ -31,26 +30,36 @@ from zcu_tools.utils.fitting.resonance import (
     fit_circle_params,
     remove_edelay,
 )
+from zcu_tools.utils.process import SmoothMethod, smooth_signal1d
 
 logger = logging.getLogger(__name__)
 
-# Smoothing divisors (the notebook's hard-coded factors): the per-row gaussian σ
-# is ``n_freq // EDELAY_SMOOTH_DIV`` before the circle fit, and
-# ``n_freq // PHASE_SMOOTH_DIV`` before the phase difference. They are part of the
-# preprocessing signature so a re-run with different smoothing invalidates a fit.
+# Smoothing divisors (the notebook's hard-coded factors): the per-row smooth
+# strength is ``n_freq // EDELAY_SMOOTH_DIV`` before the circle fit, and
+# ``n_freq // PHASE_SMOOTH_DIV`` before the phase difference. They are part of
+# the preprocessing signature so a re-run with different smoothing invalidates a fit.
+PREPROCESS_SMOOTH_METHOD: SmoothMethod = "wavelet"
 EDELAY_SMOOTH_DIV = 30
 PHASE_SMOOTH_DIV = 10
 
 
 def _smooth_sigma(n_freq: int, divisor: int) -> int:
-    """Gaussian σ = ``n_freq // divisor``, floored at 1.
+    """Smooth strength = ``n_freq // divisor``, floored at 1.
 
-    ``gaussian_filter1d`` divides by σ², so a σ of 0 (a coarse grid with fewer
-    than ``divisor`` frequency points) raises ZeroDivisionError. Flooring at 1 is
-    a harmless single-point smooth — the notebook's grids are large enough that
-    the floor never binds there, but the GUI must not crash on a small spectrum.
+    A coarse grid with fewer than ``divisor`` frequency points would otherwise
+    disable smoothing. Flooring at 1 keeps the GUI pipeline deterministic on
+    small spectra.
     """
     return max(1, n_freq // divisor)
+
+
+def _smooth_freq_axis(signals: NDArray, divisor: int) -> NDArray:
+    return smooth_signal1d(
+        signals,
+        method=PREPROCESS_SMOOTH_METHOD,
+        sigma=float(_smooth_sigma(int(signals.shape[1]), divisor)),
+        axis=1,
+    )
 
 
 def compute_preprocess(
@@ -70,9 +79,7 @@ def compute_preprocess(
 
     n_freq = int(signals.shape[1])
     rot_signals = remove_edelay(sp_freqs, signals, edelay)
-    rot_signals = gaussian_filter1d(
-        rot_signals, _smooth_sigma(n_freq, EDELAY_SMOOTH_DIV), axis=1
-    )
+    rot_signals = _smooth_freq_axis(rot_signals, EDELAY_SMOOTH_DIV)
     rot_signals = np.asarray(rot_signals, dtype=np.complex128)
 
     circle_param = np.median(
@@ -80,9 +87,7 @@ def compute_preprocess(
     )
     phases = calc_phase(rot_signals, circle_param[0], circle_param[1], axis=1)
 
-    norm_phases = gaussian_filter1d(
-        phases, _smooth_sigma(phases.shape[1], PHASE_SMOOTH_DIV), axis=1
-    )
+    norm_phases = _smooth_freq_axis(phases, PHASE_SMOOTH_DIV)
     norm_phases = np.diff(norm_phases, axis=1, prepend=norm_phases[:, :1])
     norm_phases = np.abs(norm_phases)
     norm_phases /= np.max(norm_phases, axis=1, keepdims=True)
@@ -99,7 +104,13 @@ def compute_preprocess(
         edelays=edelays,
         edelay=edelay,
         median_rf=median_rf,
-        signature=(EDELAY_SMOOTH_DIV, PHASE_SMOOTH_DIV, int(signals.shape[0]), n_freq),
+        signature=(
+            PREPROCESS_SMOOTH_METHOD,
+            EDELAY_SMOOTH_DIV,
+            PHASE_SMOOTH_DIV,
+            int(signals.shape[0]),
+            n_freq,
+        ),
     )
 
 

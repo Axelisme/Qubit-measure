@@ -8,7 +8,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from scipy.ndimage import gaussian_filter
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -32,6 +31,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules import TwoPulseResetCfg
 from zcu_tools.utils.datasaver import load_data, save_data
+from zcu_tools.utils.process import SmoothMethod, smooth_signal_nd
 
 
 @dataclass(frozen=True)
@@ -144,6 +144,9 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         result: PowerResult | None = None,
         *,
         smooth: float = 1.0,
+        smooth_method: SmoothMethod = "wavelet",
+        wavelet: str = "sym4",
+        wavelet_level: int = 0,
         xname: str | None = None,
         yname: str | None = None,
     ) -> tuple[float, float, Figure]:
@@ -154,7 +157,14 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         gains1, gains2, signals = result.gains1, result.gains2, result.signals
 
         # Apply smoothing for peak finding
-        signals_smooth = gaussian_filter(signals, smooth)
+        signals_smooth = smooth_signal_nd(
+            signals,
+            method=smooth_method,
+            sigma=smooth,
+            axes=(0, 1),
+            wavelet=wavelet,
+            wavelet_level=wavelet_level,
+        )
 
         ref_i = 0 if gains1[0] < gains1[-1] else -1
         ref_j = 0 if gains2[0] < gains2[-1] else -1

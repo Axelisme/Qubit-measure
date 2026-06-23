@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Annotated, Any, ClassVar, TypeAlias
+from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
 from matplotlib.figure import Figure
 
@@ -39,6 +39,10 @@ RoOptLengthRunResult: TypeAlias = LengthResult
 
 @dataclass
 class RoOptLengthAnalyzeParams:
+    smooth_method: Annotated[
+        Literal["wavelet", "gaussian"], ParamMeta(label="Smooth method")
+    ] = "wavelet"
+    smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)] = 1.0
     # 't0' is the length-penalty knob of the underlying analyze(): t0=None → raw
     # SNR max; t0>0 → max snr/sqrt(length+t0), favouring shorter readout. Optional
     # float — left blank (the "(none)" field) it stays None.
@@ -94,12 +98,10 @@ class RoOptLengthAdapter(
                 "'readout_dpm' role)."
             ),
             recommended=(
-                "Analysis picks the raw SNR maximum by default. The optional 't0' "
-                "analyze param is a length penalty: leave it blank (None) for the "
-                "raw max, or set a small us value to bias toward shorter readout "
-                "(maximises snr/sqrt(length+t0)). Sweep length from short to a few "
-                "us (e.g. ~0.01–3.5 us); since SNR usually keeps rising with "
-                "length, judge by eye where it plateaus and trade length for SNR."
+                "Analysis denoises the SNR curve before picking the peak; wavelet "
+                "smoothing is the default. The optional 't0' analyze param is a "
+                "length penalty: leave it blank (None) for the raw max, or set a "
+                "small us value to bias toward shorter readout."
             ),
         )
 
@@ -140,7 +142,13 @@ class RoOptLengthAdapter(
     def analyze(
         self, req: AnalyzeRequest[RoOptLengthRunResult, RoOptLengthAnalyzeParams]
     ) -> RoOptLengthAnalyzeResult:
-        best_length, fig = LengthExp().analyze(req.run_result, t0=req.analyze_params.t0)
+        params = req.analyze_params
+        best_length, fig = LengthExp().analyze(
+            req.run_result,
+            t0=params.t0,
+            smooth=params.smooth,
+            smooth_method=params.smooth_method,
+        )
         return RoOptLengthAnalyzeResult(best_length=best_length, figure=fig)
 
     def get_writeback_items(

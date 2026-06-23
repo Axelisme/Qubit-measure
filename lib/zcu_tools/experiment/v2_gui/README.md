@@ -1,6 +1,6 @@
 # QICK Note for `experiment/v2_gui`
 
-**Last updated:** 2026-06-23 (measure GUI operator bring-up workflow guide)
+**Last updated:** 2026-06-24（len_rabi hardware-grid run preflight）
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -21,8 +21,13 @@ experiment/v2_gui/
 ```
 
 每個 adapter 實作 `cfg_spec()`（純結構 spec，classmethod）、`make_default_value(ctx)`（讀
-md/ml 算預設值）、`run` / `analyze` / `get_writeback_items` / `guide`。詳細框架契約見
+md/ml 算預設值）、`run` / `analyze` / `get_writeback_items` / `guide`。需要 SoC-dependent
+但可預測的 run-time cfg 檢查時，覆寫 `validate_run_request(req, raw_cfg)` 做純 preflight
+（例如 `len_rabi` 先確認 length sweep 在 ZCU 時間格點上不會量化成 zero-step）。詳細框架契約見
 `gui/app/main/README.md`。
+
+ro-optimize 與 reset 的 peak-picking adapter 以 `smooth_method` 提供 `wavelet` / `gaussian`
+選擇，預設 `wavelet`；`smooth` 在 GUI 標為 smoothing strength，不再只代表 Gaussian sigma。
 
 ---
 

@@ -67,8 +67,8 @@ def test_compute_preprocess_signature_is_deterministic():
     r1 = compute_preprocess(fluxs, freqs, signals)
     r2 = compute_preprocess(fluxs, freqs, signals)
     assert r1.signature == r2.signature
-    # signature encodes smoothing divisors + grid shape
-    assert r1.signature == (30, 10, len(fluxs), len(freqs))
+    # signature encodes smoothing method, divisors, and grid shape
+    assert r1.signature == ("wavelet", 30, 10, len(fluxs), len(freqs))
 
 
 def test_service_compute_requires_onetone():

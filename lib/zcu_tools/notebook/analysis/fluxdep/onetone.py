@@ -7,8 +7,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from IPython.display import clear_output, display
 from numpy.typing import NDArray
-from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
+
+from zcu_tools.utils.process import smooth_signal1d
 
 
 class InteractiveOneTone:
@@ -70,9 +71,11 @@ class InteractiveOneTone:
         rel_grad = abs_grad / (
             np.clip(np.abs(self.signals[:, 1:] + self.signals[:, :-1]), 1e-12, None)
         )
-        rel_grad = gaussian_filter1d(rel_grad, sigma=1, axis=1)
+        rel_grad = smooth_signal1d(rel_grad, method="wavelet", sigma=1.0, axis=1)
 
-        self.max_freq_idx = np.argmax(np.mean(rel_grad, axis=0))
+        self.max_freq_idx = min(
+            int(np.argmax(np.mean(rel_grad, axis=0))) + 1, len(self.freqs) - 1
+        )
 
         self.img = self.axes[0].imshow(
             self.real_signals.T,
@@ -94,8 +97,10 @@ class InteractiveOneTone:
         # 顯示1D切面
         self.real_signals_slice = self.real_signals[:, self.max_freq_idx]  # (mAs,)
 
-        self.smoothed_real_signals = gaussian_filter1d(
-            np.max(self.real_signals_slice) - self.real_signals_slice, sigma=1
+        self.smoothed_real_signals = smooth_signal1d(
+            np.max(self.real_signals_slice) - self.real_signals_slice,
+            method="wavelet",
+            sigma=1.0,
         )
         self.smoothed_real_signals /= np.std(self.smoothed_real_signals)
 

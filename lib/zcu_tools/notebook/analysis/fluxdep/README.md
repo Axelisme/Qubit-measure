@@ -1,6 +1,6 @@
 # fluxdep 模塊重點文檔
 
-**Last updated:** 2026-06-08
+**Last updated:** 2026-06-23（wavelet smoothing in spectrum preprocessing）
 
 本模塊提供 Fluxonium 通量依賴光譜（flux-dependent spectrum）的擬合、資料處理、
 與互動式標註工具。搭配 `notebook_md/analysis/fluxdep_fit.md` 使用。
@@ -83,9 +83,8 @@ fluxdep/
 
 ## 資料處理（`processing.py`）
 
-- `cast2real_and_norm(signals, use_phase=True, sigma=1)`：
-  預設減去每列平均（去除 flux-independent background），高斯平滑後取 `|signal|` 並按列 std 歸一化。
-  `use_phase=False` 退回純 magnitude 模式。
+- `cast2real_and_norm(signals, use_phase=True, sigma=1, smooth_method="wavelet")`：
+  預設減去每列平均（去除 flux-independent background），沿頻率軸做 wavelet smoothing 後取 `|signal|` 並按列 std 歸一化；`smooth_method="gaussian"` 保留為舊行為對照。`use_phase=False` 退回純 magnitude 模式。
 - `spectrum2d_findpoint(dev_values, freqs, real_signals, threshold, weight=None)`：
   對每個通量（每列）呼叫 `scipy.signal.find_peaks`，最多保留 3 個最高峰。回傳打平的 `(fluxs, freqs)`。
 - `downsample_points(xs, ys, threshold)`：2D 空間去密集點（同一 x 下的點保留為一組）。

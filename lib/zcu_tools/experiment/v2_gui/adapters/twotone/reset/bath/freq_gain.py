@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Annotated, Any, ClassVar, TypeAlias
+from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
 from matplotlib.figure import Figure
 
@@ -52,7 +52,10 @@ _PI2_PHASE_OFFSET_DEG: float = 90.0
 
 @dataclass
 class BathFreqGainAnalyzeParams:
-    smooth: Annotated[float, ParamMeta(label="Smooth sigma", decimals=2)]
+    smooth_method: Annotated[
+        Literal["wavelet", "gaussian"], ParamMeta(label="Smooth method")
+    ]
+    smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)]
 
 
 @dataclass
@@ -102,11 +105,11 @@ class BathFreqGainAdapter(
                 "phase steps (D2(a))."
             ),
             recommended=(
-                "Analysis smooths the 2D map before picking the peak; a 'smooth' "
-                "sigma around 1 is a reasonable default — raise it on a noisy map. "
-                "Saving is not offered: the experiment writes four phase-resolved "
-                "files internally, which does not fit the single-file save path — "
-                "read the optimum off the Analyze tab and write it back."
+                "Analysis denoises the 2D map before picking the peak; wavelet "
+                "smoothing is the default and Gaussian remains available for "
+                "comparison. Saving is not offered: the experiment writes four "
+                "phase-resolved files internally, which does not fit the single-file "
+                "save path — read the optimum off the Analyze tab and write it back."
             ),
         )
 
@@ -150,13 +153,15 @@ class BathFreqGainAdapter(
     def get_analyze_params(
         self, result: BathFreqGainRunResult, ctx: ExpContext
     ) -> BathFreqGainAnalyzeParams:
-        return BathFreqGainAnalyzeParams(smooth=1.0)
+        return BathFreqGainAnalyzeParams(smooth_method="wavelet", smooth=1.0)
 
     def analyze(
         self, req: AnalyzeRequest[BathFreqGainRunResult, BathFreqGainAnalyzeParams]
     ) -> BathFreqGainAnalyzeResult:
         params = req.analyze_params
-        gain, freq, fig = FreqGainExp().analyze(req.run_result, smooth=params.smooth)
+        gain, freq, fig = FreqGainExp().analyze(
+            req.run_result, smooth=params.smooth, smooth_method=params.smooth_method
+        )
         return BathFreqGainAnalyzeResult(gain=gain, freq=freq, figure=fig)
 
     def get_writeback_items(

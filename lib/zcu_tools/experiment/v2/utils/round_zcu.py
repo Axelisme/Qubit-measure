@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from numbers import Number
 from typing import Any, Literal, TypeVar
@@ -131,11 +132,48 @@ def apply_round(
         raise ValueError(f"Invalid round type: {round_type}")
 
 
-def round_sweep_dict(sweep: SweepCfg, *args, **kwargs) -> SweepCfg:
+def _format_zero_step_error(
+    sweep: SweepCfg,
+    round_type: str,
+    requested_step: float,
+    rounded_step: float,
+) -> str:
+    reason = (
+        "sweep step is effectively zero"
+        if round_type == "none"
+        else "sweep step becomes zero after hardware quantization"
+    )
+    return (
+        f"{reason}: "
+        f"round_type={round_type!r}, start={sweep.start}, stop={sweep.stop}, "
+        f"expts={sweep.expts}, requested_step={requested_step}, "
+        f"rounded_step={rounded_step}. Increase the sweep span or reduce expts so "
+        "adjacent points remain distinct on the hardware grid."
+    )
+
+
+def round_sweep_dict(
+    sweep: SweepCfg,
+    round_type: Literal["none", "time", "freq", "phase", "gain"] = "none",
+    round_info: dict[str, Any] | None = None,
+) -> SweepCfg:
+    if round_info is None:
+        round_info = {}
+
     expts = sweep.expts
     span = sweep.stop - sweep.start
-    round_start = apply_round(sweep.start, *args, **kwargs)
-    round_step = apply_round(span / (expts - 1), *args, **kwargs)
+    round_start = apply_round(sweep.start, round_type, round_info)
+    if expts == 1:
+        return SweepCfg(start=round_start, stop=round_start, expts=expts, step=0.0)
+
+    requested_step = span / (expts - 1)
+    round_step = apply_round(requested_step, round_type, round_info)
+    if math.isclose(float(round_step), 0.0, rel_tol=1e-9, abs_tol=1e-12):
+        raise ValueError(
+            _format_zero_step_error(
+                sweep, round_type, requested_step, float(round_step)
+            )
+        )
     round_span = (expts - 1) * round_step
     round_stop = round_start + round_span
 

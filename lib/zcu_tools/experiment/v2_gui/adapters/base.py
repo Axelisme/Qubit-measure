@@ -126,6 +126,16 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
             )
         return req.ml.make_cfg(raw_cfg, self.ExpCfg_cls)
 
+    def validate_run_request(self, req: RunRequest, raw_cfg: dict[str, object]) -> None:
+        """Pure run preflight for adapter-specific constraints.
+
+        GuardService calls this before opening an async run handle. The default is
+        intentionally empty because most adapters have no constraints beyond
+        lowering + model construction; adapters that need SoC-dependent checks
+        override it and must not touch devices or mutate cfg/state.
+        """
+        del req, raw_cfg
+
     @abstractmethod
     def make_filename_stem(self, ctx: ExpContext) -> str:
         """Return the filename stem used by the default save path template."""

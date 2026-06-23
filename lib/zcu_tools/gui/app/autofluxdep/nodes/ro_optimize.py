@@ -39,7 +39,6 @@ from typing import Any, cast
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy.ndimage import gaussian_filter
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -74,13 +73,14 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
+from zcu_tools.utils.process import smooth_signal_nd
 
 logger = logging.getLogger(__name__)
 
 
 def _ro_signal2real(signals: NDArray[np.float64]) -> NDArray[np.float64]:
     """Smooth the SNR landscape before argmax (lower-layer ``ro_opt_signal2real``)."""
-    return np.abs(gaussian_filter(signals, sigma=1))
+    return np.abs(smooth_signal_nd(signals, method="wavelet", sigma=1.0))
 
 
 def _ro_landscape(

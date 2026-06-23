@@ -1,6 +1,6 @@
 # QICK Note for `experiment/v2`
 
-**Last updated:** 2026-06-08
+**Last updated:** 2026-06-24（rounded sweep zero-step fast-fail）
 
 這份筆記整理 `experiment/v2/` 的整體設計，說明 Experiment 層與 Task 層的分工、典型實驗的撰寫範本，以及各子模組的角色。`runner/` 的細節另見 `runner/README.md`。
 
@@ -145,6 +145,7 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):          # 主要 Cfg = program cfg + 
 - **`default_raw2signal_fn`**（`runner/task.py`）：`raw[0][0].dot([1, 1j])` — 取第 0 個 RO channel、該 channel 的第 0 次 readout，再把 IQ 轉成 complex。絕大多數 1D 實驗用這個。
 - **客製化 `raw2signal_fn`**：當 acquire 形狀不同（例如 `acquire_decimated`、多 RO、singleshot 用 `KMeansTracker` / `MomentTracker`）時，在 `Task(raw2signal_fn=...)` 傳入。
 - **`signal2real` 函式**：每個 Exp 檔案會定義 local 的 `xxx_signal2real`（通常 `np.abs`），給 liveplot 用；analyze 階段可能換成 phase / real。
+- **peak-picking smoothing**：ro-optimize 與 reset 這類以 SNR/map argmax 找最佳點的分析預設使用 `smooth_method="wavelet"`；`smooth_method="gaussian"` 保留為舊 Gaussian 對照。`smooth` 是通用強度：Gaussian 時是 sigma，wavelet 時是 threshold scale。
 
 ---
 
@@ -172,7 +173,7 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):          # 主要 Cfg = program cfg + 
 ## `utils/` 子模組重點
 
 - **`sweep2array(sweep_cfg, name, {"soccfg", "gen_ch", "ro_ch"})`** — 展開 `SweepCfg` 為 numpy array，已套 ZCU 量化（`round_zcu_freq/time/gain/phase`）。Exp 幾乎都靠這個產生 x 軸。
-- **`round_zcu_*`** — 單點版本的量化函式；`round_sweep_dict` 同時處理整個 sweep dict。時間的量化有特殊處理：預先減去 `0.5 * one_cycle` 以匹配 QICK sweep 用 `np.trunc` 的行為。
+- **`round_zcu_*`** — 單點版本的量化函式；`round_sweep_dict` 同時處理整個 sweep dict。時間的量化有特殊處理：預先減去 `0.5 * one_cycle` 以匹配 QICK sweep 用 `np.trunc` 的行為。多點 sweep 的 step 若在量化後變成 0，會 fast-fail 並要求放大 span 或減少 expts，避免 GUI/agent 看到低階 `SweepCfg` 一致性錯誤。
 - **`merge_result_list(list_of_results)`** — 把 `list[dict[name, ndarray]]` 遞迴轉成 `dict[name, ndarray]`（外層 list 變成最外層維度）。Executor 取得 `Scan` 結果後呼叫它把 `list` 轉成 stacked array。
 - **`estimate_snr` / `snr_as_signal` / `snr_checker`** — SNR 估計與 early-stop：當 SNR 達門檻時提前結束測量，節省時間。`snr_as_signal` 給 singleshot（吃 `MomentTracker` 的 raw）用。
 

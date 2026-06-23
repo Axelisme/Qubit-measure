@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-22（Phase 169：移除 9 個冗餘 agent 工具——WIRE 39 刪 tab.get_cfg_summary / adapter.cfg_spec / adapter.analyze_spec / tab.update_cfg / dialog.open|close|list_open；app.shutdown + view.snapshot 保留為 internal-only wire（無 agent 工具）；WIRE 39 / GUI 46 / MCP 53）
+**Last updated:** 2026-06-24（run preflight before async operation handle）
 
 # `zcu_tools/gui/app/main/` — measure-gui Framework AI Note
 
@@ -78,7 +78,7 @@ gui/
 
 - View（Qt UI）與 RemoteControlAdapter（NDJSON RPC）是兩個平級 client，受保護操作必經同一帶 guard 路徑，行為規範一致。
 - `GuardService` 是 domain guard 的單一所有者，發放型別化 **Permit**（`RunPermit` / `SavePermit` / `AnalyzePermit` / `WritebackPermit`）。受保護 service 方法（`RunService.start_run` 等）只收 Permit，不自行重查前置條件；pyright 在編譯期擋住「拿錯 / 沒拿 permit」。
-- **Permit = 靜態前置**（context readiness、committed-cfg validity、SoC capability）；純憑證、無需釋放。`RunPermit` 攜 `RunRequest` + committed `CfgSchema` + adapter，validity 在 acquire 時 lower 一次 fail-fast。
+- **Permit = 靜態前置**（context readiness、committed-cfg validity、SoC capability、adapter 可選 `validate_run_request` 純 preflight）；純憑證、無需釋放。`RunPermit` 攜 `RunRequest` + committed `CfgSchema` + adapter，validity 在 acquire 時 lower 一次並執行 adapter preflight（若 adapter 提供），fail-fast 後才開 async operation handle。
 - **Operation = token + opt-in facets（ADR-0019）= 動態互斥/handle 拆兩個 sibling leaf**（取代舊 `OperationGate` 統合 façade + `OperationLease`）：
   - **`OperationGate` = 純 Exclusion**（hardware 排斥；`is_tab_busy` 仍歸此語意但在 service 查）：`ensure_can_start(kind)`（fail-fast guard，conflict raise，**在開 handle 前**呼叫，故衝突不留半成品）+ `register(token, kind, owner_id, resource_id)` + `release(token)` + `has_active`/`is_device_mutating`，keyed by token。只 run/device/connect 用。
   - **`OperationHandles` = async Handle/Cancel facet（per-op `OperationChannel`，ADR-0025）**：`create(cancel_hook=None) -> token`（mint operation_id + 開該 op 的 channel）+ `settle(token, OperationOutcome)` + 動詞 `await_outcome`（off-main 阻塞、消費 channel）/`poll`（非阻塞）/`cancel`/`message`（nudge）/`stop(reason)`（Send & Stop）/`cancel_all() -> list[token]`/`live_count()`/`has_cancel_hook()`。run/device/connect **和** analyze/interactive 共用（**analyze 只拿 handle、不拿 exclusion**）。
@@ -164,7 +164,7 @@ GUI 上的「Agent」按鈕觸發 `AgentLaunchDialog`（可選 resumable session
 
 ### Adapter Contract
 
-- **框架契約 = `gui.adapter.ExpAdapterProtocol`（generic-free Protocol，11 成員）**：列出 framework 真正呼叫的成員（`cfg_spec`/`guide`/`make_default_cfg`/`make_save_paths`/`run`/`analyze`/`save`/`get_analyze_params`/`analyze_params_cls`/`get_writeback_items`/`capabilities`），無實作、無 generic。GUI 一律以不帶 generic 的 `ExpAdapterProtocol` 持 adapter（run/analyze/writeback result 過 Qt `Signal(object)` 即成 `object`，gui 從不 narrow）
+- **框架契約 = `gui.adapter.ExpAdapterProtocol`（generic-free Protocol）**：列出 framework 真正呼叫的必備成員（`cfg_spec`/`guide`/`make_default_cfg`/`make_save_paths`/`run`/`analyze`/`save`/`get_analyze_params`/`analyze_params_cls`/`get_writeback_items`/`capabilities` 等），無實作、無 generic。GUI 一律以不帶 generic 的 `ExpAdapterProtocol` 持 adapter（run/analyze/writeback result 過 Qt `Signal(object)` 即成 `object`，gui 從不 narrow）。`BaseAdapter.validate_run_request` 是可選純 run preflight hook，讓 SoC-dependent 但可預測的 cfg 錯誤在 GuardService 階段同步拒絕，不建立 operation handle。
 - **`guide()` → `AdapterGuide`（靜態行為導覽，開跑前讀）**：五欄 prose（behavior/expects_md/expects_ml/typical_writeback/recommended），**導覽非契約**——讓 agent/user 概觀「測什麼、讀哪些 md/ml key、寫回什麼、推薦設定」，實際怎麼用是其自由（現在式、含具體 key name + 建議範圍 + 標 optional）。BaseAdapter 給「(no guide written yet)」誠實預設；每個 registered adapter 應覆寫（測試 `test_every_registered_adapter_has_a_written_guide` 守此）。雙端出口：agent 走 `adapter.guide` RPC（→ `gui_adapter_guide`）、user 看 `ExpTabWidget` 左側 Config/Analysis 之後的唯讀第三分頁 "Guide"
 - **共用實作 = `experiment/v2_gui/adapters/base.py::BaseAdapter[T_Cfg, T_Result, T_AnalyzeResult=NoAnalysisResult, T_AnalyzeParams=NoAnalyzeParams]`**（PEP 696 default；pyright 1.1.410 + typing_extensions 支援）。四 generic 強型別連動（run→analyze→writeback）活在**單一 concrete adapter 內部**，由 BaseAdapter generic 保證。adapter 繼承 BaseAdapter，structural 滿足 Protocol（非 nominal）
 - `exp_cls` 透過 structural `ExperimentProtocol[T_Cfg, T_Result]` 約束；`run(soc, soccfg, cfg, **kwargs)` 與 `save(filepath, result, **kwargs)` 採 `**kwargs` 容納 experiment-specific 擴充（例 `earlystop_snr`）

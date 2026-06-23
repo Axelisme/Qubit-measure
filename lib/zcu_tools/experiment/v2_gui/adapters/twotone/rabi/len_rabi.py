@@ -12,6 +12,7 @@ from zcu_tools.experiment.v2.twotone.rabi.len_rabi import (
     LenRabiExp,
     LenRabiResult,
 )
+from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
@@ -32,10 +33,12 @@ from zcu_tools.gui.app.main.adapter import (
     MetaDictWriteback,
     ModuleWriteback,
     ParamMeta,
+    RunRequest,
     SweepSpec,
     SweepValue,
     WritebackItem,
     WritebackRequest,
+    require_soc_handles,
 )
 from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
 
@@ -141,6 +144,15 @@ class LenRabiAdapter(
                 "sweep.length", SweepValue(start=0.03, stop=sweep_stop, expts=101)
             )
             .build()
+        )
+
+    def validate_run_request(self, req: RunRequest, raw_cfg: dict[str, object]) -> None:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        _, soccfg = require_soc_handles(req)
+        sweep2array(
+            cfg.sweep.length,
+            "time",
+            {"soccfg": soccfg, "gen_ch": cfg.modules.qub_pulse.ch},
         )
 
     def get_analyze_params(

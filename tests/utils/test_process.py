@@ -20,6 +20,8 @@ from zcu_tools.utils.process import (
     peak_n_avg,
     rotate2real,
     rotate_phase,
+    smooth_signal1d,
+    smooth_signal_nd,
 )
 
 # ---------------------------------------------------------------------------
@@ -385,3 +387,41 @@ class TestPeakNAvgMinMode:
             assert peak_n_avg(data, n=n, mode="min") == pytest.approx(
                 _old_min(data, n), rel=1e-12
             )
+
+
+class TestWaveletSmoothing:
+    def test_wavelet_preserves_shape_and_nan_mask(self) -> None:
+        x = np.linspace(0.0, 2.0 * np.pi, 64)
+        data = np.vstack([np.sin(x), np.cos(x)]).astype(np.float64)
+        data[1, 7] = np.nan
+
+        out = smooth_signal1d(data, method="wavelet", sigma=1.0, axis=1)
+
+        assert out.shape == data.shape
+        assert np.isnan(out[1, 7])
+        assert np.all(np.isfinite(out[~np.isnan(data)]))
+
+    def test_wavelet_handles_complex_nd_axis(self) -> None:
+        x = np.linspace(0.0, 2.0 * np.pi, 32)
+        real = np.vstack([np.sin(x), np.cos(x)])
+        data = (real + 0.25j * real).astype(np.complex128)
+
+        out = smooth_signal_nd(data, method="wavelet", sigma=1.0, axes=(1,))
+
+        assert out.shape == data.shape
+        assert np.iscomplexobj(out)
+        assert np.all(np.isfinite(np.real(out)))
+        assert np.all(np.isfinite(np.imag(out)))
+
+    def test_gaussian_fallback_matches_scipy(self) -> None:
+        from scipy.ndimage import gaussian_filter1d
+
+        data = RNG.random((4, 20))
+        out = smooth_signal1d(data, method="gaussian", sigma=1.5, axis=1)
+        expected = gaussian_filter1d(data, sigma=1.5, axis=1)
+
+        assert_allclose(out, expected)
+
+    def test_invalid_smooth_method_raises(self) -> None:
+        with pytest.raises(ValueError, match="Invalid smoothing method"):
+            smooth_signal1d(np.arange(8.0), method="median")  # type: ignore[arg-type]

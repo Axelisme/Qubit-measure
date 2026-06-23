@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import warnings
-from typing import Literal, TypeVar, cast
+from collections.abc import Sequence
+from typing import Any, Literal, TypeAlias, TypeVar, cast
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy.ndimage import gaussian_filter1d
+from scipy.ndimage import gaussian_filter, gaussian_filter1d
 
 T_dtype = TypeVar("T_dtype", bound=np.number)
+SmoothMethod: TypeAlias = Literal["wavelet", "gaussian"]
+WaveletThresholdMode: TypeAlias = Literal["soft", "hard"]
 
 
 def find_rotate_angle(signals: NDArray[np.complex128]) -> float:
@@ -228,6 +231,209 @@ def rescale(signals: NDArray[T_dtype], axis: int | None = None) -> NDArray[T_dty
         raise ValueError(f"Invalid axis: {axis} for rescale")
 
     return signals
+
+
+def _require_pywt() -> Any:
+    try:
+        import pywt
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "Wavelet smoothing requires PyWavelets; install the client extra."
+        ) from exc
+    return pywt
+
+
+def _normalize_axis(axis: int, ndim: int) -> int:
+    if ndim == 0:
+        raise ValueError("axis is invalid for a scalar signal")
+    normalized = axis + ndim if axis < 0 else axis
+    if normalized < 0 or normalized >= ndim:
+        raise ValueError(f"axis {axis} is out of bounds for signal ndim {ndim}")
+    return normalized
+
+
+def _normalize_axes(axes: Sequence[int] | None, ndim: int) -> tuple[int, ...]:
+    if axes is None:
+        return tuple(range(ndim))
+    normalized = tuple(_normalize_axis(axis, ndim) for axis in axes)
+    if len(set(normalized)) != len(normalized):
+        raise ValueError(f"axes must not contain duplicates: {axes}")
+    return normalized
+
+
+def _resolve_wavelet_level(pywt: Any, length: int, wavelet: str, level: int) -> int:
+    if length < 2:
+        return 0
+    max_level = int(pywt.dwt_max_level(length, pywt.Wavelet(wavelet).dec_len))
+    if max_level <= 0:
+        return 0
+    if level <= 0:
+        return min(3, max_level)
+    if level > max_level:
+        raise ValueError(
+            f"wavelet_level={level} is too high for length {length}; max is {max_level}"
+        )
+    return level
+
+
+def _wavelet_denoise_real_vector(
+    values: NDArray[np.float64],
+    *,
+    pywt: Any,
+    wavelet: str,
+    level: int,
+    threshold_scale: float,
+    threshold_mode: WaveletThresholdMode,
+) -> NDArray[np.float64]:
+    if threshold_scale < 0:
+        raise ValueError("threshold_scale must be non-negative")
+
+    out = values.astype(np.float64, copy=True)
+    finite_mask = np.isfinite(out)
+    if np.count_nonzero(finite_mask) < 2:
+        return out
+
+    invalid_mask = ~finite_mask
+    if np.any(invalid_mask):
+        x = np.arange(out.size)
+        out[invalid_mask] = np.interp(x[invalid_mask], x[finite_mask], out[finite_mask])
+
+    resolved_level = _resolve_wavelet_level(pywt, out.size, wavelet, level)
+    if resolved_level == 0:
+        out[invalid_mask] = values[invalid_mask]
+        return out
+
+    coeffs = pywt.wavedec(out, wavelet=wavelet, mode="symmetric", level=resolved_level)
+    detail = np.asarray(coeffs[-1], dtype=np.float64)
+    noise_sigma = float(np.median(np.abs(detail - np.median(detail))) / 0.6745)
+    if np.isfinite(noise_sigma) and noise_sigma > 0.0 and threshold_scale > 0.0:
+        threshold = threshold_scale * noise_sigma * np.sqrt(2.0 * np.log(out.size))
+        coeffs[1:] = [
+            pywt.threshold(coeff, threshold, mode=threshold_mode)
+            for coeff in coeffs[1:]
+        ]
+
+    reconstructed = np.asarray(
+        pywt.waverec(coeffs, wavelet=wavelet, mode="symmetric"),
+        dtype=np.float64,
+    )
+    if reconstructed.size < out.size:
+        reconstructed = np.pad(reconstructed, (0, out.size - reconstructed.size))
+    out = reconstructed[: out.size]
+    out[invalid_mask] = values[invalid_mask]
+    return out
+
+
+def wavelet_denoise1d(
+    signals: NDArray[Any],
+    *,
+    axis: int = -1,
+    wavelet: str = "sym4",
+    level: int = 0,
+    threshold_scale: float = 1.0,
+    threshold_mode: WaveletThresholdMode = "soft",
+) -> NDArray[Any]:
+    """Denoise 1D traces along one axis with wavelet coefficient thresholding."""
+    pywt = _require_pywt()
+    signals_arr = np.asarray(signals)
+    if signals_arr.ndim == 0:
+        return signals_arr.copy()
+    normalized_axis = _normalize_axis(axis, signals_arr.ndim)
+
+    if np.iscomplexobj(signals_arr):
+        real = wavelet_denoise1d(
+            np.real(signals_arr),
+            axis=normalized_axis,
+            wavelet=wavelet,
+            level=level,
+            threshold_scale=threshold_scale,
+            threshold_mode=threshold_mode,
+        )
+        imag = wavelet_denoise1d(
+            np.imag(signals_arr),
+            axis=normalized_axis,
+            wavelet=wavelet,
+            level=level,
+            threshold_scale=threshold_scale,
+            threshold_mode=threshold_mode,
+        )
+        return real + 1j * imag
+
+    moved = np.moveaxis(signals_arr.astype(np.float64, copy=True), normalized_axis, -1)
+    out = np.empty_like(moved)
+    for idx in np.ndindex(moved.shape[:-1]):
+        out[idx] = _wavelet_denoise_real_vector(
+            moved[idx],
+            pywt=pywt,
+            wavelet=wavelet,
+            level=level,
+            threshold_scale=threshold_scale,
+            threshold_mode=threshold_mode,
+        )
+    return np.moveaxis(out, -1, normalized_axis)
+
+
+def smooth_signal1d(
+    signals: NDArray[Any],
+    *,
+    method: SmoothMethod = "wavelet",
+    sigma: float = 1.0,
+    axis: int = -1,
+    wavelet: str = "sym4",
+    wavelet_level: int = 0,
+    wavelet_threshold: float | None = None,
+    threshold_mode: WaveletThresholdMode = "soft",
+) -> NDArray[Any]:
+    """Smooth traces along one axis with a shared method knob."""
+    if method == "gaussian":
+        return cast(NDArray[Any], gaussian_filter1d(signals, sigma=sigma, axis=axis))
+    elif method == "wavelet":
+        return wavelet_denoise1d(
+            signals,
+            axis=axis,
+            wavelet=wavelet,
+            level=wavelet_level,
+            threshold_scale=sigma if wavelet_threshold is None else wavelet_threshold,
+            threshold_mode=threshold_mode,
+        )
+    else:
+        raise ValueError(f"Invalid smoothing method: {method}")
+
+
+def smooth_signal_nd(
+    signals: NDArray[Any],
+    *,
+    method: SmoothMethod = "wavelet",
+    sigma: float = 1.0,
+    axes: Sequence[int] | None = None,
+    wavelet: str = "sym4",
+    wavelet_level: int = 0,
+    wavelet_threshold: float | None = None,
+    threshold_mode: WaveletThresholdMode = "soft",
+) -> NDArray[Any]:
+    """Smooth an N-D signal; wavelet mode applies separable 1D denoise per axis."""
+    if method == "gaussian":
+        if axes is None:
+            return cast(NDArray[Any], gaussian_filter(signals, sigma=sigma))
+        return cast(
+            NDArray[Any], gaussian_filter(signals, sigma=sigma, axes=tuple(axes))
+        )
+    elif method == "wavelet":
+        out = np.asarray(signals)
+        for axis in _normalize_axes(axes, out.ndim):
+            out = wavelet_denoise1d(
+                out,
+                axis=axis,
+                wavelet=wavelet,
+                level=wavelet_level,
+                threshold_scale=sigma
+                if wavelet_threshold is None
+                else wavelet_threshold,
+                threshold_mode=threshold_mode,
+            )
+        return out
+    else:
+        raise ValueError(f"Invalid smoothing method: {method}")
 
 
 def calculate_noise(signals: NDArray[T_dtype]) -> tuple[float, NDArray[T_dtype]]:

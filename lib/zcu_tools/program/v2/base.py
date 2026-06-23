@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 import logging
+from collections.abc import Callable
 
 from qick import QickConfig
 from qick.asm_v2 import AveragerProgramV2

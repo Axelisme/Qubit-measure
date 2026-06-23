@@ -8,7 +8,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from scipy.ndimage import gaussian_filter
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -32,7 +31,12 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules import TwoPulseResetCfg
 from zcu_tools.utils.datasaver import load_data, save_data
-from zcu_tools.utils.process import minus_background, rotate2real
+from zcu_tools.utils.process import (
+    SmoothMethod,
+    minus_background,
+    rotate2real,
+    smooth_signal_nd,
+)
 
 
 def dual_reset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -238,6 +242,9 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         result: FreqResult | None = None,
         *,
         smooth: float = 1.0,
+        smooth_method: SmoothMethod = "wavelet",
+        wavelet: str = "sym4",
+        wavelet_level: int = 0,
         xname: str | None = None,
         yname: str | None = None,
         corner_as_background: bool = False,
@@ -249,7 +256,14 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         freqs1, freqs2, signals = result.freqs1, result.freqs2, result.signals
 
         # Apply smoothing for peak finding
-        signals_smooth = gaussian_filter(signals, smooth)
+        signals_smooth = smooth_signal_nd(
+            signals,
+            method=smooth_method,
+            sigma=smooth,
+            axes=(0, 1),
+            wavelet=wavelet,
+            wavelet_level=wavelet_level,
+        )
 
         # Find peak in amplitude
         if corner_as_background:

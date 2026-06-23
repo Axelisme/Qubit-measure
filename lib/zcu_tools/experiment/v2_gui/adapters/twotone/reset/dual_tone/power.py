@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Annotated, Any, ClassVar, TypeAlias
+from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
 from matplotlib.figure import Figure
 
@@ -44,7 +44,10 @@ DualTonePowerRunResult: TypeAlias = PowerResult
 
 @dataclass
 class DualTonePowerAnalyzeParams:
-    smooth: Annotated[float, ParamMeta(label="Smooth sigma", decimals=2)]
+    smooth_method: Annotated[
+        Literal["wavelet", "gaussian"], ParamMeta(label="Smooth method")
+    ]
+    smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)]
 
 
 @dataclass
@@ -92,10 +95,11 @@ class DualTonePowerAdapter(
                 "'reset_120' registration done at the length step (D2(a))."
             ),
             recommended=(
-                "Sweep each gain across its full usable range; 'smooth' "
-                "Gaussian-filters the map before picking the optimum (sigma ~1 by "
-                "default). The frequencies are held at 'reset_f1' / 'reset_f2', so "
-                "calibrate those first."
+                "Sweep each gain across its full usable range. Analysis denoises "
+                "the map before picking the optimum; wavelet smoothing is the "
+                "default and Gaussian remains available for comparison. The "
+                "frequencies are held at 'reset_f1' / 'reset_f2', so calibrate "
+                "those first."
             ),
         )
 
@@ -147,13 +151,15 @@ class DualTonePowerAdapter(
     def get_analyze_params(
         self, result: DualTonePowerRunResult, ctx: ExpContext
     ) -> DualTonePowerAnalyzeParams:
-        return DualTonePowerAnalyzeParams(smooth=1.0)
+        return DualTonePowerAnalyzeParams(smooth_method="wavelet", smooth=1.0)
 
     def analyze(
         self, req: AnalyzeRequest[DualTonePowerRunResult, DualTonePowerAnalyzeParams]
     ) -> DualTonePowerAnalyzeResult:
         params = req.analyze_params
-        gain1, gain2, fig = PowerExp().analyze(req.run_result, smooth=params.smooth)
+        gain1, gain2, fig = PowerExp().analyze(
+            req.run_result, smooth=params.smooth, smooth_method=params.smooth_method
+        )
         return DualTonePowerAnalyzeResult(gain1=gain1, gain2=gain2, figure=fig)
 
     def get_writeback_items(

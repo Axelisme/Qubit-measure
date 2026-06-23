@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Annotated, Any, ClassVar, TypeAlias
+from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
 from matplotlib.figure import Figure
 
@@ -48,7 +48,10 @@ DualToneFreqRunResult: TypeAlias = FreqResult
 
 @dataclass
 class DualToneFreqAnalyzeParams:
-    smooth: Annotated[float, ParamMeta(label="Smooth sigma", decimals=2)]
+    smooth_method: Annotated[
+        Literal["wavelet", "gaussian"], ParamMeta(label="Smooth method")
+    ]
+    smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)]
 
 
 @dataclass
@@ -100,9 +103,9 @@ class DualToneFreqAdapter(
             ),
             recommended=(
                 "Keep each axis a tight span (a few MHz) around the predicted "
-                "sideband; the 2D scan cost grows with both axes. 'smooth' "
-                "Gaussian-filters the map before peak finding — a sigma around 1 is "
-                "a reasonable default, raise it on a noisy map."
+                "sideband; the 2D scan cost grows with both axes. Analysis denoises "
+                "the map before peak finding; wavelet smoothing is the default and "
+                "Gaussian remains available for comparison."
             ),
         )
 
@@ -165,13 +168,15 @@ class DualToneFreqAdapter(
     def get_analyze_params(
         self, result: DualToneFreqRunResult, ctx: ExpContext
     ) -> DualToneFreqAnalyzeParams:
-        return DualToneFreqAnalyzeParams(smooth=1.0)
+        return DualToneFreqAnalyzeParams(smooth_method="wavelet", smooth=1.0)
 
     def analyze(
         self, req: AnalyzeRequest[DualToneFreqRunResult, DualToneFreqAnalyzeParams]
     ) -> DualToneFreqAnalyzeResult:
         params = req.analyze_params
-        freq1, freq2, fig = FreqExp().analyze(req.run_result, smooth=params.smooth)
+        freq1, freq2, fig = FreqExp().analyze(
+            req.run_result, smooth=params.smooth, smooth_method=params.smooth_method
+        )
         return DualToneFreqAnalyzeResult(freq1=freq1, freq2=freq2, figure=fig)
 
     def get_writeback_items(

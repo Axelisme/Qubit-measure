@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-13（共用層依賴校正：McpBridge 住 mcp.core.bridge、worker 不依賴 gui.plotting）
+**Last updated:** 2026-06-23（preprocess wavelet smoothing signature）
 
 # `zcu_tools/gui/app/dispersive/` — Fluxonium Dispersive-Shift Analysis GUI AI Note
 
@@ -63,7 +63,7 @@ agent 只觀測、user 在 GUI 驅動。method set 全純查詢（state.check / 
 - **preprocess edelay 用 numba kernel（GUI-local，非 utils）**：`services/_fast_edelay.py` 的 `@njit(parallel=True, fastmath=True, cache=True)` 把整個 (n_flux × 1000-grid) 雙層 loop 編成機器碼、per-flux 外層 `prange` 平行，內聯 **Kasa 代數圓擬合**（2×2 solve，取代 utils 的 `fit_circle_params` scipy.eig，圓心相同、半徑差 ~2e-3）。**~14x**（benchmark：scipy.eig+loky 1.49s → numba 8thr 0.103s；單核也 5x）。numba 放 GIL → 不 fork、不 pickle（解掉 `GuiProgressBar` 過 fork pickle 問題）；kernel 是黑盒 ~0.1s → 進度條走 **busy/indeterminate**（無 per-flux tick，`gui_pbar.py` 已刪）。**不動 utils 通用 `fit_edelay`/`fit_circle_params`**（這是 dispersive 專用快路徑）。數值對齊：transpose 正確的真實檔上 numba vs utils fit_edelay 差 = 0.000000。
   - **平行化教訓（benchmark 實測）**：per-row Python loop + threads **比 serial 慢 3.5x**（`np.linalg.solve`/scipy LAPACK 不放 GIL，線程互搶）；向量化（消內層 grid loop）後 threads/loky 才好（0.4-0.5s）；numba prange 最贏（放 GIL 的真平行 + 無 fork 開銷）。
 - **OneTone 檔軸常反**：OneTone hdf5 常存成 `[Frequency, Flux]`，loader 假設 `[Flux, Flux→Freq]` → 載入後 freqs 變垃圾（如 ~1e-12），preprocess edelay 全錯。**不是 bug，是檔格式** —— user 在 load dialog 看 preview 勾「Transpose axes」修正（這正是 preview dialog 的用途）。同 fluxdep OneTone 軸反問題。
-- **preprocess 小頻網格 σ=0 崩潰**：`gaussian_filter1d(σ=n_freq//30)` 在小網格 σ=0 → scipy ZeroDivisionError。`_smooth_sigma` floor 至 1（notebook 網格夠大不觸發，GUI 須不崩）。
+- **preprocess smoothing signature**：preprocess 在 edelay/circle-fit 前與 phase-diff 前沿頻率軸做 smoothing，預設 method 是 `wavelet`；signature 包含 method、兩個 smoothing divisor 與 grid shape，因此 smoothing pipeline 變更會讓既有 fit 失效。小頻網格的 smoothing strength floor 至 1，GUI 不因粗網格崩潰。
 - **路徑**：`result_dir`=`result/<chip>/<qub>`（processed 輸出 / params.json）；`database_path`=`Database/<chip>/<qub>`（**raw onetone root**，對齊 notebook `Database/Q12_2D[5]/Q1/...`，**不是** result/ 下）。browse onetone 預設走 `database_path`。
 - **export 需既存 params.json**：`update_result` 先讀檔；export 前 gate on `has_result` + 檔存在，缺則 fast-fail 指向 fluxdep。
 - **bare_rf seed 不覆蓋**：`set_fit_inputs` 只在 disp_fit.bare_rf 無值時 seed（不蓋既有 tuning 值）。

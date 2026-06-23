@@ -44,11 +44,11 @@ is statistically meaningful (Q1).
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from functools import lru_cache
 import itertools
 import logging
 import math
+from collections.abc import Callable
+from functools import lru_cache
 
 import numpy as np
 from numpy.polynomial.legendre import leggauss

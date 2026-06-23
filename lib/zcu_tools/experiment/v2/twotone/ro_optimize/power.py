@@ -9,7 +9,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from scipy.ndimage import gaussian_filter1d
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -33,6 +32,7 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
+from zcu_tools.utils.process import SmoothMethod, smooth_signal1d
 
 
 @dataclass(frozen=True)
@@ -132,7 +132,14 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         return self.last_result
 
     def analyze(
-        self, result: PowerResult | None = None, penalty_ratio: float = 0.0
+        self,
+        result: PowerResult | None = None,
+        penalty_ratio: float = 0.0,
+        *,
+        smooth: float = 1.0,
+        smooth_method: SmoothMethod = "wavelet",
+        wavelet: str = "sym4",
+        wavelet_level: int = 0,
     ) -> tuple[float, Figure]:
         if result is None:
             result = self.last_result
@@ -144,7 +151,14 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         # fill NaNs with zeros
         snrs[np.isnan(snrs)] = 0.0
 
-        snrs = gaussian_filter1d(snrs, 1)
+        snrs = smooth_signal1d(
+            snrs,
+            method=smooth_method,
+            sigma=smooth,
+            axis=0,
+            wavelet=wavelet,
+            wavelet_level=wavelet_level,
+        )
         penaltized_snrs = snrs * np.exp(-powers * penalty_ratio)
 
         max_id = np.argmax(penaltized_snrs)

@@ -13,8 +13,9 @@ import numpy as np
 from numpy.typing import NDArray
 from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
 from qtpy.QtWidgets import QLabel, QSlider, QWidget  # type: ignore[attr-defined]
-from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
+
+from zcu_tools.utils.process import smooth_signal1d
 
 from .base import InteractiveMplWidget
 
@@ -29,15 +30,15 @@ def max_dispersion_freq_index(
     """Index of the frequency with the largest mean relative dispersion.
 
     Pure port of InteractiveOneTone.init_plots: the relative gradient of the
-    complex signal along frequency, gaussian-smoothed, averaged over device
-    values, argmax'd.
+    complex signal along frequency, denoised, averaged over device values, and
+    mapped from the adjacent-bin gradient index onto a frequency-bin index.
     """
     abs_grad = (
         np.abs(signals[:, 1:] - signals[:, :-1]) / ((freqs[1:] - freqs[:-1])[None])
     )
     rel_grad = abs_grad / np.clip(np.abs(signals[:, 1:] + signals[:, :-1]), 1e-12, None)
-    rel_grad = gaussian_filter1d(rel_grad, sigma=1, axis=1)
-    return int(np.argmax(np.mean(rel_grad, axis=0)))
+    rel_grad = smooth_signal1d(rel_grad, method="wavelet", sigma=1.0, axis=1)
+    return min(int(np.argmax(np.mean(rel_grad, axis=0))) + 1, len(freqs) - 1)
 
 
 def smoothed_slice(
@@ -45,7 +46,9 @@ def smoothed_slice(
 ) -> NDArray[np.float64]:
     """The normalised, inverted, smoothed amplitude slice at ``freq_idx``."""
     real_slice = np.abs(signals)[:, freq_idx]
-    smoothed = gaussian_filter1d(np.max(real_slice) - real_slice, sigma=1)
+    smoothed = smooth_signal1d(
+        np.max(real_slice) - real_slice, method="wavelet", sigma=1.0
+    )
     std = np.std(smoothed)
     if std == 0.0:
         # A perfectly flat slice (no dispersion at this frequency) — normalising

@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Annotated, Any, ClassVar, TypeAlias
+from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
 from matplotlib.figure import Figure
 
@@ -40,7 +40,10 @@ RoOptFreqRunResult: TypeAlias = FreqResult
 
 @dataclass
 class RoOptFreqAnalyzeParams:
-    smooth: Annotated[float, ParamMeta(label="Smooth sigma", decimals=2)]
+    smooth_method: Annotated[
+        Literal["wavelet", "gaussian"], ParamMeta(label="Smooth method")
+    ]
+    smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)]
 
 
 @dataclass
@@ -92,11 +95,11 @@ class RoOptFreqAdapter(
                 "'readout_dpm' module afterwards (the 'readout_dpm' role)."
             ),
             recommended=(
-                "Analysis smooths the SNR curve before picking the peak; a "
-                "'smooth' sigma around 2 tames noise without washing out the "
-                "feature — raise it if the optimum jitters, lower it for a sharp "
-                "peak. A sweep of a couple of linewidths around 'r_f' usually "
-                "brackets the best frequency."
+                "Analysis denoises the SNR curve before picking the peak. "
+                "Wavelet smoothing is the default; switch to Gaussian only when "
+                "you need to compare against the older sigma-based result. A "
+                "'smooth' strength around 2 tames noise without washing out the "
+                "feature."
             ),
         )
 
@@ -130,13 +133,15 @@ class RoOptFreqAdapter(
     def get_analyze_params(
         self, result: RoOptFreqRunResult, ctx: ExpContext
     ) -> RoOptFreqAnalyzeParams:
-        return RoOptFreqAnalyzeParams(smooth=2.0)
+        return RoOptFreqAnalyzeParams(smooth_method="wavelet", smooth=2.0)
 
     def analyze(
         self, req: AnalyzeRequest[RoOptFreqRunResult, RoOptFreqAnalyzeParams]
     ) -> RoOptFreqAnalyzeResult:
         params = req.analyze_params
-        best_freq, fig = FreqExp().analyze(req.run_result, smooth=params.smooth)
+        best_freq, fig = FreqExp().analyze(
+            req.run_result, smooth=params.smooth, smooth_method=params.smooth_method
+        )
         return RoOptFreqAnalyzeResult(best_freq=best_freq, figure=fig)
 
     def get_writeback_items(

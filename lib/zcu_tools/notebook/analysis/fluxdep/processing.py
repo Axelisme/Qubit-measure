@@ -6,18 +6,22 @@ including removing close points, preprocessing data, and analyzing spectra.
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
+
+from zcu_tools.utils.process import SmoothMethod, smooth_signal1d
 
 
 def cast2real_and_norm(
-    signals: NDArray, use_phase: bool = True, sigma: float = 1
+    signals: NDArray,
+    use_phase: bool = True,
+    sigma: float = 1,
+    smooth_method: SmoothMethod = "wavelet",
 ) -> NDArray[np.float64]:
     """Convert complex signals to real with maximum snr"""
 
     if use_phase:
         signals = signals - np.ma.mean(signals, axis=1, keepdims=True)
-        signals = gaussian_filter1d(signals, sigma=sigma, axis=1)
+        signals = smooth_signal1d(signals, method=smooth_method, sigma=sigma, axis=1)
         real_signals = np.abs(signals)
         std = np.ma.std(real_signals, axis=1, keepdims=True)
         # A constant (or fully masked) row has zero/undefined std and carries no
@@ -28,7 +32,9 @@ def cast2real_and_norm(
         real_signals /= std
     else:
         real_signals = np.abs(signals)
-        real_signals = gaussian_filter1d(real_signals, sigma=sigma, axis=1)
+        real_signals = smooth_signal1d(
+            real_signals, method=smooth_method, sigma=sigma, axis=1
+        )
 
     return real_signals
 

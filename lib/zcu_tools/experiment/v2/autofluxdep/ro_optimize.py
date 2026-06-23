@@ -6,7 +6,6 @@ from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy.ndimage import gaussian_filter
 from typing_extensions import (
     TypedDict,  # closed/extra_items (PEP 728) not in stdlib 3.13
 )
@@ -35,12 +34,13 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils import deepupdate
 from zcu_tools.utils.func_tools import MinIntervalFunc
+from zcu_tools.utils.process import smooth_signal_nd
 
 from .executor import FluxDepCfg, FluxDepInfoDict, MeasurementTask, T_RootResult
 
 
 def ro_opt_signal2real(signals: NDArray[np.float64]) -> NDArray[np.float64]:
-    return np.abs(gaussian_filter(signals, sigma=1))
+    return np.abs(smooth_signal_nd(signals, method="wavelet", sigma=1.0))
 
 
 def ro_opt_fluxdep_signal2real(signals: NDArray[np.float64]) -> NDArray[np.float64]:

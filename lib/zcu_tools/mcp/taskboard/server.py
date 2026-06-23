@@ -13,9 +13,9 @@ Usage (per ``.mcp.json``):
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
-import logging
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any

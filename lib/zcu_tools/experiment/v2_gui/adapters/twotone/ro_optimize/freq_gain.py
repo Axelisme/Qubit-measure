@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Annotated, Any, ClassVar, TypeAlias
+from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
 from matplotlib.figure import Figure
 
@@ -40,7 +40,10 @@ RoOptFreqGainRunResult: TypeAlias = FreqGainResult
 
 @dataclass
 class RoOptFreqGainAnalyzeParams:
-    smooth: Annotated[float, ParamMeta(label="Smooth sigma", decimals=2)]
+    smooth_method: Annotated[
+        Literal["wavelet", "gaussian"], ParamMeta(label="Smooth method")
+    ]
+    smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)]
 
 
 @dataclass
@@ -93,10 +96,9 @@ class RoOptFreqGainAdapter(
                 "'readout_dpm' module afterwards (the 'readout_dpm' role)."
             ),
             recommended=(
-                "Analysis smooths the 2D SNR map before picking the peak; a "
-                "'smooth' sigma around 1 is a reasonable default — raise it if the "
-                "optimum jitters on a noisy map. Keep the freq span tight (a "
-                "fraction of a linewidth around the known readout frequency) and "
+                "Analysis denoises the 2D SNR map before picking the peak. Wavelet "
+                "smoothing is the default; switch to Gaussian only when comparing "
+                "against the older sigma-based result. Keep the freq span tight and "
                 "the gain range modest so the 2D scan stays affordable."
             ),
         )
@@ -136,14 +138,14 @@ class RoOptFreqGainAdapter(
     def get_analyze_params(
         self, result: RoOptFreqGainRunResult, ctx: ExpContext
     ) -> RoOptFreqGainAnalyzeParams:
-        return RoOptFreqGainAnalyzeParams(smooth=1.0)
+        return RoOptFreqGainAnalyzeParams(smooth_method="wavelet", smooth=1.0)
 
     def analyze(
         self, req: AnalyzeRequest[RoOptFreqGainRunResult, RoOptFreqGainAnalyzeParams]
     ) -> RoOptFreqGainAnalyzeResult:
         params = req.analyze_params
         best_freq, best_gain, fig = FreqGainExp().analyze(
-            req.run_result, smooth=params.smooth
+            req.run_result, smooth=params.smooth, smooth_method=params.smooth_method
         )
         return RoOptFreqGainAnalyzeResult(
             best_freq=best_freq, best_gain=best_gain, figure=fig
