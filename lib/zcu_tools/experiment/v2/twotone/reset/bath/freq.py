@@ -32,7 +32,8 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
+from zcu_tools.utils.datasaver import safe_labber_filepath
+from zcu_tools.utils.labber_io import load_labber_data, save_labber_data
 from zcu_tools.utils.process import SmoothMethod, smooth_signal_nd
 
 
@@ -206,7 +207,6 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
         result: FreqGainResult | None = None,
         comment: str | None = None,
         tag: str = "twotone/reset/bath/freq_gain",
-        **kwargs,
     ) -> None:
         if result is None:
             result = self.last_result
@@ -221,86 +221,46 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
         cfg = result.cfg_snapshot
         comment = make_comment(cfg, comment)
 
-        # 0 signals
-        save_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_0deg")),
-            x_info={"name": "Cavity drive Gain", "unit": "a.u.", "values": gains},
-            y_info={"name": "Cavity Frequency", "unit": "Hz", "values": freqs * 1e6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals[0].T},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
+        # one Labber file per interference phase (0/90/180/270 deg); each stores
+        # z as native (Ny=freqs, Nx=gains) so the on-disk axis identity is
+        # x=gain (inner) / y=freq (outer)
+        for k, suffix in enumerate(("_0deg", "_90deg", "_180deg", "_270deg")):
+            path = safe_labber_filepath(
+                str(_filepath.with_name(_filepath.name + suffix))
+            )
+            save_labber_data(
+                path,
+                z=("Signal", "a.u.", signals[k].T),
+                axes=[
+                    ("Cavity drive Gain", "a.u.", gains),
+                    ("Cavity Frequency", "Hz", freqs * 1e6),
+                ],
+                comment=comment,
+                tags=tag,
+            )
 
-        # 90 signals
-        save_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_90deg")),
-            x_info={"name": "Cavity drive Gain", "unit": "a.u.", "values": gains},
-            y_info={"name": "Cavity Frequency", "unit": "Hz", "values": freqs * 1e6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals[1].T},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-        # 180 signals
-        save_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_180deg")),
-            x_info={"name": "Cavity drive Gain", "unit": "a.u.", "values": gains},
-            y_info={"name": "Cavity Frequency", "unit": "Hz", "values": freqs * 1e6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals[2].T},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-        # 270 signals
-        save_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_270deg")),
-            x_info={"name": "Cavity drive Gain", "unit": "a.u.", "values": gains},
-            y_info={"name": "Cavity Frequency", "unit": "Hz", "values": freqs * 1e6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals[3].T},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-    def load(self, filepath: list[str], **kwargs) -> FreqGainResult:
+    def load(self, filepath: list[str]) -> FreqGainResult:
         deg0_filepath, deg90_filepath, deg180_filepath, deg270_filepath = filepath
 
-        deg0_signals, gains, freqs, comment = load_data(
-            deg0_filepath, return_comment=True, **kwargs
-        )
-        assert gains is not None and freqs is not None
+        ld0 = load_labber_data(deg0_filepath)
+        gains = np.asarray(ld0.axes[0].values, dtype=np.float64)
+        freqs = np.asarray(ld0.axes[1].values, dtype=np.float64)
         assert len(gains.shape) == 1 and len(freqs.shape) == 1
-        assert deg0_signals.shape == (len(freqs), len(gains))
+        assert ld0.z.shape == (len(freqs), len(gains))
+        comment = ld0.comment
 
         freqs = freqs * 1e-6  # Hz -> MHz
-        deg0_signals = deg0_signals.T  # transpose back
+        deg0_signals = ld0.z.T  # (freqs, gains) -> (gains, freqs)
 
-        deg90_signals, *_ = load_data(deg90_filepath, **kwargs)
-        assert gains is not None and freqs is not None
-        assert len(gains.shape) == 1 and len(freqs.shape) == 1
-        assert deg90_signals.shape == (len(freqs), len(gains))
+        def _load_phase(path: str) -> NDArray[np.complex128]:
+            ld = load_labber_data(path)
+            assert ld.z.shape == (len(freqs), len(gains))
+            return ld.z.T  # (freqs, gains) -> (gains, freqs)
 
-        deg90_signals = deg90_signals.T  # transpose back
+        deg90_signals = _load_phase(deg90_filepath)
+        deg180_signals = _load_phase(deg180_filepath)
+        deg270_signals = _load_phase(deg270_filepath)
 
-        deg180_signals, *_ = load_data(deg180_filepath, **kwargs)
-        assert gains is not None and freqs is not None
-        assert len(gains.shape) == 1 and len(freqs.shape) == 1
-        assert deg180_signals.shape == (len(freqs), len(gains))
-
-        deg180_signals = deg180_signals.T  # transpose back
-
-        deg270_signals, *_ = load_data(deg270_filepath, **kwargs)
-        assert gains is not None and freqs is not None
-        assert len(gains.shape) == 1 and len(freqs.shape) == 1
-        assert deg270_signals.shape == (len(freqs), len(gains))
-
-        deg270_signals = deg270_signals.T  # transpose back
-
-        gains = gains.astype(np.float64)
-        freqs = freqs.astype(np.float64)
         signals = np.stack(
             [deg0_signals, deg90_signals, deg180_signals, deg270_signals], axis=0
         ).astype(np.complex128)

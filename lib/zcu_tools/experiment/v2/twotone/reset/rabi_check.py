@@ -29,7 +29,8 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
+from zcu_tools.utils.datasaver import safe_labber_filepath
+from zcu_tools.utils.labber_io import load_labber_data, save_labber_data
 from zcu_tools.utils.process import rotate2real
 
 
@@ -166,7 +167,6 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
         result: RabiCheckResult | None = None,
         comment: str | None = None,
         tag: str = "twotone/reset/rabi_check",
-        **kwargs,
     ) -> None:
         if result is None:
             result = self.last_result
@@ -179,29 +179,32 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
         cfg = result.cfg_snapshot
         comment = make_comment(cfg, comment)
 
-        save_data(
-            filepath=filepath,
-            x_info={"name": "Amplitude", "unit": "a.u.", "values": gains},
-            y_info={"name": "Reset", "unit": "None", "values": np.array([0, 1, 2])},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals},
+        save_labber_data(
+            safe_labber_filepath(filepath),
+            z=("Signal", "a.u.", signals),  # (Ny=3, Nx=gains) native (inner last)
+            axes=[
+                ("Amplitude", "a.u.", gains),  # inner axis (x)
+                ("Reset", "None", np.array([0, 1, 2])),  # outer axis (y), discrete
+            ],
             comment=comment,
-            tag=tag,
-            **kwargs,
+            tags=tag,
         )
 
-    def load(self, filepath: str, **kwargs) -> RabiCheckResult:
-        signals, gains, y_values, comment = load_data(
-            filepath, return_comment=True, **kwargs
-        )
-        assert gains is not None and y_values is not None
-        assert len(gains.shape) == 1 and len(y_values.shape) == 1
+    def load(self, filepath: str) -> RabiCheckResult:
+        data = load_labber_data(filepath)
+        signals = np.asarray(data.z)  # native (Ny=3, Nx)
+        gains = np.asarray(data.axes[0].values)  # axes[0] = Amplitude
+        y_values = np.asarray(data.axes[1].values)  # axes[1] = Reset [0, 1, 2]
+        comment = data.comment
+
+        assert gains.ndim == 1 and y_values.ndim == 1
         assert signals.shape == (len(y_values), len(gains))
 
         gains = gains.astype(np.float64)
         signals = signals.astype(np.complex128)
 
         cfg_snapshot = None
-        if comment is not None:
+        if comment:
             cfg, _, _ = parse_comment(comment)
             if cfg is not None:
                 cfg_snapshot = RabiCheckCfg.validate_or_warn(cfg, source=filepath)

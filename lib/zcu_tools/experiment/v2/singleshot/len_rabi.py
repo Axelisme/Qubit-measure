@@ -18,7 +18,8 @@ from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import SweepCfg, TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.program.v2.twotone import TwoToneModuleCfg
-from zcu_tools.utils.datasaver import load_data, save_data
+from zcu_tools.utils.datasaver import safe_labber_filepath
+from zcu_tools.utils.labber_io import load_labber_data, save_labber_data
 
 from .util import calc_populations, correct_populations
 
@@ -175,26 +176,24 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
             raise ValueError("result.cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
-        save_data(
-            filepath=filepath,
-            x_info={"name": "Length", "unit": "s", "values": lens * 1e-6},
-            y_info={"name": "GE population", "unit": "a.u.", "values": [0, 1]},
-            z_info={"name": "Population", "unit": "a.u.", "values": populations.T},
+        save_labber_data(
+            safe_labber_filepath(filepath),
+            z=("Population", "a.u.", populations.T),
+            axes=[
+                ("Length", "s", lens * 1e-6),
+                ("GE population", "a.u.", np.array([0, 1])),
+            ],
             comment=comment,
-            tag=tag,
-            **kwargs,
+            tags=tag,
         )
 
-    def load(self, filepath: str, **kwargs) -> LenRabiResult:
-        populations, lens, _, comment = load_data(
-            filepath, return_comment=True, **kwargs
-        )
-        assert lens is not None
+    def load(self, filepath: str) -> LenRabiResult:
+        ld = load_labber_data(filepath)
+        comment = ld.comment
 
-        lens = lens.astype(np.float64)
-        populations = np.real(populations).astype(np.float64)
-
-        lens = lens * 1e6  # s -> us
+        lens = np.asarray(ld.axes[0].values, dtype=np.float64) * 1e6  # s -> us
+        # native load returns z as (Ny, Nx) = (2, len); transpose to (len, 2)
+        populations = np.real(np.asarray(ld.z)).astype(np.float64).T
 
         cfg_snapshot = None
         if comment is not None:

@@ -34,7 +34,8 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     SweepCfg,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
+from zcu_tools.utils.datasaver import safe_labber_filepath
+from zcu_tools.utils.labber_io import load_labber_data, save_labber_data
 
 
 @dataclass(frozen=True)
@@ -309,7 +310,6 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
         result: AutoOptResult | None = None,
         comment: str | None = None,
         tag: str = "twotone/ge/ro_optimize/auto",
-        **kwargs,
     ) -> None:
         if result is None:
             result = self.last_result
@@ -324,48 +324,41 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
 
         _filepath = Path(filepath)
 
-        x_info = {
-            "name": "Iteration",
-            "unit": "a.u.",
-            "values": np.arange(params.shape[0]),
-        }
+        iters = np.arange(params.shape[0])
 
-        save_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_params")),
-            x_info=x_info,
-            y_info={"name": "Parameter Type", "unit": "a.u.", "values": [0, 1, 2]},
-            z_info={"name": "Parameters", "unit": "a.u.", "values": params.T},
+        # params file: 2-D native (Ny=3 Parameter Type, Nx=Np Iteration); inner
+        # axis (Iteration) is last in z, matching the (Ny, Nx) on-disk layout.
+        save_labber_data(
+            safe_labber_filepath(str(_filepath.with_name(_filepath.name + "_params"))),
+            z=("Parameters", "a.u.", params.T),
+            axes=[
+                ("Iteration", "a.u.", iters),
+                ("Parameter Type", "a.u.", np.array([0, 1, 2])),
+            ],
             comment=comment,
-            tag=tag + "/params",
-            **kwargs,
+            tags=tag + "/params",
         )
 
-        save_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_signals")),
-            x_info=x_info,
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals},
+        # signals file: 1-D over Iteration.
+        save_labber_data(
+            safe_labber_filepath(str(_filepath.with_name(_filepath.name + "_signals"))),
+            z=("Signal", "a.u.", signals),
+            axes=[("Iteration", "a.u.", iters)],
             comment=comment,
-            tag=tag + "/signals",
-            **kwargs,
+            tags=tag + "/signals",
         )
 
-    def load(self, filepath: str, **kwargs) -> AutoOptResult:
+    def load(self, filepath: str) -> AutoOptResult:
         _filepath = Path(filepath)
 
-        params_data, _, _, comment = load_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_params")),
-            return_comment=True,
-            **kwargs,
-        )
+        ld_p = load_labber_data(str(_filepath.with_name(_filepath.name + "_params")))
+        ld_s = load_labber_data(str(_filepath.with_name(_filepath.name + "_signals")))
 
-        signals_data, _, _ = load_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_signals")),
-            return_comment=False,
-            **kwargs,
-        )
-
-        params = params_data.astype(np.float64)
-        signals = signals_data.astype(np.float64)
+        # native load does NOT flip inner axes: ld_p.z is (Ny=3, Nx=Np); the
+        # callers expect (Np, 3) (row=iteration, col=param-type) -> re-apply .T.
+        params = np.asarray(ld_p.z, dtype=np.float64).T
+        signals = np.asarray(ld_s.z, dtype=np.float64)
+        comment = ld_p.comment
 
         cfg_snapshot = None
         if comment is not None:

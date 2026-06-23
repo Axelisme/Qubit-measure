@@ -31,8 +31,9 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
+from zcu_tools.utils.datasaver import safe_labber_filepath
 from zcu_tools.utils.fitting.multi_decay import calc_lambdas, fit_dual_transition_rates
+from zcu_tools.utils.labber_io import load_labber_data, save_labber_data
 
 from ..util import calc_populations, correct_populations
 from .util import measure_with_sweep
@@ -363,7 +364,6 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
         result: T1WithToneResult | None = None,
         comment: str | None = None,
         tag: str = "singleshot/t1/t1_with_tone",
-        **kwargs,
     ) -> None:
         if result is None:
             result = self.last_result
@@ -382,44 +382,58 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
             raise ValueError("result.cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
-        save_data(
-            filepath=str(_filepath.with_name(_filepath.stem + "_initg")),
-            x_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
-            y_info={"name": "GE population", "unit": "a.u.", "values": [0, 1]},
-            z_info={"name": "Signal", "unit": "a.u.", "values": populations1.T},
+        # z = populationsX.T is (Ny=2 GE-pop, Nx=N Time) = native (Ny, Nx) layout
+        initg_path = safe_labber_filepath(
+            str(_filepath.with_name(_filepath.stem + "_initg"))
+        )
+        save_labber_data(
+            initg_path,
+            z=("Signal", "a.u.", populations1.T),
+            axes=[
+                ("Time", "s", Ts * 1e-6),  # inner axis (x) first
+                ("GE population", "a.u.", [0, 1]),  # outer axis (y)
+            ],
             comment=comment,
-            tag=tag,
-            **kwargs,
+            tags=tag,
         )
 
         # initial in e
-        save_data(
-            filepath=str(_filepath.with_name(_filepath.stem + "_inite")),
-            x_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
-            y_info={"name": "GE population", "unit": "a.u.", "values": [0, 1]},
-            z_info={"name": "Signal", "unit": "a.u.", "values": populations2.T},
+        inite_path = safe_labber_filepath(
+            str(_filepath.with_name(_filepath.stem + "_inite"))
+        )
+        save_labber_data(
+            inite_path,
+            z=("Signal", "a.u.", populations2.T),
+            axes=[
+                ("Time", "s", Ts * 1e-6),
+                ("GE population", "a.u.", [0, 1]),
+            ],
             comment=comment,
-            tag=tag,
-            **kwargs,
+            tags=tag,
         )
 
-    def load(self, filepath: list[str], **kwargs) -> T1WithToneResult:
+    def load(self, filepath: list[str]) -> T1WithToneResult:
         g_filepath, e_filepath = filepath
 
-        # Load ground populations
-        g_pop, g_Ts, _, comment = load_data(g_filepath, return_comment=True, **kwargs)
-        assert g_pop.shape == (len(g_Ts), 2)
+        # Load ground populations; native z is (Ny=2, Nx=N) -- inner axis last, NO flip
+        dg = load_labber_data(g_filepath)
+        g_pop = np.asarray(dg.z)  # (2, N)
+        g_Ts = np.asarray(dg.axes[0].values, dtype=np.float64)  # Time axis (inner, x)
+        comment = dg.comment
+        assert g_pop.shape == (2, len(g_Ts))
 
         # Load excited populations
-        e_pop, e_Ts, _ = load_data(e_filepath, **kwargs)
-        assert e_pop.shape == (len(e_Ts), 2)
+        de = load_labber_data(e_filepath)
+        e_pop = np.asarray(de.z)  # (2, N)
+        e_Ts = np.asarray(de.axes[0].values, dtype=np.float64)
+        assert e_pop.shape == (2, len(e_Ts))
 
         assert np.allclose(g_Ts, e_Ts), "Time arrays do not match"
 
         Ts = g_Ts * 1e6  # s -> us
 
-        # Reconstruct signals shape: (Ts, 2, 2)
-        populations = np.stack([g_pop, e_pop], axis=1)
+        # Reconstruct signals shape: (N, 2, 2); transpose native (2,N) back to (N,2)
+        populations = np.stack([g_pop.T, e_pop.T], axis=1)
 
         Ts = Ts.astype(np.float64)
         populations = np.real(populations).astype(np.float64)

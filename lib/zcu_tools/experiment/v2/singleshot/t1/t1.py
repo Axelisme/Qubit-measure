@@ -34,8 +34,9 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
+from zcu_tools.utils.datasaver import safe_labber_filepath
 from zcu_tools.utils.fitting.multi_decay import calc_lambdas, fit_dual_transition_rates
+from zcu_tools.utils.labber_io import load_labber_data, save_labber_data
 
 from ..util import calc_populations, correct_populations
 
@@ -352,7 +353,6 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         result: T1Result | None = None,
         comment: str | None = None,
         tag: str = "singleshot/t1",
-        **kwargs,
     ) -> None:
         if result is None:
             result = self.last_result
@@ -371,36 +371,47 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
             raise ValueError("result.cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
-        save_data(
-            filepath=str(_filepath.with_name(_filepath.stem + "_initg")),
-            x_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
-            y_info={"name": "GE population", "unit": "a.u.", "values": [0, 1]},
-            z_info={"name": "Signal", "unit": "a.u.", "values": populations1.T},
+        # axes are inner-first: x=Time (fastest-varying), y=GE population.
+        # z is native (Ny, Nx) inner-last, i.e. populations*.T has shape (2, len(Ts)).
+        save_labber_data(
+            safe_labber_filepath(str(_filepath.with_name(_filepath.stem + "_initg"))),
+            z=("Signal", "a.u.", populations1.T),
+            axes=[
+                ("Time", "s", Ts * 1e-6),
+                ("GE population", "a.u.", np.array([0, 1])),
+            ],
             comment=comment,
-            tag=tag,
-            **kwargs,
+            tags=tag,
         )
 
         # initial in e
-        save_data(
-            filepath=str(_filepath.with_name(_filepath.stem + "_inite")),
-            x_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
-            y_info={"name": "GE population", "unit": "a.u.", "values": [0, 1]},
-            z_info={"name": "Signal", "unit": "a.u.", "values": populations2.T},
+        save_labber_data(
+            safe_labber_filepath(str(_filepath.with_name(_filepath.stem + "_inite"))),
+            z=("Signal", "a.u.", populations2.T),
+            axes=[
+                ("Time", "s", Ts * 1e-6),
+                ("GE population", "a.u.", np.array([0, 1])),
+            ],
             comment=comment,
-            tag=tag,
-            **kwargs,
+            tags=tag,
         )
 
-    def load(self, filepath: list[str], **kwargs) -> T1Result:
+    def load(self, filepath: list[str]) -> T1Result:
         g_filepath, e_filepath = filepath
 
-        # Load ground populations
-        g_pop, g_Ts, _, comment = load_data(g_filepath, return_comment=True, **kwargs)
+        # Load ground populations. Native load_labber_data returns z as
+        # (Ny=2, Nx=len(Ts)); transpose back to the old (Nx, Ny) layout the
+        # downstream stack expects.
+        g_ld = load_labber_data(g_filepath)
+        g_pop = np.asarray(g_ld.z).T
+        g_Ts = np.asarray(g_ld.axes[0].values)
+        comment = g_ld.comment
         assert g_pop.shape == (len(g_Ts), 2)
 
         # Load excited populations
-        e_pop, e_Ts, _ = load_data(e_filepath, **kwargs)
+        e_ld = load_labber_data(e_filepath)
+        e_pop = np.asarray(e_ld.z).T
+        e_Ts = np.asarray(e_ld.axes[0].values)
         assert e_pop.shape == (len(e_Ts), 2)
 
         assert np.allclose(g_Ts, e_Ts), "Time arrays do not match"

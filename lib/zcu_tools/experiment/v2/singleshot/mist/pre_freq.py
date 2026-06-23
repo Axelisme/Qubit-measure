@@ -29,7 +29,8 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
+from zcu_tools.utils.datasaver import safe_labber_filepath
+from zcu_tools.utils.labber_io import load_labber_data, save_labber_data
 
 from ..util import calc_populations, correct_populations
 
@@ -179,7 +180,6 @@ class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
         result: PreFreqResult | None = None,
         comment: str | None = None,
         tag: str = "singleshot/mist/pre_freq",
-        **kwargs,
     ) -> None:
         if result is None:
             result = self.last_result
@@ -192,23 +192,24 @@ class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
             raise ValueError("result.cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
-        save_data(
-            filepath=filepath,
-            x_info={"name": "PrePulse frequency", "unit": "Hz", "values": 1e6 * freqs},
-            y_info={"name": "GE population", "unit": "a.u.", "values": [0, 1]},
-            z_info={"name": "Population", "unit": "a.u.", "values": populations.T},
+        save_labber_data(
+            safe_labber_filepath(filepath),
+            z=("Population", "a.u.", populations.T),  # native (Ny=2, Nx=len(freqs))
+            axes=[
+                ("PrePulse frequency", "Hz", 1e6 * freqs),  # inner-first: freq (Nx)
+                ("GE population", "a.u.", np.array([0, 1])),  # outer: ge (Ny=2)
+            ],
             comment=comment,
-            tag=tag,
-            **kwargs,
+            tags=tag,
         )
 
-    def load(self, filepath: str, **kwargs) -> PreFreqResult:
-        populations, freqs, _, comment = load_data(
-            filepath, return_comment=True, **kwargs
-        )
+    def load(self, filepath: str) -> PreFreqResult:
+        data = load_labber_data(filepath)
 
-        freqs = freqs / 1e6  # convert to MHz
-        populations = np.real(populations).astype(np.float64)
+        # native load returns z as (Ny=2, Nx=len(freqs)); transpose to (Nx, Ny)
+        populations = np.real(data.z.T).astype(np.float64)
+        freqs = data.axes[0].values / 1e6  # axes[0]=freq inner, Hz->MHz
+        comment = data.comment
 
         cfg_snapshot = None
         if comment is not None:

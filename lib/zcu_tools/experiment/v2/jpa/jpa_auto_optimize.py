@@ -43,7 +43,8 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     SweepCfg,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
+from zcu_tools.utils.datasaver import safe_labber_filepath
+from zcu_tools.utils.labber_io import load_labber_data, save_labber_data
 
 from .jpa_optimizer import JPAOptimizer
 
@@ -309,7 +310,6 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
         result: JPAOptimizeResult | None = None,
         comment: str | None = None,
         tag: str = "jpa/auto_optimize",
-        **kwargs,
     ) -> None:
         if result is None:
             result = self.last_result
@@ -321,75 +321,65 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
 
         _filepath = Path(filepath)
 
-        x_info = {
-            "name": "Iteration",
-            "unit": "a.u.",
-            "values": np.arange(params.shape[0]),
-        }
+        # inner axis (x), fastest-varying, shared by all three files
+        iteration_axis = ("Iteration", "a.u.", np.arange(params.shape[0]))
 
         cfg = result.cfg_snapshot
         if cfg is None:
             raise ValueError("cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
-        save_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_params")),
-            x_info=x_info,
-            y_info={"name": "Parameter Type", "unit": "a.u.", "values": [0, 1, 2]},
-            z_info={"name": "Parameters", "unit": "a.u.", "values": params.T},
+        # params: 2-D, native z stored (Ny=3=Parameter Type, Nx=N=Iteration)
+        save_labber_data(
+            safe_labber_filepath(str(_filepath.with_name(_filepath.name + "_params"))),
+            z=("Parameters", "a.u.", params.T),
+            axes=[
+                iteration_axis,
+                ("Parameter Type", "a.u.", np.array([0, 1, 2])),
+            ],
             comment=comment,
-            tag=tag + "/params",
-            **kwargs,
+            tags=tag + "/params",
         )
 
-        save_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_phases")),
-            x_info=x_info,
-            z_info={"name": "Phase", "unit": "a.u.", "values": phases},
+        # phases: 1-D
+        save_labber_data(
+            safe_labber_filepath(str(_filepath.with_name(_filepath.name + "_phases"))),
+            z=("Phase", "a.u.", phases),
+            axes=[iteration_axis],
             comment=comment,
-            tag=tag + "/phases",
-            **kwargs,
+            tags=tag + "/phases",
         )
 
-        save_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_signals")),
-            x_info=x_info,
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals},
+        # signals: 1-D
+        save_labber_data(
+            safe_labber_filepath(str(_filepath.with_name(_filepath.name + "_signals"))),
+            z=("Signal", "a.u.", signals),
+            axes=[iteration_axis],
             comment=comment,
-            tag=tag + "/signals",
-            **kwargs,
+            tags=tag + "/signals",
         )
 
-    def load(self, filepath: str, **kwargs) -> JPAOptimizeResult:
+    def load(self, filepath: str) -> JPAOptimizeResult:
         _filepath = Path(filepath)
 
-        # Load params (iterations x 3)
+        # Load params (native z = (3, N); .T -> (num_points, 3))
         param_path = str(_filepath.with_name(_filepath.name + "_params"))
-        params_data, iters, param_types, comment = load_data(
-            param_path, return_comment=True, **kwargs
-        )
-        assert iters is not None and param_types is not None
-        assert len(iters.shape) == 1 and len(param_types.shape) == 1
-        assert params_data.shape == (len(param_types), len(iters))
+        ld_p = load_labber_data(param_path)
+        comment = ld_p.comment
+        params = np.asarray(ld_p.z).T.astype(np.float64)
+        assert params.ndim == 2 and params.shape[1] == 3
 
-        params = params_data.T  # transpose back (num_points, 3)
-
+        # Load phases (1-D, no flip)
         phase_path = str(_filepath.with_name(_filepath.name + "_phases"))
-        phases, iters_ph, _ = load_data(phase_path, **kwargs)
-        assert iters_ph is not None
-        assert len(iters_ph.shape) == 1
-        assert phases.shape[0] == params.shape[0]
+        ld_ph = load_labber_data(phase_path)
+        phases = np.asarray(ld_ph.z).astype(np.int32)
+        assert phases.ndim == 1 and phases.shape[0] == params.shape[0]
 
-        # Load signals
+        # Load signals (1-D, no flip)
         signal_path = str(_filepath.with_name(_filepath.name + "_signals"))
-        signals, iters_sig, _ = load_data(signal_path, **kwargs)
-        assert iters_sig is not None
-        assert len(signals.shape) == 1
-        assert signals.shape[0] == params.shape[0]
-
-        phases = phases.astype(np.int32)
-        params = params.astype(np.float64)
-        signals = signals.astype(np.float64)
+        ld_s = load_labber_data(signal_path)
+        signals = np.asarray(ld_s.z).astype(np.float64)
+        assert signals.ndim == 1 and signals.shape[0] == params.shape[0]
 
         cfg_snapshot = None
         if comment is not None:

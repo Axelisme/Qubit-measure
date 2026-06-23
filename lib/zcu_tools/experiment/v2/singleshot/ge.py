@@ -26,7 +26,8 @@ from zcu_tools.program.v2 import (
     Reset,
     ResetCfg,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
+from zcu_tools.utils.datasaver import safe_labber_filepath
+from zcu_tools.utils.labber_io import load_labber_data, save_labber_data
 
 from .util import classify_result, plot_with_classified
 
@@ -395,29 +396,28 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
             raise ValueError("result.cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
-        save_data(
-            filepath=filepath,
-            x_info={
-                "name": "shot",
-                "unit": "point",
-                "values": np.arange(signals.shape[1]),
-            },
-            y_info={"name": "ge", "unit": "", "values": np.array([0, 1])},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals},
+        # signals shape (Ny=2, Nx=shots): inner axis (shot) LAST -> native, no transpose
+        save_labber_data(
+            safe_labber_filepath(filepath),
+            z=("Signal", "a.u.", signals),
+            axes=[
+                ("shot", "point", np.arange(signals.shape[1])),  # inner axis first
+                ("ge", "", np.array([0, 1])),  # outer axis
+            ],
             comment=comment,
-            tag=tag,
-            **kwargs,
+            tags=tag,
         )
 
-    def load(self, filepath: str, **kwargs) -> GE_Result:
-        signals, _, _, comment = load_data(filepath, return_comment=True, **kwargs)
+    def load(self, filepath: str) -> GE_Result:
+        ld = load_labber_data(filepath)
 
-        signals = signals.astype(np.complex128)
+        # native z is (Ny=2, Nx=shots) = (ge, shot), already the in-memory shape
+        signals = np.asarray(ld.z).astype(np.complex128)
 
         cfg_snapshot = None
-        if comment is not None:
-            cfg, _, _ = parse_comment(comment)
+        if ld.comment:
+            cfg, _, _ = parse_comment(ld.comment)
             if cfg is not None:
                 cfg_snapshot = GE_Cfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = GE_Result(signals=signals.T, cfg_snapshot=cfg_snapshot)
+        self.last_result = GE_Result(signals=signals, cfg_snapshot=cfg_snapshot)
         return self.last_result

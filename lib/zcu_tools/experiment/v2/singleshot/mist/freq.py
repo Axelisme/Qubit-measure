@@ -29,7 +29,8 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
+from zcu_tools.utils.datasaver import safe_labber_filepath
+from zcu_tools.utils.labber_io import load_labber_data, save_labber_data
 
 from ..util import calc_populations, correct_populations
 
@@ -190,23 +191,33 @@ class FreqDepExp(AbsExperiment[FreqResult, FreqCfg]):
             raise ValueError("result.cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
-        save_data(
-            filepath=filepath,
-            x_info={"name": "Drive Freq", "unit": "Hz", "values": 1e6 * freqs},
-            y_info={"name": "GE population", "unit": "a.u.", "values": [0, 1]},
-            z_info={"name": "Population", "unit": "a.u.", "values": populations.T},
+        save_labber_data(
+            safe_labber_filepath(filepath),
+            z=(
+                "Population",
+                "a.u.",
+                populations.T,
+            ),  # (Ny=2, Nx=len(freqs)): inner (freqs) last
+            axes=[
+                ("Drive Freq", "Hz", 1e6 * freqs),  # inner axis (x)
+                (
+                    "GE population",
+                    "a.u.",
+                    np.asarray([0, 1]),
+                ),  # outer axis (y), synthesized
+            ],
             comment=comment,
-            tag=tag,
-            **kwargs,
+            tags=tag,
         )
 
     def load(self, filepath: str, **kwargs) -> FreqResult:
-        populations, freqs, _, comment = load_data(
-            filepath, return_comment=True, **kwargs
-        )
+        ld = load_labber_data(filepath)
 
-        freqs = 1e-6 * freqs  # Hz to MHz
-        populations = np.real(populations).astype(np.float64)
+        freqs = 1e-6 * np.asarray(ld.axes[0].values, dtype=np.float64)  # Hz to MHz
+        # native load_labber_data does NOT flip axes: ld.z is (Ny=2, Nx=len(freqs))
+        # restore (len(freqs), 2) shape that result.signals expects
+        populations = np.real(np.asarray(ld.z)).astype(np.float64).T
+        comment = ld.comment
 
         cfg_snapshot = None
         if comment is not None:

@@ -29,7 +29,8 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
+from zcu_tools.utils.datasaver import safe_labber_filepath
+from zcu_tools.utils.labber_io import load_labber_data, save_labber_data
 
 from ..util import calc_populations, correct_populations
 
@@ -191,7 +192,6 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         result: PowerResult | None = None,
         comment: str | None = None,
         tag: str = "singleshot/mist/gain",
-        **kwargs,
     ) -> None:
         if result is None:
             result = self.last_result
@@ -204,23 +204,24 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             raise ValueError("result.cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
-        save_data(
-            filepath=filepath,
-            x_info={"name": "Drive gain", "unit": "a.u.", "values": gains},
-            y_info={"name": "GE population", "unit": "a.u.", "values": [0, 1]},
-            z_info={"name": "Population", "unit": "a.u.", "values": populations.T},
+        save_labber_data(
+            safe_labber_filepath(filepath),
+            z=("Population", "a.u.", populations.T),  # native (Ny=2, Nx)
+            axes=[
+                ("Drive gain", "a.u.", gains),  # inner axis (x = gains, Nx)
+                ("GE population", "a.u.", np.asarray([0, 1])),  # outer axis (y, Ny=2)
+            ],
             comment=comment,
-            tag=tag,
-            **kwargs,
+            tags=tag,
         )
 
-    def load(self, filepath: str, **kwargs) -> PowerResult:
-        populations, gains, _, comment = load_data(
-            filepath, return_comment=True, **kwargs
-        )
+    def load(self, filepath: str) -> PowerResult:
+        data = load_labber_data(filepath)
 
-        gains = gains.astype(np.float64)
-        populations = np.real(populations).astype(np.float64)
+        gains = np.asarray(data.axes[0].values, dtype=np.float64)
+        # native z is (Ny=2, Nx); transpose to PowerResult.signals (Nx, 2)
+        populations = np.real(data.z).astype(np.float64).T
+        comment = data.comment
 
         cfg_snapshot = None
         if comment is not None:

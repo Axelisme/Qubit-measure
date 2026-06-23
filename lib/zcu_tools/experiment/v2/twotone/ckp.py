@@ -32,8 +32,8 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import batch_fit_func, fitlor, lorfunc
+from zcu_tools.utils.labber_io import load_labber_data, save_labber_data
 from zcu_tools.utils.process import rotate2real
 
 
@@ -326,7 +326,6 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         result: CKP_Result | None = None,
         comment: str | None = None,
         tag: str = "twotone/ge/ckp",
-        **kwargs,
     ) -> None:
         """Save AC Stark experiment data."""
         if result is None:
@@ -345,45 +344,42 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
 
         comment = make_comment(cfg, comment)
 
-        save_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_ground")),
-            x_info={
-                "name": "Resonator Frequency",
-                "unit": "Hz",
-                "values": 1e6 * res_freqs,
-            },
-            y_info={"name": "Qubit Frequency", "unit": "Hz", "values": 1e6 * qub_freqs},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals[0].T},
+        save_labber_data(
+            str(_filepath.with_name(_filepath.name + "_ground")),
+            z=("Signal", "a.u.", signals[0].T),
+            axes=[
+                ("Resonator Frequency", "Hz", 1e6 * res_freqs),
+                ("Qubit Frequency", "Hz", 1e6 * qub_freqs),
+            ],
             comment=comment,
-            tag=tag,
-            **kwargs,
+            tags=tag,
         )
         # excited
-        save_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_excited")),
-            x_info={
-                "name": "Resonator Frequency",
-                "unit": "Hz",
-                "values": 1e6 * res_freqs,
-            },
-            y_info={"name": "Qubit Frequency", "unit": "Hz", "values": 1e6 * qub_freqs},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals[1].T},
+        save_labber_data(
+            str(_filepath.with_name(_filepath.name + "_excited")),
+            z=("Signal", "a.u.", signals[1].T),
+            axes=[
+                ("Resonator Frequency", "Hz", 1e6 * res_freqs),
+                ("Qubit Frequency", "Hz", 1e6 * qub_freqs),
+            ],
             comment=comment,
-            tag=tag,
-            **kwargs,
+            tags=tag,
         )
 
-    def load(self, filepath: list[str], **kwargs) -> CKP_Result:
+    def load(self, filepath: list[str]) -> CKP_Result:
         g_filepath, e_filepath = filepath
 
-        g_signals, res_freqs, qub_freqs, comment = load_data(
-            g_filepath, return_comment=True, **kwargs
-        )
+        g = load_labber_data(g_filepath)
+        g_signals = g.z.T  # native (Ny=qub, Nx=res) -> (res, qub)
+        res_freqs = g.axes[0].values
+        qub_freqs = g.axes[1].values
+        comment = g.comment
         assert qub_freqs is not None
         assert len(res_freqs.shape) == 1 and len(qub_freqs.shape) == 1
         assert g_signals.shape == (len(res_freqs), len(qub_freqs))
 
-        e_signals, *_ = load_data(e_filepath, **kwargs)
+        e = load_labber_data(e_filepath)
+        e_signals = e.z.T  # native (Ny=qub, Nx=res) -> (res, qub)
         assert e_signals.shape == (len(res_freqs), len(qub_freqs))
 
         res_freqs = res_freqs * 1e-6  # Hz -> MHz
@@ -395,7 +391,7 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         signals = signals.astype(np.complex128)
 
         cfg_snapshot = None
-        if comment is not None:
+        if comment:
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:

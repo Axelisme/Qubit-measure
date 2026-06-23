@@ -36,8 +36,9 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import safe_labber_filepath
 from zcu_tools.utils.fitting import fit_decay, fit_decay_fringe
+from zcu_tools.utils.labber_io import save_labber_data
 from zcu_tools.utils.process import rotate2real
 
 
@@ -327,7 +328,6 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         result: CPMG_Result | None = None,
         comment: str | None = None,
         tag: str = "twotone/ge/cpmg",
-        **kwargs,
     ) -> None:
         if result is None:
             result = self.last_result
@@ -354,28 +354,30 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         length_idxs = np.arange(lengths.shape[1])
 
         # lengths
-        save_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_length")),
-            x_info={"name": "Number of Pi", "unit": "a.u.", "values": float_times},
-            y_info={"name": "Time Index", "unit": "a.u.", "values": length_idxs},
-            z_info={"name": "Length", "unit": "s", "values": 1e-6 * lengths.T},
+        save_labber_data(
+            safe_labber_filepath(str(_filepath.with_name(_filepath.name + "_length"))),
+            z=("Length", "s", 1e-6 * lengths.T),
+            axes=[
+                ("Number of Pi", "a.u.", float_times),
+                ("Time Index", "a.u.", length_idxs),
+            ],
             comment=comment,
-            tag=tag,
-            **kwargs,
+            tags=tag,
         )
 
         # signals
-        save_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_signals")),
-            x_info={"name": "Number of pi", "unit": "a.u.", "values": float_times},
-            y_info={"name": "Time Index", "unit": "a.u.", "values": length_idxs},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals2D.T},
+        save_labber_data(
+            safe_labber_filepath(str(_filepath.with_name(_filepath.name + "_signals"))),
+            z=("Signal", "a.u.", signals2D.T),
+            axes=[
+                ("Number of pi", "a.u.", float_times),
+                ("Time Index", "a.u.", length_idxs),
+            ],
             comment=comment,
-            tag=tag,
-            **kwargs,
+            tags=tag,
         )
 
-    def load(self, filepath: str, **kwargs) -> CPMG_Result:
+    def load(self, filepath: str) -> CPMG_Result:
         data = np.load(filepath)
         times = data["times"]
         lengths = data["lengths"]

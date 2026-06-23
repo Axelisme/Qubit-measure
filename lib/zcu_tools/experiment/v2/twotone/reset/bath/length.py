@@ -30,7 +30,8 @@ from zcu_tools.program.v2 import (
     SweepCfg,
 )
 from zcu_tools.program.v2.modules import BathResetCfg
-from zcu_tools.utils.datasaver import load_data, save_data
+from zcu_tools.utils.datasaver import safe_labber_filepath
+from zcu_tools.utils.labber_io import load_labber_data, save_labber_data
 
 
 @dataclass(frozen=True)
@@ -186,7 +187,6 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         result: LengthResult | None = None,
         comment: str | None = None,
         tag: str = "twotone/reset/bath/length",
-        **kwargs,
     ) -> None:
         if result is None:
             result = self.last_result
@@ -199,29 +199,30 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         cfg = result.cfg_snapshot
         comment = make_comment(cfg, comment)
 
-        save_data(
-            filepath=filepath,
-            x_info={"name": "Length", "unit": "s", "values": lens * 1e-6},
-            y_info={"name": "Pi2 Phase", "unit": "deg", "values": [0, 90, 180, 270]},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals.T},
+        save_labber_data(
+            safe_labber_filepath(filepath),
+            z=("Signal", "a.u.", signals.T),  # (Ny=4, Nx=lengths) native (inner last)
+            axes=[
+                ("Length", "s", lens * 1e-6),  # inner axis (x), us -> s
+                ("Pi2 Phase", "deg", [0, 90, 180, 270]),  # outer axis (y), discrete
+            ],
             comment=comment,
-            tag=tag,
-            **kwargs,
+            tags=tag,
         )
 
-    def load(self, filepath: str, **kwargs) -> LengthResult:
-        signals, lens, _, comment = load_data(filepath, return_comment=True, **kwargs)
-        assert lens is not None
-        assert len(lens.shape) == 1 and len(signals.shape) == 2
-        assert signals.shape == (len(lens), 2)
+    def load(self, filepath: str) -> LengthResult:
+        data = load_labber_data(filepath)
+        signals = np.asarray(data.z).T  # native (Ny=4, Nx) -> (lengths, 4)
+        lens = np.asarray(data.axes[0].values) * 1e6  # axes[0] = Length, s -> us
+        comment = data.comment
 
-        lens = lens * 1e6  # s -> us
+        assert lens.ndim == 1 and signals.shape == (len(lens), 4)
 
         lens = lens.astype(np.float64)
         signals = signals.astype(np.complex128)
 
         cfg_snapshot = None
-        if comment is not None:
+        if comment:
             cfg, _, _ = parse_comment(comment)
             if cfg is not None:
                 cfg_snapshot = LengthCfg.validate_or_warn(cfg, source=filepath)

@@ -30,7 +30,7 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
+from zcu_tools.utils.labber_io import load_labber_data, save_labber_data
 
 from ..util import calc_populations, correct_populations
 
@@ -265,55 +265,53 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
             raise ValueError("result.cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
-        save_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_g_population")),
-            x_info={"name": "Drive gain", "unit": "a.u.", "values": gains},
-            y_info={"name": "Drive freq", "unit": "Hz", "values": 1e6 * freqs},
-            z_info={
-                "name": "Population",
-                "unit": "a.u.",
-                "values": populations[..., 0].T,
-            },
+        save_labber_data(
+            str(_filepath.with_name(_filepath.name + "_g_population")),
+            z=("Population", "a.u.", populations[..., 0].T),
+            axes=[
+                ("Drive gain", "a.u.", gains),
+                ("Drive freq", "Hz", 1e6 * freqs),
+            ],
             comment=comment,
-            tag=tag,
-            **kwargs,
+            tags=tag,
         )
 
-        save_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_e_population")),
-            x_info={"name": "Drive gain", "unit": "a.u.", "values": gains},
-            y_info={"name": "Drive freq", "unit": "Hz", "values": 1e6 * freqs},
-            z_info={
-                "name": "Population",
-                "unit": "a.u.",
-                "values": populations[..., 1].T,
-            },
+        save_labber_data(
+            str(_filepath.with_name(_filepath.name + "_e_population")),
+            z=("Population", "a.u.", populations[..., 1].T),
+            axes=[
+                ("Drive gain", "a.u.", gains),
+                ("Drive freq", "Hz", 1e6 * freqs),
+            ],
             comment=comment,
-            tag=tag,
-            **kwargs,
+            tags=tag,
         )
 
-    def load(self, filepath: list[str], **kwargs) -> FreqPowerResult:
+    def load(self, filepath: list[str]) -> FreqPowerResult:
         g_filepath, e_filepath = filepath
 
         # Load ground populations
-        g_pop, gains, freqs, comment = load_data(
-            g_filepath, return_comment=True, **kwargs
-        )
-        assert freqs is not None
+        g_ld = load_labber_data(g_filepath)
+        g_pop = g_ld.z  # native (Ny, Nx) = (len(freqs), len(gains)), NOT flipped
+        gains = np.asarray(g_ld.axes[0].values)
+        freqs = np.asarray(g_ld.axes[1].values)
+        comment = g_ld.comment
         assert len(gains.shape) == 1 and len(freqs.shape) == 1
-        assert g_pop.shape == (len(gains), len(freqs))
+        assert g_pop.shape == (len(freqs), len(gains))
 
         # Load excited populations
-        e_pop, gains_e, Ts_e = load_data(e_filepath, **kwargs)
-        assert gains_e is not None and Ts_e is not None
-        assert e_pop.shape == (len(gains_e), len(Ts_e))
-        assert np.array_equal(gains, gains_e) and np.array_equal(freqs, Ts_e)
+        e_ld = load_labber_data(e_filepath)
+        e_pop = e_ld.z
+        gains_e = np.asarray(e_ld.axes[0].values)
+        freqs_e = np.asarray(e_ld.axes[1].values)
+        assert e_pop.shape == (len(freqs_e), len(gains_e))
+        assert np.array_equal(gains, gains_e) and np.array_equal(freqs, freqs_e)
 
         freqs = freqs * 1e-6  # Hz to MHz
 
-        # Reconstruct signals shape: (gains, ts, 2)
-        populations = np.stack([g_pop, e_pop], axis=-1)
+        # Reconstruct signals shape: (gains, freqs, 2).
+        # native z is (freqs, gains); transpose each plane back to (gains, freqs).
+        populations = np.stack([g_pop.T, e_pop.T], axis=-1)
 
         gains = gains.astype(np.float64)
         freqs = freqs.astype(np.float64)

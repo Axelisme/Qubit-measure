@@ -36,8 +36,9 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_data, save_data
+from zcu_tools.utils.datasaver import safe_labber_filepath
 from zcu_tools.utils.fitting import fitlor
+from zcu_tools.utils.labber_io import load_labber_data, save_labber_data
 from zcu_tools.utils.process import minus_background
 
 
@@ -412,7 +413,6 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         result: AcStarkResult | None = None,
         comment: str | None = None,
         tag: str = "singleshot/ac_stark",
-        **kwargs,
     ) -> None:
         """Save AC Stark experiment data."""
         if result is None:
@@ -428,42 +428,49 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
             raise ValueError("result.cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
-        save_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_g_pop")),
-            x_info={"name": "Stark Pulse Gain", "unit": "a.u.", "values": gains},
-            y_info={"name": "Frequency", "unit": "Hz", "values": freqs * 1e6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": populations[..., 0].T},
+        # z is on-disk (Nfreq, Ngain) = (Nouter, Ninner); axes inner-first
+        # (gains = inner/x, freqs = outer/y). populations[..., i] is
+        # (Ngain, Nfreq), so .T is required to get (Nfreq, Ngain).
+        save_labber_data(
+            safe_labber_filepath(str(_filepath.with_name(_filepath.name + "_g_pop"))),
+            z=("Signal", "a.u.", populations[..., 0].T),
+            axes=[
+                ("Stark Pulse Gain", "a.u.", gains),
+                ("Frequency", "Hz", freqs * 1e6),
+            ],
             comment=comment,
-            tag=tag,
-            **kwargs,
+            tags=tag,
         )
 
         # Excited state population
-        save_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_e_pop")),
-            x_info={"name": "Stark Pulse Gain", "unit": "a.u.", "values": gains},
-            y_info={"name": "Frequency", "unit": "Hz", "values": freqs * 1e6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": populations[..., 1].T},
+        save_labber_data(
+            safe_labber_filepath(str(_filepath.with_name(_filepath.name + "_e_pop"))),
+            z=("Signal", "a.u.", populations[..., 1].T),
+            axes=[
+                ("Stark Pulse Gain", "a.u.", gains),
+                ("Frequency", "Hz", freqs * 1e6),
+            ],
             comment=comment,
-            tag=tag,
-            **kwargs,
+            tags=tag,
         )
 
-    def load(self, filepath: list[str], **kwargs) -> AcStarkResult:
+    def load(self, filepath: list[str]) -> AcStarkResult:
         g_filepath, e_filepath = filepath
 
-        # Load ground populations
-        g_pop, gains, freqs, comment = load_data(
-            g_filepath, return_comment=True, **kwargs
-        )
-        assert freqs is not None
+        # Load ground populations. Native load_labber_data returns .z as
+        # (Ny, Nx) = (Nfreq, Ngain) (inner axis = gains is LAST) and does NOT
+        # flip, so transpose back to the (Ngain, Nfreq) in-memory convention.
+        g_ld = load_labber_data(g_filepath)
+        g_pop = g_ld.z.T  # (Nfreq, Ngain) -> (Ngain, Nfreq)
+        gains = g_ld.axes[0].values  # inner axis = gains
+        freqs = g_ld.axes[1].values  # outer axis = freqs (Hz)
+        comment = g_ld.comment
         assert len(gains.shape) == 1 and len(freqs.shape) == 1
         assert g_pop.shape == (len(gains), len(freqs))
 
-        # Load ground populations
-        e_pop, gains, freqs = load_data(e_filepath, **kwargs)
-        assert freqs is not None
-        assert len(gains.shape) == 1 and len(freqs.shape) == 1
+        # Load excited populations
+        e_ld = load_labber_data(e_filepath)
+        e_pop = e_ld.z.T  # (Nfreq, Ngain) -> (Ngain, Nfreq)
         assert e_pop.shape == (len(gains), len(freqs))
 
         populations = np.stack((g_pop, e_pop), axis=-1)
@@ -475,7 +482,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         populations = np.real(populations).astype(np.float64)
 
         cfg_snapshot = None
-        if comment is not None:
+        if comment:
             cfg, _, _ = parse_comment(comment)
             if cfg is not None:
                 cfg_snapshot = AcStarkCfg.validate_or_warn(cfg, source=g_filepath)
