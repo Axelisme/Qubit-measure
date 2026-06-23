@@ -89,7 +89,7 @@ from zcu_tools.mcp.core.call_log import wrap_handler  # noqa: E402
 # tool renames) that leave the wire contract untouched. A wire-contract change is
 # tracked separately by WIRE_VERSION (see ``wire_version.py``); the two are
 # independent. (Git history holds the per-version evolution.)
-MCP_VERSION = 60  # Phase 171 polish: gui_debug_versions renamed to gui_debug_resource_versions (MCP-side rename, WIRE unchanged)
+MCP_VERSION = 61  # Phase 171 guide-default flip: gui_tab_open sends guide by default; skip_guide=true to opt out (MCP-side policy change, WIRE unchanged)
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -310,18 +310,6 @@ _GUARD_DEPS: dict[str, tuple[str, ...]] = {
 # removed — they persist for the entire MCP server process lifetime. A stale key
 # for a completed operation is expected and does not indicate an active operation.
 _OP_BY_KEY: dict[str, int] = {}
-
-# --- Session-scoped guide deduplication (mcp-side policy) --------------------
-#
-# adapter.guide returns static text (classmethod, no instance/cfg state). Sending
-# it on every stage1 call wastes tokens (~7.8 KB per call; Phase 167 analysis).
-# Track which adapter names have received their guide in this MCP server process;
-# once sent, subsequent stage1 calls for the same adapter omit 'guide' and carry
-# 'guide_omitted: True' so the agent knows the omission is intentional.
-# Keyed by adapter_name string; cleared on nothing (session = process lifetime).
-# Exposed as a module-level variable so tests can monkeypatch or .clear() it
-# without reloading the module.
-_GUIDE_SENT: set[str] = set()
 
 # Which semantic key a start RPC's operation_id belongs to (param -> key).
 # Device connect/disconnect/setup all key on the device name: "latest wins" means
@@ -1685,33 +1673,38 @@ def tool_gui_tab_open(arguments: dict[str, Any]) -> dict[str, Any]:
 
     Composes tab.new with the fan-out reads the agent always makes before editing
     cfg (tab.snapshot for editor_id, tab.get_cfg for the settable cfg tree)
-    plus the adapter's orientation guide (adapter.guide). The guide is returned
-    on the FIRST call per adapter in this MCP server session; subsequent calls for
-    the same adapter omit 'guide' and carry 'guide_omitted: True' instead (the
-    guide is static — classmethod, no per-cfg content — so re-sending it wastes
-    tokens; Phase 167). ``force_guide`` overrides the dedup and always returns the
-    guide (e.g. after the agent's context was reset mid-session). Returns
-    {tab_id, adapter, editor_id, tree, guide} when the guide is sent;
-    {tab_id, adapter, editor_id, tree, guide_omitted: True} when deduped.
+    plus the adapter's orientation guide (adapter.guide).
+
+    The guide is included BY DEFAULT so that any fresh agent context, sub-agent,
+    or context-reset session receives the orientation text it needs without having
+    to remember to pass a flag. The server no longer tracks whether the guide was
+    previously sent — that decision belongs to the caller (the agent), which is the
+    only one who knows whether its context already contains the guide.
+
+    Pass ``skip_guide=true`` to suppress the guide fetch when you know the guide is
+    already in your context (e.g. you already opened a tab for the same adapter
+    earlier in this session) — the reply will carry ``guide_omitted: True`` to
+    confirm the intentional omission. Callers who are unsure should NOT pass
+    skip_guide=true; getting a duplicate guide wastes fewer tokens than missing it.
+
+    Returns {tab_id, adapter, editor_id, tree, guide} by default;
+    {tab_id, adapter, editor_id, tree, guide_omitted: True} when skip_guide=true.
     Configure + run with gui_tab_run(tab_id, edits).
     """
     adapter_name = str(arguments["adapter_name"])
-    force_guide = bool(arguments.get("force_guide", False))
+    # skip_guide lets a caller that already has the guide in context suppress the
+    # fetch; the default (False) ensures fresh/sub-agent contexts always get it.
+    skip_guide = bool(arguments.get("skip_guide", False))
     tab_id = str(send_gui_rpc("tab.new", {"adapter_name": adapter_name})["tab_id"])
     reply: dict[str, Any] = {"tab_id": tab_id, "adapter": adapter_name}
     _fold_tab_editing_context(tab_id, reply)
-    # force_guide bypasses the per-session dedup; otherwise send the guide only on
-    # the first open for this adapter this session (it is static — Phase 167).
-    if force_guide or adapter_name not in _GUIDE_SENT:
-        # First call for this adapter in this session: fetch and include the full
-        # guide, then mark it as sent so subsequent calls skip the fetch entirely.
+    if not skip_guide:
+        # Default path: fetch and include the full guide so the caller always has it.
         reply["guide"] = send_gui_rpc(
             "adapter.guide", {"adapter_name": adapter_name}
         ).get("guide")
-        _GUIDE_SENT.add(adapter_name)
     else:
-        # Guide already sent this session; omit it and signal the intentional
-        # omission so the agent does not mistake its absence for a missing field.
+        # Caller explicitly opted out; signal the intentional omission.
         reply["guide_omitted"] = True
     return reply
 
@@ -2560,15 +2553,20 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "commit) — open. = tab.new + tab.snapshot + tab.get_cfg + adapter.guide. "
             "Create a tab for 'adapter_name' (see gui_adapter_list) and fold its "
             "editing context (tab.snapshot for editor_id, tab.get_cfg for the "
-            "settable cfg tree) + the adapter guide into ONE reply. Returns "
-            "{tab_id, adapter, editor_id, tree, guide} on the FIRST call for an "
-            "adapter in this MCP session; on repeat calls for the SAME adapter "
-            "'guide' is omitted and 'guide_omitted: True' is set instead (the "
-            "guide is static and re-sending it wastes tokens). Pass force_guide=true "
-            "to always include the guide (e.g. after a context reset). 'tree' is the "
-            "nested current-value cfg tree (the gui_tab_set_cfg path source AND the "
-            "read-only values view, in one — see gui_tab_get_cfg for the node "
-            "shape with $value/$choices/$ref). Then configure + run with "
+            "settable cfg tree) + the adapter guide into ONE reply. The guide is "
+            "INCLUDED BY DEFAULT — this ensures any fresh context, sub-agent, or "
+            "context-reset session that opens a tab always receives the orientation "
+            "text without having to remember a flag. Returns "
+            "{tab_id, adapter, editor_id, tree, guide}. "
+            "Pass skip_guide=true only if you already have the guide in your context "
+            "(e.g. you opened a tab for this same adapter earlier in this session and "
+            "your context still contains it) — the reply will carry "
+            "'guide_omitted: True' to confirm the omission. When in doubt, do NOT "
+            "pass skip_guide=true; a duplicate guide wastes fewer tokens than a "
+            "missing one (sub-agents sharing no context would be starved otherwise). "
+            "'tree' is the nested current-value cfg tree (the gui_tab_set_cfg path "
+            "source AND the read-only values view, in one — see gui_tab_get_cfg for "
+            "the node shape with $value/$choices/$ref). Then configure + run with "
             "gui_tab_run(tab_id, edits)."
         ),
         "inputSchema": {
@@ -2578,12 +2576,16 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
                     "type": "string",
                     "description": "Adapter to instantiate (see gui_adapter_list)",
                 },
-                "force_guide": {
+                "skip_guide": {
                     "type": "boolean",
                     "default": False,
                     "description": (
-                        "Always include the adapter guide, bypassing the per-session "
-                        "dedup (use after a context reset). Default false."
+                        "Suppress the adapter guide fetch (reply carries "
+                        "guide_omitted: true). Only pass true when you are certain "
+                        "the guide is already in your context — e.g. you opened a "
+                        "tab for this same adapter earlier this session. Default "
+                        "false (guide always sent) so sub-agents / new contexts are "
+                        "never starved."
                     ),
                 },
             },

@@ -1807,18 +1807,17 @@ def test_fold_analyze_params_fetch_failure_is_swallowed(monkeypatch):
 
 # ---------------------------------------------------------------------------
 # MCP 45 / P4 Phase ①: gui_tab_open creates a tab + folds the editing context
-# + the adapter guide (per-session guide dedup; force_guide overrides it)
+# + the adapter guide (guide always sent by default; skip_guide=true to opt out)
 # ---------------------------------------------------------------------------
 
 
 def test_open_creates_tab_and_folds_context_and_guide(monkeypatch):
     """gui_tab_open creates the tab, fans out the two editing-context reads
     (snapshot for editor_id, tab.get_cfg for the settable cfg tree) and folds the
-    adapter guide into one reply on the first call. The cfg tree already carries
-    the current values."""
+    adapter guide into one reply. The guide is included on every call by default —
+    no server-side dedup; the cfg tree already carries the current values."""
     from zcu_tools.mcp.measure import server as mcp_server
 
-    monkeypatch.setattr(mcp_server, "_GUIDE_SENT", set())
     calls: list[tuple[str, dict]] = []
     tree = {"reps": 100, "sweep": {"freq": {"start": 1.0}}}
 
@@ -1837,7 +1836,7 @@ def test_open_creates_tab_and_folds_context_and_guide(monkeypatch):
     out = mcp_server.TOOLS["gui_tab_open"]["handler"]({"adapter_name": "fake/freq"})
 
     # tab.new first (adapter_name verbatim), then the two reads keyed by the new
-    # tab_id, then the adapter.guide fetch (always — no first-use gating).
+    # tab_id, then the adapter.guide fetch (always by default — no server-side gating).
     assert calls == [
         ("tab.new", {"adapter_name": "fake/freq"}),
         ("tab.snapshot", {"tab_id": "tw-1"}),
@@ -1853,14 +1852,12 @@ def test_open_creates_tab_and_folds_context_and_guide(monkeypatch):
     }
 
 
-def test_open_dedupes_guide_per_adapter(monkeypatch):
-    """The adapter guide rides the FIRST gui_tab_open for an adapter in a
-    session; a repeat call for the same adapter omits it and sets
-    guide_omitted=True instead (the guide is static, so re-sending it each call
-    is wasted tokens)."""
+def test_open_second_call_default_still_sends_guide(monkeypatch):
+    """A repeat gui_tab_open for the same adapter (without skip_guide) still
+    returns the guide — there is no server-side dedup any more. The server cannot
+    know whether the caller's context still has the guide (e.g. context-reset,
+    sub-agent)."""
     from zcu_tools.mcp.measure import server as mcp_server
-
-    monkeypatch.setattr(mcp_server, "_GUIDE_SENT", set())
 
     def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
         del params, timeout_seconds
@@ -1878,16 +1875,16 @@ def test_open_dedupes_guide_per_adapter(monkeypatch):
     second = mcp_server.TOOLS["gui_tab_open"]["handler"]({"adapter_name": "amp_rabi"})
     assert first["guide"] == {"behavior": "measures X"}
     assert "guide_omitted" not in first
-    assert "guide" not in second
-    assert second["guide_omitted"] is True
+    # Second call — no skip_guide — also returns the full guide.
+    assert second["guide"] == {"behavior": "measures X"}
+    assert "guide_omitted" not in second
 
 
-def test_open_force_guide_overrides_dedup(monkeypatch):
-    """force_guide=true returns the guide even on a repeat call (the dedup is
-    bypassed — e.g. after the agent's context was reset)."""
+def test_open_skip_guide_omits_guide(monkeypatch):
+    """skip_guide=true suppresses the adapter.guide RPC and returns
+    guide_omitted: True. Callers use this only when they know the guide is
+    already in their context (e.g. same adapter opened earlier this session)."""
     from zcu_tools.mcp.measure import server as mcp_server
-
-    monkeypatch.setattr(mcp_server, "_GUIDE_SENT", set())
 
     def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
         del params, timeout_seconds
@@ -1900,12 +1897,11 @@ def test_open_force_guide_overrides_dedup(monkeypatch):
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
 
-    mcp_server.TOOLS["gui_tab_open"]["handler"]({"adapter_name": "amp_rabi"})
-    forced = mcp_server.TOOLS["gui_tab_open"]["handler"](
-        {"adapter_name": "amp_rabi", "force_guide": True}
+    result = mcp_server.TOOLS["gui_tab_open"]["handler"](
+        {"adapter_name": "amp_rabi", "skip_guide": True}
     )
-    assert forced["guide"] == {"behavior": "measures X"}
-    assert "guide_omitted" not in forced
+    assert "guide" not in result
+    assert result["guide_omitted"] is True
 
 
 # ---------------------------------------------------------------------------

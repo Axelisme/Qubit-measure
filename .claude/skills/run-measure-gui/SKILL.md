@@ -185,9 +185,11 @@ gui_tab_set_cfg(tab_id, edits=[{path,value},…])   # batch-set tab cfg fields i
 #   each folds the NEXT decision's input, stops at a decision point):
 #   gui_tab_open(adapter_name)                  -> {tab_id, editor_id, tree, guide}   # ① open: new+guide
 #                                                  tree = nested value tree (same shape as gui_tab_get_cfg — see above).
-#                                                  guide = adapter guide (full prose) on FIRST call for this adapter in the
-#                                                  current MCP session; subsequent calls for the SAME adapter return
-#                                                  guide_omitted: true instead (guide already in session context, not resent).
+#                                                  guide = adapter guide (full prose) ALWAYS included by default so any
+#                                                  fresh context / sub-agent / context-reset gets it without a flag.
+#                                                  Pass skip_guide=true only if your context already has the guide
+#                                                  (e.g. you opened a tab for the same adapter earlier this session);
+#                                                  reply carries guide_omitted: true to confirm the intentional omission.
 #   gui_tab_run(tab_id, edits=[{path,value},…]) -> {..run.., figure, analyze_params}   # ② run: configure+run; STOPS before analyze
 #                                                  edits is an ORDERED list (ref-switch before the paths it unlocks).
 #   gui_tab_analyze_review(tab_id)              -> {summary, figure, writeback_preview}   # ③ analyze_review: analyze + preview writeback
