@@ -31,7 +31,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-from ..util import calc_populations
+from ..util import calc_populations, correct_populations
 
 
 @dataclass(frozen=True)
@@ -157,9 +157,7 @@ class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
 
         populations = calc_populations(populations)
 
-        if confusion_matrix is not None:  # readout correction
-            populations = populations @ np.linalg.inv(confusion_matrix)
-            populations = np.clip(populations, 0.0, 1.0)
+        populations = correct_populations(populations, confusion_matrix)
 
         fig, ax = plt.subplots(figsize=(6, 6))
 

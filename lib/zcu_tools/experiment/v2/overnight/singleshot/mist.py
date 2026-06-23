@@ -17,6 +17,7 @@ from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState
+from zcu_tools.experiment.v2.singleshot.util import correct_populations
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, LivePlot2D
 from zcu_tools.program.v2 import (
@@ -102,9 +103,7 @@ class MistOvernightAnalyzer:
         populations = gaussian_filter(populations, sigma=0.5, axes=(0, 1))
 
         populations = calc_populations(populations)  # (iters, Ts, 3)
-        if confusion_matrix is not None:  # readout correction
-            populations = populations @ np.linalg.inv(confusion_matrix)
-            populations = np.clip(populations, 0.0, 1.0)
+        populations = correct_populations(populations, confusion_matrix)
 
         sort_populations = np.sort(populations, axis=0)
         max_populations = sort_populations[iter - drop_extreme_num - 1]
@@ -202,9 +201,7 @@ class MistOvernightAnalyzer:
         populations = gaussian_filter(populations, sigma=0.5, axes=(0, 1))
 
         populations = calc_populations(populations)  # (iters, Ts, 3)
-        if confusion_matrix is not None:  # readout correction
-            populations = populations @ np.linalg.inv(confusion_matrix)
-            populations = np.clip(populations, 0.0, 1.0)
+        populations = correct_populations(populations, confusion_matrix)
 
         if ac_coeff is None:
             xs = gains

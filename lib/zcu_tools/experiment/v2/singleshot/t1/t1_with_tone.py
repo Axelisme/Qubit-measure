@@ -34,7 +34,7 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting.multi_decay import calc_lambdas, fit_dual_transition_rates
 
-from ..util import calc_populations
+from ..util import calc_populations, correct_populations
 from .util import measure_with_sweep
 
 
@@ -312,9 +312,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
 
         populations = calc_populations(populations)  # (N, 2, 3)
 
-        if confusion_matrix is not None:  # readout correction
-            populations = populations @ np.linalg.inv(confusion_matrix)
-            populations = np.clip(populations, 0.0, 1.0)
+        populations = correct_populations(populations, confusion_matrix)
 
         populations1 = populations[:, 0]  # init in g
         populations2 = populations[:, 1]  # init in e

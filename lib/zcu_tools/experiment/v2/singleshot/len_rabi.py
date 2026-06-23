@@ -20,7 +20,7 @@ from zcu_tools.program.v2 import SweepCfg, TwoToneCfg, TwoToneProgram, sweep2par
 from zcu_tools.program.v2.twotone import TwoToneModuleCfg
 from zcu_tools.utils.datasaver import load_data, save_data
 
-from .util import calc_populations
+from .util import calc_populations, correct_populations
 
 
 @dataclass(frozen=True)
@@ -132,9 +132,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
 
         populations = calc_populations(populations)  # (len, geo)
 
-        if confusion_matrix is not None:  # readout correction
-            populations = populations @ np.linalg.inv(confusion_matrix)
-            populations = np.clip(populations, 0.0, 1.0)
+        populations = correct_populations(populations, confusion_matrix)
 
         fig, ax = plt.subplots(figsize=config.figsize)
         assert isinstance(fig, Figure)

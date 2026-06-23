@@ -11,6 +11,19 @@ def calc_populations(signals: NDArray[np.float64]) -> NDArray[np.float64]:
     return np.stack([g_pop, e_pop, 1 - g_pop - e_pop], axis=-1)
 
 
+def correct_populations(
+    populations: NDArray[np.float64],
+    confusion_matrix: NDArray[np.float64] | None,
+) -> NDArray[np.float64]:
+    # Apply readout confusion-matrix correction. None -> returned unchanged
+    # (deliberate no-op contract). A singular/non-square matrix raises via
+    # np.linalg.inv (Fast-Fail preserved).
+    if confusion_matrix is None:
+        return populations
+    populations = populations @ np.linalg.inv(confusion_matrix)
+    return np.clip(populations, 0.0, 1.0)
+
+
 def classify_result(
     signals: NDArray[np.complex128],
     g_center: complex,

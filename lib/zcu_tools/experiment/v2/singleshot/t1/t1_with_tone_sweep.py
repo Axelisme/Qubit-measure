@@ -17,7 +17,10 @@ from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
-from zcu_tools.experiment.v2.singleshot.util import calc_populations
+from zcu_tools.experiment.v2.singleshot.util import (
+    calc_populations,
+    correct_populations,
+)
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, LivePlot2D, MultiLivePlot, make_plot_frame
 from zcu_tools.program.v2 import (
@@ -433,9 +436,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
 
         populations = calc_populations(populations)  # (xs, 2, Ts, 3)
 
-        if confusion_matrix is not None:  # readout correction
-            populations = populations @ np.linalg.inv(confusion_matrix)
-            populations = np.clip(populations, 0.0, 1.0)
+        populations = correct_populations(populations, confusion_matrix)
 
         # (T_ge, T_eg, T_eo, T_oe, T_go, T_og)
         N = populations.shape[0]
