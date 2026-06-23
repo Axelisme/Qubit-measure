@@ -70,6 +70,34 @@ class TestResonatorFreqs:
         assert isinstance(rf_g, float)
         assert isinstance(rf_e, float)
 
+    def test_same_flux_reuses_cached_prediction(self, monkeypatch) -> None:
+        readout._cached_resonator_freqs.cache_clear()
+        calls = 0
+
+        def fake_calculate(params, fluxes, bare_rf, g):
+            nonlocal calls
+            calls += 1
+            flux = float(fluxes[0])
+            return (
+                np.array([bare_rf - 1e-3 * flux], dtype=np.float64),
+                np.array([bare_rf + 1e-3 * flux], dtype=np.float64),
+            )
+
+        monkeypatch.setattr(
+            readout, "calculate_dispersive_vs_flux_fast", fake_calculate
+        )
+        try:
+            first = resonator_freqs(_SIM, flux=0.3)
+            second = resonator_freqs(_SIM, flux=0.3)
+            assert second == first
+            assert calls == 1
+
+            third = resonator_freqs(_SIM, flux=0.31)
+            assert third != first
+            assert calls == 2
+        finally:
+            readout._cached_resonator_freqs.cache_clear()
+
 
 class TestDressedLabelingFallback:
     def test_fallback_to_bare_rf_with_warning(self, monkeypatch) -> None:

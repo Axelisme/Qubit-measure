@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-15 — predictor set_model_params（typed EJ/EC/EL model install + dialog editable fields）
+**Last updated:** 2026-06-23 — SessionControllerPort startup project return contract
 
 # gui/session/ — 量測 session core（measure + autofluxdep 共用）
 
@@ -45,6 +45,7 @@ session/
 - **app 注入 app-local infra 經 port**：concrete `OperationGate`（衝突 policy）+ `BackgroundService`（measure 帶 QtLivePlot facet / autofluxdep 瘦版無 figure routing）各 app 自持；`ProgressService`/`IOManager`/`QtProgressTransport` 已 promote 成**共用**。session service 只依賴 `ExclusionGate`/`BackgroundExecutor`/`ProgressHub`/`ProjectIOPort` port。
 - **ExclusionGate str-keyed**：session `OperationKind`（soc/device kinds）+ app 自己的 kind（measure/autofluxdep 各自 `RUN`）用 wire 字串比較，故兩 enum 同一 gate。
 - **app 繼承/實作**：measure `State(SessionState)`、autofluxdep `AutoFluxDepState(SessionState)`；兩 Controller 結構上實作 `SessionControllerPort`（pyright 在各自 dialog call site 驗證 conformance）。
+- **startup project return contract**：`SessionControllerPort.apply_startup_project` 允許 `bool | dict[str, str]`。共用 setup dialog 只看 truthiness；measure 的 remote `startup.apply` / `gui_project_apply` 回 resolved project dict（WIRE 44），autofluxdep controller 仍回 bool。
 - **import-clean leaf**（不得拉 Qt/matplotlib/gui.app.*，`tests/gui/test_shared_layer.py` 守）：types/events/operation_handles/ports/state/pbar_host/controller_port。`adapters/` + `ui/*` + `services/*` 是 Qt/重，不列。
 - **wire name 來源**：`SessionEvent.X` 的字串值即 wire event name；measure-gui 的 wire-name lock 測試（`test_remote_event_dialog_view.py`）鎖全集，搬移/改名 payload 不得動字串值。
 

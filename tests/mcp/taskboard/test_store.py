@@ -588,6 +588,30 @@ def test_store_reclaim_idempotent(tmp_path):
     assert len(lst["active"]) == 1
 
 
+def test_store_same_identity_overlap_returns_warning(tmp_path):
+    """Same-session duplicate claims are granted but surfaced as reminders."""
+    store = TaskboardStore(
+        json_path=tmp_path / "taskboard.json",
+        md_path=tmp_path / "taskboard.md",
+    )
+    r1 = store.claim("parent", ["lib/foo"], "A", identity="sess-1")
+    r2 = store.claim("sub-agent", ["lib/foo"], "B", identity="sess-1")
+
+    assert r2["status"] == "granted"
+    assert r2["claim_id"] == r1["claim_id"]
+    assert r2["conflicts"] == []
+    assert r2["warnings"] == [
+        {
+            "kind": "same_session_overlap",
+            "owner": "parent",
+            "claim_id": r1["claim_id"],
+            "paths": ["lib/foo"],
+            "mode": "write",
+            "message": "overlap is from the same session; granted without blocking",
+        }
+    ]
+
+
 def test_store_check_skips_same_identity(tmp_path):
     """check with a matching identity does not report the caller's own grant."""
     store = TaskboardStore(
@@ -597,8 +621,10 @@ def test_store_check_skips_same_identity(tmp_path):
     store.claim("orch", ["lib/foo"], "A", identity="sess-1")
     same = store.check(["lib/foo"], identity="sess-1")
     assert same["conflicts"] == []
+    assert same["warnings"][0]["kind"] == "same_session_overlap"
     other = store.check(["lib/foo"], identity="sess-2")
     assert len(other["conflicts"]) == 1
+    assert other["warnings"] == []
 
 
 def test_store_check_read_read_no_conflict(tmp_path):

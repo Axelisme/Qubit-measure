@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-06-12 (poll_latency: configurable mock pacing per data element in poll_data)
+**Last updated:** 2026-06-23 (cancellable mocksim and operating-point cache)
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -55,13 +55,23 @@ The qubit frequency `f_qubit` and the dressed resonator frequencies come from th
 existing fluxonium physics (`FluxoniumPredictor`, `calculate_dispersive_vs_flux_fast`,
 `HangerModel`); the sim package re-implements none of it.
 
-**Flux-constant work is computed once.** With the operating flux constant *within
-one acquire*, `f_qubit` and `rf_g` / `rf_e` are the same for every sweep point, so
-the engine computes them once per run and feeds `rf_g` / `rf_e` into each point's
-S21 blend — the fluxonium eigensolve behind `resonator_freqs` (the dominant cost,
-~58% of a sweep) never runs per point.  The cache is valid only because the flux is
-fixed *for that acquire*; a per-point operating flux would have to move that call
-back into the loop.
+**Flux-constant work is cached by operating point.** With the operating flux
+constant *within one acquire*, `f_qubit` and `rf_g` / `rf_e` are the same for every
+sweep point, so the engine computes them once per run and feeds `rf_g` / `rf_e`
+into each point's S21 blend — the fluxonium eigensolve behind `resonator_freqs`
+(the dominant cost) never runs per point.  Identical physical parameters at the
+same reduced flux also reuse a small process-local hot cache for the expensive
+`predict_freq` / dressed-resonator prediction.  The cache key is the explicit
+`SimParams` physics/alignment plus reduced flux; it never falls back to `MetaDict`
+or moves the mock operating flux to a convenience point.  The cache is valid only
+because the flux is fixed *for that acquire*; a per-point operating flux would have
+to move that call back into the loop.
+
+**Cooperative cancellation.** Acquire-level `stop_checkers` are passed into
+`SimEngine`.  The sweep-point loop and the Lorentzian detune ensemble loop check
+them between physics evaluations and raise `SimCancelledError` when cancellation
+is requested, so `MockQickSoc.poll_data` fails fast instead of returning empty data
+while QICK's polling loop is still waiting for shots.
 
 **FLUX-AWARE-MOCK — operating flux from a live device.** By default the operating
 flux is pinned at reduced flux = 1.0 (R-3).  `SimParams.flux_device` opts into
@@ -106,11 +116,12 @@ every coupling point.
   noise / the per-shot Bernoulli draw (the engine owns that).
 - `engine.py` — `SimEngine`: glue. Pins the operating point at reduced flux
   `Phi/Phi0 = 1.0` (R-3; no longer derived from the cfg `dev` map), computes
-  f_qubit AND `rf_g` / `rf_e` there ONCE (flux-constant), drives lowering -> bloch
-  -> readout, caches the deterministic `(s_g, s_e, p_e)` blob grids, and per round
-  draws a per-shot `Bernoulli(p_e)` to select a blob and adds per-shot Gaussian
-  noise into the QICK `(*loop_dims, nreads, 2)` int64 buffer (snr / reps / rounds /
-  seed; fresh Bernoulli + noise per round so software-averaging works). The
+  f_qubit AND `rf_g` / `rf_e` there ONCE (flux-constant, with a hot cache for
+  identical operating points), drives lowering -> bloch -> readout, caches the
+  deterministic `(s_g, s_e, p_e)` blob grids, and per round draws a per-shot
+  `Bernoulli(p_e)` to select a blob and adds per-shot Gaussian noise into the QICK
+  `(*loop_dims, nreads, 2)` int64 buffer (snr / reps / rounds / seed; fresh
+  Bernoulli + noise per round so software-averaging works). The
   reps-mean is the accumulated `mixed_signal` blend (zero regression); `get_raw`
   sees the two blobs. Owns the Lorentzian quasi-static detune
   ensemble: it averages `P_e` over a deterministic Gauss-Legendre quadrature in `δ`

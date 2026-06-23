@@ -34,6 +34,7 @@ of crashing.
 from __future__ import annotations
 
 import warnings
+from functools import lru_cache
 
 import numpy as np
 from numpy.typing import NDArray
@@ -75,6 +76,36 @@ def value_to_flux(sim: SimParams, device_value: float) -> float:
     return predictor.value_to_flux(device_value)
 
 
+@lru_cache(maxsize=256)
+def _cached_resonator_freqs(
+    EJ: float,
+    EC: float,
+    EL: float,
+    bare_rf: float,
+    g: float,
+    flux: float,
+) -> tuple[float, float]:
+    """Cached dressed resonator prediction for one physical operating point."""
+
+    try:
+        rf_g_arr, rf_e_arr = calculate_dispersive_vs_flux_fast(
+            (EJ, EC, EL),
+            np.array([flux], dtype=np.float64),
+            bare_rf,
+            g,
+        )
+    except DressedLabelingError:
+        warnings.warn(
+            f"dispersive labeling ambiguous at flux={flux:.4f}; "
+            f"falling back to no dispersive shift (rf_g = rf_e = "
+            f"bare_rf = {bare_rf} GHz)",
+            stacklevel=3,
+        )
+        return (bare_rf, bare_rf)
+
+    return (float(rf_g_arr[0]), float(rf_e_arr[0]))
+
+
 def resonator_freqs(sim: SimParams, flux: float) -> tuple[float, float]:
     """Return ``(rf_g, rf_e)`` resonator frequencies (GHz) at the given flux.
 
@@ -90,23 +121,14 @@ def resonator_freqs(sim: SimParams, flux: float) -> tuple[float, float]:
     bare_rf``) and emits a warning naming the flux value. The degradation is
     deterministic and logged — never a silent random value.
     """
-    try:
-        rf_g_arr, rf_e_arr = calculate_dispersive_vs_flux_fast(
-            (sim.EJ, sim.EC, sim.EL),
-            np.array([flux], dtype=np.float64),
-            sim.bare_rf,
-            sim.g,
-        )
-    except DressedLabelingError:
-        warnings.warn(
-            f"dispersive labeling ambiguous at flux={flux:.4f}; "
-            f"falling back to no dispersive shift (rf_g = rf_e = "
-            f"bare_rf = {sim.bare_rf} GHz)",
-            stacklevel=2,
-        )
-        return (sim.bare_rf, sim.bare_rf)
-
-    return (float(rf_g_arr[0]), float(rf_e_arr[0]))
+    return _cached_resonator_freqs(
+        sim.EJ,
+        sim.EC,
+        sim.EL,
+        sim.bare_rf,
+        sim.g,
+        float(flux),
+    )
 
 
 def s21(

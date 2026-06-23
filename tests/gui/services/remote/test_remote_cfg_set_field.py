@@ -575,6 +575,18 @@ def _fakefreq_root():
     return SectionLiveField(cfg.spec, env, initial_val=cfg.value)
 
 
+def test_unknown_field_suggests_matching_descendant_path(qapp):  # noqa: ARG001
+    from zcu_tools.gui.app.main.services.remote.path_resolver import resolve_and_set
+    from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+
+    root = _fakefreq_root()
+    with pytest.raises(RemoteError) as exc:
+        resolve_and_set(root, "modules.readout.gain", 0.25)
+
+    assert exc.value.code == ErrorCode.INVALID_PARAMS
+    assert "modules.readout.pulse_cfg.gain" in exc.value.message
+
+
 def test_moduleref_bare_label_normalized_to_custom_tag(qapp):  # noqa: ARG001
     from zcu_tools.gui.app.main.services.remote.path_resolver import (
         list_settable_paths_full,

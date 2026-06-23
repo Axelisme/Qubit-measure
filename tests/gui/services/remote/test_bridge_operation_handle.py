@@ -102,6 +102,59 @@ def test_connect_degrades_to_pending_on_short_wait_timeout(wired):
     assert "flux" in out["message"]
 
 
+def test_soc_connect_uses_method_spec_timeout(monkeypatch):
+    calls: list[tuple[str, dict[str, Any], float]] = []
+
+    def fake_send(method, params, timeout_seconds=30.0):
+        calls.append((method, params, timeout_seconds))
+        return {"soc": {"description": "mock soc", "is_mock": True}}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
+
+    out = mcp_server.tool_gui_soc_connect({"kind": "mock"})
+
+    assert out["soc"]["is_mock"] is True
+    method, params, timeout = calls[0]
+    assert method == "soc.connect"
+    assert params == {"kind": "mock"}
+    assert timeout == pytest.approx(
+        mcp_server.METHOD_SPECS["soc.connect"].timeout_seconds
+        + mcp_server._SOC_CONNECT_TIMEOUT_SLACK
+    )
+
+
+def test_soc_connect_timeout_reconciles_completed_connection(monkeypatch):
+    calls: list[tuple[str, float]] = []
+
+    def fake_send(method, params, timeout_seconds=30.0):
+        del params
+        calls.append((method, timeout_seconds))
+        if method == "soc.connect":
+            raise TimeoutError("late connect reply")
+        if method == "state.has_soc":
+            return {"value": True}
+        if method == "soc.info":
+            return {"description": "connected after timeout", "is_mock": False}
+        raise AssertionError(method)
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
+
+    out = mcp_server.tool_gui_soc_connect(
+        {"kind": "remote", "ip": "192.0.2.1", "port": 8888}
+    )
+
+    assert out["soc"] == {"description": "connected after timeout", "is_mock": False}
+    assert "warning" in out
+    assert [method for method, _ in calls] == [
+        "soc.connect",
+        "state.has_soc",
+        "soc.info",
+    ]
+    assert calls[0][1] == pytest.approx(mcp_server._soc_connect_rpc_timeout())
+    assert calls[1][1] == mcp_server._SOC_CONNECT_RECONCILE_TIMEOUT
+    assert calls[2][1] == mcp_server._SOC_CONNECT_RECONCILE_TIMEOUT
+
+
 def test_op_wait_forwards_handle_to_operation_await(wired):
     # P2 (ADR-0026 §8): the generic gui_op_wait drives the operation by the handle
     # the START reply folded — no name->id translation, the agent passes the id

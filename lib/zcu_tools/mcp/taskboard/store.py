@@ -161,13 +161,30 @@ def claims_conflict(c1: Claim, c2: Claim) -> bool:
     claims has mode ``write`` (read+read is non-conflicting).
 
     The identity gate (a) is what lets an orchestrator and its sub-agents — all
-    sharing one ``CLAUDE_CODE_SESSION_ID`` — never block each other: same identity
+    sharing one agent session id — never block each other: same identity
     means "the same caller", and a caller cannot conflict with itself (ADR-0022).
     Identity is stored under the ``identity`` key; when absent (legacy / not yet
     set) it falls back to ``owner`` so the gate degrades to per-owner coordination.
     """
     if _identity_of(c1) == _identity_of(c2):
         return False
+    return _lock_scopes_overlap(c1, c2)
+
+
+def claims_same_identity_overlap(c1: Claim, c2: Claim) -> bool:
+    """Return True when two same-identity claims overlap but must not block.
+
+    This is the warning counterpart to :func:`claims_conflict`: same-session
+    parent/sub-agent claims are intentionally granted, but surfacing the overlap
+    helps the caller notice duplicate or nested scopes without entering pending.
+    """
+    if _identity_of(c1) != _identity_of(c2):
+        return False
+    return _lock_scopes_overlap(c1, c2)
+
+
+def _lock_scopes_overlap(c1: Claim, c2: Claim) -> bool:
+    """Return True when two claims would contend if their identities differed."""
     if c1["mode"] == "read" and c2["mode"] == "read":
         return False
     for p1 in c1["paths"]:
@@ -289,6 +306,34 @@ def compute_conflicts(
         if c["status"] == "granted"
         and c["claim_id"] != exclude_id
         and claims_conflict(probe, c)
+    ]
+
+
+def compute_same_identity_overlaps(
+    state: State,
+    paths: list[str],
+    mode: str,
+    identity: str,
+    exclude_id: str | None = None,
+) -> list[Claim]:
+    """Return granted same-identity claims that overlap the requested scope.
+
+    These overlaps are non-blocking by design, but callers include them as
+    warnings so a parent and sub-agent can see that they claimed the same target.
+    """
+    probe: Claim = {
+        "paths": paths,
+        "mode": mode,
+        "status": "granted",
+        "claim_id": "",
+        "identity": identity,
+    }
+    return [
+        c
+        for c in state.get("claims", [])
+        if c["status"] == "granted"
+        and c["claim_id"] != exclude_id
+        and claims_same_identity_overlap(probe, c)
     ]
 
 
@@ -554,6 +599,21 @@ def render_markdown(state: State) -> str:
     return "\n".join(lines)
 
 
+def _warning_payload(claims: list[Claim]) -> list[dict[str, Any]]:
+    """Wire payload for non-blocking same-session overlap reminders."""
+    return [
+        {
+            "kind": "same_session_overlap",
+            "owner": c["owner"],
+            "claim_id": c["claim_id"],
+            "paths": c["paths"],
+            "mode": c["mode"],
+            "message": "overlap is from the same session; granted without blocking",
+        }
+        for c in claims
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Empty initial state factory
 # ---------------------------------------------------------------------------
@@ -708,11 +768,12 @@ class TaskboardStore:
         """Attempt to claim (paths, mode) for owner.
 
         ``identity`` is the conflict identity supplied by the server (derived from
-        ``CLAUDE_CODE_SESSION_ID``; ADR-0022); it is not a wire parameter.  When
+        the host agent's session env; ADR-0022); it is not a wire parameter.  When
         omitted it falls back to ``owner``.
 
-        Returns ``{status, claim_id, conflicts}``.  Paths are normalised before
-        storing.  Mode must be ``"read"`` or ``"write"``.
+        Returns ``{status, claim_id, conflicts, warnings}``.  ``warnings`` lists
+        non-blocking same-session overlaps.  Paths are normalised before storing.
+        Mode must be ``"read"`` or ``"write"``.
         """
         _validate_mode(mode)
         # Guard before iterating: a stringified list would silently char-split.
@@ -731,10 +792,14 @@ class TaskboardStore:
                 {"owner": g["owner"], "paths": g["paths"], "mode": g["mode"]}
                 for g in compute_conflicts(state, norm_paths, mode, eff_identity)
             ]
+            warnings = _warning_payload(
+                compute_same_identity_overlaps(state, norm_paths, mode, eff_identity)
+            )
             return new_state, {
                 "status": c["status"],
                 "claim_id": c["claim_id"],
                 "conflicts": conflicts,
+                "warnings": warnings,
             }
 
         return self._with_lock(_mutate)
@@ -775,7 +840,7 @@ class TaskboardStore:
         omitted it falls back to ``owner``-less behaviour by using a sentinel that
         matches no existing claim, surfacing every overlapping grant.
 
-        Returns ``{conflicts: [{owner, paths, mode}]}``.
+        Returns ``{conflicts: [{owner, paths, mode}], warnings: [...]}``.
         """
         _validate_mode(mode)
         # Guard before iterating: a stringified list would silently char-split.
@@ -795,7 +860,12 @@ class TaskboardStore:
                 "conflicts": [
                     {"owner": c["owner"], "paths": c["paths"], "mode": c["mode"]}
                     for c in conflicts
-                ]
+                ],
+                "warnings": _warning_payload(
+                    compute_same_identity_overlaps(
+                        state, norm_paths, mode, eff_identity
+                    )
+                ),
             }
 
         return self._with_lock(_read, exclusive=False)

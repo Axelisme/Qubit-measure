@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.main.live_model import LiveField
 
 _SWEEP_EDGES = {"start", "stop", "expts", "step"}
+_MAX_UNKNOWN_FIELD_SUGGESTIONS = 3
 
 
 def resolve_and_set(root: SectionLiveField, path: str, value: object) -> None:
@@ -69,7 +70,7 @@ def _set_recursive(
         if child is None:
             raise RemoteError(
                 ErrorCode.INVALID_PARAMS,
-                f"unknown field {head!r} in path {full_path!r}",
+                _unknown_field_message(field, head, segments, full_path),
             )
         if not rest:
             _set_leaf(child, full_path, value)
@@ -94,6 +95,35 @@ def _set_recursive(
         ErrorCode.INVALID_PARAMS,
         f"path {full_path!r} descends into non-container {type(field).__name__}",
     )
+
+
+def _unknown_field_message(
+    section: SectionLiveField, head: str, segments: list[str], full_path: str
+) -> str:
+    msg = f"unknown field {head!r} in path {full_path!r}"
+    suggestions = _same_subtree_leaf_suggestions(section, head, segments, full_path)
+    if suggestions:
+        paths = ", ".join(repr(path) for path in suggestions)
+        msg = f"{msg}; did you mean {paths}?"
+    return msg
+
+
+def _same_subtree_leaf_suggestions(
+    section: SectionLiveField, leaf_name: str, segments: list[str], full_path: str
+) -> list[str]:
+    """Suggest legal descendant paths when a skipped section is unambiguous."""
+    full_segments = full_path.split(".")
+    prefix_len = max(len(full_segments) - len(segments), 0)
+    prefix = ".".join(full_segments[:prefix_len])
+    candidates: list[str] = []
+    for entry in _list_field(prefix, section):
+        path = str(entry["path"])
+        if path.rsplit(".", 1)[-1] == leaf_name:
+            candidates.append(path)
+    unique = sorted(set(candidates))
+    if len(unique) > _MAX_UNKNOWN_FIELD_SUGGESTIONS:
+        return []
+    return unique
 
 
 def _set_leaf(field: LiveField, full_path: str, value: object) -> None:
@@ -572,7 +602,9 @@ def _navigate(root: SectionLiveField, segments: list[str]) -> tuple[LiveField, s
             if child is None:
                 raise RemoteError(
                     ErrorCode.INVALID_PARAMS,
-                    f"unknown field {head!r} in path {'.'.join(segments)!r}",
+                    _unknown_field_message(
+                        field, head, segments[i:], ".".join(segments)
+                    ),
                 )
             field = child
             consumed.append(head)

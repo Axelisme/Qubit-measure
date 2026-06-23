@@ -89,7 +89,7 @@ from zcu_tools.mcp.core.call_log import wrap_handler  # noqa: E402
 # tool renames) that leave the wire contract untouched. A wire-contract change is
 # tracked separately by WIRE_VERSION (see ``wire_version.py``); the two are
 # independent. (Git history holds the per-version evolution.)
-MCP_VERSION = 62  # Read-reveal guard refresh: a pure read only refreshes the version keys it reveals (not the whole table), so reading an unrelated resource no longer absorbs another resource's staleness; writes still whole-table refresh (self-block safe). MCP-side bookkeeping change, WIRE unchanged.
+MCP_VERSION = 63  # gui_soc_connect now uses the soc.connect MethodSpec timeout (+small transport slack) and reconciles post-timeout SoC state; WIRE unchanged.
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -1617,6 +1617,72 @@ def tool_gui_tab_save(arguments: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+_SOC_CONNECT_TIMEOUT_SLACK = 0.25
+_SOC_CONNECT_RECONCILE_TIMEOUT = 1.0
+
+
+def _soc_connect_rpc_timeout() -> float:
+    return METHOD_SPECS["soc.connect"].timeout_seconds + _SOC_CONNECT_TIMEOUT_SLACK
+
+
+def _is_soc_connect_timeout(exc: Exception) -> bool:
+    if isinstance(exc, TimeoutError):
+        return True
+    if isinstance(exc, GuiRpcError) and exc.code == "timeout":
+        return True
+    return isinstance(exc, RuntimeError) and _is_timeout_error(exc)
+
+
+def _soc_summary_from_info(info: dict[str, Any]) -> dict[str, Any]:
+    return {"description": info.get("description"), "is_mock": info.get("is_mock")}
+
+
+def _soc_timeout_message(timeout: float, detail: str) -> str:
+    return (
+        f"GUI RPC 'soc.connect' did not return within {timeout:g}s. "
+        "The GUI may still complete the SoC connection and post-connect side "
+        f"effects after the MCP timeout; {detail}. Re-run gui_overview before retrying."
+    )
+
+
+def _reconcile_soc_connect_timeout(timeout: float, exc: Exception) -> dict[str, Any]:
+    try:
+        has_soc = bool(
+            send_gui_rpc("state.has_soc", {}, _SOC_CONNECT_RECONCILE_TIMEOUT).get(
+                "value", False
+            )
+        )
+    except Exception as reconcile_exc:
+        raise TimeoutError(
+            _soc_timeout_message(
+                timeout,
+                f"post-timeout reconciliation also failed ({reconcile_exc})",
+            )
+        ) from exc
+    if not has_soc:
+        raise TimeoutError(
+            _soc_timeout_message(
+                timeout, "post-timeout reconciliation found no connected SoC"
+            )
+        ) from exc
+    try:
+        info = send_gui_rpc("soc.info", {}, _SOC_CONNECT_RECONCILE_TIMEOUT)
+    except Exception as info_exc:
+        raise TimeoutError(
+            _soc_timeout_message(
+                timeout,
+                f"post-timeout reconciliation found a SoC but soc.info failed ({info_exc})",
+            )
+        ) from exc
+    return {
+        "soc": _soc_summary_from_info(info),
+        "warning": (
+            f"soc.connect timed out after {timeout:g}s at the MCP layer, but "
+            "post-timeout reconciliation found the GUI connected."
+        ),
+    }
+
+
 def tool_gui_soc_connect(arguments: dict[str, Any]) -> dict[str, Any]:
     """Connect the SoC SYNCHRONOUSLY and return its hardware summary.
 
@@ -1636,10 +1702,15 @@ def tool_gui_soc_connect(arguments: dict[str, Any]) -> dict[str, Any]:
         params["ip"] = str(arguments["ip"])
     if "port" in arguments:
         params["port"] = int(arguments["port"])
-    # Explicit per-call timeout ~2.0s: a small margin above make_soc_proxy's 1s
-    # COMMTIMEOUT so the board-side 1s cap fires first with a clean error, rather
-    # than this socket round-trip being cut. Do NOT rely on the 30s default here.
-    result = send_gui_rpc("soc.connect", params, 2.0)
+    # Use the wire spec's 3s budget plus a tiny transport slack so the GUI-side
+    # handler budget fires first; do NOT fall back to the 30s generic default.
+    timeout = _soc_connect_rpc_timeout()
+    try:
+        result = send_gui_rpc("soc.connect", params, timeout)
+    except Exception as exc:
+        if _is_soc_connect_timeout(exc):
+            return _reconcile_soc_connect_timeout(timeout, exc)
+        raise
     return {"soc": result.get("soc")}
 
 
@@ -2170,9 +2241,9 @@ _NON_GENERATED_METHODS = frozenset(
         # product, a slow one degrades to a handle (poll/wait via gui_op_poll /
         # gui_op_wait).
         "tab.run_start",
-        # hand-written synchronous wrapper (passes an explicit ~2s timeout so the
-        # board-side 1s COMMTIMEOUT fires first); not auto-generated so the override
-        # gui_soc_connect tool is the only soc-connect surface.
+        # hand-written synchronous wrapper (passes the spec timeout plus small
+        # transport slack); not auto-generated so the override gui_soc_connect tool
+        # is the only soc-connect surface.
         "soc.connect",
         # hand-written short-wait degrade (analyze is an async worker / interactive
         # pick; mirrors tab.run_start). To see the fit plot the agent calls

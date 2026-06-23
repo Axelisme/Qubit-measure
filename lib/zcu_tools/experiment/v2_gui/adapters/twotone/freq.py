@@ -64,8 +64,9 @@ class FreqAdapter(
                 "reading out the resonator, sweeps the drive frequency, and fits "
                 "the qubit response (Lorentzian or sinc) to extract the qubit "
                 "transition frequency and its linewidth. Runs on real hardware. "
-                "Typically run once the resonator is calibrated and you have a "
-                "rough idea of where the qubit sits."
+                "In first bring-up, run it after onetone/flux_dep has found "
+                "'flx_int' and onetone/freq has re-calibrated the resonator at "
+                "that flux."
             ),
             expects_md=(
                 "Reads from the MetaDict (all optional): 'q_f' — qubit frequency, "
@@ -74,7 +75,9 @@ class FreqAdapter(
                 "qubit-drive channel; 'r_f' — resonator frequency for the readout "
                 "tone (~4000–8000 MHz); 'res_ch' / 'ro_ch' — readout drive / ADC "
                 "channels; 'timeFly' — readout trigger-offset cable delay (~0–1 "
-                "us). Absent 'q_f'/'qf_w' → a fixed ±30 MHz span around 4000 MHz."
+                "us). Absent 'q_f'/'qf_w' → a fixed ±30 MHz span around 4000 MHz; "
+                "for a first qubit search this default is only a placeholder, so "
+                "override it with a broad, hardware-safe survey window."
             ),
             expects_ml=(
                 "Needs a qubit-probe pulse module and a pulse-readout module; "
@@ -84,15 +87,19 @@ class FreqAdapter(
             ),
             typical_writeback=(
                 "Proposes the fitted qubit frequency into MetaDict 'q_f' and the "
-                "fitted linewidth (FWHM) into 'qf_w'. No ModuleLibrary writeback."
+                "fitted linewidth (FWHM) into 'qf_w'. No ModuleLibrary writeback. "
+                "Apply only after the agent/user verifies that the plotted feature "
+                "is the intended qubit line."
             ),
             recommended=(
+                "Standard flow at a fresh 'flx_int': first run a wide survey over "
+                "the user-approved passband to find a real qubit feature, without "
+                "using predictor output or simulator truth as the answer. Then "
+                "run a narrower scan around the observed feature and fit it. "
                 "Analysis defaults to the Lorentzian fit ('lor') with plot-fit on; "
-                "switch to 'sinc' for power-broadened or saturated lines. A sweep "
-                "of ~301 points spanning a couple of linewidths around the "
-                "expected qubit frequency captures the peak cleanly; widen the "
-                "span and lower the drive gain if the qubit has drifted or the "
-                "line is washed out."
+                "switch to 'sinc' for power-broadened or saturated lines. If the "
+                "scan looks like noise, widen/re-centre and check readout/gain "
+                "before concluding there is no qubit."
             ),
         )
 

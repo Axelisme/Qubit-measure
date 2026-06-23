@@ -1,6 +1,6 @@
 # QICK Note for `experiment/v2_gui`
 
-**Last updated:** 2026-06-13 (reset module writeback → gated per-experiment；領域層不產 WaveformWriteback)
+**Last updated:** 2026-06-23 (measure GUI operator bring-up workflow guide)
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -23,6 +23,23 @@ experiment/v2_gui/
 每個 adapter 實作 `cfg_spec()`（純結構 spec，classmethod）、`make_default_value(ctx)`（讀
 md/ml 算預設值）、`run` / `analyze` / `get_writeback_items` / `guide`。詳細框架契約見
 `gui/app/main/README.md`。
+
+---
+
+## Operator workflow guide 約束
+
+`run-measure-gui` skill 與各 adapter guide 描述 operator 流程時，把 mock / real
+量測都當黑盒：不假設已知 flux 位置，不用 simulator truth、FakeDevice 內部真值或
+predictor 輸出取代掃描與看圖判讀。
+
+標準 bring-up 順序是：`lookback` → `onetone/freq` → `onetone/flux_dep` 找
+`flx_int` / period（視 2D map 判讀）→ 將 flux device 移到 `flx_int` →
+在該 flux 重跑 `onetone/freq` → `twotone/freq` 寬掃 → `twotone/freq` 窄掃 →
+agent / user 審核 figure 與 writeback preview → 後續 Rabi / T1 / T2。
+
+`twotone/flux_dep` 是 readout 與 `q_f` 可信後的後續 qubit model mapping，不是早期找
+flux 的工具；readout/qubit 參數還沒處理好時通常看不到可用 arc。Writeback 責任留給
+agent / human 判讀，guide 不暗示用自動 fidelity gate 代替判斷。
 
 ---
 

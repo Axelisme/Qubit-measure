@@ -49,6 +49,8 @@ Workflow:
        Option A (short wait, <=30s): taskboard_wait(claim_id, timeout_s=...).
        Option B (longer wait): ScheduleWakeup and poll taskboard_list until
        your claim_id appears in the 'active' list.
+     - Same-session overlaps are granted and returned under warnings; only a
+       different top-level session blocks.
   3. Do your edits / commits.
   4. taskboard_release(claim_id) — ONLY after your changes are committed to git.
      This auto-promotes the next pending claim(s).
@@ -65,6 +67,12 @@ Path syntax:
 Read-only work (no writes, no ambiguous scope) does not require a claim.
 """
 
+_SESSION_ID_ENV_VARS = (
+    "CLAUDE_CODE_SESSION_ID",
+    "CODEX_THREAD_ID",
+    "AGENT_SESSION_ID",
+)
+
 _CONFIG = McpServerConfig(
     tool_prefix="taskboard_",
     server_display_name="taskboard",
@@ -75,14 +83,19 @@ _CONFIG = McpServerConfig(
 def _session_identity() -> str | None:
     """The conflict identity for claims/checks from this server process.
 
-    Claude Code injects ``CLAUDE_CODE_SESSION_ID`` into every stdio MCP subprocess;
-    it is the *same* value for a top-level session and all its sub-agents, and
+    Agent hosts inject a stable session/thread id into stdio MCP subprocesses
+    (``CLAUDE_CODE_SESSION_ID`` for Claude Code, ``CODEX_THREAD_ID`` for Codex).
+    It is the same value for a top-level session and all its sub-agents, and
     differs across top-level sessions.  Reading it from the process env (MCP tool
     calls carry no per-request session context) is what lets an orchestrator and
     its sub-agents share one coordination identity (ADR-0022).  Returns ``None``
     when unset, so the store falls back to the per-call ``owner`` label.
     """
-    return os.environ.get("CLAUDE_CODE_SESSION_ID")
+    for name in _SESSION_ID_ENV_VARS:
+        value = os.environ.get(name)
+        if value:
+            return value
+    return None
 
 
 def build_dispatch(
@@ -90,9 +103,10 @@ def build_dispatch(
 ) -> dict[str, Callable[[dict[str, Any]], Any]]:
     """Map each wire method to a ``TaskboardStore`` call. Keys must match METHOD_SPECS.
 
-    ``claim`` and ``check`` are augmented with a server-derived ``identity``: the CC
-    session id when present, else (for claim only — check carries no owner) the
-    caller's ``owner``.  Identity is never a wire parameter; callers do not pass it.
+    ``claim`` and ``check`` are augmented with a server-derived ``identity``: the
+    agent session id when present, else (for claim only — check carries no owner)
+    the caller's ``owner``.  Identity is never a wire parameter; callers do not
+    pass it.
     """
     session_id = _session_identity()
 

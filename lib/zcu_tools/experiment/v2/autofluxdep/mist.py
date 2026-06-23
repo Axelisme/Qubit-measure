@@ -11,7 +11,7 @@ from typing_extensions import (
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import make_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
@@ -29,7 +29,7 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils import deepupdate
-from zcu_tools.utils.datasaver import load_data, save_data
+from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.func_tools import MinIntervalFunc
 
 from .executor import FluxDepCfg, MeasurementTask, T_RootResult
@@ -237,7 +237,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
         try:
             flux_values = data["flux_values"]
         except KeyError:
-            flux_values = data["flx_values"] # support old format
+            flux_values = data["flx_values"]  # support old format
         gains = data["gains"]
         raw_signals = data["raw_signals"]
         success = data["success"]

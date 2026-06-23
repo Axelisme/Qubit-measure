@@ -41,12 +41,13 @@ def test_build_tools_exposes_seven_tools(tmp_path):
 def test_claim_tool_end_to_end(tmp_path, monkeypatch):
     """Full round-trip via MCP tool handlers: claim → check → list → release.
 
-    Identity is derived from CLAUDE_CODE_SESSION_ID, which the test runner inherits
-    from Claude Code; delete it so this test exercises the deterministic
-    owner-fallback path (check has no owner → reports the alien grant as a conflict)
-    regardless of where it runs.
+    Identity is derived from host session env; delete those variables so this test
+    exercises the deterministic owner-fallback path (check has no owner → reports
+    the alien grant as a conflict) regardless of where it runs.
     """
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
+    monkeypatch.delenv("AGENT_SESSION_ID", raising=False)
     store = TaskboardStore(
         json_path=tmp_path / "taskboard.json",
         md_path=tmp_path / "taskboard.md",
@@ -112,10 +113,15 @@ def test_force_release_tool(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def _build_tools_for_session(json_path, session_id, monkeypatch):
+def _build_tools_for_session(
+    json_path, session_id, monkeypatch, env_name="CLAUDE_CODE_SESSION_ID"
+):
     """Build a fresh tool table whose dispatch snapshots ``session_id`` from env,
     pointing at the shared ``json_path`` (one server process == one session)."""
-    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", session_id)
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
+    monkeypatch.delenv("AGENT_SESSION_ID", raising=False)
+    monkeypatch.setenv(env_name, session_id)
     store = TaskboardStore(
         json_path=json_path,
         md_path=json_path.parent / "taskboard.md",
@@ -124,7 +130,7 @@ def _build_tools_for_session(json_path, session_id, monkeypatch):
 
 
 def test_same_session_overlapping_claims_both_granted(tmp_path, monkeypatch):
-    """Two different owners under the SAME CC session never block each other —
+    """Two different owners under the same agent session never block each other —
     identity is derived from the env, overriding the per-call owner label."""
     json_path = tmp_path / "taskboard.json"
     tools = _build_tools_for_session(json_path, "session-A", monkeypatch)
@@ -133,14 +139,17 @@ def test_same_session_overlapping_claims_both_granted(tmp_path, monkeypatch):
         {"owner": "orchestrator", "paths": ["lib/foo"], "task": "A"}
     )
     r2 = tools["taskboard_claim"]["handler"](
-        {"owner": "sub-agent", "paths": ["lib/bar"], "task": "B"}
+        {"owner": "sub-agent", "paths": ["lib/foo"], "task": "B"}
     )
     assert r1["status"] == "granted"
     assert r2["status"] == "granted"
+    assert r2["claim_id"] == r1["claim_id"]
+    assert r2["conflicts"] == []
+    assert r2["warnings"][0]["kind"] == "same_session_overlap"
 
 
 def test_cross_session_overlapping_claims_pending(tmp_path, monkeypatch):
-    """A different CC session (a separate server process) still contends on
+    """A different agent session (a separate server process) still contends on
     overlapping write paths — second claim is queued."""
     json_path = tmp_path / "taskboard.json"
 
@@ -157,10 +166,30 @@ def test_cross_session_overlapping_claims_pending(tmp_path, monkeypatch):
     assert r2["status"] == "pending"
 
 
+def test_codex_thread_id_is_session_identity(tmp_path, monkeypatch):
+    """Codex passes CODEX_THREAD_ID rather than CLAUDE_CODE_SESSION_ID."""
+    json_path = tmp_path / "taskboard.json"
+    tools = _build_tools_for_session(
+        json_path, "codex-thread-A", monkeypatch, env_name="CODEX_THREAD_ID"
+    )
+
+    r1 = tools["taskboard_claim"]["handler"](
+        {"owner": "parent", "paths": ["lib/foo"], "task": "A"}
+    )
+    r2 = tools["taskboard_claim"]["handler"](
+        {"owner": "sub-agent", "paths": ["lib/foo"], "task": "B"}
+    )
+    assert r1["status"] == "granted"
+    assert r2["status"] == "granted"
+    assert r2["warnings"][0]["owner"] == "parent"
+
+
 def test_no_session_id_falls_back_to_owner(tmp_path, monkeypatch):
-    """With CLAUDE_CODE_SESSION_ID unset, identity falls back to owner: same owner
+    """With session env unset, identity falls back to owner: same owner
     overlap auto-grants (idempotent), different owner conflicts."""
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
+    monkeypatch.delenv("AGENT_SESSION_ID", raising=False)
     store = TaskboardStore(
         json_path=tmp_path / "taskboard.json",
         md_path=tmp_path / "taskboard.md",

@@ -7,13 +7,15 @@ readout model.  The public surface is:
   - :class:`SimParams` — the physical parameter container.
   - :class:`SimEngine` — assembles lowering + bloch + readout into QICK raw
     accumulated I/Q (driven by ``MyProgramV2.acquire`` on a sim soc).
+  - :class:`SimCancelledError` — cooperative cancellation from acquire-level
+    ``stop_checkers``.
 
 The remaining sub-modules (``bloch``, ``lowering``, ``readout``) are the physics
 layers the engine delegates to; import them directly when needed (the
 analytic-limit / lowering tests do).
 """
 
-from .engine import SimEngine
+from .engine import SimCancelledError, SimEngine
 from .params import DEFAULT_SIMPARAM, SimParams
 
-__all__ = ["SimParams", "SimEngine", "DEFAULT_SIMPARAM"]
+__all__ = ["SimParams", "SimEngine", "SimCancelledError", "DEFAULT_SIMPARAM"]

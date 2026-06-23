@@ -36,7 +36,7 @@ from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import DirectReadoutCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.sim import SimParams
-from zcu_tools.program.v2.sim.engine import _FULL_SCALE
+from zcu_tools.program.v2.sim.engine import SimCancelledError, _FULL_SCALE
 from zcu_tools.program.v2.sim.readout import resonator_freqs, s21
 from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.program.v2.utils import sweep2param
@@ -682,11 +682,15 @@ def test_engine_lazy_compute_respects_early_stop(monkeypatch):
     from zcu_tools.program.v2.sim.engine import SimEngine
 
     calls: list[int] = []
+    completed_rounds = 0
     real_compute_round = SimEngine.compute_round
 
     def spy_compute_round(self, round_idx: int):
+        nonlocal completed_rounds
         calls.append(round_idx)
-        return real_compute_round(self, round_idx)
+        result = real_compute_round(self, round_idx)
+        completed_rounds += 1
+        return result
 
     monkeypatch.setattr(SimEngine, "compute_round", spy_compute_round)
 
@@ -707,12 +711,122 @@ def test_engine_lazy_compute_respects_early_stop(monkeypatch):
         modules=[pulse, _readout(_rf_g_mhz())],
     )
 
-    # A stop_checker that always returns True halts after the first round.
-    prog.acquire(soc, progress=False, stop_checkers=[lambda: True])
+    # The stop_checker fires after the first round has been computed, so this
+    # remains a round-boundary early-stop test rather than an intra-round cancel
+    # test (covered separately below).
+    prog.acquire(
+        soc,
+        progress=False,
+        stop_checkers=[lambda: completed_rounds >= 1],
+    )
 
     assert calls == [0], (
         f"expected exactly one round computed (early stop), got rounds {calls}"
     )
+
+
+def test_engine_cancel_during_signal_grid_raises(monkeypatch):
+    """A stop_checker can cancel inside the first round's sweep-grid compute.
+
+    This covers the path that matters for the GUI: ``MyProgramV2.acquire`` passes
+    the same stop_checkers into the SimEngine, ``MockQickSoc.poll_data`` computes
+    lazily, and cancellation propagates as an explicit exception instead of an
+    empty poll that would leave QICK's count loop spinning.
+    """
+
+    from zcu_tools.program.v2.sim.engine import SimEngine
+
+    point_calls: list[dict[str, int]] = []
+
+    def fake_operating_signal(self) -> tuple[float, float, float]:
+        return (4.0, 7.0, 7.01)
+
+    def fake_point_signal(
+        self, point: dict[str, int], f_qubit_ghz: float, rf_g: float, rf_e: float
+    ) -> tuple[NDArray[np.complex128], NDArray[np.complex128], float]:
+        point_calls.append(point)
+        return (
+            np.array([1.0 + 0.0j], dtype=np.complex128),
+            np.array([0.0 + 0.0j], dtype=np.complex128),
+            0.0,
+        )
+
+    monkeypatch.setattr(SimEngine, "_operating_signal", fake_operating_signal)
+    monkeypatch.setattr(SimEngine, "_point_signal", fake_point_signal)
+
+    soc, soccfg = make_mock_soc(sim=_SIM.model_copy(update={"poll_latency": 0.0}))
+    sw = SweepCfg(start=7000.0, stop=7010.0, expts=8, step=10.0 / 7)
+    ro_param = sweep2param("ro_freq", sw)
+    readout = DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=ro_param).build("ro")
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=1, rounds=1),
+        modules=[readout],
+        sweep=[("ro_freq", sw)],
+    )
+
+    def stop_after_two_points() -> bool:
+        return len(point_calls) >= 2
+
+    with pytest.raises(SimCancelledError, match="cancelled"):
+        prog.acquire(soc, progress=False, stop_checkers=[stop_after_two_points])
+
+    assert 0 < len(point_calls) < sw.expts
+
+
+def test_engine_cancel_during_detune_loop_raises(monkeypatch):
+    """The Lorentzian detune ensemble loop checks stop_checkers cooperatively."""
+
+    from zcu_tools.program.v2.sim import engine as engine_module
+    from zcu_tools.program.v2.sim.bloch import Segment
+    from zcu_tools.program.v2.sim.engine import SimEngine
+    from zcu_tools.program.v2.sim.lowering import LoweredPoint, ReadoutPlan
+
+    sim = _SIM.model_copy(update={"T2": 10.0, "T2_star": 5.0})
+    soc, soccfg = make_mock_soc(sim=sim)
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=1, rounds=1),
+        modules=[_readout(_rf_g_mhz())],
+    )
+    prog.compile()
+
+    evolve_calls = 0
+
+    def fake_lower(
+        self, point: dict[str, int], f_qubit_ghz: float, detune_offset: float
+    ) -> LoweredPoint:
+        return LoweredPoint(
+            segments=[
+                Segment(
+                    omega=1.0,
+                    delta=detune_offset,
+                    phase=0.0,
+                    t=0.01,
+                    t1=None,
+                    t2=None,
+                    thermal_pop=0.0,
+                )
+            ],
+            readout=ReadoutPlan(f_ro_ghz=7.0),
+        )
+
+    def fake_evolve(v0, segments):
+        nonlocal evolve_calls
+        evolve_calls += 1
+        return np.array([0.0, 0.0, -1.0], dtype=np.float64)
+
+    def stop_after_three_detune_nodes() -> bool:
+        return evolve_calls >= 3
+
+    monkeypatch.setattr(SimEngine, "_lower", fake_lower)
+    monkeypatch.setattr(engine_module.bloch, "evolve", fake_evolve)
+
+    engine = SimEngine(prog, sim, stop_checkers=[stop_after_three_detune_nodes])
+    with pytest.raises(SimCancelledError, match="cancelled"):
+        engine._point_signal({}, 4.0, 7.0, 7.01)
+
+    assert 0 < evolve_calls < len(engine._detune_nodes)
 
 
 # ---------------------------------------------------------------- decimated D2

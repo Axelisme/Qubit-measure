@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 import logging
 
 from qick import QickConfig
@@ -79,7 +80,11 @@ class MyProgramV2(ImproveAcquireMixin, ImproveAsmV2, AveragerProgramV2, IRCompil
         # is identical to the prior real path (D1).
         sim = getattr(soc, "_sim_params", None)
         if sim is not None:
-            self._attach_sim_engine(soc, sim)
+            self._attach_sim_engine(
+                soc,
+                sim,
+                stop_checkers=self._sim_stop_checkers(kwargs),
+            )
 
         return super().acquire(soc, *args, rounds=self.cfg_model.rounds, **kwargs)
 
@@ -99,13 +104,32 @@ class MyProgramV2(ImproveAcquireMixin, ImproveAsmV2, AveragerProgramV2, IRCompil
         # and behaviour is identical to the prior real path (D1).
         sim = getattr(soc, "_sim_params", None)
         if sim is not None:
-            self._attach_sim_engine(soc, sim)
+            self._attach_sim_engine(
+                soc,
+                sim,
+                stop_checkers=self._sim_stop_checkers(kwargs),
+            )
 
         return super().acquire_decimated(
             soc, *args, rounds=self.cfg_model.rounds, **kwargs
         )
 
-    def _attach_sim_engine(self, soc, sim) -> None:
+    def _sim_stop_checkers(self, kwargs: dict) -> list[Callable[[], bool]] | None:
+        stop_checkers = kwargs.get("stop_checkers")
+        if stop_checkers is None:
+            extra_args = kwargs.get("extra_args")
+            if isinstance(extra_args, dict):
+                stop_checkers = extra_args.get("stop_checkers")
+        if stop_checkers is None:
+            return None
+        return list(stop_checkers)
+
+    def _attach_sim_engine(
+        self,
+        soc,
+        sim,
+        stop_checkers: list[Callable[[], bool]] | None = None,
+    ) -> None:
         """Build the SimEngine and inject it onto the mock soc for poll-time compute.
 
         Ensures the program is compiled (the engine reads loop_dims / ro_chs /
@@ -121,4 +145,4 @@ class MyProgramV2(ImproveAcquireMixin, ImproveAsmV2, AveragerProgramV2, IRCompil
         if self.loop_dims is None or self.avg_level is None:
             self.compile()
 
-        soc.set_sim_engine(SimEngine(self, sim))
+        soc.set_sim_engine(SimEngine(self, sim, stop_checkers=stop_checkers))

@@ -25,14 +25,15 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "claim": MethodSpec(
         10.0,
         "Claim a set of paths/resources before writing them.  Returns "
-        "{status: 'granted'|'pending', claim_id, conflicts}.  "
+        "{status: 'granted'|'pending', claim_id, conflicts, warnings}.  "
         "If status is 'pending' the claim is queued behind conflicting grants; "
         "use taskboard_wait(claim_id) or schedule a ScheduleWakeup to poll "
         "taskboard_list until your claim appears in 'active'.  "
-        "Only claims from a DIFFERENT Claude Code session contend: an orchestrator "
-        "and the sub-agents it spawns share one session, so their claims never "
-        "block each other, and re-claiming an already-held scope returns the same "
-        "claim_id (no duplicate).  "
+        "Only claims from a DIFFERENT top-level agent session contend: an "
+        "orchestrator and the sub-agents it spawns share one session, so their "
+        "claims never block each other; same-session overlaps are returned under "
+        "warnings, and re-claiming an already-held scope returns the same claim_id "
+        "(no duplicate).  "
         "Always release (taskboard_release) AFTER your changes are committed.",
         params=(
             P(
@@ -41,9 +42,9 @@ METHOD_SPECS: dict[str, MethodSpec] = {
                 description=(
                     "human-readable label shown on the board, e.g. 'impl-162a'.  "
                     "NOT the conflict identity — the server derives that from the "
-                    "Claude Code session, so claims from one session (an "
-                    "orchestrator + its sub-agents) never block each other and a "
-                    "re-claim of an already-held scope is ignored."
+                    "agent session, so claims from one session (an orchestrator + "
+                    "its sub-agents) never block each other and a re-claim of an "
+                    "already-held scope is ignored."
                 ),
             ),
             P("paths", J.ARRAY, description=_PATHS_DOC),
@@ -92,7 +93,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "check": MethodSpec(
         5.0,
         "Dry-run conflict check — zero side effects, shared lock.  "
-        "Returns {conflicts:[{owner, paths, mode}]}.  "
+        "Returns {conflicts:[{owner, paths, mode}], warnings:[...]}.  "
         "Use before taskboard_claim to decide whether to proceed or wait.",
         params=(
             P("paths", J.ARRAY, description=_PATHS_DOC),

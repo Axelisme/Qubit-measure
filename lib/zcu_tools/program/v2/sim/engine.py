@@ -44,6 +44,8 @@ is statistically meaningful (Q1).
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from functools import lru_cache
 import itertools
 import logging
 import math
@@ -123,6 +125,33 @@ def _lorentzian_quadrature(
     return theta, weights
 
 
+class SimCancelledError(RuntimeError):
+    """Raised when a mock simulation stops cooperatively via ``stop_checkers``."""
+
+
+@lru_cache(maxsize=256)
+def _cached_predict_freq_ghz(
+    EJ: float,
+    EC: float,
+    EL: float,
+    flux_half: float,
+    flux_period: float,
+    flux_bias: float,
+    reduced_flux: float,
+) -> float:
+    """Cached qubit transition frequency for one physical operating point."""
+
+    predictor = FluxoniumPredictor(
+        params=(EJ, EC, EL),
+        flux_half=flux_half,
+        flux_period=flux_period,
+        flux_bias=flux_bias,
+    )
+    device_value = predictor.flux_to_value(reduced_flux)
+    f_qubit_mhz = float(predictor.predict_freq(device_value))
+    return f_qubit_mhz * _MHZ_TO_GHZ
+
+
 class SimEngine:
     """Turn a compiled program + SimParams into QICK raw accumulated I/Q data.
 
@@ -131,7 +160,12 @@ class SimEngine:
     (``ro_chs``), and the semantic module tree (``modules`` / ``sweep_dict``).
     """
 
-    def __init__(self, program, sim: SimParams) -> None:
+    def __init__(
+        self,
+        program,
+        sim: SimParams,
+        stop_checkers: list[Callable[[], bool]] | None = None,
+    ) -> None:
         from zcu_tools.program.v2.modular import ModularProgramV2
 
         if not isinstance(program, ModularProgramV2):
@@ -147,6 +181,7 @@ class SimEngine:
 
         self.program = program
         self.sim = sim
+        self._stop_checkers = tuple(stop_checkers or ())
 
         # Deterministic per-(sweep-point, read) blob grids ``(s_g, s_e, p_e)``,
         # each of shape ``(*sweep, nreads)``, built lazily on the first
@@ -186,6 +221,15 @@ class SimEngine:
         else:
             self._detune_nodes = np.zeros(1, dtype=np.float64)
             self._detune_weights = np.ones(1, dtype=np.float64)
+
+    def _raise_if_cancelled(self) -> None:
+        """Fail fast when any acquire-level stop checker requests cancellation."""
+
+        for checker in self._stop_checkers:
+            if checker():
+                raise SimCancelledError(
+                    "mock simulation cancelled because a stop_checker returned True"
+                )
 
     # ----------------------------------------------------------- sweep points
     def _sweep_axes(self) -> list[tuple[str, int]]:
@@ -241,6 +285,7 @@ class SimEngine:
 
         index_ranges = [range(count) for _, count in axes]
         for multi_index in itertools.product(*index_ranges):
+            self._raise_if_cancelled()
             point = {name: idx for (name, _), idx in zip(axes, multi_index)}
             s_g, s_e, p_e = self._point_signal(point, f_qubit_ghz, rf_g, rf_e)
             idx = (*multi_index, slice(None))
@@ -301,6 +346,7 @@ class SimEngine:
 
         # δ=0 lowering supplies this point's f_ro (δ never affects readout) and
         # serves as the single-node ensemble when Gamma == 0.
+        self._raise_if_cancelled()
         zero_lowered = self._lower(point, f_qubit_ghz, 0.0)
 
         # No-drive short-circuit: the quasi-static detune δ enters the Bloch
@@ -323,6 +369,7 @@ class SimEngine:
             # (zero regression vs the pre-ensemble single-eval path).
             p_e_mean = 0.0
             for delta, weight in zip(self._detune_nodes, self._detune_weights):
+                self._raise_if_cancelled()
                 lowered = (
                     zero_lowered
                     if delta == 0.0
@@ -449,11 +496,20 @@ class SimEngine:
         if self._operating is not None:
             return self._operating
 
+        self._raise_if_cancelled()
         reduced_flux = self._reduced_operating_flux()
-        device_value = self._predictor.flux_to_value(reduced_flux)
-        f_qubit_mhz = float(self._predictor.predict_freq(device_value))
-        f_qubit_ghz = f_qubit_mhz * _MHZ_TO_GHZ
+        f_qubit_ghz = _cached_predict_freq_ghz(
+            self.sim.EJ,
+            self.sim.EC,
+            self.sim.EL,
+            self.sim.flux_half,
+            self.sim.flux_period,
+            self.sim.flux_bias,
+            reduced_flux,
+        )
+        self._raise_if_cancelled()
         rf_g, rf_e = resonator_freqs(self.sim, reduced_flux)
+        self._raise_if_cancelled()
 
         logger.debug(
             "SimEngine: flux=%.4f, f_qubit=%.4f GHz, rf_g=%.4f GHz, rf_e=%.4f GHz",
@@ -486,6 +542,7 @@ class SimEngine:
         applied in :meth:`compute_round`, not cached here.
         """
 
+        self._raise_if_cancelled()
         if self._det_grids is not None:
             return self._det_grids
 
@@ -518,7 +575,9 @@ class SimEngine:
 
         logger.debug("SimEngine.compute_round: round_idx=%d", round_idx)
 
+        self._raise_if_cancelled()
         s_g_grid, s_e_grid, p_e_grid = self._ensure_signal()
+        self._raise_if_cancelled()
 
         loop_dims = self.program.loop_dims
         assert loop_dims is not None  # guaranteed by __init__; reasserted for typing
@@ -572,7 +631,9 @@ class SimEngine:
         means them.
         """
 
+        self._raise_if_cancelled()
         f_qubit_ghz, rf_g, rf_e = self._operating_signal()
+        self._raise_if_cancelled()
 
         # Single-point lowering: lookback declares no sweep, so the sweep
         # multi-index is empty and the Bloch timeline / readout plan are resolved
@@ -580,6 +641,7 @@ class SimEngine:
         # quasi-static detune ensemble does not apply here.)
         point: dict[str, int] = {}
         lowered = self._lower(point, f_qubit_ghz, 0.0)
+        self._raise_if_cancelled()
         v_final = bloch.evolve(
             bloch.ground_state(self.sim.thermal_pop), lowered.segments
         )

@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 41
+skill_version: 42
 ---
 
 # run-measure-gui
@@ -238,9 +238,11 @@ a handle, never by subscribing to a push stream:
 
 ### Acceptance gate (after analyze, before writeback)
 
-Once `gui_tab_analyze_start` has settled, before you write anything back, run the gate. It is
-**self-grading, not a blocker** — an imperfect run is acceptable, but you must
-record *why* honestly.
+Once `gui_tab_analyze_start` has settled, before you write anything back, run the
+gate. It is **self-grading, not a blocker** — an imperfect run is acceptable,
+but you must record *why* honestly. The gate is evidence for the agent/human
+writeback decision; it is not an automatic fidelity threshold and does not
+replace looking at the figure.
 
 1. **Re-read the checklist** from the `memory_recall(chip, qub, exp_type)` you did
    before the run (the `checklist` bucket). If it is empty, grade against the
@@ -256,10 +258,11 @@ record *why* honestly.
    the plot(s) into the record folder (pass the PNG path the run/analyze reply
    gave you; omit `figure_paths` if there is no figure — a record with no figure
    is still valid), and `data_ref` if you saved the data.
-4. **Then writeback as usual** — the gate does not block it (`gui_tab_commit` /
-   `gui_tab_writeback_apply`). If an item failed, prefer the partial-writeback rules in
-   "Gotchas" (write the safe subset, leave the dubious one unset) and say so in the
-   record's `reason`.
+4. **Then decide writeback deliberately** — the gate does not block it
+   (`gui_tab_commit` / `gui_tab_writeback_apply`), but the responsibility stays
+   with the agent/human reviewing the figure and preview. If an item failed,
+   prefer the partial-writeback rules in "Gotchas" (write the safe subset, leave
+   the dubious one unset) and say so in the record's `reason`.
 5. **If you learned a reusable rule** (a symptom→fix that generalizes beyond this
    qubit): `memory_search` the symptom; update the matching solution
    (`memory_update_solution`, add this record id to `seen_in`) or add a new one
@@ -430,46 +433,47 @@ experiment produces each, and the cross-experiment relations (e.g.
 `reset_f = r_f − q_f`, `post_delay = 5/(2π·rf_w)`). Per-experiment recommended
 sweep ranges stay in `gui_adapter_guide`, not the glossary.
 
-The **standard order** to characterize one bias point (→ = "then"; `(opt)` =
-optional). Each stage's fitted result is written back into the context and
-consumed by the next:
+The **standard order** to bring up a flux point (→ = "then"). Each writeback is
+reviewed by the agent/human before it becomes context for the next stage:
 
 1. `lookback` → `timeFly` (readout time-of-flight)
-2. `onetone/freq` → `r_f`, `rf_w` (resonator freq + linewidth)
-3. `onetone/power_dep` **(opt)** → readout saturation power
-4. `onetone/flux_dep` → flux period / sweet spot — **then move the flux bias to
-   the integer (half-flux) point** before continuing
-5. `twotone/freq` → `q_f`, `qf_w` (qubit freq)
-6. `twotone/flux_dep` **(opt)** → fit qubit model parameters
-7. `twotone/rabi/len_rabi` → `pi_len`, `pi2_len`, `rabi_f`
-8. `twotone/rabi/amp_rabi` → `pi_gain`, `pi2_gain`
-9. optimize readout **(opt)** (`twotone/power_dep` etc. → readout freq/gain/length)
-10. `twotone/t2ramsey` → `t2*` — **use it to calibrate `q_f`** (Ramsey detuning)
-11. **re-run `twotone/rabi/amp_rabi`** with the corrected `q_f`
-12. `twotone/t1` → `t1`
+2. `onetone/freq` → preliminary `r_f`, `rf_w` (resonator freq + linewidth)
+3. `onetone/flux_dep` → user/agent-reviewed `flx_int`, `flx_half`, and
+   `flx_period` when the resonator map supports those picks
+4. Move the flux device to `flx_int` (the integer-flux sweet spot)
+5. Re-run `onetone/freq` at `flx_int` → final `r_f`, `rf_w` for that flux point
+6. `twotone/freq` **wide survey** at `flx_int` → find a real qubit feature
+7. `twotone/freq` **narrow scan** around the observed feature → `q_f`, `qf_w`
+8. Agent/user review of the figure and writeback preview → apply the safe subset
+9. Continue with `twotone/rabi/len_rabi`, `twotone/rabi/amp_rabi`, optional
+   readout optimization, `twotone/t2ramsey` to refine `q_f`, re-run amp Rabi with
+   the corrected `q_f`, then `twotone/t1`
 
-Steps 7–12 (Rabi/T2/recalibrate/Rabi/T1) are the per-point qubit
-characterization. Reset characterization (single/dual/bath, in the notebook) is
-a separate sub-procedure layered on top once a π pulse exists.
+Optional readout power checks (`onetone/power_dep`, `twotone/power_dep`, etc.)
+belong where the figure shows they are needed. Reset characterization
+(single/dual/bath, in the notebook) is a separate sub-procedure layered on top
+once a π pulse exists.
 
-**Estimate `q_f` before `twotone/freq` — sweep the right window or you see only
-noise.** At a fresh bias point `q_f` is unknown, and a narrow or mis-centered
-twotone window returns pure noise that *looks* like "no qubit". After step 4 (at
-the integer / sweet-spot bias) predict `q_f` from the fluxonium model first:
-- Set the model in the predictor — `gui_predictor_install_params(EJ, EC, EL,
-  flux_half, flux_period)` (energies in GHz; a typical fluxonium is roughly
-  `EJ:EC:EL ≈ 4:1:1`), or `gui_predictor_install_from_file(path)` from a
-  `params.json` `fluxdep_fit`. Then `gui_predictor_predict(device_value)` — where
-  `device_value` is the instrument's native setpoint (e.g. current in A for a
-  YOKOGS200, NOT a flux quantum) — at the current flux returns the predicted `q_f`
-  (`gui_predictor_info` reads back the active EJ/EC/EL + flux alignment).
-- Then run `twotone/freq` with a **wide** sweep bracketing that estimate (e.g. a
-  ~2 GHz span such as 4000–6000 MHz) to actually catch the peak; narrow only once
-  you see it. **A twotone scan that looks like noise almost always means the
-  window missed `q_f`, not that there is no qubit** — widen and re-centre before
-  giving up. `q_f` also moves strongly with flux (a fluxonium sits low at the
-  half-flux sweet spot and much higher at the integer point), so confirm which
-  bias you are at before trusting a window.
+**Do not assume the flux position or qubit frequency in either mock or real
+flows.** Treat the system as a black-box measurement: do not use simulator truth,
+hidden fake-device parameters, or predictor output to choose `flx_int`, `flx_half`,
+or `q_f`. Predictor output is non-authoritative context only after measured
+features exist; it is not measurement evidence, does not choose writeback values,
+and does not replace the wide `twotone/freq` survey.
+
+**Do not use `twotone/flux_dep` early to find flux.** Before readout and qubit
+parameters are credible, a two-tone flux map commonly shows nothing useful: the
+readout tone can be wrong, the qubit-drive window can miss the transition, and the
+gain may be inappropriate. Find `flx_int` / period with `onetone/flux_dep`, move
+there, re-measure the resonator, and only then do wide → narrow `twotone/freq`.
+Use `twotone/flux_dep` later for qubit-model mapping after `r_f`, `q_f`, and the
+drive/readout settings are already believable.
+
+At a fresh `flx_int`, `q_f` is unknown. Start `twotone/freq` with a **wide,
+hardware-safe survey window** chosen from user/lab constraints and the relevant
+passband, then narrow only after the figure shows a real feature. A narrow or
+mis-centered twotone window returns pure noise that *looks* like "no qubit"; widen
+and re-centre before giving up.
 
 ## Decision boundaries — act vs. ask
 
@@ -668,8 +672,8 @@ hardware) — the smoke harness uses it.
   DAC has a finite sampling rate and side-band leakage, so a real transition can
   show up *mirrored* around `sample_f/2` in a twotone spectrum. A peak at the
   "wrong" frequency may be an alias, not a real transition — sanity-check
-  against the predicted qubit/resonator frequency before trusting it, and ask
-  the user if unsure.
+  against the current measured qubit/resonator context and the passband before
+  trusting it, and ask the user if unsure.
 
 ## Troubleshooting
 
