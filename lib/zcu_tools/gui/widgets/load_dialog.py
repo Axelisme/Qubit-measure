@@ -39,7 +39,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.utils.datasaver import load_data
+from zcu_tools.utils.labber_io import load_labber_data
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +153,15 @@ class LoadDataDialog(QDialog):
         filepath: str,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None] | None:
         try:
-            signals, x, y = load_data(filepath, return_comment=False)
+            ld = load_labber_data(filepath)
+            # native load_labber_data does NOT flip the inner two axes: for a 2D
+            # log ``ld.z`` is (Ny, Nx) with the inner axis (x) last. The rest of
+            # this dialog assumes the old dict-load orientation — freq-major
+            # ``signals`` shaped (Nx, Ny) — so transpose the 2D array back to
+            # keep the preview / transpose-toggle behaviour unchanged.
+            x = ld.axes[0].values
+            y = ld.axes[1].values if len(ld.axes) > 1 else None
+            signals = ld.z.T if y is not None else ld.z
             return signals, x, y
         except Exception:  # noqa: BLE001 — preview is best-effort; never crash the dialog
             logger.exception("preview read failed for %r", filepath)

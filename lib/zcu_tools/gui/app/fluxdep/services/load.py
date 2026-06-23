@@ -1,10 +1,10 @@
 """LoadService — read a raw spectrum hdf5 into a SpectrumEntry.
 
-Depends only on the low-level ``load_data`` (pure hdf5 IO) and ``format_rawdata``
-(Hz→GHz + monotonic ordering); it does NOT import ``experiment.v2`` (that would
-pull the whole measure experiment layer into fluxdep). OneTone and TwoTone load
-identically — ``spec_type`` is metadata recorded on the entry and only branches
-the point-selection tool downstream.
+Depends only on the low-level ``load_labber_data`` (pure hdf5 IO) and
+``format_rawdata`` (Hz→GHz + monotonic ordering); it does NOT import
+``experiment.v2`` (that would pull the whole measure experiment layer into
+fluxdep). OneTone and TwoTone load identically — ``spec_type`` is metadata
+recorded on the entry and only branches the point-selection tool downstream.
 
 This module is the synchronous core. Wrapping it in a worker thread + OperationGate
 (so a slow load degrades to an operation handle, like measure's run/device setup)
@@ -30,7 +30,7 @@ from zcu_tools.notebook.persistance import (
     load_spectrums,
 )
 from zcu_tools.simulate import value2flux
-from zcu_tools.utils.datasaver import load_data
+from zcu_tools.utils.labber_io import load_labber_data
 
 logger = logging.getLogger(__name__)
 
@@ -81,9 +81,15 @@ class LoadService:
 
         Returns the spectrum name (basename of ``filepath``).
         """
-        signals2d, dev_values, freqs = load_data(filepath, return_comment=False)
-        if freqs is None:
+        ld = load_labber_data(filepath)
+        dev_values = np.asarray(ld.axes[0].values)
+        if len(ld.axes) < 2:
             raise ValueError(f"{filepath!r} has no frequency axis (not a 2D spectrum)")
+        freqs = np.asarray(ld.axes[1].values)
+        # native load_labber_data returns z as (Ny, Nx) = (N_freq, N_dev); the
+        # downstream pipeline (format_rawdata, SpectrumData) expects device-major
+        # (N_dev, N_freq), so transpose the inner two axes back.
+        signals2d = np.asarray(ld.z).T
 
         if transpose_axes:
             signals2d, dev_values, freqs = transpose_spectrum_data(

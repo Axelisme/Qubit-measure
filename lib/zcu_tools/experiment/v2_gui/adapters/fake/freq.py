@@ -420,15 +420,16 @@ class FakeFreqAdapter(
         # "data saved to <path>" report is truthful and the file exists.
         if not self._persist_data:
             return
-        from zcu_tools.utils.datasaver import save_data
+        from zcu_tools.utils.datasaver import safe_labber_filepath
+        from zcu_tools.utils.labber_io import save_labber_data
 
         result = req.run_result
-        save_data(
-            filepath=req.data_path,
-            x_info={"name": "Frequency", "unit": "Hz", "values": result.freqs * 1e6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": result.signals},
+        save_labber_data(
+            safe_labber_filepath(req.data_path),
+            z=("Signal", "a.u.", result.signals),
+            axes=[("Frequency", "Hz", result.freqs * 1e6)],
             comment=req.comment or "fake/freq simulated data",
-            tag="fake/freq",
+            tags="fake/freq",
         )
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
