@@ -89,7 +89,7 @@ from zcu_tools.mcp.core.call_log import wrap_handler  # noqa: E402
 # tool renames) that leave the wire contract untouched. A wire-contract change is
 # tracked separately by WIRE_VERSION (see ``wire_version.py``); the two are
 # independent. (Git history holds the per-version evolution.)
-MCP_VERSION = 61  # Phase 171 guide-default flip: gui_tab_open sends guide by default; skip_guide=true to opt out (MCP-side policy change, WIRE unchanged)
+MCP_VERSION = 62  # Read-reveal guard refresh: a pure read only refreshes the version keys it reveals (not the whole table), so reading an unrelated resource no longer absorbs another resource's staleness; writes still whole-table refresh (self-block safe). MCP-side bookkeeping change, WIRE unchanged.
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -247,12 +247,41 @@ _DIAGNOSTIC_COND = threading.Condition()
 # --- Optimistic-concurrency bookkeeping (policy lives here, mcp side) --------
 #
 # The agent never sees version numbers; they are bookkeeping between this mcp
-# layer and the RPC server. ``_LAST_SEEN`` tracks the versions we last read via
-# ``resources.versions``. Guarded ops (run/save/commit) attach the subset of
-# versions they depend on as ``expected_versions``; the server compares them
-# atomically and rejects with PRECONDITION_FAILED if any moved (a concurrent —
-# possibly human — edit). On rejection we re-read the table so the next attempt
-# carries fresh baselines.
+# layer and the RPC server. ``_LAST_SEEN`` is the guard BASELINE: the per-key
+# version each guarded op compares against (it attaches the subset it depends on
+# as ``expected_versions``; the server compares atomically and rejects with
+# PRECONDITION_FAILED if any moved — a concurrent, possibly human, edit).
+#
+# How the baseline is refreshed after a successful RPC depends on the method
+# kind (the central safety property of this guard):
+#   - WRITE / mutation (and any read we are not 100% sure about) -> whole-table
+#     ``_refresh_versions()``. A write self-bumps the keys it touched, so
+#     re-reading the whole table absorbs the op's own bump and the agent is not
+#     later blocked by its own write (self-block safe). Whole-table is ALWAYS
+#     safe — it can only fail to *improve* on the read-absorption issue below,
+#     never produce a false reject.
+#   - A pure read we are sure about -> ``_refresh_revealed_versions()``: refresh
+#     ONLY the keys that read actually revealed (``_READ_REVEALS``), leaving
+#     every other key's baseline untouched. This stops an unrelated read from
+#     silently advancing resource X's baseline to current (which would let a
+#     concurrent edit to X slip past the next write to X).
+#
+# Two intentional residual gaps (honestly narrower than the old "any RPC absorbs
+# everything" model, but not zero):
+#   (a) An UNRELATED WRITE between two operations still whole-table refreshes, so
+#       it absorbs (masks) a concurrent edit to a resource it did not touch. Pure
+#       reads no longer do this (unless they fall back to whole-table); writes
+#       still do (whole-table is the price of self-block safety). Narrower than
+#       before, not eliminated.
+#   (b) ``_LAST_SEEN`` is PROCESS-GLOBAL and shared across every agent driving
+#       this one bridge — there is NO per-agent isolation (the platform carries
+#       no agent identity; per-agent staleness cursors are Not Planned upstream).
+#       So two agents concurrently writing the same GUI do NOT get per-agent
+#       staleness guarantees. True per-agent guarding would need each agent to
+#       carry an opaque baseline cursor (not implemented).
+#
+# On a stale rejection we re-read the whole table so the next attempt carries
+# fresh baselines (connect and stale-reject paths are always whole-table).
 _LAST_SEEN: dict[str, int] = {}
 
 # Dependency map (the single place that knows what each guarded op depends on).
@@ -295,6 +324,67 @@ _GUARD_DEPS: dict[str, tuple[str, ...]] = {
         "context",
     ),
     "editor.commit": ("editor:{editor_id}", "context"),
+}
+
+# Read-reveal map (the mirror of ``_GUARD_DEPS`` for the read side). Maps a PURE
+# READ method to the version-key patterns it reveals — the keys whose current
+# value the agent genuinely observed by making that read. After such a read we
+# refresh ONLY these keys in ``_LAST_SEEN`` (``_refresh_revealed_versions``),
+# leaving every other key's baseline untouched, so reading resource Y does not
+# advance resource X's baseline and mask a concurrent edit to X.
+#
+# SAFETY — the only way a wrong entry here causes trouble is MASKING / false-ACCEPT:
+# mapping a read to a key it does NOT fully reveal advances that key's baseline to
+# current → expected==current → the server lets through a concurrent edit the agent
+# never actually saw. This is a security hole (the guard is bypassed), NOT a
+# false-reject (a too-high baseline never triggers a reject; the server only rejects
+# when expected LAGS current). So the bar is: add an entry ONLY when you are 100%
+# sure the read observes the COMPLETE state tracked by that key. When unsure, leave
+# it OUT — an unmapped read falls back to the whole-table refresh (safe, no masking).
+#
+# Patterns use the same {tab_id}/{editor_id}/{name} placeholders and literal
+# ``device:*`` glob as ``_GUARD_DEPS``; ``_expand_pattern_keys`` shares the
+# expansion logic. ``devices:__set__`` is a literal key (set cardinality).
+#
+# Deliberately LEFT OUT (whole-table) and why:
+#   - ALL context.* reads — the ``context`` key is a COARSE key tracking the entire
+#     active md/ml CONTENT. No single content-read reveals the whole of it:
+#     context.md_get returns only key names, md_get_attr returns one value,
+#     ml_get returns only entry names/kinds, ml_list_roles returns the STATIC role
+#     catalog (not content at all). Mapping any of these to ``context`` would advance
+#     the content baseline on a read that observed only a projection, masking
+#     concurrent edits to any md/ml entry the read did not touch. This is confirmed
+#     over-broad, not merely uncertain — same root cause as context.labels/active.
+#   - context.labels / context.active — neither is tracked by any version key
+#     (a context-switch does not bump ``context``; there is no set-membership key
+#     for the context list). No valid mapping exists.
+#   - tab.snapshot — reveals many facets (editor_id, save paths, interaction,
+#     existence flag); mapping it correctly would require intersecting multiple keys,
+#     and a wrong mapping masks concurrent edits. Left whole-table.
+#   - analyze/post-analyze reads (tab.get_analyze_result/params,
+#     tab.get_post_analyze_result/params) — the analyze trio is server-gated on
+#     has_run_result, NOT on a version key; the facet↔key mapping is uncertain.
+#   - device.list — each entry returns only {name, type_name, status}; the
+#     ``device:{name}`` key also bumps on info/value changes (set_device_info),
+#     which device.list does NOT observe. Mapping to ``device:*`` would mask
+#     concurrent info/value changes. Only set membership (devices:__set__) is
+#     truly fully revealed by listing the set.
+_READ_REVEALS: dict[str, tuple[str, ...]] = {
+    # Reads the chosen tab's settable cfg tree: the whole cfg state for that tab.
+    "tab.get_cfg": ("tab:{tab_id}:cfg",),
+    # Reads one editing session's full draft: the whole editor state for that id.
+    "editor.get": ("editor:{editor_id}",),
+    # Reads one device's full cached snapshot: name/address/status/error/info —
+    # the full state tracked by device:{name}. Slightly broader than just status
+    # (it includes info/value), but there is no guarded op that consumes only
+    # device:{name} without also consuming devices:__set__, so the masking risk
+    # is bounded. Left in as the safe narrowing over whole-table.
+    "device.snapshot": ("device:{name}",),
+    # Lists the set of registered devices (membership only). device.list reveals
+    # set membership (devices:__set__) but NOT device info/value (which also bumps
+    # device:{name}), so mapping to device:* would mask concurrent info changes.
+    # Only devices:__set__ (set cardinality) is fully revealed.
+    "device.list": ("devices:__set__",),
 }
 
 # --- Async-operation handle bookkeeping (debug-only projection) ---------------
@@ -372,48 +462,91 @@ _CONFIG = MCPBridgeConfig(
 _BRIDGE = McpBridge(_CONFIG, on_event=_deliver_event)
 
 
-def _refresh_versions() -> None:
-    """Re-read the full resource version table into ``_LAST_SEEN``.
+def _read_version_table() -> dict[str, int] | None:
+    """Read the full resource version table verbatim (no side effects).
 
-    Pure read via ``resources.versions`` (the single read entry point). Called
-    on connect and after a stale rejection so the next guarded op carries fresh
-    baselines. Failures are swallowed — a missing table just means no guard.
+    Pure read via ``resources.versions`` (the single read entry point), through
+    ``send_rpc_raw`` to avoid recursing back into the guard. Returns the table or
+    None on any failure — a missing table just means no guard this round.
     """
     try:
         resp = _BRIDGE.send_rpc_raw("resources.versions", {}, 5.0)
     except Exception:  # pragma: no cover — best-effort resync
-        return
+        return None
     if not resp.get("ok", False):
-        return
+        return None
     versions = resp.get("result", {}).get("versions")
-    if isinstance(versions, dict):
+    return versions if isinstance(versions, dict) else None
+
+
+def _refresh_versions() -> None:
+    """Replace the whole ``_LAST_SEEN`` baseline with the current version table.
+
+    Called on connect, after a stale rejection, and after every successful WRITE
+    (or unclassified read) — whole-table is always safe (self-block safe for a
+    write, since it absorbs the op's own bump). Failures are swallowed.
+    """
+    versions = _read_version_table()
+    if versions is not None:
         _LAST_SEEN.clear()
         _LAST_SEEN.update(versions)
+
+
+def _expand_pattern_keys(
+    patterns: tuple[str, ...], params: dict[str, Any], source_table: dict[str, int]
+) -> dict[str, int]:
+    """Expand dependency/reveal patterns into concrete {key: version} entries.
+
+    Shared by ``_build_expected_versions`` (source = ``_LAST_SEEN`` baseline) and
+    ``_refresh_revealed_versions`` (source = the just-read current table). The
+    literal ``device:*`` glob expands to every ``device:`` key in ``source_table``
+    at its value there; ``{tab_id}``/``{editor_id}``/``{name}`` placeholders fill
+    from ``params``; a key absent from ``source_table`` reads as version 0.
+    """
+    out: dict[str, int] = {}
+    for pattern in patterns:
+        if pattern == "device:*":
+            for key, version in source_table.items():
+                if key.startswith("device:"):
+                    out[key] = version
+            continue
+        key = pattern.format(
+            tab_id=params.get("tab_id", ""),
+            editor_id=params.get("editor_id", ""),
+            name=params.get("name", ""),
+        )
+        out[key] = source_table.get(key, 0)
+    return out
 
 
 def _build_expected_versions(method: str, params: dict[str, Any]) -> dict[str, int]:
     """Resolve a guarded method's dependency patterns into expected versions.
 
-    Policy lives here: expand {tab_id}/{editor_id} placeholders and the literal
-    ``device:*`` (every current device:* key) against ``_LAST_SEEN``. Returns the
-    subset of versions the op depends on; the server compares only these.
+    Policy lives here: expand the ``_GUARD_DEPS`` patterns against the current
+    ``_LAST_SEEN`` baseline. Returns the subset of versions the op depends on;
+    the server compares only these.
     """
     deps = _GUARD_DEPS.get(method)
     if not deps:
         return {}
-    expected: dict[str, int] = {}
-    for pattern in deps:
-        if pattern == "device:*":
-            for key in _LAST_SEEN:
-                if key.startswith("device:"):
-                    expected[key] = _LAST_SEEN[key]
-            continue
-        key = pattern.format(
-            tab_id=params.get("tab_id", ""),
-            editor_id=params.get("editor_id", ""),
-        )
-        expected[key] = _LAST_SEEN.get(key, 0)
-    return expected
+    return _expand_pattern_keys(deps, params, _LAST_SEEN)
+
+
+def _refresh_revealed_versions(method: str, params: dict[str, Any]) -> None:
+    """Refresh ONLY the keys a pure read revealed into ``_LAST_SEEN``.
+
+    The narrow counterpart to ``_refresh_versions``: after a read listed in
+    ``_READ_REVEALS`` we re-read the whole table but copy back only the keys that
+    read genuinely observed (its reveal patterns expanded against the just-read
+    table), leaving every other key's baseline untouched. That is what stops an
+    unrelated read from advancing a sibling resource's baseline (the read-
+    absorption bug). The caller guarantees ``method in _READ_REVEALS``.
+    """
+    versions = _read_version_table()
+    if versions is None:
+        return
+    revealed = _expand_pattern_keys(_READ_REVEALS[method], params, versions)
+    _LAST_SEEN.update(revealed)
 
 
 def _describe_stale_keys(keys: list) -> list[str]:
@@ -516,6 +649,12 @@ def send_gui_rpc(
     hand. For guarded methods (run/save/commit) attaches ``expected_versions``
     from the mcp-side bookkeeping so the server can reject stale operations. On
     a stale rejection the version table is re-read so the agent's retry is fresh.
+
+    After a successful round-trip the guard baseline is refreshed by method kind:
+    a pure read listed in ``_READ_REVEALS`` refreshes only the keys it revealed
+    (narrow); every other method — every write, plus any read we are not sure
+    about — refreshes the whole table (self-block safe). See the ``_LAST_SEEN``
+    comment for the safety rationale and the two residual gaps.
     """
     _ensure_connected()
 
@@ -543,10 +682,19 @@ def send_gui_rpc(
         msg = f"GUI Error ({err.get('code')}): {err.get('message')}"
         raise GuiRpcError(msg, reason=err.get("reason"), code=err.get("code"))
     # Every successful RPC is a round-trip in which the agent "observed" the GUI;
-    # refresh the baseline so its own reads/writes are not later seen as stale by
-    # its own guarded ops. A concurrent (human) change between two RPCs lands
-    # after this refresh and so is correctly caught by the next guard.
-    _refresh_versions()
+    # refresh the guard baseline so its own writes are not later seen as stale by
+    # its own guarded ops. Split by method kind (see the _LAST_SEEN comment):
+    #   - a pure read we are SURE about (in _READ_REVEALS) refreshes ONLY the keys
+    #     it revealed, so reading resource Y leaves resource X's baseline alone —
+    #     a concurrent edit to X is then still caught by the next write to X.
+    #   - everything else (writes; reads we are not sure about) whole-table
+    #     refreshes: a write self-bumps the keys it touched, so re-reading the
+    #     whole table absorbs its own bump (self-block safe). Whole-table is
+    #     always safe; it only fails to *narrow* the read-absorption window.
+    if method in _READ_REVEALS:
+        _refresh_revealed_versions(method, params)
+    else:
+        _refresh_versions()
     result = dict(resp.get("result", {}))
     # A start op returns an ``operation_id``. The agent now holds it directly: it
     # is renamed to ``handle`` (an opaque token the agent feeds to gui_op_poll /
