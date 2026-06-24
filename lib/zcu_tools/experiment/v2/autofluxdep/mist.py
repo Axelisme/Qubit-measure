@@ -29,8 +29,8 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils import deepupdate
+from zcu_tools.utils.datasaver import save_labber_data
 from zcu_tools.utils.func_tools import MinIntervalFunc
-from zcu_tools.utils.labber_io import save_labber_data
 
 from .executor import FluxDepCfg, MeasurementTask, T_RootResult
 

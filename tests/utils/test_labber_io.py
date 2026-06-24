@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from zcu_tools.utils.labber_io import (
-    Channel,
+from zcu_tools.utils.datasaver import (
+    Axis,
     LabberData,
     load_labber_data,
     save_labber_data,
@@ -341,8 +341,8 @@ def test_labberdata_class_save_load(tmp_path):
     ld = LabberData(
         ("S21", "arb", z2d),
         axes=[
-            Channel("Frequency", "Hz", freq),
-            Channel("Power", "dBm", power),
+            Axis("Frequency", "Hz", freq),
+            Axis("Power", "dBm", power),
         ],
         comment="class test",
         tags=["cls"],

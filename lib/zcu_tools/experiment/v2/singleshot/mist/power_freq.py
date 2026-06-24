@@ -30,7 +30,7 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.labber_io import load_labber_data, save_labber_data
+from zcu_tools.utils.datasaver import load_labber_data, save_labber_data
 
 from ..util import calc_populations, correct_populations
 

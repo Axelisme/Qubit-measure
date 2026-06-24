@@ -13,7 +13,7 @@ Everything is described by ``(name, unit, values)`` triples.  Axes are listed
 **inner axis first** (the inner axis is the last axis of the data array)::
 
     import numpy as np
-    from labber_io import save_labber_data, load_labber_data
+    from zcu_tools.utils.datasaver import save_labber_data, load_labber_data
 
     freq  = np.linspace(4e9, 5e9, 201)
     power = np.linspace(-30, 0, 11)
@@ -48,15 +48,15 @@ Everything is described by ``(name, unit, values)`` triples.  Axes are listed
 :func:`save_labber_data` / :func:`load_labber_data` are thin wrappers around the
 :class:`LabberData` model, which can be used directly::
 
-    from labber_io import LabberData, Channel
+    from zcu_tools.utils.datasaver import Axis, LabberData
 
     ld = LabberData(("S21", "", z2d),
                     axes=[("Frequency","Hz",freq), ("Power","dBm",power)])
     ld.save("scan_2d")                 # == save_labber_data(...)
     ld = LabberData.load("scan_2d")    # == load_labber_data(...)
 
-:data:`Channel` is a ``namedtuple(name, unit, values)`` -- and therefore a plain
-3-tuple, so a ``(name, unit, values)`` triple and a ``Channel`` are
+:data:`Axis` is a ``namedtuple(name, unit, values)`` -- and therefore a plain
+3-tuple, so a ``(name, unit, values)`` triple and an ``Axis`` are
 interchangeable everywhere.
 
 Data-shape convention
@@ -75,7 +75,7 @@ all lengths match).
 
 Public API
 ----------
-* :data:`Channel`               -- ``(name, unit, values)`` namedtuple
+* :data:`Axis`                  -- ``(name, unit, values)`` namedtuple
 * :class:`LabberData`           -- the data model, with ``.save`` / ``.load``
 * :func:`save_labber_data`      -- save a uniform-grid scan (1-D / 2-D / N-D)
 * :func:`save_labber_trace_data`-- save variable-length / non-uniform traces
@@ -100,12 +100,21 @@ from __future__ import annotations
 
 import os
 import time
-from collections import namedtuple
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 import h5py
 import numpy as np
+
+from .models import (
+    Axis,
+    LabberData,
+    LabberMetadata,
+    LabberPayload,
+    as_tag_list,
+    unpack_triple,
+)
+from .paths import format_ext
 
 if TYPE_CHECKING:
     # array-like type alias (covers ndarray, list, tuple, scalars) for checkers
@@ -114,18 +123,14 @@ else:
     ArrayLike = Any
 
 __all__ = [
-    "Channel",
+    "Axis",
+    "LabberMetadata",
+    "LabberPayload",
     "LabberData",
     "save_labber_data",
     "save_labber_trace_data",
     "load_labber_data",
 ]
-
-
-#: A named ``(name, unit, values)`` triple describing a data channel or axis.
-#: ``Channel`` is a ``namedtuple``, so it is also a plain 3-tuple -- anywhere a
-#: ``(name, unit, values)`` tuple is accepted, a ``Channel`` works too.
-Channel = namedtuple("Channel", ["name", "unit", "values"])
 
 _VERSION = "1.8.6"
 _INSTR_STEP = "Generic - GPIB: , Step channels at localhost"
@@ -294,190 +299,6 @@ _DT_CHANNEL_NAMES = np.dtype([("name", _VLEN_STR), ("info", _VLEN_STR)])
 
 
 # ============================================================================
-# LabberData -- the data model (hub for save/load); see module docstring
-# ============================================================================
-
-
-class LabberData:
-    """In-memory model of a Labber log: one complex log channel over N axes.
-
-    This is the hub of the module: :meth:`save` writes it to an HDF5 file and
-    :meth:`load` reads one back, while the module-level :func:`save_labber_data`
-    / :func:`load_labber_data` functions are thin wrappers around them.
-
-    Parameters / attributes
-    -----------------------
-    data : Channel
-        The complex log channel as ``Channel(name, unit, values)``.  ``values``
-        is the data array, shaped ``(Nx,)`` / ``(Ny, Nx)`` / ``(Nw, Ny, Nx)`` /
-        ... (inner axis last), or a list of ragged arrays for variable-length
-        traces.
-    axes : list of Channel
-        One ``Channel(name, unit, values)`` per axis, **inner axis first**.
-    comment : str
-    tags : list of str
-    project, user : str
-    timestamps : np.ndarray or None
-        Per-entry absolute timestamps (epoch s).
-    creation_time : float or None
-        File creation time (epoch s).
-
-    Convenience read-only properties: ``x``/``y``/``w`` return the inner /
-    second / third axis *values*; ``z`` returns the data array (``data.values``).
-    Iterating a ``LabberData`` yields ``(z, x, y)``.  The ``get_log_channels`` /
-    ``get_step_channels`` / ``get_num_entries`` methods return the same dict
-    shapes as the original Labber ``LogFile`` API, for easy migration.
-
-    Examples
-    --------
-    >>> ld = LabberData(("S21", "", z2d),
-    ...                 axes=[("Frequency", "Hz", freq), ("Power", "dBm", power)],
-    ...                 comment="cooldown", tags=["q1"])
-    >>> ld.save("scan_2d")
-    >>> d = LabberData.load("scan_2d")
-    >>> d.data.values.shape          # (Npower, Nfreq)
-    >>> d.axes[0].name               # 'Frequency'
-    >>> d.z, d.x, d.y                # array shortcuts
-    """
-
-    __slots__ = (
-        "data",
-        "axes",
-        "comment",
-        "tags",
-        "project",
-        "user",
-        "timestamps",
-        "creation_time",
-    )
-
-    def __init__(
-        self,
-        data: Channel | tuple[str, str, Any],
-        axes: Sequence[Channel | tuple[str, str, Any]],
-        *,
-        comment: str = "",
-        tags: str | Sequence[str] | None = None,
-        project: str = "",
-        user: str = "",
-        timestamps: Any = None,
-        creation_time: float | None = None,
-    ) -> None:
-        self.data: Channel = _as_channel(data, "data")
-        self.axes: list[Channel] = [
-            _as_channel(a, f"axes[{i}]") for i, a in enumerate(axes)
-        ]
-        self.comment = comment
-        self.tags = _as_tag_list(tags)
-        self.project = project
-        self.user = user
-        self.timestamps = timestamps
-        self.creation_time = creation_time
-
-    # -- convenience accessors -------------------------------------------------
-    @property
-    def z(self) -> Any:
-        """The data array (alias for ``self.data.values``)."""
-        return self.data.values
-
-    @property
-    def x(self) -> Any:
-        """Inner-axis values, or None."""
-        return self.axes[0].values if len(self.axes) >= 1 else None
-
-    @property
-    def y(self) -> Any:
-        """Second-axis values, or None."""
-        return self.axes[1].values if len(self.axes) >= 2 else None
-
-    @property
-    def w(self) -> Any:
-        """Third-axis values, or None."""
-        return self.axes[2].values if len(self.axes) >= 3 else None
-
-    def __iter__(self):
-        """Unpack as ``z, x, y`` (matches the old ``load_local_data`` API)."""
-        return iter((self.z, self.x, self.y))
-
-    def get_log_channels(self) -> list[dict[str, Any]]:
-        """Labber-style list of log-channel dicts (``name``/``unit``/...)."""
-        vals = self.data.values
-        complex_ = bool(
-            np.iscomplexobj(np.asarray(vals[0] if isinstance(vals, list) else vals))
-        )
-        return [
-            {
-                "name": self.data.name,
-                "unit": self.data.unit,
-                "complex": complex_,
-                "vector": isinstance(vals, list),
-            }
-        ]
-
-    def get_step_channels(self) -> list[dict[str, Any]]:
-        """Labber-style list of step-channel dicts, inner axis first."""
-        return [
-            {
-                "name": a.name,
-                "unit": a.unit,
-                "values": np.asarray(a.values),
-                "complex": False,
-                "vector": False,
-            }
-            for a in self.axes
-        ]
-
-    def get_num_entries(self) -> int:
-        """Number of stored entries (product of the outer axis lengths)."""
-        vals = self.data.values
-        if isinstance(vals, list):
-            return len(vals)
-        if getattr(vals, "ndim", 1) <= 1:
-            return 1
-        return int(np.prod(vals.shape[:-1]))
-
-    # -- I/O -------------------------------------------------------------------
-    def save(self, path: str) -> str:
-        """Write this dataset to a Labber-compatible HDF5 file.
-
-        ``.hdf5`` is appended to ``path`` if missing (``.h5`` -> ``.hdf5``).
-        Routes to the variable-length ``Traces/`` writer when ``data.values``
-        is a list of arrays (ragged traces), else to the uniform-grid writer.
-        Returns the path actually written.
-
-        Equivalent to the free function :func:`save_labber_data` (or
-        :func:`save_labber_trace_data` for ragged traces).
-        """
-        if isinstance(self.data.values, list):
-            return _save_labber_trace_data(path, self)
-        return _save_labber_data(path, self)
-
-    @classmethod
-    def load(cls, path: str) -> LabberData:
-        """Load a :class:`LabberData` from a Labber HDF5 file.
-
-        Accepts a path with or without the ``.hdf5`` extension.  Reads every log
-        config in the file (root + ``Log_2``, ``Log_3`` ...); multiple logs that
-        share identical axes are stacked along a new leading axis of
-        ``data.values``.  Equivalent to the free function
-        :func:`load_labber_data`.
-        """
-        return _load_labber_data(path)
-
-    def __repr__(self) -> str:
-        vals = self.data.values
-        shape = (
-            f"[{len(vals)} ragged]"
-            if isinstance(vals, list)
-            else (None if vals is None else vals.shape)
-        )
-        return (
-            f"LabberData(data={self.data.name!r} shape={shape}, "
-            f"axes={[a.name for a in self.axes]!r}, tags={self.tags!r})"
-        )
-
-
-# ============================================================================
 # WRITE -- public save functions (thin wrappers) + private _save_* / _write_*
 # ============================================================================
 
@@ -547,6 +368,53 @@ def save_labber_data(
 
 def _save_labber_data(path: str, ld: LabberData) -> str:
     """Core writer for uniform-grid data (the ``Data/Data`` scalar layout)."""
+    path = format_ext(path)
+    log_name = os.path.splitext(os.path.basename(path))[0]
+
+    with h5py.File(path, "w") as f:
+        _write_uniform_log_group(f, ld, log_name=log_name, write_tags=True)
+
+    return path
+
+
+def _write_payload_to_log(
+    target: h5py.File | h5py.Group,
+    payload: LabberPayload,
+    metadata: LabberMetadata,
+    *,
+    log_name: str,
+    creation_time: float | None = None,
+    write_tags: bool = False,
+) -> None:
+    data = LabberData(payload=payload, metadata=metadata)
+    if isinstance(data.data.values, list):
+        _write_trace_log_group(
+            target,
+            data,
+            log_name=log_name,
+            creation_time=creation_time,
+            write_tags=write_tags,
+        )
+        return
+
+    _write_uniform_log_group(
+        target,
+        data,
+        log_name=log_name,
+        creation_time=creation_time,
+        write_tags=write_tags,
+    )
+
+
+def _write_uniform_log_group(
+    target: h5py.File | h5py.Group,
+    ld: LabberData,
+    *,
+    log_name: str,
+    creation_time: float | None = None,
+    write_tags: bool = False,
+) -> None:
+    """Write uniform-grid data into an open root or ``Log_N`` group."""
     z_name, z_unit, z_values = ld.data
     z_arr = np.asarray(z_values, dtype=complex)
 
@@ -567,9 +435,6 @@ def _save_labber_data(path: str, ld: LabberData) -> str:
                 f"axis '{nm}' length {val.shape[0]} != z dim {inner_to_outer_dims[k]}"
             )
 
-    path = _format_ext(path)
-    log_name = os.path.splitext(os.path.basename(path))[0]
-
     n_x = z_arr.shape[-1]
     # Step dimensions are inner-first: [Nx, Ny, Nw, ...].
     step_dims = np.array([a[2].shape[0] for a in axis_list], dtype=np.int64)
@@ -577,47 +442,22 @@ def _save_labber_data(path: str, ld: LabberData) -> str:
     n_entry = int(np.prod(step_dims[1:])) if len(step_dims) > 1 else 1
 
     log_channels = [(z_name, z_unit)]
-    t0, ts_rel = _resolve_timestamps(ld.timestamps, n_entry)
+    t0, ts_rel = _resolve_timestamps(
+        ld.timestamps,
+        n_entry,
+        ld.creation_time if creation_time is None else creation_time,
+    )
 
-    with h5py.File(path, "w") as f:
-        _write_root_attrs(f, log_name, step_dims, ld.comment, t0)
-        _write_config(f, axis_list, log_channels)
-        _write_tags(f, _as_tag_list(ld.tags), ld.project, ld.user)
-        _write_data_group(
-            f, axis_list, log_channels, step_dims, z_arr, n_entry, n_x, ts_rel
-        )
-
-    return path
-
-
-def _as_tag_list(tags):
-    if tags is None:
-        return []
-    if isinstance(tags, str):
-        return [tags]
-    return list(tags)
+    _write_root_attrs(target, log_name, step_dims, ld.comment, t0)
+    _write_config(target, axis_list, log_channels)
+    if write_tags:
+        _write_tags(target, as_tag_list(ld.tags), ld.project, ld.user)
+    _write_data_group(
+        target, axis_list, log_channels, step_dims, z_arr, n_entry, n_x, ts_rel
+    )
 
 
-def _unpack_triple(triple, what: str) -> tuple[str, str, Any]:
-    """Validate and unpack a ``(name, unit, values)`` triple."""
-    try:
-        name, unit, values = triple
-    except (TypeError, ValueError):
-        raise ValueError(
-            f"`{what}` must be a (name, unit, values) tuple, got {triple!r}"
-        )
-    return str(name), str(unit), values
-
-
-def _as_channel(triple, what: str) -> Channel:
-    """Coerce a ``(name, unit, values)`` tuple (or Channel) into a Channel."""
-    if isinstance(triple, Channel):
-        return Channel(str(triple.name), str(triple.unit), triple.values)
-    name, unit, values = _unpack_triple(triple, what)
-    return Channel(name, unit, values)
-
-
-def _resolve_timestamps(timestamps, n_entry):
+def _resolve_timestamps(timestamps, n_entry, creation_time: float | None = None):
     """Return ``(t0, ts_rel)`` for the file's Time stamp datasets.
 
     Labber stores per-entry timestamps *relative* to a base ``creation_time``
@@ -625,7 +465,7 @@ def _resolve_timestamps(timestamps, n_entry):
     ``time.time()`` when none is given), and store the rest as offsets.
     """
     if timestamps is None:
-        t0 = time.time()
+        t0 = time.time() if creation_time is None else float(creation_time)
         return t0, np.zeros(n_entry, dtype=float)
     ts_abs = np.asarray(timestamps, dtype=float).ravel()
     if ts_abs.shape[0] != n_entry:
@@ -633,7 +473,7 @@ def _resolve_timestamps(timestamps, n_entry):
             f"len(timestamps) ({ts_abs.shape[0]}) must equal "
             f"number of entries ({n_entry})"
         )
-    t0 = float(ts_abs[0])
+    t0 = float(ts_abs[0]) if creation_time is None else float(creation_time)
     return t0, ts_abs - t0
 
 
@@ -687,7 +527,7 @@ def save_labber_trace_data(
     str
         The path actually written.
     """
-    z_name, z_unit, traces = _unpack_triple(z, "z")
+    z_name, z_unit, traces = unpack_triple(z, "z")
     # store the trace list as data.values; LabberData.save() detects the list
     # and routes to the trace writer.  x keeps its per-trace-or-shared values.
     axes = [x] if y is None else [x, y]
@@ -704,6 +544,24 @@ def save_labber_trace_data(
 
 def _save_labber_trace_data(path: str, ld: LabberData) -> str:
     """Core writer for variable-length traces (the ``Traces/`` layout)."""
+    path = format_ext(path)
+    log_name = os.path.splitext(os.path.basename(path))[0]
+
+    with h5py.File(path, "w") as f:
+        _write_trace_log_group(f, ld, log_name=log_name, write_tags=True)
+
+    return path
+
+
+def _write_trace_log_group(
+    target: h5py.File | h5py.Group,
+    ld: LabberData,
+    *,
+    log_name: str,
+    creation_time: float | None = None,
+    write_tags: bool = False,
+) -> None:
+    """Write variable-length trace data into an open root or ``Log_N`` group."""
     z_name, z_unit, traces = ld.data
     x_name, x_unit, x_values = ld.axes[0]
 
@@ -735,9 +593,6 @@ def _save_labber_trace_data(path: str, ld: LabberData) -> str:
     else:
         y_name, y_unit, y_vals = "", "", None
 
-    path = _format_ext(path)
-    log_name = os.path.splitext(os.path.basename(path))[0]
-
     # Step dimensions: inner is variable (=1), then the outer entry axis.
     if has_outer:
         step_dims = np.array([1, n_entry], dtype=np.int64)
@@ -747,26 +602,28 @@ def _save_labber_trace_data(path: str, ld: LabberData) -> str:
         step_channels = [(_STEP_NAME_API, "", None)]
     log_channels = [(z_name, z_unit)]
 
-    t0, ts_rel = _resolve_timestamps(ld.timestamps, n_entry)
+    t0, ts_rel = _resolve_timestamps(
+        ld.timestamps,
+        n_entry,
+        ld.creation_time if creation_time is None else creation_time,
+    )
 
-    with h5py.File(path, "w") as f:
-        _write_root_attrs(f, log_name, step_dims, ld.comment, t0)
-        _write_config(
-            f,
-            step_channels,
-            log_channels,
-            log_vector=True,
-            trace_x_name=x_name,
-            trace_x_unit=x_unit,
-        )
-        _write_tags(f, _as_tag_list(ld.tags), ld.project, ld.user)
-        # Data/ holds only the (dummy + outer) step columns, no z
-        _write_trace_data_stub(f, step_channels, step_dims, y_vals, n_entry, ts_rel)
-        _write_traces_group(
-            f, z_name, trace_list, x_list, x_name, x_unit, n_entry, ts_rel
-        )
-
-    return path
+    _write_root_attrs(target, log_name, step_dims, ld.comment, t0)
+    _write_config(
+        target,
+        step_channels,
+        log_channels,
+        log_vector=True,
+        trace_x_name=x_name,
+        trace_x_unit=x_unit,
+    )
+    if write_tags:
+        _write_tags(target, as_tag_list(ld.tags), ld.project, ld.user)
+    # Data/ holds only the (dummy + outer) step columns, no z
+    _write_trace_data_stub(target, step_channels, step_dims, y_vals, n_entry, ts_rel)
+    _write_traces_group(
+        target, z_name, trace_list, x_list, x_name, x_unit, n_entry, ts_rel
+    )
 
 
 def _is_sequence_of_arrays(x) -> bool:
@@ -775,14 +632,6 @@ def _is_sequence_of_arrays(x) -> bool:
         first = x[0]
         return isinstance(first, (list, tuple, np.ndarray))
     return False
-
-
-def _format_ext(path: str) -> str:
-    if path.lower().endswith(".h5"):
-        return path[:-3] + ".hdf5"
-    if path.lower().endswith(".hdf5"):
-        return path
-    return path + ".hdf5"
 
 
 def _write_root_attrs(f, log_name, step_dims, comment, t0):
@@ -1133,6 +982,11 @@ def _load_labber_data(path: str) -> LabberData:
     path = _resolve_path(path)
 
     with h5py.File(path, "r") as f:
+        if "zcu_tools.grouped_dataset_version" in f.attrs:
+            raise ValueError(
+                "file is a grouped Labber dataset; use load_grouped_labber_data"
+            )
+
         comment = _decode(f.attrs.get("comment", "")) or ""
         tags, project, user = _read_tags(f)
         creation_time = float(f.attrs.get("creation_time", 0.0) or 0.0)
@@ -1160,8 +1014,8 @@ def _load_labber_data(path: str) -> LabberData:
     timestamps = None if ts_rel is None else (creation_time + np.asarray(ts_rel))
 
     return LabberData(
-        data=Channel(z_name, z_unit, z),
-        axes=[Channel(n, u, v) for n, u, v in axes0],
+        data=Axis(z_name, z_unit, z),
+        axes=[Axis(n, u, v) for n, u, v in axes0],
         comment=comment,
         tags=tags,
         project=project,
@@ -1174,7 +1028,7 @@ def _load_labber_data(path: str) -> LabberData:
 def _resolve_path(path: str) -> str:
     if os.path.exists(path):
         return path
-    cand = _format_ext(path)
+    cand = format_ext(path)
     return cand if os.path.exists(cand) else path
 
 
