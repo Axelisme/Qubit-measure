@@ -1,76 +1,83 @@
 {
-  "mcpServers": {
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
     "measure-gui": {
-      "type": "stdio",
-      "command": "uv",
-      "args": [
+      "type": "local",
+      "command": [
+        "uv",
         "run",
         "--extra",
         "gui",
         "python",
         "lib/zcu_tools/mcp/measure/server.py"
       ],
-      "env": {}
+      "enabled": true,
+      "environment": {}
     },
     "fluxdep-gui": {
-      "type": "stdio",
-      "command": "uv",
-      "args": [
+      "type": "local",
+      "command": [
+        "uv",
         "run",
         "--extra",
         "gui",
         "python",
         "lib/zcu_tools/mcp/fluxdep/server.py"
       ],
-      "env": {}
+      "enabled": true,
+      "environment": {}
     },
     "dispersive-gui": {
-      "type": "stdio",
-      "command": "uv",
-      "args": [
+      "type": "local",
+      "command": [
+        "uv",
         "run",
         "--extra",
         "gui",
         "python",
         "lib/zcu_tools/mcp/dispersive/server.py"
       ],
-      "env": {}
+      "enabled": true,
+      "environment": {}
     },
     "autofluxdep-gui": {
-      "type": "stdio",
-      "command": "uv",
-      "args": [
+      "type": "local",
+      "command": [
+        "uv",
         "run",
         "--extra",
         "gui",
         "python",
         "lib/zcu_tools/mcp/autofluxdep/server.py"
       ],
-      "env": {}
+      "enabled": true,
+      "environment": {}
     },
     "agent-memory": {
-      "type": "stdio",
-      "command": "uv",
-      "args": [
+      "type": "local",
+      "command": [
+        "uv",
         "run",
         "--extra",
         "client",
         "python",
         "lib/zcu_tools/mcp/agent_memory/server.py"
       ],
-      "env": {}
+      "enabled": true,
+      "environment": {}
     },
     "taskboard": {
-      "type": "stdio",
-      "command": "uv",
-      "args": [
+      "type": "local",
+      "command": [
+        "uv",
         "run",
         "--extra",
         "client",
         "python",
         "lib/zcu_tools/mcp/taskboard/server.py"
       ],
-      "env": {}
+      "enabled": true,
+      "environment": {}
     }
   }
 }

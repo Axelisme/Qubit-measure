@@ -1,0 +1,141 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["AGENTS.md"],
+  "agent": {
+    "mcp-skill-tester": {
+      "description": "Exercises MCP tools and their associated skills end-to-end during development, validating behavior and gathering structured usability feedback.",
+      "mode": "subagent",
+      "color": "warning",
+      "options": {
+        "claude_model": "sonnet",
+        "claude_memory": "project",
+        "source": ".agents/agents/mcp-skill-tester.md"
+      }
+    }
+  },
+  "mcp": {
+    "measure-gui": {
+      "type": "local",
+      "command": [
+        "uv",
+        "run",
+        "--extra",
+        "gui",
+        "python",
+        "lib/zcu_tools/mcp/measure/server.py"
+      ],
+      "enabled": true,
+      "environment": {}
+    },
+    "fluxdep-gui": {
+      "type": "local",
+      "command": [
+        "uv",
+        "run",
+        "--extra",
+        "gui",
+        "python",
+        "lib/zcu_tools/mcp/fluxdep/server.py"
+      ],
+      "enabled": true,
+      "environment": {}
+    },
+    "dispersive-gui": {
+      "type": "local",
+      "command": [
+        "uv",
+        "run",
+        "--extra",
+        "gui",
+        "python",
+        "lib/zcu_tools/mcp/dispersive/server.py"
+      ],
+      "enabled": true,
+      "environment": {}
+    },
+    "autofluxdep-gui": {
+      "type": "local",
+      "command": [
+        "uv",
+        "run",
+        "--extra",
+        "gui",
+        "python",
+        "lib/zcu_tools/mcp/autofluxdep/server.py"
+      ],
+      "enabled": true,
+      "environment": {}
+    },
+    "agent-memory": {
+      "type": "local",
+      "command": [
+        "uv",
+        "run",
+        "--extra",
+        "client",
+        "python",
+        "lib/zcu_tools/mcp/agent_memory/server.py"
+      ],
+      "enabled": true,
+      "environment": {}
+    },
+    "taskboard": {
+      "type": "local",
+      "command": [
+        "uv",
+        "run",
+        "--extra",
+        "client",
+        "python",
+        "lib/zcu_tools/mcp/taskboard/server.py"
+      ],
+      "enabled": true,
+      "environment": {}
+    }
+  },
+  "permission": {
+    "bash": {
+      "*": "ask",
+      "python *": "allow",
+      "python3 *": "allow",
+      ".venv/bin/python *": "allow",
+      ".venv/bin/python3 *": "allow",
+      ".venv/bin/pytest *": "allow",
+      ".venv/bin/pyright *": "allow",
+      "~/.local/bin/pyright *": "allow",
+      ".venv/bin/ruff *": "allow",
+      "git status *": "allow",
+      "git stash *": "allow",
+      "git diff *": "allow",
+      "git pull *": "allow",
+      "git add *": "allow",
+      "sed *": "allow",
+      "ruff *": "allow",
+      "npx *": "allow",
+      "uvx *": "allow",
+      "uv *": "allow",
+      "grep *": "allow",
+      "pgrep *": "allow",
+      "find *": "allow",
+      "ln *": "allow",
+      "pip *": "allow",
+      "cat *": "allow",
+      "mkdir *": "allow",
+      "ls *": "allow",
+      "cd *": "allow",
+      "echo *": "allow",
+      "wc *": "allow"
+    },
+    "skill": {
+      "*": "ask",
+      "planning-with-files:planning-with-files": "allow",
+      "planning-with-files:planning-with-files-zh": "allow"
+    },
+    "websearch": "allow",
+    "mcp__measure-gui": "allow",
+    "mcp__fluxdep-gui": "allow",
+    "mcp__agent-memory": "allow",
+    "mcp__dispersive-gui": "allow",
+    "mcp__taskboard": "allow"
+  }
+}
