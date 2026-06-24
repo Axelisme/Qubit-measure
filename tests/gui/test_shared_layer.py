@@ -38,6 +38,9 @@ _SHARED_MODULES = [
     # The Controller port the shared dialogs depend on — pure Protocol, all
     # collaborator types are TYPE_CHECKING-only.
     "zcu_tools.gui.session.controller_port",
+    # The shared body of that port (identical service-forward methods); same
+    # import-clean invariant — every service/request type is TYPE_CHECKING-only.
+    "zcu_tools.gui.session.controller_mixin",
     # The worker-side progress bar + main-thread bar model are Qt-free (the Qt
     # marshal lives in a driven adapter); only the ProgressStack widget pulls Qt.
     "zcu_tools.gui.session.pbar_host",

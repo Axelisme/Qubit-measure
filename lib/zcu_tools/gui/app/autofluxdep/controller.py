@@ -15,7 +15,7 @@ dependency model.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from zcu_tools.gui.app.autofluxdep.derivation import DerivationService
@@ -54,39 +54,18 @@ from zcu_tools.gui.app.autofluxdep.tools import (
 )
 from zcu_tools.gui.background import BackgroundRunner
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.session.controller_mixin import SessionControllerMixin
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.services.build import build_session_services
 from zcu_tools.gui.session.services.io_manager import IOManager
 from zcu_tools.gui.session.services.progress import ProgressService
 
 if TYPE_CHECKING:
-    from zcu_tools.device.base import BaseDeviceInfo
-    from zcu_tools.gui.session.pbar_host import ProgressBarModel
     from zcu_tools.gui.session.ports import ProgressTransport
-    from zcu_tools.gui.session.services.connection import ConnectRequest
-    from zcu_tools.gui.session.services.device import (
-        ConnectDeviceRequest,
-        DeviceEntry,
-        DeviceSnapshot,
-        DisconnectDeviceRequest,
-        SetupDeviceRequest,
-    )
-    from zcu_tools.gui.session.services.predictor import (
-        LoadPredictorRequest,
-        PredictCurveRequest,
-        PredictCurveResult,
-        PredictFreqRequest,
-        PredictMatrixCurveRequest,
-        PredictMatrixCurveResult,
-        SetModelParamsRequest,
-    )
     from zcu_tools.gui.session.services.startup import (
-        PersistedStartup,
-        StartupConnectionRequest,
         StartupProjectRequest,
     )
-    from zcu_tools.gui.session.types import SocCfgHandle
-    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+    from zcu_tools.meta_tool import ModuleLibrary
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +97,7 @@ class _MlModuleSource:
         return getattr(self._ml, attr)
 
 
-class Controller:
+class Controller(SessionControllerMixin):
     def __init__(
         self,
         state: AutoFluxDepState,
@@ -205,164 +184,26 @@ class Controller:
 
     # ------------------------------------------------------------------
     # SessionControllerPort — the surface the shared setup / device / inspect
-    # dialogs depend on (gui/session/controller_port). Each method delegates to
-    # a session service; the dialogs never reach a concrete service, only this
-    # Protocol. pyright verifies conformance at the dialog call sites (S4-c).
+    # dialogs depend on (gui/session/controller_port). The identical forwards live
+    # in SessionControllerMixin (read through the _*_svc accessors, supplied below
+    # in __init__); only the methods whose body diverges are kept here. pyright
+    # verifies conformance at the dialog call sites.
     # ------------------------------------------------------------------
 
     def get_bus(self) -> EventBus:
         return self._bus
 
     # -- setup dialog: project / startup --
+    # apply_startup_project diverges (autofluxdep returns bool; measure returns the
+    # resolved-project dict per WIRE-44) so it stays a per-app override. get_bus /
+    # get_project_root also stay per-app (app EventBus subtype / app state). Every
+    # other SessionControllerPort forward lives in SessionControllerMixin.
     def apply_startup_project(self, req: StartupProjectRequest) -> bool:
         self._startup_svc.apply_project(req)
         return True
 
-    def get_persisted_startup(self) -> PersistedStartup:
-        return self._startup_svc.get_persisted()
-
     def get_project_root(self) -> str:
         return self._project_root
-
-    # -- setup dialog: context switching --
-    def use_context(self, label: str) -> None:
-        self._ctx_svc.use_context(label)
-
-    def new_context(
-        self,
-        bind_device: str | None = None,
-        clone_from: str | None = None,
-    ) -> None:
-        """Create a new flux context, optionally bound to a flux device.
-
-        ``bind_device`` (a connected device name) decides the flux unit/value:
-        the unit comes from the device-type whitelist (Fast-Fail if unknown) and
-        the value is *read* from the device's current state (never set).
-        ``bind_device=None`` makes an unbound context. ``clone_from`` clones an
-        existing context's ml/md.
-        """
-        if bind_device is not None:
-            unit = self._dev_svc.get_device_unit_strict(bind_device)
-            value = self._dev_svc.get_device_value_for_new_context(bind_device)
-        else:
-            unit, value = "none", None
-        self._ctx_svc.new_context(value=value, unit=unit, clone_from=clone_from)
-
-    def get_context_labels(self) -> list[str]:
-        return self._ctx_svc.get_context_labels()
-
-    def get_active_context_label(self) -> str | None:
-        return self._ctx_svc.get_active_context_label()
-
-    # -- setup dialog: connection --
-    def start_connect(self, req: ConnectRequest) -> int:
-        return self._soc_svc.start_connect(req)
-
-    def bind_connection_outcome(
-        self,
-        on_finished: Callable[[], None],
-        on_failed: Callable[[str], None],
-    ) -> None:
-        """Bind the single connection observer (the open SetupDialog) without
-        exposing the service. Drops all prior slots first so a re-created dialog
-        does not leak the previous observer (a no-arg ``disconnect()`` clears
-        every connection)."""
-        for signal in (
-            self._soc_svc.connection_finished,
-            self._soc_svc.connection_failed,
-        ):
-            try:
-                signal.disconnect()
-            except (TypeError, RuntimeError):
-                pass  # no existing connections
-        self._soc_svc.connection_finished.connect(on_finished)
-        self._soc_svc.connection_failed.connect(on_failed)
-
-    def remember_startup_connection(self, req: StartupConnectionRequest) -> None:
-        self._startup_svc.remember_connection(req)
-
-    def get_soccfg(self) -> SocCfgHandle | None:
-        return self._soc_svc.get_soccfg()
-
-    def get_device_unit(self, name: str) -> str:
-        return self._dev_svc.get_device_unit(name)
-
-    # -- predictor dialog: load / clear / predict (the shared PredictorDialog) --
-    def load_predictor(self, req: LoadPredictorRequest) -> None:
-        self._pred_svc.load_predictor(req)
-
-    def set_predictor_model_params(self, req: SetModelParamsRequest) -> None:
-        self._pred_svc.set_model_params(req)
-
-    def clear_predictor(self) -> None:
-        self._pred_svc.clear_predictor()
-
-    def predict_freq(self, req: PredictFreqRequest) -> float:
-        return self._pred_svc.predict_freq(req)
-
-    def predict_freq_curve(self, req: PredictCurveRequest) -> PredictCurveResult:
-        return self._pred_svc.predict_freq_curve(req)
-
-    def predict_matrix_element_curve(
-        self, req: PredictMatrixCurveRequest
-    ) -> PredictMatrixCurveResult:
-        return self._pred_svc.predict_matrix_element_curve(req)
-
-    def get_predictor_info(self) -> dict | None:
-        return self._pred_svc.get_predictor_info()
-
-    # -- device dialog: lifecycle --
-    def start_connect_device(self, req: ConnectDeviceRequest) -> int:
-        return self._dev_svc.start_connect_device(req)
-
-    def start_disconnect_device(self, req: DisconnectDeviceRequest) -> int:
-        return self._dev_svc.start_disconnect_device(req)
-
-    def start_reconnect_device(self, name: str) -> int:
-        return self._dev_svc.start_reconnect_device(name)
-
-    def start_setup_device(self, req: SetupDeviceRequest) -> int:
-        return self._dev_svc.start_setup_device(req)
-
-    def forget_device(self, name: str) -> None:
-        self._dev_svc.forget_device(name)
-
-    def cancel_device_operation(self, name: str) -> None:
-        self._dev_svc.cancel_device_operation(name)
-
-    # -- device dialog: queries --
-    def list_devices(self) -> list[DeviceEntry]:
-        return self._dev_svc.list_devices()
-
-    def get_device_snapshot(self, name: str) -> DeviceSnapshot | None:
-        return self._dev_svc.get_device_snapshot(name)
-
-    def get_device_info(self, name: str) -> BaseDeviceInfo | None:
-        return self._dev_svc.get_device_info(name)
-
-    def poll_device_info(self, name: str) -> None:
-        # Dialog-scoped off-main live-read (best-effort); result flows back via
-        # DEVICE_CHANGED. DeviceService owns the worker/main-thread split.
-        self._dev_svc.poll_device_info(name)
-
-    def is_memory_device(self, name: str) -> bool:
-        return self._dev_svc.is_memory_device(name)
-
-    # -- device dialog: progress --
-    def attach_progress(
-        self, owner_id: str, listener: Callable[[], None]
-    ) -> Callable[[], None]:
-        return self._progress_svc.attach_by_owner(owner_id, listener)
-
-    def progress_bars(self, owner_id: str) -> tuple[tuple[int, ProgressBarModel], ...]:
-        return self._progress_svc.bars_for_owner(owner_id)
-
-    # -- inspect dialog: md edit + ml view/rename/delete --
-    def get_current_md(self) -> MetaDict:
-        return self._ctx_svc.get_current_md()
-
-    def get_current_ml(self) -> ModuleLibrary:
-        return self._ctx_svc.get_current_ml()
 
     # -- cfg form (node detail pane): the LiveModel env contract --
     # The reused measure LiveModel fields fetch their environment through this
@@ -375,27 +216,6 @@ class Controller:
 
     def list_device_names(self) -> list[str]:
         return [entry.name for entry in self._dev_svc.list_devices()]
-
-    def coerce_md_value(self, key: str, text: str) -> Any:
-        return self._ctx_svc.coerce_md_value(key, text)
-
-    def set_md_attr(self, key: str, value: Any) -> None:
-        self._ctx_svc.set_md_attr(key, value)
-
-    def del_md_attr(self, key: str) -> None:
-        self._ctx_svc.del_md_attr(key)
-
-    def rename_ml_module(self, old: str, new: str) -> None:
-        self._ctx_svc.rename_ml_module(old, new)
-
-    def rename_ml_waveform(self, old: str, new: str) -> None:
-        self._ctx_svc.rename_ml_waveform(old, new)
-
-    def del_ml_module(self, name: str) -> None:
-        self._ctx_svc.del_ml_module(name)
-
-    def del_ml_waveform(self, name: str) -> None:
-        self._ctx_svc.del_ml_waveform(name)
 
     # --- workflow definition (the only writes the user makes) ---
 
