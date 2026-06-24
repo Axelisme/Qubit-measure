@@ -1,6 +1,6 @@
 # QICK Note for `experiment/v2`
 
-**Last updated:** 2026-06-24（rounded sweep zero-step fast-fail）
+**Last updated:** 2026-06-24（持久化改走 PersistableExperiment + AxesSpec；MultiMeasurementExecutor 共用基底）
 
 這份筆記整理 `experiment/v2/` 的整體設計，說明 Experiment 層與 Task 層的分工、典型實驗的撰寫範本，以及各子模組的角色。`runner/` 的細節另見 `runner/README.md`。
 
@@ -10,10 +10,11 @@
 
 `experiment/v2/` 有兩層抽象，分別解決不同問題：
 
-- `Experiment` 層：`AbsExperiment[T_Result, T_Config]`（`experiment/base.py`）
-  - 對外 API：`run` / `analyze` / `save` / `load`
-  - 在 `last_result` 上保留最後一次結果（不保留 `last_cfg`）
-- `Task` 層：`AbsTask` / `Task` / `BatchTask` / `Scan` / `RepeatOverTime`（`runner/`）
+- `Experiment` 層（`experiment/base.py`）
+  - `AbsExperiment[T_Result, T_Config]`：最小基底，只提供 `last_result` 快取（不保留 `last_cfg`），`run` / `analyze` 由各子類別自行實作。
+  - `PersistableExperiment[T_Result, T_Config]`：opt-in 持久化基底，宣告 class-level `AXES_SPEC`（`AxesSpec`）後即繼承共用的 `save()` / `load()`（見「持久化」一節）。
+  - `ExperimentProtocol`：結構性合約（runtime_checkable），描述所有實驗共有的 `last_result` / `run` / `analyze` / `save` / `load` 表面，刻意開放讓實驗自行擴充方法。
+- `Task` 層：`AbsTask` / `Task` / `BatchTask` / `RetryBatchTask` / `Scan` / `RepeatOverTime`（`runner/`）
   - 內部執行樹：驅動硬體、更新 liveplot、串接 sweep/repeat/retry
 
 Experiment 是使用者（notebook）呼叫的入口；Task 是 Experiment 內部組裝出的執行樹。多數 `*Exp` 類別在 `run()` 裡組一棵 Task tree，然後交給 `run_task()` 執行。
@@ -46,14 +47,31 @@ experiment/v2/
 class AbsExperiment(Generic[T_Result, T_Config]):
     def __init__(self) -> None:
         self.last_result: Optional[T_Result] = None
-    # run / analyze / save / load 均由各子類別自行實作，非 abstract method
+    # 最小基底：只有 last_result 快取；run / analyze 由各子類別實作。
+    # 持久化（save / load）改由 PersistableExperiment 提供（見「持久化」一節）。
 ```
 
-- **`T_Result`**：每個實驗各自定義的結果型別，為 `@dataclass(frozen=True)`。包含 `cfg_snapshot: Optional[T_Config] = None` 屬性。
+- **`T_Result`**：每個實驗各自定義的結果型別，為 `@dataclass(frozen=True)`。必須宣告 `cfg_snapshot: Optional[T_Config] = None` 欄位。
 - **`run()`** 的呼叫慣例：`exp.run(soc, soccfg, cfg)`，回傳 `T_Result` 實例。
 - **`last_result`**：`run()` 結束後寫入；`analyze` / `save` 可以省略 `result` 參數直接吃最後一次結果。`last_result` 內部攜帶 `cfg_snapshot` 屬性。不另外提供 `last_cfg` 屬性。
+- **`last_result` 記帳由 decorator DRY**：`record_result`（套在 `run` / `load`）把回傳值寫入 `self.last_result`；`retrieve_result`（套在 `analyze` / `save`）在 `result` 參數為 `None` 時回退到 `self.last_result`（依參數名定位，與其在簽名中的位置無關）。
 - **解包與存取**：所有對 Result 物件的存取均採用屬性存取（Property access，例如 `result.freqs`、`result.signals`），不可直接解包為 tuple。
-- **`save` 格式**：`save()` 方法中不再定義 `cfg` 參數。直接自 `result.cfg_snapshot` 讀取，當 `result.cfg_snapshot` 為 `None` 時拋出 `ValueError`。儲存走 `zcu_tools.utils.datasaver.save_data`，`x_info` / `z_info` 用 SI 單位（Hz、s），內部計算用習慣單位（MHz、us）。`load` 會做單位反轉。
+
+---
+
+## 持久化：PersistableExperiment + AxesSpec（ADR-0027）
+
+實驗量測資料的存取走 **labber_io 原生 axes-list**，不再經 datasaver 的 dict 殼（`save_data` / `load_data` 已刪除）。
+
+- **opt-in 基底**：要有持久化的實驗繼承 `PersistableExperiment[T_Result, T_Config]`（而非 `AbsExperiment`），並在類別層宣告 `AXES_SPEC`，即繼承共用的 `save()` / `load()`。未遷移的實驗留在最小的 `AbsExperiment` 上、各自保留不相容的 save/load 簽名。
+- **宣告式 spec**（`experiment/axes_spec.py`）：
+  - `AxesSpec(axes, z, result_type, cfg_type, tag)` — `axes` 是 `tuple[Axis, ...]`、`z` 是 `ZSpec`、`result_type` 是 frozen Result dataclass、`cfg_type` 是該實驗 Cfg、`tag` 是有層次的 on-disk tag（如 `"onetone/freq"`）。建構時 Fast-Fail：spec 引用的 `field_name` 必須是 Result 真實欄位，且 Result 必須有 `cfg_snapshot` 欄位。
+  - `Axis(field_name, label, unit, scale=IDENTITY, dtype=np.float64)` — 把 Result 的某個軸欄位映到 on-disk channel；`scale` 帶 SI 單位轉換（`disk = memory * scale`），常數 `IDENTITY` / `MHZ_TO_HZ` / `US_TO_S`（頻率存 Hz、時間存 s，記憶體內仍是 MHz / us）。
+  - `ZSpec(field_name, label, unit, dtype=np.complex128)` — log（z）channel。
+- **inner-first 軸序慣例**：`axes` 以 inner-first 排列，`z.shape == tuple(len(ax) for ax in reversed(axes))`（inner 軸恆為 z 的最後一維）。**`load` 是 `save` 的恒等逆，兩邊都不做 caller-side transpose**。
+- **單位反轉與 cfg**：`save()` 對每個 axis 乘 `scale` 後寫盤；`load()` 除回 `scale` 並 cast 回 `dtype`，是 `save()` 的逐欄逆運算。cfg snapshot 透過 comment channel 走 `make_comment` / `parse_comment`（`load()` 以 `cfg_type.validate_or_warn` 還原），不佔 axes / z。`save()` 在 `cfg_snapshot` 為 `None` 時拋 `ValueError`。
+
+詳見 [[0027]]。
 
 ---
 
@@ -62,6 +80,7 @@ class AbsExperiment(Generic[T_Result, T_Config]):
 幾乎所有 `*Exp.run()` 都遵循這個樣板：
 
 ```python
+@record_result                                                  # 自動把回傳值寫進 last_result
 def run(self, soc, soccfg, cfg: FreqCfg) -> FreqResult:
     orig_cfg = deepcopy(cfg)                                     # 1. 執行前快照（給 cfg_snapshot）
     setup_devices(cfg, progress=True)
@@ -90,10 +109,9 @@ def run(self, soc, soccfg, cfg: FreqCfg) -> FreqResult:
             on_update=lambda ctx: viewer.update(freqs, signal2real(ctx.root_data)),
         )
 
-    self.last_result = FreqResult(                              # 5. 記錄（cfg 走 cfg_snapshot）
+    return FreqResult(                                          # 5. 回傳（cfg 走 cfg_snapshot）
         freqs=freqs, signals=signals, cfg_snapshot=orig_cfg
     )
-    return self.last_result
 ```
 
 關鍵元素：
@@ -102,7 +120,7 @@ def run(self, soc, soccfg, cfg: FreqCfg) -> FreqResult:
 2. **`sweep2array`**（`utils/round_zcu.py`）把 `SweepCfg` 展成實際會量到的點（已套 ZCU 的 freq/time/gain 量化），用來畫圖 / 存檔。
 3. **`measure_fn(ctx, update_hook)`** 是傳給 `Task` 的單次測量函式；`update_hook` 是 round-level callback，每個 round 結束時被 QICK 呼叫以更新 pbar 與 liveplot。task runner（`run_task` 的 `init_cfg`）內部會 `deepcopy` 一份，`measure_fn`/`before_each` 裡的 mutation 都作用在那份副本（`ctx.cfg`）上，不會汙染 `orig_cfg`。
 4. **LivePlot**：`LivePlot1D` / `LivePlot2D` 是 context manager，`on_update` 裡每次都以當前 `ctx.root_data` 重畫。
-5. **寫回 `last_result`**：給 `analyze` / `save` 使用，內部攜帶 `cfg_snapshot`。
+5. **回傳 Result**：`run()` 直接 `return XxxResult(...)`，由 `@record_result` decorator 寫入 `last_result`（給 `analyze` / `save` 使用），Result 內部攜帶 `cfg_snapshot`。
 
 ### sweep 參數 mutation 的歸屬：搬進 `measure_fn`
 
@@ -151,13 +169,16 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):          # 主要 Cfg = program cfg + 
 
 ## Executor 模式（`autofluxdep` / `overnight`）
 
-當要在外層再疊一層「sweep 多個子實驗」的場景（例如掃 flux × {freq, t1, t2echo, ...}），會用 Executor：
+當要在外層再疊一層「sweep 多個子實驗」的場景（例如掃 flux × {freq, t1, t2echo, ...}），會用 Executor。
 
-- `FluxDepExecutor`（`autofluxdep/executor.py`）：註冊多個 `MeasurementTask`（繼承 `AbsTask` 並加上 `num_axes` / `make_plotter` / `update_plotter` / `save`），組一棵 `Scan("flux") → FluxDepBatchTask(tasks)`，並自動排版 matplotlib subplot。
-- `OvernightExecutor`：類似概念，但改用 `RepeatOverTime` 在時間軸上重複。
-- 兩者都支援 `record_animation(mp4_path)`（需要 `ffmpeg`），與 `FluxoniumPredictor` 協作根據模型預測下一個 flux 點的 qubit freq。
+兩個 Executor 共用同一個基底 `MultiMeasurementExecutor`（`runner/multi_executor.py`，見 `runner/README.md`），由它提供版面排版（`make_ax_layout` / `make_plotter`）、`record_animation` 的 FFMpeg facet 與 `_run_with_plotting`（包 `run_task` + 動畫錄製）；子類別只各自實作 `run()`（不同的外層 driver 與 cfg/env 前置）。
 
-實作新 executor task 時：繼承 `MeasurementTask[T_Result, T_RootResult, T_PlotDict]`，實作 `num_axes()`（告訴 executor 需要幾個 ax）、`make_plotter()` / `update_plotter()`（建立並更新 `AbsLivePlot`）、`save()`（flux sweep 版的存檔）。
+- `FluxDepExecutor`（`autofluxdep/executor.py`）：註冊多個 `MeasurementTask`，組一棵 `RetryBatchTask(tasks).scan("flux", ...)`，並與 `FluxoniumPredictor` 協作（`before_each` 內依模型預測下一個 flux 點並設 flux device）。
+- `OvernightExecutor`（`overnight/executor.py`）：類似概念，但改用 `RetryBatchTask(tasks).repeat("Iter", ...)` 在時間軸上重複。
+
+兩者用的 `RetryBatchTask` 會對每個子 task 套上重試（`retry_time` 預算）；`record_animation(mp4_path)` 需要 `ffmpeg`。
+
+實作新 executor task 時：繼承各 app 自己的 `MeasurementTask[T_Result, T_RootResult, T_PlotDict]`（兩個 app 因 cfg 泛型不同而各保留一份 ABC，共有的繪圖合約由 `PlottableMeasurement` Protocol 捕捉），實作 `num_axes()`（告訴 executor 需要幾個 ax）、`make_plotter()` / `update_plotter()`（建立並更新 `AbsLivePlot`）、`save()`（外層 sweep 版的存檔）。
 
 ---
 
@@ -208,10 +229,10 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):          # 主要 Cfg = program cfg + 
 ## 寫新 Experiment 時的檢查清單
 
 1. 定義 `XxxModuleCfg` / `XxxSweepCfg`（通常繼承 `ConfigBase`）與 `XxxCfg = ProgramV2Cfg + ExpCfgModel + 自己欄位`。
-2. 繼承 `AbsExperiment[T_Result, XxxCfg]`，實作 `run` / `analyze` / `save` / `load`。
-3. `run()` 模板：開頭 `orig_cfg = deepcopy(cfg)` → `sweep2array` → 組 `measure_fn` → `with LivePlot: run_task(Task(...))` → 寫 `self.last_result = XxxResult(..., cfg_snapshot=orig_cfg)`（不存 `last_cfg`）。
+2. 繼承 `PersistableExperiment[T_Result, XxxCfg]`（要有持久化）並宣告 class-level `AXES_SPEC`（`AxesSpec`）即繼承 `save` / `load`；只需自行實作 `run`（套 `@record_result`）/ `analyze`（套 `@retrieve_result`）。Result dataclass 須有 `cfg_snapshot` 欄位。
+3. `run()` 模板：開頭 `orig_cfg = deepcopy(cfg)` → `sweep2array` → 組 `measure_fn` → `with LivePlot: run_task(Task(...))` → 回傳 `XxxResult(..., cfg_snapshot=orig_cfg)`（`@record_result` 自動寫入 `last_result`，不存 `last_cfg`）。
 4. `measure_fn` 內的 `acquire()` 必須傳入 `stop_checkers=[ctx.is_stop]`（可加 SNR checker）。
-5. `save`：`x_info` 用 SI 單位（Hz/s），`tag` 取有層次的名字（`"twotone/rabi/len"`）。`load` 要做單位反轉，並重新設 `self.last_result`。
+5. 持久化由 `AXES_SPEC` 宣告：每個 `Axis` 帶 `scale`（頻率 `MHZ_TO_HZ`、時間 `US_TO_S`）讓盤上是 SI 單位、記憶體內維持習慣單位，`tag` 取有層次的名字（`"twotone/rabi/len"`），axes 以 inner-first 排列；繼承的 `save` / `load` 自動依 spec 做單位轉換與恒等逆 round-trip，無需自行寫 save/load。
 6. 如果有多個 sweep 軸，考慮用 `Task.scan()` 或直接在 `ModularProgramV2(sweep=[...])` 裡放多個 sweep。
 7. 如果要在樹的外層疊 flux / time sweep，改繼承 `AbsTask`（或 `MeasurementTask`）而不是 `AbsExperiment`，再由 Executor 組起來。
 
@@ -221,6 +242,7 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):          # 主要 Cfg = program cfg + 
 
 | 日期 | Codebase commit | 說明 |
 |------|-----------------|------|
+| 2026-06-24 | — | ADR-0027 持久化遷移：實驗資料改走 labber_io 原生 axes-list，刪除 datasaver dict 殼（`save_data` / `load_data`）；新增 `PersistableExperiment` opt-in 基底 + class-level `AXES_SPEC`（`AxesSpec` / `Axis` / `ZSpec`，inner-first、SI scale、load = save 恒等逆），實驗只留宣告式 spec 與 `record_result` / `retrieve_result` decorator，不再各自手寫 save/load；新增「持久化」一節並改寫合約／範本／Checklist。#10：`FluxDepExecutor` / `OvernightExecutor` 抽出共用基底 `MultiMeasurementExecutor`（版面 + `record_animation` FFMpeg facet + `_run_with_plotting`），兩者改用 `RetryBatchTask`，更新「Executor 模式」一節。 |
 | 2026-06-05 | `cfc86975` | 移除所有非 executor 實驗的 `self.last_cfg` 中介屬性，cfg 統一由 Result 的 `cfg_snapshot` 攜帶；`run()` 改用開頭 `orig_cfg = deepcopy(cfg)` 快照；補上 `onetone/flux_dep`、`twotone/ckp`、`twotone/fluxdep` 缺失的 cfg_snapshot；修正 `len_rabi`/`t2echo`/`t2ramsey` 的 load() 把 cfg 誤存 last_cfg 導致 cfg_snapshot 永遠為 None 的 bug；改寫範本與 Checklist 第 3 項。再把各實驗 `run()` body 頂層的 `modules.xxx.set_param(...)` 副本外 mutation 一律搬進 `measure_fn`（作用於 `ctx.cfg`），只保留 device-setup 與 singleshot reps/rounds 兩類有意例外（見「sweep 參數 mutation 的歸屬」）。autofluxdep/overnight Executor 不在此變更範圍。 |
 | 2026-05-25 | `fb0ffc22` | 為所有 Task 框架內的 acquire() 加入 stop_checkers=[ctx.is_stop]，支援外部中斷；新增「外部中斷支援」章節；Checklist 新增第 4 項。 |
 | 2026-04-27 | `3f9bb55f` | 對齊近 30 天變更：`runner/QICK_NOTE.md` 改為 `runner/AI_NOTE.md`，`ConfigBase` 匯入路徑改為 `zcu_tools.cfg_model`，Checklist 改為繼承 `ConfigBase`。 |

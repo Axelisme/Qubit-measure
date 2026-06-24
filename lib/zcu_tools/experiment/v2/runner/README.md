@@ -1,6 +1,6 @@
 # QICK Note for `experiment/v2/runner`
 
-**Last updated:** 2026-06-08
+**Last updated:** 2026-06-24（新增 RetryBatchTask 與 MultiMeasurementExecutor）
 
 這份筆記整理 `runner/` 的任務執行框架設計，說明各類別的職責、組合方式與執行流程。
 
@@ -8,7 +8,7 @@
 
 ## 架構總覽（一句話版）
 
-`runner/` 以 **Composite 模式** 把測量任務組成樹狀結構：`AbsTask` 是抽象節點，`Task` 是葉節點（實際呼叫硬體），`BatchTask`/`Scan`/`RepeatOverTime`/`ReTryIfFail` 是中間節點（組合或修飾子任務）。結果也以同構樹（`Result`）儲存，`TaskState` 攜帶當前在樹中的位置。
+`runner/` 以 **Composite 模式** 把測量任務組成樹狀結構：`AbsTask` 是抽象節點，`Task` 是葉節點（實際呼叫硬體），`BatchTask`/`RetryBatchTask`/`Scan`/`RepeatOverTime`/`ReTryIfFail` 是中間節點（組合或修飾子任務）。結果也以同構樹（`Result`）儲存，`TaskState` 攜帶當前在樹中的位置。`MultiMeasurementExecutor`（`multi_executor.py`）是 runner 層的 Executor 共用 scaffold（非樹節點）。
 
 ---
 
@@ -100,8 +100,22 @@ BatchTask({
 ```
 
 - `init()` 呼叫每個子任務的 `init(dynamic_pbar=True)`。
-- `run()` 依序執行每個子任務 `task.run(state.child(name))`，顯示外層 pbar（N tasks）。
+- `run()` 依序執行每個子任務 `task.run(state.child(name))`，顯示外層 pbar（N tasks）。每個子任務的執行委派給 `_run_child(task, state)` hook（預設直接 `task.run(state)`）。
 - `cleanup()` 呼叫所有子任務的 `cleanup()`。
+
+---
+
+### `RetryBatchTask`（`batch.py`）
+
+`BatchTask` 的變體：每個子任務各自重試失敗。
+
+```python
+RetryBatchTask({"t1": task_a, "t2": task_b}, retry_time=3)
+```
+
+- 繼承 `BatchTask` 不改 `run()`（因此 `state.is_stop()` 短路與外層 pbar 行為一致），只覆寫 `_run_child` hook：每個子任務改走 `run_with_retries(task, state, retry_time, dynamic_pbar=True)`，即失敗時 `cleanup()` + `init()` 重置後重試，最多 `retry_time` 次。
+- `retry_time=0`（預設）等同 `BatchTask`（不重試）。
+- 重試是 **per-child**：子任務 A 重試耗盡才向上拋出，不影響尚未開始的子任務 B 的重試預算。`autofluxdep` / `overnight` 的 Executor 用它對 flux/time sweep 下的每個量測加重試。
 
 ---
 
@@ -153,7 +167,17 @@ task.auto_retry(max_retries=3)
 
 ### `run_with_retries`（`repeat.py`）
 
-獨立函式，提供與 `ReTryIfFail` 相同的重試邏輯，方便在不需包裝的場景直接呼叫。
+獨立函式，提供與 `ReTryIfFail` 相同的重試邏輯，方便在不需包裝的場景直接呼叫，也是 `RetryBatchTask._run_child` 的底層。
+
+---
+
+### `MultiMeasurementExecutor`（`multi_executor.py`）
+
+不是 task tree 節點，而是 **Executor 共用 scaffold**：把「同時跑多個量測 + 合併 live plot（可選錄 FFmpeg 動畫）」的共用機制收在一處，供 `autofluxdep` / `overnight` 的 Executor 繼承（這兩個子類別與各自的 `MeasurementTask` ABC 住在 app 模組，不在 runner）。
+
+- 提供：`add_measurements`、`record_animation(path)`（FFMpeg facet，缺 `ffmpeg` 即 Fast-Fail）、`make_ax_layout` / `make_plotter`（依各量測 `num_axes()` 自動排版 subplot），以及 `_run_with_plotting(task, cfg, env_dict)`（在 plotter context 內呼叫 `run_task`，並在 `finally` 收尾動畫）。
+- 子類別只負責各自的 `run()`（不同的外層 driver 與 cfg/env 前置），共用此處的版面 / plotter / 錄製機器。
+- 對 task 的需求以結構性 `PlottableMeasurement` Protocol 表達（`num_axes` / `make_plotter` / `update_plotter`），讓基底不必把兩個 app 的 `MeasurementTask` ABC 強行合併。
 
 ---
 
@@ -301,6 +325,7 @@ BatchTask({
 
 | 日期 | Codebase commit | 說明 |
 |------|-----------------|------|
+| 2026-06-24 | — | #10：新增 `RetryBatchTask`（`batch.py`，`BatchTask` 變體，以 `_run_child` hook 對每個子任務套 `run_with_retries` per-child 重試）與 `MultiMeasurementExecutor`（`multi_executor.py`，Executor 共用 scaffold：版面 + `record_animation` FFMpeg facet + `_run_with_plotting`，供 autofluxdep/overnight 繼承）；`BatchTask` 抽出 `_run_child` hook。 |
 | 2026-05-19 | `02b7ac0b` | `ActiveTask` 改為必要參數 `stop_event: threading.Event`，event 由外部建立與持有，移除自動建立邏輯。 |
 | 2026-05-19 | `15b9144f` | 新增跨線程中斷機制：`TaskState._stop_flag` / `is_stop()`、`run_task(stop_flag=...)`、`TaskHandle`、`ActiveTask`；`EarlyStopMixin` 改為 `stop_checkers` 參數；`wrap_earlystop_check` 改寫為 `snr_checker`；容器節點加入 `is_stop()` 短路；runner 測試覆蓋率 84% → 97%。 |
 | 2026-04-29 | `f2f30ae1` | 對齊 `Scan` 介面：統一 `before_each` 簽名為 `(i, state, v)` 必要參數。 |
