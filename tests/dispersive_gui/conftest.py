@@ -6,7 +6,7 @@ import json
 
 import numpy as np
 import pytest
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.labber_io import save_labber_data
 
 
 @pytest.fixture
@@ -26,11 +26,17 @@ def onetone_hdf5(tmp_path):
     ).astype(np.complex128)
 
     filepath = str(tmp_path / "R1_flux_1")
-    save_data(
-        filepath=filepath,
-        x_info={"name": "Flux device value", "unit": "a.u.", "values": dev_values},
-        y_info={"name": "Frequency", "unit": "Hz", "values": freqs_ghz * 1e9},
-        z_info={"name": "Signal", "unit": "a.u.", "values": signals.T},
+    # Native labber_io: axes are inner-first [inner=x, outer=y]; z is (Ny, Nx).
+    # The migrated loader sets dev=axes[0] (x), freq=axes[1] (y), signals=z.T,
+    # so we store dev as the inner axis, freq as the outer axis, and z=signals.T
+    # with shape (Nfreq, Ndev) — z.T then yields device-major (Ndev, Nfreq).
+    save_labber_data(
+        filepath,
+        z=("Signal", "a.u.", signals.T),
+        axes=[
+            ("Flux device value", "a.u.", dev_values),  # inner axis (x)
+            ("Frequency", "Hz", freqs_ghz * 1e9),  # outer axis (y)
+        ],
     )
     return filepath + ".hdf5", dev_values, freqs_ghz, signals
 
