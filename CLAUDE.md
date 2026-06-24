@@ -23,6 +23,7 @@
 - **遇到不確定**：實作不確定，或架構不適合某種擴展時，**不要自行猜測或勉強實作**，先說明原因交由用戶決定。
 - **先規劃再實作**：架構仍在演化，發現不合理處或更好的設計請直接告知，**不要自行調整架構**，由用戶決定；除非用戶要求，**不要保留 legacy 或相容性邏輯**。
 - **完成任務後**：依序跑 `pyright`/`pytest`（檢查錯誤、測試失敗、覆蓋率不足；全套測試加 `-n auto` 平行加速，已裝 pytest-xdist），再用 `ruff` 格式化與修正風格；用戶要求才 git commit；最後更新對應的模組 README.md。
+- **禁止 `git commit --amend`**：除非用戶明確要求，不得使用 `git commit --amend`。原因：主 checkout 的 `main` 是 live singleton，並行 orchestrator 可能在你兩次指令之間於 `main` 上 commit/merge，amend 會誤改到別人的 commit（曾因此覆蓋一個 merge commit 的訊息）。要修正剛才的 commit 時，改用新增 follow-up commit，不要改寫既有歷史。
 - **測試**：放在根目錄 `tests/`，目錄結構對應被測檔案，命名 `test_*.py`，用 `pytest` 撰寫，盡量涵蓋主要功能與邏輯；測試需獨立、可重複、不依賴外部狀態。
 - **工具優先序**：少用 Shell 指令，優先用內建工具（前者需用戶審核、後者自證安全）；**不要用 `sed`** 替換子串（跨平台行為不一），需替換時優先 mcp/function tool，其次 Python 腳本。
 - **文件追蹤**：CLAUDE.md、模組 README.md 與 docs/adr/ 已入 git 追蹤，會進 diff 與 commit；`.agent_state/` 為 gitignored agent 工作區（plans / worktrees / reports / state），不入 commit；舊 `task_plans/` 若存在也維持 gitignored，僅作遷移前殘留。
