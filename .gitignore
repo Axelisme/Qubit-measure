@@ -10,8 +10,9 @@ wheels/
 .vscode
 .github
 .cursor
-.claude
+.claude/*
 !.claude/skills/
+!.claude/skills/**
 !.claude/settings.json
 
 agent_memory/
