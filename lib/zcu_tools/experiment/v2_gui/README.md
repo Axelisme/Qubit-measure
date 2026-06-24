@@ -1,6 +1,6 @@
 # QICK Note for `experiment/v2_gui`
 
-**Last updated:** 2026-06-24（len_rabi hardware-grid run preflight）
+**Last updated:** 2026-06-24（bath freq-gain single-file save；len_rabi hardware-grid run preflight）
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -105,8 +105,9 @@ agent / human 判讀，guide 不暗示用自動 fidelity gate 代替判斷。
 
 - **gated per-experiment**：reset module 提供條件是「校準 md 齊」而非「跑到最後一步」，
   配合使用者亂序、重複跑各校準實驗的工作流；同一校準齊時不論跑哪個實驗都提供。
-- **D3**：bath `freq_gain` 是 2D（四個 phase-resolved 檔），單路徑 GUI save pipeline
-  無法表示，故 `save` fast-fail（`NotImplementedError`）。
+- **D3**：bath `freq_gain` 透過單路徑 GUI save pipeline 寫入 single-role 3D HDF5；
+  tomography phase 是同一 Result 的內部 sweep axis，不再拆成四個 phase-resolved sidecar
+  檔，也不再 `save` fast-fail。
 - **D5**：length / 部分掃描是「看曲線」型，analyze 只渲圖、不抽純量 → 無 md writeback。
 - **graceful without snapshot**：`cfg_snapshot is None`（如從檔載入）時，module
   writeback 全略過，只剩既有 md item。
