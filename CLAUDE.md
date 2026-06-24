@@ -25,8 +25,8 @@
 - **完成任務後**：依序跑 `pyright`/`pytest`（檢查錯誤、測試失敗、覆蓋率不足；全套測試加 `-n auto` 平行加速，已裝 pytest-xdist），再用 `ruff` 格式化與修正風格；用戶要求才 git commit；最後更新對應的模組 README.md。
 - **測試**：放在根目錄 `tests/`，目錄結構對應被測檔案，命名 `test_*.py`，用 `pytest` 撰寫，盡量涵蓋主要功能與邏輯；測試需獨立、可重複、不依賴外部狀態。
 - **工具優先序**：少用 Shell 指令，優先用內建工具（前者需用戶審核、後者自證安全）；**不要用 `sed`** 替換子串（跨平台行為不一），需替換時優先 mcp/function tool，其次 Python 腳本。
-- **文件追蹤**：CLAUDE.md、模組 README.md 與 docs/adr/ 已入 git 追蹤，會進 diff 與 commit；`task_plans/` 為 gitignored 工作檔（見 .gitignore），不入 commit。
-- **平行 agent 協調**：可能有多個 agent/session 同時在這個 repo 工作，動工前使用 `agent-taskboard` skill（`taskboard_*` MCP 工具）認領 scope，避免改到同一份檔案（見下方「### 平行 agent 協調」）。
+- **文件追蹤**：CLAUDE.md、模組 README.md 與 docs/adr/ 已入 git 追蹤，會進 diff 與 commit；`.agent_state/` 為 gitignored agent 工作區（plans / worktrees / reports / state），不入 commit；舊 `task_plans/` 若存在也維持 gitignored，僅作遷移前殘留。
+- **平行 agent 協調**：一般單 agent 工作直接在目前 checkout 完成；需要多 agent / 長線 orchestration 時，使用 `orchestrate` skill 的 `.agent_state/` worktree protocol，由 orchestrator 建立、指派、合併並關閉 task worktree（見下方「### 平行 agent 協調」）。
 - **task_plan.md Phase 壓縮**：每累積 5 個新 Phase 就把最舊的 5 個詳細記錄壓縮成「歷史 Phase 摘要表」中的列（一列一 Phase：編號｜主題｜結論/commit），即詳細記錄 **最多保留 10 個 Phase**；被壓縮的原文移入同目錄 `archive.md`（同為 gitignored）以備查。
 
 ### 模組 README.md
@@ -50,13 +50,16 @@
 
 ### 平行 agent 協調
 
-多個 agent/session 可能同時在同一個 checkout 上工作。協調透過 **`agent-taskboard` skill**（`taskboard_*` MCP 工具）完成：原子、可程式化的 path 衝突偵測，取代手編 markdown。完整協議見 `agent-taskboard` skill 文件。
+本 repo 不使用 taskboard MCP 或 path lock。協調策略改為 **orchestrator-owned Git worktree**：
 
-要點摘要（細節在 skill）：
-- **動工前 `taskboard_claim`**：取得 `granted` 後才動 Edit/Write；若 `pending` 則等待或 ScheduleWakeup 輪詢。
-- **commit 後才 `taskboard_release`**：未 commit 的 working-tree 改動一律保留 claim，否則後進 agent 的 commit 會污染你的未提交改動。
-- **純讀 / 純查詢 / 無爭用的顯而易見小修** 免認領。
-- 人類視圖：`task_plans/taskboard.md`（auto-rendered，勿手編）。
+- 一般單 agent 工作不需要額外協調，直接在目前 checkout 修改、測試、回報。
+- 需要多 agent 或跨回合 orchestration 時，一個 task item 對應一個 worktree：`.agent_state/worktrees/trees/<task-id>/`，由 orchestrator 建立 branch/worktree、記錄狀態、最後 merge/abandon/block 並移除 worktree。
+- `.agent_state/worktrees/state.json` 是 gitignored source of truth，記錄 task id、branch、worktree path、base branch/commit、status、agents、reports、commits、ignored inputs 與時間戳。
+- worktree 只自動包含 Git-tracked content；若 task 需要 `.agent_state/plans/<area>/`、本地設定、scratch fixtures、未追蹤資料檔等 gitignored inputs，orchestrator 必須在建立 worktree 時明確複製到 task worktree，或把主 checkout 絕對路徑交給 sub-agent 只讀使用，並在 state/report 中記錄。
+- sub-agent 長報告寫到主 checkout 的 `.agent_state/worktrees/reports/<task-id>/<agent-id>.md`；不要寫在 task worktree 裡，因為 untracked 檔不會跨 worktree 同步。
+- 多個 sub-agent 可以共用同一個 task worktree，但 orchestrator 必須明確排序或分配不重疊 write scope；不要假設 Codex/Claude 內建 sub-agent 會自動使用獨立 worktree。
+- 每個 task item 或 Phase 告一段落時要做整合決策並關閉 worktree；不要把 task worktree 當長期常駐 checkout，避免 branch、ignored inputs、reports 與 base branch 失同步。
+- live singleton 資源（ZCU 板、GUI、固定 port）不靠通用 lock；需要時由 orchestrator 人工序列化，MEASUREMENT 角色仍遵循量測 skill 與 agent-memory。
 
 ## 專案概觀
 

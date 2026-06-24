@@ -1,15 +1,13 @@
-"""Regression tests for Phase 164: array-param bug in generate_tools / param_spec.
+"""Regression tests for ARRAY params in generate_tools / param_spec.
 
 Root cause: J.JSON emits no "type" key in the MCP inputSchema, so MCP clients
 stringify the whole array.  J.ARRAY must emit {"type": "array", "items":
 {"type": "string"}} so the client passes the list through untouched.
 
-Three invariants pinned here (TDD — written BEFORE the fix):
+Two invariants pinned here:
   1. build_input_schema emits {"type": "array"} for ARRAY params.
   2. A generate_tools forwarder passes a multi-element list through to the
      handler intact (no char-split).
-  3. TaskboardStore.claim / check raise TypeError when paths is a str (not a
-     list), preventing silent char-split of e.g. "['lib/a', 'lib/b']".
 """
 
 from __future__ import annotations
@@ -104,27 +102,3 @@ def test_forwarder_does_not_char_split_serialised_array_string():
 
     with pytest.raises(RemoteError, match="must be a list"):
         validate_params(specs, {"paths": stringified})
-
-
-# ---------------------------------------------------------------------------
-# Invariant 3: TaskboardStore.claim / check fail-fast on str paths
-# ---------------------------------------------------------------------------
-
-
-def test_taskboard_store_claim_rejects_str_paths(tmp_path):
-    """store.claim must raise TypeError/ValueError when paths is a str,
-    not silently char-split it."""
-    from zcu_tools.mcp.taskboard.store import TaskboardStore
-
-    store = TaskboardStore(tmp_path / "tb.json")
-    with pytest.raises((TypeError, ValueError), match="list"):
-        store.claim("owner", "lib/foo", "task")  # type: ignore[arg-type]
-
-
-def test_taskboard_store_check_rejects_str_paths(tmp_path):
-    """store.check must raise TypeError/ValueError when paths is a str."""
-    from zcu_tools.mcp.taskboard.store import TaskboardStore
-
-    store = TaskboardStore(tmp_path / "tb.json")
-    with pytest.raises((TypeError, ValueError), match="list"):
-        store.check("lib/foo")  # type: ignore[arg-type]

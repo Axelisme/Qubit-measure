@@ -8,7 +8,7 @@ to a hanger resonator.
 The two state-conditioned responses are the per-shot Bernoulli outcomes the
 engine selects between: ``s21(f_ro; rf_g)`` when the qubit is in |g> and
 ``s21(f_ro; rf_e)`` when in |e>.  Their population-weighted mixture (see
-task_plans/mocksim/task_plan.md, P1-4) is the *averaged* readout
+.agent_state/plans/mocksim/task_plan.md, P1-4) is the *averaged* readout
 
     signal = S21(f_ro; rf_g) + P_e * [S21(f_ro; rf_e) - S21(f_ro; rf_g)]
 
@@ -202,7 +202,7 @@ def decimated_trace(
 ) -> NDArray[np.complex128]:
     """Time-domain down-converted readout trace (model A) at ADC samples ``ts``.
 
-    Model A (task_plans/mocksim/findings.md, "decimated 支援評估"):
+    Model A (.agent_state/plans/mocksim/findings.md, "decimated 支援評估"):
 
         trace(t) = readout_envelope(t - timeFly) * steady_mixed_S21(f_ro; rf_g, rf_e, p_e)
 

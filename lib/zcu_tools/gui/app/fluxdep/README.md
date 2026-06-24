@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-23（wavelet smoothing in interactive preprocessing）
+**Last updated:** 2026-06-24（agent state plan path）
 
 # `zcu_tools/gui/app/fluxdep/` — Fluxonium Flux-Dependence Analysis GUI AI Note
 
@@ -14,7 +14,7 @@
 上提到 `gui/remote`（`NdjsonRpcEndpoint`、`McpBridge`、`MethodSpec`）與
 `gui/event_bus`（`BaseEventBus`/`BasePayload`），三個 app 共用一份**；domain 仍各
 app 自帶（version table、worker 模式等仍 per-app）。version table 等領域機制日後是否
-再上提見 `task_plans/tool_gui/`（gitignored）。
+再上提見 `.agent_state/plans/tool_gui/`（gitignored）。
 
 定位是**可選工具**，measure-gui 不含它。
 

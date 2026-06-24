@@ -1,6 +1,6 @@
 # AI Note for `tests/`
 
-**Last updated:** 2026-06-23 — taskboard identity fallback coverage
+**Last updated:** 2026-06-24 — taskboard MCP removal
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -107,8 +107,7 @@ tests/
 │           ├── test_registry.py
 │           └── test_util.py
 ├── experiment/v2/runner/           # 高層 runner / task 狀態機測試
-├── mcp/
-│   └── taskboard/                  # taskboard MCP method spec/dispatch、path conflict、session identity/ancestor fallback、TTL/promotion 測試
+├── mcp/                            # MCP bridge、call-log、remote schema / ARRAY param regression tests
 ├── notebook/analysis/fluxdep/      # Fluxonium 光譜分析模型測試
 └── utils/fitting/                  # 曲線擬合工具測試
 ```

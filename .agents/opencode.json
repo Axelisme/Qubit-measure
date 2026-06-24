@@ -81,19 +81,6 @@
       ],
       "enabled": true,
       "environment": {}
-    },
-    "taskboard": {
-      "type": "local",
-      "command": [
-        "uv",
-        "run",
-        "--extra",
-        "client",
-        "python",
-        "lib/zcu_tools/mcp/taskboard/server.py"
-      ],
-      "enabled": true,
-      "environment": {}
     }
   },
   "permission": {
@@ -138,7 +125,6 @@
     "mcp__measure-gui": "allow",
     "mcp__fluxdep-gui": "allow",
     "mcp__agent-memory": "allow",
-    "mcp__dispersive-gui": "allow",
-    "mcp__taskboard": "allow"
+    "mcp__dispersive-gui": "allow"
   }
 }

@@ -8,8 +8,7 @@
 # without prompting — the Codex analogue of the per-server "mcp__<server>" allow
 # rules in .claude/settings.local.json. The GUI servers additionally pass
 # through the Qt/session env vars so a GUI subprocess they launch can reach the
-# user's display; taskboard passes host session ids so parent/sub-agent claims
-# share one conflict identity; agent-memory has no GUI and needs none.
+# user's display; agent-memory has no GUI and needs none.
 
 [mcp_servers.measure-gui]
 command = "uv"
@@ -95,21 +94,5 @@ args = [
   "client",
   "python",
   "lib/zcu_tools/mcp/agent_memory/server.py",
-]
-default_tools_approval_mode = "approve"
-
-[mcp_servers.taskboard]
-command = "uv"
-args = [
-  "run",
-  "--extra",
-  "client",
-  "python",
-  "lib/zcu_tools/mcp/taskboard/server.py",
-]
-env_vars = [
-  "CLAUDE_CODE_SESSION_ID",
-  "CODEX_THREAD_ID",
-  "AGENT_SESSION_ID",
 ]
 default_tools_approval_mode = "approve"
