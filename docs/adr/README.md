@@ -40,7 +40,7 @@
 ## VI. 持久化
 
 - [0015 — PersistenceCaretaker（Memento + Caretaker）](0015-persistence-caretaker-memento-single-file.md)：單檔 app-state、關閉才寫。
-- [0027 — 實驗資料持久化：labber_io 原生 axes-list + per-experiment axes-spec](0027-experiment-data-persistence-native-labber-axes-list.md)：**（proposed）** 刪 datasaver dict 殼（含洩漏軸序的 load-flip）、caller 直接講 labber_io 原生 inner-first axes-list（N 維、load 為 save 恒等逆、零 transpose）；每實驗一份 typed axes-spec 驅動共用 save/load helper（合併 save/load 樣板）；N 維折疊與 caller 遷移為增量 phase。與 [[0015]] 劃清（app-state vs 實驗資料）。
+- [0027 — 實驗資料持久化：labber_io 原生 axes-list + per-experiment axes-spec](0027-experiment-data-persistence-native-labber-axes-list.md)：**（accepted/已落地）** 刪 datasaver dict 殼（含洩漏軸序的 load-flip）、caller 直接講 labber_io 原生 inner-first axes-list（N 維、load 為 save 恒等逆、零 transpose）；每實驗一份 typed axes-spec 驅動共用 save/load helper（合併 save/load 樣板）；N 維折疊與 caller 遷移為增量 phase。與 [[0015]] 劃清（app-state vs 實驗資料）。
 
 ## VII. 繪圖
 

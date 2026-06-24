@@ -1,10 +1,10 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # 實驗資料持久化：labber_io 原生 axes-list（inner-first, N 維）為唯一介面 + per-experiment axes-spec
 
-**狀態：** proposed（**決策已定、實作分批進行中**；code 尚未全面對齊本檔——遷移為增量 phase，見下「遷移」段。本檔以**目標生效設計**現在式描述）。
+**狀態：** accepted（**已落地**：experiment data 持久化全面改走 labber_io 原生 axes-list；`PersistableExperiment` + per-experiment `AxesSpec`（typed Result builder、`Axis.dtype`、tag 內含）驅動 single-file 實驗；multi-file/heterogeneous（autofluxdep/overnight/singleshot stacked 等）保留自訂 save/load 但改呼叫原生 `save_labber_data`/`load_labber_data`；datasaver 的 dict 殼（save_data/load_data/save_local_data/load_local_data + load-flip）已刪，僅留路徑/傳輸 helper。本檔以現在式描述生效設計）。
 **關聯：** 與 [[0015]] 劃清（PersistenceCaretaker 是 GUI app-state 的 Memento 單檔持久化，與此**實驗量測資料**的 HDF5 round-trip 不同層、不同關注點）；save 動作位於實驗 run path 尾端，故與 runner / run-driver 設計相鄰。
 
 ## 脈絡
