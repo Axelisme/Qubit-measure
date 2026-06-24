@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -10,27 +10,39 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import (
+    IDENTITY,
+    US_TO_S,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    config,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import SweepCfg, TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.program.v2.twotone import TwoToneModuleCfg
-from zcu_tools.utils.datasaver import (
-    load_labber_data,
-    safe_labber_filepath,
-    save_labber_data,
-)
 
 from .util import calc_populations, correct_populations
+
+
+def _default_population_states() -> NDArray[np.int64]:
+    return np.array([0, 1], dtype=np.int64)
 
 
 @dataclass(frozen=True)
 class LenRabiResult:
     lengths: NDArray[np.float64]
     signals: NDArray[np.float64]
+    population_states: NDArray[np.int64] = field(
+        default_factory=_default_population_states
+    )
     cfg_snapshot: LenRabiCfg | None = None
 
 
@@ -43,7 +55,25 @@ class LenRabiCfg(TwoToneCfg, ExpCfgModel):
     sweep: LenRabiSweepCfg
 
 
-class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
+class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
+    AXES_SPEC = AxesSpec(
+        axes=(
+            Axis(
+                "population_states",
+                "GE Population",
+                "None",
+                scale=IDENTITY,
+                dtype=np.int64,
+            ),
+            Axis("lengths", "Length", "s", scale=US_TO_S, dtype=np.float64),
+        ),
+        z=ZSpec("signals", "Population", "a.u.", dtype=np.float64),
+        result_type=LenRabiResult,
+        cfg_type=LenRabiCfg,
+        tag="singleshot/len_rabi",
+    )
+
+    @record_result
     def run(
         self,
         soc,
@@ -115,21 +145,15 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
                 ),
             )
 
-        # record last cfg and result
-        self.last_result = LenRabiResult(
-            lengths=lengths, signals=populations, cfg_snapshot=cfg
-        )
+        return LenRabiResult(lengths=lengths, signals=populations, cfg_snapshot=cfg)
 
-        return self.last_result
-
+    @retrieve_result
     def analyze(
         self,
         result: LenRabiResult | None = None,
         *,
         confusion_matrix: NDArray[np.float64] | None = None,
     ) -> Figure:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         lens, populations = result.lengths, result.signals
@@ -160,51 +184,3 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         fig.tight_layout()
 
         return fig
-
-    def save(
-        self,
-        filepath: str,
-        result: LenRabiResult | None = None,
-        comment: str | None = None,
-        tag: str = "singleshot/len_rabi",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        lens, populations = result.lengths, result.signals
-        cfg = result.cfg_snapshot
-        if cfg is None:
-            raise ValueError("result.cfg_snapshot is None")
-        comment = make_comment(cfg, comment)
-
-        save_labber_data(
-            safe_labber_filepath(filepath),
-            z=("Population", "a.u.", populations.T),
-            axes=[
-                ("Length", "s", lens * 1e-6),
-                ("GE population", "a.u.", np.array([0, 1])),
-            ],
-            comment=comment,
-            tags=tag,
-        )
-
-    def load(self, filepath: str) -> LenRabiResult:
-        ld = load_labber_data(filepath)
-        comment = ld.comment
-
-        lens = np.asarray(ld.axes[0].values, dtype=np.float64) * 1e6  # s -> us
-        # native load returns z as (Ny, Nx) = (2, len); transpose to (len, 2)
-        populations = np.real(np.asarray(ld.z)).astype(np.float64).T
-
-        cfg_snapshot = None
-        if comment is not None:
-            cfg, _, _ = parse_comment(comment)
-            if cfg is not None:
-                cfg_snapshot = LenRabiCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = LenRabiResult(
-            lengths=lens, signals=populations, cfg_snapshot=cfg_snapshot
-        )
-
-        return self.last_result

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -11,9 +11,18 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment import (
+    IDENTITY,
+    MHZ_TO_HZ,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -29,19 +38,21 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import (
-    load_labber_data,
-    safe_labber_filepath,
-    save_labber_data,
-)
 
 from ..util import calc_populations, correct_populations
+
+
+def _default_population_states() -> NDArray[np.int64]:
+    return np.array([0, 1], dtype=np.int64)
 
 
 @dataclass(frozen=True)
 class FreqResult:
     freqs: NDArray[np.float64]
     signals: NDArray[np.float64]
+    population_states: NDArray[np.int64] = field(
+        default_factory=_default_population_states
+    )
     cfg_snapshot: FreqCfg | None = None
 
 
@@ -61,7 +72,25 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: FreqSweepCfg
 
 
-class FreqDepExp(AbsExperiment[FreqResult, FreqCfg]):
+class FreqDepExp(PersistableExperiment[FreqResult, FreqCfg]):
+    AXES_SPEC = AxesSpec(
+        axes=(
+            Axis(
+                "population_states",
+                "GE Population",
+                "None",
+                scale=IDENTITY,
+                dtype=np.int64,
+            ),
+            Axis("freqs", "Drive Freq", "Hz", scale=MHZ_TO_HZ, dtype=np.float64),
+        ),
+        z=ZSpec("signals", "Population", "a.u.", dtype=np.float64),
+        result_type=FreqResult,
+        cfg_type=FreqCfg,
+        tag="singleshot/mist/freq",
+    )
+
+    @record_result
     def run(
         self,
         soc,
@@ -140,19 +169,15 @@ class FreqDepExp(AbsExperiment[FreqResult, FreqCfg]):
                 ),
             )
 
-        # record the last result
-        self.last_result = FreqResult(freqs=freqs, signals=signals, cfg_snapshot=cfg)
+        return FreqResult(freqs=freqs, signals=signals, cfg_snapshot=cfg)
 
-        return self.last_result
-
+    @retrieve_result
     def analyze(
         self,
         result: FreqResult | None = None,
         *,
         confusion_matrix: NDArray[np.float64] | None = None,
     ) -> Figure:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         freqs, populations = result.freqs, result.signals
@@ -174,61 +199,3 @@ class FreqDepExp(AbsExperiment[FreqResult, FreqCfg]):
         ax.set_ylim(0, 1)
 
         return fig
-
-    def save(
-        self,
-        filepath: str,
-        result: FreqResult | None = None,
-        comment: str | None = None,
-        tag: str = "singleshot/mist/freq",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        freqs, populations = result.freqs, result.signals
-
-        cfg = result.cfg_snapshot
-        if cfg is None:
-            raise ValueError("result.cfg_snapshot is None")
-        comment = make_comment(cfg, comment)
-
-        save_labber_data(
-            safe_labber_filepath(filepath),
-            z=(
-                "Population",
-                "a.u.",
-                populations.T,
-            ),  # (Ny=2, Nx=len(freqs)): inner (freqs) last
-            axes=[
-                ("Drive Freq", "Hz", 1e6 * freqs),  # inner axis (x)
-                (
-                    "GE population",
-                    "a.u.",
-                    np.asarray([0, 1]),
-                ),  # outer axis (y), synthesized
-            ],
-            comment=comment,
-            tags=tag,
-        )
-
-    def load(self, filepath: str, **kwargs) -> FreqResult:
-        ld = load_labber_data(filepath)
-
-        freqs = 1e-6 * np.asarray(ld.axes[0].values, dtype=np.float64)  # Hz to MHz
-        # native load_labber_data does NOT flip axes: ld.z is (Ny=2, Nx=len(freqs))
-        # restore (len(freqs), 2) shape that result.signals expects
-        populations = np.real(np.asarray(ld.z)).astype(np.float64).T
-        comment = ld.comment
-
-        cfg_snapshot = None
-        if comment is not None:
-            cfg, _, _ = parse_comment(comment)
-            if cfg is not None:
-                cfg_snapshot = FreqCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = FreqResult(
-            freqs=freqs, signals=populations, cfg_snapshot=cfg_snapshot
-        )
-
-        return self.last_result
