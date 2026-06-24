@@ -11,13 +11,27 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.experiment import AxesSpec
+from zcu_tools.experiment.v2.singleshot.ac_stark import AcStarkExp, AcStarkResult
 from zcu_tools.experiment.v2.singleshot.ge import GE_Exp, GE_Result
 from zcu_tools.experiment.v2.singleshot.len_rabi import LenRabiExp, LenRabiResult
 from zcu_tools.experiment.v2.singleshot.mist.freq import FreqDepExp, FreqResult
 from zcu_tools.experiment.v2.singleshot.mist.power import PowerExp, PowerResult
+from zcu_tools.experiment.v2.singleshot.mist.power_freq import (
+    FreqPowerExp,
+    FreqPowerResult,
+)
 from zcu_tools.experiment.v2.singleshot.mist.pre_freq import (
     PreFreqExp,
     PreFreqResult,
+)
+from zcu_tools.experiment.v2.singleshot.t1.t1 import T1Exp, T1Result
+from zcu_tools.experiment.v2.singleshot.t1.t1_with_tone import (
+    T1WithToneExp,
+    T1WithToneResult,
+)
+from zcu_tools.experiment.v2.singleshot.t1.t1_with_tone_sweep import (
+    T1WithToneSweepExp,
+    T1WithToneSweepResult,
 )
 from zcu_tools.experiment.v2.twotone.ckp import CKP_Exp, CKP_Result
 from zcu_tools.experiment.v2.twotone.reset.bath.length import LengthExp, LengthResult
@@ -295,6 +309,112 @@ def _convert_len_rabi_labber(input_path: Path, output_path: Path) -> None:
     _save_axes_spec_result_exact(output_path, axes_spec, result, comment=data.comment)
 
 
+def _convert_ac_stark_sidecars(input_path: Path, output_path: Path) -> None:
+    ground_path, excited_path = _legacy_sidecar_paths_by_name(
+        input_path, ("_g_pop", "_e_pop")
+    )
+    ground = load_labber_data(str(ground_path))
+    excited = load_labber_data(str(excited_path))
+    _require_same_metadata(ground, (excited,), "legacy AC Stark sidecars")
+
+    gains, freq_hz = _legacy_axes(
+        ground,
+        ground_path,
+        expected=(("Stark Pulse Gain", "a.u."), ("Frequency", "Hz")),
+    )
+    excited_gains, excited_freq_hz = _legacy_axes(
+        excited,
+        excited_path,
+        expected=(("Stark Pulse Gain", "a.u."), ("Frequency", "Hz")),
+    )
+    _require_same_axis_values_for_context(
+        "Stark Pulse Gain", gains, excited_gains, "legacy AC Stark sidecars"
+    )
+    _require_same_axis_values_for_context(
+        "Frequency", freq_hz, excited_freq_hz, "legacy AC Stark sidecars"
+    )
+
+    expected_shape = (len(freq_hz), len(gains))
+    ground_pop = _legacy_real_z(
+        ground,
+        ground_path,
+        expected_label="Signal",
+        expected_unit="a.u.",
+        expected_shape=expected_shape,
+    )
+    excited_pop = _legacy_real_z(
+        excited,
+        excited_path,
+        expected_label="Signal",
+        expected_unit="a.u.",
+        expected_shape=expected_shape,
+    )
+
+    result = AcStarkResult(
+        gains=gains.astype(np.float64),
+        freqs=(freq_hz * 1e-6).astype(np.float64),
+        populations=np.stack([ground_pop.T, excited_pop.T], axis=-1),
+        population_states=np.array([0, 1], dtype=np.int64),
+    )
+    axes_spec = AcStarkExp.AXES_SPEC
+    if axes_spec is None:
+        raise RuntimeError("AcStarkExp has no AXES_SPEC")
+    _save_axes_spec_result_exact(output_path, axes_spec, result, comment=ground.comment)
+
+
+def _convert_mist_power_freq_sidecars(input_path: Path, output_path: Path) -> None:
+    ground_path, excited_path = _legacy_sidecar_paths_exact_by_name(
+        input_path, ("_g_population", "_e_population")
+    )
+    ground = load_labber_data(str(ground_path))
+    excited = load_labber_data(str(excited_path))
+    _require_same_metadata(ground, (excited,), "legacy MIST power-freq sidecars")
+
+    gains, freq_hz = _legacy_axes(
+        ground,
+        ground_path,
+        expected=(("Drive gain", "a.u."), ("Drive freq", "Hz")),
+    )
+    excited_gains, excited_freq_hz = _legacy_axes(
+        excited,
+        excited_path,
+        expected=(("Drive gain", "a.u."), ("Drive freq", "Hz")),
+    )
+    _require_same_axis_values_for_context(
+        "Drive gain", gains, excited_gains, "legacy MIST power-freq sidecars"
+    )
+    _require_same_axis_values_for_context(
+        "Drive freq", freq_hz, excited_freq_hz, "legacy MIST power-freq sidecars"
+    )
+
+    expected_shape = (len(freq_hz), len(gains))
+    ground_pop = _legacy_real_z(
+        ground,
+        ground_path,
+        expected_label="Population",
+        expected_unit="a.u.",
+        expected_shape=expected_shape,
+    )
+    excited_pop = _legacy_real_z(
+        excited,
+        excited_path,
+        expected_label="Population",
+        expected_unit="a.u.",
+        expected_shape=expected_shape,
+    )
+
+    result = FreqPowerResult(
+        gains=gains.astype(np.float64),
+        freqs=(freq_hz * 1e-6).astype(np.float64),
+        signals=np.stack([ground_pop.T, excited_pop.T], axis=-1),
+        population_states=np.array([0, 1], dtype=np.int64),
+    )
+    axes_spec = FreqPowerExp.AXES_SPEC
+    if axes_spec is None:
+        raise RuntimeError("FreqPowerExp has no AXES_SPEC")
+    _save_axes_spec_result_exact(output_path, axes_spec, result, comment=ground.comment)
+
+
 def _convert_mist_power_labber(input_path: Path, output_path: Path) -> None:
     data = load_labber_data(str(input_path))
     gains, population_values = _legacy_two_axes(
@@ -373,6 +493,104 @@ def _convert_mist_pre_freq_labber(input_path: Path, output_path: Path) -> None:
     _save_axes_spec_result_exact(output_path, axes_spec, result, comment=data.comment)
 
 
+def _convert_t1_sidecars(input_path: Path, output_path: Path) -> None:
+    result, comment = _load_legacy_t1_sidecars(
+        input_path,
+        result_type=T1Result,
+        context="legacy T1 sidecars",
+    )
+    axes_spec = T1Exp.AXES_SPEC
+    if axes_spec is None:
+        raise RuntimeError("T1Exp has no AXES_SPEC")
+    _save_axes_spec_result_exact(output_path, axes_spec, result, comment=comment)
+
+
+def _convert_t1_with_tone_sidecars(input_path: Path, output_path: Path) -> None:
+    result, comment = _load_legacy_t1_sidecars(
+        input_path,
+        result_type=T1WithToneResult,
+        context="legacy T1-with-tone sidecars",
+    )
+    axes_spec = T1WithToneExp.AXES_SPEC
+    if axes_spec is None:
+        raise RuntimeError("T1WithToneExp has no AXES_SPEC")
+    _save_axes_spec_result_exact(output_path, axes_spec, result, comment=comment)
+
+
+def _convert_t1_with_tone_sweep_sidecars(input_path: Path, output_path: Path) -> None:
+    paths = _legacy_sidecar_paths_by_name(
+        input_path, ("_gg_pop", "_ge_pop", "_eg_pop", "_ee_pop")
+    )
+    gg_path, ge_path, eg_path, ee_path = paths
+    gg, ge, eg, ee = tuple(load_labber_data(str(path)) for path in paths)
+    _require_same_metadata(gg, (ge, eg, ee), "legacy T1-with-tone-sweep sidecars")
+
+    time_s, xs = _legacy_axes(
+        gg,
+        gg_path,
+        expected=(("Time", "s"), ("sweep value", "a.u.")),
+    )
+    for path, data in ((ge_path, ge), (eg_path, eg), (ee_path, ee)):
+        candidate_time_s, candidate_xs = _legacy_axes(
+            data,
+            path,
+            expected=(("Time", "s"), ("sweep value", "a.u.")),
+        )
+        _require_same_axis_values_for_context(
+            "Time", time_s, candidate_time_s, "legacy T1-with-tone-sweep sidecars"
+        )
+        _require_same_axis_values_for_context(
+            "sweep value", xs, candidate_xs, "legacy T1-with-tone-sweep sidecars"
+        )
+
+    expected_shape = (len(xs), len(time_s))
+    gg_pop = _legacy_real_z(
+        gg,
+        gg_path,
+        expected_label="Ground Populations",
+        expected_unit="a.u.",
+        expected_shape=expected_shape,
+    )
+    ge_pop = _legacy_real_z(
+        ge,
+        ge_path,
+        expected_label="Ground Populations",
+        expected_unit="a.u.",
+        expected_shape=expected_shape,
+    )
+    eg_pop = _legacy_real_z(
+        eg,
+        eg_path,
+        expected_label="Ground Populations",
+        expected_unit="a.u.",
+        expected_shape=expected_shape,
+    )
+    ee_pop = _legacy_real_z(
+        ee,
+        ee_path,
+        expected_label="Ground Populations",
+        expected_unit="a.u.",
+        expected_shape=expected_shape,
+    )
+
+    signals = np.empty((len(xs), 2, len(time_s), 2), dtype=np.float64)
+    signals[:, 0, :, 0] = gg_pop
+    signals[:, 0, :, 1] = ge_pop
+    signals[:, 1, :, 0] = eg_pop
+    signals[:, 1, :, 1] = ee_pop
+    result = T1WithToneSweepResult(
+        xs=xs.astype(np.float64),
+        lengths=(time_s * 1e6).astype(np.float64),
+        signals=signals,
+        initial_states=np.array([0, 1], dtype=np.int64),
+        population_states=np.array([0, 1], dtype=np.int64),
+    )
+    axes_spec = T1WithToneSweepExp.AXES_SPEC
+    if axes_spec is None:
+        raise RuntimeError("T1WithToneSweepExp has no AXES_SPEC")
+    _save_axes_spec_result_exact(output_path, axes_spec, result, comment=gg.comment)
+
+
 def _validate_ge_output(path: str) -> GE_Result:
     return GE_Exp().load(path)
 
@@ -383,6 +601,14 @@ def _validate_bath_length_output(path: str) -> LengthResult:
 
 def _validate_len_rabi_output(path: str) -> LenRabiResult:
     return LenRabiExp().load(path)
+
+
+def _validate_ac_stark_output(path: str) -> AcStarkResult:
+    return AcStarkExp().load(path)
+
+
+def _validate_mist_power_freq_output(path: str) -> FreqPowerResult:
+    return FreqPowerExp().load(path)
 
 
 def _validate_mist_power_output(path: str) -> PowerResult:
@@ -401,6 +627,50 @@ def _validate_ckp_output(path: str) -> CKP_Result:
     return CKP_Exp().load(path)
 
 
+def _validate_t1_output(path: str) -> T1Result:
+    return T1Exp().load(path)
+
+
+def _validate_t1_with_tone_output(path: str) -> T1WithToneResult:
+    return T1WithToneExp().load(path)
+
+
+def _validate_t1_with_tone_sweep_output(path: str) -> T1WithToneSweepResult:
+    return T1WithToneSweepExp().load(path)
+
+
+def _validate_ac_stark_sidecar_input(input_path: Path) -> None:
+    _validate_sidecar_input(
+        _legacy_sidecar_paths_by_name(input_path, ("_g_pop", "_e_pop")),
+        "legacy AC Stark sidecar",
+    )
+
+
+def _validate_mist_power_freq_sidecar_input(input_path: Path) -> None:
+    _validate_sidecar_input(
+        _legacy_sidecar_paths_exact_by_name(
+            input_path, ("_g_population", "_e_population")
+        ),
+        "legacy MIST power-freq sidecar",
+    )
+
+
+def _validate_t1_sidecar_input(input_path: Path) -> None:
+    _validate_sidecar_input(
+        _legacy_sidecar_paths_by_stem(input_path, ("_initg", "_inite")),
+        "legacy T1 sidecar",
+    )
+
+
+def _validate_t1_with_tone_sweep_sidecar_input(input_path: Path) -> None:
+    _validate_sidecar_input(
+        _legacy_sidecar_paths_by_name(
+            input_path, ("_gg_pop", "_ge_pop", "_eg_pop", "_ee_pop")
+        ),
+        "legacy T1-with-tone-sweep sidecar",
+    )
+
+
 def _validate_ckp_sidecar_input(input_path: Path) -> None:
     for sidecar_path in _legacy_ckp_sidecar_paths(input_path):
         if not sidecar_path.is_file():
@@ -414,6 +684,66 @@ def _legacy_ckp_sidecar_paths(input_path: Path) -> tuple[Path, Path]:
         Path(format_ext(str(input_path.with_name(input_path.name + "_ground")))),
         Path(format_ext(str(input_path.with_name(input_path.name + "_excited")))),
     )
+
+
+def _legacy_sidecar_paths_by_name(
+    input_path: Path, suffixes: tuple[str, ...]
+) -> tuple[Path, ...]:
+    return tuple(
+        _resolve_legacy_sidecar_path(input_path.with_name(input_path.name + suffix))
+        for suffix in suffixes
+    )
+
+
+def _legacy_sidecar_paths_exact_by_name(
+    input_path: Path, suffixes: tuple[str, ...]
+) -> tuple[Path, ...]:
+    return tuple(
+        Path(format_ext(str(input_path.with_name(input_path.name + suffix))))
+        for suffix in suffixes
+    )
+
+
+def _legacy_sidecar_paths_by_stem(
+    input_path: Path, suffixes: tuple[str, ...]
+) -> tuple[Path, ...]:
+    return tuple(
+        _resolve_legacy_sidecar_path(input_path.with_name(input_path.stem + suffix))
+        for suffix in suffixes
+    )
+
+
+def _resolve_legacy_sidecar_path(sidecar_base: Path) -> Path:
+    exact = Path(format_ext(str(sidecar_base)))
+    candidates: list[Path] = []
+    if exact.is_file():
+        candidates.append(exact)
+
+    numbered_prefix = exact.stem + "_"
+    if exact.parent.exists():
+        for child in exact.parent.iterdir():
+            suffix_number = child.stem.removeprefix(numbered_prefix)
+            if (
+                child.is_file()
+                and child.suffix == exact.suffix
+                and child.stem.startswith(numbered_prefix)
+                and suffix_number.isdigit()
+            ):
+                candidates.append(child)
+
+    candidates = sorted(set(candidates))
+    if len(candidates) > 1:
+        formatted = ", ".join(str(path) for path in candidates)
+        raise ValueError(f"ambiguous legacy sidecar for {exact}: {formatted}")
+    if candidates:
+        return candidates[0]
+    return exact
+
+
+def _validate_sidecar_input(paths: tuple[Path, ...], label: str) -> None:
+    for sidecar_path in paths:
+        if not sidecar_path.is_file():
+            raise FileNotFoundError(f"{label} does not exist: {sidecar_path}")
 
 
 def _load_legacy_ckp_sidecars(input_path: Path) -> tuple[CKP_Result, str]:
@@ -439,6 +769,93 @@ def _load_legacy_ckp_sidecars(input_path: Path) -> tuple[CKP_Result, str]:
         ),
     )
     return result, ground.comment
+
+
+def _load_legacy_t1_sidecars(
+    input_path: Path,
+    *,
+    result_type: type[T1Result] | type[T1WithToneResult],
+    context: str,
+) -> tuple[T1Result | T1WithToneResult, str]:
+    initg_path, inite_path = _legacy_sidecar_paths_by_stem(
+        input_path, ("_initg", "_inite")
+    )
+    initg = load_labber_data(str(initg_path))
+    inite = load_labber_data(str(inite_path))
+    _require_same_metadata(initg, (inite,), context)
+
+    time_s, population_values = _legacy_axes(
+        initg,
+        initg_path,
+        expected=(("Time", "s"), ("GE population", "a.u.")),
+    )
+    inite_time_s, inite_population_values = _legacy_axes(
+        inite,
+        inite_path,
+        expected=(("Time", "s"), ("GE population", "a.u.")),
+    )
+    _require_population_axis(population_values, initg_path)
+    _require_population_axis(inite_population_values, inite_path)
+    _require_same_axis_values_for_context("Time", time_s, inite_time_s, context)
+    _require_same_axis_values_for_context(
+        "GE population", population_values, inite_population_values, context
+    )
+
+    expected_shape = (len(population_values), len(time_s))
+    initg_pop = _legacy_real_z(
+        initg,
+        initg_path,
+        expected_label="Signal",
+        expected_unit="a.u.",
+        expected_shape=expected_shape,
+    )
+    inite_pop = _legacy_real_z(
+        inite,
+        inite_path,
+        expected_label="Signal",
+        expected_unit="a.u.",
+        expected_shape=expected_shape,
+    )
+    signals = np.stack([initg_pop.T, inite_pop.T], axis=1)
+    result = result_type(
+        lengths=(time_s * 1e6).astype(np.float64),
+        signals=signals,
+        initial_states=np.array([0, 1], dtype=np.int64),
+        population_states=population_values.astype(np.int64),
+    )
+    return result, initg.comment
+
+
+def _legacy_axes(
+    data: LabberData,
+    path: Path,
+    *,
+    expected: tuple[tuple[str, str], ...],
+) -> tuple[NDArray[np.float64], ...]:
+    if len(data.axes) != len(expected):
+        raise ValueError(
+            f"legacy file {path} has {len(data.axes)} axes; expected {len(expected)}"
+        )
+
+    values: list[NDArray[np.float64]] = []
+    for index, (axis, (expected_name, expected_unit)) in enumerate(
+        zip(data.axes, expected, strict=True)
+    ):
+        if axis.name != expected_name or axis.unit != expected_unit:
+            raise ValueError(
+                f"legacy file {path} axis {index} is "
+                f"{axis.name!r} [{axis.unit!r}], expected "
+                f"{expected_name!r} [{expected_unit!r}]"
+            )
+        axis_values = np.asarray(axis.values, dtype=np.float64)
+        if axis_values.ndim != 1:
+            raise ValueError(
+                f"legacy file {path} axis {expected_name!r} is "
+                f"{axis_values.ndim}D; expected 1D"
+            )
+        values.append(axis_values)
+
+    return tuple(values)
 
 
 def _legacy_ckp_axes(
@@ -548,6 +965,32 @@ def _legacy_z(
     return signals
 
 
+def _legacy_real_z(
+    data: LabberData,
+    path: Path,
+    *,
+    expected_label: str,
+    expected_unit: str,
+    expected_shape: tuple[int, ...],
+) -> NDArray[np.float64]:
+    if data.data.name != expected_label or data.data.unit != expected_unit:
+        raise ValueError(
+            f"legacy file {path} z channel is "
+            f"{data.data.name!r} [{data.data.unit!r}], expected "
+            f"{expected_label!r} [{expected_unit!r}]"
+        )
+
+    values = np.asarray(data.z, dtype=np.complex128)
+    if values.shape != expected_shape:
+        raise ValueError(
+            f"legacy file {path} z shape {values.shape} != "
+            f"expected legacy shape {expected_shape}"
+        )
+    if np.any(values.imag != 0.0):
+        raise ValueError(f"legacy file {path} z contains imaginary components")
+    return values.real.astype(np.float64)
+
+
 def _legacy_population_z(
     data: LabberData,
     path: Path,
@@ -607,6 +1050,28 @@ def _require_same_axis_values(
         raise ValueError(f"legacy CKP sidecars disagree on {axis_name} axis values")
 
 
+def _require_same_axis_values_for_context(
+    axis_name: str,
+    reference_values: NDArray[np.float64],
+    candidate_values: NDArray[np.float64],
+    context: str,
+) -> None:
+    if reference_values.shape != candidate_values.shape or not np.array_equal(
+        reference_values, candidate_values
+    ):
+        raise ValueError(f"{context} disagree on {axis_name} axis values")
+
+
+def _require_same_metadata(
+    reference: LabberData, others: Sequence[LabberData], context: str
+) -> None:
+    for other in others:
+        if reference.comment != other.comment:
+            raise ValueError(f"{context} disagree on comment metadata")
+        if reference.tags != other.tags:
+            raise ValueError(f"{context} disagree on tags")
+
+
 def _require_same_ckp_metadata(ground: LabberData, excited: LabberData) -> None:
     if ground.comment != excited.comment:
         raise ValueError("legacy CKP sidecars disagree on comment metadata")
@@ -624,6 +1089,11 @@ def _npz_comment(data: np.lib.npyio.NpzFile) -> str:
 
 
 CONVERTERS: dict[str, ConverterSpec] = {
+    "singleshot/ac_stark": ConverterSpec(
+        convert=_convert_ac_stark_sidecars,
+        validate=_validate_ac_stark_output,
+        validate_input=_validate_ac_stark_sidecar_input,
+    ),
     "singleshot/ge": ConverterSpec(
         convert=_convert_ge_labber,
         validate=_validate_ge_output,
@@ -640,9 +1110,29 @@ CONVERTERS: dict[str, ConverterSpec] = {
         convert=_convert_mist_power_labber,
         validate=_validate_mist_power_output,
     ),
+    "singleshot/mist/power_freq": ConverterSpec(
+        convert=_convert_mist_power_freq_sidecars,
+        validate=_validate_mist_power_freq_output,
+        validate_input=_validate_mist_power_freq_sidecar_input,
+    ),
     "singleshot/mist/pre_freq": ConverterSpec(
         convert=_convert_mist_pre_freq_labber,
         validate=_validate_mist_pre_freq_output,
+    ),
+    "singleshot/t1/t1": ConverterSpec(
+        convert=_convert_t1_sidecars,
+        validate=_validate_t1_output,
+        validate_input=_validate_t1_sidecar_input,
+    ),
+    "singleshot/t1/t1_with_tone": ConverterSpec(
+        convert=_convert_t1_with_tone_sidecars,
+        validate=_validate_t1_with_tone_output,
+        validate_input=_validate_t1_sidecar_input,
+    ),
+    "singleshot/t1/t1_with_tone_sweep": ConverterSpec(
+        convert=_convert_t1_with_tone_sweep_sidecars,
+        validate=_validate_t1_with_tone_sweep_output,
+        validate_input=_validate_t1_with_tone_sweep_sidecar_input,
     ),
     "twotone/reset/bath/length": ConverterSpec(
         convert=_convert_bath_length_labber,

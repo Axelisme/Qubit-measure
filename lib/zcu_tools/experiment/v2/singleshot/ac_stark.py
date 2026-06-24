@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
-from pathlib import Path
+from dataclasses import dataclass, field
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -14,9 +13,16 @@ from numpy import float64
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment import (
+    IDENTITY,
+    MHZ_TO_HZ,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.singleshot.util import (
     calc_populations,
@@ -36,13 +42,12 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import (
-    load_labber_data,
-    safe_labber_filepath,
-    save_labber_data,
-)
 from zcu_tools.utils.fitting import fitlor
 from zcu_tools.utils.process import minus_background
+
+
+def _default_population_states() -> NDArray[np.int64]:
+    return np.array([0, 1], dtype=np.int64)
 
 
 @dataclass(frozen=True)
@@ -50,6 +55,9 @@ class AcStarkResult:
     gains: NDArray[np.float64]
     freqs: NDArray[np.float64]
     populations: NDArray[np.float64]
+    population_states: NDArray[np.int64] = field(
+        default_factory=_default_population_states
+    )
     cfg_snapshot: AcStarkCfg | None = None
 
 
@@ -98,7 +106,31 @@ class AcStarkCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: AcStarkSweepCfg
 
 
-class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
+class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
+    AXES_SPEC = AxesSpec(
+        axes=(
+            Axis(
+                "population_states",
+                "GE Population",
+                "None",
+                scale=IDENTITY,
+                dtype=np.int64,
+            ),
+            Axis("freqs", "Frequency", "Hz", scale=MHZ_TO_HZ, dtype=np.float64),
+            Axis(
+                "gains",
+                "Stark Pulse Gain",
+                "a.u.",
+                scale=IDENTITY,
+                dtype=np.float64,
+            ),
+        ),
+        z=ZSpec("populations", "Population", "a.u.", dtype=np.float64),
+        result_type=AcStarkResult,
+        cfg_type=AcStarkCfg,
+        tag="singleshot/ac_stark",
+    )
+
     def run(
         self,
         soc,
@@ -409,88 +441,3 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         fig.tight_layout()
 
         return fig
-
-    def save(
-        self,
-        filepath: str,
-        result: AcStarkResult | None = None,
-        comment: str | None = None,
-        tag: str = "singleshot/ac_stark",
-    ) -> None:
-        """Save AC Stark experiment data."""
-        if result is None:
-            result = self.last_result
-        assert result is not None, "No result found"
-
-        _filepath = Path(filepath)
-
-        gains, freqs, populations = result.gains, result.freqs, result.populations
-
-        cfg = result.cfg_snapshot
-        if cfg is None:
-            raise ValueError("result.cfg_snapshot is None")
-        comment = make_comment(cfg, comment)
-
-        # z is on-disk (Nfreq, Ngain) = (Nouter, Ninner); axes inner-first
-        # (gains = inner/x, freqs = outer/y). populations[..., i] is
-        # (Ngain, Nfreq), so .T is required to get (Nfreq, Ngain).
-        save_labber_data(
-            safe_labber_filepath(str(_filepath.with_name(_filepath.name + "_g_pop"))),
-            z=("Signal", "a.u.", populations[..., 0].T),
-            axes=[
-                ("Stark Pulse Gain", "a.u.", gains),
-                ("Frequency", "Hz", freqs * 1e6),
-            ],
-            comment=comment,
-            tags=tag,
-        )
-
-        # Excited state population
-        save_labber_data(
-            safe_labber_filepath(str(_filepath.with_name(_filepath.name + "_e_pop"))),
-            z=("Signal", "a.u.", populations[..., 1].T),
-            axes=[
-                ("Stark Pulse Gain", "a.u.", gains),
-                ("Frequency", "Hz", freqs * 1e6),
-            ],
-            comment=comment,
-            tags=tag,
-        )
-
-    def load(self, filepath: list[str]) -> AcStarkResult:
-        g_filepath, e_filepath = filepath
-
-        # Load ground populations. Native load_labber_data returns .z as
-        # (Ny, Nx) = (Nfreq, Ngain) (inner axis = gains is LAST) and does NOT
-        # flip, so transpose back to the (Ngain, Nfreq) in-memory convention.
-        g_ld = load_labber_data(g_filepath)
-        g_pop = g_ld.z.T  # (Nfreq, Ngain) -> (Ngain, Nfreq)
-        gains = g_ld.axes[0].values  # inner axis = gains
-        freqs = g_ld.axes[1].values  # outer axis = freqs (Hz)
-        comment = g_ld.comment
-        assert len(gains.shape) == 1 and len(freqs.shape) == 1
-        assert g_pop.shape == (len(gains), len(freqs))
-
-        # Load excited populations
-        e_ld = load_labber_data(e_filepath)
-        e_pop = e_ld.z.T  # (Nfreq, Ngain) -> (Ngain, Nfreq)
-        assert e_pop.shape == (len(gains), len(freqs))
-
-        populations = np.stack((g_pop, e_pop), axis=-1)
-
-        freqs = freqs * 1e-6  # Hz -> MHz
-
-        gains = gains.astype(np.float64)
-        freqs = freqs.astype(np.float64)
-        populations = np.real(populations).astype(np.float64)
-
-        cfg_snapshot = None
-        if comment:
-            cfg, _, _ = parse_comment(comment)
-            if cfg is not None:
-                cfg_snapshot = AcStarkCfg.validate_or_warn(cfg, source=g_filepath)
-        self.last_result = AcStarkResult(
-            gains=gains, freqs=freqs, populations=populations, cfg_snapshot=cfg_snapshot
-        )
-
-        return self.last_result

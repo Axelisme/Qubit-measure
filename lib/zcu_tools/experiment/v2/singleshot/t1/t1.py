@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from copy import deepcopy
-from dataclasses import dataclass
-from pathlib import Path
+from dataclasses import dataclass, field
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -12,9 +11,16 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment import (
+    IDENTITY,
+    US_TO_S,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, MultiLivePlot, make_plot_frame
@@ -34,20 +40,27 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import (
-    load_labber_data,
-    safe_labber_filepath,
-    save_labber_data,
-)
 from zcu_tools.utils.fitting.multi_decay import calc_lambdas, fit_dual_transition_rates
 
 from ..util import calc_populations, correct_populations
+
+
+def _default_initial_states() -> NDArray[np.int64]:
+    return np.array([0, 1], dtype=np.int64)
+
+
+def _default_population_states() -> NDArray[np.int64]:
+    return np.array([0, 1], dtype=np.int64)
 
 
 @dataclass(frozen=True)
 class T1Result:
     lengths: NDArray[np.float64]
     signals: NDArray[np.float64]
+    initial_states: NDArray[np.int64] = field(default_factory=_default_initial_states)
+    population_states: NDArray[np.int64] = field(
+        default_factory=_default_population_states
+    )
     cfg_snapshot: T1Cfg | None = None
 
 
@@ -66,7 +79,31 @@ class T1Cfg(ProgramV2Cfg, ExpCfgModel):
     sweep: T1SweepCfg
 
 
-class T1Exp(AbsExperiment[T1Result, T1Cfg]):
+class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
+    AXES_SPEC = AxesSpec(
+        axes=(
+            Axis(
+                "population_states",
+                "GE Population",
+                "None",
+                scale=IDENTITY,
+                dtype=np.int64,
+            ),
+            Axis(
+                "initial_states",
+                "Initial State",
+                "None",
+                scale=IDENTITY,
+                dtype=np.int64,
+            ),
+            Axis("lengths", "Time", "s", scale=US_TO_S, dtype=np.float64),
+        ),
+        z=ZSpec("signals", "Population", "a.u.", dtype=np.float64),
+        result_type=T1Result,
+        cfg_type=T1Cfg,
+        tag="singleshot/t1",
+    )
+
     """T1 relaxation time measurement.
 
     Applies a π pulse and then waits for a variable time before readout
@@ -349,91 +386,3 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         fig.tight_layout()
 
         return fig
-
-    def save(
-        self,
-        filepath: str,
-        result: T1Result | None = None,
-        comment: str | None = None,
-        tag: str = "singleshot/t1",
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        Ts, populations = result.lengths, result.signals
-
-        populations1 = populations[:, 0]  # init in g
-        populations2 = populations[:, 1]  # init in e
-
-        _filepath = Path(filepath)
-
-        # initial in g
-        cfg = result.cfg_snapshot
-        if cfg is None:
-            raise ValueError("result.cfg_snapshot is None")
-        comment = make_comment(cfg, comment)
-
-        # axes are inner-first: x=Time (fastest-varying), y=GE population.
-        # z is native (Ny, Nx) inner-last, i.e. populations*.T has shape (2, len(Ts)).
-        save_labber_data(
-            safe_labber_filepath(str(_filepath.with_name(_filepath.stem + "_initg"))),
-            z=("Signal", "a.u.", populations1.T),
-            axes=[
-                ("Time", "s", Ts * 1e-6),
-                ("GE population", "a.u.", np.array([0, 1])),
-            ],
-            comment=comment,
-            tags=tag,
-        )
-
-        # initial in e
-        save_labber_data(
-            safe_labber_filepath(str(_filepath.with_name(_filepath.stem + "_inite"))),
-            z=("Signal", "a.u.", populations2.T),
-            axes=[
-                ("Time", "s", Ts * 1e-6),
-                ("GE population", "a.u.", np.array([0, 1])),
-            ],
-            comment=comment,
-            tags=tag,
-        )
-
-    def load(self, filepath: list[str]) -> T1Result:
-        g_filepath, e_filepath = filepath
-
-        # Load ground populations. Native load_labber_data returns z as
-        # (Ny=2, Nx=len(Ts)); transpose back to the old (Nx, Ny) layout the
-        # downstream stack expects.
-        g_ld = load_labber_data(g_filepath)
-        g_pop = np.asarray(g_ld.z).T
-        g_Ts = np.asarray(g_ld.axes[0].values)
-        comment = g_ld.comment
-        assert g_pop.shape == (len(g_Ts), 2)
-
-        # Load excited populations
-        e_ld = load_labber_data(e_filepath)
-        e_pop = np.asarray(e_ld.z).T
-        e_Ts = np.asarray(e_ld.axes[0].values)
-        assert e_pop.shape == (len(e_Ts), 2)
-
-        assert np.allclose(g_Ts, e_Ts), "Time arrays do not match"
-
-        Ts = g_Ts * 1e6  # s -> us
-
-        # Reconstruct signals shape: (Ts, 2, 2)
-        populations = np.stack([g_pop, e_pop], axis=1)
-
-        Ts = Ts.astype(np.float64)
-        populations = np.real(populations).astype(np.float64)
-
-        cfg_snapshot = None
-        if comment is not None:
-            cfg, _, _ = parse_comment(comment)
-            if cfg is not None:
-                cfg_snapshot = T1Cfg.validate_or_warn(cfg, source=g_filepath)
-        self.last_result = T1Result(
-            lengths=Ts, signals=populations, cfg_snapshot=cfg_snapshot
-        )
-
-        return self.last_result

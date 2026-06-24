@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from copy import deepcopy
-from dataclasses import dataclass
-from pathlib import Path
+from dataclasses import dataclass, field
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -13,9 +12,16 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment import (
+    IDENTITY,
+    US_TO_S,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.singleshot.util import (
     calc_populations,
@@ -37,14 +43,17 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.progress_bar import make_pbar
-from zcu_tools.utils.datasaver import (
-    load_labber_data,
-    safe_labber_filepath,
-    save_labber_data,
-)
 from zcu_tools.utils.fitting.multi_decay import fit_dual_transition_rates
 
 from .util import measure_with_sweep
+
+
+def _default_initial_states() -> NDArray[np.int64]:
+    return np.array([0, 1], dtype=np.int64)
+
+
+def _default_population_states() -> NDArray[np.int64]:
+    return np.array([0, 1], dtype=np.int64)
 
 
 @dataclass(frozen=True)
@@ -52,6 +61,10 @@ class T1WithToneSweepResult:
     xs: NDArray[np.float64]
     lengths: NDArray[np.float64]
     signals: NDArray[np.float64]
+    initial_states: NDArray[np.int64] = field(default_factory=_default_initial_states)
+    population_states: NDArray[np.int64] = field(
+        default_factory=_default_population_states
+    )
     cfg_snapshot: T1WithToneSweepCfg | None = None
 
 
@@ -73,7 +86,34 @@ class T1WithToneSweepModuleCfg(ConfigBase):
     readout: ReadoutCfg
 
 
-class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
+class T1WithToneSweepExp(
+    PersistableExperiment[T1WithToneSweepResult, T1WithToneSweepCfg]
+):
+    AXES_SPEC = AxesSpec(
+        axes=(
+            Axis(
+                "population_states",
+                "GE Population",
+                "None",
+                scale=IDENTITY,
+                dtype=np.int64,
+            ),
+            Axis("lengths", "Time", "s", scale=US_TO_S, dtype=np.float64),
+            Axis(
+                "initial_states",
+                "Initial State",
+                "None",
+                scale=IDENTITY,
+                dtype=np.int64,
+            ),
+            Axis("xs", "Sweep Value", "a.u.", scale=IDENTITY, dtype=np.float64),
+        ),
+        z=ZSpec("signals", "Population", "a.u.", dtype=np.float64),
+        result_type=T1WithToneSweepResult,
+        cfg_type=T1WithToneSweepCfg,
+        tag="singleshot/t1/t1_with_tone_sweep",
+    )
+
     def _resolve_outer_sweep(
         self, cfg: T1WithToneSweepCfg, soccfg
     ) -> tuple[str, NDArray[np.float64]]:
@@ -549,106 +589,3 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         fig.tight_layout()
 
         return fig
-
-    def save(
-        self,
-        filepath: str,
-        result: T1WithToneSweepResult | None = None,
-        comment: str | None = None,
-        tag: str = "singleshot/t1/t1_with_tone_sweep",
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        cfg = result.cfg_snapshot
-        if cfg is None:
-            raise ValueError("result.cfg_snapshot is None")
-
-        xs, Ts, populations = result.xs, result.lengths, result.signals
-        comment = make_comment(cfg, comment)
-
-        _filepath = Path(filepath)
-
-        axes = [
-            ("Time", "s", Ts * 1e-6),
-            ("sweep value", "a.u.", xs),
-        ]
-        save_labber_data(
-            safe_labber_filepath(str(_filepath.with_name(_filepath.name + "_gg_pop"))),
-            z=("Ground Populations", "a.u.", populations[:, 0, :, 0]),
-            axes=axes,
-            comment=comment,
-            tags=tag,
-        )
-        save_labber_data(
-            safe_labber_filepath(str(_filepath.with_name(_filepath.name + "_ge_pop"))),
-            z=("Ground Populations", "a.u.", populations[:, 0, :, 1]),
-            axes=axes,
-            comment=comment,
-            tags=tag,
-        )
-        save_labber_data(
-            safe_labber_filepath(str(_filepath.with_name(_filepath.name + "_eg_pop"))),
-            z=("Ground Populations", "a.u.", populations[:, 1, :, 0]),
-            axes=axes,
-            comment=comment,
-            tags=tag,
-        )
-        save_labber_data(
-            safe_labber_filepath(str(_filepath.with_name(_filepath.name + "_ee_pop"))),
-            z=("Ground Populations", "a.u.", populations[:, 1, :, 1]),
-            axes=axes,
-            comment=comment,
-            tags=tag,
-        )
-
-    def load(self, filepath: list[str]) -> T1WithToneSweepResult:
-        gg_filepath, ge_filepath, eg_filepath, ee_filepath = filepath
-
-        # Load ground populations
-        ld = load_labber_data(gg_filepath)
-        gg_pop = ld.z
-        comment = ld.comment
-        Ts = ld.axes[0].values  # Time
-        xs = ld.axes[1].values  # sweep value
-        assert len(xs.shape) == 1 and len(Ts.shape) == 1
-        assert gg_pop.shape == (len(xs), len(Ts))
-
-        # Load ground populations
-        ge_pop = load_labber_data(ge_filepath).z
-        assert ge_pop.shape == (len(xs), len(Ts))
-
-        # Load ground populations
-        eg_pop = load_labber_data(eg_filepath).z
-        assert eg_pop.shape == (len(xs), len(Ts))
-
-        # Load ground populations
-        ee_pop = load_labber_data(ee_filepath).z
-        assert ee_pop.shape == (len(xs), len(Ts))
-
-        # Reconstruct signals shape: (gains, ts, 2)
-        populations = np.zeros((len(xs), 2, len(Ts), 3), dtype=np.complex128)
-        populations[:, 0, :, 0] = gg_pop
-        populations[:, 0, :, 1] = ge_pop
-        populations[:, 1, :, 0] = eg_pop
-        populations[:, 1, :, 1] = ee_pop
-
-        Ts = Ts * 1e6  # s -> us
-
-        xs = xs.astype(np.float64)
-        Ts = Ts.astype(np.float64)
-        populations = np.real(populations).astype(np.float64)
-
-        cfg_snapshot = None
-        if comment:
-            cfg, _, _ = parse_comment(comment)
-            if cfg is not None:
-                cfg_snapshot = T1WithToneSweepCfg.validate_or_warn(
-                    cfg, source=gg_filepath
-                )
-        self.last_result = T1WithToneSweepResult(
-            xs=xs, lengths=Ts, signals=populations, cfg_snapshot=cfg_snapshot
-        )
-
-        return self.last_result

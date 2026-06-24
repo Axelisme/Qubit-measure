@@ -11,7 +11,7 @@ Covers:
 - mist/power_freq + t1_tone_sweep analyze: figure-only result
 - t1_tone_sweep: each adapter lowers exactly one outer sweep (domain
   _resolve_outer_sweep satisfied) + uniform default True + pop-before-lowering
-- multi-file save: domain derives suffixed paths from one data_path (no clash)
+- canonical save: domain writes one ADR-0027 native HDF5 from one data_path
 """
 
 from __future__ import annotations
@@ -52,6 +52,7 @@ from zcu_tools.gui.app.main.adapter import (
     WritebackRequest,
 )
 from zcu_tools.meta_tool import MetaDict
+from zcu_tools.utils.datasaver import load_labber_data
 
 # ---------------------------------------------------------------------------
 # Fixtures / shared helpers (mirror test_phase162b_adapters)
@@ -505,43 +506,55 @@ def test_t1_tone_sweep_analyze_figure_only_with_xlabel(
 
 
 # ---------------------------------------------------------------------------
-# multi-file save — domain derives suffixed paths from one data_path (no clash)
+# canonical save — one native HDF5 from one data_path
 # ---------------------------------------------------------------------------
 
 
-def test_ac_stark_multifile_save_no_clash(
+def test_ac_stark_canonical_save_single_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The BaseAdapter hands one data_path; the domain save derives _g_pop / _e_pop.
-    # Confirm the two derived files are distinct and both written. The cfg-snapshot
-    # comment is not under test, so stub make_comment (avoids serializing the cfg).
-    import zcu_tools.experiment.v2.singleshot.ac_stark as mod
+    import zcu_tools.experiment.utils as experiment_utils
 
-    monkeypatch.setattr(mod, "make_comment", lambda cfg, comment: "")
+    monkeypatch.setattr(experiment_utils, "make_comment", lambda cfg, comment: "")
     exp = AcStarkExp()
     exp.last_result = _make_ac_stark_result()
     base = tmp_path / "Q1_sh_ac_stark@flux0"
     exp.save(filepath=str(base))
     written = sorted(p.name for p in tmp_path.iterdir())
-    assert any(name.startswith("Q1_sh_ac_stark@flux0_g_pop") for name in written)
-    assert any(name.startswith("Q1_sh_ac_stark@flux0_e_pop") for name in written)
-    # distinct files (suffix keeps them apart within the same data folder).
-    assert len(set(written)) == len(written)
+    assert written == ["Q1_sh_ac_stark@flux0_1.hdf5"]
+
+    raw = load_labber_data(str(tmp_path / written[0]))
+    assert [axis.name for axis in raw.axes] == [
+        "GE Population",
+        "Frequency",
+        "Stark Pulse Gain",
+    ]
+    assert raw.z.shape == (4, 3, 2)
+    assert raw.tags == ["singleshot/ac_stark"]
 
 
-def test_t1_tone_sweep_multifile_save_no_clash(
+def test_t1_tone_sweep_canonical_save_single_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import zcu_tools.experiment.v2.singleshot.t1.t1_with_tone_sweep as mod
+    import zcu_tools.experiment.utils as experiment_utils
 
-    monkeypatch.setattr(mod, "make_comment", lambda cfg, comment: "")
+    monkeypatch.setattr(experiment_utils, "make_comment", lambda cfg, comment: "")
     exp = T1WithToneSweepExp()
     exp.last_result = _make_t1_tone_sweep_result()
     base = tmp_path / "Q1_ss_t1_tone_sweep_gain@flux0"
     exp.save(filepath=str(base))
     written = sorted(p.name for p in tmp_path.iterdir())
-    for suffix in ("_gg_pop", "_ge_pop", "_eg_pop", "_ee_pop"):
-        assert any(f"@flux0{suffix}" in name for name in written), suffix
+    assert written == ["Q1_ss_t1_tone_sweep_gain@flux0_1.hdf5"]
+
+    raw = load_labber_data(str(tmp_path / written[0]))
+    assert [axis.name for axis in raw.axes] == [
+        "GE Population",
+        "Time",
+        "Initial State",
+        "Sweep Value",
+    ]
+    assert raw.z.shape == (4, 2, 5, 2)
+    assert raw.tags == ["singleshot/t1/t1_with_tone_sweep"]
 
 
 # --- small real-result builders for the save tests -------------------------
@@ -569,7 +582,7 @@ def _make_t1_tone_sweep_result() -> Any:
 
     xs = np.linspace(0.0, 1.0, 4, dtype=np.float64)
     lengths = np.linspace(0.0, 10.0, 5, dtype=np.float64)
-    signals = np.zeros((len(xs), 2, len(lengths), 3), dtype=np.float64)
+    signals = np.zeros((len(xs), 2, len(lengths), 2), dtype=np.float64)
     cfg = cast(_Cfg, MagicMock(spec=_Cfg))
     return T1WithToneSweepResult(
         xs=xs, lengths=lengths, signals=signals, cfg_snapshot=cfg
