@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from copy import deepcopy
-from dataclasses import dataclass
-from pathlib import Path
+from dataclasses import dataclass, field
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -12,9 +11,18 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment import (
+    IDENTITY,
+    MHZ_TO_HZ,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D, MultiLivePlot, make_plot_frame
@@ -32,9 +40,12 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_labber_data, save_labber_data
 from zcu_tools.utils.fitting import batch_fit_func, fitlor, lorfunc
 from zcu_tools.utils.process import rotate2real
+
+
+def _default_initial_states() -> NDArray[np.int64]:
+    return np.array([0, 1], dtype=np.int64)
 
 
 @dataclass(frozen=True)
@@ -42,6 +53,7 @@ class CKP_Result:
     res_freqs: NDArray[np.float64]
     qub_freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    initial_states: NDArray[np.int64] = field(default_factory=_default_initial_states)
     cfg_snapshot: CKP_Cfg | None = None
 
 
@@ -95,7 +107,34 @@ class CKP_Cfg(ProgramV2Cfg, ExpCfgModel):
     sweep: CKPSweepCfg
 
 
-class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
+class CKP_Exp(PersistableExperiment[CKP_Result, CKP_Cfg]):
+    AXES_SPEC = AxesSpec(
+        axes=(
+            Axis(
+                "qub_freqs", "Qubit Frequency", "Hz", scale=MHZ_TO_HZ, dtype=np.float64
+            ),
+            Axis(
+                "res_freqs",
+                "Resonator Frequency",
+                "Hz",
+                scale=MHZ_TO_HZ,
+                dtype=np.float64,
+            ),
+            Axis(
+                "initial_states",
+                "Initial State",
+                "None",
+                scale=IDENTITY,
+                dtype=np.int64,
+            ),
+        ),
+        z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),
+        result_type=CKP_Result,
+        cfg_type=CKP_Cfg,
+        tag="twotone/ge/ckp",
+    )
+
+    @record_result
     def run(
         self,
         soc,
@@ -206,22 +245,18 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
             )
         plt.close(fig)
 
-        # record result
-        self.last_result = CKP_Result(
+        return CKP_Result(
             res_freqs=res_freqs,
             qub_freqs=qub_freqs,
             signals=signals,
             cfg_snapshot=orig_cfg,
         )
 
-        return self.last_result
-
+    @retrieve_result
     def analyze(
         self, result: CKP_Result | None = None
     ) -> tuple[float, float, float, Figure]:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "No result found"
+        assert result is not None, "no result found"
 
         res_freqs = result.res_freqs
         qub_freqs = result.qub_freqs
@@ -319,88 +354,3 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         fig.tight_layout()
 
         return chi, kappa, res_freq, fig
-
-    def save(
-        self,
-        filepath: str,
-        result: CKP_Result | None = None,
-        comment: str | None = None,
-        tag: str = "twotone/ge/ckp",
-    ) -> None:
-        """Save AC Stark experiment data."""
-        if result is None:
-            result = self.last_result
-        assert result is not None, "No result found"
-
-        cfg = result.cfg_snapshot
-        if cfg is None:
-            raise ValueError("cfg_snapshot is None")
-
-        res_freqs = result.res_freqs
-        qub_freqs = result.qub_freqs
-        signals = result.signals
-
-        _filepath = Path(filepath)
-
-        comment = make_comment(cfg, comment)
-
-        save_labber_data(
-            str(_filepath.with_name(_filepath.name + "_ground")),
-            z=("Signal", "a.u.", signals[0].T),
-            axes=[
-                ("Resonator Frequency", "Hz", 1e6 * res_freqs),
-                ("Qubit Frequency", "Hz", 1e6 * qub_freqs),
-            ],
-            comment=comment,
-            tags=tag,
-        )
-        # excited
-        save_labber_data(
-            str(_filepath.with_name(_filepath.name + "_excited")),
-            z=("Signal", "a.u.", signals[1].T),
-            axes=[
-                ("Resonator Frequency", "Hz", 1e6 * res_freqs),
-                ("Qubit Frequency", "Hz", 1e6 * qub_freqs),
-            ],
-            comment=comment,
-            tags=tag,
-        )
-
-    def load(self, filepath: list[str]) -> CKP_Result:
-        g_filepath, e_filepath = filepath
-
-        g = load_labber_data(g_filepath)
-        g_signals = g.z.T  # native (Ny=qub, Nx=res) -> (res, qub)
-        res_freqs = g.axes[0].values
-        qub_freqs = g.axes[1].values
-        comment = g.comment
-        assert qub_freqs is not None
-        assert len(res_freqs.shape) == 1 and len(qub_freqs.shape) == 1
-        assert g_signals.shape == (len(res_freqs), len(qub_freqs))
-
-        e = load_labber_data(e_filepath)
-        e_signals = e.z.T  # native (Ny=qub, Nx=res) -> (res, qub)
-        assert e_signals.shape == (len(res_freqs), len(qub_freqs))
-
-        res_freqs = res_freqs * 1e-6  # Hz -> MHz
-        qub_freqs = qub_freqs * 1e-6  # Hz -> MHz
-        signals = np.stack([g_signals, e_signals], axis=0)
-
-        res_freqs = res_freqs.astype(np.float64)
-        qub_freqs = qub_freqs.astype(np.float64)
-        signals = signals.astype(np.complex128)
-
-        cfg_snapshot = None
-        if comment:
-            cfg, _, _ = parse_comment(comment)
-
-            if cfg is not None:
-                cfg_snapshot = CKP_Cfg.validate_or_warn(cfg, source=g_filepath)
-        self.last_result = CKP_Result(
-            res_freqs=res_freqs,
-            qub_freqs=qub_freqs,
-            signals=signals,
-            cfg_snapshot=cfg_snapshot,
-        )
-
-        return self.last_result

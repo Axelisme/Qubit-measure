@@ -6,21 +6,30 @@ import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
-
+from numpy.typing import NDArray
+from zcu_tools.experiment import AxesSpec
+from zcu_tools.experiment.v2.twotone.ckp import CKP_Exp, CKP_Result
 from zcu_tools.experiment.v2.twotone.time_domain.cpmg import (
     CPMG_Result,
     load_cpmg_grouped_result,
     save_cpmg_grouped_result,
 )
-from zcu_tools.utils.datasaver import format_ext
+from zcu_tools.utils.datasaver import (
+    LabberData,
+    format_ext,
+    load_labber_data,
+    save_labber_data,
+)
 
 
 @dataclass(frozen=True)
 class ConverterSpec:
     convert: Callable[[Path, Path], None]
     validate: Callable[[str], object]
+    validate_input: Callable[[Path], None] | None = None
 
 
 def migrate_experiment_data(
@@ -38,8 +47,10 @@ def migrate_experiment_data(
             f"unsupported experiment {experiment!r}; supported: {supported}"
         ) from None
 
-    if not input_path.is_file():
-        raise FileNotFoundError(f"input file does not exist: {input_path}")
+    if spec.validate_input is None:
+        _validate_regular_input_file(input_path)
+    else:
+        spec.validate_input(input_path)
 
     output_path = Path(format_ext(str(output_path)))
     if output_path.exists() and not overwrite:
@@ -77,7 +88,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--input",
         required=True,
         type=Path,
-        help="Legacy input file.",
+        help="Legacy input file, or legacy base path for sidecar converters.",
     )
     parser.add_argument(
         "--output",
@@ -116,6 +127,49 @@ def _make_temp_path(output_path: Path) -> Path:
     return Path(temp_name)
 
 
+def _validate_regular_input_file(input_path: Path) -> None:
+    if not input_path.is_file():
+        raise FileNotFoundError(f"input file does not exist: {input_path}")
+
+
+def _save_axes_spec_result_exact(
+    output_path: Path,
+    axes_spec: AxesSpec[Any, Any],
+    result: object,
+    *,
+    comment: str = "",
+    tag: str | None = None,
+) -> None:
+    axes = [
+        (
+            axis.label,
+            axis.unit,
+            np.asarray(getattr(result, axis.field_name)) * axis.scale,
+        )
+        for axis in axes_spec.axes
+    ]
+    z = (
+        axes_spec.z.label,
+        axes_spec.z.unit,
+        np.asarray(getattr(result, axes_spec.z.field_name)),
+    )
+
+    requested_path = Path(format_ext(str(output_path)))
+    written_path = Path(
+        save_labber_data(
+            str(output_path),
+            z=z,
+            axes=axes,
+            comment=comment,
+            tags=tag or axes_spec.tag,
+        )
+    )
+    if written_path != requested_path:
+        raise RuntimeError(
+            f"converter wrote {written_path}, expected exact path {requested_path}"
+        )
+
+
 def _convert_cpmg_npz(input_path: Path, output_path: Path) -> None:
     with np.load(input_path) as data:
         missing = {"times", "lengths", "signals2D"} - set(data.files)
@@ -135,6 +189,131 @@ def _convert_cpmg_npz(input_path: Path, output_path: Path) -> None:
     save_cpmg_grouped_result(str(output_path), result, comment=comment)
 
 
+def _convert_ckp_sidecars(input_path: Path, output_path: Path) -> None:
+    result, comment = _load_legacy_ckp_sidecars(input_path)
+    axes_spec = CKP_Exp.AXES_SPEC
+    if axes_spec is None:
+        raise RuntimeError("CKP_Exp has no AXES_SPEC")
+
+    _save_axes_spec_result_exact(output_path, axes_spec, result, comment=comment)
+
+
+def _validate_ckp_output(path: str) -> CKP_Result:
+    return CKP_Exp().load(path)
+
+
+def _validate_ckp_sidecar_input(input_path: Path) -> None:
+    for sidecar_path in _legacy_ckp_sidecar_paths(input_path):
+        if not sidecar_path.is_file():
+            raise FileNotFoundError(
+                f"legacy CKP sidecar does not exist: {sidecar_path}"
+            )
+
+
+def _legacy_ckp_sidecar_paths(input_path: Path) -> tuple[Path, Path]:
+    return (
+        Path(format_ext(str(input_path.with_name(input_path.name + "_ground")))),
+        Path(format_ext(str(input_path.with_name(input_path.name + "_excited")))),
+    )
+
+
+def _load_legacy_ckp_sidecars(input_path: Path) -> tuple[CKP_Result, str]:
+    ground_path, excited_path = _legacy_ckp_sidecar_paths(input_path)
+    ground = load_labber_data(str(ground_path))
+    excited = load_labber_data(str(excited_path))
+    _require_same_ckp_metadata(ground, excited)
+
+    ground_res_hz, ground_qub_hz = _legacy_ckp_axes(ground, ground_path)
+    excited_res_hz, excited_qub_hz = _legacy_ckp_axes(excited, excited_path)
+    _require_same_axis_values("Resonator Frequency", ground_res_hz, excited_res_hz)
+    _require_same_axis_values("Qubit Frequency", ground_qub_hz, excited_qub_hz)
+
+    expected_shape = (len(ground_qub_hz), len(ground_res_hz))
+    ground_signals = _legacy_ckp_z(ground, ground_path, expected_shape)
+    excited_signals = _legacy_ckp_z(excited, excited_path, expected_shape)
+
+    result = CKP_Result(
+        res_freqs=(ground_res_hz * 1e-6).astype(np.float64),
+        qub_freqs=(ground_qub_hz * 1e-6).astype(np.float64),
+        signals=np.stack([ground_signals.T, excited_signals.T], axis=0).astype(
+            np.complex128
+        ),
+    )
+    return result, ground.comment
+
+
+def _legacy_ckp_axes(
+    data: LabberData, path: Path
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    expected = (
+        ("Resonator Frequency", "Hz"),
+        ("Qubit Frequency", "Hz"),
+    )
+    if len(data.axes) != len(expected):
+        raise ValueError(
+            f"legacy CKP sidecar {path} has {len(data.axes)} axes; "
+            f"expected {len(expected)}"
+        )
+
+    values: list[NDArray[np.float64]] = []
+    for index, (axis, (expected_name, expected_unit)) in enumerate(
+        zip(data.axes, expected, strict=True)
+    ):
+        if axis.name != expected_name or axis.unit != expected_unit:
+            raise ValueError(
+                f"legacy CKP sidecar {path} axis {index} is "
+                f"{axis.name!r} [{axis.unit!r}], expected "
+                f"{expected_name!r} [{expected_unit!r}]"
+            )
+        axis_values = np.asarray(axis.values, dtype=np.float64)
+        if axis_values.ndim != 1:
+            raise ValueError(
+                f"legacy CKP sidecar {path} axis {expected_name!r} is "
+                f"{axis_values.ndim}D; expected 1D"
+            )
+        values.append(axis_values)
+
+    return values[0], values[1]
+
+
+def _legacy_ckp_z(
+    data: LabberData,
+    path: Path,
+    expected_shape: tuple[int, int],
+) -> NDArray[np.complex128]:
+    if data.data.name != "Signal" or data.data.unit != "a.u.":
+        raise ValueError(
+            f"legacy CKP sidecar {path} z channel is "
+            f"{data.data.name!r} [{data.data.unit!r}], expected 'Signal' ['a.u.']"
+        )
+
+    signals = np.asarray(data.z, dtype=np.complex128)
+    if signals.shape != expected_shape:
+        raise ValueError(
+            f"legacy CKP sidecar {path} z shape {signals.shape} != "
+            f"expected legacy shape {expected_shape}"
+        )
+    return signals
+
+
+def _require_same_axis_values(
+    axis_name: str,
+    ground_values: NDArray[np.float64],
+    excited_values: NDArray[np.float64],
+) -> None:
+    if ground_values.shape != excited_values.shape or not np.array_equal(
+        ground_values, excited_values
+    ):
+        raise ValueError(f"legacy CKP sidecars disagree on {axis_name} axis values")
+
+
+def _require_same_ckp_metadata(ground: LabberData, excited: LabberData) -> None:
+    if ground.comment != excited.comment:
+        raise ValueError("legacy CKP sidecars disagree on comment metadata")
+    if ground.tags != excited.tags:
+        raise ValueError("legacy CKP sidecars disagree on tags")
+
+
 def _npz_comment(data: np.lib.npyio.NpzFile) -> str:
     if "comment" not in data.files:
         return ""
@@ -148,7 +327,12 @@ CONVERTERS: dict[str, ConverterSpec] = {
     "twotone/cpmg": ConverterSpec(
         convert=_convert_cpmg_npz,
         validate=load_cpmg_grouped_result,
-    )
+    ),
+    "twotone/ckp": ConverterSpec(
+        convert=_convert_ckp_sidecars,
+        validate=_validate_ckp_output,
+        validate_input=_validate_ckp_sidecar_input,
+    ),
 }
 
 
