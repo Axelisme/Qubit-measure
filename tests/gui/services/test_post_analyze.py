@@ -1,7 +1,7 @@
 """Unit tests for PostAnalyzeService.
 
 Mirrors tests/gui/services/test_analyze.py: a real State + real EventBus, with
-BackgroundService mocked. Covers the gate (no primary analyze result), the
+BackgroundRunner mocked. Covers the gate (no primary analyze result), the
 submit-to-bg path, and the finished/failed terminal paths.
 
 Stage 2c: PostAnalyzeService uses _submit_with_runner. Tests drive terminal

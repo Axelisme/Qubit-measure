@@ -1,11 +1,11 @@
-"""Tests for BackgroundService — the pure OffMain executor (ADR-0019, ADR-0026 §2).
+"""Tests for BackgroundRunner — the pure OffMain executor (ADR-0019, ADR-0026 §2).
 
 Covers both substrates (dedicated QThread vs shared pool), the done/error
 delivery on the main thread, that a None result is delivered (not swallowed),
 and that work-thunk closures correctly install ambient scopes on the worker
 thread (figure routing via ``figure_ambient``, pbar via ``progress_ambient``).
 
-BackgroundService is now scope-agnostic: it no longer accepts or reads an
+BackgroundRunner is now scope-agnostic: it no longer accepts or reads an
 ``OffMainScopes`` argument. Scope entering is the caller's responsibility,
 embedded in the work thunk.
 """
@@ -15,20 +15,20 @@ from __future__ import annotations
 import time
 
 import pytest
-from zcu_tools.gui.app.main.services.background import BackgroundService
+from zcu_tools.gui.background import BackgroundRunner
 from zcu_tools.gui.app.main.services.scopes import figure_ambient
 from zcu_tools.gui.plotting.routing import get_current_container
 from zcu_tools.gui.session.scopes import progress_ambient
 
-# Every BackgroundService created by a test is registered here so that the
+# Every BackgroundRunner created by a test is registered here so that the
 # autouse quiesce fixture can drain it before its QObjects are GC'd.  A queued
 # cross-thread delivery dispatched onto a freed C++ object segfaults (same
 # pattern as tests/gui/services/test_device.py).
-_LIVE_BG: list[BackgroundService] = []
+_LIVE_BG: list[BackgroundRunner] = []
 
 
-def _bg() -> BackgroundService:
-    bg = BackgroundService()
+def _bg() -> BackgroundRunner:
+    bg = BackgroundRunner()
     _LIVE_BG.append(bg)
     return bg
 
@@ -122,7 +122,7 @@ def test_pool_delivers_error(qapp):
 def test_figure_ambient_routing_active_during_work(qapp):
     # Work thunk closes over figure_ambient: the routing ContextVar is set on
     # the worker thread for the duration of the thunk (ADR-0026 §2).
-    # BackgroundService itself is unaware of the scope — only the thunk knows.
+    # BackgroundRunner itself is unaware of the scope — only the thunk knows.
     bg = _bg()
     container = object()
     seen: list[object] = []

@@ -104,7 +104,7 @@ class ControllerFixture:
     def quiesce(self) -> None:
         """Join the Controller's in-flight background work and flush its queued
         main-thread deliveries (run/analyze/save/device all share one
-        BackgroundService). Must run before the fixture — and thus the Controller
+        BackgroundRunner). Must run before the fixture — and thus the Controller
         and its QObject service graph — is GC'd: a run spawns a dedicated worker
         thread whose finished→deleteLater and done delivery are posted to the main
         thread. If the Controller is collected with those still queued, a later

@@ -9,7 +9,7 @@ events to the session, and shows ``session.info_text()`` verbatim.
 
 All interaction is on the Qt main thread (Case B of ADR-0017); only the compute
 passed to ``run_background`` runs off-main, delegated to the app's
-``BackgroundService`` (pool strategy) through the injected ``InteractiveHostEnv``
+``BackgroundRunner`` (pool strategy) through the injected ``InteractiveHostEnv``
 port (ADR-0019), which marshals the result back to the main thread.
 """
 
@@ -34,7 +34,7 @@ from zcu_tools.gui.app.main.adapter import InteractiveSession
 class InteractiveHostEnv(Protocol):
     """The narrow capability the host widget needs from the app to run a heavy
     interactive step off the main thread (ADR-0019). The Controller satisfies it
-    (delegating to ``BackgroundService``'s pool); tests inject a fake. The widget
+    (delegating to ``BackgroundRunner``'s pool); tests inject a fake. The widget
     is a passive host that issues no commands — this one capability is all it
     pulls from the app, so it is injected as this port rather than the whole
     Controller."""
@@ -87,7 +87,7 @@ class InteractiveAnalysisWidget(QWidget):
     def run_background(
         self, compute: Callable[[], object], on_done: Callable[[object], None]
     ) -> None:
-        # Delegate to the app's BackgroundService (pool strategy) via the injected
+        # Delegate to the app's BackgroundRunner (pool strategy) via the injected
         # env port; the widget no longer owns a thread pool or the marshal.
         self._env.run_background(compute, on_done)
 

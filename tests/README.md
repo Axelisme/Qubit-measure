@@ -29,7 +29,7 @@
 
 ### BackgroundRunner.quiesce() — 測試 teardown 必要模式
 
-任何 fixture 若持有會透過 `BackgroundRunner`（或持有它的 `BackgroundService`）提交 pool 或
+任何 fixture 若持有會透過 `BackgroundRunner` 提交 pool 或
 thread worker 的物件，都必須在 teardown 呼叫 `quiesce()`，**才** `deleteLater()` / 放 GC。
 
 原因：worker 的 `on_done` 是跨執行緒 queued signal；如果 runner 在 delivery 進到 main-thread queue
@@ -48,7 +48,7 @@ def my_widget(qapp):
     qapp.processEvents()
 ```
 
-如果 fixture 持有的是 `Controller`（它包含 `BackgroundService`），改呼叫
+如果 fixture 持有的是 `Controller`（它持有具體 `BackgroundRunner`），改呼叫
 `ctrl._background_svc.quiesce()`（見 `tests/gui/test_controller.py`）。
 
 ---

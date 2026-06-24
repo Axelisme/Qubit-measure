@@ -61,7 +61,7 @@ def _seed_context(ctrl: Controller) -> tuple[MetaDict, ModuleLibrary]:
 def ctrl(qapp):
     c = build_core()
     yield c
-    # Quiesce the BackgroundService before GC (a pending queued delivery to a
+    # Quiesce the BackgroundRunner before GC (a pending queued delivery to a
     # GC'd runner segfaults a later test's event pump — see test_interaction).
     c._background_svc.quiesce()
 

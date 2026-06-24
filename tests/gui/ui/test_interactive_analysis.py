@@ -4,7 +4,7 @@ Headless: a fake InteractiveSession is bound and the widget is driven by
 clicking its rendered buttons and feeding it fake matplotlib mouse events. The
 off-main work is delegated to an injected InteractiveHostEnv port (ADR-0019);
 tests pass a fake env that runs the compute synchronously (the real marshal is
-BackgroundService's job — see tests/gui/services/test_background.py).
+BackgroundRunner's job — see tests/gui/services/test_background.py).
 """
 
 from __future__ import annotations

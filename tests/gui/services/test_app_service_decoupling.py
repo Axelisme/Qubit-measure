@@ -21,10 +21,12 @@ What does NOT count as a forbidden dependency, and why:
   runtime wiring goes through the injected port (``WritebackQueryPort``).
 
 Coverage includes the infrastructure modules that have session-layer ports:
-``background`` (port: ``BackgroundExecutor``), ``operation_gate`` (port:
-``ExclusionGate``), ``cfg_editor`` (port: ``CfgEditorPort``), and ``writeback``
-(port: ``WritebackLifecyclePort``).  These did NOT end in "Service" before the
-infra denylist was added — the ``_is_infra_symbol`` check fills that gap.
+``operation_gate`` (port: ``ExclusionGate``), ``cfg_editor`` (port:
+``CfgEditorPort``), and ``writeback`` (port: ``WritebackLifecyclePort``).  These
+did NOT end in "Service" before the infra denylist was added — the
+``_is_infra_symbol`` check fills that gap. (The OffMain executor is the shared
+``BackgroundRunner`` in ``gui/`` — outside ``services/`` — so it was never a
+guard target here.)
 """
 
 from __future__ import annotations
@@ -42,11 +44,10 @@ _SERVICES_PKG = services_pkg.__name__  # "zcu_tools.gui.app.main.services"
 
 # Modules that are application services (not ports / DTOs / infra adapters).
 # Includes the infrastructure modules that own concrete classes *with* declared
-# ports: background, operation_gate, cfg_editor.  Runtime imports of their
-# concrete classes by sibling app services are violations.
+# ports: operation_gate, cfg_editor.  Runtime imports of their concrete classes
+# by sibling app services are violations.
 _APP_SERVICE_MODULES = {
     "analyze",
-    "background",
     "cfg_editor",
     "connection",
     "context",
@@ -66,7 +67,6 @@ _APP_SERVICE_MODULES = {
 # (e.g. ``OperationGate`` whose port is ``ExclusionGate``).
 _CONCRETE_INFRA_NAMES: frozenset[str] = frozenset(
     {
-        "BackgroundService",
         "CfgEditorService",
         "OperationGate",
         "WritebackService",

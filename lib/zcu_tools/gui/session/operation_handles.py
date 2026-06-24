@@ -1,7 +1,7 @@
 """OperationHandles — the async-operation Handle/Cancel facet (ADR-0019).
 
 Owns the operation *lifecycle*, independent of how the work executes
-(BackgroundService) and of hardware *exclusion* (OperationGate). It mints the
+(BackgroundRunner) and of hardware *exclusion* (OperationGate). It mints the
 operation token (= ``operation_id``) and exposes the three async verbs over it:
 ``await_outcome`` (off-main blocking wait), ``poll`` (non-blocking), ``cancel``
 (async stop request). Settled tokens are retained briefly (LRU) so a late

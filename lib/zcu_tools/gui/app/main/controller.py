@@ -834,7 +834,7 @@ class Controller:
         self, compute: Callable[[], object], on_done: Callable[[object], None]
     ) -> None:
         """InteractiveHostEnv (ADR-0019): run a short interactive compute off-main
-        via BackgroundService's pool, delivering the result to ``on_done`` on the
+        via BackgroundRunner's pool, delivering the result to ``on_done`` on the
         main thread. The interactive host has no error channel, so a failure is
         logged (the user keeps the current picker state)."""
         self._background_svc.submit(

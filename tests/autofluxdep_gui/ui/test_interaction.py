@@ -28,8 +28,8 @@ def app(qapp):
     ctrl.add_node(make_builder("probe", provides=("v",)))
     win = MainWindow(ctrl)
     yield ctrl, win
-    # Quiesce the controller's BackgroundService before GC: device setup and
-    # other session operations submit pool workers via BackgroundService._runner;
+    # Quiesce the controller's BackgroundRunner before GC: device setup and
+    # other session operations submit pool workers via the runner;
     # a pending queued delivery to a GC'd runner segfaults a later test's event pump.
     ctrl._background_svc.quiesce()
     win.close()

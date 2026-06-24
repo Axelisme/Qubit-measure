@@ -69,7 +69,7 @@ def connect_mock(ctrl: Controller, *, sim_params: Any = None) -> None:
 
     FLUX-AWARE-MOCK: a mock connect also fires the shared MockFluxProvisioner,
     which registers + ramps a ``fake_flux`` FakeDevice through the controller's
-    BackgroundService (async). We pump until that settles so a flux-aware acquire
+    BackgroundRunner (async). We pump until that settles so a flux-aware acquire
     sees the operating value and no background op is left running at teardown
     (an unquiesced worker QThread segfaults the process). Best-effort with a
     timeout — a test that does not exercise flux still returns promptly.

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from zcu_tools.gui.background import BackgroundRunner
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.build import build_session_services
@@ -14,7 +15,6 @@ from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.services.startup import StartupService
 
 from .analyze import AnalyzeService
-from .background import BackgroundService
 from .cfg_editor import CfgEditorService
 from .guard import GuardService
 from .operation_gate import OperationGate
@@ -52,7 +52,7 @@ class AppServices:
 
     operation_gate: OperationGate
     handles: OperationHandles
-    background: BackgroundService
+    background: BackgroundRunner
     progress: ProgressService
     guard: GuardService
     device: DeviceService
@@ -88,7 +88,7 @@ def build_app_services(
     """
     operation_gate = OperationGate()
     handles = OperationHandles()
-    background = BackgroundService()
+    background = BackgroundRunner()
     progress = ProgressService(progress_transport)
     # OperationRunner: the kind-agnostic lifecycle mechanism (ADR-0026 §1).
     # Shared by run / FIT-analyze / post-analyze / device ops. Interactive analyze

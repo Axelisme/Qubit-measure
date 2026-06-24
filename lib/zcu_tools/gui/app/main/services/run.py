@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 
 
 class RunService(QObject):
-    """Encapsulates execution of an experiment adapter via BackgroundService
+    """Encapsulates execution of an experiment adapter via BackgroundRunner
     (OffMain-thread strategy with figure/progress/cancel scopes — ADR-0019).
 
     Uses OperationRunner (ADR-0026 §1) for the lifecycle mechanism; domain

@@ -10,7 +10,7 @@ import pytest
 from qtpy.QtCore import QEventLoop
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.fake import FakeDeviceInfo
-from zcu_tools.gui.app.main.services.background import BackgroundService
+from zcu_tools.gui.background import BackgroundRunner
 from zcu_tools.gui.app.main.services.operation_gate import OperationGate
 from zcu_tools.gui.app.main.state import State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
@@ -26,23 +26,23 @@ from zcu_tools.gui.session.services.device import (
 )
 from zcu_tools.gui.session.services.progress import ProgressService
 
-# Every BackgroundService created in a test is registered here so the autouse
+# Every BackgroundRunner created in a test is registered here so the autouse
 # teardown can quiesce it: a DeviceService runs its commands on a dedicated worker
 # thread whose done/failed outcome is delivered via a queued main-thread signal.
 # If the service (and its runner) is GC'd while that delivery is still queued, the
 # next processEvents() dispatches it onto a freed C++ object and segfaults.
-_LIVE_BG: list[BackgroundService] = []
+_LIVE_BG: list[BackgroundRunner] = []
 
 
-def _bg() -> BackgroundService:
-    bg = BackgroundService()
+def _bg() -> BackgroundRunner:
+    bg = BackgroundRunner()
     _LIVE_BG.append(bg)
     return bg
 
 
 @pytest.fixture(autouse=True)
 def _quiesce_services():
-    """Drain every test-created BackgroundService before its objects are GC'd."""
+    """Drain every test-created BackgroundRunner before its objects are GC'd."""
     yield
     for bg in _LIVE_BG:
         bg.quiesce()

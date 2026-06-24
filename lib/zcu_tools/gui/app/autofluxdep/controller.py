@@ -18,7 +18,6 @@ import logging
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
-from zcu_tools.gui.app.autofluxdep.background import BackgroundService
 from zcu_tools.gui.app.autofluxdep.derivation import DerivationService
 from zcu_tools.gui.app.autofluxdep.events.run import (
     NodeEnteredPayload,
@@ -53,6 +52,7 @@ from zcu_tools.gui.app.autofluxdep.tools import (
     SimplePredictor,
     Tools,
 )
+from zcu_tools.gui.background import BackgroundRunner
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.services.build import build_session_services
@@ -145,7 +145,7 @@ class Controller:
         # autofluxdep composes the shared session services (connection / context /
         # device / startup) by injecting its own concrete infra through the session
         # ports (ADR-0019, session-core extraction decision 3): an app-local
-        # OperationGate (conflict policy) + thin BackgroundService (no figure
+        # OperationGate (conflict policy) + the shared BackgroundRunner (no figure
         # routing) alongside the shared OperationHandles / ProgressService /
         # IOManager. The progress transport defaults to the Qt marshal so a GUI /
         # agent process works without the entry point wiring it; tests inject a
@@ -162,7 +162,7 @@ class Controller:
             transport = QtProgressTransport()
         self._operation_gate = OperationGate()
         self._operation_handles = OperationHandles()
-        self._background_svc = BackgroundService()
+        self._background_svc = BackgroundRunner()
         self._progress_svc = ProgressService(transport)
         from zcu_tools.gui.session.operation_runner import OperationRunner
 

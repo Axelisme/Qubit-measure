@@ -4,7 +4,7 @@ Owns only the "can this hardware operation start right now" concern: the set of
 active leases and the conflict rules. It is execution- and handle-agnostic — the
 async handle (poll / await / cancel / operation_id) lives in the shared
 ``OperationHandles`` leaf, and the off-main execution in autofluxdep's
-``BackgroundService``.
+``BackgroundRunner``.
 
 The conflict *policy* is per-app (session-core extraction, decision 3): the shared
 session services name session kinds through the ``ExclusionGate`` port

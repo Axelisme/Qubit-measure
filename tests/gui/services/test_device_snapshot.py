@@ -9,7 +9,7 @@ from qtpy.QtCore import QEventLoop
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.fake import FakeDevice
 from zcu_tools.device.yoko import YOKOGS200Info
-from zcu_tools.gui.app.main.services.background import BackgroundService
+from zcu_tools.gui.background import BackgroundRunner
 from zcu_tools.gui.app.main.services.operation_gate import OperationGate
 from zcu_tools.gui.app.main.state import State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
@@ -19,13 +19,13 @@ from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.device import ConnectDeviceRequest, DeviceService
 from zcu_tools.gui.session.services.progress import ProgressService
 
-# See tests/gui/services/test_device.py for why test-created BackgroundServices must
+# See tests/gui/services/test_device.py for why test-created BackgroundRunners must
 # be quiesced before GC: a queued main-thread delivery to a GC'd runner segfaults.
-_LIVE_BG: list[BackgroundService] = []
+_LIVE_BG: list[BackgroundRunner] = []
 
 
-def _bg() -> BackgroundService:
-    bg = BackgroundService()
+def _bg() -> BackgroundRunner:
+    bg = BackgroundRunner()
     _LIVE_BG.append(bg)
     return bg
 

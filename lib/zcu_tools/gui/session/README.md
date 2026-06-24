@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-23 — SessionControllerPort startup project return contract
+**Last updated:** 2026-06-24 — 刪 BackgroundService husk，owner 直接持共用 BackgroundRunner
 
 # gui/session/ — 量測 session core（measure + autofluxdep 共用）
 
@@ -14,7 +14,7 @@ session/
 ├── ports.py            — session service 依賴的 driven-adapter/seam ports：ExclusionGate(+OperationKind/OperationConflictError)、BackgroundExecutor（純 off-main 執行器，`submit(work,*,run_in_pool,on_done,on_error)` 無 scopes 參數）、ProgressHub、ProgressEvent/Kind/Transport、DriverFactoryPort、RememberedDevicePort、DeviceRegistryPort（GlobalDeviceManager classmethod 面的 instance 化，DeviceService 依契約存取、測試注 in-memory fake，ADR-0026 §6）、ProjectIOPort、ContextReadPort、StartupContextPort
 ├── operation_handles.py— OperationHandles（async Handle/Cancel facet，零 kind）+ per-op OperationChannel（單一有序事件 FIFO Settled/Message/Stop，取代舊 FeedbackInbox + poll-loop，ADR-0025）+ OperationOutcome/OperationStatus/AwaitResult/CancelHook；`create(cancel_hook=)`、`has_cancel_hook`/channel.`can_cancel`（gate 'Send & Stop' 鈕，無 op-kind 知識）
 ├── operation_runner.py — OperationRunner（唯一 kind-agnostic operation 生命週期機制，ADR-0026 §1：ensure_can_start→create→register→progress factory→submit→終局 settle）+ OperationSpec（各 op 把領域 policy 交給 runner）；run/analyze/device/SoC-connect 都是它的 client，runner 只認 port 不認行為
-├── scopes.py           — progress_ambient（session 層：pbar ContextVar，無 Qt；ADR-0026 §2，取代舊 BackgroundService._entered/OffMainScopes 的 pbar 欄位）。figure_ambient（Qt）住 app 層 `gui/app/main/services/scopes.py`
+├── scopes.py           — progress_ambient（session 層：pbar ContextVar，無 Qt；ADR-0026 §2，取代舊 executor `_entered`/OffMainScopes 的 pbar 欄位）。figure_ambient（Qt）住 app 層 `gui/app/main/services/scopes.py`
 ├── notify_handles.py   — NotifyChannel/NotifyHandles（agent→user prompt 的跨線程 channel，事件集 Reply/Dismiss/Timeout，獨立於 operation 的 Settled/Message/Stop；鏡像 OperationChannel 四不變式，ADR-0025）
 ├── controller_port.py  — SessionControllerPort：共用 dialog 依賴的窄 Controller 面（setup/context/connection + device lifecycle/queries/progress + predictor load/set_model_params/clear/predict/curve + inspect md/ml）；回傳宣告對 BaseEventBus 故 app EventBus covariant 滿足
 ├── pbar_host.py        — ProgressBar(worker)/ProgressBarModel(主線程 SSOT)，Qt-free
@@ -42,7 +42,7 @@ session/
 
 ## 關鍵設計
 
-- **app 注入 app-local infra 經 port**：concrete `OperationGate`（衝突 policy）+ `BackgroundService`（measure 帶 QtLivePlot facet / autofluxdep 瘦版無 figure routing）各 app 自持；`ProgressService`/`IOManager`/`QtProgressTransport` 已 promote 成**共用**。session service 只依賴 `ExclusionGate`/`BackgroundExecutor`/`ProgressHub`/`ProjectIOPort` port。
+- **app 注入 infra 經 port**：concrete `OperationGate`（衝突 policy，app-local）+ 共用 `BackgroundRunner`（`gui/background.py`，純 off-main 執行器，三 app 共用同一 class——owner 直接持具體 runner 才能呼 anti-segfault 的 `quiesce()`）各自建；`ProgressService`/`IOManager`/`QtProgressTransport` 已 promote 成**共用**。session service 只依賴 `ExclusionGate`/`BackgroundExecutor`（只宣告 `submit`，`quiesce` 不進 port）/`ProgressHub`/`ProjectIOPort` port。
 - **ExclusionGate str-keyed**：session `OperationKind`（soc/device kinds）+ app 自己的 kind（measure/autofluxdep 各自 `RUN`）用 wire 字串比較，故兩 enum 同一 gate。
 - **app 繼承/實作**：measure `State(SessionState)`、autofluxdep `AutoFluxDepState(SessionState)`；兩 Controller 結構上實作 `SessionControllerPort`（pyright 在各自 dialog call site 驗證 conformance）。
 - **startup project return contract**：`SessionControllerPort.apply_startup_project` 允許 `bool | dict[str, str]`。共用 setup dialog 只看 truthiness；measure 的 remote `startup.apply` / `gui_project_apply` 回 resolved project dict（WIRE 44），autofluxdep controller 仍回 bool。

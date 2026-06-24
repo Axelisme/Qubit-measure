@@ -34,7 +34,7 @@ def _make_service() -> tuple[SaveService, State, MagicMock]:
         Session(adapter_name="fake", adapter=adapter, cfg_schema=MagicMock()),
     )
     state.update_tab_result("tab", object())
-    bg = MagicMock()  # BackgroundService stand-in; submit() is inspected per-test
+    bg = MagicMock()  # BackgroundRunner stand-in; submit() is inspected per-test
     svc = SaveService(state, bg, EventBus())
     return svc, state, bg
 

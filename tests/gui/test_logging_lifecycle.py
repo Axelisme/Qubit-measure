@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 
 import pytest
-from zcu_tools.gui.app.main.services.background import BackgroundService
+from zcu_tools.gui.background import BackgroundRunner
 from zcu_tools.gui.app.main.services.caretaker import PersistenceCaretaker
 from zcu_tools.gui.app.main.services.persistence_types import AppPersistedState
 from zcu_tools.gui.app.main.services.ports import RestoreReport
@@ -24,7 +24,7 @@ from zcu_tools.gui.session.operation_handles import (
 
 # Reuse the same quiesce discipline as test_background: a queued cross-thread
 # delivery onto a freed C++ object segfaults, so drain every runner before GC.
-_LIVE_BG: list[BackgroundService] = []
+_LIVE_BG: list[BackgroundRunner] = []
 
 
 @pytest.fixture(autouse=True)
@@ -88,7 +88,7 @@ def test_caretaker_load_failure_logs_warning(tmp_path: Path, caplog) -> None:
 
 
 def test_background_worker_exception_logs_traceback(qapp, caplog) -> None:
-    bg = BackgroundService()
+    bg = BackgroundRunner()
     _LIVE_BG.append(bg)
     errors: list[Exception] = []
 

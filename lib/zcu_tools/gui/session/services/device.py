@@ -55,7 +55,7 @@ class DeviceProtocol(Protocol):
     The semantic invariants an implementer must also honour — and which a bug
     silently violates — are:
 
-    - ``setup`` runs **off the main thread** (via ``BackgroundService``), never
+    - ``setup`` runs **off the main thread** (via ``BackgroundRunner``), never
       the Qt main thread. It MUST poll ``stop_event`` during any long operation:
       cancellation works by ``stop_event.set()``, and the worker reports
       "cancelled" only if it returns with the event set. A ``setup`` that ignores

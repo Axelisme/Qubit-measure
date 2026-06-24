@@ -1,7 +1,7 @@
 """Shared fixtures for autofluxdep-gui tests (ui and non-ui).
 
 The session core is async and Qt-backed: a controller composes the shared session
-services (ConnectionService / DeviceService / BackgroundService — all QObjects)
+services (ConnectionService / DeviceService / BackgroundRunner — all QObjects)
 at construction, and establishing a mock SoC goes through ConnectionService's
 ``QTimer.singleShot`` settle. So a ``QApplication`` must exist *before* any
 ``build_core()`` (a QObject created with no app gets its C++ side torn down) and

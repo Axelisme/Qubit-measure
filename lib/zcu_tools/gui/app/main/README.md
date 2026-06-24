@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-24（run preflight before async operation handle）
+**Last updated:** 2026-06-24（刪 BackgroundService husk，owner 直接持共用 BackgroundRunner）
 
 # `zcu_tools/gui/app/main/` — measure-gui Framework AI Note
 
@@ -22,7 +22,7 @@ gui/
 ├── specs/           — fresh spec factory functions（對應 program/v2/modules/ 結構）
 ├── state.py         — State (被動容器 + 主線 mutator/version bump) + aggregate roots TabState/DeviceState (帶自己的查詢謂詞 is_busy/has_*/is_connected/is_live/effective_save_paths)
 ├── registry.py      — name → Adapter class 映射
-│   （off-main 執行 = `services/background.py` `BackgroundService`：**純 off-main 執行器**（ADR-0026 §2）`submit(work, *, run_in_pool, on_done, on_error)`——只把無參 thunk 丟 worker/pool、結果 marshal 回主線程，**無 scopes 參數、不認 figure/stop facet**（舊 `OffMainScopes`/`_entered` 已退役）。scope wiring 改由 op policy 的 work thunk 自己用 closure 套（`figure_ambient`/`progress_ambient`/`ActiveTask`）。生命週期編排移到 `OperationRunner`（見「Hardware Operation Gate」/ADR-0026），BackgroundService 只剩執行。**executor 機制本身已下放共用** `gui/background.py` `BackgroundRunner`（generic worker + pool + `submit(work,*,on_done,on_error,run_in_pool)`，三 app 共用）；`BackgroundService` 組合它）
+│   （off-main 執行 = 共用 `gui/background.py` `BackgroundRunner`：**純 off-main 執行器**（ADR-0026 §2）`submit(work, *, run_in_pool, on_done, on_error[, enter])`——只把無參 thunk 丟 worker/pool、結果 marshal 回主線程，**無 scopes 參數、不認 figure/stop facet**（舊 `OffMainScopes`/`_entered` 已退役）。scope wiring 改由 op policy 的 work thunk 自己用 closure 套（`figure_ambient`/`progress_ambient`/`ActiveTask`）。生命週期編排移到 `OperationRunner`（見「Hardware Operation Gate」/ADR-0026），runner 只剩執行。**measure 與 autofluxdep owner 直接持具體 `BackgroundRunner`**（才能呼 anti-segfault 的 `quiesce()`）；session service 只認 `BackgroundExecutor` port 的 `submit`（薄 `BackgroundRunner(QObject)` 殼已刪）。三 app 共用同一 runner）
 ├── controller.py    — 薄 Façade，委託邏輯給 services/
 ├── live_model.py    — LiveField / LiveModel：反應式資料層 (Observable Proxy)
 ├── sweep_model.py   — SweepEditor：無 Qt dependency 的 sweep canonical transform
@@ -69,7 +69,7 @@ gui/
     ├── feedback_widget.py  — FloatingFeedbackWidget（右下角浮動 overlay，parent=MainWindow，跨 tab 持久；user→agent nudge / Send & Stop；Stop 鈕依 active op 是否有 cancel hook gating，`Controller.can_cancel_active_operation`→`OperationHandles.has_cancel_hook`→`OperationChannel.can_cancel`，無 op-kind 知識，ADR-0025 §Stop-gating）
     ├── notify_dialog.py    — NotifyUserDialog（`gui_prompt_user` 的 non-modal prompt；dialog 是 timeout SSOT，QTimer fire→`ctrl.timeout_notify`；Reply/Dismiss/window-X/timeout 各呼一次 NotifyChannel producer，ADR-0025）
     └── analyze_form.py     — AnalyzeFormWidget：扁平 analysis 參數表單
-（共用件已下放 session：setup_dialog/device_dialog/predictor_dialog/inspect_base 在 `gui/session/ui/`（吃 `SessionControllerPort`）、ProgressService/IOManager 在 `gui/session/services/`、QtProgressTransport 在 `gui/session/adapters/`、TrimDoubleSpinBox 在 `gui/widgets/spinbox.py`。measure 保留 app-local OperationGate/BackgroundService（policy/Qt facet）+ 自己的 cfg-editor/role-catalog/inspect ml-edit）
+（共用件已下放 session：setup_dialog/device_dialog/predictor_dialog/inspect_base 在 `gui/session/ui/`（吃 `SessionControllerPort`）、ProgressService/IOManager 在 `gui/session/services/`、QtProgressTransport 在 `gui/session/adapters/`、TrimDoubleSpinBox 在 `gui/widgets/spinbox.py`。measure 保留 app-local OperationGate（policy）+ 直接持共用 BackgroundRunner（executor）+ 自己的 cfg-editor/role-catalog/inspect ml-edit）
 ```
 
 ## Key Design Decisions
@@ -182,8 +182,8 @@ GUI 上的「Agent」按鈕觸發 `AgentLaunchDialog`（可選 resumable session
 ### Adapter Capabilities
 
 - `AdapterCapabilities(requires_soc, analysis: AnalysisMode)` 是 SoC / analyze 需求單一聲明，由 `ExpAdapterProtocol.capabilities` / `BaseAdapter.capabilities` ClassVar 表達。**覆寫時必須帶 `ClassVar[...]` 註解**，否則 pyright 視為 instance attr、Protocol 結構比對失敗。`analysis` 判別式 `NONE | FIT | INTERACTIVE`（取代舊 `supports_analysis: bool`，Phase 145）：NONE=無分析（power_dep 2D 掃描）、FIT=worker 擬合、**INTERACTIVE=人在圖上拖線選點、結果延遲**（onetone/twotone flux_dep）。
-  - **INTERACTIVE 契約**：adapter 多 `setup_interactive_analysis(req, host: InteractiveHost) -> InteractiveSession`（兩 Protocol 在 `adapter/types`，Qt-free）。`InteractiveHost`(figure/redraw/run_background) gui 實作（`ui/interactive_analysis.InteractiveAnalysisWidget`=canvas+從 `actions()` 渲染 generic 鈕+Done；`run_background` **委派注入的窄 `InteractiveHostEnv` port=Controller**，背後走 `BackgroundService` pool，widget 不持自己的 pool —— passive host 收窄注入，ADR-0019），`InteractiveSession`(on_press/move/release/actions/invoke_action/info_text/finish) adapter 寫（flux-pick 在 `shared/interactive_flux_pick`，包 `TwoLinePicker`：toolkit-agnostic，host-driven mutation（拖線/swap）由 host repaint，但 **live mirror-loss 由 picker 自有 matplotlib `canvas.new_timer` throttle 重算 + 自 `draw_idle`**（取代原 `InteractiveLines` 的 `FuncAnimation`，host 無 hook）；**只 off-main auto-align 走 `host.run_background`**）。
-  - **生命週期**：`Controller.analyze` 分派 FIT→`AnalyzeService.start_analyze`(worker)／INTERACTIVE→`_start_interactive_analyze`（acquire lease + `RenderHost.mount_interactive_analysis` 主線程掛 canvas，**不起 worker**）；用戶 Done → `AnalyzeService.finish_interactive(tab_id, session)` → `session.finish()` → 走**和 FIT 同一條** `_on_analyze_finished`（writeback compute + `update_tab_analyze` + lease release）。agent 端 `gui_tab_analyze_start` degrade（pending）+ 泛型 `gui_op_poll(handle)` 等用戶（MCP 26）。互動全主線程、只 heavy step 經 `host.run_background`→`InteractiveHostEnv`(Controller)→`BackgroundService` pool off-main（ADR-0017 Case B / ADR-0019）
+  - **INTERACTIVE 契約**：adapter 多 `setup_interactive_analysis(req, host: InteractiveHost) -> InteractiveSession`（兩 Protocol 在 `adapter/types`，Qt-free）。`InteractiveHost`(figure/redraw/run_background) gui 實作（`ui/interactive_analysis.InteractiveAnalysisWidget`=canvas+從 `actions()` 渲染 generic 鈕+Done；`run_background` **委派注入的窄 `InteractiveHostEnv` port=Controller**，背後走 `BackgroundRunner` pool，widget 不持自己的 pool —— passive host 收窄注入，ADR-0019），`InteractiveSession`(on_press/move/release/actions/invoke_action/info_text/finish) adapter 寫（flux-pick 在 `shared/interactive_flux_pick`，包 `TwoLinePicker`：toolkit-agnostic，host-driven mutation（拖線/swap）由 host repaint，但 **live mirror-loss 由 picker 自有 matplotlib `canvas.new_timer` throttle 重算 + 自 `draw_idle`**（取代原 `InteractiveLines` 的 `FuncAnimation`，host 無 hook）；**只 off-main auto-align 走 `host.run_background`**）。
+  - **生命週期**：`Controller.analyze` 分派 FIT→`AnalyzeService.start_analyze`(worker)／INTERACTIVE→`_start_interactive_analyze`（acquire lease + `RenderHost.mount_interactive_analysis` 主線程掛 canvas，**不起 worker**）；用戶 Done → `AnalyzeService.finish_interactive(tab_id, session)` → `session.finish()` → 走**和 FIT 同一條** `_on_analyze_finished`（writeback compute + `update_tab_analyze` + lease release）。agent 端 `gui_tab_analyze_start` degrade（pending）+ 泛型 `gui_op_poll(handle)` 等用戶（MCP 26）。互動全主線程、只 heavy step 經 `host.run_background`→`InteractiveHostEnv`(Controller)→`BackgroundRunner` pool off-main（ADR-0017 Case B / ADR-0019）
 - `RunService.start_run()` 在 acquire `RUN` lease 前依 `capabilities.requires_soc` 呼叫 `require_soc_handles(req)` Fast Fail；違規不佔 lease、不啟 worker
 - `TabViewSnapshot.capabilities` 為 UI 唯一來源；`MainWindow` 依 `requires_soc` 決定 Run 按鈕是否需要 SoC、依 `analysis is (not) AnalysisMode.NONE` 顯示 / 隱藏 Analyze tab
 - `Controller.start_run()` 不再 hard-code `has_soc()` 檢查；SoC 需求屬於 capability domain
@@ -216,7 +216,7 @@ GUI 上的「Agent」按鈕觸發 `AgentLaunchDialog`（可選 resumable session
 - `ExpContext` 欄位：`md, ml, soc, soccfg, chip_name, qub_name, res_name, result_dir, database_path, active_label, predictor, readiness`
 - `ContextReadiness.EMPTY/DRAFT/ACTIVE`：分離未建立、僅可編輯的 startup context、可執行/儲存的 file-backed context；`ExpContext.readiness` 為唯一 SSOT，`State` 不再 mirror 此資訊
 - `State` 是 shared live context 的 SSOT；`TabState` 承接每個 tab 的 `cfg_schema`、run/analyze result、figure、analyze param instance、save path state、busy flags
-- `State.devices: dict[str, DeviceState]` 是 device 狀態的 SSOT（含 `remember`）；`DeviceService` 只持 live driver/progress（execution 經 `BackgroundService`，見上「Device Lifecycle」）。device mutator 與 tab mutator 同樣只在主線寫、語義寫入 bump `device:<name>`
+- `State.devices: dict[str, DeviceState]` 是 device 狀態的 SSOT（含 `remember`）；`DeviceService` 只持 live driver/progress（execution 經 `BackgroundRunner`，見上「Device Lifecycle」）。device mutator 與 tab mutator 同樣只在主線寫、語義寫入 bump `device:<name>`
 - `State.add_tab()` 只接受完整 `TabState`；`TabService` 負責建立 adapter 與 default cfg
 - 只有 `run` 使用全域 `running_tab_id` lock；`analyze` 與 `save data` 是 per-tab busy state
 - Run/Stop 按鈕只受全域 run lock 與本 tab run state 影響；analyze/save/writeback 只受本 tab busy 與資料可用性影響

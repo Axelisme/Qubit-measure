@@ -148,7 +148,7 @@ class MockFluxProvisioner:
             # device becomes live again. No
             # initial-value setup: the user's last-known value is already persisted
             # and is loaded by the driver on connect; we never stomp it.
-            # Fire-and-forget (async via BackgroundService).
+            # Fire-and-forget (async via BackgroundRunner).
             self._dev_svc.start_reconnect_device(FAKE_FLUX_DEVICE_NAME)
             return
 

@@ -92,7 +92,7 @@ class ExclusionGate(Protocol):
 
 class BackgroundExecutor(Protocol):
     """Off-main execution seam a session service depends on. The app injects its
-    concrete ``BackgroundService``; the session service never constructs one.
+    concrete ``BackgroundRunner``; the session service never constructs one.
 
     ``submit`` runs ``work`` off-main, delivering its result to ``on_done`` or
     its exception to ``on_error`` on the main thread. ``run_in_pool`` picks the
