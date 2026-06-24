@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from pathlib import Path
+from collections.abc import Mapping
 from typing import Any, Optional, cast
 
 import matplotlib.pyplot as plt
@@ -35,9 +35,11 @@ from zcu_tools.program.v2 import (
     SweepCfg,
 )
 from zcu_tools.utils.datasaver import (
-    load_labber_data,
-    safe_labber_filepath,
-    save_labber_data,
+    DatasetRole,
+    LabberMetadata,
+    LabberPayload,
+    load_grouped_labber_data,
+    save_grouped_labber_data,
 )
 
 
@@ -113,6 +115,202 @@ class AutoOptSweepCfg(ConfigBase):
 class AutoOptCfg(ProgramV2Cfg, ExpCfgModel):
     modules: AutoOptModuleCfg
     sweep: AutoOptSweepCfg
+
+
+RO_AUTO_READOUT_FREQ_ROLE = "readout_freq"
+RO_AUTO_READOUT_GAIN_ROLE = "readout_gain"
+RO_AUTO_READOUT_LENGTH_ROLE = "readout_length"
+RO_AUTO_SNR_ROLE = "snr"
+RO_AUTO_GROUPED_ROLES = (
+    RO_AUTO_READOUT_FREQ_ROLE,
+    RO_AUTO_READOUT_GAIN_ROLE,
+    RO_AUTO_READOUT_LENGTH_ROLE,
+    RO_AUTO_SNR_ROLE,
+)
+
+
+def auto_opt_result_to_grouped_payloads(
+    result: AutoOptResult,
+) -> dict[str, LabberPayload]:
+    params = np.asarray(result.params, dtype=np.float64)
+    signals = np.asarray(result.signals, dtype=np.float64)
+    _validate_auto_opt_arrays(params, signals)
+
+    axes = _iteration_axis(params.shape[0])
+    return {
+        RO_AUTO_READOUT_FREQ_ROLE: LabberPayload(
+            ("Readout Frequency", "Hz", params[:, 0] * 1e6),
+            axes=axes,
+        ),
+        RO_AUTO_READOUT_GAIN_ROLE: LabberPayload(
+            ("Readout Gain", "a.u.", params[:, 1]),
+            axes=axes,
+        ),
+        RO_AUTO_READOUT_LENGTH_ROLE: LabberPayload(
+            ("Readout Length", "s", params[:, 2] * 1e-6),
+            axes=axes,
+        ),
+        RO_AUTO_SNR_ROLE: LabberPayload(
+            ("SNR", "a.u.", signals),
+            axes=axes,
+        ),
+    }
+
+
+def save_auto_opt_grouped_result(
+    filepath: str,
+    result: AutoOptResult,
+    *,
+    comment: str = "",
+    tag: str = "twotone/ge/ro_optimize/auto",
+) -> str:
+    return save_grouped_labber_data(
+        filepath,
+        auto_opt_result_to_grouped_payloads(result),
+        metadata=LabberMetadata(comment=comment, tags=tag),
+    )
+
+
+def load_auto_opt_grouped_result(filepath: str) -> AutoOptResult:
+    grouped = load_grouped_labber_data(filepath, required_roles=RO_AUTO_GROUPED_ROLES)
+    payloads = {
+        str(role): grouped.roles[DatasetRole(role)] for role in RO_AUTO_GROUPED_ROLES
+    }
+    iterations = _require_shared_iteration_axes(payloads)
+    num_points = len(iterations)
+
+    freq_hz = _require_1d_real_role(
+        payloads[RO_AUTO_READOUT_FREQ_ROLE],
+        RO_AUTO_READOUT_FREQ_ROLE,
+        "Readout Frequency",
+        "Hz",
+        num_points,
+    )
+    gain = _require_1d_real_role(
+        payloads[RO_AUTO_READOUT_GAIN_ROLE],
+        RO_AUTO_READOUT_GAIN_ROLE,
+        "Readout Gain",
+        "a.u.",
+        num_points,
+    )
+    length_s = _require_1d_real_role(
+        payloads[RO_AUTO_READOUT_LENGTH_ROLE],
+        RO_AUTO_READOUT_LENGTH_ROLE,
+        "Readout Length",
+        "s",
+        num_points,
+    )
+    snr = _require_1d_real_role(
+        payloads[RO_AUTO_SNR_ROLE],
+        RO_AUTO_SNR_ROLE,
+        "SNR",
+        "a.u.",
+        num_points,
+    )
+
+    params = np.column_stack([freq_hz * 1e-6, gain, length_s * 1e6]).astype(np.float64)
+    signals = snr.astype(np.float64)
+    _validate_auto_opt_arrays(params, signals)
+
+    cfg_snapshot = None
+    comment = grouped.metadata.comment
+    if comment:
+        cfg, _, _ = parse_comment(comment)
+        if cfg is not None:
+            cfg_snapshot = AutoOptCfg.validate_or_warn(cfg, source=filepath)
+
+    return AutoOptResult(params=params, signals=signals, cfg_snapshot=cfg_snapshot)
+
+
+def _iteration_axis(num_points: int) -> list[tuple[str, str, NDArray[np.int64]]]:
+    return [("Iteration", "a.u.", np.arange(num_points, dtype=np.int64))]
+
+
+def _validate_auto_opt_arrays(
+    params: NDArray[np.float64], signals: NDArray[np.float64]
+) -> None:
+    if params.ndim != 2 or params.shape[1] != 3:
+        raise ValueError(
+            f"RO auto-optimize params must have shape (N, 3), got {params.shape}"
+        )
+    if signals.ndim != 1:
+        raise ValueError(
+            f"RO auto-optimize signals must be 1-D, got shape {signals.shape}"
+        )
+    if signals.shape[0] != params.shape[0]:
+        raise ValueError(
+            "RO auto-optimize signals length must match params rows "
+            f"(got signals={signals.shape}, params={params.shape})"
+        )
+
+
+def _require_shared_iteration_axes(
+    payloads: Mapping[str, LabberPayload],
+) -> NDArray[np.int64]:
+    reference: NDArray[np.int64] | None = None
+    for role, payload in payloads.items():
+        if len(payload.axes) != 1:
+            raise ValueError(
+                f"RO auto-optimize {role!r} role must have exactly one axis"
+            )
+        axis = payload.axes[0]
+        if axis.name != "Iteration" or axis.unit != "a.u.":
+            raise ValueError(
+                f"RO auto-optimize {role!r} axis must be 'Iteration' / 'a.u.', "
+                f"got {axis.name!r} / {axis.unit!r}"
+            )
+        values = np.asarray(axis.values, dtype=np.float64)
+        if values.ndim != 1:
+            raise ValueError(
+                f"RO auto-optimize {role!r} Iteration axis must be 1-D, "
+                f"got shape {values.shape}"
+            )
+        rounded = np.round(values)
+        if not np.allclose(values, rounded):
+            raise ValueError("RO auto-optimize Iteration axis must contain integers")
+        iterations = rounded.astype(np.int64)
+        if not np.array_equal(iterations, np.arange(len(iterations), dtype=np.int64)):
+            raise ValueError("RO auto-optimize Iteration axis must equal arange(N)")
+        if reference is None:
+            reference = iterations
+        elif not np.array_equal(reference, iterations):
+            raise ValueError(
+                "RO auto-optimize grouped roles disagree on Iteration axis"
+            )
+
+    if reference is None:
+        raise ValueError("RO auto-optimize grouped result has no roles")
+    return reference
+
+
+def _require_1d_real_role(
+    payload: LabberPayload,
+    role: str,
+    expected_label: str,
+    expected_unit: str,
+    num_points: int,
+) -> NDArray[np.float64]:
+    if payload.data.name != expected_label or payload.data.unit != expected_unit:
+        raise ValueError(
+            f"RO auto-optimize {role!r} z channel is "
+            f"{payload.data.name!r} [{payload.data.unit!r}], expected "
+            f"{expected_label!r} [{expected_unit!r}]"
+        )
+    values = np.asarray(payload.z)
+    if values.shape != (num_points,):
+        raise ValueError(
+            f"RO auto-optimize {role!r} z shape {values.shape} != "
+            f"expected {(num_points,)}"
+        )
+    return _real_values(values, f"RO auto-optimize {role!r}")
+
+
+def _real_values(values: NDArray[Any], context: str) -> NDArray[np.float64]:
+    if np.iscomplexobj(values):
+        if np.any(np.imag(values) != 0.0):
+            raise ValueError(f"{context} must not contain imaginary values")
+        values = np.real(values)
+    return np.asarray(values, dtype=np.float64)
 
 
 class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
@@ -318,56 +516,13 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        params, signals = result.params, result.signals
-
         if result.cfg_snapshot is None:
             raise ValueError("Cannot save result without configuration snapshot")
         cfg = result.cfg_snapshot
         comment = make_comment(cfg, comment)
 
-        _filepath = Path(filepath)
-
-        iters = np.arange(params.shape[0])
-
-        # params file: 2-D native (Ny=3 Parameter Type, Nx=Np Iteration); inner
-        # axis (Iteration) is last in z, matching the (Ny, Nx) on-disk layout.
-        save_labber_data(
-            safe_labber_filepath(str(_filepath.with_name(_filepath.name + "_params"))),
-            z=("Parameters", "a.u.", params.T),
-            axes=[
-                ("Iteration", "a.u.", iters),
-                ("Parameter Type", "a.u.", np.array([0, 1, 2])),
-            ],
-            comment=comment,
-            tags=tag + "/params",
-        )
-
-        # signals file: 1-D over Iteration.
-        save_labber_data(
-            safe_labber_filepath(str(_filepath.with_name(_filepath.name + "_signals"))),
-            z=("Signal", "a.u.", signals),
-            axes=[("Iteration", "a.u.", iters)],
-            comment=comment,
-            tags=tag + "/signals",
-        )
+        save_auto_opt_grouped_result(filepath, result, comment=comment, tag=tag)
 
     def load(self, filepath: str) -> AutoOptResult:
-        _filepath = Path(filepath)
-
-        ld_p = load_labber_data(str(_filepath.with_name(_filepath.name + "_params")))
-        ld_s = load_labber_data(str(_filepath.with_name(_filepath.name + "_signals")))
-
-        # native load does NOT flip inner axes: ld_p.z is (Ny=3, Nx=Np); the
-        # callers expect (Np, 3) (row=iteration, col=param-type) -> re-apply .T.
-        params = np.asarray(ld_p.z, dtype=np.float64).T
-        signals = np.asarray(ld_s.z, dtype=np.float64)
-        comment = ld_p.comment
-
-        cfg_snapshot = None
-        if comment is not None:
-            cfg, _, _ = parse_comment(comment)
-            if cfg is not None:
-                cfg_snapshot = AutoOptCfg.validate_or_warn(cfg, source=filepath)
-
-        self.last_result = AutoOptResult(params, signals, cfg_snapshot=cfg_snapshot)
+        self.last_result = load_auto_opt_grouped_result(filepath)
         return self.last_result
