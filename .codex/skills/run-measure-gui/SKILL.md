@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 43
+skill_version: 44
 ---
 
 # run-measure-gui

@@ -26,8 +26,8 @@ settles the interactive handle (`{ok:true, cancelled:true}` when one was in
 flight; `cancelled:false` is a graceful no-op when nothing is mounted) and
 unmounts the picker so the tab is free again. Cancel stays op-specific (the generic
 `gui_op_*` family has no cancel). The cancel outcome rides `gui_tab_analyze_cancel`'s
-own reply — **after a cancel, `gui_op_poll` reports `status:finished`, not
-`cancelled`** (only a run handle surfaces a cancelled status through poll/wait).
+own reply, and `gui_op_poll(handle)` on that settled handle reports `status:cancelled`
+(the true terminal — poll never mislabels a cancelled or still-running op as finished).
 
 **Post-analysis (second layer, e.g. single-shot `ge` discrimination).** Some
 adapters offer a second analysis on top of the primary fit. After a primary
@@ -71,7 +71,12 @@ The operation is **not cancelled** — it keeps running. You should:
 2. Re-call the same `*_wait` with a fresh timeout to keep observing.
 
 If you never re-await, `gui_op_poll(handle)` / `gui_tab_list` still work for
-non-blocking status checks.
+non-blocking status checks. `gui_op_poll` additionally DRAINS every feedback
+message buffered since your last drain and returns them as `feedback:[...]` (in
+arrival order) while still reporting the TRUE status — so a non-blocking check
+never loses a nudge and never falsely reads `finished` on a still-running op.
+Draining consumes those messages: a subsequent `gui_op_wait` will not re-deliver
+them (only the sticky terminal outcome is re-readable by wait).
 
 A `diagnostic{severity}` push (errors / info the GUI would show in a dialog) rides
 along in the *next* tool reply's notifications — you get it without asking. Don't

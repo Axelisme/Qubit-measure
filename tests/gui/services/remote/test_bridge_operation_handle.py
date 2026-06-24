@@ -283,6 +283,197 @@ def test_wait_cancelled_without_feedback_no_feedback_key(wired):
     assert "feedback" not in out
 
 
+class _AwaitScript:
+    """Stateful fake send_gui_rpc that scripts a sequence of operation.await
+    replies (the poll drain loop calls await repeatedly) plus a static
+    operation.progress payload.
+
+    Each ``await`` step is one of: a dict payload (delivered as a success reply),
+    or a RuntimeError instance (raised — e.g. a TIMEOUT or PRECONDITION_FAILED).
+    After the scripted steps are exhausted, the last step repeats (so a terminal /
+    timeout is sticky, mirroring the wire's settled re-readability).
+    """
+
+    def __init__(self, steps, progress=None):
+        self._steps = list(steps)
+        self._idx = 0
+        self._progress = progress or {"active": True, "bars": []}
+        self.await_calls = 0
+
+    def __call__(self, method, params, timeout_seconds=30.0):
+        del params, timeout_seconds
+        if method == "operation.progress":
+            return self._progress
+        if method == "operation.await":
+            self.await_calls += 1
+            step = self._steps[min(self._idx, len(self._steps) - 1)]
+            self._idx += 1
+            if isinstance(step, BaseException):
+                raise step
+            return step
+        return {}
+
+
+def _timeout_err() -> RuntimeError:
+    return RuntimeError("GUI Error (timeout): not done")
+
+
+def _msg(text: str) -> dict[str, Any]:
+    return {"reason": "user_feedback", "feedback": text}
+
+
+def test_poll_drains_all_buffered_feedback_while_running(monkeypatch):
+    # (1) N feedback Messages buffered + op running -> status 'running' AND the
+    # reply carries all N messages in arrival order. Because poll DRAINS, a
+    # subsequent immediate wait does NOT re-deliver them (the queue is emptied;
+    # await then times out = still running).
+    script = _AwaitScript(
+        [_msg("first"), _msg("second"), _msg("third"), _timeout_err()],
+        progress={
+            "active": True,
+            "bars": [{"token": "t0", "format": "50%", "percent": 50, "maximum": 100}],
+        },
+    )
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", script)
+
+    out = mcp_server.TOOLS["gui_op_poll"]["handler"]({"handle": 5})
+
+    assert out["status"] == "running"
+    assert out["feedback"] == ["first", "second", "third"]  # FIFO order
+    assert out["bars"] == [{"token": "t0", "format": "50%", "percent": 50}]
+    # 3 messages + 1 timeout = 4 await calls (drained until the queue emptied).
+    assert script.await_calls == 4
+
+    # Subsequent immediate wait: queue already drained -> await times out ->
+    # gui_op_wait reports 'timed_out' (still running), NOT the consumed feedback.
+    follow = _AwaitScript([_timeout_err()])
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", follow)
+    out2 = mcp_server.TOOLS["gui_op_wait"]["handler"]({"handle": 5, "timeout": 0.01})
+    assert out2["status"] == "timed_out"
+    assert "feedback" not in out2
+
+
+def test_poll_after_send_and_stop_returns_cancelled_with_reason(monkeypatch):
+    # (2) Send & Stop -> sticky cancelled terminal. poll -> status 'cancelled'
+    # with the Stop reason; a subsequent wait STILL returns cancelled (the sticky
+    # terminal is not destroyed by poll).
+    cancelled = {
+        "reason": "completed",
+        "status": "cancelled",
+        "feedback": "stop: recalibrate first",
+    }
+    script = _AwaitScript([cancelled])
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", script)
+
+    out = mcp_server.TOOLS["gui_op_poll"]["handler"]({"handle": 7})
+
+    assert out["status"] == "cancelled"
+    assert out["stop_reason"] == "stop: recalibrate first"
+    assert "recalibrate" in out["message"]
+
+    # Sticky terminal: a later wait reads the SAME cancelled outcome (re-readable).
+    out2 = mcp_server.TOOLS["gui_op_wait"]["handler"]({"handle": 7, "timeout": 1.0})
+    assert out2["status"] == "cancelled"
+    assert out2["feedback"] == "stop: recalibrate first"
+
+
+def test_poll_running_no_events_folds_progress(monkeypatch):
+    # (3) running op, no events -> 'running' + slimmed progress bars (the
+    # unchanged behaviour; no feedback key when nothing was drained).
+    script = _AwaitScript(
+        [_timeout_err()],
+        progress={
+            "active": True,
+            "bars": [
+                {"token": "outer", "format": "2/10", "percent": 20, "maximum": 10}
+            ],
+        },
+    )
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", script)
+
+    out = mcp_server.TOOLS["gui_op_poll"]["handler"]({"handle": 9})
+
+    assert out["status"] == "running"
+    assert out["active"] is True
+    assert out["bars"] == [{"token": "outer", "format": "2/10", "percent": 20}]
+    assert "feedback" not in out
+
+
+def test_poll_cleanly_finished(monkeypatch):
+    # (4) cleanly finished op -> 'finished' (no feedback key).
+    script = _AwaitScript([{"reason": "completed", "status": "finished"}])
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", script)
+
+    out = mcp_server.TOOLS["gui_op_poll"]["handler"]({"handle": 11})
+
+    assert out["status"] == "finished"
+    assert "feedback" not in out
+
+
+def test_poll_messages_then_terminal_in_one_drain(monkeypatch):
+    # (5) mixed: messages THEN a terminal drained in one poll -> the reply carries
+    # BOTH the feedback list AND the terminal status. Here the terminal is a clean
+    # finish; the queued nudges that preceded it are still surfaced.
+    script = _AwaitScript(
+        [
+            _msg("note A"),
+            _msg("note B"),
+            {"reason": "completed", "status": "finished"},
+        ]
+    )
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", script)
+
+    out = mcp_server.TOOLS["gui_op_poll"]["handler"]({"handle": 13})
+
+    assert out["status"] == "finished"
+    assert out["feedback"] == ["note A", "note B"]
+    assert script.await_calls == 3
+
+
+def test_poll_messages_then_cancelled_terminal(monkeypatch):
+    # (5b) mixed where the terminal is a cancel: both the drained feedback list and
+    # the cancelled status (+stop_reason) ride the same reply.
+    script = _AwaitScript(
+        [
+            _msg("watch the fridge temp"),
+            {
+                "reason": "completed",
+                "status": "cancelled",
+                "feedback": "stop: drifted",
+            },
+        ]
+    )
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", script)
+
+    out = mcp_server.TOOLS["gui_op_poll"]["handler"]({"handle": 15})
+
+    assert out["status"] == "cancelled"
+    assert out["feedback"] == ["watch the fridge temp"]
+    assert out["stop_reason"] == "stop: drifted"
+
+
+def test_poll_failed_outcome_reports_failed_status(monkeypatch):
+    # A genuine failure surfaces as a raised RuntimeError (reason='failed'); poll
+    # reports it as status 'failed' (does NOT raise, unlike the blocking wait).
+    def fail(method, params, timeout_seconds=30.0):
+        del params, timeout_seconds
+        if method == "operation.await":
+            raise RuntimeError("GUI Error (precondition_failed): hardware boom")
+        return {}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", fail)
+
+    out = mcp_server.TOOLS["gui_op_poll"]["handler"]({"handle": 17})
+
+    assert out["status"] == "failed"
+    assert "hardware boom" in out["message"]
+
+
+def test_poll_no_operation_when_handle_absent():
+    out = mcp_server._poll_operation_by_handle(None, "operation")
+    assert out["status"] == "no_operation"
+
+
 def test_run_start_captures_operation_id_under_tab_key(wired):
     # tab.run_start is also a guarded op; expected_versions ride along, and the
     # returned operation_id is captured under the tab key.

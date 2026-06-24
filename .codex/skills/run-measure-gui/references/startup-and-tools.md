@@ -116,7 +116,8 @@ gui_tab_set_cfg(tab_id, edits=[{path,value},…])   # batch-set tab cfg fields i
 gui_tab_run_start(tab_id)                         # waits ~1s; finished -> {status:finished, handle, figure:<png>,...}, slow -> {status:pending, handle}
 gui_op_wait(handle)                               # block until the op (by handle) ends (only after pending; blocks your turn —
                                                   # for a long run background it, see "Detecting completion"). Generic: drives ANY handle.
-gui_op_poll(handle)                               # non-blocking status of the op (by handle); NEVER raises. Generic: drives ANY handle.
+gui_op_poll(handle)                               # non-blocking TRUE status of the op (by handle); NEVER raises. DRAINS all buffered
+                                                  # user feedback -> feedback:[...] (every queued nudge, any status). Generic: drives ANY handle.
 gui_tab_get_current_figure(tab_id)                # RARELY NEEDED (run/analyze finished already fold the figure, incl 2D
                                                   # scans via run; use only for a re-render / mid-flight plot / chosen out_path).
                                                   # Writes the CURRENT plot (run's 2D map, analysis fit, or post-analysis
@@ -150,5 +151,6 @@ a handle, never by subscribing to a push stream:
 | fast run / fast fit | the call returns `{status:finished}` (`gui_tab_run_start` / `gui_tab_analyze_start` when it settles within `wait_seconds`, default 1.0) |
 | a START returned `{status:pending, handle}` | wait (`gui_op_wait(handle)`, blocks) or poll (`gui_op_poll(handle)`, non-blocking) — the SAME generic drains for run / analyze / post-analyze / device handles |
 | want live progress bars | already in the `gui_op_poll(handle)` reply while `status:running` (active + bars); no separate progress tool |
+| buffered user feedback during a long run | `gui_op_poll(handle)` DRAINS every queued nudge and returns them as `feedback:[...]` (any status — even `running`); it reports the TRUE status, never a false `finished`. Draining consumes them: a later `gui_op_wait` won't re-deliver those nudges (the sticky terminal outcome is still re-readable) |
 | a poll or wait says `status:cancelled` | a user/agent cancel (distinct from `failed`); **not a raise, not an error** — read optional `feedback` for the Stop reason (present when user clicked "Send & Stop"), then re-plan |
 | after a `pending`->`finished` run/analyze | `gui_op_wait`/`gui_op_poll` report ONLY status — read the figure with `gui_tab_get_current_figure` and the fit summary with `gui_tab_get_analyze_result` (they are NOT auto-folded after a degrade) |

@@ -1219,43 +1219,128 @@ def _slim_progress(progress: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Safety cap on the poll drain loop: a single poll loops on zero-timeout awaits
+# only to drain ALREADY-BUFFERED user-feedback Messages, which terminates on the
+# first terminal/timeout. The cap guards against a pathological producer enqueuing
+# Messages faster than we drain — far above any realistic buffered-nudge count.
+_POLL_DRAIN_CAP = 4096
+
+
 def _poll_operation_by_handle(operation_id: int | None, what: str) -> dict[str, Any]:
     """Non-blocking status of a wire ``operation_id`` (no event needed). The
     op-agnostic core of the generic gui_op_poll (ADR-0026 §8).
 
-    Maps a zero-timeout await onto a plain status: 'finished' (settled OK),
-    'running' (still in flight), 'failed'/'cancelled' (terminal error — does NOT
-    raise here, unlike the blocking wait; poll reports it as a status), or
+    DRAINS every currently-buffered user-feedback Message (zero-timeout awaits in
+    a loop) and returns them as a ``feedback`` list, then maps the FINAL outcome
+    onto a plain status: 'running' (still in flight — even right after draining
+    feedback), 'finished' (genuinely settled OK), 'cancelled'/'failed' (terminal —
+    poll reports as a status, it does NOT raise like the blocking wait), or
     'no_operation' (no handle supplied / already reaped). Lets an agent that
-    started a slow op go do other work and check back without blocking.
+    started a slow op go do other work, see every queued nudge, and check back
+    without blocking.
+
+    INVARIANT: NEVER returns 'finished' unless the op is genuinely settled-finished.
+    A live op (the zero-timeout await raised TIMEOUT) is 'running', even if feedback
+    was just drained from it. user-feedback Messages are one-shot FIFO — consuming
+    them here is intended; a later gui_op_wait will not re-deliver them, though the
+    sticky terminal outcome remains re-readable by wait.
     """
     if operation_id is None:
         return {"status": "no_operation", "message": f"No operation for {what}."}
-    try:
-        send_gui_rpc("operation.await", {"operation_id": operation_id, "timeout": 0.0})
-    except RuntimeError as exc:
-        if _is_timeout_error(exc):
-            # Still running — fold the live progress bars into the poll reply so
-            # the agent watches progress without a separate tool call, slimmed to
-            # {token, format, percent} (Qt-scaled counters are dropped here).
-            progress = send_gui_rpc(
-                "operation.progress", {"operation_id": operation_id}
+
+    drained: list[str] = []
+    for _ in range(_POLL_DRAIN_CAP):
+        try:
+            res = send_gui_rpc(
+                "operation.await", {"operation_id": operation_id, "timeout": 0.0}
             )
-            return {
-                "status": "running",
-                "message": f"{what} still in progress.",
-                **_slim_progress(progress),
+        except RuntimeError as exc:
+            if _is_timeout_error(exc):
+                # Queue drained and op NOT settled — still running. Fold the live
+                # progress bars into the reply (slimmed to {token, format, percent};
+                # Qt-scaled counters dropped here) so the agent watches progress
+                # without a separate tool call. Mirror of today's running branch.
+                progress = send_gui_rpc(
+                    "operation.progress", {"operation_id": operation_id}
+                )
+                return _with_feedback(
+                    {
+                        "status": "running",
+                        "message": f"{what} still in progress.",
+                        **_slim_progress(progress),
+                    },
+                    drained,
+                )
+            # terminal error — report as status rather than raising (poll is a
+            # query, not an await). A user-initiated cancel is a distinct,
+            # non-failure outcome: surface it as 'cancelled' so the agent need not
+            # parse the message to tell "it crashed" from "I cancelled it" (the
+            # wire carries reason='cancelled', read structurally via reason attr).
+            reason = getattr(exc, "reason", None)
+            if reason == "cancelled":
+                return _with_feedback(
+                    {"status": "cancelled", "message": f"{what} was cancelled."},
+                    drained,
+                )
+            return _with_feedback(
+                {"status": "failed", "message": f"{what}: {exc}"}, drained
+            )
+
+        # Successful payload: either a buffered user-feedback Message (consumed —
+        # keep draining) or the sticky terminal outcome (stop). Mirror
+        # _await_operation_by_handle's classification of the SAME payload shape.
+        reason = res.get("reason", "completed")
+        if reason == "user_feedback":
+            text = res.get("feedback") or ""
+            drained.append(text)
+            continue
+        status = res.get("status", "finished")
+        if status == "cancelled":
+            # Structured cancellation: status + optional Stop reason. The Stop
+            # reason rides the dedicated message key; the drained-feedback list is
+            # separate (queued nudges that preceded the terminal).
+            out: dict[str, Any] = {
+                "status": "cancelled",
+                "message": f"{what} was cancelled.",
             }
-        # terminal error — report as status rather than raising (poll is a query,
-        # not an await). A user-initiated cancel is a distinct, non-failure
-        # outcome: surface it as 'cancelled' so the agent need not parse the
-        # message to tell "it crashed" from "I cancelled it" (the wire carries
-        # reason='cancelled', read structurally via GuiRpcError.reason).
-        reason = getattr(exc, "reason", None)
-        if reason == "cancelled":
-            return {"status": "cancelled", "message": f"{what} was cancelled."}
-        return {"status": "failed", "message": f"{what}: {exc}"}
-    return {"status": "finished", "message": f"{what} completed."}
+            cancel_reason = res.get("feedback")
+            if cancel_reason:
+                out["message"] = f"{what} was cancelled: {cancel_reason}"
+                out["stop_reason"] = cancel_reason
+            return _with_feedback(out, drained)
+        if status == "failed":
+            # Failure surfaced as a structured payload (rare — usually a raise).
+            return _with_feedback(
+                {"status": "failed", "message": f"{what}: {res.get('error')}"},
+                drained,
+            )
+        return _with_feedback(
+            {"status": status, "message": f"{what} completed."}, drained
+        )
+
+    # Drain cap hit: a pathological feedback producer. Do NOT claim finished — the
+    # op may well still be live. Report running and let the agent re-poll.
+    return _with_feedback(
+        {
+            "status": "running",
+            "message": (
+                f"{what} still in progress (drained {_POLL_DRAIN_CAP} feedback "
+                "messages without reaching a terminal — re-poll)."
+            ),
+        },
+        drained,
+    )
+
+
+def _with_feedback(reply: dict[str, Any], drained: list[str]) -> dict[str, Any]:
+    """Attach the drained user-feedback list to a poll reply when non-empty.
+
+    Queued nudges may precede a terminal, so a finished/cancelled/running reply can
+    all carry drained messages. The list is in strict arrival (FIFO) order.
+    """
+    if drained:
+        reply["feedback"] = list(drained)
+    return reply
 
 
 def _is_timeout_error(exc: RuntimeError) -> bool:
@@ -1273,11 +1358,19 @@ def tool_gui_op_poll(arguments: dict[str, Any]) -> dict[str, Any]:
 
     ``handle`` is the opaque token a START tool (gui_tab_run_start /
     gui_tab_analyze_start / gui_tab_post_analyze_start / gui_device_*) returned in
-    its reply. Maps a zero-timeout await onto a plain status — NEVER raises:
-    finished | running | cancelled | failed | no_operation. While 'running' the
-    reply folds the live progress bars (active, bars[token/format/percent]).
-    Returns only the status (+progress): the op's product (figure/summary/snapshot)
-    is read from the START finished reply or the matching typed getter.
+    its reply. NEVER raises. Reports the TRUE status: running (still live — even
+    right after feedback was drained) | finished (genuinely settled OK) | cancelled
+    (with the Stop reason in 'stop_reason' / message when "Send & Stop" was used) |
+    failed | no_operation. While 'running' the reply folds the live progress bars
+    (active, bars[token/format/percent]).
+
+    DRAINS all currently-buffered user feedback in one call and returns it as a
+    ``feedback`` LIST (every queued nudge, in arrival order) so the agent sees every
+    message — present on ANY status (a nudge may precede a terminal). Draining
+    CONSUMES those messages: a later gui_op_wait will NOT re-deliver them, though
+    the sticky terminal outcome stays re-readable by gui_op_wait. Returns only the
+    status (+progress +feedback): the op's product (figure/summary/snapshot) is read
+    from the START finished reply or the matching typed getter.
     """
     handle = int(arguments["handle"])
     return _poll_operation_by_handle(handle, "operation")
