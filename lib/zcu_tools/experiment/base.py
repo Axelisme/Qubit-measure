@@ -275,6 +275,23 @@ class PersistableExperiment(AbsExperiment[T_Result, T_Config]):
             ).astype(ax.dtype)
             for i, ax in enumerate(spec.axes)
         }
-        kwargs[spec.z.field_name] = np.asarray(ld.z).astype(spec.z.dtype)
+        kwargs[spec.z.field_name] = self._cast_loaded_z(ld.z, spec)
         kwargs["cfg_snapshot"] = cfg_snapshot
         return spec.result_type(**kwargs)
+
+    def _cast_loaded_z(
+        self,
+        loaded_z: Any,
+        spec: AxesSpec[T_Result, T_Config],
+    ) -> np.ndarray:
+        target_dtype = np.dtype(spec.z.dtype)
+        z_values = np.asarray(loaded_z)
+        if target_dtype.kind != "c" and np.iscomplexobj(z_values):
+            if np.any(np.imag(z_values) != 0.0):
+                raise ValueError(
+                    f"{type(self).__name__} canonical z channel "
+                    f"{spec.z.label!r} contains non-zero imaginary component; "
+                    f"cannot load as {target_dtype}"
+                )
+            z_values = np.real(z_values)
+        return z_values.astype(target_dtype)

@@ -12,6 +12,13 @@ import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.experiment import AxesSpec
 from zcu_tools.experiment.v2.singleshot.ge import GE_Exp, GE_Result
+from zcu_tools.experiment.v2.singleshot.len_rabi import LenRabiExp, LenRabiResult
+from zcu_tools.experiment.v2.singleshot.mist.freq import FreqDepExp, FreqResult
+from zcu_tools.experiment.v2.singleshot.mist.power import PowerExp, PowerResult
+from zcu_tools.experiment.v2.singleshot.mist.pre_freq import (
+    PreFreqExp,
+    PreFreqResult,
+)
 from zcu_tools.experiment.v2.twotone.ckp import CKP_Exp, CKP_Result
 from zcu_tools.experiment.v2.twotone.reset.bath.length import LengthExp, LengthResult
 from zcu_tools.experiment.v2.twotone.time_domain.cpmg import (
@@ -262,12 +269,132 @@ def _convert_bath_length_labber(input_path: Path, output_path: Path) -> None:
     _save_axes_spec_result_exact(output_path, axes_spec, result, comment=data.comment)
 
 
+def _convert_len_rabi_labber(input_path: Path, output_path: Path) -> None:
+    data = load_labber_data(str(input_path))
+    length_seconds, population_values = _legacy_two_axes(
+        data,
+        input_path,
+        expected=(("Length", "s"), ("GE population", "a.u.")),
+    )
+    _require_population_axis(population_values, input_path)
+    legacy_populations = _legacy_population_z(
+        data,
+        input_path,
+        expected_shape=(len(population_values), len(length_seconds)),
+    )
+
+    result = LenRabiResult(
+        lengths=(length_seconds * 1e6).astype(np.float64),
+        signals=legacy_populations.T.astype(np.float64),
+        population_states=population_values.astype(np.int64),
+    )
+    axes_spec = LenRabiExp.AXES_SPEC
+    if axes_spec is None:
+        raise RuntimeError("LenRabiExp has no AXES_SPEC")
+
+    _save_axes_spec_result_exact(output_path, axes_spec, result, comment=data.comment)
+
+
+def _convert_mist_power_labber(input_path: Path, output_path: Path) -> None:
+    data = load_labber_data(str(input_path))
+    gains, population_values = _legacy_two_axes(
+        data,
+        input_path,
+        expected=(("Drive gain", "a.u."), ("GE population", "a.u.")),
+    )
+    _require_population_axis(population_values, input_path)
+    legacy_populations = _legacy_population_z(
+        data,
+        input_path,
+        expected_shape=(len(population_values), len(gains)),
+    )
+
+    result = PowerResult(
+        gains=gains.astype(np.float64),
+        signals=legacy_populations.T.astype(np.float64),
+        population_states=population_values.astype(np.int64),
+    )
+    axes_spec = PowerExp.AXES_SPEC
+    if axes_spec is None:
+        raise RuntimeError("PowerExp has no AXES_SPEC")
+
+    _save_axes_spec_result_exact(output_path, axes_spec, result, comment=data.comment)
+
+
+def _convert_mist_freq_labber(input_path: Path, output_path: Path) -> None:
+    data = load_labber_data(str(input_path))
+    freq_hz, population_values = _legacy_two_axes(
+        data,
+        input_path,
+        expected=(("Drive Freq", "Hz"), ("GE population", "a.u.")),
+    )
+    _require_population_axis(population_values, input_path)
+    legacy_populations = _legacy_population_z(
+        data,
+        input_path,
+        expected_shape=(len(population_values), len(freq_hz)),
+    )
+
+    result = FreqResult(
+        freqs=(freq_hz * 1e-6).astype(np.float64),
+        signals=legacy_populations.T.astype(np.float64),
+        population_states=population_values.astype(np.int64),
+    )
+    axes_spec = FreqDepExp.AXES_SPEC
+    if axes_spec is None:
+        raise RuntimeError("FreqDepExp has no AXES_SPEC")
+
+    _save_axes_spec_result_exact(output_path, axes_spec, result, comment=data.comment)
+
+
+def _convert_mist_pre_freq_labber(input_path: Path, output_path: Path) -> None:
+    data = load_labber_data(str(input_path))
+    freq_hz, population_values = _legacy_two_axes(
+        data,
+        input_path,
+        expected=(("PrePulse frequency", "Hz"), ("GE population", "a.u.")),
+    )
+    _require_population_axis(population_values, input_path)
+    legacy_populations = _legacy_population_z(
+        data,
+        input_path,
+        expected_shape=(len(population_values), len(freq_hz)),
+    )
+
+    result = PreFreqResult(
+        freqs=(freq_hz * 1e-6).astype(np.float64),
+        signals=legacy_populations.T.astype(np.float64),
+        population_states=population_values.astype(np.int64),
+    )
+    axes_spec = PreFreqExp.AXES_SPEC
+    if axes_spec is None:
+        raise RuntimeError("PreFreqExp has no AXES_SPEC")
+
+    _save_axes_spec_result_exact(output_path, axes_spec, result, comment=data.comment)
+
+
 def _validate_ge_output(path: str) -> GE_Result:
     return GE_Exp().load(path)
 
 
 def _validate_bath_length_output(path: str) -> LengthResult:
     return LengthExp().load(path)
+
+
+def _validate_len_rabi_output(path: str) -> LenRabiResult:
+    return LenRabiExp().load(path)
+
+
+def _validate_mist_power_output(path: str) -> PowerResult:
+    return PowerExp().load(path)
+
+
+def _validate_mist_freq_output(path: str) -> FreqResult:
+    return FreqDepExp().load(path)
+
+
+def _validate_mist_pre_freq_output(path: str) -> PreFreqResult:
+    return PreFreqExp().load(path)
 
 
 def _validate_ckp_output(path: str) -> CKP_Result:
@@ -421,6 +548,40 @@ def _legacy_z(
     return signals
 
 
+def _legacy_population_z(
+    data: LabberData,
+    path: Path,
+    *,
+    expected_shape: tuple[int, ...],
+) -> NDArray[np.float64]:
+    if data.data.name != "Population" or data.data.unit != "a.u.":
+        raise ValueError(
+            f"legacy file {path} z channel is "
+            f"{data.data.name!r} [{data.data.unit!r}], expected 'Population' ['a.u.']"
+        )
+
+    populations = np.asarray(data.z, dtype=np.complex128)
+    if populations.shape != expected_shape:
+        raise ValueError(
+            f"legacy file {path} z shape {populations.shape} != "
+            f"expected legacy shape {expected_shape}"
+        )
+    if np.any(populations.imag != 0.0):
+        raise ValueError(
+            f"legacy file {path} population z contains imaginary components"
+        )
+    return populations.real.astype(np.float64)
+
+
+def _require_population_axis(values: NDArray[np.float64], path: Path) -> None:
+    _require_axis_values(
+        "population state",
+        values,
+        np.array([0, 1], dtype=np.float64),
+        path=path,
+    )
+
+
 def _require_axis_values(
     axis_name: str,
     values: NDArray[np.float64],
@@ -466,6 +627,22 @@ CONVERTERS: dict[str, ConverterSpec] = {
     "singleshot/ge": ConverterSpec(
         convert=_convert_ge_labber,
         validate=_validate_ge_output,
+    ),
+    "singleshot/len_rabi": ConverterSpec(
+        convert=_convert_len_rabi_labber,
+        validate=_validate_len_rabi_output,
+    ),
+    "singleshot/mist/freq": ConverterSpec(
+        convert=_convert_mist_freq_labber,
+        validate=_validate_mist_freq_output,
+    ),
+    "singleshot/mist/power": ConverterSpec(
+        convert=_convert_mist_power_labber,
+        validate=_validate_mist_power_output,
+    ),
+    "singleshot/mist/pre_freq": ConverterSpec(
+        convert=_convert_mist_pre_freq_labber,
+        validate=_validate_mist_pre_freq_output,
     ),
     "twotone/reset/bath/length": ConverterSpec(
         convert=_convert_bath_length_labber,

@@ -19,6 +19,7 @@ ADR-0027 invariants under test:
 from __future__ import annotations
 
 import os
+import warnings
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
@@ -86,6 +87,16 @@ class _Exp1D(PersistableExperiment[_Result1D, _TinyCfg]):
         result_type=_Result1D,
         cfg_type=_TinyCfg,
         tag="test/roundtrip1d",
+    )
+
+
+class _Exp1DReal(PersistableExperiment[_Result1D, _TinyCfg]):
+    AXES_SPEC: ClassVar[AxesSpec[Any, Any] | None] = AxesSpec(
+        axes=(Axis("freqs", "Frequency", "Hz", MHZ_TO_HZ, np.float64),),
+        z=ZSpec("signals", "Population", "a.u.", np.float64),
+        result_type=_Result1D,
+        cfg_type=_TinyCfg,
+        tag="test/roundtrip1d-real",
     )
 
 
@@ -199,6 +210,43 @@ def test_roundtrip_1d(tmp_path: Any) -> None:
 
     assert loaded.cfg_snapshot is not None
     assert loaded.cfg_snapshot.reps == 7
+
+
+def test_real_z_roundtrip_does_not_warn_on_complex_container(tmp_path: Any) -> None:
+    freqs = np.array([4000.0, 5000.0, 6000.0], dtype=np.float64)
+    signals = np.array([0.1, 0.2, 0.3], dtype=np.float64)
+    path = os.path.join(str(tmp_path), "real_z_complex_container.hdf5")
+    save_labber_data(
+        path,
+        z=("Population", "a.u.", signals.astype(np.complex128)),
+        axes=[("Frequency", "Hz", freqs * MHZ_TO_HZ)],
+    )
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        loaded = _Exp1DReal().load(path)
+
+    assert caught == []
+    assert loaded.signals.dtype == np.float64
+    np.testing.assert_allclose(loaded.signals, signals, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("imaginary", [0.25, 1e-12])
+def test_real_z_load_rejects_nonzero_imaginary_component(
+    tmp_path: Any,
+    imaginary: float,
+) -> None:
+    freqs = np.array([4000.0, 5000.0, 6000.0], dtype=np.float64)
+    signals = np.array([0.1, 0.2, 0.3], dtype=np.float64) + 1j * imaginary
+    path = os.path.join(str(tmp_path), f"real_z_nonzero_imag_{imaginary}.hdf5")
+    save_labber_data(
+        path,
+        z=("Population", "a.u.", signals.astype(np.complex128)),
+        axes=[("Frequency", "Hz", freqs * MHZ_TO_HZ)],
+    )
+
+    with pytest.raises(ValueError, match="z channel.*imaginary component"):
+        _Exp1DReal().load(path)
 
 
 def test_save_fast_fails_on_shape_mismatch(tmp_path: Any) -> None:

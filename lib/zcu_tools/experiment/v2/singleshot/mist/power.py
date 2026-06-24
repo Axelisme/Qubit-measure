@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -11,9 +11,17 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment import (
+    IDENTITY,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -29,19 +37,21 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import (
-    load_labber_data,
-    safe_labber_filepath,
-    save_labber_data,
-)
 
 from ..util import calc_populations, correct_populations
+
+
+def _default_population_states() -> NDArray[np.int64]:
+    return np.array([0, 1], dtype=np.int64)
 
 
 @dataclass(frozen=True)
 class PowerResult:
     gains: NDArray[np.float64]
     signals: NDArray[np.float64]
+    population_states: NDArray[np.int64] = field(
+        default_factory=_default_population_states
+    )
     cfg_snapshot: PowerCfg | None = None
 
 
@@ -61,7 +71,25 @@ class PowerCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: PowerSweepCfg
 
 
-class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
+class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
+    AXES_SPEC = AxesSpec(
+        axes=(
+            Axis(
+                "population_states",
+                "GE Population",
+                "None",
+                scale=IDENTITY,
+                dtype=np.int64,
+            ),
+            Axis("gains", "Drive gain", "a.u.", scale=IDENTITY, dtype=np.float64),
+        ),
+        z=ZSpec("signals", "Population", "a.u.", dtype=np.float64),
+        result_type=PowerResult,
+        cfg_type=PowerCfg,
+        tag="singleshot/mist/power",
+    )
+
+    @record_result
     def run(
         self,
         soc,
@@ -143,11 +171,9 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                 ),
             )
 
-        # record the last result
-        self.last_result = PowerResult(gains=gains, signals=signals, cfg_snapshot=cfg)
+        return PowerResult(gains=gains, signals=signals, cfg_snapshot=cfg)
 
-        return self.last_result
-
+    @retrieve_result
     def analyze(
         self,
         result: PowerResult | None = None,
@@ -156,8 +182,6 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         log_scale=False,
         confusion_matrix: NDArray[np.float64] | None = None,
     ) -> Figure:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         gains, populations = result.gains, result.signals
@@ -188,51 +212,3 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             ax.set_xscale("log")
 
         return fig
-
-    def save(
-        self,
-        filepath: str,
-        result: PowerResult | None = None,
-        comment: str | None = None,
-        tag: str = "singleshot/mist/gain",
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        gains, populations = result.gains, result.signals
-
-        cfg = result.cfg_snapshot
-        if cfg is None:
-            raise ValueError("result.cfg_snapshot is None")
-        comment = make_comment(cfg, comment)
-
-        save_labber_data(
-            safe_labber_filepath(filepath),
-            z=("Population", "a.u.", populations.T),  # native (Ny=2, Nx)
-            axes=[
-                ("Drive gain", "a.u.", gains),  # inner axis (x = gains, Nx)
-                ("GE population", "a.u.", np.asarray([0, 1])),  # outer axis (y, Ny=2)
-            ],
-            comment=comment,
-            tags=tag,
-        )
-
-    def load(self, filepath: str) -> PowerResult:
-        data = load_labber_data(filepath)
-
-        gains = np.asarray(data.axes[0].values, dtype=np.float64)
-        # native z is (Ny=2, Nx); transpose to PowerResult.signals (Nx, 2)
-        populations = np.real(data.z).astype(np.float64).T
-        comment = data.comment
-
-        cfg_snapshot = None
-        if comment is not None:
-            cfg, _, _ = parse_comment(comment)
-            if cfg is not None:
-                cfg_snapshot = PowerCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = PowerResult(
-            gains=gains, signals=populations, cfg_snapshot=cfg_snapshot
-        )
-
-        return self.last_result
