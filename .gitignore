@@ -14,6 +14,8 @@ wheels/
 .claude/*
 !.claude/skills/
 !.claude/skills/**
+!.claude/agents/
+!.claude/agents/**
 !.claude/settings.json
 
 agent_memory/
