@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -44,9 +43,11 @@ from zcu_tools.program.v2 import (
     SweepCfg,
 )
 from zcu_tools.utils.datasaver import (
-    load_labber_data,
-    safe_labber_filepath,
-    save_labber_data,
+    DatasetRole,
+    LabberMetadata,
+    LabberPayload,
+    load_grouped_labber_data,
+    save_grouped_labber_data,
 )
 
 from .jpa_optimizer import JPAOptimizer
@@ -78,6 +79,248 @@ class JPAOptCfg(ProgramV2Cfg, ExpCfgModel):
     # default from ExpCfgModel — intentional Pydantic pattern (type: ignore[override]).
     dev: Mapping[str, DeviceInfo] = Field(...)  # type: ignore[override]
     sweep: JPAOptSweepCfg
+
+
+JPA_AUTO_FLUX_ROLE = "jpa_flux"
+JPA_AUTO_FREQ_ROLE = "jpa_freq"
+JPA_AUTO_POWER_ROLE = "jpa_power"
+JPA_AUTO_PHASE_ROLE = "jpa_phase"
+JPA_AUTO_SNR_ROLE = "snr"
+JPA_AUTO_GROUPED_ROLES = (
+    JPA_AUTO_FLUX_ROLE,
+    JPA_AUTO_FREQ_ROLE,
+    JPA_AUTO_POWER_ROLE,
+    JPA_AUTO_PHASE_ROLE,
+    JPA_AUTO_SNR_ROLE,
+)
+
+
+def jpa_auto_result_to_grouped_payloads(
+    result: JPAOptimizeResult,
+) -> dict[str, LabberPayload]:
+    params = np.asarray(result.params, dtype=np.float64)
+    phases = np.asarray(result.phases)
+    signals = np.asarray(result.signals, dtype=np.float64)
+    _validate_jpa_auto_arrays(params, phases, signals)
+
+    axes = _iteration_axis(params.shape[0])
+    return {
+        JPA_AUTO_FLUX_ROLE: LabberPayload(
+            ("JPA Flux", "A", params[:, 0]),
+            axes=axes,
+        ),
+        JPA_AUTO_FREQ_ROLE: LabberPayload(
+            ("JPA Frequency", "Hz", params[:, 1] * 1e6),
+            axes=axes,
+        ),
+        JPA_AUTO_POWER_ROLE: LabberPayload(
+            ("JPA Power", "dBm", params[:, 2]),
+            axes=axes,
+        ),
+        JPA_AUTO_PHASE_ROLE: LabberPayload(
+            ("JPA Phase", "index", phases.astype(np.int64)),
+            axes=axes,
+        ),
+        JPA_AUTO_SNR_ROLE: LabberPayload(
+            ("SNR", "a.u.", signals),
+            axes=axes,
+        ),
+    }
+
+
+def save_jpa_auto_grouped_result(
+    filepath: str,
+    result: JPAOptimizeResult,
+    *,
+    comment: str = "",
+    tag: str = "jpa/auto_optimize",
+) -> str:
+    return save_grouped_labber_data(
+        filepath,
+        jpa_auto_result_to_grouped_payloads(result),
+        metadata=LabberMetadata(comment=comment, tags=tag),
+    )
+
+
+def load_jpa_auto_grouped_result(filepath: str) -> JPAOptimizeResult:
+    grouped = load_grouped_labber_data(filepath, required_roles=JPA_AUTO_GROUPED_ROLES)
+    payloads = {
+        str(role): grouped.roles[DatasetRole(role)] for role in JPA_AUTO_GROUPED_ROLES
+    }
+    iterations = _require_shared_iteration_axes(payloads)
+    num_points = len(iterations)
+
+    flux = _require_1d_real_role(
+        payloads[JPA_AUTO_FLUX_ROLE],
+        JPA_AUTO_FLUX_ROLE,
+        "JPA Flux",
+        "A",
+        num_points,
+    )
+    freq_hz = _require_1d_real_role(
+        payloads[JPA_AUTO_FREQ_ROLE],
+        JPA_AUTO_FREQ_ROLE,
+        "JPA Frequency",
+        "Hz",
+        num_points,
+    )
+    power = _require_1d_real_role(
+        payloads[JPA_AUTO_POWER_ROLE],
+        JPA_AUTO_POWER_ROLE,
+        "JPA Power",
+        "dBm",
+        num_points,
+    )
+    phases = _require_1d_integer_role(
+        payloads[JPA_AUTO_PHASE_ROLE],
+        JPA_AUTO_PHASE_ROLE,
+        "JPA Phase",
+        "index",
+        num_points,
+    ).astype(np.int32)
+    snr = _require_1d_real_role(
+        payloads[JPA_AUTO_SNR_ROLE],
+        JPA_AUTO_SNR_ROLE,
+        "SNR",
+        "a.u.",
+        num_points,
+    )
+
+    params = np.column_stack([flux, freq_hz * 1e-6, power]).astype(np.float64)
+    signals = snr.astype(np.float64)
+    _validate_jpa_auto_arrays(params, phases, signals)
+
+    cfg_snapshot = None
+    comment = grouped.metadata.comment
+    if comment:
+        cfg, _, _ = parse_comment(comment)
+        if cfg is not None:
+            cfg_snapshot = JPAOptCfg.validate_or_warn(cfg, source=filepath)
+
+    return JPAOptimizeResult(
+        params=params,
+        phases=phases,
+        signals=signals,
+        cfg_snapshot=cfg_snapshot,
+    )
+
+
+def _iteration_axis(num_points: int) -> list[tuple[str, str, NDArray[np.int64]]]:
+    return [("Iteration", "a.u.", np.arange(num_points, dtype=np.int64))]
+
+
+def _validate_jpa_auto_arrays(
+    params: NDArray[np.float64],
+    phases: NDArray[Any],
+    signals: NDArray[np.float64],
+) -> None:
+    if params.ndim != 2 or params.shape[1] != 3:
+        raise ValueError(
+            f"JPA auto-optimize params must have shape (N, 3), got {params.shape}"
+        )
+    if phases.ndim != 1:
+        raise ValueError(
+            f"JPA auto-optimize phases must be 1-D, got shape {phases.shape}"
+        )
+    if signals.ndim != 1:
+        raise ValueError(
+            f"JPA auto-optimize signals must be 1-D, got shape {signals.shape}"
+        )
+    if phases.shape[0] != params.shape[0]:
+        raise ValueError(
+            "JPA auto-optimize phases length must match params rows "
+            f"(got phases={phases.shape}, params={params.shape})"
+        )
+    if signals.shape[0] != params.shape[0]:
+        raise ValueError(
+            "JPA auto-optimize signals length must match params rows "
+            f"(got signals={signals.shape}, params={params.shape})"
+        )
+
+
+def _require_shared_iteration_axes(
+    payloads: Mapping[str, LabberPayload],
+) -> NDArray[np.int64]:
+    reference: NDArray[np.int64] | None = None
+    for role, payload in payloads.items():
+        if len(payload.axes) != 1:
+            raise ValueError(
+                f"JPA auto-optimize {role!r} role must have exactly one axis"
+            )
+        axis = payload.axes[0]
+        if axis.name != "Iteration" or axis.unit != "a.u.":
+            raise ValueError(
+                f"JPA auto-optimize {role!r} axis must be 'Iteration' / 'a.u.', "
+                f"got {axis.name!r} / {axis.unit!r}"
+            )
+        values = np.asarray(axis.values, dtype=np.float64)
+        if values.ndim != 1:
+            raise ValueError(
+                f"JPA auto-optimize {role!r} Iteration axis must be 1-D, "
+                f"got shape {values.shape}"
+            )
+        rounded = np.round(values)
+        if not np.allclose(values, rounded):
+            raise ValueError("JPA auto-optimize Iteration axis must contain integers")
+        iterations = rounded.astype(np.int64)
+        if not np.array_equal(iterations, np.arange(len(iterations), dtype=np.int64)):
+            raise ValueError("JPA auto-optimize Iteration axis must equal arange(N)")
+        if reference is None:
+            reference = iterations
+        elif not np.array_equal(reference, iterations):
+            raise ValueError(
+                "JPA auto-optimize grouped roles disagree on Iteration axis"
+            )
+
+    if reference is None:
+        raise ValueError("JPA auto-optimize grouped result has no roles")
+    return reference
+
+
+def _require_1d_real_role(
+    payload: LabberPayload,
+    role: str,
+    expected_label: str,
+    expected_unit: str,
+    num_points: int,
+) -> NDArray[np.float64]:
+    if payload.data.name != expected_label or payload.data.unit != expected_unit:
+        raise ValueError(
+            f"JPA auto-optimize {role!r} z channel is "
+            f"{payload.data.name!r} [{payload.data.unit!r}], expected "
+            f"{expected_label!r} [{expected_unit!r}]"
+        )
+    values = np.asarray(payload.z)
+    if values.shape != (num_points,):
+        raise ValueError(
+            f"JPA auto-optimize {role!r} z shape {values.shape} != "
+            f"expected {(num_points,)}"
+        )
+    return _real_values(values, f"JPA auto-optimize {role!r}")
+
+
+def _require_1d_integer_role(
+    payload: LabberPayload,
+    role: str,
+    expected_label: str,
+    expected_unit: str,
+    num_points: int,
+) -> NDArray[np.int64]:
+    values = _require_1d_real_role(
+        payload, role, expected_label, expected_unit, num_points
+    )
+    rounded = np.round(values)
+    if not np.allclose(values, rounded):
+        raise ValueError(f"JPA auto-optimize {role!r} values must be integers")
+    return rounded.astype(np.int64)
+
+
+def _real_values(values: NDArray[Any], context: str) -> NDArray[np.float64]:
+    if np.iscomplexobj(values):
+        if np.any(np.imag(values) != 0.0):
+            raise ValueError(f"{context} must not contain imaginary values")
+        values = np.real(values)
+    return np.asarray(values, dtype=np.float64)
 
 
 class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
@@ -318,79 +561,13 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        params = result.params
-        phases = result.phases
-        signals = result.signals
-
-        _filepath = Path(filepath)
-
-        # inner axis (x), fastest-varying, shared by all three files
-        iteration_axis = ("Iteration", "a.u.", np.arange(params.shape[0]))
-
         cfg = result.cfg_snapshot
         if cfg is None:
             raise ValueError("cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
-        # params: 2-D, native z stored (Ny=3=Parameter Type, Nx=N=Iteration)
-        save_labber_data(
-            safe_labber_filepath(str(_filepath.with_name(_filepath.name + "_params"))),
-            z=("Parameters", "a.u.", params.T),
-            axes=[
-                iteration_axis,
-                ("Parameter Type", "a.u.", np.array([0, 1, 2])),
-            ],
-            comment=comment,
-            tags=tag + "/params",
-        )
-
-        # phases: 1-D
-        save_labber_data(
-            safe_labber_filepath(str(_filepath.with_name(_filepath.name + "_phases"))),
-            z=("Phase", "a.u.", phases),
-            axes=[iteration_axis],
-            comment=comment,
-            tags=tag + "/phases",
-        )
-
-        # signals: 1-D
-        save_labber_data(
-            safe_labber_filepath(str(_filepath.with_name(_filepath.name + "_signals"))),
-            z=("Signal", "a.u.", signals),
-            axes=[iteration_axis],
-            comment=comment,
-            tags=tag + "/signals",
-        )
+        save_jpa_auto_grouped_result(filepath, result, comment=comment, tag=tag)
 
     def load(self, filepath: str) -> JPAOptimizeResult:
-        _filepath = Path(filepath)
-
-        # Load params (native z = (3, N); .T -> (num_points, 3))
-        param_path = str(_filepath.with_name(_filepath.name + "_params"))
-        ld_p = load_labber_data(param_path)
-        comment = ld_p.comment
-        params = np.asarray(ld_p.z).T.astype(np.float64)
-        assert params.ndim == 2 and params.shape[1] == 3
-
-        # Load phases (1-D, no flip)
-        phase_path = str(_filepath.with_name(_filepath.name + "_phases"))
-        ld_ph = load_labber_data(phase_path)
-        phases = np.asarray(ld_ph.z).astype(np.int32)
-        assert phases.ndim == 1 and phases.shape[0] == params.shape[0]
-
-        # Load signals (1-D, no flip)
-        signal_path = str(_filepath.with_name(_filepath.name + "_signals"))
-        ld_s = load_labber_data(signal_path)
-        signals = np.asarray(ld_s.z).astype(np.float64)
-        assert signals.ndim == 1 and signals.shape[0] == params.shape[0]
-
-        cfg_snapshot = None
-        if comment is not None:
-            _cfg, _, _ = parse_comment(comment)
-            if _cfg is not None:
-                cfg_snapshot = JPAOptCfg.validate_or_warn(_cfg, source=param_path)
-        self.last_result = JPAOptimizeResult(
-            params=params, phases=phases, signals=signals, cfg_snapshot=cfg_snapshot
-        )
-
+        self.last_result = load_jpa_auto_grouped_result(filepath)
         return self.last_result

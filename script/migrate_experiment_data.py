@@ -33,7 +33,17 @@ from zcu_tools.experiment.v2.singleshot.t1.t1_with_tone_sweep import (
     T1WithToneSweepExp,
     T1WithToneSweepResult,
 )
+from zcu_tools.experiment.v2.jpa.jpa_auto_optimize import (
+    JPAOptimizeResult,
+    load_jpa_auto_grouped_result,
+    save_jpa_auto_grouped_result,
+)
 from zcu_tools.experiment.v2.twotone.ckp import CKP_Exp, CKP_Result
+from zcu_tools.experiment.v2.twotone.ro_optimize.auto_optimize import (
+    AutoOptResult,
+    load_auto_opt_grouped_result,
+    save_auto_opt_grouped_result,
+)
 from zcu_tools.experiment.v2.twotone.reset.bath.length import LengthExp, LengthResult
 from zcu_tools.experiment.v2.twotone.time_domain.cpmg import (
     CPMG_Result,
@@ -219,6 +229,16 @@ def _convert_ckp_sidecars(input_path: Path, output_path: Path) -> None:
         raise RuntimeError("CKP_Exp has no AXES_SPEC")
 
     _save_axes_spec_result_exact(output_path, axes_spec, result, comment=comment)
+
+
+def _convert_ro_auto_sidecars(input_path: Path, output_path: Path) -> None:
+    result, comment = _load_legacy_ro_auto_sidecars(input_path)
+    save_auto_opt_grouped_result(str(output_path), result, comment=comment)
+
+
+def _convert_jpa_auto_sidecars(input_path: Path, output_path: Path) -> None:
+    result, comment = _load_legacy_jpa_auto_sidecars(input_path)
+    save_jpa_auto_grouped_result(str(output_path), result, comment=comment)
 
 
 def _convert_ge_labber(input_path: Path, output_path: Path) -> None:
@@ -627,6 +647,14 @@ def _validate_ckp_output(path: str) -> CKP_Result:
     return CKP_Exp().load(path)
 
 
+def _validate_ro_auto_output(path: str) -> AutoOptResult:
+    return load_auto_opt_grouped_result(path)
+
+
+def _validate_jpa_auto_output(path: str) -> JPAOptimizeResult:
+    return load_jpa_auto_grouped_result(path)
+
+
 def _validate_t1_output(path: str) -> T1Result:
     return T1Exp().load(path)
 
@@ -677,6 +705,20 @@ def _validate_ckp_sidecar_input(input_path: Path) -> None:
             raise FileNotFoundError(
                 f"legacy CKP sidecar does not exist: {sidecar_path}"
             )
+
+
+def _validate_ro_auto_sidecar_input(input_path: Path) -> None:
+    _validate_sidecar_input(
+        _legacy_sidecar_paths_by_name(input_path, ("_params", "_signals")),
+        "legacy RO auto-optimize sidecar",
+    )
+
+
+def _validate_jpa_auto_sidecar_input(input_path: Path) -> None:
+    _validate_sidecar_input(
+        _legacy_sidecar_paths_by_name(input_path, ("_params", "_phases", "_signals")),
+        "legacy JPA auto-optimize sidecar",
+    )
 
 
 def _legacy_ckp_sidecar_paths(input_path: Path) -> tuple[Path, Path]:
@@ -769,6 +811,137 @@ def _load_legacy_ckp_sidecars(input_path: Path) -> tuple[CKP_Result, str]:
         ),
     )
     return result, ground.comment
+
+
+def _load_legacy_ro_auto_sidecars(input_path: Path) -> tuple[AutoOptResult, str]:
+    params_path, signals_path = _legacy_sidecar_paths_by_name(
+        input_path, ("_params", "_signals")
+    )
+    params_data = load_labber_data(str(params_path))
+    signals_data = load_labber_data(str(signals_path))
+    _require_same_comment_metadata(
+        params_data,
+        (signals_data,),
+        "legacy RO auto-optimize sidecars",
+    )
+
+    iterations, params = _legacy_auto_params(
+        params_data,
+        params_path,
+        context="legacy RO auto-optimize params sidecar",
+    )
+    signals = _legacy_auto_1d_real_z(
+        signals_data,
+        signals_path,
+        iterations,
+        expected_label="Signal",
+        expected_unit="a.u.",
+        context="legacy RO auto-optimize signals sidecar",
+    )
+    return AutoOptResult(params=params, signals=signals), params_data.comment
+
+
+def _load_legacy_jpa_auto_sidecars(input_path: Path) -> tuple[JPAOptimizeResult, str]:
+    params_path, phases_path, signals_path = _legacy_sidecar_paths_by_name(
+        input_path, ("_params", "_phases", "_signals")
+    )
+    params_data = load_labber_data(str(params_path))
+    phases_data = load_labber_data(str(phases_path))
+    signals_data = load_labber_data(str(signals_path))
+    _require_same_comment_metadata(
+        params_data,
+        (phases_data, signals_data),
+        "legacy JPA auto-optimize sidecars",
+    )
+
+    iterations, params = _legacy_auto_params(
+        params_data,
+        params_path,
+        context="legacy JPA auto-optimize params sidecar",
+    )
+    phases_real = _legacy_auto_1d_real_z(
+        phases_data,
+        phases_path,
+        iterations,
+        expected_label="Phase",
+        expected_unit="a.u.",
+        context="legacy JPA auto-optimize phases sidecar",
+    )
+    phases = _require_integer_like_values(
+        phases_real,
+        "legacy JPA auto-optimize phase",
+        phases_path,
+    ).astype(np.int32)
+    signals = _legacy_auto_1d_real_z(
+        signals_data,
+        signals_path,
+        iterations,
+        expected_label="Signal",
+        expected_unit="a.u.",
+        context="legacy JPA auto-optimize signals sidecar",
+    )
+    return (
+        JPAOptimizeResult(params=params, phases=phases, signals=signals),
+        params_data.comment,
+    )
+
+
+def _legacy_auto_params(
+    data: LabberData,
+    path: Path,
+    *,
+    context: str,
+) -> tuple[NDArray[np.int64], NDArray[np.float64]]:
+    iteration_values, parameter_type_values = _legacy_axes(
+        data,
+        path,
+        expected=(("Iteration", "a.u."), ("Parameter Type", "a.u.")),
+    )
+    iterations = _require_iteration_axis_values(iteration_values, path, context)
+    _require_axis_values(
+        "parameter type",
+        parameter_type_values,
+        np.array([0.0, 1.0, 2.0], dtype=np.float64),
+        path=path,
+    )
+    z = _legacy_real_z(
+        data,
+        path,
+        expected_label="Parameters",
+        expected_unit="a.u.",
+        expected_shape=(3, len(iterations)),
+    )
+    return iterations, z.T.astype(np.float64)
+
+
+def _legacy_auto_1d_real_z(
+    data: LabberData,
+    path: Path,
+    iterations: NDArray[np.int64],
+    *,
+    expected_label: str,
+    expected_unit: str,
+    context: str,
+) -> NDArray[np.float64]:
+    (iteration_values,) = _legacy_axes(
+        data,
+        path,
+        expected=(("Iteration", "a.u."),),
+    )
+    candidate_iterations = _require_iteration_axis_values(
+        iteration_values,
+        path,
+        context,
+    )
+    if not np.array_equal(candidate_iterations, iterations):
+        raise ValueError(f"{context} disagrees on Iteration axis values")
+    return _legacy_real_z(
+        data,
+        path,
+        expected_label=expected_label,
+        expected_unit=expected_unit,
+        expected_shape=(len(iterations),),
+    )
 
 
 def _load_legacy_t1_sidecars(
@@ -1025,6 +1198,32 @@ def _require_population_axis(values: NDArray[np.float64], path: Path) -> None:
     )
 
 
+def _require_iteration_axis_values(
+    values: NDArray[np.float64],
+    path: Path,
+    context: str,
+) -> NDArray[np.int64]:
+    rounded = _require_integer_like_values(values, f"{context} Iteration axis", path)
+    expected = np.arange(len(rounded), dtype=np.int64)
+    if not np.array_equal(rounded, expected):
+        raise ValueError(
+            f"{context} Iteration axis values {rounded.tolist()} != "
+            f"expected {expected.tolist()}"
+        )
+    return rounded
+
+
+def _require_integer_like_values(
+    values: NDArray[np.float64],
+    label: str,
+    path: Path,
+) -> NDArray[np.int64]:
+    rounded = np.round(values)
+    if not np.allclose(values, rounded):
+        raise ValueError(f"legacy file {path} {label} values must be integers")
+    return rounded.astype(np.int64)
+
+
 def _require_axis_values(
     axis_name: str,
     values: NDArray[np.float64],
@@ -1070,6 +1269,14 @@ def _require_same_metadata(
             raise ValueError(f"{context} disagree on comment metadata")
         if reference.tags != other.tags:
             raise ValueError(f"{context} disagree on tags")
+
+
+def _require_same_comment_metadata(
+    reference: LabberData, others: Sequence[LabberData], context: str
+) -> None:
+    for other in others:
+        if reference.comment != other.comment:
+            raise ValueError(f"{context} disagree on comment metadata")
 
 
 def _require_same_ckp_metadata(ground: LabberData, excited: LabberData) -> None:
@@ -1146,6 +1353,16 @@ CONVERTERS: dict[str, ConverterSpec] = {
         convert=_convert_ckp_sidecars,
         validate=_validate_ckp_output,
         validate_input=_validate_ckp_sidecar_input,
+    ),
+    "twotone/ro_optimize/auto_optimize": ConverterSpec(
+        convert=_convert_ro_auto_sidecars,
+        validate=_validate_ro_auto_output,
+        validate_input=_validate_ro_auto_sidecar_input,
+    ),
+    "jpa/jpa_auto_optimize": ConverterSpec(
+        convert=_convert_jpa_auto_sidecars,
+        validate=_validate_jpa_auto_output,
+        validate_input=_validate_jpa_auto_sidecar_input,
     ),
 }
 
