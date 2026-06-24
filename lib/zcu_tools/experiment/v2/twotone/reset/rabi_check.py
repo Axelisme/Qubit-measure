@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -10,9 +10,18 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import (
+    IDENTITY,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    config,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -29,11 +38,6 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import (
-    load_labber_data,
-    safe_labber_filepath,
-    save_labber_data,
-)
 from zcu_tools.utils.process import rotate2real
 
 
@@ -41,6 +45,9 @@ from zcu_tools.utils.process import rotate2real
 class RabiCheckResult:
     gains: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    reset_states: NDArray[np.int64] = field(
+        default_factory=lambda: np.array([0, 1, 2], dtype=np.int64)
+    )
     cfg_snapshot: RabiCheckCfg | None = None
 
 
@@ -65,7 +72,19 @@ class RabiCheckCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: RabiCheckSweepCfg
 
 
-class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
+class RabiCheckExp(PersistableExperiment[RabiCheckResult, RabiCheckCfg]):
+    AXES_SPEC = AxesSpec(
+        axes=(
+            Axis("gains", "Amplitude", "a.u.", scale=IDENTITY, dtype=np.float64),
+            Axis("reset_states", "Reset", "None", scale=IDENTITY, dtype=np.int64),
+        ),
+        z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),
+        result_type=RabiCheckResult,
+        cfg_type=RabiCheckCfg,
+        tag="twotone/reset/rabi_check",
+    )
+
+    @record_result
     def run(
         self,
         soc,
@@ -138,15 +157,11 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
                 ),
             )
 
-        # Cache results
-        self.last_result = RabiCheckResult(gains, signals, cfg_snapshot=cfg)
+        return RabiCheckResult(gains, signals, cfg_snapshot=cfg)
 
-        return self.last_result
-
+    @retrieve_result
     def analyze(self, result: RabiCheckResult | None = None) -> Figure:
         """Analyze reset rabi check results. (No specific analysis implemented)"""
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         gains, signals = result.gains, result.signals
@@ -163,54 +178,3 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
         ax.grid(True)
 
         return fig
-
-    def save(
-        self,
-        filepath: str,
-        result: RabiCheckResult | None = None,
-        comment: str | None = None,
-        tag: str = "twotone/reset/rabi_check",
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        gains, signals = result.gains, result.signals
-
-        if result.cfg_snapshot is None:
-            raise ValueError("Cannot save result without configuration snapshot")
-        cfg = result.cfg_snapshot
-        comment = make_comment(cfg, comment)
-
-        save_labber_data(
-            safe_labber_filepath(filepath),
-            z=("Signal", "a.u.", signals),  # (Ny=3, Nx=gains) native (inner last)
-            axes=[
-                ("Amplitude", "a.u.", gains),  # inner axis (x)
-                ("Reset", "None", np.array([0, 1, 2])),  # outer axis (y), discrete
-            ],
-            comment=comment,
-            tags=tag,
-        )
-
-    def load(self, filepath: str) -> RabiCheckResult:
-        data = load_labber_data(filepath)
-        signals = np.asarray(data.z)  # native (Ny=3, Nx)
-        gains = np.asarray(data.axes[0].values)  # axes[0] = Amplitude
-        y_values = np.asarray(data.axes[1].values)  # axes[1] = Reset [0, 1, 2]
-        comment = data.comment
-
-        assert gains.ndim == 1 and y_values.ndim == 1
-        assert signals.shape == (len(y_values), len(gains))
-
-        gains = gains.astype(np.float64)
-        signals = signals.astype(np.complex128)
-
-        cfg_snapshot = None
-        if comment:
-            cfg, _, _ = parse_comment(comment)
-            if cfg is not None:
-                cfg_snapshot = RabiCheckCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = RabiCheckResult(gains, signals, cfg_snapshot=cfg_snapshot)
-
-        return self.last_result
