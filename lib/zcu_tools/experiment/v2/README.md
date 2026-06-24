@@ -1,6 +1,6 @@
 # QICK Note for `experiment/v2`
 
-**Last updated:** 2026-06-24（bath freq-gain 3D persistence；CPMG grouped persistence；PersistableExperiment + AxesSpec）
+**Last updated:** 2026-06-24（CKP 3D persistence；bath freq-gain 3D persistence；CPMG grouped persistence；PersistableExperiment + AxesSpec）
 
 這份筆記整理 `experiment/v2/` 的整體設計，說明 Experiment 層與 Task 層的分工、典型實驗的撰寫範本，以及各子模組的角色。`runner/` 的細節另見 `runner/README.md`。
 
@@ -71,7 +71,7 @@ class AbsExperiment(Generic[T_Result, T_Config]):
 - **inner-first 軸序慣例**：`axes` 以 inner-first 排列，`z.shape == tuple(len(ax) for ax in reversed(axes))`（inner 軸恆為 z 的最後一維）。**`load` 是 `save` 的恒等逆，兩邊都不做 caller-side transpose**。
 - **單位反轉與 cfg**：`save()` 對每個 axis 乘 `scale` 後寫盤；`load()` 除回 `scale` 並 cast 回 `dtype`，是 `save()` 的逐欄逆運算。cfg snapshot 透過 comment channel 走 `make_comment` / `parse_comment`（`load()` 以 `cfg_type.validate_or_warn` 還原），不佔 axes / z。`save()` 在 `cfg_snapshot` 為 `None` 時拋 `ValueError`。
 - **grouped experiment dataset**：單一 Experiment Result 若含多個 peer Dataset Role，仍只產生一個 grouped `.hdf5` Experiment Data File。`CPMG_Exp` 使用 roles `lengths` / `signals`，axes 為 inner-first 的 `Time Index`、`Number of Pi`，盤上 `lengths` 單位為 seconds，記憶體內仍回復為 us。legacy `.npz` 不由 runtime `load()` 讀取，需用 `script/migrate_experiment_data.py --experiment twotone/cpmg` 轉成 grouped HDF5。
-- **single-role 3D sweep**：bath reset freq-gain 把四點 pi/2 tomography phase 視為同一個 Result 的第三個 sweep axis，存成單一 3D `.hdf5`；phase 不是 Dataset Role，也不再拆成多個 sidecar artifact。
+- **single-role 3D sweep**：bath reset freq-gain 把四點 pi/2 tomography phase 視為同一個 Result 的第三個 sweep axis；`CKP_Exp` 把 ground/excited prepared state 視為 `initial_states` axis。這類 homogeneous Result 存成單一 3D `.hdf5`，離散狀態不是 Dataset Role，也不再拆成多個 sidecar artifact；legacy sidecar 只透過 `script/migrate_experiment_data.py` 轉換。
 
 詳見 [[0027]]。
 
@@ -244,6 +244,7 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):          # 主要 Cfg = program cfg + 
 
 | 日期 | Codebase commit | 說明 |
 |------|-----------------|------|
+| 2026-06-24 | — | `CKP_Exp` 持久化為 single-role 3D HDF5，`initial_states=[0, 1]` 是第三個 axis；runtime 不再寫/讀 `_ground` / `_excited` sidecar，legacy sidecar 透過 `script/migrate_experiment_data.py --experiment twotone/ckp` 轉換。 |
 | 2026-06-24 | — | bath reset `freq_gain` 持久化為 single-role 3D HDF5，phase 是同一 Result 的第三個 sweep axis；legacy phase sidecar artifact 不走 runtime save/load。 |
 | 2026-06-24 | — | ADR-0027 Phase 002：`CPMG_Exp.save/load` 改為單一 grouped `.hdf5`，roles 固定為 `lengths` / `signals`；legacy `.npz` 只透過 `script/migrate_experiment_data.py --experiment twotone/cpmg` 轉換。 |
 | 2026-06-24 | — | ADR-0027 持久化遷移：實驗資料改走 labber_io 原生 axes-list，刪除 datasaver dict 殼（`save_data` / `load_data`）；新增 `PersistableExperiment` opt-in 基底 + class-level `AXES_SPEC`（`AxesSpec` / `Axis` / `ZSpec`，inner-first、SI scale、load = save 恒等逆），實驗只留宣告式 spec 與 `record_result` / `retrieve_result` decorator，不再各自手寫 save/load；新增「持久化」一節並改寫合約／範本／Checklist。#10：`FluxDepExecutor` / `OvernightExecutor` 抽出共用基底 `MultiMeasurementExecutor`（版面 + `record_animation` FFMpeg facet + `_run_with_plotting`），兩者改用 `RetryBatchTask`，更新「Executor 模式」一節。 |
