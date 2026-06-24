@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from copy import deepcopy
-from dataclasses import dataclass
-from pathlib import Path
+from dataclasses import dataclass, field
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -12,9 +11,16 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment import (
+    IDENTITY,
+    MHZ_TO_HZ,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D, MultiLivePlot, make_plot_frame
@@ -30,9 +36,12 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import load_labber_data, save_labber_data
 
 from ..util import calc_populations, correct_populations
+
+
+def _default_population_states() -> NDArray[np.int64]:
+    return np.array([0, 1], dtype=np.int64)
 
 
 @dataclass(frozen=True)
@@ -40,6 +49,9 @@ class FreqPowerResult:
     gains: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.float64]
+    population_states: NDArray[np.int64] = field(
+        default_factory=_default_population_states
+    )
     cfg_snapshot: FreqPowerCfg | None = None
 
 
@@ -60,7 +72,25 @@ class FreqPowerCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: FreqPowerSweepCfg
 
 
-class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
+class FreqPowerExp(PersistableExperiment[FreqPowerResult, FreqPowerCfg]):
+    AXES_SPEC = AxesSpec(
+        axes=(
+            Axis(
+                "population_states",
+                "GE Population",
+                "None",
+                scale=IDENTITY,
+                dtype=np.int64,
+            ),
+            Axis("freqs", "Drive Freq", "Hz", scale=MHZ_TO_HZ, dtype=np.float64),
+            Axis("gains", "Drive gain", "a.u.", scale=IDENTITY, dtype=np.float64),
+        ),
+        z=ZSpec("signals", "Population", "a.u.", dtype=np.float64),
+        result_type=FreqPowerResult,
+        cfg_type=FreqPowerCfg,
+        tag="singleshot/mist/power_freq",
+    )
+
     def run(
         self,
         soc,
@@ -243,87 +273,3 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
         fig.tight_layout()
 
         return fig
-
-    def save(
-        self,
-        filepath: str,
-        result: FreqPowerResult | None = None,
-        comment: str | None = None,
-        tag: str = "singleshot/mist/gain_freq",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        _filepath = Path(filepath)
-
-        gains, freqs, populations = result.gains, result.freqs, result.signals
-
-        cfg = result.cfg_snapshot
-        if cfg is None:
-            raise ValueError("result.cfg_snapshot is None")
-        comment = make_comment(cfg, comment)
-
-        save_labber_data(
-            str(_filepath.with_name(_filepath.name + "_g_population")),
-            z=("Population", "a.u.", populations[..., 0].T),
-            axes=[
-                ("Drive gain", "a.u.", gains),
-                ("Drive freq", "Hz", 1e6 * freqs),
-            ],
-            comment=comment,
-            tags=tag,
-        )
-
-        save_labber_data(
-            str(_filepath.with_name(_filepath.name + "_e_population")),
-            z=("Population", "a.u.", populations[..., 1].T),
-            axes=[
-                ("Drive gain", "a.u.", gains),
-                ("Drive freq", "Hz", 1e6 * freqs),
-            ],
-            comment=comment,
-            tags=tag,
-        )
-
-    def load(self, filepath: list[str]) -> FreqPowerResult:
-        g_filepath, e_filepath = filepath
-
-        # Load ground populations
-        g_ld = load_labber_data(g_filepath)
-        g_pop = g_ld.z  # native (Ny, Nx) = (len(freqs), len(gains)), NOT flipped
-        gains = np.asarray(g_ld.axes[0].values)
-        freqs = np.asarray(g_ld.axes[1].values)
-        comment = g_ld.comment
-        assert len(gains.shape) == 1 and len(freqs.shape) == 1
-        assert g_pop.shape == (len(freqs), len(gains))
-
-        # Load excited populations
-        e_ld = load_labber_data(e_filepath)
-        e_pop = e_ld.z
-        gains_e = np.asarray(e_ld.axes[0].values)
-        freqs_e = np.asarray(e_ld.axes[1].values)
-        assert e_pop.shape == (len(freqs_e), len(gains_e))
-        assert np.array_equal(gains, gains_e) and np.array_equal(freqs, freqs_e)
-
-        freqs = freqs * 1e-6  # Hz to MHz
-
-        # Reconstruct signals shape: (gains, freqs, 2).
-        # native z is (freqs, gains); transpose each plane back to (gains, freqs).
-        populations = np.stack([g_pop.T, e_pop.T], axis=-1)
-
-        gains = gains.astype(np.float64)
-        freqs = freqs.astype(np.float64)
-        populations = np.real(populations).astype(np.float64)
-
-        cfg_snapshot = None
-        if comment is not None:
-            cfg, _, _ = parse_comment(comment)
-            if cfg is not None:
-                cfg_snapshot = FreqPowerCfg.validate_or_warn(cfg, source=g_filepath)
-        self.last_result = FreqPowerResult(
-            gains=gains, freqs=freqs, signals=populations, cfg_snapshot=cfg_snapshot
-        )
-
-        return self.last_result
