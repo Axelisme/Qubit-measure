@@ -61,6 +61,14 @@ def _fake_signals(n: int = 16) -> NDArray[np.complex128]:
     return np.zeros((2, n), dtype=np.complex128)
 
 
+def _fake_result(n: int = 16) -> GE_Result:
+    return GE_Result(
+        signals=_fake_signals(n),
+        shot_indices=np.arange(n, dtype=np.int64),
+        prepared_states=np.array([0, 1], dtype=np.int64),
+    )
+
+
 def _fake_fit_result(
     g_center: complex = -1.0 + 0j, e_center: complex = 1.0 + 0j
 ) -> dict[str, Any]:
@@ -205,7 +213,7 @@ def _patched_analyze(
 
 def test_ge_analyze_maps_fit_result(monkeypatch: pytest.MonkeyPatch) -> None:
     adapter = GEAdapter()
-    out = _patched_analyze(adapter, GE_Result(signals=_fake_signals()), monkeypatch)
+    out = _patched_analyze(adapter, _fake_result(), monkeypatch)
 
     assert out.fidelity == pytest.approx(0.95)
     assert out.theta == pytest.approx(0.2)
@@ -266,7 +274,7 @@ def _make_post_req(
     params: GEPostAnalyzeParams,
 ) -> PostAnalyzeRequest[Any, Any, GEPostAnalyzeParams]:
     return PostAnalyzeRequest(
-        run_result=GE_Result(signals=_fake_signals()),
+        run_result=_fake_result(),
         analyze_result=MagicMock(),
         post_analyze_params=params,
         md=MagicMock(),
@@ -332,7 +340,7 @@ def test_ge_writeback_proposes_fid_ge_s_centers_and_radius(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     adapter = GEAdapter()
-    result = GE_Result(signals=_fake_signals())
+    result = _fake_result()
     analyze_result = _patched_analyze(adapter, result, monkeypatch)
 
     items = adapter.get_writeback_items(

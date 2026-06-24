@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -11,9 +13,18 @@ from numpy.typing import NDArray
 from qick.asm_v2 import QickSweep1D
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment import (
+    IDENTITY,
+    US_TO_S,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -30,17 +41,17 @@ from zcu_tools.program.v2 import (
     SweepCfg,
 )
 from zcu_tools.program.v2.modules import BathResetCfg
-from zcu_tools.utils.datasaver import (
-    load_labber_data,
-    safe_labber_filepath,
-    save_labber_data,
-)
+
+
+def _default_phase_values() -> NDArray[np.float64]:
+    return np.array([0.0, 90.0, 180.0, 270.0], dtype=np.float64)
 
 
 @dataclass(frozen=True)
 class LengthResult:
     lengths: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    phases: NDArray[np.float64] = dataclass_field(default_factory=_default_phase_values)
     cfg_snapshot: LengthCfg | None = None
 
 
@@ -67,7 +78,19 @@ class LengthCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: LengthSweepCfg
 
 
-class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
+class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
+    AXES_SPEC = AxesSpec(
+        axes=(
+            Axis("phases", "Pi2 Phase", "deg", scale=IDENTITY, dtype=np.float64),
+            Axis("lengths", "Length", "s", scale=US_TO_S, dtype=np.float64),
+        ),
+        z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),
+        result_type=LengthResult,
+        cfg_type=LengthCfg,
+        tag="twotone/reset/bath/length",
+    )
+
+    @record_result
     def run(
         self,
         soc,
@@ -76,6 +99,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         *,
         acquire_kwargs: dict[str, Any] | None = None,
     ) -> LengthResult:
+        orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -160,14 +184,15 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
             )
             signals = average_signals(signals)
 
-        # Cache results
-        self.last_result = LengthResult(lengths, signals, cfg_snapshot=cfg)
+        return LengthResult(
+            lengths=lengths,
+            signals=signals,
+            phases=_default_phase_values(),
+            cfg_snapshot=orig_cfg,
+        )
 
-        return self.last_result
-
+    @retrieve_result
     def analyze(self, result: LengthResult | None = None) -> Figure:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         lens, signals = result.lengths, result.signals
@@ -183,52 +208,3 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         ax.grid(True)
 
         return fig
-
-    def save(
-        self,
-        filepath: str,
-        result: LengthResult | None = None,
-        comment: str | None = None,
-        tag: str = "twotone/reset/bath/length",
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        lens, signals = result.lengths, result.signals
-
-        if result.cfg_snapshot is None:
-            raise ValueError("Cannot save result without configuration snapshot")
-        cfg = result.cfg_snapshot
-        comment = make_comment(cfg, comment)
-
-        save_labber_data(
-            safe_labber_filepath(filepath),
-            z=("Signal", "a.u.", signals.T),  # (Ny=4, Nx=lengths) native (inner last)
-            axes=[
-                ("Length", "s", lens * 1e-6),  # inner axis (x), us -> s
-                ("Pi2 Phase", "deg", [0, 90, 180, 270]),  # outer axis (y), discrete
-            ],
-            comment=comment,
-            tags=tag,
-        )
-
-    def load(self, filepath: str) -> LengthResult:
-        data = load_labber_data(filepath)
-        signals = np.asarray(data.z).T  # native (Ny=4, Nx) -> (lengths, 4)
-        lens = np.asarray(data.axes[0].values) * 1e6  # axes[0] = Length, s -> us
-        comment = data.comment
-
-        assert lens.ndim == 1 and signals.shape == (len(lens), 4)
-
-        lens = lens.astype(np.float64)
-        signals = signals.astype(np.complex128)
-
-        cfg_snapshot = None
-        if comment:
-            cfg, _, _ = parse_comment(comment)
-            if cfg is not None:
-                cfg_snapshot = LengthCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = LengthResult(lens, signals, cfg_snapshot=cfg_snapshot)
-
-        return self.last_result

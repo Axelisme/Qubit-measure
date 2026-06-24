@@ -33,6 +33,7 @@ from zcu_tools.experiment.axes_spec import (
 )
 from zcu_tools.experiment.base import PersistableExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.utils.datasaver import LabberData, save_labber_data
 
 # --------------------------------------------------------------------------- #
 # Minimal cfg / Result / experiment fixtures matching the AxesSpec contract.
@@ -231,3 +232,77 @@ def test_save_fast_fails_without_cfg_snapshot(tmp_path: Any) -> None:
     exp = _Exp1D()
     with pytest.raises(ValueError):
         exp.save(os.path.join(str(tmp_path), "nocfg"), result)
+
+
+@pytest.mark.parametrize(
+    ("axes", "match"),
+    [
+        (
+            [
+                ("Wrong Frequency", "Hz", np.array([4000.0, 5000.0]) * MHZ_TO_HZ),
+                ("Pulse length", "s", np.array([1.0, 2.0]) * US_TO_S),
+            ],
+            "axis 0 label",
+        ),
+        (
+            [
+                ("Frequency", "wrong", np.array([4000.0, 5000.0]) * MHZ_TO_HZ),
+                ("Pulse length", "s", np.array([1.0, 2.0]) * US_TO_S),
+            ],
+            "axis 0 unit",
+        ),
+    ],
+)
+def test_load_rejects_wrong_axis_metadata(
+    tmp_path: Any, axes: list[tuple[str, str, np.ndarray]], match: str
+) -> None:
+    signals = np.ones((2, 2), dtype=np.complex128)
+    path = os.path.join(str(tmp_path), "wrong_axis.hdf5")
+    save_labber_data(path, z=("S21", "", signals), axes=axes)
+
+    with pytest.raises(ValueError, match=match):
+        _Exp2D().load(path)
+
+
+@pytest.mark.parametrize(
+    ("z", "match"),
+    [
+        (("Wrong S21", "", np.ones((2, 2), dtype=np.complex128)), "z channel label"),
+        (("S21", "wrong", np.ones((2, 2), dtype=np.complex128)), "z channel unit"),
+    ],
+)
+def test_load_rejects_wrong_z_channel_metadata(
+    tmp_path: Any, z: tuple[str, str, np.ndarray], match: str
+) -> None:
+    freqs = np.array([4000.0, 5000.0])
+    lengths = np.array([1.0, 2.0])
+    path = os.path.join(str(tmp_path), "wrong_z.hdf5")
+    save_labber_data(
+        path,
+        z=z,
+        axes=[
+            ("Frequency", "Hz", freqs * MHZ_TO_HZ),
+            ("Pulse length", "s", lengths * US_TO_S),
+        ],
+    )
+
+    with pytest.raises(ValueError, match=match):
+        _Exp2D().load(path)
+
+
+def test_load_rejects_wrong_z_shape(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = LabberData(
+        data=("S21", "", np.ones((2, 3), dtype=np.complex128)),
+        axes=[
+            ("Frequency", "Hz", np.array([4000.0, 5000.0]) * MHZ_TO_HZ),
+            ("Pulse length", "s", np.array([1.0, 2.0]) * US_TO_S),
+        ],
+    )
+
+    monkeypatch.setattr(
+        "zcu_tools.utils.datasaver.load_labber_data",
+        lambda _path: payload,
+    )
+
+    with pytest.raises(ValueError, match="z shape"):
+        _Exp2D().load("fake.hdf5")

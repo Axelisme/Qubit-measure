@@ -11,9 +11,17 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment import (
+    IDENTITY,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.utils.single_shot import GE_FitResult, singleshot_ge_analysis
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.program.v2 import (
@@ -25,11 +33,6 @@ from zcu_tools.program.v2 import (
     PulseReadoutCfg,
     Reset,
     ResetCfg,
-)
-from zcu_tools.utils.datasaver import (
-    load_labber_data,
-    safe_labber_filepath,
-    save_labber_data,
 )
 
 from .util import classify_result, plot_with_classified
@@ -165,9 +168,15 @@ def optimize_ge_radius(
 # ------------------------------------------------------------
 
 
+def _default_prepared_states() -> NDArray[np.int64]:
+    return np.array([0, 1], dtype=np.int64)
+
+
 @dataclass(frozen=True)
 class GE_Result:
     signals: NDArray[np.complex128]
+    shot_indices: NDArray[np.int64]
+    prepared_states: NDArray[np.int64]
     cfg_snapshot: GE_Cfg | None = None
 
 
@@ -183,7 +192,31 @@ class GE_Cfg(ProgramV2Cfg, ExpCfgModel):
     shots: int
 
 
-class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
+class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
+    AXES_SPEC = AxesSpec(
+        axes=(
+            Axis(
+                "shot_indices",
+                "Shot Index",
+                "None",
+                scale=IDENTITY,
+                dtype=np.int64,
+            ),
+            Axis(
+                "prepared_states",
+                "Prepared State",
+                "None",
+                scale=IDENTITY,
+                dtype=np.int64,
+            ),
+        ),
+        z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),
+        result_type=GE_Result,
+        cfg_type=GE_Cfg,
+        tag="singleshot/ge",
+    )
+
+    @record_result
     def run(self, soc, soccfg, cfg: GE_Cfg) -> GE_Result:
         cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
@@ -246,25 +279,27 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
         )
         signals = np.asarray(signals)
 
-        # Cache results
-        self.last_result = GE_Result(signals=signals, cfg_snapshot=cfg)
+        return GE_Result(
+            signals=signals,
+            shot_indices=np.arange(signals.shape[1], dtype=np.int64),
+            prepared_states=_default_prepared_states(),
+            cfg_snapshot=cfg,
+        )
 
-        return self.last_result
-
+    @retrieve_result
     def analyze(
         self,
         result: GE_Result | None = None,
         backend: Literal["center", "regression", "pca"] = "pca",
         **kwargs,
     ) -> tuple[float, NDArray[np.float64], GE_FitResult, Figure]:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         signals = result.signals
 
         return singleshot_ge_analysis(signals, backend=backend, **kwargs)
 
+    @retrieve_result
     def calc_confusion_matrix(
         self,
         init_pops: NDArray[np.float64],
@@ -274,8 +309,6 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
         result: GE_Result | None = None,
         consider_other: bool = True,
     ) -> tuple[NDArray[np.float64], float, Figure]:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         signals = result.signals
@@ -377,50 +410,3 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
         ax3.set_title(f"Confusion Matrix (cond: {cond_number:.1f})")
 
         return confusion_matrix, radius, fig
-
-    def save(
-        self,
-        filepath: str,
-        result: GE_Result | None = None,
-        comment: str | None = None,
-        tag: str = "singleshot/ge",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, (
-            "No measurement data available. Run experiment first."
-        )
-
-        signals = result.signals
-
-        cfg = result.cfg_snapshot
-        if cfg is None:
-            raise ValueError("result.cfg_snapshot is None")
-        comment = make_comment(cfg, comment)
-
-        # signals shape (Ny=2, Nx=shots): inner axis (shot) LAST -> native, no transpose
-        save_labber_data(
-            safe_labber_filepath(filepath),
-            z=("Signal", "a.u.", signals),
-            axes=[
-                ("shot", "point", np.arange(signals.shape[1])),  # inner axis first
-                ("ge", "", np.array([0, 1])),  # outer axis
-            ],
-            comment=comment,
-            tags=tag,
-        )
-
-    def load(self, filepath: str) -> GE_Result:
-        ld = load_labber_data(filepath)
-
-        # native z is (Ny=2, Nx=shots) = (ge, shot), already the in-memory shape
-        signals = np.asarray(ld.z).astype(np.complex128)
-
-        cfg_snapshot = None
-        if ld.comment:
-            cfg, _, _ = parse_comment(ld.comment)
-            if cfg is not None:
-                cfg_snapshot = GE_Cfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = GE_Result(signals=signals, cfg_snapshot=cfg_snapshot)
-        return self.last_result
