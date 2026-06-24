@@ -35,9 +35,6 @@ from zcu_tools.gui.session.events import (
 
 logger = logging.getLogger(__name__)
 
-# Gap (px) between the feedback widget and the MainWindow's right/bottom edges.
-_FEEDBACK_MARGIN = 12
-
 from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
 from qtpy.QtGui import (  # type: ignore[attr-defined]
     QCloseEvent,  # type: ignore[attr-defined]
@@ -370,8 +367,11 @@ class ExpTabWidget(QWidget):
 
         # ── Right pane: Plot ─────────────────────────────────────────────
         plot_panel = QWidget()
-        plot_layout = QVBoxLayout(plot_panel)
-        plot_layout.setContentsMargins(0, 0, 0, 0)
+        # Kept as an attribute so MainWindow can dock the feedback panel below
+        # the figure (mount_feedback_panel inserts it at index 1, directly under
+        # the plot stack).
+        self._plot_layout = QVBoxLayout(plot_panel)
+        self._plot_layout.setContentsMargins(0, 0, 0, 0)
 
         self._plot_stack = QStackedWidget()
 
@@ -382,12 +382,35 @@ class ExpTabWidget(QWidget):
             self._plot_stack, self._plot_placeholder
         )
 
-        plot_layout.addWidget(self._plot_stack, stretch=1)
+        self._plot_layout.addWidget(self._plot_stack, stretch=1)
         splitter.addWidget(plot_panel)
 
         splitter.setCollapsible(0, True)
         self._update_left_panel_controls()
         self._schedule_handle_layout()
+
+    # ------------------------------------------------------------------
+    # Docked feedback panel host (ADR-0025 C3)
+    # ------------------------------------------------------------------
+
+    def mount_feedback_panel(self, panel: QWidget) -> None:
+        """Dock the feedback panel directly below the figure (idempotent).
+
+        Inserts ``panel`` into the plot column at index 1 — right under the plot
+        stack (index 0). Re-mounting the same panel is a no-op; mounting a
+        different panel first unmounts the current one.
+        """
+        if self._plot_layout.indexOf(panel) != -1:
+            return
+        self._plot_layout.insertWidget(1, panel)
+        panel.show()
+
+    def unmount_feedback_panel(self, panel: QWidget) -> None:
+        """Remove the feedback panel from the plot column (idempotent)."""
+        if self._plot_layout.indexOf(panel) == -1:
+            return
+        self._plot_layout.removeWidget(panel)
+        panel.setParent(None)  # type: ignore[arg-type]
 
     def resizeEvent(self, a0) -> None:
         super().resizeEvent(a0)
@@ -969,11 +992,15 @@ class MainWindow(QMainWindow):
         # both starts and completions of connect/disconnect ops.
         bus.subscribe(DeviceChangedPayload, self._on_bus_device_changed)
 
-        # Floating feedback widget (built after bus wiring; initially hidden).
-        from .feedback_widget import FloatingFeedbackWidget
+        # Docked feedback panel (built after bus wiring; mounted under the
+        # target tab's figure only while the C3 gate holds — see
+        # refresh_feedback_widget).
+        from .feedback_widget import FeedbackPanel
 
-        self._feedback_widget = FloatingFeedbackWidget(self._ctrl, parent=self)
+        self._feedback_widget = FeedbackPanel(self._ctrl, parent=self)
         self._feedback_widget.hide()
+        # The tab the panel is currently docked under (None when unmounted).
+        self._feedback_host_tab: ExpTabWidget | None = None
 
         # Cleanup on destroy
         self.destroyed.connect(self._cleanup_bus_subscriptions)
@@ -1132,37 +1159,23 @@ class MainWindow(QMainWindow):
         self._refresh_feedback_widget()
 
     # ------------------------------------------------------------------
-    # Floating feedback widget (Stage 4a)
+    # Docked feedback panel (ADR-0025 C3)
     # ------------------------------------------------------------------
 
-    def resizeEvent(self, a0) -> None:  # type: ignore[override]
-        super().resizeEvent(a0)
-        # Re-position the feedback widget after window resize.
-        QTimer.singleShot(0, self._layout_feedback_widget)
+    def _feedback_target_tab(self) -> ExpTabWidget | None:
+        """The tab whose figure the feedback panel docks under.
 
-    def _layout_feedback_widget(self) -> None:
-        """Position the feedback widget in the bottom-left corner.
-
-        Bottom-left avoids overlapping the flux_dep interactive-analysis
-        "Finish/Done" button, which sits at the bottom of the 220px right-side
-        controls column.  The left panel's collapse/expand handle is vertically
-        centred, so it does not conflict with a bottom-left widget.
-
-        Uses the same QTimer.singleShot(0, ...) deferred layout technique as
-        _PanelEdgeHandle._schedule_handle_layout, ensuring the geometry is
-        read after the Qt layout pass has completed.
+        The running tab if one is running, else the active (focused) tab. When
+        neither exists (no tabs at all), returns None — the panel stays
+        unmounted (no figure to sit under).
         """
-        widget = self._feedback_widget
-        if not widget.isVisible():
-            return
-        widget.adjustSize()
-        h = widget.height()
-        x = _FEEDBACK_MARGIN
-        y = self.height() - h - _FEEDBACK_MARGIN
-        widget.move(max(0, x), max(0, y))
+        tab_id = self._ctrl.get_running_tab_id() or self._ctrl.get_active_tab_id()
+        if tab_id is None:
+            return None
+        return self._tab_widgets.get(tab_id)
 
     def _refresh_feedback_widget(self) -> None:
-        """Show/hide the floating feedback widget (internal bus-handler trampoline).
+        """Mount/unmount the feedback panel (internal bus-handler trampoline).
 
         Idempotent: all bus handlers that may change op-count or agent-presence
         call this; the decision is centralised in refresh_feedback_widget().
@@ -1170,27 +1183,41 @@ class MainWindow(QMainWindow):
         self.refresh_feedback_widget()
 
     def refresh_feedback_widget(self) -> None:
-        """Show/hide the floating feedback widget based on op count + agent presence.
+        """Mount/unmount the docked feedback panel on op count + agent presence.
 
-        ADR-0025 C3 gate: show only when at least one op is live AND at least
-        one MCP control client is connected. Either condition going false hides
-        the widget. Called by both bus handlers (op count change) and
+        ADR-0025 C3 gate: mount only when at least one op is live AND at least
+        one MCP control client is connected. Either condition going false
+        unmounts the panel and clears its input. The panel docks under the
+        target tab's figure (running tab if any, else the active tab); if the
+        target tab changes while mounted, the panel re-mounts under the new tab.
+        Called by both bus handlers (op count change) and
         RemoteControlAdapter._on_client_count_changed() (agent presence change).
         Both callers run on the Qt main thread — no thread guard needed.
         """
         count = self._ctrl.active_operation_count()
         agent = self._ctrl.has_agent_connected()
-        if count > 0 and agent:
-            self._feedback_widget.refresh_gating()
-            if not self._feedback_widget.isVisible():
-                self._feedback_widget.show()
-                self._feedback_widget.raise_()
-                QTimer.singleShot(0, self._layout_feedback_widget)
-            else:
-                QTimer.singleShot(0, self._layout_feedback_widget)
-        else:
-            self._feedback_widget.hide()
-            self._feedback_widget.clear_input()
+        target = self._feedback_target_tab() if (count > 0 and agent) else None
+
+        if target is None:
+            self._unmount_feedback_panel()
+            return
+
+        if self._feedback_host_tab is not target:
+            # Target tab changed (or first mount): move the panel under it.
+            if self._feedback_host_tab is not None:
+                self._feedback_host_tab.unmount_feedback_panel(self._feedback_widget)
+            target.mount_feedback_panel(self._feedback_widget)
+            self._feedback_host_tab = target
+
+        self._feedback_widget.refresh_gating()
+
+    def _unmount_feedback_panel(self) -> None:
+        """Detach the panel from its host tab and clear its input (idempotent)."""
+        if self._feedback_host_tab is not None:
+            self._feedback_host_tab.unmount_feedback_panel(self._feedback_widget)
+            self._feedback_host_tab = None
+        self._feedback_widget.hide()
+        self._feedback_widget.clear_input()
 
     # ------------------------------------------------------------------
     # ViewProtocol implementation
@@ -1553,6 +1580,9 @@ class MainWindow(QMainWindow):
         if not self._ctrl.has_tab(widget.tab_id):
             return
         self._ctrl.set_active_tab(widget.tab_id)
+        # The active tab is the feedback panel's target when nothing is running;
+        # re-evaluate so a visible panel follows the user to the new tab.
+        self._refresh_feedback_widget()
 
     def _resolve_tab_widget(self, tab_id: str, action: str) -> ExpTabWidget | None:
         """Look up the widget; log + bail if tab_id is unknown to the controller."""
@@ -1829,9 +1859,9 @@ class MainWindow(QMainWindow):
         """Grab the WHOLE main window (client area + child widgets) as PNG bytes.
 
         ``self.grab()`` renders this QMainWindow and its child widgets, so it
-        captures the non-dialog floating widgets (FloatingFeedbackWidget, the
-        left-edge handle) that ride on the client area and are invisible to the
-        per-dialog grab. Same main-thread Qt path as take_dialog_screenshot.
+        captures the docked feedback panel and the left-edge handle that ride on
+        the client area and are invisible to the per-dialog grab. Same
+        main-thread Qt path as take_dialog_screenshot.
         """
         from qtpy.QtCore import QBuffer, QIODevice  # type: ignore[attr-defined]
 

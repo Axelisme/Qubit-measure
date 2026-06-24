@@ -154,11 +154,11 @@ class RenderView(Protocol):
         ...
 
     def refresh_feedback_widget(self) -> None:
-        """Re-evaluate and show/hide the floating feedback widget.
+        """Re-evaluate and mount/unmount the docked feedback panel.
 
         Called by RemoteControlAdapter._on_client_count_changed() on the Qt
         main thread when a control client connects or disconnects, so the
-        widget tracks both op-count changes and agent-presence changes.
+        panel tracks both op-count changes and agent-presence changes.
         """
         ...
 
@@ -499,6 +499,9 @@ class Controller(SessionControllerMixin):
     def set_active_tab(self, tab_id: str) -> None:
         self._workspace_svc.set_active_tab(tab_id)
 
+    def get_active_tab_id(self) -> str | None:
+        return self._state.active_tab_id
+
     # ------------------------------------------------------------------
     # Run flow (RunService & ContextService)
     # ------------------------------------------------------------------
@@ -617,7 +620,7 @@ class Controller(SessionControllerMixin):
         return None, None
 
     def cancel_active_operation(self) -> str | None:
-        """Cancel the single in-flight operation the floating feedback widget
+        """Cancel the single in-flight operation the docked feedback panel
         represents; returns a short tag of what was cancelled (or None for a
         no-op). The ONLY place that maps "the active op" to the right cancel —
         op-taxonomy lives here, not in the View. Priority run > interactive
@@ -640,7 +643,7 @@ class Controller(SessionControllerMixin):
     def can_cancel_active_operation(self) -> bool:
         """True when the active foreground operation has a cancel hook.
 
-        Used by FloatingFeedbackWidget to gate the 'Send & Stop' button: ops
+        Used by FeedbackPanel to gate the 'Send & Stop' button: ops
         without a cancel hook (connect / FIT-analyze / device connect-
         disconnect) should not show Stop (ADR-0025 §Stop-gating, ADR-0019).
         Returns False when no operation is active.

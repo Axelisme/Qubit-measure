@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -23,7 +24,7 @@ def _apply_window_defaults(ctrl: MagicMock) -> MagicMock:
     """Set the minimal return values required by MainWindow.__init__ on a mock ctrl.
 
     MainWindow calls active_operation_count() and has_agent_connected() during
-    bus-event handlers (FloatingFeedbackWidget visibility, ADR-0025 C3); tests
+    bus-event handlers (FeedbackPanel docking, ADR-0025 C3); tests
     that emit bus events must stub both to deterministic values.
     """
     ctrl.active_operation_count.return_value = 0
@@ -888,125 +889,165 @@ def test_show_analysis_figure_keeps_two_figures_coexisting(qapp):
 
 
 # ---------------------------------------------------------------------------
-# FloatingFeedbackWidget gate (ADR-0025 C3): op-count AND agent-connected
+# FeedbackPanel docking gate (ADR-0025 C3): op-count AND agent-connected
 # ---------------------------------------------------------------------------
 
 
-def _window_for_gate_tests(
+def _gate_window(
     qapp,
     *,
     op_count: int,
     agent_connected: bool,
-) -> MainWindow:  # type: ignore[name-defined]  # noqa: F821
-    """Build a MainWindow with ctrl stubs for the C3 gate tests."""
-    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+    running_tab_id: str | None = None,
+    active_tab_id: str | None = None,
+):
+    """Build a MainWindow + register a real ExpTabWidget per provided tab id.
+
+    Returns (window, {tab_id: ExpTabWidget}). The C3 gate inputs and the
+    running/active-tab resolution are stubbed on the mock controller; the tab
+    widgets are real so mount_feedback_panel docks into a live plot_layout.
+    """
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget, MainWindow
 
     del qapp
     ctrl = MagicMock()
     ctrl.get_bus.return_value = EventBus()
+    ctrl.get_persisted_startup.return_value = PersistedStartup(left_panel_width=500)
     ctrl.active_operation_count.return_value = op_count
     ctrl.has_agent_connected.return_value = agent_connected
     ctrl.can_cancel_active_operation.return_value = False
+    ctrl.get_running_tab_id.return_value = running_tab_id
+    ctrl.get_active_tab_id.return_value = active_tab_id
+    ctrl.has_tab.side_effect = lambda tid: tid in tabs
+
     window = MainWindow(ctrl)
-    return window
+
+    tabs: dict[str, ExpTabWidget] = {}
+    for tid in {t for t in (running_tab_id, active_tab_id) if t is not None}:
+        tab_w = ExpTabWidget(tid, ctrl)
+        tabs[tid] = tab_w
+        window._tab_widgets[tid] = tab_w
+    return window, tabs
 
 
-def test_feedback_widget_hidden_when_op_active_but_no_agent(qapp):
+def _panel_docked_below_stack(window, tab_w) -> bool:
+    """True iff the window's feedback panel sits at plot_layout index 1, i.e.
+    directly below the plot stack (index 0)."""
+    layout = tab_w._plot_layout
+    panel = window._feedback_widget
+    return layout.indexOf(panel) == 1 and layout.indexOf(tab_w._plot_stack) == 0
+
+
+def test_feedback_panel_unmounted_when_op_active_but_no_agent(qapp):
     """C3 gate: active op alone is not enough — agent must also be connected."""
-    window = _window_for_gate_tests(qapp, op_count=1, agent_connected=False)
-    window.refresh_feedback_widget()
-    assert not window._feedback_widget.isVisible()
-
-
-def test_feedback_widget_hidden_when_agent_connected_but_no_op(qapp):
-    """C3 gate: agent connected alone is not enough — op must also be live."""
-    window = _window_for_gate_tests(qapp, op_count=0, agent_connected=True)
-    window.refresh_feedback_widget()
-    assert not window._feedback_widget.isVisible()
-
-
-def test_feedback_widget_hidden_when_no_op_and_no_agent(qapp):
-    """Both conditions false: widget stays hidden."""
-    window = _window_for_gate_tests(qapp, op_count=0, agent_connected=False)
-    window.refresh_feedback_widget()
-    assert not window._feedback_widget.isVisible()
-
-
-def test_feedback_widget_show_called_when_op_active_and_agent_connected(qapp):
-    """C3 gate satisfied: widget.show() is called when op live AND agent
-    connected. isVisible() is not reliable for a non-shown parent in tests."""
-    from unittest.mock import patch
-
-    window = _window_for_gate_tests(qapp, op_count=1, agent_connected=True)
-    # Patch the widget's show/hide so we can assert calls without needing
-    # the parent window to be visible (Qt hides children of hidden parents).
-    with (
-        patch.object(window._feedback_widget, "show") as mock_show,
-        patch.object(window._feedback_widget, "hide") as mock_hide,
-    ):
-        window.refresh_feedback_widget()
-    mock_show.assert_called_once()
-    mock_hide.assert_not_called()
-
-
-def test_feedback_widget_hide_called_when_last_client_disconnects(qapp):
-    """Client disconnect (agent_connected flips False) triggers hide() even
-    while an op is still live (refresh_feedback_widget is idempotent)."""
-    from unittest.mock import patch
-
-    ctrl = MagicMock()
-    ctrl.get_bus.return_value = EventBus()
-    ctrl.active_operation_count.return_value = 1
-    ctrl.has_agent_connected.return_value = True
-    ctrl.can_cancel_active_operation.return_value = False
-    from zcu_tools.gui.app.main.ui.main_window import MainWindow
-
-    window = MainWindow(ctrl)
-
-    # First call with agent connected: show() fires.
-    with patch.object(window._feedback_widget, "show") as mock_show:
-        window.refresh_feedback_widget()
-    mock_show.assert_called_once()
-
-    # Simulate client disconnect: agent_connected becomes False → hide() fires.
-    ctrl.has_agent_connected.return_value = False
-    with patch.object(window._feedback_widget, "hide") as mock_hide:
-        window.refresh_feedback_widget()
-    mock_hide.assert_called_once()
-
-
-# ---------------------------------------------------------------------------
-# FloatingFeedbackWidget layout: bottom-left anchor
-# ---------------------------------------------------------------------------
-
-
-def test_feedback_widget_positioned_at_bottom_left(qapp):
-    """_layout_feedback_widget places the widget at x=_FEEDBACK_MARGIN (left),
-    not at x=width-w-margin (right), so it does not overlap the flux_dep
-    Done button in the right-side controls column."""
-    from qtpy.QtCore import QCoreApplication
-    from qtpy.QtWidgets import QApplication
-    from zcu_tools.gui.app.main.ui.main_window import _FEEDBACK_MARGIN, MainWindow
-
-    ctrl = MagicMock()
-    ctrl.get_bus.return_value = EventBus()
-    # Both C3 conditions true so the widget is shown and laid out.
-    ctrl.active_operation_count.return_value = 1
-    ctrl.has_agent_connected.return_value = True
-    ctrl.can_cancel_active_operation.return_value = False
-
-    window = MainWindow(ctrl)
-    window.resize(900, 600)
-    window.show()
-    QApplication.processEvents()
-
-    # Trigger show() + deferred layout via refresh_feedback_widget.
-    window.refresh_feedback_widget()
-    # Drain the QTimer.singleShot(0) that _layout_feedback_widget is queued on.
-    QCoreApplication.processEvents()
-
-    x = window._feedback_widget.x()
-    # x must equal _FEEDBACK_MARGIN (left anchor), NOT near the right edge.
-    assert x == _FEEDBACK_MARGIN, (
-        f"Expected feedback widget at x={_FEEDBACK_MARGIN} (left), got x={x}"
+    window, tabs = _gate_window(
+        qapp, op_count=1, agent_connected=False, active_tab_id="tab-1"
     )
+    window.refresh_feedback_widget()
+    assert window._feedback_host_tab is None
+    assert tabs["tab-1"]._plot_layout.indexOf(window._feedback_widget) == -1
+
+
+def test_feedback_panel_unmounted_when_agent_connected_but_no_op(qapp):
+    """C3 gate: agent connected alone is not enough — op must also be live."""
+    window, tabs = _gate_window(
+        qapp, op_count=0, agent_connected=True, active_tab_id="tab-1"
+    )
+    window.refresh_feedback_widget()
+    assert window._feedback_host_tab is None
+    assert tabs["tab-1"]._plot_layout.indexOf(window._feedback_widget) == -1
+
+
+def test_feedback_panel_unmounted_when_no_op_and_no_agent(qapp):
+    """Both conditions false: panel stays unmounted."""
+    window, tabs = _gate_window(
+        qapp, op_count=0, agent_connected=False, active_tab_id="tab-1"
+    )
+    window.refresh_feedback_widget()
+    assert window._feedback_host_tab is None
+
+
+def test_feedback_panel_unmounted_when_no_tabs(qapp):
+    """Edge case: gate true but no target tab → panel stays unmounted."""
+    window, _ = _gate_window(qapp, op_count=1, agent_connected=True)
+    window.refresh_feedback_widget()
+    assert window._feedback_host_tab is None
+
+
+def test_feedback_panel_mounted_below_figure_when_gate_true(qapp):
+    """C3 gate satisfied: panel docks into the active tab's plot_layout at
+    index 1 (directly below the plot stack), visible and expanded."""
+    window, tabs = _gate_window(
+        qapp, op_count=1, agent_connected=True, active_tab_id="tab-1"
+    )
+    window.refresh_feedback_widget()
+
+    tab_w = tabs["tab-1"]
+    assert window._feedback_host_tab is tab_w
+    assert _panel_docked_below_stack(window, tab_w)
+    # Default EXPANDED: the collapsible body is not collapsed (toggle checked,
+    # body visible relative to the panel — the window itself is not shown in the
+    # test, so absolute isVisible() would be False).
+    assert window._feedback_widget._toggle_btn is not None
+    assert window._feedback_widget._toggle_btn.isChecked()
+    assert window._feedback_widget._body.isVisibleTo(window._feedback_widget)
+
+
+def test_feedback_panel_targets_running_tab_over_active(qapp):
+    """Target tab = running tab if one is running, else active tab."""
+    window, tabs = _gate_window(
+        qapp,
+        op_count=1,
+        agent_connected=True,
+        running_tab_id="run-tab",
+        active_tab_id="act-tab",
+    )
+    window.refresh_feedback_widget()
+    assert window._feedback_host_tab is tabs["run-tab"]
+    assert tabs["act-tab"]._plot_layout.indexOf(window._feedback_widget) == -1
+
+
+def test_feedback_panel_unmounts_and_clears_input_when_gate_drops(qapp):
+    """Gate flips false (agent disconnects): panel unmounts and input clears."""
+    window, tabs = _gate_window(
+        qapp, op_count=1, agent_connected=True, active_tab_id="tab-1"
+    )
+    window.refresh_feedback_widget()
+    window._feedback_widget._input.setText("pending message")
+    assert window._feedback_host_tab is tabs["tab-1"]
+
+    cast(MagicMock, window._ctrl).has_agent_connected.return_value = False
+    window.refresh_feedback_widget()
+
+    assert window._feedback_host_tab is None
+    assert tabs["tab-1"]._plot_layout.indexOf(window._feedback_widget) == -1
+    assert window._feedback_widget._input.text() == ""
+
+
+def test_feedback_panel_remounts_on_target_tab_change(qapp):
+    """If the target tab changes while visible, the panel re-mounts under the
+    new tab (and is removed from the old one)."""
+    window, tabs = _gate_window(
+        qapp,
+        op_count=1,
+        agent_connected=True,
+        running_tab_id="tab-a",
+        active_tab_id="tab-b",
+    )
+    # Add tab-b as a real tab too (active fallback target after run finishes).
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
+
+    window.refresh_feedback_widget()
+    assert window._feedback_host_tab is tabs["tab-a"]
+
+    # Run finishes: no running tab now, active tab becomes the target.
+    cast(MagicMock, window._ctrl).get_running_tab_id.return_value = None
+    if "tab-b" not in tabs:
+        tab_b = ExpTabWidget("tab-b", window._ctrl)
+        tabs["tab-b"] = tab_b
+        window._tab_widgets["tab-b"] = tab_b
+    window.refresh_feedback_widget()
+
+    assert window._feedback_host_tab is tabs["tab-b"]
+    assert tabs["tab-a"]._plot_layout.indexOf(window._feedback_widget) == -1
+    assert _panel_docked_below_stack(window, tabs["tab-b"])
