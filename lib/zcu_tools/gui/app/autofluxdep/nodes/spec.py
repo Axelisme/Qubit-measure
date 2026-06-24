@@ -4,7 +4,7 @@ This is the *declaration vocabulary* shared by every provider (a measurement
 ``Builder`` or a ``Service`` — see ``nodes/builder.py``). It replaces the
 runner-based ``autofluxdep`` module's ``cfg_maker`` lambda + ``ctx.env["info"]``
 walrus chains with an explicit, declarative dependency model. See
-``task_plans/tool_gui/autofluxdep_gui_assessment.md`` §3 for the analysis.
+``.agent_state/plans/tool_gui/autofluxdep_gui_assessment.md`` §3 for the analysis.
 
 A provider declares:
 

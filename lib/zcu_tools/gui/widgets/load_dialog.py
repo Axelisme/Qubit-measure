@@ -39,7 +39,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.utils.labber_io import load_labber_data
+from zcu_tools.utils.datasaver import load_labber_data
 
 logger = logging.getLogger(__name__)
 

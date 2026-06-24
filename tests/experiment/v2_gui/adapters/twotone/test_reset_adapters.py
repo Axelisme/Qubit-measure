@@ -8,6 +8,9 @@ from zcu_tools.experiment.v2.twotone.reset.bath.freq import (
     FreqGainCfg as BathFreqGainCfg,
 )
 from zcu_tools.experiment.v2.twotone.reset.bath.freq import (
+    FreqGainExp as BathFreqGainExp,
+)
+from zcu_tools.experiment.v2.twotone.reset.bath.freq import (
     FreqGainResult as BathFreqGainResult,
 )
 from zcu_tools.experiment.v2.twotone.reset.bath.length import (
@@ -966,15 +969,27 @@ def test_bath_per_experiment_each_step_emits_reset_bath_pair() -> None:
     _assert_reset_bath_pair(phase_items)
 
 
-def test_bath_freq_gain_save_not_supported() -> None:
+def test_bath_freq_gain_save_delegates_to_domain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from zcu_tools.gui.app.main.adapter import SaveDataRequest
 
-    # D3: the 2D bath freq-gain experiment writes four phase-resolved files, which
-    # the single-path GUI save pipeline cannot represent — save must fast-fail
-    # rather than report a path that never exists.
+    calls: list[tuple[str, BathFreqGainResult | None]] = []
+
+    def fake_save(
+        self: BathFreqGainExp,
+        filepath: str,
+        result: BathFreqGainResult | None = None,
+        **kwargs: Any,
+    ) -> None:
+        del self, kwargs
+        calls.append((filepath, result))
+
+    monkeypatch.setattr(BathFreqGainExp, "save", fake_save)
+    run_result = cast(BathFreqGainResult, MagicMock(spec=BathFreqGainResult))
     req = SaveDataRequest(
-        run_result=cast(BathFreqGainResult, MagicMock(spec=BathFreqGainResult)),
-        data_path="/tmp/whatever.hdf5",
+        run_result=run_result,
+        data_path="/tmp/whatever_1.hdf5",
         md=MagicMock(),
         ml=MagicMock(),
         chip_name="C",
@@ -983,8 +998,9 @@ def test_bath_freq_gain_save_not_supported() -> None:
         active_label="flux0",
         comment="",
     )
-    with pytest.raises(NotImplementedError, match="not supported"):
-        BathFreqGainAdapter().save(req)
+    BathFreqGainAdapter().save(req)
+
+    assert calls == [("/tmp/whatever_1.hdf5", run_result)]
 
 
 def test_bath_length_holds_cavity_md_link_and_no_writeback() -> None:

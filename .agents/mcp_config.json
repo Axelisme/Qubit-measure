@@ -65,19 +65,6 @@
       ],
       "enabled": true,
       "environment": {}
-    },
-    "taskboard": {
-      "type": "local",
-      "command": [
-        "uv",
-        "run",
-        "--extra",
-        "client",
-        "python",
-        "lib/zcu_tools/mcp/taskboard/server.py"
-      ],
-      "enabled": true,
-      "environment": {}
     }
   }
 }

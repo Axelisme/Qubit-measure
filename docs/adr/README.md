@@ -40,7 +40,7 @@
 ## VI. 持久化
 
 - [0015 — PersistenceCaretaker（Memento + Caretaker）](0015-persistence-caretaker-memento-single-file.md)：單檔 app-state、關閉才寫。
-- [0027 — 實驗資料持久化：labber_io 原生 axes-list + per-experiment axes-spec](0027-experiment-data-persistence-native-labber-axes-list.md)：**（accepted/已落地）** 刪 datasaver dict 殼（含洩漏軸序的 load-flip）、caller 直接講 labber_io 原生 inner-first axes-list（N 維、load 為 save 恒等逆、零 transpose）；每實驗一份 typed axes-spec 驅動共用 save/load helper（合併 save/load 樣板）；N 維折疊與 caller 遷移為增量 phase。與 [[0015]] 劃清（app-state vs 實驗資料）。
+- [0027 — 實驗資料持久化：labber_io 原生 axes-list + per-experiment axes-spec + grouped experiment dataset](0027-experiment-data-persistence-native-labber-axes-list.md)：**（accepted/部分已落地）** 刪 datasaver dict 殼（含洩漏軸序的 load-flip）；public API 收斂到 `zcu_tools.utils.datasaver` package facade，caller 透過 re-exported `save_labber_data` / `load_labber_data` 使用 inner-first axes-list（N 維、load 為 save 恒等逆、零 transpose）；每實驗一份 typed axes-spec 驅動共用 save/load helper。Grouped Experiment Dataset 延伸採單一 Experiment Data File + 多 Labber log group 表達多個 Dataset Role；legacy artifact 只透過 migration script 轉換，不保留 runtime compatibility path。與 [[0015]] 劃清（app-state vs 實驗資料）。
 
 ## VII. 繪圖
 
@@ -54,6 +54,6 @@
 
 ## IX. 多 agent 協作
 
-- [0022 — taskboard 為主協調層、worktree 為輔](0022-agent-coordination-taskboard.md)：多 agent 共享 checkout 的協調＝stdio MCP taskboard（file-backed JSON+flock、path 衝突偵測、read/write 鎖、資源 token、pending/wait、TTL 自動回收、md 視圖）；worktree 解不了 singleton 資源爭用故僅為輔。
+- [0022 — orchestrator-owned worktree protocol](0022-agent-coordination-worktree.md)：多 agent / 長線 orchestration 使用 `.agent_state/` 下的一 task 一 worktree、state.json、reports 與 plans；orchestrator 建立/指派/驗證/合併，taskboard MCP 不再使用。
 - [0023 — Cooperative interrupt：feedback 喚醒 pending wait](0023-cooperative-interrupt-feedback-wakeup.md)：**（已被 [[0025]] 取代）** 原設計給單一共用 await 加 thread-safe feedback inbox 作第二喚醒源；其「多 channel + 時序敏感 combine」形狀會生 race，由 [[0025]] 的單一有序 channel 取代。
 - [0024 — 外部終端 agent launch 架構](0024-embedded-agent-session-architecture.md)：measure-gui「Agent」按鈕 spawn 系統終端跑真互動式 claude，經 loopback mcp.json 操作 GUI；GUI 狀態烤進 `--append-system-prompt`；`--resume` 持久（last session id 存 cache 檔）；跨平台終端 spawn + `ZCU_AGENT_CMD`；lazy auto-connect 靠既有 mcp server；Ctrl-C 原生中斷。取代原內嵌 stream-json 設計。

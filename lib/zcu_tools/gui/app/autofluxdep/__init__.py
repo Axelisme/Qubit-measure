@@ -15,6 +15,6 @@ sweeps flux × the user-ordered providers, replacing the old ``cfg_maker`` lambd
 - ``orchestrator``     — runner-free flux × provider sweep + requirement resolution
 - ``state`` / ``event_bus`` / ``controller`` / ``app`` — composition root + façade
 
-See ``task_plans/tool_gui/autofluxdep_gui_assessment.md`` for the full plan and
+See ``.agent_state/plans/tool_gui/autofluxdep_gui_assessment.md`` for the full plan and
 ``CONTEXT.md`` for the Builder/Node/Service/Result/Plotter glossary.
 """

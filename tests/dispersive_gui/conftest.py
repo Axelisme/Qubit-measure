@@ -6,7 +6,7 @@ import json
 
 import numpy as np
 import pytest
-from zcu_tools.utils.labber_io import save_labber_data
+from zcu_tools.utils.datasaver import save_labber_data
 
 
 @pytest.fixture

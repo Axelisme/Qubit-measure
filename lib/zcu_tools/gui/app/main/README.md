@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-24（feedback overlay → docked collapsible FeedbackPanel 在 figure 下方）
+**Last updated:** 2026-06-24（agent state plan path）
 
 # `zcu_tools/gui/app/main/` — measure-gui Framework AI Note
 
@@ -6,7 +6,7 @@
 
 > **位置**：此套件 2026-06-04 從 `zcu_tools/gui/` 純搬遷到 `zcu_tools/gui/app/main/`（Phase 133 步驟 A，只搬不抽共用層）。import 一律 `zcu_tools.gui.app.main.X`；同子目錄內走相對 import、跨子目錄走絕對。`zcu_tools.gui` 父套件只是 namespace（不 re-export、import-clean）。本筆記與 ADR/memory 中殘留的 `zcu_tools.gui.X` 舊路徑請按此對映理解。
 
-> **session 共用層（2026-06-09, 3b89bacf, S1）**：量測 session-core 值型別 + 事件 + async-operation handle 已提到 app-agnostic 共用層 `zcu_tools/gui/session/`（供 measure + 開發中 autofluxdep 複用，計劃見 `task_plans/gui/session_core_extraction.md`）：`session/types.py`（`ExpContext`/`ContextReadiness`/`SocHandle`/`SocCfgHandle`/`SocProtocol`/`SocCfgProtocol`——adapter 從此 re-export，因為是 `ExpAdapterProtocol` 契約詞彙）、`session/events.py`（session 事件：`SessionEvent` enum + `SessionPayload` base + md/ml/context/soc/predictor/device payloads）、`session/operation_handles.py`（`OperationHandles`）。三模組 import-clean（登記於 `tests/gui/test_shared_layer.py`）。S2–S5（抽 session services/SessionState/dialog、重塑 autofluxdep）待做。
+> **session 共用層（2026-06-09, 3b89bacf, S1）**：量測 session-core 值型別 + 事件 + async-operation handle 已提到 app-agnostic 共用層 `zcu_tools/gui/session/`（供 measure + 開發中 autofluxdep 複用，計劃見 `.agent_state/plans/gui/session_core_extraction.md`）：`session/types.py`（`ExpContext`/`ContextReadiness`/`SocHandle`/`SocCfgHandle`/`SocProtocol`/`SocCfgProtocol`——adapter 從此 re-export，因為是 `ExpAdapterProtocol` 契約詞彙）、`session/events.py`（session 事件：`SessionEvent` enum + `SessionPayload` base + md/ml/context/soc/predictor/device payloads）、`session/operation_handles.py`（`OperationHandles`）。三模組 import-clean（登記於 `tests/gui/test_shared_layer.py`）。S2–S5（抽 session services/SessionState/dialog、重塑 autofluxdep）待做。
 
 ## Module Purpose
 
@@ -450,8 +450,8 @@ readout / reset 等多形狀 role 另有形狀明確 factory（`make_pulse_reado
 
 ## References
 
-- 設計契約：`task_plans/gui/architecture.md`
-- Phase 70 / 71 實作細節：`task_plans/gui/refractor_plan.md`
-- 階段記錄：`task_plans/gui/task_plan.md`
-- Phase 61 findings：`task_plans/gui/findings.md`
-- Phase 69 findings：`task_plans/gui/review_gui.md`
+- 設計契約：`.agent_state/plans/gui/architecture.md`
+- Phase 70 / 71 實作細節：`.agent_state/plans/gui/refractor_plan.md`
+- 階段記錄：`.agent_state/plans/gui/task_plan.md`
+- Phase 61 findings：`.agent_state/plans/gui/findings.md`
+- Phase 69 findings：`.agent_state/plans/gui/review_gui.md`

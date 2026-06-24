@@ -1,17 +1,14 @@
-"""Path / transport helpers for experiment data files.
+"""Path helpers for experiment data files.
 
 The dict-based ``save_data`` / ``load_data`` / ``save_local_data`` /
-``load_local_data`` layer is gone (ADR-0027): persistence is now native
-``labber_io`` via ``PersistableExperiment``. This module retains the
-filesystem-path helpers (datafolder layout, extension normalization, unique
-filenames), the remote upload/download transport, and ``load_comment`` (a thin
-read over ``labber_io``).
+``load_local_data`` layer is gone (ADR-0027). This module retains the
+filesystem-path helpers: datafolder layout, extension normalization, and unique
+filenames.
 """
 
 from __future__ import annotations
 
 import os
-import warnings
 from datetime import datetime
 
 
@@ -98,67 +95,3 @@ def safe_labber_filepath(filepath: str) -> str:
         filepath = filename + f"_{count}" + ext
 
     return filepath
-
-
-def load_comment(filepath: str) -> str | None:
-    """Return the file's comment string, or None if it cannot be read.
-
-    Backed by ``labber_io.load_labber_data`` (the comment is also available as
-    the ``.comment`` attribute of a loaded ``LabberData``).
-    """
-    from .labber_io import load_labber_data
-
-    try:
-        return load_labber_data(format_ext(filepath)).comment
-    except Exception as e:
-        warnings.warn(f"Failed to load comment from {filepath}: {e}")
-        return None
-
-
-def upload_to_server(filepath: str, server_ip: str, port: int) -> bool:
-    """
-    Upload a file to a remote server.
-
-    Args:
-        filepath (str): The path to the file to upload.
-        server_ip (str): The IP address of the server.
-        port (int): The port number of the server.
-
-    Returns:
-        bool: True if upload succeeded, False otherwise.
-    """
-    import requests
-
-    filepath = os.path.abspath(filepath)
-    url = f"http://{server_ip}:{port}/upload"
-    try:
-        with open(filepath, "rb") as file:
-            files = {"file": (filepath, file)}
-            response = requests.post(url, files=files)
-        print(response.text)
-        return response.status_code == 200
-    except Exception as e:
-        print(f"Upload failed: {e}")
-        return False
-
-
-def download_from_server(filepath: str, server_ip: str, port: int) -> None:
-    """
-    Download a file from a remote server.
-
-    Args:
-        filepath (str): The path where the downloaded file will be saved.
-        server_ip (str): The IP address of the server.
-        port (int): The port number of the server.
-    """
-    import requests
-
-    url = f"http://{server_ip}:{port}/download"
-    response = requests.post(url, json={"path": filepath})
-    assert response.status_code == 200, f"Fail to download file: {response.text}"
-
-    os.makedirs(os.path.dirname(filepath), exist_ok=True)
-    with open(filepath, "wb") as file:
-        file.write(response.content)
-
-    print(f"Download file to {filepath}")

@@ -33,7 +33,6 @@ from zcu_tools.gui.app.main.adapter import (
     ExpContext,
     MetaDictWriteback,
     ParamMeta,
-    SaveDataRequest,
     SweepSpec,
     SweepValue,
     WritebackItem,
@@ -107,9 +106,8 @@ class BathFreqGainAdapter(
             recommended=(
                 "Analysis denoises the 2D map before picking the peak; wavelet "
                 "smoothing is the default and Gaussian remains available for "
-                "comparison. Saving is not offered: the experiment writes four "
-                "phase-resolved files internally, which does not fit the single-file "
-                "save path — read the optimum off the Analyze tab and write it back."
+                "comparison. Save writes one 3D HDF5 file with the tomography phase "
+                "stored as an internal sweep axis."
             ),
         )
 
@@ -183,23 +181,6 @@ class BathFreqGainAdapter(
         ]
         items.extend(bath_reset_writeback_items(req.ctx, req.run_result.cfg_snapshot))
         return items
-
-    def save(self, req: SaveDataRequest[BathFreqGainRunResult]) -> None:
-        # D3: the domain FreqGainExp.save writes four phase-resolved HDF5 files
-        # (``<stem>_0deg`` .. ``<stem>_270deg``) and its load() takes a 4-path
-        # list. The GUI save pipeline resolves a single ``.hdf5`` path up front
-        # and reports it as written, so routing the multi-file save through it
-        # would report a path that never exists (the display-vs-reality lie the
-        # save layer guards against). Multi-file save is not in the framework's
-        # contract, so this adapter does not support save — surface that plainly
-        # rather than fake a single-file write or silently drop the data.
-        del req
-        raise NotImplementedError(
-            "Bath freq–gain save is not supported in the GUI: the experiment "
-            "writes four phase-resolved files, which the single-path save "
-            "pipeline cannot represent. Read the optimum off the Analyze tab "
-            "and write it back instead."
-        )
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.qub_name}_bathreset_freqgain_{time.strftime('%m%d')}"

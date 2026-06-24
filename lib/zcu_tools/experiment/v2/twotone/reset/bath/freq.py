@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
-from pathlib import Path
+from copy import deepcopy
+from dataclasses import dataclass, field
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -12,9 +12,18 @@ from numpy.typing import NDArray
 from qick.asm_v2 import QickSweep1D
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment import (
+    IDENTITY,
+    MHZ_TO_HZ,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    ZSpec,
+    record_result,
+    retrieve_result,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
@@ -32,9 +41,11 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import safe_labber_filepath
-from zcu_tools.utils.labber_io import load_labber_data, save_labber_data
 from zcu_tools.utils.process import SmoothMethod, smooth_signal_nd
+
+
+def _default_phase_values() -> NDArray[np.float64]:
+    return np.array([0.0, 90.0, 180.0, 270.0], dtype=np.float64)
 
 
 @dataclass(frozen=True)
@@ -42,6 +53,7 @@ class FreqGainResult:
     gains: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    phases: NDArray[np.float64] = field(default_factory=_default_phase_values)
     cfg_snapshot: FreqGainCfg | None = None
 
 
@@ -68,7 +80,22 @@ def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
     )  # (gain, freq)
 
 
-class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
+class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
+    AXES_SPEC = AxesSpec(
+        axes=(
+            Axis("freqs", "Cavity Frequency", "Hz", scale=MHZ_TO_HZ, dtype=np.float64),
+            Axis(
+                "gains", "Cavity drive Gain", "a.u.", scale=IDENTITY, dtype=np.float64
+            ),
+            Axis("phases", "Pi2 Phase", "deg", scale=IDENTITY, dtype=np.float64),
+        ),
+        z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),
+        result_type=FreqGainResult,
+        cfg_type=FreqGainCfg,
+        tag="twotone/reset/bath/freq_gain",
+    )
+
+    @record_result
     def run(
         self,
         soc,
@@ -77,10 +104,12 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
         *,
         acquire_kwargs: dict[str, Any] | None = None,
     ) -> FreqGainResult:
+        orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
         reset_cfg = modules.tested_reset
+        phases = _default_phase_values()
         gains = sweep2array(
             cfg.sweep.gain,
             "gain",
@@ -146,11 +175,15 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
                 ),
             )
 
-        # Cache results
-        self.last_result = FreqGainResult(gains, freqs, signals, cfg_snapshot=cfg)
+        return FreqGainResult(
+            gains=gains,
+            freqs=freqs,
+            phases=phases,
+            signals=signals,
+            cfg_snapshot=orig_cfg,
+        )
 
-        return self.last_result
-
+    @retrieve_result
     def analyze(
         self,
         result: FreqGainResult | None = None,
@@ -160,8 +193,6 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
         wavelet: str = "sym4",
         wavelet_level: int = 0,
     ) -> tuple[float, float, Figure]:
-        if result is None:
-            result = self.last_result
         assert result is not None, "no result found"
 
         gains, freqs, signals = result.gains, result.freqs, result.signals
@@ -200,80 +231,3 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
         fig.tight_layout()
 
         return gain_opt, freq_opt, fig
-
-    def save(
-        self,
-        filepath: str,
-        result: FreqGainResult | None = None,
-        comment: str | None = None,
-        tag: str = "twotone/reset/bath/freq_gain",
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        gains, freqs, signals = result.gains, result.freqs, result.signals
-
-        _filepath = Path(filepath)
-
-        if result.cfg_snapshot is None:
-            raise ValueError("Cannot save result without configuration snapshot")
-        cfg = result.cfg_snapshot
-        comment = make_comment(cfg, comment)
-
-        # one Labber file per interference phase (0/90/180/270 deg); each stores
-        # z as native (Ny=freqs, Nx=gains) so the on-disk axis identity is
-        # x=gain (inner) / y=freq (outer)
-        for k, suffix in enumerate(("_0deg", "_90deg", "_180deg", "_270deg")):
-            path = safe_labber_filepath(
-                str(_filepath.with_name(_filepath.name + suffix))
-            )
-            save_labber_data(
-                path,
-                z=("Signal", "a.u.", signals[k].T),
-                axes=[
-                    ("Cavity drive Gain", "a.u.", gains),
-                    ("Cavity Frequency", "Hz", freqs * 1e6),
-                ],
-                comment=comment,
-                tags=tag,
-            )
-
-    def load(self, filepath: list[str]) -> FreqGainResult:
-        deg0_filepath, deg90_filepath, deg180_filepath, deg270_filepath = filepath
-
-        ld0 = load_labber_data(deg0_filepath)
-        gains = np.asarray(ld0.axes[0].values, dtype=np.float64)
-        freqs = np.asarray(ld0.axes[1].values, dtype=np.float64)
-        assert len(gains.shape) == 1 and len(freqs.shape) == 1
-        assert ld0.z.shape == (len(freqs), len(gains))
-        comment = ld0.comment
-
-        freqs = freqs * 1e-6  # Hz -> MHz
-        deg0_signals = ld0.z.T  # (freqs, gains) -> (gains, freqs)
-
-        def _load_phase(path: str) -> NDArray[np.complex128]:
-            ld = load_labber_data(path)
-            assert ld.z.shape == (len(freqs), len(gains))
-            return ld.z.T  # (freqs, gains) -> (gains, freqs)
-
-        deg90_signals = _load_phase(deg90_filepath)
-        deg180_signals = _load_phase(deg180_filepath)
-        deg270_signals = _load_phase(deg270_filepath)
-
-        signals = np.stack(
-            [deg0_signals, deg90_signals, deg180_signals, deg270_signals], axis=0
-        ).astype(np.complex128)
-
-        cfg_snapshot = None
-        if comment is not None:
-            cfg, _, _ = parse_comment(comment)
-            if cfg is not None:
-                cfg_snapshot = FreqGainCfg.validate_or_warn(
-                    cfg, source=str(deg0_filepath)
-                )
-        self.last_result = FreqGainResult(
-            gains, freqs, signals, cfg_snapshot=cfg_snapshot
-        )
-
-        return self.last_result

@@ -19,6 +19,7 @@ Database/
 result/
 logs/
 scratch/
+.agent_state/
 task_plans/
 test.py
 test.ipynb

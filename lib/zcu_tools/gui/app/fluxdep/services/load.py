@@ -30,7 +30,7 @@ from zcu_tools.notebook.persistance import (
     load_spectrums,
 )
 from zcu_tools.simulate import value2flux
-from zcu_tools.utils.labber_io import load_labber_data
+from zcu_tools.utils.datasaver import load_labber_data
 
 logger = logging.getLogger(__name__)
 

@@ -420,8 +420,7 @@ class FakeFreqAdapter(
         # "data saved to <path>" report is truthful and the file exists.
         if not self._persist_data:
             return
-        from zcu_tools.utils.datasaver import safe_labber_filepath
-        from zcu_tools.utils.labber_io import save_labber_data
+        from zcu_tools.utils.datasaver import safe_labber_filepath, save_labber_data
 
         result = req.run_result
         save_labber_data(

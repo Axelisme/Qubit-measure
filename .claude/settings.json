@@ -4,8 +4,7 @@
       "mcp__measure-gui",
       "mcp__fluxdep-gui",
       "mcp__agent-memory",
-      "mcp__dispersive-gui",
-      "mcp__taskboard"
+      "mcp__dispersive-gui"
     ]
   },
   "enableAllProjectMcpServers": true,
@@ -13,7 +12,6 @@
     "measure-gui",
     "fluxdep-gui",
     "agent-memory",
-    "dispersive-gui",
-    "taskboard"
+    "dispersive-gui"
   ]
 }
