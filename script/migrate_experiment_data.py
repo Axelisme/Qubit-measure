@@ -11,7 +11,9 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.experiment import AxesSpec
+from zcu_tools.experiment.v2.singleshot.ge import GE_Exp, GE_Result
 from zcu_tools.experiment.v2.twotone.ckp import CKP_Exp, CKP_Result
+from zcu_tools.experiment.v2.twotone.reset.bath.length import LengthExp, LengthResult
 from zcu_tools.experiment.v2.twotone.time_domain.cpmg import (
     CPMG_Result,
     load_cpmg_grouped_result,
@@ -198,6 +200,76 @@ def _convert_ckp_sidecars(input_path: Path, output_path: Path) -> None:
     _save_axes_spec_result_exact(output_path, axes_spec, result, comment=comment)
 
 
+def _convert_ge_labber(input_path: Path, output_path: Path) -> None:
+    data = load_labber_data(str(input_path))
+    shot_values, prepared_values = _legacy_two_axes(
+        data,
+        input_path,
+        expected=(("shot", "point"), ("ge", "")),
+    )
+    _require_axis_values(
+        "prepared state",
+        prepared_values,
+        np.array([0, 1], dtype=np.int64),
+        path=input_path,
+    )
+    signals = _legacy_z(
+        data,
+        input_path,
+        expected_shape=(len(prepared_values), len(shot_values)),
+    )
+
+    result = GE_Result(
+        signals=signals,
+        shot_indices=shot_values.astype(np.int64),
+        prepared_states=prepared_values.astype(np.int64),
+    )
+    axes_spec = GE_Exp.AXES_SPEC
+    if axes_spec is None:
+        raise RuntimeError("GE_Exp has no AXES_SPEC")
+
+    _save_axes_spec_result_exact(output_path, axes_spec, result, comment=data.comment)
+
+
+def _convert_bath_length_labber(input_path: Path, output_path: Path) -> None:
+    data = load_labber_data(str(input_path))
+    length_seconds, phases = _legacy_two_axes(
+        data,
+        input_path,
+        expected=(("Length", "s"), ("Pi2 Phase", "deg")),
+    )
+    _require_axis_values(
+        "phase",
+        phases,
+        np.array([0.0, 90.0, 180.0, 270.0], dtype=np.float64),
+        path=input_path,
+    )
+    legacy_signals = _legacy_z(
+        data,
+        input_path,
+        expected_shape=(len(phases), len(length_seconds)),
+    )
+
+    result = LengthResult(
+        lengths=(length_seconds * 1e6).astype(np.float64),
+        phases=phases.astype(np.float64),
+        signals=legacy_signals.T.astype(np.complex128),
+    )
+    axes_spec = LengthExp.AXES_SPEC
+    if axes_spec is None:
+        raise RuntimeError("LengthExp has no AXES_SPEC")
+
+    _save_axes_spec_result_exact(output_path, axes_spec, result, comment=data.comment)
+
+
+def _validate_ge_output(path: str) -> GE_Result:
+    return GE_Exp().load(path)
+
+
+def _validate_bath_length_output(path: str) -> LengthResult:
+    return LengthExp().load(path)
+
+
 def _validate_ckp_output(path: str) -> CKP_Result:
     return CKP_Exp().load(path)
 
@@ -296,6 +368,73 @@ def _legacy_ckp_z(
     return signals
 
 
+def _legacy_two_axes(
+    data: LabberData,
+    path: Path,
+    *,
+    expected: tuple[tuple[str, str], tuple[str, str]],
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    if len(data.axes) != len(expected):
+        raise ValueError(
+            f"legacy file {path} has {len(data.axes)} axes; expected {len(expected)}"
+        )
+
+    values: list[NDArray[np.float64]] = []
+    for index, (axis, (expected_name, expected_unit)) in enumerate(
+        zip(data.axes, expected, strict=True)
+    ):
+        if axis.name != expected_name or axis.unit != expected_unit:
+            raise ValueError(
+                f"legacy file {path} axis {index} is "
+                f"{axis.name!r} [{axis.unit!r}], expected "
+                f"{expected_name!r} [{expected_unit!r}]"
+            )
+        axis_values = np.asarray(axis.values, dtype=np.float64)
+        if axis_values.ndim != 1:
+            raise ValueError(
+                f"legacy file {path} axis {expected_name!r} is "
+                f"{axis_values.ndim}D; expected 1D"
+            )
+        values.append(axis_values)
+
+    return values[0], values[1]
+
+
+def _legacy_z(
+    data: LabberData,
+    path: Path,
+    *,
+    expected_shape: tuple[int, ...],
+) -> NDArray[np.complex128]:
+    if data.data.name != "Signal" or data.data.unit != "a.u.":
+        raise ValueError(
+            f"legacy file {path} z channel is "
+            f"{data.data.name!r} [{data.data.unit!r}], expected 'Signal' ['a.u.']"
+        )
+
+    signals = np.asarray(data.z, dtype=np.complex128)
+    if signals.shape != expected_shape:
+        raise ValueError(
+            f"legacy file {path} z shape {signals.shape} != "
+            f"expected legacy shape {expected_shape}"
+        )
+    return signals
+
+
+def _require_axis_values(
+    axis_name: str,
+    values: NDArray[np.float64],
+    expected: NDArray[Any],
+    *,
+    path: Path,
+) -> None:
+    if values.shape != expected.shape or not np.array_equal(values, expected):
+        raise ValueError(
+            f"legacy file {path} {axis_name} values {values.tolist()} != "
+            f"expected {expected.tolist()}"
+        )
+
+
 def _require_same_axis_values(
     axis_name: str,
     ground_values: NDArray[np.float64],
@@ -324,6 +463,14 @@ def _npz_comment(data: np.lib.npyio.NpzFile) -> str:
 
 
 CONVERTERS: dict[str, ConverterSpec] = {
+    "singleshot/ge": ConverterSpec(
+        convert=_convert_ge_labber,
+        validate=_validate_ge_output,
+    ),
+    "twotone/reset/bath/length": ConverterSpec(
+        convert=_convert_bath_length_labber,
+        validate=_validate_bath_length_output,
+    ),
     "twotone/cpmg": ConverterSpec(
         convert=_convert_cpmg_npz,
         validate=load_cpmg_grouped_result,

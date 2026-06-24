@@ -154,6 +154,56 @@ class PersistableExperiment(AbsExperiment[T_Result, T_Config]):
             )
         return spec
 
+    def _validate_canonical_labber_data(
+        self, data: Any, spec: AxesSpec[T_Result, T_Config]
+    ) -> None:
+        if len(data.axes) != len(spec.axes):
+            raise ValueError(
+                f"{type(self).__name__} canonical data has {len(data.axes)} axes; "
+                f"expected {len(spec.axes)}"
+            )
+
+        axis_lengths: list[int] = []
+        for index, (loaded_axis, expected_axis) in enumerate(
+            zip(data.axes, spec.axes, strict=True)
+        ):
+            if loaded_axis.name != expected_axis.label:
+                raise ValueError(
+                    f"{type(self).__name__} canonical axis {index} label is "
+                    f"{loaded_axis.name!r}; expected {expected_axis.label!r}"
+                )
+            if loaded_axis.unit != expected_axis.unit:
+                raise ValueError(
+                    f"{type(self).__name__} canonical axis {index} unit is "
+                    f"{loaded_axis.unit!r}; expected {expected_axis.unit!r}"
+                )
+            axis_values = np.asarray(loaded_axis.values)
+            if axis_values.ndim != 1:
+                raise ValueError(
+                    f"{type(self).__name__} canonical axis {index} is "
+                    f"{axis_values.ndim}D; expected 1D"
+                )
+            axis_lengths.append(axis_values.shape[0])
+
+        if data.data.name != spec.z.label:
+            raise ValueError(
+                f"{type(self).__name__} canonical z channel label is "
+                f"{data.data.name!r}; expected {spec.z.label!r}"
+            )
+        if data.data.unit != spec.z.unit:
+            raise ValueError(
+                f"{type(self).__name__} canonical z channel unit is "
+                f"{data.data.unit!r}; expected {spec.z.unit!r}"
+            )
+
+        z_shape = np.asarray(data.z).shape
+        expected_shape = tuple(reversed(axis_lengths))
+        if z_shape != expected_shape:
+            raise ValueError(
+                f"{type(self).__name__} canonical z shape {z_shape} != "
+                f"expected {expected_shape}"
+            )
+
     @retrieve_result
     def save(
         self,
@@ -211,6 +261,7 @@ class PersistableExperiment(AbsExperiment[T_Result, T_Config]):
             download_from_server(filepath, server_ip, port)
 
         ld = load_labber_data(filepath)
+        self._validate_canonical_labber_data(ld, spec)
 
         cfg_snapshot = None
         if ld.comment:
