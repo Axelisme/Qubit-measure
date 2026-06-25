@@ -8,10 +8,10 @@ switch and owns the liveplot integration:
   .prepare_run_results``) and, for every Result, builds a bare matplotlib
   ``Figure`` + the provider's ``Plotter`` + a ``FigureCanvasQTAgg`` — all
   sweep-lived, so auto-follow can show any provider's plot at any time.
-- It starts a ``_RunWorker`` thread that calls ``Controller.start_run``, passing
-  a ``notify(name, idx)`` callback. The worker fills the Result rows in place and
-  fires ``notify``; ``notify`` and the EventBus run events are marshalled to the
-  Qt main thread by ``_RunBridge``. A main-thread slot then calls
+- It calls ``Controller.start_run`` as an OperationRunner client, passing a
+  ``notify(name, idx)`` callback. The shared BackgroundRunner fills the Result
+  rows in place and fires ``notify``; ``notify`` and the EventBus run events are
+  marshalled to the Qt main thread by ``_RunBridge``. A main-thread slot then calls
   ``plotter.update(result, idx)`` — all drawing stays on the main thread
   (ADR-0017: the worker never touches matplotlib).
 
@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from qtpy.QtCore import QObject, Qt, QThread, Signal  # type: ignore[attr-defined]
+from qtpy.QtCore import QObject, Qt, Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QDialog,
     QMainWindow,
@@ -45,22 +45,6 @@ from zcu_tools.gui.session.events import SocChangedPayload
 
 from .node_detail import NodeDetailPane
 from .node_list import NodeListPane
-
-
-class _RunWorker(QThread):
-    """Runs the sweep off the main thread so Stop stays responsive.
-
-    The worker fills numpy Result rows + fires the notify callback (which emits a
-    Qt queued signal); it never touches matplotlib.
-    """
-
-    def __init__(self, ctrl: Controller, notify) -> None:
-        super().__init__()
-        self._ctrl = ctrl
-        self._notify = notify
-
-    def run(self) -> None:  # noqa: D401 - QThread entry point
-        self._ctrl.start_run(notify=self._notify)
 
 
 class _RunBridge(QObject):
@@ -105,7 +89,6 @@ class MainWindow(QMainWindow):
     def __init__(self, ctrl: Controller, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._ctrl = ctrl
-        self._worker: _RunWorker | None = None
         # per-provider sweep-lived liveplot state: name -> (canvas, plotter)
         self._plots: dict[str, tuple[QWidget, Any]] = {}
         # The single live (non-modal) context inspector, or None when closed. The
@@ -208,8 +191,7 @@ class MainWindow(QMainWindow):
         self._build_plots()
         self._progress.setMaximum(max(1, len(self._ctrl.state.flux_values)))
         self._progress.setValue(0)
-        self._worker = _RunWorker(self._ctrl, self._bridge.notify)
-        self._worker.start()
+        self._ctrl.start_run(notify=self._bridge.notify)
 
     def _build_plots(self) -> None:
         """Allocate Results + build each provider's Figure / Plotter / canvas.
@@ -281,9 +263,6 @@ class MainWindow(QMainWindow):
     def _on_run_done(self) -> None:
         self._list.set_running(False)
         self._detail.set_running(False)
-        if self._worker is not None:
-            self._worker.wait()
-            self._worker = None
 
     def _on_run_failed(self, message: str) -> None:
         """A Node's produce raised mid-sweep → unlock the UI + surface the error.

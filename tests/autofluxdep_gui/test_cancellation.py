@@ -9,6 +9,10 @@ independent of experiment physics, so a fake measurement Node (a deterministic
 
 from __future__ import annotations
 
+import time
+
+import numpy as np
+from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.events.run import (
     PointDonePayload,
@@ -18,14 +22,19 @@ from zcu_tools.gui.app.autofluxdep.events.run import (
 )
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 
-from ._helpers import make_builder
+from ._helpers import (
+    make_builder,
+    make_measurement_builder,
+    pump_controller_until_idle,
+    run_controller_to_completion,
+)
 
 _FLUX = [0.0, 0.25, 0.5, 0.75, 1.0]
 
 
 def _build_ready_controller():
     ctrl = build_core()
-    ctrl.add_node(make_builder("probe", produce_fn=lambda env, snap: Patch()))
+    ctrl.add_node(make_measurement_builder("probe"))
     ctrl.set_flux_values(_FLUX)
     return ctrl
 
@@ -42,18 +51,31 @@ def test_stop_run_mid_sweep_emits_run_stopped_not_finished():
     def on_point_done(p: PointDonePayload) -> None:
         points.append(p.idx)
         if len(points) == 2:  # request cancel after the 2nd point completes
-            ctrl.stop_run()
+            ctrl.stop_run("test cancellation")
 
     ctrl.bus.subscribe(PointDonePayload, on_point_done)
 
-    info = ctrl.start_run()
+    token = ctrl.start_run()
+    pump_controller_until_idle(ctrl)
+    info = ctrl.last_run_info
+    assert info is not None
 
     # the run ended on RUN_STOPPED, and RUN_FINISHED never fired
     assert events == [RunEvent.RUN_STOPPED]
+    result = ctrl.await_operation(token, timeout=0.0)
+    assert result is not None
+    assert result.outcome is not None
+    assert result.outcome.status == "cancelled"
+    assert result.feedback == "test cancellation"
     # only points 0 and 1 ran; the sweep broke before point 2 of 5
     assert points == [0, 1]
     # the returned InfoStore is partial: it reflects the last completed point
     assert info.point["flux_idx"] == 1
+    # completed rows stay in the pre-allocated Result; later rows remain untouched
+    sweep_result = ctrl.state.run_results["probe"]
+    assert not np.isnan(sweep_result.signal[0]).any()
+    assert not np.isnan(sweep_result.signal[1]).any()
+    assert np.isnan(sweep_result.signal[2]).all()
 
 
 def test_full_run_without_stop_emits_run_finished():
@@ -67,8 +89,41 @@ def test_full_run_without_stop_emits_run_finished():
     points: list[int] = []
     ctrl.bus.subscribe(PointDonePayload, lambda p: points.append(p.idx))
 
-    info = ctrl.start_run()
+    info = run_controller_to_completion(ctrl)
 
     assert events == [RunEvent.RUN_FINISHED]
     assert points == [0, 1, 2, 3, 4]
     assert info.point["flux_idx"] == 4
+
+
+def test_run_operation_progress_is_live_until_terminal():
+    ctrl = build_core()
+
+    def wait_for_cancel(env, snapshot):
+        del snapshot
+        while env.should_stop is not None and not env.should_stop():
+            time.sleep(0.001)
+        return Patch()
+
+    ctrl.add_node(make_builder("slow_probe", produce_fn=wait_for_cancel))
+    ctrl.set_flux_values([0.0])
+    token = ctrl.start_run()
+
+    app = QApplication.instance()
+    assert app is not None
+    deadline = time.monotonic() + 3.0
+    bars = ()
+    while time.monotonic() < deadline:
+        app.processEvents()
+        bars = ctrl.get_operation_progress(token)
+        if bars:
+            break
+        time.sleep(0.001)
+
+    assert ctrl.is_running
+    assert bars
+
+    ctrl.stop_run("progress test cleanup")
+    pump_controller_until_idle(ctrl)
+
+    assert ctrl.get_operation_progress(token) == ()

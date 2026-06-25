@@ -15,7 +15,9 @@ dependency model.
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from zcu_tools.gui.app.autofluxdep.derivation import DerivationService
@@ -34,7 +36,7 @@ from zcu_tools.gui.app.autofluxdep.events.workflow import (
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import DEFAULT_ROUNDS
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, PlacedNode
 from zcu_tools.gui.app.autofluxdep.nodes.predictor import PredictorBuilder
-from zcu_tools.gui.app.autofluxdep.operation_gate import OperationGate
+from zcu_tools.gui.app.autofluxdep.operation_gate import OperationGate, OperationKind
 from zcu_tools.gui.app.autofluxdep.orchestrator import (
     InfoStore,
     ModuleSource,
@@ -55,7 +57,19 @@ from zcu_tools.gui.app.autofluxdep.tools import (
 from zcu_tools.gui.background import BackgroundRunner
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.controller_mixin import SessionControllerMixin
-from zcu_tools.gui.session.operation_handles import OperationHandles
+from zcu_tools.gui.session.operation_handles import (
+    AwaitResult,
+    OperationHandles,
+    OperationOutcome,
+)
+from zcu_tools.gui.session.operation_runner import (
+    BgResult,
+    ExclusionRequest,
+    OperationRunner,
+    OperationSpec,
+    SettleFn,
+)
+from zcu_tools.gui.session.scopes import progress_ambient
 from zcu_tools.gui.session.services.build import build_session_services
 from zcu_tools.gui.session.services.io_manager import IOManager
 from zcu_tools.gui.session.services.progress import ProgressService
@@ -68,6 +82,17 @@ if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary
 
 logger = logging.getLogger(__name__)
+
+_RUN_OWNER_ID = "autofluxdep-run"
+
+
+@dataclass(frozen=True)
+class _RunOutcome:
+    """Worker return value for one autofluxdep sweep operation."""
+
+    info: InfoStore
+    run_error: Exception | None
+    stopped: bool
 
 
 class _MlModuleSource:
@@ -109,9 +134,10 @@ class Controller(SessionControllerMixin):
     ) -> None:
         self._state = state
         self._bus = bus
-        self._stop = False  # cooperative run-cancel flag
-        self._running = False
         self._cur_idx = 0  # current flux index during a run (for POINT_DONE)
+        self._active_run_token: int | None = None
+        self._run_stop_event: threading.Event | None = None
+        self._last_run_info: InfoStore | None = None
 
         # Base directory default result/database paths are anchored under (the
         # entry script injects the repo root). None falls back to cwd — fine for
@@ -143,8 +169,6 @@ class Controller(SessionControllerMixin):
         self._operation_handles = OperationHandles()
         self._background_svc = BackgroundRunner()
         self._progress_svc = ProgressService(transport)
-        from zcu_tools.gui.session.operation_runner import OperationRunner
-
         self._runner = OperationRunner(
             self._operation_gate,
             self._operation_handles,
@@ -180,7 +204,17 @@ class Controller(SessionControllerMixin):
 
     @property
     def is_running(self) -> bool:
-        return self._running
+        return self._active_run_token is not None
+
+    @property
+    def active_run_token(self) -> int | None:
+        """The operation token for the live RUN, or None when idle."""
+        return self._active_run_token
+
+    @property
+    def last_run_info(self) -> InfoStore | None:
+        """The latest terminal sweep InfoStore, if the worker produced one."""
+        return self._last_run_info
 
     # ------------------------------------------------------------------
     # SessionControllerPort — the surface the shared setup / device / inspect
@@ -353,10 +387,17 @@ class Controller(SessionControllerMixin):
 
     # --- run control (cancellable) ---
 
-    def stop_run(self) -> None:
+    def stop_run(self, reason: str = "Autofluxdep run stop requested") -> bool:
         """Request cooperative cancellation of an in-progress run."""
         logger.info("stop_run requested (at flux idx %d)", self._cur_idx)
-        self._stop = True
+        token = self._active_run_token
+        if token is None:
+            event = self._run_stop_event
+            if event is not None:
+                event.set()
+            return False
+        self._operation_handles.stop(token, reason=reason)
+        return True
 
     def _build_providers(self) -> list[PlacedNode]:
         """The execution sequence: the predictor Service prepended to the user's
@@ -398,27 +439,31 @@ class Controller(SessionControllerMixin):
                 results[node.name] = result
         return results
 
-    def start_run(self, notify: Notify | None = None) -> InfoStore:
-        """Run flux × providers, emitting run events. Each provider's Node
+    def start_run(self, notify: Notify | None = None) -> int:
+        """Start an async flux × providers RUN operation.
+
+        Each provider's Node
         ``produce`` runs a real acquire (flux-aware MockSoc offline or real
         hardware), fits it, fills its sweep Result in place, and fires
         ``notify(name, idx)`` so the main thread redraws.
 
         ``notify`` is the row-updated callback (the UI passes one bound to its
-        Plotters); None for a headless run. Blocks until the sweep finishes or
-        is stopped — the UI calls this on a worker thread. Emits RUN_STARTED,
-        POINT_DONE(idx) after each flux point, and RUN_FINISHED / RUN_STOPPED.
+        Plotters); None for a headless run. Returns the OperationRunner token
+        immediately; terminal state is observed through run events or
+        ``await_operation``. Emits RUN_STARTED, POINT_DONE(idx) after each flux
+        point, and RUN_FINISHED / RUN_STOPPED / RUN_FAILED.
         """
-        self._stop = False
-        self._running = True
+        if self.is_running:
+            raise RuntimeError("autofluxdep run is already active")
+
         self._cur_idx = 0
+        self._last_run_info = None
         logger.info(
             "run start: %d user Node(s) %s over %d flux point(s)",
             len(self._state.nodes),
             self._state.node_names(),
             len(self._state.flux_values),
         )
-        self._bus.emit(RunStartedPayload())
 
         ctx = self._state.exp_context
         soc, soccfg, md = ctx.soc, ctx.soccfg, ctx.md
@@ -432,6 +477,9 @@ class Controller(SessionControllerMixin):
         if not self._state.run_results:
             self.prepare_run_results()
         results = self._state.run_results
+        flux_values = list(self._state.flux_values)
+        providers = self._build_providers()
+        flux_device = self._state.flux_device_name
 
         def on_point(idx: int, flux: float, info: InfoStore) -> None:
             del flux, info  # POINT_DONE carries only the index
@@ -454,39 +502,136 @@ class Controller(SessionControllerMixin):
         # predictor the run calibrated.
         tools = self._build_tools()
         self._state.run_predictor = tools.predictor
-        orch = Orchestrator(
-            providers=self._build_providers(),
-            tools=tools,
-            ml=ml,
-            soc=soc,
-            soccfg=soccfg,
-            md=md,
-            # The user's flux-source pick reaches each RunEnv so a real acquire
-            # writes this point's flux into cfg.dev[flux_device] (RB-0b).
-            flux_device=self._state.flux_device_name,
-            results=results,
-            notify=notify,
-        )
-        info = orch.run(
-            self._state.flux_values,
-            on_point=on_point,
-            on_node=on_node,
-            should_stop=lambda: self._stop,
-        )
-        self._running = False
-        # A produce error is a terminal RUN_FAILED (distinct from a cooperative
-        # stop): the orchestrator caught it so the worker QThread never aborts.
-        # Either terminal state unlocks the UI; the failure carries its message.
-        if orch.run_error is not None:
-            logger.error("run failed at flux idx %d: %s", self._cur_idx, orch.run_error)
-            self._bus.emit(RunFailedPayload(message=str(orch.run_error)))
-        elif self._stop:
-            logger.info("run stopped at flux idx %d", self._cur_idx)
-            self._bus.emit(RunStoppedPayload())
-        else:
-            logger.info("run finished: %d flux point(s)", len(self._state.flux_values))
+        stop_event = threading.Event()
+        self._run_stop_event = stop_event
+
+        def work(factory: Any) -> _RunOutcome:
+            from zcu_tools.progress_bar import make_pbar
+
+            with progress_ambient(factory):
+                pbar = make_pbar(
+                    total=len(flux_values),
+                    desc="flux sweep",
+                    leave=True,
+                )
+
+                def on_point_with_progress(
+                    idx: int, flux: float, info: InfoStore
+                ) -> None:
+                    pbar.update((idx + 1) - pbar.n)
+                    on_point(idx, flux, info)
+
+                try:
+                    orch = Orchestrator(
+                        providers=providers,
+                        tools=tools,
+                        ml=ml,
+                        soc=soc,
+                        soccfg=soccfg,
+                        md=md,
+                        # The user's flux-source pick reaches each RunEnv so a real
+                        # acquire writes this point's flux into cfg.dev[flux_device]
+                        # (RB-0b).
+                        flux_device=flux_device,
+                        results=results,
+                        notify=notify,
+                    )
+                    info = orch.run(
+                        flux_values,
+                        on_point=on_point_with_progress,
+                        on_node=on_node,
+                        should_stop=stop_event.is_set,
+                    )
+                    pbar.refresh()
+                    return _RunOutcome(
+                        info=info,
+                        run_error=orch.run_error,
+                        stopped=stop_event.is_set(),
+                    )
+                finally:
+                    pbar.close()
+
+        def on_terminal(bg: BgResult, settle: SettleFn) -> None:
+            if bg.ok:
+                outcome = bg.result
+                if not isinstance(outcome, _RunOutcome):
+                    _on_run_failed(
+                        RuntimeError(
+                            f"autofluxdep run returned {type(outcome).__name__}"
+                        ),
+                        settle,
+                    )
+                    return
+                self._last_run_info = outcome.info
+                if outcome.run_error is not None:
+                    _on_run_failed(outcome.run_error, settle)
+                elif outcome.stopped:
+                    _on_run_stopped(settle)
+                else:
+                    _on_run_finished(settle)
+                return
+
+            assert bg.error is not None
+            if stop_event.is_set():
+                _on_run_stopped(settle)
+            else:
+                _on_run_failed(bg.error, settle)
+
+        def _clear_active_run() -> None:
+            self._active_run_token = None
+            self._run_stop_event = None
+
+        def _on_run_finished(settle: SettleFn) -> None:
+            logger.info("run finished: %d flux point(s)", len(flux_values))
+            _clear_active_run()
+            settle(OperationOutcome("finished"))
             self._bus.emit(RunFinishedPayload())
-        return info
+
+        def _on_run_stopped(settle: SettleFn) -> None:
+            logger.info("run stopped at flux idx %d", self._cur_idx)
+            _clear_active_run()
+            settle(OperationOutcome("cancelled"))
+            self._bus.emit(RunStoppedPayload())
+
+        def _on_run_failed(error: Exception, settle: SettleFn) -> None:
+            logger.error("run failed at flux idx %d: %s", self._cur_idx, error)
+            _clear_active_run()
+            settle(OperationOutcome("failed", str(error)))
+            self._bus.emit(RunFailedPayload(message=str(error)))
+
+        spec = OperationSpec(
+            exclusion=ExclusionRequest(
+                kind=OperationKind.RUN,
+                owner_id=_RUN_OWNER_ID,
+            ),
+            owner_id=_RUN_OWNER_ID,
+            wants_progress=True,
+            cancel_hook=stop_event.set,
+            work=work,
+            run_in_pool=False,
+            on_terminal=on_terminal,
+        )
+
+        try:
+            token = self._runner.begin(spec)
+        except Exception:
+            self._run_stop_event = None
+            raise
+        self._active_run_token = token
+        self._bus.emit(RunStartedPayload())
+        return token
+
+    def await_operation(self, operation_id: int, timeout: float) -> AwaitResult | None:
+        """Block until an async operation settles or a wakeup condition fires."""
+        return self._operation_handles.await_outcome(operation_id, timeout)
+
+    def get_operation_progress(self, operation_id: int) -> tuple:
+        """Live progress bars for one operation by id."""
+        return self._progress_svc.bars_for_operation(operation_id)
+
+    def active_operation_count(self) -> int:
+        """How many shared operation handles are live right now."""
+        return self._operation_handles.live_count()
 
     def prepare_run_results(self) -> dict[str, Any]:
         """Allocate + store this run's Results in State (main thread, Run start).

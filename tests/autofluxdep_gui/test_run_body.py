@@ -14,7 +14,7 @@ from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency
 
-from ._helpers import make_builder
+from ._helpers import make_builder, run_controller_to_completion
 
 
 def _consume_predict(env, snapshot):
@@ -45,7 +45,7 @@ def test_controller_run_drives_predictor_service_then_consumer():
     ctrl = build_core()
     ctrl.add_node(_fake_consumer())
     ctrl.set_flux_values([0.0, 1.0])
-    info = ctrl.start_run()
+    info = run_controller_to_completion(ctrl)
     # the predictor Service produced predict_freq at the last point, and the
     # consumer produced its derived key off it
     assert "predict_freq" in info.point
@@ -69,7 +69,7 @@ def test_run_threads_flux_into_env():
         )
     )
     ctrl.set_flux_values([0.0, 0.5, 1.0])
-    ctrl.start_run()
+    run_controller_to_completion(ctrl)
     assert seen == [0.0, 0.5, 1.0]
 
 
@@ -97,7 +97,7 @@ def test_produce_exception_fails_run_gracefully():
     ctrl.bus.subscribe(RunFailedPayload, lambda p: events.append(f"failed:{p.message}"))
     ctrl.bus.subscribe(RunFinishedPayload, lambda p: events.append("finished"))
 
-    ctrl.start_run()  # must not raise
+    run_controller_to_completion(ctrl)  # must not raise
 
     assert len(events) == 1 and events[0].startswith("failed:")
     assert "node not configured" in events[0]

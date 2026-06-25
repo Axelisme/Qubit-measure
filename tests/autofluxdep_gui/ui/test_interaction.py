@@ -116,6 +116,7 @@ def test_inspect_button_opens_single_non_modal_inspector(app):
 
     win._list.inspect_requested.emit()  # the button's slot
     dlg = win._inspect_dialog
+    assert dlg is not None
     assert isinstance(dlg, InspectDialogBase)
     # Opened via ``open()`` (non-blocking, so the run worker's event loop keeps
     # pumping) rather than ``exec()``.
@@ -175,8 +176,9 @@ def _zero_delays(ctrl):
 def _pump_until_done(ctrl, win):
     for _ in range(20000):
         QApplication.processEvents()
-        if win._worker is None and not ctrl.is_running:
+        if not ctrl.is_running:
             break
+    ctrl._background_svc.quiesce()
 
 
 def _run_to_completion(ctrl, win):
@@ -230,8 +232,7 @@ def test_produce_exception_during_gui_run_does_not_crash_and_unlocks(qapp, monke
     win._start()
     _pump_until_done(ctrl, win)
 
-    # the run ended (worker quiesced, not aborted) and the UI is back in edit state
-    assert win._worker is None
+    # the run ended and the UI is back in edit state
     assert not ctrl.is_running
     assert win._list._run_btn.text() == "▶ Run"
     assert win._list._add_btn.isEnabled()

@@ -20,7 +20,7 @@ from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.cfg import SweepValue
 from zcu_tools.gui.session.services.mock_flux import FAKE_FLUX_DEVICE_NAME
 
-from ._helpers import connect_mock
+from ._helpers import connect_mock, run_controller_to_completion
 
 # A readout module near the dressed resonator (~6 GHz under DEFAULT_SIMPARAM).
 _READOUT = {
@@ -80,7 +80,7 @@ def test_qubit_freq_acquire_fit_varies_with_flux():
     # (Avoid exact multiples of flux_period, which alias back to the same flux.)
     flux_values = [0.0, 1.5e-3, 2.5e-3]
     ctrl.set_flux_values(flux_values)
-    ctrl.start_run()
+    run_controller_to_completion(ctrl, timeout=15.0)
 
     res = ctrl.state.run_results["qubit_freq"]
     fit = np.asarray(res.fit_freq, dtype=np.float64)

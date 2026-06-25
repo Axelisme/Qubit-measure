@@ -16,7 +16,7 @@ from zcu_tools.gui.app.autofluxdep.events.workflow import WorkflowChangedPayload
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
 
-from ._helpers import make_builder
+from ._helpers import make_builder, run_controller_to_completion
 
 
 def _make_filling_builder(name: str):
@@ -97,7 +97,7 @@ def test_two_mist_instances_get_independent_results():
     ctrl.add_node(_make_filling_builder("mist"))
     ctrl.rename_node(1, "e_mist")
     ctrl.set_flux_values([0.0, 0.5])
-    ctrl.start_run()
+    run_controller_to_completion(ctrl)
 
     results = ctrl.state.run_results
     assert set(results) == {"g_mist", "e_mist"}  # keyed by instance name
@@ -129,6 +129,6 @@ def test_node_entered_excludes_predictor_service():
 
     entered = []
     ctrl.bus.subscribe(NodeEnteredPayload, lambda p: entered.append(p.name))
-    ctrl.start_run()
+    run_controller_to_completion(ctrl)
     assert "predictor" not in entered
     assert set(entered) == {"qubit_freq", "g_mist"}
