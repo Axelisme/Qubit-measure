@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Literal
 
 from flask import Flask, request, send_file
-from zcu_tools.utils.datasaver import safe_labber_filepath
+from zcu_tools.utils.datasaver import reserve_labber_filepath
 
 DATABASE_DIR_NAME = "Database"
 ROOT_DIR = Path(__file__).resolve().parents[1] / DATABASE_DIR_NAME
@@ -31,7 +31,7 @@ def save_file(file) -> tuple[str, Literal[200]]:
     rel = get_relpath(file.filename)
     dest = ROOT_DIR / rel
     dest_str = str(dest)
-    filepath = safe_labber_filepath(dest_str)
+    filepath = reserve_labber_filepath(dest_str)
     Path(filepath).parent.mkdir(parents=True, exist_ok=True)
     file.save(filepath)
 

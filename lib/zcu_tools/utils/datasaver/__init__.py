@@ -21,7 +21,7 @@ from .paths import (
     format_ext,
     get_datafolder_path,
     remove_ext,
-    safe_labber_filepath,
+    reserve_labber_filepath,
 )
 from .transport import download_from_server, upload_to_server
 
@@ -39,7 +39,7 @@ __all__ = [
     "save_labber_trace_data",
     "format_ext",
     "remove_ext",
-    "safe_labber_filepath",
+    "reserve_labber_filepath",
     "get_datafolder_path",
     "create_datafolder",
     "upload_to_server",

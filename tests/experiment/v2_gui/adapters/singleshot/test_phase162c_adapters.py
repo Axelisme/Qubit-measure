@@ -521,7 +521,7 @@ def test_ac_stark_canonical_save_single_output(
     base = tmp_path / "Q1_sh_ac_stark@flux0"
     exp.save(filepath=str(base))
     written = sorted(p.name for p in tmp_path.iterdir())
-    assert written == ["Q1_sh_ac_stark@flux0_1.hdf5"]
+    assert written == ["Q1_sh_ac_stark@flux0.hdf5"]
 
     raw = load_labber_data(str(tmp_path / written[0]))
     assert [axis.name for axis in raw.axes] == [
@@ -544,7 +544,7 @@ def test_t1_tone_sweep_canonical_save_single_output(
     base = tmp_path / "Q1_ss_t1_tone_sweep_gain@flux0"
     exp.save(filepath=str(base))
     written = sorted(p.name for p in tmp_path.iterdir())
-    assert written == ["Q1_ss_t1_tone_sweep_gain@flux0_1.hdf5"]
+    assert written == ["Q1_ss_t1_tone_sweep_gain@flux0.hdf5"]
 
     raw = load_labber_data(str(tmp_path / written[0]))
     assert [axis.name for axis in raw.axes] == [

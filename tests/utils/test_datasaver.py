@@ -2,16 +2,17 @@
 
 The dict save/load layer (save_data / load_data / save_local_data /
 load_local_data) is gone (ADR-0027); persistence is native labber_io. These
-tests cover the surviving path helpers: safe_labber_filepath / format_ext /
+tests cover the surviving path helpers: reserve_labber_filepath / format_ext /
 remove_ext.
 """
 
 from __future__ import annotations
 
+import zcu_tools.utils.datasaver as datasaver
 from zcu_tools.utils.datasaver import (
     format_ext,
     remove_ext,
-    safe_labber_filepath,
+    reserve_labber_filepath,
 )
 
 # ---------------------------------------------------------------------------
@@ -32,18 +33,23 @@ def test_remove_ext_strips_known_extensions():
 
 
 # ---------------------------------------------------------------------------
-# safe_labber_filepath: unique-name suffixing
+# reserve_labber_filepath: unique-name suffixing
 # ---------------------------------------------------------------------------
 
 
-def test_safe_labber_filepath_appends_suffix_and_ext(tmp_path):
+def test_reserve_labber_filepath_appends_suffix_and_ext(tmp_path):
     """First call yields the _1 suffix with .hdf5 extension."""
-    out = safe_labber_filepath(str(tmp_path / "run"))
+    out = reserve_labber_filepath(str(tmp_path / "run"))
     assert out == str(tmp_path / "run_1.hdf5")
 
 
-def test_safe_labber_filepath_increments_past_existing(tmp_path):
+def test_reserve_labber_filepath_increments_past_existing(tmp_path):
     """An existing _1 file forces the next call to bump to _2."""
     (tmp_path / "run_1.hdf5").write_bytes(b"")
-    out = safe_labber_filepath(str(tmp_path / "run"))
+    out = reserve_labber_filepath(str(tmp_path / "run"))
     assert out == str(tmp_path / "run_2.hdf5")
+
+
+def test_legacy_reservation_alias_is_not_exported():
+    legacy_name = "safe" + "_labber_filepath"
+    assert not hasattr(datasaver, legacy_name)

@@ -371,7 +371,7 @@ def _save_labber_data(path: str, ld: LabberData) -> str:
     path = format_ext(path)
     log_name = os.path.splitext(os.path.basename(path))[0]
 
-    with h5py.File(path, "w") as f:
+    with h5py.File(path, "x") as f:
         _write_uniform_log_group(f, ld, log_name=log_name, write_tags=True)
 
     return path
@@ -547,7 +547,7 @@ def _save_labber_trace_data(path: str, ld: LabberData) -> str:
     path = format_ext(path)
     log_name = os.path.splitext(os.path.basename(path))[0]
 
-    with h5py.File(path, "w") as f:
+    with h5py.File(path, "x") as f:
         _write_trace_log_group(f, ld, log_name=log_name, write_tags=True)
 
     return path

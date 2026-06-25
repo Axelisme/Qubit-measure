@@ -9,8 +9,14 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from numpy.lib.npyio import NpzFile
 from numpy.typing import NDArray
 from zcu_tools.experiment import AxesSpec
+from zcu_tools.experiment.v2.jpa.jpa_auto_optimize import (
+    JPAOptimizeResult,
+    load_jpa_auto_grouped_result,
+    save_jpa_auto_grouped_result,
+)
 from zcu_tools.experiment.v2.singleshot.ac_stark import AcStarkExp, AcStarkResult
 from zcu_tools.experiment.v2.singleshot.ge import GE_Exp, GE_Result
 from zcu_tools.experiment.v2.singleshot.len_rabi import LenRabiExp, LenRabiResult
@@ -33,18 +39,13 @@ from zcu_tools.experiment.v2.singleshot.t1.t1_with_tone_sweep import (
     T1WithToneSweepExp,
     T1WithToneSweepResult,
 )
-from zcu_tools.experiment.v2.jpa.jpa_auto_optimize import (
-    JPAOptimizeResult,
-    load_jpa_auto_grouped_result,
-    save_jpa_auto_grouped_result,
-)
 from zcu_tools.experiment.v2.twotone.ckp import CKP_Exp, CKP_Result
+from zcu_tools.experiment.v2.twotone.reset.bath.length import LengthExp, LengthResult
 from zcu_tools.experiment.v2.twotone.ro_optimize.auto_optimize import (
     AutoOptResult,
     load_auto_opt_grouped_result,
     save_auto_opt_grouped_result,
 )
-from zcu_tools.experiment.v2.twotone.reset.bath.length import LengthExp, LengthResult
 from zcu_tools.experiment.v2.twotone.time_domain.cpmg import (
     CPMG_Result,
     load_cpmg_grouped_result,
@@ -157,6 +158,7 @@ def _make_temp_path(output_path: Path) -> Path:
         dir=output_path.parent,
     )
     os.close(fd)
+    os.unlink(temp_name)
     return Path(temp_name)
 
 
@@ -1286,7 +1288,7 @@ def _require_same_ckp_metadata(ground: LabberData, excited: LabberData) -> None:
         raise ValueError("legacy CKP sidecars disagree on tags")
 
 
-def _npz_comment(data: np.lib.npyio.NpzFile) -> str:
+def _npz_comment(data: NpzFile) -> str:
     if "comment" not in data.files:
         return ""
     comment = data["comment"]

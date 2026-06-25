@@ -33,7 +33,7 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import (
     format_ext,
     load_labber_data,
-    safe_labber_filepath,
+    reserve_labber_filepath,
     save_labber_data,
 )
 from zcu_tools.utils.fitting import fit_decay
@@ -110,7 +110,7 @@ class T1PlotAndSaveMixin(Generic[T_Cfg]):
 
         # signals: z stored native (Ny, Nx) = (Time, Iteration), inner axis last
         save_labber_data(
-            safe_labber_filepath(str(filepath.with_name(filepath.name + "_signals"))),
+            reserve_labber_filepath(str(filepath.with_name(filepath.name + "_signals"))),
             z=("Signal", "a.u.", result["signals"].T),
             axes=[
                 ("Iteration", "a.u.", iters),

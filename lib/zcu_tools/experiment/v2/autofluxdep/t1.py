@@ -33,7 +33,7 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils import deepupdate
 from zcu_tools.utils.datasaver import (
     load_labber_data,
-    safe_labber_filepath,
+    reserve_labber_filepath,
     save_labber_data,
 )
 from zcu_tools.utils.fitting import fit_decay
@@ -266,7 +266,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
 
         # signals: native z is (Nflux, Ntime) = (outer, inner), axes inner-first
         save_labber_data(
-            safe_labber_filepath(str(filepath.with_name(filepath.name + "_signals"))),
+            reserve_labber_filepath(str(filepath.with_name(filepath.name + "_signals"))),
             z=("Signal", "a.u.", result["raw_signals"]),
             axes=[time_axis, flux_axis],
             comment=comment,
@@ -275,7 +275,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
 
         # length: native z is (Nflux, Ntime)
         save_labber_data(
-            safe_labber_filepath(str(filepath.with_name(filepath.name + "_length"))),
+            reserve_labber_filepath(str(filepath.with_name(filepath.name + "_length"))),
             z=("Time (us)", "s", result["length"] * 1e-6),
             axes=[time_axis, flux_axis],
             comment=comment,
@@ -284,7 +284,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
 
         # t1: 1D over flux only
         save_labber_data(
-            safe_labber_filepath(str(filepath.with_name(filepath.name + "_t1"))),
+            reserve_labber_filepath(str(filepath.with_name(filepath.name + "_t1"))),
             z=("T1", "s", result["t1"] * 1e-6),
             axes=[flux_axis],
             comment=comment,

@@ -203,7 +203,7 @@ def test_save_persist_true_writes_hdf5(tmp_path):
     result = _run_for_save(adapter)
     data_path = str(tmp_path / "fake_save")
     adapter.save(_save_request(result, data_path))
-    # save_data appends an extension / safe-name; assert a file actually landed.
+    # Fake adapter reserves an extension / unique name before low-level save.
     assert glob.glob(str(tmp_path / "fake_save*")), "no data file written"
 
 

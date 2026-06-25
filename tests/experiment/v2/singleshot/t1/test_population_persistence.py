@@ -34,7 +34,7 @@ from zcu_tools.program.v2.modules import ConstWaveformCfg
 from zcu_tools.utils.datasaver import (
     LabberData,
     load_labber_data,
-    safe_labber_filepath,
+    reserve_labber_filepath,
     save_labber_data,
 )
 
@@ -189,22 +189,22 @@ def _sample_sweep_result(
 
 
 def _saved_path(tmp_path: Path, base: str) -> Path:
-    return tmp_path / f"{base}_1.hdf5"
+    return tmp_path / f"{base}.hdf5"
 
 
 def _t1_sidecar_paths(base: Path) -> tuple[Path, Path]:
     return (
-        Path(safe_labber_filepath(str(base.with_name(base.stem + "_initg")))),
-        Path(safe_labber_filepath(str(base.with_name(base.stem + "_inite")))),
+        Path(reserve_labber_filepath(str(base.with_name(base.stem + "_initg")))),
+        Path(reserve_labber_filepath(str(base.with_name(base.stem + "_inite")))),
     )
 
 
 def _sweep_sidecar_paths(base: Path) -> tuple[Path, Path, Path, Path]:
     return (
-        Path(safe_labber_filepath(str(base.with_name(base.name + "_gg_pop")))),
-        Path(safe_labber_filepath(str(base.with_name(base.name + "_ge_pop")))),
-        Path(safe_labber_filepath(str(base.with_name(base.name + "_eg_pop")))),
-        Path(safe_labber_filepath(str(base.with_name(base.name + "_ee_pop")))),
+        Path(reserve_labber_filepath(str(base.with_name(base.name + "_gg_pop")))),
+        Path(reserve_labber_filepath(str(base.with_name(base.name + "_ge_pop")))),
+        Path(reserve_labber_filepath(str(base.with_name(base.name + "_eg_pop")))),
+        Path(reserve_labber_filepath(str(base.with_name(base.name + "_ee_pop")))),
     )
 
 

@@ -68,7 +68,7 @@ def _sample_result(*, with_cfg: bool = True) -> GE_Result:
 
 
 def _saved_path(tmp_path: Path, base: str) -> Path:
-    return tmp_path / f"{base}_1.hdf5"
+    return tmp_path / f"{base}.hdf5"
 
 
 def _write_legacy_ge(

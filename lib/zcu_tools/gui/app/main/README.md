@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-24（agent state plan path）
+**Last updated:** 2026-06-25（save path ownership）
 
 # `zcu_tools/gui/app/main/` — measure-gui Framework AI Note
 
@@ -173,7 +173,7 @@ GUI 上的「Agent」按鈕觸發 `AgentLaunchDialog`（可選 resumable session
 - **無 analysis 的 adapter**：只填兩格 generic（`BaseAdapter[Cfg, Result]`，PEP 696 補 `No*`），宣告 `capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE)`，**不覆寫** `analyze`/`get_analyze_params`。BaseAdapter 的預設 body **raise NotImplementedError**（Fast Fail）——`analysis=NONE` 時 framework gate（`tab.py`）擋掉不會走到；`analysis=FIT` 卻忘覆寫時才觸發 raise。(舊 `NoAnalysisAdapterMixin` 已刪)
 - `RunRequest`、`AnalyzeRequest[T_Result, T_AnalyzeParams]`、`SaveDataRequest[T_Result]`、`WritebackRequest[T_Result, T_AnalyzeResult]` 是跨 worker 的 immutable 邊界
 - 真實 experiment adapter run result 必須攜帶 `cfg_snapshot`；adapter 在 save 邊界以 snapshot + raw result 重建 `last_cfg/last_result`，委派既有 experiment `save()`
-- 預設 save path policy 由 `BaseAdapter` 提供；一般 adapter 只需定義 filename stem；`make_save_paths()` 是 pure suggestion，不建立目錄（實際 `mkdir` 由寫 HDF5 時負責）。路徑結構對齊 notebook（single_qubit.md）：data=`{database_path}/{stem}@{active_label}`、image=`result/chip/qub/exps/{label}/image/{stem}.png`。**日期段（`YYYY/MM/Data_MMDD`）在 `database_path` 裡**（`derive_project_paths` 用共享純函數 `get_datafolder_path` 算出 `Database/chip/qub/YYYY/MM/Data_MMDD`，與 notebook 的 `create_datafolder` 回傳同款，唯不建目錄）——`make_default_save_paths` 直接 join `ctx.database_path`，**不再重複補日期**。`get_datafolder_path`（純）↔ `create_datafolder`（= 純 + makedirs）是 utils 層同一抽出；GUI 走純版本。chip/qub + 日期 scoping 全在 `derive_project_paths` 一處；`apply_project` 不 re-scope。setup dialog prefill 時對持久化的 chip/qub **re-derive**（取今天日期，避免隔天恢復寫進昨天資料夾）
+- 預設 save path policy 由 `BaseAdapter` 提供；一般 adapter 只需定義 filename stem；`make_save_paths()` 是 pure suggestion，不建立目錄。`SaveService` 是 GUI save flow 的 path reservation boundary：在提交 worker 前用 `reserve_labber_filepath` 決定 final data path，再把 exact path 傳給 adapter/experiment save；低層 persistence 不自動 suffix 或覆寫。路徑結構對齊 notebook（single_qubit.md）：data=`{database_path}/{stem}@{active_label}`、image=`result/chip/qub/exps/{label}/image/{stem}.png`。**日期段（`YYYY/MM/Data_MMDD`）在 `database_path` 裡**（`derive_project_paths` 用共享純函數 `get_datafolder_path` 算出 `Database/chip/qub/YYYY/MM/Data_MMDD`，與 notebook 的 `create_datafolder` 回傳同款，唯不建目錄）——`make_default_save_paths` 直接 join `ctx.database_path`，**不再重複補日期**。`get_datafolder_path`（純）↔ `create_datafolder`（= 純 + makedirs）是 utils 層同一抽出；GUI 走純版本。chip/qub + 日期 scoping 全在 `derive_project_paths` 一處；`apply_project` 不 re-scope。setup dialog prefill 時對持久化的 chip/qub **re-derive**（取今天日期，避免隔天恢復寫進昨天資料夾）
 - `build_exp_cfg()` 慣例：flat GUI raw cfg → nested exp cfg dict 重組，交由 `ctx.ml.make_cfg(...)` 統一驗證與 `modules`/`sweep` 轉換。**不屬 Protocol**（只被 `run()` 內部呼叫）。**有預設實作**：設 `ExpCfg_cls: ClassVar` 即繼承 `return req.ml.make_cfg(raw_cfg, ExpCfg_cls)`;`ExpCfg_cls` 未設（None）時預設 body **raise**（Fast Fail，與 analyze no-op 同慣例）。bespoke 映射（fake 自建 cfg、fakefreq 多帶 kwarg、flux_dep pop `dev` 重塑）覆寫 `build_exp_cfg`、不設 `ExpCfg_cls`
 - **cfg 靜態/動態拆分**：`make_default_cfg(ctx)` 是 BaseAdapter 的 concrete = `CfgSchema(cfg_spec(), make_default_value(ctx))` + **`schema.validate(ctx.ml)`**。adapter 實作兩個 abstract：`cfg_spec() -> CfgSectionSpec`（**classmethod**、純結構、**不讀 ctx**，供 agent 未建 tab 即查 spec）與 `make_default_value(ctx) -> CfgSectionValue`（讀 md/ml/device 算預設值，**不屬 Protocol**）。`analyze_params_cls()` classmethod 由 `get_analyze_params` 的 return annotation 反射取得 analyze params dataclass（靜態）。
 - **adapter 必回傳完整合法 value 樹**：`make_default_value(ctx)` 產的 value 樹**每個 spec key 都要有 entry**（含 `LiteralSpec` = `DirectValue(spec.value)`、停用 optional ref = `None` entry）；`make_default_cfg` 用 `validate` 強制（漏/不符當場 raise，責任指向該 adapter，**框架不補齊**）。`lock_literal` 鎖的欄位 value 也要服從鎖定值（如 onetone/freq `.with_field("pulse_cfg.freq", 0.0)`，因 freq 被 sweep 軸接管；value 帶 EvalValue("r_f") 是與鎖定矛盾的誤導值，validate 抓它）。
@@ -222,7 +222,7 @@ GUI 上的「Agent」按鈕觸發 `AgentLaunchDialog`（可選 resumable session
 - Run/Stop 按鈕只受全域 run lock 與本 tab run state 影響；analyze/save/writeback 只受本 tab busy 與資料可用性影響
 - `plot reset` 只能跟真正的 `run start` 綁定
 - Form state 必須回寫 State：tab 切換、event refresh、context 切換後 UI 能從 State 重新 hydrate；hydrate 路徑不得 emit state-change signal
-- Save path state：每個 tab 只保存使用者 `save_path_overrides`；未覆寫時由 `TabService.get_tab_save_paths()` pure 計算 suggestion，實際 `mkdir` 只在 `SaveService` command boundary 執行
+- Save path state：每個 tab 只保存使用者 `save_path_overrides`；未覆寫時由 `TabService.get_tab_save_paths()` pure 計算 suggestion，實際 reservation 與 `mkdir` 只在 `SaveService` command boundary 執行
 - Tab render state 由 `TabViewService.get_snapshot()` 一次組裝；snapshot query 不初始化 analyze state 或觸發 IO/event
 - Analyze parameter instance 在 run success boundary 建立，`MainWindow` 只 render 已準備的 snapshot
 
