@@ -47,8 +47,9 @@ gdrive = [
   "google-auth-oauthlib",
   "python-dotenv",
 ]
+design = ["quantum-metal[gui,ansys] @ git+https://github.com/qiskit-community/qiskit-metal.git"]
 gui = ["zcu-tools[client]", "qtpy", "PyQt6"]
-all = ["zcu_tools[development,client,gdrive,gui]"]
+all = ["zcu_tools[development,client,gdrive,gui,design]"]
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
@@ -96,5 +97,8 @@ cell_metadata_filter = "-all"
 environments = [
   "sys_platform == 'linux' and platform_machine == 'x86_64'",
   "sys_platform == 'win32' and platform_machine == 'AMD64'",
-  # "sys_platform == 'darwin' and platform_machine == 'arm64'",
+  "sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
+
+[tool.uv.extra-build-dependencies]
+pyaedt = ["pip"]
