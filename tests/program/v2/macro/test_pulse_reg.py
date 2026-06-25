@@ -7,10 +7,11 @@ from unittest.mock import MagicMock
 from qick.asm_v2 import AsmInst
 from zcu_tools.program.v2.macro.pluse_reg import PulseByReg
 
+from tests.program.v2.support import ProgramTrace
+
 
 def _make_prog(tproc_ch=0):
-    prog = MagicMock()
-    prog._get_reg.side_effect = lambda name: name
+    prog = ProgramTrace()
     prog.soccfg = {"gens": [{} for _ in range(4)]}
     prog.soccfg["gens"][0]["tproc_ch"] = tproc_ch
     return prog

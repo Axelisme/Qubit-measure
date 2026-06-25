@@ -1,6 +1,6 @@
-from unittest.mock import MagicMock
-
 import pytest
+
+from tests.program.v2.support import ProgramTrace
 
 _FCLK = 430.08
 
@@ -14,8 +14,8 @@ def _make_ro_entry(f_output=_FCLK):
 
 
 @pytest.fixture
-def mock_prog():
-    prog = MagicMock()
+def mock_prog() -> ProgramTrace:
+    prog = ProgramTrace()
     prog.soccfg = {
         "tprocs": [{"f_time": _FCLK}],
         # provide entries for channels 0-4 so run() tests don't KeyError

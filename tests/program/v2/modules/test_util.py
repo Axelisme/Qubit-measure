@@ -31,6 +31,8 @@ def test_round_timestamp():
     param = QickParam(start=0.001, spans={"a": 0.005})
     rounded = round_timestamp(prog, param, take_ceil=True)
     assert isinstance(rounded, QickParam)
+    assert not isinstance(rounded, float)
+    assert not isinstance(rounded, int)
     assert math.isclose(rounded.start, 1.0 / 430.08)
     assert math.isclose(
         rounded.spans["a"], 3.0 / 430.08
