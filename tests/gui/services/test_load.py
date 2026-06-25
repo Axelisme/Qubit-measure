@@ -12,7 +12,7 @@ from zcu_tools.gui.app.main.adapter import (
 )
 from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
 from zcu_tools.gui.app.main.services.guard import LoadPermit
-from zcu_tools.gui.app.main.services.load import LoadService
+from zcu_tools.gui.app.main.services.load import LoadDataError, LoadService
 from zcu_tools.gui.app.main.state import ExpContext, Session, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
@@ -105,9 +105,23 @@ def test_load_result_error_leaves_state_unchanged() -> None:
     adapter.load.side_effect = ValueError("bad file")
     svc, _emit, writeback = _service(state)
 
-    with pytest.raises(ValueError, match="bad file"):
+    with pytest.raises(LoadDataError, match="Cannot load this data file") as exc_info:
         svc.load_result(LoadPermit(tab_id), "/tmp/bad.hdf5")
 
+    assert exc_info.value.reason_code == "invalid_data_file"
+    assert "Details: bad file" in str(exc_info.value)
     writeback.teardown_tab_items.assert_not_called()
     assert state.get_tab(tab_id).run_result is old
     assert state.version.get(f"tab:{tab_id}:result") == 0
+
+
+def test_load_result_wraps_unsupported_adapter() -> None:
+    state, tab_id, adapter = _make_state()
+    adapter.load.side_effect = NotImplementedError("unsupported")
+    svc, _emit, writeback = _service(state)
+
+    with pytest.raises(LoadDataError, match="does not support loading") as exc_info:
+        svc.load_result(LoadPermit(tab_id), "/tmp/file.hdf5")
+
+    assert exc_info.value.reason_code == "unsupported_load"
+    writeback.teardown_tab_items.assert_not_called()

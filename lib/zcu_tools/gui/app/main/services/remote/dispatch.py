@@ -48,6 +48,7 @@ from zcu_tools.gui.session.services.device import (
     SetupDeviceRequest,
 )
 
+from ..load import LoadDataError
 from .method_specs import METHOD_SPECS
 
 logger = logging.getLogger(__name__)
@@ -298,6 +299,12 @@ def _h_tab_load_data(
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     try:
         outcome = adapter.ctrl.load_tab_result(tab_id, str(params["data_path"]))
+    except LoadDataError as exc:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=exc.reason_code,
+        ) from exc
     except (RuntimeError, OSError, ValueError) as exc:
         reason = getattr(exc, "reason_code", "")
         if isinstance(exc, NotImplementedError):

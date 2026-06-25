@@ -430,6 +430,36 @@ def test_main_window_load_data_dialog_cancel_is_noop(qapp, monkeypatch):
     ctrl.load_tab_result.assert_not_called()
 
 
+def test_main_window_load_data_dialog_shows_user_facing_error(qapp, monkeypatch):
+    from qtpy.QtWidgets import QFileDialog
+    from zcu_tools.gui.app.main.services.load import LoadDataError
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+
+    ctrl = _apply_window_defaults(MagicMock())
+    ctrl.get_bus.return_value = EventBus()
+    ctrl.has_tab.return_value = True
+    ctrl.load_tab_result.side_effect = LoadDataError(
+        "Cannot load this data file into the current tab.\n\nDetails: bad axes",
+        reason_code="invalid_data_file",
+    )
+    window = MainWindow(ctrl)
+    window._tab_widgets["tab-1"] = MagicMock()
+    window.show_error_dialog = MagicMock()
+    monkeypatch.setattr(
+        QFileDialog,
+        "getOpenFileName",
+        lambda *args, **kwargs: ("/tmp/bad.hdf5", ""),
+    )
+
+    window._on_load_data_clicked("tab-1")
+
+    window.show_error_dialog.assert_called_once()
+    title, message = window.show_error_dialog.call_args.args
+    assert title == "Load data failed"
+    assert "Cannot load this data file" in message
+    assert "bad axes" in message
+
+
 def test_main_window_run_lock_disables_only_new_tab_and_run(qapp):
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
 

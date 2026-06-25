@@ -28,6 +28,24 @@ class LoadTabResultOutcome:
     source_kind: str = "loaded"
 
 
+class LoadDataError(RuntimeError):
+    """User-facing load failure with a stable reason code."""
+
+    def __init__(self, message: str, *, reason_code: str) -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
+
+
+def _format_invalid_data_message(data_path: str, detail: str) -> str:
+    return (
+        "Cannot load this data file into the current tab. "
+        "It may belong to a different experiment, use an older format, or have "
+        "canonical axes that do not match this adapter.\n\n"
+        f"File: {data_path}\n"
+        f"Details: {detail}"
+    )
+
+
 class LoadService:
     """Synchronous canonical result load boundary.
 
@@ -54,7 +72,23 @@ class LoadService:
         ctx = self._state.exp_context
         request = LoadDataRequest(data_path=data_path, md=ctx.md, ml=ctx.ml)
         logger.info("load_result: tab_id=%r data_path=%r", tab_id, data_path)
-        result = tab.adapter.load(request)
+        try:
+            result = tab.adapter.load(request)
+        except NotImplementedError as exc:
+            raise LoadDataError(
+                f"This tab does not support loading data files.\n\nDetails: {exc}",
+                reason_code="unsupported_load",
+            ) from exc
+        except OSError as exc:
+            raise LoadDataError(
+                f"Could not read the data file.\n\nFile: {data_path}\nDetails: {exc}",
+                reason_code="data_file_read_failed",
+            ) from exc
+        except ValueError as exc:
+            raise LoadDataError(
+                _format_invalid_data_message(data_path, str(exc)),
+                reason_code="invalid_data_file",
+            ) from exc
 
         self._writeback.teardown_tab_items(tab_id)
         self._state.update_tab_loaded_result(tab_id, result, data_path)

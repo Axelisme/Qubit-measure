@@ -17,6 +17,9 @@ RemoteControlAdapter。此 package 是 app-local policy 層，不是共用 trans
 - `tab.load_data` / generated `gui_tab_load_data` 是同步 mutation：guard deps 是
   `tab:{tab_id}`、`tab:{tab_id}:result`、`tab:{tab_id}:analyze`、`context`；不依賴
   SoC、device、cfg 或 save path，且不進 operation-handle table。
+- load failure 以 `precondition_failed` 搭配 stable `reason` 呈現：
+  `invalid_data_file`（canonical/adapter 不相容）、`unsupported_load`、
+  `data_file_read_failed`；agent 不需要 parse traceback 或 raw Python exception。
 - `McpBridge` 只屬於 `zcu_tools.mcp.core` 的 transport adapter；measure-gui policy
   不下放到 bridge。
 

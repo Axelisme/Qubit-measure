@@ -17,6 +17,7 @@ from zcu_tools.gui.app.main.events.tab import (
     TabContentChangedPayload,
     TabInteractionChangedPayload,
 )
+from zcu_tools.gui.app.main.services.load import LoadDataError
 from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
 from zcu_tools.gui.plotting import (
     FigureContainer,
@@ -1647,6 +1648,15 @@ class MainWindow(QMainWindow):
             return
         try:
             self._ctrl.load_tab_result(tab_id, path)
+        except LoadDataError as exc:
+            logger.warning(
+                "_on_load_data_clicked rejected data file: tab_id=%r path=%r reason=%s",
+                tab_id,
+                path,
+                exc.reason_code,
+            )
+            self.show_error_dialog("Load data failed", str(exc))
+            return
         except Exception as exc:
             logger.exception("_on_load_data_clicked failed: tab_id=%r", tab_id)
             self.show_error_dialog("Load data failed", str(exc))
