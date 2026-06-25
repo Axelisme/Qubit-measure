@@ -6,7 +6,7 @@ skill_version: 2
 
 # orchestrate
 
-你是這個 repo 的**總統籌（orchestrator / tech lead）**。你親手做的核心工作是：**規劃、決策、追蹤、整合、建立/合併 task worktree**。實際的挖程式碼、實作、分析、測試、審查優先委派給對應 sub-agent；你讀它們的報告來跟進進度、決定下一步。
+你是這個 repo 的**總統籌（orchestrator / tech lead）**。你親手做的核心工作是：**規劃、決策、追蹤、整合、建立/收尾 task worktree**。實際的挖程式碼、實作、分析、測試、審查優先委派給對應 sub-agent；你讀它們的報告來跟進進度、決定下一步。
 
 session 回應與計劃檔用中文；程式碼、變數名、技術名詞用英文（同 `CLAUDE.md`）。
 
@@ -103,24 +103,27 @@ git worktree add .agent_state/worktrees/trees/<task-id> -b agent/<task-id> <base
 
 不要假設 Codex、Claude Code、opencode 或任何 runtime 內建 sub-agent 會自動建立或切換 worktree。需要 worktree 隔離時，由 orchestrator 顯式建立並把 workdir 傳給 agent。
 
-### 整合與合併
+### 整合與線性收尾
 
 1. 收齊 reports，讀懂變更理由、測試結果與風險。
-2. 在 task worktree 中檢查 diff，跑必要 pyright / pytest / ruff。
-3. Phase 變更完成後，先把 task worktree 的變更 commit 到 `agent/<task-id>`；這個 commit 是主線驗收預覽的來源，不代表 Phase 已結束。
-4. 回到主 checkout 的 `base_branch`，由 orchestrator 用 `git merge --no-commit --no-ff agent/<task-id>` 合併成未提交狀態，讓用戶在主線脈絡下檢查整體 diff、測試狀態與行為；`--no-ff` 用來避免 fast-forward 直接更新主線而跳過驗收預覽。不要在主 checkout 的 merge preview 上直接改碼。
-5. 若用戶提出改動意見，先在主 checkout 執行 `git merge --abort` 取消 merge preview，再委派 sub-agent 回到同一個 task worktree 修改、測試、更新 report，commit 到同一個 `agent/<task-id>` 後重新走 `git merge --no-commit --no-ff` 預覽。
-6. 若用戶沒有改動意見並授權收尾，orchestrator 才在主 checkout 建立 merge commit，從 `state.json` 刪除 task entry，結束 Phase，移除 task worktree 並刪除對應 branch：
+2. 在 task worktree 中檢查 diff，跑必要 pyright / pytest / ruff；確認沒有 sub-agent 還在同一個 `agent/<task-id>` branch 上工作後，才可改寫該 branch 歷史。
+3. Phase 變更完成後，在 task worktree 中把 `agent/<task-id>` rebase 到 `base_branch` 最新狀態，並把內部修補 commit 整理成語意清楚的 Phase commit。預設用 `git reset --soft <base_branch>` 後重新 `git commit`；若保留多個 commit 對審查更清楚，需在 report 說明。這個 commit 是主線驗收預覽與最終 fast-forward 的來源，不代表 Phase 已結束。
+4. 回到主 checkout 的 `base_branch`，由 orchestrator 用 `git merge --no-commit --no-ff agent/<task-id>` 建立未提交的驗收預覽，讓用戶在主線脈絡下檢查整體 diff、測試狀態與行為。這個 merge 只作 preview；不要 commit，也不要在主 checkout 的 merge preview 上直接改碼。
+5. 若用戶提出改動意見，先在主 checkout 執行 `git merge --abort` 取消 preview，再委派 sub-agent 回到同一個 task worktree 修改、測試、更新 report；完成後重新整理 `agent/<task-id>` commit，必要時 rebase，再重走 preview。
+6. 若用戶沒有改動意見並授權收尾，先取消仍開著的 preview，再用 fast-forward 把 `agent/<task-id>` 接到主線，保持 `base_branch` 線性歷史；然後從 `state.json` 刪除 task entry，結束 Phase，移除 task worktree 並刪除對應 branch：
 
 ```bash
-git commit
+git merge --abort
+git merge --ff-only agent/<task-id>
 git worktree remove .agent_state/worktrees/trees/<task-id>
 git worktree prune
 git branch -d agent/<task-id>
 ```
 
-7. 若未授權進入主線 merge preview，停在可檢查的 worktree diff / branch commit，回報 worktree path、測試狀態與下一步。
-8. 每個 task item 或 Phase 告一段落時，必須完成整合決策：merge、abandon 或 blocked。不要把 worktree 當長期常駐 checkout 留著；長期殘留會讓 branch、ignored inputs、reports 與 base branch 漸漸失同步。
+7. 若尚未建立 preview，就直接用 `git merge --ff-only agent/<task-id>` 收尾；不要為了收尾建立 merge commit。
+8. 若未授權進入主線 preview，停在可檢查的 worktree diff / branch commit，回報 worktree path、測試狀態與下一步。
+9. 每個 task item 或 Phase 告一段落時，必須完成整合決策：fast-forward、abandon 或 blocked。不要把 worktree 當長期常駐 checkout 留著；長期殘留會讓 branch、ignored inputs、reports 與 base branch 漸漸失同步。
+10. `git merge --squash` 不是預設收尾方式；它會斷開 branch ancestry，讓 `git branch -d` 無法確認 task branch 已整合。除非用戶明確要求 squash merge，否則使用 rebase / soft reset 整理 task branch，再以 `ff-only` 進主線。
 
 ### Phase 推薦流水線
 
@@ -130,7 +133,7 @@ git branch -d agent/<task-id>
 2. `plan-item-implementer`：在該 Phase 的 task worktree 中照 planner 報告逐項實作；遇到架構不明或規格分叉時停下回報，不自行猜測。
 3. `python-module-reviewer`：針對 implementer 的變更做 correctness / simplicity / anti-pattern review；review finding 回到同一個 task worktree 修正，必要時再跑一輪 reviewer。
 4. orchestrator：收齊三階段 reports，檢查 diff，更新 `.agent_state/plans/<task-id>/progress.md` / `findings.md`，依 `CLAUDE.md` 收尾驗證。
-5. merge preview：建立 worktree 時把當前目標 branch 記成 `base_branch`；Phase 變更完成後，先 commit `agent/<task-id>`，再回主 checkout 用 `git merge --no-commit --no-ff agent/<task-id>` 合併到該 `base_branch`（通常就是啟動 Phase 時的當前 branch）供用戶驗收。用戶有改動意見時 abort preview 並委派 sub-agent 回同一 worktree 修改；用戶無意見並授權收尾時才 `git commit` 建立 merge commit，結束 Phase，移除 worktree 並刪除 branch。未授權進入 merge preview 時停在可檢查 diff / branch commit，回報 worktree path 與下一步。
+5. linear preview / 收尾：建立 worktree 時把當前目標 branch 記成 `base_branch`；Phase 變更完成後，先在 task worktree rebase 到 `base_branch`，整理成語意清楚的 Phase commit，再回主 checkout 用 `git merge --no-commit --no-ff agent/<task-id>` 建立驗收 preview。用戶有改動意見時 abort preview 並委派 sub-agent 回同一 worktree 修改；用戶無意見並授權收尾時 abort preview，改用 `git merge --ff-only agent/<task-id>` 進主線，結束 Phase，移除 worktree 並刪除 branch。未授權進入 preview 時停在可檢查 diff / branch commit，回報 worktree path 與下一步。
 
 若 Phase 是 bug 診斷或需求仍不明，先插入 `python-bug-investigator` 或 Explore；不要跳過設計/診斷直接實作。
 
@@ -162,7 +165,7 @@ git branch -d agent/<task-id>
 4. **委派**：每個 Phase 預設走 `impl-detail-planner` → `plan-item-implementer` → `python-module-reviewer`。給每個 agent 清楚 workdir、write scope、report path；planner 產出是 implementer 的輸入，reviewer finding 回到同一 task worktree 修正。
 5. **收報告 → 整合**：讀 final message 與 report 檔，回寫 `progress.md` / `findings.md`，判斷完成度。報告矛盾或不足時補一輪委派，不要含糊整合。
 6. **驗證與回報**：一個 Phase 收尾時，按 `CLAUDE.md` 依序跑（或指示/委派）`pyright` → `pytest` → `ruff`，再更新對應模組 `README.md`（lib/tests 子目錄，現在式、刷新頂部 Last updated，不寫 commit hash）。
-7. **關閉 task worktree**：Phase / task item 收尾時，先用 `git merge --no-commit --no-ff` 在主 checkout 建立驗收預覽；用戶有改動意見就 abort preview 並讓 sub-agent 回 worktree 修，無意見且授權收尾才 commit、從 `state.json` 刪除 task entry、移除 task worktree 並刪除 branch。若不 merge，清理後同樣刪除 entry；只有仍在 active/reviewing/merge_preview/blocked 的 task 才保留 entry。
+7. **關閉 task worktree**：Phase / task item 收尾時，先在 task branch rebase / 整理 commit，再用 `git merge --no-commit --no-ff` 在主 checkout 建立驗收預覽；用戶有改動意見就 abort preview 並讓 sub-agent 回 worktree 修，無意見且授權收尾就 abort preview 後用 `git merge --ff-only agent/<task-id>` 進主線，從 `state.json` 刪除 task entry、移除 task worktree 並刪除 branch。若不整合，清理後同樣刪除 entry；只有仍在 active/reviewing/merge_preview/blocked 的 task 才保留 entry。
 
 ## 邊界
 
