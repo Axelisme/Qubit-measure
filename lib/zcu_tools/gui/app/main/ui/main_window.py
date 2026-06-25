@@ -931,10 +931,6 @@ class MainWindow(QMainWindow):
         # closeEvent (triggered by _perform_close's self.close()) passes straight
         # through instead of re-entering the cancel-and-wait coordination.
         self._closing = False
-        # AgentLaunchDialog is created lazily on first "Agent…" click (non-modal,
-        # WA_DeleteOnClose); set to None when closed/destroyed.
-        self._agent_launch_dialog: QDialog | None = None
-
         self.setWindowTitle("ZCU Qubit Measure — v2 GUI")
         self.resize(1280, 750)
 
@@ -965,10 +961,6 @@ class MainWindow(QMainWindow):
         inspect_btn = QPushButton("Inspect…")
         inspect_btn.clicked.connect(self._on_inspect_clicked)
         toolbar.addWidget(inspect_btn)
-
-        agent_btn = QPushButton("Agent…")
-        agent_btn.clicked.connect(self._open_agent_launch)
-        toolbar.addWidget(agent_btn)
 
         main_layout.addLayout(toolbar)
 
@@ -1473,33 +1465,6 @@ class MainWindow(QMainWindow):
         if isinstance(current, ExpTabWidget):
             return current._splitter_left_saved
         return DEFAULT_LEFT_PANEL_WIDTH
-
-    # ------------------------------------------------------------------
-    # Agent launch dialog: open the system terminal running interactive claude
-    # ------------------------------------------------------------------
-
-    def _open_agent_launch(self) -> None:
-        """Open (or raise) the non-modal AgentLaunchDialog.
-
-        Lazy import keeps the Qt-free Controller importable without loading
-        the dialog module. WA_DeleteOnClose: Qt destroys the dialog on close and
-        the finished signal clears self._agent_launch_dialog.
-        """
-        if self._agent_launch_dialog is not None:
-            # Already open — bring to front.
-            self._agent_launch_dialog.raise_()
-            self._agent_launch_dialog.activateWindow()
-            return
-        from .agent_launch_dialog import AgentLaunchDialog
-
-        dlg = AgentLaunchDialog(self._ctrl)
-        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)  # type: ignore[attr-defined]
-        dlg.finished.connect(self._on_agent_launch_closed)
-        self._agent_launch_dialog = dlg
-        dlg.open()
-
-    def _on_agent_launch_closed(self) -> None:
-        self._agent_launch_dialog = None
 
     def notify_diagnostic(self, severity: str, title: str, message: str) -> None:
         """DiagnosticSink impl (ADR-0013): render a Controller diagnostic the Qt

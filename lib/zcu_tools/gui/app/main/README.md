@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-26（Predictor dialog persistent close / arbitrary waveform Inspect toolbar entry）
+**Last updated:** 2026-06-26（Agent launch UI removal / Predictor dialog persistent close）
 
 # `zcu_tools/gui/app/main/` — measure-gui Framework AI Note
 
@@ -50,7 +50,6 @@ gui/
 │   ├── staged_analyze.py — _StagedAnalyzeService (analyze/post-analyze 共用基底：OperationRunner client（exclusion=None，handle-only）+ 主線程 record result/figure 經 TabAnalyzeWritePort + 失敗路徑)
 │   ├── analyze.py        — AnalyzeService (主分析層：FIT worker + INTERACTIVE finish；算 writeback items)
 │   ├── post_analyze.py   — PostAnalyzeService (第二分析層，鏡像 AnalyzeService：FIT-only、在 primary analyze 結果之上重算、gate on primary 已存在；State 平行 post_* 欄位)
-│   ├── agent_launcher.py — Qt-free 外部終端 agent launch 服務：`build_loopback_mcp_config`（暫存 mcp.json，repo_root cwd + uv run measure/server.py loopback）、`_EMBEDDED_SYSTEM_PROMPT`（告知 agent「gui_* 工具已自動 attach、勿自呼 gui_bridge_connect、需要狀態自呼 gui_overview」）、`build_claude_argv`（互動模式不帶 -p、`--mcp-config` / `--allowedTools "mcp__measure-gui__*"` / `--append-system-prompt` / `--resume <id>` 或 `--session-id <uuid>`）、`new_session_id`、`record_launched_session`/`list_resumable_sessions`/`claude_project_dir`（追蹤我們 launch 過的 session 於 `~/.cache/zcu-tools/agent_sessions.json`，列表時從 claude `~/.claude/projects/<slug>/*.jsonl` 補 last-active + 首則訊息 label）、`launch_agent_terminal(repo_root, *, resume_session_id=None, bootstrap_prompt=None)`（跨平台 spawn：Linux gnome-terminal/konsole/xterm/x-terminal-emulator 或 `ZCU_AGENT_TERMINAL` 覆寫、macOS `open -a Terminal`、Windows **直接 `subprocess.Popen([claude, *args])` + `CREATE_NEW_CONSOLE`**（**不經** launcher 的 `os.execv` —— execv 在 Windows 把多行 `--append-system-prompt` 重新引號時拆裂、漏一個 prompt 字成 phantom 首訊息「are」；subprocess 正確引號 list。**不用** Store 版 `wt`/`cmd start`；`ZCU_AGENT_TERMINAL` 可覆寫，覆寫與 POSIX 才走 launcher，launcher 在 win32 改用 `subprocess.run` 同避此 bug）；剝除父進程的 Claude Code 編排 env（`ANTHROPIC_API_KEY` + `CLAUDE_CODE_*` / `CLAUDECODE` / `CLAUDE_AGENT_SDK*`，見 `_strip_orchestration_env`，讓子 claude 是乾淨 cli 而非 Desktop-embedded）；argv[0] 由 `resolve_agent_command()` 解析：`ZCU_AGENT_CMD` 覆寫（任何平台，如換 codex）> **PATH 上的獨立 `claude` 優先**（如 `claude install` 裝的）> Windows 退 Claude Desktop 內建 CLI（`_find_desktop_bundled_claude` 找最新版 `%APPDATA%\Claude\claude-code\*\claude.exe`）> 裸 `claude`（fast-fail）。Windows 解析序＝PATH `claude` → Desktop 內建 → fast-fail）
 │   ├── tab.py            — TabService (分頁狀態與 tab-local query/update)
 │   ├── tab_view.py       — TabViewService / TabViewSnapshot (pure tab render read model)
 │   ├── save.py           — SaveService (資料/圖片儲存 pipeline)
@@ -67,8 +66,7 @@ gui/
     ├── fields/             — 渲染邏輯：registry.py / common.py / containers.py
     ├── inspect_dialog.py   — InspectDialog(InspectDialogBase 子類)：補 Arb Waveforms top-toolbar 入口與 ml create/modify（_MlCreateDialog/_MlModifyDialog 拖 CfgEditor）；md tab + ml view/rename/del 在 base（session）
     ├── arb_waveform_dialog.py — ArbWaveformDialog：管理 qubit-scoped arbitrary waveform `.npz` asset；支援 formula segment insert/delete、normalize toggle、保存、rename/delete、debounced normalized I/Q/Abs preview；新建 draft 預設為兩側 half-Gaussian 的 flat-top recipe；ML waveform 建立仍走 Inspect 的正常 create/modify 流程
-    ├── agent_launch_dialog.py — AgentLaunchDialog(QDialog)：可選 resumable session 清單（`list_resumable_sessions`：我們 launch 過的 session + claude jsonl 補 label/last-active、最近在上）+ Resume selected / **Remove**（`remove_recorded_session`：把選中的從 Resume 清單移除，不動 claude transcript）/ New session / Refresh；直接呼 `agent_launcher.launch_agent_terminal(resume_session_id=…|None, bootstrap_prompt=ctrl.build_agent_bootstrap_prompt())`。
-    ├── main_window.py      — MainWindow(QMainWindow) 實作 ViewProtocol；toolbar 有 Agent… 按鈕（開 AgentLaunchDialog）與 Inspect…（Arb Waveforms 入口在 Inspect 內）；named dialog registry 對 Predictor 採 persistent hide-on-close（重開不重算曲線），其餘 dialog 仍 close 後釋放；持 FeedbackPanel（`refresh_feedback_widget` 依 (live op 數 且 `ctrl.has_agent_connected()`) 把單一 app-level panel mount 進 target tab 的 plot_layout / unmount；target tab = running tab，無則 active tab；tab 變則 re-mount；`ExpTabWidget.mount_feedback_panel`/`unmount_feedback_panel` 為 host API）+ `open_notify_prompt` 開 NotifyUserDialog
+    ├── main_window.py      — MainWindow(QMainWindow) 實作 ViewProtocol；toolbar 保留 Setup / Devices / Predictor / Inspect（Arb Waveforms 入口在 Inspect 內）；named dialog registry 對 Predictor 採 persistent hide-on-close（重開不重算曲線），其餘 dialog 仍 close 後釋放；持 FeedbackPanel（`refresh_feedback_widget` 依 (live op 數 且 `ctrl.has_agent_connected()`) 把單一 app-level panel mount 進 target tab 的 plot_layout / unmount；target tab = running tab，無則 active tab；tab 變則 re-mount；`ExpTabWidget.mount_feedback_panel`/`unmount_feedback_panel` 為 host API）+ `open_notify_prompt` 開 NotifyUserDialog
     ├── feedback_widget.py  — FeedbackPanel(_CollapsibleSection)（docked 在 figure 下方、可摺疊的「Send to agent」section，預設展開；非 overlay）；user→agent nudge / Send & Stop；Stop 鈕依 active op 是否有 cancel hook gating，`Controller.can_cancel_active_operation`→`OperationHandles.has_cancel_hook`→`OperationChannel.can_cancel`，無 op-kind 知識，ADR-0025 §Stop-gating；unmount 時 clear_input
     ├── notify_dialog.py    — NotifyUserDialog（`gui_prompt_user` 的 non-modal prompt；dialog 是 timeout SSOT，QTimer fire→`ctrl.timeout_notify`；Reply/Dismiss/window-X/timeout 各呼一次 NotifyChannel producer，ADR-0025）
     └── analyze_form.py     — AnalyzeFormWidget：扁平 analysis 參數表單
@@ -121,17 +119,9 @@ measure / fluxdep / dispersive 三個 GUI app 共用 transport + wire 機制，d
 
 ### Agent 體驗（事件 / 錯誤 / 發現）
 
-#### 外部終端 Agent Launch 架構（ADR-0024）
+#### Agent launch UI 已退役（ADR-0024）
 
-GUI 上的「Agent」按鈕觸發 `AgentLaunchDialog`（可選 resumable session 清單 + Resume selected / New session）→ `build_agent_bootstrap_prompt()` 產生一段**常數 bootstrap 指令**（指示 agent 第一步呼 `gui_overview` 讀 live 狀態、勿假設；**不再 bake project / context / SoC / open tabs 快照**——快照會在 user 一動 GUI 就過時）→ 委 `services/agent_launcher.py` 的 `launch_agent_terminal()` spawn 系統終端（Linux：gnome-terminal/konsole/xterm，macOS：`open -a Terminal`，Windows：**直接 spawn claude（`subprocess.Popen` + `CREATE_NEW_CONSOLE`），不經 launcher 的 `os.execv`**（execv 重新引號會拆裂多行 prompt → phantom 首訊息「are」）；`ZCU_AGENT_TERMINAL` 可覆寫終端；agent CLI 由 `resolve_agent_command()` 解析（`ZCU_AGENT_CMD` 覆寫 → PATH `claude` 優先 → Windows 退 Claude Desktop 內建 CLI → fast-fail））。
-
-終端內跑**真互動式 `claude`**（不是 headless subprocess）：
-- 經 `--mcp-config`（暫存 loopback mcp.json）掛上 GUI control socket；首次 `gui_*` 呼叫即由 lazy auto-connect 自動 attach。
-- `--allowedTools "mcp__measure-gui__*"` 限制工具範圍。
-- bootstrap 指令以 `--append-system-prompt` 接在 `_EMBEDDED_SYSTEM_PROMPT` 之後——指示 agent 第一步呼 `gui_overview` 讀 live 狀態（含 `project` 欄位），**不烤入會過時的快照資料**。
-- **New**：生成新 `session_id`（`--session-id <uuid>`）並 `record_launched_session` 進 `~/.cache/zcu-tools/agent_sessions.json`。
-- **Resume**：從清單（`list_resumable_sessions`：我們 launch 過的 session、依 claude jsonl 補 last-active + 首則訊息 label、最近在上）選一個，帶 `--resume <id>` 接回。
-- **中斷**：終端原生 Ctrl-C / Esc。
+measure-gui 不再提供 toolbar「Agent」按鈕、`AgentLaunchDialog` 或 `services/agent_launcher.py`。Agent session 由外部 CLI/MCP 入口自行啟動並透過既有 measure-gui control socket 連線；GUI 端只保留 runtime control surface，不再負責 spawn terminal、記錄 resumable session 或注入 bootstrap prompt。
 - **跨線程互動（user↔agent，ADR-0025）**：cooperative-interrupt 走 per-op `OperationChannel`（取代舊 ADR-0023 `FeedbackInbox` + poll-loop）。GUI 端的 `FeedbackPanel`（docked 在 target tab figure 下方的可摺疊 section，**只在有 live op 且 MCP control client 連線時 mount**＝agent 在驅動時才出現，C3）讓 user 在 op 進行中對 active op 注入 nudge（`Message`，op 續跑、agent 收 `user_feedback`）或 Send & Stop（`Stop(reason)`，依 cancel-hook gating）；`await_outcome` 消費 channel 依到達序折疊成 AwaitResult。client 連線/斷線經 `NdjsonRpcEndpoint.has_live_client()` + queued dispatch 在主線程刷新 widget。反向（agent→user）走獨立的 `NotifyChannel`（`gui_prompt_user` → notify.open/await wire → `NotifyUserDialog` prompt，事件 Reply/Dismiss/Timeout）。
 
 - **Run / Device-setup 生命週期（對齊，wire v10）**：`RUN_STARTED{tab_id}`+`RUN_FINISHED{tab_id,outcome,error_message}` 與 `DEVICE_SETUP_STARTED{name}`+`DEVICE_SETUP_FINISHED{name,outcome,error_message}` 同構（一事件一語義+outcome，拆自舊 RUN_LOCK_CHANGED / DEVICE_SETUP_CHANGED）。進度走 `operation.progress(operation_id)`（run+device 通用，按 id 查；`{active,bars}` 形狀，主線程 `ProgressBarModel` 實時算 format/percent + raw n/total；折進 `gui_*_poll` running 回傳）；進度純拉不發 event（高頻），完成才發 *_finished。**progress 由唯一 `ProgressService` 持有**（Phase 111，見下「Progress 子系統」）：container 生死綁 operation（discard_operation 於終局），View 經 owner_id（tab_id/device_name）attach 一次、跟隨 operation 輪替 → 關 dialog 不銷毀進度（container 在 service 仍活，重開 re-attach 即見）。

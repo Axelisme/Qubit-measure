@@ -67,4 +67,4 @@
 
 - [0022 — orchestrator-owned worktree protocol](0022-agent-coordination-worktree.md)：多 agent / 長線 orchestration 使用 `.agent_state/` 下的一 task 一 worktree、state.json、reports 與 plans；orchestrator 建立/指派/驗證/合併，taskboard MCP 不再使用。
 - [0023 — Cooperative interrupt：feedback 喚醒 pending wait](0023-cooperative-interrupt-feedback-wakeup.md)：**（已被 [[0025]] 取代）** 原設計給單一共用 await 加 thread-safe feedback inbox 作第二喚醒源；其「多 channel + 時序敏感 combine」形狀會生 race，由 [[0025]] 的單一有序 channel 取代。
-- [0024 — 外部終端 agent launch 架構](0024-embedded-agent-session-architecture.md)：measure-gui「Agent」按鈕 spawn 系統終端跑真互動式 claude，經 loopback mcp.json 操作 GUI；GUI 狀態烤進 `--append-system-prompt`；`--resume` 持久（last session id 存 cache 檔）；跨平台終端 spawn + `ZCU_AGENT_CMD`；lazy auto-connect 靠既有 mcp server；Ctrl-C 原生中斷。取代原內嵌 stream-json 設計。
+- [0024 — Agent launch UI 退役](0024-embedded-agent-session-architecture.md)：**（已退役）** measure-gui 不再提供 toolbar「Agent」按鈕、`AgentLaunchDialog` 或 `services/agent_launcher.py`；agent 啟動責任回到外部 CLI/MCP workflow。runtime `FeedbackPanel` / Send / Send & Stop / `gui_prompt_user` 保留，由 [[0025]] 定義。

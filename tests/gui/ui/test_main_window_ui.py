@@ -444,6 +444,7 @@ def test_main_window_toolbar_does_not_show_arb_waveforms(qapp):
     texts = {button.text() for button in window.findChildren(QPushButton)}
 
     assert "Inspect…" in texts
+    assert "Agent…" not in texts
     assert "Arb Waveforms…" not in texts
 
 

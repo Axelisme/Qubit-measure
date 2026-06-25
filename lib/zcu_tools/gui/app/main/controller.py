@@ -1269,25 +1269,6 @@ class Controller(SessionControllerMixin):
         """
         return self._notify_handles.await_result(token, timeout)
 
-    def build_agent_bootstrap_prompt(self) -> str:
-        """Render the bootstrap directive injected into a launched agent's prompt.
-
-        Appended to the launched ``claude`` system prompt so the agent's FIRST
-        action is to read the live GUI picture instead of trusting any baked-in
-        snapshot. Intentionally carries NO project / context / SoC / tab DATA —
-        a snapshot frozen at launch time goes stale the moment the user touches
-        the GUI; the agent must read the live state over the wire.
-
-        A constant directive (no GUI getters), so it can never crash the launch.
-        """
-        return (
-            "Before doing anything else, read the live GUI state with the "
-            "gui_overview tool (it returns the current project / context / soc / "
-            "open tabs / what is running) — and re-read it with gui_overview "
-            "whenever you need to know the state. Do NOT assume "
-            "any state; this prompt carries no snapshot."
-        )
-
     # ------------------------------------------------------------------
     # Startup application workflow (StartupService)
     # ------------------------------------------------------------------
