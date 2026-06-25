@@ -113,8 +113,8 @@ def test_ss_len_rabi_build_exp_cfg_passes_correct_model() -> None:
     adapter = SsLenRabiAdapter()
     schema = adapter.make_default_cfg(_make_ctx(ml))
     raw = schema.to_raw_dict(None, ml)
-    adapter.build_exp_cfg(raw, _run_req(_md_with_centers(), ml))
-    ml.make_cfg.assert_called_once_with(raw, LenRabiCfg)
+    cfg = adapter.build_exp_cfg(raw, _run_req(_md_with_centers(), ml))
+    assert isinstance(cfg, LenRabiCfg)
 
 
 def test_ss_t1_cfg_validates() -> None:

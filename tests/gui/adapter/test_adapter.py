@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import cast
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
@@ -746,7 +746,7 @@ def test_base_adapter_analyze_raises_by_default():
 
 
 def test_base_adapter_build_exp_cfg_delegates_to_make_cfg():
-    """ExpCfg_cls set → default build_exp_cfg delegates to ml.make_cfg."""
+    """ExpCfg_cls set → default build_exp_cfg delegates to cfg_assembler.make_cfg."""
 
     class _Cfg:
         pass
@@ -768,9 +768,11 @@ def test_base_adapter_build_exp_cfg_delegates_to_make_cfg():
 
     req = MagicMock()
     sentinel = object()
-    req.ml.make_cfg.return_value = sentinel
-    out = _Adapter().build_exp_cfg({"reps": 1}, req)
-    req.ml.make_cfg.assert_called_once_with({"reps": 1}, _Cfg)
+    with patch(
+        "zcu_tools.experiment.v2_gui.adapters.base.make_cfg", return_value=sentinel
+    ) as make_cfg:
+        out = _Adapter().build_exp_cfg({"reps": 1}, req)
+    make_cfg.assert_called_once_with({"reps": 1}, _Cfg, ml=req.ml)
     assert out is sentinel
 
 

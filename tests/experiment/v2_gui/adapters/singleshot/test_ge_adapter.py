@@ -103,8 +103,8 @@ def test_ge_round_trip_delegates_to_make_cfg() -> None:
     # shots present; the domain copies it into reps at run.
     assert raw["shots"] == 100000
 
-    adapter.build_exp_cfg(raw, _make_req(ml))
-    ml.make_cfg.assert_called_once_with(raw, GE_Cfg)
+    cfg = adapter.build_exp_cfg(raw, _make_req(ml))
+    assert isinstance(cfg, GE_Cfg)
 
 
 def test_ge_default_adopts_library_readout() -> None:

@@ -48,7 +48,7 @@ def _lower(schema: CfgSchema, req: RunRequest) -> dict[str, object]:
     return schema.to_raw_dict(None, req.ml)
 
 
-def test_onetone_freq_build_exp_cfg_delegates_to_ml_make_cfg() -> None:
+def test_onetone_freq_build_exp_cfg_uses_cfg_assembler() -> None:
     ml = _make_ml()
     adapter = OneToneFreqAdapter()
     raw = _lower(adapter.make_default_cfg(_make_ctx(ml)), _make_req(ml))
@@ -63,8 +63,8 @@ def test_onetone_freq_build_exp_cfg_delegates_to_ml_make_cfg() -> None:
     ro_cfg = cast(dict[str, Any], readout["ro_cfg"])
     assert "gen_ch" not in ro_cfg
 
-    adapter.build_exp_cfg(raw, _make_req(ml))
-    ml.make_cfg.assert_called_once_with(raw, FreqCfg)
+    cfg = adapter.build_exp_cfg(raw, _make_req(ml))
+    assert isinstance(cfg, FreqCfg)
 
 
 @pytest.mark.parametrize(

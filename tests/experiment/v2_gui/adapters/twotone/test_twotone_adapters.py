@@ -65,7 +65,7 @@ def _lower(schema: CfgSchema, req: RunRequest) -> dict[str, object]:
         (T1Adapter(), T1Cfg),
     ],
 )
-def test_twotone_build_exp_cfg_delegates_to_ml_make_cfg(
+def test_twotone_build_exp_cfg_uses_cfg_assembler(
     adapter: Any, cfg_model: type
 ) -> None:
     ml = _make_ml()
@@ -77,8 +77,8 @@ def test_twotone_build_exp_cfg_delegates_to_ml_make_cfg(
     assert "readout" in modules
     assert "reset" not in modules  # optional reset disabled by default in tests
 
-    adapter.build_exp_cfg(raw, _make_req(ml))
-    ml.make_cfg.assert_called_once_with(raw, cfg_model)
+    cfg = adapter.build_exp_cfg(raw, _make_req(ml))
+    assert isinstance(cfg, cfg_model)
 
 
 @pytest.mark.parametrize(
@@ -126,7 +126,7 @@ def test_t2_build_exp_cfg_strips_detune_ratio(adapter: Any, cfg_model: type) -> 
         (PowerDepAdapter(), PowerCfg),
     ],
 )
-def test_twotone_2d_build_exp_cfg_delegates_to_ml_make_cfg(
+def test_twotone_2d_build_exp_cfg_uses_cfg_assembler(
     adapter: Any, cfg_model: type
 ) -> None:
     ml = _make_ml()
@@ -138,8 +138,8 @@ def test_twotone_2d_build_exp_cfg_delegates_to_ml_make_cfg(
     assert isinstance(sweep["gain"], SweepCfg)
     assert isinstance(sweep["freq"], SweepCfg)
 
-    adapter.build_exp_cfg(raw, _make_req(ml))
-    assert ml.make_cfg.call_args.args[1] is cfg_model
+    cfg = adapter.build_exp_cfg(raw, _make_req(ml))
+    assert isinstance(cfg, cfg_model)
 
 
 def test_twotone_freq_sweep_contains_freq() -> None:
