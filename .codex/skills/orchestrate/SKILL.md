@@ -133,6 +133,11 @@ git worktree add .agent_state/worktrees/trees/<task-id>--integration -b agent/<t
 
 跨 lane 的 write scope 也要明確不重疊；若兩個 lane 都需要碰同一檔案、同一 public API 或同一測試 fixture，合併到同一 lane 序列化。不要假設 Codex、Claude Code、opencode 或任何 runtime 內建 sub-agent 會自動建立或切換 worktree。需要 worktree 隔離時，由 orchestrator 顯式建立並把 workdir 傳給 agent。
 
+### 驗證環境注意事項
+
+- 如果 task / lane worktree 需要建立自己的 `.venv`，必須用專案的 `development` extra 建立，例如 `uv sync --extra development`（或等價的 `.venv/bin/python -m pip install -e ".[development]"`）。只建立基礎 venv 會缺 `pytest` / `pytest-xdist`，導致收尾驗證無法跑 `pytest`。
+- 收尾驗證中的 `pyright` / `ruff` 一律在目標 workdir 用 `uv run` 執行，例如 `uv run pyright`、`uv run ruff check .`、`uv run ruff format .`，避免吃到系統或其它 worktree 的工具版本。
+
 ### 整合與線性收尾
 
 1. 收齊 reports，讀懂變更理由、測試結果與風險。
