@@ -31,11 +31,12 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.background import BackgroundRunner
-from zcu_tools.notebook.analysis.fluxdep.processing import (
+from zcu_tools.analysis.fluxdep import (
     cast2real_and_norm,
     downsample_points,
+    points_in_normalized_brush,
 )
+from zcu_tools.gui.background import BackgroundRunner
 from zcu_tools.notebook.persistance import SpectrumResult
 
 from .base import InteractiveMplWidget
@@ -279,9 +280,15 @@ class SelectorWidget(InteractiveMplWidget):
         if event.xdata is None or event.ydata is None:
             return
         x, y, width = float(event.xdata), float(event.ydata), self._width_val()
-        x_d = np.abs(self._s_fluxs - x) / (self._flux_bound[1] - self._flux_bound[0])
-        y_d = np.abs(self._s_freqs - y) / (self._freq_bound[1] - self._freq_bound[0])
-        toggle = x_d**2 + y_d**2 <= width**2
+        toggle = points_in_normalized_brush(
+            self._s_fluxs,
+            self._s_freqs,
+            x=x,
+            y=y,
+            width=width,
+            x_bound=self._flux_bound,
+            y_bound=self._freq_bound,
+        )
         self._selected[toggle] = self._operation_select()
         self._show_temp_circle(x, y, width)
         self.apply_filter()
@@ -313,10 +320,11 @@ class SelectorWidget(InteractiveMplWidget):
         )
         self._ax.add_patch(self._temp_circle)
 
-        self._temp_timer = QTimer(self)
-        self._temp_timer.setSingleShot(True)
-        self._temp_timer.timeout.connect(self._remove_temp_circle)
-        self._temp_timer.start(1000)
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.timeout.connect(self._remove_temp_circle)
+        self._temp_timer = timer
+        timer.start(1000)
 
     def _remove_temp_circle(self) -> None:
         if self._temp_circle is not None:

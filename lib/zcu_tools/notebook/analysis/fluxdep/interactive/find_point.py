@@ -6,7 +6,11 @@ import numpy as np
 from IPython.display import clear_output, display
 from numpy.typing import NDArray
 
-from ..processing import cast2real_and_norm, spectrum2d_findpoint
+from zcu_tools.analysis.fluxdep import (
+    cast2real_and_norm,
+    spectrum2d_findpoint,
+    toggle_near_mask,
+)
 
 
 class InteractiveFindPoints:
@@ -168,15 +172,17 @@ class InteractiveFindPoints:
         self.spectrum_img.autoscale()
 
     def toggle_near_mask(self, x, y, width, mask, mode) -> None:
-        x_d = np.abs(self.dev_values - x) / (self.dev_values[-1] - self.dev_values[0])
-        y_d = np.abs(self.freqs - y) / (self.freqs[-1] - self.freqs[0])
-        d2 = x_d[:, None] ** 2 + y_d[None, :] ** 2
-
-        weight = d2 <= width**2
-        if mode == "Select":
-            mask |= weight
-        elif mode == "Erase":
-            mask &= ~weight
+        if mode not in {"Select", "Erase"}:
+            raise ValueError(f"unknown mask operation: {mode!r}")
+        toggle_near_mask(
+            self.dev_values,
+            self.freqs,
+            mask,
+            x,
+            y,
+            width,
+            select=mode == "Select",
+        )
 
     def on_ratio_change(self, _) -> None:
         if self.is_finished:

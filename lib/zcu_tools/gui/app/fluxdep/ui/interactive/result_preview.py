@@ -19,8 +19,8 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.analysis.fluxdep import cast2real_and_norm
 from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
-from zcu_tools.notebook.analysis.fluxdep.processing import cast2real_and_norm
 
 from .display import contrast_limits
 

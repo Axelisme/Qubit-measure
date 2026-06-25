@@ -1,6 +1,6 @@
 # fluxdep 模塊重點文檔
 
-**Last updated:** 2026-06-23（wavelet smoothing in spectrum preprocessing）
+**Last updated:** 2026-06-25（analysis kernel delegation）
 
 本模塊提供 Fluxonium 通量依賴光譜（flux-dependent spectrum）的擬合、資料處理、
 與互動式標註工具。搭配 `notebook_md/analysis/fluxdep_fit.md` 使用。
@@ -13,14 +13,19 @@ fluxdep/
 ├── models.py          # 能量 → 躍遷頻率的線性形式轉換
 ├── fitting.py         # 資料庫搜索 + least-squares 微調
 ├── njit.py            # numba JIT 核心：energy2linearform_nb、eval_dist_bounded、candidate_breakpoint_search、entry_lower_bound、_lower_bound_kernel、search_one_entry 等
-├── processing.py      # 2D 頻譜峰值偵測 / 信號預處理
-├── onetone.py         # InteractiveOneTone：onetone 峰值挑點 GUI
+├── processing.py      # re-export zcu_tools.analysis.fluxdep processing kernel
+├── onetone.py         # InteractiveOneTone：onetone 峰值挑點 notebook adapter
 ├── utils.py           # 繪圖工具（plotly 可視化）
 └── interactive/       # matplotlib + ipywidgets 互動式工具
     ├── find_line.py    # InteractiveLines：拖曳半通量/整通量定標
     ├── find_point.py   # InteractiveFindPoints：筆刷式選取光譜點
-    └── point_select.py # InteractiveSelector：多光譜點選擇/過濾
+    ├── point_select.py # InteractiveSelector：多光譜點選擇/過濾
+    └── two_line_picker.py # re-export shared TwoLinePicker kernel
 ```
+
+共用的 Flux-Dependence Analysis 選點/filtering/line selection/one-tone peak detection
+規則位於 `zcu_tools.analysis.fluxdep`（ADR-0028）。Notebook 這層保留 fitting/model/visualizer
+與 ipywidgets shell；被抽出的互動與 processing API 透過 thin re-export 或 adapter 呼叫 kernel。
 
 ## 核心物理模型（`models.py`）
 
@@ -82,6 +87,9 @@ fluxdep/
 這裡負責精修。
 
 ## 資料處理（`processing.py`）
+
+`processing.py` 是 `zcu_tools.analysis.fluxdep.processing` 的 re-export，保留 notebook 既有 import
+路徑；共用 domain 規則不在 notebook adapter 內維護。
 
 - `cast2real_and_norm(signals, use_phase=True, sigma=1, smooth_method="wavelet")`：
   預設減去每列平均（去除 flux-independent background），沿頻率軸做 wavelet smoothing 後取 `|signal|` 並按列 std 歸一化；`smooth_method="gaussian"` 保留為舊行為對照。`use_phase=False` 退回純 magnitude 模式。

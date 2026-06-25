@@ -7,9 +7,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 from IPython.display import clear_output, display
 from numpy.typing import NDArray
-from scipy.signal import find_peaks
 
-from zcu_tools.utils.process import smooth_signal1d
+from zcu_tools.analysis.fluxdep import (
+    detect_peaks,
+    max_dispersion_freq_index,
+    smoothed_slice,
+)
 
 
 class InteractiveOneTone:
@@ -64,18 +67,7 @@ class InteractiveOneTone:
         # 顯示2D頻譜
         self.real_signals = np.abs(self.signals)  # (mAs, freqs)
 
-        abs_grad = (
-            np.abs(self.signals[:, 1:] - self.signals[:, :-1])
-            / (self.freqs[1:] - self.freqs[:-1])[None]
-        )
-        rel_grad = abs_grad / (
-            np.clip(np.abs(self.signals[:, 1:] + self.signals[:, :-1]), 1e-12, None)
-        )
-        rel_grad = smooth_signal1d(rel_grad, method="wavelet", sigma=1.0, axis=1)
-
-        self.max_freq_idx = min(
-            int(np.argmax(np.mean(rel_grad, axis=0))) + 1, len(self.freqs) - 1
-        )
+        self.max_freq_idx = max_dispersion_freq_index(self.signals, self.freqs)
 
         self.img = self.axes[0].imshow(
             self.real_signals.T,
@@ -96,13 +88,7 @@ class InteractiveOneTone:
 
         # 顯示1D切面
         self.real_signals_slice = self.real_signals[:, self.max_freq_idx]  # (mAs,)
-
-        self.smoothed_real_signals = smooth_signal1d(
-            np.max(self.real_signals_slice) - self.real_signals_slice,
-            method="wavelet",
-            sigma=1.0,
-        )
-        self.smoothed_real_signals /= np.std(self.smoothed_real_signals)
+        self.smoothed_real_signals = smoothed_slice(self.signals, self.max_freq_idx)
 
         (self.curve,) = self.axes[1].plot(self.dev_values, self.smoothed_real_signals)
         self.axes[1].set_xlim(self.dev_values[0], self.dev_values[-1])
@@ -119,7 +105,7 @@ class InteractiveOneTone:
         """更新峰值點"""
 
         # 找出峰值
-        peaks, _ = find_peaks(self.smoothed_real_signals, prominence=threshold)
+        peaks = detect_peaks(self.smoothed_real_signals, threshold)
 
         # 獲取對應的 mAs 和 freqs
         self.s_dev_values = self.dev_values[peaks]

@@ -1,10 +1,8 @@
 """OneToneWidget — one-tone point selection by threshold (no mouse interaction).
 
-The simplest interactive tool, used to validate the InteractiveMplWidget base:
-a threshold slider drives automatic peak detection on the most-dispersive
-frequency slice. The numerical core is reused verbatim from the notebook's
-InteractiveOneTone (gradient → max-dispersion frequency → smoothed slice →
-scipy find_peaks); only the ipywidgets shell becomes Qt.
+The simplest interactive tool: a threshold slider drives automatic peak
+detection on the most-dispersive frequency slice. The numerical rules live in
+``zcu_tools.analysis.fluxdep``; this widget only renders Qt controls/canvas.
 """
 
 from __future__ import annotations
@@ -13,55 +11,18 @@ import numpy as np
 from numpy.typing import NDArray
 from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
 from qtpy.QtWidgets import QLabel, QSlider, QWidget  # type: ignore[attr-defined]
-from scipy.signal import find_peaks
 
-from zcu_tools.utils.process import smooth_signal1d
+from zcu_tools.analysis.fluxdep import (
+    detect_peaks,
+    max_dispersion_freq_index,
+    smoothed_slice,
+)
 
 from .base import InteractiveMplWidget
 
 # FloatSlider(0..5, step 0.01) emulated on an int QSlider scaled by 100.
 _THRESHOLD_SCALE = 100
 _THRESHOLD_MAX = 5.0
-
-
-def max_dispersion_freq_index(
-    signals: NDArray[np.complex128], freqs: NDArray[np.float64]
-) -> int:
-    """Index of the frequency with the largest mean relative dispersion.
-
-    Pure port of InteractiveOneTone.init_plots: the relative gradient of the
-    complex signal along frequency, denoised, averaged over device values, and
-    mapped from the adjacent-bin gradient index onto a frequency-bin index.
-    """
-    abs_grad = (
-        np.abs(signals[:, 1:] - signals[:, :-1]) / ((freqs[1:] - freqs[:-1])[None])
-    )
-    rel_grad = abs_grad / np.clip(np.abs(signals[:, 1:] + signals[:, :-1]), 1e-12, None)
-    rel_grad = smooth_signal1d(rel_grad, method="wavelet", sigma=1.0, axis=1)
-    return min(int(np.argmax(np.mean(rel_grad, axis=0))) + 1, len(freqs) - 1)
-
-
-def smoothed_slice(
-    signals: NDArray[np.complex128], freq_idx: int
-) -> NDArray[np.float64]:
-    """The normalised, inverted, smoothed amplitude slice at ``freq_idx``."""
-    real_slice = np.abs(signals)[:, freq_idx]
-    smoothed = smooth_signal1d(
-        np.max(real_slice) - real_slice, method="wavelet", sigma=1.0
-    )
-    std = np.std(smoothed)
-    if std == 0.0:
-        # A perfectly flat slice (no dispersion at this frequency) — normalising
-        # would divide by zero; return the flat (all-zero) slice so peak finding
-        # simply yields nothing rather than NaNs.
-        return np.zeros_like(smoothed)
-    return smoothed / std
-
-
-def detect_peaks(smoothed: NDArray[np.float64], threshold: float) -> NDArray[np.intp]:
-    """Peak indices of ``smoothed`` with prominence ≥ ``threshold``."""
-    peaks, _ = find_peaks(smoothed, prominence=threshold)
-    return peaks
 
 
 class OneToneWidget(InteractiveMplWidget):

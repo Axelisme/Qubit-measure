@@ -9,9 +9,10 @@ from IPython.display import clear_output, display
 from matplotlib.patches import Ellipse
 from numpy.typing import NDArray
 
-from zcu_tools.notebook.analysis.fluxdep.processing import (
+from zcu_tools.analysis.fluxdep import (
     cast2real_and_norm,
     downsample_points,
+    points_in_normalized_brush,
 )
 from zcu_tools.notebook.persistance import SpectrumResult
 
@@ -180,9 +181,15 @@ class InteractiveSelector:
         self.scatter.set_array(self.get_cur_selected().astype(float))
 
     def toggle_near_mask(self, x, y, width):
-        x_d = np.abs(self.s_fluxs - x) / (self.flux_bound[1] - self.flux_bound[0])
-        y_d = np.abs(self.s_freqs - y) / (self.freq_bound[1] - self.freq_bound[0])
-        toggle_mask = x_d**2 + y_d**2 <= width**2
+        toggle_mask = points_in_normalized_brush(
+            self.s_fluxs,
+            self.s_freqs,
+            x=x,
+            y=y,
+            width=width,
+            x_bound=(float(self.flux_bound[0]), float(self.flux_bound[1])),
+            y_bound=(float(self.freq_bound[0]), float(self.freq_bound[1])),
+        )
 
         self.selected[toggle_mask] = self.operation_tb.value == "Select"
 
