@@ -1,6 +1,6 @@
 # AI Note for `tests/`
 
-**Last updated:** 2026-06-24 — taskboard MCP removal
+**Last updated:** 2026-06-25 — fluxdep analysis kernel tests
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -107,6 +107,8 @@ tests/
 │           ├── test_registry.py
 │           └── test_util.py
 ├── experiment/v2/runner/           # 高層 runner / task 狀態機測試
+├── analysis/
+│   └── fluxdep/                    # Flux-Dependence Analysis kernel tests
 ├── mcp/                            # MCP bridge、call-log、remote schema / ARRAY param regression tests
 ├── notebook/analysis/fluxdep/      # Fluxonium 光譜分析模型測試
 └── utils/fitting/                  # 曲線擬合工具測試

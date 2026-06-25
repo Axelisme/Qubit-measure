@@ -27,11 +27,12 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.background import BackgroundRunner
-from zcu_tools.notebook.analysis.fluxdep.processing import (
+from zcu_tools.analysis.fluxdep import (
     cast2real_and_norm,
     spectrum2d_findpoint,
+    toggle_near_mask,
 )
+from zcu_tools.gui.background import BackgroundRunner
 
 from .base import InteractiveMplWidget
 from .display import contrast_limits
@@ -39,31 +40,6 @@ from .display import contrast_limits
 logger = logging.getLogger(__name__)
 
 _SCALE = 1000  # int-QSlider scale for float sliders
-
-
-def toggle_near_mask(
-    dev_values: NDArray[np.float64],
-    freqs: NDArray[np.float64],
-    mask: NDArray[np.bool_],
-    x: float,
-    y: float,
-    width: float,
-    select: bool,
-) -> None:
-    """In-place select/erase the mask within a normalised circular brush.
-
-    Pure port of InteractiveFindPoints.toggle_near_mask: points whose normalised
-    (dev, freq) distance² to (x, y) is ≤ width² are set (select) or cleared
-    (erase).
-    """
-    x_d = np.abs(dev_values - x) / (dev_values[-1] - dev_values[0])
-    y_d = np.abs(freqs - y) / (freqs[-1] - freqs[0])
-    d2 = x_d[:, None] ** 2 + y_d[None, :] ** 2
-    region = d2 <= width**2
-    if select:
-        mask |= region
-    else:
-        mask &= ~region
 
 
 class FindPointsWidget(InteractiveMplWidget):

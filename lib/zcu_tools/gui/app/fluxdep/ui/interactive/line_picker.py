@@ -1,9 +1,9 @@
 """LinePickerWidget — pick the half-flux and integer-flux lines on a 2D spectrum.
 
-Thin Qt chrome around the toolkit-agnostic ``TwoLinePicker`` core (in
-``zcu_tools.notebook.analysis.fluxdep.interactive.two_line_picker``): the canvas
-is a Qt-embedded FigureCanvasQTAgg, the conjugate toggle, swap / auto-align
-buttons and the info label are Qt widgets wired to the core, and
+Thin Qt chrome around the toolkit-agnostic ``TwoLinePicker`` kernel (in
+``zcu_tools.analysis.fluxdep``): the canvas is a Qt-embedded FigureCanvasQTAgg,
+the conjugate toggle, swap / auto-align buttons and the info label are Qt
+widgets wired to the core, and
 ``get_result`` returns the core's picked positions. The core is passive (it only
 mutates state), so this widget repaints (``_repaint``) after each interaction it
 drives. measure-gui drives the same core through its own interactive analysis
@@ -24,7 +24,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.notebook.analysis.fluxdep.interactive.two_line_picker import (
+from zcu_tools.analysis.fluxdep import (
     TwoLinePicker,
     find_best_mirror_position,
     fold_initial_lines,
@@ -89,9 +89,10 @@ class LinePickerWidget(InteractiveMplWidget):
         align_button.clicked.connect(self._on_auto_align)
         self.controls_layout.addWidget(align_button)
 
-        self._info = QLabel(self._picker.info_text())
-        self._info.setWordWrap(True)
-        self.controls_layout.addWidget(self._info)
+        info = QLabel(self._picker.info_text())
+        info.setWordWrap(True)
+        self._info = info
+        self.controls_layout.addWidget(info)
 
         self.add_finish_button()
 
