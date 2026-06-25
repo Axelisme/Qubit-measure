@@ -980,7 +980,8 @@ def test_debug_operations_dumps_handle_cache(monkeypatch):
         raise AssertionError(f"gui_debug_operations must not call the wire: {method}")
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {"tab:t1": 42, "device:flux": 7})
+    mcp_server._SESSION.operation_handles.clear()
+    mcp_server._SESSION.operation_handles.update({"tab:t1": 42, "device:flux": 7})
     out = mcp_server.TOOLS["gui_debug_operations"]["handler"]({})
     assert out == {
         "handles": {
@@ -1182,7 +1183,8 @@ def test_analyze_degrades_to_pending_when_not_settled(monkeypatch):
     A pending reply must NOT include 'figure' (nothing settled yet — MCP 46)."""
     from zcu_tools.mcp.measure import server as mcp_server
 
-    monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {"analyze:t1": 9})
+    mcp_server._SESSION.operation_handles.clear()
+    mcp_server._SESSION.operation_handles.update({"analyze:t1": 9})
 
     def fake_send(method, params, timeout_seconds=30.0):
         del timeout_seconds, params
@@ -1313,7 +1315,6 @@ def test_stale_error_message_names_changed_resources(monkeypatch):
         }
 
     monkeypatch.setattr(mcp_server._BRIDGE, "send_rpc_raw", fake_raw)
-    monkeypatch.setattr(mcp_server, "_refresh_versions", lambda: None)
     # send_gui_rpc lazily auto-connects on the first call; here we test the
     # stale-message translation on an already-connected bridge, so short-circuit
     # _ensure_connected by reporting a live socket.
@@ -1406,7 +1407,8 @@ def test_run_start_pending_has_no_figure(monkeypatch):
     only exists once the run settles (MCP 46)."""
     from zcu_tools.mcp.measure import server as mcp_server
 
-    monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {"tab:slow-1": 5})
+    mcp_server._SESSION.operation_handles.clear()
+    mcp_server._SESSION.operation_handles.update({"tab:slow-1": 5})
 
     def fake_send(method, params, timeout_seconds=30.0):
         del timeout_seconds, params
@@ -1775,7 +1777,8 @@ def test_run_pending_run_owes_figure_and_omits_analyze_params(monkeypatch):
     analyze_params (nothing settled to analyze yet); 'owed' names the deferred read."""
     from zcu_tools.mcp.measure import server as mcp_server
 
-    monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {"tab:stage-tab": 5})
+    mcp_server._SESSION.operation_handles.clear()
+    mcp_server._SESSION.operation_handles.update({"tab:stage-tab": 5})
     calls: list[str] = []
 
     def fake_send(method, params, timeout_seconds=30.0):
@@ -2008,7 +2011,8 @@ def test_analyze_review_pending_interactive_owes_and_omits_folds(monkeypatch):
     NOTHING (no figure, no writeback preview) and names the deferred reads in 'owed'."""
     from zcu_tools.mcp.measure import server as mcp_server
 
-    monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {"analyze:az-1": 9})
+    mcp_server._SESSION.operation_handles.clear()
+    mcp_server._SESSION.operation_handles.update({"analyze:az-1": 9})
     calls: list[str] = []
 
     def fake_send(method, params, timeout_seconds=30.0):

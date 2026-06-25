@@ -7,8 +7,9 @@ _LAST_SEEN after every successful RPC) without a real GUI.
 
 Post-E4/F: socket I/O lives behind the McpBridge transport seam — tests inject a
 synchronous ``FakeTransport`` (no socket, no thread) and run the bridge's REAL
-``send_rpc_raw``; the mcp policy (``send_gui_rpc`` / ``_LAST_SEEN`` / guard) stays
-on ``mcp_server`` and is asserted there. No socket internals are patched.
+``send_rpc_raw``; the measure MCP session policy (``send_gui_rpc`` /
+``_LAST_SEEN`` / guard) is asserted through ``mcp_server``. No socket internals
+are patched.
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ from ._helpers import FakeTransport
 
 
 @pytest.fixture()
-def wired(monkeypatch):
+def wired():
     """Inject a FakeTransport into the bridge; reset the guard baseline.
 
     Returns a dict you populate as ``{method: reply_envelope}``; ``["sent"]``
@@ -31,11 +32,12 @@ def wired(monkeypatch):
     """
     fake = FakeTransport()
     mcp_server._BRIDGE.set_transport(fake)
-    monkeypatch.setattr(mcp_server, "_LAST_SEEN", {}, raising=False)
+    mcp_server._SESSION.clear_policy_state()
     replies: dict[str, dict[str, Any]] = fake.replies
     replies["sent"] = fake.sent  # type: ignore[assignment]
     yield replies
     mcp_server._BRIDGE.set_transport(None)
+    mcp_server._SESSION.clear_policy_state()
 
 
 def _versions_reply(table: dict[str, int]) -> dict[str, Any]:

@@ -21,12 +21,13 @@ from ._helpers import FakeTransport
 
 
 @pytest.fixture()
-def disconnected(monkeypatch):
+def disconnected():
     """Bridge with no live socket + a clean guard baseline."""
     mcp_server._BRIDGE.set_transport(None)
-    monkeypatch.setattr(mcp_server, "_LAST_SEEN", {}, raising=False)
+    mcp_server._SESSION.clear_policy_state()
     yield
     mcp_server._BRIDGE.set_transport(None)
+    mcp_server._SESSION.clear_policy_state()
 
 
 def _versions_reply(table: dict[str, int]) -> dict[str, Any]:
@@ -110,7 +111,7 @@ def test_does_not_reconnect_when_already_connected(monkeypatch):
     fake.replies["state.has_soc"] = {"ok": True, "result": {"value": True}}
     fake.replies["resources.versions"] = _versions_reply({})
     mcp_server._BRIDGE.set_transport(fake)
-    monkeypatch.setattr(mcp_server, "_LAST_SEEN", {}, raising=False)
+    mcp_server._SESSION.clear_policy_state()
 
     def _boom(*_a, **_k):
         raise AssertionError("must not re-attach when already connected")

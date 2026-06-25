@@ -25,10 +25,8 @@ import importlib.util
 import json
 import logging
 import sys
-import threading
 import time
-from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, MutableMapping
 from pathlib import Path
 from tempfile import gettempdir
 from typing import Any
@@ -80,6 +78,14 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
     run_stdio_loop,
 )
 from zcu_tools.mcp.core.call_log import wrap_handler  # noqa: E402
+from zcu_tools.mcp.measure.session import (  # noqa: E402
+    GuiRpcError,
+    MeasureMcpSession,
+)
+from zcu_tools.mcp.measure.session_policy import (  # noqa: E402
+    describe_stale_keys,
+    expand_pattern_keys,
+)
 
 # ``MCP_VERSION`` is this MCP bridge's own code revision (the mcp_server / tool
 # layer, NOT the wire contract). It is REPORTED — never compared — in the version
@@ -89,7 +95,8 @@ from zcu_tools.mcp.core.call_log import wrap_handler  # noqa: E402
 # tool renames) that leave the wire contract untouched. A wire-contract change is
 # tracked separately by WIRE_VERSION (see ``wire_version.py``); the two are
 # independent. (Git history holds the per-version evolution.)
-MCP_VERSION = 63  # gui_soc_connect now uses the soc.connect MethodSpec timeout (+small transport slack) and reconciles post-timeout SoC state; WIRE unchanged.
+# MeasureMcpSession owns measure-only MCP policy state; WIRE unchanged.
+MCP_VERSION = 64
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -229,222 +236,9 @@ or the dialog times out. Returns {reason:'reply'|'dismiss'|'timeout', reply?}:
 """
 
 # ---------------------------------------------------------------------------
-# App-specific state (socket I/O lives in the shared McpBridge; what stays here
-# is measure-gui's policy: the diagnostic queue, the optimistic-concurrency
-# bookkeeping, and the async-operation handle map)
+# App session + transport bridge
 # ---------------------------------------------------------------------------
 
-# Diagnostic push queue (FIFO, drop-oldest when full). The GUI still emits its
-# full EventBus stream + diagnostics on the wire, but the agent is exposed only
-# to diagnostics — user-facing error/info feedback ("Data saved to …", a run
-# failure reason) that no version-guard or poll could surface. Resource-change
-# events are dropped in _deliver_event. Diagnostics piggyback on the next tool
-# reply; _DIAGNOSTIC_COND guards the queue (notified on append).
-_DIAGNOSTIC_QUEUE_MAX = 1024
-_DIAGNOSTIC_QUEUE: deque[dict[str, Any]] = deque(maxlen=_DIAGNOSTIC_QUEUE_MAX)
-_DIAGNOSTIC_COND = threading.Condition()
-
-# --- Optimistic-concurrency bookkeeping (policy lives here, mcp side) --------
-#
-# The agent never sees version numbers; they are bookkeeping between this mcp
-# layer and the RPC server. ``_LAST_SEEN`` is the guard BASELINE: the per-key
-# version each guarded op compares against (it attaches the subset it depends on
-# as ``expected_versions``; the server compares atomically and rejects with
-# PRECONDITION_FAILED if any moved — a concurrent, possibly human, edit).
-#
-# How the baseline is refreshed after a successful RPC depends on the method
-# kind (the central safety property of this guard):
-#   - WRITE / mutation (and any read we are not 100% sure about) -> whole-table
-#     ``_refresh_versions()``. A write self-bumps the keys it touched, so
-#     re-reading the whole table absorbs the op's own bump and the agent is not
-#     later blocked by its own write (self-block safe). Whole-table is ALWAYS
-#     safe — it can only fail to *improve* on the read-absorption issue below,
-#     never produce a false reject.
-#   - A pure read we are sure about -> ``_refresh_revealed_versions()``: refresh
-#     ONLY the keys that read actually revealed (``_READ_REVEALS``), leaving
-#     every other key's baseline untouched. This stops an unrelated read from
-#     silently advancing resource X's baseline to current (which would let a
-#     concurrent edit to X slip past the next write to X).
-#
-# Two intentional residual gaps (honestly narrower than the old "any RPC absorbs
-# everything" model, but not zero):
-#   (a) An UNRELATED WRITE between two operations still whole-table refreshes, so
-#       it absorbs (masks) a concurrent edit to a resource it did not touch. Pure
-#       reads no longer do this (unless they fall back to whole-table); writes
-#       still do (whole-table is the price of self-block safety). Narrower than
-#       before, not eliminated.
-#   (b) ``_LAST_SEEN`` is PROCESS-GLOBAL and shared across every agent driving
-#       this one bridge — there is NO per-agent isolation (the platform carries
-#       no agent identity; per-agent staleness cursors are Not Planned upstream).
-#       So two agents concurrently writing the same GUI do NOT get per-agent
-#       staleness guarantees. True per-agent guarding would need each agent to
-#       carry an opaque baseline cursor (not implemented).
-#
-# On a stale rejection we re-read the whole table so the next attempt carries
-# fresh baselines (connect and stale-reject paths are always whole-table).
-_LAST_SEEN: dict[str, int] = {}
-
-# Dependency map (the single place that knows what each guarded op depends on).
-# Patterns use {tab_id}/{editor_id} placeholders and a literal ``device:*`` that
-# expands to every current device:* key. save.* does NOT depend on cfg — the
-# saved content comes from the run result's own cfg_snapshot. tab.writeback_apply
-# depends on the run+analyze results it recomputes from, plus context (it writes
-# md/ml). Note: md/ml content edits bump the ``context`` version, so any op
-# depending on ``context`` (tab.run_start / editor.commit / tab.writeback_apply) detects
-# a concurrent md/ml change.
-_GUARD_DEPS: dict[str, tuple[str, ...]] = {
-    # ``device:*`` guards mutations of *existing* devices; ``devices:__set__``
-    # guards *set membership* (a device added/removed since the agent last read
-    # versions) which the per-member glob cannot reveal.
-    "tab.run_start": (
-        "tab:{tab_id}:cfg",
-        "tab:{tab_id}",
-        "soc",
-        "context",
-        "device:*",
-        "devices:__set__",
-    ),
-    "tab.save_data": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
-    "tab.save_image": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
-    # tab.save_post_image renders the post-analysis figure, so it depends on the
-    # post-analysis result (not the primary run result) + the save path.
-    "tab.save_post_image": ("tab:{tab_id}:post_analyze", "tab:{tab_id}:save_path"),
-    "tab.save_result": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
-    # tab.save_set_paths writes the save_path override; guard on that very
-    # resource so a concurrent save-path edit (GUI user / another agent) is
-    # detected (read-modify-write optimistic concurrency).
-    "tab.save_set_paths": ("tab:{tab_id}:save_path",),
-    # tab.writeback_set / tab.writeback_apply edit + apply the persistent draft
-    # (computed from run+analyze results, write md/ml). A concurrent rerun/
-    # reanalyze or context edit must invalidate them.
-    "tab.writeback_set": ("tab:{tab_id}:result", "tab:{tab_id}:analyze", "context"),
-    "tab.writeback_apply": (
-        "tab:{tab_id}:result",
-        "tab:{tab_id}:analyze",
-        "context",
-    ),
-    "editor.commit": ("editor:{editor_id}", "context"),
-}
-
-# Read-reveal map (the mirror of ``_GUARD_DEPS`` for the read side). Maps a PURE
-# READ method to the version-key patterns it reveals — the keys whose current
-# value the agent genuinely observed by making that read. After such a read we
-# refresh ONLY these keys in ``_LAST_SEEN`` (``_refresh_revealed_versions``),
-# leaving every other key's baseline untouched, so reading resource Y does not
-# advance resource X's baseline and mask a concurrent edit to X.
-#
-# SAFETY — the only way a wrong entry here causes trouble is MASKING / false-ACCEPT:
-# mapping a read to a key it does NOT fully reveal advances that key's baseline to
-# current → expected==current → the server lets through a concurrent edit the agent
-# never actually saw. This is a security hole (the guard is bypassed), NOT a
-# false-reject (a too-high baseline never triggers a reject; the server only rejects
-# when expected LAGS current). So the bar is: add an entry ONLY when you are 100%
-# sure the read observes the COMPLETE state tracked by that key. When unsure, leave
-# it OUT — an unmapped read falls back to the whole-table refresh (safe, no masking).
-#
-# Patterns use the same {tab_id}/{editor_id}/{name} placeholders and literal
-# ``device:*`` glob as ``_GUARD_DEPS``; ``_expand_pattern_keys`` shares the
-# expansion logic. ``devices:__set__`` is a literal key (set cardinality).
-#
-# Deliberately LEFT OUT (whole-table) and why:
-#   - ALL context.* reads — the ``context`` key is a COARSE key tracking the entire
-#     active md/ml CONTENT. No single content-read reveals the whole of it:
-#     context.md_get returns only key names, md_get_attr returns one value,
-#     ml_get returns only entry names/kinds, ml_list_roles returns the STATIC role
-#     catalog (not content at all). Mapping any of these to ``context`` would advance
-#     the content baseline on a read that observed only a projection, masking
-#     concurrent edits to any md/ml entry the read did not touch. This is confirmed
-#     over-broad, not merely uncertain — same root cause as context.labels/active.
-#   - context.labels / context.active — neither is tracked by any version key
-#     (a context-switch does not bump ``context``; there is no set-membership key
-#     for the context list). No valid mapping exists.
-#   - tab.snapshot — reveals many facets (editor_id, save paths, interaction,
-#     existence flag); mapping it correctly would require intersecting multiple keys,
-#     and a wrong mapping masks concurrent edits. Left whole-table.
-#   - analyze/post-analyze reads (tab.get_analyze_result/params,
-#     tab.get_post_analyze_result/params) — the analyze trio is server-gated on
-#     has_run_result, NOT on a version key; the facet↔key mapping is uncertain.
-#   - device.list — each entry returns only {name, type_name, status}; the
-#     ``device:{name}`` key also bumps on info/value changes (set_device_info),
-#     which device.list does NOT observe. Mapping to ``device:*`` would mask
-#     concurrent info/value changes. Only set membership (devices:__set__) is
-#     truly fully revealed by listing the set.
-_READ_REVEALS: dict[str, tuple[str, ...]] = {
-    # Reads the chosen tab's settable cfg tree: the whole cfg state for that tab.
-    "tab.get_cfg": ("tab:{tab_id}:cfg",),
-    # Reads one editing session's full draft: the whole editor state for that id.
-    "editor.get": ("editor:{editor_id}",),
-    # Reads one device's full cached snapshot: name/address/status/error/info —
-    # the full state tracked by device:{name}. Slightly broader than just status
-    # (it includes info/value), but there is no guarded op that consumes only
-    # device:{name} without also consuming devices:__set__, so the masking risk
-    # is bounded. Left in as the safe narrowing over whole-table.
-    "device.snapshot": ("device:{name}",),
-    # Lists the set of registered devices (membership only). device.list reveals
-    # set membership (devices:__set__) but NOT device info/value (which also bumps
-    # device:{name}), so mapping to device:* would mask concurrent info changes.
-    # Only devices:__set__ (set cardinality) is fully revealed.
-    "device.list": ("devices:__set__",),
-}
-
-# --- Async-operation handle bookkeeping (debug-only projection) ---------------
-#
-# Start ops (device.setup / tab.run_start) return an ``operation_id``; the agent
-# now holds it directly as ``handle`` (exposed in the START reply, ADR-0026 §8)
-# and drives gui_op_poll / gui_op_wait with it. So this map is NO LONGER on the
-# wait/poll path. It survives only as the "latest handle per resource" projection
-# that gui_debug_operations reads: semantic key -> latest operation_id for that
-# resource. "Latest wins": starting overwrites the key.
-#
-# Lifecycle: entries are written on each START RPC (latest-wins) and are NEVER
-# removed — they persist for the entire MCP server process lifetime. A stale key
-# for a completed operation is expected and does not indicate an active operation.
-_OP_BY_KEY: dict[str, int] = {}
-
-# Which semantic key a start RPC's operation_id belongs to (param -> key).
-# Device connect/disconnect/setup all key on the device name: "latest wins" means
-# the most recent operation for that device is the one a wait tool awaits.
-_OP_KEY_OF: dict[str, Callable[[dict[str, Any]], str]] = {
-    "device.connect": lambda p: f"device:{p.get('name', '')}",
-    "device.reconnect": lambda p: f"device:{p.get('name', '')}",
-    "device.disconnect": lambda p: f"device:{p.get('name', '')}",
-    "device.setup": lambda p: f"device:{p.get('name', '')}",
-    "tab.run_start": lambda p: f"tab:{p.get('tab_id', '')}",
-    "tab.analyze": lambda p: f"analyze:{p.get('tab_id', '')}",
-    "tab.post_analyze": lambda p: f"post_analyze:{p.get('tab_id', '')}",
-}
-
-
-def _deliver_event(msg: dict[str, Any]) -> None:
-    # The GUI still emits its full EventBus stream over the wire (RPC-side
-    # registration unchanged), but the agent is NOT exposed to resource-change
-    # events: stale detection is the version-guard's job, and async completion is
-    # polled via gui_op_poll / gui_op_wait on the op handle. Only diagnostics (the GUI's own
-    # error/info push — "Data saved to …", run-failure reason) reach the agent,
-    # piggybacked on the next tool reply. Everything else is dropped here.
-    if msg.get("event") != "diagnostic":
-        return
-    with _DIAGNOSTIC_COND:
-        _DIAGNOSTIC_QUEUE.append(msg)
-        _DIAGNOSTIC_COND.notify_all()
-
-
-def _drain_pending() -> dict[str, list]:
-    """Take the diagnostics buffered since the last drain — for piggyback on any
-    tool result. The agent gets GUI error/info feedback without a dedicated poll
-    call (resource-change events are not exposed; see _deliver_event)."""
-    with _DIAGNOSTIC_COND:
-        diagnostics = [m for m in _DIAGNOSTIC_QUEUE]
-        _DIAGNOSTIC_QUEUE.clear()
-    return {"diagnostics": diagnostics}
-
-
-# The shared transport bridge for this process. ``on_event=_deliver_event`` routes
-# the GUI's event-push stream through measure-gui's diagnostic filter (only
-# diagnostics are queued for piggyback; resource-change events are dropped). All
-# socket I/O, the reader thread, RID routing, the launched subprocess + pid/log
-# files live in the bridge; this module composes its ``send_rpc_raw`` with the
-# version guard + operation tracking below.
 _CONFIG = MCPBridgeConfig(
     app_name="gui",
     app_slug="measure",
@@ -459,182 +253,69 @@ _CONFIG = MCPBridgeConfig(
     run_script_name="run_measure_gui.py",
 )
 
-_BRIDGE = McpBridge(_CONFIG, on_event=_deliver_event)
+
+def _session_resolve_connect_port(
+    config: MCPBridgeConfig, requested: int | None
+) -> int:
+    return resolve_connect_port(config, requested)
+
+
+def _session_port_is_open(port: int) -> bool:
+    return _port_is_open(port)
+
+
+_SESSION = MeasureMcpSession(
+    _CONFIG,
+    resolve_connect_port=_session_resolve_connect_port,
+    port_is_open=_session_port_is_open,
+)
+_BRIDGE = McpBridge(_CONFIG, on_event=_SESSION.deliver_event)
+_SESSION.attach_bridge(_BRIDGE)
+
+# Compatibility aliases for internal tests and debugging helpers.  Ownership is
+# still in MeasureMcpSession; these names reference its live mutable maps.
+_LAST_SEEN: MutableMapping[str, int] = _SESSION.last_seen_versions
+_GUARD_DEPS: Mapping[str, tuple[str, ...]] = _SESSION.policy.guard_deps
+_READ_REVEALS: Mapping[str, tuple[str, ...]] = _SESSION.policy.read_reveals
+_OP_BY_KEY: MutableMapping[str, int] = _SESSION.operation_handles
+
+
+def _deliver_event(msg: dict[str, Any]) -> None:
+    _SESSION.deliver_event(msg)
+
+
+def _drain_pending() -> dict[str, list[dict[str, Any]]]:
+    return _SESSION.drain_pending()
 
 
 def _read_version_table() -> dict[str, int] | None:
-    """Read the full resource version table verbatim (no side effects).
-
-    Pure read via ``resources.versions`` (the single read entry point), through
-    ``send_rpc_raw`` to avoid recursing back into the guard. Returns the table or
-    None on any failure — a missing table just means no guard this round.
-    """
-    try:
-        resp = _BRIDGE.send_rpc_raw("resources.versions", {}, 5.0)
-    except Exception:  # pragma: no cover — best-effort resync
-        return None
-    if not resp.get("ok", False):
-        return None
-    versions = resp.get("result", {}).get("versions")
-    return versions if isinstance(versions, dict) else None
+    return _SESSION.read_version_table()
 
 
 def _refresh_versions() -> None:
-    """Replace the whole ``_LAST_SEEN`` baseline with the current version table.
-
-    Called on connect, after a stale rejection, and after every successful WRITE
-    (or unclassified read) — whole-table is always safe (self-block safe for a
-    write, since it absorbs the op's own bump). Failures are swallowed.
-    """
-    versions = _read_version_table()
-    if versions is not None:
-        _LAST_SEEN.clear()
-        _LAST_SEEN.update(versions)
+    _SESSION.refresh_versions()
 
 
 def _expand_pattern_keys(
     patterns: tuple[str, ...], params: dict[str, Any], source_table: dict[str, int]
 ) -> dict[str, int]:
-    """Expand dependency/reveal patterns into concrete {key: version} entries.
-
-    Shared by ``_build_expected_versions`` (source = ``_LAST_SEEN`` baseline) and
-    ``_refresh_revealed_versions`` (source = the just-read current table). The
-    literal ``device:*`` glob expands to every ``device:`` key in ``source_table``
-    at its value there; ``{tab_id}``/``{editor_id}``/``{name}`` placeholders fill
-    from ``params``; a key absent from ``source_table`` reads as version 0.
-    """
-    out: dict[str, int] = {}
-    for pattern in patterns:
-        if pattern == "device:*":
-            for key, version in source_table.items():
-                if key.startswith("device:"):
-                    out[key] = version
-            continue
-        key = pattern.format(
-            tab_id=params.get("tab_id", ""),
-            editor_id=params.get("editor_id", ""),
-            name=params.get("name", ""),
-        )
-        out[key] = source_table.get(key, 0)
-    return out
+    return expand_pattern_keys(patterns, params, source_table)
 
 
 def _build_expected_versions(method: str, params: dict[str, Any]) -> dict[str, int]:
-    """Resolve a guarded method's dependency patterns into expected versions.
-
-    Policy lives here: expand the ``_GUARD_DEPS`` patterns against the current
-    ``_LAST_SEEN`` baseline. Returns the subset of versions the op depends on;
-    the server compares only these.
-    """
-    deps = _GUARD_DEPS.get(method)
-    if not deps:
-        return {}
-    return _expand_pattern_keys(deps, params, _LAST_SEEN)
+    return _SESSION.build_expected_versions(method, params)
 
 
 def _refresh_revealed_versions(method: str, params: dict[str, Any]) -> None:
-    """Refresh ONLY the keys a pure read revealed into ``_LAST_SEEN``.
-
-    The narrow counterpart to ``_refresh_versions``: after a read listed in
-    ``_READ_REVEALS`` we re-read the whole table but copy back only the keys that
-    read genuinely observed (its reveal patterns expanded against the just-read
-    table), leaving every other key's baseline untouched. That is what stops an
-    unrelated read from advancing a sibling resource's baseline (the read-
-    absorption bug). The caller guarantees ``method in _READ_REVEALS``.
-    """
-    versions = _read_version_table()
-    if versions is None:
-        return
-    revealed = _expand_pattern_keys(_READ_REVEALS[method], params, versions)
-    _LAST_SEEN.update(revealed)
+    _SESSION.refresh_revealed_versions(method, params)
 
 
 def _describe_stale_keys(keys: list) -> list[str]:
-    """Translate stale resource keys into agent language (no version numbers).
-
-    The server names which resource identities moved (e.g. 'tab:<uuid>:cfg',
-    'context', 'device:flux'); the agent should not see the raw keyspace, so map
-    them to phrases it can act on. Unknown shapes pass through verbatim (forward-
-    compatible) rather than being dropped.
-    """
-    out: list[str] = []
-    for raw in keys:
-        key = str(raw)
-        if key == "context":
-            out.append("the active context (md/ml)")
-        elif key == "soc":
-            out.append("the SoC connection")
-        elif key == "devices:__set__":
-            out.append("the set of devices (one added/removed)")
-        elif key.startswith("device:"):
-            out.append(f"device {key[len('device:') :]!r}")
-        elif key.startswith("editor:"):
-            out.append("the cfg-editor draft")
-        elif key.startswith("tab:"):
-            # tab:<uuid>[:facet] — surface the facet, not the opaque uuid.
-            facet = key.split(":", 2)[2] if key.count(":") >= 2 else ""
-            label = {
-                "cfg": "this tab's cfg",
-                "result": "this tab's run result",
-                "analyze": "this tab's analysis",
-                "save_path": "this tab's save path",
-            }.get(facet, "this tab")
-            if label not in out:
-                out.append(label)
-        else:
-            out.append(key)
-    return out
-
-
-class GuiRpcError(RuntimeError):
-    """A wire-level GUI error, carrying the structured ``reason`` / ``code``
-    tags alongside the human message. Subclasses RuntimeError so existing
-    ``except RuntimeError`` sites keep working; callers that care (e.g. poll
-    distinguishing cancelled vs failed) read ``.reason`` instead of the text."""
-
-    def __init__(
-        self, message: str, *, reason: str | None = None, code: str | None = None
-    ) -> None:
-        super().__init__(message)
-        self.reason = reason
-        self.code = code
+    return describe_stale_keys(keys)
 
 
 def _ensure_connected() -> None:
-    """Lazily attach to the running GUI before the first guarded RPC.
-
-    An agent should not have to call gui_bridge_connect by hand: the first time
-    any gui_* tool reaches send_gui_rpc with no live socket, we resolve the running
-    GUI's port via session discovery (the SAME path gui_bridge_connect takes) and
-    attach. This is a measure-specific attach policy (session-discovery slug +
-    resolve_connect_port), so it stays here rather than in the shared bridge,
-    whose send_rpc_raw also serves the read-only apps.
-
-    Only the control channel is attached — never soc.connect: choosing the SoC
-    (mock vs remote) is the user's decision, not an auto-connect side effect.
-
-    Fail-fast when no GUI is discoverable, with a message that no longer tells
-    the agent to "call gui_bridge_connect first" (it is automatic now).
-    """
-    if _BRIDGE.is_connected:
-        return
-    port = resolve_connect_port(_CONFIG, None)
-    # Fast-fail: probe the port before attempting a full TCP connect so a cold
-    # start (no GUI listening) returns an actionable error immediately instead
-    # of hanging ~30s until the socket timeout fires.  _port_is_open uses a
-    # 0.5s timeout and is the same probe used by the bridge's launch path.
-    if not _port_is_open(port):
-        raise RuntimeError(
-            "no running measure-gui found to attach to "
-            f"(tried 127.0.0.1:{port}); start one with gui_launch."
-        )
-    try:
-        _BRIDGE.connect(port)
-    except RuntimeError as exc:
-        raise RuntimeError(
-            "no running measure-gui found to attach to "
-            f"(tried 127.0.0.1:{port}); start one with gui_launch."
-        ) from exc
+    _SESSION.ensure_connected()
 
 
 def send_gui_rpc(
@@ -642,72 +323,7 @@ def send_gui_rpc(
     params: dict[str, Any],
     timeout_seconds: float = 30.0,
 ) -> dict[str, Any]:
-    """Issue one RPC against the GUI; raises on error or timeout.
-
-    If no socket is live yet, lazily attaches to the running GUI first
-    (:func:`_ensure_connected`) so an agent never has to call gui_bridge_connect by
-    hand. For guarded methods (run/save/commit) attaches ``expected_versions``
-    from the mcp-side bookkeeping so the server can reject stale operations. On
-    a stale rejection the version table is re-read so the agent's retry is fresh.
-
-    After a successful round-trip the guard baseline is refreshed by method kind:
-    a pure read listed in ``_READ_REVEALS`` refreshes only the keys it revealed
-    (narrow); every other method — every write, plus any read we are not sure
-    about — refreshes the whole table (self-block safe). See the ``_LAST_SEEN``
-    comment for the safety rationale and the two residual gaps.
-    """
-    _ensure_connected()
-
-    send_params = params
-    if method in _GUARD_DEPS:
-        send_params = dict(params)
-        send_params["expected_versions"] = _build_expected_versions(method, params)
-
-    resp = _BRIDGE.send_rpc_raw(method, send_params, timeout_seconds)
-    if not resp.get("ok", False):
-        err = resp.get("error", {})
-        if err.get("reason") == "stale_version":
-            # A dependency moved since we last read it; resync so the retry is
-            # against the current table, and name (in agent language) which
-            # resources changed so the agent knows what to re-read.
-            _refresh_versions()
-            data = err.get("data") or {}
-            stale = _describe_stale_keys(data.get("stale", []))
-            detail = f" ({', '.join(stale)})" if stale else ""
-            raise RuntimeError(
-                "GUI Error (PRECONDITION_FAILED): a resource you depend on was "
-                f"changed in the GUI since you last saw it{detail}; review then "
-                "retry"
-            )
-        msg = f"GUI Error ({err.get('code')}): {err.get('message')}"
-        raise GuiRpcError(msg, reason=err.get("reason"), code=err.get("code"))
-    # Every successful RPC is a round-trip in which the agent "observed" the GUI;
-    # refresh the guard baseline so its own writes are not later seen as stale by
-    # its own guarded ops. Split by method kind (see the _LAST_SEEN comment):
-    #   - a pure read we are SURE about (in _READ_REVEALS) refreshes ONLY the keys
-    #     it revealed, so reading resource Y leaves resource X's baseline alone —
-    #     a concurrent edit to X is then still caught by the next write to X.
-    #   - everything else (writes; reads we are not sure about) whole-table
-    #     refreshes: a write self-bumps the keys it touched, so re-reading the
-    #     whole table absorbs its own bump (self-block safe). Whole-table is
-    #     always safe; it only fails to *narrow* the read-absorption window.
-    if method in _READ_REVEALS:
-        _refresh_revealed_versions(method, params)
-    else:
-        _refresh_versions()
-    result = dict(resp.get("result", {}))
-    # A start op returns an ``operation_id``. The agent now holds it directly: it
-    # is renamed to ``handle`` (an opaque token the agent feeds to gui_op_poll /
-    # gui_op_wait) and KEPT in the reply, so the START tool can fold it in
-    # (ADR-0026 §8). _OP_BY_KEY is still written under the semantic key (latest
-    # wins) but only as the debug-only latest-handle-per-resource projection that
-    # gui_debug_operations reads — it is NO LONGER on the wait/poll main path.
-    key_of = _OP_KEY_OF.get(method)
-    if key_of is not None and "operation_id" in result:
-        handle = int(result.pop("operation_id"))
-        _OP_BY_KEY[key_of(params)] = handle
-        result["handle"] = handle
-    return result
+    return _SESSION.send_gui_rpc(method, params, timeout_seconds)
 
 
 # ---------------------------------------------------------------------------
@@ -737,8 +353,7 @@ def tool_gui_disconnect(arguments: dict[str, Any]) -> dict[str, Any]:
     note = _BRIDGE.disconnect()
     # App-specific housekeeping: drop any buffered diagnostics — they belong to
     # the connection that just closed.
-    with _DIAGNOSTIC_COND:
-        _DIAGNOSTIC_QUEUE.clear()
+    _SESSION.clear_diagnostics()
     return {"note": note}
 
 
@@ -772,8 +387,7 @@ def tool_gui_stop(arguments: dict[str, Any]) -> dict[str, Any]:
     )
     # The bridge's disconnect does not clear measure-gui's diagnostic queue; do it
     # here so a later session does not see the previous one's buffered messages.
-    with _DIAGNOSTIC_COND:
-        _DIAGNOSTIC_QUEUE.clear()
+    _SESSION.clear_diagnostics()
     # Branch on the bridge's machine-readable outcome (no prose string-matching).
     return {"stopped": result["exited"], "note": result["note"]}
 
@@ -1415,7 +1029,7 @@ def _start_op_with_short_wait(
     gui_op_wait. Shared by device connect/disconnect/setup and tab.run_start.
     (soc.connect is excluded: it is synchronous and returns its product directly.)
     """
-    operation_id = _OP_BY_KEY.get(key)
+    operation_id = _SESSION.operation_handle_for_key(key)
     if operation_id is None:
         # No handle captured (op already settled synchronously) — report product.
         return {"status": "finished", **product()}
@@ -1886,8 +1500,7 @@ def tool_gui_debug_resource_versions(arguments: dict[str, Any]) -> dict[str, Any
 def tool_gui_debug_operations(arguments: dict[str, Any]) -> dict[str, Any]:
     """Dump the mcp-side per-key operation-handle cache (DEV).
 
-    The ONLY source is the _OP_BY_KEY map (semantic key -> latest operation_id for
-    that resource) — the debug-only "latest handle per resource" projection
+    The ONLY source is the session's semantic-key -> latest operation_id projection
     (ADR-0026 §8). It is NO LONGER on the wait/poll path (the agent drives
     gui_op_poll / gui_op_wait with the handle a START reply gave it); surfacing it
     here answers "what handle did the last run/analyze/setup on this tab/device
@@ -1901,10 +1514,7 @@ def tool_gui_debug_operations(arguments: dict[str, Any]) -> dict[str, Any]:
     Returns {handles: {key: {operation_id: int}}}.
     """
     del arguments
-    # latest-wins, never-removed cache (ADR-0026 §8). No 'live' flag: the cache
-    # has no liveness source — the wire enumerator lives in gui_device_list_operations.
-    handles = {key: {"operation_id": op_id} for key, op_id in _OP_BY_KEY.items()}
-    return {"handles": handles}
+    return _SESSION.debug_operations()
 
 
 def _render_tab_figure(tab_id: str, out_path: str | None = None) -> dict[str, Any]:
@@ -2240,9 +1850,9 @@ def tool_gui_prompt_user(arguments: dict[str, Any]) -> dict[str, Any]:
     """Blocking request-reply prompt to the user. BLOCKS the turn until they respond.
 
     Serially composes notify.open (main thread: mint token + open dialog) and
-    notify.await (off-main: block until Reply/Dismiss/QTimer). Neither method
-    uses _OP_KEY_OF — not a start-op, no operation_id captured. There is NO poll
-    or cancel: this is a single blocking request-reply, not an async handle.
+    notify.await (off-main: block until Reply/Dismiss/QTimer). Neither method is a
+    session-tracked start-op, so no operation_id is captured. There is NO poll or
+    cancel: this is a single blocking request-reply, not an async handle.
 
     Returns {reason: 'reply'|'dismiss'|'timeout', reply?}: 'reply' carries the
     user's answer (a possibly-empty string); 'dismiss'/'timeout' carry no reply.
