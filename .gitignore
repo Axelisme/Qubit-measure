@@ -29,6 +29,7 @@ test.py
 test.ipynb
 
 qick/
+qiskit-metal/
 
 client_secret.json
 package-lock.json
