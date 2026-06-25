@@ -26,7 +26,7 @@ class MainWindow(QMainWindow):
         self._panel = PipelinePanelWidget(ctrl)
         self.setCentralWidget(self._panel)
 
-    def closeEvent(self, a0: QCloseEvent | None) -> None:  # noqa: N802
+    def closeEvent(self, a0: QCloseEvent) -> None:  # noqa: N802
         """Quiesce the pipeline panel's background runner before Qt tears down the
         widget tree.  ``PipelinePanelWidget`` owns a ``BackgroundRunner`` for the
         preprocess / predict / auto-tune pool workers; any in-flight worker's

@@ -519,8 +519,10 @@ class InteractiveLines:
         self.picked = None
         self.active_line = None
         # 停止動畫
-        self.anim_main.event_source.stop()
-        self.anim_loss.event_source.stop()
+        if self.anim_main.event_source is not None:
+            self.anim_main.event_source.stop()
+        if self.anim_loss.event_source is not None:
+            self.anim_loss.event_source.stop()
         plt.close(self.fig_main)
         plt.close(self.fig_loss)
 

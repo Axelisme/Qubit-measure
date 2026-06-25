@@ -27,7 +27,7 @@ class QtProgressTransport(QObject):
         # marshalling worker-thread emits across the boundary.
         self._event.connect(self._on_event, type=Qt.ConnectionType.QueuedConnection)  # type: ignore[call-arg]
 
-    def emit(self, event: ProgressEvent) -> None:
+    def emit(self, event: ProgressEvent) -> None:  # type: ignore[reportIncompatibleMethodOverride]
         # Thread-safe: Qt marshals the queued signal to the owning thread.
         self._event.emit(event)
 

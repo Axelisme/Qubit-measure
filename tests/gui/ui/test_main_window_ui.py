@@ -815,7 +815,7 @@ def test_new_tab_menu_supports_nested_paths(qapp, monkeypatch):
             if action.data() == target:
                 return action
             child = action.menu()
-            if child is not None:
+            if isinstance(child, QMenu):
                 found = _find_action_by_data(child, target)
                 if found is not None:
                     return found

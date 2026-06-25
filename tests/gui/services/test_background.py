@@ -15,8 +15,8 @@ from __future__ import annotations
 import time
 
 import pytest
-from zcu_tools.gui.background import BackgroundRunner
 from zcu_tools.gui.app.main.services.scopes import figure_ambient
+from zcu_tools.gui.background import BackgroundRunner
 from zcu_tools.gui.plotting.routing import get_current_container
 from zcu_tools.gui.session.scopes import progress_ambient
 

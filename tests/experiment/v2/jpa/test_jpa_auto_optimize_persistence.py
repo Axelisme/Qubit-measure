@@ -5,9 +5,7 @@ from typing import cast
 
 import numpy as np
 import pytest
-
 import zcu_tools.experiment.v2.jpa.jpa_auto_optimize as jpa_mod
-from script.migrate_experiment_data import migrate_experiment_data
 from zcu_tools.experiment.v2.jpa.jpa_auto_optimize import (
     JPA_AUTO_FLUX_ROLE,
     JPA_AUTO_FREQ_ROLE,
@@ -15,9 +13,9 @@ from zcu_tools.experiment.v2.jpa.jpa_auto_optimize import (
     JPA_AUTO_PHASE_ROLE,
     JPA_AUTO_POWER_ROLE,
     JPA_AUTO_SNR_ROLE,
+    AutoOptimizeExp,
     JPAOptCfg,
     JPAOptimizeResult,
-    AutoOptimizeExp,
     load_jpa_auto_grouped_result,
 )
 from zcu_tools.utils.datasaver import (
@@ -27,6 +25,8 @@ from zcu_tools.utils.datasaver import (
     save_grouped_labber_data,
     save_labber_data,
 )
+
+from script.migrate_experiment_data import migrate_experiment_data
 
 
 def _sample_result(*, with_cfg: bool = False) -> JPAOptimizeResult:

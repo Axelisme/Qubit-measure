@@ -481,7 +481,7 @@ class MainWindow(QMainWindow):
 
     # --- close path --------------------------------------------------------
 
-    def closeEvent(self, a0: QCloseEvent | None) -> None:  # noqa: N802
+    def closeEvent(self, a0: QCloseEvent) -> None:  # noqa: N802
         """Quiesce all background workers before the C++ widget tree is torn down.
 
         ``_current_editor`` (FindPointsWidget) is handled by ``_clear_editor`` when

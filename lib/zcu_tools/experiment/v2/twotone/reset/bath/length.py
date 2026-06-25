@@ -56,9 +56,10 @@ class LengthResult:
 
 
 def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return (
+    return np.asarray(
         np.abs(signals[..., 2] - signals[..., 0]) ** 2
-        + np.abs(signals[..., 3] - signals[..., 1]) ** 2
+        + np.abs(signals[..., 3] - signals[..., 1]) ** 2,
+        dtype=np.float64,
     )  # (lengths, )
 
 

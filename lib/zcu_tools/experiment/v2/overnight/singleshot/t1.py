@@ -144,7 +144,9 @@ class T1PlotAndSaveMixin(Generic[T_Cfg]):
             ("_ee_populations", "ee_populations", populations[:, 1, :, 1]),
         ):
             save_labber_data(
-                reserve_labber_filepath(str(filepath.with_name(filepath.name + suffix))),
+                reserve_labber_filepath(
+                    str(filepath.with_name(filepath.name + suffix))
+                ),
                 z=("Populations", "a.u.", zslice.T),
                 axes=axes,
                 comment=comment,

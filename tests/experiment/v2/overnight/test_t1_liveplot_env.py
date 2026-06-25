@@ -15,7 +15,6 @@ from __future__ import annotations
 from typing import Any, cast
 
 import numpy as np
-
 from zcu_tools.experiment.v2.overnight.singleshot.t1 import (
     T1PlotAndSaveMixin as SingleshotT1Mixin,
 )

@@ -266,7 +266,9 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
 
         # signals: native z is (Nflux, Ntime) = (outer, inner), axes inner-first
         save_labber_data(
-            reserve_labber_filepath(str(filepath.with_name(filepath.name + "_signals"))),
+            reserve_labber_filepath(
+                str(filepath.with_name(filepath.name + "_signals"))
+            ),
             z=("Signal", "a.u.", result["raw_signals"]),
             axes=[time_axis, flux_axis],
             comment=comment,

@@ -240,9 +240,7 @@ class SessionControllerMixin:
         via ``progress_bars``."""
         return self._progress_svc.attach_by_owner(owner_id, listener)
 
-    def progress_bars(
-        self, owner_id: str
-    ) -> tuple[tuple[int, ProgressBarModel], ...]:
+    def progress_bars(self, owner_id: str) -> tuple[tuple[int, ProgressBarModel], ...]:
         """Live (handle_id, ProgressBarModel) pairs for the owner's current
         operation (empty if none live)."""
         return self._progress_svc.bars_for_owner(owner_id)

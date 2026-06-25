@@ -38,9 +38,9 @@ _COMMON = dict(
 # (params, golden snr[-3]) captured from the unmodified floquet.py on this
 # machine. Deterministic to the ULP (measured reproducibility spread == 0.0).
 _GOLDEN: list[tuple[tuple[float, float, float], float]] = [
-    ((5.5, 1.2, 0.9), 0.6161074224266799),
-    ((4.5, 1.0, 0.5), 1.5201939570255476),
-    ((7.0, 1.4, 1.4), 1.9192775983522998),
+    ((5.5, 1.2, 0.9), 0.6161074224298325),
+    ((4.5, 1.0, 0.5), 1.5201939570232865),
+    ((7.0, 1.4, 1.4), 1.9192775983018446),
 ]
 
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-import zcu_tools.gui.app.dispersive.services.predict as predict_mod
+import zcu_tools.simulate.fluxonium.prediction as prediction_mod
 from zcu_tools.gui.app.dispersive.controller import Controller
 from zcu_tools.gui.app.dispersive.state import (
     DispersiveState,
@@ -98,7 +98,7 @@ def test_sections_gated_on_pipeline_progress(qapp):
 
 
 def test_preprocess_done_slot_records_and_enables(qapp, monkeypatch):
-    monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux_fast", _stub)
+    monkeypatch.setattr(prediction_mod, "calculate_dispersive_vs_flux_fast", _stub)
     state = DispersiveState(ProjectInfo(chip_name="C", qub_name="Q1"))
     state.set_fit_inputs(_inputs())
     state.set_onetone(_onetone())
@@ -231,7 +231,7 @@ def test_tune_button_disabled_during_compute(qapp, monkeypatch):
     # so a new compute cannot start while one is in flight.
     from zcu_tools.gui.app.dispersive.ui.pipeline_panel import _TuneData
 
-    monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux_fast", _stub)
+    monkeypatch.setattr(prediction_mod, "calculate_dispersive_vs_flux_fast", _stub)
     state = DispersiveState(ProjectInfo(chip_name="C", qub_name="Q1"))
     state.set_fit_inputs(_inputs())
     state.set_onetone(_onetone())
@@ -256,7 +256,7 @@ def test_tune_button_disabled_during_compute(qapp, monkeypatch):
 
 def _tune_panel(qapp, monkeypatch, median_rf=5.4):
     """A panel with inputs/onetone/preprocess set and the tune view initialised."""
-    monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux_fast", _stub)
+    monkeypatch.setattr(prediction_mod, "calculate_dispersive_vs_flux_fast", _stub)
     state = DispersiveState(ProjectInfo(chip_name="C", qub_name="Q1"))
     state.set_fit_inputs(_inputs())
     state.set_onetone(_onetone())
@@ -290,7 +290,7 @@ def test_rf_slider_refreshes_sample_dots_after_debounce(qapp, monkeypatch):
             np.full(len(fluxs), bare_rf + k) for k in range(kw.get("return_dim", 2))
         )
 
-    monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux_fast", echo_rf)
+    monkeypatch.setattr(prediction_mod, "calculate_dispersive_vs_flux_fast", echo_rf)
     panel._on_add_sample()
     s = panel._tune_artists.samples[0]  # type: ignore[union-attr]
 
@@ -308,7 +308,7 @@ def test_g_change_refreshes_sample_dots_after_debounce(qapp, monkeypatch):
     def echo_g(params, fluxs, bare_rf, g, *, progress=False, res_dim=4, **kw):
         return tuple(np.full(len(fluxs), g + k) for k in range(kw.get("return_dim", 2)))
 
-    monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux_fast", echo_g)
+    monkeypatch.setattr(prediction_mod, "calculate_dispersive_vs_flux_fast", echo_g)
     panel._on_add_sample()
     s = panel._tune_artists.samples[0]  # type: ignore[union-attr]
 
@@ -330,7 +330,7 @@ def test_drag_moves_line_without_recompute_until_drop(qapp, monkeypatch):
         arr = np.asarray(fluxs, dtype=float)
         return tuple(arr + k for k in range(kw.get("return_dim", 2)))
 
-    monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux_fast", echo_flux)
+    monkeypatch.setattr(prediction_mod, "calculate_dispersive_vs_flux_fast", echo_flux)
     panel._on_add_sample()
     s = panel._tune_artists.samples[0]  # type: ignore[union-attr]
     before = float(np.asarray(s.dot_ground.get_ydata())[0])  # type: ignore[union-attr]

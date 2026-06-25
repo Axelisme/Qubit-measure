@@ -5,9 +5,7 @@ from typing import cast
 
 import numpy as np
 import pytest
-
 import zcu_tools.experiment.v2.twotone.time_domain.cpmg as cpmg_mod
-from script.migrate_experiment_data import main, migrate_experiment_data
 from zcu_tools.experiment.v2.twotone.time_domain.cpmg import (
     CPMG_GROUPED_ROLES,
     CPMG_LENGTHS_ROLE,
@@ -18,6 +16,8 @@ from zcu_tools.experiment.v2.twotone.time_domain.cpmg import (
     load_cpmg_grouped_result,
 )
 from zcu_tools.utils.datasaver import DatasetRole, load_grouped_labber_data
+
+from script.migrate_experiment_data import main, migrate_experiment_data
 
 
 def _sample_arrays() -> tuple[

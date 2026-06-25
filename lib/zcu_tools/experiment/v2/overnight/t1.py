@@ -110,7 +110,9 @@ class T1PlotAndSaveMixin(Generic[T_Cfg]):
 
         # signals: z stored native (Ny, Nx) = (Time, Iteration), inner axis last
         save_labber_data(
-            reserve_labber_filepath(str(filepath.with_name(filepath.name + "_signals"))),
+            reserve_labber_filepath(
+                str(filepath.with_name(filepath.name + "_signals"))
+            ),
             z=("Signal", "a.u.", result["signals"].T),
             axes=[
                 ("Iteration", "a.u.", iters),

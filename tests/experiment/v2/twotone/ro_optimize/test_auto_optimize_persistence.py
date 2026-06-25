@@ -5,9 +5,7 @@ from typing import cast
 
 import numpy as np
 import pytest
-
 import zcu_tools.experiment.v2.twotone.ro_optimize.auto_optimize as ro_mod
-from script.migrate_experiment_data import migrate_experiment_data
 from zcu_tools.experiment.v2.twotone.ro_optimize.auto_optimize import (
     RO_AUTO_GROUPED_ROLES,
     RO_AUTO_READOUT_FREQ_ROLE,
@@ -26,6 +24,8 @@ from zcu_tools.utils.datasaver import (
     save_grouped_labber_data,
     save_labber_data,
 )
+
+from script.migrate_experiment_data import migrate_experiment_data
 
 
 def _sample_result(*, with_cfg: bool = False) -> AutoOptResult:

@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 
 import numpy as np
-import zcu_tools.gui.app.dispersive.services.predict as predict_mod
+import zcu_tools.simulate.fluxonium.prediction as prediction_mod
 from zcu_tools.gui.app.dispersive.controller import Controller
 from zcu_tools.gui.app.dispersive.event_bus import (
     DispFitChangedPayload,
@@ -49,7 +49,7 @@ def _params_json(tmp_path):
 
 
 def test_full_pipeline(monkeypatch, tmp_path, onetone_hdf5):
-    monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux_fast", _stub)
+    monkeypatch.setattr(prediction_mod, "calculate_dispersive_vs_flux_fast", _stub)
     onetone_path, *_ = onetone_hdf5
     params_path = _params_json(tmp_path)
 
@@ -101,7 +101,7 @@ def test_full_pipeline(monkeypatch, tmp_path, onetone_hdf5):
 
 
 def test_predictor_rebuilt_when_inputs_change(monkeypatch, tmp_path, onetone_hdf5):
-    monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux_fast", _stub)
+    monkeypatch.setattr(prediction_mod, "calculate_dispersive_vs_flux_fast", _stub)
     onetone_path, *_ = onetone_hdf5
     params_path = _params_json(tmp_path)
     state = DispersiveState(ProjectInfo(chip_name="C", qub_name="Q1"))

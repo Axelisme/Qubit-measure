@@ -50,10 +50,11 @@ class FigureContainer:
     def clear_dynamic_canvases(self) -> None:
         while self._stack.count() > 1:
             widget = self._stack.widget(self._stack.count() - 1)
+            if widget is None:
+                break
             self._stack.removeWidget(widget)
-            if widget is not None:
-                figure = getattr(widget, "figure", None)
-                if isinstance(figure, Figure):
-                    _host.drop_from_registry(figure)
-                widget.deleteLater()
+            figure = getattr(widget, "figure", None)
+            if isinstance(figure, Figure):
+                _host.drop_from_registry(figure)
+            widget.deleteLater()
         self._stack.setCurrentWidget(self._placeholder)
