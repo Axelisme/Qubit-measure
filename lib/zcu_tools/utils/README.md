@@ -1,6 +1,6 @@
 # zcu_tools.utils
 
-**Last updated:** 2026-06-25 save path ownership
+**Last updated:** 2026-06-25 grouped axes spec boundary
 
 `utils` 放可被 experiment / GUI 共用、且不反向依賴上層 domain 的 helper。
 實驗資料持久化的 public API 收斂在 `zcu_tools.utils.datasaver` package
@@ -20,6 +20,9 @@ import。
 - `save_grouped_labber_data` / `load_grouped_labber_data` 處理 grouped file；
   experiment loader 傳 required roles，省略 required roles 只用於 diagnostic
   與 migration tooling。
+- Experiment semantic schema 住在 `zcu_tools.experiment.axes_spec`：
+  `GroupedAxesSpec` / `RoleSpec` 把 Result/Cfg 映射到這裡的 generic grouped
+  payload；`utils.datasaver` 不反向依賴 experiment Result 或 cfg。
 - Save helpers 寫入 caller 傳入的 formatted path；既有目的地 fast-fail，不自動
   suffix 或覆寫。
 - Path helpers（`format_ext`、`reserve_labber_filepath`、datafolder helpers）與
