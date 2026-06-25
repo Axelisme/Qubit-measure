@@ -9,6 +9,7 @@ params. Together they replace the old ``NodeSpec`` + injected ``run_node``.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -25,6 +26,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.autofluxdep.controller import Controller
+    from zcu_tools.gui.app.autofluxdep.orchestrator import InfoStore, Notify
 
 ProduceFn = Callable[[RunEnv, Snapshot], Patch]
 
@@ -111,6 +113,37 @@ def connect_mock(ctrl: Controller, *, sim_params: Any = None) -> None:
         ):
             break
         time.sleep(0.005)
+
+
+def pump_controller_until_idle(ctrl: Controller, *, timeout: float = 5.0) -> None:
+    """Pump Qt events until the controller's async RUN terminal path settles."""
+    from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
+
+    app = QApplication.instance()
+    assert app is not None
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        app.processEvents()
+        if not ctrl.is_running:
+            ctrl._background_svc.quiesce()
+            return
+        time.sleep(0.001)
+    raise AssertionError("autofluxdep run did not settle before timeout")
+
+
+def run_controller_to_completion(
+    ctrl: Controller,
+    *,
+    notify: Notify | None = None,
+    timeout: float = 5.0,
+) -> InfoStore:
+    """Start an async controller RUN and return its terminal InfoStore."""
+    ctrl.start_run(notify=notify)
+    pump_controller_until_idle(ctrl, timeout=timeout)
+    info = ctrl.last_run_info
+    if info is None:
+        raise AssertionError("autofluxdep run finished without an InfoStore")
+    return info
 
 
 class _FnNode(Node):

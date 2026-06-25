@@ -23,7 +23,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 
-from ._helpers import make_builder
+from ._helpers import make_builder, run_controller_to_completion
 
 
 def _filling_result(params, flux):
@@ -182,7 +182,7 @@ def _run_all(flux_values):
     for b in _builders():
         ctrl.add_node(b)
     ctrl.set_flux_values(flux_values)
-    info = ctrl.start_run()
+    info = run_controller_to_completion(ctrl)
     return ctrl, info
 
 

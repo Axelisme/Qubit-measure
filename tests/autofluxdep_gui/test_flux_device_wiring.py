@@ -11,7 +11,7 @@ from __future__ import annotations
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 
-from ._helpers import connect_mock, make_builder
+from ._helpers import connect_mock, make_builder, run_controller_to_completion
 
 
 def _capture_builder(seen: list[str | None]):
@@ -31,7 +31,7 @@ def test_flux_device_name_reaches_run_env():
     # the shared MockFluxProvisioner on the mock connect above.
     ctrl.set_flux_device("fake_flux")
     ctrl.set_flux_values([0.0, 0.2, 0.4])
-    ctrl.start_run()
+    run_controller_to_completion(ctrl)
 
     assert seen == ["fake_flux", "fake_flux", "fake_flux"]
 
@@ -43,6 +43,6 @@ def test_flux_device_none_when_unset():
     connect_mock(ctrl)
     # No flux source picked → env.flux_device is None (bare-number flux sweep).
     ctrl.set_flux_values([0.0, 0.5])
-    ctrl.start_run()
+    run_controller_to_completion(ctrl)
 
     assert seen == [None, None]
