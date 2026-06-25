@@ -1,12 +1,15 @@
 # README - program/v2
 
-**Last updated:** 2026-06-08
+**Last updated:** 2026-06-25 - ProgramTrace test adapter
 
 ## Testing & Type Checking Conventions
 
 - **Type Narrowing**: When a mock or abstract base class type is too generic in tests (e.g., retrieving an item from an `IRNode.insts` list where you expect a `RegWriteInst`), use an explicit assertion (`assert isinstance(item, RegWriteInst)`) rather than `cast()`. This ensures Pyright can perform type narrowing safely while maintaining a runtime guarantee.
 - **Mock Overrides**: When testing edge cases that intentionally return unexpected types to trigger errors (like testing how `Branch` handles a `QickParam` duration), expand the overridden function's return signature (e.g. `-> Any`) rather than using `cast()` to silence the type checker.
 - **Mock Interfaces**: For simple fake objects passed to functions (like `_FakeTracker` to `snr_as_signal`), if it structurally satisfies the requirements for the test, a single `# type: ignore[arg-type]` at the injection site is preferred over verbose `cast(list[Interface], ...)` syntax to keep the testing code clean.
+- **Program Emission Tests**: Unit tests that assert emitted program actions use a typed `ProgramTrace` adapter rather than loose `MagicMock` program objects. The trace records semantic program intents (readout declarations, triggers, pulses, loops, delays, register writes, and jumps) without acting as a second compiler or IR parser.
+- **MagicMock Scope**: Keep `MagicMock` for non-program collaborators, child-module spy hooks, and deliberate error-injection tests. Do not use it as the default stand-in for a program object when the test is asserting emitted program behavior.
+- **MockSoc Role**: `MockSoc` remains the compile/acquire/sim adapter for integration-style tests. `ProgramTrace` is a unit-test recorder and does not replace hardware-aligned compile or acquisition coverage.
 
 ## IR System & Hardware Alignment
 

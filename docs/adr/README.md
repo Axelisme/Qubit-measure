@@ -17,7 +17,7 @@
 
 - [0004 — Service 互依的三問規則](0004-service-dependency-three-questions.md)：Query/Command/Reaction 三問取代分層表治循環；含「狀態放 State vs service 私有」兩軸。
 - [0005 — Service 角色規範（DDD + Hexagonal）](0005-service-roles-ddd-hexagonal.md)：Driving Adapter / App Service / Aggregate Root / Repository / Driven Adapter 五角色 + 重構結果。
-- [0006 — ml/md 內容寫入的唯一權威 = ContextService](0006-single-ml-md-write-authority.md)：經窄 write port，lowering+register 收進 ContextService。
+- [0006 — ml/md 內容寫入的唯一權威 = ContextService](0006-single-ml-md-write-authority.md)：經窄 write port，lowering+register 收進 ContextService；run-time experiment cfg materialization 從 `ModuleLibrary` store 拆到 stateless `assemble_experiment_cfg`，`make_cfg` 只是薄 wrapper。
 - [0007 — Device 狀態下放 State（SSOT）](0007-device-state-to-state-ssot.md)：DeviceService 退化 driver/worker；persistence 為 State 投影。
 - [0021 — Event 所有權：domain module 擁有 enum + payload](0021-event-ownership-domain-modules.md)：domain module 擁有 enum+payload 定義；app 在 bus/EVENT_SERIALIZERS 層組裝；bus 維持 payload-type-key；port 集中各層 ports.py（掛 [[0004]]/[[0005]]）。
 
@@ -41,6 +41,11 @@
 
 - [0015 — PersistenceCaretaker（Memento + Caretaker）](0015-persistence-caretaker-memento-single-file.md)：單檔 app-state、關閉才寫。
 - [0027 — 實驗資料持久化：labber_io 原生 axes-list + per-experiment axes-spec + grouped experiment dataset](0027-experiment-data-persistence-native-labber-axes-list.md)：**（accepted/部分已落地）** 刪 datasaver dict 殼（含洩漏軸序的 load-flip）；public API 收斂到 `zcu_tools.utils.datasaver` package facade，caller 透過 re-exported `save_labber_data` / `load_labber_data` 使用 inner-first axes-list（N 維、load 為 save 恒等逆、零 transpose）；每實驗一份 typed axes-spec 驅動共用 save/load helper。Grouped Experiment Dataset 延伸採單一 Experiment Data File + 多 Labber log group 表達多個 Dataset Role；legacy artifact 只透過 migration script 轉換，不保留 runtime compatibility path。與 [[0015]] 劃清（app-state vs 實驗資料）。
+
+## VI-A. 分析 kernel
+
+- [0028 — Flux-Dependence Analysis kernel lives outside notebook and GUI adapters](0028-fluxdep-analysis-kernel.md)：Flux-Dependence Analysis 的互動選點 / filtering / line selection / one-tone peak detection domain implementation 住 notebook-neutral `zcu_tools.analysis.fluxdep`；notebook 與 Qt GUI 只是 adapters。第一批只含 stateless 計算函式 + interaction state machine，不含 database search / plotting / export。
+- [0029 — Fluxonium Prediction engine owns simulation policy outside GUI adapters](0029-fluxonium-prediction-engine.md)：Fluxonium Prediction 的 value-to-flux affine、typed resolution、dispersive fast/scqubits fallback、fallback provenance 與 axis-bound cache identity 住 `zcu_tools.simulate.fluxonium`；GUI/session/notebook 只是 adapters。`FluxoniumPredictor` 保留穩定 facade 並可逐步委派到 engine。
 
 ## VII. 繪圖
 

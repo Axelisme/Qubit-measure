@@ -38,6 +38,17 @@ ADR-0008 原述「commit 時 aggregate（CfgEditorSession）lowers + registers i
 
 `ContextWritePort` 暴露：`set_ml_module_from_schema(name, schema)` / `set_ml_waveform_from_schema(name, schema)` / `set_md_attr(key, value)` / batch 入口。三來源端（editor commit / writeback apply / inspect save）依賴此 port 型別，唯一實作 = ContextService。`set_ml_*_from_raw` 移除後，`from_schema` 內部 = `schema_to_dict(schema, ml, md)` lower → `Factory.from_raw`(內部反序列化，非 public 寫入入口) → register → bump → emit，唯一寫入路徑。
 
+### Run-time experiment config materialization
+
+`ModuleLibrary` 是 YAML-backed waveform/module store，不擁有 live device snapshot，也不擁有 run-time experiment config materialization。把 raw experiment cfg 轉成 typed `ExpCfgModel` 的流程由 `zcu_tools.experiment.cfg_assembler` 擁有：
+
+- `assemble_experiment_cfg(raw_cfg, cfg_model, *, ml, device_snapshot, overrides=None)` 是 stateless materializer。它接收 concrete `raw_cfg`、當下的 `ml`、已取好的 `device_snapshot`，負責套 overrides、注入 device snapshot、lower `modules` 欄位、format single sweep，最後呼 `cfg_model.model_validate()`。
+- `assemble_experiment_cfg` 不接 `md`。`CfgSchema` / `EvalValue` / md lowering 屬 adapter 或 ContextService 寫入邊界；進入 assembler 的資料已經是 concrete raw dict。
+- `make_cfg(raw_cfg, cfg_model, *, ml, overrides=None, device_snapshot=None)` 是 thin wrapper：若 caller 沒傳 `device_snapshot`，它在呼叫當下讀 `GlobalDeviceManager.get_all_info()` 後轉呼 `assemble_experiment_cfg`。
+- `ModuleLibrary.make_cfg(...)` 只作過渡 forwarding wrapper，轉呼新的 `make_cfg(..., ml=self, ...)`；repo-wide caller migration 完成後刪除。此 forwarding 不形成第二套 materialization implementation。
+
+這個邊界與本 ADR 的寫入權威一致：`ModuleLibrary` 保持 store / lookup / writeback target；ContextService 擁有 ml/md 內容寫入；experiment cfg assembly 則是獨立的 stateless materialization function。GUI 與 notebook 都在每次 run / call 時傳入當下 active `ml` 與當下 device snapshot，因此 context switch 只影響下一次 assembly，不會被長壽 object 綁住舊 context。
+
 ### Batch 寫入（Writeback apply）
 
 Writeback 一次 apply 套多 item（md + 多筆 ml）必須是 **1 次 `bump("context")` + 各型別最多 1 次 emit**（ML_CHANGED/MD_CHANGED 的消費者是粗粒度全刷；逐筆 N 次 = N 次無謂全刷 + 版本亂跳）。

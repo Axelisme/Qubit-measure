@@ -24,6 +24,8 @@ measure-gui 的「量測 session core」（context 系統 MetaDict/ModuleLibrary
 
 **app 接法**：`State(SessionState)` 子類化（零 ripple 繼承）；Controller `__init__` 組 `build_session_services` + 注入 app-local infra；run 讀 `exp_context`（SSOT），無 app 自己的 SetupResources/setup()。
 
+**autofluxdep RUN lifecycle**：autofluxdep 的 flux-sweep RUN 使用共用 `OperationRunner` 生命週期機制，而不是 app-local `_RunWorker` / `_running` / `_stop` 平行實作。RUN 的 domain loop、workflow state 與 per-node result summary 仍屬 autofluxdep；operation facet（exclusion、handle、progress、cancel、terminal outcome）走 shared session operation interface。Stop 是帶 reason 的協作停止，保留已完成 partial results。
+
 **autofluxdep Phase B（run path，simulated）**：每 node 的 `Builder.make_cfg`（**在 `produce` 跑**，snapshot 在手——決策 A + D1）lower 當前 context 的 ml/md + drive 設定頭 params → 真 cfg（經 `ml.make_cfg`），再從 cfg 驅動**模擬** acquire（無硬體、無 mock 偵測）；空-ml/demo context fallback 純 snapshot 模擬。真 acquire（per-point `setup_devices` + program `acquire` + `cfg.dev` 寫入 + mock/real 分支）延未來獨立 phase——只換 `produce` 的合成那段。
 
 ## 理由 / 取捨

@@ -1,6 +1,6 @@
 # QICK Note for `meta_tool`
 
-**Last updated:** 2026-06-08
+**Last updated:** 2026-06-25（Experiment cfg materialization boundary）
 
 這份筆記整理 `meta_tool/` 的設計，說明各類別的職責、同步機制與使用模式。
 
@@ -95,20 +95,24 @@ modules:
 | `register_waveform(**wav_kwargs)` | 新增/覆蓋波形設定並寫回 |
 | `register_module(**mod_kwargs)` | 新增/覆蓋模組設定並寫回 |
 | `update_module(name, override_cfg)` | 部分更新既有模組設定 |
-| `make_cfg(exp_cfg, cfg_model, **kwargs)` | 合併 exp_cfg + kwargs + GlobalDeviceManager 設備資訊，並解析 modules 欄位 |
+| `make_cfg(exp_cfg, cfg_model, **kwargs)` | 過渡 thin wrapper；轉呼 `zcu_tools.experiment.cfg_assembler.make_cfg(..., ml=self, ...)` |
 
-**`make_cfg()` 詳細流程**（簽名：`make_cfg(exp_cfg, cfg_model, **kwargs) -> T_ExpCfg`）：
+**Experiment cfg materialization 邊界**：
 
-1. `deepcopy(exp_cfg)` 後用 kwargs 強制覆蓋。
-2. 讀取 `GlobalDeviceManager.get_all_info()` 取得當前設備資訊，以 exp_cfg 的 `dev` 欄位 override。
-3. 將 `modules` 欄位中的字串/dict 解析為 `ModuleCfg` 物件：字串 → `self.get_module(name)`；dict → `ModuleCfgFactory.from_raw(d, ml=self)`（discriminated union 自動 dispatch 到具體 leaf）。
-4. 若 `cfg_model` 有唯一 sweep 子欄位，則自動呼叫 `format_sweep1D()` 將 `sweep` 欄位規格化（縮寫格式 → `{name: SweepCfg}` 格式）。
-5. 以 `cfg_model.model_validate(exp_cfg)` 建立並回傳型別安全的 config 物件（`T_ExpCfg`，bound to `ExpCfgModel`）。
+`ModuleLibrary` 是 YAML-backed store：它擁有 waveform/module 的持久化、lookup、register/update/delete 與 mtime sync，不擁有 live device snapshot，也不擁有 experiment cfg materialization 流程。
+
+把 concrete raw experiment cfg 轉成 typed `ExpCfgModel` 的核心邏輯位於 `zcu_tools.experiment.cfg_assembler`：
+
+1. `assemble_experiment_cfg(raw_cfg, cfg_model, *, ml, device_snapshot, overrides=None)` 是 stateless materializer。
+2. `raw_cfg` 已是 concrete dict；GUI 的 `CfgSchema` / `EvalValue` / md lowering 在 adapter 層完成，不進 assembler。
+3. caller 在每次 run / notebook call 當下傳入 current `ml` 與 `device_snapshot`。核心不持有 active context，也不直接讀 `GlobalDeviceManager`。
+4. `make_cfg(raw_cfg, cfg_model, *, ml, overrides=None, device_snapshot=None)` 是薄 wrapper；若未傳 `device_snapshot`，在呼叫當下讀 `GlobalDeviceManager.get_all_info()`，再轉呼 `assemble_experiment_cfg`。
+5. `ModuleLibrary.make_cfg(...)` 只保留為過渡 forwarding wrapper，避免形成第二套 materialization implementation；caller migration 完成後刪除。
 
 **Cfg 解析 API**（統一走 Factory wrapper）：
 
 ```python
-# library.py 內所有解析點（_load / register_* / make_cfg）統一使用：
+# library.py 內 store 解析點（_load / register_*）統一使用：
 WaveformCfgFactory.from_raw(raw, ml=self)
 ModuleCfgFactory.from_raw(raw, ml=self)
 ```
@@ -220,7 +224,13 @@ ml.register_module(readout={...})
 
 # 或載入既有測量點
 ml, md = em.use_flux("0113_10_1.234mA")
-cfg = ml.make_cfg({"reps": 1000, "rounds": 10}, SomeExpCfgModel)  # SomeExpCfgModel = 你的 ExpCfgModel 子類
+from zcu_tools.experiment.cfg_assembler import make_cfg
+
+cfg = make_cfg(
+    {"reps": 1000, "rounds": 10},
+    SomeExpCfgModel,  # SomeExpCfgModel = 你的 ExpCfgModel 子類
+    ml=ml,
+)
 ```
 
 ---
@@ -231,8 +241,12 @@ cfg = ml.make_cfg({"reps": 1000, "rounds": 10}, SomeExpCfgModel)  # SomeExpCfgMo
 ExperimentManager
     ├── ModuleLibrary  (module_cfg.yaml)
     │       └── ModuleCfg / WaveformCfg  (from program/v2/modules)
-    │               └── GlobalDeviceManager.get_all_info()  (make_cfg 時注入)
     └── MetaDict       (meta_info.json)
+
+Experiment cfg materialization
+    ├── zcu_tools.experiment.cfg_assembler.make_cfg / assemble_experiment_cfg
+    ├── ModuleLibrary  (current ml；module lookup / lowering context)
+    └── GlobalDeviceManager.get_all_info()  (thin wrapper 呼叫當下的 default snapshot provider)
 
 ArbWaveformDatabase  (獨立，被 modules/waveform.py:ArbWaveform 使用)
 SampleTable          (獨立，供 notebook 記錄量測結果用)
@@ -245,7 +259,7 @@ SampleTable          (獨立，供 notebook 記錄量測結果用)
 - `SyncFile.sync()` 採 mtime 比較，且目前沒有 file lock。若兩個 process 同時寫同一個檔案，會 warning 衝突並以本地 dirty 內容覆蓋磁碟版本。
 - `MetaDict` 的 `_dirty` + `sync()` 表示每次 `__setattr__` 都會立即寫回磁碟（兩次 `sync()`：設定前確保最新，設定後立即寫回）。
 - `ModuleLibrary.get_waveform()` / `get_module()` 回傳 deepcopy，修改回傳值不影響 library 內部狀態（需透過 `register_*` / `update_*` 才能持久化）。
-- `make_cfg()` 中 `GlobalDeviceManager.get_all_info()` 會讀取當前所有設備的 info（含 addr、當前電流/電壓值等），注入到 `cfg["dev"]`，確保每次實驗設定包含設備快照。
+- experiment cfg materialization 每次呼叫都使用 caller 傳入的 current `ml` 與 device snapshot；active context 切換不應被長壽 object 綁住。
 
 ---
 
@@ -253,6 +267,7 @@ SampleTable          (獨立，供 notebook 記錄量測結果用)
 
 | 日期 | Codebase commit | 說明 |
 |------|-----------------|------|
+| 2026-06-25 | — | `ModuleLibrary` 與 experiment cfg materialization 劃清：核心改由 stateless `assemble_experiment_cfg` 擁有，`make_cfg` 是薄 wrapper，`ModuleLibrary.make_cfg` 只作過渡 forwarding。 |
 | 2026-05-21 | `d957bc8c` | `new_flux`/`_auto_label` 新增 `unit="none"` 支援：無物理單位的純 flux 數值以 fixed-point + SI 前綴格式化（u/m/空/k/M/G/T），不附加物理單位字串；`unit` 預設值從 `"A"` 改為 `"none"`。 |
 | 2026-04-29 | `f2f30ae1` | 對齊現況：`ModuleCfgFactory`/`WaveformCfgFactory` 改為 TypeAdapter 薄封裝，移除「registry + register」敘述；補充 `SyncFile` 無 file lock 的衝突語意。 |
 | 2026-04-26 | `cd0bc869` | `make_cfg()` 新增 sweep auto-format 步驟；回傳型別改為 `T_ExpCfg`（bound to `ExpCfgModel`） |

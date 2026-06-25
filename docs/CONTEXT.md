@@ -55,6 +55,19 @@ all member datasets are peers under the same experiment result identity and each
 member has a dataset role.
 _Avoid_: grouped persistence, multi-file workaround, sidecar artifact
 
+**Flux-Dependence Analysis**:
+The analysis workflow that uses flux-dependent spectra, selected spectral
+features, and flux alignment to produce a fluxonium fit handoff for later
+measurement and dispersive analysis.
+_Avoid_: fluxdep widget, spectrum editor, point-picking UI
+
+**Fluxonium Prediction**:
+The simulation-backed calculation that maps fitted fluxonium parameters and
+value-to-flux alignment into predicted transition frequencies, matrix elements,
+or dispersive resonator frequencies. GUI services and notebook helpers may adapt
+it, but they are not the prediction model itself.
+_Avoid_: GUI predictor service, dispersive tuning widget, plot overlay
+
 ## Example Dialogue
 
 Developer: "This experiment result has multiple measured views. Is that several

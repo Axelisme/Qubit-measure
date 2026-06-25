@@ -1,6 +1,6 @@
 # QICK Note for `experiment/v2`
 
-**Last updated:** 2026-06-25（auto-optimize grouped persistence）
+**Last updated:** 2026-06-25（cfg materialization boundary）
 
 這份筆記整理 `experiment/v2/` 的整體設計，說明 Experiment 層與 Task 層的分工、典型實驗的撰寫範本，以及各子模組的角色。`runner/` 的細節另見 `runner/README.md`。
 
@@ -157,6 +157,7 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):          # 主要 Cfg = program cfg + 
 - `ProgramV2Cfg`（來自 `program/v2`）定義 QICK 程式需要的欄位（`reps`、`rounds`、...）。
 - `ExpCfgModel`（`experiment/cfg_model.py`）提供共用欄位（目前含 `dev`）與統一驗證行為。
 - `SweepCfg` 已移至 `program/v2/sweep.py`（從 `zcu_tools.program.v2` import），繼承 `ConfigBase`，並帶有 `@model_validator` 驗證 `start/stop/step/expts` 一致性。
+- **run-time cfg materialization** 由 `zcu_tools.experiment.cfg_assembler` 擁有，而不是 `ModuleLibrary` store 擁有。核心 `assemble_experiment_cfg(raw_cfg, cfg_model, *, ml, device_snapshot, overrides=None)` 是 stateless function：caller 每次傳入 current `ml` 與當下 device snapshot；它負責套 overrides、注入 `dev` snapshot、lower `modules`、format single sweep、最後 `cfg_model.model_validate()`。`make_cfg(...)` 是薄 wrapper，預設在呼叫當下讀 `GlobalDeviceManager.get_all_info()`；`ModuleLibrary.make_cfg(...)` 只作過渡 forwarding wrapper，caller migration 後刪除。
 
 ---
 
@@ -245,6 +246,7 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):          # 主要 Cfg = program cfg + 
 
 | 日期 | Codebase commit | 說明 |
 |------|-----------------|------|
+| 2026-06-25 | — | Config 組合慣例補上 `cfg_assembler` 邊界：`assemble_experiment_cfg` 是 stateless materializer，`make_cfg` 是薄 wrapper，`ModuleLibrary` 不再擁有 live device snapshot / materialization 責任。 |
 | 2026-06-25 | — | RO auto-optimize 與 JPA auto-optimize 持久化為單一 grouped HDF5：RO roles 為 `readout_freq` / `readout_gain` / `readout_length` / `snr`，JPA roles 為 `jpa_flux` / `jpa_freq` / `jpa_power` / `jpa_phase` / `snr`；legacy sidecar 只透過 `script/migrate_experiment_data.py` converter 轉換。 |
 | 2026-06-25 | — | singleshot `ac_stark`、MIST `power_freq`、`t1`、`t1_with_tone` 與 `t1_with_tone_sweep` 持久化為 single-role canonical HDF5：`population_states` / `initial_states` 是普通 axes，不是 Dataset Roles；`t1_with_tone_sweep` canonical Result 只存 g/e components，legacy zero-filled `other` 只屬 migration 邊界。 |
 | 2026-06-25 | — | singleshot `len_rabi` 與 MIST `power` / `freq` / `pre_freq` 持久化為 single-role canonical HDF5：`population_states=[0, 1]` 是 inner axis，sweep axis 是 outer axis，Result-native z shape 為 `(Nsweep, 2)`；legacy `(2, Nsweep)` population HDF5 只透過 `script/migrate_experiment_data.py` 轉換。 |
