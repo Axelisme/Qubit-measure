@@ -32,7 +32,7 @@ def test_format_alu_op_invalid_rhs_raises(mock_prog):
 
 
 def test_format_alu_op_resolves_via_get_reg(mock_prog):
-    mock_prog._get_reg.side_effect = lambda name: f"mapped_{name}"
+    mock_prog.set_reg_resolver(lambda name: f"mapped_{name}")
     result = format_alu_op(mock_prog, "r0", "+", "r1")
     assert result == "mapped_r0 + mapped_r1"
 

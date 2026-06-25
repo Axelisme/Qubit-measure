@@ -250,28 +250,34 @@ class TestDirectReadoutRuntime:
     def test_init_calls_declare_and_add(self, mock_prog):
         ro = DirectReadout("ro", _make_direct_cfg(ro_ch=2, ro_freq=6000.0))
         ro.init(mock_prog)
-        mock_prog.declare_readout.assert_called_once_with(ch=2, length=1.0)
-        mock_prog.add_readoutconfig.assert_called_once()
+        assert mock_prog.only("declare_readout").kwargs == {"ch": 2, "length": 1.0}
+        assert mock_prog.only("add_readout_config").kwargs == {
+            "ch": 2,
+            "name": "ro",
+            "freq": 6000.0,
+        }
 
     def test_init_passes_gen_ch_when_set(self, mock_prog):
         cfg = DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=5000.0, gen_ch=1)
         ro = DirectReadout("ro", cfg)
         ro.init(mock_prog)
-        _, kwargs = mock_prog.add_readoutconfig.call_args
-        assert kwargs.get("gen_ch") == 1
+        assert mock_prog.only("add_readout_config").kwargs["gen_ch"] == 1
 
     def test_init_omits_gen_ch_when_none(self, mock_prog):
         ro = DirectReadout("ro", _make_direct_cfg())
         ro.init(mock_prog)
-        _, kwargs = mock_prog.add_readoutconfig.call_args
-        assert "gen_ch" not in kwargs
+        assert "gen_ch" not in mock_prog.only("add_readout_config").kwargs
 
     def test_run_calls_send_readoutconfig_and_trigger(self, mock_prog):
         ro = DirectReadout("ro", _make_direct_cfg())
         ro.init(mock_prog)
         result = ro.run(mock_prog, t=0.5)
-        mock_prog.send_readoutconfig.assert_called_once()
-        mock_prog.trigger.assert_called_once()
+        assert mock_prog.only("send_readout_config").kwargs == {
+            "ch": 0,
+            "name": "ro",
+            "t": 0.5,
+        }
+        assert mock_prog.only("trigger").kwargs == {"ros": [0], "t": 0.5}
         assert result == 0.5  # returns t unchanged
 
     def test_allow_rerun(self):
@@ -282,16 +288,16 @@ class TestPulseReadoutRuntime:
     def test_init_wires_pulse_and_ro_window(self, mock_prog):
         ro = PulseReadout("ro", _make_pulse_ro_cfg(ch=3))
         ro.init(mock_prog)
-        mock_prog.declare_readout.assert_called_once()
-        mock_prog.declare_gen.assert_called_once()
+        assert mock_prog.count("declare_readout") == 1
+        assert mock_prog.count("declare_gen") == 1
 
     def test_run_calls_both_submodules(self, mock_prog):
         ro = PulseReadout("ro", _make_pulse_ro_cfg(ch=3))
         ro.init(mock_prog)
         ro.run(mock_prog, t=0.0)
-        mock_prog.send_readoutconfig.assert_called_once()
-        mock_prog.trigger.assert_called_once()
-        mock_prog.pulse.assert_called_once()
+        assert mock_prog.count("send_readout_config") == 1
+        assert mock_prog.count("trigger") == 1
+        assert mock_prog.count("pulse") == 1
 
     def test_allow_rerun(self):
         assert PulseReadout("ro", _make_pulse_ro_cfg()).allow_rerun() is True

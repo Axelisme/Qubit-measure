@@ -34,11 +34,18 @@ def test_branch_uses_dispatch_table_jumps(mock_prog):
     out = b.run(mock_prog, t=0.25)
 
     assert out == 0.0
-    assert mock_prog.cond_jump.call_count == 0
-    assert mock_prog.write_reg_op.call_count == 1
-    assert mock_prog.write_reg_op.call_args_list[0].args == ("s15", "s15", "+", "sel")
+    jumps = mock_prog.events_of("jump")
+    assert all(event.kwargs.get("if_cond") is None for event in jumps)
+    assert len(mock_prog.events_of("reg_write")) == 1
+    assert mock_prog.only("reg_write").kwargs == {
+        "mode": "op",
+        "dst": "s15",
+        "lhs": "s15",
+        "op": "+",
+        "rhs": "sel",
+    }
     # 3 dispatch table stubs + 2 end-of-case jumps (all non-last cases).
-    assert mock_prog.jump.call_count == 5
+    assert len([event for event in jumps if event.kwargs.get("label") is not None]) == 5
 
 
 def test_branch_power_of_two_has_no_nop_padding(mock_prog):
@@ -52,8 +59,10 @@ def test_branch_power_of_two_has_no_nop_padding(mock_prog):
 
     b.run(mock_prog)
 
-    assert mock_prog.nop.call_count == 0
-    assert mock_prog.cond_jump.call_count == 0
+    assert mock_prog.count("nop") == 0
+    assert all(
+        event.kwargs.get("if_cond") is None for event in mock_prog.events_of("jump")
+    )
 
 
 def test_branch_rejects_qickparam_duration(mock_prog):
@@ -115,7 +124,7 @@ def test_repeat_range_hint_none_by_default():
 def test_repeat_init_registers_counter_reg(mock_prog):
     r = Repeat("lp", n=3)
     r.init(mock_prog)
-    mock_prog.add_reg.assert_called_with("lp")
+    assert mock_prog.only("add_reg").kwargs == {"name": "lp"}
 
 
 def test_repeat_init_zero_n_short_circuit(mock_prog):
@@ -127,7 +136,7 @@ def test_repeat_init_zero_n_short_circuit(mock_prog):
     r.add_content(child)
     r.init(mock_prog)
 
-    mock_prog.add_reg.assert_not_called()
+    assert mock_prog.count("add_reg") == 0
     child.init.assert_not_called()
 
 
@@ -151,18 +160,34 @@ def test_repeat_run_integer_n_calls_open_close_inner_loop(mock_prog):
     r = Repeat("lp", n=4)
     r.run(mock_prog)
 
-    mock_prog.open_inner_loop.assert_called_once_with("lp", "lp", 4, range_hint=None)
-    mock_prog.close_inner_loop.assert_called_once_with("lp", "lp", 4)
+    assert mock_prog.only("open_loop").kwargs == {
+        "name": "lp",
+        "counter_reg": "lp",
+        "n": 4,
+        "range_hint": None,
+    }
+    assert mock_prog.only("close_loop").kwargs == {
+        "name": "lp",
+        "counter_reg": "lp",
+        "n": 4,
+    }
 
 
 def test_repeat_run_string_n_calls_open_close_inner_loop_with_reg(mock_prog):
     r = Repeat("lp", n="n_reg")
     r.run(mock_prog)
 
-    mock_prog.open_inner_loop.assert_called_once_with(
-        "lp", "lp", "n_reg", range_hint=None
-    )
-    mock_prog.close_inner_loop.assert_called_once_with("lp", "lp", "n_reg")
+    assert mock_prog.only("open_loop").kwargs == {
+        "name": "lp",
+        "counter_reg": "lp",
+        "n": "n_reg",
+        "range_hint": None,
+    }
+    assert mock_prog.only("close_loop").kwargs == {
+        "name": "lp",
+        "counter_reg": "lp",
+        "n": "n_reg",
+    }
 
 
 def test_repeat_run_returns_zero(mock_prog):
@@ -176,16 +201,26 @@ def test_repeat_run_zero_n_short_circuits_loop_macros(mock_prog):
     out = r.run(mock_prog, t=0.25)
 
     assert out == 0.0
-    mock_prog.open_inner_loop.assert_not_called()
-    mock_prog.close_inner_loop.assert_not_called()
-    mock_prog.delay.assert_called_once_with(t=0.25)
-    mock_prog.delay_auto.assert_called_once_with(t=0.0)
+    assert mock_prog.count("open_loop") == 0
+    assert mock_prog.count("close_loop") == 0
+    assert mock_prog.only("delay").kwargs == {"t": 0.25, "tag": None}
+    assert mock_prog.only("delay_auto").kwargs == {
+        "t": 0.0,
+        "gens": True,
+        "ros": True,
+        "tag": None,
+    }
 
 
 def test_repeat_run_passes_range_hint(mock_prog):
     r = Repeat("lp", n=5, range_hint=(0, 5))
     r.run(mock_prog)
-    mock_prog.open_inner_loop.assert_called_once_with("lp", "lp", 5, range_hint=(0, 5))
+    assert mock_prog.only("open_loop").kwargs == {
+        "name": "lp",
+        "counter_reg": "lp",
+        "n": 5,
+        "range_hint": (0, 5),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -194,7 +229,7 @@ def test_repeat_run_passes_range_hint(mock_prog):
 
 
 def test_branch_large_pmem_emits_extra_write_reg_op(mock_prog):
-    mock_prog.tproccfg = {"pmem_size": 4096}
+    mock_prog.tproccfg["pmem_size"] = 4096
     b = Branch(
         "sel",
         [_FixedDurationModule("b0", 0.1)],
@@ -202,7 +237,16 @@ def test_branch_large_pmem_emits_extra_write_reg_op(mock_prog):
     )
     b.run(mock_prog)
     # big_jump: write_reg_op called for s15 base address + 2 dispatch stubs write_label + jump
-    assert mock_prog.write_reg_op.call_count >= 1
+    reg_writes = mock_prog.events_of("reg_write")
+    assert len(reg_writes) >= 1
+    assert reg_writes[0].kwargs == {
+        "mode": "op",
+        "dst": "s15",
+        "lhs": "s15",
+        "op": "+",
+        "rhs": "sel",
+    }
+    assert mock_prog.count("write_label") >= 2
 
 
 def test_branch_requires_at_least_two_branches():

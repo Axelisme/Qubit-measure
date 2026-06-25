@@ -7,14 +7,15 @@ from unittest.mock import MagicMock
 from qick.asm_v2 import AsmInst
 from zcu_tools.program.v2.macro.delay import DelayRegAuto
 
+from tests.program.v2.support import ProgramTrace
+
 
 def _make_delay_auto(time_reg="r0", gens=True, ros=True):
     return DelayRegAuto(time_reg=time_reg, gens=gens, ros=ros)
 
 
 def _make_prog_with_auto_t(auto_t_value, time_reg="r0"):
-    prog = MagicMock()
-    prog._get_reg.side_effect = lambda name: name
+    prog = ProgramTrace()
     macro = _make_delay_auto(time_reg=time_reg)
     macro.t_regs = {"auto_t": auto_t_value}
     return prog, macro
@@ -27,18 +28,20 @@ def _make_prog_with_auto_t(auto_t_value, time_reg="r0"):
 
 def test_preprocess_calls_get_reg(mock_prog):
     macro = _make_delay_auto(time_reg="r0")
-    mock_prog.get_max_timestamp.return_value = 0.0
+    resolved_regs = []
+    mock_prog.set_reg_resolver(lambda name: resolved_regs.append(name) or name)
+    mock_prog.max_timestamp = 0.0
     macro.convert_time = MagicMock(return_value=0)
     macro.preprocess(mock_prog)
-    mock_prog._get_reg.assert_called_with("r0")
+    assert resolved_regs == ["r0"]
 
 
 def test_preprocess_calls_decrement_timestamps(mock_prog):
     macro = _make_delay_auto()
-    mock_prog.get_max_timestamp.return_value = 1.5
+    mock_prog.max_timestamp = 1.5
     macro.convert_time = MagicMock(return_value=10)
     macro.preprocess(mock_prog)
-    mock_prog.decrement_timestamps.assert_called_once_with(10)
+    assert mock_prog.decremented_timestamps == [10]
 
 
 # ---------------------------------------------------------------------------

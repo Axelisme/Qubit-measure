@@ -449,7 +449,7 @@ class TestResetCfgAdapter:
 class TestNoneResetRuntime:
     def test_init_is_noop(self, mock_prog):
         NoneReset("r", NoneResetCfg()).init(mock_prog)
-        mock_prog.assert_not_called()
+        assert mock_prog.has_no_events()
 
     def test_run_returns_t(self, mock_prog):
         r = NoneReset("r", NoneResetCfg())
@@ -463,13 +463,13 @@ class TestPulseResetRuntime:
     def test_init_declares_gen(self, mock_prog):
         r = PulseReset("r", PulseResetCfg(pulse_cfg=_make_pulse_cfg()))
         r.init(mock_prog)
-        mock_prog.declare_gen.assert_called_once()
+        assert mock_prog.count("declare_gen") == 1
 
     def test_run_emits_pulse(self, mock_prog):
         r = PulseReset("r", PulseResetCfg(pulse_cfg=_make_pulse_cfg()))
         r.init(mock_prog)
         r.run(mock_prog, t=0.0)
-        mock_prog.pulse.assert_called_once()
+        assert mock_prog.count("pulse") == 1
 
 
 class TestTwoPulseResetRuntime:
@@ -485,13 +485,13 @@ class TestTwoPulseResetRuntime:
     def test_init_declares_both_gens(self, mock_prog):
         r = self._make()
         r.init(mock_prog)
-        assert mock_prog.declare_gen.call_count == 2
+        assert mock_prog.count("declare_gen") == 2
 
     def test_run_emits_both_pulses(self, mock_prog):
         r = self._make()
         r.init(mock_prog)
         r.run(mock_prog, t=0.0)
-        assert mock_prog.pulse.call_count == 2
+        assert mock_prog.count("pulse") == 2
 
 
 class TestBathResetRuntime:
@@ -508,10 +508,10 @@ class TestBathResetRuntime:
     def test_init_declares_three_gens(self, mock_prog):
         r = self._make()
         r.init(mock_prog)
-        assert mock_prog.declare_gen.call_count == 3
+        assert mock_prog.count("declare_gen") == 3
 
     def test_run_emits_three_pulses(self, mock_prog):
         r = self._make()
         r.init(mock_prog)
         r.run(mock_prog, t=0.0)
-        assert mock_prog.pulse.call_count == 3
+        assert mock_prog.count("pulse") == 3

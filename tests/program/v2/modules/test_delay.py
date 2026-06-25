@@ -53,15 +53,22 @@ def test_join_allow_rerun_aggregates():
 def test_delay_auto_normal_calls_delay_auto(mock_prog):
     da = DelayAuto("d", t=0.5)
     da.run(mock_prog, t=0.0)
-    mock_prog.delay_auto.assert_called_once_with(t=0.5, gens=True, ros=True, tag=None)
+    assert mock_prog.only("delay_auto").kwargs == {
+        "t": 0.5,
+        "gens": True,
+        "ros": True,
+        "tag": None,
+    }
 
 
 def test_delay_auto_reg_name_calls_delay_reg_auto(mock_prog):
     da = DelayAuto("d", t="time_reg")
     da.run(mock_prog, t=0.0)
-    mock_prog.delay_reg_auto.assert_called_once_with(
-        time_reg="time_reg", gens=True, ros=True
-    )
+    assert mock_prog.only("delay_reg_auto").kwargs == {
+        "time_reg": "time_reg",
+        "gens": True,
+        "ros": True,
+    }
 
 
 def test_delay_auto_returns_zero(mock_prog):
@@ -84,32 +91,13 @@ def test_delay_auto_without_tag_allows_rerun_true():
 
 
 def test_join_calls_disable_delay_context(mock_prog):
-    from contextlib import contextmanager
-
-    entered = []
-
-    @contextmanager
-    def _cm():
-        entered.append(True)
-        yield
-
-    mock_prog.disable_delay.side_effect = _cm
-
     child = SoftDelay("s", 0.0)
     j = Join([child])
     j.run(mock_prog, t=0.0)
-    assert entered, "disable_delay context was not entered"
+    assert mock_prog.disable_delay_entries == 1
 
 
 def test_join_returns_max_of_branch_times(mock_prog):
-    from contextlib import contextmanager
-
-    @contextmanager
-    def _cm():
-        yield
-
-    mock_prog.disable_delay.side_effect = _cm
-
     # Use distinct non-zero delays so merge_max_length can pick a clear winner
     # without triggering the overlapping-lengths warning.
     fast = SoftDelay("f", 0.1)
