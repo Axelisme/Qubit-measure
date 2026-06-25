@@ -37,6 +37,7 @@ from .types import (
     InteractiveSession,
     IntSpec,
     LiteralSpec,
+    LoadDataRequest,
     MetaDictWriteback,
     ModuleRefSpec,
     ModuleRefValue,

@@ -159,6 +159,13 @@ class RunRequest:
 
 
 @dataclass(frozen=True)
+class LoadDataRequest:
+    data_path: str
+    md: MetaDict
+    ml: ModuleLibrary
+
+
+@dataclass(frozen=True)
 class AnalyzeRequest(Generic[T_Result, T_AnalyzeParams]):
     run_result: T_Result
     analyze_params: T_AnalyzeParams

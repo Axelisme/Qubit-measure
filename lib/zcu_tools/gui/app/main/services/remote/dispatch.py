@@ -153,6 +153,7 @@ def _tab_snapshot_wire(adapter: RemoteControlAdapter, tab_id: str) -> dict[str, 
             "has_figure": bool(interaction.has_figure),
         },
         "save_paths": _save_paths_wire(snap.save_paths),
+        "result_source_path": snap.result_source_path,
     }
 
 
@@ -285,6 +286,41 @@ def _h_tab_run_start(
             reason=getattr(exc, "reason_code", ""),
         ) from exc
     return {"operation_id": operation_id}
+
+
+def _h_tab_load_data(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    import dataclasses
+
+    tab_id = str(params["tab_id"])
+    if not adapter.ctrl.has_tab(tab_id):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    try:
+        outcome = adapter.ctrl.load_tab_result(tab_id, str(params["data_path"]))
+    except (RuntimeError, OSError, ValueError) as exc:
+        reason = getattr(exc, "reason_code", "")
+        if isinstance(exc, NotImplementedError):
+            reason = "unsupported_load"
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=reason,
+        ) from exc
+
+    snap = adapter.ctrl.get_tab_snapshot(tab_id)
+    interaction = snap.interaction
+    assert interaction is not None
+    result: dict[str, object] = dataclasses.asdict(outcome)
+    result["has_run_result"] = bool(interaction.has_run_result)
+    ap = snap.analyze_params
+    if ap is None:
+        result["analyze_params"] = None
+    elif dataclasses.is_dataclass(ap) and not isinstance(ap, type):
+        result["analyze_params"] = dataclasses.asdict(ap)
+    else:
+        result["analyze_params"] = {}
+    return result
 
 
 def _h_tab_run_cancel(
@@ -1954,6 +1990,7 @@ _HANDLERS: dict[str, Handler] = {
     "tab.get_cfg": _h_tab_get_cfg,
     "tab.set_cfg": _h_tab_set_cfg,
     "tab.run_start": _h_tab_run_start,
+    "tab.load_data": _h_tab_load_data,
     "tab.run_cancel": _h_tab_run_cancel,
     "analyze.cancel": _h_analyze_cancel,
     "run.running_tab": _h_run_running_tab,

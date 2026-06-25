@@ -140,6 +140,16 @@ def test_writeback_apply_is_a_pure_generated_forwarder():
     assert set(schema["properties"]) == {"tab_id"}
 
 
+def test_load_data_is_generated_with_hidden_expected_versions():
+    assert "tab.load_data" in METHOD_SPECS
+    assert "tab.load_data" not in m._NON_GENERATED_METHODS
+    assert "gui_tab_load_data" in m.TOOLS
+
+    schema = m.TOOLS["gui_tab_load_data"]["inputSchema"]
+    assert set(schema["required"]) == {"tab_id", "data_path"}
+    assert set(schema["properties"]) == {"tab_id", "data_path"}
+
+
 def test_writeback_set_item_selected_is_boolean_schema():
     """``selected`` must render as a boolean schema so the client sends a real
     boolean. A JSON-any schema lets the client send the string "false", which

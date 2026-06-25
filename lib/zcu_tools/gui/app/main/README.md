@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-25（save path ownership）
+**Last updated:** 2026-06-25（load canonical result）
 
 # `zcu_tools/gui/app/main/` — measure-gui Framework AI Note
 
@@ -46,6 +46,7 @@ gui/
 │   ├── session_codec.py  — tabs raw↔live codec (Workspace 內部，Caretaker 只見不透明 cfg_raw)
 │   ├── startup.py        — StartupService (typed startup requests + capture_startup/restore_startup；無狀態)
 │   ├── run.py            — RunService (執行與進度條；OperationRunner client：組 OperationSpec、cancel-partial 判讀在 on_terminal、寫 State 經 TabResultWritePort)
+│   ├── load.py           — LoadService (Analysis tab / remote 載入 canonical result：呼 adapter.load、替換 run_result、清 analyze/post/writeback；不碰 SoC、不反填 cfg_snapshot)
 │   ├── staged_analyze.py — _StagedAnalyzeService (analyze/post-analyze 共用基底：OperationRunner client（exclusion=None，handle-only）+ 主線程 record result/figure 經 TabAnalyzeWritePort + 失敗路徑)
 │   ├── analyze.py        — AnalyzeService (主分析層：FIT worker + INTERACTIVE finish；算 writeback items)
 │   ├── post_analyze.py   — PostAnalyzeService (第二分析層，鏡像 AnalyzeService：FIT-only、在 primary analyze 結果之上重算、gate on primary 已存在；State 平行 post_* 欄位)
@@ -374,6 +375,12 @@ plot substrate 已抽到頂層共用套件 `lib/zcu_tools/gui/plotting/`（measu
 2. Run / Analyze 中 → worker 入口建立 routing scope，liveplot helper 與 GUI custom backend 從當前 routing context 取得宿主
 3. Run 結束 → `update_tab_result()` 寫新 result；liveplot canvas 留在 stack
 4. Analyze 後 → 若 figure 已由 GUI custom backend 建好 canvas，`show_analysis_figure()` 直接重用
+
+### Canonical Result Load
+
+- 使用者先開對應 adapter tab，再在 Analysis tab 用 `Load Data...` 載入 canonical result；remote/MCP 對應 `tab.load_data` / `gui_tab_load_data`。第一版不 auto-detect adapter。
+- load 只要求 context not empty，不要求 active file-backed context 或 SoC；成功後把 loaded object 安裝為 `run_result`、記錄 `result_source_path`、清掉舊 analyze/post/writeback/figure，並對 analysis adapter 重新初始化 analyze params，因此可直接 Analyze。
+- load 不把 `result.cfg_snapshot` 反填 Config tab，也不 bump `tab:<id>:cfg` / save path / SoC/device/context。未來 backfill seam 是 stateless `cfg_snapshot_backfill.py`，目前 load path 不呼叫。
 
 ### 固定尺寸出圖（`gui/figure_export.py`）
 

@@ -233,6 +233,9 @@ class ExpTabWidget(QWidget):
         analysis_layout = QVBoxLayout(analysis_inner)
         analysis_layout.setAlignment(Qt.AlignTop)  # type: ignore[attr-defined]
 
+        self.load_data_btn = QPushButton("Load Data...")
+        analysis_layout.addWidget(self.load_data_btn)
+
         # Analyze params group
         self._analyze_section = _CollapsibleSection(
             "Analysis", collapsible=True, collapsed=False
@@ -755,12 +758,14 @@ class ExpTabWidget(QWidget):
         # never lingers from a previous analysis adapter on the same tab.)
         has_analysis = capabilities.analysis is not AnalysisMode.NONE
         self._analyze_section.setVisible(has_analysis)
+        self.load_data_btn.setVisible(has_analysis)
         self.analyze_btn.setVisible(has_analysis)
         if not has_analysis:
             self.writeback_section.setVisible(False)
         # The second tab carries analysis widgets + Save; when analysis is hidden
         # only Save remains, so label it accordingly instead of "Analysis".
         self._left_tabs.setTabText(1, "Analysis" if has_analysis else "Save")
+        self.load_data_btn.setEnabled(idle and has_analysis and state.has_context)
         self.analyze_form.setEnabled(idle and has_analysis)
         self.analyze_btn.setEnabled(
             idle and has_analysis and state.has_context and state.has_run_result
@@ -834,6 +839,9 @@ class ExpTabWidget(QWidget):
         self._image_path_edit.textChanged.connect(save_paths_cb)
         self.reset_btn.clicked.connect(self._on_reset_cfg_clicked)
         self.run_btn.clicked.connect(lambda: main_window._on_run_stop_clicked(tab_id))
+        self.load_data_btn.clicked.connect(
+            lambda: main_window._on_load_data_clicked(tab_id)
+        )
         self.analyze_btn.clicked.connect(
             lambda: main_window._on_analyze_clicked(tab_id)
         )
@@ -1624,6 +1632,26 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         self._ctrl.analyze(tab_id, tab_w.read_analyze_params())
+
+    def _on_load_data_clicked(self, tab_id: str) -> None:
+        logger.info("_on_load_data_clicked: tab_id=%r", tab_id)
+        if self._resolve_tab_widget(tab_id, "_on_load_data_clicked") is None:
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load data file",
+            "",
+            "HDF5 files (*.hdf5 *.h5);;All files (*)",
+        )
+        if not path:
+            return
+        try:
+            self._ctrl.load_tab_result(tab_id, path)
+        except Exception as exc:
+            logger.exception("_on_load_data_clicked failed: tab_id=%r", tab_id)
+            self.show_error_dialog("Load data failed", str(exc))
+            return
+        self.show_status_message(f"Loaded data from {path}")
 
     def _on_post_analyze_clicked(self, tab_id: str) -> None:
         logger.info("_on_post_analyze_clicked: tab_id=%r", tab_id)

@@ -3,7 +3,8 @@ from __future__ import annotations
 import os
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from typing import Any, ClassVar, Generic
+from inspect import signature
+from typing import Any, ClassVar, Generic, cast
 
 from zcu_tools.experiment.cfg_assembler import make_cfg
 from zcu_tools.gui.app.main.adapter import (
@@ -16,6 +17,7 @@ from zcu_tools.gui.app.main.adapter import (
     ExpContext,
     InteractiveHost,
     InteractiveSession,
+    LoadDataRequest,
     NoAnalyzeParams,
     PostAnalyzeRequest,
     PostAnalyzeResultBase,
@@ -54,6 +56,16 @@ def _analyze_params_generic_arg(cls: type) -> type:
             if isinstance(arg, type):
                 return arg
     return NoAnalyzeParams
+
+
+def _can_construct_without_args(cls: type[Any]) -> bool:
+    try:
+        signature(cls).bind()
+    except TypeError:
+        return False
+    except ValueError:
+        return True
+    return True
 
 
 class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
@@ -295,6 +307,19 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
             soc, soccfg = require_soc_handles(req)
             return self.exp_cls().run(soc, soccfg, cfg)
         return self.exp_cls().run(req.soc, req.soccfg, cfg)
+
+    def load(self, req: LoadDataRequest) -> T_Result:
+        if not _can_construct_without_args(self.exp_cls):
+            raise NotImplementedError(
+                f"{type(self).__name__} does not support loading canonical result files"
+            )
+        exp = self.exp_cls()
+        load = getattr(exp, "load", None)
+        if not callable(load):
+            raise NotImplementedError(
+                f"{type(self).__name__} does not support loading canonical result files"
+            )
+        return cast(T_Result, load(filepath=req.data_path))
 
     def get_writeback_items(
         self, req: WritebackRequest[T_Result, T_AnalyzeResult]

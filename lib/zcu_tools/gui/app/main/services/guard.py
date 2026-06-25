@@ -60,6 +60,13 @@ class SavePermit:
 
 
 @dataclass(frozen=True)
+class LoadPermit:
+    """Proof that a tab may load a canonical result into the current context."""
+
+    tab_id: str
+
+
+@dataclass(frozen=True)
 class AnalyzePermit:
     """Proof that a tab is eligible to analyze (context + has run result)."""
 
@@ -164,6 +171,12 @@ class GuardService:
             )
         logger.debug("acquire_save_permit: tab_id=%r", tab_id)
         return SavePermit(tab_id=tab_id)
+
+    def acquire_load_permit(self, tab_id: str) -> LoadPermit:
+        self._require_tab(tab_id)
+        self._require_context("load data")
+        logger.debug("acquire_load_permit: tab_id=%r", tab_id)
+        return LoadPermit(tab_id=tab_id)
 
     def acquire_analyze_permit(self, tab_id: str) -> AnalyzePermit:
         tab = self._require_tab(tab_id)

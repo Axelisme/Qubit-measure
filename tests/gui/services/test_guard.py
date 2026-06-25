@@ -10,6 +10,7 @@ from zcu_tools.gui.app.main.services.guard import (
     AnalyzePermit,
     GuardError,
     GuardService,
+    LoadPermit,
     RunPermit,
     SavePermit,
     WritebackPermit,
@@ -157,6 +158,35 @@ def test_save_permit_rejected_without_run_result():
 
     with pytest.raises(GuardError, match="No run result"):
         guard.acquire_save_permit(tab_id)
+
+
+# ---------------------------------------------------------------------------
+# Load permit (allows DRAFT, no SoC/result requirement)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("readiness", [ContextReadiness.DRAFT, ContextReadiness.ACTIVE])
+def test_load_permit_issued_with_context_without_soc_or_result(
+    readiness: ContextReadiness,
+):
+    state, tab_id = _make_state(
+        readiness=readiness,
+        soc_attached=False,
+        run_result=None,
+        analyze_result=None,
+    )
+    guard = GuardService(state)
+
+    assert isinstance(guard.acquire_load_permit(tab_id), LoadPermit)
+
+
+def test_load_permit_rejected_when_empty():
+    state, tab_id = _make_state(readiness=ContextReadiness.EMPTY)
+    guard = GuardService(state)
+
+    with pytest.raises(GuardError, match="no experiment context") as exc:
+        guard.acquire_load_permit(tab_id)
+    assert exc.value.reason_code == "no_context"
 
 
 # ---------------------------------------------------------------------------

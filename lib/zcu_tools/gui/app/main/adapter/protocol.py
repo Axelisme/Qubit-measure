@@ -12,6 +12,7 @@ from .types import (
     ExpContext,
     InteractiveHost,
     InteractiveSession,
+    LoadDataRequest,
     NoAnalysisResult,
     NoAnalyzeParams,
     PostAnalyzeRequest,
@@ -81,6 +82,10 @@ class ExpAdapterProtocol(Protocol):
 
     def run(self, req: RunRequest, schema: CfgSchema) -> Any:
         """Run the experiment and return its result."""
+        ...
+
+    def load(self, req: LoadDataRequest) -> Any:
+        """Load a canonical result file and return its run-result object."""
         ...
 
     def analyze(self, req: AnalyzeRequest[Any, Any]) -> Any:

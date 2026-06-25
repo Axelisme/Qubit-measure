@@ -170,6 +170,7 @@ def test_exp_tab_disables_local_buttons_while_analyzing(qapp):
     )
 
     assert tab.analyze_btn.isEnabled() is False
+    assert tab.load_data_btn.isEnabled() is False
     assert tab.writeback_widget.isEnabled() is False
     assert tab.save_image_btn.isEnabled() is False  # disabled because is_analyzing
 
@@ -300,6 +301,7 @@ def test_exp_tab_draft_context_allows_analysis_but_disables_run_and_save(qapp):
 
     assert tab.run_btn.isEnabled() is False
     assert tab.run_btn.toolTip() == "Select or create a file-backed context"
+    assert tab.load_data_btn.isEnabled() is True
     assert tab.analyze_btn.isEnabled() is True
     assert tab.writeback_widget.isEnabled() is True
     assert tab.save_data_btn.isEnabled() is False
@@ -332,6 +334,10 @@ def test_non_analysis_adapter_hides_analysis_widgets_but_keeps_save(qapp):
     # Analysis widgets are hidden ...
     assert tab._analyze_section.isHidden() is True
     assert tab.analyze_btn.isHidden() is True
+    # Load is an Analysis-tab action, not a Save Browse button.
+    assert tab.load_data_btn.text() == "Load Data..."
+    assert tab.load_data_btn.isHidden() is True
+    assert tab.load_data_btn.isEnabled() is False
     # ... but Save stays reachable and usable (run result + active context).
     assert tab.save_data_btn.isHidden() is False
     assert tab.save_data_btn.isEnabled() is True
@@ -351,6 +357,77 @@ def test_analysis_adapter_shows_analysis_widgets_and_labels_tab(qapp):
     assert tab._analyze_section.isHidden() is False
     assert tab.analyze_btn.isHidden() is False
     assert tab.save_data_btn.isHidden() is False
+
+
+def test_exp_tab_load_button_requires_context_but_not_soc(qapp):
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
+
+    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab.update_interaction_state(
+        _snapshot(
+            "tab-1",
+            has_context=True,
+            has_active_context=False,
+            has_soc=False,
+            has_run_result=False,
+            has_analyze_result=False,
+            has_figure=False,
+        )
+    )
+    assert tab.load_data_btn.isEnabled() is True
+
+    tab.update_interaction_state(
+        _snapshot(
+            "tab-1",
+            has_context=False,
+            has_active_context=False,
+            has_soc=False,
+            has_run_result=False,
+            has_analyze_result=False,
+            has_figure=False,
+        )
+    )
+    assert tab.load_data_btn.isEnabled() is False
+
+
+def test_main_window_load_data_dialog_calls_controller(qapp, monkeypatch):
+    from qtpy.QtWidgets import QFileDialog
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+
+    ctrl = _apply_window_defaults(MagicMock())
+    ctrl.get_bus.return_value = EventBus()
+    ctrl.has_tab.return_value = True
+    window = MainWindow(ctrl)
+    window._tab_widgets["tab-1"] = MagicMock()
+    window.show_status_message = MagicMock()
+    monkeypatch.setattr(
+        QFileDialog,
+        "getOpenFileName",
+        lambda *args, **kwargs: ("/tmp/result.hdf5", ""),
+    )
+
+    window._on_load_data_clicked("tab-1")
+
+    ctrl.load_tab_result.assert_called_once_with("tab-1", "/tmp/result.hdf5")
+    window.show_status_message.assert_called_once()
+
+
+def test_main_window_load_data_dialog_cancel_is_noop(qapp, monkeypatch):
+    from qtpy.QtWidgets import QFileDialog
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+
+    ctrl = _apply_window_defaults(MagicMock())
+    ctrl.get_bus.return_value = EventBus()
+    ctrl.has_tab.return_value = True
+    window = MainWindow(ctrl)
+    window._tab_widgets["tab-1"] = MagicMock()
+    monkeypatch.setattr(
+        QFileDialog, "getOpenFileName", lambda *args, **kwargs: ("", "")
+    )
+
+    window._on_load_data_clicked("tab-1")
+
+    ctrl.load_tab_result.assert_not_called()
 
 
 def test_main_window_run_lock_disables_only_new_tab_and_run(qapp):

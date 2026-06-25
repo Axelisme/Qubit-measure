@@ -87,6 +87,7 @@ class TabService:
             writeback_items=tuple(self._writeback.get_tab_writeback_items(tab_id)),
             figure=tab.figure,
             save_paths=tab.effective_save_paths(ctx),
+            result_source_path=tab.result_source_path,
         )
 
     def new_tab(self, adapter_name: str, from_dict: TabSnapshot | None = None) -> str:

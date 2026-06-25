@@ -6,6 +6,7 @@ import dataclasses
 import threading
 import time
 from collections.abc import Iterator
+from dataclasses import dataclass
 from unittest.mock import MagicMock
 
 import pytest
@@ -550,6 +551,44 @@ def test_draft_context_rejects_real_run_and_save(cf):
         cf.ctrl.save_image(tab_id, "/tmp/image.png")
     with pytest.raises(RuntimeError, match="active file-backed context"):
         cf.ctrl.save_result(tab_id, "/tmp/data.h5", "/tmp/image.png")
+
+
+@dataclass
+class _LoadedAnalyzeParams:
+    threshold: float
+
+
+def test_load_tab_result_allows_draft_context_without_soc_and_initializes_analyze(cf):
+    tab_id = cf.ctrl.new_tab("fake")
+    cf.state.set_context(
+        dataclasses.replace(
+            cf.state.exp_context,
+            soc=None,
+            soccfg=None,
+            active_label="",
+            readiness=ContextReadiness.DRAFT,
+        )
+    )
+    loaded = object()
+    adapter = MagicMock()
+    adapter.capabilities = FakeAdapter.capabilities
+    adapter.load.return_value = loaded
+    adapter.get_analyze_params.return_value = _LoadedAnalyzeParams(threshold=0.7)
+    cf.state.get_tab(tab_id).adapter = adapter
+    cf.bus.emit.reset_mock()
+
+    outcome = cf.ctrl.load_tab_result(tab_id, "/tmp/loaded.hdf5")
+
+    assert cf.state.get_tab(tab_id).run_result is loaded
+    assert cf.state.get_tab(tab_id).result_source_path == "/tmp/loaded.hdf5"
+    assert cf.state.get_tab(tab_id).analyze_param_instance == _LoadedAnalyzeParams(
+        threshold=0.7
+    )
+    request = adapter.load.call_args.args[0]
+    assert request.data_path == "/tmp/loaded.hdf5"
+    assert not hasattr(request, "soc")
+    assert outcome.has_analyze_params is True
+    cf.bus.emit.assert_any_call(TabContentChangedPayload(tab_id=tab_id))
 
 
 def test_run_rejected_while_soc_connect_lease_active(cf):

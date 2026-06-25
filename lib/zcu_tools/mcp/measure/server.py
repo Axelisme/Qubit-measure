@@ -95,8 +95,8 @@ from zcu_tools.mcp.measure.session_policy import (  # noqa: E402
 # tool renames) that leave the wire contract untouched. A wire-contract change is
 # tracked separately by WIRE_VERSION (see ``wire_version.py``); the two are
 # independent. (Git history holds the per-version evolution.)
-# MeasureMcpSession owns measure-only MCP policy state; WIRE unchanged.
-MCP_VERSION = 64
+# MeasureMcpSession owns measure-only MCP policy state.
+MCP_VERSION = 65
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -134,10 +134,12 @@ ON-DEMAND — the fine-grained base tools, when a bundle doesn't fit:
     gui_tab_get_cfg (read tree) / gui_tab_set_cfg (batch write);
     gui_editor_open / gui_editor_get_cfg / gui_editor_set (batch) for non-tab
     editors (addressed by editor_id).
-  - Run + analyze: gui_tab_run_start, gui_tab_analyze_start, gui_tab_post_analyze_start
-    (each waits briefly then degrades to a handle). A FINISHED run/analyze reply
-    (settled in the short wait) already carries 'figure' — the plot rendered to a
-    temp PNG. After a pending->finished op, read the figure with
+  - Run / load / analyze: gui_tab_run_start, gui_tab_load_data,
+    gui_tab_analyze_start, gui_tab_post_analyze_start. gui_tab_load_data is
+    synchronous; run/analyze/post-analyze each waits briefly then degrades to a
+    handle. A FINISHED run/analyze reply (settled in the short wait) already
+    carries 'figure' — the plot rendered to a temp PNG. After a
+    pending->finished op, read the figure with
     gui_tab_get_current_figure and the fit summary with gui_tab_get_analyze_result /
     gui_tab_get_post_analyze_result (the generic wait/poll report only status).
     gui_tab_save (artifact + figure selectors) persists data and/or the figure and
@@ -159,9 +161,10 @@ normally hidden from the operator; do NOT use these for measurement):
     gui_debug_operations (the in-flight operation handles, semantic key -> id).
 
 Startup precondition: gui_overview's 'state' field must report all four flags true
-before running experiments. Run/save require an active file-backed context;
-save/analyze require an existing run result. A precondition violation returns
-precondition_failed; editing cfg while a tab is running likewise.
+before running experiments. Run/save require an active file-backed context; load
+requires an existing experiment context but no SoC; save/analyze require an
+existing run result. A precondition violation returns precondition_failed;
+editing cfg while a tab is running likewise.
 
 gui_soc_connect is SYNCHRONOUS — NOT part of the async-handle family: it blocks
 until the SoC is connected and returns {status:'finished', soc:{...}} in one call

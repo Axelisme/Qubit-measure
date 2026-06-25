@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
@@ -44,6 +45,7 @@ from .services import (
     AppPersistedState,
     ConnectDeviceRequest,
     DisconnectDeviceRequest,
+    LoadTabResultOutcome,
     PersistenceCaretaker,
     PersistenceError,
     RestoreReport,
@@ -61,7 +63,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.ports import ProgressTransport
 
     from .adapters.qt_shutdown_driver import QtShutdownDriver
-    from .guard import AnalyzePermit
+    from .services.guard import AnalyzePermit
 
 
 # A View has two distinct down-channels from the Controller (ADR-0013):
@@ -248,6 +250,7 @@ class Controller(SessionControllerMixin):
         self._pred_svc = services.predictor
         self._ctx_svc = services.context
         self._tab_svc = services.tab
+        self._load_svc = services.load
         self._run_svc = services.run
         self._analyze_svc = services.analyze
         self._post_analyze_svc = services.post_analyze
@@ -569,6 +572,17 @@ class Controller(SessionControllerMixin):
         host = self._render_host
         live_container = host.make_live_container(tab_id) if host is not None else None
         return self._run_svc.start_run(permit, live_container)
+
+    def load_tab_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome:
+        permit = self._guard_svc.acquire_load_permit(tab_id)
+        outcome = self._load_svc.load_result(permit, data_path)
+        tab = self._state.get_tab(tab_id)
+        has_analyze_params = False
+        if tab.adapter.capabilities.analysis is not AnalysisMode.NONE:
+            self._tab_svc.initialize_tab_analyze_params(tab_id)
+            has_analyze_params = True
+        self._bus.emit(TabContentChangedPayload(tab_id=tab_id))
+        return replace(outcome, has_analyze_params=has_analyze_params)
 
     def cancel_run(self) -> bool:
         # Best-effort: True when a live run was signalled, False on a no-op

@@ -66,10 +66,10 @@ from __future__ import annotations
 #     replies surface the operation handle (operation_id) instead of stripping it.
 #   - tab.writeback_apply: enriched echo
 #     {applied_ids, written, context_version}.
-WIRE_VERSION = 44
+WIRE_VERSION = 45
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION (a wire-contract change
 # bumps both; a pure-internal GUI change bumps only this). Git history holds the
 # per-version evolution.
-GUI_VERSION = 52  # Phase 171 polish: gui_device_cancel error messages differentiate no-op vs non-cancellable kind
+GUI_VERSION = 53  # load canonical result into an already-open adapter tab

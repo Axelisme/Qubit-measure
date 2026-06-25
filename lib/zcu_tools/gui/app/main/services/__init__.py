@@ -25,10 +25,12 @@ from .guard import (
     AnalyzePermit,
     GuardError,
     GuardService,
+    LoadPermit,
     RunPermit,
     SavePermit,
     WritebackPermit,
 )
+from .load import LoadService, LoadTabResultOutcome
 from .operation_gate import OperationGate, OperationKind
 from .persistence_types import (
     APP_STATE_VERSION,
@@ -67,10 +69,13 @@ __all__ = [
     "PostAnalyzeService",
     "GuardError",
     "GuardService",
+    "LoadPermit",
     "RunPermit",
     "SavePermit",
     "AnalyzePermit",
     "WritebackPermit",
+    "LoadService",
+    "LoadTabResultOutcome",
     "RunService",
     "SaveResultOutcome",
     "SaveService",

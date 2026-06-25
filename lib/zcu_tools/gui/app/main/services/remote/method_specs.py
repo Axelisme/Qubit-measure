@@ -167,6 +167,17 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "tab.run_start": MethodSpec(
         5.0, "Start a run (fire-and-forget)", (_str("tab_id"), _expected_versions())
     ),
+    "tab.load_data": MethodSpec(
+        30.0,
+        "Load a canonical result file into an already-open adapter tab. The tab "
+        "then has a run result and can be analyzed without a SoC connection. "
+        "First release does not backfill Config from cfg_snapshot.",
+        (
+            _str("tab_id"),
+            _str("data_path", "Canonical HDF5 result file to load"),
+            _expected_versions(),
+        ),
+    ),
     "tab.run_cancel": MethodSpec(
         5.0,
         "Request cancellation of the current run (op-specific cancel; there is no "

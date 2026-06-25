@@ -79,6 +79,9 @@ class TabSnapshot:
     # Render-computed effective paths (override, else adapter suggestion from
     # ctx). The View shows this; it is *not* persisted (derivable on restore).
     save_paths: SavePaths | None = None
+    # Source file for a loaded result. None for live run results and restored
+    # app-state snapshots; shares the tab:<id>:result lifetime.
+    result_source_path: str | None = None
 
 
 @dataclass(frozen=True)

@@ -61,6 +61,7 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     # the live form.
     cfg_schema: CfgSchema
     run_result: T_Result | None = None
+    result_source_path: str | None = None
     analyze_result: T_AnalyzeResult | None = None
     figure: Figure | None = None
     analyze_param_instance: T_AnalyzeParams | None = None
@@ -203,6 +204,7 @@ class State(SessionState):
         logger.debug("clear_tab_results: tab_id=%r", tab_id)
         tab = self.tabs[tab_id]
         tab.run_result = None
+        tab.result_source_path = None
         tab.analyze_result = None
         tab.figure = None
         tab.analyze_param_instance = None
@@ -219,6 +221,7 @@ class State(SessionState):
         )
         tab = self.tabs[tab_id]
         tab.run_result = result
+        tab.result_source_path = None
         tab.analyze_param_instance = None
         # invalidate stale analyze results and figure from the previous run
         tab.analyze_result = None
@@ -231,6 +234,28 @@ class State(SessionState):
         # stale (post depends on the primary analyze, which is cleared above).
         self._invalidate_post_analyze(tab)
         self.version.bump(f"tab:{tab_id}:result")
+        self.version.bump(f"tab:{tab_id}:post_analyze")
+
+    def update_tab_loaded_result(
+        self, tab_id: str, result: object, source_path: str
+    ) -> None:
+        logger.debug(
+            "update_tab_loaded_result: tab_id=%r source_path=%r result_type=%s",
+            tab_id,
+            source_path,
+            type(result).__name__,
+        )
+        tab = self.tabs[tab_id]
+        tab.run_result = result
+        tab.result_source_path = source_path
+        tab.analyze_param_instance = None
+        tab.analyze_result = None
+        tab.figure = None
+        tab.writeback_items = []
+        tab.applied_session_ids.clear()
+        self._invalidate_post_analyze(tab)
+        self.version.bump(f"tab:{tab_id}:result")
+        self.version.bump(f"tab:{tab_id}:analyze")
         self.version.bump(f"tab:{tab_id}:post_analyze")
 
     def update_tab_analyze(

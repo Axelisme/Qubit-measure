@@ -17,6 +17,7 @@ from zcu_tools.gui.session.services.startup import StartupService
 from .analyze import AnalyzeService
 from .cfg_editor import CfgEditorService
 from .guard import GuardService
+from .load import LoadService
 from .operation_gate import OperationGate
 from .post_analyze import PostAnalyzeService
 from .run import RunService
@@ -60,6 +61,7 @@ class AppServices:
     predictor: PredictorService
     context: ContextService
     tab: TabService
+    load: LoadService
     run: RunService
     analyze: AnalyzeService
     post_analyze: PostAnalyzeService
@@ -132,6 +134,7 @@ def build_app_services(
         predictor=session.predictor,
         context=context,
         tab=tab,
+        load=LoadService(state, bus, writeback),
         run=RunService(state, runner, bus, handles, writeback),
         analyze=AnalyzeService(state, runner, bus, writeback, handles),
         # Second analysis layer (post_analysis cap) — handle-only off-main worker,

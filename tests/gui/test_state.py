@@ -137,14 +137,29 @@ def test_update_tab_result_stores_result_and_clears_stale_analyze_data():
     state = State(_make_ctx())
     adapter = _make_adapter()
     _add_tab(state, "t1", adapter)
+    state.get_tab("t1").result_source_path = "/tmp/loaded.hdf5"
     state.update_tab_analyze_param_instance("t1", _AnalyzeParams(threshold=0.5))
     fig = Figure()
     state.update_tab_analyze("t1", object(), fig)
     state.update_tab_result("t1", object())
     tab = state.get_tab("t1")
+    assert tab.result_source_path is None
     assert tab.analyze_result is None
     assert tab.figure is None  # figure is cleared with stale analyze data
     assert tab.analyze_param_instance is None
+
+
+def test_update_tab_loaded_result_bumps_result_analyze_and_post_versions():
+    state = State(_make_ctx())
+    adapter = _make_adapter()
+    _add_tab(state, "t1", adapter)
+    state.update_tab_loaded_result("t1", object(), "/tmp/loaded.hdf5")
+
+    tab = state.get_tab("t1")
+    assert tab.result_source_path == "/tmp/loaded.hdf5"
+    assert state.version.get("tab:t1:result") == 1
+    assert state.version.get("tab:t1:analyze") == 1
+    assert state.version.get("tab:t1:post_analyze") == 1
 
 
 def test_update_tab_analyze_stores_analyze_result_and_figure():

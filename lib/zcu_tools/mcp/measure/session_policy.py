@@ -27,6 +27,12 @@ _GUARD_DEPS_DATA: dict[str, tuple[str, ...]] = {
         "device:*",
         "devices:__set__",
     ),
+    "tab.load_data": (
+        "tab:{tab_id}",
+        "tab:{tab_id}:result",
+        "tab:{tab_id}:analyze",
+        "context",
+    ),
     "tab.save_data": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
     "tab.save_image": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
     "tab.save_post_image": ("tab:{tab_id}:post_analyze", "tab:{tab_id}:save_path"),

@@ -1,6 +1,6 @@
 # AI Note for `tests/`
 
-**Last updated:** 2026-06-25 — fluxdep analysis kernel tests
+**Last updated:** 2026-06-25 — measure-gui load result tests
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -267,6 +267,14 @@ Register-driven loop（`n=Register`）+ `available_regs` 非空 + `k_final >= 2`
 ### GUI analyze params 測試
 
 `tests/gui/adapter/test_analyze_params.py` 覆蓋 dataclass-based analyze params helper；`tests/gui/ui/test_analyze_form.py` 覆蓋 `AnalyzeFormWidget` 的 dataclass round-trip、hydrate 不 emit、使用者編輯 emit instance。新增 GUI adapter 測試時，analysis 參數應直接使用 adapter 回傳的 params dataclass instance，不要組 raw dict 或假設 `get_analyze_params()` 可迭代。
+
+### measure-gui canonical result load 測試
+
+load-result feature 的 targeted tests 分散在對應 ownership：
+`tests/experiment/v2_gui/adapters/test_base_load.py` 鎖 adapter default load contract；
+`tests/gui/services/test_load.py` 鎖 state invalidation / version bump；
+`tests/gui/ui/test_main_window_ui.py` 鎖 `Load Data...` button gate 與 file dialog；
+`tests/gui/services/remote/` 鎖 `tab.load_data` dispatch、tool generation 與 MCP guard deps。
 
 **新增整合測試**：在 `test_modules_integration.py` 加入新的 test class / method，  
 用 `_make_prog(modules=[...])` 建構程式，斷言 `prog.binprog is not None`。
