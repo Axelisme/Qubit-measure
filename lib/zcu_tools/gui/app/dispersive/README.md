@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-23（preprocess wavelet smoothing signature）
+**Last updated:** 2026-06-25（Fluxonium Prediction engine delegation）
 
 # `zcu_tools/gui/app/dispersive/` — Fluxonium Dispersive-Shift Analysis GUI AI Note
 
@@ -12,7 +12,7 @@
 
 **領域依賴 fluxdep**：兩 app 經 **同一個 `params.json` 的不同 section** 銜接 —— fluxdep-gui 寫 `fluxdep_fit`（EJ/EC/EL + flux 對齊），dispersive 讀它當輸入、寫 `dispersive`（g, bare_rf）。典型工作流：先跑 fluxdep-gui，再跑 dispersive-fit-gui。`update_result` 保留 fluxdep_fit（不用 dump_result，會覆蓋）。
 
-**簡化過（移除 chi 圖 + qub_dim/cutoff 控件 + step）**：流程是 **load inputs → load onetone → preprocess → tune g/r_f（手動 slider 或 Auto tune）→ export**。**fit 由手動 accept 定案**：user 調 g/r_f（拖 slider，或先按 Auto tune 讓 scipy 粗調，見下方 step4 段）後按「Use these g/r_f」即最終 fit（`set_manual_fit` 記 State）；Auto tune 只回填 slider、不自動 accept。**沒有 chi 圖 / Result tab**：tune 圖（g/r_f 線疊 norm-phase）即最終結果。`qub_dim`/`qub_cutoff` 寫死在 `PredictService`（`_QUB_DIM=15`/`_QUB_CUTOFF=30`），不曝露為控件。**沒有 step**：預測一律跑全 preprocessed flux 軸（preprocess 已降採樣、fast 路徑夠快），`DispFitState` 無 step、`fit.result` RPC 無 step。
+**簡化過（移除 chi 圖 + qub_dim/cutoff 控件 + step）**：流程是 **load inputs → load onetone → preprocess → tune g/r_f（手動 slider 或 Auto tune）→ export**。**fit 由手動 accept 定案**：user 調 g/r_f（拖 slider，或先按 Auto tune 讓 scipy 粗調，見下方 step4 段）後按「Use these g/r_f」即最終 fit（`set_manual_fit` 記 State）；Auto tune 只回填 slider、不自動 accept。**沒有 chi 圖 / Result tab**：tune 圖（g/r_f 線疊 norm-phase）即最終結果。`qub_dim`/`qub_cutoff` 寫死在 `PredictService` 的 `PredictionResolution`（`qub_dim=15`/`qub_cutoff=30`/`res_dim=4`），不曝露為控件。**沒有 step**：預測一律跑全 preprocessed flux 軸（preprocess 已降採樣、fast 路徑夠快），`DispFitState` 無 step、`fit.result` RPC 無 step。
 
 ## 架構（對標 fluxdep，骨架共用、領域各寫）
 
@@ -37,19 +37,19 @@
 ## 計算全走 worker（避免 GUI 卡頓）
 **重計算都經共用 `gui/background.py` `BackgroundRunner.submit`（per-panel，`enter=None`——無 routing/pbar scope）** off-main：preprocess（joblib edelay）、predict（tune 圖，scqubits）、auto_tune。模式統一：提交的 `work` 純呼 `compute_*`/`predict_*`（讀 State 不寫）並回**純資料 dataclass**（`_TuneData`/PreprocessResult）；`on_done`（主執行緒）唯一 `record_*`（State 寫）+ **畫圖**（worker 從不碰 Qt widget / pyplot，守 ADR-0017 + main-thread State 不變式）。一次只跑一個用按鈕 disable guard（不需 generation 戳記）。
 
-- **step4 Tune 互動模型**：**g=QSlider**（固定 0..200 MHz、1 MHz/tick、預設 50，`_G_MIN/MAX/DEFAULT_MHZ`，`_g_mhz()` 讀值）、**r_f=QSlider**（MHz 整數）；兩條 slider 垂直排（`_slider_row` 名稱+slider+數值）。**res_dim/qub_dim/qub_cutoff 全寫死**（`PredictService._RES_DIM=4`/`_QUB_DIM=15`/`_QUB_CUTOFF=30`）。
+- **step4 Tune 互動模型**：**g=QSlider**（固定 0..200 MHz、1 MHz/tick、預設 50，`_G_MIN/MAX/DEFAULT_MHZ`，`_g_mhz()` 讀值）、**r_f=QSlider**（MHz 整數）；兩條 slider 垂直排（`_slider_row` 名稱+slider+數值）。**res_dim/qub_dim/qub_cutoff 全寫死**（`PredictionResolution(res_dim=4, qub_dim=15, qub_cutoff=30)`）。
   - **preprocess done → `_init_tune_view`**：r_f slider 用**固定 0..300 tick**（`_RF_TICKS=300`）跨數據 sp_freqs.min~max → 精度恆 = **span/300**（不隨範圍寬窄變）；tick↔GHz 映射在 `_rf_ghz`/`_rf_tick_for`。預設 tick = 最接近 `PreprocessResult.median_rf`（每 flux norm_phases 峰值頻率的**中位數**，在 preprocess 算）。tune 圖**先畫背景熱圖 + r_f 線**（`render_tune_figure`，無色散線）。同時 `bind_drag` 把 TuneCanvas 的 sample-line 拖曳指向新 artists。
   - **拖 r_f / g slider（debounce）**：line / 數值 label 每 tick 即時動（純畫、不算），但 sample 點重算 **debounce `_SLIDER_DEBOUNCE_MS=150ms`**（`_dot_debounce` single-shot QTimer，slider move 只 `start()`，停手才 `_on_dot_debounce_fired`→`_refresh_sample_dots`）。
   - **按 Use these g/r_f → `_PredictWorker`**（off-main fast/scqubits）→ done slot `set_dispersion_lines` 畫 ground/excited 色散線 + `set_manual_fit` 記結果（**手動 tune 即最終 fit**）+ enable export。**計算中 disable 按鈕**（一次只跑一個、不需 generation guard）。
-  - **sample-flux 線（即時、不整體重算）**：「Add sample flux」在 flux 軸中央放一條**可滑鼠拖曳的垂直線**（`TuneCanvasWidget` 用 `mpl_connect` press/move/release，`_pick_sample` 用 x-tolerance 抓最近線）；每條線顯示該單一 flux 的 **ground(藍)/excited(紅)** 點（**與色散線同色**：dispersion line ground=`b-`/excited=`r-`，dots 對齊）。**拖線 motion 只移線不算**（`_on_sample_drag`），**release 才重算該點**（`_on_sample_drop`，`bind_drag(on_drag,on_drop)`、canvas `_dragged` 旗標只在真的有動過才觸發 drop）。`_compute_sample_dots`=**batched 單點 `predict_sample_points`**（繞 `PredictService` 軸綁定快取，走 `predict_dispersive_at` 直接 `calculate_dispersive_vs_flux_fast`），**不跑全軸**。fresh preprocess（`_init_tune_view`）清空 sample 線；「Clear samples」原地移除（保留色散線）。
+  - **sample-flux 線（即時、不整體重算）**：「Add sample flux」在 flux 軸中央放一條**可滑鼠拖曳的垂直線**（`TuneCanvasWidget` 用 `mpl_connect` press/move/release，`_pick_sample` 用 x-tolerance 抓最近線）；每條線顯示該單一 flux 的 **ground(藍)/excited(紅)** 點（**與色散線同色**：dispersion line ground=`b-`/excited=`r-`，dots 對齊）。**拖線 motion 只移線不算**（`_on_sample_drag`），**release 才重算該點**（`_on_sample_drop`，`bind_drag(on_drag,on_drop)`、canvas `_dragged` 旗標只在真的有動過才觸發 drop）。`_compute_sample_dots`=**batched 單點 `predict_sample_points`**（繞 `PredictService` 軸綁定快取，走 engine stateless `predict_dispersive_at`），**不跑全軸**。fresh preprocess（`_init_tune_view`）清空 sample 線；「Clear samples」原地移除（保留色散線）。
   - **Auto tune（scipy，off-main，global→local）**：`services/autotune.py` 的 `auto_tune` 先 `_coarse_seed`（**2D r_f×g 粗網格** `_COARSE_N_RF=50`×`_COARSE_N_G=10` + 當前 g0/rf0 也當候選，取最高 `sample_score` 點）當種子，再 `scipy.optimize.minimize`（Nelder-Mead，手動 bound clamp）局部精修。**為何要粗掃**：純局部會卡在 decoy（偽亮帶）的 basin（實證：種子落 decoy 5.2 附近時純局部 rf=5205 WRONG，粗掃跳出找到真值）；乾淨雙帶 case 純局部本來就 OK，但真實譜有 spurious feature 故加全域。grid+NM ≈ differential_evolution 同準同速但**確定性、可控、透明、複用 predict**（評估過 brute/diff_evo 都不選）。loss = mean over sample fluxes of `max(norm_phase@ground, norm_phase@excited)`，**最大化**（`norm_phase` 用 `RegularGridInterpolator` bilinear、查詢點 **clip 到網格邊界免外插負值**）。`controller.auto_tune` 快照 State 純算 → `_AutoTuneWorker` off-main（粗掃 ~500 predict ≈ 2-3s）→ done slot **只回填 g/r_f slider**（不 accept、不畫全軸；user 自己再按 Use these）。**無 sample 線時按鈕 disable**（`_sync_auto_tune_enabled`，add/clear 時同步，因 sample 線在 artists 非 State）。⚠ **g 常被 loss 的 `max()` 弄成不可辨**（r_f 對後只要 ground 或 excited 之一落在亮帶，max≈1、g 幾乎不影響 score → g 易飄到 bound）；r_f 收斂良好。這是用戶自訂 loss 的固有性質、非 bug，且只回填供 user 檢視。
   - viz：`render_tune_figure`（背景+r_f 線）/ `update_bare_line`（slider 即時）/ `set_dispersion_lines`（predict 後色散線）+ sample 四件 `add_sample_line`/`move_sample_line`/`remove_sample_line`/`update_sample_dots`（`TuneArtists.samples: list[SampleArtists]`，各帶 dot_ground/excited Optional）。
 
 > **R4 不適用**：worker 只回資料不在 worker 畫圖 → 不需 routing_scope。
 
 ## 效能關鍵
-- `PredictService`：`functools.lru_cache` 包 **`calculate_dispersive_vs_flux_fast`**（simulate 的 numpy 等效，**~9x** scqubits-free，逐點對齊到 0.00000 MHz），`DressedLabelingError` 時 fallback 舊 scqubits `calculate_dispersive_vs_flux`。鍵 (g,bare_rf,return_dim)（**無 step**）；res_dim/qub_dim/cutoff 寫死。綁定一組 (params, flux-axis)，inputs/preprocess 變則 Controller 重建（限 cache 壽命）。
-- **sample-flux 單點**走 `predict_dispersive_at`（不經 PredictService 軸綁定，arbitrary fluxs），同 fast + DressedLabelingError fallback。
+- `PredictService`：薄 adapter,固定 GUI `PredictionResolution` 後委派 `FluxoniumPredictionSession`。axis-bound cache、fast/scqubits fallback 與 backend provenance 屬 simulate engine；cache key 是 `(g,bare_rf,return_dim)`（**無 step**）。綁定一組 (params, flux-axis)，inputs/preprocess 變則 Controller 重建 service/session。
+- **sample-flux 單點**走 `predict_dispersive_at`（不經 PredictService 軸綁定，arbitrary fluxs），同樣委派 engine 的 stateless dispersive prediction；GUI normal path 不 catch `DressedLabelingError`。
 - **fast 函式的 flux-independent operators 由 simulate 端 `_fluxonium_operators` @lru_cache(params,cutoff,dim)**：scqubits `cos_phi_operator`/`sin_phi_operator` 走 scipy `cosm`/`sinm`(expm)，fresh Fluxonium 每次重建 ~84ms → cache 後 drag 單點 **84→0.6ms**（~130x），全軸 predict 也降到 ~11ms。numerically identical（只 memoize）。
 - preprocess edelay 用 numba kernel（見「已知坑」段），predict 用 fast dispersive —— 兩個 scqubits/scipy 熱點都繞過了。
 

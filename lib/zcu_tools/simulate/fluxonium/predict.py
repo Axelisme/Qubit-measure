@@ -7,6 +7,8 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import root_scalar
 
+from zcu_tools.simulate.fluxonium.prediction import FluxAffineMap
+
 
 class FluxoniumPredictor:
     """
@@ -25,6 +27,7 @@ class FluxoniumPredictor:
         self.flux_period = flux_period
 
         self.flux_bias = flux_bias
+        self._affine = FluxAffineMap(flux_half, flux_period, flux_bias)
 
         from scqubits.core.fluxonium import Fluxonium  # lazy import
 
@@ -55,19 +58,15 @@ class FluxoniumPredictor:
         )
 
     def value_to_flux(self, cur_value: float) -> float:
-        return (cur_value + self.flux_bias - self.flux_half) / self.flux_period + 0.5
+        return self._affine.value_to_flux(cur_value)
 
     def _value_to_flux_array(
         self, cur_values: NDArray[np.float64]
     ) -> NDArray[np.float64]:
-        # Array form of value_to_flux (same affine, kept in lockstep): a separate
-        # method so the scalar value_to_flux keeps its float-only public signature
-        # while the batched paths get a typed array transform.
-        flux = (cur_values + self.flux_bias - self.flux_half) / self.flux_period + 0.5
-        return np.asarray(flux, dtype=np.float64)
+        return self._affine.values_to_flux(cur_values)
 
     def flux_to_value(self, cur_flux: float) -> float:
-        return (cur_flux - 0.5) * self.flux_period + self.flux_half - self.flux_bias
+        return self._affine.flux_to_value(cur_flux)
 
     def calculate_bias(
         self, cur_value: float, cur_freq: float, transition: tuple[int, int] = (0, 1)
@@ -139,6 +138,7 @@ class FluxoniumPredictor:
 
     def update_bias(self, flux_bias: float) -> None:
         self.flux_bias = flux_bias
+        self._affine = FluxAffineMap(self.flux_half, self.flux_period, flux_bias)
 
     def _predict_freq(self, cur_value: float, transition: tuple[int, int]) -> float:
         flux = self.value_to_flux(cur_value)

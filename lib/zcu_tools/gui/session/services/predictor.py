@@ -18,6 +18,7 @@ from numpy.typing import NDArray
 
 from zcu_tools.gui.session.events import PredictorChangedPayload
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
+from zcu_tools.simulate.fluxonium.prediction import FluxoniumPrediction
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus
@@ -291,11 +292,9 @@ class PredictorService:
     def predict_freq_curve(self, req: PredictCurveRequest) -> PredictCurveResult:
         """Compute f_ij vs device-value curves for multiple transitions in one pass.
 
-        Uses calculate_energy_vs_flux (same backend as FluxoniumPredictor._predict_freq_array)
-        so all transitions share a single diagonalisation sweep — O(n_values) eigen-
-        solves rather than O(n_transitions * n_values). The value→flux conversion
-        replicates the public scalar value_to_flux affine in vectorised form to
-        avoid calling the private _value_to_flux_array.
+        Uses FluxoniumPrediction so all transitions share a single diagonalisation
+        sweep — O(n_values) eigensolves rather than O(n_transitions * n_values).
+        The value→flux affine is owned by the simulate-layer engine (ADR-0029).
         """
         predictor = self._state.exp_context.predictor
         if predictor is None:
@@ -310,30 +309,12 @@ class PredictorService:
                     f"Transition to-level must be >= from-level, got ({frm}, {to})"
                 )
 
-        # Vectorised value→flux (mirrors the public value_to_flux affine exactly).
         values = np.asarray(req.values, dtype=np.float64)
-        fluxs = (
-            values + predictor.flux_bias - predictor.flux_half
-        ) / predictor.flux_period + 0.5
-
-        from zcu_tools.simulate.fluxonium.energies import calculate_energy_vs_flux
-
-        evals_count = max(to for _, to in req.transitions) + 5
-        # cutoff=40 must match FluxoniumPredictor._predict_freq_array (predict.py:199)
-        # to keep both code paths numerically consistent.
-        _, energies = calculate_energy_vs_flux(
-            predictor.params, fluxs, cutoff=40, evals_count=evals_count
+        engine = _engine_from_predictor(predictor)
+        fluxs, freqs_mhz = engine.predict_frequencies_mhz(
+            values, req.transitions, cutoff=40
         )
-        # energies shape: (n_values, evals_count)
-
-        freq_rows: list[NDArray[np.float64]] = []
-        labels: list[str] = []
-        for frm, to in req.transitions:
-            diff = (energies[:, to] - energies[:, frm]) * 1e3  # GHz→MHz
-            freq_rows.append(np.asarray(diff, dtype=np.float64))
-            labels.append(f"{frm}→{to}")
-
-        freqs_mhz = np.stack(freq_rows, axis=0)  # (n_transitions, n_values)
+        labels = [f"{frm}→{to}" for frm, to in req.transitions]
         return PredictCurveResult(
             labels=tuple(labels),
             values=values,
@@ -346,10 +327,10 @@ class PredictorService:
     ) -> PredictMatrixCurveResult:
         """Compute |<i|op|j>| vs device-value curves for multiple transitions.
 
-        Uses calculate_n_oper_vs_flux / calculate_phi_oper_vs_flux directly so
-        there is no per-level cap — unlike FluxoniumPredictor.predict_matrix_element
-        which hard-limits both levels to <=1.  return_dim is set to max(level)+1
-        so higher transitions (e.g. 0->3) work correctly.
+        Uses FluxoniumPrediction so there is no per-level cap — unlike
+        FluxoniumPredictor.predict_matrix_element which hard-limits both levels to
+        <=1. The engine sets return_dim to max(level)+1 so higher transitions
+        (e.g. 0->3) work correctly.
         """
         predictor = self._state.exp_context.predictor
         if predictor is None:
@@ -364,39 +345,24 @@ class PredictorService:
                     f"Transition to-level must be >= from-level, got ({frm}, {to})"
                 )
 
-        # Vectorised value→flux (mirrors predict_freq_curve affine exactly).
         values = np.asarray(req.values, dtype=np.float64)
-        fluxs = (
-            values + predictor.flux_bias - predictor.flux_half
-        ) / predictor.flux_period + 0.5
-
-        # Return dimension must cover the highest level in any transition.
-        needed_dim = max(max(frm, to) for frm, to in req.transitions) + 1
-
-        from zcu_tools.simulate.fluxonium.matrix_element import (
-            calculate_n_oper_vs_flux,
-            calculate_phi_oper_vs_flux,
+        engine = _engine_from_predictor(predictor)
+        fluxs, mags = engine.predict_matrix_elements(
+            values, req.transitions, req.operator
         )
-
-        calc = (
-            calculate_n_oper_vs_flux
-            if req.operator == "n"
-            else calculate_phi_oper_vs_flux
-        )
-        _, opers = calc(predictor.params, fluxs, return_dim=needed_dim)
-        # opers shape: (n_values, needed_dim, needed_dim), dtype complex
-
-        mag_rows: list[NDArray[np.float64]] = []
-        labels: list[str] = []
-        for frm, to in req.transitions:
-            mag = np.abs(opers[:, frm, to]).astype(np.float64)
-            mag_rows.append(mag)
-            labels.append(f"{frm}→{to}")
-
-        mags = np.stack(mag_rows, axis=0)  # (n_transitions, n_values)
+        labels = [f"{frm}→{to}" for frm, to in req.transitions]
         return PredictMatrixCurveResult(
             labels=tuple(labels),
             values=values,
             fluxs=fluxs,
             mags=mags,
         )
+
+
+def _engine_from_predictor(predictor: FluxoniumPredictor) -> FluxoniumPrediction:
+    return FluxoniumPrediction(
+        predictor.params,
+        flux_half=predictor.flux_half,
+        flux_period=predictor.flux_period,
+        flux_bias=predictor.flux_bias,
+    )

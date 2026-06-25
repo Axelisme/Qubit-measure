@@ -8,7 +8,7 @@ real eigensolve.
 from __future__ import annotations
 
 import numpy as np
-import zcu_tools.gui.app.dispersive.services.predict as predict_mod
+import zcu_tools.simulate.fluxonium.prediction as prediction_mod
 from zcu_tools.gui.app.dispersive.services.predict import (
     PredictService,
     predict_dispersive_at,
@@ -24,7 +24,7 @@ def test_predict_covers_full_axis_and_caches(monkeypatch):
         calls.append((g, bare_rf, res_dim, len(fluxs), return_dim))
         return tuple(np.full(len(fluxs), g + k) for k in range(return_dim))
 
-    monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux_fast", fake_calc)
+    monkeypatch.setattr(prediction_mod, "calculate_dispersive_vs_flux_fast", fake_calc)
 
     sp_fluxs = np.linspace(0.0, 1.0, 20).astype(np.float64)
     svc = PredictService(params=(4.0, 1.0, 0.5), sp_fluxs=sp_fluxs)
@@ -60,7 +60,7 @@ def test_predict_dispersive_at_arbitrary_fluxs(monkeypatch):
         seen["fluxs"] = np.asarray(fluxs)
         return tuple(np.full(len(fluxs), g + 0.1 * k) for k in range(return_dim))
 
-    monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux_fast", fake_calc)
+    monkeypatch.setattr(prediction_mod, "calculate_dispersive_vs_flux_fast", fake_calc)
 
     fluxs = np.array([0.12, 0.31, 0.47])
     rf_0, rf_1 = predict_dispersive_at((4.0, 1.0, 0.5), fluxs, 0.06, 5.3)
@@ -83,8 +83,8 @@ def test_predict_dispersive_at_falls_back_on_ambiguous_labeling(monkeypatch):
         calls.append("scqubits")
         return tuple(np.zeros(len(fluxs)) for _ in range(return_dim))
 
-    monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux_fast", boom)
-    monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux", fallback)
+    monkeypatch.setattr(prediction_mod, "calculate_dispersive_vs_flux_fast", boom)
+    monkeypatch.setattr(prediction_mod, "calculate_dispersive_vs_flux", fallback)
 
     predict_dispersive_at((4.0, 1.0, 0.5), np.array([0.3]), 0.5, 5.3)
     assert calls == ["scqubits"]
