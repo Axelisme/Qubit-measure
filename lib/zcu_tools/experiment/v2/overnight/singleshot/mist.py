@@ -34,7 +34,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import (
     load_labber_data,
-    safe_labber_filepath,
+    reserve_labber_filepath,
     save_labber_data,
 )
 from zcu_tools.utils.func_tools import MinIntervalFunc
@@ -269,7 +269,7 @@ class MistOvernightAnalyzer:
 
         # g_populations
         save_labber_data(
-            safe_labber_filepath(
+            reserve_labber_filepath(
                 str(_filepath.with_name(_filepath.name + "_g_populations"))
             ),
             z=("Populations", "a.u.", populations[..., 0]),
@@ -280,7 +280,7 @@ class MistOvernightAnalyzer:
 
         # e_populations
         save_labber_data(
-            safe_labber_filepath(
+            reserve_labber_filepath(
                 str(_filepath.with_name(_filepath.name + "_e_populations"))
             ),
             z=("Populations", "a.u.", populations[..., 1]),

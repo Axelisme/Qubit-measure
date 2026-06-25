@@ -60,7 +60,7 @@ def save_grouped_labber_data(
     role_items = list(grouped.roles.items())
     role_names = [str(role) for role, _payload in role_items]
 
-    with h5py.File(path, "w") as f:
+    with h5py.File(path, "x") as f:
         for index, (role, payload) in enumerate(role_items):
             target: h5py.File | h5py.Group
             if index == 0:

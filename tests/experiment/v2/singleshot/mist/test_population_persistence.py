@@ -256,7 +256,7 @@ def _cfg_expts(loaded: MistResult) -> int:
 
 
 def _saved_path(tmp_path: Path, base: str) -> Path:
-    return tmp_path / f"{base}_1.hdf5"
+    return tmp_path / f"{base}.hdf5"
 
 
 def _legacy_sweep_axis(

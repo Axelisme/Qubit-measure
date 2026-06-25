@@ -2,8 +2,8 @@
 
 The dict-based ``save_data`` / ``load_data`` / ``save_local_data`` /
 ``load_local_data`` layer is gone (ADR-0027). This module retains the
-filesystem-path helpers: datafolder layout, extension normalization, and unique
-filenames.
+filesystem-path helpers: datafolder layout, extension normalization, and caller
+path reservation.
 """
 
 from __future__ import annotations
@@ -64,15 +64,15 @@ def remove_ext(filepath: str) -> str:
     return filepath
 
 
-def safe_labber_filepath(filepath: str) -> str:
+def reserve_labber_filepath(filepath: str) -> str:
     """
-    Ensure a unique file path by appending a numeric suffix if the file already exists.
+    Return a caller-owned unique Labber filepath.
 
     Args:
         filepath (str): The initial file path.
 
     Returns:
-        str: A unique file path with a numeric suffix if necessary.
+        str: A unique file path with a numeric suffix.
     """
     filepath = os.path.abspath(filepath)
 

@@ -16,7 +16,7 @@ from zcu_tools.program.v2.modules import ConstWaveformCfg
 from zcu_tools.utils.datasaver import (
     LabberData,
     load_labber_data,
-    safe_labber_filepath,
+    reserve_labber_filepath,
     save_labber_data,
 )
 
@@ -88,13 +88,13 @@ def _sample_result(
 
 
 def _saved_path(tmp_path: Path, base: str) -> Path:
-    return tmp_path / f"{base}_1.hdf5"
+    return tmp_path / f"{base}.hdf5"
 
 
 def _sidecar_paths(base: Path) -> tuple[Path, Path]:
     return (
-        Path(safe_labber_filepath(str(base.with_name(base.name + "_g_pop")))),
-        Path(safe_labber_filepath(str(base.with_name(base.name + "_e_pop")))),
+        Path(reserve_labber_filepath(str(base.with_name(base.name + "_g_pop")))),
+        Path(reserve_labber_filepath(str(base.with_name(base.name + "_e_pop")))),
     )
 
 

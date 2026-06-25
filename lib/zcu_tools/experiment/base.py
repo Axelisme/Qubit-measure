@@ -217,7 +217,6 @@ class PersistableExperiment(AbsExperiment[T_Result, T_Config]):
     ) -> None:
         from zcu_tools.experiment.utils import make_comment
         from zcu_tools.utils.datasaver import (
-            safe_labber_filepath,
             save_labber_data,
             upload_to_server,
         )
@@ -236,7 +235,6 @@ class PersistableExperiment(AbsExperiment[T_Result, T_Config]):
         ]
         z = (spec.z.label, spec.z.unit, np.asarray(getattr(result, spec.z.field_name)))
 
-        filepath = safe_labber_filepath(filepath)
         save_labber_data(
             filepath, z=z, axes=axes, comment=comment, tags=tag or spec.tag
         )

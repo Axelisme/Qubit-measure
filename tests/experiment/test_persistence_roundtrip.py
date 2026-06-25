@@ -101,10 +101,8 @@ class _Exp1DReal(PersistableExperiment[_Result1D, _TinyCfg]):
 
 
 def _saved_path(tmp_path: Any, base: str) -> str:
-    """save() routes through safe_labber_filepath, which appends a ``_N`` suffix
-    and the ``.hdf5`` extension; with a fresh tmp_path the first save lands on
-    ``<base>_1.hdf5``."""
-    return os.path.join(str(tmp_path), f"{base}_1.hdf5")
+    """save() writes the exact formatted path; reservation belongs to callers."""
+    return os.path.join(str(tmp_path), f"{base}.hdf5")
 
 
 # --------------------------------------------------------------------------- #
@@ -210,6 +208,21 @@ def test_roundtrip_1d(tmp_path: Any) -> None:
 
     assert loaded.cfg_snapshot is not None
     assert loaded.cfg_snapshot.reps == 7
+
+
+def test_experiment_save_rejects_existing_exact_path(tmp_path: Any) -> None:
+    freqs = np.array([4000.0, 5000.0])
+    signals = np.ones(2, dtype=np.complex128)
+    result = _Result1D(freqs=freqs, signals=signals, cfg_snapshot=_TinyCfg(reps=3))
+    exp = _Exp1D()
+    base = os.path.join(str(tmp_path), "scan1d")
+
+    exp.save(base, result)
+    with pytest.raises(FileExistsError):
+        exp.save(base, result)
+
+    assert os.path.exists(_saved_path(tmp_path, "scan1d"))
+    assert not os.path.exists(os.path.join(str(tmp_path), "scan1d_1.hdf5"))
 
 
 def test_real_z_roundtrip_does_not_warn_on_complex_container(tmp_path: Any) -> None:

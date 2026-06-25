@@ -1,6 +1,6 @@
 # zcu_tools.utils
 
-**Last updated:** 2026-06-24 ADR-0027 datasaver facade
+**Last updated:** 2026-06-25 save path ownership
 
 `utils` 放可被 experiment / GUI 共用、且不反向依賴上層 domain 的 helper。
 實驗資料持久化的 public API 收斂在 `zcu_tools.utils.datasaver` package
@@ -20,7 +20,10 @@ import。
 - `save_grouped_labber_data` / `load_grouped_labber_data` 處理 grouped file；
   experiment loader 傳 required roles，省略 required roles 只用於 diagnostic
   與 migration tooling。
-- Path helpers（`format_ext`、`safe_labber_filepath`、datafolder helpers）與
-  HTTP transport helpers 由 facade re-export。
+- Save helpers 寫入 caller 傳入的 formatted path；既有目的地 fast-fail，不自動
+  suffix 或覆寫。
+- Path helpers（`format_ext`、`reserve_labber_filepath`、datafolder helpers）與
+  HTTP transport helpers 由 facade re-export；`reserve_labber_filepath` 只供 caller
+  / orchestration layer 預先決定 unique final path。
 
 `datasaver/` 內部 module 是責任拆分，不是額外 public import path。

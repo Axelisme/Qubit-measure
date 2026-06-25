@@ -37,7 +37,7 @@ from zcu_tools.progress_bar import make_pbar
 from zcu_tools.utils.datasaver import (
     format_ext,
     load_labber_data,
-    safe_labber_filepath,
+    reserve_labber_filepath,
     save_labber_data,
 )
 from zcu_tools.utils.fitting.multi_decay import fit_dual_transition_rates
@@ -144,7 +144,7 @@ class T1PlotAndSaveMixin(Generic[T_Cfg]):
             ("_ee_populations", "ee_populations", populations[:, 1, :, 1]),
         ):
             save_labber_data(
-                safe_labber_filepath(str(filepath.with_name(filepath.name + suffix))),
+                reserve_labber_filepath(str(filepath.with_name(filepath.name + suffix))),
                 z=("Populations", "a.u.", zslice.T),
                 axes=axes,
                 comment=comment,

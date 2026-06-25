@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from zcu_tools.experiment.utils import make_comment
 from zcu_tools.experiment.v2.twotone.ckp import (
     CKP_Cfg,
     CKP_Exp,
@@ -11,7 +12,6 @@ from zcu_tools.experiment.v2.twotone.ckp import (
     CKPModuleCfg,
     CKPSweepCfg,
 )
-from zcu_tools.experiment.utils import make_comment
 from zcu_tools.program.v2 import DirectReadoutCfg, PulseCfg, SweepCfg
 from zcu_tools.program.v2.modules import ConstWaveformCfg
 from zcu_tools.utils.datasaver import format_ext, load_labber_data, save_labber_data
@@ -68,7 +68,7 @@ def _sample_result(*, with_cfg: bool = True) -> CKP_Result:
 
 
 def _saved_path(tmp_path: Path, base: str) -> Path:
-    return tmp_path / f"{base}_1.hdf5"
+    return tmp_path / f"{base}.hdf5"
 
 
 def _legacy_sidecar_path(base_path: Path, suffix: str) -> Path:

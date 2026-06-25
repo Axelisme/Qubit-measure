@@ -161,6 +161,17 @@ def test_grouped_save_uses_exact_formatted_path_without_suffixing(tmp_path):
     assert existing_suffix.read_bytes() == b"existing"
 
 
+def test_grouped_save_rejects_existing_formatted_path(tmp_path):
+    path = tmp_path / "grouped.hdf5"
+    path.write_bytes(b"existing")
+
+    with pytest.raises(FileExistsError):
+        save_grouped_labber_data(str(path), {"signal": _payload_2d()})
+
+    assert path.read_bytes() == b"existing"
+    assert not (tmp_path / "grouped_1.hdf5").exists()
+
+
 def test_grouped_role_value_cannot_be_labber_data(tmp_path):
     data = LabberData(
         ("Signal", "arb", np.ones(3, dtype=complex)),

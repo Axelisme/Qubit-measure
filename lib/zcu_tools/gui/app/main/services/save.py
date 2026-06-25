@@ -11,7 +11,7 @@ from zcu_tools.gui.app.main.adapter import SaveDataRequest
 from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
 from zcu_tools.gui.app.main.figure_export import save_figure_to_path
 from zcu_tools.gui.session.ports import BackgroundExecutor
-from zcu_tools.utils.datasaver import safe_labber_filepath
+from zcu_tools.utils.datasaver import reserve_labber_filepath
 
 from .guard import SavePermit
 
@@ -68,11 +68,9 @@ class SaveService(QObject):
         self, permit: SavePermit, data_path: str, comment: str = ""
     ) -> str:
         tab_id = permit.tab_id
-        # Resolve to the path the saver will actually write (.hdf5 + uniqueness
-        # suffix) so the report matches the file — see start_save_result. The
-        # resolution is synchronous (the worker that follows only writes), so we
-        # return the resolved path for the caller to report immediately.
-        data_path = safe_labber_filepath(data_path)
+        # Reserve the final data path in the GUI orchestration layer so the
+        # worker receives the exact file it must write.
+        data_path = reserve_labber_filepath(data_path)
         req = self._make_save_data_request(tab_id, data_path, comment=comment)
         logger.info("start_save_data: tab_id=%r path=%r", tab_id, data_path)
         self._ensure_parent_directory(data_path)
@@ -93,15 +91,10 @@ class SaveService(QObject):
         if tab.figure is None:
             raise RuntimeError("No figure available to save")
 
-        # Normalise the data path to what the saver will ACTUALLY write, up front.
-        # The low-level saver (utils.datasaver.save_local_data) quietly forces the
-        # .hdf5 extension and always appends a uniqueness suffix (foo -> foo_1.hdf5,
-        # via safe_labber_filepath). If we reported the caller's raw path the agent
-        # would be told "saved to foo" / "foo.h5" while the file is foo_1.hdf5 —
-        # the same display-vs-reality lie as the fake-save no-op. Resolve it here
-        # (the file does not exist yet, so the suffix the saver picks is the one we
-        # compute) and pass the resolved path both downstream and to the report.
-        data_path = safe_labber_filepath(data_path)
+        # Reserve the final data path up front. Low-level persistence now writes
+        # the exact path it receives, so the GUI must own uniqueness policy before
+        # it submits the worker and before it reports the destination.
+        data_path = reserve_labber_filepath(data_path)
 
         # savefig runs on the main thread — no cross-thread canvas repaint.
         image_error: str | None = None

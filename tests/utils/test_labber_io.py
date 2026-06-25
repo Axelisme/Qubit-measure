@@ -324,6 +324,37 @@ def test_extension_h5_becomes_hdf5(tmp_path):
     assert not os.path.exists(path_h5)
 
 
+def test_save_labber_data_rejects_existing_formatted_path(tmp_path):
+    """Low-level persistence must not overwrite or suffix an existing target."""
+    path = tmp_path / "existing.hdf5"
+    path.write_bytes(b"existing")
+
+    with pytest.raises(FileExistsError):
+        save_labber_data(
+            str(path),
+            z=("S21", "", np.ones(1, dtype=complex)),
+            axes=[("Freq", "Hz", np.array([1.0]))],
+        )
+
+    assert path.read_bytes() == b"existing"
+    assert not (tmp_path / "existing_1.hdf5").exists()
+
+
+def test_save_labber_trace_data_rejects_existing_formatted_path(tmp_path):
+    path = tmp_path / "existing_trace.hdf5"
+    path.write_bytes(b"existing")
+
+    with pytest.raises(FileExistsError):
+        save_labber_trace_data(
+            str(path),
+            z=("S21", "", [np.ones(2, dtype=complex)]),
+            x=("Time", "s", [np.array([0.0, 1.0])]),
+        )
+
+    assert path.read_bytes() == b"existing"
+    assert not (tmp_path / "existing_trace_1.hdf5").exists()
+
+
 # ---------------------------------------------------------------------------
 # LabberData.save / LabberData.load (class-level wrappers)
 # ---------------------------------------------------------------------------
