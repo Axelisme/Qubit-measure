@@ -1,6 +1,6 @@
 # QICK Note for `meta_tool`
 
-**Last updated:** 2026-06-25（Experiment cfg materialization boundary）
+**Last updated:** 2026-06-26（ArbWaveformDatabase single-file recipes）
 
 這份筆記整理 `meta_tool/` 的設計，說明各類別的職責、同步機制與使用模式。
 
@@ -8,7 +8,7 @@
 
 ## 架構總覽（一句話版）
 
-`meta_tool/` 提供實驗的**持久化設定管理**：`SyncFile` 是自動讀寫同步的抽象基礎，`MetaDict` 以 JSON 儲存任意實驗參數、`ModuleLibrary` 以 YAML 管理波形與模組設定，`ExperimentManager` 把兩者綁定到以 flux 值命名的資料夾上下文，`SampleTable` 儲存樣品量測紀錄，`ArbWaveformDatabase` 管理任意波形 npz 資料。
+`meta_tool/` 提供實驗的**持久化設定管理**：`SyncFile` 是自動讀寫同步的抽象基礎，`MetaDict` 以 JSON 儲存任意實驗參數、`ModuleLibrary` 以 YAML 管理波形與模組設定，`ExperimentManager` 把兩者綁定到以 flux 值命名的資料夾上下文，`SampleTable` 儲存樣品量測紀錄，`ArbWaveformDatabase` 管理 qubit-scoped arbitrary waveform `.npz` asset。
 
 ---
 
@@ -185,28 +185,48 @@ df = st.get_samples()
 
 ## `ArbWaveformDatabase`（`arb_waveform.py`）
 
-以 npz 格式儲存任意波形資料的類別方法資料庫（Class-level singleton path）。
+以單一 `.npz` 檔儲存任意波形資料的類別方法資料庫（Class-level singleton path）。GUI 與 notebook 共用這個 repository，避免 formula recipe、import、preview 與 `ArbWaveform` 使用端各自長出不同規則。
 
 ```python
 ArbWaveformDatabase.init("data/arb_waveforms/")
-ArbWaveformDatabase.save("my_pulse", idata, time, qdata=None)
-idata, qdata, time = ArbWaveformDatabase.get("my_pulse")
+ArbWaveformDatabase.create_from_formula(
+    "my_pulse",
+    {
+        "segments": [{"duration": 1.0, "formula": "sin(2*pi*t)"}],
+        "normalize": "peak",
+    },
+    overwrite=False,
+)
+data = ArbWaveformDatabase.load("my_pulse")
 ```
 
-**資料夾結構**：
+**檔案結構**：
 
 ```
 <database_path>/
-    <waveform_name>/
-        data.npz   # 包含 idata, qdata, time
-        example.png
+    my_pulse.npz   # idata, qdata, time, optional recipe_json
 ```
+
+**主要方法**：
+
+| 方法 | 說明 |
+|------|------|
+| `list()` | 只列出 sorted data keys，不開 `.npz` |
+| `list_entries()` | 列出 data key 加檔案 `mtime` / `file_size` |
+| `inspect(data_key)` | 載入單筆 asset 並即時計算 duration、sample count、peak Abs、recipe summary |
+| `load(data_key)` / `get(data_key)` | 取得 `ArbWaveformData` 或舊 notebook 常用的 `(idata, qdata, time)` |
+| `save(data_key, idata, time, qdata=None, recipe=None)` | 寫入 raw data；`recipe` 可省略 |
+| `create_from_formula(...)` / `update_formula(...)` | 用 formula recipe 重新渲染並覆寫資料 |
+| `import_file(...)` / `import_data(...)` | 只接受 `.npz` 或已在記憶體中的三條 1D array |
+| `delete(...)` / `rename(...)` | 只操作 asset 檔案，不掃描 `ModuleLibrary` references |
 
 **約束**：
 
-- `idata`/`qdata` 的最大絕對值必須 ≤ 1（正規化振幅）。
-- `time` 必須單調遞增（微秒單位）。
-- 被 `ArbWaveform`（`modules/waveform.py`）在建立波形時 lazy load（避免循環 import）。
+- `.npz` 必須只有 `idata`、`qdata`、`time`，以及可選的 `recipe_json`；不支援 legacy folder layout 或 `.npy` / `.csv`。
+- `idata`、`qdata`、`time` 必須是一維、同長度、finite array；`time[0] == 0` 且嚴格遞增，單位固定為 us。
+- `Abs = hypot(I, Q)` 必須落在 `[0, 1]`；I/Q 可為負值。
+- formula recipe 是可選資料；用 recipe 生成等於完全覆寫原本 data，並把 recipe 一起寫入同一個 `.npz`。
+- 被 `ArbWaveform`（`modules/waveform.py`）在建立波形時 lazy load；若 requested sample count 小於 asset data 長度，使用端只截斷並寫 logger warning，不做縮放。
 
 ---
 

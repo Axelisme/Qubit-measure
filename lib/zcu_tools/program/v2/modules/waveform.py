@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from typing import (
     TYPE_CHECKING,
@@ -22,6 +23,9 @@ from zcu_tools.cfg_model import ConfigBase
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary
     from zcu_tools.program.v2.modular import ModularProgramV2
+
+
+logger = logging.getLogger(__name__)
 
 
 class AbsWaveformCfg(ConfigBase):
@@ -313,6 +317,17 @@ class ArbWaveform(AbsWaveform):
         maxv = prog.soccfg.get_maxv(ch)
         samps_per_clk = prog.soccfg["gens"][ch]["samps_per_clk"]
         length = self.length
+        raw_end = float(time_raw[-1])
+
+        if length < raw_end:
+            logger.warning(
+                "Arbitrary waveform %r uses playback length %.6g us shorter than "
+                "data time axis end %.6g us; trailing data will be truncated "
+                "instead of time-scaled.",
+                cfg.data,
+                length,
+                raw_end,
+            )
 
         if even_length:
             n_clks = 2 * prog.us2cycles(gen_ch=ch, us=length / 2)

@@ -95,12 +95,16 @@ def make_value_widget(
         w.setMinimumWidth(FIELD_INPUT_MIN_WIDTH)
         w.setEnabled(editable)
         return w
-    if choices:
+    if choices is not None:
         w = QComboBox()
         w.addItems([str(c) for c in choices])
         idx = w.findText(str(default))
         if idx >= 0:
             w.setCurrentIndex(idx)
+        else:
+            w.setCurrentIndex(-1)
+            if hasattr(w, "setPlaceholderText"):
+                w.setPlaceholderText("Select...")
         w.setMinimumWidth(FIELD_INPUT_MIN_WIDTH)
         w.setEnabled(editable)
         return w
@@ -135,6 +139,8 @@ def make_value_widget(
 def read_value_widget(w: QWidget, type_: type, fallback: Any = None) -> Any:
     """Read the current value from a widget created by make_value_widget."""
     if isinstance(w, QComboBox):
+        if w.currentIndex() < 0:
+            return fallback
         txt = w.currentText()
         return type_(txt) if type_ is not str else txt
     if isinstance(w, QCheckBox):
@@ -153,6 +159,29 @@ def make_scalar_widget(spec: ScalarSpec, value: Any) -> QWidget:
     return make_value_widget(
         spec.type, value, spec.choices, spec.editable, spec.decimals, spec.optional
     )
+
+
+def _dynamic_choices_for_scalar(field: ScalarLiveField, current: Any) -> list | None:
+    spec = field.spec
+    if spec.choices_source == "":
+        return spec.choices
+    if spec.choices_source == "arb_waveforms":
+        list_arb_waveforms = getattr(field.env.ctrl, "list_arb_waveforms", None)
+        if not callable(list_arb_waveforms):
+            choices = []
+        else:
+            raw_choices = list_arb_waveforms()
+            choices = (
+                [str(choice) for choice in raw_choices]
+                if isinstance(raw_choices, list)
+                else []
+            )
+        if not spec.required and "" not in choices:
+            choices.insert(0, "")
+        if current not in (None, "") and current not in choices:
+            choices.insert(0, current)
+        return choices
+    raise RuntimeError(f"Unsupported ScalarSpec choices_source {spec.choices_source!r}")
 
 
 def read_scalar_widget(w: QWidget, spec: ScalarSpec) -> Any:
@@ -316,10 +345,11 @@ class ScalarWidget(BaseLiveWidget):
             self._layout.addWidget(self._ghost)
             self._sync_eval_ghost(value)
         else:
+            raw = _widget_default_for_direct_value(value, field.spec)
             self._input = make_value_widget(
                 field.spec.type,
-                _widget_default_for_direct_value(value, field.spec),
-                field.spec.choices,
+                raw,
+                _dynamic_choices_for_scalar(field, raw),
                 field.spec.editable,
                 field.spec.decimals,
                 field.spec.optional,

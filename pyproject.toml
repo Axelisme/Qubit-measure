@@ -8,6 +8,7 @@ dependencies = [
   "numpy",
   "tqdm",
   "matplotlib",
+  "sympy",
   "jupytext",
   "pydantic>=2",
   # Only for PEP 728 TypedDict (closed=True / extra_items=), which stdlib

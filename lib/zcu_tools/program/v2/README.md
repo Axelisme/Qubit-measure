@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-06-25 - ProgramTrace test adapter
+**Last updated:** 2026-06-25 - ArbWaveform reference time axis
 
 ## Testing & Type Checking Conventions
 
@@ -97,3 +97,7 @@ Big-jump 判斷集中在 `ir/hw_semantics.py::needs_big_jump(pmem_size)` 回傳 
 ## Repeat（control module）n=0 短路
 
 `Repeat` 在 `n` 為整數 `0` 時，`init()` 與 `run()` 都會短路：不分配 counter register、不初始化子模組，也不展開 loop macro。`run()` 仍保留開頭的 `delay(t)`/`delay_auto(0)` 對齊時間基準，然後直接返回。
+
+## ArbWaveform reference time axis
+
+`ArbWaveformDatabase` 的 `time` array 是 arbitrary waveform data 的 reference time axis。`ArbWaveformCfg.length` 是 requested playback window，不會把 stored data stretch/compress 到新長度；`ArbWaveform.make_iqdata()` 只在 `[0, length)` 上插值取樣。若 `length` 短於 data time-axis end，trailing data 會被截斷並 log warning。

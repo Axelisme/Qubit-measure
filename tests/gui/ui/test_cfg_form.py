@@ -35,6 +35,7 @@ def ctrl():
     c.get_bus.return_value = EventBus()
     c.get_current_md.return_value = MagicMock()
     c.get_current_ml.return_value = MagicMock()
+    c.list_arb_waveforms.return_value = []
     return c
 
 
@@ -133,6 +134,72 @@ def test_scalar_choices_widget_round_trip(qapp):
     spec = ScalarSpec(label="Model", type=str, choices=["hm", "t", "auto"])
     w = make_scalar_widget(spec, "hm")
     assert read_scalar_widget(w, spec) == "hm"
+
+
+def test_dynamic_arb_waveform_data_choices(qapp, ctrl):
+    from qtpy.QtWidgets import QComboBox
+    from zcu_tools.gui.app.main.live_model import ScalarLiveField
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+
+    ctrl.list_arb_waveforms.return_value = ["asset_a", "asset_b"]
+    schema = _schema(
+        {
+            "data": ScalarSpec(
+                label="Data key",
+                type=str,
+                required=True,
+                choices_source="arb_waveforms",
+            )
+        },
+        {"data": DirectValue(None)},
+    )
+    w = CfgFormWidget()
+    model = _attach(w, schema, ctrl)
+
+    combo = w.findChild(QComboBox)
+    assert combo is not None
+    assert [combo.itemText(i) for i in range(combo.count())] == ["asset_a", "asset_b"]
+    assert combo.currentIndex() == -1
+    assert not w.is_valid()
+
+    combo.setCurrentIndex(1)
+
+    field = cast(ScalarLiveField, model.fields["data"])
+    value = field.get_value()
+    assert isinstance(value, DirectValue)
+    assert value.value == "asset_b"
+    assert w.is_valid()
+
+
+def test_arb_waveform_data_choice_allows_empty_initial_value(qapp, ctrl):
+    from qtpy.QtWidgets import QComboBox
+    from zcu_tools.gui.app.main.live_model import ScalarLiveField
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+
+    ctrl.list_arb_waveforms.return_value = ["asset_a"]
+    schema = _schema(
+        {
+            "data": ScalarSpec(
+                label="Data key",
+                type=str,
+                choices_source="arb_waveforms",
+            )
+        },
+        {"data": DirectValue("")},
+    )
+    w = CfgFormWidget()
+    model = _attach(w, schema, ctrl)
+
+    combo = w.findChild(QComboBox)
+    assert combo is not None
+    assert [combo.itemText(i) for i in range(combo.count())] == ["", "asset_a"]
+    assert combo.currentIndex() == 0
+    assert w.is_valid()
+
+    field = cast(ScalarLiveField, model.fields["data"])
+    value = field.get_value()
+    assert isinstance(value, DirectValue)
+    assert value.value == ""
 
 
 def test_scalar_editable_false_widget_disabled(qapp):

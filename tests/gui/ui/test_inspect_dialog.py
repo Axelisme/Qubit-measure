@@ -129,6 +129,37 @@ def test_inspect_dialog_init_and_refresh(qapp):
     assert dialog._ml_tree.topLevelItemCount() == 2
 
 
+def test_inspect_dialog_toolbar_has_arb_waveforms_before_refresh(qapp):
+    from qtpy.QtWidgets import QWidget
+    from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
+
+    class Parent(QWidget):
+        def __init__(self) -> None:
+            super().__init__()
+            self.opened: list[DialogName] = []
+
+        def open_dialog(self, name: DialogName) -> None:
+            self.opened.append(name)
+
+    parent = Parent()
+    ctrl = _make_ctrl_with_ml(_make_ml())
+    dialog = InspectDialog(ctrl, MagicMock(), parent=parent)
+
+    root_layout = dialog.layout()
+    assert root_layout is not None
+    toolbar_item = root_layout.itemAt(0)
+    assert toolbar_item is not None
+    toolbar = toolbar_item.layout()
+    assert toolbar is not None
+    assert toolbar.indexOf(dialog._arb_waveform_btn) < toolbar.indexOf(
+        dialog._refresh_btn
+    )
+
+    dialog._arb_waveform_btn.click()
+
+    assert parent.opened == [DialogName.ARB_WAVEFORM]
+
+
 def test_inspect_dialog_md_edit(qapp):
     ctrl = MagicMock()
     bus = MagicMock()

@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-25 (load-data guard policy)
+**Last updated:** 2026-06-26 (arb waveform tools/version guard)
 
 # `zcu_tools/mcp/measure/`
 
@@ -14,6 +14,11 @@ RemoteControlAdapter。此 package 是 app-local policy 層，不是共用 trans
   `gui_debug_operations` 使用的 latest-handle projection。
 - `session_policy.py` 放不可變 policy table 與純 helper：version guard deps、
   read-reveal table、start-op semantic key mapping、stale key 語義化。
+- arbitrary waveform tools 是 agent-friendly generated RPC aliases：
+  `list_arb_waveform`、`get_arb_waveform_preview`、`set_arb_waveform`。
+  它們操作 qubit-scoped `.npz` asset store；`set_arb_waveform` guard deps 是
+  `arb_waveforms`，list/preview 只 reveal `arb_waveforms`，validation/collision/missing
+  以 tool error 的 stable `reason` 回報。
 - `tab.load_data` / generated `gui_tab_load_data` 是同步 mutation：guard deps 是
   `tab:{tab_id}`、`tab:{tab_id}:result`、`tab:{tab_id}:analyze`、`context`；不依賴
   SoC、device、cfg 或 save path，且不進 operation-handle table。

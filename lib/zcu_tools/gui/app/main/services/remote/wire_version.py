@@ -66,10 +66,12 @@ from __future__ import annotations
 #     replies surface the operation handle (operation_id) instead of stripping it.
 #   - tab.writeback_apply: enriched echo
 #     {applied_ids, written, context_version}.
-WIRE_VERSION = 45
+# v46: arbitrary waveform asset RPCs:
+#   arb_waveform.list / preview / set with formula recipe persistence.
+WIRE_VERSION = 46
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION (a wire-contract change
 # bumps both; a pure-internal GUI change bumps only this). Git history holds the
 # per-version evolution.
-GUI_VERSION = 53  # load canonical result into an already-open adapter tab
+GUI_VERSION = 58  # arb waveform entry moved into Inspect dialog toolbar

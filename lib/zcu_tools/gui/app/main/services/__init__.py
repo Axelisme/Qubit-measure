@@ -19,6 +19,7 @@ from zcu_tools.gui.session.services.startup import (
 )
 
 from .analyze import AnalyzeService
+from .arb_waveform import ArbWaveformService
 from .app_services import AppServices, build_app_services
 from .caretaker import PersistenceCaretaker, RestoreOutcome
 from .guard import (
@@ -52,6 +53,7 @@ from .writeback import WritebackService
 
 __all__ = [
     "AnalyzeService",
+    "ArbWaveformService",
     "AppServices",
     "build_app_services",
     "SoCConnectionService",

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, NoReturn, cast
 
 from zcu_tools.gui.app.main.adapter import (
     MetaDictWriteback,
@@ -47,6 +47,7 @@ from zcu_tools.gui.session.services.device import (
     DisconnectDeviceRequest,
     SetupDeviceRequest,
 )
+from zcu_tools.meta_tool import ArbWaveformError
 
 from ..load import LoadDataError
 from .method_specs import METHOD_SPECS
@@ -830,6 +831,86 @@ def _h_resources_versions(
 ) -> Mapping[str, object]:
     del params
     return {"versions": adapter.ctrl.resources_versions()}
+
+
+_ARB_INVALID_PARAM_REASONS = frozenset(
+    {
+        "invalid_data_key",
+        "invalid_recipe",
+        "invalid_recipe_json",
+        "formula_parse_failed",
+        "formula_unsafe",
+        "formula_unknown_symbol",
+        "formula_conditional_not_supported",
+        "formula_evaluation_failed",
+        "formula_not_numeric",
+        "formula_shape_mismatch",
+        "formula_non_finite",
+        "amplitude_out_of_range",
+        "sample_count_too_small",
+        "sample_count_too_large",
+        "data_key_not_found",
+    }
+)
+
+
+def _raise_arb_waveform_error(exc: ArbWaveformError) -> NoReturn:
+    code = (
+        ErrorCode.INVALID_PARAMS
+        if exc.reason in _ARB_INVALID_PARAM_REASONS
+        else ErrorCode.PRECONDITION_FAILED
+    )
+    raise RemoteError(code, str(exc), reason=exc.reason, data=exc.data) from exc
+
+
+def _h_arb_waveform_list(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    del params
+    try:
+        return {"waveforms": adapter.ctrl.list_arb_waveforms()}
+    except RuntimeError as exc:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", "no_project"),
+        ) from exc
+
+
+def _h_arb_waveform_preview(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    name = require_str(params, "name")
+    try:
+        return adapter.ctrl.get_arb_waveform_preview(name)
+    except ArbWaveformError as exc:
+        _raise_arb_waveform_error(exc)
+    except RuntimeError as exc:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", "no_project"),
+        ) from exc
+
+
+def _h_arb_waveform_set(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    name = require_str(params, "name")
+    overwrite = optional_bool(params, "overwrite", False)
+    recipe = params["recipe"]
+    try:
+        result = dict(adapter.ctrl.set_arb_waveform(name, recipe, overwrite=overwrite))
+    except ArbWaveformError as exc:
+        _raise_arb_waveform_error(exc)
+    except RuntimeError as exc:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", "no_project"),
+        ) from exc
+    result["success"] = True
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -2027,6 +2108,9 @@ _HANDLERS: dict[str, Handler] = {
     "state.has_soc": _h_state_has_soc,
     "soc.info": _h_soc_info,
     "project.info": _h_project_info,
+    "arb_waveform.list": _h_arb_waveform_list,
+    "arb_waveform.preview": _h_arb_waveform_preview,
+    "arb_waveform.set": _h_arb_waveform_set,
     "resources.versions": _h_resources_versions,
     "soc.connect": _h_soc_connect,
     "startup.apply": _h_startup_apply,

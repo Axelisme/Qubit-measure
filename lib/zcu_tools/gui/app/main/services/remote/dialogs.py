@@ -28,6 +28,7 @@ class DialogName(str, Enum):
     DEVICE = "device"
     PREDICTOR = "predictor"
     INSPECT = "inspect"
+    ARB_WAVEFORM = "arb_waveform"
     STARTUP = "startup"
 
 

@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-25（load canonical result）
+**Last updated:** 2026-06-26（arbitrary waveform Inspect toolbar entry / data selector）
 
 # `zcu_tools/gui/app/main/` — measure-gui Framework AI Note
 
@@ -56,6 +56,7 @@ gui/
 │   ├── save.py           — SaveService (資料/圖片儲存 pipeline)
 │   ├── writeback.py      — WritebackService (分析結果寫回 md/ml)
 │   ├── cfg_editor.py     — CfgEditorSession (aggregate root：set_field/commit_schema 行為上身，只到 CfgSchema 快照) + CfgEditorService (Repository：lifecycle/LRU/變更流)；commit 把 CfgSchema 交 ContextWritePort 寫 (ADR-0006，session 不再 lower/register)
+│   ├── arb_waveform.py   — ArbWaveformService：qubit-scoped arbitrary waveform asset adapter；共用 `meta_tool.ArbWaveformDatabase`，負責 preview PNG、resource version bump 與 GUI/MCP 邊界
 │   ├── ports.py          — driven-adapter / sibling-service ports (Protocol)：PersistOriginator(Caretaker↔Controller 窄介面)/ProjectIO/DriverFactory/ContextRead/ContextWrite(+ContextWrites batch)/WritebackQuery/TabLifecycle/StartupContext/RememberedDevice/**TabResultWritePort**(run policy 對 State 的窄 write：clear_tab_results/set_tab_running/update_tab_result)/**TabAnalyzeWritePort**(analyze/post policy 的窄 write：set_tab_analyzing/update_tab_analyze/update_tab_post_analyze)。app service / op policy 依賴 port 而非具體 infra/sibling/`State` (ADR-0005/0006/0026 §3，`State` 是唯一 implementer)
 │   └── remote/           — RemoteControlAdapter：第二個 driving View，是共用 NdjsonRpcEndpoint 上的 router；socket/NDJSON-over-TCP transport 住在共用層 zcu_tools.gui.remote（見下「共用 transport 層」）
 │       ├── method_specs.py — METHOD_SPECS 契約表 (wire 參數型別 SSOT)；MethodSpec 型別來自 gui.remote
@@ -64,9 +65,10 @@ gui/
 └── ui/
     ├── cfg_form.py         — CfgFormWidget：LiveModel 反應式容器
     ├── fields/             — 渲染邏輯：registry.py / common.py / containers.py
-    ├── inspect_dialog.py   — InspectDialog(InspectDialogBase 子類)：只補 ml create/modify（_MlCreateDialog/_MlModifyDialog 拖 CfgEditor）；md tab + ml view/rename/del 在 base（session）
+    ├── inspect_dialog.py   — InspectDialog(InspectDialogBase 子類)：補 Arb Waveforms top-toolbar 入口與 ml create/modify（_MlCreateDialog/_MlModifyDialog 拖 CfgEditor）；md tab + ml view/rename/del 在 base（session）
+    ├── arb_waveform_dialog.py — ArbWaveformDialog：管理 qubit-scoped arbitrary waveform `.npz` asset；支援 formula segment insert/delete、normalize toggle、保存、rename/delete、debounced normalized I/Q/Abs preview；新建 draft 預設為兩側 half-Gaussian 的 flat-top recipe；ML waveform 建立仍走 Inspect 的正常 create/modify 流程
     ├── agent_launch_dialog.py — AgentLaunchDialog(QDialog)：可選 resumable session 清單（`list_resumable_sessions`：我們 launch 過的 session + claude jsonl 補 label/last-active、最近在上）+ Resume selected / **Remove**（`remove_recorded_session`：把選中的從 Resume 清單移除，不動 claude transcript）/ New session / Refresh；直接呼 `agent_launcher.launch_agent_terminal(resume_session_id=…|None, bootstrap_prompt=ctrl.build_agent_bootstrap_prompt())`。
-    ├── main_window.py      — MainWindow(QMainWindow) 實作 ViewProtocol；toolbar 有 Agent… 按鈕（開 AgentLaunchDialog）；持 FeedbackPanel（`refresh_feedback_widget` 依 (live op 數 且 `ctrl.has_agent_connected()`) 把單一 app-level panel mount 進 target tab 的 plot_layout / unmount；target tab = running tab，無則 active tab；tab 變則 re-mount；`ExpTabWidget.mount_feedback_panel`/`unmount_feedback_panel` 為 host API）+ `open_notify_prompt` 開 NotifyUserDialog
+    ├── main_window.py      — MainWindow(QMainWindow) 實作 ViewProtocol；toolbar 有 Agent… 按鈕（開 AgentLaunchDialog）與 Inspect…（Arb Waveforms 入口在 Inspect 內）；持 FeedbackPanel（`refresh_feedback_widget` 依 (live op 數 且 `ctrl.has_agent_connected()`) 把單一 app-level panel mount 進 target tab 的 plot_layout / unmount；target tab = running tab，無則 active tab；tab 變則 re-mount；`ExpTabWidget.mount_feedback_panel`/`unmount_feedback_panel` 為 host API）+ `open_notify_prompt` 開 NotifyUserDialog
     ├── feedback_widget.py  — FeedbackPanel(_CollapsibleSection)（docked 在 figure 下方、可摺疊的「Send to agent」section，預設展開；非 overlay）；user→agent nudge / Send & Stop；Stop 鈕依 active op 是否有 cancel hook gating，`Controller.can_cancel_active_operation`→`OperationHandles.has_cancel_hook`→`OperationChannel.can_cancel`，無 op-kind 知識，ADR-0025 §Stop-gating；unmount 時 clear_input
     ├── notify_dialog.py    — NotifyUserDialog（`gui_prompt_user` 的 non-modal prompt；dialog 是 timeout SSOT，QTimer fire→`ctrl.timeout_notify`；Reply/Dismiss/window-X/timeout 各呼一次 NotifyChannel producer，ADR-0025）
     └── analyze_form.py     — AnalyzeFormWidget：扁平 analysis 參數表單
@@ -352,9 +354,11 @@ plot substrate 已抽到頂層共用套件 `lib/zcu_tools/gui/plotting/`（measu
 | `ModuleLibrary` (live) | `ContextService` | `get_current_ml()`、`set_ml_module_from_schema`、`set_ml_waveform_from_schema`、`apply_writes`、`del_ml_module`、`del_ml_waveform`（ADR-0006 唯一寫入權威） |
 | `MetaDict` (live) | `ContextService` | `get_current_md()`、`set_md_attr`、`del_md_attr`、`coerce_md_value` |
 | `ExperimentManager` (file IO) | `ContextService` via `IOManager` | `use_context`、`new_context`、`setup_project`、`get_context_labels`、`get_active_context_label` |
+| `ArbWaveformDatabase` (qubit-scoped `.npz` assets) | `ArbWaveformService` | `list_arb_waveforms()`、`get_arb_waveform_preview()`、`set_arb_waveform()`、`delete_arb_waveform()`、`rename_arb_waveform()` |
 
 - LiveFields 透過 `ControllerProtocol` 取得 reactive environment，不直接 import singleton
 - `DeviceService` 不直接用 `GlobalDeviceManager` singleton，改經 `DeviceRegistryPort`（5 個 instance method 鏡像 classmethod 面）；production 預設 `GlobalDeviceRegistryAdapter`，測試注 in-memory fake（ADR-0026 §6）
+- `style:"arb"` waveform entry 仍由 Inspect 的 normal ML create/modify flow 建立；其 `data` scalar 透過 `choices_source="arb_waveforms"` 顯示目前 qubit-scoped asset keys，且允許空字串作為 Inspect 建立新 Arb waveform 的初始值；底層 `ArbWaveform` runtime 仍在空字串或 missing asset 時 fail-fast。delete/rename asset 不掃描 ML references，使用端碰到 missing asset 時 fail-fast。
 
 ### MetaDict Text Coercion
 

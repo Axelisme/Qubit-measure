@@ -1758,6 +1758,10 @@ class MainWindow(QMainWindow):
             from .inspect_dialog import InspectDialog
 
             return InspectDialog(self._ctrl, bus=self._ctrl.get_bus(), parent=self)
+        if name is DialogName.ARB_WAVEFORM:
+            from .arb_waveform_dialog import ArbWaveformDialog
+
+            return ArbWaveformDialog(self._ctrl, parent=self)
         if name is DialogName.STARTUP:
             # STARTUP dialog needs ``startup_mode=True`` and is normally opened
             # by the application bootstrap, not by this generic factory. We

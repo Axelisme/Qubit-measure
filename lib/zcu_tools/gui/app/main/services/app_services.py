@@ -15,6 +15,7 @@ from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.services.startup import StartupService
 
 from .analyze import AnalyzeService
+from .arb_waveform import ArbWaveformService
 from .cfg_editor import CfgEditorService
 from .guard import GuardService
 from .load import LoadService
@@ -70,6 +71,7 @@ class AppServices:
     workspace: WorkspaceService
     startup: StartupService
     cfg_editor: CfgEditorService
+    arb_waveform: ArbWaveformService
 
 
 def build_app_services(
@@ -108,6 +110,7 @@ def build_app_services(
     )
     context = session.context
     device = session.device
+    arb_waveform = ArbWaveformService(state)
     # cfg_editor owns the per-tab and per-writeback-item cfg models; WritebackService
     # builds/reads/tears those down, so it is built after cfg_editor (single-
     # direction command edge — cfg_editor never calls writeback, ADR-0004).
@@ -145,4 +148,5 @@ def build_app_services(
         workspace=WorkspaceService(state, tab, bus),
         startup=session.startup,
         cfg_editor=cfg_editor,
+        arb_waveform=arb_waveform,
     )

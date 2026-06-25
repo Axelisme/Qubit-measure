@@ -1,3 +1,4 @@
+import logging
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -293,6 +294,38 @@ def test_arb_waveform_make_iqdata_handles_missing_q_channel(monkeypatch):
 
     assert np.allclose(idata, np.array([0.0, 4.0, 0.0]))
     assert qdata is None
+
+
+def test_arb_waveform_warns_when_playback_length_truncates_data(caplog, monkeypatch):
+    class FakeSoccfg(dict):
+        def get_maxv(self, ch):
+            return 1.0
+
+    prog = MagicMock()
+    prog.soccfg = FakeSoccfg({"gens": [{"samps_per_clk": 1}]})
+    prog.us2cycles.return_value = 1
+
+    waveform = ArbWaveformCfg(length=1.0, data="long_data").build("arb")
+
+    monkeypatch.setattr(
+        "zcu_tools.meta_tool.arb_waveform.ArbWaveformDatabase.get",
+        lambda key: (
+            np.array([0.0, 1.0, 0.0]),
+            None,
+            np.array([0.0, 1.0, 2.0]),
+        ),
+    )
+
+    with caplog.at_level(
+        logging.WARNING, logger="zcu_tools.program.v2.modules.waveform"
+    ):
+        idata, qdata = waveform.make_iqdata(0, prog)
+
+    assert qdata is None
+    assert np.allclose(idata, np.array([0.0]))
+    assert "long_data" in caplog.text
+    assert "trailing data will be truncated" in caplog.text
+    assert "instead of time-scaled" in caplog.text
 
 
 def test_flat_top_waveform_create_and_kwargs():

@@ -901,6 +901,15 @@ def test_screenshot_dialog_omitted_out_path_writes_temp_file(monkeypatch):
     assert calls == [("dialog.screenshot", {"name": "setup"})]
 
 
+def test_screenshot_schema_includes_arb_waveform_dialog():
+    from zcu_tools.mcp.measure import server as mcp_server
+
+    target = mcp_server.TOOLS["gui_screenshot"]["inputSchema"]["properties"]["target"]
+    assert "arb_waveform" in target["enum"]
+    assert "arb_waveform" in target["description"]
+    assert "arb_waveform" in mcp_server.TOOLS["gui_screenshot"]["description"]
+
+
 def test_screenshot_dialog_explicit_out_path(monkeypatch, tmp_path):
     import base64
 

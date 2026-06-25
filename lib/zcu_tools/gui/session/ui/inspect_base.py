@@ -1,12 +1,9 @@
 """InspectDialogBase — app-agnostic context inspector (MetaDict + ModuleLibrary).
 
 The session-core half of the inspect dialog: the MetaDict tab (read + edit) and
-the ModuleLibrary tab's *view / rename / delete*. The ml *create / modify* path
-drags the CfgEditor (a measure concern) and lives in the ``InspectDialog``
-subclass; this base exposes two template-method hooks
-(``_build_extra_ml_buttons`` / ``_on_ml_selection_changed``) so the subclass can
-inject its Create / Modify buttons and follow the selection without the base
-ever knowing about them.
+the ModuleLibrary tab's *view / rename / delete*. App-specific actions live in
+subclasses; this base exposes template-method hooks for the top toolbar and the
+ModuleLibrary button row so the base never learns app-local concerns.
 
 Depends only on ``SessionControllerPort`` + the shared event bus, so every
 measurement-session app reuses it (measure adds ml-edit; autofluxdep can use it
@@ -82,16 +79,17 @@ class InspectDialogBase(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
 
-        # --- top toolbar: status on the left, Refresh + Close on the right ---
+        # --- top toolbar: status on the left, app actions + Refresh + Close on the right ---
         toolbar = QHBoxLayout()
         self._status_label = QLabel("No context")
         toolbar.addWidget(self._status_label)
         toolbar.addStretch()
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.clicked.connect(self.refresh)
+        self._build_extra_toolbar_buttons(toolbar)
+        self._refresh_btn = QPushButton("Refresh")
+        self._refresh_btn.clicked.connect(self.refresh)
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.close)
-        toolbar.addWidget(refresh_btn)
+        toolbar.addWidget(self._refresh_btn)
         toolbar.addWidget(close_btn)
         layout.addLayout(toolbar)
 
@@ -115,11 +113,17 @@ class InspectDialogBase(QDialog):
     # Template-method hooks (the measure subclass adds ml create/modify)
     # ------------------------------------------------------------------
 
+    def _build_extra_toolbar_buttons(self, toolbar: QHBoxLayout) -> None:
+        """Hook: subclasses prepend app-specific toolbar buttons before Refresh."""
+        del toolbar
+
     def _build_extra_ml_buttons(self, btn_layout: QHBoxLayout) -> None:
         """Hook: subclasses prepend ml create/modify buttons (default: none)."""
+        del btn_layout
 
     def _on_ml_selection_changed(self, enabled: bool) -> None:
         """Hook: subclasses toggle their own ml-edit buttons (default: none)."""
+        del enabled
 
     # ------------------------------------------------------------------
     # Tab builders

@@ -28,6 +28,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.app.main.adapter import CfgSchema
+from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
 from zcu_tools.gui.session.services.context import MlEntryValidationError
 from zcu_tools.gui.session.ui.inspect_base import InspectDialogBase
 
@@ -283,6 +284,12 @@ class InspectDialog(InspectDialogBase):
     # Narrow the base's SessionControllerPort to the concrete Controller, whose
     # CfgEditor methods (open/commit/teardown) the edit dialogs below call.
     _ctrl: Controller
+    _arb_waveform_dialog: QDialog | None = None
+
+    def _build_extra_toolbar_buttons(self, toolbar: QHBoxLayout) -> None:
+        self._arb_waveform_btn = QPushButton("Arb Waveforms…")
+        toolbar.addWidget(self._arb_waveform_btn)
+        self._arb_waveform_btn.clicked.connect(self._on_arb_waveform_clicked)
 
     def _build_extra_ml_buttons(self, btn_layout: QHBoxLayout) -> None:
         self._create_btn = QPushButton("Create...")
@@ -292,6 +299,33 @@ class InspectDialog(InspectDialogBase):
         btn_layout.addWidget(self._modify_ml_btn)
         self._create_btn.clicked.connect(self._on_create_clicked)
         self._modify_ml_btn.clicked.connect(self._on_modify_ml_clicked)
+
+    def _on_arb_waveform_clicked(self) -> None:
+        opener = getattr(self.parent(), "open_dialog", None)
+        if callable(opener):
+            opener(DialogName.ARB_WAVEFORM)
+            return
+
+        existing = self._arb_waveform_dialog
+        if existing is not None:
+            try:
+                existing.raise_()
+                existing.activateWindow()
+                if not existing.isVisible():
+                    existing.show()
+                return
+            except RuntimeError:
+                self._arb_waveform_dialog = None
+
+        from .arb_waveform_dialog import ArbWaveformDialog
+
+        dlg = ArbWaveformDialog(self._ctrl, parent=self)
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._arb_waveform_dialog = dlg
+        dlg.finished.connect(
+            lambda _status: setattr(self, "_arb_waveform_dialog", None)
+        )
+        dlg.open()
 
     def _on_ml_selection_changed(self, enabled: bool) -> None:
         self._modify_ml_btn.setEnabled(enabled)

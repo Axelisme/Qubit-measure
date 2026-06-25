@@ -96,7 +96,7 @@ from zcu_tools.mcp.measure.session_policy import (  # noqa: E402
 # tracked separately by WIRE_VERSION (see ``wire_version.py``); the two are
 # independent. (Git history holds the per-version evolution.)
 # MeasureMcpSession owns measure-only MCP policy state.
-MCP_VERSION = 65
+MCP_VERSION = 67
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -148,11 +148,13 @@ ON-DEMAND — the fine-grained base tools, when a bundle doesn't fit:
     it with the generic gui_op_poll(handle) / gui_op_wait(handle).
   - Devices / context / predictor / adapters: gui_device_*, gui_context_*,
     gui_predictor_*, gui_adapter_*.
+  - Arbitrary waveforms: list_arb_waveform, get_arb_waveform_preview,
+    set_arb_waveform. These manage qubit-scoped .npz assets and render preview PNGs.
 ON-DEMAND — screenshot (a window/dialog grab; useful to show the user what the GUI
 looks like, not part of the measurement loop):
   - gui_screenshot(target): 'window' grabs the whole main window, a dialog name
-    (setup/device/predictor/inspect/startup) grabs that dialog; always writes a PNG
-    file (never inline base64).
+    (setup/device/predictor/inspect/arb_waveform/startup) grabs that dialog; always
+    writes a PNG file (never inline base64).
 DEV — debugging the GUI/MCP itself (the version table + in-flight handles are
 normally hidden from the operator; do NOT use these for measurement):
   - gui_debug_resource_versions (the per-resource optimistic-concurrency version
@@ -228,7 +230,8 @@ Call contract — read before issuing defensive/duplicate calls:
   - Mutating tools have side effects and must be sent exactly once: gui_tab_run_start
     (a duplicate starts a SECOND run), gui_editor_set, gui_tab_new /
     gui_tab_close, gui_tab_save, gui_device_connect / _disconnect / _apply,
-    gui_context_md_write / _md_delete / _ml_delete_* / _ml_rename_*, gui_editor_save.
+    gui_context_md_write / _md_delete / _ml_delete_* / _ml_rename_*,
+    gui_editor_save, set_arb_waveform.
 
 Agent-to-user prompting: gui_prompt_user(message, timeout=600) opens a prompt
 dialog for the user and BLOCKS your entire turn until the user replies, dismisses,
@@ -2809,7 +2812,7 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "non-dialog floating widgets (the feedback widget, the left-edge "
             "handle) that a per-dialog grab cannot see.\n"
             "  - target=<dialog name> (one of: setup, device, predictor, inspect, "
-            "startup): that dialog; fails PRECONDITION_FAILED if it is not "
+            "arb_waveform, startup): that dialog; fails PRECONDITION_FAILED if it is not "
             "currently open.\n"
             "The PNG is ALWAYS written to disk and the reply is {saved_to, bytes} — "
             "Read the saved_to path to view it (never inline base64, so it cannot "
@@ -2832,11 +2835,12 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
                         "device",
                         "predictor",
                         "inspect",
+                        "arb_waveform",
                         "startup",
                     ],
                     "description": (
                         "'window' for the whole main window, or a dialog name "
-                        "(setup, device, predictor, inspect, startup)"
+                        "(setup, device, predictor, inspect, arb_waveform, startup)"
                     ),
                 },
                 "out_path": {

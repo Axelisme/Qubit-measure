@@ -60,7 +60,11 @@ def make_arb_waveform_spec() -> CfgSectionSpec:
         fields={
             "style": LiteralSpec("arb"),
             "length": ScalarSpec(label="Length (us)", type=float, decimals=3),
-            "data": ScalarSpec(label="Data key", type=str, required=True),
+            "data": ScalarSpec(
+                label="Data key",
+                type=str,
+                choices_source="arb_waveforms",
+            ),
         },
     )
 

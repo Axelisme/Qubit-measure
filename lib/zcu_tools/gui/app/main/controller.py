@@ -60,6 +60,7 @@ from .services.remote.dialogs import DialogName
 from .state import State
 
 if TYPE_CHECKING:
+    from zcu_tools.meta_tool import ArbWaveformData, ArbWaveformInfo
     from zcu_tools.gui.session.ports import ProgressTransport
 
     from .adapters.qt_shutdown_driver import QtShutdownDriver
@@ -259,6 +260,7 @@ class Controller(SessionControllerMixin):
         self._workspace_svc = services.workspace
         self._startup_svc = services.startup
         self._cfg_editor_svc = services.cfg_editor
+        self._arb_waveform_svc = services.arb_waveform
         # Notify prompt registry (Stage 4b): independent of OperationHandles;
         # tokens minted on the main thread, consumed off-main (ADR-0025).
         self._notify_handles: NotifyHandles = NotifyHandles()
@@ -993,6 +995,45 @@ class Controller(SessionControllerMixin):
             lower_waveform=lower_waveform,
             dump=True,
         )
+
+    # ------------------------------------------------------------------
+    # Arbitrary waveform assets (qubit-scoped repository)
+    # ------------------------------------------------------------------
+
+    def list_arb_waveforms(self) -> list[str]:
+        return self._arb_waveform_svc.list_data_keys()
+
+    def list_arb_waveform_infos(self) -> list[ArbWaveformInfo]:
+        return self._arb_waveform_svc.list_infos()
+
+    def inspect_arb_waveform(self, data_key: str) -> dict[str, object]:
+        info = self._arb_waveform_svc.inspect(data_key)
+        return {
+            "data_key": info.data_key,
+            "duration": info.duration,
+            "mtime": info.mtime,
+        }
+
+    def load_arb_waveform_data(self, data_key: str) -> ArbWaveformData:
+        return self._arb_waveform_svc.load_data(data_key)
+
+    def get_arb_waveform_preview(self, data_key: str) -> dict[str, object]:
+        return self._arb_waveform_svc.get_preview(data_key)
+
+    def set_arb_waveform(
+        self, data_key: str, recipe: Any, *, overwrite: bool = False
+    ) -> dict[str, object]:
+        return self._arb_waveform_svc.set_formula(
+            data_key,
+            recipe,
+            overwrite=overwrite,
+        )
+
+    def delete_arb_waveform(self, data_key: str) -> None:
+        self._arb_waveform_svc.delete(data_key)
+
+    def rename_arb_waveform(self, old_data_key: str, new_data_key: str) -> None:
+        self._arb_waveform_svc.rename(old_data_key, new_data_key)
 
     # ------------------------------------------------------------------
     # Role templates — one-shot "create blank ml entry from a named role"

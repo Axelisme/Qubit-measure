@@ -433,6 +433,20 @@ def test_main_window_load_data_dialog_calls_controller(qapp, monkeypatch, tmp_pa
     assert captured_dir["directory"] == str(database_root)
 
 
+def test_main_window_toolbar_does_not_show_arb_waveforms(qapp):
+    from qtpy.QtWidgets import QPushButton
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+
+    ctrl = _apply_window_defaults(MagicMock())
+    ctrl.get_bus.return_value = EventBus()
+
+    window = MainWindow(ctrl)
+    texts = {button.text() for button in window.findChildren(QPushButton)}
+
+    assert "Inspect…" in texts
+    assert "Arb Waveforms…" not in texts
+
+
 def test_main_window_load_data_dialog_cancel_is_noop(qapp, monkeypatch):
     from qtpy.QtWidgets import QFileDialog
     from zcu_tools.gui.app.main.ui.main_window import MainWindow

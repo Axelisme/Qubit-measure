@@ -68,6 +68,32 @@ or dispersive resonator frequencies. GUI services and notebook helpers may adapt
 it, but they are not the prediction model itself.
 _Avoid_: GUI predictor service, dispersive tuning widget, plot overlay
 
+**Arbitrary Waveform Asset**:
+A qubit-scoped stored waveform sample asset file that can be referenced by an
+arbitrary waveform configuration. It always has playback data, and it may also
+embed an editable formula recipe.
+_Avoid_: waveform cfg, formula file, arbitrary pulse, asset folder
+
+**Arbitrary Waveform Data Key**:
+The path-safe identity of an arbitrary waveform asset, used as the asset filename
+stem and as the reference string in arbitrary waveform configurations.
+_Avoid_: filename, module name, waveform name
+
+**Formula Recipe**:
+An optional editable source definition for an arbitrary waveform asset. User and
+agent-created formula waveforms store a formula recipe, while imported waveform
+assets may exist as playback data only. A formula recipe is stored inside the
+asset file and may contain one or more formula segments.
+_Avoid_: source of truth, cache metadata, formula cfg
+
+**Formula Segment**:
+An ordered part of a formula recipe with its own duration and formula
+expression. Formula segments concatenate to form one arbitrary waveform asset;
+their formulas are written against segment-local time. Segment rendering uses
+half-open time intervals, with the final segment including the waveform endpoint.
+Total waveform duration is the sum of segment durations.
+_Avoid_: piece, section, pulse part
+
 ## Example Dialogue
 
 Developer: "This experiment result has multiple measured views. Is that several

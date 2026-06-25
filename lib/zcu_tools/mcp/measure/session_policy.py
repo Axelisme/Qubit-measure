@@ -45,6 +45,7 @@ _GUARD_DEPS_DATA: dict[str, tuple[str, ...]] = {
         "context",
     ),
     "editor.commit": ("editor:{editor_id}", "context"),
+    "arb_waveform.set": ("arb_waveforms",),
 }
 
 GUARD_DEPS: VersionPatternMap = MappingProxyType(_GUARD_DEPS_DATA)
@@ -55,6 +56,8 @@ _READ_REVEALS_DATA: dict[str, tuple[str, ...]] = {
     "editor.get": ("editor:{editor_id}",),
     "device.snapshot": ("device:{name}",),
     "device.list": ("devices:__set__",),
+    "arb_waveform.list": ("arb_waveforms",),
+    "arb_waveform.preview": ("arb_waveforms",),
 }
 
 READ_REVEALS: VersionPatternMap = MappingProxyType(_READ_REVEALS_DATA)
@@ -124,6 +127,8 @@ def describe_stale_keys(keys: list[Any]) -> list[str]:
             out.append("the SoC connection")
         elif key == "devices:__set__":
             out.append("the set of devices (one added/removed)")
+        elif key == "arb_waveforms":
+            out.append("the arbitrary waveform asset store")
         elif key.startswith("device:"):
             out.append(f"device {key[len('device:') :]!r}")
         elif key.startswith("editor:"):

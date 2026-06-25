@@ -8,6 +8,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Generic,
+    Literal,
     Protocol,
     Self,
     TypeAlias,
@@ -387,6 +388,7 @@ class ScalarSpec:
     type: type
     editable: bool = True
     choices: list | None = None
+    choices_source: Literal["", "arb_waveforms"] = ""
     decimals: int | None = None
     required: bool = False
     # ``optional``: the field may be left empty (value ``None``) and is *valid*
