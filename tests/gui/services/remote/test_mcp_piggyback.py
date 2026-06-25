@@ -14,8 +14,7 @@ from zcu_tools.mcp.measure import server as mcp_server
 
 
 def _clear() -> None:
-    with mcp_server._DIAGNOSTIC_COND:
-        mcp_server._DIAGNOSTIC_QUEUE.clear()
+    mcp_server._SESSION.clear_diagnostics()
 
 
 def test_deliver_drops_events_keeps_diagnostics():
@@ -26,8 +25,9 @@ def test_deliver_drops_events_keeps_diagnostics():
     mcp_server._deliver_event(
         {"event": "diagnostic", "payload": {"severity": "error", "title": "x"}}
     )
-    assert len(mcp_server._DIAGNOSTIC_QUEUE) == 1
-    assert mcp_server._DIAGNOSTIC_QUEUE[0]["event"] == "diagnostic"
+    drained = mcp_server._drain_pending()
+    assert len(drained["diagnostics"]) == 1
+    assert drained["diagnostics"][0]["event"] == "diagnostic"
     _clear()
 
 

@@ -20,22 +20,23 @@ from ._helpers import FakeTransport
 
 
 @pytest.fixture()
-def wired(monkeypatch):
+def wired():
     """Inject a synchronous FakeTransport into the bridge; reset mcp policy state.
 
     No socket internals are patched: the bridge runs its REAL send_rpc_raw over
     the fake transport, which echoes a reply per ``replies[method]``. ``_LAST_SEEN``
-    / ``_OP_BY_KEY`` are measure-gui mcp policy (reset for isolation). The returned
-    dict carries ``["sent"]`` = the transport's recorded outgoing (method, params).
+    / ``_OP_BY_KEY`` are measure MCP session policy (reset for isolation). The
+    returned dict carries ``["sent"]`` = the transport's recorded outgoing
+    (method, params).
     """
     fake = FakeTransport()
     mcp_server._BRIDGE.set_transport(fake)
-    monkeypatch.setattr(mcp_server, "_LAST_SEEN", {}, raising=False)
-    monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {}, raising=False)
+    mcp_server._SESSION.clear_policy_state()
     replies: dict[str, dict[str, Any]] = fake.replies
     replies["sent"] = fake.sent  # type: ignore[assignment]
     yield replies
     mcp_server._BRIDGE.set_transport(None)
+    mcp_server._SESSION.clear_policy_state()
 
 
 def _versions(table: dict[str, int]) -> dict[str, Any]:
