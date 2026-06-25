@@ -66,8 +66,8 @@ def test_ro_opt_1d_build_exp_cfg_delegates(
     sweep = cast(dict[str, Any], raw["sweep"])
     assert isinstance(sweep[sweep_key], SweepCfg)
 
-    adapter.build_exp_cfg(raw, _make_req(ml))
-    ml.make_cfg.assert_called_once_with(raw, cfg_model)
+    cfg = adapter.build_exp_cfg(raw, _make_req(ml))
+    assert isinstance(cfg, cfg_model)
 
 
 def test_ro_opt_freq_gain_build_exp_cfg_delegates() -> None:
@@ -79,8 +79,8 @@ def test_ro_opt_freq_gain_build_exp_cfg_delegates() -> None:
     assert isinstance(sweep["freq"], SweepCfg)
     assert isinstance(sweep["gain"], SweepCfg)
 
-    adapter.build_exp_cfg(raw, _make_req(ml))
-    ml.make_cfg.assert_called_once_with(raw, FreqGainCfg)
+    cfg = adapter.build_exp_cfg(raw, _make_req(ml))
+    assert isinstance(cfg, FreqGainCfg)
 
 
 def test_ro_opt_auto_pops_num_points_before_make_cfg() -> None:

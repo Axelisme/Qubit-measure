@@ -157,7 +157,7 @@ def _ctx_with_md(**md_values: float) -> Any:
         (SingleToneLengthAdapter(), LengthCfg, "length"),
     ],
 )
-def test_reset_build_exp_cfg_delegates_to_ml_make_cfg(
+def test_reset_build_exp_cfg_uses_cfg_assembler(
     adapter: Any, cfg_model: type, sweep_axis: str
 ) -> None:
     ml = _make_ml()
@@ -176,8 +176,8 @@ def test_reset_build_exp_cfg_delegates_to_ml_make_cfg(
     sweep = cast(dict[str, Any], raw["sweep"])
     assert isinstance(sweep[sweep_axis], SweepCfg)
 
-    adapter.build_exp_cfg(raw, _make_req(ml))
-    ml.make_cfg.assert_called_once_with(raw, cfg_model)
+    cfg = adapter.build_exp_cfg(raw, _make_req(ml))
+    assert isinstance(cfg, cfg_model)
 
 
 def test_reset_freq_sweep_centres_on_reset_f() -> None:
@@ -407,8 +407,8 @@ def test_dual_reset_build_exp_cfg_round_trip(
     for axis in sweep_axes:
         assert isinstance(sweep[axis], SweepCfg)
 
-    adapter.build_exp_cfg(raw, _make_req(ml))
-    ml.make_cfg.assert_called_once_with(raw, cfg_model)
+    cfg = adapter.build_exp_cfg(raw, _make_req(ml))
+    assert isinstance(cfg, cfg_model)
 
 
 def test_dual_reset_freq_centres_each_axis_and_locks_freqs() -> None:
@@ -801,8 +801,8 @@ def test_bath_reset_build_exp_cfg_round_trip(
     for axis in sweep_axes:
         assert isinstance(sweep[axis], SweepCfg)
 
-    adapter.build_exp_cfg(raw, _make_req(ml))
-    ml.make_cfg.assert_called_once_with(raw, cfg_model)
+    cfg = adapter.build_exp_cfg(raw, _make_req(ml))
+    assert isinstance(cfg, cfg_model)
 
 
 def test_bath_freq_gain_centres_freq_and_locks_cavity_and_pi2() -> None:
@@ -1178,7 +1178,7 @@ def test_bath_reset_run_without_soc_fast_fails(adapter: Any) -> None:
 
 
 def test_rabi_check_round_trip() -> None:
-    """make_default_cfg → validate → to_raw_dict → ml.make_cfg is wired correctly."""
+    """make_default_cfg → validate → to_raw_dict → cfg assembly is wired correctly."""
     ml = _make_ml()
     adapter = RabiCheckAdapter()
     raw = _lower(adapter.make_default_cfg(_make_ctx(ml)), _make_req(ml))
@@ -1197,8 +1197,8 @@ def test_rabi_check_round_trip() -> None:
     sweep = cast(dict[str, Any], raw["sweep"])
     assert isinstance(sweep["gain"], SweepCfg)
 
-    adapter.build_exp_cfg(raw, _make_req(ml))
-    ml.make_cfg.assert_called_once_with(raw, RabiCheckCfg)
+    cfg = adapter.build_exp_cfg(raw, _make_req(ml))
+    assert isinstance(cfg, RabiCheckCfg)
 
 
 def test_rabi_check_capabilities_analysis_none() -> None:

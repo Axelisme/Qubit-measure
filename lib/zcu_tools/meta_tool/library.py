@@ -7,9 +7,7 @@ from typing import Any, TypeVar, cast
 import yaml
 from yaml.nodes import MappingNode
 
-from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import format_sweep1D, get_single_sweep_name
 from zcu_tools.program.v2 import (
     AbsModuleCfg,
     AbsWaveformCfg,
@@ -18,7 +16,7 @@ from zcu_tools.program.v2 import (
     WaveformCfg,
     WaveformCfgFactory,
 )
-from zcu_tools.utils import deepupdate, format_obj
+from zcu_tools.utils import format_obj
 
 from .syncfile import SyncFile, auto_sync
 
@@ -136,35 +134,9 @@ class ModuleLibrary(SyncFile):
     def make_cfg(
         self, exp_cfg: dict[str, Any], cfg_model: type[T_ExpCfg], **kwargs
     ) -> T_ExpCfg:
-        exp_cfg = deepcopy(exp_cfg)
-        deepupdate(exp_cfg, kwargs, behavior="force")
+        from zcu_tools.experiment.cfg_assembler import make_cfg
 
-        # derive device configuration from global device manager
-        dev_cfg = GlobalDeviceManager.get_all_info()
-        for name, patch in exp_cfg.get("dev", {}).items():
-            if name not in dev_cfg:
-                raise KeyError(f"Device {name} not found in global device manager.")
-            dev_cfg[name] = dev_cfg[name].with_updates(**patch)
-        exp_cfg["dev"] = dev_cfg
-
-        # format modules
-        if (modules := exp_cfg.get("modules")) is not None:
-            for name, sub_cfg in modules.items():
-                modules[name] = ModuleCfgFactory.from_raw(sub_cfg, ml=self)
-
-        # format sweep
-        if (sweep_cfg := exp_cfg.get("sweep")) is not None:
-            if (sweep_name := get_single_sweep_name(cfg_model)) is not None:
-                exp_cfg["sweep"] = format_sweep1D(sweep_cfg, sweep_name)
-
-        try:
-            return cfg_model.model_validate(exp_cfg)
-        except Exception as e:
-            raise ValueError(
-                f"Error validating experiment config with {cfg_model.__name__}:\n"
-                f"exp_cfg: {exp_cfg}\n"
-                f"error: {e}"
-            ) from e
+        return make_cfg(exp_cfg, cfg_model, ml=self, overrides=kwargs or None)
 
     @auto_sync("write")
     def register_waveform(self, **wav_kwargs: dict[str, Any] | WaveformCfg) -> None:
@@ -223,7 +195,7 @@ class ModuleLibrary(SyncFile):
         if override_cfg is not None:
             waveform = waveform.with_updates(context=dict(ml=self), **override_cfg)
 
-        return deepcopy(waveform)
+        return cast(T_WaveformCfg, deepcopy(waveform))
 
     @auto_sync("read")
     def get_module(
@@ -244,7 +216,7 @@ class ModuleLibrary(SyncFile):
         if override_cfg is not None:
             module = module.with_updates(context=dict(ml=self), **override_cfg)
 
-        return deepcopy(module)
+        return cast(T_ModuleCfg, deepcopy(module))
 
     @auto_sync("write")
     def update_module(self, name: str, override_cfg: dict[str, Any]) -> None:

@@ -145,8 +145,8 @@ def test_mist_cfg_validates_and_delegates(
     sweep = cast(dict[str, Any], raw["sweep"])
     assert isinstance(sweep[sweep_key], SweepCfg)
 
-    adapter.build_exp_cfg(raw, _run_req(MetaDict(), ml))
-    ml.make_cfg.assert_called_once_with(raw, cfg_model)
+    cfg = adapter.build_exp_cfg(raw, _run_req(MetaDict(), ml))
+    assert isinstance(cfg, cfg_model)
 
 
 def test_check_cfg_validates_and_has_shots() -> None:
@@ -160,8 +160,8 @@ def test_check_cfg_validates_and_has_shots() -> None:
     assert "probe_pulse" in modules and "readout" in modules
     # check has no swept axis.
     assert "sweep" not in raw
-    adapter.build_exp_cfg(raw, _run_req(MetaDict(), ml))
-    ml.make_cfg.assert_called_once_with(raw, CheckCfg)
+    cfg = adapter.build_exp_cfg(raw, _run_req(MetaDict(), ml))
+    assert isinstance(cfg, CheckCfg)
 
 
 @pytest.mark.parametrize(

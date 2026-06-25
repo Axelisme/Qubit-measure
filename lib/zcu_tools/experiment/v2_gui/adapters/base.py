@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from typing import Any, ClassVar, Generic
 
+from zcu_tools.experiment.cfg_assembler import make_cfg
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AdapterGuide,
@@ -78,7 +79,7 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities()
 
     # Experiment cfg dataclass used by the default build_exp_cfg. Adapters whose
-    # raw → cfg mapping is the common "flat dict through ml.make_cfg" shape just
+    # raw → cfg mapping is the common "flat dict through make_cfg" shape just
     # set this and inherit build_exp_cfg. Adapters with a bespoke mapping (e.g.
     # extra kwargs, hand-built cfg) override build_exp_cfg and leave this None.
     ExpCfg_cls: ClassVar[Any] = None
@@ -116,7 +117,7 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> T_Cfg:
         """Build experiment config from the flat GUI raw dict.
 
-        Default delegates to ``ml.make_cfg(raw_cfg, ExpCfg_cls)``. An adapter must
+        Default delegates to ``make_cfg(raw_cfg, ExpCfg_cls, ml=req.ml)``. An adapter must
         either set the ``ExpCfg_cls`` ClassVar or override this; the raise is a
         Fast-Fail guard against forgetting both (mirrors the analysis no-ops).
         """
@@ -124,7 +125,7 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
             raise NotImplementedError(
                 f"{type(self).__name__} must set ExpCfg_cls or override build_exp_cfg"
             )
-        return req.ml.make_cfg(raw_cfg, self.ExpCfg_cls)
+        return make_cfg(raw_cfg, self.ExpCfg_cls, ml=req.ml)
 
     def validate_run_request(self, req: RunRequest, raw_cfg: dict[str, object]) -> None:
         """Pure run preflight for adapter-specific constraints.
