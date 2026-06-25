@@ -1,6 +1,6 @@
 # `simulate/fluxonium` 模塊重點文檔
 
-**Last updated:** 2026-06-12（branch/floquet snr 路徑優化：serial photon + 可注入 solver options）
+**Last updated:** 2026-06-25（Fluxonium Prediction engine）
 
 基於 [scqubits](https://scqubits.readthedocs.io) 的 Fluxonium 量子比特數值模擬工具集,提供能譜、色散位移、矩陣元、相干時間與實驗參數預測等計算。
 
@@ -40,7 +40,7 @@
 - `calculate_dispersive(params, flux, bare_rf, g)` — 回傳 `(rf|0⟩, rf|1⟩)`,由 dressed 能量差得到。
 - `calculate_dispersive_sweep` — 通用 sweep 介面,透過使用者傳入的 `update_fn(fluxonium, param)` 更新系統。
 - `calculate_dispersive_vs_flux` — 上述的 flux-sweep 特化。
-- **`calculate_dispersive_vs_flux_fast`** — scqubits-free 的 numpy 等效,**~9x**(繞過 `ParameterSweep`)。複用 `energies.py` 的 cos/sin 預算技巧算裸 fluxonium evals+evecs,組 composite `H_res⊗I + I⊗H_qub + g(a†⊗n+a⊗n†)` 對角化,dressed (0/1,i) 用 **bare-product-state overlap argmax** 標記。**逐點對齊 `calculate_dispersive_vs_flux` 到 0.00000 MHz**(含 avoided crossing,見 `tests/simulate/fluxonium/test_dispersive_fast.py`)。labeling 撞號則 raise `DressedLabelingError`(caller fallback scqubits)。低能態 + dispersive regime(g 小)labeling 乾淨;強耦合/密能級才可能撞。介面與舊版略不同（無 `progress`，res_dim/qub_dim 預設 4/15）。**dispersive-gui PredictService 用此 + DressedLabelingError fallback；舊 `calculate_dispersive_vs_flux` 保留給 notebook。**
+- **`calculate_dispersive_vs_flux_fast`** — scqubits-free 的 numpy 等效,**~9x**(繞過 `ParameterSweep`)。複用 `energies.py` 的 cos/sin 預算技巧算裸 fluxonium evals+evecs,組 composite `H_res⊗I + I⊗H_qub + g(a†⊗n+a⊗n†)` 對角化,dressed (0/1,i) 用 **bare-product-state overlap argmax** 標記。**逐點對齊 `calculate_dispersive_vs_flux` 到 0.00000 MHz**(含 avoided crossing,見 `tests/simulate/fluxonium/test_dispersive_fast.py`)。labeling 撞號則 raise `DressedLabelingError`;`prediction.py` 的 engine 負責 normal-path fallback。低能態 + dispersive regime(g 小)labeling 乾淨;強耦合/密能級才可能撞。介面與舊版略不同（無 `progress`，res_dim/qub_dim 預設 4/15）。舊 `calculate_dispersive_vs_flux` 保留給 notebook 與 fallback。
   - **flux-independent operators 用 `_fluxonium_operators` @lru_cache(params,cutoff,dim)**：`cos_phi_operator`/`sin_phi_operator` 走 scipy `cosm`/`sinm`(各一次 `expm`),fresh `Fluxonium` 每次 ~84ms;memoize 後重複呼叫(GUI live tuning 拖 r_f/g、sample 單點)只跑 per-flux recombination+eigh(~1ms/flux)。回傳是 cache 自有 array,**caller 不可 mutate**(fast 路徑只讀)。numerically identical(只 memoize)。
 - `calculate_chi_sweep` / `calculate_chi_vs_flux` — 直接回傳 scqubits 的 `sweep["chi"]`(subsys1=fluxonium, subsys2=resonator)。
 - 注意 dispersive vs chi 兩組函式在 `HilbertSpace` 中 **subsys 順序相反**(dispersive 是 `[resonator, fluxonium]`,chi 是 `[fluxonium, resonator]`)。
@@ -58,12 +58,22 @@
   - `Γ↓ = Σ P_res(n) κ (n_th(−ΔE)+1) |⟨…|a|…⟩|²`
   - 回傳 `1/(Γ↑+Γ↓)` (ns)。
 
+### `prediction.py` — `FluxoniumPrediction` engine
+
+ADR-0029 的 production seam。GUI/session/notebook adapter 只接這層,不各自重寫 prediction policy。
+
+- `PredictionResolution(qub_dim, qub_cutoff, res_dim)` — typed Hilbert-space resolution;GUI adapter 固定用 app default,notebook/tests 可注入。
+- `FluxAffineMap` — value↔flux affine 的單一實作,`flux_period == 0` fast-fail。
+- `FluxoniumPrediction.predict_dispersive(...)` — 包 fast path + scqubits fallback,回傳 `DispersivePredictionResult(lines, backend)`;`used_fallback` 是輕量 provenance,GUI normal path 不需 catch `DressedLabelingError`。
+- `FluxoniumPrediction.bind_flux_axis(fluxs)` — 建 `FluxoniumPredictionSession`,axis copy 由 engine 持有,cache key 只含 `(g, bare_rf, return_dim)`;controller 在 params/axis 變化時重建 session。
+- `predict_frequencies_mhz` / `predict_matrix_elements` — session predictor dialog 的批次曲線 helper,共用 engine affine 與一次 sweep 多 transition 的計算。
+
 ### `predict.py` — `FluxoniumPredictor`
 
 應用層預測器,連接實驗電流/電壓值與理論模型。
 
 - 建構: `(params, flux_half, flux_period, flux_bias)`;另可 `FluxoniumPredictor.from_file(result_path, flux_bias)` 從 fluxdep_fit 結果載入。
-- 座標轉換: `value_to_flux` / `flux_to_value`,使用
+- 座標轉換: `value_to_flux` / `flux_to_value` 委派 `FluxAffineMap`,使用
   `flux = (value + bias − flux_half)/flux_period + 0.5`。
 - `predict_freq(cur_value, transition=(0,1))` — 回傳 **MHz**;輸入支援 scalar 或 array。**array 輸入走等效矩陣批次路徑**(`calculate_energy_vs_flux`,~7x@200 點);批次路徑各自建 local `Fluxonium`、不 mutate `self.fluxonium`(比 scalar 路徑 thread-safe)。
 - `predict_matrix_element(cur_value, transition, operator="n"|"phi")` — 回傳 `|⟨i|O|j⟩|`。**只支援含 level 0,1 的 transition**(`truncated_dim=2`,level≥2 raise;高 level 支援屬功能擴充另案)。array 輸入批次走 `calculate_n/phi_oper_vs_flux`。

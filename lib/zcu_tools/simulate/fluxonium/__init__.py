@@ -29,6 +29,14 @@ from .matrix_element import (
     calculate_system_n_oper_vs_flux,
 )
 from .predict import FluxoniumPredictor
+from .prediction import (
+    DEFAULT_PREDICTION_RESOLUTION,
+    DispersivePredictionResult,
+    FluxAffineMap,
+    FluxoniumPrediction,
+    FluxoniumPredictionSession,
+    PredictionResolution,
+)
 
 __all__ = [
     # coherence
@@ -61,5 +69,11 @@ __all__ = [
     "calculate_phi_oper",
     "calculate_phi_oper_vs_flux",
     # predict
+    "DEFAULT_PREDICTION_RESOLUTION",
+    "DispersivePredictionResult",
+    "FluxAffineMap",
+    "FluxoniumPrediction",
+    "FluxoniumPredictionSession",
+    "PredictionResolution",
     "FluxoniumPredictor",
 ]

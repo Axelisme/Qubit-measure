@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-24 — SessionControllerMixin 收斂兩 app 重複的 port forwards
+**Last updated:** 2026-06-25 — PredictorService 委派 FluxoniumPrediction engine
 
 # gui/session/ — 量測 session core（measure + autofluxdep 共用）
 
@@ -23,7 +23,7 @@ session/
 │   └── qt_progress_transport.py — QtProgressTransport（worker→主線程 progress marshal，queued signal；app-agnostic）
 ├── services/
 │   ├── connection.py   — SoCConnectionService（SoC connect op；硬體 facet、OperationRunner client、cancel_hook=None 無 cancellation point；終局經 connection_finished/connection_failed signal，typed requests/failures）
-│   ├── predictor.py    — PredictorService（predictor load/set_model_params〔typed EJ/EC/EL→FluxoniumPredictor，走 install_predictor in-memory seam〕/clear/install + predict_freq + 批次曲線計算 predict_freq_curve/predict_matrix_element_curve；get_predictor_info 含 EJ/EC/EL；純函式 read_fluxdep_fit_params〔params.json→typed model query〕；純計算，無 Qt signal/runner/gate，擁有 exp_context.predictor 寫 seam，ADR-0026 §5 自 connection.py 拆出）
+│   ├── predictor.py    — PredictorService（predictor load/set_model_params〔typed EJ/EC/EL→FluxoniumPredictor，走 install_predictor in-memory seam〕/clear/install + predict_freq + 批次曲線計算 predict_freq_curve/predict_matrix_element_curve〔委派 simulate `FluxoniumPrediction` engine 的 affine/array paths〕；get_predictor_info 含 EJ/EC/EL；純函式 read_fluxdep_fit_params〔params.json→typed model query〕；純計算，無 Qt signal/runner/gate，擁有 exp_context.predictor 寫 seam，ADR-0026 §5 自 connection.py 拆出）
 │   ├── context.py      — ContextService（context-switch + md ops + ml del/rename + 單一寫入 primitive apply_ml_writes，CfgSchema lowering 經 callback 注入；MdValueError/MlEntryValidationError）
 │   ├── device.py       — DeviceService（connect/disconnect/setup off-main，**全 port 注入**：gate/bg/progress 必傳）；`_mode_dependent_unit(dev)` module-level helper 集中 YOKOGS200 voltage/current→V/A 判斷（`get_device_unit` + `get_device_unit_strict` 共用，消除逐字重複）；`poll_device_info(name)` = best-effort off-main live-read（worker 純讀 driver、on_done 主線做 cache 比對+bump+DEVICE_CHANGED；memory-only/mutating skip、單次讀失敗吞掉，不寫 State 於 worker）
 │   ├── startup.py      — StartupService + PersistedStartup/PersistedDeviceEntry memento + requests + derive_project_paths
