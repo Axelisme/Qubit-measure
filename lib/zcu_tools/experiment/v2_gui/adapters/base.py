@@ -89,6 +89,7 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
 
     exp_cls: ClassVar[type[Any]]
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities()
+    legacy_migration_experiment: ClassVar[str | None] = None
 
     # Experiment cfg dataclass used by the default build_exp_cfg. Adapters whose
     # raw → cfg mapping is the common "flat dict through make_cfg" shape just
@@ -319,7 +320,43 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
             raise NotImplementedError(
                 f"{type(self).__name__} does not support loading canonical result files"
             )
-        return cast(T_Result, load(filepath=req.data_path))
+        try:
+            return cast(T_Result, load(filepath=req.data_path))
+        except ValueError as canonical_exc:
+            legacy_experiment = self.legacy_migration_experiment
+            if legacy_experiment is None:
+                raise
+            return self._load_via_legacy_migration(
+                load,
+                req,
+                legacy_experiment=legacy_experiment,
+                canonical_exc=canonical_exc,
+            )
+
+    def _load_via_legacy_migration(
+        self,
+        load: Any,
+        req: LoadDataRequest,
+        *,
+        legacy_experiment: str,
+        canonical_exc: ValueError,
+    ) -> T_Result:
+        from zcu_tools.experiment.legacy_migration import migrated_legacy_tempfile
+
+        try:
+            with migrated_legacy_tempfile(
+                experiment=legacy_experiment,
+                input_path=req.data_path,
+            ) as migrated_path:
+                return cast(T_Result, load(filepath=str(migrated_path)))
+        except (OSError, FileNotFoundError):
+            raise
+        except ValueError as legacy_exc:
+            raise ValueError(
+                "canonical load failed and legacy migration fallback also failed. "
+                f"Canonical error: {canonical_exc}. "
+                f"Legacy migration error for {legacy_experiment!r}: {legacy_exc}"
+            ) from canonical_exc
 
     def get_writeback_items(
         self, req: WritebackRequest[T_Result, T_AnalyzeResult]

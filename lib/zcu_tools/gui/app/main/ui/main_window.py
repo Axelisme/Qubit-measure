@@ -24,6 +24,7 @@ from zcu_tools.gui.plotting import (
     attach_existing_figure_to_container,
     set_shutting_down,
 )
+from zcu_tools.gui.project import nearest_existing
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
     DeviceChangedPayload,
@@ -1634,6 +1635,9 @@ class MainWindow(QMainWindow):
             return
         self._ctrl.analyze(tab_id, tab_w.read_analyze_params())
 
+    def _load_data_dialog_start_dir(self) -> str:
+        return nearest_existing(self._ctrl.get_exp_context().database_path)
+
     def _on_load_data_clicked(self, tab_id: str) -> None:
         logger.info("_on_load_data_clicked: tab_id=%r", tab_id)
         if self._resolve_tab_widget(tab_id, "_on_load_data_clicked") is None:
@@ -1641,7 +1645,7 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Load data file",
-            "",
+            self._load_data_dialog_start_dir(),
             "HDF5 files (*.hdf5 *.h5);;All files (*)",
         )
         if not path:

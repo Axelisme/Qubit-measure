@@ -378,7 +378,7 @@ plot substrate 已抽到頂層共用套件 `lib/zcu_tools/gui/plotting/`（measu
 
 ### Canonical Result Load
 
-- 使用者先開對應 adapter tab，再在 Analysis tab 用 `Load Data...` 載入 canonical result；remote/MCP 對應 `tab.load_data` / `gui_tab_load_data`。第一版不 auto-detect adapter。
+- 使用者先開對應 adapter tab，再在 Analysis tab 用 `Load Data...` 載入 canonical result；file browser 以目前 context 的 `database_path` 最近存在目錄作為起點；remote/MCP 對應 `tab.load_data` / `gui_tab_load_data`。第一版不 auto-detect adapter。
 - load 只要求 context not empty，不要求 active file-backed context 或 SoC；成功後把 loaded object 安裝為 `run_result`、記錄 `result_source_path`、清掉舊 analyze/post/writeback/figure，並對 analysis adapter 重新初始化 analyze params，因此可直接 Analyze。
 - load 不把 `result.cfg_snapshot` 反填 Config tab，也不 bump `tab:<id>:cfg` / save path / SoC/device/context。未來 backfill seam 是 stateless `cfg_snapshot_backfill.py`，目前 load path 不呼叫。
 

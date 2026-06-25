@@ -47,6 +47,7 @@ class OneToneFluxDepAdapter(
     BaseAdapter[FluxDepCfg, OneToneFluxDepRunResult, FluxPickResult, FluxPickParams]
 ):
     exp_cls = FluxDepExp
+    legacy_migration_experiment: ClassVar[str | None] = "onetone/flux_dep"
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         requires_soc=True, analysis=AnalysisMode.INTERACTIVE
     )

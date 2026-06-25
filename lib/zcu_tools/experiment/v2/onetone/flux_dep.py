@@ -72,11 +72,12 @@ class FluxDepCfg(ProgramV2Cfg, ExpCfgModel):
 
 
 class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
-    # inner axis (fastest-varying) = freqs (MHz on disk); outer = flux values (a.u.)
+    # inner axis (fastest-varying) = freqs (MHz in memory, Hz on disk);
+    # outer axis = flux device values (a.u.).
     AXES_SPEC = AxesSpec(
         axes=(
-            Axis("values", "Flux device value", "a.u."),
             Axis("freqs", "Frequency", "Hz", scale=MHZ_TO_HZ),
+            Axis("values", "Flux device value", "a.u."),
         ),
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=FluxDepResult,

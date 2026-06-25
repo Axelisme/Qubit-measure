@@ -55,6 +55,7 @@ class FreqAdapter(
 ):
     exp_cls = FreqExp
     ExpCfg_cls: ClassVar[Any] = FreqCfg
+    legacy_migration_experiment: ClassVar[str | None] = "twotone/freq"
 
     @classmethod
     def guide(cls) -> AdapterGuide:

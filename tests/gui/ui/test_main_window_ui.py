@@ -12,6 +12,7 @@ from zcu_tools.gui.app.main.services import PersistedStartup, TabSnapshot
 from zcu_tools.gui.app.main.state import TabInteractionState
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.events import SocChangedPayload
+from zcu_tools.gui.session.types import ExpContext
 
 
 def _mock_ctrl() -> MagicMock:
@@ -29,6 +30,9 @@ def _apply_window_defaults(ctrl: MagicMock) -> MagicMock:
     """
     ctrl.active_operation_count.return_value = 0
     ctrl.has_agent_connected.return_value = False
+    ctrl.get_exp_context.return_value = ExpContext(
+        md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None
+    )
     return ctrl
 
 
@@ -390,26 +394,43 @@ def test_exp_tab_load_button_requires_context_but_not_soc(qapp):
     assert tab.load_data_btn.isEnabled() is False
 
 
-def test_main_window_load_data_dialog_calls_controller(qapp, monkeypatch):
+def test_main_window_load_data_dialog_calls_controller(qapp, monkeypatch, tmp_path):
     from qtpy.QtWidgets import QFileDialog
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
     ctrl = _apply_window_defaults(MagicMock())
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.return_value = True
+    database_root = tmp_path / "Database" / "Q3_2D" / "Q1"
+    database_root.mkdir(parents=True)
+    ctrl.get_exp_context.return_value = ExpContext(
+        md=MagicMock(),
+        ml=MagicMock(),
+        soc=None,
+        soccfg=None,
+        database_path=str(database_root / "2026" / "06" / "Data_0625"),
+    )
     window = MainWindow(ctrl)
     window._tab_widgets["tab-1"] = MagicMock()
     window.show_status_message = MagicMock()
+
+    captured_dir: dict[str, str] = {}
+
+    def fake_get_open_file_name(*args, **kwargs):
+        captured_dir["directory"] = args[2]
+        return ("/tmp/result.hdf5", "")
+
     monkeypatch.setattr(
         QFileDialog,
         "getOpenFileName",
-        lambda *args, **kwargs: ("/tmp/result.hdf5", ""),
+        fake_get_open_file_name,
     )
 
     window._on_load_data_clicked("tab-1")
 
     ctrl.load_tab_result.assert_called_once_with("tab-1", "/tmp/result.hdf5")
     window.show_status_message.assert_called_once()
+    assert captured_dir["directory"] == str(database_root)
 
 
 def test_main_window_load_data_dialog_cancel_is_noop(qapp, monkeypatch):

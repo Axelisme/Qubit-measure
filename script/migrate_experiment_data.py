@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import argparse
-import os
-import tempfile
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +9,11 @@ import numpy as np
 from numpy.lib.npyio import NpzFile
 from numpy.typing import NDArray
 from zcu_tools.experiment import AxesSpec
+from zcu_tools.experiment.legacy_migration import (
+    CONVERTERS as SINGLE_FILE_CONVERTERS,
+    ConverterSpec,
+    migrate_experiment_data as _migrate_experiment_data,
+)
 from zcu_tools.experiment.v2.jpa.jpa_auto_optimize import (
     JPAOptimizeResult,
     load_jpa_auto_grouped_result,
@@ -59,13 +61,6 @@ from zcu_tools.utils.datasaver import (
 )
 
 
-@dataclass(frozen=True)
-class ConverterSpec:
-    convert: Callable[[Path, Path], None]
-    validate: Callable[[str], object]
-    validate_input: Callable[[Path], None] | None = None
-
-
 def migrate_experiment_data(
     *,
     experiment: str,
@@ -73,39 +68,13 @@ def migrate_experiment_data(
     output_path: Path,
     overwrite: bool = False,
 ) -> Path:
-    try:
-        spec = CONVERTERS[experiment]
-    except KeyError:
-        supported = ", ".join(sorted(CONVERTERS))
-        raise ValueError(
-            f"unsupported experiment {experiment!r}; supported: {supported}"
-        ) from None
-
-    if spec.validate_input is None:
-        _validate_regular_input_file(input_path)
-    else:
-        spec.validate_input(input_path)
-
-    output_path = Path(format_ext(str(output_path)))
-    if output_path.exists() and not overwrite:
-        raise FileExistsError(
-            f"output file already exists: {output_path}; pass --overwrite to replace it"
-        )
-    if not output_path.parent.exists():
-        raise FileNotFoundError(
-            f"output directory does not exist: {output_path.parent}"
-        )
-
-    temp_path = _make_temp_path(output_path)
-    try:
-        spec.convert(input_path, temp_path)
-        spec.validate(str(temp_path))
-        os.replace(temp_path, output_path)
-    except Exception:
-        temp_path.unlink(missing_ok=True)
-        raise
-
-    return output_path
+    return _migrate_experiment_data(
+        experiment=experiment,
+        input_path=input_path,
+        output_path=output_path,
+        overwrite=overwrite,
+        converters=CONVERTERS,
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -149,22 +118,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     print(migrated)
     return 0
-
-
-def _make_temp_path(output_path: Path) -> Path:
-    fd, temp_name = tempfile.mkstemp(
-        prefix=f".{output_path.name}.",
-        suffix=".hdf5",
-        dir=output_path.parent,
-    )
-    os.close(fd)
-    os.unlink(temp_name)
-    return Path(temp_name)
-
-
-def _validate_regular_input_file(input_path: Path) -> None:
-    if not input_path.is_file():
-        raise FileNotFoundError(f"input file does not exist: {input_path}")
 
 
 def _save_axes_spec_result_exact(
@@ -1298,6 +1251,7 @@ def _npz_comment(data: NpzFile) -> str:
 
 
 CONVERTERS: dict[str, ConverterSpec] = {
+    **SINGLE_FILE_CONVERTERS,
     "singleshot/ac_stark": ConverterSpec(
         convert=_convert_ac_stark_sidecars,
         validate=_validate_ac_stark_output,
