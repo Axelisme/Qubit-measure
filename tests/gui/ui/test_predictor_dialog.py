@@ -470,6 +470,26 @@ def test_predictor_dialog_init_no_predictor_no_curve_call(qapp):
     ctrl.predict_matrix_element_curve.assert_not_called()
 
 
+def test_predictor_dialog_persistent_reject_hides_without_finishing(qapp):
+    """Persistent host mode hides on close so cached curves and bus subscription remain."""
+    from qtpy.QtWidgets import QApplication
+
+    ctrl = _make_ctrl(has_predictor=False)
+    bus = ctrl.get_bus.return_value
+    dialog = PredictorDialog(ctrl, persistent_on_close=True)
+    finished = MagicMock()
+    dialog.finished.connect(finished)
+    dialog.show()
+    QApplication.processEvents()
+
+    dialog.reject()
+    QApplication.processEvents()
+
+    assert dialog.isVisible() is False
+    finished.assert_not_called()
+    bus.unsubscribe.assert_not_called()
+
+
 def test_predictor_dialog_init_with_predictor_all_canvases_have_axes(qapp):
     """After init with a loaded predictor, all three canvases have axes (curves drawn)."""
     ctrl = _make_ctrl(has_predictor=True, path="/p.json")

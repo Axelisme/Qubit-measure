@@ -2,14 +2,15 @@
 
 ``DialogName`` is the wire enum a remote caller uses with
 ``dialog.open`` / ``dialog.close`` / ``dialog.list_open``. ``MainWindow``
-owns the live registry (``self._open_dialogs``) and the per-name factory
-that builds a fresh ``QDialog`` when the remote (or a UI click) asks to
-open one.
+owns the registry (``self._open_dialogs``) and the per-name factory that
+builds or reuses a ``QDialog`` when the remote (or a UI click) asks to open
+one.
 
 All dialogs are opened **non-modal** (``dlg.open()``) so that the Qt event
 loop keeps pumping while the dialog is visible — this is mandatory for
 remote-driven flows where a follow-up RPC must still be dispatchable.
-``WA_DeleteOnClose`` + ``finished`` signal handler keep the registry clean.
+Most dialogs use ``WA_DeleteOnClose`` + ``finished`` cleanup; expensive
+persistent dialogs can instead hide on close and stay cached in the registry.
 
 The ``STARTUP`` factory is registered late by ``gui/app.py``
 because the startup dialog construction needs ``startup_mode=True`` and is

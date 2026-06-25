@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-26（arbitrary waveform Inspect toolbar entry / data selector）
+**Last updated:** 2026-06-26（Predictor dialog persistent close / arbitrary waveform Inspect toolbar entry）
 
 # `zcu_tools/gui/app/main/` — measure-gui Framework AI Note
 
@@ -68,7 +68,7 @@ gui/
     ├── inspect_dialog.py   — InspectDialog(InspectDialogBase 子類)：補 Arb Waveforms top-toolbar 入口與 ml create/modify（_MlCreateDialog/_MlModifyDialog 拖 CfgEditor）；md tab + ml view/rename/del 在 base（session）
     ├── arb_waveform_dialog.py — ArbWaveformDialog：管理 qubit-scoped arbitrary waveform `.npz` asset；支援 formula segment insert/delete、normalize toggle、保存、rename/delete、debounced normalized I/Q/Abs preview；新建 draft 預設為兩側 half-Gaussian 的 flat-top recipe；ML waveform 建立仍走 Inspect 的正常 create/modify 流程
     ├── agent_launch_dialog.py — AgentLaunchDialog(QDialog)：可選 resumable session 清單（`list_resumable_sessions`：我們 launch 過的 session + claude jsonl 補 label/last-active、最近在上）+ Resume selected / **Remove**（`remove_recorded_session`：把選中的從 Resume 清單移除，不動 claude transcript）/ New session / Refresh；直接呼 `agent_launcher.launch_agent_terminal(resume_session_id=…|None, bootstrap_prompt=ctrl.build_agent_bootstrap_prompt())`。
-    ├── main_window.py      — MainWindow(QMainWindow) 實作 ViewProtocol；toolbar 有 Agent… 按鈕（開 AgentLaunchDialog）與 Inspect…（Arb Waveforms 入口在 Inspect 內）；持 FeedbackPanel（`refresh_feedback_widget` 依 (live op 數 且 `ctrl.has_agent_connected()`) 把單一 app-level panel mount 進 target tab 的 plot_layout / unmount；target tab = running tab，無則 active tab；tab 變則 re-mount；`ExpTabWidget.mount_feedback_panel`/`unmount_feedback_panel` 為 host API）+ `open_notify_prompt` 開 NotifyUserDialog
+    ├── main_window.py      — MainWindow(QMainWindow) 實作 ViewProtocol；toolbar 有 Agent… 按鈕（開 AgentLaunchDialog）與 Inspect…（Arb Waveforms 入口在 Inspect 內）；named dialog registry 對 Predictor 採 persistent hide-on-close（重開不重算曲線），其餘 dialog 仍 close 後釋放；持 FeedbackPanel（`refresh_feedback_widget` 依 (live op 數 且 `ctrl.has_agent_connected()`) 把單一 app-level panel mount 進 target tab 的 plot_layout / unmount；target tab = running tab，無則 active tab；tab 變則 re-mount；`ExpTabWidget.mount_feedback_panel`/`unmount_feedback_panel` 為 host API）+ `open_notify_prompt` 開 NotifyUserDialog
     ├── feedback_widget.py  — FeedbackPanel(_CollapsibleSection)（docked 在 figure 下方、可摺疊的「Send to agent」section，預設展開；非 overlay）；user→agent nudge / Send & Stop；Stop 鈕依 active op 是否有 cancel hook gating，`Controller.can_cancel_active_operation`→`OperationHandles.has_cancel_hook`→`OperationChannel.can_cancel`，無 op-kind 知識，ADR-0025 §Stop-gating；unmount 時 clear_input
     ├── notify_dialog.py    — NotifyUserDialog（`gui_prompt_user` 的 non-modal prompt；dialog 是 timeout SSOT，QTimer fire→`ctrl.timeout_notify`；Reply/Dismiss/window-X/timeout 各呼一次 NotifyChannel producer，ADR-0025）
     └── analyze_form.py     — AnalyzeFormWidget：扁平 analysis 參數表單

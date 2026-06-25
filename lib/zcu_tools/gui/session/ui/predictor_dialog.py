@@ -31,6 +31,7 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
+from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QAbstractItemView,
     QDialog,
@@ -94,10 +95,15 @@ class PredictorDialog(QDialog):
     """
 
     def __init__(
-        self, controller: SessionControllerPort, parent: QWidget | None = None
+        self,
+        controller: SessionControllerPort,
+        parent: QWidget | None = None,
+        *,
+        persistent_on_close: bool = False,
     ) -> None:
         super().__init__(parent)
         self._ctrl = controller
+        self._persistent_on_close = persistent_on_close
         self.setWindowTitle("Predictor")
         self.setMinimumWidth(1000)
         self.setMinimumHeight(480)
@@ -230,7 +236,7 @@ class PredictorDialog(QDialog):
         action_row.addWidget(self._remove_btn)
         action_row.addStretch()
         close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.reject)
+        close_btn.clicked.connect(self._on_close_requested)
         action_row.addWidget(close_btn)
         left_layout.addLayout(action_row)
 
@@ -305,6 +311,22 @@ class PredictorDialog(QDialog):
         self._bus_subscribed = True
         self.finished.connect(self._cleanup_bus)
         self.destroyed.connect(self._cleanup_bus)
+
+    def reject(self) -> None:
+        if self._persistent_on_close:
+            self.hide()
+            return
+        super().reject()
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+        if self._persistent_on_close:
+            event.ignore()
+            self.hide()
+            return
+        super().closeEvent(event)
+
+    def _on_close_requested(self) -> None:
+        self.reject()
 
     # ------------------------------------------------------------------
     # Model-param widgets / helpers

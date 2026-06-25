@@ -6,7 +6,7 @@ Implements ViewProtocol; all state lives in Controller/State, never here.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
 from zcu_tools.gui.app.main.adapter import AnalysisMode, CfgSchema
@@ -36,6 +36,23 @@ from zcu_tools.gui.session.events import (
 )
 
 logger = logging.getLogger(__name__)
+
+_PERSISTENT_DIALOGS: frozenset[DialogName] = frozenset({DialogName.PREDICTOR})
+
+
+def _visible_dialog_names(dialogs: Mapping[DialogName, object]) -> list[DialogName]:
+    visible: list[DialogName] = []
+    for name, dialog in dialogs.items():
+        is_visible = getattr(dialog, "isVisible", None)
+        if is_visible is None:
+            continue
+        try:
+            if bool(is_visible()):
+                visible.append(name)
+        except RuntimeError:
+            continue
+    return visible
+
 
 from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
 from qtpy.QtGui import (  # type: ignore[attr-defined]
@@ -905,9 +922,10 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._ctrl = controller
         self._tab_widgets: dict[str, ExpTabWidget] = {}
-        # ``DialogName -> live QDialog`` registry. ``InspectDialog`` is also
-        # tracked through this dict (the legacy ``_inspect_dialog`` attribute
-        # is gone — there is now exactly one entry point).
+        # ``DialogName -> QDialog`` registry. Most entries are live visible dialogs
+        # removed on close; persistent entries may remain hidden for fast reopen.
+        # ``InspectDialog`` is also tracked through this dict (the legacy
+        # ``_inspect_dialog`` attribute is gone — there is now exactly one entry point).
         self._open_dialogs: dict[DialogName, QDialog] = {}
         # True once _perform_close has begun the actual teardown, so the second
         # closeEvent (triggered by _perform_close's self.close()) passes straight
@@ -1753,7 +1771,7 @@ class MainWindow(QMainWindow):
         if name is DialogName.PREDICTOR:
             from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
 
-            return PredictorDialog(self._ctrl, parent=self)
+            return PredictorDialog(self._ctrl, parent=self, persistent_on_close=True)
         if name is DialogName.INSPECT:
             from .inspect_dialog import InspectDialog
 
@@ -1775,8 +1793,8 @@ class MainWindow(QMainWindow):
     def open_dialog(self, name: DialogName) -> None:
         """Open the named dialog non-modally, or raise it if already open.
 
-        Idempotent: a second ``open_dialog(name)`` while the dialog is
-        visible just brings it to the front (``raise_`` + ``activateWindow``).
+        Idempotent: a second ``open_dialog(name)`` while the dialog exists
+        raises it if visible, or shows a hidden persistent instance.
         """
         existing = self._open_dialogs.get(name)
         if existing is not None:
@@ -1793,15 +1811,19 @@ class MainWindow(QMainWindow):
                 self._open_dialogs.pop(name, None)
 
         dlg = self._build_dialog(name)
-        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        if name not in _PERSISTENT_DIALOGS:
+            dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self._open_dialogs[name] = dlg
-        # ``finished`` fires for both accept and reject; the lambda must
-        # tolerate signal payload (status code) being passed through.
-        dlg.finished.connect(lambda _status, n=name: self._open_dialogs.pop(n, None))
+        if name not in _PERSISTENT_DIALOGS:
+            # ``finished`` fires for both accept and reject; the lambda must
+            # tolerate signal payload (status code) being passed through.
+            dlg.finished.connect(
+                lambda _status, n=name: self._open_dialogs.pop(n, None)
+            )
         dlg.open()
 
     def close_dialog(self, name: DialogName) -> None:
-        """Close the named dialog if it is currently open."""
+        """Close or hide the named dialog if it is currently open."""
         existing = self._open_dialogs.get(name)
         if existing is None:
             return
@@ -1812,7 +1834,8 @@ class MainWindow(QMainWindow):
             self._open_dialogs.pop(name, None)
 
     def list_open_dialogs(self) -> list[DialogName]:
-        return list(self._open_dialogs.keys())
+        """Return dialogs that are currently visible on screen."""
+        return _visible_dialog_names(self._open_dialogs)
 
     def register_dialog(self, name: DialogName, dialog: QDialog) -> None:
         """Register a dialog that was constructed outside ``open_dialog``.
@@ -1859,7 +1882,9 @@ class MainWindow(QMainWindow):
                 self._predictor_label.text() if self._predictor_label else ""
             ),
             "status": self._status_bar.currentMessage() if self._status_bar else "",
-            "open_dialogs": [n.value for n in self._open_dialogs.keys()],
+            "open_dialogs": [
+                n.value for n in _visible_dialog_names(self._open_dialogs)
+            ],
         }
 
     def take_figure_screenshot(self, tab_id: str) -> bytes:
@@ -1889,7 +1914,7 @@ class MainWindow(QMainWindow):
         from qtpy.QtCore import QBuffer, QIODevice  # type: ignore[attr-defined]
 
         dlg = self._open_dialogs.get(dialog_name)
-        if dlg is None:
+        if dlg is None or not dlg.isVisible():
             raise RuntimeError(f"dialog {dialog_name.value!r} is not currently open")
         pixmap = dlg.grab()
         buf = QBuffer()
