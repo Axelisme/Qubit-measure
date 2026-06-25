@@ -15,6 +15,7 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
     ExpContext,
+    LoadDataRequest,
     MetaDictWriteback,
     NoAnalyzeParams,
     RunRequest,
@@ -83,6 +84,9 @@ class _DummyAdapter:
         return _DummyAnalyzeParams()
 
     def run(self, req: RunRequest, schema: CfgSchema):  # noqa: ARG002
+        return object()
+
+    def load(self, req: LoadDataRequest):  # noqa: ARG002
         return object()
 
     def analyze(self, req: AnalyzeRequest[object, _DummyAnalyzeParams]):  # noqa: ARG002
