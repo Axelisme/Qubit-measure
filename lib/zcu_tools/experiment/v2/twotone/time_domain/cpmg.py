@@ -13,9 +13,17 @@ from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment import (
+    US_TO_S,
+    AbsExperiment,
+    GroupedAxesSpec,
+    GroupedLoadData,
+    RoleAxisSpec,
+    RoleSpec,
+    RoleZSpec,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import make_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import snr_checker, sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
@@ -35,13 +43,7 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import (
-    DatasetRole,
-    LabberMetadata,
-    LabberPayload,
-    load_grouped_labber_data,
-    save_grouped_labber_data,
-)
+from zcu_tools.utils.datasaver import LabberPayload
 from zcu_tools.utils.fitting import fit_decay, fit_decay_fringe
 from zcu_tools.utils.process import rotate2real
 
@@ -86,23 +88,7 @@ CPMG_GROUPED_ROLES = (CPMG_LENGTHS_ROLE, CPMG_SIGNALS_ROLE)
 
 
 def cpmg_result_to_grouped_payloads(result: CPMG_Result) -> dict[str, LabberPayload]:
-    times = np.asarray(result.ns, dtype=np.int64)
-    lengths = np.asarray(result.delays, dtype=np.float64)
-    signals = np.asarray(result.signals, dtype=np.complex128)
-
-    _validate_cpmg_arrays(times, lengths, signals)
-    axes = _cpmg_grouped_axes(times, lengths)
-
-    return {
-        CPMG_LENGTHS_ROLE: LabberPayload(
-            ("Length", "s", 1e-6 * lengths),
-            axes=axes,
-        ),
-        CPMG_SIGNALS_ROLE: LabberPayload(
-            ("Signal", "a.u.", signals),
-            axes=axes,
-        ),
-    }
+    return CPMG_GROUPED_AXES_SPEC.payloads_from_result(result)
 
 
 def save_cpmg_grouped_result(
@@ -112,37 +98,16 @@ def save_cpmg_grouped_result(
     comment: str = "",
     tag: str = "twotone/ge/cpmg",
 ) -> str:
-    return save_grouped_labber_data(
+    return CPMG_GROUPED_AXES_SPEC.save_grouped_result(
         filepath,
-        cpmg_result_to_grouped_payloads(result),
-        metadata=LabberMetadata(comment=comment, tags=tag),
+        result,
+        comment=comment,
+        tag=tag,
     )
 
 
 def load_cpmg_grouped_result(filepath: str) -> CPMG_Result:
-    grouped = load_grouped_labber_data(filepath, required_roles=CPMG_GROUPED_ROLES)
-    lengths_payload = grouped.roles[DatasetRole(CPMG_LENGTHS_ROLE)]
-    signals_payload = grouped.roles[DatasetRole(CPMG_SIGNALS_ROLE)]
-
-    _validate_cpmg_payload_axes(lengths_payload, signals_payload)
-    ns = _payload_number_of_pi(lengths_payload)
-    delays = _payload_lengths_us(lengths_payload)
-    signals = np.asarray(signals_payload.z, dtype=np.complex128)
-    _validate_cpmg_arrays(ns, delays, signals)
-
-    cfg_snapshot = None
-    comment = grouped.metadata.comment
-    if comment:
-        cfg, _, _ = parse_comment(comment)
-        if cfg is not None:
-            cfg_snapshot = CPMG_Cfg.validate_or_warn(cfg, source=filepath)
-
-    return CPMG_Result(
-        ns=ns,
-        delays=delays,
-        signals=signals,
-        cfg_snapshot=cfg_snapshot,
-    )
+    return CPMG_GROUPED_AXES_SPEC.load_result(filepath)
 
 
 def _validate_cpmg_arrays(
@@ -166,72 +131,63 @@ def _validate_cpmg_arrays(
         )
 
 
-def _cpmg_grouped_axes(
-    times: NDArray[np.int64],
-    lengths: NDArray[np.float64],
-) -> list[tuple[str, str, NDArray[np.float64]]]:
-    time_indices = np.arange(lengths.shape[1], dtype=np.float64)
-    number_of_pi = times.astype(np.float64)
-    return [
-        ("Time Index", "a.u.", time_indices),
-        ("Number of Pi", "a.u.", number_of_pi),
-    ]
+def _validate_cpmg_result(result: CPMG_Result) -> None:
+    _validate_cpmg_arrays(
+        np.asarray(result.ns, dtype=np.int64),
+        np.asarray(result.delays, dtype=np.float64),
+        np.asarray(result.signals, dtype=np.complex128),
+    )
 
 
-def _validate_cpmg_payload_axes(
-    lengths_payload: LabberPayload,
-    signals_payload: LabberPayload,
-) -> None:
-    _require_cpmg_axes(lengths_payload, CPMG_LENGTHS_ROLE)
-    _require_cpmg_axes(signals_payload, CPMG_SIGNALS_ROLE)
-    for index in range(2):
-        lengths_axis = lengths_payload.axes[index]
-        signals_axis = signals_payload.axes[index]
-        if lengths_axis.name != signals_axis.name:
-            raise ValueError(
-                "CPMG grouped roles must share axis names "
-                f"(axis {index}: {lengths_axis.name!r} != {signals_axis.name!r})"
-            )
-        if lengths_axis.unit != signals_axis.unit:
-            raise ValueError(
-                "CPMG grouped roles must share axis units "
-                f"(axis {index}: {lengths_axis.unit!r} != {signals_axis.unit!r})"
-            )
-        if not np.array_equal(
-            np.asarray(lengths_axis.values), np.asarray(signals_axis.values)
-        ):
-            raise ValueError(f"CPMG grouped roles axis {index} values differ")
+def _build_cpmg_result(data: GroupedLoadData[CPMG_Cfg]) -> CPMG_Result:
+    lengths_role = data.role(CPMG_LENGTHS_ROLE)
+    signals_role = data.role(CPMG_SIGNALS_ROLE)
+    ns = lengths_role.axes[1].astype(np.int64)
+    delays = lengths_role.z.astype(np.float64)
+    signals = signals_role.z.astype(np.complex128)
+    _validate_cpmg_arrays(ns, delays, signals)
+    return CPMG_Result(
+        ns=ns,
+        delays=delays,
+        signals=signals,
+        cfg_snapshot=data.cfg_snapshot,
+    )
 
 
-def _require_cpmg_axes(payload: LabberPayload, role: str) -> None:
-    if len(payload.axes) != 2:
-        raise ValueError(f"CPMG {role!r} role must have exactly two axes")
-    expected = (("Time Index", "a.u."), ("Number of Pi", "a.u."))
-    for index, (expected_name, expected_unit) in enumerate(expected):
-        axis = payload.axes[index]
-        if axis.name != expected_name or axis.unit != expected_unit:
-            raise ValueError(
-                f"CPMG {role!r} axis {index} must be "
-                f"{expected_name!r} / {expected_unit!r}, got "
-                f"{axis.name!r} / {axis.unit!r}"
-            )
-
-
-def _payload_number_of_pi(payload: LabberPayload) -> NDArray[np.int64]:
-    number_of_pi = np.asarray(payload.axes[1].values, dtype=np.float64)
-    rounded = np.round(number_of_pi)
-    if not np.allclose(number_of_pi, rounded):
-        raise ValueError("CPMG Number of Pi axis must contain integer values")
-    return rounded.astype(np.int64)
-
-
-def _payload_lengths_us(payload: LabberPayload) -> NDArray[np.float64]:
-    lengths_s = np.asarray(payload.z)
-    if np.iscomplexobj(lengths_s):
-        if not np.allclose(np.imag(lengths_s), 0.0):
-            raise ValueError("CPMG lengths role must not contain imaginary values")
-        lengths_s = np.real(lengths_s)
-    return np.asarray(lengths_s, dtype=np.float64) * 1e6
+_CPMG_ROLE_AXES = (
+    RoleAxisSpec.generated_arange("Time Index", "a.u.", dtype=np.int64),
+    RoleAxisSpec("Number of Pi", "a.u.", field_name="ns", dtype=np.int64),
+)
+CPMG_GROUPED_AXES_SPEC = GroupedAxesSpec(
+    roles=(
+        RoleSpec(
+            role=CPMG_LENGTHS_ROLE,
+            axes=_CPMG_ROLE_AXES,
+            z=RoleZSpec(
+                field_name="delays",
+                label="Length",
+                unit="s",
+                scale=US_TO_S,
+                dtype=np.float64,
+            ),
+        ),
+        RoleSpec(
+            role=CPMG_SIGNALS_ROLE,
+            axes=_CPMG_ROLE_AXES,
+            z=RoleZSpec(
+                field_name="signals",
+                label="Signal",
+                unit="a.u.",
+                dtype=np.complex128,
+            ),
+        ),
+    ),
+    result_type=CPMG_Result,
+    cfg_type=CPMG_Cfg,
+    tag="twotone/ge/cpmg",
+    result_builder=_build_cpmg_result,
+    result_validator=_validate_cpmg_result,
+)
 
 
 class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
@@ -490,13 +446,13 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
-
-        cfg = result.cfg_snapshot
-        if cfg is None:
-            raise ValueError("cfg_snapshot is None")
-
-        comment = make_comment(cfg, comment)
-        save_cpmg_grouped_result(filepath, result, comment=comment, tag=tag)
+        CPMG_GROUPED_AXES_SPEC.save_experiment_result(
+            filepath,
+            result,
+            comment=comment,
+            tag=tag,
+            make_comment_fn=make_comment,
+        )
 
     def load(self, filepath: str) -> CPMG_Result:
         self.last_result = load_cpmg_grouped_result(filepath)

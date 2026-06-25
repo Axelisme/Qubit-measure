@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from collections.abc import Mapping
 from typing import Any, Optional, cast
 
 import matplotlib.pyplot as plt
@@ -10,9 +9,18 @@ from skopt import Optimizer
 from skopt.space import Real
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment import (
+    MHZ_TO_HZ,
+    US_TO_S,
+    AbsExperiment,
+    GroupedAxesSpec,
+    GroupedLoadData,
+    RoleAxisSpec,
+    RoleSpec,
+    RoleZSpec,
+)
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import make_comment, setup_devices
 from zcu_tools.experiment.v2.runner import (
     Task,
     TaskState,
@@ -34,13 +42,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     SweepCfg,
 )
-from zcu_tools.utils.datasaver import (
-    DatasetRole,
-    LabberMetadata,
-    LabberPayload,
-    load_grouped_labber_data,
-    save_grouped_labber_data,
-)
+from zcu_tools.utils.datasaver import LabberPayload
 
 
 @dataclass(frozen=True)
@@ -132,29 +134,7 @@ RO_AUTO_GROUPED_ROLES = (
 def auto_opt_result_to_grouped_payloads(
     result: AutoOptResult,
 ) -> dict[str, LabberPayload]:
-    params = np.asarray(result.params, dtype=np.float64)
-    signals = np.asarray(result.signals, dtype=np.float64)
-    _validate_auto_opt_arrays(params, signals)
-
-    axes = _iteration_axis(params.shape[0])
-    return {
-        RO_AUTO_READOUT_FREQ_ROLE: LabberPayload(
-            ("Readout Frequency", "Hz", params[:, 0] * 1e6),
-            axes=axes,
-        ),
-        RO_AUTO_READOUT_GAIN_ROLE: LabberPayload(
-            ("Readout Gain", "a.u.", params[:, 1]),
-            axes=axes,
-        ),
-        RO_AUTO_READOUT_LENGTH_ROLE: LabberPayload(
-            ("Readout Length", "s", params[:, 2] * 1e-6),
-            axes=axes,
-        ),
-        RO_AUTO_SNR_ROLE: LabberPayload(
-            ("SNR", "a.u.", signals),
-            axes=axes,
-        ),
-    }
+    return RO_AUTO_GROUPED_AXES_SPEC.payloads_from_result(result)
 
 
 def save_auto_opt_grouped_result(
@@ -164,66 +144,16 @@ def save_auto_opt_grouped_result(
     comment: str = "",
     tag: str = "twotone/ge/ro_optimize/auto",
 ) -> str:
-    return save_grouped_labber_data(
+    return RO_AUTO_GROUPED_AXES_SPEC.save_grouped_result(
         filepath,
-        auto_opt_result_to_grouped_payloads(result),
-        metadata=LabberMetadata(comment=comment, tags=tag),
+        result,
+        comment=comment,
+        tag=tag,
     )
 
 
 def load_auto_opt_grouped_result(filepath: str) -> AutoOptResult:
-    grouped = load_grouped_labber_data(filepath, required_roles=RO_AUTO_GROUPED_ROLES)
-    payloads = {
-        str(role): grouped.roles[DatasetRole(role)] for role in RO_AUTO_GROUPED_ROLES
-    }
-    iterations = _require_shared_iteration_axes(payloads)
-    num_points = len(iterations)
-
-    freq_hz = _require_1d_real_role(
-        payloads[RO_AUTO_READOUT_FREQ_ROLE],
-        RO_AUTO_READOUT_FREQ_ROLE,
-        "Readout Frequency",
-        "Hz",
-        num_points,
-    )
-    gain = _require_1d_real_role(
-        payloads[RO_AUTO_READOUT_GAIN_ROLE],
-        RO_AUTO_READOUT_GAIN_ROLE,
-        "Readout Gain",
-        "a.u.",
-        num_points,
-    )
-    length_s = _require_1d_real_role(
-        payloads[RO_AUTO_READOUT_LENGTH_ROLE],
-        RO_AUTO_READOUT_LENGTH_ROLE,
-        "Readout Length",
-        "s",
-        num_points,
-    )
-    snr = _require_1d_real_role(
-        payloads[RO_AUTO_SNR_ROLE],
-        RO_AUTO_SNR_ROLE,
-        "SNR",
-        "a.u.",
-        num_points,
-    )
-
-    params = np.column_stack([freq_hz * 1e-6, gain, length_s * 1e6]).astype(np.float64)
-    signals = snr.astype(np.float64)
-    _validate_auto_opt_arrays(params, signals)
-
-    cfg_snapshot = None
-    comment = grouped.metadata.comment
-    if comment:
-        cfg, _, _ = parse_comment(comment)
-        if cfg is not None:
-            cfg_snapshot = AutoOptCfg.validate_or_warn(cfg, source=filepath)
-
-    return AutoOptResult(params=params, signals=signals, cfg_snapshot=cfg_snapshot)
-
-
-def _iteration_axis(num_points: int) -> list[tuple[str, str, NDArray[np.int64]]]:
-    return [("Iteration", "a.u.", np.arange(num_points, dtype=np.int64))]
+    return RO_AUTO_GROUPED_AXES_SPEC.load_result(filepath)
 
 
 def _validate_auto_opt_arrays(
@@ -244,73 +174,90 @@ def _validate_auto_opt_arrays(
         )
 
 
-def _require_shared_iteration_axes(
-    payloads: Mapping[str, LabberPayload],
-) -> NDArray[np.int64]:
-    reference: NDArray[np.int64] | None = None
-    for role, payload in payloads.items():
-        if len(payload.axes) != 1:
-            raise ValueError(
-                f"RO auto-optimize {role!r} role must have exactly one axis"
-            )
-        axis = payload.axes[0]
-        if axis.name != "Iteration" or axis.unit != "a.u.":
-            raise ValueError(
-                f"RO auto-optimize {role!r} axis must be 'Iteration' / 'a.u.', "
-                f"got {axis.name!r} / {axis.unit!r}"
-            )
-        values = np.asarray(axis.values, dtype=np.float64)
-        if values.ndim != 1:
-            raise ValueError(
-                f"RO auto-optimize {role!r} Iteration axis must be 1-D, "
-                f"got shape {values.shape}"
-            )
-        rounded = np.round(values)
-        if not np.allclose(values, rounded):
-            raise ValueError("RO auto-optimize Iteration axis must contain integers")
-        iterations = rounded.astype(np.int64)
-        if not np.array_equal(iterations, np.arange(len(iterations), dtype=np.int64)):
-            raise ValueError("RO auto-optimize Iteration axis must equal arange(N)")
-        if reference is None:
-            reference = iterations
-        elif not np.array_equal(reference, iterations):
-            raise ValueError(
-                "RO auto-optimize grouped roles disagree on Iteration axis"
-            )
-
-    if reference is None:
-        raise ValueError("RO auto-optimize grouped result has no roles")
-    return reference
+def _validate_auto_opt_result(result: AutoOptResult) -> None:
+    _validate_auto_opt_arrays(
+        np.asarray(result.params, dtype=np.float64),
+        np.asarray(result.signals, dtype=np.float64),
+    )
 
 
-def _require_1d_real_role(
-    payload: LabberPayload,
-    role: str,
-    expected_label: str,
-    expected_unit: str,
-    num_points: int,
-) -> NDArray[np.float64]:
-    if payload.data.name != expected_label or payload.data.unit != expected_unit:
-        raise ValueError(
-            f"RO auto-optimize {role!r} z channel is "
-            f"{payload.data.name!r} [{payload.data.unit!r}], expected "
-            f"{expected_label!r} [{expected_unit!r}]"
-        )
-    values = np.asarray(payload.z)
-    if values.shape != (num_points,):
-        raise ValueError(
-            f"RO auto-optimize {role!r} z shape {values.shape} != "
-            f"expected {(num_points,)}"
-        )
-    return _real_values(values, f"RO auto-optimize {role!r}")
+def _build_auto_opt_result(data: GroupedLoadData[AutoOptCfg]) -> AutoOptResult:
+    params = np.column_stack(
+        [
+            data.role(RO_AUTO_READOUT_FREQ_ROLE).z,
+            data.role(RO_AUTO_READOUT_GAIN_ROLE).z,
+            data.role(RO_AUTO_READOUT_LENGTH_ROLE).z,
+        ]
+    ).astype(np.float64)
+    signals = data.role(RO_AUTO_SNR_ROLE).z.astype(np.float64)
+    _validate_auto_opt_arrays(params, signals)
+    return AutoOptResult(
+        params=params,
+        signals=signals,
+        cfg_snapshot=data.cfg_snapshot,
+    )
 
 
-def _real_values(values: NDArray[Any], context: str) -> NDArray[np.float64]:
-    if np.iscomplexobj(values):
-        if np.any(np.imag(values) != 0.0):
-            raise ValueError(f"{context} must not contain imaginary values")
-        values = np.real(values)
-    return np.asarray(values, dtype=np.float64)
+_RO_AUTO_ITERATION_AXIS = (
+    RoleAxisSpec.generated_arange("Iteration", "a.u.", dtype=np.int64),
+)
+RO_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
+    roles=(
+        RoleSpec(
+            role=RO_AUTO_READOUT_FREQ_ROLE,
+            axes=_RO_AUTO_ITERATION_AXIS,
+            z=RoleZSpec(
+                field_name="params",
+                label="Readout Frequency",
+                unit="Hz",
+                scale=MHZ_TO_HZ,
+                dtype=np.float64,
+                index=0,
+                index_axis=1,
+            ),
+        ),
+        RoleSpec(
+            role=RO_AUTO_READOUT_GAIN_ROLE,
+            axes=_RO_AUTO_ITERATION_AXIS,
+            z=RoleZSpec(
+                field_name="params",
+                label="Readout Gain",
+                unit="a.u.",
+                dtype=np.float64,
+                index=1,
+                index_axis=1,
+            ),
+        ),
+        RoleSpec(
+            role=RO_AUTO_READOUT_LENGTH_ROLE,
+            axes=_RO_AUTO_ITERATION_AXIS,
+            z=RoleZSpec(
+                field_name="params",
+                label="Readout Length",
+                unit="s",
+                scale=US_TO_S,
+                dtype=np.float64,
+                index=2,
+                index_axis=1,
+            ),
+        ),
+        RoleSpec(
+            role=RO_AUTO_SNR_ROLE,
+            axes=_RO_AUTO_ITERATION_AXIS,
+            z=RoleZSpec(
+                field_name="signals",
+                label="SNR",
+                unit="a.u.",
+                dtype=np.float64,
+            ),
+        ),
+    ),
+    result_type=AutoOptResult,
+    cfg_type=AutoOptCfg,
+    tag="twotone/ge/ro_optimize/auto",
+    result_builder=_build_auto_opt_result,
+    result_validator=_validate_auto_opt_result,
+)
 
 
 class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
@@ -518,10 +465,13 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
 
         if result.cfg_snapshot is None:
             raise ValueError("Cannot save result without configuration snapshot")
-        cfg = result.cfg_snapshot
-        comment = make_comment(cfg, comment)
-
-        save_auto_opt_grouped_result(filepath, result, comment=comment, tag=tag)
+        RO_AUTO_GROUPED_AXES_SPEC.save_experiment_result(
+            filepath,
+            result,
+            comment=comment,
+            tag=tag,
+            make_comment_fn=make_comment,
+        )
 
     def load(self, filepath: str) -> AutoOptResult:
         self.last_result = load_auto_opt_grouped_result(filepath)
