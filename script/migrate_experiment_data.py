@@ -11,7 +11,11 @@ from numpy.typing import NDArray
 from zcu_tools.experiment import AxesSpec
 from zcu_tools.experiment.legacy_migration import (
     CONVERTERS as SINGLE_FILE_CONVERTERS,
+)
+from zcu_tools.experiment.legacy_migration import (
     ConverterSpec,
+)
+from zcu_tools.experiment.legacy_migration import (
     migrate_experiment_data as _migrate_experiment_data,
 )
 from zcu_tools.experiment.v2.jpa.jpa_auto_optimize import (

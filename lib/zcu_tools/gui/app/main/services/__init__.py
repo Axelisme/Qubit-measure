@@ -19,8 +19,8 @@ from zcu_tools.gui.session.services.startup import (
 )
 
 from .analyze import AnalyzeService
-from .arb_waveform import ArbWaveformService
 from .app_services import AppServices, build_app_services
+from .arb_waveform import ArbWaveformService
 from .caretaker import PersistenceCaretaker, RestoreOutcome
 from .guard import (
     AnalyzePermit,

@@ -60,8 +60,8 @@ from .services.remote.dialogs import DialogName
 from .state import State
 
 if TYPE_CHECKING:
-    from zcu_tools.meta_tool import ArbWaveformData, ArbWaveformInfo
     from zcu_tools.gui.session.ports import ProgressTransport
+    from zcu_tools.meta_tool import ArbWaveformData, ArbWaveformInfo
 
     from .adapters.qt_shutdown_driver import QtShutdownDriver
     from .services.guard import AnalyzePermit

@@ -4,7 +4,6 @@ import json
 
 import numpy as np
 import pytest
-
 from zcu_tools.meta_tool import (
     ArbWaveformDatabase,
     ArbWaveformError,

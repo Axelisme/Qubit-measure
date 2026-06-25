@@ -14,8 +14,8 @@ from zcu_tools.meta_tool import (
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.session.types import ExpContext
     from zcu_tools.gui.app.main.state import State
+    from zcu_tools.gui.session.types import ExpContext
 
 
 ARB_WAVEFORMS_VERSION_KEY = "arb_waveforms"

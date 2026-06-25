@@ -4,11 +4,12 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from script.migrate_experiment_data import migrate_experiment_data
 from zcu_tools.experiment.v2.onetone.flux_dep import FluxDepExp as OneToneFluxDepExp
 from zcu_tools.experiment.v2.onetone.freq import FreqExp as OneToneFreqExp
 from zcu_tools.experiment.v2.twotone.fluxdep import FreqFluxExp
 from zcu_tools.utils.datasaver import load_labber_data, save_labber_data
+
+from script.migrate_experiment_data import migrate_experiment_data
 
 
 def _write_legacy_onetone_freq(path: Path) -> tuple[np.ndarray, np.ndarray]:
