@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-26（ArbWaveform data-derived length；dialog debounce + typed recipe + preview helper）
+**Last updated:** 2026-06-26（ArbWaveform startup-safe choices）
 
 # `zcu_tools/gui/app/main/` — measure-gui Framework AI Note
 
@@ -348,7 +348,7 @@ plot substrate 已抽到頂層共用套件 `lib/zcu_tools/gui/plotting/`（measu
 
 - LiveFields 透過 `ControllerProtocol` 取得 reactive environment，不直接 import singleton
 - `DeviceService` 不直接用 `GlobalDeviceManager` singleton，改經 `DeviceRegistryPort`（5 個 instance method 鏡像 classmethod 面）；production 預設 `GlobalDeviceRegistryAdapter`，測試注 in-memory fake（ADR-0026 §6）
-- `style:"arb"` waveform entry 仍由 Inspect 的 normal ML create/modify flow 建立；entry 只存 `data` scalar，透過 `choices_source="arb_waveforms"` 顯示目前 qubit-scoped asset keys，且允許空字串作為 Inspect 建立新 Arb waveform 的初始值。Arb playback length 由 asset `time[-1]` 衍生，不是 editable cfg field；底層 `ArbWaveform` runtime 仍在空字串或 missing asset 時 fail-fast。delete/rename asset 不掃描 ML references，使用端碰到 missing asset 時 fail-fast。
+- `style:"arb"` waveform entry 仍由 Inspect 的 normal ML create/modify flow 建立；entry 只存 `data` scalar，透過 `choices_source="arb_waveforms"` 顯示目前 qubit-scoped asset keys，且允許空字串作為 Inspect 建立新 Arb waveform 的初始值。Arb playback length 由 asset `time[-1]` 衍生，不是 editable cfg field；尚未設定 project `database_path` 時，arb list/read choices 回空清單以便 startup form 能建立，真正的 inspect/load/mutation 仍 fail-fast。底層 `ArbWaveform` runtime 仍在空字串或 missing asset 時 fail-fast。delete/rename asset 不掃描 ML references，使用端碰到 missing asset 時 fail-fast。
 
 ### MetaDict Text Coercion
 

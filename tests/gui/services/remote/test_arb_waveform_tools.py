@@ -72,6 +72,14 @@ def test_set_list_and_preview_round_trip(fixture: Fixture, tmp_path: Path) -> No
     assert Path(str(preview["preview_figure"])).exists()
 
 
+def test_list_without_project_database_path_returns_empty(fixture: Fixture) -> None:
+    fixture.state.exp_context = replace(fixture.state.exp_context, database_path="")
+
+    assert fixture.ctrl.list_arb_waveforms() == []
+    assert fixture.ctrl.list_arb_waveform_infos() == []
+    assert dispatch_handler(fixture.ctrl, "arb_waveform.list", {}) == {"waveforms": []}
+
+
 def test_set_existing_without_overwrite_reports_reason(fixture: Fixture) -> None:
     params = {"name": "arb_wav1", "recipe": _recipe(), "overwrite": False}
     dispatch_handler(fixture.ctrl, "arb_waveform.set", params)

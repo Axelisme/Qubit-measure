@@ -32,11 +32,13 @@ class ArbWaveformService:
         return root
 
     def list_data_keys(self) -> list[str]:
-        self._init_database()
+        if not self._try_init_database():
+            return []
         return ArbWaveformDatabase.list()
 
     def list_infos(self) -> list[ArbWaveformInfo]:
-        self._init_database()
+        if not self._try_init_database():
+            return []
         return [
             ArbWaveformDatabase.inspect(data_key)
             for data_key in ArbWaveformDatabase.list()
@@ -88,12 +90,29 @@ class ArbWaveformService:
     def _init_database(self) -> None:
         ArbWaveformDatabase.init(self.root_path())
 
+    def _try_init_database(self) -> bool:
+        root = try_resolve_arb_waveform_root(self._state.exp_context)
+        if root is None:
+            return False
+        root.mkdir(parents=True, exist_ok=True)
+        ArbWaveformDatabase.init(root)
+        return True
+
 
 def resolve_arb_waveform_root(ctx: ExpContext) -> Path:
     """Resolve the qubit-scoped arbitrary waveform root from the active project."""
 
-    if not ctx.database_path:
+    root = try_resolve_arb_waveform_root(ctx)
+    if root is None:
         raise RuntimeError("No project database_path is configured.")
+    return root
+
+
+def try_resolve_arb_waveform_root(ctx: ExpContext) -> Path | None:
+    """Resolve the arbitrary waveform root, or ``None`` before project setup."""
+
+    if not ctx.database_path:
+        return None
     database_path = Path(ctx.database_path)
     chip = ctx.chip_name
     qub = ctx.qub_name
