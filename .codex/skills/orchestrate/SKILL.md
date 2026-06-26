@@ -29,6 +29,8 @@ session 回應與計劃檔用中文；程式碼、變數名、技術名詞用英
 ```text
 .agent_state/
   plans/
+    archives/
+      <task-id>/      # completed task plan folders
     <task-id>/
       task_plan.md
       findings.md
@@ -47,6 +49,7 @@ session 回應與計劃檔用中文；程式碼、變數名、技術名詞用英
 - `.agent_state/plans/<task-id>/task_plan.md`：Goal / Current State / Architecture Baseline / Phase 工作項。
 - `.agent_state/plans/<task-id>/findings.md`：委派過程中的非顯而易見發現、決策、踩過的坑。
 - `.agent_state/plans/<task-id>/progress.md`：各 Phase / 工作項的狀態與時間軸。
+- `.agent_state/plans/archives/<task-id>/`：已結束 task 的完整 plan 目錄；task fast-forward 或明確 abandoned 收尾、且 `state.json` / worktree / branch 都清理完成後，將 `.agent_state/plans/<task-id>/` 整包移到這裡，讓 `.agent_state/plans/` 只保留仍 active / reviewing / merge_preview / blocked 的計劃。這個 `archives/` 是完成 task 的收納區；task 內的 `archive.md` 仍只用於 Phase 壓縮。
 - `.agent_state/worktrees/state.json`：仍需操作的 task / lane checkpoint；已 merge / abandoned 並清理完的 task 不留在這裡。
 - `.agent_state/worktrees/reports/<task-id>/<lane-id>/`：sub-agent 長報告。報告寫在**主 checkout 的絕對路徑**，不要寫進 task worktree，因為 untracked 檔不會跨 worktree 同步。
 - `.agent_state/worktrees/trees/<worktree-id>/`：實際 git worktree checkout；單 lane 預設 `worktree-id = <task-id>`，多 lane 使用 `worktree-id = <task-id>--<lane-id>`。
@@ -160,9 +163,11 @@ git branch -d agent/<task-id>
 
 單 lane 時 `agent/<worktree-id>` 與 `agent/<task-id>` 是同一個 branch，只刪一次。多 lane 時，上述 `worktree remove` / `branch -d` 對每個 lane branch、integration worktree 與 integration branch 各執行一次；若 lane branch 已被 fast-forward 納入 `agent/<task-id>`，`git branch -d agent/<worktree-id>` 應能成功。
 
+若 `.agent_state/plans/<task-id>/` 存在，最後建立 `.agent_state/plans/archives/` 並將整個 plan 目錄移到 `.agent_state/plans/archives/<task-id>/`；不要只複製單一檔案，也不要把已結束 task 留在 active plans 列表旁。
+
 9. 若尚未建立 preview，就直接用 `git merge --ff-only agent/<task-id>` 收尾；不要為了收尾建立 merge commit。
 10. 若未授權進入主線 preview，停在可檢查的 integration branch / lane branch diff，回報 task-id、lane-id、worktree path、測試狀態與下一步。
-11. 每個 task item 或 Phase 告一段落時，必須完成整合決策：fast-forward、abandon 或 blocked。不要把 worktree 當長期常駐 checkout 留著；長期殘留會讓 branch、ignored inputs、reports 與 base branch 漸漸失同步。
+11. 每個 task item 或 Phase 告一段落時，必須完成整合決策：fast-forward、abandon 或 blocked。已結束 task 要同步完成 plan 歸檔；不要把 worktree 或 active plan 當長期常駐狀態留著，長期殘留會讓 branch、ignored inputs、reports 與 base branch 漸漸失同步。
 12. `git merge --squash` 不是預設收尾方式；它會斷開 branch ancestry，讓 `git branch -d` 無法確認 task / lane branch 已整合。除非用戶明確要求 squash merge，否則使用 rebase / soft reset 整理 lane branch，再以 `ff-only` 推進 integration branch 與主線。
 
 ### Phase 推薦流水線
@@ -205,7 +210,7 @@ git branch -d agent/<task-id>
 4. **委派**：每個 Phase 預設走 `impl-detail-planner` → `plan-item-implementer` → `python-module-reviewer`。給每個 agent 清楚 task-id、lane-id、workdir、write scope、report path；planner 產出是 implementer 的輸入，reviewer finding 回到同一 lane worktree 修正。
 5. **收報告 → 整合**：讀 final message 與 report 檔，回寫 `progress.md` / `findings.md`，判斷完成度。報告矛盾或不足時補一輪委派，不要含糊整合。
 6. **驗證與回報**：一個 Phase 收尾時，按 `CLAUDE.md` 依序跑（或指示/委派）`pyright` → `pytest` → `ruff`，再更新對應模組 `README.md`（lib/tests 子目錄，現在式、刷新頂部 Last updated，不寫 commit hash）。
-7. **關閉 task / lane worktree**：Phase / task item 收尾時，先在各 lane branch rebase / 整理 commit，必要時整合到 parent branch `agent/<task-id>`，再用 `git merge --no-commit --no-ff` 在主 checkout 建立驗收預覽；用戶有改動意見就 abort preview 並讓 sub-agent 回相關 lane / integration worktree 修，無意見且授權收尾就 abort preview 後用 `git merge --ff-only agent/<task-id>` 進主線，從 `state.json` 刪除 task entry、移除所有 lane / integration worktree 並刪除 branch。若不整合，清理後同樣刪除 entry；只有仍在 active/reviewing/merge_preview/blocked 的 task 才保留 entry。
+7. **關閉 task / lane worktree**：Phase / task item 收尾時，先在各 lane branch rebase / 整理 commit，必要時整合到 parent branch `agent/<task-id>`，再用 `git merge --no-commit --no-ff` 在主 checkout 建立驗收預覽；用戶有改動意見就 abort preview 並讓 sub-agent 回相關 lane / integration worktree 修，無意見且授權收尾就 abort preview 後用 `git merge --ff-only agent/<task-id>` 進主線，從 `state.json` 刪除 task entry、移除所有 lane / integration worktree 並刪除 branch。若不整合，清理後同樣刪除 entry；只有仍在 active/reviewing/merge_preview/blocked 的 task 才保留 entry。task 結束後，將 `.agent_state/plans/<task-id>/` 整包移到 `.agent_state/plans/archives/<task-id>/`，讓 plans 根目錄維持乾淨。
 
 ## 邊界
 
