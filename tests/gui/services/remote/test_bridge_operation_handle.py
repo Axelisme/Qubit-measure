@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError
 from zcu_tools.mcp.measure import server as mcp_server
 
 from ._helpers import FakeTransport
@@ -124,6 +125,64 @@ def test_soc_connect_uses_method_spec_timeout(monkeypatch):
     )
 
 
+def test_default_rpc_timeout_uses_method_spec(monkeypatch):
+    calls: list[tuple[str, dict[str, Any], float]] = []
+
+    def fake_send(method, params, timeout_seconds):
+        calls.append((method, params, timeout_seconds))
+        return {}
+
+    monkeypatch.setattr(mcp_server._SESSION, "send_gui_rpc", fake_send)
+
+    mcp_server.send_gui_rpc("state.has_soc", {})
+
+    assert calls == [
+        (
+            "state.has_soc",
+            {},
+            mcp_server.METHOD_SPECS["state.has_soc"].timeout_seconds
+            + mcp_server._WAIT_TRANSPORT_SLACK_SECONDS,
+        )
+    ]
+
+
+def test_long_wait_rpc_requires_explicit_timeout():
+    with pytest.raises(ValueError, match="operation.await"):
+        mcp_server.send_gui_rpc("operation.await", {"operation_id": 1, "timeout": 0.0})
+
+
+def test_send_gui_rpc_marks_gui_handler_timeout(wired):
+    wired["state.has_soc"] = {
+        "ok": False,
+        "error": {
+            "code": "timeout",
+            "message": "handler did not complete within 5.0s",
+        },
+    }
+
+    with pytest.raises(mcp_server.GuiRpcError) as exc_info:
+        mcp_server.send_gui_rpc("state.has_soc", {})
+
+    assert exc_info.value.code == "timeout"
+    assert exc_info.value.reason == "gui_handler_timeout"
+
+
+def test_send_gui_rpc_marks_transport_timeout(monkeypatch, wired):
+    del wired
+
+    def fail_transport(method, params, timeout_seconds):
+        del params
+        raise GuiTransportTimeoutError(method, timeout_seconds)
+
+    monkeypatch.setattr(mcp_server._BRIDGE, "send_rpc_raw", fail_transport)
+
+    with pytest.raises(mcp_server.GuiRpcError) as exc_info:
+        mcp_server.send_gui_rpc("state.has_soc", {})
+
+    assert exc_info.value.code == "timeout"
+    assert exc_info.value.reason == "gui_transport_timeout"
+
+
 def test_soc_connect_timeout_reconciles_completed_connection(monkeypatch):
     calls: list[tuple[str, float]] = []
 
@@ -212,15 +271,18 @@ def test_await_operation_refreshes_last_seen_via_rpc(wired):
 def test_wait_timeout_returns_timed_out_not_raises(monkeypatch):
     # Phase 120c-4: a bounded wait that elapses is an expected outcome, not a
     # crash — gui_op_wait returns {status:'timed_out', waited_seconds} instead of
-    # raising. Covers both timeout flavors (bridge socket TimeoutError and the
-    # GUI-side "(timeout)" RuntimeError).
-    def bridge_timeout(method, params, timeout_seconds=30.0):
+    # raising. Covers both structured GuiRpcError and the legacy string form.
+    def gui_handler_timeout(method, params, timeout_seconds=30.0):
         del params, timeout_seconds
         if method == "operation.await":
-            raise TimeoutError("GUI RPC 'operation.await' did not complete")
+            raise mcp_server.GuiRpcError(
+                "GUI Error (timeout): not done",
+                reason="gui_handler_timeout",
+                code="timeout",
+            )
         return {}
 
-    monkeypatch.setattr(mcp_server, "send_gui_rpc", bridge_timeout)
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", gui_handler_timeout)
     out = mcp_server.TOOLS["gui_op_wait"]["handler"]({"handle": 5, "timeout": 0.05})
     assert out["status"] == "timed_out"
     assert isinstance(out["waited_seconds"], float)
@@ -234,6 +296,23 @@ def test_wait_timeout_returns_timed_out_not_raises(monkeypatch):
     monkeypatch.setattr(mcp_server, "send_gui_rpc", gui_timeout)
     out2 = mcp_server.TOOLS["gui_op_wait"]["handler"]({"handle": 5, "timeout": 0.05})
     assert out2["status"] == "timed_out"
+
+
+def test_wait_transport_timeout_raises(monkeypatch):
+    def transport_timeout(method, params, timeout_seconds=30.0):
+        del params, timeout_seconds
+        if method == "operation.await":
+            raise mcp_server.GuiRpcError(
+                "GUI Transport Timeout: operation.await",
+                reason="gui_transport_timeout",
+                code="timeout",
+            )
+        return {}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", transport_timeout)
+
+    with pytest.raises(mcp_server.GuiRpcError, match="Transport Timeout"):
+        mcp_server.TOOLS["gui_op_wait"]["handler"]({"handle": 5, "timeout": 0.05})
 
 
 def test_wait_failed_outcome_still_raises(monkeypatch):

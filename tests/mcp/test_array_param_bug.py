@@ -70,10 +70,10 @@ def test_forwarder_passes_list_intact():
     handler as-is — no char-split, no stringify."""
     from zcu_tools.mcp.core.bridge import make_forwarder
 
-    received: list[object] = []
+    received: list[tuple[object, float]] = []
 
     def _send(method: str, params: dict, *, timeout_seconds: float) -> dict:
-        received.append(params.get("paths"))
+        received.append((params.get("paths"), timeout_seconds))
         return {"ok": True}
 
     spec = MethodSpec(
@@ -90,7 +90,8 @@ def test_forwarder_passes_list_intact():
     forwarder({"paths": paths})
 
     assert len(received) == 1
-    assert received[0] == paths, f"expected {paths!r}, got {received[0]!r}"
+    assert received[0][0] == paths, f"expected {paths!r}, got {received[0][0]!r}"
+    assert received[0][1] == pytest.approx(6.0)
 
 
 def test_forwarder_does_not_char_split_serialised_array_string():

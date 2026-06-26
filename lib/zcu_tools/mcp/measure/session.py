@@ -13,7 +13,11 @@ from collections import deque
 from collections.abc import Callable, MutableMapping
 from typing import Any
 
-from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
+from zcu_tools.mcp.core.bridge import (
+    GuiTransportTimeoutError,
+    McpBridge,
+    MCPBridgeConfig,
+)
 from zcu_tools.mcp.measure.session_policy import (
     DEFAULT_POLICY,
     MeasureMcpPolicy,
@@ -182,7 +186,17 @@ class MeasureMcpSession:
                 method, params
             )
 
-        resp = self.bridge.send_rpc_raw(method, send_params, timeout_seconds)
+        try:
+            resp = self.bridge.send_rpc_raw(method, send_params, timeout_seconds)
+        except GuiTransportTimeoutError as exc:
+            raise GuiRpcError(
+                (
+                    f"GUI Transport Timeout: {exc}. The MCP bridge closed the "
+                    "stale control socket and will reconnect on the next call."
+                ),
+                reason="gui_transport_timeout",
+                code="timeout",
+            ) from exc
         if not resp.get("ok", False):
             err = resp.get("error", {})
             if err.get("reason") == "stale_version":
@@ -195,8 +209,12 @@ class MeasureMcpSession:
                     f"changed in the GUI since you last saw it{detail}; review then "
                     "retry"
                 )
-            msg = f"GUI Error ({err.get('code')}): {err.get('message')}"
-            raise GuiRpcError(msg, reason=err.get("reason"), code=err.get("code"))
+            code = err.get("code")
+            reason = err.get("reason")
+            if code == "timeout" and reason is None:
+                reason = "gui_handler_timeout"
+            msg = f"GUI Error ({code}): {err.get('message')}"
+            raise GuiRpcError(msg, reason=reason, code=code)
 
         if method in self._policy.read_reveals:
             self.refresh_revealed_versions(method, params)

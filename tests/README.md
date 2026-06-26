@@ -1,6 +1,6 @@
 # AI Note for `tests/`
 
-**Last updated:** 2026-06-26 — measure-gui arb waveform invalid recipe regression
+**Last updated:** 2026-06-26 — measure-gui MCP timeout policy
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -109,7 +109,7 @@ tests/
 ├── experiment/v2/runner/           # 高層 runner / task 狀態機測試
 ├── analysis/
 │   └── fluxdep/                    # Flux-Dependence Analysis kernel tests
-├── mcp/                            # MCP bridge、call-log、remote schema / ARRAY param regression tests
+├── mcp/                            # MCP bridge、call-log、timeout policy、remote schema / ARRAY param regression tests
 ├── notebook/analysis/fluxdep/      # Fluxonium 光譜分析模型測試
 └── utils/fitting/                  # 曲線擬合工具測試
 ```
@@ -276,6 +276,8 @@ load-result feature 的 targeted tests 分散在對應 ownership：
 `tests/gui/services/test_load.py` 鎖 state invalidation / version bump；
 `tests/gui/ui/test_main_window_ui.py` 鎖 `Load Data...` button gate 與 file dialog；
 `tests/gui/services/remote/` 鎖 `tab.load_data` dispatch、tool generation 與 MCP guard deps。
+同目錄也覆蓋 measure MCP 的 operation handle 與 RPC timeout policy：bounded
+GUI handler timeout 應回傳狀態，transport timeout 應被視為連線異常。
 
 **新增整合測試**：在 `test_modules_integration.py` 加入新的 test class / method，  
 用 `_make_prog(modules=[...])` 建構程式，斷言 `prog.binprog is not None`。

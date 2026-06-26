@@ -56,6 +56,8 @@ from zcu_tools.gui.remote.param_spec import JsonType, build_input_schema
 
 logger = logging.getLogger(__name__)
 
+_GENERATED_RPC_TRANSPORT_SLACK_SECONDS = 1.0
+
 # The type of a generated/override MCP tool entry.
 Tool = dict[str, Any]
 ToolTable = dict[str, Tool]
@@ -152,6 +154,17 @@ def _pid_alive(pid: int) -> bool:
         return False
     except OSError:
         return True
+
+
+class GuiTransportTimeoutError(TimeoutError):
+    """The GUI socket did not return an RPC reply before the transport deadline."""
+
+    def __init__(self, method: str, timeout_seconds: float) -> None:
+        self.method = method
+        self.timeout_seconds = timeout_seconds
+        super().__init__(
+            f"GUI RPC {method!r} did not complete within {timeout_seconds:g}s"
+        )
 
 
 # A line arrived from the GUI: route it (reply keyed by id / event push).
@@ -407,6 +420,15 @@ class McpBridge:
             holder["done"] = True
             self._rid_cond.notify_all()
 
+    def _close_timed_out_transport(self, transport: Transport) -> None:
+        """Drop a socket whose reply stream is no longer trustworthy."""
+
+        try:
+            transport.close()
+        finally:
+            if self._transport is transport:
+                self._transport = None
+
     def send_rpc_raw(
         self, method: str, params: dict[str, Any], timeout_seconds: float
     ) -> dict[str, Any]:
@@ -432,15 +454,18 @@ class McpBridge:
             raise
 
         deadline = time.monotonic() + timeout_seconds
+        timed_out = False
         with self._rid_cond:
             while not holder["done"]:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     self._pending.pop(rid, None)
-                    raise TimeoutError(
-                        f"GUI RPC {method!r} did not complete within {timeout_seconds}s"
-                    )
+                    timed_out = True
+                    break
                 self._rid_cond.wait(timeout=remaining)
+        if timed_out:
+            self._close_timed_out_transport(transport)
+            raise GuiTransportTimeoutError(method, timeout_seconds)
         if "error" in holder and "message" not in holder:
             raise ConnectionError(holder["error"])
         return holder["message"]
@@ -768,6 +793,12 @@ def coerce_arg(value: object, json_type: JsonType) -> object:
     return value  # JSON: pass through
 
 
+def generated_rpc_timeout_seconds(spec: Any) -> float:
+    """Transport ceiling for generated tools: handler budget plus wire slack."""
+
+    return float(spec.timeout_seconds) + _GENERATED_RPC_TRANSPORT_SLACK_SECONDS
+
+
 def make_forwarder(method: str, spec, send_fn: SendFn):
     """Build an MCP forwarder that projects arguments into RPC params per spec.
 
@@ -775,7 +806,7 @@ def make_forwarder(method: str, spec, send_fn: SendFn):
     over :meth:`McpBridge.send_rpc_raw`; measure-gui passes its guarded
     ``send_gui_rpc``.
     """
-    rpc_timeout = max(float(spec.timeout_seconds), 30.0)
+    rpc_timeout = generated_rpc_timeout_seconds(spec)
 
     def _forwarder(arguments: dict[str, Any]) -> dict[str, Any]:
         rpc_params: dict[str, Any] = {}
@@ -1003,6 +1034,7 @@ def run_stdio_loop(
 
 
 __all__ = [
+    "GuiTransportTimeoutError",
     "McpBridge",
     "MCPBridgeConfig",
     "McpServerConfig",
@@ -1010,6 +1042,7 @@ __all__ = [
     "build_initialize_result",
     "coerce_arg",
     "generate_tools",
+    "generated_rpc_timeout_seconds",
     "make_forwarder",
     "resolve_connect_port",
     "run_stdio_loop",

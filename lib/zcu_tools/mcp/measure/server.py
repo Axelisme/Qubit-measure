@@ -74,6 +74,7 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
     _port_is_open,
     assemble_tools,
     generate_tools,
+    generated_rpc_timeout_seconds,
     resolve_connect_port,
     run_stdio_loop,
 )
@@ -96,7 +97,7 @@ from zcu_tools.mcp.measure.session_policy import (  # noqa: E402
 # tracked separately by WIRE_VERSION (see ``wire_version.py``); the two are
 # independent. (Git history holds the per-version evolution.)
 # MeasureMcpSession owns measure-only MCP policy state.
-MCP_VERSION = 67
+MCP_VERSION = 68
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -324,12 +325,27 @@ def _ensure_connected() -> None:
     _SESSION.ensure_connected()
 
 
+_EXPLICIT_TIMEOUT_METHODS = frozenset({"operation.await", "notify.await"})
+_WAIT_TRANSPORT_SLACK_SECONDS = 1.0
+
+
+def _default_rpc_timeout_seconds(method: str) -> float:
+    if method in _EXPLICIT_TIMEOUT_METHODS:
+        raise ValueError(f"{method!r} requires explicit timeout_seconds")
+    return generated_rpc_timeout_seconds(METHOD_SPECS[method])
+
+
 def send_gui_rpc(
     method: str,
     params: dict[str, Any],
-    timeout_seconds: float = 30.0,
+    timeout_seconds: float | None = None,
 ) -> dict[str, Any]:
-    return _SESSION.send_gui_rpc(method, params, timeout_seconds)
+    timeout = (
+        _default_rpc_timeout_seconds(method)
+        if timeout_seconds is None
+        else float(timeout_seconds)
+    )
+    return _SESSION.send_gui_rpc(method, params, timeout)
 
 
 # ---------------------------------------------------------------------------
@@ -761,17 +777,8 @@ def _await_operation_by_handle(
         res = send_gui_rpc(
             "operation.await",
             {"operation_id": operation_id, "timeout": timeout},
-            timeout + 5.0,
+            timeout + _WAIT_TRANSPORT_SLACK_SECONDS,
         )
-    except TimeoutError:
-        # Bridge socket round-trip ceiling hit — the op is still running. This is
-        # an expected outcome of a bounded wait, not a crash: report it (no raise,
-        # no traceback) with how long we actually waited so the agent can decide.
-        return {
-            "status": "timed_out",
-            "waited_seconds": round(time.monotonic() - start, 3),
-            "message": f"{what} still in progress after {timeout}s.",
-        }
     except RuntimeError as exc:
         if _is_timeout_error(exc):
             return {
@@ -872,7 +879,9 @@ def _poll_operation_by_handle(operation_id: int | None, what: str) -> dict[str, 
     for _ in range(_POLL_DRAIN_CAP):
         try:
             res = send_gui_rpc(
-                "operation.await", {"operation_id": operation_id, "timeout": 0.0}
+                "operation.await",
+                {"operation_id": operation_id, "timeout": 0.0},
+                _WAIT_TRANSPORT_SLACK_SECONDS,
             )
         except RuntimeError as exc:
             if _is_timeout_error(exc):
@@ -963,13 +972,14 @@ def _with_feedback(reply: dict[str, Any], drained: list[str]) -> dict[str, Any]:
     return reply
 
 
-def _is_timeout_error(exc: RuntimeError) -> bool:
-    """True when a send_gui_rpc RuntimeError carries the wire TIMEOUT code.
+def _is_timeout_error(exc: Exception) -> bool:
+    """True when a send_gui_rpc error is a normal GUI handler timeout.
 
-    send_gui_rpc formats failures as ``GUI Error (<code>): ...`` where <code> is
-    the lowercase ErrorCode value (ErrorCode.TIMEOUT == 'timeout'). The literal is
-    matched here to keep the bridge free of the errors-module import.
+    ``gui_transport_timeout`` means the control socket stopped replying and the
+    bridge has dropped it; that is not an operation-still-running signal.
     """
+    if isinstance(exc, GuiRpcError):
+        return exc.code == "timeout" and exc.reason != "gui_transport_timeout"
     return "(timeout)" in str(exc)
 
 
@@ -1043,7 +1053,7 @@ def _start_op_with_short_wait(
         send_gui_rpc(
             "operation.await",
             {"operation_id": operation_id, "timeout": wait_seconds},
-            wait_seconds + 5.0,
+            wait_seconds + _WAIT_TRANSPORT_SLACK_SECONDS,
         )
     except RuntimeError as exc:
         if _is_timeout_error(exc):
@@ -1883,7 +1893,7 @@ def tool_gui_prompt_user(arguments: dict[str, Any]) -> dict[str, Any]:
     await_result = send_gui_rpc(
         "notify.await",
         {"token": token, "timeout": await_timeout},
-        await_timeout + 5.0,
+        await_timeout + _WAIT_TRANSPORT_SLACK_SECONDS,
     )
     # Forward the structured reason (reply/dismiss/timeout) verbatim; never raise.
     out: dict[str, Any] = {"reason": await_result.get("reason", "timeout")}

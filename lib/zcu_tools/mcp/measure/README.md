@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-26 (arb waveform tools/version guard)
+**Last updated:** 2026-06-26 (RPC timeout policy)
 
 # `zcu_tools/mcp/measure/`
 
@@ -25,6 +25,11 @@ RemoteControlAdapter。此 package 是 app-local policy 層，不是共用 trans
 - load failure 以 `precondition_failed` 搭配 stable `reason` 呈現：
   `invalid_data_file`（canonical/adapter 不相容）、`unsupported_load`、
   `data_file_read_failed`；agent 不需要 parse traceback 或 raw Python exception。
+- 一般 generated / hand-written RPC 的 transport timeout 以 `MethodSpec.timeout_seconds`
+  加少量 slack 為準；`operation.await` 與 `notify.await` 必須由 caller 明確傳入
+  動態 timeout。GUI handler timeout 代表可預期的 bounded wait 結果，transport
+  timeout 代表控制 socket 已失去可信度，MCP bridge 會關閉該 socket 並讓下一次 call
+  重新連線。
 - `McpBridge` 只屬於 `zcu_tools.mcp.core` 的 transport adapter；measure-gui policy
   不下放到 bridge。
 

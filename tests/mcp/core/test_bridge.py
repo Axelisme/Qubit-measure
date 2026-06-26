@@ -16,9 +16,17 @@ Used before a full TCP connect in ``_ensure_connected`` so that a cold start
 from __future__ import annotations
 
 import socket
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
-from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig, _port_is_open
+import pytest
+from zcu_tools.mcp.core.bridge import (
+    GuiTransportTimeoutError,
+    McpBridge,
+    MCPBridgeConfig,
+    _port_is_open,
+)
 
 
 def _config(tmp_path: Path) -> MCPBridgeConfig:
@@ -45,6 +53,29 @@ class _FakeProc:
 
     def poll(self) -> int | None:
         return None if self._alive else 0
+
+
+class _SilentTransport:
+    """Transport fake that records requests but never delivers replies."""
+
+    def __init__(self) -> None:
+        self.closed = False
+        self.sent: list[dict[str, Any]] = []
+        self._on_closed: Callable[[], None] | None = None
+
+    def attach(self, deliver_reply, deliver_event, on_closed) -> None:
+        del deliver_reply, deliver_event
+        self._on_closed = on_closed
+
+    @property
+    def is_open(self) -> bool:
+        return not self.closed
+
+    def send_line(self, payload: dict[str, Any]) -> None:
+        self.sent.append(payload)
+
+    def close(self) -> None:
+        self.closed = True
 
 
 def test_launched_gui_false_when_attached_only(tmp_path: Path) -> None:
@@ -110,3 +141,17 @@ def test_port_is_open_returns_true_for_listening_port() -> None:
         srv.listen(1)
         port = int(srv.getsockname()[1])
         assert _port_is_open(port) is True
+
+
+def test_send_rpc_raw_timeout_closes_transport(tmp_path: Path) -> None:
+    transport = _SilentTransport()
+    bridge = McpBridge(_config(tmp_path), transport=transport)
+
+    with pytest.raises(GuiTransportTimeoutError) as exc_info:
+        bridge.send_rpc_raw("slow.method", {}, 0.001)
+
+    assert exc_info.value.method == "slow.method"
+    assert transport.closed is True
+    assert bridge.is_connected is False
+    assert bridge._pending == {}
+    assert transport.sent[0]["method"] == "slow.method"
