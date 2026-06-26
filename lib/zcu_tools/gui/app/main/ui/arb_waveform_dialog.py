@@ -348,7 +348,6 @@ class ArbWaveformDialog(QDialog):
         layout.addWidget(symbols)
 
         self._warning = QLabel()
-        self._warning.setStyleSheet("color: red;")
         self._warning.setWordWrap(True)
         self._warning.setVisible(False)
         layout.addWidget(self._warning)
@@ -506,14 +505,20 @@ class ArbWaveformDialog(QDialog):
         data_key = self._selected_data_key()
         if data_key is None:
             return
-        self._current_data_key = data_key
-        self._data_key_edit.setText(data_key)
+        # Load before mutating editor state: ArbWaveformDatabase wraps every
+        # expected load failure (missing / corrupt / invalid asset) in
+        # ArbWaveformError, so this narrow catch is the correct fail-fast
+        # boundary — anything else is an unexpected bug and propagates to the
+        # global exception hook. On failure we must not leave the editor
+        # pointing at an unloadable key with the previous draft still saveable.
         try:
             data = self._ctrl.load_arb_waveform_data(data_key)
         except ArbWaveformError as exc:
             self._preview.clear(str(exc))
             self._set_warning(str(exc))
             return
+        self._current_data_key = data_key
+        self._data_key_edit.setText(data_key)
         if data.recipe is None:
             # Asset has no formula recipe; seed the editor with a placeholder.
             self._set_segments(
@@ -534,9 +539,11 @@ class ArbWaveformDialog(QDialog):
         self._valid_data = data
         self._render_error = None
         if data.recipe is None:
-            # Override apply_feedback's message with the no-recipe notice.
+            # Override apply_feedback's message with the no-recipe notice
+            # (informational, not an error).
             self._set_warning(
-                "Selected asset has no formula recipe; saving will overwrite its data."
+                "Selected asset has no formula recipe; saving will overwrite its data.",
+                is_error=False,
             )
 
     # ------------------------------------------------------------------
@@ -548,7 +555,7 @@ class ArbWaveformDialog(QDialog):
         self._data_key_edit.setText(self._next_data_key())
         self._set_segments(_DEFAULT_RECIPE)
         self._preview.clear("Preview updates after a valid recipe")
-        self._render_error = None
+        # _on_structure_changed clears _render_error before re-validating.
         self._on_structure_changed()
 
     def _set_segments(self, recipe: FormulaRecipe) -> None:
@@ -640,6 +647,9 @@ class ArbWaveformDialog(QDialog):
             QMessageBox.critical(self, "Save failed", str(exc))
             return
         self._current_data_key = data_key
+        # A pending debounce render would re-render the same recipe we just
+        # persisted; cancel it (the reload below repaints the preview).
+        self._preview_timer.stop()
         # Reload try (separate): reload failure is distinct from save failure.
         try:
             data = self._ctrl.load_arb_waveform_data(data_key)
@@ -719,7 +729,10 @@ class ArbWaveformDialog(QDialog):
     # Helpers
     # ------------------------------------------------------------------
 
-    def _set_warning(self, message: str) -> None:
+    def _set_warning(self, message: str, *, is_error: bool = True) -> None:
+        # Error feedback is red; purely informational notices (e.g. the
+        # no-recipe selection notice) use a non-alarming amber instead.
+        self._warning.setStyleSheet("color: red;" if is_error else "color: #b36b00;")
         self._warning.setText(message)
         self._warning.setVisible(bool(message))
 

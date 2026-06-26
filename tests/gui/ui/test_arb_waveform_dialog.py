@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import time
 from typing import Any
-from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -426,6 +425,36 @@ def test_B7_reload_failure_reports_reload_failed_not_save_failed(
     # Error reported as "Reload failed", not "Save failed".
     assert len(critical_calls) == 1
     assert critical_calls[0][0] == "Reload failed"
+
+
+def test_asset_load_failure_keeps_editor_state(qapp, monkeypatch) -> None:  # noqa: ARG001
+    """Selecting an asset whose load fails must not mutate editor state.
+
+    The load runs before _current_data_key / the data_key field are updated, so
+    a failed selection leaves the draft intact — its recipe cannot be saved
+    under the unloadable key (item-3 fail-fast / consistency fix).
+    """
+    from zcu_tools.meta_tool import ArbWaveformError
+
+    ctrl = _FakeController()
+    dlg = ArbWaveformDialog(ctrl)  # type: ignore[arg-type]
+    draft_key = dlg._data_key_edit.text()
+
+    # Simulate selecting an asset that lists fine but fails to load.
+    monkeypatch.setattr(dlg, "_selected_data_key", lambda: "broken")
+
+    def _raise_load(data_key: str) -> ArbWaveformData:
+        raise ArbWaveformError("corrupt asset", reason="load_failed")
+
+    monkeypatch.setattr(ctrl, "load_arb_waveform_data", _raise_load)
+
+    dlg._on_asset_selection_changed()
+
+    assert dlg._data_key_edit.text() == draft_key
+    assert dlg._current_data_key is None
+    # Warning is shown (the dialog is never .show()n in tests, so check the
+    # explicit hidden flag rather than isVisible(), which needs a shown ancestry).
+    assert not dlg._warning.isHidden()
 
 
 # ---------------------------------------------------------------------------
