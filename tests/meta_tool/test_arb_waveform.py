@@ -5,6 +5,7 @@ import json
 import numpy as np
 import pytest
 from zcu_tools.meta_tool import (
+    ArbWaveformData,
     ArbWaveformDatabase,
     ArbWaveformError,
     ArbWaveformPreview,
@@ -235,7 +236,7 @@ def test_collision_update_delete_and_rename_policy(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def _make_data(i: float, q: float, duration: float = 0.002) -> object:
+def _make_data(i: float, q: float, duration: float = 0.002) -> ArbWaveformData:
     """Helper: render a constant I+Q waveform via formula."""
     return render_formula_recipe(
         {
