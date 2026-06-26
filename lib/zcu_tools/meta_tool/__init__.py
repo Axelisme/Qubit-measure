@@ -6,9 +6,11 @@ from .arb_waveform import (
     ArbWaveformError,
     ArbWaveformInfo,
     ArbWaveformListEntry,
+    ArbWaveformPreview,
     FormulaRecipe,
     FormulaSegment,
     FormulaValidationResult,
+    prepare_preview_series,
     render_formula_recipe,
     validate_payload,
 )
@@ -26,9 +28,11 @@ __all__ = [
     "ArbWaveformError",
     "ArbWaveformInfo",
     "ArbWaveformListEntry",
+    "ArbWaveformPreview",
     "FormulaRecipe",
     "FormulaSegment",
     "FormulaValidationResult",
+    "prepare_preview_series",
     "render_formula_recipe",
     "validate_payload",
     # library

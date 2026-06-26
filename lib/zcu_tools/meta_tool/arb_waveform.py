@@ -225,6 +225,46 @@ class ArbWaveformInfo:
 
 
 @dataclass(frozen=True)
+class ArbWaveformPreview:
+    """Peak-normalized (optional) I/Q/Abs series ready for preview rendering.
+
+    Keeps GUI and agent-PNG callers consistent without each reimplementing the
+    normalization arithmetic.  All arrays share the same sample count as the
+    source ArbWaveformData.  ADR-0034: preview series generation is domain logic.
+    """
+
+    time: NDArray[np.float64]
+    idata: NDArray[np.float64]
+    qdata: NDArray[np.float64]
+    abs_data: NDArray[np.float64]
+
+
+def prepare_preview_series(
+    data: ArbWaveformData, *, normalize: bool
+) -> ArbWaveformPreview:
+    """Peak-normalize (optional) and derive I/Q/Abs series for preview rendering.
+
+    When normalize=True and peak>0, each channel is divided by the peak |IQ|.
+    When peak==0 the raw (all-zero) data is returned unchanged to avoid division
+    by zero.  abs_data is always computed from the (possibly normalized) I/Q.
+    """
+    idata = np.asarray(data.idata, dtype=np.float64)
+    qdata = np.asarray(data.qdata, dtype=np.float64)
+    if normalize:
+        peak = float(np.max(np.hypot(idata, qdata)))
+        if peak > 0.0:
+            idata = idata / peak
+            qdata = qdata / peak
+    abs_data = np.hypot(idata, qdata)
+    return ArbWaveformPreview(
+        time=np.asarray(data.time, dtype=np.float64),
+        idata=idata,
+        qdata=qdata,
+        abs_data=abs_data,
+    )
+
+
+@dataclass(frozen=True)
 class FormulaValidationResult:
     ok: bool
     data: ArbWaveformData | None = None

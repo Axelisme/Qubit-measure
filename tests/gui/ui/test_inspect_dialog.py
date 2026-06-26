@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
 from zcu_tools.gui.app.main.ui import inspect_dialog
 from zcu_tools.gui.app.main.ui.inspect_dialog import (
     InspectDialog,
@@ -158,6 +159,19 @@ def test_inspect_dialog_toolbar_has_arb_waveforms_before_refresh(qapp):
     dialog._arb_waveform_btn.click()
 
     assert parent.opened == [DialogName.ARB_WAVEFORM]
+
+
+def test_C9_inspect_dialog_raises_when_parent_has_no_open_dialog(qapp):
+    """_on_arb_waveform_clicked must raise RuntimeError when parent lacks open_dialog."""
+    from qtpy.QtWidgets import QWidget  # type: ignore[attr-defined]
+
+    # Parent is a plain QWidget with no open_dialog attribute.
+    bare_parent = QWidget()
+    ctrl = _make_ctrl_with_ml(_make_ml())
+    dialog = InspectDialog(ctrl, MagicMock(), parent=bare_parent)
+
+    with pytest.raises(RuntimeError, match="open_dialog"):
+        dialog._on_arb_waveform_clicked()
 
 
 def test_inspect_dialog_md_edit(qapp):

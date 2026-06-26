@@ -1,6 +1,6 @@
 # QICK Note for `meta_tool`
 
-**Last updated:** 2026-06-26（ArbWaveformDatabase single-file recipes）
+**Last updated:** 2026-06-26（prepare_preview_series domain helper）
 
 這份筆記整理 `meta_tool/` 的設計，說明各類別的職責、同步機制與使用模式。
 
@@ -227,6 +227,8 @@ data = ArbWaveformDatabase.load("my_pulse")
 - `Abs = hypot(I, Q)` 必須落在 `[0, 1]`；I/Q 可為負值。
 - formula recipe 是可選資料；用 recipe 生成等於完全覆寫原本 data，並把 recipe 一起寫入同一個 `.npz`。
 - 被 `ArbWaveform`（`modules/waveform.py`）在建立波形時 lazy load；若 requested sample count 小於 asset data 長度，使用端只截斷並寫 logger warning，不做縮放。
+
+**Preview helper（ADR-0034）**：`prepare_preview_series(data, normalize: bool) -> ArbWaveformPreview` 是純 numpy domain 函式，統一計算 peak-normalize（可選）+ I/Q/Abs 三條 series。GUI dialog 與 agent PNG service 共用此 helper，而非各自重寫 normalization 算式。
 
 ---
 

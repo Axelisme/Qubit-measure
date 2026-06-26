@@ -4,13 +4,12 @@ from pathlib import Path
 from tempfile import gettempdir
 from typing import TYPE_CHECKING
 
-import numpy as np
-
 from zcu_tools.meta_tool import (
     ArbWaveformData,
     ArbWaveformDatabase,
     ArbWaveformInfo,
     FormulaRecipe,
+    prepare_preview_series,
 )
 
 if TYPE_CHECKING:
@@ -122,21 +121,16 @@ def render_preview_png(
     fig = Figure(figsize=(6.4, 4.0), dpi=100)
     FigureCanvasAgg(fig)
     ax = fig.subplots()
-    idata = np.asarray(data.idata, dtype=np.float64)
-    qdata = np.asarray(data.qdata, dtype=np.float64)
-    peak_abs = float(np.max(np.hypot(idata, qdata)))
-    if peak_abs > 0.0:
-        idata = idata / peak_abs
-        qdata = qdata / peak_abs
-    abs_data = np.hypot(idata, qdata)
-    ax.plot(data.time, idata, label="I")
-    ax.plot(data.time, qdata, label="Q")
-    ax.plot(data.time, abs_data, label="Abs")
+    # Agent/MCP PNG always uses normalized output; GUI dialog respects user toggle.
+    series = prepare_preview_series(data, normalize=True)
+    ax.plot(series.time, series.idata, label="I")
+    ax.plot(series.time, series.qdata, label="Q")
+    ax.plot(series.time, series.abs_data, label="Abs")
     ax.set_title(data_key)
     ax.set_xlabel("Time (us)")
     ax.set_ylabel("Normalized amplitude")
     ax.set_ylim(-1.0, 1.0)
-    ax.set_xlim(float(data.time[0]), float(data.time[-1]))
+    ax.set_xlim(float(series.time[0]), float(series.time[-1]))
     ax.grid(True, alpha=0.3)
     ax.legend(loc="best")
     fig.tight_layout()

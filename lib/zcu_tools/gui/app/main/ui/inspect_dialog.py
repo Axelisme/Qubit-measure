@@ -284,7 +284,6 @@ class InspectDialog(InspectDialogBase):
     # Narrow the base's SessionControllerPort to the concrete Controller, whose
     # CfgEditor methods (open/commit/teardown) the edit dialogs below call.
     _ctrl: Controller
-    _arb_waveform_dialog: QDialog | None = None
 
     def _build_extra_toolbar_buttons(self, toolbar: QHBoxLayout) -> None:
         self._arb_waveform_btn = QPushButton("Arb Waveforms…")
@@ -301,31 +300,15 @@ class InspectDialog(InspectDialogBase):
         self._modify_ml_btn.clicked.connect(self._on_modify_ml_clicked)
 
     def _on_arb_waveform_clicked(self) -> None:
+        # InspectDialog is always parented to MainWindow, which provides open_dialog.
+        # The local fallback was dead code that could create a registry-invisible
+        # dialog; removed for Fast-Fail clarity (ADR-0002).
         opener = getattr(self.parent(), "open_dialog", None)
-        if callable(opener):
-            opener(DialogName.ARB_WAVEFORM)
-            return
-
-        existing = self._arb_waveform_dialog
-        if existing is not None:
-            try:
-                existing.raise_()
-                existing.activateWindow()
-                if not existing.isVisible():
-                    existing.show()
-                return
-            except RuntimeError:
-                self._arb_waveform_dialog = None
-
-        from .arb_waveform_dialog import ArbWaveformDialog
-
-        dlg = ArbWaveformDialog(self._ctrl, parent=self)
-        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        self._arb_waveform_dialog = dlg
-        dlg.finished.connect(
-            lambda _status: setattr(self, "_arb_waveform_dialog", None)
-        )
-        dlg.open()
+        if not callable(opener):
+            raise RuntimeError(
+                "InspectDialog must be parented to a window providing open_dialog()"
+            )
+        opener(DialogName.ARB_WAVEFORM)
 
     def _on_ml_selection_changed(self, enabled: bool) -> None:
         self._modify_ml_btn.setEnabled(enabled)

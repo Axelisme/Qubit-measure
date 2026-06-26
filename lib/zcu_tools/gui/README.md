@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-06-14 (non-blocking dialog convention)
+**Last updated:** 2026-06-26 (short-lived modal carve-out)
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -19,6 +19,16 @@ The measure registry path (`MainWindow.open_dialog` / `close_dialog`) is detaile
 in `app/main/services/remote/README.md`. The sole intentional `exec()` is the
 global unhandled-exception hook in `app/main/utils/error_handler.py`, where the
 process is already crashing and the message must block.
+
+Short-lived modal confirmations, error reports, and text prompts are the
+deliberate exception. A synchronous `QMessageBox.question` / `.warning` /
+`.critical` or `QInputDialog.getText` may block: it is raised by a direct,
+synchronous user action while no operation is in flight, carries no
+long-running flow, and never marshals a worker result back to the main
+thread. Its nested modal loop still services the control socket's queued
+notifier, so it neither stalls startup nor deadlocks cross-thread
+marshalling. The `open()` rule still governs every dialog that hosts a
+long-running flow or can surface while an operation is running.
 
 ## Logging (`logging_setup.py`)
 

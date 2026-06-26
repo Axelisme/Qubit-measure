@@ -7,7 +7,9 @@ import pytest
 from zcu_tools.meta_tool import (
     ArbWaveformDatabase,
     ArbWaveformError,
+    ArbWaveformPreview,
     FormulaRecipe,
+    prepare_preview_series,
     render_formula_recipe,
 )
 
@@ -226,3 +228,60 @@ def test_collision_update_delete_and_rename_policy(tmp_path):
     assert missing_update_exc.value.reason == "data_key_not_found"
     assert rename_collision_exc.value.reason == "data_key_exists"
     assert ArbWaveformDatabase.list() == ["asset_b"]
+
+
+# ---------------------------------------------------------------------------
+# D10. prepare_preview_series unit tests
+# ---------------------------------------------------------------------------
+
+
+def _make_data(i: float, q: float, duration: float = 0.002) -> object:
+    """Helper: render a constant I+Q waveform via formula."""
+    return render_formula_recipe(
+        {
+            "segments": [{"duration": duration, "formula": f"{i} + {q}*I"}],
+            "normalize": "none",
+        }
+    )
+
+
+def test_D10_prepare_preview_series_normalize_true_divides_by_peak():
+    """normalize=True: I/Q are divided by the peak |IQ|; abs_data == hypot(i, q)."""
+    data = _make_data(i=0.3, q=0.4)
+    expected_peak = float(np.hypot(0.3, 0.4))
+
+    series = prepare_preview_series(data, normalize=True)
+
+    assert isinstance(series, ArbWaveformPreview)
+    assert np.allclose(series.idata, np.asarray(data.idata) / expected_peak)
+    assert np.allclose(series.qdata, np.asarray(data.qdata) / expected_peak)
+    assert np.allclose(series.abs_data, np.hypot(series.idata, series.qdata))
+    assert np.allclose(series.time, data.time)
+
+
+def test_D10_prepare_preview_series_normalize_false_keeps_raw():
+    """normalize=False: I/Q are unchanged; abs_data == hypot(i, q)."""
+    data = _make_data(i=0.3, q=0.4)
+
+    series = prepare_preview_series(data, normalize=False)
+
+    assert np.allclose(series.idata, data.idata)
+    assert np.allclose(series.qdata, data.qdata)
+    assert np.allclose(series.abs_data, np.hypot(data.idata, data.qdata))
+
+
+def test_D10_prepare_preview_series_all_zero_no_division_error():
+    """All-zero waveform with normalize=True must not raise a ZeroDivisionError."""
+    data = render_formula_recipe(
+        {
+            "segments": [{"duration": 0.002, "formula": "0"}],
+            "normalize": "none",
+        }
+    )
+
+    series = prepare_preview_series(data, normalize=True)
+
+    # Peak is 0 → no division; raw (all-zero) data returned unchanged.
+    assert np.all(series.idata == 0.0)
+    assert np.all(series.qdata == 0.0)
+    assert np.all(series.abs_data == 0.0)

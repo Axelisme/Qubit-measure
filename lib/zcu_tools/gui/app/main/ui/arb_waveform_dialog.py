@@ -29,21 +29,30 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.meta_tool import ArbWaveformData, ArbWaveformError, render_formula_recipe
+from zcu_tools.meta_tool import (
+    ArbWaveformData,
+    ArbWaveformError,
+    FormulaRecipe,
+    prepare_preview_series,
+    render_formula_recipe,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.controller import Controller
 
 
 _DATA_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
-_DEFAULT_RECIPE = {
-    "segments": [
-        {"duration": 0.2, "formula": "exp(-0.5*((t-0.2)/0.05)**2)"},
-        {"duration": 0.6, "formula": "1"},
-        {"duration": 0.2, "formula": "exp(-0.5*(t/0.05)**2)"},
-    ],
-    "normalize": "peak",
-}
+# Evaluated once at import; from_raw is cheap (structure validation only, no render).
+_DEFAULT_RECIPE: FormulaRecipe = FormulaRecipe.from_raw(
+    {
+        "segments": [
+            {"duration": 0.2, "formula": "exp(-0.5*((t-0.2)/0.05)**2)"},
+            {"duration": 0.6, "formula": "1"},
+            {"duration": 0.2, "formula": "exp(-0.5*(t/0.05)**2)"},
+        ],
+        "normalize": "peak",
+    }
+)
 _PREVIEW_DEBOUNCE_MS = 250
 
 
@@ -92,35 +101,30 @@ class _PreviewCanvas(QWidget):
         self.canvas.draw_idle()
 
     def plot(self, data_key: str, data: ArbWaveformData, *, normalize: bool) -> None:
-        time = np.asarray(data.time, dtype=np.float64)
-        idata = np.asarray(data.idata, dtype=np.float64)
-        qdata = np.asarray(data.qdata, dtype=np.float64)
-        if normalize:
-            peak = float(np.max(np.hypot(idata, qdata)))
-        else:
-            peak = 0.0
-        if normalize and peak > 0.0:
-            idata = idata / peak
-            qdata = qdata / peak
-        abs_data = np.hypot(idata, qdata)
+        # Delegate normalize + I/Q/Abs computation to the domain helper (ADR-0034).
+        series = prepare_preview_series(data, normalize=normalize)
 
-        self._time = time
-        self._idata = idata
-        self._qdata = qdata
-        self._abs_data = abs_data
+        self._time = series.time
+        self._idata = series.idata
+        self._qdata = series.qdata
+        self._abs_data = series.abs_data
 
         self._ax.clear()
-        (self._i_line,) = self._ax.plot(time, idata, label="I:0.00")
-        (self._q_line,) = self._ax.plot(time, qdata, label="Q:0.00")
-        (self._abs_line,) = self._ax.plot(time, abs_data, label="Abs:0.00")
-        self._marker = self._ax.axvline(float(time[0]), color="black", linewidth=1.0)
+        (self._i_line,) = self._ax.plot(series.time, series.idata, label="I:0.00")
+        (self._q_line,) = self._ax.plot(series.time, series.qdata, label="Q:0.00")
+        (self._abs_line,) = self._ax.plot(
+            series.time, series.abs_data, label="Abs:0.00"
+        )
+        self._marker = self._ax.axvline(
+            float(series.time[0]), color="black", linewidth=1.0
+        )
         self._ax.set_title(data_key)
         self._ax.set_xlabel("Time (us)")
         self._ax.set_ylabel("Normalized amplitude" if normalize else "Amplitude")
-        self._ax.set_xlim(float(time[0]), float(time[-1]))
-        self._ax.set_ylim(self._data_ylim(idata, qdata, abs_data))
+        self._ax.set_xlim(float(series.time[0]), float(series.time[-1]))
+        self._ax.set_ylim(self._data_ylim(series.idata, series.qdata, series.abs_data))
         self._ax.grid(True, alpha=0.3)
-        self._move_marker(float(time[0]), draw=False)
+        self._move_marker(float(series.time[0]), draw=False)
         self.figure.tight_layout()
         self.canvas.draw_idle()
 
@@ -200,11 +204,18 @@ class ArbWaveformDialog(QDialog):
         self._ctrl = ctrl
         self._current_data_key: str | None = None
         self._suppress_segment_change = False
-        self._valid_recipe: dict[str, object] | None = None
+        # Cheap path state: updated synchronously on every structure/data_key change.
+        # _valid_recipe is set by _validate_structure (cheap, no render).
+        self._valid_recipe: FormulaRecipe | None = None
+        self._data_key_error: str | None = None
+        self._structure_error: str | None = None
+        # Deep path state: updated only by the debounce timer callback.
         self._valid_data: ArbWaveformData | None = None
+        self._render_error: str | None = None
+        # Debounce timer fires _render_preview (the expensive render path).
         self._preview_timer = QTimer(self)
         self._preview_timer.setSingleShot(True)
-        self._preview_timer.timeout.connect(self._preview_valid_recipe)
+        self._preview_timer.timeout.connect(self._render_preview)
 
         self.setWindowTitle("Arbitrary Waveforms")
         self.setMinimumSize(980, 720)
@@ -254,7 +265,7 @@ class ArbWaveformDialog(QDialog):
                 self._asset_table.setItem(row, col, item)
         if selected:
             self._select_data_key(selected)
-        self._validate_recipe(schedule_preview=False)
+        self._revalidate_cheap()
 
     def _build_asset_group(self) -> QGroupBox:
         group = QGroupBox("Assets")
@@ -311,7 +322,7 @@ class ArbWaveformDialog(QDialog):
         segment_header = self._segment_table.horizontalHeader()
         segment_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         segment_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self._segment_table.cellChanged.connect(self._validate_recipe)
+        self._segment_table.cellChanged.connect(self._on_structure_changed)
         layout.addWidget(self._segment_table)
 
         segment_btns = QHBoxLayout()
@@ -342,8 +353,9 @@ class ArbWaveformDialog(QDialog):
         self._warning.setVisible(False)
         layout.addWidget(self._warning)
 
-        self._data_key_edit.textChanged.connect(self._validate_recipe)
-        self._normalize_check.toggled.connect(self._validate_recipe)
+        # data_key edits only re-validate the key; structure/render state is unchanged.
+        self._data_key_edit.textChanged.connect(self._on_data_key_changed)
+        self._normalize_check.toggled.connect(self._on_structure_changed)
         self._insert_before_btn.clicked.connect(
             lambda: self._insert_segment(before=True)
         )
@@ -353,6 +365,128 @@ class ArbWaveformDialog(QDialog):
         self._delete_segment_btn.clicked.connect(self._delete_segment)
         self._save_btn.clicked.connect(self._save_recipe)
         return group
+
+    # ------------------------------------------------------------------
+    # Cheap validation primitives (no render_formula_recipe call)
+    # ------------------------------------------------------------------
+
+    def _validate_data_key(self) -> bool:
+        data_key = self._data_key_edit.text().strip()
+        if not _DATA_KEY_RE.fullmatch(data_key):
+            self._data_key_error = "data_key must match ^[A-Za-z][A-Za-z0-9_]*$"
+            return False
+        self._data_key_error = None
+        return True
+
+    def _validate_structure(self) -> FormulaRecipe | None:
+        """Construct FormulaRecipe from UI state (cheap: no render_formula_recipe).
+
+        Sets _valid_recipe as a side effect so the cheap path always holds a
+        fresh recipe object for save to use without triggering another render.
+        """
+        try:
+            recipe = self._recipe_from_ui()
+        except (ArbWaveformError, ValueError) as exc:
+            self._structure_error = str(exc)
+            self._valid_recipe = None
+            return None
+        self._structure_error = None
+        self._valid_recipe = recipe
+        return recipe
+
+    def _apply_feedback(self) -> None:
+        """Push consolidated error/warning to the UI; gate the Save button.
+
+        Priority: data_key > structure > render (single warning label).
+        Save is enabled only when all three error slots are None.
+        """
+        message = (
+            self._data_key_error or self._structure_error or self._render_error or ""
+        )
+        self._set_warning(message)
+        self._save_btn.setEnabled(
+            self._data_key_error is None
+            and self._structure_error is None
+            and self._render_error is None
+        )
+
+    def _revalidate_cheap(self) -> None:
+        """Re-run cheap validation only; does not touch the timer or render."""
+        self._validate_data_key()
+        self._validate_structure()
+        self._apply_feedback()
+
+    # ------------------------------------------------------------------
+    # Edit event slots
+    # ------------------------------------------------------------------
+
+    def _on_structure_changed(self, *_: object) -> None:
+        """Slot for cellChanged / normalize toggled.
+
+        Runs cheap validation immediately; clears old render verdict (pending);
+        restarts debounce timer for the expensive render path if structure is valid.
+        """
+        if self._suppress_segment_change:
+            return
+        recipe = self._validate_structure()
+        # Structure changed → old render result is stale; mark pending.
+        self._render_error = None
+        self._apply_feedback()
+        if recipe is None:
+            # Broken structure: stop timer and clear deep-path cache.
+            self._preview_timer.stop()
+            self._valid_data = None
+            return
+        self._preview_timer.start(_PREVIEW_DEBOUNCE_MS)
+
+    def _on_data_key_changed(self, *_: object) -> None:
+        """Slot for data_key textChanged.
+
+        Only re-validates the key; never touches the timer or renders.  data_key
+        has no effect on the waveform shape, so triggering render here would be
+        wasteful and confusing (preview title is not SSOT).
+        """
+        self._validate_data_key()
+        self._apply_feedback()
+
+    # ------------------------------------------------------------------
+    # Debounced render (expensive path — only called by QTimer.timeout)
+    # ------------------------------------------------------------------
+
+    def _render_preview(self) -> None:
+        """Expensive render triggered by debounce timer.
+
+        Re-reads UI state (avoids relying on a snapshot taken at edit time).
+        On failure: clears _valid_data, sets _render_error, disables Save.
+        On success: sets _valid_data, clears _render_error, enables Save, plots preview.
+        Invariant after settle: warning visible ⟺ Save disabled.
+        """
+        recipe = self._validate_structure()  # re-read; also updates _valid_recipe
+        if recipe is None:
+            self._valid_data = None
+            self._render_error = None
+            self._apply_feedback()
+            return
+        try:
+            data = render_formula_recipe(recipe)
+        except (ArbWaveformError, ValueError) as exc:
+            # Render failure: no half-baked state — clear _valid_data.
+            self._valid_data = None
+            self._render_error = str(exc)
+            self._apply_feedback()
+            return
+        self._valid_data = data
+        self._render_error = None
+        self._apply_feedback()
+        self._preview.plot(
+            self._data_key_edit.text().strip(),
+            data,
+            normalize=self._normalize_check.isChecked(),
+        )
+
+    # ------------------------------------------------------------------
+    # Asset selection
+    # ------------------------------------------------------------------
 
     def _selected_data_key(self) -> str | None:
         row = self._asset_table.currentRow()
@@ -381,46 +515,55 @@ class ArbWaveformDialog(QDialog):
             self._set_warning(str(exc))
             return
         if data.recipe is None:
+            # Asset has no formula recipe; seed the editor with a placeholder.
             self._set_segments(
-                [{"duration": max(data.duration, 1e-6), "formula": "0"}],
-                normalize="peak",
+                FormulaRecipe.from_raw(
+                    {
+                        "segments": [
+                            {"duration": max(data.duration, 1e-6), "formula": "0"}
+                        ],
+                        "normalize": "peak",
+                    }
+                )
             )
+        else:
+            self._set_segments(data.recipe)
+        self._revalidate_cheap()
+        # Use already-loaded data directly; no debounce render needed.
+        self._preview.plot(data_key, data, normalize=self._normalize_check.isChecked())
+        self._valid_data = data
+        self._render_error = None
+        if data.recipe is None:
+            # Override apply_feedback's message with the no-recipe notice.
             self._set_warning(
                 "Selected asset has no formula recipe; saving will overwrite its data."
             )
-        else:
-            self._set_segments(
-                data.recipe.to_dict()["segments"], normalize=data.recipe.normalize
-            )
-        self._validate_recipe(schedule_preview=False)
-        self._preview.plot(data_key, data, normalize=self._normalize_check.isChecked())
+
+    # ------------------------------------------------------------------
+    # Draft management
+    # ------------------------------------------------------------------
 
     def _reset_draft(self) -> None:
         self._current_data_key = None
         self._data_key_edit.setText(self._next_data_key())
-        self._set_segments(_DEFAULT_RECIPE["segments"], normalize="peak")
+        self._set_segments(_DEFAULT_RECIPE)
         self._preview.clear("Preview updates after a valid recipe")
-        self._validate_recipe()
+        self._render_error = None
+        self._on_structure_changed()
 
-    def _set_segments(self, segments: object, *, normalize: str) -> None:
+    def _set_segments(self, recipe: FormulaRecipe) -> None:
+        """Populate segment table from a typed FormulaRecipe; suppresses cellChanged."""
         self._suppress_segment_change = True
         try:
-            self._normalize_check.setChecked(normalize != "none")
+            self._normalize_check.setChecked(recipe.normalize == "peak")
             self._segment_table.setRowCount(0)
-            if isinstance(segments, list):
-                for segment in segments:
-                    if not isinstance(segment, dict):
-                        continue
-                    self._append_segment(
-                        duration=segment.get("duration", 1.0),
-                        formula=segment.get("formula", "0"),
-                    )
-            if self._segment_table.rowCount() == 0:
-                self._append_segment(duration=1.0, formula="0")
+            for segment in recipe.segments:
+                # from_raw guarantees ≥1 segment; no empty-table fallback needed.
+                self._append_segment(duration=segment.duration, formula=segment.formula)
         finally:
             self._suppress_segment_change = False
 
-    def _append_segment(self, *, duration: object, formula: object) -> None:
+    def _append_segment(self, *, duration: float, formula: str) -> None:
         row = self._segment_table.rowCount()
         self._segment_table.insertRow(row)
         self._segment_table.setItem(row, 0, QTableWidgetItem(str(duration)))
@@ -432,11 +575,16 @@ class ArbWaveformDialog(QDialog):
             row = self._segment_table.rowCount()
         elif not before:
             row += 1
-        self._segment_table.insertRow(row)
-        self._segment_table.setItem(row, 0, QTableWidgetItem("1.0"))
-        self._segment_table.setItem(row, 1, QTableWidgetItem("0"))
+        # Suppress cellChanged from setItem; fire a single _on_structure_changed after.
+        self._suppress_segment_change = True
+        try:
+            self._segment_table.insertRow(row)
+            self._segment_table.setItem(row, 0, QTableWidgetItem("1.0"))
+            self._segment_table.setItem(row, 1, QTableWidgetItem("0"))
+        finally:
+            self._suppress_segment_change = False
         self._segment_table.selectRow(row)
-        self._validate_recipe()
+        self._on_structure_changed()
 
     def _delete_segment(self) -> None:
         if self._segment_table.rowCount() <= 1:
@@ -445,67 +593,37 @@ class ArbWaveformDialog(QDialog):
         if row < 0:
             row = self._segment_table.rowCount() - 1
         self._segment_table.removeRow(row)
-        self._validate_recipe()
+        self._on_structure_changed()
 
-    def _recipe_from_ui(self) -> dict[str, object]:
-        segments: list[dict[str, object]] = []
+    def _recipe_from_ui(self) -> FormulaRecipe:
+        """Read the segment table and normalize checkbox into a typed FormulaRecipe.
+
+        Passes duration as a string so _coerce_positive_float handles both numeric
+        and textual input in a single validation point inside from_raw.
+        """
+        raw_segments: list[dict[str, object]] = []
         for row in range(self._segment_table.rowCount()):
             duration_item = self._segment_table.item(row, 0)
             formula_item = self._segment_table.item(row, 1)
             duration_text = duration_item.text().strip() if duration_item else ""
             formula = formula_item.text().strip() if formula_item else ""
-            segments.append({"duration": float(duration_text), "formula": formula})
+            raw_segments.append({"duration": duration_text, "formula": formula})
         normalize = "peak" if self._normalize_check.isChecked() else "none"
-        return {"segments": segments, "normalize": normalize}
-
-    def _validate_recipe(self, *_: object, schedule_preview: bool = True) -> None:
-        if self._suppress_segment_change:
-            return
-        data_key = self._data_key_edit.text().strip()
-        if not _DATA_KEY_RE.fullmatch(data_key):
-            self._valid_recipe = None
-            self._valid_data = None
-            self._preview_timer.stop()
-            self._set_warning("data_key must match ^[A-Za-z][A-Za-z0-9_]*$")
-            self._save_btn.setEnabled(False)
-            return
-        try:
-            recipe = self._recipe_from_ui()
-            data = render_formula_recipe(recipe)
-        except (ArbWaveformError, ValueError) as exc:
-            self._valid_recipe = None
-            self._valid_data = None
-            self._preview_timer.stop()
-            self._set_warning(str(exc))
-            self._save_btn.setEnabled(False)
-            return
-        self._valid_recipe = recipe
-        self._valid_data = data
-        self._set_warning("")
-        self._save_btn.setEnabled(True)
-        if schedule_preview:
-            self._preview_timer.start(_PREVIEW_DEBOUNCE_MS)
-
-    def _set_warning(self, message: str) -> None:
-        self._warning.setText(message)
-        self._warning.setVisible(bool(message))
-
-    def _preview_valid_recipe(self) -> None:
-        data = self._valid_data
-        if data is None:
-            return
-        self._preview.plot(
-            self._data_key_edit.text().strip(),
-            data,
-            normalize=self._normalize_check.isChecked(),
+        return FormulaRecipe.from_raw(
+            {"segments": raw_segments, "normalize": normalize}
         )
 
+    # ------------------------------------------------------------------
+    # Save path (override design: render done once inside service)
+    # ------------------------------------------------------------------
+
     def _save_recipe(self) -> None:
-        self._validate_recipe(schedule_preview=False)
-        recipe = self._valid_recipe
         data_key = self._data_key_edit.text().strip()
+        if not _DATA_KEY_RE.fullmatch(data_key):
+            return  # Save gate should have blocked; defensive return.
+        recipe = self._valid_recipe  # cheap path keeps this fresh
         if recipe is None:
-            return
+            return  # Save gate should have blocked; defensive return.
         exists = data_key in self._known_data_keys()
         if exists and data_key != self._current_data_key:
             answer = QMessageBox.question(
@@ -515,16 +633,28 @@ class ArbWaveformDialog(QDialog):
             )
             if answer != QMessageBox.StandardButton.Yes:
                 return
+        # Save try: service renders the recipe once and persists it.
         try:
             self._ctrl.set_arb_waveform(data_key, recipe, overwrite=exists)
-            data = self._ctrl.load_arb_waveform_data(data_key)
         except Exception as exc:  # noqa: BLE001 — user-facing dialog boundary
             QMessageBox.critical(self, "Save failed", str(exc))
             return
         self._current_data_key = data_key
+        # Reload try (separate): reload failure is distinct from save failure.
+        try:
+            data = self._ctrl.load_arb_waveform_data(data_key)
+        except Exception as exc:  # noqa: BLE001 — user-facing dialog boundary
+            QMessageBox.critical(self, "Reload failed", str(exc))
+            self.refresh()
+            self._select_data_key(data_key)
+            return
         self._preview.plot(data_key, data, normalize=self._normalize_check.isChecked())
         self.refresh()
         self._select_data_key(data_key)
+
+    # ------------------------------------------------------------------
+    # Rename / delete
+    # ------------------------------------------------------------------
 
     def _rename_selected(self) -> None:
         old_key = self._selected_data_key()
@@ -584,6 +714,14 @@ class ArbWaveformDialog(QDialog):
         self._current_data_key = None
         self.refresh()
         self._reset_draft()
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _set_warning(self, message: str) -> None:
+        self._warning.setText(message)
+        self._warning.setVisible(bool(message))
 
     def _next_data_key(self) -> str:
         existing = self._known_data_keys()
