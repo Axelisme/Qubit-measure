@@ -182,12 +182,12 @@ def test_device_dialog_refresh_reloads_selected_device_info(qapp):
     dialog._list.setCurrentRow(0)
     panel = dialog._stack.currentWidget()
     assert isinstance(panel, _FakeDevicePanel)
-    assert panel._value_spin.value() == 1.0
+    assert panel._value_field.read_raw() == 1.0
 
     box["value"] = 2.0
     dialog._refresh_btn.click()
 
-    assert panel._value_spin.value() == 2.0
+    assert panel._value_field.read_raw() == 2.0
     ctrl.get_device_info.assert_called_once_with("fd")
 
 
@@ -208,12 +208,12 @@ def test_device_changed_repaints_selected_panel(qapp):
     dialog._list.setCurrentRow(0)
     panel = dialog._stack.currentWidget()
     assert isinstance(panel, _FakeDevicePanel)
-    assert panel._value_spin.value() == 1.0
+    assert panel._value_field.read_raw() == 1.0
 
     box["value"] = 2.0
     ctrl.get_bus.return_value.emit(DeviceChangedPayload(name="fd"))
 
-    assert panel._value_spin.value() == 2.0
+    assert panel._value_field.read_raw() == 2.0
 
 
 def test_device_changed_for_other_device_keeps_selection(qapp):
@@ -641,3 +641,241 @@ def test_device_dialog_close_keeps_setup_running_and_unsubscribes(qapp):
 
     ctrl.cancel_device_operation.assert_not_called()
     assert ctrl.get_bus.return_value._subs[DeviceSetupFinishedPayload] == []
+
+
+# ---------------------------------------------------------------------------
+# Eval mode / apply resolve tests
+# ---------------------------------------------------------------------------
+
+
+def _make_ctrl_with_md(flx_int: float = 0.5) -> MagicMock:
+    """Build a ctrl mock pre-loaded with a MetaDict containing flx_int."""
+    from zcu_tools.meta_tool import MetaDict
+
+    md = MetaDict()
+    md.flx_int = flx_int
+
+    ctrl = _make_ctrl()
+    ctrl.get_current_md.return_value = md
+    return ctrl
+
+
+def test_eval_apply_resolves_expression_to_float(qapp):
+    """Eval mode: apply resolves the expression to a concrete float and passes it
+    to start_setup_device. The resolved info.value must be a float, not an EvalRef."""
+    from zcu_tools.device.fake import FakeDeviceInfo
+    from zcu_tools.gui.session.ui.device_dialog import _FakeDevicePanel
+
+    ctrl = _make_ctrl_with_md(flx_int=0.5)
+    ctrl.list_devices.return_value = [_entry("fd")]
+    info = FakeDeviceInfo(address="none")
+    ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
+    ctrl.get_device_info.return_value = info
+
+    dialog = DeviceDialog(ctrl)
+    dialog._list.setCurrentRow(0)
+
+    panel = dialog._stack.currentWidget()
+    assert isinstance(panel, _FakeDevicePanel)
+    # Switch value field to eval mode and type an expression
+    panel._value_field._switch_to_eval()
+    panel._value_field._line_edit.setText("flx_int")
+
+    dialog._apply_btn.click()
+
+    ctrl.start_setup_device.assert_called_once()
+    (req,) = ctrl.start_setup_device.call_args.args
+    assert isinstance(req, SetupDeviceRequest)
+    assert req.name == "fd"
+    assert isinstance(req.info, FakeDeviceInfo)
+    assert req.info.value == pytest.approx(0.5)
+    assert isinstance(req.info.value, float)
+
+
+def test_eval_apply_fast_fails_on_undefined_name(qapp):
+    """Eval mode: apply with an undefined variable name fast-fails: status shown
+    in red, start_setup_device is NOT called."""
+    from zcu_tools.device.fake import FakeDeviceInfo
+    from zcu_tools.gui.session.ui.device_dialog import _FakeDevicePanel
+
+    ctrl = _make_ctrl_with_md()
+    ctrl.list_devices.return_value = [_entry("fd")]
+    info = FakeDeviceInfo(address="none")
+    ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
+    ctrl.get_device_info.return_value = info
+
+    dialog = DeviceDialog(ctrl)
+    dialog._list.setCurrentRow(0)
+
+    panel = dialog._stack.currentWidget()
+    assert isinstance(panel, _FakeDevicePanel)
+    panel._value_field._switch_to_eval()
+    panel._value_field._line_edit.setText("missing_var")
+
+    dialog._apply_btn.click()
+
+    ctrl.start_setup_device.assert_not_called()
+    assert "red" in dialog._add_status.styleSheet()
+    assert dialog._add_status.text() != ""
+
+
+def test_eval_apply_fast_fails_on_syntax_error(qapp):
+    """Eval mode: apply with a syntax-error expression fast-fails."""
+    from zcu_tools.device.fake import FakeDeviceInfo
+    from zcu_tools.gui.session.ui.device_dialog import _FakeDevicePanel
+
+    ctrl = _make_ctrl_with_md()
+    ctrl.list_devices.return_value = [_entry("fd")]
+    info = FakeDeviceInfo(address="none")
+    ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
+    ctrl.get_device_info.return_value = info
+
+    dialog = DeviceDialog(ctrl)
+    dialog._list.setCurrentRow(0)
+
+    panel = dialog._stack.currentWidget()
+    assert isinstance(panel, _FakeDevicePanel)
+    panel._value_field._switch_to_eval()
+    panel._value_field._line_edit.setText("r_f[")
+
+    dialog._apply_btn.click()
+
+    ctrl.start_setup_device.assert_not_called()
+    assert "red" in dialog._add_status.styleSheet()
+
+
+def test_eval_apply_no_context_fast_fails(qapp):
+    """When get_current_md() raises (no active context), apply fast-fails."""
+    from zcu_tools.device.fake import FakeDeviceInfo
+    from zcu_tools.gui.session.ui.device_dialog import _FakeDevicePanel
+
+    ctrl = _make_ctrl()
+    ctrl.get_current_md.side_effect = RuntimeError("no active context")
+    ctrl.list_devices.return_value = [_entry("fd")]
+    info = FakeDeviceInfo(address="none")
+    ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
+    ctrl.get_device_info.return_value = info
+
+    dialog = DeviceDialog(ctrl)
+    dialog._list.setCurrentRow(0)
+
+    panel = dialog._stack.currentWidget()
+    assert isinstance(panel, _FakeDevicePanel)
+    panel._value_field._switch_to_eval()
+    panel._value_field._line_edit.setText("flx_int")
+
+    dialog._apply_btn.click()
+
+    ctrl.start_setup_device.assert_not_called()
+    assert "red" in dialog._add_status.styleSheet()
+
+
+def test_direct_mode_apply_unchanged(qapp):
+    """Direct mode (no eval): apply behaviour is identical to the pre-eval baseline."""
+    from zcu_tools.device.fake import FakeDeviceInfo
+
+    ctrl = _make_ctrl_with_md()
+    ctrl.list_devices.return_value = [_entry("fd")]
+    info = FakeDeviceInfo(address="none", value=3.14)
+    ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
+    ctrl.get_device_info.return_value = info
+
+    dialog = DeviceDialog(ctrl)
+    dialog._list.setCurrentRow(0)
+
+    dialog._apply_btn.click()
+
+    ctrl.start_setup_device.assert_called_once()
+    (req,) = ctrl.start_setup_device.call_args.args
+    assert isinstance(req, SetupDeviceRequest)
+    assert req.name == "fd"
+    assert isinstance(req.info, FakeDeviceInfo)
+    # value should be the float passed through unchanged
+    assert req.info.value == pytest.approx(3.14)
+
+
+def test_eval_apply_out_of_range_fast_fails(qapp):
+    """Eval mode: rampstep expression resolves to 0 (below minimum=1e-9) → fast-fail.
+
+    This is the concrete ZeroDivisionError guard: eval must reject rampstep=0 at
+    apply time before the value ever reaches the driver's ramp logic.
+    """
+    from zcu_tools.device.fake import FakeDeviceInfo
+    from zcu_tools.gui.session.ui.device_dialog import _FakeDevicePanel
+
+    ctrl = _make_ctrl_with_md(flx_int=0.0)  # flx_int evaluates to 0.0
+    ctrl.list_devices.return_value = [_entry("fd")]
+    info = FakeDeviceInfo(address="none")
+    ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
+    ctrl.get_device_info.return_value = info
+
+    dialog = DeviceDialog(ctrl)
+    dialog._list.setCurrentRow(0)
+
+    panel = dialog._stack.currentWidget()
+    assert isinstance(panel, _FakeDevicePanel)
+    # rampstep_field has minimum=1e-9; expression evaluates to 0.0 → below minimum
+    panel._rampstep_field._switch_to_eval()
+    panel._rampstep_field._line_edit.setText("flx_int")
+
+    dialog._apply_btn.click()
+
+    ctrl.start_setup_device.assert_not_called()
+    assert "red" in dialog._add_status.styleSheet()
+    assert "rampstep" in dialog._add_status.text()
+
+
+def test_eval_apply_in_range_sends_setup(qapp):
+    """Eval mode: rampstep expression resolves within [1e-9, 1e9] → setup dispatched."""
+    from zcu_tools.device.fake import FakeDeviceInfo
+    from zcu_tools.gui.session.ui.device_dialog import _FakeDevicePanel
+
+    ctrl = _make_ctrl_with_md(flx_int=0.001)  # 0.001 is within [1e-9, 1e9]
+    ctrl.list_devices.return_value = [_entry("fd")]
+    info = FakeDeviceInfo(address="none")
+    ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
+    ctrl.get_device_info.return_value = info
+
+    dialog = DeviceDialog(ctrl)
+    dialog._list.setCurrentRow(0)
+
+    panel = dialog._stack.currentWidget()
+    assert isinstance(panel, _FakeDevicePanel)
+    panel._rampstep_field._switch_to_eval()
+    panel._rampstep_field._line_edit.setText("flx_int")
+
+    dialog._apply_btn.click()
+
+    ctrl.start_setup_device.assert_called_once()
+    (req,) = ctrl.start_setup_device.call_args.args
+    assert isinstance(req, SetupDeviceRequest)
+    assert req.name == "fd"
+    assert isinstance(req.info, FakeDeviceInfo)
+    assert req.info.rampstep == pytest.approx(0.001)
+
+
+def test_choice_field_unaffected_by_eval_mode(qapp):
+    """The 'output' combo (choice field) is never wrapped in EvalRef regardless
+    of whether any numeric field is in eval mode."""
+    from zcu_tools.device.fake import FakeDeviceInfo
+    from zcu_tools.gui.session.ui.device_dialog import _FakeDevicePanel
+
+    ctrl = _make_ctrl_with_md()
+    ctrl.list_devices.return_value = [_entry("fd")]
+    info = FakeDeviceInfo(address="none", output="on")
+    ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
+    ctrl.get_device_info.return_value = info
+
+    dialog = DeviceDialog(ctrl)
+    dialog._list.setCurrentRow(0)
+
+    panel = dialog._stack.currentWidget()
+    assert isinstance(panel, _FakeDevicePanel)
+    panel._value_field._switch_to_eval()
+    panel._value_field._line_edit.setText("flx_int")
+
+    dialog._apply_btn.click()
+
+    ctrl.start_setup_device.assert_called_once()
+    (req,) = ctrl.start_setup_device.call_args.args
+    assert req.info.output == "on"  # choice field passes through as plain string

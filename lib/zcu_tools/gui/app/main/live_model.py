@@ -198,7 +198,10 @@ class ScalarLiveField(LiveField):
     def _resolved_eval_value(self, value: EvalValue) -> EvalValue:
         from dataclasses import replace
 
-        from .expression import coerce_eval_result, evaluate_numeric_expr
+        from zcu_tools.gui.session.expression import (
+            coerce_eval_result,
+            evaluate_numeric_expr,
+        )
 
         try:
             resolved = coerce_eval_result(

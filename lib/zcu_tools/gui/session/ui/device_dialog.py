@@ -13,7 +13,6 @@ from qtpy.QtGui import QColor  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QComboBox,
     QDialog,
-    QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -41,11 +40,12 @@ from zcu_tools.gui.session.services.device import (
     SetupDeviceRequest,
     list_supported_device_types,
 )
+from zcu_tools.gui.session.ui.eval_field import EvalNumericField
 from zcu_tools.gui.session.ui.progress_stack import ProgressStack
-from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.controller_port import SessionControllerPort
+    from zcu_tools.meta_tool import MetaDict
 
 
 @runtime_checkable
@@ -54,6 +54,7 @@ class DevicePanelProtocol(Protocol):
 
     def load(self, info: Any) -> None: ...
     def read(self) -> Any: ...
+    def reset_eval_fields(self) -> None: ...
 
 
 # ---------------------------------------------------------------------------
@@ -64,7 +65,9 @@ class DevicePanelProtocol(Protocol):
 class _FakeDevicePanel(QWidget):
     """Info + control panel for FakeDevice."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, md_provider: Callable[[], MetaDict], parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
         form = QFormLayout(self)
 
@@ -78,17 +81,15 @@ class _FakeDevicePanel(QWidget):
         self._output_combo.addItems(["on", "off"])
         form.addRow("Output:", self._output_combo)
 
-        self._value_spin = TrimDoubleSpinBox()
-        self._value_spin.setRange(-1e9, 1e9)
-        self._value_spin.setDecimals(6)
-        self._value_spin.setStepType(QDoubleSpinBox.StepType.AdaptiveDecimalStepType)  # type: ignore[attr-defined]
-        form.addRow("Value:", self._value_spin)
+        self._value_field = EvalNumericField(
+            minimum=-1e9, maximum=1e9, decimals=6, md_provider=md_provider
+        )
+        form.addRow("Value:", self._value_field)
 
-        self._rampstep_spin = TrimDoubleSpinBox()
-        self._rampstep_spin.setRange(1e-9, 1e9)
-        self._rampstep_spin.setDecimals(9)
-        self._rampstep_spin.setStepType(QDoubleSpinBox.StepType.AdaptiveDecimalStepType)  # type: ignore[attr-defined]
-        form.addRow("Ramp step:", self._rampstep_spin)
+        self._rampstep_field = EvalNumericField(
+            minimum=1e-9, maximum=1e9, decimals=9, md_provider=md_provider
+        )
+        form.addRow("Ramp step:", self._rampstep_field)
 
     def load(self, info: Any) -> None:
         from zcu_tools.device.fake import FakeDeviceInfo
@@ -97,21 +98,32 @@ class _FakeDevicePanel(QWidget):
         self._type_label.setText(info.type)
         self._address_label.setText(info.address)
         self._output_combo.setCurrentText(info.output)
-        self._value_spin.setValue(info.value)
-        self._rampstep_spin.setValue(info.rampstep)
+        self._value_field.load_direct(info.value)
+        self._rampstep_field.load_direct(info.rampstep)
+
+    def reset_eval_fields(self) -> None:
+        """Reset all eval-mode fields to direct mode.
+
+        Called when a different device is loaded into this panel to prevent an
+        expression from persisting into a different device's context (R3).
+        """
+        self._value_field.reset_to_direct()
+        self._rampstep_field.reset_to_direct()
 
     def read(self) -> Any:
         return {
             "output": self._output_combo.currentText(),
-            "value": self._value_spin.value(),
-            "rampstep": self._rampstep_spin.value(),
+            "value": self._value_field.read_raw(),
+            "rampstep": self._rampstep_field.read_raw(),
         }
 
 
 class _YOKOGS200Panel(QWidget):
     """Info + control panel for YOKOGS200."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, md_provider: Callable[[], MetaDict], parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
         form = QFormLayout(self)
 
@@ -128,11 +140,10 @@ class _YOKOGS200Panel(QWidget):
         self._output_combo.addItems(["on", "off"])
         form.addRow("Output:", self._output_combo)
 
-        self._value_spin = TrimDoubleSpinBox()
-        self._value_spin.setRange(-1e9, 1e9)
-        self._value_spin.setDecimals(6)
-        self._value_spin.setStepType(QDoubleSpinBox.StepType.AdaptiveDecimalStepType)  # type: ignore[attr-defined]
-        form.addRow("Value:", self._value_spin)
+        self._value_field = EvalNumericField(
+            minimum=-1e9, maximum=1e9, decimals=6, md_provider=md_provider
+        )
+        form.addRow("Value:", self._value_field)
 
     def load(self, info: Any) -> None:
         from zcu_tools.device.yoko import YOKOGS200Info
@@ -142,19 +153,25 @@ class _YOKOGS200Panel(QWidget):
         self._address_label.setText(info.address)
         self._mode_label.setText(info.mode)
         self._output_combo.setCurrentText(info.output)
-        self._value_spin.setValue(info.value)
+        self._value_field.load_direct(info.value)
+
+    def reset_eval_fields(self) -> None:
+        """Reset all eval-mode fields to direct mode (R3 device-switch guard)."""
+        self._value_field.reset_to_direct()
 
     def read(self) -> Any:
         return {
             "output": self._output_combo.currentText(),
-            "value": self._value_spin.value(),
+            "value": self._value_field.read_raw(),
         }
 
 
 class _SGS100APanel(QWidget):
     """Info + control panel for SGS100A."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, md_provider: Callable[[], MetaDict], parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
         form = QFormLayout(self)
 
@@ -168,17 +185,15 @@ class _SGS100APanel(QWidget):
         self._output_combo.addItems(["on", "off"])
         form.addRow("Output:", self._output_combo)
 
-        self._freq_spin = TrimDoubleSpinBox()
-        self._freq_spin.setRange(1e6, 20e9)
-        self._freq_spin.setDecimals(3)
-        self._freq_spin.setStepType(QDoubleSpinBox.StepType.AdaptiveDecimalStepType)  # type: ignore[attr-defined]
-        form.addRow("Freq (Hz):", self._freq_spin)
+        self._freq_field = EvalNumericField(
+            minimum=1e6, maximum=20e9, decimals=3, md_provider=md_provider
+        )
+        form.addRow("Freq (Hz):", self._freq_field)
 
-        self._pow_spin = TrimDoubleSpinBox()
-        self._pow_spin.setRange(-120, 30)
-        self._pow_spin.setDecimals(2)
-        self._pow_spin.setStepType(QDoubleSpinBox.StepType.AdaptiveDecimalStepType)  # type: ignore[attr-defined]
-        form.addRow("Power (dBm):", self._pow_spin)
+        self._power_field = EvalNumericField(
+            minimum=-120, maximum=30, decimals=2, md_provider=md_provider
+        )
+        form.addRow("Power (dBm):", self._power_field)
 
     def load(self, info: Any) -> None:
         from zcu_tools.device.sgs100a import RohdeSchwarzSGS100AInfo
@@ -187,14 +202,19 @@ class _SGS100APanel(QWidget):
         self._type_label.setText(info.type)
         self._address_label.setText(info.address)
         self._output_combo.setCurrentText(info.output)
-        self._freq_spin.setValue(info.freq_Hz)
-        self._pow_spin.setValue(info.power_dBm)
+        self._freq_field.load_direct(info.freq_Hz)
+        self._power_field.load_direct(info.power_dBm)
+
+    def reset_eval_fields(self) -> None:
+        """Reset all eval-mode fields to direct mode (R3 device-switch guard)."""
+        self._freq_field.reset_to_direct()
+        self._power_field.reset_to_direct()
 
     def read(self) -> Any:
         return {
             "output": self._output_combo.currentText(),
-            "freq_Hz": self._freq_spin.value(),
-            "power_dBm": self._pow_spin.value(),
+            "freq_Hz": self._freq_field.read_raw(),
+            "power_dBm": self._power_field.read_raw(),
         }
 
 
@@ -287,11 +307,14 @@ class DeviceDialog(QDialog):
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 0, 0)
 
+        # Panels receive md_provider so their EvalNumericField widgets can show
+        # a live ghost preview while the user composes an expression.
+        _md = self._ctrl.get_current_md
         self._stack = QStackedWidget()
         self._stack.addWidget(QLabel("Select a device to configure."))  # Page 0: Idle
-        self._stack.addWidget(_FakeDevicePanel())  # Page 1
-        self._stack.addWidget(_YOKOGS200Panel())  # Page 2
-        self._stack.addWidget(_SGS100APanel())  # Page 3
+        self._stack.addWidget(_FakeDevicePanel(_md))  # Page 1
+        self._stack.addWidget(_YOKOGS200Panel(_md))  # Page 2
+        self._stack.addWidget(_SGS100APanel(_md))  # Page 3
         self._memory_panel = _MemoryDevicePanel()
         self._stack.addWidget(self._memory_panel)  # Page 4: memory-only
         right_layout.addWidget(self._stack, stretch=1)
@@ -347,6 +370,12 @@ class DeviceDialog(QDialog):
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(1000)
         self._poll_timer.timeout.connect(self._on_poll_tick)
+
+        # Tracks the device name most recently loaded into the right panel. Used
+        # in _on_selection_changed to distinguish a poll repaint of the SAME device
+        # (name unchanged → preserve eval expressions, R3) from a device SWITCH
+        # (name changed → reset eval fields to direct mode before loading).
+        self._last_panel_device_name: str | None = None
 
         self._refresh_list()
         # Phase C: subscribe progress for every device already setting up (the
@@ -489,6 +518,12 @@ class DeviceDialog(QDialog):
 
         panel = self._stack.currentWidget()
         if page > 0 and isinstance(panel, DevicePanelProtocol):
+            # R3: reset eval fields when a different device is loaded into this panel
+            # so expressions from one device do not persist into another device's context.
+            # Same-device repaints (poll tick, status update) preserve the expression.
+            if name != self._last_panel_device_name:
+                panel.reset_eval_fields()
+            self._last_panel_device_name = name
             panel.load(info)
 
     def _setup_device_names(self) -> set[str]:
@@ -657,6 +692,52 @@ class DeviceDialog(QDialog):
             return
 
         updates = panel.read()
+
+        # Resolve any EvalRef markers against the current MetaDict (Design 1:
+        # apply-time resolve once, not per-keystroke). Only touch the controller's
+        # MetaDict when at least one field is in eval mode — direct-only applies
+        # do not depend on an active context.
+        from zcu_tools.gui.session.expression import (
+            EvalRef,
+            coerce_eval_result,
+            evaluate_numeric_expr,
+        )
+
+        if any(isinstance(v, EvalRef) for v in updates.values()):
+            try:
+                md = self._ctrl.get_current_md()
+            except Exception as exc:
+                self._add_status.setStyleSheet("color: red;")
+                self._add_status.setText(f"{name}: {exc}")
+                return
+            resolved_updates: dict[str, Any] = {}
+            for key, val in updates.items():
+                if isinstance(val, EvalRef):
+                    try:
+                        coerced = coerce_eval_result(
+                            evaluate_numeric_expr(val.expr, md), val.type_
+                        )
+                    except Exception as exc:
+                        self._add_status.setStyleSheet("color: red;")
+                        self._add_status.setText(f"{name}: field '{key}': {exc}")
+                        return
+                    # Bounds check: eval must respect the same inclusive range as
+                    # the direct spinbox path — prevents e.g. rampstep=0 reaching
+                    # the driver where it would cause ZeroDivisionError.
+                    if not (val.minimum <= float(coerced) <= val.maximum):
+                        self._add_status.setStyleSheet("color: red;")
+                        self._add_status.setText(
+                            f"{name}: field '{key}': value {coerced} out of range"
+                            f" [{val.minimum}, {val.maximum}]"
+                        )
+                        return
+                    resolved_updates[key] = coerced
+                else:
+                    resolved_updates[key] = val
+        else:
+            # All fields are direct values — pass through unchanged, no md access.
+            resolved_updates = dict(updates)
+
         info = self._ctrl.get_device_info(name)
         if info is None:
             return
@@ -664,7 +745,7 @@ class DeviceDialog(QDialog):
 
         if not isinstance(info, BaseDeviceInfo):
             return
-        new_info = info.with_updates(**updates)
+        new_info = info.with_updates(**resolved_updates)
         self._ctrl.start_setup_device(SetupDeviceRequest(name=name, info=new_info))
 
     def _on_device_changed(self, payload: DeviceChangedPayload) -> None:

@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-26 — PredictorDialog persistent close option
+**Last updated:** 2026-06-26 — expression.py + EvalRef + device dialog eval mode
 
 # gui/session/ — 量測 session core（measure + autofluxdep 共用）
 
@@ -18,6 +18,7 @@ session/
 ├── notify_handles.py   — NotifyChannel/NotifyHandles（agent→user prompt 的跨線程 channel，事件集 Reply/Dismiss/Timeout，獨立於 operation 的 Settled/Message/Stop；鏡像 OperationChannel 四不變式，ADR-0025）
 ├── controller_port.py  — SessionControllerPort：共用 dialog 依賴的窄 Controller 面（setup/context/connection + device lifecycle/queries/progress + predictor load/set_model_params/clear/predict/curve + inspect md/ml）；回傳宣告對 BaseEventBus 故 app EventBus covariant 滿足
 ├── controller_mixin.py — SessionControllerMixin：SessionControllerPort 的「共用 body」——兩 app 逐字相同的 39 個 port forward（讀 6 個 abstract service accessor `_soc_svc`/`_pred_svc`/`_ctx_svc`/`_dev_svc`/`_startup_svc`/`_progress_svc`，以 annotation-only 宣告型別由 concrete Controller 供應同名 attr，**不**用 @property 以免 data-descriptor `__set__` 撞既有 `self._x_svc=` 賦值）。app 各自只留 body 真正分歧的 override：`apply_startup_project`（measure 回 resolved dict/WIRE-44、autofluxdep 回 bool）、`get_project_root`（讀 app `_project_root`）、`get_bus`（回 app EventBus subtype）。import-clean（service/request 型別全 TYPE_CHECKING-only），列入 test_shared_layer 守
+├── expression.py       — 安全 numeric expression evaluator（evaluate_numeric_expr + coerce_eval_result，純函式吃 MetaDict）+ EvalRef（frozen dataclass：eval 模式欄位的 read_raw() marker，apply 時 resolve，不持久化）；import-clean leaf
 ├── pbar_host.py        — ProgressBar(worker)/ProgressBarModel(主線程 SSOT)，Qt-free
 ├── adapters/
 │   └── qt_progress_transport.py — QtProgressTransport（worker→主線程 progress marshal，queued signal；app-agnostic）

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.app.main.expression import coerce_eval_result, evaluate_numeric_expr
+from zcu_tools.gui.session.expression import coerce_eval_result, evaluate_numeric_expr
 from zcu_tools.meta_tool import MetaDict
 
 

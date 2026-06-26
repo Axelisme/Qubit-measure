@@ -44,6 +44,9 @@ _SHARED_MODULES = [
     # The worker-side progress bar + main-thread bar model are Qt-free (the Qt
     # marshal lives in a driven adapter); only the ProgressStack widget pulls Qt.
     "zcu_tools.gui.session.pbar_host",
+    # The numeric expression evaluator is a pure-logic leaf: stdlib ast/operator
+    # + MetaDict only. EvalRef lives here too (frozen dataclass, no Qt).
+    "zcu_tools.gui.session.expression",
     # The plotting package + its backend-select module must stay import-clean so
     # an entry script can configure the matplotlib backend before any pyplot
     # import. The heavy plotting submodules (backend/host/container) DO pull in

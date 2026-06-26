@@ -44,7 +44,7 @@ def _resolve_eval(
     ``coerce_eval_result`` (int spec → int, float spec → float) so that e.g. an
     ``EvalValue("ro_ch")`` for an int channel lowers to ``int`` rather than float.
     """
-    from zcu_tools.gui.app.main.expression import coerce_eval_result
+    from zcu_tools.gui.session.expression import coerce_eval_result
 
     if value.resolved is not None:
         resolved = value.resolved
@@ -53,7 +53,7 @@ def _resolve_eval(
         # after the field was set). Log it — never silently lower a stale value
         # without trace — but keep the snapshot to preserve existing semantics.
         if md is not None:
-            from zcu_tools.gui.app.main.expression import evaluate_numeric_expr
+            from zcu_tools.gui.session.expression import evaluate_numeric_expr
 
             try:
                 fresh = evaluate_numeric_expr(value.expr, md)
@@ -75,7 +75,7 @@ def _resolve_eval(
                         fresh,
                     )
     elif md is not None:
-        from zcu_tools.gui.app.main.expression import evaluate_numeric_expr
+        from zcu_tools.gui.session.expression import evaluate_numeric_expr
 
         try:
             resolved = evaluate_numeric_expr(value.expr, md)
@@ -522,7 +522,7 @@ def _validate_eval(
     full_path: str,
     label: str,
 ) -> None:
-    from zcu_tools.gui.app.main.expression import (
+    from zcu_tools.gui.session.expression import (
         coerce_eval_result,
         evaluate_numeric_expr,
     )
