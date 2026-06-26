@@ -91,12 +91,15 @@ class _PreviewCanvas(QWidget):
         self.figure.tight_layout()
         self.canvas.draw_idle()
 
-    def plot(self, data_key: str, data: ArbWaveformData) -> None:
+    def plot(self, data_key: str, data: ArbWaveformData, *, normalize: bool) -> None:
         time = np.asarray(data.time, dtype=np.float64)
         idata = np.asarray(data.idata, dtype=np.float64)
         qdata = np.asarray(data.qdata, dtype=np.float64)
-        peak = float(np.max(np.hypot(idata, qdata)))
-        if peak > 0.0:
+        if normalize:
+            peak = float(np.max(np.hypot(idata, qdata)))
+        else:
+            peak = 0.0
+        if normalize and peak > 0.0:
             idata = idata / peak
             qdata = qdata / peak
         abs_data = np.hypot(idata, qdata)
@@ -113,13 +116,31 @@ class _PreviewCanvas(QWidget):
         self._marker = self._ax.axvline(float(time[0]), color="black", linewidth=1.0)
         self._ax.set_title(data_key)
         self._ax.set_xlabel("Time (us)")
-        self._ax.set_ylabel("Normalized amplitude")
+        self._ax.set_ylabel("Normalized amplitude" if normalize else "Amplitude")
         self._ax.set_xlim(float(time[0]), float(time[-1]))
-        self._ax.set_ylim(-1.05, 1.05)
+        self._ax.set_ylim(self._data_ylim(idata, qdata, abs_data))
         self._ax.grid(True, alpha=0.3)
         self._move_marker(float(time[0]), draw=False)
         self.figure.tight_layout()
         self.canvas.draw_idle()
+
+    @staticmethod
+    def _data_ylim(
+        idata: NDArray[np.float64],
+        qdata: NDArray[np.float64],
+        abs_data: NDArray[np.float64],
+    ) -> tuple[float, float]:
+        low = min(
+            float(np.min(idata)), float(np.min(qdata)), float(np.min(abs_data)), 0.0
+        )
+        high = max(
+            float(np.max(idata)), float(np.max(qdata)), float(np.max(abs_data)), 0.0
+        )
+        if low == high:
+            pad = max(abs(low) * 0.05, 0.05)
+        else:
+            pad = max((high - low) * 0.05, 0.05)
+        return low - pad, high + pad
 
     def _on_press(self, event: object) -> None:
         if getattr(event, "inaxes", None) is not self._ax:
@@ -359,7 +380,6 @@ class ArbWaveformDialog(QDialog):
             self._preview.clear(str(exc))
             self._set_warning(str(exc))
             return
-        self._preview.plot(data_key, data)
         if data.recipe is None:
             self._set_segments(
                 [{"duration": max(data.duration, 1e-6), "formula": "0"}],
@@ -373,6 +393,7 @@ class ArbWaveformDialog(QDialog):
                 data.recipe.to_dict()["segments"], normalize=data.recipe.normalize
             )
         self._validate_recipe(schedule_preview=False)
+        self._preview.plot(data_key, data, normalize=self._normalize_check.isChecked())
 
     def _reset_draft(self) -> None:
         self._current_data_key = None
@@ -473,7 +494,11 @@ class ArbWaveformDialog(QDialog):
         data = self._valid_data
         if data is None:
             return
-        self._preview.plot(self._data_key_edit.text().strip(), data)
+        self._preview.plot(
+            self._data_key_edit.text().strip(),
+            data,
+            normalize=self._normalize_check.isChecked(),
+        )
 
     def _save_recipe(self) -> None:
         self._validate_recipe(schedule_preview=False)
@@ -497,7 +522,7 @@ class ArbWaveformDialog(QDialog):
             QMessageBox.critical(self, "Save failed", str(exc))
             return
         self._current_data_key = data_key
-        self._preview.plot(data_key, data)
+        self._preview.plot(data_key, data, normalize=self._normalize_check.isChecked())
         self.refresh()
         self._select_data_key(data_key)
 

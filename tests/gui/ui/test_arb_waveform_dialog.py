@@ -3,8 +3,12 @@ from __future__ import annotations
 import time
 from typing import Any
 
+import numpy as np
 import pytest
-from zcu_tools.gui.app.main.ui.arb_waveform_dialog import ArbWaveformDialog
+from zcu_tools.gui.app.main.ui.arb_waveform_dialog import (
+    ArbWaveformDialog,
+    _PreviewCanvas,
+)
 from zcu_tools.meta_tool import ArbWaveformData, ArbWaveformInfo, render_formula_recipe
 
 
@@ -137,3 +141,40 @@ def test_dialog_validates_segments_and_saves_preview(  # noqa: ARG001
     dlg._rename_btn.click()
     assert "renamed_data" in ctrl.assets
     assert "arb_data1" not in ctrl.assets
+
+
+def test_preview_canvas_autoscales_y_axis_for_normalized_and_raw(qapp) -> None:  # noqa: ARG001
+    data = render_formula_recipe(
+        {
+            "segments": [{"duration": 0.002, "formula": "0.25 + 0.5*I"}],
+            "normalize": "none",
+        }
+    )
+    canvas = _PreviewCanvas()
+
+    canvas.plot("subunit", data, normalize=True)
+
+    assert canvas._i_line is not None
+    assert canvas._q_line is not None
+    assert canvas._ax.get_ylabel() == "Normalized amplitude"
+    assert np.asarray(canvas._i_line.get_ydata(), dtype=float)[0] == pytest.approx(
+        0.25 / data.peak_abs
+    )
+    assert np.asarray(canvas._q_line.get_ydata(), dtype=float)[0] == pytest.approx(
+        0.5 / data.peak_abs
+    )
+    normalized_y_min, normalized_y_max = canvas._ax.get_ylim()
+    assert -0.1 < normalized_y_min < 0.0
+    assert 1.0 < normalized_y_max < 1.1
+
+    canvas.plot("subunit", data, normalize=False)
+
+    assert canvas._i_line is not None
+    assert canvas._q_line is not None
+    assert canvas._ax.get_ylabel() == "Amplitude"
+    assert np.asarray(canvas._i_line.get_ydata(), dtype=float)[0] == pytest.approx(0.25)
+    assert np.asarray(canvas._q_line.get_ydata(), dtype=float)[0] == pytest.approx(0.5)
+    raw_y_min, raw_y_max = canvas._ax.get_ylim()
+    assert -0.1 < raw_y_min < 0.0
+    assert 0.5 < raw_y_max < 1.0
+    assert raw_y_max < normalized_y_max
