@@ -50,6 +50,16 @@ def test_waveform_cfg_flat_top():
     assert cast(DirectValue, raise_wav.value.fields["length"]).value == 0.5
 
 
+def test_waveform_cfg_to_value_arb_has_no_length_field():
+    cfg = {"style": "arb", "length": 9.0, "data": "asset_a"}
+    spec, val = waveform_cfg_to_value(cfg)
+
+    assert "length" not in spec.fields
+    assert "length" not in val.fields
+    assert cast(DirectValue, val.fields["style"]).value == "arb"
+    assert cast(DirectValue, val.fields["data"]).value == "asset_a"
+
+
 def test_module_cfg_to_value_direct_readout():
     cfg = {"type": "readout/direct", "ro_freq": 7000.0}
     spec, val = module_cfg_to_value(cfg)

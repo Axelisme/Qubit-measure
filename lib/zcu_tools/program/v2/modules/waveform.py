@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from abc import ABC, abstractmethod
 from typing import (
     TYPE_CHECKING,
@@ -25,12 +24,8 @@ if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
 
 
-logger = logging.getLogger(__name__)
-
-
 class AbsWaveformCfg(ConfigBase):
     style: str
-    length: float | QickParam
 
     def build(self, name: str) -> AbsWaveform:
         raise NotImplementedError(f"{type(self).__name__}.build is not implemented")
@@ -124,14 +119,21 @@ class DragWaveformCfg(AbsWaveformCfg):
 
 class ArbWaveformCfg(AbsWaveformCfg):
     style: Literal["arb"] = "arb"
-    length: float
     data: str
+
+    @property
+    def length(self) -> float:
+        from zcu_tools.meta_tool.arb_waveform import ArbWaveformDatabase
+
+        return ArbWaveformDatabase.inspect(self.data).duration
 
     def build(self, name: str) -> ArbWaveform:
         return ArbWaveform(name, self)
 
     def set_param(self, name: str, value: float | QickParam) -> None:
-        raise ValueError("Arb waveform length and data cannot be changed")
+        raise ValueError(
+            "Arb waveform length is asset-derived; data cannot be changed through set_param"
+        )
 
 
 def resolve_waveform_ref(value: Any, info: ValidationInfo) -> Any:
@@ -232,7 +234,9 @@ class CosineWaveform(AbsWaveform):
 
     @property
     def length(self) -> float:
-        return self.waveform_cfg.length  # type: ignore[return-value]
+        cfg = self.waveform_cfg
+        assert isinstance(cfg, CosineWaveformCfg)
+        return cfg.length
 
     def create(self, prog: ModularProgramV2, ch: int, **kwargs) -> None:
         prog.add_cosine(ch, self.name, length=self.length, **kwargs)
@@ -248,7 +252,9 @@ class GaussWaveform(AbsWaveform):
 
     @property
     def length(self) -> float:
-        return self.waveform_cfg.length  # type: ignore[return-value]
+        cfg = self.waveform_cfg
+        assert isinstance(cfg, GaussWaveformCfg)
+        return cfg.length
 
     def create(self, prog: ModularProgramV2, ch: int, **kwargs) -> None:
         wav_cfg = self.waveform_cfg
@@ -298,7 +304,9 @@ class ArbWaveform(AbsWaveform):
 
     @property
     def length(self) -> float:
-        return self.waveform_cfg.length  # type: ignore[return-value]
+        cfg = self.waveform_cfg
+        assert isinstance(cfg, ArbWaveformCfg)
+        return cfg.length
 
     def create(self, prog: ModularProgramV2, ch: int, **kwargs) -> None:
         idata, qdata = self.make_iqdata(ch, prog, **kwargs)
@@ -316,18 +324,8 @@ class ArbWaveform(AbsWaveform):
 
         maxv = prog.soccfg.get_maxv(ch)
         samps_per_clk = prog.soccfg["gens"][ch]["samps_per_clk"]
-        length = self.length
         raw_end = float(time_raw[-1])
-
-        if length < raw_end:
-            logger.warning(
-                "Arbitrary waveform %r uses playback length %.6g us shorter than "
-                "data time axis end %.6g us; trailing data will be truncated "
-                "instead of time-scaled.",
-                cfg.data,
-                length,
-                raw_end,
-            )
+        length = raw_end
 
         if even_length:
             n_clks = 2 * prog.us2cycles(gen_ch=ch, us=length / 2)

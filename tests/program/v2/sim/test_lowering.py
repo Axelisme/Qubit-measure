@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pytest
 from qick.asm_v2 import QickParam
 from zcu_tools.program.v2.modules.base import Module
@@ -46,6 +47,7 @@ from zcu_tools.program.v2.modules.reset import (
     TwoPulseResetCfg,
 )
 from zcu_tools.program.v2.modules.waveform import (
+    ArbWaveformCfg,
     ConstWaveformCfg,
     FlatTopWaveformCfg,
     GaussWaveformCfg,
@@ -218,6 +220,56 @@ class TestShapedPulseSegments:
         assert all(s.omega <= full_omega + 1e-9 for s in lp.segments)
         # Total duration is preserved.
         assert sum(s.t for s in lp.segments) == pytest.approx(0.6)
+
+    def test_arb_waveform_segments_use_asset_duration(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        time = np.array([0.0, 1.0, 2.0], dtype=np.float64)
+        idata = np.array([0.0, 0.5, 1.0], dtype=np.float64)
+
+        class Info:
+            duration = 2.0
+
+        def fake_get(name: str):
+            assert name == "arb_drive"
+            return idata, None, time
+
+        monkeypatch.setattr(
+            "zcu_tools.meta_tool.arb_waveform.ArbWaveformDatabase.inspect",
+            lambda name: Info(),
+        )
+        monkeypatch.setattr(
+            "zcu_tools.meta_tool.arb_waveform.ArbWaveformDatabase.get", fake_get
+        )
+
+        cfg = PulseCfg(
+            waveform=ArbWaveformCfg(data="arb_drive"),
+            ch=0,
+            nqz=1,
+            freq=4000.0,
+            gain=1.0,
+        )
+        lp = lower_point(
+            [cfg.build("arb"), _readout()],
+            None,
+            _SIM,
+            _F_QUBIT_GHZ,
+            {},
+            _identity_cycles2us,
+        )
+
+        assert len(lp.segments) == _SHAPED_PULSE_SEGMENTS
+        assert sum(s.t for s in lp.segments) == pytest.approx(2.0)
+
+        midpoints = (
+            (np.arange(_SHAPED_PULSE_SEGMENTS, dtype=np.float64) + 0.5)
+            * 2.0
+            / _SHAPED_PULSE_SEGMENTS
+        )
+        expected_amp = np.interp(midpoints, time, idata, left=0.0, right=0.0)
+        omega_scale = math.pi / _SIM.pi_gain_len
+        actual_amp = np.array([seg.omega / omega_scale for seg in lp.segments])
+        np.testing.assert_allclose(actual_amp, expected_amp)
 
 
 class TestDelaySegments:

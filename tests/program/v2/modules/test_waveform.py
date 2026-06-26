@@ -1,4 +1,3 @@
-import logging
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -38,7 +37,7 @@ def test_cosine_waveform_rejects_qickparam_length():
 
 
 def test_abs_waveform_cfg_default_methods_raise():
-    cfg = AbsWaveformCfg(style="const", length=1.0)
+    cfg = AbsWaveformCfg(style="const")
 
     with pytest.raises(NotImplementedError):
         cfg.build("base")
@@ -114,9 +113,28 @@ def test_drag_waveform_rejects_unknown_param():
 
 
 def test_arb_waveform_set_param_rejected():
-    cfg = ArbWaveformCfg(length=1.0, data="dummy")
+    cfg = ArbWaveformCfg(data="dummy")
     with pytest.raises(ValueError):
         cfg.set_param("length", 2.0)
+
+
+def test_arb_waveform_cfg_rejects_legacy_length_field():
+    with pytest.raises(ValueError):
+        ArbWaveformCfg.model_validate({"style": "arb", "length": 1.0, "data": "dummy"})
+
+
+def test_arb_waveform_cfg_length_comes_from_data_duration(monkeypatch):
+    class Info:
+        duration = 2.5
+
+    monkeypatch.setattr(
+        "zcu_tools.meta_tool.arb_waveform.ArbWaveformDatabase.inspect",
+        lambda key: Info(),
+    )
+
+    cfg = ArbWaveformCfg(data="dummy")
+
+    assert cfg.length == 2.5
 
 
 def test_waveform_build_dispatch_const():
@@ -138,7 +156,7 @@ def test_waveform_build_dispatch_cosine():
 
 def test_waveform_build_dispatch_drag_arb_and_flat_top():
     drag = DragWaveformCfg(length=1.0, sigma=0.2, delta=0.1, alpha=0.0).build("d")
-    arb = ArbWaveformCfg(length=1.0, data="demo").build("a")
+    arb = ArbWaveformCfg(data="demo").build("a")
     flat_top = FlatTopWaveformCfg(
         length=1.0,
         raise_waveform=GaussWaveformCfg(length=0.2, sigma=0.05),
@@ -238,7 +256,7 @@ def test_arb_waveform_make_iqdata_and_create(monkeypatch):
     prog.soccfg = FakeSoccfg({"gens": [{"samps_per_clk": 2}]})
     prog.us2cycles.side_effect = lambda *, gen_ch, us: 2 if us == 2.0 else 3
 
-    cfg = ArbWaveformCfg(length=2.0, data="demo")
+    cfg = ArbWaveformCfg(data="demo")
     waveform = cfg.build("arb")
 
     idata_raw = np.array([0.0, 1.0, 0.5])
@@ -279,7 +297,7 @@ def test_arb_waveform_make_iqdata_handles_missing_q_channel(monkeypatch):
     prog.soccfg = FakeSoccfg({"gens": [{"samps_per_clk": 1}]})
     prog.us2cycles.return_value = 3
 
-    waveform = ArbWaveformCfg(length=3.0, data="demo").build("arb")
+    waveform = ArbWaveformCfg(data="demo").build("arb")
 
     monkeypatch.setattr(
         "zcu_tools.meta_tool.arb_waveform.ArbWaveformDatabase.get",
@@ -292,20 +310,20 @@ def test_arb_waveform_make_iqdata_handles_missing_q_channel(monkeypatch):
 
     idata, qdata = waveform.make_iqdata(0, prog)
 
-    assert np.allclose(idata, np.array([0.0, 4.0, 0.0]))
+    assert np.allclose(idata, np.array([0.0, 8.0 / 3.0, 8.0 / 3.0]))
     assert qdata is None
 
 
-def test_arb_waveform_warns_when_playback_length_truncates_data(caplog, monkeypatch):
+def test_arb_waveform_make_iqdata_uses_full_data_duration(monkeypatch):
     class FakeSoccfg(dict):
         def get_maxv(self, ch):
             return 1.0
 
     prog = MagicMock()
     prog.soccfg = FakeSoccfg({"gens": [{"samps_per_clk": 1}]})
-    prog.us2cycles.return_value = 1
+    prog.us2cycles.side_effect = lambda *, gen_ch, us: 2 if us == 2.0 else 99
 
-    waveform = ArbWaveformCfg(length=1.0, data="long_data").build("arb")
+    waveform = ArbWaveformCfg(data="long_data").build("arb")
 
     monkeypatch.setattr(
         "zcu_tools.meta_tool.arb_waveform.ArbWaveformDatabase.get",
@@ -316,16 +334,11 @@ def test_arb_waveform_warns_when_playback_length_truncates_data(caplog, monkeypa
         ),
     )
 
-    with caplog.at_level(
-        logging.WARNING, logger="zcu_tools.program.v2.modules.waveform"
-    ):
-        idata, qdata = waveform.make_iqdata(0, prog)
+    idata, qdata = waveform.make_iqdata(0, prog)
 
     assert qdata is None
-    assert np.allclose(idata, np.array([0.0]))
-    assert "long_data" in caplog.text
-    assert "trailing data will be truncated" in caplog.text
-    assert "instead of time-scaled" in caplog.text
+    assert np.allclose(idata, np.array([0.0, 1.0]))
+    prog.us2cycles.assert_called_once_with(gen_ch=0, us=2.0)
 
 
 def test_flat_top_waveform_create_and_kwargs():

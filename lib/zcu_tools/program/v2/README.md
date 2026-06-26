@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-06-25 - ArbWaveform reference time axis
+**Last updated:** 2026-06-26 - ArbWaveform asset-derived length
 
 ## Testing & Type Checking Conventions
 
@@ -100,4 +100,4 @@ Big-jump 判斷集中在 `ir/hw_semantics.py::needs_big_jump(pmem_size)` 回傳 
 
 ## ArbWaveform reference time axis
 
-`ArbWaveformDatabase` 的 `time` array 是 arbitrary waveform data 的 reference time axis。`ArbWaveformCfg.length` 是 requested playback window，不會把 stored data stretch/compress 到新長度；`ArbWaveform.make_iqdata()` 只在 `[0, length)` 上插值取樣。若 `length` 短於 data time-axis end，trailing data 會被截斷並 log warning。
+`ArbWaveformDatabase` 的 `time` array 是 arbitrary waveform data 的 reference time axis。`ArbWaveformCfg` 只存 asset `data` key；`length` 是由 `ArbWaveformDatabase.inspect(data).duration` 得到的屬性（即 `time[-1]`），不寫入 ModuleLibrary waveform config。`ArbWaveform.make_iqdata()` 在 asset duration 上插值取樣，不把 stored data stretch/compress，也不提供 config-level truncation；要改播放長度就改 asset arrays 或 formula recipe。

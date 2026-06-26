@@ -663,7 +663,7 @@ class SimEngine:
                 f"unsupported readout module {type(readout).__name__} for decimated"
             )
 
-        ro_length = _resolve_scalar(ro_cfg.ro_length, {}, point)
+        pulse_length = _resolve_scalar(ro_pulse_cfg.waveform.length, {}, point)
         trig_offset = _resolve_scalar(ro_cfg.trig_offset, {}, point)
 
         # Program-time axis: cycles2us(get_time_axis) + trig_offset.  The decimated
@@ -682,7 +682,7 @@ class SimEngine:
             self.sim,
             ts,
             ro_pulse_cfg,
-            ro_length,
+            pulse_length,
             lowered.readout.f_ro_ghz,
             rf_g,
             rf_e,

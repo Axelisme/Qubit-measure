@@ -19,6 +19,7 @@ import numpy as np
 import pytest
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.waveform import (
+    ArbWaveformCfg,
     ConstWaveformCfg,
     FlatTopWaveformCfg,
     GaussWaveformCfg,
@@ -278,6 +279,33 @@ class TestEnvelopeAt:
         amp_fall = envelope_at(cfg, np.array([1.0 - 0.05]), length=1.0)[0]
         assert abs(amp_fall - amp_rise) < 1e-9
 
+    def test_arb_waveform_samples_iq_magnitude_on_reference_axis(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def fake_get(name: str):
+            assert name == "arb_readout"
+            return (
+                np.array([0.0, 0.3, 0.6], dtype=np.float64),
+                np.array([0.0, 0.4, 0.8], dtype=np.float64),
+                np.array([0.0, 0.5, 1.0], dtype=np.float64),
+            )
+
+        monkeypatch.setattr(
+            "zcu_tools.meta_tool.arb_waveform.ArbWaveformDatabase.get", fake_get
+        )
+
+        cfg = PulseCfg(
+            waveform=ArbWaveformCfg(data="arb_readout"),
+            ch=0,
+            nqz=1,
+            freq=7200.0,
+            gain=1.0,
+        )
+        t = np.array([-0.1, 0.0, 0.5, 0.75, 1.0], dtype=np.float64)
+        amp = envelope_at(cfg, t, length=1.0)
+
+        np.testing.assert_allclose(amp, [0.0, 0.0, 0.5, 0.75, 0.0])
+
     def test_unknown_window_is_zero_before_start(self) -> None:
         cfg = _const_readout_cfg(length=1.0)
         # Everything before the pulse start is 0 (trig_offset region in the trace).
@@ -290,7 +318,7 @@ class TestDecimatedTrace:
 
     The envelope is shifted by ``_SIM.timeFly`` (the readout time of flight, 0.5 µs
     here): the trace is ~0 for program-time ``ts < timeFly`` and the readout pulse
-    appears in ``[timeFly, timeFly + ro_length)``.
+    appears in ``[timeFly, timeFly + pulse_length)``.
     """
 
     def _rf(self) -> tuple[float, float]:
@@ -314,6 +342,29 @@ class TestDecimatedTrace:
         # Before timeFly: ~0 (signal not yet received); inside: steady S21 point.
         np.testing.assert_allclose(trace[before], 0.0)
         np.testing.assert_allclose(trace[inside], steady)
+
+    def test_trace_window_uses_pulse_length(self) -> None:
+        rf_g, rf_e = self._rf()
+        f_ro = rf_g
+        tof = _SIM.timeFly
+        pulse_len = 0.5
+        cfg = _const_readout_cfg(length=pulse_len)
+        ts = np.array([tof + 0.1, tof + pulse_len + 0.1], dtype=np.float64)
+
+        trace = decimated_trace(
+            _SIM,
+            ts,
+            cfg,
+            pulse_len,
+            f_ro,
+            rf_g,
+            rf_e,
+            p_e=0.0,
+        )
+
+        steady = s21(_SIM, np.array([f_ro]), rf_g)[0]
+        assert trace[0] == pytest.approx(steady)
+        assert trace[1] == pytest.approx(0.0)
 
     def test_p_e_endpoints_and_midpoint(self) -> None:
         rf_g, rf_e = self._rf()

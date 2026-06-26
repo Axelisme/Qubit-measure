@@ -92,6 +92,7 @@ from zcu_tools.program.v2.modules.reset import (
     TwoPulseReset,
 )
 from zcu_tools.program.v2.modules.waveform import (
+    ArbWaveformCfg,
     ConstWaveformCfg,
     CosineWaveformCfg,
     DragWaveformCfg,
@@ -102,7 +103,7 @@ from zcu_tools.program.v2.sweep import SweepCfg
 
 from .bloch import Segment
 from .params import SimParams
-from .waveforms import cosine_shape, gauss_shape
+from .waveforms import arb_waveform_abs_at, cosine_shape, gauss_shape
 
 # Number of piecewise-constant sub-segments used to sample a smoothly shaped
 # pulse envelope (gauss / drag / cosine ramp).  ~32 keeps the area / chevron
@@ -209,14 +210,20 @@ def _cosine_amplitudes(length: float, n: int) -> np.ndarray:
     return cosine_shape(_segment_midpoints(length, n), length)
 
 
+def _arb_amplitudes(wav: ArbWaveformCfg, length: float, n: int) -> np.ndarray:
+    """Arbitrary I/Q waveform magnitude sampled on the ``n`` segment midpoints."""
+
+    return arb_waveform_abs_at(wav, _segment_midpoints(length, n), length)
+
+
 def _drive_amp_segments(
     cfg: PulseCfg, length: float, n: int
 ) -> tuple[list[float], list[float]]:
     """Return ``(durations, amplitudes)`` for the pulse envelope (peak = 1).
 
     Const and flat_top flat tops collapse to single full-amplitude segments;
-    gauss / drag / cosine shapes (and flat_top ramps) are discretized into ``n``
-    midpoint samples each.  Lengths are in µs.
+    gauss / drag / cosine / arb shapes (and flat_top ramps) are discretized into
+    ``n`` midpoint samples each.  Lengths are in µs.
     """
 
     wav = cfg.waveform
@@ -242,6 +249,11 @@ def _drive_amp_segments(
         amps = _cosine_amplitudes(length, n)
         durs = [length / n] * n
         return durs, list(amps)
+
+    if isinstance(wav, ArbWaveformCfg):
+        amps = _arb_amplitudes(wav, length, n)
+        durs = [length / n] * n
+        return durs, [float(amp) for amp in amps]
 
     if isinstance(wav, FlatTopWaveformCfg):
         # flat_top = rise ramp + flat top + fall ramp.  The ramp shape is the
@@ -275,9 +287,20 @@ def _drive_amp_segments(
             durs += list(reversed(durs[: len(rise)]))
             amps = list(rise) + [1.0] + list(reversed(rise))
             return durs, amps
-        # Const / arb ramp: approximate the ramp as full amplitude (its area is
-        # small relative to the flat top); fall back to a single flat segment of
-        # the full length.
+        if isinstance(ramp_cfg, ArbWaveformCfg):
+            rise = _arb_amplitudes(ramp_cfg, ramp_len, n)[: n // 2 or 1]
+            durs = [half / len(rise)] * len(rise)
+            durs += [flat_len]
+            durs += list(reversed(durs[: len(rise)]))
+            amps = (
+                [float(amp) for amp in rise]
+                + [1.0]
+                + [float(amp) for amp in reversed(rise)]
+            )
+            return durs, amps
+        # Const ramp: approximate the ramp as full amplitude (its area is small
+        # relative to the flat top); fall back to a single flat segment of the
+        # full length.
         return [length], [1.0]
 
     raise UnsupportedModuleError(

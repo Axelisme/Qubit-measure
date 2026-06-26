@@ -832,20 +832,23 @@ def test_engine_cancel_during_detune_loop_raises(monkeypatch):
 # ---------------------------------------------------------------- decimated D2
 
 
-def _pulse_readout(ro_freq_mhz: float, ro_length: float = 2.0) -> Module:
+def _pulse_readout(
+    ro_freq_mhz: float, ro_length: float = 2.0, pulse_length: float | None = None
+) -> Module:
     """A PulseReadout (const envelope) for the decimated/lookback path.
 
     Decimated needs a PulseReadout because its ``pulse_cfg`` defines the readout
     envelope shape rendered in the time domain.
     """
 
+    pulse_len = ro_length if pulse_length is None else pulse_length
     pulse_cfg = PulseCfg(
         ch=0,
         nqz=1,
         gain=0.1,
         freq=ro_freq_mhz,
         phase=0.0,
-        waveform=ConstWaveformCfg(length=ro_length),
+        waveform=ConstWaveformCfg(length=pulse_len),
     )
     ro_cfg = DirectReadoutCfg(ro_ch=0, ro_length=ro_length, ro_freq=ro_freq_mhz)
     return PulseReadoutCfg(pulse_cfg=pulse_cfg, ro_cfg=ro_cfg).build("ro")
@@ -885,6 +888,33 @@ def test_engine_acquire_decimated_returns_timefly_shifted_trace():
     inside = mag[(ts > tof + 0.1) & (ts < tof + 1.9)]
     assert before.size > 0 and inside.size > 0
     assert inside.mean() > 10.0 * (before.mean() + 1.0)
+
+
+def test_engine_acquire_decimated_uses_pulse_length_not_adc_window():
+    """The ADC window can outlive the generator pulse envelope."""
+
+    sim = _SIM.model_copy(update={"snr": 1.0e9})
+    soc, soccfg = make_mock_soc(sim=sim)
+    pulse_length = 0.6
+    ro_length = 2.0
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=1, rounds=1),
+        modules=[
+            _pulse_readout(_rf_g_mhz(), ro_length=ro_length, pulse_length=pulse_length)
+        ],
+    )
+
+    trace = prog.acquire_decimated(soc, progress=False)[0]
+    ts = prog.get_time_axis(ro_index=0)
+    mag = np.abs(trace[:, 0] + 1j * trace[:, 1])
+    tof = sim.timeFly
+
+    inside = mag[(ts > tof + 0.1) & (ts < tof + pulse_length - 0.1)]
+    after_pulse = mag[(ts > tof + pulse_length + 0.1) & (ts < tof + ro_length - 0.1)]
+
+    assert inside.size > 0 and after_pulse.size > 0
+    assert inside.mean() > 100.0 * (after_pulse.mean() + 1.0)
 
 
 # ---------------------------------------------- Phase 2c: Lorentzian dephasing

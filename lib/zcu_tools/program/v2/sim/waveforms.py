@@ -28,6 +28,7 @@ from numpy.typing import NDArray
 
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.waveform import (
+    ArbWaveformCfg,
     ConstWaveformCfg,
     CosineWaveformCfg,
     DragWaveformCfg,
@@ -74,6 +75,33 @@ def _windowed(
     return np.where((t >= 0.0) & (t < length), amp, 0.0)
 
 
+def arb_waveform_abs_at(
+    wav: ArbWaveformCfg, t: NDArray[np.float64], length: float
+) -> NDArray[np.float64]:
+    """Sample an ArbWaveform on its stored reference time axis.
+
+    The asset's stored time axis is the playback window; it is not stretched or
+    compressed. The Bloch/readout simulator uses one scalar envelope, so the I/Q
+    asset is represented by ``abs(I + jQ)``.
+    """
+
+    from zcu_tools.meta_tool.arb_waveform import ArbWaveformDatabase
+
+    idata_raw, qdata_raw, time_raw = ArbWaveformDatabase.get(wav.data)
+    idata = np.asarray(idata_raw, dtype=np.float64)
+    qdata = None if qdata_raw is None else np.asarray(qdata_raw, dtype=np.float64)
+    time = np.asarray(time_raw, dtype=np.float64)
+
+    ienv = np.interp(t, time, idata, left=0.0, right=0.0)
+    if qdata is None:
+        amp = np.abs(ienv)
+    else:
+        qenv = np.interp(t, time, qdata, left=0.0, right=0.0)
+        amp = np.hypot(ienv, qenv)
+
+    return _windowed(amp, t, length)
+
+
 def envelope_at(
     cfg: PulseCfg, t: NDArray[np.float64], length: float
 ) -> NDArray[np.float64]:
@@ -89,6 +117,7 @@ def envelope_at(
       - gauss/drag -> the in-phase Gaussian bell (drag's derivative term has no
         two-level analogue, so it is dropped, consistent with lowering),
       - cosine    -> raised-cosine ramp,
+      - arb       -> abs(I+jQ) sampled on the stored reference time axis,
       - flat_top  -> rise ramp + flat top (1) + fall ramp, the ramp shape taken
         from the nested ``raise_waveform``.
 
@@ -109,6 +138,9 @@ def envelope_at(
     if isinstance(wav, CosineWaveformCfg):
         return _windowed(cosine_shape(t, length), t, length)
 
+    if isinstance(wav, ArbWaveformCfg):
+        return arb_waveform_abs_at(wav, t, length)
+
     if isinstance(wav, FlatTopWaveformCfg):
         return _flat_top_envelope_at(wav, t, length)
 
@@ -126,8 +158,9 @@ def _flat_top_envelope_at(
     into a rising half over ``[0, ramp_len/2)`` and a falling half over
     ``[length - ramp_len/2, length)``, with a flat top of value 1 in between —
     the same rise/flat/fall decomposition lowering uses, evaluated continuously
-    on the ADC grid here.  ``raise_waveform`` is a gauss or cosine ramp; a const
-    ramp degrades to a flat window (matching lowering's const-ramp fallback).
+    on the ADC grid here.  ``raise_waveform`` is a gauss, cosine, or arb ramp; a
+    const ramp degrades to a flat window (matching lowering's const-ramp
+    fallback).
     """
 
     ramp_len = float(wav.raise_waveform.length)
@@ -153,9 +186,11 @@ def _flat_top_envelope_at(
         ramp_amp = gauss_shape(mirrored, ramp_len, sigma)
     elif isinstance(ramp_cfg, CosineWaveformCfg):
         ramp_amp = cosine_shape(mirrored, ramp_len)
+    elif isinstance(ramp_cfg, ArbWaveformCfg):
+        ramp_amp = arb_waveform_abs_at(ramp_cfg, mirrored, ramp_len)
     else:
-        # Const / arb ramp: lowering approximates it as a single full-amplitude
-        # segment, i.e. no ramp shaping — mirror that by a flat window here.
+        # Const ramp: lowering approximates it as a single full-amplitude segment,
+        # i.e. no ramp shaping — mirror that by a flat window here.
         return _windowed(np.ones_like(t), t, length)
 
     amp = np.where(rise_region | fall_region, ramp_amp, 1.0)

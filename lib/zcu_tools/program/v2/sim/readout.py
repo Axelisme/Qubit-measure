@@ -194,7 +194,7 @@ def decimated_trace(
     sim: SimParams,
     ts: NDArray[np.float64],
     readout_cfg: PulseCfg,
-    ro_length: float,
+    pulse_length: float,
     f_ro_ghz: float,
     rf_g: float,
     rf_e: float,
@@ -216,7 +216,7 @@ def decimated_trace(
     but the signal only reaches the ADC ``sim.timeFly`` later (the propagation
     delay), so the envelope is sampled at ``ts - sim.timeFly``: the trace is ~0
     for ``ts < sim.timeFly`` and the readout pulse appears in
-    ``[timeFly, timeFly + ro_length)``.  This is the rising edge lookback's
+    ``[timeFly, timeFly + pulse_length)``.  This is the rising edge lookback's
     ``analyze`` recovers as the trig_offset.  ``ts`` is the program-time axis
     (``cycles2us(get_time_axis) + trig_offset``); the trig_offset is already
     baked into ``ts`` by the engine, so this layer applies no trig_offset shift of
@@ -233,11 +233,11 @@ def decimated_trace(
     readout_cfg
         The readout pulse cfg whose waveform defines the envelope shape (for a
         PulseReadout this is ``ro_module.cfg.pulse_cfg``).
-    ro_length
-        The resolved readout pulse length (µs) at this sweep point; the envelope
-        is zero outside ``[0, ro_length)``.  Passed in (not read off the cfg)
-        because a swept length is resolved by the caller, mirroring how lowering
-        threads resolved scalars.
+    pulse_length
+        The resolved generator pulse/envelope length (µs) at this sweep point;
+        the envelope is zero outside ``[0, pulse_length)``. This is deliberately
+        separate from the ADC/readout integration window length (`ro_length`),
+        which only determines the sampled ``ts`` axis upstream.
     f_ro_ghz
         The readout probe frequency (GHz); the steady S21 is evaluated here.
     rf_g, rf_e
@@ -267,5 +267,5 @@ def decimated_trace(
         0
     ]
 
-    amp = envelope_at(readout_cfg, ts - sim.timeFly, ro_length)
+    amp = envelope_at(readout_cfg, ts - sim.timeFly, pulse_length)
     return (amp * steady).astype(np.complex128)

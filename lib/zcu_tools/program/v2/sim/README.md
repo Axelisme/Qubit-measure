@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-06-23 (cancellable mocksim and operating-point cache)
+**Last updated:** 2026-06-26 (ArbWaveform asset length and decimated envelope)
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -107,6 +107,10 @@ every coupling point.
   `detune_offset` frame shift), shaped-pulse discretisation, deterministic Branch
   selection, and the dmem (non-uniform T1) register indirection. Does NOT compute
   f_qubit, acc_buf, noise, S21, or the detune ensemble (the engine owns that).
+- `waveforms.py` — shared peak-normalized envelope sampling for both lowering and
+  decimated readout. `ArbWaveform` uses the asset's stored reference time axis and
+  asset duration (`time[-1]`) as its playback length; config no longer supplies a
+  separate arb waveform length.
 - `readout.py` — dispersive readout: physical quantities -> complex IQ.
   `resonator_freqs` is the eigensolve (flux -> `rf_g` / `rf_e`); `s21` is the pure,
   eigh-free per-state hanger response (the engine calls it twice per point for the
@@ -139,6 +143,11 @@ every coupling point.
   is the qubit control pulses' frequency. Idle segments carry the frame detuning
   (not 0), which is what makes Ramsey fringes appear. Qubit pulses that disagree
   in frequency at a point have no single frame -> fast-fail.
+- **Waveform envelopes.** Const, gauss/drag, cosine, flat_top, and `ArbWaveform`
+  pulses all lower through the same scalar envelope path. `ArbWaveform` assets are
+  represented as `abs(I+jQ)` because the current TLS Bloch/readout model has one
+  amplitude envelope plus a static pulse phase; time-varying quadrature phase in
+  the asset is not modeled separately.
 - **Dephasing = homogeneous + Lorentzian quasi-static detune.** Decoherence has
   two parts: a *homogeneous* rate (`Tφ`, folded with T1 into the Bloch `T2` an
   echo recovers) carried by the Bloch propagator, and an *inhomogeneous*
@@ -157,13 +166,15 @@ every coupling point.
   lookback point, evolves the Bloch vector to `P_e`, and renders the time-domain
   trace via `decimated_trace` — the readout envelope scaled by the steady mixed
   S21, **shifted by `sim.timeFly`** (the readout time of flight). So the trace is
-  ~0 for program-time `< timeFly` and the readout pulse appears at
-  `[timeFly, timeFly + ro_length)`, giving lookback a physical rising edge whose
-  position `analyze` recovers as the trig_offset (`≈ timeFly`). Model A has no
-  resonator ring-up transient (the steady S21 applied per sample); the accumulated
-  companion `acc_buf` stays white noise (lookback never reads it). Decimated needs
-  a `PulseReadout` (its `pulse_cfg` defines the envelope); a `DirectReadout` or
-  more than one readout fast-fails.
+  ~0 for program-time `< timeFly` and the readout pulse envelope appears at
+  `[timeFly, timeFly + pulse_cfg.waveform.length)`, giving lookback a physical
+  rising edge whose position `analyze` recovers as the trig_offset (`≈ timeFly`).
+  The ADC/readout window length (`ro_cfg.ro_length`) only determines the sampled
+  time axis and may outlive the generator envelope. Model A has no resonator
+  ring-up transient (the steady S21 applied per sample); the accumulated companion
+  `acc_buf` stays white noise (lookback never reads it). Decimated needs a
+  `PulseReadout` (its `pulse_cfg` defines the envelope); a `DirectReadout` or more
+  than one readout fast-fails.
 - **Deterministic Branch supported.** A `Branch` selected by a registered
   sweep-loop counter (e.g. g/e prep) lowers its chosen sub-sequence; the frame
   detuning recurses into the selected branch. Measurement-conditional branches,

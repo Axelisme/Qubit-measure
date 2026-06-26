@@ -123,7 +123,6 @@ def waveform_cfg_to_value(cfg_input: Any) -> tuple[CfgSectionSpec, CfgSectionVal
         val = CfgSectionValue(
             fields={
                 "style": DirectValue("arb"),
-                "length": _val(cfg, "length"),
                 "data": _val(cfg, "data"),
             }
         )
