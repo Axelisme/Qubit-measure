@@ -108,14 +108,24 @@ def test_preview_missing_name_reports_available(fixture: Fixture) -> None:
     assert data["available"] == []
 
 
-def test_set_invalid_recipe_reports_reason(fixture: Fixture) -> None:
+@pytest.mark.parametrize(
+    "recipe",
+    [
+        {"segments": [{"duration": 0.001, "formula": "unknown(t)"}]},
+        {"normalize": True, "segments": [{}]},
+        {"normalize": "peak", "segments": [{}]},
+    ],
+)
+def test_set_invalid_recipe_reports_reason(
+    fixture: Fixture, recipe: dict[str, object]
+) -> None:
     with pytest.raises(RemoteError) as exc:
         dispatch_handler(
             fixture.ctrl,
             "arb_waveform.set",
             {
                 "name": "arb_wav1",
-                "recipe": {"segments": [{"duration": 0.001, "formula": "unknown(t)"}]},
+                "recipe": recipe,
                 "overwrite": False,
             },
         )
