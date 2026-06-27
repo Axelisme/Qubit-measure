@@ -168,7 +168,8 @@ git branch -d agent/<task-id>
 9. 若尚未建立 preview，就直接用 `git merge --ff-only agent/<task-id>` 收尾；不要為了收尾建立 merge commit。
 10. 若未授權進入主線 preview，停在可檢查的 integration branch / lane branch diff，回報 task-id、lane-id、worktree path、測試狀態與下一步。
 11. 每個 task item 或 Phase 告一段落時，必須完成整合決策：fast-forward、abandon 或 blocked。已結束 task 要同步完成 plan 歸檔；不要把 worktree 或 active plan 當長期常駐狀態留著，長期殘留會讓 branch、ignored inputs、reports 與 base branch 漸漸失同步。
-12. `git merge --squash` 不是預設收尾方式；它會斷開 branch ancestry，讓 `git branch -d` 無法確認 task / lane branch 已整合。除非用戶明確要求 squash merge，否則使用 rebase / soft reset 整理 lane branch，再以 `ff-only` 推進 integration branch 與主線。
+12. 當 task 告一段落且沒有剩餘 backlog 時，可以主動詢問用戶是否關閉這個 task。用戶同意後，依上方收尾規則清理目前 task 的 worktree / branch / `state.json` entry，並將 `.agent_state/plans/<task-id>/` 整包移到 `.agent_state/plans/archives/<task-id>/`。
+13. `git merge --squash` 不是預設收尾方式；它會斷開 branch ancestry，讓 `git branch -d` 無法確認 task / lane branch 已整合。除非用戶明確要求 squash merge，否則使用 rebase / soft reset 整理 lane branch，再以 `ff-only` 推進 integration branch 與主線。
 
 ### Phase 推薦流水線
 
@@ -210,7 +211,7 @@ git branch -d agent/<task-id>
 4. **委派**：每個 Phase 預設走 `impl-detail-planner` → `plan-item-implementer` → `python-module-reviewer`。給每個 agent 清楚 task-id、lane-id、workdir、write scope、report path；planner 產出是 implementer 的輸入，reviewer finding 回到同一 lane worktree 修正。
 5. **收報告 → 整合**：讀 final message 與 report 檔，回寫 `progress.md` / `findings.md`，判斷完成度。報告矛盾或不足時補一輪委派，不要含糊整合。
 6. **驗證與回報**：一個 Phase 收尾時，按 `CLAUDE.md` 依序跑（或指示/委派）`pyright` → `pytest` → `ruff`，再更新對應模組 `README.md`（lib/tests 子目錄，現在式、刷新頂部 Last updated，不寫 commit hash）。
-7. **關閉 task / lane worktree**：Phase / task item 收尾時，先在各 lane branch rebase / 整理 commit，必要時整合到 parent branch `agent/<task-id>`，再用 `git merge --no-commit --no-ff` 在主 checkout 建立驗收預覽；用戶有改動意見就 abort preview 並讓 sub-agent 回相關 lane / integration worktree 修，無意見且授權收尾就 abort preview 後用 `git merge --ff-only agent/<task-id>` 進主線，從 `state.json` 刪除 task entry、移除所有 lane / integration worktree 並刪除 branch。若不整合，清理後同樣刪除 entry；只有仍在 active/reviewing/merge_preview/blocked 的 task 才保留 entry。task 結束後，將 `.agent_state/plans/<task-id>/` 整包移到 `.agent_state/plans/archives/<task-id>/`，讓 plans 根目錄維持乾淨。
+7. **關閉 task / lane worktree**：Phase / task item 收尾時，先在各 lane branch rebase / 整理 commit，必要時整合到 parent branch `agent/<task-id>`，再用 `git merge --no-commit --no-ff` 在主 checkout 建立驗收預覽；用戶有改動意見就 abort preview 並讓 sub-agent 回相關 lane / integration worktree 修，無意見且授權收尾就 abort preview 後用 `git merge --ff-only agent/<task-id>` 進主線，從 `state.json` 刪除 task entry、移除所有 lane / integration worktree 並刪除 branch。若 task 已告一段落且沒有剩餘 backlog，可以先詢問用戶是否關閉；用戶同意後就按同一套清理流程移除當前 worktree 並歸檔 plan。若不整合，清理後同樣刪除 entry；只有仍在 active/reviewing/merge_preview/blocked 的 task 才保留 entry。task 結束後，將 `.agent_state/plans/<task-id>/` 整包移到 `.agent_state/plans/archives/<task-id>/`，讓 plans 根目錄維持乾淨。
 
 ## 邊界
 
