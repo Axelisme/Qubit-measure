@@ -33,6 +33,7 @@ session/
 │   ├── io_manager.py   — IOManager（ExperimentManager 包裝，實作 ProjectIOPort；**共用**）
 │   ├── mock_flux.py    — MockFluxProvisioner（FLUX-AWARE-MOCK：訂閱 SOC_CHANGED，mock connect 時 ① 綁定/provision fake_flux 源 ② 從 mock soc 自身 SimParams 建 FluxoniumPredictor 經 connection seam 安裝——不蓋使用者已載入的 predictor）
 │   ├── predictor_from_sim.py — build_predictor_from_simparams(SimParams)→FluxoniumPredictor（純函式；橋接兩個彼此獨立的 lib leaf，放 session 層避免在 program/simulate 間造新跨依賴；測試共用）
+│   ├── value_sources.py — ValueSourceBinder：訂閱 Context/Predictor/Device event，把 live SessionState 投影註冊進 `ValueRegistry`；provider 只讀 cached state（device value 只看 `DeviceState.info`，不 poll hardware），並用 owner-level replace/unregister 維護 lifecycle
 │   └── build.py        — SessionServices bundle（soc_connection/predictor/context/device/startup）+ build_session_services(state,bus,gate,handles,background,progress,io_manager,runner,driver_factory?,device_registry?)
 └── ui/                 — 共用 dialog（吃 SessionControllerPort）
     ├── progress_stack.py — ProgressStack widget（唯一拉 Qt 的 progress 件）

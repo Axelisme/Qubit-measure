@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 from zcu_tools.gui.session.value_lookup import (
     DuplicateValueKey,
@@ -59,7 +61,11 @@ def test_get_default_covers_missing_and_unavailable_values() -> None:
 
 def test_missing_unavailable_type_and_provider_errors_are_distinct() -> None:
     registry = ValueRegistry()
-    registry.register(ValueKey("source.float", float), lambda: "bad", owner="source")
+    registry.register(
+        ValueKey("source.float", float),
+        lambda: cast(float, "bad"),
+        owner="source",
+    )
     registry.register(
         ValueKey("source.broken", float),
         lambda: (_ for _ in ()).throw(RuntimeError("boom")),

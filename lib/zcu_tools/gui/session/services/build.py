@@ -23,6 +23,7 @@ from zcu_tools.gui.session.services.device import DeviceService
 from zcu_tools.gui.session.services.mock_flux import MockFluxProvisioner
 from zcu_tools.gui.session.services.predictor import PredictorService
 from zcu_tools.gui.session.services.startup import StartupService
+from zcu_tools.gui.session.services.value_sources import ValueSourceBinder
 from zcu_tools.gui.session.value_lookup import ValueLookup, ValueRegistry
 
 if TYPE_CHECKING:
@@ -50,6 +51,7 @@ class SessionServices:
     device: DeviceService
     startup: StartupService
     values: ValueLookup
+    value_sources: ValueSourceBinder
 
 
 def build_session_services(
@@ -89,6 +91,7 @@ def build_session_services(
     soc_connection = SoCConnectionService(state, bus, gate, handles, runner)
     predictor = PredictorService(state, bus)
     context = ContextService(state, io_manager, bus, values=value_registry)
+    value_sources = ValueSourceBinder(state=state, bus=bus, registry=value_registry)
     # StartupService bridges the two session services it commands through their
     # ports (context bootstrap + remembered-device registration) + State prefs.
     startup = StartupService(context, device, state)
@@ -106,4 +109,5 @@ def build_session_services(
         device=device,
         startup=startup,
         values=value_registry,
+        value_sources=value_sources,
     )

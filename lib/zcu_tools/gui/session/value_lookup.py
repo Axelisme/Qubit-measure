@@ -10,12 +10,12 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from typing import Generic, Protocol, TypeAlias, TypeVar, overload
+from typing import Generic, Protocol, TypeAlias, TypeVar, cast
 
 ScalarValue: TypeAlias = int | float | str | bool
 ScalarType: TypeAlias = type[int] | type[float] | type[str] | type[bool]
 
-T = TypeVar("T", int, float, str, bool)
+T = TypeVar("T")
 
 
 class _Missing:
@@ -110,19 +110,7 @@ class ValueProviderSpec(Generic[T]):
 class ValueLookup(Protocol):
     """Read-only surface exposed to adapters, GUI, and remote handlers."""
 
-    @overload
-    def get(self, key: ValueKey[T]) -> T: ...
-
-    @overload
-    def get(self, key: ValueKey[T], *, default: T) -> T: ...
-
     def get(self, key: ValueKey[T], *, default: T | _Missing = MISSING) -> T: ...
-
-    @overload
-    def get_as(self, path: str, type_: type[T]) -> T: ...
-
-    @overload
-    def get_as(self, path: str, type_: type[T], *, default: T) -> T: ...
 
     def get_as(
         self, path: str, type_: type[T], *, default: T | _Missing = MISSING
@@ -142,7 +130,7 @@ class _Entry(Generic[T]):
     def info(self) -> ValueInfo:
         return ValueInfo(
             key=self.key.path,
-            type_=self.key.type_,
+            type_=cast(ScalarType, self.key.type_),
             owner=self.owner,
             description=self.description,
         )
@@ -281,11 +269,16 @@ class ValueRegistry(ValueLookup):
                 requested.path, f"Value source {requested.path!r} is not registered"
             )
         if entry.key.type_ is not requested.type_:
+            registered_type = cast(ScalarType, entry.key.type_)
+            requested_type = cast(
+                ScalarType,
+                _ensure_supported_type(requested.path, requested.type_),
+            )
             raise ValueTypeError(
                 requested.path,
                 f"Value source {requested.path!r} has type "
-                f"{_name_from_type(entry.key.type_)!r}, requested "
-                f"{_name_from_type(_ensure_supported_type(requested.path, requested.type_))!r}",
+                f"{_name_from_type(registered_type)!r}, requested "
+                f"{_name_from_type(requested_type)!r}",
             )
         try:
             value = entry.provider()
@@ -298,12 +291,15 @@ class ValueRegistry(ValueLookup):
         return _coerce_value(entry.key.path, value, requested.type_)
 
     def _entry_from_spec(self, spec: ValueProviderSpec[T]) -> _Entry[ScalarValue]:
-        return _Entry(
-            key=ValueKey(spec.key.path, spec.key.type_),
-            provider=spec.provider,
-            owner=spec.owner,
-            description=spec.description,
-            token=object(),
+        return cast(
+            _Entry[ScalarValue],
+            _Entry(
+                key=ValueKey(spec.key.path, spec.key.type_),
+                provider=spec.provider,
+                owner=spec.owner,
+                description=spec.description,
+                token=object(),
+            ),
         )
 
     def _install_entry(self, entry: _Entry[ScalarValue]) -> None:
@@ -409,19 +405,19 @@ def _coerce_value(key: str, value: object, type_: type[T]) -> T:
     if type_ is bool:
         if type(value) is not bool:
             raise ValueTypeError(key, f"Value source {key!r} did not return a bool")
-        return value
+        return cast(T, value)
     if type_ is int:
         if type(value) is not int:
             raise ValueTypeError(key, f"Value source {key!r} did not return an int")
-        return value
+        return cast(T, value)
     if type_ is float:
         if type(value) in (int, float):
-            return float(value)
+            return cast(T, float(cast(int | float, value)))
         raise ValueTypeError(key, f"Value source {key!r} did not return a float")
     if type_ is str:
         if type(value) is not str:
             raise ValueTypeError(key, f"Value source {key!r} did not return a str")
-        return value
+        return cast(T, value)
     raise AssertionError(f"Unsupported type {type_!r}")
 
 
