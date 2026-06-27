@@ -46,13 +46,22 @@ def patch_pulse_fields(
     *,
     freq: float | ScalarValue,
     ch: int | ScalarValue,
-    gain: float,
-    length: float,
+    gain: float | ScalarValue,
+    length: float | ScalarValue,
 ) -> None:
-    """Patch a pulse CfgSectionValue (flat fields) in-place with sensible values."""
+    """Patch a pulse CfgSectionValue (flat fields) in-place with sensible values.
+
+    Every field accepts a raw scalar (wrapped in DirectValue) or an already-built
+    DirectValue/EvalValue — so a field may be a live md expression (e.g. a
+    best_ro_* readout seed) as readily as a literal constant.
+    """
     waveform_ref = value.fields.get("waveform")
     if isinstance(waveform_ref, (ModuleRefValue, WaveformRefValue)):
-        waveform_ref.value.fields["length"] = DirectValue(length)
+        waveform_ref.value.fields["length"] = (
+            length
+            if isinstance(length, (DirectValue, EvalValue))
+            else DirectValue(length)
+        )
 
     value.fields["ch"] = (
         ch if isinstance(ch, (DirectValue, EvalValue)) else DirectValue(ch)
@@ -61,7 +70,9 @@ def patch_pulse_fields(
     value.fields["freq"] = (
         freq if isinstance(freq, (DirectValue, EvalValue)) else DirectValue(freq)
     )
-    value.fields["gain"] = DirectValue(gain)
+    value.fields["gain"] = (
+        gain if isinstance(gain, (DirectValue, EvalValue)) else DirectValue(gain)
+    )
 
 
 def patch_ro_cfg_fields(
