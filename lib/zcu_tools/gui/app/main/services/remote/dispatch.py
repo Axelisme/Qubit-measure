@@ -47,6 +47,13 @@ from zcu_tools.gui.session.services.device import (
     DisconnectDeviceRequest,
     SetupDeviceRequest,
 )
+from zcu_tools.gui.session.value_lookup import (
+    MissingValue,
+    ProviderError,
+    UnavailableValue,
+    ValueInfo,
+    ValueTypeError,
+)
 from zcu_tools.meta_tool import ArbWaveformError
 
 from ..load import LoadDataError
@@ -600,6 +607,45 @@ def _h_context_md_get_attr(
     if value is sentinel:
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown md key: {key!r}")
     return {"key": key, "value": _json_safe(value)}
+
+
+def _value_info_to_wire(info: ValueInfo) -> dict[str, object]:
+    return {
+        "key": info.key,
+        "type": info.type_name,
+        "owner": info.owner,
+        "description": info.description,
+    }
+
+
+def _h_value_list(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    del params
+    return {
+        "values": [
+            _value_info_to_wire(info) for info in adapter.ctrl.list_value_sources()
+        ]
+    }
+
+
+def _h_value_read(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    key = str(params["key"])
+    raw_type = params.get("type")
+    if raw_type is not None and not isinstance(raw_type, str):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "'type' must be a string")
+    type_name = cast(str | None, raw_type)
+    try:
+        info, value = adapter.ctrl.read_value_source(key, type_name)
+    except (MissingValue, ValueTypeError, ValueError) as exc:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+    except UnavailableValue as exc:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+    except ProviderError as exc:
+        raise RemoteError(ErrorCode.CONTROLLER_ERROR, str(exc)) from exc
+    return {**_value_info_to_wire(info), "value": value}
 
 
 def _h_context_ml_get(
@@ -2093,6 +2139,8 @@ _HANDLERS: dict[str, Handler] = {
     "context.active": _h_context_active,
     "context.md_get": _h_context_md_get,
     "context.md_get_attr": _h_context_md_get_attr,
+    "value.list": _h_value_list,
+    "value.read": _h_value_read,
     "context.ml_get": _h_context_ml_get,
     "context.md_set_attr": _h_context_md_set_attr,
     "context.md_del_attr": _h_context_md_del_attr,

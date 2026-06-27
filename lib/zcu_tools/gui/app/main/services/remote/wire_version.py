@@ -68,10 +68,12 @@ from __future__ import annotations
 #     {applied_ids, written, context_version}.
 # v46: arbitrary waveform asset RPCs:
 #   arb_waveform.list / preview / set with formula recipe persistence.
-WIRE_VERSION = 46
+# v47: read-only value source RPCs:
+#   value.list / value.read.
+WIRE_VERSION = 47
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION (a wire-contract change
 # bumps both; a pure-internal GUI change bumps only this). Git history holds the
 # per-version evolution.
-GUI_VERSION = 58  # arb waveform entry moved into Inspect dialog toolbar
+GUI_VERSION = 59  # value source read-only RPCs

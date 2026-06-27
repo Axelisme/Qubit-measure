@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-26 (RPC timeout policy)
+**Last updated:** 2026-06-28 (value source generated tools)
 
 # `zcu_tools/mcp/measure/`
 
@@ -19,6 +19,9 @@ RemoteControlAdapter。此 package 是 app-local policy 層，不是共用 trans
   它們操作 qubit-scoped `.npz` asset store；`set_arb_waveform` guard deps 是
   `arb_waveforms`，list/preview 只 reveal `arb_waveforms`，validation/collision/missing
   以 tool error 的 stable `reason` 回報。
+- `gui_value_list` / `gui_value_read` 是 generated read-only RPC tools，對應
+  `value.list` / `value.read`。它們是 resolve-once value source 逃生通道；
+  因來源可能投影 context/device/predictor，不列入 read-reveal table。
 - `tab.load_data` / generated `gui_tab_load_data` 是同步 mutation：guard deps 是
   `tab:{tab_id}`、`tab:{tab_id}:result`、`tab:{tab_id}:analyze`、`context`；不依賴
   SoC、device、cfg 或 save path，且不進 operation-handle table。

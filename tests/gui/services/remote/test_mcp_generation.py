@@ -150,6 +150,23 @@ def test_load_data_is_generated_with_hidden_expected_versions():
     assert set(schema["properties"]) == {"tab_id", "data_path"}
 
 
+def test_value_source_tools_are_generated_read_only_forwards():
+    assert "value.list" in METHOD_SPECS
+    assert "value.read" in METHOD_SPECS
+    assert "value.list" not in m._NON_GENERATED_METHODS
+    assert "value.read" not in m._NON_GENERATED_METHODS
+    assert "gui_value_list" in m.TOOLS
+    assert "gui_value_read" in m.TOOLS
+    assert "gui_value_list" not in m._OVERRIDE_NAMES
+    assert "gui_value_read" not in m._OVERRIDE_NAMES
+
+    read_schema = m.TOOLS["gui_value_read"]["inputSchema"]
+    assert read_schema["required"] == ["key"]
+    assert set(read_schema["properties"]) == {"key", "type"}
+    assert read_schema["properties"]["key"]["type"] == "string"
+    assert read_schema["properties"]["type"]["type"] == "string"
+
+
 def test_writeback_set_item_selected_is_boolean_schema():
     """``selected`` must render as a boolean schema so the client sends a real
     boolean. A JSON-any schema lets the client send the string "false", which

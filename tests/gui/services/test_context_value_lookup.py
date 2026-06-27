@@ -5,7 +5,11 @@ from unittest.mock import MagicMock
 from zcu_tools.gui.app.main.adapter import ContextReadiness
 from zcu_tools.gui.app.main.state import ExpContext, State
 from zcu_tools.gui.session.services.context import ContextService
-from zcu_tools.gui.session.value_lookup import EmptyValueLookup, ValueRegistry
+from zcu_tools.gui.session.value_lookup import (
+    EmptyValueLookup,
+    ValueKey,
+    ValueRegistry,
+)
 
 
 def _state() -> State:
@@ -79,3 +83,24 @@ def test_new_context_preserves_lookup_when_io_returns_fresh_context() -> None:
     assert state.exp_context.values is registry
     assert state.exp_context.active_label == "flux_1.0_V"
     assert state.exp_context.readiness is ContextReadiness.ACTIVE
+
+
+def test_context_service_lists_and_reads_value_sources() -> None:
+    state = _state()
+    registry = ValueRegistry()
+    registry.register(
+        ValueKey("device.active_flux.value", float),
+        lambda: 0.125,
+        owner="device:active_flux",
+        description="Active flux device cached value.",
+    )
+    svc = ContextService(state, MagicMock(), MagicMock(), values=registry)
+
+    assert [info.key for info in svc.list_value_sources()] == [
+        "device.active_flux.value"
+    ]
+    info, value = svc.read_value_source("device.active_flux.value", "float")
+
+    assert info.type_name == "float"
+    assert info.owner == "device:active_flux"
+    assert value == 0.125

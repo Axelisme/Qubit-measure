@@ -11,7 +11,14 @@ from zcu_tools.gui.session.events import (
     MlChangedPayload,
 )
 from zcu_tools.gui.session.types import ContextReadiness
-from zcu_tools.gui.session.value_lookup import ValueLookup
+from zcu_tools.gui.session.value_lookup import (
+    MissingValue,
+    ScalarValue,
+    ValueInfo,
+    ValueLookup,
+    ValueRef,
+    resolve_value_ref,
+)
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 logger = logging.getLogger(__name__)
@@ -133,6 +140,22 @@ class ContextService:
     def get_exp_context(self) -> ExpContext:
         """The live ExpContext (md + ml + …) — used to seed role templates."""
         return self._state.exp_context
+
+    def list_value_sources(self) -> tuple[ValueInfo, ...]:
+        return self._values.describe()
+
+    def read_value_source(
+        self, key: str, type_name: str | None = None
+    ) -> tuple[ValueInfo, ScalarValue]:
+        ref = ValueRef(key=key, type_name=type_name)
+        info = self._value_info(ref.key)
+        return info, resolve_value_ref(ref, self._values)
+
+    def _value_info(self, key: str) -> ValueInfo:
+        for info in self._values.describe():
+            if info.key == key:
+                return info
+        raise MissingValue(key, f"Value source {key!r} is not registered")
 
     def get_flux_dir(self) -> str | None:
         import os

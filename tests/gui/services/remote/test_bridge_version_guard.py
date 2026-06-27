@@ -442,6 +442,8 @@ def test_context_md_get_does_not_mask_context_change(wired):
     assert "context.md_get_attr" not in mcp_server._READ_REVEALS
     assert "context.ml_get" not in mcp_server._READ_REVEALS
     assert "context.ml_list_roles" not in mcp_server._READ_REVEALS
+    assert "value.list" not in mcp_server._READ_REVEALS
+    assert "value.read" not in mcp_server._READ_REVEALS
 
     # Verify that context.md_get falls back to whole-table (not narrow) by
     # confirming it behaves like an unmapped read: it replaces all of _LAST_SEEN.

@@ -79,6 +79,7 @@ if TYPE_CHECKING:
         StartupService,
     )
     from zcu_tools.gui.session.types import SocCfgHandle
+    from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 
@@ -138,6 +139,14 @@ class SessionControllerMixin:
 
     def get_active_context_label(self) -> str | None:
         return self._ctx_svc.get_active_context_label()
+
+    def list_value_sources(self) -> tuple[ValueInfo, ...]:
+        return self._ctx_svc.list_value_sources()
+
+    def read_value_source(
+        self, key: str, type_name: str | None = None
+    ) -> tuple[ValueInfo, ScalarValue]:
+        return self._ctx_svc.read_value_source(key, type_name)
 
     # --- setup dialog: connection ----------------------------------------
     def start_connect(self, req: ConnectRequest) -> int:

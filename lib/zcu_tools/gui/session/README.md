@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-28 — value_lookup read-only registry
+**Last updated:** 2026-06-28 — value source read facade
 
 # gui/session/ — 量測 session core（measure + autofluxdep 共用）
 
@@ -16,8 +16,8 @@ session/
 ├── operation_runner.py — OperationRunner（唯一 kind-agnostic operation 生命週期機制，ADR-0026 §1：ensure_can_start→create→register→progress factory→submit→終局 settle）+ OperationSpec（各 op 把領域 policy 交給 runner）；run/analyze/device/SoC-connect 都是它的 client，runner 只認 port 不認行為
 ├── scopes.py           — progress_ambient（session 層：pbar ContextVar，無 Qt；ADR-0026 §2，取代舊 executor `_entered`/OffMainScopes 的 pbar 欄位）。figure_ambient（Qt）住 app 層 `gui/app/main/services/scopes.py`
 ├── notify_handles.py   — NotifyChannel/NotifyHandles（agent→user prompt 的跨線程 channel，事件集 Reply/Dismiss/Timeout，獨立於 operation 的 Settled/Message/Stop；鏡像 OperationChannel 四不變式，ADR-0025）
-├── controller_port.py  — SessionControllerPort：共用 dialog 依賴的窄 Controller 面（setup/context/connection + device lifecycle/queries/progress + predictor load/set_model_params/clear/predict/curve + inspect md/ml）；回傳宣告對 BaseEventBus 故 app EventBus covariant 滿足
-├── controller_mixin.py — SessionControllerMixin：SessionControllerPort 的「共用 body」——兩 app 逐字相同的 39 個 port forward（讀 6 個 abstract service accessor `_soc_svc`/`_pred_svc`/`_ctx_svc`/`_dev_svc`/`_startup_svc`/`_progress_svc`，以 annotation-only 宣告型別由 concrete Controller 供應同名 attr，**不**用 @property 以免 data-descriptor `__set__` 撞既有 `self._x_svc=` 賦值）。app 各自只留 body 真正分歧的 override：`apply_startup_project`（measure 回 resolved dict/WIRE-44、autofluxdep 回 bool）、`get_project_root`（讀 app `_project_root`）、`get_bus`（回 app EventBus subtype）。import-clean（service/request 型別全 TYPE_CHECKING-only），列入 test_shared_layer 守
+├── controller_port.py  — SessionControllerPort：共用 dialog 依賴的窄 Controller 面（setup/context/value lookup/connection + device lifecycle/queries/progress + predictor load/set_model_params/clear/predict/curve + inspect md/ml）；回傳宣告對 BaseEventBus 故 app EventBus covariant 滿足
+├── controller_mixin.py — SessionControllerMixin：SessionControllerPort 的「共用 body」——兩 app 逐字相同的 41 個 port forward（讀 6 個 abstract service accessor `_soc_svc`/`_pred_svc`/`_ctx_svc`/`_dev_svc`/`_startup_svc`/`_progress_svc`，以 annotation-only 宣告型別由 concrete Controller 供應同名 attr，**不**用 @property 以免 data-descriptor `__set__` 撞既有 `self._x_svc=` 賦值）。app 各自只留 body 真正分歧的 override：`apply_startup_project`（measure 回 resolved dict/WIRE-44、autofluxdep 回 bool）、`get_project_root`（讀 app `_project_root`）、`get_bus`（回 app EventBus subtype）。import-clean（service/request 型別全 TYPE_CHECKING-only），列入 test_shared_layer 守
 ├── expression.py       — 安全 numeric expression evaluator（evaluate_numeric_expr + coerce_eval_result，純函式吃 MetaDict）+ EvalRef（frozen dataclass：eval 模式欄位的 read_raw() marker，apply 時 resolve，不持久化）；import-clean leaf
 ├── value_lookup.py     — read-only value source lookup（`ValueLookup`/`ValueRegistry`/owner-scoped replace/unregister/`ValueRef` resolve-once helpers）；純 session leaf，provider 來源由 service binder 負責，使用端只見 lookup
 ├── pbar_host.py        — ProgressBar(worker)/ProgressBarModel(主線程 SSOT)，Qt-free
@@ -52,6 +52,6 @@ session/
 - **startup project return contract**：`SessionControllerPort.apply_startup_project` 允許 `bool | dict[str, str]`。共用 setup dialog 只看 truthiness；measure 的 remote `startup.apply` / `gui_project_apply` 回 resolved project dict（WIRE 44），autofluxdep controller 仍回 bool。
 - **import-clean leaf**（不得拉 Qt/matplotlib/gui.app.*，`tests/gui/test_shared_layer.py` 守）：types/events/operation_handles/ports/state/pbar_host/controller_port。`adapters/` + `ui/*` + `services/*` 是 Qt/重，不列。
 - **wire name 來源**：`SessionEvent.X` 的字串值即 wire event name；measure-gui 的 wire-name lock 測試（`test_remote_event_dialog_view.py`）鎖全集，搬移/改名 payload 不得動字串值。
-- **`ExpContext.values`**：只攜帶 read-only `ValueLookup` facade，供 default generation / resolve-once 讀目前 session 投影；mutable `ValueRegistry` 只在 session composition root / source binder 內使用。`ExpContext` 仍是 live environment facade，不是 snapshot。
+- **`ExpContext.values`**：只攜帶 read-only `ValueLookup` facade，供 default generation / resolve-once 讀目前 session 投影；`ContextService.list_value_sources/read_value_source` 是 GUI/remote 共用查詢面，mutable `ValueRegistry` 只在 session composition root / source binder 內使用。`ExpContext` 仍是 live environment facade，不是 snapshot。
 
 跨模組設計見 ADR-0002/0004/0005/0006/0019/0020/0021/0025/0026（0021：event ownership——domain module 擁有 enum+payload、app 組裝；0025：跨線程互動 channel——OperationChannel/NotifyChannel；0026：operation abstraction——OperationRunner + scope-as-adapter-input + State write port + ConnectionService 拆 SoC/Predictor + DeviceRegistryPort）。**autofluxdep 已完整複用**（session-core extraction S1–S5：組 session services + 實作 SessionControllerPort + run 讀 exp_context + 用共用 setup/device/predictor dialog；見 ADR-0020 + autofluxdep/README）。

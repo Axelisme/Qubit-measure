@@ -293,6 +293,23 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "context.md_get_attr": MethodSpec(
         5.0, "Read one MetaDict attribute", (_str("key", "MetaDict key"),)
     ),
+    "value.list": MethodSpec(
+        5.0,
+        "List registered read-only value sources. Returns "
+        "{values: [{key, type, owner, description}]}. These are escape-hatch "
+        "resolve-once sources for rare defaults and agent reads; prefer typed "
+        "RPCs when a stable API exists.",
+    ),
+    "value.read": MethodSpec(
+        5.0,
+        "Resolve one registered value source immediately. Returns "
+        "{key, type, owner, description, value}. Optional 'type' is one of "
+        "int|float|str|bool and must match the registered source type.",
+        (
+            _str("key", "Registered value source key, e.g. device.active_flux.value"),
+            _str_opt("type", "Optional expected type: int, float, str, or bool"),
+        ),
+    ),
     "context.ml_get": MethodSpec(
         5.0,
         "List ModuleLibrary entries with their discriminator: returns "
