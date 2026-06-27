@@ -2213,8 +2213,10 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "non-atomic), addressed by 'editor_id' (from gui_editor_open). For tab "
             "cfg editing use gui_tab_set_cfg instead. 'edits' is an ORDERED list of "
             "{path, value}: 'path' is dotted (see gui_editor_get_cfg); 'value' is a "
-            "JSON scalar or an md-ref {__kind:eval, expr} (the eval form is accepted "
-            "only on a scalar leaf, never a sweep edge). Apply ref-switch edits "
+            "JSON scalar, an md-ref {__kind:eval, expr}, or a resolve-once value "
+            "source {__kind:value_ref, key, type?} (eval/value_ref forms are "
+            "accepted only on a scalar leaf, never a sweep edge). Discover value "
+            "source keys with gui_value_list / gui_value_read. Apply ref-switch edits "
             "before dependent inner-path edits (a ref switch removes child paths). "
             "Stops at the first failure and edits applied before it are NOT rolled "
             "back; the error names the failing path and how many already applied. On "
@@ -2245,7 +2247,10 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
                                 # generator's JsonType.JSON rendering. A 'type' union
                                 # listing "string" would let the client coerce a
                                 # number (0.2) to "0.2" and fail the float check.
-                                "description": "JSON scalar or {__kind:eval, expr}"
+                                "description": (
+                                    "JSON scalar, {__kind:eval, expr}, or "
+                                    "{__kind:value_ref, key, type?}"
+                                )
                             },
                         },
                         "required": ["path", "value"],
@@ -2273,7 +2278,10 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "gui_context_md_write): edits applied before it stay applied and are "
             "NOT rolled back. On success returns {valid, removed, added} "
             "aggregated across the batch. A running tab is rejected (cancel the "
-            "run first). Read the current tree with gui_tab_get_cfg."
+            "run first). Each value is a JSON scalar, {__kind:eval, expr}, or "
+            "{__kind:value_ref, key, type?}; value_ref resolves immediately and "
+            "source keys come from gui_value_list / gui_value_read. Read the current "
+            "tree with gui_tab_get_cfg."
         ),
         "inputSchema": {
             "type": "object",
@@ -2294,7 +2302,10 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
                             },
                             "value": {
                                 # Untyped: numbers must not be coerced to strings.
-                                "description": "JSON scalar or {__kind:eval, expr}",
+                                "description": (
+                                    "JSON scalar, {__kind:eval, expr}, or "
+                                    "{__kind:value_ref, key, type?}"
+                                ),
                             },
                         },
                         "required": ["path", "value"],

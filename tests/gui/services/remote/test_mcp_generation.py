@@ -105,14 +105,30 @@ def test_cfg_editor_tools_generated():
     assert "under" not in get_props
 
     # gui_editor_set is batch-only (edits = list of {path, value}). Each edit's
-    # 'value' is a JSON kind (scalar OR the tagged eval object): its schema is
-    # UNTYPED (no "type" key) so the MCP client never coerces a number against a
-    # "string" member and stringifies it (e.g. 0.2 -> "0.2", which then fails the
-    # downstream float-field check).
+    # 'value' is a JSON kind (scalar OR tagged eval/value_ref object): its schema
+    # is UNTYPED (no "type" key) so the MCP client never coerces a number against
+    # a "string" member and stringifies it (e.g. 0.2 -> "0.2", which then fails
+    # the downstream float-field check).
     set_props = m.TOOLS["gui_editor_set"]["inputSchema"]["properties"]
     assert "edits" in set_props
     value_schema = set_props["edits"]["items"]["properties"]["value"]
     assert "type" not in value_schema
+    assert "value_ref" in m.TOOLS["gui_editor_set"]["description"]
+    assert "gui_value_list" in m.TOOLS["gui_editor_set"]["description"]
+    assert "value_ref" in value_schema["description"]
+
+
+def test_cfg_set_tools_document_value_refs():
+    assert "value_ref" in METHOD_SPECS["tab.set_cfg"].description
+    assert "value_ref" in METHOD_SPECS["editor.set_field"].description
+    assert "value_ref" in m.TOOLS["gui_tab_set_cfg"]["description"]
+    assert "gui_value_list" in m.TOOLS["gui_tab_set_cfg"]["description"]
+
+    tab_value_schema = m.TOOLS["gui_tab_set_cfg"]["inputSchema"]["properties"][
+        "edits"
+    ]["items"]["properties"]["value"]
+    assert "type" not in tab_value_schema
+    assert "value_ref" in tab_value_schema["description"]
 
 
 def test_tab_new_is_a_pure_generated_forwarder():

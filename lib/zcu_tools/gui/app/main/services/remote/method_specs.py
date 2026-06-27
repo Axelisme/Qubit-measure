@@ -155,6 +155,11 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "Batch-set cfg fields on a tab in order (fail-fast, non-atomic). 'edits' "
         "is an ORDERED list of {path, value} objects. Apply ref-switch edits "
         "before dependent inner-path edits (a ref switch removes child paths). "
+        "'value' is a JSON scalar, an md-reference eval tag "
+        '{"__kind":"eval","expr":"r_f"}, or a registered value-source tag '
+        '{"__kind":"value_ref","key":"device.active_flux.value","type":"float"}; '
+        "value_ref is resolved immediately at set time and stored as a direct "
+        "scalar. Discover keys with value.list / value.read. "
         "Returns {valid, removed, added} aggregated across the batch — the same "
         "shape as editor.set_field. A tab that is currently running is rejected "
         "(cancel the run first). Use tab.get_cfg to read the current tree.",
@@ -821,10 +826,14 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "editor.new/get (ModuleRef sub-fields descend directly, no 'value' "
         "segment); 'value' is a JSON scalar, or an md-reference expression as "
         '{"__kind":"eval","expr":"r_f - 0.1"} (resolved against MetaDict at '
-        "commit). NOTE: the eval form is accepted ONLY on a scalar leaf — a "
+        "commit), or a registered value source as "
+        '{"__kind":"value_ref","key":"device.active_flux.value","type":"float"} '
+        "(resolved immediately at set time and stored as a direct scalar; discover "
+        "keys with value.list / value.read). NOTE: eval/value_ref forms are "
+        "accepted ONLY on a scalar leaf — a "
         "sweep_edge (a sweep's start/stop/expts/step) accepts ONLY a number/int, "
-        "never an eval/ref; an adapter's default eval edge cannot be overwritten "
-        "this way, pass a numeric value instead. "
+        "never an eval/value_ref; an adapter's default eval edge cannot be "
+        "overwritten this way, pass a numeric value instead. "
         "Returns {valid, removed, added} — does NOT echo cfg content "
         "(that would force a lowering pass that eagerly evaluates EvalValue). "
         "'valid' is whether the whole draft is currently valid; 'removed'/'added' "
@@ -834,7 +843,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         (
             _str("editor_id"),
             _str("path", "Dotted field path"),
-            _json("value", "JSON scalar or {__kind:eval, expr}"),
+            _json("value", "JSON scalar, {__kind:eval, expr}, or {__kind:value_ref, key, type?}"),
         ),
     ),
     "editor.get": MethodSpec(
