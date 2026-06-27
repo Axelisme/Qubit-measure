@@ -27,10 +27,11 @@
 
 ## IV. Spec / Value 設定模型
 
-- [0009 — Spec/Value fluent + LiteralSpec 鎖定 + 每角色 default factory](0009-spec-value-fluent-and-literal-lock.md)
+- [0009 — Spec/Value fluent + LiteralSpec 鎖定 + 角色 default 表（ROLE_TABLE）](0009-spec-value-fluent-and-literal-lock.md)
 - [0010 — Value 樹永遠完整 + None 統一表「空」](0010-value-tree-complete-none-for-empty.md)：（併入 DisabledRefValue marker 的演化）
 - [0011 — CfgSchema.validate 成品邊界靜態檢查](0011-cfgschema-validate-boundary.md)
 - [0012 — CfgBuilder value 層組裝 builder](0012-cfgbuilder-value-layer-fluent-assembly.md)
+- [0036 — Adapter capability 契約（顯式 `AdapterCapabilities` + import-time 驗證）](0036-adapter-capability-contract-validated-at-import.md)：每 adapter 顯式宣告 `AdapterCapabilities(analysis/requires_soc/post_analysis)`，`__init_subclass__` 在 import 時 getattr-identity（MRO-aware、不 hardcode base）Fast-Fail 宣告↔hook 不一致；analyze-params override 只在 params 無法全 default 建構時必須（否則 base 回 `params_cls()`）。取代 design_v2 的 DEC-1/3/4 機制探索，關聯 [[0009]]/[[0012]]。
 
 ## V. Remote / 傳輸
 
