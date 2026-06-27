@@ -407,7 +407,7 @@ save_image 與 figure-screenshot 出圖**與視窗無關**：兩者都用嵌進 
 
 role 預設由 `ROLE_TABLE` 資料 + `role_blank`/`role_ref` builder（`defaults/role_table.py`）提供，只收 `ctx`，seed 是 `Pulse`/`Ro` 資料而非 hardcoded 程式碼；adapter 端用 OO `.with_field(path, value)` 逐欄位覆寫（取代舊的 `gain=`/`ro_length=`/`trig_*=` 長參數列）。`make_trig_offset(ctx, *, trig_expr, trig_fallback)`：md 有 timeFly → `EvalValue(trig_expr)`（resolved 交給 lowering）、否則 `DirectValue(trig_fallback)`。
 
-readout / reset 等多形狀 role 另有形狀明確 factory（`make_pulse_readout_default` / `make_direct_readout_default` / `make_pulse_reset_default` …）；`make_readout_default` / `make_reset_default` 為 thin alias → pulse 形狀。挑形狀的 adapter 呼叫明確版。
+readout / reset 等多形狀 role 的每個形狀是獨立 role_id（`pulse_readout` / `direct_readout` / `readout_dpm`、`none_reset` / `pulse_reset` / `two_pulse_reset` / `bath_reset`）；`readout` / `reset` 的 blank 是 thin alias → pulse 形狀。挑形狀的 adapter 掛形狀明確 role（如 `.role(..., "pulse_readout")`），不靠 role 預設「正好是該形狀」。
 
 ### CfgBuilder（value 樹組裝入口，`shared/cfg_builder.py`，ADR-0012）
 

@@ -159,7 +159,7 @@ def _make_ctx(ml: ModuleLibrary) -> ExpContext:
     )
 
 
-def test_make_readout_ref_default_uses_library_selection_before_fallback():
+def test_readout_role_ref_uses_library_selection_before_fallback():
     ml = ModuleLibrary()
     ml.register_module(
         readout_rf=ModuleCfgFactory.from_raw(
@@ -190,7 +190,7 @@ def test_make_readout_ref_default_uses_library_selection_before_fallback():
     assert module_ref.chosen_key == "readout_rf"
 
 
-def test_make_readout_ref_default_falls_back_to_custom_when_lib_empty():
+def test_readout_role_ref_falls_back_to_custom_when_lib_empty():
     ctx = _make_ctx(ModuleLibrary())
     module_ref = role_ref(ROLE_TABLE["readout"], ctx)
 
@@ -198,7 +198,7 @@ def test_make_readout_ref_default_falls_back_to_custom_when_lib_empty():
     assert module_ref.chosen_key == "<Custom:Pulse Readout>"
 
 
-def test_make_readout_ref_default_prefers_readout_dpm_over_readout_rf():
+def test_readout_role_ref_prefers_readout_dpm_over_readout_rf():
     ml = ModuleLibrary()
     ml.register_module(
         readout_rf=ModuleCfgFactory.from_raw(
@@ -246,7 +246,7 @@ def test_make_readout_ref_default_prefers_readout_dpm_over_readout_rf():
     assert module_ref.chosen_key == "readout_dpm"
 
 
-def test_make_readout_ref_default_fallback_uses_directvalue_when_md_missing():
+def test_readout_role_ref_fallback_uses_directvalue_when_md_missing():
     ctx = _make_ctx(ModuleLibrary())
     module_ref = role_ref(ROLE_TABLE["readout"], ctx)
     assert isinstance(module_ref, ModuleRefValue)
@@ -266,7 +266,7 @@ def test_make_readout_ref_default_fallback_uses_directvalue_when_md_missing():
     assert ro_freq.value == 6000.0
 
 
-def test_make_readout_ref_default_fallback_prefers_ro_waveform_if_present():
+def test_readout_role_ref_fallback_prefers_ro_waveform_if_present():
     from zcu_tools.gui.app.main.adapter import WaveformRefValue
 
     ml = ModuleLibrary()
@@ -285,7 +285,7 @@ def test_make_readout_ref_default_fallback_prefers_ro_waveform_if_present():
     assert waveform.chosen_key == "ro_waveform"
 
 
-def test_make_readout_ref_default_returns_disabled_when_optional_and_empty():
+def test_readout_role_ref_returns_disabled_when_optional_and_empty():
     # ADR-0010: optional ref with an empty library → None (disabled).
     ctx = _make_ctx(ModuleLibrary())
     module_ref = role_ref(ROLE_TABLE["readout"], ctx, optional=True)

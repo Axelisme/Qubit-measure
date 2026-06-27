@@ -16,9 +16,10 @@ grill 過程定錨的事實（推翻 HANDOFF 對 backlog 2 的舊描述）：
 
 - backlog 2 設想的「`default_value_from(ctx, spec)` + 明文 dict + type 字串比對 ref」**主體已被
   ADR-0009 的 `shared/defaults/` per-role factory 取代**；HANDOFF 是舊快照。
-- 預設值是**角色相關**非 field-name 相關（同名 `gain` 在 qub_probe=0.05、readout=0.1），扁平 dict 解
-  不了；領域默認**大量是公式**（`trig_offset=timeFly+0.05`、`post_delay=5/(2π·rf_w)`），純資料表裝
-  不下，必須是代碼（現 L2 factory 即是）。
+- 預設值是**角色相關**非 field-name 相關（同名 `gain` 在 qub_probe=0.05、readout=0.1），**寫死字面值的
+  扁平 dict** 解不了；領域默認**含公式**（`trig_offset=timeFly+0.05`、`best_ro_length+0.1`），故資料表的
+  種子必須能表達公式——`ROLE_TABLE` 用 `Md(expr=)` / `TRIG` 種子達成（公式種子仍 lower 成 EvalValue），
+  即一張**typed 種子表 + 兩個 builder**，而非寫死數值的扁平 dict。
 - 「角色」已 first-class：`RoleCatalog`+`RoleEntry`，Inspect 建 module/waveform 用 L2 factory（第二
   消費者）→ L2 簽名鎖定，**不能被 builder 收編成私有 step**。
 

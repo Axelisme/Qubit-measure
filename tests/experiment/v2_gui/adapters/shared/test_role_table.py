@@ -1,10 +1,11 @@
 """The data-driven ROLE_TABLE + builders reproduce the role-factory golden.
 
-Proves ``role_blank`` / ``role_ref`` over ``ROLE_TABLE`` produce byte-identical
-value trees to the legacy per-role factories (the golden), so wiring the table
-into ``ROLE_FACTORIES`` is a behaviour-preserving change. ``readout_dpm`` is not
-in ``ROLE_TABLE`` yet (it is migrated together with its live-eval normalization),
-so it is covered by the legacy-factory characterization, not here.
+Proves ``role_blank`` / ``role_ref`` over ``ROLE_TABLE`` produce the golden value
+trees for every role. For the 14 non-``readout_dpm`` roles the table is
+byte-identical to the legacy per-role factories; ``readout_dpm`` is in the table
+too, pinned to its normalized all-live golden (the one deliberate live-eval
+change). The golden's two md cases (empty / fully populated) do not reach the
+``readout_dpm`` freq fallback path, so a separate focused test below locks it.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared.defaults.role_table import (
     role_blank,
     role_ref,
 )
+from zcu_tools.gui.app.main.adapter import CfgSectionValue, EvalValue
 
 from .test_role_default_characterization import (
     _POPULATED_MD,
@@ -46,3 +48,27 @@ def test_role_table_reproduces_golden_payload(role_id: str) -> None:
         f"ROLE_TABLE[{role_id!r}] payload differs from the role-factory golden — "
         "the data-driven builder is not behaviour-identical to the legacy factory"
     )
+
+
+def test_readout_dpm_freq_falls_back_to_live_r_f_when_best_ro_freq_absent() -> None:
+    """Partial md (``r_f`` present, ``best_ro_freq`` absent): readout_dpm's pulse
+    and ro freq fall back to a *live* ``EvalValue("r_f")`` — mirroring how the
+    plain readout role seeds freq from ``r_f``, not a snapshot. The nested
+    ``Md("best_ro_freq", Md("r_f", 6000.0))`` seed expresses "prefer best_ro_freq,
+    else the same r_f the plain readout uses". This is the all-live normalization
+    (the golden's empty/populated md cases never reach this fallback)."""
+    node = role_blank(ROLE_TABLE["readout_dpm"], _mk_ctx({"r_f": 6100.0}))
+    readout = node.value
+    assert isinstance(readout, CfgSectionValue)
+
+    pulse_cfg = readout.fields["pulse_cfg"]
+    ro_cfg = readout.fields["ro_cfg"]
+    assert isinstance(pulse_cfg, CfgSectionValue)
+    assert isinstance(ro_cfg, CfgSectionValue)
+
+    pulse_freq = pulse_cfg.fields["freq"]
+    ro_freq = ro_cfg.fields["ro_freq"]
+    assert isinstance(pulse_freq, EvalValue)
+    assert pulse_freq.expr == "r_f"
+    assert isinstance(ro_freq, EvalValue)
+    assert ro_freq.expr == "r_f"

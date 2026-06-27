@@ -1,6 +1,6 @@
 # QICK Note for `experiment/v2_gui`
 
-**Last updated:** 2026-06-27（CfgBuilder Init modes）
+**Last updated:** 2026-06-28（ROLE_TABLE role-default engine）
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -15,7 +15,7 @@ experiment/v2_gui/
 ├── registry.py          — register_all / register_all_roles（啟動時把 adapter 與 role 填進框架 catalog）
 └── adapters/
     ├── base.py          — BaseAdapter[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]（共用實作）
-    ├── shared/          — CfgBuilder / build_exp_spec / make_*_module_spec / md_* sugar / role defaults
+    ├── shared/          — CfgBuilder / build_exp_spec / make_*_module_spec / md_* sugar / ROLE_TABLE role defaults
     ├── lookback / onetone / twotone / fake
     └── twotone/reset/   — reset 校準實驗群（single_tone / dual_tone / bath / check）
 ```
