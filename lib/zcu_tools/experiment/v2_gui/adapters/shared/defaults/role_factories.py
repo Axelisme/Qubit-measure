@@ -1,12 +1,16 @@
-"""Single source of truth mapping a ``role_id`` to its L2 default factories.
+"""Single source of truth mapping a ``role_id`` to its default factories.
 
-A role has a *blank* factory (``make_<role>_default(ctx)`` — md-linked defaults,
-never a library lookup, never ``None``) and optionally a *ref* factory
-(``make_<role>_ref_default(ctx, *, optional=...)`` — prefers a named library
-entry, falls back to the blank, and may return ``None`` when ``optional`` and
-nothing matches). Both the GUI ``RoleCatalog`` registration (``registry.py``)
-and the value-assembly ``CfgBuilder`` consume this table, so the role vocabulary
-lives in exactly one place.
+A role has a *blank* factory (md-linked defaults, never a library lookup, never
+``None``) and optionally a *ref* factory (prefers a named library entry, falls
+back to the blank, and may return ``None`` when ``optional`` and nothing matches).
+Both the GUI ``RoleCatalog`` registration (``registry.py``) and the value-assembly
+``CfgBuilder`` consume this table, so the role vocabulary lives in exactly one
+place.
+
+The factory pair for each role is generated from the declarative ``ROLE_TABLE``
+(``role_table.py``): ``role_blank`` / ``role_ref`` close over the role's
+``RoleDef``. (``readout_dpm`` keeps its verbatim factory until it is migrated to
+``ROLE_TABLE`` together with its live-eval normalization.)
 
 The ``CfgBuilder.role()`` verb selects an initialization mode: ``Init.ADOPT``
 calls the *ref* factory (library-aware, the common case), ``Init.INLINE`` forces
@@ -23,27 +27,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Union
 
-from .pi2_pulse import make_pi2_pulse_default, make_pi2_pulse_ref_default
-from .pi_pulse import make_pi_pulse_default, make_pi_pulse_ref_default
-from .qub_probe import make_qub_probe_default, make_qub_probe_ref_default
-from .qub_waveform import make_qub_waveform_default, make_qub_waveform_ref_default
-from .readout import (
-    make_direct_readout_default,
-    make_pulse_readout_default,
-    make_readout_default,
-    make_readout_dpm_default,
-    make_readout_ref_default,
-)
-from .res_probe import make_res_probe_default, make_res_probe_ref_default
-from .res_waveform import make_res_waveform_default, make_res_waveform_ref_default
-from .reset import (
-    make_bath_reset_default,
-    make_none_reset_default,
-    make_pulse_reset_default,
-    make_reset_default,
-    make_reset_ref_default,
-    make_two_pulse_reset_default,
-)
+from .readout import make_readout_dpm_default
+from .role_table import ROLE_TABLE, RoleDef, role_blank, role_ref
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.adapter import (
@@ -61,7 +46,7 @@ RefFactory = Callable[..., _RefNode | None]
 
 @dataclass(frozen=True)
 class RoleFactorySpec:
-    """The L2 factory pair for one role.
+    """The factory pair for one role.
 
     ``ref`` is ``None`` for roles that have no library-aware variant (a concrete
     shape that is always built inline — e.g. ``pulse_readout``, ``bath_reset``).
@@ -72,30 +57,28 @@ class RoleFactorySpec:
     ref: RefFactory | None = None
 
 
-# role_id -> factory pair. Order is informational only (RoleCatalog defines its
-# own dropdown order in registry.py).
+def _from_role(role: RoleDef) -> RoleFactorySpec:
+    """Build the blank/ref factory pair from a declarative ``RoleDef``."""
+
+    def blank(ctx: ExpContext, _role: RoleDef = role) -> _RefNode:
+        return role_blank(_role, ctx)
+
+    if role.lib is None:
+        return RoleFactorySpec(blank=blank)
+
+    def ref(
+        ctx: ExpContext, *, optional: bool = False, _role: RoleDef = role
+    ) -> _RefNode | None:
+        return role_ref(_role, ctx, optional=optional)
+
+    return RoleFactorySpec(blank=blank, ref=ref)
+
+
+# role_id -> factory pair, generated from ROLE_TABLE. Order is informational only
+# (RoleCatalog defines its own dropdown order in registry.py).
 ROLE_FACTORIES: dict[str, RoleFactorySpec] = {
-    # qubit / resonator probe pulses
-    "qub_probe": RoleFactorySpec(make_qub_probe_default, make_qub_probe_ref_default),
-    "res_probe": RoleFactorySpec(make_res_probe_default, make_res_probe_ref_default),
-    "pi_pulse": RoleFactorySpec(make_pi_pulse_default, make_pi_pulse_ref_default),
-    "pi2_pulse": RoleFactorySpec(make_pi2_pulse_default, make_pi2_pulse_ref_default),
-    # readout (role "readout" is library-aware; the concrete shapes are blank-only)
-    "readout": RoleFactorySpec(make_readout_default, make_readout_ref_default),
-    "pulse_readout": RoleFactorySpec(make_pulse_readout_default),
-    "direct_readout": RoleFactorySpec(make_direct_readout_default),
-    "readout_dpm": RoleFactorySpec(make_readout_dpm_default),
-    # reset (role "reset" is library-aware; the concrete shapes are blank-only)
-    "reset": RoleFactorySpec(make_reset_default, make_reset_ref_default),
-    "none_reset": RoleFactorySpec(make_none_reset_default),
-    "pulse_reset": RoleFactorySpec(make_pulse_reset_default),
-    "two_pulse_reset": RoleFactorySpec(make_two_pulse_reset_default),
-    "bath_reset": RoleFactorySpec(make_bath_reset_default),
-    # waveforms
-    "qub_waveform": RoleFactorySpec(
-        make_qub_waveform_default, make_qub_waveform_ref_default
-    ),
-    "res_waveform": RoleFactorySpec(
-        make_res_waveform_default, make_res_waveform_ref_default
-    ),
+    role_id: _from_role(role) for role_id, role in ROLE_TABLE.items()
 }
+# readout_dpm migrates to ROLE_TABLE later (with its live-eval normalization);
+# until then it keeps its verbatim blank-only factory.
+ROLE_FACTORIES["readout_dpm"] = RoleFactorySpec(make_readout_dpm_default)
