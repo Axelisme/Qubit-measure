@@ -22,6 +22,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.gui.session.value_lookup import ValueLookupError, parse_value_ref_text
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 
 from ...adapter import DirectValue, EvalValue, default_value_for_type
@@ -269,6 +270,8 @@ class ScalarWidget(BaseLiveWidget):
             field = cast(ScalarLiveField, self._field)
             inp = self._input
             assert inp is not None
+            if isinstance(inp, QLineEdit) and self._apply_value_ref_text(field, inp):
+                return
             if isinstance(field.get_value(), EvalValue):
                 assert isinstance(inp, QLineEdit)
                 field.set_value(EvalValue(expr=inp.text().strip()))
@@ -289,6 +292,26 @@ class ScalarWidget(BaseLiveWidget):
                 field.set_value(val)
         finally:
             self._updating = False
+
+    def _apply_value_ref_text(self, field: ScalarLiveField, inp: QLineEdit) -> bool:
+        text = inp.text().strip()
+        if text.startswith("@{") and not text.endswith("}"):
+            return True
+        try:
+            ref = parse_value_ref_text(text)
+        except (ValueError, ValueLookupError) as exc:
+            logger.debug("Invalid value_ref text for %s: %s", field.spec.label, exc)
+            return text.startswith("@{")
+        if ref is None:
+            return False
+        try:
+            field.set_value(ref)
+        except ValueLookupError as exc:
+            logger.debug("Could not resolve value_ref for %s: %s", field.spec.label, exc)
+            inp.setToolTip(str(exc))
+            return True
+        self._rebuild_ui()
+        return True
 
     def _on_model_changed(self, val: Any) -> None:
         next_mode = "eval" if isinstance(val, EvalValue) else "direct"

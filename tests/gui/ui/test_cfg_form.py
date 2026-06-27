@@ -313,6 +313,40 @@ def test_scalar_widget_eval_mode_marks_unresolved_red(qapp, ctrl):
     assert "red" in w._ghost.styleSheet()
 
 
+def test_scalar_widget_value_ref_text_resolves_to_direct(qapp, ctrl):
+    from qtpy.QtWidgets import QLineEdit  # type: ignore[attr-defined]
+    from zcu_tools.gui.app.main.live_model import LiveModelEnv, ScalarLiveField
+    from zcu_tools.gui.app.main.ui.fields.common import ScalarWidget
+    from zcu_tools.gui.session.value_lookup import ValueInfo
+    from zcu_tools.meta_tool import MetaDict
+
+    md = MetaDict()
+    md.r_f = 6000.0
+    ctrl.get_current_md.return_value = md
+    ctrl.read_value_source.return_value = (
+        ValueInfo("device.active_flux.value", float, "device"),
+        0.125,
+    )
+    field = ScalarLiveField(
+        ScalarSpec(label="Freq", type=float),
+        LiveModelEnv(ctrl=ctrl),
+        initial_val=EvalValue("r_f"),
+    )
+    w = ScalarWidget(field)
+    edit = w.findChild(QLineEdit)
+    assert edit is not None
+
+    edit.setText("@{device.active_flux.value}")
+
+    val = field.get_value()
+    assert isinstance(val, DirectValue)
+    assert val.value == pytest.approx(0.125)
+    assert w._mode == "direct"
+    ctrl.read_value_source.assert_called_once_with(
+        "device.active_flux.value", "float"
+    )
+
+
 def test_scalar_widget_eval_menu_extends_standard_line_edit_menu(qapp, ctrl):
     from qtpy.QtWidgets import QLineEdit  # type: ignore[attr-defined]
     from zcu_tools.gui.app.main.live_model import LiveModelEnv, ScalarLiveField
