@@ -55,7 +55,9 @@ T2EchoRunResult: TypeAlias = T2EchoResult
 
 @dataclass
 class T2EchoAnalyzeParams:
-    fit_method: Annotated[Literal["fringe", "decay"], ParamMeta(label="Fit method")]
+    fit_method: Annotated[Literal["fringe", "decay"], ParamMeta(label="Fit method")] = (
+        "fringe"
+    )
 
 
 @dataclass
@@ -183,11 +185,6 @@ class T2EchoAdapter(
         result, true_detune = self.exp_cls().run(soc, soccfg, cfg, detune=detune)
         logger.info("T2 Echo true detune: %.3f MHz", true_detune)
         return result
-
-    def get_analyze_params(
-        self, result: T2EchoRunResult, ctx: ExpContext
-    ) -> T2EchoAnalyzeParams:
-        return T2EchoAnalyzeParams(fit_method="fringe")
 
     def analyze(
         self, req: AnalyzeRequest[T2EchoRunResult, T2EchoAnalyzeParams]

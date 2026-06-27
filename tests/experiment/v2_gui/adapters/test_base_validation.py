@@ -49,7 +49,14 @@ class _FitNoParamsAdapter(_MinimalNoAnalysisAdapter):
 
 @dataclass
 class _RealParams:
+    # All fields have defaults → base get_analyze_params can call _RealParams().
     flag: bool = False
+
+
+@dataclass
+class _RequiredParams:
+    # No defaults → the base default cannot construct it; override is required.
+    required_flag: bool
 
 
 def test_fit_requires_analyze() -> None:
@@ -70,10 +77,12 @@ def test_fit_forbids_interactive_setup() -> None:
                 return object()
 
 
-def test_fit_requires_real_analyze_params_hook() -> None:
-    with pytest.raises(TypeError, match="params _RealParams.*get_analyze_params"):
+def test_fit_requires_analyze_params_hook_when_params_need_values() -> None:
+    # Params without defaults cannot be constructed by the base default; the
+    # validation must require an explicit get_analyze_params override.
+    with pytest.raises(TypeError, match="params _RequiredParams.*get_analyze_params"):
 
-        class _BadAdapter(BaseAdapter[Any, Any, NoAnalysisResult, _RealParams]):
+        class _BadAdapter(BaseAdapter[Any, Any, NoAnalysisResult, _RequiredParams]):
             capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
                 analysis=AnalysisMode.FIT
             )
@@ -94,6 +103,37 @@ def test_fit_requires_real_analyze_params_hook() -> None:
             def analyze(self, req: Any) -> NoAnalysisResult:
                 del req
                 return NoAnalysisResult()
+
+
+def test_fit_allows_base_analyze_params_hook_when_params_all_have_defaults() -> None:
+    # Params whose every field has a default are constructible by the base
+    # default (params_cls()); no override is required.
+    class _OkAdapter(BaseAdapter[Any, Any, NoAnalysisResult, _RealParams]):
+        capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
+            analysis=AnalysisMode.FIT
+        )
+        exp_cls: ClassVar[type[object]] = object
+
+        @classmethod
+        def cfg_spec(cls) -> CfgSectionSpec:
+            return CfgSectionSpec()
+
+        def make_default_value(self, ctx: Any) -> CfgSectionValue:
+            del ctx
+            return CfgSectionValue()
+
+        def make_filename_stem(self, ctx: Any) -> str:
+            del ctx
+            return "ok"
+
+        def analyze(self, req: Any) -> NoAnalysisResult:
+            del req
+            return NoAnalysisResult()
+
+    assert _OkAdapter.analyze_params_cls() is _RealParams
+    params = _OkAdapter().get_analyze_params(object(), object())  # type: ignore[arg-type]
+    assert isinstance(params, _RealParams)
+    assert params.flag is False
 
 
 def test_fit_allows_base_analyze_params_for_no_params() -> None:

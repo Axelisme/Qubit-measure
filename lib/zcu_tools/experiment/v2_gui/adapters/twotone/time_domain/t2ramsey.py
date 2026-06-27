@@ -56,7 +56,7 @@ T2RamseyRunResult: TypeAlias = T2RamseyResult
 
 @dataclass
 class T2RamseyAnalyzeParams:
-    fit_fringe: Annotated[bool, ParamMeta(label="Fit fringe")]
+    fit_fringe: Annotated[bool, ParamMeta(label="Fit fringe")] = True
 
 
 @dataclass
@@ -189,11 +189,6 @@ class T2RamseyAdapter(
         result = self.exp_cls().run(soc, soccfg, cfg, detune=detune)
         logger.info("T2 Ramsey true detune: %.3f MHz", result.true_activate_detune)
         return result
-
-    def get_analyze_params(
-        self, result: T2RamseyRunResult, ctx: ExpContext
-    ) -> T2RamseyAnalyzeParams:
-        return T2RamseyAnalyzeParams(fit_fringe=True)
 
     def analyze(
         self, req: AnalyzeRequest[T2RamseyRunResult, T2RamseyAnalyzeParams]

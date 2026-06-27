@@ -37,8 +37,8 @@ FreqRunResult: TypeAlias = FreqResult
 
 @dataclass
 class FreqAnalyzeParams:
-    model_type: Annotated[Literal["lor", "sinc"], ParamMeta(label="Model type")]
-    plot_fit: Annotated[bool, ParamMeta(label="Plot fit")]
+    model_type: Annotated[Literal["lor", "sinc"], ParamMeta(label="Model type")] = "lor"
+    plot_fit: Annotated[bool, ParamMeta(label="Plot fit")] = True
 
 
 @dataclass
@@ -128,11 +128,6 @@ class FreqAdapter(
             .set_sweep("sweep.freq", proper_qub_freq_range(ctx, 301))
             .build()
         )
-
-    def get_analyze_params(
-        self, result: FreqRunResult, ctx: ExpContext
-    ) -> FreqAnalyzeParams:
-        return FreqAnalyzeParams(model_type="lor", plot_fit=True)
 
     def analyze(
         self, req: AnalyzeRequest[FreqRunResult, FreqAnalyzeParams]

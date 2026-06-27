@@ -46,7 +46,7 @@ AmpRabiRunResult: TypeAlias = AmpRabiResult
 
 @dataclass
 class AmpRabiAnalyzeParams:
-    skip: Annotated[int, ParamMeta(label="Skip points")]
+    skip: Annotated[int, ParamMeta(label="Skip points")] = 0
 
 
 @dataclass
@@ -150,11 +150,6 @@ class AmpRabiAdapter(
             )
             .build()
         )
-
-    def get_analyze_params(
-        self, result: AmpRabiRunResult, ctx: ExpContext
-    ) -> AmpRabiAnalyzeParams:
-        return AmpRabiAnalyzeParams(skip=0)
 
     def analyze(
         self, req: AnalyzeRequest[AmpRabiRunResult, AmpRabiAnalyzeParams]

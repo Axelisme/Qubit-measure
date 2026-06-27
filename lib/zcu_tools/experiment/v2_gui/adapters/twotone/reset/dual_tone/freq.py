@@ -51,8 +51,8 @@ DualToneFreqRunResult: TypeAlias = FreqResult
 class DualToneFreqAnalyzeParams:
     smooth_method: Annotated[
         Literal["wavelet", "gaussian"], ParamMeta(label="Smooth method")
-    ]
-    smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)]
+    ] = "wavelet"
+    smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)] = 1.0
 
 
 @dataclass
@@ -163,11 +163,6 @@ class DualToneFreqAdapter(
         cfg = self.build_exp_cfg(raw_cfg, req)
         soc, soccfg = require_soc_handles(req)
         return self.exp_cls().run(soc, soccfg, cfg, method="hard")
-
-    def get_analyze_params(
-        self, result: DualToneFreqRunResult, ctx: ExpContext
-    ) -> DualToneFreqAnalyzeParams:
-        return DualToneFreqAnalyzeParams(smooth_method="wavelet", smooth=1.0)
 
     def analyze(
         self, req: AnalyzeRequest[DualToneFreqRunResult, DualToneFreqAnalyzeParams]

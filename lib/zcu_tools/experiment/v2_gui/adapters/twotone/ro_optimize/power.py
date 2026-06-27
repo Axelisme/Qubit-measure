@@ -42,9 +42,11 @@ RoOptPowerRunResult: TypeAlias = PowerResult
 class RoOptPowerAnalyzeParams:
     smooth_method: Annotated[
         Literal["wavelet", "gaussian"], ParamMeta(label="Smooth method")
-    ]
-    smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)]
-    penalty_ratio: Annotated[float, ParamMeta(label="Power penalty ratio", decimals=2)]
+    ] = "wavelet"
+    smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)] = 1.0
+    penalty_ratio: Annotated[
+        float, ParamMeta(label="Power penalty ratio", decimals=2)
+    ] = 0.5
 
 
 @dataclass
@@ -125,13 +127,6 @@ class RoOptPowerAdapter(
             .role("modules.reset", "reset", Init.DISABLED)
             .sweep("sweep.gain", 0.001, 0.2, 101)
             .build()
-        )
-
-    def get_analyze_params(
-        self, result: RoOptPowerRunResult, ctx: ExpContext
-    ) -> RoOptPowerAnalyzeParams:
-        return RoOptPowerAnalyzeParams(
-            smooth_method="wavelet", smooth=1.0, penalty_ratio=0.5
         )
 
     def analyze(

@@ -696,18 +696,20 @@ def test_base_adapter_get_analyze_params_returns_noparams_when_no_params():
 
 
 def test_base_adapter_validates_forgotten_real_analyze_params_override():
-    # An adapter declaring a REAL (non-NoAnalyzeParams) analyze-params type via its
-    # 4th generic arg but forgetting the override still Fast-Fails (the guard).
+    # An adapter whose analyze-params REQUIRE values (a field without a default)
+    # but forgetting the override still Fast-Fails (the guard). Params whose every
+    # field has a default instead inherit the base get_analyze_params (covered by
+    # test_base_validation).
     from dataclasses import dataclass
 
     @dataclass
-    class _RealParams:
-        flag: bool = False
+    class _RequiredParams:
+        flag: bool  # no default → base get_analyze_params cannot construct it
 
     with pytest.raises(TypeError, match="get_analyze_params"):
 
         class _Adapter(
-            BaseAdapter[MagicMock, MagicMock, NoAnalysisResult, _RealParams]
+            BaseAdapter[MagicMock, MagicMock, NoAnalysisResult, _RequiredParams]
         ):
             capabilities = AdapterCapabilities(analysis=AnalysisMode.FIT)
             exp_cls = MagicMock()

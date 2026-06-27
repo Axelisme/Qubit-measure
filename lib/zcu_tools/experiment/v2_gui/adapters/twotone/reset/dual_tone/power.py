@@ -47,8 +47,8 @@ DualTonePowerRunResult: TypeAlias = PowerResult
 class DualTonePowerAnalyzeParams:
     smooth_method: Annotated[
         Literal["wavelet", "gaussian"], ParamMeta(label="Smooth method")
-    ]
-    smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)]
+    ] = "wavelet"
+    smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)] = 1.0
 
 
 @dataclass
@@ -146,11 +146,6 @@ class DualTonePowerAdapter(
             .sweep("sweep.gain2", 0.0, 1.0, 51)
             .build()
         )
-
-    def get_analyze_params(
-        self, result: DualTonePowerRunResult, ctx: ExpContext
-    ) -> DualTonePowerAnalyzeParams:
-        return DualTonePowerAnalyzeParams(smooth_method="wavelet", smooth=1.0)
 
     def analyze(
         self, req: AnalyzeRequest[DualTonePowerRunResult, DualTonePowerAnalyzeParams]

@@ -141,14 +141,6 @@ class FluxDepAdapter(
             .build()
         )
 
-    def get_analyze_params(
-        self, result: FluxDepRunResult, ctx: ExpContext
-    ) -> FluxPickParams:
-        del result, ctx
-        # No tunable analyze params; the magnitude-only projection is hardcoded
-        # in setup_interactive_analysis (see below).
-        return FluxPickParams()
-
     def setup_interactive_analysis(
         self,
         req: AnalyzeRequest[FluxDepRunResult, FluxPickParams],

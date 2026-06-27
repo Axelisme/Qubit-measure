@@ -133,11 +133,6 @@ class RoOptLengthAdapter(
             .build()
         )
 
-    def get_analyze_params(
-        self, result: RoOptLengthRunResult, ctx: ExpContext
-    ) -> RoOptLengthAnalyzeParams:
-        return RoOptLengthAnalyzeParams()
-
     def analyze(
         self, req: AnalyzeRequest[RoOptLengthRunResult, RoOptLengthAnalyzeParams]
     ) -> RoOptLengthAnalyzeResult:

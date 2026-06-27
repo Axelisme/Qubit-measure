@@ -73,8 +73,8 @@ def _cavity_freq_range(ctx: ExpContext, expts: int) -> SweepValue:
 class BathFreqGainAnalyzeParams:
     smooth_method: Annotated[
         Literal["wavelet", "gaussian"], ParamMeta(label="Smooth method")
-    ]
-    smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)]
+    ] = "wavelet"
+    smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)] = 1.0
 
 
 @dataclass
@@ -167,11 +167,6 @@ class BathFreqGainAdapter(
             .sweep("sweep.gain", 0.4, 1.0, 51)
             .build()
         )
-
-    def get_analyze_params(
-        self, result: BathFreqGainRunResult, ctx: ExpContext
-    ) -> BathFreqGainAnalyzeParams:
-        return BathFreqGainAnalyzeParams(smooth_method="wavelet", smooth=1.0)
 
     def analyze(
         self, req: AnalyzeRequest[BathFreqGainRunResult, BathFreqGainAnalyzeParams]

@@ -138,8 +138,10 @@ class FakeFreqAnalyzeResult(AnalyzeResultBase):
 
 @dataclass
 class FakeFreqAnalyzeParams:
-    model_type: Annotated[Literal["hm", "t", "auto"], ParamMeta(label="Model type")]
-    fit_bg_slope: Annotated[bool, ParamMeta(label="Fit background slope")]
+    model_type: Annotated[Literal["hm", "t", "auto"], ParamMeta(label="Model type")] = (
+        "hm"
+    )
+    fit_bg_slope: Annotated[bool, ParamMeta(label="Fit background slope")] = False
 
 
 # ---------------------------------------------------------------------------
@@ -373,11 +375,6 @@ class FakeFreqAdapter(
             sweep=FreqSweepCfg(freq=cfg.sweep.freq),
         )
         return dataclasses.replace(result, cfg_snapshot=freq_cfg)
-
-    def get_analyze_params(
-        self, result: FakeFreqRunResult, ctx: ExpContext
-    ) -> FakeFreqAnalyzeParams:
-        return FakeFreqAnalyzeParams(model_type="hm", fit_bg_slope=False)
 
     def analyze(
         self,

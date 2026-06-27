@@ -50,7 +50,7 @@ class GEAnalyzeParams:
     # the post-analysis (multi-method) phase, so only the two implemented choices
     # are offered (the Literal supplies the form's choices) and the default is
     # "pca".
-    backend: Annotated[Literal["pca", "center"], ParamMeta(label="Backend")]
+    backend: Annotated[Literal["pca", "center"], ParamMeta(label="Backend")] = "pca"
 
 
 @dataclass
@@ -182,11 +182,6 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
             .role("modules.init_pulse", "pi_pulse", Init.DISABLED)
             .build()
         )
-
-    def get_analyze_params(
-        self, result: GERunResult, ctx: ExpContext
-    ) -> GEAnalyzeParams:
-        return GEAnalyzeParams(backend="pca")
 
     def analyze(
         self, req: AnalyzeRequest[GERunResult, GEAnalyzeParams]

@@ -49,7 +49,7 @@ LenRabiRunResult: TypeAlias = LenRabiResult
 
 @dataclass
 class LenRabiAnalyzeParams:
-    decay: Annotated[bool, ParamMeta(label="Fit decay envelope")]
+    decay: Annotated[bool, ParamMeta(label="Fit decay envelope")] = True
 
 
 @dataclass
@@ -160,11 +160,6 @@ class LenRabiAdapter(
             "time",
             {"soccfg": soccfg, "gen_ch": cfg.modules.qub_pulse.ch},
         )
-
-    def get_analyze_params(
-        self, result: LenRabiRunResult, ctx: ExpContext
-    ) -> LenRabiAnalyzeParams:
-        return LenRabiAnalyzeParams(decay=True)
 
     def analyze(
         self, req: AnalyzeRequest[LenRabiRunResult, LenRabiAnalyzeParams]

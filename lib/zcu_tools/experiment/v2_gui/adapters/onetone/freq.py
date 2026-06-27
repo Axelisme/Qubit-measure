@@ -37,8 +37,10 @@ OneToneFreqRunResult: TypeAlias = FreqResult
 
 @dataclass
 class OneToneFreqAnalyzeParams:
-    model_type: Annotated[Literal["hm", "t", "auto"], ParamMeta(label="Model type")]
-    fit_bg_slope: Annotated[bool, ParamMeta(label="Fit background slope")]
+    model_type: Annotated[Literal["hm", "t", "auto"], ParamMeta(label="Model type")] = (
+        "hm"
+    )
+    fit_bg_slope: Annotated[bool, ParamMeta(label="Fit background slope")] = True
 
 
 @dataclass
@@ -125,11 +127,6 @@ class OneToneFreqAdapter(
             .set_sweep("sweep.freq", proper_res_freq_range(ctx, 301))
             .build()
         )
-
-    def get_analyze_params(
-        self, result: OneToneFreqRunResult, ctx: ExpContext
-    ) -> OneToneFreqAnalyzeParams:
-        return OneToneFreqAnalyzeParams(model_type="hm", fit_bg_slope=True)
 
     def analyze(
         self, req: AnalyzeRequest[OneToneFreqRunResult, OneToneFreqAnalyzeParams]

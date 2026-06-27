@@ -66,7 +66,7 @@ class FakeAnalyzeResult(AnalyzeResultBase):
 
 @dataclass
 class FakeAnalyzeParams:
-    threshold: Annotated[float, ParamMeta(label="Threshold", decimals=2)]
+    threshold: Annotated[float, ParamMeta(label="Threshold", decimals=2)] = 0.5
 
 
 def _require_int(raw_cfg: dict[str, object], key: str) -> int:
@@ -130,11 +130,6 @@ class FakeAdapter(
         raw_cfg = schema.to_raw_dict(req.md, req.ml)
         cfg = self.build_exp_cfg(raw_cfg, req)
         return FakeExp().run(cfg)
-
-    def get_analyze_params(
-        self, result: FakeRunResult, ctx: ExpContext
-    ) -> FakeAnalyzeParams:
-        return FakeAnalyzeParams(threshold=0.5)
 
     def analyze(
         self, req: AnalyzeRequest[FakeRunResult, FakeAnalyzeParams]

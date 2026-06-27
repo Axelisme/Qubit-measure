@@ -37,9 +37,9 @@ LookbackRunResult: TypeAlias = LookbackResult
 
 @dataclass
 class LookbackAnalyzeParams:
-    ratio: Annotated[float, ParamMeta(label="Threshold ratio", decimals=3)]
-    smooth: Annotated[float, ParamMeta(label="Smooth sigma", decimals=3)]
-    plot_fit: Annotated[bool, ParamMeta(label="Plot fit")]
+    ratio: Annotated[float, ParamMeta(label="Threshold ratio", decimals=3)] = 0.1
+    smooth: Annotated[float, ParamMeta(label="Smooth sigma", decimals=3)] = 1.0
+    plot_fit: Annotated[bool, ParamMeta(label="Plot fit")] = True
 
 
 @dataclass
@@ -129,11 +129,6 @@ class LookbackAdapter(
             )
             .build()
         )
-
-    def get_analyze_params(
-        self, result: LookbackRunResult, ctx: ExpContext
-    ) -> LookbackAnalyzeParams:
-        return LookbackAnalyzeParams(ratio=0.1, smooth=1.0, plot_fit=True)
 
     def analyze(
         self,

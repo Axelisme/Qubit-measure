@@ -152,14 +152,6 @@ class OneToneFluxDepAdapter(
 
     # -- interactive analysis: user picks the half/integer flux lines ----------
 
-    def get_analyze_params(
-        self, result: OneToneFluxDepRunResult, ctx: ExpContext
-    ) -> FluxPickParams:
-        del result, ctx
-        # No tunable analyze params; the magnitude-only projection is hardcoded
-        # in setup_interactive_analysis (see below).
-        return FluxPickParams()
-
     def setup_interactive_analysis(
         self,
         req: AnalyzeRequest[OneToneFluxDepRunResult, FluxPickParams],

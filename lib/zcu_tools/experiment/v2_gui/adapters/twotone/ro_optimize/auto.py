@@ -164,11 +164,6 @@ class RoOptAutoAdapter(
         num_points = self._num_points(raw_cfg)
         return AutoOptExp().run(soc, soccfg, cfg, num_points=num_points)
 
-    def get_analyze_params(
-        self, result: RoOptAutoRunResult, ctx: ExpContext
-    ) -> RoOptAutoAnalyzeParams:
-        return RoOptAutoAnalyzeParams()
-
     def analyze(
         self, req: AnalyzeRequest[RoOptAutoRunResult, RoOptAutoAnalyzeParams]
     ) -> RoOptAutoAnalyzeResult:

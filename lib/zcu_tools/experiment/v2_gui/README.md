@@ -53,8 +53,9 @@ graceful skip。
 `BaseAdapter` 在 class definition/import 時驗證 `AdapterCapabilities` 與 lifecycle method 是否
 一致。`analysis=FIT` 必須實作 `analyze()` 且不得實作 interactive setup；`analysis=INTERACTIVE`
 必須實作 `setup_interactive_analysis()` 且不得實作 `analyze()`；`analysis=NONE` 不得實作
-analyze hooks。`get_analyze_params()` 只在非 `NoAnalyzeParams` 時必須覆寫；figure-only / no-param
-analysis 可沿用 base default。`post_analysis=True` 僅允許搭配 primary FIT analyze，並必須實作
+analyze hooks。`get_analyze_params()` 只在 analyze-params **無法全 default 建構**（有欄位無 default）
+時才必須覆寫；params 每欄位都有 default（含 `NoAnalyzeParams`、及把常數折進欄位 default 的 adapter）時
+沿用 base default（回 `params_cls()`）。`post_analysis=True` 僅允許搭配 primary FIT analyze，並必須實作
 `get_post_analyze_params()` / `post_analyze()`；post-analysis 是第二層 CPU-only 探索/比較視圖，
 不更新 writeback draft，writeback 仍只由 primary `analyze()` result 經 `get_writeback_items()`
 產生。

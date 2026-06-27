@@ -178,11 +178,12 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
 
         if analysis is not AnalysisMode.NONE:
             params_cls = cls.analyze_params_cls()
-            if params_cls is not NoAnalyzeParams:
+            if not _can_construct_without_args(params_cls):
                 cls._require_method(
                     "get_analyze_params",
-                    f"declares analysis={analysis.name} with params {params_cls.__name__}",
-                    "override get_analyze_params() or use NoAnalyzeParams",
+                    f"declares analysis={analysis.name} with params "
+                    f"{params_cls.__name__} that require values",
+                    "override get_analyze_params() or give every param field a default",
                 )
 
         if caps.post_analysis:
@@ -273,21 +274,20 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     def get_analyze_params(self, result: T_Result, ctx: ExpContext) -> T_AnalyzeParams:
         """Build the analyze parameter instance presented to the user.
 
-        An adapter whose analysis takes tunable params overrides this. An adapter
-        whose analyze is a look-at-the-curve render with NO params declares
-        ``NoAnalyzeParams`` as its 4th generic arg and inherits this default, which
-        returns the empty ``NoAnalyzeParams()`` (no override boilerplate). When the
-        adapter declares a real (non-``NoAnalyzeParams``) param type but forgets the
-        override, this Fast-Fails — a forgotten override, not a normal code path.
+        An adapter whose analyze-params are all-default-constructible (including
+        ``NoAnalyzeParams``) inherits this default, which returns ``params_cls()``.
+        An adapter whose params need values (a field without a default) must override;
+        otherwise this Fast-Fails — a forgotten override, not a normal code path.
         Adapters with ``analysis=AnalysisMode.NONE`` are never routed here.
         """
         del result, ctx
         params_cls = type(self).analyze_params_cls()
-        if params_cls is NoAnalyzeParams:
-            return NoAnalyzeParams()  # type: ignore[return-value]
+        if _can_construct_without_args(params_cls):
+            return params_cls()  # type: ignore[return-value]
         raise NotImplementedError(
-            f"{type(self).__name__} declares analysis support but does not "
-            "override get_analyze_params"
+            f"{type(self).__name__} declares analysis with params "
+            f"{params_cls.__name__} that need values, but does not override "
+            "get_analyze_params"
         )
 
     def analyze(

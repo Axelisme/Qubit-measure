@@ -39,7 +39,7 @@ T1RunResult: TypeAlias = T1Result
 
 @dataclass
 class T1AnalyzeParams:
-    dual_exp: Annotated[bool, ParamMeta(label="Dual exponential")]
+    dual_exp: Annotated[bool, ParamMeta(label="Dual exponential")] = False
 
 
 @dataclass
@@ -119,11 +119,6 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams
             )
             .build()
         )
-
-    def get_analyze_params(
-        self, result: T1RunResult, ctx: ExpContext
-    ) -> T1AnalyzeParams:
-        return T1AnalyzeParams(dual_exp=False)
 
     def analyze(
         self, req: AnalyzeRequest[T1RunResult, T1AnalyzeParams]

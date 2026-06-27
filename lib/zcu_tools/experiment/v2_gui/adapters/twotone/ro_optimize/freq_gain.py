@@ -43,8 +43,8 @@ RoOptFreqGainRunResult: TypeAlias = FreqGainResult
 class RoOptFreqGainAnalyzeParams:
     smooth_method: Annotated[
         Literal["wavelet", "gaussian"], ParamMeta(label="Smooth method")
-    ]
-    smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)]
+    ] = "wavelet"
+    smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)] = 1.0
 
 
 @dataclass
@@ -133,11 +133,6 @@ class RoOptFreqGainAdapter(
             .sweep("sweep.gain", 0.0, 0.2, 31)
             .build()
         )
-
-    def get_analyze_params(
-        self, result: RoOptFreqGainRunResult, ctx: ExpContext
-    ) -> RoOptFreqGainAnalyzeParams:
-        return RoOptFreqGainAnalyzeParams(smooth_method="wavelet", smooth=1.0)
 
     def analyze(
         self, req: AnalyzeRequest[RoOptFreqGainRunResult, RoOptFreqGainAnalyzeParams]

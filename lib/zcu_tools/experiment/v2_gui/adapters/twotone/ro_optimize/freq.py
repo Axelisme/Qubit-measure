@@ -44,8 +44,8 @@ RoOptFreqRunResult: TypeAlias = FreqResult
 class RoOptFreqAnalyzeParams:
     smooth_method: Annotated[
         Literal["wavelet", "gaussian"], ParamMeta(label="Smooth method")
-    ]
-    smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)]
+    ] = "wavelet"
+    smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)] = 2.0
 
 
 @dataclass
@@ -128,11 +128,6 @@ class RoOptFreqAdapter(
             .set_sweep("sweep.freq", proper_res_freq_range(ctx, 301, span_factor=1.0))
             .build()
         )
-
-    def get_analyze_params(
-        self, result: RoOptFreqRunResult, ctx: ExpContext
-    ) -> RoOptFreqAnalyzeParams:
-        return RoOptFreqAnalyzeParams(smooth_method="wavelet", smooth=2.0)
 
     def analyze(
         self, req: AnalyzeRequest[RoOptFreqRunResult, RoOptFreqAnalyzeParams]
