@@ -17,9 +17,11 @@ from here.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Protocol, TypeAlias
+
+from zcu_tools.gui.session.value_lookup import EmptyValueLookup, ValueLookup
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary
@@ -83,6 +85,7 @@ class ExpContext:
     active_label: str = ""
     predictor: FluxoniumPredictor | None = None
     readiness: ContextReadiness = ContextReadiness.EMPTY
+    values: ValueLookup = field(default_factory=EmptyValueLookup)
 
     # -- readiness predicates (the context answers about itself) -----------
 

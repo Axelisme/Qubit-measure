@@ -11,6 +11,7 @@ from zcu_tools.gui.session.events import (
     MlChangedPayload,
 )
 from zcu_tools.gui.session.types import ContextReadiness
+from zcu_tools.gui.session.value_lookup import ValueLookup
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 logger = logging.getLogger(__name__)
@@ -87,10 +88,21 @@ class ContextService:
         state: SessionState,
         io_manager: ProjectIOPort,
         bus: BaseEventBus,
+        values: ValueLookup | None = None,
     ) -> None:
         self._state = state
         self._io = io_manager
         self._bus = bus
+        self._values = values or state.exp_context.values
+        if state.exp_context.values is not self._values:
+            # Pure facade injection: this preserves set_context's "no content bump"
+            # semantics because md/ml are unchanged.
+            self._state.set_context(self._attach_values(state.exp_context))
+
+    def _attach_values(self, ctx: ExpContext) -> ExpContext:
+        if ctx.values is self._values:
+            return ctx
+        return dataclasses.replace(ctx, values=self._values)
 
     def has_project(self) -> bool:
         return self._io.has_project
@@ -153,17 +165,19 @@ class ContextService:
             result_dir,
             database_path,
         )
-        new_ctx = dataclasses.replace(
-            self._state.exp_context,
-            md=md,
-            ml=ml,
-            chip_name=chip_name,
-            qub_name=qub_name,
-            res_name=res_name,
-            result_dir=result_dir,
-            database_path=database_path,
-            active_label="",
-            readiness=ContextReadiness.DRAFT,
+        new_ctx = self._attach_values(
+            dataclasses.replace(
+                self._state.exp_context,
+                md=md,
+                ml=ml,
+                chip_name=chip_name,
+                qub_name=qub_name,
+                res_name=res_name,
+                result_dir=result_dir,
+                database_path=database_path,
+                active_label="",
+                readiness=ContextReadiness.DRAFT,
+            )
         )
         self._state.set_context(new_ctx)
         # md/ml content is fully swapped → bump context (path 3 of 3; see the
@@ -177,8 +191,10 @@ class ContextService:
     def use_context(self, label: str) -> None:
         logger.info("use_context: label=%r", label)
         new_ctx = self._io.use_context(label, self._state.exp_context)
-        new_ctx = dataclasses.replace(
-            new_ctx, active_label=label, readiness=ContextReadiness.ACTIVE
+        new_ctx = self._attach_values(
+            dataclasses.replace(
+                new_ctx, active_label=label, readiness=ContextReadiness.ACTIVE
+            )
         )
         self._state.set_context(new_ctx)
         self._state.version.bump("context")
@@ -202,8 +218,10 @@ class ContextService:
             clone_from=clone_from,
         )
         label = self._io.get_active_label() or ""
-        new_ctx = dataclasses.replace(
-            new_ctx, active_label=label, readiness=ContextReadiness.ACTIVE
+        new_ctx = self._attach_values(
+            dataclasses.replace(
+                new_ctx, active_label=label, readiness=ContextReadiness.ACTIVE
+            )
         )
         self._state.set_context(new_ctx)
         self._state.version.bump("context")

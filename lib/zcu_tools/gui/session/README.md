@@ -51,5 +51,6 @@ session/
 - **startup project return contract**：`SessionControllerPort.apply_startup_project` 允許 `bool | dict[str, str]`。共用 setup dialog 只看 truthiness；measure 的 remote `startup.apply` / `gui_project_apply` 回 resolved project dict（WIRE 44），autofluxdep controller 仍回 bool。
 - **import-clean leaf**（不得拉 Qt/matplotlib/gui.app.*，`tests/gui/test_shared_layer.py` 守）：types/events/operation_handles/ports/state/pbar_host/controller_port。`adapters/` + `ui/*` + `services/*` 是 Qt/重，不列。
 - **wire name 來源**：`SessionEvent.X` 的字串值即 wire event name；measure-gui 的 wire-name lock 測試（`test_remote_event_dialog_view.py`）鎖全集，搬移/改名 payload 不得動字串值。
+- **`ExpContext.values`**：只攜帶 read-only `ValueLookup` facade，供 default generation / resolve-once 讀目前 session 投影；mutable `ValueRegistry` 只在 session composition root / source binder 內使用。`ExpContext` 仍是 live environment facade，不是 snapshot。
 
 跨模組設計見 ADR-0002/0004/0005/0006/0019/0020/0021/0025/0026（0021：event ownership——domain module 擁有 enum+payload、app 組裝；0025：跨線程互動 channel——OperationChannel/NotifyChannel；0026：operation abstraction——OperationRunner + scope-as-adapter-input + State write port + ConnectionService 拆 SoC/Predictor + DeviceRegistryPort）。**autofluxdep 已完整複用**（session-core extraction S1–S5：組 session services + 實作 SessionControllerPort + run 讀 exp_context + 用共用 setup/device/predictor dialog；見 ADR-0020 + autofluxdep/README）。

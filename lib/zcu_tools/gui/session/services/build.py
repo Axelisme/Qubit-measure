@@ -23,6 +23,7 @@ from zcu_tools.gui.session.services.device import DeviceService
 from zcu_tools.gui.session.services.mock_flux import MockFluxProvisioner
 from zcu_tools.gui.session.services.predictor import PredictorService
 from zcu_tools.gui.session.services.startup import StartupService
+from zcu_tools.gui.session.value_lookup import ValueLookup, ValueRegistry
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus
@@ -48,6 +49,7 @@ class SessionServices:
     context: ContextService
     device: DeviceService
     startup: StartupService
+    values: ValueLookup
 
 
 def build_session_services(
@@ -73,6 +75,7 @@ def build_session_services(
     when omitted; ``device_registry`` defaults to the ``GlobalDeviceRegistryAdapter``
     (production singleton) when omitted — tests inject an in-memory fake.
     """
+    value_registry = ValueRegistry()
     device = DeviceService(
         bus,
         state,
@@ -85,7 +88,7 @@ def build_session_services(
     )
     soc_connection = SoCConnectionService(state, bus, gate, handles, runner)
     predictor = PredictorService(state, bus)
-    context = ContextService(state, io_manager, bus)
+    context = ContextService(state, io_manager, bus, values=value_registry)
     # StartupService bridges the two session services it commands through their
     # ports (context bootstrap + remembered-device registration) + State prefs.
     startup = StartupService(context, device, state)
@@ -102,4 +105,5 @@ def build_session_services(
         context=context,
         device=device,
         startup=startup,
+        values=value_registry,
     )
