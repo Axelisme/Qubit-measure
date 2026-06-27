@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 import pytest
 from zcu_tools.gui.app.main.services.cfg_editor import CfgEditorError, CfgEditorService
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.session.value_lookup import ValueInfo
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 
@@ -198,6 +199,40 @@ def test_eval_value_requires_string_expr(service):
     editor_id, _ = service.open("module", discriminator="pulse")
     with pytest.raises(CfgEditorError):
         service.set_field(editor_id, "freq", {"__kind": "eval", "expr": 123})
+
+
+def test_value_ref_resolves_to_concrete_direct_value_on_set_field(service, ctrl, ml):
+    ctrl.read_value_source.return_value = (
+        ValueInfo("device.active_flux.value", float, "device"),
+        6.25,
+    )
+    editor_id, _ = service.open("module", discriminator="pulse")
+
+    service.set_field(
+        editor_id,
+        "freq",
+        {
+            "__kind": "value_ref",
+            "key": "device.active_flux.value",
+            "type": "float",
+        },
+    )
+    service.commit(editor_id, "agent_ref")
+
+    assert ml.modules["agent_ref"].to_dict()["freq"] == 6.25
+    ctrl.read_value_source.assert_called_once_with(
+        "device.active_flux.value", "float"
+    )
+
+
+def test_value_ref_requires_string_key(service):
+    editor_id, _ = service.open("module", discriminator="pulse")
+    with pytest.raises(CfgEditorError, match="string 'key'"):
+        service.set_field(
+            editor_id,
+            "freq",
+            {"__kind": "value_ref", "key": 123},
+        )
 
 
 # ---------------------------------------------------------------------------

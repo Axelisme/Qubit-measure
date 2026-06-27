@@ -32,6 +32,7 @@ from zcu_tools.gui.app.main.live_model import (
 )
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.events import SessionEvent
+from zcu_tools.gui.session.value_lookup import ValueInfo, ValueRef, ValueTypeError
 from zcu_tools.meta_tool import ModuleLibrary
 
 
@@ -168,6 +169,33 @@ def test_scalar_eval_field_invalid_expression_marks_invalid(env):
     assert val.resolved is None
     assert val.error
     assert field.is_valid() is False
+
+
+def test_scalar_value_ref_resolves_once_to_direct_value(env):
+    env.ctrl.read_value_source.return_value = (
+        ValueInfo("device.active_flux.value", float, "device"),
+        0.125,
+    )
+    field = ScalarLiveField(ScalarSpec(label="Flux", type=float), env)
+
+    field.set_value(ValueRef("device.active_flux.value"))
+    field.refresh_external(SessionEvent.DEVICE_CHANGED)
+
+    val = field.get_value()
+    assert isinstance(val, DirectValue)
+    assert val.value == 0.125
+    env.ctrl.read_value_source.assert_called_once_with(
+        "device.active_flux.value", "float"
+    )
+
+
+def test_scalar_value_ref_type_mismatch_fails_before_lookup(env):
+    field = ScalarLiveField(ScalarSpec(label="Flux", type=float), env)
+
+    with pytest.raises(ValueTypeError, match="target field"):
+        field.set_value(ValueRef("predictor.loaded", "bool"))
+
+    env.ctrl.read_value_source.assert_not_called()
 
 
 def test_scalar_eval_unresolved_marks_invalid(env):

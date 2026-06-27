@@ -32,6 +32,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Protocol, cast
 
+from zcu_tools.gui.session.value_lookup import ValueRef, ValueTypeError
+
 from .adapter import (
     CfgNodeSpec,
     CfgNodeValue,
@@ -54,6 +56,12 @@ from .sweep_model import SweepEditor
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+    from zcu_tools.gui.session.value_lookup import (
+        ScalarValue as LookupScalarValue,
+    )
+    from zcu_tools.gui.session.value_lookup import (
+        ValueInfo,
+    )
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 logger = logging.getLogger(__name__)
@@ -67,6 +75,9 @@ class ControllerProtocol(Protocol):
     def get_current_ml(self) -> ModuleLibrary: ...
     def has_soc(self) -> bool: ...
     def list_device_names(self) -> list[str]: ...
+    def read_value_source(
+        self, key: str, type_name: str | None = None
+    ) -> tuple[ValueInfo, LookupScalarValue]: ...
 
 
 @dataclass(frozen=True)
@@ -170,7 +181,9 @@ class ScalarLiveField(LiveField):
         return self._value
 
     def set_value(self, val: object) -> None:
-        if isinstance(val, (DirectValue, EvalValue)):
+        if isinstance(val, ValueRef):
+            new_value = self._make_direct_value_from_ref(val)
+        elif isinstance(val, (DirectValue, EvalValue)):
             new_value = val
         else:
             new_value = self._make_direct_value(val)
@@ -193,6 +206,17 @@ class ScalarLiveField(LiveField):
     def _make_direct_value(self, value: object) -> DirectValue:
         # ``value is None`` means unset (ADR-0010) — no placeholder substitution,
         # the None is kept as the single source of truth.
+        return DirectValue(value=value)
+
+    def _make_direct_value_from_ref(self, ref: ValueRef) -> DirectValue:
+        target_type_name = _value_ref_type_name(ref.key, self.spec.type)
+        if ref.type_name is not None and ref.type_name != target_type_name:
+            raise ValueTypeError(
+                ref.key,
+                f"Value source {ref.key!r} requested as {ref.type_name!r} but "
+                f"target field {self.spec.label!r} expects {target_type_name!r}",
+            )
+        _, value = self.env.ctrl.read_value_source(ref.key, target_type_name)
         return DirectValue(value=value)
 
     def _resolved_eval_value(self, value: EvalValue) -> EvalValue:
@@ -244,6 +268,22 @@ class ScalarLiveField(LiveField):
                     self._value.error,
                 )
             self._set_valid(valid)
+
+
+def _value_ref_type_name(key: str, type_: type) -> str:
+    if type_ is int:
+        return "int"
+    if type_ is float:
+        return "float"
+    if type_ is str:
+        return "str"
+    if type_ is bool:
+        return "bool"
+    raise ValueTypeError(
+        key,
+        f"Value source {key!r} cannot target unsupported scalar field type "
+        f"{type_.__name__!r}; only int, float, str, and bool fields are supported",
+    )
 
 
 class LiteralLiveField(LiveField):

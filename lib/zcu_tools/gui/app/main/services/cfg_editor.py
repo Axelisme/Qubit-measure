@@ -30,7 +30,8 @@ for exactly this reason.
 on the wire as the cfg-form tagged form ``{"__kind": "eval", "expr": ...}`` and
 resolved against the live MetaDict at ``commit`` time (``schema.to_raw_dict`` lowers
 ``EvalValue`` to its concrete ``resolved`` number), because ModuleLibrary stores
-concrete numbers, never md references.
+concrete numbers, never md references. ``value_ref`` tags are different: they are
+resolved once at ``set_field`` time and stored only as ``DirectValue`` snapshots.
 
 All methods run on the Qt main thread (the LiveModel and ModuleLibrary live
 there); the remote service marshals handler calls accordingly.
@@ -62,6 +63,7 @@ from zcu_tools.gui.app.main.live_model import (
 )
 from zcu_tools.gui.app.main.specs import make_waveform_spec_by_style
 from zcu_tools.gui.session.ports import ContextReadPort
+from zcu_tools.gui.session.value_lookup import ValueLookupError, decode_value_ref
 
 from .ports import ContextWritePort
 from .remote.path_resolver import (
@@ -175,7 +177,10 @@ class CfgEditorSession:
         so it need not re-list the whole tab after a variant switch.
         """
         before = {str(e["path"]) for e in list_settable_paths_full(self.root)}
-        resolve_and_set(self.root, path, _decode_value(value))
+        try:
+            resolve_and_set(self.root, path, _decode_value(value))
+        except ValueLookupError as exc:
+            raise CfgEditorError(str(exc)) from exc
         after = {str(e["path"]) for e in list_settable_paths_full(self.root)}
         return {
             "valid": bool(self.root.is_valid()),
@@ -555,15 +560,23 @@ class CfgEditorService:
 
 
 def _decode_value(value: object) -> object:
-    """Turn a tagged eval value into an ``EvalValue``; pass others through.
+    """Turn tagged values into model-layer value objects; pass others through.
 
     The agent sends ``{"__kind": "eval", "expr": "..."}`` for an md-reference
-    expression (the same tag used by the cfg-form codec). Everything else is a
-    plain JSON scalar that ``resolve_and_set`` handles directly.
+    expression (the same tag used by the cfg-form codec), or
+    ``{"__kind": "value_ref", "key": "...", "type": "float"}`` for a registered
+    value source. Everything else is a plain JSON scalar that ``resolve_and_set``
+    handles directly.
     """
     if isinstance(value, dict) and value.get("__kind") == "eval":
         expr = value.get("expr")
         if not isinstance(expr, str):
             raise CfgEditorError("eval value requires a string 'expr'")
         return EvalValue(expr=expr)
+    try:
+        ref = decode_value_ref(value)
+    except (ValueError, ValueLookupError) as exc:
+        raise CfgEditorError(str(exc)) from exc
+    if ref is not None:
+        return ref
     return value
