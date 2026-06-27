@@ -47,6 +47,9 @@ _SHARED_MODULES = [
     # The numeric expression evaluator is a pure-logic leaf: stdlib ast/operator
     # + MetaDict only. EvalRef lives here too (frozen dataclass, no Qt).
     "zcu_tools.gui.session.expression",
+    # Read-only value lookup is pure session logic; concrete source binders live
+    # in services and are intentionally not part of this import-clean list.
+    "zcu_tools.gui.session.value_lookup",
     # The plotting package + its backend-select module must stay import-clean so
     # an entry script can configure the matplotlib backend before any pyplot
     # import. The heavy plotting submodules (backend/host/container) DO pull in
