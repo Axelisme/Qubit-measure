@@ -9,8 +9,7 @@ place.
 
 The factory pair for each role is generated from the declarative ``ROLE_TABLE``
 (``role_table.py``): ``role_blank`` / ``role_ref`` close over the role's
-``RoleDef``. (``readout_dpm`` keeps its verbatim factory until it is migrated to
-``ROLE_TABLE`` together with its live-eval normalization.)
+``RoleDef``.
 
 The ``CfgBuilder.role()`` verb selects an initialization mode: ``Init.ADOPT``
 calls the *ref* factory (library-aware, the common case), ``Init.INLINE`` forces

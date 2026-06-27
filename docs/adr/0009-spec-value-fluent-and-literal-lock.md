@@ -2,7 +2,7 @@
 status: accepted
 ---
 
-# Spec/Value fluent 覆寫 + LiteralSpec 鎖定 + 每角色 default factory
+# Spec/Value fluent 覆寫 + LiteralSpec 鎖定 + 角色 default 表（ROLE_TABLE）
 
 **狀態：** accepted（已實作）。本檔以現在式描述最終形狀（含試點後收斂與每角色重構）。
 **關聯：** value 樹完整性與「空」語義見 [[0010]]；成品邊界驗證見 [[0011]]；value 層組裝 builder 見 [[0012]]。
@@ -40,13 +40,13 @@ value 容器（`CfgSectionValue`/`ModuleRefValue`）**維持可變、`with_*` in
 
 **代價（誠實記錄）**：`spec.lock_literal()` 回新 frozen、`value.with_gain()` 改 self——兩側機制不對稱，是認知負擔點；取捨理由：value 本就可變、改動最小，強收 value frozen 是更大的 YAGNI。
 
-### 5. 每角色一檔的 default factory（單層）
+### 5. 角色 default 是 `ROLE_TABLE` 資料 + 兩個泛型 builder
 
-`defaults/<role>.py`（qub_probe / res_probe / pi_pulse / pi2_pulse / readout / reset / qub_waveform / res_waveform）各暴露 `make_<role>_default`（blank）+ `make_<role>_ref_default`（查庫 preferred → fallback blank，optional 無 lib 時回 `None`，見 [[0010]]）。共用 patch helper 收進 `defaults/helpers.py`。RoleCatalog 直接使用 blank factory；adapter 通常透過 [[0012]] 的 `CfgBuilder.role(..., Init.ADOPT/INLINE/DISABLED)` 選 ref / blank / disabled，少數特殊 value 組裝仍可直接呼 L2 factory。
+`defaults/role_table.py` 的 `ROLE_TABLE: dict[role_id, RoleDef]` 為每個角色（qub_probe / res_probe / pi_pulse / pi2_pulse / readout / readout_dpm / reset 各形狀 / qub_waveform / res_waveform …）宣告一個 `RoleDef` literal（pulse / ro / waveform 的 md-linked 種子值，含公式以 `Md(..., expr=)` 或 `TRIG` 表達）。兩個泛型 builder 消費它：`role_blank`（blank：md-linked 預設，永不查庫、永不 `None`）、`role_ref`（查庫 preferred → fallback blank，optional 無 lib 時回 `None`，見 [[0010]]）。共用 patch helper 收進 `defaults/helpers.py`。生成的 `ROLE_FACTORIES`（`{role_id: RoleFactorySpec(blank, ref)}`）是 RoleCatalog 與 CfgBuilder 的單一 source：RoleCatalog 用 `.blank`；adapter 透過 [[0012]] 的 `CfgBuilder.role(..., Init.ADOPT/INLINE/DISABLED)` 選 ref / blank / disabled。
 
 **default factory 零鎖定（職責邊界）**：default factory 只產 value 樹預設，**不預設鎖任何欄位**，即使是高頻場景。鎖定 100% 由 adapter 在 `cfg_spec()` 裡 `lock_literal` 宣告——鎖定屬 spec 層（決策 1）、default factory 屬 value 層；「高頻」不是放進 factory 的理由。
 
-> 演化：曾規劃「角色 wrapper 委派兩層通用 factory」（`default_pi`/`default_qub_probe`…）。後收斂為**每角色一檔的單層結構**（完整對稱矩陣），刪舊三層委派。
+> 演化：曾規劃「角色 wrapper 委派兩層通用 factory」（`default_pi`/`default_qub_probe`…）→ 收斂為每角色一檔的單層 `make_<role>_default` / `make_<role>_ref_default` factory（完整對稱矩陣）→ 再收斂為現在的 `ROLE_TABLE` 資料 + `role_blank` / `role_ref` 兩個泛型 builder（角色詞彙從「一檔一函數」變成「一列資料」，新增角色 = 加一個 `RoleDef` literal；領域公式以 `Md(expr=)` / `TRIG` 種子表達，仍是 EvalValue）。
 
 ## 替代方案（綜述）
 
@@ -56,4 +56,4 @@ value 容器（`CfgSectionValue`/`ModuleRefValue`）**維持可變、`with_*` in
 | spec 覆寫機制 | frozen + replace 回同型 | 可變 builder + .build() |
 | 鎖定/渲染概念 | 只在 spec 層（LiteralSpec by widget 隱藏） | schema 層 `schema_overrides.py`（已刪） |
 | value 覆寫 | in-place 回 self | frozen + 回新（對稱但更大改動）|
-| 角色 default | 每角色一檔單層 factory | 兩層通用 factory + wrapper |
+| 角色 default | `ROLE_TABLE` 資料 + role_blank/role_ref builder | 每角色一檔單層 factory／兩層通用 factory + wrapper |

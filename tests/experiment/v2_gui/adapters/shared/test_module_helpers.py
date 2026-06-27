@@ -8,9 +8,12 @@ if TYPE_CHECKING:
 from typing import cast
 
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    make_readout_ref_default,
     schema_from_module,
     select_named_module_value,
+)
+from zcu_tools.experiment.v2_gui.adapters.shared.defaults.role_table import (
+    ROLE_TABLE,
+    role_ref,
 )
 from zcu_tools.gui.app.main.adapter import (
     CfgSchema,
@@ -181,7 +184,7 @@ def test_make_readout_ref_default_uses_library_selection_before_fallback():
     )
 
     ctx = _make_ctx(ml)
-    module_ref = make_readout_ref_default(ctx)
+    module_ref = role_ref(ROLE_TABLE["readout"], ctx)
 
     assert isinstance(module_ref, ModuleRefValue)
     assert module_ref.chosen_key == "readout_rf"
@@ -189,7 +192,7 @@ def test_make_readout_ref_default_uses_library_selection_before_fallback():
 
 def test_make_readout_ref_default_falls_back_to_custom_when_lib_empty():
     ctx = _make_ctx(ModuleLibrary())
-    module_ref = make_readout_ref_default(ctx)
+    module_ref = role_ref(ROLE_TABLE["readout"], ctx)
 
     assert isinstance(module_ref, ModuleRefValue)
     assert module_ref.chosen_key == "<Custom:Pulse Readout>"
@@ -238,14 +241,14 @@ def test_make_readout_ref_default_prefers_readout_dpm_over_readout_rf():
         ),
     )
 
-    module_ref = make_readout_ref_default(_make_ctx(ml))
+    module_ref = role_ref(ROLE_TABLE["readout"], _make_ctx(ml))
     assert isinstance(module_ref, ModuleRefValue)
     assert module_ref.chosen_key == "readout_dpm"
 
 
 def test_make_readout_ref_default_fallback_uses_directvalue_when_md_missing():
     ctx = _make_ctx(ModuleLibrary())
-    module_ref = make_readout_ref_default(ctx)
+    module_ref = role_ref(ROLE_TABLE["readout"], ctx)
     assert isinstance(module_ref, ModuleRefValue)
     readout = module_ref.value
     assert isinstance(readout, CfgSectionValue)
@@ -272,7 +275,7 @@ def test_make_readout_ref_default_fallback_prefers_ro_waveform_if_present():
             {"style": "const", "length": 1.7}, ml=ml
         )
     )
-    module_ref = make_readout_ref_default(_make_ctx(ml))
+    module_ref = role_ref(ROLE_TABLE["readout"], _make_ctx(ml))
     assert isinstance(module_ref, ModuleRefValue)
     readout = module_ref.value
     pulse_cfg = readout.fields["pulse_cfg"]
@@ -285,6 +288,6 @@ def test_make_readout_ref_default_fallback_prefers_ro_waveform_if_present():
 def test_make_readout_ref_default_returns_disabled_when_optional_and_empty():
     # ADR-0010: optional ref with an empty library → None (disabled).
     ctx = _make_ctx(ModuleLibrary())
-    module_ref = make_readout_ref_default(ctx, optional=True)
+    module_ref = role_ref(ROLE_TABLE["readout"], ctx, optional=True)
 
     assert module_ref is None
