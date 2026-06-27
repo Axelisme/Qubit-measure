@@ -15,10 +15,15 @@ from typing import Any
 import pytest
 from zcu_tools.experiment.v2_gui.adapters.shared.defaults.role_table import (
     ROLE_TABLE,
+    Pulse,
+    RoleDef,
+    Source,
     role_blank,
     role_ref,
 )
-from zcu_tools.gui.app.main.adapter import CfgSectionValue, EvalValue
+from zcu_tools.gui.app.main.adapter import CfgSectionValue, DirectValue, EvalValue
+from zcu_tools.gui.app.main.specs.pulse import make_pulse_spec
+from zcu_tools.gui.session.value_lookup import ValueKey, ValueRegistry
 
 from .test_role_default_characterization import (
     _POPULATED_MD,
@@ -72,3 +77,23 @@ def test_readout_dpm_freq_falls_back_to_live_r_f_when_best_ro_freq_absent() -> N
     assert pulse_freq.expr == "r_f"
     assert isinstance(ro_freq, EvalValue)
     assert ro_freq.expr == "r_f"
+
+
+def test_role_source_seed_resolves_against_value_registry() -> None:
+    registry = ValueRegistry()
+    registry.register(
+        ValueKey("predictor.qubit_freq", float),
+        lambda: 4123.0,
+        owner="test",
+    )
+    ctx = _mk_ctx({})
+    ctx.values = registry
+    role = RoleDef(
+        make_pulse_spec,
+        "<Custom:Pulse>",
+        pulses=(Pulse(Source("predictor.qubit_freq", "float"), 0, 0.05, 0.1),),
+    )
+
+    node = role_blank(role, ctx)
+
+    assert node.value.fields["freq"] == DirectValue(4123.0)

@@ -21,6 +21,8 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
 from zcu_tools.experiment.v2_gui.adapters.shared.cfg_builder import CfgBuilder, Init
 from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,
+    CfgSectionValue,
+    DeviceRefSpec,
     DirectValue,
     EvalValue,
     ExpContext,
@@ -31,6 +33,7 @@ from zcu_tools.gui.app.main.adapter import (
     SweepValue,
     make_default_value,
 )
+from zcu_tools.gui.session.value_lookup import ValueKey, ValueRegistry
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2 import ModuleCfgFactory
 
@@ -71,6 +74,16 @@ def _ctx_with_library_readout() -> ExpContext:
         )
     )
     return ExpContext(md=MetaDict(), ml=ml, soc=None, soccfg=None)
+
+
+def _ctx_with_values(registry: ValueRegistry) -> ExpContext:
+    return ExpContext(
+        md=MetaDict(),
+        ml=ModuleLibrary(),
+        soc=None,
+        soccfg=None,
+        values=registry,
+    )
 
 
 def _spec() -> CfgSectionSpec:
@@ -171,6 +184,48 @@ def test_set_overrides_scalar_inside_mounted_role():
 def test_set_bad_path_fast_fails():
     with pytest.raises(RuntimeError, match="does not resolve"):
         CfgBuilder(_empty_ctx(), _spec()).set("modules.no_such.gain", 1.0)
+
+
+# --- .value_ref ---------------------------------------------------------------
+
+
+def _device_spec() -> CfgSectionSpec:
+    return CfgSectionSpec(
+        fields={
+            "dev": CfgSectionSpec(
+                fields={"flux_dev": DeviceRefSpec(label="Flux Device")}
+            )
+        }
+    )
+
+
+def test_value_ref_resolves_device_ref_to_direct_value():
+    registry = ValueRegistry()
+    registry.register(
+        ValueKey("device.active_flux.name", str),
+        lambda: "other_flux",
+        owner="test",
+    )
+
+    v = (
+        CfgBuilder(_ctx_with_values(registry), _device_spec())
+        .value_ref("dev.flux_dev", "device.active_flux.name")
+        .build()
+    )
+
+    dev = cast(CfgSectionValue, v.fields["dev"])
+    assert dev.fields["flux_dev"] == DirectValue("other_flux")
+
+
+def test_value_ref_uses_default_when_source_is_missing():
+    v = (
+        CfgBuilder(_ctx_with_values(ValueRegistry()), _device_spec())
+        .value_ref("dev.flux_dev", "device.active_flux.name", default="flux_yoko")
+        .build()
+    )
+
+    dev = cast(CfgSectionValue, v.fields["dev"])
+    assert dev.fields["flux_dev"] == DirectValue("flux_yoko")
 
 
 # --- .role -------------------------------------------------------------------

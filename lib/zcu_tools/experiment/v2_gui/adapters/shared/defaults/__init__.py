@@ -15,7 +15,7 @@ from .helpers import (
 )
 from .module_defaults import NamedModuleValue
 from .role_factories import ROLE_FACTORIES, RoleFactorySpec
-from .role_table import ROLE_TABLE, Md, RoleDef, role_blank, role_ref
+from .role_table import ROLE_TABLE, Md, RoleDef, Source, role_blank, role_ref
 
 __all__ = [
     # the role vocabulary as data + its generated factory table
@@ -24,6 +24,7 @@ __all__ = [
     "RoleFactorySpec",
     "RoleDef",
     "Md",
+    "Source",
     "role_blank",
     "role_ref",
     # shared value-tree primitives

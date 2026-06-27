@@ -44,22 +44,31 @@ offending call rather than surfacing as a later lowering error.
 from __future__ import annotations
 
 from enum import Enum
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Self, cast
 
 from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
+    DeviceRefSpec,
     DirectValue,
     LiteralSpec,
     ModuleRefSpec,
     ModuleRefValue,
     ScalarLeafInput,
+    ScalarSpec,
     SweepSpec,
     SweepValue,
     WaveformRefSpec,
     WaveformRefValue,
     find_allowed_spec,
     make_default_value,
+)
+from zcu_tools.gui.session.value_lookup import (
+    MissingValue,
+    ScalarType,
+    UnavailableValue,
+    ValueRef,
+    resolve_value_ref,
 )
 
 from .defaults import ROLE_FACTORIES
@@ -71,6 +80,13 @@ if TYPE_CHECKING:
 # disabled optional ref). Scalars never go through _mount_node — they are set
 # via CfgSectionValue.with_field (scalar-leaf only).
 _MountNode = ModuleRefValue | WaveformRefValue | SweepValue | None
+
+
+class _NoDefault:
+    pass
+
+
+_NO_DEFAULT = _NoDefault()
 
 
 class Init(Enum):
@@ -136,6 +152,33 @@ class CfgBuilder:
             )
         self._value.with_field(path, value)
         return self
+
+    def value_ref(
+        self,
+        path: str,
+        key: str,
+        *,
+        type_name: str | None = None,
+        default: ScalarLeafInput | _NoDefault = _NO_DEFAULT,
+    ) -> Self:
+        """Resolve a registered value source once, then write it as a direct leaf.
+
+        This is the default-builder escape hatch for values whose source is
+        cross-cutting (device/predictor/project). It never stores a lazy reference
+        in the cfg tree.
+        """
+        self._check_mutable()
+        parts = _split(path)
+        target_type = self._value_ref_target_type(parts, path)
+        try:
+            value = resolve_value_ref(
+                ValueRef(key, type_name), self._ctx.values, target_type=target_type
+            )
+        except (MissingValue, UnavailableValue):
+            if isinstance(default, _NoDefault):
+                raise
+            value = default
+        return self.set(path, value)
 
     def role(self, path: str, role_id: str, init: Init = Init.ADOPT) -> Self:
         """Mount a module/waveform ref at ``path`` from the L2 role factories.
@@ -311,6 +354,22 @@ class CfgBuilder:
                 f"{type(leaf_spec).__name__}, not a ModuleRefSpec/WaveformRefSpec"
             )
         return leaf_spec
+
+    def _value_ref_target_type(self, parts: list[str], path: str) -> ScalarType:
+        leaf_spec = self._resolve_leaf_spec(parts, path)
+        if isinstance(leaf_spec, ScalarSpec):
+            if leaf_spec.type not in (int, float, str, bool):
+                raise RuntimeError(
+                    f"CfgBuilder.value_ref: scalar field at {path!r} has unsupported "
+                    f"type {leaf_spec.type.__name__!r}"
+                )
+            return cast(ScalarType, leaf_spec.type)
+        if isinstance(leaf_spec, DeviceRefSpec):
+            return str
+        raise RuntimeError(
+            f"CfgBuilder.value_ref: spec at {path!r} is "
+            f"{type(leaf_spec).__name__}, not a scalar/device-ref leaf"
+        )
 
     @staticmethod
     def _check_ref_kind(

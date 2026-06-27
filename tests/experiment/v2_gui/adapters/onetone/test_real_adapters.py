@@ -15,6 +15,7 @@ from zcu_tools.experiment.v2_gui.adapters.onetone.power_dep import (
     OneTonePowerDepAdapter,
 )
 from zcu_tools.gui.app.main.adapter import CfgSchema, RunRequest
+from zcu_tools.gui.session.value_lookup import EmptyValueLookup, ValueKey, ValueRegistry
 from zcu_tools.meta_tool import MetaDict
 from zcu_tools.program.v2 import ModuleCfgFactory, SweepCfg
 
@@ -32,6 +33,7 @@ def _make_ctx(ml: MagicMock | None = None) -> MagicMock:
     ctx.ml = ml or _make_ml()
     ctx.md = MetaDict()
     ctx.res_name = "R1"
+    ctx.values = EmptyValueLookup()
     return ctx
 
 
@@ -119,6 +121,25 @@ def test_onetone_flux_dep_default_sweep_freq_uses_eval_value() -> None:
     assert isinstance(freq_sweep.stop, EvalValue)
     assert freq_sweep.start.expr == "r_f - rf_w"
     assert freq_sweep.stop.expr == "r_f + rf_w"
+
+
+def test_onetone_flux_dep_default_flux_device_uses_active_source() -> None:
+    from zcu_tools.gui.app.main.adapter import CfgSectionValue, DirectValue
+
+    registry = ValueRegistry()
+    registry.register(
+        ValueKey("device.active_flux.name", str),
+        lambda: "other_flux",
+        owner="test",
+    )
+    ctx = _make_ctx(_make_ml())
+    ctx.values = registry
+
+    schema = OneToneFluxDepAdapter().make_default_cfg(ctx)
+
+    dev = schema.value.fields["dev"]
+    assert isinstance(dev, CfgSectionValue)
+    assert dev.fields["flux_dev"] == DirectValue("other_flux")
 
 
 def test_power_dep_build_exp_cfg_strips_earlystop_snr() -> None:

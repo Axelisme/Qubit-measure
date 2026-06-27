@@ -12,11 +12,10 @@ file. Two generic builders consume the data:
   replacing the 8 near-identical ``make_<role>_ref_default`` clones (and their
   ``@overload`` stubs).
 
-The seed value carriers (:class:`Md` / :class:`Eval` / :data:`TRIG`) wrap the
-existing md-mechanism (``md_scalar_*`` / ``make_trig_offset``); they are the seam
-a later, broader refactor can widen into a multi-source ``ValueSource`` resolving
-against the whole ``ExpContext`` (predictor / device / project / …) — the builders
-already carry ``ctx``, so widening the carrier needs no builder change.
+The seed value carriers (:class:`Md` / :class:`Source` / :data:`TRIG`) wrap the
+existing md-mechanism and the read-only value-source escape hatch. They resolve
+against the whole ``ExpContext`` (predictor / device / project / …) while still
+materializing to direct/eval scalar leaves before the cfg tree leaves the builder.
 """
 
 from __future__ import annotations
@@ -59,6 +58,7 @@ from zcu_tools.gui.app.main.specs.waveform import (
 from zcu_tools.gui.app.main.specs.waveform import (
     make_cosine_waveform_spec as make_cosine_waveform_spec_,
 )
+from zcu_tools.gui.session.value_lookup import ValueRef, resolve_value_ref
 from zcu_tools.program.v2.modules import AbsResetCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 
@@ -94,6 +94,14 @@ class Md:
     expr: str | None = None
 
 
+@dataclass(frozen=True)
+class Source:
+    """A read-only value-source seed resolved once while building a role default."""
+
+    key: str
+    type_name: str | None = None
+
+
 class _Trig(Enum):
     TRIG = "trig"
 
@@ -102,9 +110,9 @@ class _Trig(Enum):
 #: ``timeFly``, else ``DirectValue(0.55)`` (see ``make_trig_offset``).
 TRIG = _Trig.TRIG
 
-#: A seed value in a RoleDef: a raw scalar, an md-linked ``Md``, or the ``TRIG``
-#: rule (ro_cfg only).
-SeedVal = Union[float, int, Md, _Trig]
+#: A seed value in a RoleDef: a raw scalar, an md-linked ``Md``, a registered
+#: ``Source``, or the ``TRIG`` rule (ro_cfg only).
+SeedVal = Union[float, int, str, bool, Md, Source, _Trig]
 
 
 def _resolve(ctx: ExpContext, v: SeedVal) -> ScalarValue:
@@ -113,6 +121,8 @@ def _resolve(ctx: ExpContext, v: SeedVal) -> ScalarValue:
         if md_has_key(ctx, v.key):
             return EvalValue(expr=v.expr if v.expr is not None else v.key)
         return _resolve(ctx, v.default)
+    if isinstance(v, Source):
+        return DirectValue(resolve_value_ref(ValueRef(v.key, v.type_name), ctx.values))
     if v is TRIG:
         return make_trig_offset(ctx, trig_expr="timeFly + 0.05", trig_fallback=0.55)
     return DirectValue(v)

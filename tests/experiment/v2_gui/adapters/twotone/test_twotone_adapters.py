@@ -23,6 +23,7 @@ from zcu_tools.experiment.v2_gui.adapters.twotone import (
     T2RamseyAdapter,
 )
 from zcu_tools.gui.app.main.adapter import CfgSchema, DirectValue, RunRequest
+from zcu_tools.gui.session.value_lookup import EmptyValueLookup, ValueKey, ValueRegistry
 from zcu_tools.meta_tool import MetaDict
 from zcu_tools.program.v2 import ModuleCfgFactory, SweepCfg
 
@@ -40,6 +41,7 @@ def _make_ctx(ml: MagicMock | None = None) -> MagicMock:
     ctx.ml = ml or _make_ml()
     ctx.md = MetaDict()
     ctx.qub_name = "Q1"
+    ctx.values = EmptyValueLookup()
     return ctx
 
 
@@ -159,6 +161,25 @@ def test_flux_dep_build_exp_cfg_converts_device_section() -> None:
     adapter.build_exp_cfg(raw, _make_req(ml))
     cfg_raw = ml.make_cfg.call_args.args[0]
     assert cfg_raw["dev"] == {"flux_yoko": {"label": "flux_dev"}}
+
+
+def test_flux_dep_default_flux_device_uses_active_source() -> None:
+    from zcu_tools.gui.app.main.adapter import CfgSectionValue
+
+    registry = ValueRegistry()
+    registry.register(
+        ValueKey("device.active_flux.name", str),
+        lambda: "other_flux",
+        owner="test",
+    )
+    ctx = _make_ctx(_make_ml())
+    ctx.values = registry
+
+    schema = FluxDepAdapter().make_default_cfg(ctx)
+
+    dev = schema.value.fields["dev"]
+    assert isinstance(dev, CfgSectionValue)
+    assert dev.fields["flux_dev"] == DirectValue("other_flux")
 
 
 def test_flux_dep_build_exp_cfg_delegates_to_make_cfg() -> None:
