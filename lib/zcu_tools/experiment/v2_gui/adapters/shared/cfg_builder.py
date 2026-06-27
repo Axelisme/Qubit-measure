@@ -11,7 +11,7 @@ path-addressed fluent API:
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(reps=100, rounds=100, relax_delay=1.0)
             .role("modules.readout", "pulse_readout")        # mount a library/blank ref
-            .role("modules.reset", "reset", optional=True)   # library miss -> None
+            .role("modules.reset", "reset", Init.DISABLED)   # library miss -> None
             .role("modules.qub_pulse", "qub_probe")
             .set("modules.qub_pulse.gain", 0.05)             # scalar override
             .set_sweep("sweep.freq", proper_qub_freq_range(ctx, 301))
@@ -43,6 +43,7 @@ offending call rather than surfacing as a later lowering error.
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import TYPE_CHECKING, Self
 
 from zcu_tools.gui.app.main.adapter import (
@@ -70,6 +71,14 @@ if TYPE_CHECKING:
 # disabled optional ref). Scalars never go through _mount_node — they are set
 # via CfgSectionValue.with_field (scalar-leaf only).
 _MountNode = ModuleRefValue | WaveformRefValue | SweepValue | None
+
+
+class Init(Enum):
+    """How ``CfgBuilder.role`` initializes a role-backed ref node."""
+
+    ADOPT = "adopt"
+    INLINE = "inline"
+    DISABLED = "disabled"
 
 
 class CfgBuilder:
@@ -128,24 +137,22 @@ class CfgBuilder:
         self._value.with_field(path, value)
         return self
 
-    def role(
-        self,
-        path: str,
-        role_id: str,
-        *,
-        optional: bool = False,
-        prefer_blank: bool = False,
-    ) -> Self:
+    def role(self, path: str, role_id: str, init: Init = Init.ADOPT) -> Self:
         """Mount a module/waveform ref at ``path`` from the L2 role factories.
 
-        - plain ``.role(path, role_id)`` → the role's *ref* factory (library
+        - ``Init.ADOPT`` → the role's *ref* factory (library
           aware), or its *blank* factory if the role has no ref variant.
-        - ``prefer_blank=True`` → force the *blank* factory (never adopt a
+        - ``Init.INLINE`` → force the *blank* factory (never adopt a
           library entry; e.g. a readout that must stay inline).
-        - ``optional=True`` → the *ref* factory's optional path (library miss →
-          ``None``). Requires a ref variant and an ``optional`` spec ref.
+        - ``Init.DISABLED`` → the *ref* factory's optional path (library miss →
+          ``None``). Requires a ref variant and an optional spec ref.
         """
         self._check_mutable()
+        if not isinstance(init, Init):
+            raise RuntimeError(
+                "CfgBuilder.role: init must be an Init value "
+                f"(got {type(init).__name__})"
+            )
         parts = _split(path)
         ref_spec = self._resolve_ref_spec(parts, path)
 
@@ -156,20 +163,20 @@ class CfgBuilder:
                 f"(available: {', '.join(sorted(ROLE_FACTORIES))})"
             )
 
-        if optional:
+        if init is Init.DISABLED:
             if not ref_spec.optional:
                 raise RuntimeError(
-                    f"CfgBuilder.role: optional=True at {path!r} but the spec ref "
+                    f"CfgBuilder.role: Init.DISABLED at {path!r} but the spec ref "
                     "is not optional (a required ref cannot be disabled)"
                 )
             if spec.ref is None:
                 raise RuntimeError(
                     f"CfgBuilder.role: role {role_id!r} has no library-aware "
-                    "(ref) factory, so optional=True (library-miss → None) is "
+                    "(ref) factory, so Init.DISABLED (library-miss → None) is "
                     "unsupported"
                 )
             node = spec.ref(self._ctx, optional=True)
-        elif prefer_blank or spec.ref is None:
+        elif init is Init.INLINE or spec.ref is None:
             node = spec.blank(self._ctx)
         else:
             node = spec.ref(self._ctx)

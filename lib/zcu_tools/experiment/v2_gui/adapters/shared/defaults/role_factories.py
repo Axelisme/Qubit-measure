@@ -8,13 +8,13 @@ nothing matches). Both the GUI ``RoleCatalog`` registration (``registry.py``)
 and the value-assembly ``CfgBuilder`` consume this table, so the role vocabulary
 lives in exactly one place.
 
-The ``CfgBuilder.role()`` verb selects between the two factories: a plain
-``.role(path, role_id)`` calls the *ref* factory (library-aware, the common
-case); ``prefer_blank=True`` forces the *blank* factory (e.g. a twotone readout
-that must stay inline, never adopting a library ``readout_dpm``);
-``optional=True`` takes the *ref* factory's optional path (library miss →
-``None``). ``RoleCatalog`` always uses the *blank* factory (creating from a role
-seeds a fresh entry, it never references an existing library entry).
+The ``CfgBuilder.role()`` verb selects an initialization mode: ``Init.ADOPT``
+calls the *ref* factory (library-aware, the common case), ``Init.INLINE`` forces
+the *blank* factory (e.g. a twotone readout that must stay inline, never adopting
+a library ``readout_dpm``), and ``Init.DISABLED`` takes the *ref* factory's
+optional path (library miss → ``None``). ``RoleCatalog`` always uses the *blank*
+factory (creating from a role seeds a fresh entry, it never references an
+existing library entry).
 """
 
 from __future__ import annotations

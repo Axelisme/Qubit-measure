@@ -13,6 +13,7 @@ from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
     FigureOnlyAnalyzeResult,
+    Init,
     build_exp_spec,
     make_pulse_module_spec,
     make_readout_module_spec,
@@ -115,9 +116,9 @@ class MistPowerFreqAdapter(
                 reps=1000, rounds=100, relax_delay=proper_relax(ctx, fallback=30.5)
             )
             # optional → None (disabled) when no library entry (ADR-0010)
-            .role("modules.reset", "reset", optional=True)
-            .role("modules.init_pulse", "pi_pulse", optional=True)
-            .role("modules.probe_pulse", "qub_probe", prefer_blank=True)
+            .role("modules.reset", "reset", Init.DISABLED)
+            .role("modules.init_pulse", "pi_pulse", Init.DISABLED)
+            .role("modules.probe_pulse", "qub_probe", Init.INLINE)
             .role("modules.readout", "readout")
             .set_sweep("sweep.freq", proper_res_freq_range(ctx, 51))
             .sweep("sweep.gain", 0.0, 1.0, 51)

@@ -31,6 +31,7 @@ from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
+    Init,
     build_exp_spec,
     make_readout_module_spec,
     md_get_float,
@@ -348,7 +349,7 @@ class FakeFreqAdapter(
         return (
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(reps=100, rounds=100)
-            .role("modules.readout", "readout", prefer_blank=True)
+            .role("modules.readout", "readout", Init.INLINE)
             .sweep("sweep.freq", freq_start, freq_stop, 201)
             .build()
         )

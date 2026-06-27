@@ -13,6 +13,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
     FluxPickParams,
     FluxPickResult,
+    Init,
     build_exp_spec,
     build_flux_pick_session,
     make_pulse_readout_module_spec,
@@ -140,7 +141,7 @@ class OneToneFluxDepAdapter(
         return (
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(reps=1000, rounds=1, relax_delay=1.0)
-            .role("modules.readout", "readout", prefer_blank=True)
+            .role("modules.readout", "readout", Init.INLINE)
             .set("modules.readout.pulse_cfg.gain", 0.05)
             .set("modules.readout.ro_cfg.ro_length", ro_length)
             .set("dev.flux_dev", "flux_yoko")

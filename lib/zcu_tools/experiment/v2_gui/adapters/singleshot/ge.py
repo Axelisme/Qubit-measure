@@ -14,6 +14,7 @@ from zcu_tools.experiment.v2.singleshot.ge import GE_Result
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
+    Init,
     build_exp_spec,
     make_pulse_module_spec,
     make_pulse_readout_module_spec,
@@ -174,11 +175,11 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(shots=100000)
             .set("relax_delay", proper_relax(ctx))
-            .role("modules.probe_pulse", "pi_pulse", prefer_blank=True)
+            .role("modules.probe_pulse", "pi_pulse", Init.INLINE)
             .role("modules.readout", "readout")
             # optional → None (disabled) when no library entry (ADR-0010)
-            .role("modules.reset", "reset", optional=True)
-            .role("modules.init_pulse", "pi_pulse", optional=True)
+            .role("modules.reset", "reset", Init.DISABLED)
+            .role("modules.init_pulse", "pi_pulse", Init.DISABLED)
             .build()
         )
 

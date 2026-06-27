@@ -1,5 +1,5 @@
 from .analyze_results import FigureOnlyAnalyzeResult, run_figure_only_analyze
-from .cfg_builder import CfgBuilder
+from .cfg_builder import CfgBuilder, Init
 from .ctx_helpers import (
     md_eval_scaled,
     md_get_float,
@@ -69,6 +69,7 @@ from .writeback_helpers import reset_module_writeback_items
 __all__ = [
     # value-tree assembly
     "CfgBuilder",
+    "Init",
     # shared analyze-result shapes
     "FigureOnlyAnalyzeResult",
     "run_figure_only_analyze",

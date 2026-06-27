@@ -11,6 +11,7 @@ from zcu_tools.experiment.v2.twotone.time_domain.t1 import T1Cfg, T1Exp, T1Resul
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
+    Init,
     build_exp_spec,
     make_pulse_module_spec,
     make_readout_module_spec,
@@ -107,7 +108,7 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams
             .role("modules.pi_pulse", "pi_pulse")
             .role("modules.readout", "readout")
             # optional → None (disabled) when no library reset (ADR-0010)
-            .role("modules.reset", "reset", optional=True)
+            .role("modules.reset", "reset", Init.DISABLED)
             .set_sweep(
                 "sweep.length",
                 SweepValue(

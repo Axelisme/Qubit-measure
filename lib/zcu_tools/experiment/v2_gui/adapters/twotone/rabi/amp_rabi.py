@@ -15,6 +15,7 @@ from zcu_tools.experiment.v2.twotone.rabi.amp_rabi import (
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
+    Init,
     build_exp_spec,
     make_pulse_module_spec,
     make_readout_module_spec,
@@ -135,10 +136,10 @@ class AmpRabiAdapter(
             .scalars(
                 reps=1000, rounds=100, relax_delay=proper_relax(ctx, fallback=30.5)
             )
-            .role("modules.qub_pulse", "qub_probe", prefer_blank=True)
+            .role("modules.qub_pulse", "qub_probe", Init.INLINE)
             .role("modules.readout", "readout")
             # optional → None (disabled) when no library reset (ADR-0010)
-            .role("modules.reset", "reset", optional=True)
+            .role("modules.reset", "reset", Init.DISABLED)
             .set_sweep(
                 "sweep.gain",
                 SweepValue(

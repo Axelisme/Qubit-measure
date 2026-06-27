@@ -15,6 +15,7 @@ from zcu_tools.experiment.v2.twotone.ro_optimize.length import (
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
+    Init,
     build_exp_spec,
     make_pulse_module_spec,
     make_pulse_readout_module_spec,
@@ -125,9 +126,9 @@ class RoOptLengthAdapter(
         return (
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(reps=10000, rounds=1, relax_delay=1.0)
-            .role("modules.qub_pulse", "qub_probe", prefer_blank=True)
+            .role("modules.qub_pulse", "qub_probe", Init.INLINE)
             .role("modules.readout", "readout")
-            .role("modules.reset", "reset", optional=True)
+            .role("modules.reset", "reset", Init.DISABLED)
             .sweep("sweep.length", 0.01, 3.5, 51)
             .build()
         )

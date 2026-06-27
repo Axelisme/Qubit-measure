@@ -15,6 +15,7 @@ from zcu_tools.experiment.v2.twotone.reset.dual_tone.power import (
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
+    Init,
     build_exp_spec,
     make_pulse_module_spec,
     make_readout_module_spec,
@@ -139,8 +140,8 @@ class DualTonePowerAdapter(
             )
             .role("modules.readout", "readout")
             # optional → None (disabled) when no library entry (ADR-0010)
-            .role("modules.reset", "reset", optional=True)
-            .role("modules.init_pulse", "pi_pulse", optional=True)
+            .role("modules.reset", "reset", Init.DISABLED)
+            .role("modules.init_pulse", "pi_pulse", Init.DISABLED)
             .sweep("sweep.gain1", 0.0, 1.0, 51)
             .sweep("sweep.gain2", 0.0, 1.0, 51)
             .build()

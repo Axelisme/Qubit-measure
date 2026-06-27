@@ -16,6 +16,7 @@ from zcu_tools.experiment.v2.twotone.time_domain.t2echo import (
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
+    Init,
     build_exp_spec,
     make_pulse_module_spec,
     make_readout_module_spec,
@@ -150,7 +151,7 @@ class T2EchoAdapter(
                 reps=1000, rounds=100, relax_delay=proper_relax(ctx), detune_ratio=0.1
             )
             # optional → None (disabled) when no library reset (ADR-0010)
-            .role("modules.reset", "reset", optional=True)
+            .role("modules.reset", "reset", Init.DISABLED)
             .role("modules.pi2_pulse", "pi2_pulse")
             .role("modules.pi_pulse", "pi_pulse")
             .role("modules.readout", "readout")

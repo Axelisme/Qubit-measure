@@ -11,6 +11,7 @@ from zcu_tools.experiment.v2.lookback import LookbackCfg, LookbackExp, LookbackR
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
+    Init,
     build_exp_spec,
     make_pulse_module_spec,
     make_pulse_readout_module_spec,
@@ -119,7 +120,7 @@ class LookbackAdapter(
         return (
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(rounds=500, relax_delay=0.0)
-            .role("modules.readout", "readout", prefer_blank=True)
+            .role("modules.readout", "readout", Init.INLINE)
             .set("modules.readout.pulse_cfg.gain", 1.0)
             .set("modules.readout.ro_cfg.ro_length", 1.4)
             .set(

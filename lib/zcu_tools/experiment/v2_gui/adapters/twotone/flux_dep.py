@@ -13,6 +13,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
     FluxPickParams,
     FluxPickResult,
+    Init,
     build_exp_spec,
     build_flux_pick_session,
     make_pulse_module_spec,
@@ -131,8 +132,8 @@ class FluxDepAdapter(
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(reps=1000, rounds=100, relax_delay=1.0)
             # optional → None (disabled) when no library reset (ADR-0010)
-            .role("modules.reset", "reset", optional=True)
-            .role("modules.qub_pulse", "qub_probe", prefer_blank=True)
+            .role("modules.reset", "reset", Init.DISABLED)
+            .role("modules.qub_pulse", "qub_probe", Init.INLINE)
             .role("modules.readout", "readout")
             .set("dev.flux_dev", "flux_yoko")
             .set_sweep("sweep.flux", proper_flux_range(ctx, 101))

@@ -9,6 +9,7 @@ from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
     FigureOnlyAnalyzeResult,
+    Init,
     build_exp_spec,
     make_pulse_module_spec,
     make_readout_module_spec,
@@ -116,7 +117,7 @@ class SsT1Adapter(
             )
             .role("modules.pi_pulse", "pi_pulse")
             .role("modules.readout", "readout")
-            .role("modules.reset", "reset", optional=True)
+            .role("modules.reset", "reset", Init.DISABLED)
             .set_sweep(
                 "sweep.length", SweepValue(start=0.0, stop=sweep_stop, expts=101)
             )

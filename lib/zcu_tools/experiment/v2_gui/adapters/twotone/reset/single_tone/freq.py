@@ -15,6 +15,7 @@ from zcu_tools.experiment.v2.twotone.reset.single_tone.freq import (
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
+    Init,
     build_exp_spec,
     make_pulse_module_spec,
     make_pulse_reset_module_spec,
@@ -119,8 +120,8 @@ class SingleToneFreqAdapter(
             .role("modules.tested_reset", "pulse_reset")
             .role("modules.readout", "readout")
             # optional → None (disabled) when no library entry (ADR-0010)
-            .role("modules.reset", "reset", optional=True)
-            .role("modules.init_pulse", "pi_pulse", optional=True)
+            .role("modules.reset", "reset", Init.DISABLED)
+            .role("modules.init_pulse", "pi_pulse", Init.DISABLED)
             .set_sweep("sweep.freq", proper_reset_freq_range(ctx, 201))
             .build()
         )

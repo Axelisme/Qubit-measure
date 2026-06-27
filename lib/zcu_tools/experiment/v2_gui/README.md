@@ -1,6 +1,6 @@
 # QICK Note for `experiment/v2_gui`
 
-**Last updated:** 2026-06-27（adapter guide_text cleanup）
+**Last updated:** 2026-06-27（CfgBuilder Init modes）
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -33,6 +33,12 @@ md/ml 算預設值）、`run` / `analyze` / `get_writeback_items`，並在同一
 concrete raw cfg 交給 `zcu_tools.experiment.cfg_assembler.make_cfg` / `assemble_experiment_cfg`。
 assembler 每次呼叫接收 request 當下的 current `ml` 與 device snapshot；不要把 active
 `ml/md` 綁進長壽 service object，也不要讓 `ModuleLibrary` store 擁有 live device snapshot。
+
+Adapter default value 由 `CfgBuilder` 組裝。`.role(path, role)` 預設採 `Init.ADOPT`：優先引用
+ModuleLibrary / WaveformLibrary 的 calibrated entry，缺項時退回 inline blank；`.role(..., Init.INLINE)`
+明確要求 inline blank，不 adopt library；`.role(..., Init.DISABLED)` 只用於 optional ref，library miss
+時產生 `None`（disabled）。spec 的 `optional=True` 是結構能力，`Init.DISABLED` 是 adapter default
+初始化選擇，兩者需同時成立。
 
 `BaseAdapter.load` 是 GUI load path 的 canonical result seam：預設建構 `exp_cls()` 並呼
 `exp.load(filepath=...)`，與 `BaseAdapter.save` 的 canonical persistence 對稱。需要 constructor

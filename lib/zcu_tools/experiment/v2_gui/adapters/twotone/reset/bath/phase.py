@@ -15,6 +15,7 @@ from zcu_tools.experiment.v2.twotone.reset.bath.phase import (
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
+    Init,
     build_exp_spec,
     make_bath_reset_module_spec,
     make_pulse_module_spec,
@@ -132,8 +133,8 @@ class BathPhaseAdapter(
             )
             .role("modules.readout", "readout")
             # optional → None (disabled) when no library entry (ADR-0010)
-            .role("modules.reset", "reset", optional=True)
-            .role("modules.init_pulse", "pi_pulse", optional=True)
+            .role("modules.reset", "reset", Init.DISABLED)
+            .role("modules.init_pulse", "pi_pulse", Init.DISABLED)
             .set_sweep("sweep.phase", SweepValue(start=-360.0, stop=360.0, expts=201))
             .build()
         )

@@ -42,7 +42,7 @@ value 容器（`CfgSectionValue`/`ModuleRefValue`）**維持可變、`with_*` in
 
 ### 5. 每角色一檔的 default factory（單層）
 
-`defaults/<role>.py`（qub_probe / res_probe / pi_pulse / pi2_pulse / readout / reset / qub_waveform / res_waveform）各暴露 `make_<role>_default`（blank）+ `make_<role>_ref_default`（查庫 preferred → fallback blank，optional 無 lib 時回 `None`，見 [[0010]]）。共用 patch helper 收進 `defaults/helpers.py`。adapter 直接呼 `make_<role>_(ref_)default`，逐欄位選 ref（校準後）或 blank（spectroscopy）。
+`defaults/<role>.py`（qub_probe / res_probe / pi_pulse / pi2_pulse / readout / reset / qub_waveform / res_waveform）各暴露 `make_<role>_default`（blank）+ `make_<role>_ref_default`（查庫 preferred → fallback blank，optional 無 lib 時回 `None`，見 [[0010]]）。共用 patch helper 收進 `defaults/helpers.py`。RoleCatalog 直接使用 blank factory；adapter 通常透過 [[0012]] 的 `CfgBuilder.role(..., Init.ADOPT/INLINE/DISABLED)` 選 ref / blank / disabled，少數特殊 value 組裝仍可直接呼 L2 factory。
 
 **default factory 零鎖定（職責邊界）**：default factory 只產 value 樹預設，**不預設鎖任何欄位**，即使是高頻場景。鎖定 100% 由 adapter 在 `cfg_spec()` 裡 `lock_literal` 宣告——鎖定屬 spec 層（決策 1）、default factory 屬 value 層；「高頻」不是放進 factory 的理由。
 

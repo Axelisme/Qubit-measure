@@ -18,11 +18,12 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_readout_module_spec,
     make_reset_module_spec,
 )
-from zcu_tools.experiment.v2_gui.adapters.shared.cfg_builder import CfgBuilder
+from zcu_tools.experiment.v2_gui.adapters.shared.cfg_builder import CfgBuilder, Init
 from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,
     DirectValue,
     EvalValue,
+    ExpContext,
     LiteralSpec,
     ModuleRefValue,
     ScalarSpec,
@@ -30,6 +31,8 @@ from zcu_tools.gui.app.main.adapter import (
     SweepValue,
     make_default_value,
 )
+from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.program.v2 import ModuleCfgFactory
 
 
 def _empty_ctx() -> MagicMock:
@@ -42,6 +45,32 @@ def _empty_ctx() -> MagicMock:
     ml.waveforms = {}
     ctx.ml = ml
     return ctx
+
+
+def _ctx_with_library_readout() -> ExpContext:
+    ml = ModuleLibrary()
+    ml.register_module(
+        readout_rf=ModuleCfgFactory.from_raw(
+            {
+                "type": "readout/pulse",
+                "pulse_cfg": {
+                    "waveform": {"style": "const", "length": 1.0},
+                    "ch": 1,
+                    "nqz": 2,
+                    "freq": 6100.0,
+                    "gain": 0.2,
+                },
+                "ro_cfg": {
+                    "ro_ch": 2,
+                    "ro_freq": 6100.0,
+                    "ro_length": 1.0,
+                    "trig_offset": 0.5,
+                },
+            },
+            ml=ml,
+        )
+    )
+    return ExpContext(md=MetaDict(), ml=ml, soc=None, soccfg=None)
 
 
 def _spec() -> CfgSectionSpec:
@@ -154,22 +183,31 @@ def test_role_mounts_module_ref():
     assert isinstance(node, ModuleRefValue)
 
 
-def test_role_optional_library_miss_mounts_none():
-    # empty ml + optional reset → disabled (None), not a blank ref (ADR-0010)
-    b = CfgBuilder(_empty_ctx(), _spec()).role("modules.reset", "reset", optional=True)
-    v = b.build()
-    assert v.fields["modules"].fields["reset"] is None  # type: ignore[union-attr]
-
-
-def test_role_prefer_blank_forces_inline():
-    # readout role has a ref factory, but prefer_blank forces the inline blank
-    b = CfgBuilder(_empty_ctx(), _spec()).role(
-        "modules.readout", "readout", prefer_blank=True
+def test_role_adopt_uses_library_match():
+    b = CfgBuilder(_ctx_with_library_readout(), _spec()).role(
+        "modules.readout", "readout"
     )
     v = b.build()
     node = v.fields["modules"].fields["readout"]  # type: ignore[union-attr]
     assert isinstance(node, ModuleRefValue)
-    assert node.chosen_key.startswith("<Custom:")  # inline, not a library name
+    assert node.chosen_key == "readout_rf"
+
+
+def test_role_disabled_library_miss_mounts_none():
+    # empty ml + disabled optional reset → None, not a blank ref (ADR-0010)
+    b = CfgBuilder(_empty_ctx(), _spec()).role("modules.reset", "reset", Init.DISABLED)
+    v = b.build()
+    assert v.fields["modules"].fields["reset"] is None  # type: ignore[union-attr]
+
+
+def test_role_inline_forces_blank_even_when_library_has_match():
+    b = CfgBuilder(_ctx_with_library_readout(), _spec()).role(
+        "modules.readout", "readout", Init.INLINE
+    )
+    v = b.build()
+    node = v.fields["modules"].fields["readout"]  # type: ignore[union-attr]
+    assert isinstance(node, ModuleRefValue)
+    assert node.chosen_key == "<Custom:Pulse Readout>"
 
 
 def test_role_unknown_id_fast_fails():
@@ -182,11 +220,27 @@ def test_role_on_non_ref_spec_fast_fails():
         CfgBuilder(_empty_ctx(), _spec()).role("reps", "qub_probe")
 
 
-def test_role_optional_on_required_ref_fast_fails():
-    # qub_pulse spec ref is NOT optional → optional=True must raise
+def test_role_disabled_on_required_ref_fast_fails():
+    # qub_pulse spec ref is NOT optional → Init.DISABLED must raise
     with pytest.raises(RuntimeError, match="not optional"):
         CfgBuilder(_empty_ctx(), _spec()).role(
-            "modules.qub_pulse", "qub_probe", optional=True
+            "modules.qub_pulse", "qub_probe", Init.DISABLED
+        )
+
+
+def test_role_disabled_blank_only_role_fast_fails():
+    with pytest.raises(RuntimeError, match="has no library-aware"):
+        CfgBuilder(_empty_ctx(), _spec()).role(
+            "modules.reset", "none_reset", Init.DISABLED
+        )
+
+
+def test_role_invalid_init_fast_fails():
+    with pytest.raises(RuntimeError, match="init must be an Init"):
+        CfgBuilder(_empty_ctx(), _spec()).role(
+            "modules.readout",
+            "readout",
+            "inline",  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
         )
 
 
