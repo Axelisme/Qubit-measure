@@ -18,7 +18,6 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_trig_offset,
 )
 from zcu_tools.gui.app.main.adapter import (
-    AdapterCapabilities,
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
@@ -56,9 +55,6 @@ class LookbackAdapter(
         LookbackAnalyzeParams,
     ]
 ):
-    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        requires_soc=False
-    )
     exp_cls = LookbackExp
     ExpCfg_cls: ClassVar[Any] = LookbackCfg
 

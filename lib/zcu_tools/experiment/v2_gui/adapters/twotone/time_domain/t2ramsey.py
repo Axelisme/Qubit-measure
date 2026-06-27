@@ -49,6 +49,7 @@ from zcu_tools.gui.app.main.adapter import (
 
 logger = logging.getLogger(__name__)
 
+
 T2RamseyRunResult: TypeAlias = T2RamseyResult
 
 
@@ -78,12 +79,6 @@ class T2RamseyAdapter(
 ):
     exp_cls = T2RamseyExp
     ExpCfg_cls: ClassVar[Any] = T2RamseyCfg
-
-    # Realized applied detune (MHz, after length quantization) carried from run()
-    # to get_writeback_items() so q_f writeback can subtract the fitted fringe
-    # detune from it. Each tab owns a fresh adapter instance (Registry.create),
-    # so this per-instance state is not shared across tabs. None until a run.
-    _last_true_detune: float | None = None
 
     @classmethod
     def guide(cls) -> AdapterGuide:
@@ -157,17 +152,22 @@ class T2RamseyAdapter(
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        sweep_stop = md_eval_scaled(ctx, "t2r", factor=4.0, fallback=20.0)
-        relax_delay = proper_relax(ctx)
         return (
             CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=100, rounds=100, relax_delay=relax_delay, detune_ratio=0.05)
-            .role("modules.pi2_pulse", "pi2_pulse")
-            .role("modules.readout", "readout")
+            .scalars(
+                reps=1000, rounds=100, relax_delay=proper_relax(ctx), detune_ratio=0.05
+            )
             # optional → None (disabled) when no library reset (ADR-0010)
             .role("modules.reset", "reset", optional=True)
+            .role("modules.pi2_pulse", "pi2_pulse")
+            .role("modules.readout", "readout")
             .set_sweep(
-                "sweep.length", SweepValue(start=0.0, stop=sweep_stop, expts=101)
+                "sweep.length",
+                SweepValue(
+                    start=0.0,
+                    stop=md_eval_scaled(ctx, "t2r", factor=4.0, fallback=20.0),
+                    expts=101,
+                ),
             )
             .build()
         )
@@ -187,9 +187,8 @@ class T2RamseyAdapter(
         # T2RamseyExp.run returns (result, true_detune); the GUI run contract
         # returns only the Result. Stash true_detune for the q_f writeback and
         # log the realized detune.
-        result, true_detune = self.exp_cls().run(soc, soccfg, cfg, detune=detune)
-        self._last_true_detune = true_detune
-        logger.info("T2 Ramsey true detune: %.3f MHz", true_detune)
+        result = self.exp_cls().run(soc, soccfg, cfg, detune=detune)
+        logger.info("T2 Ramsey true detune: %.3f MHz", result.true_activate_detune)
         return result
 
     def get_analyze_params(
@@ -202,8 +201,7 @@ class T2RamseyAdapter(
     ) -> T2RamseyAnalyzeResult:
         params = req.analyze_params
         t2r, t2r_err, detune, _, fig = T2RamseyExp().analyze(
-            req.run_result,
-            fit_fringe=params.fit_fringe,
+            req.run_result, fit_fringe=params.fit_fringe
         )
         return T2RamseyAnalyzeResult(
             t2r=t2r,
@@ -234,10 +232,12 @@ class T2RamseyAdapter(
         if (
             result.fit_fringe
             and snapshot is not None
-            and self._last_true_detune is not None
+            and req.run_result.true_activate_detune is not None
         ):
             q_f = (
-                snapshot.modules.pi2_pulse.freq + self._last_true_detune - result.detune
+                snapshot.modules.pi2_pulse.freq
+                + req.run_result.true_activate_detune
+                - result.detune
             )
             items.append(
                 MetaDictWriteback(

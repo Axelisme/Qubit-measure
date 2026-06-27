@@ -49,7 +49,7 @@ class OneToneFluxDepAdapter(
     exp_cls = FluxDepExp
     legacy_migration_experiment: ClassVar[str | None] = "onetone/flux_dep"
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        requires_soc=True, analysis=AnalysisMode.INTERACTIVE
+        analysis=AnalysisMode.INTERACTIVE
     )
 
     @classmethod
@@ -136,14 +136,14 @@ class OneToneFluxDepAdapter(
         probe_len = md_get_float(ctx, "res_probe_len", 1.0)
         ro_length: float | EvalValue = (
             EvalValue(expr="res_probe_len - 0.1")
-            if md_has_key(ctx, "res_probe_len")
+            if md_has_key(ctx, "res_probe_len") and probe_len > 0.1
             else probe_len - 0.1
         )
         return (
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(reps=1000, rounds=1, relax_delay=1.0)
             .role("modules.readout", "readout", prefer_blank=True)
-            .set("modules.readout.pulse_cfg.gain", 0.005)
+            .set("modules.readout.pulse_cfg.gain", 0.05)
             .set("modules.readout.ro_cfg.ro_length", ro_length)
             .set("dev.flux_dev", "flux_yoko")
             .set_sweep("sweep.flux", proper_flux_range(ctx, 101))

@@ -281,7 +281,6 @@ def test_t2ramsey_fringe_writeback_proposes_q_f() -> None:
     from zcu_tools.gui.app.main.adapter import MetaDictWriteback, WritebackRequest
 
     adapter = T2RamseyAdapter()
-    adapter._last_true_detune = 0.5  # stashed by run()
     analyze_result = T2RamseyAnalyzeResult(
         t2r=12.0, t2r_err=0.5, detune=0.42, fit_fringe=True, figure=MagicMock()
     )
@@ -308,7 +307,6 @@ def test_t2ramsey_decay_writeback_omits_q_f() -> None:
     from zcu_tools.gui.app.main.adapter import WritebackRequest
 
     adapter = T2RamseyAdapter()
-    adapter._last_true_detune = 0.0
     analyze_result = T2RamseyAnalyzeResult(
         t2r=12.0, t2r_err=0.5, detune=0.0, fit_fringe=False, figure=MagicMock()
     )

@@ -15,6 +15,7 @@ from zcu_tools.experiment.v2.twotone.ro_optimize.freq import (
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
+    proper_relax,
     build_exp_spec,
     make_pulse_module_spec,
     make_pulse_readout_module_spec,
@@ -109,9 +110,6 @@ class RoOptFreqAdapter(
             modules={
                 "reset": make_reset_module_spec(optional=True),
                 "qub_pulse": make_pulse_module_spec(),
-                # The freq sweep owns the readout frequency
-                # (set_param("freq") writes both pulse and ro freq), so
-                # lock it off the form.
                 "readout": make_pulse_readout_module_spec()
                 .lock_literal("pulse_cfg.freq", 0.0)
                 .lock_literal("ro_cfg.ro_freq", 0.0),
@@ -122,11 +120,13 @@ class RoOptFreqAdapter(
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         return (
             CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=1000, rounds=100, relax_delay=1.0)
+            .scalars(
+                reps=1000, rounds=100, relax_delay=proper_relax(ctx, fallback=30.5)
+            )
             .role("modules.qub_pulse", "qub_probe", prefer_blank=True)
             .role("modules.readout", "readout")
             .role("modules.reset", "reset", optional=True)
-            .set_sweep("sweep.freq", proper_res_freq_range(ctx, 301))
+            .set_sweep("sweep.freq", proper_res_freq_range(ctx, 301, span_factor=1.0))
             .build()
         )
 

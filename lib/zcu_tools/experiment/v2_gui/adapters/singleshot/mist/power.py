@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, ClassVar, TypeAlias
 
-from zcu_tools.experiment.v2.singleshot.mist import PowerCfg, PowerExp
+from zcu_tools.experiment.v2.singleshot.mist import PowerCfg, PowerExp, PowerResult
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
@@ -31,7 +31,7 @@ from zcu_tools.gui.app.main.adapter import (
 
 from .._shared import read_ge_centers
 
-MistPowerRunResult: TypeAlias = Any  # PowerResult (frozen domain dataclass)
+MistPowerRunResult: TypeAlias = PowerResult
 
 
 @dataclass
@@ -101,14 +101,15 @@ class MistPowerAdapter(
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         return (
             CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=10000, rounds=1)
-            .set("relax_delay", proper_relax(ctx))
-            .role("modules.probe_pulse", "qub_probe", prefer_blank=True)
-            .role("modules.readout", "readout")
+            .scalars(
+                reps=1000, rounds=100, relax_delay=proper_relax(ctx, fallback=30.5)
+            )
             # optional → None (disabled) when no library entry (ADR-0010)
             .role("modules.reset", "reset", optional=True)
             .role("modules.init_pulse", "pi_pulse", optional=True)
-            .set_sweep("sweep.gain", SweepValue(start=0.0, stop=1.0, expts=51))
+            .role("modules.probe_pulse", "qub_probe", prefer_blank=True)
+            .role("modules.readout", "readout")
+            .set_sweep("sweep.gain", SweepValue(start=0.0, stop=1.0, expts=151))
             .build()
         )
 

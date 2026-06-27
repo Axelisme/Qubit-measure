@@ -4,7 +4,11 @@ import time
 from dataclasses import dataclass
 from typing import Any, ClassVar, TypeAlias
 
-from zcu_tools.experiment.v2.singleshot.mist import FreqPowerCfg, FreqPowerExp
+from zcu_tools.experiment.v2.singleshot.mist import (
+    FreqPowerCfg,
+    FreqPowerExp,
+    FreqPowerResult,
+)
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
@@ -14,6 +18,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_readout_module_spec,
     make_reset_module_spec,
     proper_relax,
+    proper_res_freq_range,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -25,13 +30,12 @@ from zcu_tools.gui.app.main.adapter import (
     NoAnalyzeParams,
     RunRequest,
     SweepSpec,
-    SweepValue,
     require_soc_handles,
 )
 
 from .._shared import read_ge_centers
 
-MistPowerFreqRunResult: TypeAlias = Any  # FreqPowerResult (frozen domain dataclass)
+MistPowerFreqRunResult: TypeAlias = FreqPowerResult
 
 
 @dataclass
@@ -109,15 +113,16 @@ class MistPowerFreqAdapter(
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         return (
             CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=10000, rounds=1)
-            .set("relax_delay", proper_relax(ctx))
-            .role("modules.probe_pulse", "qub_probe", prefer_blank=True)
-            .role("modules.readout", "readout")
+            .scalars(
+                reps=1000, rounds=100, relax_delay=proper_relax(ctx, fallback=30.5)
+            )
             # optional → None (disabled) when no library entry (ADR-0010)
             .role("modules.reset", "reset", optional=True)
             .role("modules.init_pulse", "pi_pulse", optional=True)
-            .set_sweep("sweep.freq", SweepValue(start=-100.0, stop=100.0, expts=101))
-            .set_sweep("sweep.gain", SweepValue(start=0.0, stop=1.0, expts=51))
+            .role("modules.probe_pulse", "qub_probe", prefer_blank=True)
+            .role("modules.readout", "readout")
+            .set_sweep("sweep.freq", proper_res_freq_range(ctx, 51))
+            .sweep("sweep.gain", 0.0, 1.0, 51)
             .build()
         )
 

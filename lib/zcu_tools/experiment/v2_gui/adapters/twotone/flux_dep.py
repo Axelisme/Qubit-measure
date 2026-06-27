@@ -48,47 +48,8 @@ class FluxDepAdapter(
     exp_cls = FreqFluxExp
     legacy_migration_experiment: ClassVar[str | None] = "twotone/flux_dep"
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        requires_soc=True, analysis=AnalysisMode.INTERACTIVE
+        analysis=AnalysisMode.INTERACTIVE
     )
-
-    def get_analyze_params(
-        self, result: FluxDepRunResult, ctx: ExpContext
-    ) -> FluxPickParams:
-        del result, ctx
-        # No tunable analyze params; the magnitude-only projection is hardcoded
-        # in setup_interactive_analysis (see below).
-        return FluxPickParams()
-
-    def setup_interactive_analysis(
-        self,
-        req: AnalyzeRequest[FluxDepRunResult, FluxPickParams],
-        host: InteractiveHost,
-    ) -> InteractiveSession:
-        # Two-tone qubit spectra may carry useful phase information, so the
-        # magnitude-only projection is fixed False (not surfaced as an analyze param).
-        return build_flux_pick_session(req, host, force_magnitude=False)
-
-    def get_writeback_items(
-        self, req: WritebackRequest[FluxDepRunResult, FluxPickResult]
-    ) -> Sequence[WritebackItem]:
-        result = req.analyze_result
-        return [
-            MetaDictWriteback(
-                target_name="flx_half",
-                description="Half-flux (Φ₀/2) sweet-spot device value",
-                proposed_value=result.flx_half,
-            ),
-            MetaDictWriteback(
-                target_name="flx_int",
-                description="Integer-flux sweet-spot device value",
-                proposed_value=result.flx_int,
-            ),
-            MetaDictWriteback(
-                target_name="flx_period",
-                description="Flux period (device units) = 2·|flx_int − flx_half|",
-                proposed_value=result.flx_period,
-            ),
-        ]
 
     @classmethod
     def guide(cls) -> AdapterGuide:
@@ -170,16 +131,55 @@ class FluxDepAdapter(
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         return (
             CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=100, rounds=100, relax_delay=1.0)
-            .role("modules.qub_pulse", "qub_probe", prefer_blank=True)
-            .role("modules.readout", "readout")
+            .scalars(reps=1000, rounds=100, relax_delay=1.0)
             # optional → None (disabled) when no library reset (ADR-0010)
             .role("modules.reset", "reset", optional=True)
+            .role("modules.qub_pulse", "qub_probe", prefer_blank=True)
+            .role("modules.readout", "readout")
             .set("dev.flux_dev", "flux_yoko")
             .set_sweep("sweep.flux", proper_flux_range(ctx, 101))
-            .set_sweep("sweep.freq", proper_qub_freq_range(ctx, 101, span_factor=1.0))
+            .set_sweep("sweep.freq", proper_qub_freq_range(ctx, 1001, span_factor=1.0))
             .build()
         )
+
+    def get_analyze_params(
+        self, result: FluxDepRunResult, ctx: ExpContext
+    ) -> FluxPickParams:
+        del result, ctx
+        # No tunable analyze params; the magnitude-only projection is hardcoded
+        # in setup_interactive_analysis (see below).
+        return FluxPickParams()
+
+    def setup_interactive_analysis(
+        self,
+        req: AnalyzeRequest[FluxDepRunResult, FluxPickParams],
+        host: InteractiveHost,
+    ) -> InteractiveSession:
+        # Two-tone qubit spectra may carry useful phase information, so the
+        # magnitude-only projection is fixed False (not surfaced as an analyze param).
+        return build_flux_pick_session(req, host, force_magnitude=False)
+
+    def get_writeback_items(
+        self, req: WritebackRequest[FluxDepRunResult, FluxPickResult]
+    ) -> Sequence[WritebackItem]:
+        result = req.analyze_result
+        return [
+            MetaDictWriteback(
+                target_name="flx_half",
+                description="Half-flux (Φ₀/2) sweet-spot device value",
+                proposed_value=result.flx_half,
+            ),
+            MetaDictWriteback(
+                target_name="flx_int",
+                description="Integer-flux sweet-spot device value",
+                proposed_value=result.flx_int,
+            ),
+            MetaDictWriteback(
+                target_name="flx_period",
+                description="Flux period (device units) = 2·|flx_int − flx_half|",
+                proposed_value=result.flx_period,
+            ),
+        ]
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FreqFluxCfg:
         cfg_raw = dict(raw_cfg)

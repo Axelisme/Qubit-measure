@@ -121,14 +121,14 @@ def proper_res_freq_range(
     ctx: ExpContext, expts: int, *, span_factor: float = 1.5
 ) -> SweepValue:
     """Resonator frequency sweep range: ``r_f ± span_factor*rf_w``."""
-    return _freq_range(ctx, "r_f", "rf_w", expts, span_factor, 6000.0, 20.0)
+    return _freq_range(ctx, "r_f", "rf_w", expts, span_factor, 6500.0, 500.0)
 
 
 def proper_qub_freq_range(
     ctx: ExpContext, expts: int, *, span_factor: float = 1.5
 ) -> SweepValue:
     """Qubit frequency sweep range: ``q_f ± span_factor*qf_w``."""
-    return _freq_range(ctx, "q_f", "qf_w", expts, span_factor, 4000.0, 20.0)
+    return _freq_range(ctx, "q_f", "qf_w", expts, span_factor, 5000.0, 1000.0)
 
 
 def proper_reset_freq_range(
@@ -142,7 +142,7 @@ def proper_reset_freq_range(
     (notebook single-tone reset: ``reset_f - 50`` .. ``reset_f + 50``). When
     ``reset_f`` is absent the scan centres on 0.0.
     """
-    center = md_get_float(ctx, "reset_f", 0.0)
+    center = md_get_float(ctx, "reset_f", 3000.0)
     have_center = md_has_key(ctx, "reset_f")
     if have_center and md_has_key(ctx, "resetf_w"):
         start: float | EvalValue = EvalValue(expr="reset_f - 1.5 * resetf_w")
@@ -173,7 +173,7 @@ def proper_reset_freq_axis(
     When the centre key is absent the scan centres on 0.0.
     """
     width_key = f"{center_key}_w"
-    center = md_get_float(ctx, center_key, 0.0)
+    center = md_get_float(ctx, center_key, 3000.0)
     have_center = md_has_key(ctx, center_key)
     if have_center and md_has_key(ctx, width_key):
         start: float | EvalValue = EvalValue(expr=f"{center_key} - 1.5 * {width_key}")

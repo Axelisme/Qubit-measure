@@ -45,7 +45,6 @@ from .adapters.singleshot import (
     MistFreqAdapter,
     MistPowerAdapter,
     MistPowerFreqAdapter,
-    MistPreFreqAdapter,
     SsAcStarkAdapter,
     SsLenRabiAdapter,
     SsT1Adapter,
@@ -125,7 +124,6 @@ ADAPTERS = {
     "singleshot/mist/freq": MistFreqAdapter,
     "singleshot/mist/power": MistPowerAdapter,
     "singleshot/mist/power_freq": MistPowerFreqAdapter,
-    "singleshot/mist/pre_freq": MistPreFreqAdapter,
 }
 
 

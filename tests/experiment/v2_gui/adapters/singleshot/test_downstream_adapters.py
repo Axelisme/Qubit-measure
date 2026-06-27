@@ -23,12 +23,10 @@ from zcu_tools.experiment.v2.singleshot.mist import (
     PowerCfg,
     PowerExp,
 )
-from zcu_tools.experiment.v2.singleshot.mist.pre_freq import PreFreqCfg, PreFreqExp
 from zcu_tools.experiment.v2_gui.adapters.singleshot import (
     CheckAdapter,
     MistFreqAdapter,
     MistPowerAdapter,
-    MistPreFreqAdapter,
 )
 from zcu_tools.experiment.v2_gui.adapters.singleshot._shared import read_ge_centers
 from zcu_tools.experiment.v2_gui.adapters.singleshot.check import CheckAnalyzeResult
@@ -37,9 +35,6 @@ from zcu_tools.experiment.v2_gui.adapters.singleshot.mist.freq import (
 )
 from zcu_tools.experiment.v2_gui.adapters.singleshot.mist.power import (
     MistPowerAnalyzeResult,
-)
-from zcu_tools.experiment.v2_gui.adapters.singleshot.mist.pre_freq import (
-    MistPreFreqAnalyzeResult,
 )
 from zcu_tools.gui.app.main.adapter import (
     AnalyzeRequest,
@@ -125,7 +120,6 @@ def test_read_ge_centers_fast_fails_when_missing(missing: str) -> None:
 _MIST_PARAMS = [
     (MistFreqAdapter(), FreqCfg, "freq", "modules"),
     (MistPowerAdapter(), PowerCfg, "gain", "modules"),
-    (MistPreFreqAdapter(), PreFreqCfg, "freq", "modules"),
 ]
 
 
@@ -169,7 +163,6 @@ def test_check_cfg_validates_and_has_shots() -> None:
     [
         (MistFreqAdapter(), "Q1_mist_freq_"),
         (MistPowerAdapter(), "Q1_mist_power_"),
-        (MistPreFreqAdapter(), "Q1_mist_pre_freq_"),
         (CheckAdapter(), "Q1_sh_check_"),
     ],
 )
@@ -185,7 +178,6 @@ def test_filename_stem(adapter: Any, prefix: str) -> None:
 _MIST_RUN_PARAMS = [
     (MistFreqAdapter(), FreqDepExp),
     (MistPowerAdapter(), PowerExp),
-    (MistPreFreqAdapter(), PreFreqExp),
 ]
 
 
@@ -318,24 +310,6 @@ def test_mist_power_analyze_reads_ac_coeff(monkeypatch: pytest.MonkeyPatch) -> N
     assert captured["ac_coeff"] == pytest.approx(3.5)
     assert captured["log_scale"] is True
     assert captured["confusion_matrix"] is None
-
-
-def test_mist_pre_freq_analyze_reads_confusion(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, Any] = {}
-    fig = Figure()
-
-    def fake_analyze(self: Any, result: Any, *, confusion_matrix=None) -> Figure:
-        del self, result
-        captured["confusion"] = confusion_matrix
-        return fig
-
-    monkeypatch.setattr(PreFreqExp, "analyze", fake_analyze, raising=True)
-    out = MistPreFreqAdapter().analyze(_analyze_req(MagicMock(), MetaDict()))
-    assert isinstance(out, MistPreFreqAnalyzeResult)
-    assert out.figure is fig
-    assert captured["confusion"] is None
 
 
 def test_check_analyze_forwards_centers(monkeypatch: pytest.MonkeyPatch) -> None:

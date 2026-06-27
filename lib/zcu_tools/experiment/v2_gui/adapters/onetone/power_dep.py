@@ -35,7 +35,7 @@ OneTonePowerDepRunResult: TypeAlias = PowerDepResult
 class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult]):
     exp_cls = PowerDepExp
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        requires_soc=True, analysis=AnalysisMode.NONE
+        analysis=AnalysisMode.NONE
     )
 
     @classmethod
@@ -103,9 +103,9 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         return (
             CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=100, rounds=10, relax_delay=10.0, earlystop_snr=0.0)
+            .scalars(reps=1000, rounds=100, relax_delay=1.0, earlystop_snr=0.0)
             .role("modules.readout", "readout", prefer_blank=True)
-            .sweep("sweep.gain", 0.001, 0.5, 101)
+            .sweep("sweep.gain", 0.001, 1.0, 101)
             .set_sweep("sweep.freq", proper_res_freq_range(ctx, 201))
             .build()
         )

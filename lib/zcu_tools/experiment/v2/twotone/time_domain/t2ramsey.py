@@ -18,6 +18,7 @@ from zcu_tools.experiment import (
     ZSpec,
     config,
     retrieve_result,
+    record_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
@@ -49,6 +50,7 @@ def t2ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]
 class T2RamseyResult:
     times: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    true_activate_detune: float
     cfg_snapshot: T2RamseyCfg | None = None
 
 
@@ -77,6 +79,7 @@ class T2RamseyExp(PersistableExperiment[T2RamseyResult, T2RamseyCfg]):
         tag="twotone/ge/t2ramsey",
     )
 
+    @record_result
     def run(
         self,
         soc,
@@ -85,7 +88,7 @@ class T2RamseyExp(PersistableExperiment[T2RamseyResult, T2RamseyCfg]):
         *,
         detune: float = 0.0,
         acquire_kwargs: dict[str, Any] | None = None,
-    ) -> tuple[T2RamseyResult, float]:
+    ) -> T2RamseyResult:
         orig_cfg = deepcopy(cfg)
 
         setup_devices(cfg, progress=True)
@@ -162,11 +165,12 @@ class T2RamseyExp(PersistableExperiment[T2RamseyResult, T2RamseyCfg]):
             )
 
         # record result
-        self.last_result = T2RamseyResult(
-            times=lengths, signals=signals, cfg_snapshot=orig_cfg
+        return T2RamseyResult(
+            times=lengths,
+            signals=signals,
+            cfg_snapshot=orig_cfg,
+            true_activate_detune=true_detune,
         )
-
-        return self.last_result, true_detune
 
     @retrieve_result
     def analyze(

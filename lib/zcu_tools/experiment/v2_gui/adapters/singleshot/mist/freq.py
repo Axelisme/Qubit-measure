@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, ClassVar, TypeAlias
 
-from zcu_tools.experiment.v2.singleshot.mist import FreqCfg, FreqDepExp
+from zcu_tools.experiment.v2.singleshot.mist import FreqCfg, FreqDepExp, FreqResult
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
@@ -13,7 +13,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_module_spec,
     make_readout_module_spec,
     make_reset_module_spec,
-    proper_qub_freq_range,
+    proper_res_freq_range,
     proper_relax,
 )
 from zcu_tools.gui.app.main.adapter import (
@@ -31,7 +31,7 @@ from zcu_tools.gui.app.main.adapter import (
 
 from .._shared import read_ge_centers
 
-MistFreqRunResult: TypeAlias = Any  # FreqResult (frozen domain dataclass)
+MistFreqRunResult: TypeAlias = FreqResult
 
 
 @dataclass
@@ -99,14 +99,13 @@ class MistFreqAdapter(
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         return (
             CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=10000, rounds=1)
-            .set("relax_delay", proper_relax(ctx))
-            .role("modules.probe_pulse", "qub_probe", prefer_blank=True)
-            .role("modules.readout", "readout")
+            .scalars(reps=10000, rounds=1, relax_delay=proper_relax(ctx, fallback=30.5))
             # optional → None (disabled) when no library entry (ADR-0010)
             .role("modules.reset", "reset", optional=True)
             .role("modules.init_pulse", "pi_pulse", optional=True)
-            .set_sweep("sweep.freq", proper_qub_freq_range(ctx, 51))
+            .role("modules.probe_pulse", "qub_probe", prefer_blank=True)
+            .role("modules.readout", "readout")
+            .set_sweep("sweep.freq", proper_res_freq_range(ctx, 51))
             .build()
         )
 

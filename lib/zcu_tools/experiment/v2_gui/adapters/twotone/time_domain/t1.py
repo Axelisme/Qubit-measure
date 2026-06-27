@@ -103,17 +103,20 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        sweep_stop = md_eval_scaled(ctx, "t1", factor=5.0, fallback=100.0)
-        relax_delay = proper_relax(ctx)
         return (
             CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=100, rounds=100, relax_delay=relax_delay)
+            .scalars(reps=1000, rounds=100, relax_delay=proper_relax(ctx))
             .role("modules.pi_pulse", "pi_pulse")
             .role("modules.readout", "readout")
             # optional → None (disabled) when no library reset (ADR-0010)
             .role("modules.reset", "reset", optional=True)
             .set_sweep(
-                "sweep.length", SweepValue(start=0.0, stop=sweep_stop, expts=101)
+                "sweep.length",
+                SweepValue(
+                    start=0.0,
+                    stop=md_eval_scaled(ctx, "t1", factor=5.0, fallback=100.0),
+                    expts=101,
+                ),
             )
             .build()
         )

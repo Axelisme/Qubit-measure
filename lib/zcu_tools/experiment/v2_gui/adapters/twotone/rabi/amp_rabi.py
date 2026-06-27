@@ -15,6 +15,7 @@ from zcu_tools.experiment.v2.twotone.rabi.amp_rabi import (
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
+    proper_relax,
     build_exp_spec,
     make_pulse_module_spec,
     make_readout_module_spec,
@@ -131,15 +132,23 @@ class AmpRabiAdapter(
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         # gain sweep spans up to 2*pi_gain (md-linked) → an EvalValue stop edge,
         # so the sweep is pre-built and mounted via set_sweep.
-        sweep_stop = md_eval_scaled(ctx, "pi_gain", factor=2.0, fallback=0.5)
         return (
             CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=100, rounds=100, relax_delay=10.5)
+            .scalars(
+                reps=1000, rounds=100, relax_delay=proper_relax(ctx, fallback=30.5)
+            )
             .role("modules.qub_pulse", "qub_probe", prefer_blank=True)
             .role("modules.readout", "readout")
             # optional → None (disabled) when no library reset (ADR-0010)
             .role("modules.reset", "reset", optional=True)
-            .set_sweep("sweep.gain", SweepValue(start=-0.3, stop=sweep_stop, expts=51))
+            .set_sweep(
+                "sweep.gain",
+                SweepValue(
+                    start=-0.3,
+                    stop=md_eval_scaled(ctx, "pi_gain", factor=1.2, fallback=1.0),
+                    expts=51,
+                ),
+            )
             .build()
         )
 

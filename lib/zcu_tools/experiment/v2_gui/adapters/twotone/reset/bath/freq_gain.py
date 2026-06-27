@@ -22,6 +22,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_reset_module_spec,
     md_get_float,
     md_has_key,
+    proper_relax,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -47,6 +48,24 @@ BathFreqGainRunResult: TypeAlias = FreqGainResult
 # adds a 4-point QickSweep1D("phase", 0, 270) on top of pi2_cfg.phase, so the
 # form value is the *base* offset (notebook: phase=90), not a swept axis.
 _PI2_PHASE_OFFSET_DEG: float = 90.0
+
+
+def _cavity_freq_range(ctx: ExpContext, expts: int) -> SweepValue:
+    """Cavity-tone frequency sweep range: ``r_f - rabi_f`` centred.
+
+    Mirrors the notebook span ``[r_f - 1.2*rabi_f, r_f - 0.8*rabi_f]``. When both
+    md keys exist each edge stays an EvalValue (the GUI re-derives if md
+    changes); otherwise a fixed fallback span around the available centre.
+    """
+    r_f = md_get_float(ctx, "r_f", 6000.0)
+    rabi_f = md_get_float(ctx, "rabi_f", 20.0)
+    if md_has_key(ctx, "r_f") and md_has_key(ctx, "rabi_f"):
+        return SweepValue(
+            start=EvalValue(expr="r_f - 1.2 * rabi_f"),
+            stop=EvalValue(expr="r_f - 0.8 * rabi_f"),
+            expts=expts,
+        )
+    return SweepValue(start=r_f - 1.2 * rabi_f, stop=r_f - 0.8 * rabi_f, expts=expts)
 
 
 @dataclass
@@ -137,12 +156,14 @@ class BathFreqGainAdapter(
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         return (
             CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=1000, rounds=100, relax_delay=10.5)
-            .role("modules.tested_reset", "bath_reset")
-            .role("modules.readout", "readout")
+            .scalars(
+                reps=1000, rounds=100, relax_delay=proper_relax(ctx, fallback=30.5)
+            )
             # optional → None (disabled) when no library entry (ADR-0010)
             .role("modules.reset", "reset", optional=True)
             .role("modules.init_pulse", "pi_pulse", optional=True)
+            .role("modules.tested_reset", "bath_reset")
+            .role("modules.readout", "readout")
             .set_sweep("sweep.freq", _cavity_freq_range(ctx, 51))
             .sweep("sweep.gain", 0.4, 1.0, 51)
             .build()
@@ -184,21 +205,3 @@ class BathFreqGainAdapter(
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.qub_name}_bathreset_freqgain_{time.strftime('%m%d')}"
-
-
-def _cavity_freq_range(ctx: ExpContext, expts: int) -> SweepValue:
-    """Cavity-tone frequency sweep range: ``r_f - rabi_f`` centred.
-
-    Mirrors the notebook span ``[r_f - 1.2*rabi_f, r_f - 0.8*rabi_f]``. When both
-    md keys exist each edge stays an EvalValue (the GUI re-derives if md
-    changes); otherwise a fixed fallback span around the available centre.
-    """
-    r_f = md_get_float(ctx, "r_f", 6000.0)
-    rabi_f = md_get_float(ctx, "rabi_f", 20.0)
-    if md_has_key(ctx, "r_f") and md_has_key(ctx, "rabi_f"):
-        return SweepValue(
-            start=EvalValue(expr="r_f - 1.2 * rabi_f"),
-            stop=EvalValue(expr="r_f - 0.8 * rabi_f"),
-            expts=expts,
-        )
-    return SweepValue(start=r_f - 1.2 * rabi_f, stop=r_f - 0.8 * rabi_f, expts=expts)

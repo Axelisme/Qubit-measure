@@ -30,7 +30,7 @@ class PowerDepAdapter(BaseAdapter[PowerCfg, PowerDepRunResult]):
     exp_cls = PowerExp
     ExpCfg_cls: ClassVar[Any] = PowerCfg
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        requires_soc=True, analysis=AnalysisMode.NONE
+        analysis=AnalysisMode.NONE
     )
 
     @classmethod
@@ -96,12 +96,12 @@ class PowerDepAdapter(BaseAdapter[PowerCfg, PowerDepRunResult]):
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         return (
             CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=100, rounds=100, relax_delay=1.0)
-            .role("modules.qub_pulse", "qub_probe", prefer_blank=True)
-            .role("modules.readout", "readout")
+            .scalars(reps=1000, rounds=100, relax_delay=1.0)
             # optional → None (disabled) when no library reset (ADR-0010)
             .role("modules.reset", "reset", optional=True)
-            .sweep("sweep.gain", 0.001, 0.5, 101)
+            .role("modules.qub_pulse", "qub_probe", prefer_blank=True)
+            .role("modules.readout", "readout")
+            .sweep("sweep.gain", 0.001, 1.0, 101)
             .set_sweep("sweep.freq", proper_qub_freq_range(ctx, 201))
             .build()
         )
