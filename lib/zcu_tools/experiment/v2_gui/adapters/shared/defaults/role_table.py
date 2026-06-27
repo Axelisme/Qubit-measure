@@ -62,7 +62,7 @@ from zcu_tools.gui.app.main.specs.waveform import (
 from zcu_tools.program.v2.modules import AbsResetCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 
-from ..ctx_helpers import md_scalar_float, md_scalar_int
+from ..ctx_helpers import md_has_key
 from .helpers import (
     make_default_value,
     make_trig_offset,
@@ -84,18 +84,14 @@ _RefNode = Union[ModuleRefValue, WaveformRefValue]
 
 @dataclass(frozen=True)
 class Md:
-    """A md-linked seed: a live ``EvalValue(key)`` when md has ``key``, else the
-    constant ``default`` (the default's int/float type is preserved)."""
+    """A md-linked seed gated on ``key``: a live ``EvalValue`` (of ``expr`` when
+    given — for arithmetic like ``"best_ro_length + 0.1"`` — else of the bare
+    ``key``) when md has ``key``; otherwise ``default`` (a constant whose int/float
+    type is preserved, or a nested ``Md`` fallback chain)."""
 
     key: str
-    default: float | int = 0
-
-
-@dataclass(frozen=True)
-class Eval:
-    """A live md-expression seed (``EvalValue(expr)``) — e.g. ``"best_ro_length + 0.1"``."""
-
-    expr: str
+    default: float | int | Md = 0
+    expr: str | None = None
 
 
 class _Trig(Enum):
@@ -106,19 +102,17 @@ class _Trig(Enum):
 #: ``timeFly``, else ``DirectValue(0.55)`` (see ``make_trig_offset``).
 TRIG = _Trig.TRIG
 
-#: A seed value in a RoleDef: a raw scalar, an md-linked ``Md``, a live ``Eval``,
-#: or the ``TRIG`` rule (ro_cfg only).
-SeedVal = Union[float, int, Md, Eval, _Trig]
+#: A seed value in a RoleDef: a raw scalar, an md-linked ``Md``, or the ``TRIG``
+#: rule (ro_cfg only).
+SeedVal = Union[float, int, Md, _Trig]
 
 
 def _resolve(ctx: ExpContext, v: SeedVal) -> ScalarValue:
     """Lower a seed value to a scalar leaf (DirectValue / EvalValue)."""
     if isinstance(v, Md):
-        if isinstance(v.default, bool) or not isinstance(v.default, int):
-            return md_scalar_float(ctx, v.key, float(v.default))
-        return md_scalar_int(ctx, v.key, v.default)
-    if isinstance(v, Eval):
-        return EvalValue(expr=v.expr)
+        if md_has_key(ctx, v.key):
+            return EvalValue(expr=v.expr if v.expr is not None else v.key)
+        return _resolve(ctx, v.default)
     if v is TRIG:
         return make_trig_offset(ctx, trig_expr="timeFly + 0.05", trig_fallback=0.55)
     return DirectValue(v)
@@ -267,9 +261,6 @@ def role_ref(
 
 # ---------------------------------------------------------------------------
 # ROLE_TABLE — the single declarative source of every role default.
-#
-# (``readout_dpm`` is migrated in a later step together with its live-eval
-# normalization; until then ``role_factories`` keeps its verbatim factory.)
 # ---------------------------------------------------------------------------
 
 # Shared seed: a blank qubit pulse (q_f / qub_ch). qub_probe, pi_pulse and
@@ -324,6 +315,28 @@ ROLE_TABLE: dict[str, RoleDef] = {
         make_direct_readout_spec_,
         "<Custom:Direct Readout>",
         ro=Ro(Md("r_f", 6000.0), Md("ro_ch", 0), at=""),
+    ),
+    # readout_dpm: the optimized pulse readout, seeded all-live from the
+    # ro_optimize outputs (best_ro_*). The pulse window is best_ro_length + 0.1us,
+    # the acquisition window is best_ro_length; freq falls back to r_f then 6000.
+    "readout_dpm": RoleDef(
+        make_pulse_readout_spec_,
+        "<Custom:Pulse Readout>",
+        (
+            Pulse(
+                Md("best_ro_freq", Md("r_f", 6000.0)),
+                Md("res_ch", 0),
+                Md("best_ro_gain", 0.1),
+                Md("best_ro_length", 1.1, expr="best_ro_length + 0.1"),
+                at="pulse_cfg",
+            ),
+        ),
+        ro=Ro(
+            Md("best_ro_freq", Md("r_f", 6000.0)),
+            Md("ro_ch", 0),
+            Md("best_ro_length", 1.0),
+        ),
+        adopt_waveform="ro_waveform",
     ),
     # reset (the "reset" role is library-aware; concrete shapes are inline-only)
     "reset": RoleDef(

@@ -1563,7 +1563,8 @@
       "r": null
      },
      "gain": {
-      "D": 0.22
+      "E": "best_ro_gain",
+      "r": null
      },
      "mixer_freq": {
       "D": null
@@ -1588,7 +1589,8 @@
       "ref": "<Custom:Const>",
       "v": {
        "length": {
-        "D": 2.1
+        "E": "best_ro_length + 0.1",
+        "r": null
        },
        "style": {
         "D": "const"
@@ -1606,7 +1608,8 @@
       "r": null
      },
      "ro_length": {
-      "D": 2.0
+      "E": "best_ro_length",
+      "r": null
      },
      "trig_offset": {
       "E": "timeFly + 0.05",

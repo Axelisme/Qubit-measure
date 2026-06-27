@@ -27,7 +27,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Union
 
-from .readout import make_readout_dpm_default
 from .role_table import ROLE_TABLE, RoleDef, role_blank, role_ref
 
 if TYPE_CHECKING:
@@ -79,6 +78,3 @@ def _from_role(role: RoleDef) -> RoleFactorySpec:
 ROLE_FACTORIES: dict[str, RoleFactorySpec] = {
     role_id: _from_role(role) for role_id, role in ROLE_TABLE.items()
 }
-# readout_dpm migrates to ROLE_TABLE later (with its live-eval normalization);
-# until then it keeps its verbatim blank-only factory.
-ROLE_FACTORIES["readout_dpm"] = RoleFactorySpec(make_readout_dpm_default)
