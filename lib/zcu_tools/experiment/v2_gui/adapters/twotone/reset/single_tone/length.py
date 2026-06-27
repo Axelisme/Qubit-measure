@@ -114,7 +114,7 @@ class SingleToneLengthAdapter(
         return (
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(reps=100, rounds=100, relax_delay=30.5)
-            .role("modules.tested_reset", "pulse_reset")
+            .role("modules.tested_reset", "reset", Init.INLINE)
             # The tested reset drives at the fixed sideband frequency while the
             # length is swept (notebook: freq = md.reset_f).
             .set(

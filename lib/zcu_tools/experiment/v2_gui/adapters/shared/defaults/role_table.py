@@ -293,7 +293,10 @@ ROLE_TABLE: dict[str, RoleDef] = {
         _QUB_PULSE,
         lib=Lib(PulseCfg, ("pi2_amp", "pi2_len", "pi_amp", "pi_len")),
     ),
-    # readout (the "readout" role is library-aware; concrete shapes are inline-only)
+    # readout: "readout" is the library-aware pulse readout (Init.ADOPT prefers a
+    # calibrated library entry; Init.INLINE seeds a fresh inline pulse readout —
+    # the role formerly split out as "pulse_readout"). direct_readout / readout_dpm
+    # are the other inline-only shapes.
     "readout": RoleDef(
         make_pulse_readout_spec_,
         "<Custom:Pulse Readout>",
@@ -303,13 +306,6 @@ ROLE_TABLE: dict[str, RoleDef] = {
         lib=Lib(
             PulseReadoutCfg, ("readout_dpm", "readout_rf", "readout", "res_readout")
         ),
-    ),
-    "pulse_readout": RoleDef(
-        make_pulse_readout_spec_,
-        "<Custom:Pulse Readout>",
-        (Pulse(Md("r_f", 6000.0), Md("res_ch", 0), 0.1, 1.0, at="pulse_cfg"),),
-        ro=Ro(Md("r_f", 6000.0), Md("ro_ch", 0)),
-        adopt_waveform="ro_waveform",
     ),
     "direct_readout": RoleDef(
         make_direct_readout_spec_,
@@ -338,7 +334,10 @@ ROLE_TABLE: dict[str, RoleDef] = {
         ),
         adopt_waveform="ro_waveform",
     ),
-    # reset (the "reset" role is library-aware; concrete shapes are inline-only)
+    # reset: "reset" is the library-aware pulse reset (Init.ADOPT prefers a
+    # calibrated library entry; Init.INLINE seeds a fresh inline pulse reset — the
+    # role formerly split out as "pulse_reset"). none / two_pulse / bath are the
+    # other inline-only shapes.
     "reset": RoleDef(
         make_pulse_reset_spec_,
         "<Custom:Pulse Reset>",
@@ -346,11 +345,6 @@ ROLE_TABLE: dict[str, RoleDef] = {
         lib=Lib(AbsResetCfg, ("reset_bath", "reset_10", "reset_120")),
     ),
     "none_reset": RoleDef(make_none_reset_spec_, "<Custom:None Reset>"),
-    "pulse_reset": RoleDef(
-        make_pulse_reset_spec_,
-        "<Custom:Pulse Reset>",
-        (Pulse(Md("q_f", 4000.0), Md("qub_ch", 0), 0.2, 1.0, at="pulse_cfg"),),
-    ),
     "two_pulse_reset": RoleDef(
         make_two_pulse_reset_spec_,
         "<Custom:Two-Pulse Reset>",

@@ -47,7 +47,7 @@ class RoleFactorySpec:
     """The factory pair for one role.
 
     ``ref`` is ``None`` for roles that have no library-aware variant (a concrete
-    shape that is always built inline — e.g. ``pulse_readout``, ``bath_reset``).
+    shape that is always built inline — e.g. ``direct_readout``, ``bath_reset``).
     Asking such a role for a ref/optional mount is a Fast-Fail at the call site.
     """
 

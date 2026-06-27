@@ -104,8 +104,8 @@ class RabiCheckAdapter(BaseAdapter[RabiCheckCfg, RabiCheckResult]):
             # (notebook: rabi_pulse = "pi_amp").
             .role("modules.rabi_pulse", "pi_pulse")
             .role("modules.readout", "readout")
-            # tested_reset defaults to pulse_reset; the user switches shape in
-            # the form when checking a two-pulse or bath reset.
+            # tested_reset defaults to the reset role's inline pulse-reset blank;
+            # the user switches shape in the form for a two-pulse or bath reset.
             .role("modules.tested_reset", "reset")
             # pi_pulse for the third branch (same library pi_amp).
             .role("modules.pi_pulse", "pi_pulse")

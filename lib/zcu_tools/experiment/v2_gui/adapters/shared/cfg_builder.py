@@ -10,7 +10,7 @@ path-addressed fluent API:
         return (
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(reps=100, rounds=100, relax_delay=1.0)
-            .role("modules.readout", "pulse_readout")        # mount a library/blank ref
+            .role("modules.readout", "readout")              # mount a library/blank ref
             .role("modules.reset", "reset", Init.DISABLED)   # library miss -> None
             .role("modules.qub_pulse", "qub_probe")
             .set("modules.qub_pulse.gain", 0.05)             # scalar override

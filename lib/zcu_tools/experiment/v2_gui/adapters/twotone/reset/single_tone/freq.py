@@ -117,7 +117,7 @@ class SingleToneFreqAdapter(
         return (
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(reps=100, rounds=100, relax_delay=1.0)
-            .role("modules.tested_reset", "pulse_reset")
+            .role("modules.tested_reset", "reset", Init.INLINE)
             .role("modules.readout", "readout")
             # optional → None (disabled) when no library entry (ADR-0010)
             .role("modules.reset", "reset", Init.DISABLED)

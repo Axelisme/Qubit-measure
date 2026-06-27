@@ -184,20 +184,22 @@ def _blank_entries() -> list[RoleEntry]:
 # Catalog dropdown entries: (role_id, label, item_kind, default_name). Insertion
 # order = dropdown order. Readout/probe first, then pulses, then resets, then
 # waveforms. The factory is the role's *blank* builder, taken from the shared
-# ROLE_FACTORIES table (single source) — creating from a role seeds a fresh entry,
-# never a library reference, so the library-aware composite roles
-# ("readout" / "reset") are deliberately absent (only their concrete shapes appear
-# here). default_name is the create dialog's naming-convention suggestion.
+# ROLE_FACTORIES table (single source) — creating from a role always seeds a fresh
+# entry, never a library reference (the blank builder never adopts). The
+# library-aware roles "readout" / "reset" therefore appear here too: their blank
+# IS the pulse shape, so they double as the "create an inline pulse readout/reset"
+# templates (Init.ADOPT only matters on the CfgBuilder side, not in the catalog).
+# default_name is the create dialog's naming-convention suggestion.
 _CATALOG_ROLES: list[tuple[str, str, RoleItemKind, str]] = [
     ("res_probe", "Resonator probe", "module", "readout_rf"),
-    ("pulse_readout", "Pulse readout", "module", "readout_rf"),
+    ("readout", "Pulse readout", "module", "readout_rf"),
     ("readout_dpm", "Optimized readout (DPM)", "module", "readout_dpm"),
     ("direct_readout", "Direct readout", "module", "readout_direct"),
     ("qub_probe", "Qubit probe pulse", "module", "qub_pulse"),
     ("pi_pulse", "Pi pulse", "module", "pi_amp"),
     ("pi2_pulse", "Pi/2 pulse", "module", "pi2_amp"),
     ("none_reset", "No reset", "module", "reset_none"),
-    ("pulse_reset", "Pulse reset", "module", "reset_10"),
+    ("reset", "Pulse reset", "module", "reset_10"),
     ("two_pulse_reset", "Two-pulse reset", "module", "reset_120"),
     ("bath_reset", "Bath reset", "module", "reset_bath"),
     ("qub_waveform", "Qubit drive waveform", "waveform", "qub_flat"),

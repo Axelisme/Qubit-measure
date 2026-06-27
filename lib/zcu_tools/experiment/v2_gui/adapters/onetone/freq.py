@@ -11,6 +11,7 @@ from zcu_tools.experiment.v2.onetone.freq import FreqCfg, FreqExp, FreqResult
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
+    Init,
     build_exp_spec,
     make_pulse_readout_module_spec,
     md_get_float,
@@ -121,7 +122,7 @@ class OneToneFreqAdapter(
             # cfg_spec() locks pulse_cfg.freq / ro_cfg.ro_freq to 0.0 (the sweep
             # axis owns frequency); build() fills those locked literals from the
             # spec, so they are not set here.
-            .role("modules.readout", "pulse_readout")
+            .role("modules.readout", "readout", Init.INLINE)
             .set("modules.readout.pulse_cfg.gain", 0.05)
             .set("modules.readout.ro_cfg.ro_length", ro_length)
             .set_sweep("sweep.freq", proper_res_freq_range(ctx, 301))

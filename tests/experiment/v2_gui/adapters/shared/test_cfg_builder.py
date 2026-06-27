@@ -289,7 +289,7 @@ def test_build_fills_locked_literal_inside_mounted_ref():
     # .role mounts an L2 readout whose pulse_cfg.freq carries the md value;
     # build() must overwrite it with the spec's locked 0.0.
     b = CfgBuilder(_empty_ctx(), _locked_spec()).role(
-        "modules.readout", "pulse_readout"
+        "modules.readout", "readout", Init.INLINE
     )
     v = b.build()
     readout = cast(ModuleRefValue, v.fields["modules"].fields["readout"])  # type: ignore[union-attr]
@@ -306,7 +306,7 @@ def test_build_fills_top_level_locked_literal():
 def test_set_on_locked_path_fast_fails():
     with pytest.raises(RuntimeError, match="locked literal"):
         CfgBuilder(_empty_ctx(), _locked_spec()).role(
-            "modules.readout", "pulse_readout"
+            "modules.readout", "readout", Init.INLINE
         ).set("modules.readout.pulse_cfg.freq", 5.0)
 
 
