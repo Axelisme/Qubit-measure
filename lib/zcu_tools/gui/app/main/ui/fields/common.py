@@ -307,7 +307,9 @@ class ScalarWidget(BaseLiveWidget):
         try:
             field.set_value(ref)
         except ValueLookupError as exc:
-            logger.debug("Could not resolve value_ref for %s: %s", field.spec.label, exc)
+            logger.debug(
+                "Could not resolve value_ref for %s: %s", field.spec.label, exc
+            )
             inp.setToolTip(str(exc))
             return True
         self._rebuild_ui()

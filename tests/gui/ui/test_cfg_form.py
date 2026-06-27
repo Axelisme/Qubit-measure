@@ -342,9 +342,7 @@ def test_scalar_widget_value_ref_text_resolves_to_direct(qapp, ctrl):
     assert isinstance(val, DirectValue)
     assert val.value == pytest.approx(0.125)
     assert w._mode == "direct"
-    ctrl.read_value_source.assert_called_once_with(
-        "device.active_flux.value", "float"
-    )
+    ctrl.read_value_source.assert_called_once_with("device.active_flux.value", "float")
 
 
 def test_scalar_widget_eval_menu_extends_standard_line_edit_menu(qapp, ctrl):

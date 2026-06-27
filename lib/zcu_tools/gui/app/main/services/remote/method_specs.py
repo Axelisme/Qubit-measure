@@ -843,7 +843,10 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         (
             _str("editor_id"),
             _str("path", "Dotted field path"),
-            _json("value", "JSON scalar, {__kind:eval, expr}, or {__kind:value_ref, key, type?}"),
+            _json(
+                "value",
+                "JSON scalar, {__kind:eval, expr}, or {__kind:value_ref, key, type?}",
+            ),
         ),
     ),
     "editor.get": MethodSpec(

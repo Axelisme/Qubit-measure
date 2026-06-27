@@ -140,7 +140,11 @@ def test_owner_unregister_and_registration_close_are_scoped() -> None:
     old = registry.register(ValueKey("source.value", float), lambda: 1.0, owner="owner")
     registry.replace_owner(
         "owner",
-        [ValueProviderSpec(ValueKey("source.value", float), lambda: 2.0, owner="owner")],
+        [
+            ValueProviderSpec(
+                ValueKey("source.value", float), lambda: 2.0, owner="owner"
+            )
+        ],
     )
 
     old.close()
@@ -154,15 +158,15 @@ def test_owner_unregister_and_registration_close_are_scoped() -> None:
 def test_value_ref_decode_parse_and_resolve() -> None:
     registry = ValueRegistry()
     registry.register(ValueKey("device.flux.value", float), lambda: 0.25, owner="dev")
-    registry.register(ValueKey("device.flux.name", str), lambda: "flux_yoko", owner="dev")
+    registry.register(
+        ValueKey("device.flux.name", str), lambda: "flux_yoko", owner="dev"
+    )
 
     assert decode_value_ref(
         {"__kind": "value_ref", "key": "device.flux.value", "type": "float"}
     ) == ValueRef("device.flux.value", "float")
     assert decode_value_ref({"__kind": "eval", "expr": "r_f"}) is None
-    assert parse_value_ref_text(" @{device.flux.name} ") == ValueRef(
-        "device.flux.name"
-    )
+    assert parse_value_ref_text(" @{device.flux.name} ") == ValueRef("device.flux.name")
     assert resolve_value_ref(ValueRef("device.flux.value"), registry) == pytest.approx(
         0.25
     )
@@ -172,7 +176,9 @@ def test_value_ref_decode_parse_and_resolve() -> None:
     assert resolve_value_ref(ValueRef("device.flux.name"), registry) == "flux_yoko"
 
     with pytest.raises(ValueTypeError):
-        resolve_value_ref(ValueRef("device.flux.value", "float"), registry, target_type=str)
+        resolve_value_ref(
+            ValueRef("device.flux.value", "float"), registry, target_type=str
+        )
 
 
 def test_empty_lookup_uses_default_or_raises_missing() -> None:

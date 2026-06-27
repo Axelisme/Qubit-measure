@@ -236,7 +236,9 @@ class ValueSourceBinder:
                         _str_source(
                             f"device.{name}.{attr}",
                             owner,
-                            lambda name=name, attr=attr: self._device_str_attr(name, attr),
+                            lambda name=name, attr=attr: self._device_str_attr(
+                                name, attr
+                            ),
                             f"cached device {attr}",
                         )
                     )

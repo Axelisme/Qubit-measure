@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-28 (value source generated tools)
+**Last updated:** 2026-06-28 (value refs in cfg edits)
 
 # `zcu_tools/mcp/measure/`
 
@@ -22,6 +22,10 @@ RemoteControlAdapter。此 package 是 app-local policy 層，不是共用 trans
 - `gui_value_list` / `gui_value_read` 是 generated read-only RPC tools，對應
   `value.list` / `value.read`。它們是 resolve-once value source 逃生通道；
   因來源可能投影 context/device/predictor，不列入 read-reveal table。
+- `gui_editor_set` / `gui_tab_set_cfg` 的 scalar `value` 可傳
+  `{"__kind":"value_ref","key":"device.active_flux.value","type":"float"}`。
+  bridge 不解這個 tag；GUI 端 `CfgEditorSession` / `LiveModel` 立即解析成 direct
+  scalar，失敗以 stable RPC/tool error 回報。
 - `tab.load_data` / generated `gui_tab_load_data` 是同步 mutation：guard deps 是
   `tab:{tab_id}`、`tab:{tab_id}:result`、`tab:{tab_id}:analyze`、`context`；不依賴
   SoC、device、cfg 或 save path，且不進 operation-handle table。

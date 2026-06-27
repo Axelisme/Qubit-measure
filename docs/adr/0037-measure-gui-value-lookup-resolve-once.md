@@ -32,6 +32,9 @@ measure-gui provides a read-only value lookup in the session layer.
   providers read cached `SessionState.devices[*].info`; they never poll hardware.
 - Lookup errors distinguish missing keys, known-but-unavailable values, provider
   failures, duplicate registration, and type mismatches.
+- Built-in owners project current session state only: context/project labels,
+  loaded predictor metadata, cached per-device values, and
+  `device.active_flux.*` derived from the connected flux-capable device.
 
 The lookup does not replace explicit typed dependencies. Existing stable helpers
 such as `proper_res_freq_range()`, `proper_qub_freq_range()`, `proper_relax()`,
@@ -51,6 +54,9 @@ Source references use a sibling concept to `EvalValue`, not an extension of
 - GUI text conveniences such as `@{device.active_flux.value}` are only parsed at
   explicit entry points. Plain strings in the wire contract are not globally
   interpreted.
+- Adapter default generation may use `CfgBuilder.value_ref(...)`; role-default
+  seeds may use `Source(...)`. Both resolve through `ExpContext.values` during
+  default construction and store ordinary direct values in the cfg tree.
 
 `ContextService` remains the md/ml write authority. Any path that writes a
 `ValueRef` to `MetaDict` resolves it before calling the concrete md write, so the

@@ -1,6 +1,6 @@
 # QICK Note for `experiment/v2_gui`
 
-**Last updated:** 2026-06-28（ROLE_TABLE role-default engine）
+**Last updated:** 2026-06-28（value source defaults）
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -39,6 +39,13 @@ ModuleLibrary / WaveformLibrary 的 calibrated entry，缺項時退回 inline bl
 明確要求 inline blank，不 adopt library；`.role(..., Init.DISABLED)` 只用於 optional ref，library miss
 時產生 `None`（disabled）。spec 的 `optional=True` 是結構能力，`Init.DISABLED` 是 adapter default
 初始化選擇，兩者需同時成立。
+
+跨 session 狀態的少數 default 走 `CfgBuilder.value_ref(path, key, type_name?, default?)`，透過
+`ctx.values` 立即讀取 registered value source，成功後寫入普通 direct value，不把 lazy ref 放進
+cfg tree。role default table 的同類入口是 `Source(key, type_name?)` seed；只用於像 active flux
+device 這類來源多變、強型別 helper 反而會拉寬依賴的情境。`onetone/flux_dep` 與
+`twotone/flux_dep` 的 `dev.flux_dev` 以 `device.active_flux.name` 為預設，無可用來源時 fallback
+到 `flux_yoko`。
 
 `BaseAdapter.load` 是 GUI load path 的 canonical result seam：預設建構 `exp_cls()` 並呼
 `exp.load(filepath=...)`，與 `BaseAdapter.save` 的 canonical persistence 對稱。需要 constructor

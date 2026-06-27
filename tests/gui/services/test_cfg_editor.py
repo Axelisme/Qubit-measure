@@ -220,9 +220,7 @@ def test_value_ref_resolves_to_concrete_direct_value_on_set_field(service, ctrl,
     service.commit(editor_id, "agent_ref")
 
     assert ml.modules["agent_ref"].to_dict()["freq"] == 6.25
-    ctrl.read_value_source.assert_called_once_with(
-        "device.active_flux.value", "float"
-    )
+    ctrl.read_value_source.assert_called_once_with("device.active_flux.value", "float")
 
 
 def test_value_ref_requires_string_key(service):

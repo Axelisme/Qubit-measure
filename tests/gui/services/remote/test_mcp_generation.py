@@ -124,9 +124,9 @@ def test_cfg_set_tools_document_value_refs():
     assert "value_ref" in m.TOOLS["gui_tab_set_cfg"]["description"]
     assert "gui_value_list" in m.TOOLS["gui_tab_set_cfg"]["description"]
 
-    tab_value_schema = m.TOOLS["gui_tab_set_cfg"]["inputSchema"]["properties"][
-        "edits"
-    ]["items"]["properties"]["value"]
+    tab_value_schema = m.TOOLS["gui_tab_set_cfg"]["inputSchema"]["properties"]["edits"][
+        "items"
+    ]["properties"]["value"]
     assert "type" not in tab_value_schema
     assert "value_ref" in tab_value_schema["description"]
 

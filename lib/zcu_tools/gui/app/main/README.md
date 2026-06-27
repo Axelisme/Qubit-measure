@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-28（ROLE_TABLE engine + analyze-params default relax）
+**Last updated:** 2026-06-28（value_ref resolve-once cfg edits）
 
 # `zcu_tools/gui/app/main/` — measure-gui Framework AI Note
 
@@ -54,7 +54,7 @@ gui/
 │   ├── tab_view.py       — TabViewService / TabViewSnapshot (pure tab render read model)
 │   ├── save.py           — SaveService (資料/圖片儲存 pipeline)
 │   ├── writeback.py      — WritebackService (分析結果寫回 md/ml)
-│   ├── cfg_editor.py     — CfgEditorSession (aggregate root：set_field/commit_schema 行為上身，只到 CfgSchema 快照) + CfgEditorService (Repository：lifecycle/LRU/變更流)；commit 把 CfgSchema 交 ContextWritePort 寫 (ADR-0006，session 不再 lower/register)
+│   ├── cfg_editor.py     — CfgEditorSession (aggregate root：set_field/commit_schema 行為上身，只到 CfgSchema 快照；tagged EvalValue / ValueRef decode 後交 LiveModel) + CfgEditorService (Repository：lifecycle/LRU/變更流)；commit 把 CfgSchema 交 ContextWritePort 寫 (ADR-0006，session 不再 lower/register)
 │   ├── arb_waveform.py   — ArbWaveformService：qubit-scoped arbitrary waveform asset adapter；共用 `meta_tool.ArbWaveformDatabase`，負責 preview PNG、resource version bump 與 GUI/MCP 邊界
 │   ├── ports.py          — driven-adapter / sibling-service ports (Protocol)：PersistOriginator(Caretaker↔Controller 窄介面)/ProjectIO/DriverFactory/ContextRead/ContextWrite(+ContextWrites batch)/WritebackQuery/TabLifecycle/StartupContext/RememberedDevice/**TabResultWritePort**(run policy 對 State 的窄 write：clear_tab_results/set_tab_running/update_tab_result)/**TabAnalyzeWritePort**(analyze/post policy 的窄 write：set_tab_analyzing/update_tab_analyze/update_tab_post_analyze)。app service / op policy 依賴 port 而非具體 infra/sibling/`State` (ADR-0005/0006/0026 §3，`State` 是唯一 implementer)
 │   └── remote/           — RemoteControlAdapter：第二個 driving View，是共用 NdjsonRpcEndpoint 上的 router；socket/NDJSON-over-TCP transport 住在共用層 zcu_tools.gui.remote（見下「共用 transport 層」）
@@ -194,6 +194,7 @@ measure-gui 不再提供 toolbar「Agent」按鈕、`AgentLaunchDialog` 或 `ser
     - **rename 不遷移引用名**：rename = `delete+register+emit ML_CHANGED 一次`，引用方靠此分流（LINKED→可復原 invalid、MODIFIED→Custom 保值）。md-side EvalValue 懸空**維持 invalid 不 fallback**（無上次值可保、等同輸錯名）。
 - **集中 refresh 邊界**：`CfgFormWidget` 擁有 context/md/inspect/device EventBus subscriptions；`LiveField` 透過 `refresh_external()` 接收外部刷新
 - **Eval scalar value**：scalar value 是 `DirectValue | EvalValue`；`ScalarSpec` 只宣告物理型別；`EvalValue` 可只帶 `expr`（不帶 `resolved`），由 lowering 拿 md 解析。`ScalarLiveField`（及 `SweepLiveField` 經其 edge 子欄位）bind 時 auto-resolve 填 snapshot，故 `= ?` ghost 只在 expr 真的無法解析時顯示。lowering 解析時依**擁有的 `ScalarSpec.type`** 做 `coerce_eval_result`（int spec → int、float spec → float），所以 `EvalValue("ro_ch")` 這種 int channel lower 成 int 而非 float；sweep edge 無 per-edge type、一律 float
+- **ValueRef scalar input**：`ValueRef` 不是 cfg value 型別，只是 `ScalarLiveField.set_value` 的 resolve-once input。agent 走 tagged object、GUI scalar `QLineEdit` 走精確 `@{source.key}`；兩者都立刻經 `ExpContext.values` / controller lookup 讀 registered source，依目標 `ScalarSpec.type` 檢查後寫入 `DirectValue`。失敗保持原草稿，不把 lazy ref 存進 `CfgSchema` 或 md/ml。
 - **Channel as scalar**：`ch` / `ro_ch` 使用 `ScalarSpec(type=int)`
 - **Eval UI**：`ScalarWidget` eval mode 限可編輯 numeric scalar 且無 choices；右鍵 menu 切換 direct/eval；expression evaluator 只接受安全 numeric AST 與 MetaDict direct variable names
 - **Invalid state**：validity 屬於 model state，向 parent bubbling
@@ -206,7 +207,7 @@ measure-gui 不再提供 toolbar「Agent」按鈕、`AgentLaunchDialog` 或 `ser
 - `State.cfg_schema` 為 committed SSOT；`LiveModel`（`SectionLiveField` tree）為 runtime draft SSOT。tab 模式 auto-commit：每次 `LiveModel.on_change` → `CfgFormWidget.schema_changed` → `Controller.update_tab_cfg` → `State.update_tab_cfg_schema`。dialog/writeback 模式為 local draft，只在 Apply 邊界寫回 `ModuleLibrary` / `WritebackItem`
 - `Controller.start_run(tab_id)` 從 `State.cfg_schema` 讀；不接受外部傳入 schema。Form `is_valid()` / `first_invalid_reason()` 仍負責 pre-check
 - `Controller.update_tab_cfg` 不發 `TAB_INTERACTION_CHANGED`（cfg 變更不影響 `TabInteractionState`），避免每次 keystroke 觸發全量 snapshot 重建；validity refresh 走 `CfgFormWidget.validity_changed`
-- `ExpContext` 欄位：`md, ml, soc, soccfg, chip_name, qub_name, res_name, result_dir, database_path, active_label, predictor, readiness`
+- `ExpContext` 欄位：`md, ml, soc, soccfg, chip_name, qub_name, res_name, result_dir, database_path, active_label, predictor, readiness, values`
 - `ContextReadiness.EMPTY/DRAFT/ACTIVE`：分離未建立、僅可編輯的 startup context、可執行/儲存的 file-backed context；`ExpContext.readiness` 為唯一 SSOT，`State` 不再 mirror 此資訊
 - `State` 是 shared live context 的 SSOT；`TabState` 承接每個 tab 的 `cfg_schema`、run/analyze result、figure、analyze param instance、save path state、busy flags
 - `State.devices: dict[str, DeviceState]` 是 device 狀態的 SSOT（含 `remember`）；`DeviceService` 只持 live driver/progress（execution 經 `BackgroundRunner`，見上「Device Lifecycle」）。device mutator 與 tab mutator 同樣只在主線寫、語義寫入 bump `device:<name>`
@@ -412,6 +413,8 @@ readout / reset 本身是 library-aware 的 pulse 形狀 role（`Init.ADOPT` 查
 ### CfgBuilder（value 樹組裝入口，`shared/cfg_builder.py`，ADR-0012）
 
 `CfgBuilder(ctx, spec)` 是 adapter `make_default_value` 的高層組裝工具（領域層）：flat-path fluent、起手 = L1 blank 骨架（完整性 by construction），逐項覆寫。三層：L1 `make_default_value(spec)`（框架層 blank）/ L2 `ROLE_TABLE`（`role_table.py` 的 `RoleDef` 資料 + `role_blank`/`role_ref` 兩個 generic builder，領域層 role 預設）/ L3 CfgBuilder（組裝）。動詞：`.scalars(**kw)`（頂層 scalar，純顯式無內建表）、`.role(path, role_id, init=Init.ADOPT)`（經 `ROLE_FACTORIES` 表調 L2 掛 ref；`Init` enum 選初始化模式：`ADOPT`（預設）走 ref 查庫、`INLINE` 強制 inline blank、`DISABLED` 走 ref optional 查無回 None 且要求 spec ref 為 optional，否則 Fast-Fail）、`.set(path, value)`（path scalar 覆寫，複用 `with_field`）、`.sweep(path, start, stop, expts)`（**只收字面 float**，EvalValue 邊界 raise）、`.set_sweep(path, SweepValue)`（逃生口，邊界可含 EvalValue）、`.build()`（回 value 樹，一次性）。**零鎖定宣告但自動填鎖定值**：鎖的宣告歸 `cfg_spec().lock_literal`，但 `build()` 遍歷 spec 把每個 `LiteralSpec` leaf 對齊 `spec.value`（穿透已掛 ref 的 chosen shape，復用 `find_allowed_spec`）——`.role` 掛的 L2 value 不懂 ref shape 內的鎖，build 修正；`.set` 碰 locked path 直接 raise（adapter 不該手設，消掉與 spec 鎖值的重複，C-raise）。value in-place、**不 validate**（留 make_default_cfg 邊界）；全動詞 spec-aware Fast-Fail。掛整節點靠 Builder 私有 `_mount_node`（框架層 `with_field` 保持 scalar-only）。映射舊手拼：`make_<role>_default`→`.role(path, role, Init.INLINE)`、`make_<role>_ref_default(ctx)`→`.role(path, role)`（`Init.ADOPT` 預設）、`(optional=True)`→`.role(path, role, Init.DISABLED)`、無條件禁用 optional ref→不寫（L1 blank 已給 None）。`ROLE_FACTORIES`（`defaults/role_factories.py`）由 `ROLE_TABLE`（`role_table.py` 的 `RoleDef` 資料）生成，是 `{role_id: (blank, ref)}` 單一 source，registry 的 RoleCatalog 與 Builder 共用（Builder **不**走 RoleCatalog——adapter 夠不著 + catalog factory 永不回 None）。**全 20 個 adapter 的 `make_default_value` 已統一走 CfgBuilder**（含 fake stub；舊手拼產同樣 `CfgSectionValue`、仍合法，新 adapter 照 builder 寫）。
+
+`CfgBuilder.value_ref(path, key, type_name?, default?)` 是跨 session default 的窄逃生口：它從 `ctx.values` 立即讀 registered value source，依 spec 推導或顯式 `type_name` 做型別檢查，成功後寫入 ordinary direct value。缺 source 或暫不可用時只有顯式 `default` 會 fallback；未提供 default 則 fast-fail，避免 silent stale default。role table 的對應 seed 是 `Source(key, type_name?)`。
 
 ### build_exp_spec（spec 樹組裝入口，`shared/spec_helpers.py`）
 

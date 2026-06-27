@@ -20,7 +20,7 @@
 - [0006 — ml/md 內容寫入的唯一權威 = ContextService](0006-single-ml-md-write-authority.md)：經窄 write port，lowering+register 收進 ContextService；run-time experiment cfg materialization 從 `ModuleLibrary` store 拆到 stateless `assemble_experiment_cfg`，`make_cfg` 只是薄 wrapper。
 - [0007 — Device 狀態下放 State（SSOT）](0007-device-state-to-state-ssot.md)：DeviceService 退化 driver/worker；persistence 為 State 投影。
 - [0021 — Event 所有權：domain module 擁有 enum + payload](0021-event-ownership-domain-modules.md)：domain module 擁有 enum+payload 定義；app 在 bus/EVENT_SERIALIZERS 層組裝；bus 維持 payload-type-key；port 集中各層 ports.py（掛 [[0004]]/[[0005]]）。
-- [0037 — measure-gui read-only value lookup + resolve-once refs](0037-measure-gui-value-lookup-resolve-once.md)：session-layer `ValueLookup` / owner-scoped `ValueRegistry` 作為少數 default / md-write escape hatch；`ValueRef` 立即 materialize，不擴充 `EvalValue`。
+- [0037 — measure-gui read-only value lookup + resolve-once refs](0037-measure-gui-value-lookup-resolve-once.md)：session-layer `ValueLookup` / owner-scoped `ValueRegistry` 作為少數 default / md-write escape hatch；`ValueRef` 立即 materialize，不擴充 `EvalValue`；adapter defaults 經 `CfgBuilder.value_ref` / role `Source` 窄用。
 
 ## III. CfgEditor session
 
