@@ -98,9 +98,9 @@ def test_res_freq_range_uses_eval_value_when_md_present():
 
 def test_res_freq_range_falls_back_to_scalar_without_md():
     sv = proper_res_freq_range(_ctx_with_md({}), 101)
-    # no md → plain float edges (6000 ± 30 default span)
-    assert sv.start == 5970.0
-    assert sv.stop == 6030.0
+    # no md → plain float edges (6500 ± 1.5*500 default span)
+    assert sv.start == 5750.0
+    assert sv.stop == 7250.0
 
 
 def test_freq_range_span_factor_one_omits_coefficient():

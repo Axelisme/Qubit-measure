@@ -399,7 +399,8 @@ def _run_ramsey(sim: SimParams, detune: float = 2.0) -> tuple[float, float, floa
     )
     exp = T2RamseyExp()
     # true_detune is the detune after length rounding; the fringe fit recovers it.
-    result, true_detune = exp.run(soc, soccfg, cfg, detune=detune)
+    result = exp.run(soc, soccfg, cfg, detune=detune)
+    true_detune = result.true_activate_detune
     t2r, _t2rerr, fit_detune, _detune_err, _fig = exp.analyze(result)
     return t2r, fit_detune, true_detune
 

@@ -80,55 +80,53 @@ class T2RamseyAdapter(
     exp_cls = T2RamseyExp
     ExpCfg_cls: ClassVar[Any] = T2RamseyCfg
 
-    @classmethod
-    def guide(cls) -> AdapterGuide:
-        return AdapterGuide(
-            behavior=(
-                "T2 Ramsey: two pi/2 pulses separated by a swept free-evolution "
-                "delay; fits the decaying fringe to extract the Ramsey coherence "
-                "time T2* and the qubit-drive detuning. Runs on real hardware. Run "
-                "after a pi/2 pulse is calibrated; a small deliberate detuning "
-                "produces the fringe whose frequency reads out the true qubit "
-                "frequency offset."
-            ),
-            expects_md=(
-                "Reads from the MetaDict (all optional, seeding defaults): 't2r' — "
-                "prior T2-Ramsey estimate (us); the delay sweep spans up to 4*t2r "
-                "(fallback ~20 us). 't1' seeds relax_delay (5*t1, fallback ~100 "
-                "us). The pi/2 pulse pulls 'q_f' (~2000–6000 MHz) and 'qub_ch'. "
-                "Readout pulls 'r_f' (~4000–8000 MHz), 'res_ch' / 'ro_ch', and "
-                "'timeFly' for the readout trigger offset (~0–1 us)."
-            ),
-            expects_ml=(
-                "Needs a qubit pi/2-pulse module — references a calibrated library "
-                "entry ('pi2_amp' / 'pi2_len', degrading to 'pi_amp' / 'pi_len') "
-                "when present, else a blank inline pulse — and a readout module "
-                "(calibrated 'readout_dpm' / 'readout_rf' / 'readout' / "
-                "'res_readout', else a blank pulse-readout referencing "
-                "'ro_waveform' when present). Optional reset references a library "
-                "reset ('reset_bath' / 'reset_10' / 'reset_120') when present."
-            ),
-            typical_writeback=(
-                "Proposes the fitted T2-Ramsey time into MetaDict 't2r' (us). When "
-                "the fringe fit ran (the default), also proposes the corrected "
-                "qubit frequency into MetaDict 'q_f' (MHz), computed as the pi/2 "
-                "pulse frequency + the realized applied detune − the fitted fringe "
-                "detune (mirrors the notebook). A pure decay fit proposes only "
-                "'t2r'. No ModuleLibrary writeback."
-            ),
-            recommended=(
-                "Set the 'Detune ratio (fringes/step)' cfg knob to a small "
-                "deliberate offset (default 0.05) — it is the number of fringe "
-                "periods per delay-sweep step; the absolute detune (MHz) applied to "
-                "the second pi/2 pulse phase is detune_ratio / sweep step, so the "
-                "Ramsey signal oscillates at that detuning. The analysis 'Fit "
-                "fringe' option (on by default, matching the nonzero default ratio) "
-                "fits the fringe frequency to read back the true qubit-frequency "
-                "offset and write 'q_f'. Set the ratio to 0 and turn 'Fit fringe' "
-                "off for a pure decay fit when driving on resonance. A delay sweep "
-                "reaching a few T2* captures enough fringe periods and decay."
-            ),
-        )
+    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
+        behavior=(
+            "T2 Ramsey: two pi/2 pulses separated by a swept free-evolution "
+            "delay; fits the decaying fringe to extract the Ramsey coherence "
+            "time T2* and the qubit-drive detuning. Runs on real hardware. Run "
+            "after a pi/2 pulse is calibrated; a small deliberate detuning "
+            "produces the fringe whose frequency reads out the true qubit "
+            "frequency offset."
+        ),
+        expects_md=(
+            "Reads from the MetaDict (all optional, seeding defaults): 't2r' — "
+            "prior T2-Ramsey estimate (us); the delay sweep spans up to 4*t2r "
+            "(fallback ~20 us). 't1' seeds relax_delay (5*t1, fallback ~100 "
+            "us). The pi/2 pulse pulls 'q_f' (~2000–6000 MHz) and 'qub_ch'. "
+            "Readout pulls 'r_f' (~4000–8000 MHz), 'res_ch' / 'ro_ch', and "
+            "'timeFly' for the readout trigger offset (~0–1 us)."
+        ),
+        expects_ml=(
+            "Needs a qubit pi/2-pulse module — references a calibrated library "
+            "entry ('pi2_amp' / 'pi2_len', degrading to 'pi_amp' / 'pi_len') "
+            "when present, else a blank inline pulse — and a readout module "
+            "(calibrated 'readout_dpm' / 'readout_rf' / 'readout' / "
+            "'res_readout', else a blank pulse-readout referencing "
+            "'ro_waveform' when present). Optional reset references a library "
+            "reset ('reset_bath' / 'reset_10' / 'reset_120') when present."
+        ),
+        typical_writeback=(
+            "Proposes the fitted T2-Ramsey time into MetaDict 't2r' (us). When "
+            "the fringe fit ran (the default), also proposes the corrected "
+            "qubit frequency into MetaDict 'q_f' (MHz), computed as the pi/2 "
+            "pulse frequency + the realized applied detune − the fitted fringe "
+            "detune (mirrors the notebook). A pure decay fit proposes only "
+            "'t2r'. No ModuleLibrary writeback."
+        ),
+        recommended=(
+            "Set the 'Detune ratio (fringes/step)' cfg knob to a small "
+            "deliberate offset (default 0.05) — it is the number of fringe "
+            "periods per delay-sweep step; the absolute detune (MHz) applied to "
+            "the second pi/2 pulse phase is detune_ratio / sweep step, so the "
+            "Ramsey signal oscillates at that detuning. The analysis 'Fit "
+            "fringe' option (on by default, matching the nonzero default ratio) "
+            "fits the fringe frequency to read back the true qubit-frequency "
+            "offset and write 'q_f'. Set the ratio to 0 and turn 'Fit fringe' "
+            "off for a pure decay fit when driving on resonance. A delay sweep "
+            "reaching a few T2* captures enough fringe periods and decay."
+        ),
+    )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:

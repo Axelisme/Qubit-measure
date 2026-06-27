@@ -68,40 +68,38 @@ class DualTonePowerAdapter(
     exp_cls = PowerExp
     ExpCfg_cls: ClassVar[Any] = PowerCfg
 
-    @classmethod
-    def guide(cls) -> AdapterGuide:
-        return AdapterGuide(
-            behavior=(
-                "Dual-tone reset gain map: a 2D sweep of the two reset-tone gains "
-                "(pulse1 × pulse2 of the tested two-pulse reset) at the calibrated "
-                "sideband frequencies, imaging the residual excitation to pick the "
-                "gain pair that resets most completely. Runs on real hardware."
-            ),
-            expects_md=(
-                "Reads from the MetaDict (all optional): 'reset_f1' / 'reset_f2' — "
-                "the two sideband frequencies held fixed on the tested reset; "
-                "'q_f' / 'qub_ch' seed the tested-reset and init-pulse drive "
-                "defaults."
-            ),
-            expects_ml=(
-                "Needs a two-pulse-reset module (the tested reset) and a readout "
-                "module. Optionally references a calibrated upstream reset and an "
-                "init pulse (a library pi pulse when present) — both disabled when "
-                "no library entry exists."
-            ),
-            typical_writeback=(
-                "Proposes the two best gains into MetaDict 'reset_gain1' and "
-                "'reset_gain2'. No ModuleLibrary writeback — these seed the final "
-                "'reset_120' registration done at the length step (D2(a))."
-            ),
-            recommended=(
-                "Sweep each gain across its full usable range. Analysis denoises "
-                "the map before picking the optimum; wavelet smoothing is the "
-                "default and Gaussian remains available for comparison. The "
-                "frequencies are held at 'reset_f1' / 'reset_f2', so calibrate "
-                "those first."
-            ),
-        )
+    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
+        behavior=(
+            "Dual-tone reset gain map: a 2D sweep of the two reset-tone gains "
+            "(pulse1 × pulse2 of the tested two-pulse reset) at the calibrated "
+            "sideband frequencies, imaging the residual excitation to pick the "
+            "gain pair that resets most completely. Runs on real hardware."
+        ),
+        expects_md=(
+            "Reads from the MetaDict (all optional): 'reset_f1' / 'reset_f2' — "
+            "the two sideband frequencies held fixed on the tested reset; "
+            "'q_f' / 'qub_ch' seed the tested-reset and init-pulse drive "
+            "defaults."
+        ),
+        expects_ml=(
+            "Needs a two-pulse-reset module (the tested reset) and a readout "
+            "module. Optionally references a calibrated upstream reset and an "
+            "init pulse (a library pi pulse when present) — both disabled when "
+            "no library entry exists."
+        ),
+        typical_writeback=(
+            "Proposes the two best gains into MetaDict 'reset_gain1' and "
+            "'reset_gain2'. No ModuleLibrary writeback — these seed the final "
+            "'reset_120' registration done at the length step (D2(a))."
+        ),
+        recommended=(
+            "Sweep each gain across its full usable range. Analysis denoises "
+            "the map before picking the optimum; wavelet smoothing is the "
+            "default and Gaussian remains available for comparison. The "
+            "frequencies are held at 'reset_f1' / 'reset_f2', so calibrate "
+            "those first."
+        ),
+    )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:

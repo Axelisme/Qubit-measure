@@ -52,43 +52,41 @@ class SsT1Adapter(
     exp_cls = T1Exp
     ExpCfg_cls: ClassVar[Any] = T1Cfg
 
-    @classmethod
-    def guide(cls) -> AdapterGuide:
-        return AdapterGuide(
-            behavior=(
-                "Single-shot T1: applies a π pulse, waits for a variable delay, "
-                "reads out, and classifies each shot in-program against the |g>/|e> "
-                "IQ-cluster centres. Repeats from both |g> and |e> initial states "
-                "(Branch). Plots the ground / excited / other populations versus "
-                "delay time with dual-transition-rate fits for T1 and T1_b. "
-                "Runs on real hardware."
-            ),
-            expects_md=(
-                "REQUIRES the single-shot discrimination calibration in the "
-                "MetaDict — run 'singleshot/ge' first and apply its writeback so "
-                "'g_center' / 'e_center' / 'ge_radius' are present; run "
-                "fast-fails if any is missing. "
-                "Optionally reads 'confusion_matrix' to readout-correct populations "
-                "at analyze time; 't1' to seed the sweep stop (default 5*t1, "
-                "fallback 100 us); 'q_f' / 'qub_ch' for the pi pulse; 'r_f' / "
-                "'res_ch' / 'ro_ch' / 'timeFly' for readout."
-            ),
-            expects_ml=(
-                "Needs a qubit pi-pulse module and a readout module. "
-                "Optional reset (disabled when no library entry exists)."
-            ),
-            typical_writeback=(
-                "No writeback — T1 is shown in the plot title only. "
-                "Use 'singleshot/t1_tone' if you need the T1 scalar in the "
-                "MetaDict."
-            ),
-            recommended=(
-                "Run after 'singleshot/ge'. A delay sweep reaching ~5*T1 lets the "
-                "decay flatten; with no prior 't1', the sweep spans 0–100 us. "
-                "Set 'uniform=True' to sweep linearly (slower, evenly spaced); "
-                "leave False for a log-spaced geomspace (better for wide T1 range)."
-            ),
-        )
+    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
+        behavior=(
+            "Single-shot T1: applies a π pulse, waits for a variable delay, "
+            "reads out, and classifies each shot in-program against the |g>/|e> "
+            "IQ-cluster centres. Repeats from both |g> and |e> initial states "
+            "(Branch). Plots the ground / excited / other populations versus "
+            "delay time with dual-transition-rate fits for T1 and T1_b. "
+            "Runs on real hardware."
+        ),
+        expects_md=(
+            "REQUIRES the single-shot discrimination calibration in the "
+            "MetaDict — run 'singleshot/ge' first and apply its writeback so "
+            "'g_center' / 'e_center' / 'ge_radius' are present; run "
+            "fast-fails if any is missing. "
+            "Optionally reads 'confusion_matrix' to readout-correct populations "
+            "at analyze time; 't1' to seed the sweep stop (default 5*t1, "
+            "fallback 100 us); 'q_f' / 'qub_ch' for the pi pulse; 'r_f' / "
+            "'res_ch' / 'ro_ch' / 'timeFly' for readout."
+        ),
+        expects_ml=(
+            "Needs a qubit pi-pulse module and a readout module. "
+            "Optional reset (disabled when no library entry exists)."
+        ),
+        typical_writeback=(
+            "No writeback — T1 is shown in the plot title only. "
+            "Use 'singleshot/t1_tone' if you need the T1 scalar in the "
+            "MetaDict."
+        ),
+        recommended=(
+            "Run after 'singleshot/ge'. A delay sweep reaching ~5*T1 lets the "
+            "decay flatten; with no prior 't1', the sweep spans 0–100 us. "
+            "Set 'uniform=True' to sweep linearly (slower, evenly spaced); "
+            "leave False for a log-spaced geomspace (better for wide T1 range)."
+        ),
+    )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:

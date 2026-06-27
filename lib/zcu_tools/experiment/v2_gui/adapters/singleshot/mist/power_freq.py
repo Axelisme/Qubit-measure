@@ -57,40 +57,38 @@ class MistPowerFreqAdapter(
     exp_cls = FreqPowerExp
     ExpCfg_cls: ClassVar[Any] = FreqPowerCfg
 
-    @classmethod
-    def guide(cls) -> AdapterGuide:
-        return AdapterGuide(
-            behavior=(
-                "MIST probe power × frequency landscape: drives a probe pulse while "
-                "sweeping its gain and frequency (2D), classifying each shot "
-                "in-program against the |g>/|e> single-shot centres, and plotting "
-                "the ground/excited/other populations as 2D maps over (gain, freq). "
-                "Runs on real hardware; the result is already populations (no "
-                "per-point fit)."
-            ),
-            expects_md=(
-                "REQUIRES the single-shot discrimination calibration in the "
-                "MetaDict — run 'singleshot/ge' first and apply its writeback so "
-                "'g_center' / 'e_center' / 'ge_radius' are present; the run "
-                "classifies each shot against them and fast-fails if any is "
-                "missing. Optionally reads 'confusion_matrix' (readout correction), "
-                "'ac_stark_coeff' and 'log_scale' at analyze time; 't1' to set the "
-                "relax delay; 'q_f' / 'qub_ch' seed the probe drive."
-            ),
-            expects_ml=(
-                "Needs a probe pulse and a readout module. Optionally references a "
-                "calibrated reset and an init pulse — both disabled when no library "
-                "entry exists."
-            ),
-            typical_writeback=(
-                "No writeback — the population landscapes are read off the plot by eye."
-            ),
-            recommended=(
-                "Run after 'singleshot/ge' has calibrated the discrimination. Sweep "
-                "the probe gain across the MIST onset and the frequency around the "
-                "qubit/resonator line of interest."
-            ),
-        )
+    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
+        behavior=(
+            "MIST probe power × frequency landscape: drives a probe pulse while "
+            "sweeping its gain and frequency (2D), classifying each shot "
+            "in-program against the |g>/|e> single-shot centres, and plotting "
+            "the ground/excited/other populations as 2D maps over (gain, freq). "
+            "Runs on real hardware; the result is already populations (no "
+            "per-point fit)."
+        ),
+        expects_md=(
+            "REQUIRES the single-shot discrimination calibration in the "
+            "MetaDict — run 'singleshot/ge' first and apply its writeback so "
+            "'g_center' / 'e_center' / 'ge_radius' are present; the run "
+            "classifies each shot against them and fast-fails if any is "
+            "missing. Optionally reads 'confusion_matrix' (readout correction), "
+            "'ac_stark_coeff' and 'log_scale' at analyze time; 't1' to set the "
+            "relax delay; 'q_f' / 'qub_ch' seed the probe drive."
+        ),
+        expects_ml=(
+            "Needs a probe pulse and a readout module. Optionally references a "
+            "calibrated reset and an init pulse — both disabled when no library "
+            "entry exists."
+        ),
+        typical_writeback=(
+            "No writeback — the population landscapes are read off the plot by eye."
+        ),
+        recommended=(
+            "Run after 'singleshot/ge' has calibrated the discrimination. Sweep "
+            "the probe gain across the MIST onset and the frequency around the "
+            "qubit/resonator line of interest."
+        ),
+    )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:

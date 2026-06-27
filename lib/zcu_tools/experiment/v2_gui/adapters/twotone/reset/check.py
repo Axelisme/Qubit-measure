@@ -43,41 +43,39 @@ class RabiCheckAdapter(BaseAdapter[RabiCheckCfg, RabiCheckResult]):
         requires_soc=True, analysis=AnalysisMode.NONE
     )
 
-    @classmethod
-    def guide(cls) -> AdapterGuide:
-        return AdapterGuide(
-            behavior=(
-                "Reset Rabi check: sweeps the initialisation (rabi) pulse gain "
-                "and acquires three branches simultaneously — without any reset, "
-                "with the tested_reset, and with tested_reset followed by a pi "
-                "pulse — to let the user judge how well the reset prepares the "
-                "ground state. Runs on real hardware. No automated fit; read the "
-                "three traces by eye."
-            ),
-            expects_md=(
-                "Reads from the MetaDict (all optional): 'q_f' / 'qub_ch' — "
-                "qubit frequency and channel, seeding rabi_pulse / pi_pulse / "
-                "tested_reset defaults; 'r_f' / 'res_ch' / 'ro_ch' / 'timeFly' "
-                "— resonator / readout defaults."
-            ),
-            expects_ml=(
-                "Needs rabi_pulse (init pulse — typically pi_amp), tested_reset "
-                "(any reset shape: none / pulse / two-pulse / bath), pi_pulse "
-                "(calibrated pi pulse), and a readout module. Optionally "
-                "references a calibrated upstream reset (disabled when absent)."
-            ),
-            typical_writeback=(
-                "No analysis and no writeback. Inspect the three traces manually "
-                "to confirm the reset prepares the ground state; proceed to the "
-                "next calibration step once satisfied."
-            ),
-            recommended=(
-                "A gain sweep of 51 points from 0.0 to 1.0 captures the full "
-                "pi-pulse rotation. relax_delay should be long enough for thermal "
-                "equilibration (notebook: 5 × T1 for bath reset). No reset is "
-                "optional — omit it if no upstream reset is calibrated yet."
-            ),
-        )
+    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
+        behavior=(
+            "Reset Rabi check: sweeps the initialisation (rabi) pulse gain "
+            "and acquires three branches simultaneously — without any reset, "
+            "with the tested_reset, and with tested_reset followed by a pi "
+            "pulse — to let the user judge how well the reset prepares the "
+            "ground state. Runs on real hardware. No automated fit; read the "
+            "three traces by eye."
+        ),
+        expects_md=(
+            "Reads from the MetaDict (all optional): 'q_f' / 'qub_ch' — "
+            "qubit frequency and channel, seeding rabi_pulse / pi_pulse / "
+            "tested_reset defaults; 'r_f' / 'res_ch' / 'ro_ch' / 'timeFly' "
+            "— resonator / readout defaults."
+        ),
+        expects_ml=(
+            "Needs rabi_pulse (init pulse — typically pi_amp), tested_reset "
+            "(any reset shape: none / pulse / two-pulse / bath), pi_pulse "
+            "(calibrated pi pulse), and a readout module. Optionally "
+            "references a calibrated upstream reset (disabled when absent)."
+        ),
+        typical_writeback=(
+            "No analysis and no writeback. Inspect the three traces manually "
+            "to confirm the reset prepares the ground state; proceed to the "
+            "next calibration step once satisfied."
+        ),
+        recommended=(
+            "A gain sweep of 51 points from 0.0 to 1.0 captures the full "
+            "pi-pulse rotation. relax_delay should be long enough for thermal "
+            "equilibration (notebook: 5 × T1 for bath reset). No reset is "
+            "optional — omit it if no upstream reset is calibrated yet."
+        ),
+    )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:

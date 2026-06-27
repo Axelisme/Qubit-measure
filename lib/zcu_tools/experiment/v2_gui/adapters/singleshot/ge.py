@@ -110,45 +110,43 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
         analysis=AnalysisMode.FIT, post_analysis=True
     )
 
-    @classmethod
-    def guide(cls) -> AdapterGuide:
-        return AdapterGuide(
-            behavior=(
-                "Single-shot ground/excited readout: prepares the qubit in |g> "
-                "(no probe pulse) and |e> (probe pi-pulse), takes 'shots' "
-                "single-shot readouts of each, and fits the two IQ clusters to "
-                "extract the assignment fidelity, rotation angle and threshold. "
-                "Runs on real hardware; the domain forces rounds=1 and reps=shots, "
-                "running the readout twice (g-prep / e-prep) internally."
-            ),
-            expects_md=(
-                "Reads from the MetaDict (all optional): 't1' — sets the relax "
-                "delay as 5*t1 (absent → a fixed 100 us); 'r_f' / 'res_ch' / "
-                "'ro_ch' / 'timeFly' / 'best_ro_*' seed the pulse-readout module; "
-                "'q_f' / 'qub_ch' seed the probe pi-pulse drive."
-            ),
-            expects_ml=(
-                "Needs a probe pulse (a library pi pulse — 'pi_amp' — when "
-                "present) and a pulse-readout module (references a calibrated "
-                "library readout 'readout_dpm' / 'readout_rf' when present, else a "
-                "blank inline pulse readout). Optionally references a calibrated "
-                "reset and an init pulse — both disabled when no library entry "
-                "exists."
-            ),
-            typical_writeback=(
-                "Proposes the fitted assignment fidelity into MetaDict 'fid', the "
-                "cluster width into 'ge_s', the complex discrimination centres into "
-                "'g_center' / 'e_center', the optimised classification radius into "
-                "'ge_radius', and the 3x3 confusion matrix (nested list) into "
-                "'confusion_matrix' (a non-scalar, read-only writeback item)."
-            ),
-            recommended=(
-                "Use a large 'shots' (~1e5) so the IQ histograms are well sampled; "
-                "the default analysis backend is 'pca'. Run once the qubit pi-pulse "
-                "and the readout are both calibrated — a clean two-cluster IQ "
-                "scatter indicates good discrimination."
-            ),
-        )
+    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
+        behavior=(
+            "Single-shot ground/excited readout: prepares the qubit in |g> "
+            "(no probe pulse) and |e> (probe pi-pulse), takes 'shots' "
+            "single-shot readouts of each, and fits the two IQ clusters to "
+            "extract the assignment fidelity, rotation angle and threshold. "
+            "Runs on real hardware; the domain forces rounds=1 and reps=shots, "
+            "running the readout twice (g-prep / e-prep) internally."
+        ),
+        expects_md=(
+            "Reads from the MetaDict (all optional): 't1' — sets the relax "
+            "delay as 5*t1 (absent → a fixed 100 us); 'r_f' / 'res_ch' / "
+            "'ro_ch' / 'timeFly' / 'best_ro_*' seed the pulse-readout module; "
+            "'q_f' / 'qub_ch' seed the probe pi-pulse drive."
+        ),
+        expects_ml=(
+            "Needs a probe pulse (a library pi pulse — 'pi_amp' — when "
+            "present) and a pulse-readout module (references a calibrated "
+            "library readout 'readout_dpm' / 'readout_rf' when present, else a "
+            "blank inline pulse readout). Optionally references a calibrated "
+            "reset and an init pulse — both disabled when no library entry "
+            "exists."
+        ),
+        typical_writeback=(
+            "Proposes the fitted assignment fidelity into MetaDict 'fid', the "
+            "cluster width into 'ge_s', the complex discrimination centres into "
+            "'g_center' / 'e_center', the optimised classification radius into "
+            "'ge_radius', and the 3x3 confusion matrix (nested list) into "
+            "'confusion_matrix' (a non-scalar, read-only writeback item)."
+        ),
+        recommended=(
+            "Use a large 'shots' (~1e5) so the IQ histograms are well sampled; "
+            "the default analysis backend is 'pca'. Run once the qubit pi-pulse "
+            "and the readout are both calibrated — a clean two-cluster IQ "
+            "scatter indicates good discrimination."
+        ),
+    )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:

@@ -10,6 +10,7 @@ from zcu_tools.experiment.cfg_assembler import make_cfg
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AdapterGuide,
+    AnalysisMode,
     AnalyzeRequest,
     CfgSchema,
     CfgSectionSpec,
@@ -36,6 +37,13 @@ from zcu_tools.gui.app.main.adapter import (
 # Index of T_AnalyzeParams in BaseAdapter's generic parameter list
 # (Cfg, Result, AnalyzeResult, AnalyzeParams).
 _ANALYZE_PARAMS_GENERIC_INDEX = 3
+_NO_GUIDE = AdapterGuide(
+    behavior="(no guide written yet)",
+    expects_md="",
+    expects_ml="",
+    typical_writeback="",
+    recommended="",
+)
 
 
 def _analyze_params_generic_arg(cls: type) -> type:
@@ -89,6 +97,7 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
 
     exp_cls: ClassVar[type[Any]]
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities()
+    guide_text: ClassVar[AdapterGuide] = _NO_GUIDE
     legacy_migration_experiment: ClassVar[str | None] = None
 
     # Experiment cfg dataclass used by the default build_exp_cfg. Adapters whose
@@ -96,6 +105,113 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     # set this and inherit build_exp_cfg. Adapters with a bespoke mapping (e.g.
     # extra kwargs, hand-built cfg) override build_exp_cfg and leave this None.
     ExpCfg_cls: ClassVar[Any] = None
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        cls._validate_capability_contract()
+
+    @classmethod
+    def _is_method_implemented(cls, name: str) -> bool:
+        return getattr(cls, name) is not getattr(BaseAdapter, name)
+
+    @classmethod
+    def _require_method(cls, name: str, reason: str, fix: str) -> None:
+        if not cls._is_method_implemented(name):
+            raise TypeError(
+                f"{cls.__name__} {reason} but does not implement {name}(); {fix}."
+            )
+
+    @classmethod
+    def _forbid_method(cls, name: str, reason: str, fix: str) -> None:
+        if cls._is_method_implemented(name):
+            raise TypeError(f"{cls.__name__} {reason} but implements {name}(); {fix}.")
+
+    @classmethod
+    def _validate_capability_contract(cls) -> None:
+        """Fail fast when declared capabilities and implemented hooks disagree."""
+        caps = cls.capabilities
+        analysis = caps.analysis
+
+        if analysis is AnalysisMode.FIT:
+            cls._require_method(
+                "analyze",
+                "declares analysis=FIT",
+                "override analyze() or set analysis=AnalysisMode.NONE/INTERACTIVE",
+            )
+            cls._forbid_method(
+                "setup_interactive_analysis",
+                "declares analysis=FIT",
+                "remove setup_interactive_analysis() or set analysis=AnalysisMode.INTERACTIVE",
+            )
+        elif analysis is AnalysisMode.INTERACTIVE:
+            cls._require_method(
+                "setup_interactive_analysis",
+                "declares analysis=INTERACTIVE",
+                "override setup_interactive_analysis() or set analysis=AnalysisMode.FIT/NONE",
+            )
+            cls._forbid_method(
+                "analyze",
+                "declares analysis=INTERACTIVE",
+                "remove analyze() or set analysis=AnalysisMode.FIT",
+            )
+        elif analysis is AnalysisMode.NONE:
+            cls._forbid_method(
+                "analyze",
+                "declares analysis=NONE",
+                "remove analyze() or set analysis=AnalysisMode.FIT",
+            )
+            cls._forbid_method(
+                "setup_interactive_analysis",
+                "declares analysis=NONE",
+                "remove setup_interactive_analysis() or set analysis=AnalysisMode.INTERACTIVE",
+            )
+            cls._forbid_method(
+                "get_analyze_params",
+                "declares analysis=NONE",
+                "remove get_analyze_params() or set analysis=AnalysisMode.FIT/INTERACTIVE",
+            )
+        else:
+            raise TypeError(
+                f"{cls.__name__} declares unsupported analysis capability {analysis!r}; "
+                "use an AnalysisMode value"
+            )
+
+        if analysis is not AnalysisMode.NONE:
+            params_cls = cls.analyze_params_cls()
+            if params_cls is not NoAnalyzeParams:
+                cls._require_method(
+                    "get_analyze_params",
+                    f"declares analysis={analysis.name} with params {params_cls.__name__}",
+                    "override get_analyze_params() or use NoAnalyzeParams",
+                )
+
+        if caps.post_analysis:
+            if analysis is not AnalysisMode.FIT:
+                raise TypeError(
+                    f"{cls.__name__} declares post_analysis=True with analysis={analysis.name}; "
+                    "post_analysis requires analysis=AnalysisMode.FIT"
+                )
+            cls._require_method(
+                "get_post_analyze_params",
+                "declares post_analysis=True",
+                "override get_post_analyze_params() or set post_analysis=False",
+            )
+            cls._require_method(
+                "post_analyze",
+                "declares post_analysis=True",
+                "override post_analyze() or set post_analysis=False",
+            )
+        else:
+            cls._forbid_method(
+                "get_post_analyze_params",
+                "declares post_analysis=False",
+                "remove get_post_analyze_params() or set post_analysis=True",
+            )
+            cls._forbid_method(
+                "post_analyze",
+                "declares post_analysis=False",
+                "remove post_analyze() or set post_analysis=True",
+            )
 
     # -- experiment-specific contract (subclass must fill) -----------------
 
@@ -110,18 +226,16 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
 
     @classmethod
     def guide(cls) -> AdapterGuide:
-        """Static human-facing orientation guide. Override per adapter.
+        """Static human-facing orientation guide.
 
-        Honest default: an adapter that has not written one says so plainly
+        Concrete adapters keep the guide prose local as ``guide_text``. The
+        method remains the framework-facing protocol entry point so GUI/MCP
+        consumers do not need to know how each adapter stores its prose.
+
+        Honest default: an adapter that has not written prose says so plainly
         (Fast-Fail spirit — surface the gap, do not fake content).
         """
-        return AdapterGuide(
-            behavior="(no guide written yet)",
-            expects_md="",
-            expects_ml="",
-            typical_writeback="",
-            recommended="",
-        )
+        return cls.guide_text
 
     @abstractmethod
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:

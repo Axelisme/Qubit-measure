@@ -58,44 +58,42 @@ class SingleToneFreqAdapter(
     exp_cls = FreqExp
     ExpCfg_cls: ClassVar[Any] = FreqCfg
 
-    @classmethod
-    def guide(cls) -> AdapterGuide:
-        return AdapterGuide(
-            behavior=(
-                "Single-tone sideband-reset frequency sweep: drives the tested "
-                "pulse-reset tone and sweeps its frequency, fitting the qubit "
-                "response (Lorentzian) to find the reset sideband frequency and "
-                "its linewidth. Runs on real hardware. Typically run after an "
-                "init pulse excites the qubit, to locate the f01+f12 (r_f - q_f) "
-                "sideband at which the reset pulse dumps the excitation."
-            ),
-            expects_md=(
-                "Reads from the MetaDict (all optional): 'reset_f' — the sideband "
-                "reset frequency (= r_f - q_f), the sweep centre; 'resetf_w' — its "
-                "linewidth, setting the half-span as 1.5*resetf_w. Absent "
-                "'resetf_w' → a fixed ±50 MHz span around 'reset_f'; absent "
-                "'reset_f' → centred on 0 MHz. The tested reset and init pulse "
-                "pull 'q_f' / 'qub_ch' for their drive defaults."
-            ),
-            expects_ml=(
-                "Needs a pulse-reset module (the tested reset) and a readout "
-                "module. Optionally references a calibrated upstream reset and an "
-                "init pulse (a library pi pulse when present) — both disabled when "
-                "no library entry exists."
-            ),
-            typical_writeback=(
-                "Proposes the fitted sideband frequency into MetaDict 'reset_f' "
-                "and the fitted linewidth (FWHM) into 'resetf_w'. No ModuleLibrary "
-                "writeback — registering the calibrated reset module is left to "
-                "the user once both the frequency and the length are dialled in."
-            ),
-            recommended=(
-                "A sweep of ~201 points spanning a couple of linewidths around "
-                "the expected sideband captures the dip cleanly; widen the span "
-                "if 'reset_f' is only a rough r_f - q_f estimate. The reset-pulse "
-                "length is held fixed here — sweep it separately afterwards."
-            ),
-        )
+    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
+        behavior=(
+            "Single-tone sideband-reset frequency sweep: drives the tested "
+            "pulse-reset tone and sweeps its frequency, fitting the qubit "
+            "response (Lorentzian) to find the reset sideband frequency and "
+            "its linewidth. Runs on real hardware. Typically run after an "
+            "init pulse excites the qubit, to locate the f01+f12 (r_f - q_f) "
+            "sideband at which the reset pulse dumps the excitation."
+        ),
+        expects_md=(
+            "Reads from the MetaDict (all optional): 'reset_f' — the sideband "
+            "reset frequency (= r_f - q_f), the sweep centre; 'resetf_w' — its "
+            "linewidth, setting the half-span as 1.5*resetf_w. Absent "
+            "'resetf_w' → a fixed ±50 MHz span around 'reset_f'; absent "
+            "'reset_f' → centred on 0 MHz. The tested reset and init pulse "
+            "pull 'q_f' / 'qub_ch' for their drive defaults."
+        ),
+        expects_ml=(
+            "Needs a pulse-reset module (the tested reset) and a readout "
+            "module. Optionally references a calibrated upstream reset and an "
+            "init pulse (a library pi pulse when present) — both disabled when "
+            "no library entry exists."
+        ),
+        typical_writeback=(
+            "Proposes the fitted sideband frequency into MetaDict 'reset_f' "
+            "and the fitted linewidth (FWHM) into 'resetf_w'. No ModuleLibrary "
+            "writeback — registering the calibrated reset module is left to "
+            "the user once both the frequency and the length are dialled in."
+        ),
+        recommended=(
+            "A sweep of ~201 points spanning a couple of linewidths around "
+            "the expected sideband captures the dip cleanly; widen the span "
+            "if 'reset_f' is only a rough r_f - q_f estimate. The reset-pulse "
+            "length is held fixed here — sweep it separately afterwards."
+        ),
+    )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:

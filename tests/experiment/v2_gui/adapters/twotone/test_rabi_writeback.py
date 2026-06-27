@@ -371,18 +371,18 @@ def _gain_sweep_stop(ctx: MagicMock) -> float | EvalValue:
 class TestAmpRabiDefaultValueGainSeed:
     def test_pi_gain_present_yields_eval_expr(self) -> None:
         # When md has pi_gain, the stop edge must be an EvalValue referencing
-        # "2.0 * pi_gain" so the GUI keeps the live md-linked expression.
+        # "1.2 * pi_gain" so the GUI keeps the live md-linked expression.
         ctx = _make_ctx_with_md(pi_gain=0.4)
         stop = _gain_sweep_stop(ctx)
         assert isinstance(stop, EvalValue)
-        assert stop.expr == "2.0 * pi_gain"
+        assert stop.expr == "1.2 * pi_gain"
 
     def test_pi_gain_absent_yields_fallback_float(self) -> None:
-        # When md has no pi_gain, fall back to 2.0 * 0.5 = 1.0.
+        # When md has no pi_gain, fall back to 1.2 * 1.0 = 1.2.
         ctx = _make_ctx_with_md()
         stop = _gain_sweep_stop(ctx)
         assert isinstance(stop, float)
-        assert stop == pytest.approx(1.0)
+        assert stop == pytest.approx(1.2)
 
     def test_pi_amp_does_not_seed_gain_sweep(self) -> None:
         # Old md key 'pi_amp' is now reserved for pulse MODULE names; it must
@@ -424,9 +424,9 @@ class TestLenRabiDefaultValueLengthSeed:
         assert stop.expr == "4.0 * pi_len"
 
     def test_pi_len_absent_yields_fallback_float(self) -> None:
-        # When md has no pi_len, md_eval_scaled returns 4.0 * 0.1 = 0.4
-        # (factor * fallback, where fallback=0.1 from the adapter).
+        # When md has no pi_len, md_eval_scaled returns 4.0 * 1.0 = 4.0
+        # (factor * fallback, where fallback=1.0 from the adapter).
         ctx = _make_ctx_with_md()
         stop = _length_sweep_stop(ctx)
         assert isinstance(stop, float)
-        assert stop == pytest.approx(0.4)
+        assert stop == pytest.approx(4.0)

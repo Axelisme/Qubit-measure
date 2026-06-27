@@ -75,51 +75,49 @@ class LenRabiAdapter(
     exp_cls = LenRabiExp
     ExpCfg_cls: ClassVar[Any] = LenRabiCfg
 
-    @classmethod
-    def guide(cls) -> AdapterGuide:
-        return AdapterGuide(
-            behavior=(
-                "Length Rabi: drives the qubit at its known frequency and sweeps "
-                "the drive-pulse length, fitting the Rabi oscillation to find the "
-                "pi and pi/2 pulse lengths. Runs on real hardware. Run once you "
-                "know the qubit frequency, to calibrate a pi pulse by duration "
-                "(the pulse gain stays fixed)."
-            ),
-            expects_md=(
-                "Reads from the MetaDict (all optional, seeding defaults): 'q_f' — "
-                "qubit frequency feeding the drive pulse (~2000–6000 MHz); "
-                "'qub_ch' — qubit-drive channel; 'pi_len' — prior pi-pulse length, "
-                "the length sweep spans up to 4*pi_len (fallback ~0.1 us). Readout "
-                "defaults pull 'r_f' (~4000–8000 MHz), 'res_ch' / 'ro_ch', and "
-                "'timeFly' for the readout trigger offset (~0–1 us)."
-            ),
-            expects_ml=(
-                "Needs a qubit drive-pulse module (defaults to a blank inline "
-                "pulse) and a readout module — references a calibrated library "
-                "readout ('readout_dpm' / 'readout_rf' / 'readout' / "
-                "'res_readout') when present, else a blank pulse-readout that "
-                "references the 'ro_waveform' waveform when one exists. Optional "
-                "reset references a library reset ('reset_bath' / 'reset_10' / "
-                "'reset_120') when present, else stays disabled."
-            ),
-            typical_writeback=(
-                "Proposes MetaDict scalars 'pi_len', 'pi2_len' (fitted lengths), "
-                "and 'rabi_f' (Rabi oscillation frequency in MHz). Also proposes "
-                "ModuleLibrary modules 'pi_len' and 'pi2_len' — length-calibrated "
-                "pi-pulse modules produced by this adapter — with waveform length "
-                "overridden to the fitted pi / pi/2 value. amp_rabi produces the "
-                "separate 'pi_amp'/'pi2_amp' gain-calibrated modules and seeds its "
-                "gain sweep from the 'pi_len' scalar written here. Module items are "
-                "skipped when no cfg_snapshot is available (e.g. loaded from file)."
-            ),
-            recommended=(
-                "Analysis defaults to fitting a decay envelope on the oscillation; "
-                "keep it on when the Rabi oscillation visibly damps over the "
-                "sweep, turn it off for a pure undamped cosine fit. A length sweep "
-                "spanning a few pi lengths (up to 4*pi_len) captures a full "
-                "oscillation; widen it if no full period is visible."
-            ),
-        )
+    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
+        behavior=(
+            "Length Rabi: drives the qubit at its known frequency and sweeps "
+            "the drive-pulse length, fitting the Rabi oscillation to find the "
+            "pi and pi/2 pulse lengths. Runs on real hardware. Run once you "
+            "know the qubit frequency, to calibrate a pi pulse by duration "
+            "(the pulse gain stays fixed)."
+        ),
+        expects_md=(
+            "Reads from the MetaDict (all optional, seeding defaults): 'q_f' — "
+            "qubit frequency feeding the drive pulse (~2000–6000 MHz); "
+            "'qub_ch' — qubit-drive channel; 'pi_len' — prior pi-pulse length, "
+            "the length sweep spans up to 4*pi_len (fallback ~0.1 us). Readout "
+            "defaults pull 'r_f' (~4000–8000 MHz), 'res_ch' / 'ro_ch', and "
+            "'timeFly' for the readout trigger offset (~0–1 us)."
+        ),
+        expects_ml=(
+            "Needs a qubit drive-pulse module (defaults to a blank inline "
+            "pulse) and a readout module — references a calibrated library "
+            "readout ('readout_dpm' / 'readout_rf' / 'readout' / "
+            "'res_readout') when present, else a blank pulse-readout that "
+            "references the 'ro_waveform' waveform when one exists. Optional "
+            "reset references a library reset ('reset_bath' / 'reset_10' / "
+            "'reset_120') when present, else stays disabled."
+        ),
+        typical_writeback=(
+            "Proposes MetaDict scalars 'pi_len', 'pi2_len' (fitted lengths), "
+            "and 'rabi_f' (Rabi oscillation frequency in MHz). Also proposes "
+            "ModuleLibrary modules 'pi_len' and 'pi2_len' — length-calibrated "
+            "pi-pulse modules produced by this adapter — with waveform length "
+            "overridden to the fitted pi / pi/2 value. amp_rabi produces the "
+            "separate 'pi_amp'/'pi2_amp' gain-calibrated modules and seeds its "
+            "gain sweep from the 'pi_len' scalar written here. Module items are "
+            "skipped when no cfg_snapshot is available (e.g. loaded from file)."
+        ),
+        recommended=(
+            "Analysis defaults to fitting a decay envelope on the oscillation; "
+            "keep it on when the Rabi oscillation visibly damps over the "
+            "sweep, turn it off for a pure undamped cosine fit. A length sweep "
+            "spanning a few pi lengths (up to 4*pi_len) captures a full "
+            "oscillation; widen it if no full period is visible."
+        ),
+    )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:

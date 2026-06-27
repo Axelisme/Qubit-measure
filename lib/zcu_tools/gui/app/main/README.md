@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-26（ArbWaveform startup-safe choices）
+**Last updated:** 2026-06-27（adapter guide_text contract）
 
 # `zcu_tools/gui/app/main/` — measure-gui Framework AI Note
 
@@ -158,7 +158,7 @@ measure-gui 不再提供 toolbar「Agent」按鈕、`AgentLaunchDialog` 或 `ser
 ### Adapter Contract
 
 - **框架契約 = `gui.adapter.ExpAdapterProtocol`（generic-free Protocol）**：列出 framework 真正呼叫的必備成員（`cfg_spec`/`guide`/`make_default_cfg`/`make_save_paths`/`run`/`analyze`/`save`/`get_analyze_params`/`analyze_params_cls`/`get_writeback_items`/`capabilities` 等），無實作、無 generic。GUI 一律以不帶 generic 的 `ExpAdapterProtocol` 持 adapter（run/analyze/writeback result 過 Qt `Signal(object)` 即成 `object`，gui 從不 narrow）。`BaseAdapter.validate_run_request` 是可選純 run preflight hook，讓 SoC-dependent 但可預測的 cfg 錯誤在 GuardService 階段同步拒絕，不建立 operation handle。
-- **`guide()` → `AdapterGuide`（靜態行為導覽，開跑前讀）**：五欄 prose（behavior/expects_md/expects_ml/typical_writeback/recommended），**導覽非契約**——讓 agent/user 概觀「測什麼、讀哪些 md/ml key、寫回什麼、推薦設定」，實際怎麼用是其自由（現在式、含具體 key name + 建議範圍 + 標 optional）。BaseAdapter 給「(no guide written yet)」誠實預設；每個 registered adapter 應覆寫（測試 `test_every_registered_adapter_has_a_written_guide` 守此）。雙端出口：agent 走 `adapter.guide` RPC（→ `gui_adapter_guide`）、user 看 `ExpTabWidget` 左側 Config/Analysis 之後的唯讀第三分頁 "Guide"
+- **`guide()` → `AdapterGuide`（靜態行為導覽，開跑前讀）**：五欄 prose（behavior/expects_md/expects_ml/typical_writeback/recommended），**導覽非契約**——讓 agent/user 概觀「測什麼、讀哪些 md/ml key、寫回什麼、推薦設定」，實際怎麼用是其自由（現在式、含具體 key name + 建議範圍 + 標 optional）。BaseAdapter 給「(no guide written yet)」誠實預設；每個 registered adapter 在 experiment 層同檔案提供 local `guide_text`，由 `BaseAdapter.guide()` 暴露給 framework（測試 `test_every_registered_adapter_has_a_written_guide` 守此）。雙端出口：agent 走 `adapter.guide` RPC（→ `gui_adapter_guide`）、user 看 `ExpTabWidget` 左側 Config/Analysis 之後的唯讀第三分頁 "Guide"
 - **共用實作 = `experiment/v2_gui/adapters/base.py::BaseAdapter[T_Cfg, T_Result, T_AnalyzeResult=NoAnalysisResult, T_AnalyzeParams=NoAnalyzeParams]`**（PEP 696 default；pyright 1.1.410 + typing_extensions 支援）。四 generic 強型別連動（run→analyze→writeback）活在**單一 concrete adapter 內部**，由 BaseAdapter generic 保證。adapter 繼承 BaseAdapter，structural 滿足 Protocol（非 nominal）
 - `exp_cls` 透過 structural `ExperimentProtocol[T_Cfg, T_Result]` 約束；`run(soc, soccfg, cfg, **kwargs)` 與 `save(filepath, result, **kwargs)` 採 `**kwargs` 容納 experiment-specific 擴充（例 `earlystop_snr`）
 - `run()` 固定為 `run(req, schema)`；runtime user params 不屬於 adapter API，必須進入 `CfgSchema` 或 adapter constructor

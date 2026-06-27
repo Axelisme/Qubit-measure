@@ -52,66 +52,64 @@ class OneToneFluxDepAdapter(
         analysis=AnalysisMode.INTERACTIVE
     )
 
-    @classmethod
-    def guide(cls) -> AdapterGuide:
-        return AdapterGuide(
-            behavior=(
-                "One-tone resonator flux dependence: a 2D sweep of an external "
-                "flux-bias device value versus readout frequency, tracing how the "
-                "resonator frequency moves with flux. The basis for locating a "
-                "Fluxonium's flux sweet spots (half-flux and integer-flux points). "
-                "Runs on real hardware; requires a SoC connection and a configured "
-                "flux-bias device."
-            ),
-            expects_md=(
-                "Reads from the MetaDict (all optional): 'r_f' — resonator "
-                "frequency, centring the frequency sweep (~4000–8000 MHz); 'rf_w' "
-                "— linewidth, span r_f ± rf_w (~5–50 MHz; falls back to ±30 MHz); "
-                "'res_probe_len' — readout probe length, from which ro_length is "
-                "derived as 'res_probe_len - 0.1' us (~0.5–5 us); 'res_ch' / "
-                "'ro_ch' — drive / ADC channels; 'timeFly' — trigger-offset cable "
-                "delay; 'flx_half' / 'flx_int' — already-calibrated half-flux / "
-                "integer-flux device values when present. First bring-up must not "
-                "assume these are known; absent values fall back to a fixed "
-                "[-4e-3, 4e-3] device sweep that the operator should adjust to a "
-                "safe, user-approved range."
-            ),
-            expects_ml=(
-                "Needs a pulse-readout module, and references a ModuleLibrary "
-                "waveform named 'ro_waveform' when present (optional)."
-            ),
-            typical_writeback=(
-                "Interactive analysis (not a fit): after the run, the user drags "
-                "two lines on the 2D map to mark the half-flux and integer-flux "
-                "sweet spots, then clicks Done. The result writes back 'flx_half', "
-                "'flx_int', and 'flx_period' (= 2·|flx_int − flx_half|) to the "
-                "MetaDict as a preview. The picking is user/agent judgement from "
-                "the measured map, not simulator truth; apply writeback only after "
-                "reviewing the figure."
-            ),
-            recommended=(
-                "Run after lookback and an initial onetone/freq, before any "
-                "twotone flux mapping, to find 'flx_int' / period from the "
-                "resonator map. Interactive flux-line pick (no fit). Also set the "
-                "'flux_dev' field — the "
-                "flux-bias device reference (default 'flux_yoko') — and confirm it "
-                "points at a connected device. Typical sweep: flux ~101 points "
-                "across one period (driven by flx_half/flx_int when calibrated), "
-                "frequency r_f ± one linewidth over ~101 points. Start at a low "
-                "readout gain (~0.005) to stay below punch-out so the dip tracks "
-                "cleanly; if the dip is hard to see (poor SNR), raise the gain "
-                "toward ~0.05 while keeping the frequency window tight. Survey "
-                "wide, then narrow around a sweet spot — and if the resonator's "
-                "flux dispersion (dispersive shift) looks small, narrow the "
-                "frequency window early instead of keeping a broad default span. "
-                "For consecutive flux sweeps, reverse the sweep direction (swap "
-                "start/stop) on the next run so the current source need not ramp "
-                "all the way back across the full range first. Inspect the 2D map "
-                "with gui_tab_get_current_figure to judge window / SNR / shift. "
-                "After accepting 'flx_int', move the flux device there and re-run "
-                "onetone/freq at that flux before twotone/freq."
-            ),
-        )
+    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
+        behavior=(
+            "One-tone resonator flux dependence: a 2D sweep of an external "
+            "flux-bias device value versus readout frequency, tracing how the "
+            "resonator frequency moves with flux. The basis for locating a "
+            "Fluxonium's flux sweet spots (half-flux and integer-flux points). "
+            "Runs on real hardware; requires a SoC connection and a configured "
+            "flux-bias device."
+        ),
+        expects_md=(
+            "Reads from the MetaDict (all optional): 'r_f' — resonator "
+            "frequency, centring the frequency sweep (~4000–8000 MHz); 'rf_w' "
+            "— linewidth, span r_f ± rf_w (~5–50 MHz; falls back to ±30 MHz); "
+            "'res_probe_len' — readout probe length, from which ro_length is "
+            "derived as 'res_probe_len - 0.1' us (~0.5–5 us); 'res_ch' / "
+            "'ro_ch' — drive / ADC channels; 'timeFly' — trigger-offset cable "
+            "delay; 'flx_half' / 'flx_int' — already-calibrated half-flux / "
+            "integer-flux device values when present. First bring-up must not "
+            "assume these are known; absent values fall back to a fixed "
+            "[-4e-3, 4e-3] device sweep that the operator should adjust to a "
+            "safe, user-approved range."
+        ),
+        expects_ml=(
+            "Needs a pulse-readout module, and references a ModuleLibrary "
+            "waveform named 'ro_waveform' when present (optional)."
+        ),
+        typical_writeback=(
+            "Interactive analysis (not a fit): after the run, the user drags "
+            "two lines on the 2D map to mark the half-flux and integer-flux "
+            "sweet spots, then clicks Done. The result writes back 'flx_half', "
+            "'flx_int', and 'flx_period' (= 2·|flx_int − flx_half|) to the "
+            "MetaDict as a preview. The picking is user/agent judgement from "
+            "the measured map, not simulator truth; apply writeback only after "
+            "reviewing the figure."
+        ),
+        recommended=(
+            "Run after lookback and an initial onetone/freq, before any "
+            "twotone flux mapping, to find 'flx_int' / period from the "
+            "resonator map. Interactive flux-line pick (no fit). Also set the "
+            "'flux_dev' field — the "
+            "flux-bias device reference (default 'flux_yoko') — and confirm it "
+            "points at a connected device. Typical sweep: flux ~101 points "
+            "across one period (driven by flx_half/flx_int when calibrated), "
+            "frequency r_f ± one linewidth over ~101 points. Start at a low "
+            "readout gain (~0.005) to stay below punch-out so the dip tracks "
+            "cleanly; if the dip is hard to see (poor SNR), raise the gain "
+            "toward ~0.05 while keeping the frequency window tight. Survey "
+            "wide, then narrow around a sweet spot — and if the resonator's "
+            "flux dispersion (dispersive shift) looks small, narrow the "
+            "frequency window early instead of keeping a broad default span. "
+            "For consecutive flux sweeps, reverse the sweep direction (swap "
+            "start/stop) on the next run so the current source need not ramp "
+            "all the way back across the full range first. Inspect the 2D map "
+            "with gui_tab_get_current_figure to judge window / SNR / shift. "
+            "After accepting 'flx_int', move the flux device there and re-run "
+            "onetone/freq at that flux before twotone/freq."
+        ),
+    )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:

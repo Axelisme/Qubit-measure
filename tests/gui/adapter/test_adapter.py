@@ -695,7 +695,7 @@ def test_base_adapter_get_analyze_params_returns_noparams_when_no_params():
     )
 
 
-def test_base_adapter_get_analyze_params_raises_for_forgotten_real_override():
+def test_base_adapter_validates_forgotten_real_analyze_params_override():
     # An adapter declaring a REAL (non-NoAnalyzeParams) analyze-params type via its
     # 4th generic arg but forgetting the override still Fast-Fails (the guard).
     from dataclasses import dataclass
@@ -704,25 +704,29 @@ def test_base_adapter_get_analyze_params_raises_for_forgotten_real_override():
     class _RealParams:
         flag: bool = False
 
-    class _Adapter(BaseAdapter[MagicMock, MagicMock, NoAnalysisResult, _RealParams]):
-        capabilities = AdapterCapabilities(analysis=AnalysisMode.FIT)
-        exp_cls = MagicMock()
+    with pytest.raises(TypeError, match="get_analyze_params"):
 
-        @classmethod
-        def cfg_spec(cls):
-            return CfgSectionSpec()
+        class _Adapter(
+            BaseAdapter[MagicMock, MagicMock, NoAnalysisResult, _RealParams]
+        ):
+            capabilities = AdapterCapabilities(analysis=AnalysisMode.FIT)
+            exp_cls = MagicMock()
 
-        def make_default_value(self, ctx):
-            return CfgSectionValue()
+            @classmethod
+            def cfg_spec(cls):
+                return CfgSectionSpec()
 
-        def build_exp_cfg(self, raw_cfg, req):
-            return MagicMock()
+            def make_default_value(self, ctx):
+                return CfgSectionValue()
 
-        def make_filename_stem(self, ctx):
-            return "stem"
+            def build_exp_cfg(self, raw_cfg, req):
+                return MagicMock()
 
-    with pytest.raises(NotImplementedError, match="get_analyze_params"):
-        _Adapter().get_analyze_params(MagicMock(), _make_ctx())
+            def make_filename_stem(self, ctx):
+                return "stem"
+
+            def analyze(self, req):
+                return NoAnalysisResult()
 
 
 def test_base_adapter_analyze_raises_by_default():
@@ -805,7 +809,7 @@ def test_base_adapter_build_exp_cfg_raises_without_expcfg_cls():
 def test_analyze_params_cls_fallback_when_no_annotation():
 
     class _UnannotatedAdapter(BaseAdapter):
-        capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE)
+        capabilities = AdapterCapabilities(analysis=AnalysisMode.FIT)
         exp_cls = MagicMock()
 
         @classmethod
@@ -823,6 +827,9 @@ def test_analyze_params_cls_fallback_when_no_annotation():
 
         def get_analyze_params(self, result, ctx):
             return NoAnalyzeParams()
+
+        def analyze(self, req):
+            return NoAnalysisResult()
 
     # The overridden get_analyze_params has no type annotation → fallback
     cls = _UnannotatedAdapter.analyze_params_cls()

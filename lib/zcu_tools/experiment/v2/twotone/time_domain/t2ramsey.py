@@ -17,8 +17,8 @@ from zcu_tools.experiment import (
     PersistableExperiment,
     ZSpec,
     config,
-    retrieve_result,
     record_result,
+    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices

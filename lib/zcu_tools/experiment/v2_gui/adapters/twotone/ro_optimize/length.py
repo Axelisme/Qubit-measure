@@ -66,44 +66,42 @@ class RoOptLengthAdapter(
     exp_cls = LengthExp
     ExpCfg_cls: ClassVar[Any] = LengthCfg
 
-    @classmethod
-    def guide(cls) -> AdapterGuide:
-        return AdapterGuide(
-            behavior=(
-                "Readout length optimization: with the qubit toggled between g and "
-                "e by a pi pulse, sweeps the readout window length and measures the "
-                "g/e signal-to-noise ratio (SNR), to pick the shortest readout that "
-                "still resolves the states well. Runs on real hardware. A "
-                "readout-tuning step, typically after the readout frequency and "
-                "power are set."
-            ),
-            expects_md=(
-                "Reads from the MetaDict (all optional): 'r_f' / 'best_ro_freq' — "
-                "resonator / chosen readout frequency (~4000–8000 MHz); 'res_ch' / "
-                "'ro_ch' — drive / ADC channels; 'timeFly' — trigger-offset cable "
-                "delay; 'q_f' / 'qub_ch' — qubit frequency / channel for the g↔e "
-                "pi pulse."
-            ),
-            expects_ml=(
-                "Needs a qubit-probe pulse module (typically a calibrated pi "
-                "pulse, e.g. 'pi_amp') and a pulse-readout module (e.g. "
-                "'readout_rf', usually pinned to the chosen readout frequency and "
-                "gain); references a ModuleLibrary waveform 'ro_waveform' when "
-                "present. Optionally references a reset module."
-            ),
-            typical_writeback=(
-                "Proposes the SNR-maximizing readout length into MetaDict "
-                "'best_ro_length' (us). No ModuleLibrary writeback — combine the "
-                "best readout params into a 'readout_dpm' module afterwards (the "
-                "'readout_dpm' role)."
-            ),
-            recommended=(
-                "Analysis denoises the SNR curve before picking the peak; wavelet "
-                "smoothing is the default. The optional 't0' analyze param is a "
-                "length penalty: leave it blank (None) for the raw max, or set a "
-                "small us value to bias toward shorter readout."
-            ),
-        )
+    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
+        behavior=(
+            "Readout length optimization: with the qubit toggled between g and "
+            "e by a pi pulse, sweeps the readout window length and measures the "
+            "g/e signal-to-noise ratio (SNR), to pick the shortest readout that "
+            "still resolves the states well. Runs on real hardware. A "
+            "readout-tuning step, typically after the readout frequency and "
+            "power are set."
+        ),
+        expects_md=(
+            "Reads from the MetaDict (all optional): 'r_f' / 'best_ro_freq' — "
+            "resonator / chosen readout frequency (~4000–8000 MHz); 'res_ch' / "
+            "'ro_ch' — drive / ADC channels; 'timeFly' — trigger-offset cable "
+            "delay; 'q_f' / 'qub_ch' — qubit frequency / channel for the g↔e "
+            "pi pulse."
+        ),
+        expects_ml=(
+            "Needs a qubit-probe pulse module (typically a calibrated pi "
+            "pulse, e.g. 'pi_amp') and a pulse-readout module (e.g. "
+            "'readout_rf', usually pinned to the chosen readout frequency and "
+            "gain); references a ModuleLibrary waveform 'ro_waveform' when "
+            "present. Optionally references a reset module."
+        ),
+        typical_writeback=(
+            "Proposes the SNR-maximizing readout length into MetaDict "
+            "'best_ro_length' (us). No ModuleLibrary writeback — combine the "
+            "best readout params into a 'readout_dpm' module afterwards (the "
+            "'readout_dpm' role)."
+        ),
+        recommended=(
+            "Analysis denoises the SNR curve before picking the peak; wavelet "
+            "smoothing is the default. The optional 't0' analyze param is a "
+            "length penalty: leave it blank (None) for the raw max, or set a "
+            "small us value to bias toward shorter readout."
+        ),
+    )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:

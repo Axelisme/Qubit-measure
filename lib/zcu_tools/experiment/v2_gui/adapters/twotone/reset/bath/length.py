@@ -64,42 +64,40 @@ class BathLengthAdapter(
     exp_cls = LengthExp
     ExpCfg_cls: ClassVar[Any] = LengthCfg
 
-    @classmethod
-    def guide(cls) -> AdapterGuide:
-        return AdapterGuide(
-            behavior=(
-                "Bath-reset length sweep: holds the tested bath reset at its "
-                "calibrated cavity frequency and gain and sweeps its duration "
-                "(cavity and qubit tones together), with an internal 4-point pi/2 "
-                "tomography phase axis, showing how the residual excitation decays "
-                "with reset length. Runs on real hardware. Run after the cavity "
-                "freq/gain are found, to pick the shortest fully-resetting length."
-            ),
-            expects_md=(
-                "Reads from the MetaDict (all optional): 'bathreset_freq' / "
-                "'bathreset_gain' — the calibrated cavity frequency and gain "
-                "driving the tested reset (so the cfg snapshot carries them "
-                "forward); 'q_f' / 'qub_ch' / 'res_ch' seed the bath-reset and "
-                "init-pulse drive defaults."
-            ),
-            expects_ml=(
-                "Needs a bath-reset module (the tested reset) and a readout "
-                "module. Optionally references a calibrated upstream reset and an "
-                "init pulse (a library pi pulse when present) — both disabled when "
-                "no library entry exists."
-            ),
-            typical_writeback=(
-                "No writeback — the chosen reset length is read off the decay "
-                "curve by eye, and registering the calibrated 'reset_bath' module "
-                "is left to the final phase step."
-            ),
-            recommended=(
-                "A length sweep from ~0.05 us to a few times the expected reset "
-                "time captures the full decay; shorten the span once the plateau "
-                "is clear. Allow a long relax delay so the qubit fully relaxes "
-                "before each reset."
-            ),
-        )
+    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
+        behavior=(
+            "Bath-reset length sweep: holds the tested bath reset at its "
+            "calibrated cavity frequency and gain and sweeps its duration "
+            "(cavity and qubit tones together), with an internal 4-point pi/2 "
+            "tomography phase axis, showing how the residual excitation decays "
+            "with reset length. Runs on real hardware. Run after the cavity "
+            "freq/gain are found, to pick the shortest fully-resetting length."
+        ),
+        expects_md=(
+            "Reads from the MetaDict (all optional): 'bathreset_freq' / "
+            "'bathreset_gain' — the calibrated cavity frequency and gain "
+            "driving the tested reset (so the cfg snapshot carries them "
+            "forward); 'q_f' / 'qub_ch' / 'res_ch' seed the bath-reset and "
+            "init-pulse drive defaults."
+        ),
+        expects_ml=(
+            "Needs a bath-reset module (the tested reset) and a readout "
+            "module. Optionally references a calibrated upstream reset and an "
+            "init pulse (a library pi pulse when present) — both disabled when "
+            "no library entry exists."
+        ),
+        typical_writeback=(
+            "No writeback — the chosen reset length is read off the decay "
+            "curve by eye, and registering the calibrated 'reset_bath' module "
+            "is left to the final phase step."
+        ),
+        recommended=(
+            "A length sweep from ~0.05 us to a few times the expected reset "
+            "time captures the full decay; shorten the span once the plateau "
+            "is clear. Allow a long relax delay so the qubit fully relaxes "
+            "before each reset."
+        ),
+    )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:

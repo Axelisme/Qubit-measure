@@ -68,44 +68,42 @@ class SsT1ToneAdapter(
     exp_cls = T1WithToneExp
     ExpCfg_cls: ClassVar[Any] = T1WithToneCfg
 
-    @classmethod
-    def guide(cls) -> AdapterGuide:
-        return AdapterGuide(
-            behavior=(
-                "Single-shot T1-with-tone: applies a π pulse and a simultaneous "
-                "probe tone during the wait, sweeps the wait-plus-probe length, "
-                "and classifies each shot in-program against the |g>/|e> IQ-cluster "
-                "centres. Plots the ground / excited / other populations versus "
-                "delay time with dual-transition-rate fits for T1 and T1_b. The "
-                "fitted T1 value is written back to 't1_with_tone' in the MetaDict. "
-                "Runs on real hardware."
-            ),
-            expects_md=(
-                "REQUIRES the single-shot discrimination calibration in the "
-                "MetaDict — run 'singleshot/ge' first and apply its writeback so "
-                "'g_center' / 'e_center' / 'ge_radius' are present; run "
-                "fast-fails if any is missing. "
-                "Optionally reads 'confusion_matrix' to readout-correct populations "
-                "at analyze time; 't1_with_tone' or 't1' to seed the sweep stop "
-                "(default 5*t1, fallback 100 us); 'q_f' / 'qub_ch' for the pi "
-                "pulse; 'r_f' / 'res_ch' / 'ro_ch' / 'timeFly' for readout."
-            ),
-            expects_ml=(
-                "Needs a qubit pi-pulse module, a probe-tone pulse module, and a "
-                "readout module. Optional reset and optional init pulse (both "
-                "disabled when no library entry exists)."
-            ),
-            typical_writeback=(
-                "Proposes the fitted T1 relaxation time under the probe tone into "
-                "MetaDict 't1_with_tone' (us)."
-            ),
-            recommended=(
-                "Run after 'singleshot/ge'. Use 'uniform=False' (default) for "
-                "log-spaced delays (better sampling of the decay); 'uniform=True' "
-                "for a linear sweep. The probe-tone gain and frequency are set "
-                "inside the probe_pulse module."
-            ),
-        )
+    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
+        behavior=(
+            "Single-shot T1-with-tone: applies a π pulse and a simultaneous "
+            "probe tone during the wait, sweeps the wait-plus-probe length, "
+            "and classifies each shot in-program against the |g>/|e> IQ-cluster "
+            "centres. Plots the ground / excited / other populations versus "
+            "delay time with dual-transition-rate fits for T1 and T1_b. The "
+            "fitted T1 value is written back to 't1_with_tone' in the MetaDict. "
+            "Runs on real hardware."
+        ),
+        expects_md=(
+            "REQUIRES the single-shot discrimination calibration in the "
+            "MetaDict — run 'singleshot/ge' first and apply its writeback so "
+            "'g_center' / 'e_center' / 'ge_radius' are present; run "
+            "fast-fails if any is missing. "
+            "Optionally reads 'confusion_matrix' to readout-correct populations "
+            "at analyze time; 't1_with_tone' or 't1' to seed the sweep stop "
+            "(default 5*t1, fallback 100 us); 'q_f' / 'qub_ch' for the pi "
+            "pulse; 'r_f' / 'res_ch' / 'ro_ch' / 'timeFly' for readout."
+        ),
+        expects_ml=(
+            "Needs a qubit pi-pulse module, a probe-tone pulse module, and a "
+            "readout module. Optional reset and optional init pulse (both "
+            "disabled when no library entry exists)."
+        ),
+        typical_writeback=(
+            "Proposes the fitted T1 relaxation time under the probe tone into "
+            "MetaDict 't1_with_tone' (us)."
+        ),
+        recommended=(
+            "Run after 'singleshot/ge'. Use 'uniform=False' (default) for "
+            "log-spaced delays (better sampling of the decay); 'uniform=True' "
+            "for a linear sweep. The probe-tone gain and frequency are set "
+            "inside the probe_pulse module."
+        ),
+    )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:

@@ -61,39 +61,37 @@ class OneToneFreqAdapter(
     ExpCfg_cls: ClassVar[Any] = FreqCfg
     legacy_migration_experiment: ClassVar[str | None] = "onetone/freq"
 
-    @classmethod
-    def guide(cls) -> AdapterGuide:
-        return AdapterGuide(
-            behavior=(
-                "One-tone resonator spectroscopy: sweeps the readout frequency "
-                "and fits the resonator response to extract its frequency and "
-                "linewidth. Runs on real hardware. Typically run after a coarse "
-                "resonator search has placed you near the right frequency."
-            ),
-            expects_md=(
-                "Reads from the MetaDict (all optional): 'r_f' — resonator "
-                "frequency (~4000–8000 MHz); 'res_probe_len' — probe-pulse length, "
-                "from which the readout window is derived (~0.5–5 us); 'res_ch' / "
-                "'ro_ch' — drive / readout channel indices; 'timeFly' — cable "
-                "time-of-flight feeding the trigger offset (~0–1 us)."
-            ),
-            expects_ml=(
-                "Needs a pulse-readout module, and references a ModuleLibrary "
-                "waveform named 'ro_waveform' when one exists (optional)."
-            ),
-            typical_writeback=(
-                "Proposes the fitted resonator frequency and linewidth into "
-                "MetaDict 'r_f' / 'rf_w'. The readout module / waveform are left "
-                "to the user — a frequency fit alone does not justify rewriting "
-                "the whole readout config."
-            ),
-            recommended=(
-                "Analysis defaults to the hanger-model fit ('hm') with "
-                "background-slope fitting on. A sweep spanning a few linewidths "
-                "around the known resonator frequency usually captures the dip "
-                "cleanly; widen it if the resonator has drifted."
-            ),
-        )
+    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
+        behavior=(
+            "One-tone resonator spectroscopy: sweeps the readout frequency "
+            "and fits the resonator response to extract its frequency and "
+            "linewidth. Runs on real hardware. Typically run after a coarse "
+            "resonator search has placed you near the right frequency."
+        ),
+        expects_md=(
+            "Reads from the MetaDict (all optional): 'r_f' — resonator "
+            "frequency (~4000–8000 MHz); 'res_probe_len' — probe-pulse length, "
+            "from which the readout window is derived (~0.5–5 us); 'res_ch' / "
+            "'ro_ch' — drive / readout channel indices; 'timeFly' — cable "
+            "time-of-flight feeding the trigger offset (~0–1 us)."
+        ),
+        expects_ml=(
+            "Needs a pulse-readout module, and references a ModuleLibrary "
+            "waveform named 'ro_waveform' when one exists (optional)."
+        ),
+        typical_writeback=(
+            "Proposes the fitted resonator frequency and linewidth into "
+            "MetaDict 'r_f' / 'rf_w'. The readout module / waveform are left "
+            "to the user — a frequency fit alone does not justify rewriting "
+            "the whole readout config."
+        ),
+        recommended=(
+            "Analysis defaults to the hanger-model fit ('hm') with "
+            "background-slope fitting on. A sweep spanning a few linewidths "
+            "around the known resonator frequency usually captures the dip "
+            "cleanly; widen it if the resonator has drifted."
+        ),
+    )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:

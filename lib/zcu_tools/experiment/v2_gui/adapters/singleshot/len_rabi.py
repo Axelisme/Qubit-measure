@@ -55,39 +55,37 @@ class SsLenRabiAdapter(
     exp_cls = LenRabiExp
     ExpCfg_cls: ClassVar[Any] = LenRabiCfg
 
-    @classmethod
-    def guide(cls) -> AdapterGuide:
-        return AdapterGuide(
-            behavior=(
-                "Single-shot Length Rabi: sweeps the qubit-drive pulse length and "
-                "classifies each raw shot in-program against the |g>/|e> IQ-cluster "
-                "centres, plotting the ground / excited / other populations versus "
-                "pulse length. The result is already populations — no per-point "
-                "fit is performed during analyze. Runs on real hardware."
-            ),
-            expects_md=(
-                "REQUIRES the single-shot discrimination calibration in the "
-                "MetaDict — run 'singleshot/ge' first and apply its writeback so "
-                "'g_center' / 'e_center' / 'ge_radius' are present; run "
-                "fast-fails if any is missing. "
-                "Optionally reads 'confusion_matrix' to readout-correct the "
-                "populations at analyze time; 'pi_len' to seed the sweep stop "
-                "(default sweep: 0.03 – 4*pi_len us); 'q_f' / 'qub_ch' to seed "
-                "the qubit-drive defaults."
-            ),
-            expects_ml=(
-                "Needs a qubit drive-pulse module (qub_pulse) and a readout module. "
-                "Optional reset (disabled when no library entry exists)."
-            ),
-            typical_writeback=(
-                "No writeback — read the pi-pulse length off the Rabi plot by eye."
-            ),
-            recommended=(
-                "Run after 'singleshot/ge'. A sweep spanning a few pi lengths "
-                "captures a full oscillation. The three-line population plot lets "
-                "you check leakage (other population)."
-            ),
-        )
+    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
+        behavior=(
+            "Single-shot Length Rabi: sweeps the qubit-drive pulse length and "
+            "classifies each raw shot in-program against the |g>/|e> IQ-cluster "
+            "centres, plotting the ground / excited / other populations versus "
+            "pulse length. The result is already populations — no per-point "
+            "fit is performed during analyze. Runs on real hardware."
+        ),
+        expects_md=(
+            "REQUIRES the single-shot discrimination calibration in the "
+            "MetaDict — run 'singleshot/ge' first and apply its writeback so "
+            "'g_center' / 'e_center' / 'ge_radius' are present; run "
+            "fast-fails if any is missing. "
+            "Optionally reads 'confusion_matrix' to readout-correct the "
+            "populations at analyze time; 'pi_len' to seed the sweep stop "
+            "(default sweep: 0.03 – 4*pi_len us); 'q_f' / 'qub_ch' to seed "
+            "the qubit-drive defaults."
+        ),
+        expects_ml=(
+            "Needs a qubit drive-pulse module (qub_pulse) and a readout module. "
+            "Optional reset (disabled when no library entry exists)."
+        ),
+        typical_writeback=(
+            "No writeback — read the pi-pulse length off the Rabi plot by eye."
+        ),
+        recommended=(
+            "Run after 'singleshot/ge'. A sweep spanning a few pi lengths "
+            "captures a full oscillation. The three-line population plot lets "
+            "you check leakage (other population)."
+        ),
+    )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:

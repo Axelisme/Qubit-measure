@@ -793,7 +793,7 @@ def test_adapter_guide_unknown_rejected(fx):
 
 
 def test_base_adapter_guide_default_is_honest():
-    # Every registered adapter now overrides guide(), so the honest default is
+    # Every registered adapter defines local guide_text, so the honest default is
     # tested directly on BaseAdapter: an adapter with no guide says so plainly
     # rather than faking content.
     from zcu_tools.experiment.v2_gui.adapters.fake.stub import FakeAdapter
@@ -805,7 +805,7 @@ def test_base_adapter_guide_default_is_honest():
 
 
 def test_every_registered_adapter_has_a_written_guide():
-    # A new adapter that forgets to override guide() falls back to the honest
+    # A new adapter that forgets guide_text falls back to the honest
     # "(no guide written yet)" default — this test flags that so the gap is
     # caught at review time rather than shipping a blank Guide tab to users.
     from zcu_tools.experiment.v2_gui.registry import ADAPTERS

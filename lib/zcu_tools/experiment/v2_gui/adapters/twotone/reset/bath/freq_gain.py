@@ -94,41 +94,39 @@ class BathFreqGainAdapter(
     exp_cls = FreqGainExp
     ExpCfg_cls: ClassVar[Any] = FreqGainCfg
 
-    @classmethod
-    def guide(cls) -> AdapterGuide:
-        return AdapterGuide(
-            behavior=(
-                "Bath-reset cavity frequency–gain map: a 2D sweep of the bath "
-                "reset's cavity-tone frequency × gain, with an internal 4-point "
-                "pi/2 tomography phase axis the experiment drives itself, imaging "
-                "the residual coherence to locate the (freq, gain) pair that best "
-                "dumps the excitation into the cavity bath. Runs on real hardware."
-            ),
-            expects_md=(
-                "Reads from the MetaDict (all optional): 'r_f' / 'rabi_f' — the "
-                "resonator frequency and bath Rabi frequency centring the cavity "
-                "freq sweep at 'r_f - rabi_f' (absent → a fixed span); 'q_f' / "
-                "'qub_ch' / 'res_ch' seed the bath-reset tone drive defaults."
-            ),
-            expects_ml=(
-                "Needs a bath-reset module (the tested reset, with cavity / qubit / "
-                "pi-2 tones) and a readout module. Optionally references a "
-                "calibrated upstream reset and an init pulse (a library pi pulse "
-                "when present) — both disabled when no library entry exists."
-            ),
-            typical_writeback=(
-                "Proposes the best cavity gain into MetaDict 'bathreset_gain' and "
-                "frequency into 'bathreset_freq'. No ModuleLibrary writeback — these "
-                "seed the final 'reset_bath' registration done after the length and "
-                "phase steps (D2(a))."
-            ),
-            recommended=(
-                "Analysis denoises the 2D map before picking the peak; wavelet "
-                "smoothing is the default and Gaussian remains available for "
-                "comparison. Save writes one 3D HDF5 file with the tomography phase "
-                "stored as an internal sweep axis."
-            ),
-        )
+    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
+        behavior=(
+            "Bath-reset cavity frequency–gain map: a 2D sweep of the bath "
+            "reset's cavity-tone frequency × gain, with an internal 4-point "
+            "pi/2 tomography phase axis the experiment drives itself, imaging "
+            "the residual coherence to locate the (freq, gain) pair that best "
+            "dumps the excitation into the cavity bath. Runs on real hardware."
+        ),
+        expects_md=(
+            "Reads from the MetaDict (all optional): 'r_f' / 'rabi_f' — the "
+            "resonator frequency and bath Rabi frequency centring the cavity "
+            "freq sweep at 'r_f - rabi_f' (absent → a fixed span); 'q_f' / "
+            "'qub_ch' / 'res_ch' seed the bath-reset tone drive defaults."
+        ),
+        expects_ml=(
+            "Needs a bath-reset module (the tested reset, with cavity / qubit / "
+            "pi-2 tones) and a readout module. Optionally references a "
+            "calibrated upstream reset and an init pulse (a library pi pulse "
+            "when present) — both disabled when no library entry exists."
+        ),
+        typical_writeback=(
+            "Proposes the best cavity gain into MetaDict 'bathreset_gain' and "
+            "frequency into 'bathreset_freq'. No ModuleLibrary writeback — these "
+            "seed the final 'reset_bath' registration done after the length and "
+            "phase steps (D2(a))."
+        ),
+        recommended=(
+            "Analysis denoises the 2D map before picking the peak; wavelet "
+            "smoothing is the default and Gaussian remains available for "
+            "comparison. Save writes one 3D HDF5 file with the tomography phase "
+            "stored as an internal sweep axis."
+        ),
+    )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:

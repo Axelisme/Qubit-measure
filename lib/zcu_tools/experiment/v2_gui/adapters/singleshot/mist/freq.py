@@ -13,8 +13,8 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_module_spec,
     make_readout_module_spec,
     make_reset_module_spec,
-    proper_res_freq_range,
     proper_relax,
+    proper_res_freq_range,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -48,39 +48,37 @@ class MistFreqAdapter(
     exp_cls = FreqDepExp
     ExpCfg_cls: ClassVar[Any] = FreqCfg
 
-    @classmethod
-    def guide(cls) -> AdapterGuide:
-        return AdapterGuide(
-            behavior=(
-                "MIST probe-frequency sweep: drives a probe pulse whose frequency "
-                "is swept and classifies each shot in-program against the |g>/|e> "
-                "single-shot centres, plotting the ground/excited/other populations "
-                "versus probe frequency. Runs on real hardware; the result is "
-                "already populations (no per-point fit)."
-            ),
-            expects_md=(
-                "REQUIRES the single-shot discrimination calibration in the "
-                "MetaDict — run 'singleshot/ge' first and apply its writeback so "
-                "'g_center' / 'e_center' / 'ge_radius' are present; the run "
-                "classifies each shot against them and fast-fails if any is "
-                "missing. Optionally reads 'confusion_matrix' (the GE 3x3 matrix) "
-                "to readout-correct the populations at analyze time, and 't1' to "
-                "set the relax delay; 'q_f' / 'qub_ch' seed the probe drive."
-            ),
-            expects_ml=(
-                "Needs a probe pulse and a readout module. Optionally references a "
-                "calibrated reset and an init pulse — both disabled when no library "
-                "entry exists."
-            ),
-            typical_writeback=(
-                "No writeback — the population curves are read off the plot by eye."
-            ),
-            recommended=(
-                "Run after 'singleshot/ge' has calibrated the discrimination. A "
-                "frequency span around the qubit drive captures the MIST response; "
-                "use a large enough shot count (reps) for clean populations."
-            ),
-        )
+    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
+        behavior=(
+            "MIST probe-frequency sweep: drives a probe pulse whose frequency "
+            "is swept and classifies each shot in-program against the |g>/|e> "
+            "single-shot centres, plotting the ground/excited/other populations "
+            "versus probe frequency. Runs on real hardware; the result is "
+            "already populations (no per-point fit)."
+        ),
+        expects_md=(
+            "REQUIRES the single-shot discrimination calibration in the "
+            "MetaDict — run 'singleshot/ge' first and apply its writeback so "
+            "'g_center' / 'e_center' / 'ge_radius' are present; the run "
+            "classifies each shot against them and fast-fails if any is "
+            "missing. Optionally reads 'confusion_matrix' (the GE 3x3 matrix) "
+            "to readout-correct the populations at analyze time, and 't1' to "
+            "set the relax delay; 'q_f' / 'qub_ch' seed the probe drive."
+        ),
+        expects_ml=(
+            "Needs a probe pulse and a readout module. Optionally references a "
+            "calibrated reset and an init pulse — both disabled when no library "
+            "entry exists."
+        ),
+        typical_writeback=(
+            "No writeback — the population curves are read off the plot by eye."
+        ),
+        recommended=(
+            "Run after 'singleshot/ge' has calibrated the discrimination. A "
+            "frequency span around the qubit drive captures the MIST response; "
+            "use a large enough shot count (reps) for clean populations."
+        ),
+    )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:

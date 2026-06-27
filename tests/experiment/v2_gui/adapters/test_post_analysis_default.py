@@ -8,21 +8,25 @@ post-analysis to an adapter that never implemented it).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
+    AnalysisMode,
     CfgSectionSpec,
     CfgSectionValue,
 )
 
 
 class _FakeAdapter(BaseAdapter[Any, Any, Any, Any]):
-    """Minimal FIT-only adapter that does not opt into post-analysis."""
+    """Minimal no-analysis adapter that does not opt into post-analysis."""
 
+    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
+        analysis=AnalysisMode.NONE
+    )
     exp_cls = MagicMock
 
     @classmethod

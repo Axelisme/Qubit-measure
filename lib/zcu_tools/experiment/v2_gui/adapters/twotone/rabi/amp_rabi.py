@@ -15,12 +15,12 @@ from zcu_tools.experiment.v2.twotone.rabi.amp_rabi import (
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
-    proper_relax,
     build_exp_spec,
     make_pulse_module_spec,
     make_readout_module_spec,
     make_reset_module_spec,
     md_eval_scaled,
+    proper_relax,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -71,49 +71,47 @@ class AmpRabiAdapter(
     exp_cls = AmpRabiExp
     ExpCfg_cls: ClassVar[Any] = AmpRabiCfg
 
-    @classmethod
-    def guide(cls) -> AdapterGuide:
-        return AdapterGuide(
-            behavior=(
-                "Amplitude Rabi: drives the qubit at its known frequency and "
-                "sweeps the drive-pulse gain, fitting the resulting Rabi "
-                "oscillation to find the pi and pi/2 pulse amplitudes. Runs on "
-                "real hardware. Run once you know the qubit frequency, to "
-                "calibrate a pi pulse by amplitude (the pulse length stays fixed)."
-            ),
-            expects_md=(
-                "Reads from the MetaDict (all optional, seeding defaults): 'q_f' — "
-                "qubit frequency feeding the drive pulse (~2000–6000 MHz); "
-                "'qub_ch' — qubit-drive channel; 'pi_gain' — prior pi-pulse gain, "
-                "the gain sweep spans up to 2*pi_gain (fallback ~0.5). Readout "
-                "defaults pull 'r_f' (~4000–8000 MHz), 'res_ch' / 'ro_ch', and "
-                "'timeFly' for the readout trigger offset (~0–1 us)."
-            ),
-            expects_ml=(
-                "Needs a qubit drive-pulse module (defaults to a blank inline "
-                "pulse) and a readout module — references a calibrated library "
-                "readout ('readout_dpm' / 'readout_rf' / 'readout' / "
-                "'res_readout') when present, else a blank pulse-readout that "
-                "references the 'ro_waveform' waveform when one exists. Optional "
-                "reset references a library reset ('reset_bath' / 'reset_10' / "
-                "'reset_120') when present, else stays disabled."
-            ),
-            typical_writeback=(
-                "Proposes MetaDict scalars 'pi_gain' and 'pi2_gain' (fitted "
-                "gains). Also proposes ModuleLibrary modules 'pi_amp' and "
-                "'pi2_amp' — copies of the qubit drive module with gain "
-                "overridden to the fitted pi / pi/2 value. Module items are "
-                "skipped when no cfg_snapshot is available (e.g. loaded from "
-                "file)."
-            ),
-            recommended=(
-                "Analysis takes a 'Skip points' count (default 0) to drop leading "
-                "low-gain sweep points before the cosine fit; raise it only if the "
-                "first few points are distorted. A gain sweep spanning roughly two "
-                "pi amplitudes captures at least a full oscillation; widen it if "
-                "no full period is visible."
-            ),
-        )
+    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
+        behavior=(
+            "Amplitude Rabi: drives the qubit at its known frequency and "
+            "sweeps the drive-pulse gain, fitting the resulting Rabi "
+            "oscillation to find the pi and pi/2 pulse amplitudes. Runs on "
+            "real hardware. Run once you know the qubit frequency, to "
+            "calibrate a pi pulse by amplitude (the pulse length stays fixed)."
+        ),
+        expects_md=(
+            "Reads from the MetaDict (all optional, seeding defaults): 'q_f' — "
+            "qubit frequency feeding the drive pulse (~2000–6000 MHz); "
+            "'qub_ch' — qubit-drive channel; 'pi_gain' — prior pi-pulse gain, "
+            "the gain sweep spans up to 2*pi_gain (fallback ~0.5). Readout "
+            "defaults pull 'r_f' (~4000–8000 MHz), 'res_ch' / 'ro_ch', and "
+            "'timeFly' for the readout trigger offset (~0–1 us)."
+        ),
+        expects_ml=(
+            "Needs a qubit drive-pulse module (defaults to a blank inline "
+            "pulse) and a readout module — references a calibrated library "
+            "readout ('readout_dpm' / 'readout_rf' / 'readout' / "
+            "'res_readout') when present, else a blank pulse-readout that "
+            "references the 'ro_waveform' waveform when one exists. Optional "
+            "reset references a library reset ('reset_bath' / 'reset_10' / "
+            "'reset_120') when present, else stays disabled."
+        ),
+        typical_writeback=(
+            "Proposes MetaDict scalars 'pi_gain' and 'pi2_gain' (fitted "
+            "gains). Also proposes ModuleLibrary modules 'pi_amp' and "
+            "'pi2_amp' — copies of the qubit drive module with gain "
+            "overridden to the fitted pi / pi/2 value. Module items are "
+            "skipped when no cfg_snapshot is available (e.g. loaded from "
+            "file)."
+        ),
+        recommended=(
+            "Analysis takes a 'Skip points' count (default 0) to drop leading "
+            "low-gain sweep points before the cosine fit; raise it only if the "
+            "first few points are distorted. A gain sweep spanning roughly two "
+            "pi amplitudes captures at least a full oscillation; widen it if "
+            "no full period is visible."
+        ),
+    )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:
@@ -130,7 +128,7 @@ class AmpRabiAdapter(
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        # gain sweep spans up to 2*pi_gain (md-linked) → an EvalValue stop edge,
+        # gain sweep spans up to 1.2*pi_gain (md-linked) → an EvalValue stop edge,
         # so the sweep is pre-built and mounted via set_sweep.
         return (
             CfgBuilder(ctx, self.cfg_spec())

@@ -206,12 +206,15 @@ def test_t2_run_converts_detune_ratio_to_mhz(adapter_cls: type) -> None:
     # Domain T2*/T2echo run returns (result, true_detune); the GUI run override
     # converts detune_ratio (fringes/step) to absolute detune (MHz) as
     # ratio / sweep step, forwards it as a kwarg, and returns only the result.
-    sentinel_result = object()
+    sentinel_result = MagicMock()
+    sentinel_result.true_activate_detune = 0.123
     captured: dict[str, Any] = {}
 
     class FakeExp:
         def run(self, soc, soccfg, cfg, *, detune: float):
             captured["detune"] = detune
+            if adapter_cls is T2RamseyAdapter:
+                return sentinel_result
             return sentinel_result, 0.123  # (result, true_detune)
 
     adapter = adapter_cls()
@@ -242,6 +245,10 @@ def test_t2_run_zero_ratio_passes_zero_detune(adapter_cls: type) -> None:
     class FakeExp:
         def run(self, soc, soccfg, cfg, *, detune: float):
             captured["detune"] = detune
+            if adapter_cls is T2RamseyAdapter:
+                result = MagicMock()
+                result.true_activate_detune = 0.0
+                return result
             return object(), 0.0
 
     adapter = adapter_cls()
@@ -269,6 +276,7 @@ def _ramsey_run_result(pi2_freq: float) -> Any:
     return T2RamseyResult(
         times=np.zeros(1, dtype=np.float64),
         signals=np.zeros(1, dtype=np.complex128),
+        true_activate_detune=0.5,
         cfg_snapshot=snapshot,
     )
 

@@ -184,40 +184,38 @@ class SsT1ToneSweepGainAdapter(_SsT1ToneSweepBase):
     outer_default: ClassVar[SweepValue] = SweepValue(start=0.0, stop=1.0, expts=21)
     filename_token: ClassVar[str] = "gain"
 
-    @classmethod
-    def guide(cls) -> AdapterGuide:
-        return AdapterGuide(
-            behavior=(
-                "Single-shot T1-with-tone, probe-gain sweep: at each probe gain it "
-                "sweeps the wait-plus-probe length from both |g> and |e> initial "
-                "states (Branch), classifies each shot in-program against the "
-                "|g>/|e> centres, fits the dual transition rates per gain, and "
-                "renders the 3×3 rate landscape over (gain, time). Runs on real "
-                "hardware."
-            ),
-            expects_md=(
-                "REQUIRES the single-shot discrimination calibration in the "
-                "MetaDict — run 'singleshot/ge' first and apply its writeback so "
-                "'g_center' / 'e_center' / 'ge_radius' are present; run fast-fails "
-                "if any is missing. Optionally reads 'confusion_matrix' (readout "
-                "correction) and 'ac_stark_coeff' (rescales the gain axis to photon "
-                "number) at analyze time; 't1' to seed the length sweep stop."
-            ),
-            expects_ml=(
-                "Needs a qubit pi-pulse module, a probe-tone pulse module, and a "
-                "readout module. Optional reset (disabled when no library entry "
-                "exists)."
-            ),
-            typical_writeback=(
-                "No writeback — the rate landscape is read off the grid by eye."
-            ),
-            recommended=(
-                "Run after 'singleshot/ge'. Keep the gain sweep coarse (the inner "
-                "length sweep multiplies the run time). Provide 'ac_stark_coeff' "
-                "for a photon-number x-axis. 'uniform=True' (default) uses a linear "
-                "length sweep; set False for log-spaced delays."
-            ),
-        )
+    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
+        behavior=(
+            "Single-shot T1-with-tone, probe-gain sweep: at each probe gain it "
+            "sweeps the wait-plus-probe length from both |g> and |e> initial "
+            "states (Branch), classifies each shot in-program against the "
+            "|g>/|e> centres, fits the dual transition rates per gain, and "
+            "renders the 3×3 rate landscape over (gain, time). Runs on real "
+            "hardware."
+        ),
+        expects_md=(
+            "REQUIRES the single-shot discrimination calibration in the "
+            "MetaDict — run 'singleshot/ge' first and apply its writeback so "
+            "'g_center' / 'e_center' / 'ge_radius' are present; run fast-fails "
+            "if any is missing. Optionally reads 'confusion_matrix' (readout "
+            "correction) and 'ac_stark_coeff' (rescales the gain axis to photon "
+            "number) at analyze time; 't1' to seed the length sweep stop."
+        ),
+        expects_ml=(
+            "Needs a qubit pi-pulse module, a probe-tone pulse module, and a "
+            "readout module. Optional reset (disabled when no library entry "
+            "exists)."
+        ),
+        typical_writeback=(
+            "No writeback — the rate landscape is read off the grid by eye."
+        ),
+        recommended=(
+            "Run after 'singleshot/ge'. Keep the gain sweep coarse (the inner "
+            "length sweep multiplies the run time). Provide 'ac_stark_coeff' "
+            "for a photon-number x-axis. 'uniform=True' (default) uses a linear "
+            "length sweep; set False for log-spaced delays."
+        ),
+    )
 
 
 class SsT1ToneSweepFreqAdapter(_SsT1ToneSweepBase):
@@ -226,37 +224,35 @@ class SsT1ToneSweepFreqAdapter(_SsT1ToneSweepBase):
     outer_default: ClassVar[SweepValue] = SweepValue(start=-100.0, stop=100.0, expts=21)
     filename_token: ClassVar[str] = "freq"
 
-    @classmethod
-    def guide(cls) -> AdapterGuide:
-        return AdapterGuide(
-            behavior=(
-                "Single-shot T1-with-tone, probe-frequency sweep: at each probe "
-                "frequency it sweeps the wait-plus-probe length from both |g> and "
-                "|e> initial states (Branch), classifies each shot in-program "
-                "against the |g>/|e> centres, fits the dual transition rates per "
-                "frequency, and renders the 3×3 rate landscape over (freq, time). "
-                "Runs on real hardware."
-            ),
-            expects_md=(
-                "REQUIRES the single-shot discrimination calibration in the "
-                "MetaDict — run 'singleshot/ge' first and apply its writeback so "
-                "'g_center' / 'e_center' / 'ge_radius' are present; run fast-fails "
-                "if any is missing. Optionally reads 'confusion_matrix' (readout "
-                "correction) at analyze time; 't1' to seed the length sweep stop. "
-                "('ac_stark_coeff' applies only to a gain sweep, not this one.)"
-            ),
-            expects_ml=(
-                "Needs a qubit pi-pulse module, a probe-tone pulse module, and a "
-                "readout module. Optional reset (disabled when no library entry "
-                "exists)."
-            ),
-            typical_writeback=(
-                "No writeback — the rate landscape is read off the grid by eye."
-            ),
-            recommended=(
-                "Run after 'singleshot/ge'. Keep the frequency sweep coarse (the "
-                "inner length sweep multiplies the run time). 'uniform=True' "
-                "(default) uses a linear length sweep; set False for log-spaced "
-                "delays."
-            ),
-        )
+    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
+        behavior=(
+            "Single-shot T1-with-tone, probe-frequency sweep: at each probe "
+            "frequency it sweeps the wait-plus-probe length from both |g> and "
+            "|e> initial states (Branch), classifies each shot in-program "
+            "against the |g>/|e> centres, fits the dual transition rates per "
+            "frequency, and renders the 3×3 rate landscape over (freq, time). "
+            "Runs on real hardware."
+        ),
+        expects_md=(
+            "REQUIRES the single-shot discrimination calibration in the "
+            "MetaDict — run 'singleshot/ge' first and apply its writeback so "
+            "'g_center' / 'e_center' / 'ge_radius' are present; run fast-fails "
+            "if any is missing. Optionally reads 'confusion_matrix' (readout "
+            "correction) at analyze time; 't1' to seed the length sweep stop. "
+            "('ac_stark_coeff' applies only to a gain sweep, not this one.)"
+        ),
+        expects_ml=(
+            "Needs a qubit pi-pulse module, a probe-tone pulse module, and a "
+            "readout module. Optional reset (disabled when no library entry "
+            "exists)."
+        ),
+        typical_writeback=(
+            "No writeback — the rate landscape is read off the grid by eye."
+        ),
+        recommended=(
+            "Run after 'singleshot/ge'. Keep the frequency sweep coarse (the "
+            "inner length sweep multiplies the run time). 'uniform=True' "
+            "(default) uses a linear length sweep; set False for log-spaced "
+            "delays."
+        ),
+    )

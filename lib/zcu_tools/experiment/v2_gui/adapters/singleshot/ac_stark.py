@@ -61,45 +61,43 @@ class SsAcStarkAdapter(
     exp_cls = AcStarkExp
     ExpCfg_cls: ClassVar[Any] = AcStarkCfg
 
-    @classmethod
-    def guide(cls) -> AdapterGuide:
-        return AdapterGuide(
-            behavior=(
-                "Single-shot AC-Stark calibration: drives two Stark pulses while "
-                "sweeping the first pulse's gain and the probe frequency (2D), "
-                "classifying each shot in-program against the |g>/|e> IQ-cluster "
-                "centres. Fits the Stark-shifted resonance versus gain² to extract "
-                "the AC-Stark coefficient (photon number per gain²). Runs on real "
-                "hardware."
-            ),
-            expects_md=(
-                "REQUIRES the single-shot discrimination calibration in the "
-                "MetaDict — run 'singleshot/ge' first and apply its writeback so "
-                "'g_center' / 'e_center' / 'ge_radius' are present; the run "
-                "classifies each shot against them and fast-fails if any is missing. "
-                "ANALYSIS additionally REQUIRES 'chi' (dispersive shift, MHz) and "
-                "'rf_w' (resonator linewidth kappa, MHz) — both feed the AC-Stark "
-                "coefficient fit and analyze fast-fails if either is missing (run "
-                "the dispersive-shift experiment first). Optionally reads "
-                "'confusion_matrix' (readout correction) and 'cutoff' (drop gains "
-                "above it before fitting) at analyze time."
-            ),
-            expects_ml=(
-                "Needs two Stark pulses and a readout module. Optionally references "
-                "a calibrated reset and an init pulse — both disabled when no "
-                "library entry exists."
-            ),
-            typical_writeback=(
-                "Proposes the fitted AC-Stark coefficient into MetaDict "
-                "'ac_stark_coeff' (photon number per gain²); the MIST experiments "
-                "read it to rescale their x-axis to photon number."
-            ),
-            recommended=(
-                "Run after 'singleshot/ge' and after the dispersive-shift "
-                "experiment has set 'chi' / 'rf_w'. Sweep the Stark gain across the "
-                "onset and the probe frequency around the qubit line."
-            ),
-        )
+    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
+        behavior=(
+            "Single-shot AC-Stark calibration: drives two Stark pulses while "
+            "sweeping the first pulse's gain and the probe frequency (2D), "
+            "classifying each shot in-program against the |g>/|e> IQ-cluster "
+            "centres. Fits the Stark-shifted resonance versus gain² to extract "
+            "the AC-Stark coefficient (photon number per gain²). Runs on real "
+            "hardware."
+        ),
+        expects_md=(
+            "REQUIRES the single-shot discrimination calibration in the "
+            "MetaDict — run 'singleshot/ge' first and apply its writeback so "
+            "'g_center' / 'e_center' / 'ge_radius' are present; the run "
+            "classifies each shot against them and fast-fails if any is missing. "
+            "ANALYSIS additionally REQUIRES 'chi' (dispersive shift, MHz) and "
+            "'rf_w' (resonator linewidth kappa, MHz) — both feed the AC-Stark "
+            "coefficient fit and analyze fast-fails if either is missing (run "
+            "the dispersive-shift experiment first). Optionally reads "
+            "'confusion_matrix' (readout correction) and 'cutoff' (drop gains "
+            "above it before fitting) at analyze time."
+        ),
+        expects_ml=(
+            "Needs two Stark pulses and a readout module. Optionally references "
+            "a calibrated reset and an init pulse — both disabled when no "
+            "library entry exists."
+        ),
+        typical_writeback=(
+            "Proposes the fitted AC-Stark coefficient into MetaDict "
+            "'ac_stark_coeff' (photon number per gain²); the MIST experiments "
+            "read it to rescale their x-axis to photon number."
+        ),
+        recommended=(
+            "Run after 'singleshot/ge' and after the dispersive-shift "
+            "experiment has set 'chi' / 'rf_w'. Sweep the Stark gain across the "
+            "onset and the probe frequency around the qubit line."
+        ),
+    )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:

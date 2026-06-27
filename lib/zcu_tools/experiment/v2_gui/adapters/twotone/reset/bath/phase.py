@@ -60,44 +60,42 @@ class BathPhaseAdapter(
     exp_cls = PhaseExp
     ExpCfg_cls: ClassVar[Any] = PhaseCfg
 
-    @classmethod
-    def guide(cls) -> AdapterGuide:
-        return AdapterGuide(
-            behavior=(
-                "Bath-reset pi/2 phase sweep: holds the tested bath reset at its "
-                "calibrated cavity freq/gain and length and sweeps the tomography "
-                "pi/2 pulse phase, fitting the cosine response to find the phases "
-                "that reset to ground (max) and to excited (min). Runs on real "
-                "hardware. Run last, to fix the pi/2 phase of the reset module."
-            ),
-            expects_md=(
-                "Reads from the MetaDict (all optional): 'bathreset_freq' / "
-                "'bathreset_gain' — the calibrated cavity frequency and gain so the "
-                "cfg snapshot carries the fully calibrated reset forward for "
-                "registration; 'q_f' / 'qub_ch' / 'res_ch' seed the bath-reset "
-                "tone drive defaults."
-            ),
-            expects_ml=(
-                "Needs a bath-reset module (the tested reset) and a readout "
-                "module. Optionally references a calibrated upstream reset and an "
-                "init pulse (a library pi pulse when present) — both disabled when "
-                "no library entry exists."
-            ),
-            typical_writeback=(
-                "Proposes the ground-reset phase into MetaDict "
-                "'bathreset_max_phase' and the excited-reset phase into "
-                "'bathreset_min_phase'. Also proposes two ModuleLibrary modules: "
-                "'reset_bath' (the calibrated tested reset with pi/2 phase set to "
-                "the max/ground phase) and 'reset_bath_e' (pi/2 phase set to the "
-                "min/excited phase) — both skipped when no cfg_snapshot is "
-                "available (e.g. loaded from file) (D2(a))."
-            ),
-            recommended=(
-                "A full -360..360 deg sweep captures a clean cosine; the fit picks "
-                "the max / min phases automatically. Allow a long relax delay so "
-                "the qubit fully relaxes before each shot."
-            ),
-        )
+    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
+        behavior=(
+            "Bath-reset pi/2 phase sweep: holds the tested bath reset at its "
+            "calibrated cavity freq/gain and length and sweeps the tomography "
+            "pi/2 pulse phase, fitting the cosine response to find the phases "
+            "that reset to ground (max) and to excited (min). Runs on real "
+            "hardware. Run last, to fix the pi/2 phase of the reset module."
+        ),
+        expects_md=(
+            "Reads from the MetaDict (all optional): 'bathreset_freq' / "
+            "'bathreset_gain' — the calibrated cavity frequency and gain so the "
+            "cfg snapshot carries the fully calibrated reset forward for "
+            "registration; 'q_f' / 'qub_ch' / 'res_ch' seed the bath-reset "
+            "tone drive defaults."
+        ),
+        expects_ml=(
+            "Needs a bath-reset module (the tested reset) and a readout "
+            "module. Optionally references a calibrated upstream reset and an "
+            "init pulse (a library pi pulse when present) — both disabled when "
+            "no library entry exists."
+        ),
+        typical_writeback=(
+            "Proposes the ground-reset phase into MetaDict "
+            "'bathreset_max_phase' and the excited-reset phase into "
+            "'bathreset_min_phase'. Also proposes two ModuleLibrary modules: "
+            "'reset_bath' (the calibrated tested reset with pi/2 phase set to "
+            "the max/ground phase) and 'reset_bath_e' (pi/2 phase set to the "
+            "min/excited phase) — both skipped when no cfg_snapshot is "
+            "available (e.g. loaded from file) (D2(a))."
+        ),
+        recommended=(
+            "A full -360..360 deg sweep captures a clean cosine; the fit picks "
+            "the max / min phases automatically. Allow a long relax delay so "
+            "the qubit fully relaxes before each shot."
+        ),
+    )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:

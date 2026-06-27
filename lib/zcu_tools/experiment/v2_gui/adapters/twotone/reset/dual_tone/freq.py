@@ -72,42 +72,40 @@ class DualToneFreqAdapter(
     exp_cls = FreqExp
     ExpCfg_cls: ClassVar[Any] = FreqCfg
 
-    @classmethod
-    def guide(cls) -> AdapterGuide:
-        return AdapterGuide(
-            behavior=(
-                "Dual-tone reset frequency map: a 2D sweep of the two reset-tone "
-                "frequencies (pulse1 × pulse2 of the tested two-pulse reset), "
-                "imaging the qubit response to locate the pair of sideband "
-                "frequencies that jointly dump the excitation. Runs on real "
-                "hardware in hard-sweep mode (both axes are QICK register sweeps)."
-            ),
-            expects_md=(
-                "Reads from the MetaDict (all optional): 'reset_f1' / 'reset_f2' — "
-                "the two sideband reset frequencies centring each sweep axis "
-                "(absent → centred on 0 MHz); 'reset_gain1' / 'reset_gain2' seed "
-                "the two tested-reset pulse gains; 'q_f' / 'qub_ch' seed the "
-                "tested-reset and init-pulse drive defaults."
-            ),
-            expects_ml=(
-                "Needs a two-pulse-reset module (the tested reset) and a readout "
-                "module. Optionally references a calibrated upstream reset and an "
-                "init pulse (a library pi pulse when present) — both disabled when "
-                "no library entry exists."
-            ),
-            typical_writeback=(
-                "Proposes the two fitted sideband frequencies into MetaDict "
-                "'reset_f1' and 'reset_f2'. No ModuleLibrary writeback — "
-                "registering the calibrated 'reset_120' module is left to the final "
-                "length step once frequency, gain and length are all dialled in."
-            ),
-            recommended=(
-                "Keep each axis a tight span (a few MHz) around the predicted "
-                "sideband; the 2D scan cost grows with both axes. Analysis denoises "
-                "the map before peak finding; wavelet smoothing is the default and "
-                "Gaussian remains available for comparison."
-            ),
-        )
+    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
+        behavior=(
+            "Dual-tone reset frequency map: a 2D sweep of the two reset-tone "
+            "frequencies (pulse1 × pulse2 of the tested two-pulse reset), "
+            "imaging the qubit response to locate the pair of sideband "
+            "frequencies that jointly dump the excitation. Runs on real "
+            "hardware in hard-sweep mode (both axes are QICK register sweeps)."
+        ),
+        expects_md=(
+            "Reads from the MetaDict (all optional): 'reset_f1' / 'reset_f2' — "
+            "the two sideband reset frequencies centring each sweep axis "
+            "(absent → centred on 0 MHz); 'reset_gain1' / 'reset_gain2' seed "
+            "the two tested-reset pulse gains; 'q_f' / 'qub_ch' seed the "
+            "tested-reset and init-pulse drive defaults."
+        ),
+        expects_ml=(
+            "Needs a two-pulse-reset module (the tested reset) and a readout "
+            "module. Optionally references a calibrated upstream reset and an "
+            "init pulse (a library pi pulse when present) — both disabled when "
+            "no library entry exists."
+        ),
+        typical_writeback=(
+            "Proposes the two fitted sideband frequencies into MetaDict "
+            "'reset_f1' and 'reset_f2'. No ModuleLibrary writeback — "
+            "registering the calibrated 'reset_120' module is left to the final "
+            "length step once frequency, gain and length are all dialled in."
+        ),
+        recommended=(
+            "Keep each axis a tight span (a few MHz) around the predicted "
+            "sideband; the 2D scan cost grows with both axes. Analysis denoises "
+            "the map before peak finding; wavelet smoothing is the default and "
+            "Gaussian remains available for comparison."
+        ),
+    )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:

@@ -58,42 +58,40 @@ class SingleToneLengthAdapter(
     exp_cls = LengthExp
     ExpCfg_cls: ClassVar[Any] = LengthCfg
 
-    @classmethod
-    def guide(cls) -> AdapterGuide:
-        return AdapterGuide(
-            behavior=(
-                "Single-tone sideband-reset length sweep: holds the tested "
-                "pulse-reset at its calibrated sideband frequency and sweeps its "
-                "duration, showing how the residual excitation decays with reset "
-                "length. Runs on real hardware. Run after the reset frequency is "
-                "found, to pick the shortest length that fully resets the qubit."
-            ),
-            expects_md=(
-                "Reads from the MetaDict (all optional): 'reset_f' — the sideband "
-                "reset frequency (= r_f - q_f) driving the tested reset (fallback "
-                "0 MHz); 'q_f' / 'qub_ch' seed the tested-reset and init-pulse "
-                "drive defaults."
-            ),
-            expects_ml=(
-                "Needs a pulse-reset module (the tested reset) and a readout "
-                "module. Optionally references a calibrated upstream reset and an "
-                "init pulse (a library pi pulse when present) — both disabled when "
-                "no library entry exists."
-            ),
-            typical_writeback=(
-                "Proposes the ModuleLibrary module 'reset_10' — the calibrated "
-                "tested single-pulse reset (carrying its md-linked sideband "
-                "frequency) registered as the final reset module; the user picks "
-                "the final reset length in the writeback dialog. Skipped when no "
-                "cfg_snapshot is available (e.g. loaded from file)."
-            ),
-            recommended=(
-                "A length sweep from ~0.1 us to a few times the expected reset "
-                "time captures the full decay; shorten the span once the plateau "
-                "is clear. Allow a long relax delay between shots so the qubit "
-                "fully relaxes before each reset."
-            ),
-        )
+    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
+        behavior=(
+            "Single-tone sideband-reset length sweep: holds the tested "
+            "pulse-reset at its calibrated sideband frequency and sweeps its "
+            "duration, showing how the residual excitation decays with reset "
+            "length. Runs on real hardware. Run after the reset frequency is "
+            "found, to pick the shortest length that fully resets the qubit."
+        ),
+        expects_md=(
+            "Reads from the MetaDict (all optional): 'reset_f' — the sideband "
+            "reset frequency (= r_f - q_f) driving the tested reset (fallback "
+            "0 MHz); 'q_f' / 'qub_ch' seed the tested-reset and init-pulse "
+            "drive defaults."
+        ),
+        expects_ml=(
+            "Needs a pulse-reset module (the tested reset) and a readout "
+            "module. Optionally references a calibrated upstream reset and an "
+            "init pulse (a library pi pulse when present) — both disabled when "
+            "no library entry exists."
+        ),
+        typical_writeback=(
+            "Proposes the ModuleLibrary module 'reset_10' — the calibrated "
+            "tested single-pulse reset (carrying its md-linked sideband "
+            "frequency) registered as the final reset module; the user picks "
+            "the final reset length in the writeback dialog. Skipped when no "
+            "cfg_snapshot is available (e.g. loaded from file)."
+        ),
+        recommended=(
+            "A length sweep from ~0.1 us to a few times the expected reset "
+            "time captures the full decay; shorten the span once the plateau "
+            "is clear. Allow a long relax delay between shots so the qubit "
+            "fully relaxes before each reset."
+        ),
+    )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:
