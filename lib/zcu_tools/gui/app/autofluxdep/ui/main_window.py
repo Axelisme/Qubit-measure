@@ -364,14 +364,18 @@ class MainWindow(QMainWindow):
         """Auto-follow: a provider started → select it + show its run tab/plot.
 
         The predictor Service (not in the user's list) and any name absent from
-        the list are skipped — there is nothing to navigate to.
+        the list are skipped — there is nothing to navigate to. If the running
+        provider is already selected, keep the user's current edit/run sub-tab.
         """
         del idx
         names = self._ctrl.state.node_names()
         if name not in names:
             return  # a Service (predictor) or unknown name → no navigation
-        self._list.select_index(names.index(name))  # → _on_select shows its canvas
-        self._detail.focus_run()
+        target = names.index(name)
+        already_selected = self._list.selected_index == target
+        self._list.select_index(target)  # → _on_select shows its canvas
+        if not already_selected:
+            self._detail.focus_run()
 
     def _on_row_updated(self, name: str, idx: int) -> None:
         """Main-thread: a Result row was filled → redraw that provider's Plotter."""

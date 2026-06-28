@@ -407,6 +407,22 @@ def test_run_auto_follows_each_entered_node(qapp):
     win.deleteLater()
 
 
+def test_auto_follow_same_node_preserves_detail_tab(app):
+    _ctrl, win = app
+    win._list.select_index(0)
+    win._detail._tabs.setCurrentIndex(0)
+
+    win._on_node_entered("qubit_freq", 0)
+
+    assert win._list.selected_index == 0
+    assert win._detail.current_tab == 0
+
+    win._on_node_entered("probe", 0)
+
+    assert win._list.selected_index == 1
+    assert win._detail.current_tab == 1
+
+
 def test_rename_updates_list_and_keeps_canvas_key(qapp):
     # renaming two mist placements to g_mist / e_mist relabels the list and keys
     # each one's liveplot canvas under its instance name.
