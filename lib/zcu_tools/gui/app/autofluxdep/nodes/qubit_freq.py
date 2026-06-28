@@ -60,8 +60,10 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
+from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import READOUT_LIBRARY_ALIASES
 from zcu_tools.gui.app.autofluxdep.nodes.result import QubitFreqResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
+from zcu_tools.gui.app.autofluxdep.nodes.waveform_defaults import waveform_or_const
 from zcu_tools.program.v2 import SweepCfg, TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import rotate2real
@@ -308,8 +310,10 @@ class QubitFreqBuilder(Builder):
         # orchestrator builds the SmoothingService from this declaration alone.
         Dependency("fit_kappa", smooth="ewma", default=_default_kappa),
     )
-    # the readout module: Node-produced (ro_optimize) → ml preset → default.
-    optional_modules = (ModuleDep("readout", default=_default_readout),)
+    # the readout module: Node-produced → calibrated ml preset → default.
+    optional_modules = (
+        ModuleDep("readout", default=_default_readout, aliases=READOUT_LIBRARY_ALIASES),
+    )
 
     def make_default_schema(self) -> NodeCfgSchema:
         """The typed node-knob schema (defaults + types) — the param SSOT.
@@ -319,9 +323,9 @@ class QubitFreqBuilder(Builder):
         editor): its default ``(-20, 50, expts=141)`` reproduces the prototype's
         ``step=0.5`` axis point-for-point. The drive defaults follow the
         measure-gui qubit-pulse convention: ``qub_flat`` on channel 0, with
-        ``qub_length`` at 0.1 us. If a project does not define that waveform,
-        ``make_cfg`` still Fast-Fails at the ModuleLibrary boundary instead of
-        fabricating a pulse silently.
+        ``qub_length`` at 0.1 us. If a project does not define that named
+        waveform, ``make_cfg`` uses an inline const waveform of that length so
+        mock-created contexts remain runnable.
         """
         return NodeCfgSchema(
             flat_node_schema(
@@ -356,8 +360,10 @@ class QubitFreqBuilder(Builder):
             )
         )
 
-    def make_init_result(self, schema: NodeCfgSchema, flux: Any) -> QubitFreqResult:
-        knobs = schema.lower(None)
+    def make_init_result(
+        self, schema: NodeCfgSchema, flux: Any, md: Any = None
+    ) -> QubitFreqResult:
+        knobs = schema.lower(None, md=md)
         detune = sweepcfg_to_axis(knobs["detune_sweep"])
         return QubitFreqResult.allocate(flux, detune)
 
@@ -392,22 +398,19 @@ class QubitFreqBuilder(Builder):
         # the typed knobs (defaults + types owned by the placement's schema);
         # reps/rounds/relax come pre-typed, the optional drive waveform/ch are
         # omitted when unset.
-        knobs = env.schema.lower(ml)
+        knobs = env.schema.lower(ml, md=env.md)
         waveform_name = knobs.get("qub_waveform")
         ch = knobs.get("qub_ch")
-        if not waveform_name or ch is None:
-            raise RuntimeError(
-                "qubit_freq.make_cfg needs qub_waveform + qub_ch params set"
-            )
+        if ch is None:
+            raise RuntimeError("qubit_freq.make_cfg needs qub_ch param set")
         predict_freq = float(snapshot["predict_freq"])
         return ml.make_cfg(
             {
                 "modules": {
                     "qub_pulse": {
                         "type": "pulse",
-                        "waveform": ml.get_waveform(
-                            waveform_name,
-                            {"length": knobs["qub_length"]},
+                        "waveform": waveform_or_const(
+                            ml, waveform_name, length=knobs["qub_length"]
                         ),
                         "ch": ch,
                         "nqz": knobs["qub_nqz"],

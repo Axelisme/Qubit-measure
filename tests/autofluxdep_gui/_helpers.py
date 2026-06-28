@@ -193,7 +193,10 @@ def make_builder(
         def build_node(self, env: RunEnv) -> Node:
             return _FnNode(env, produce_fn)
 
-        def make_init_result(self, schema: NodeCfgSchema, flux: Any) -> Any:
+        def make_init_result(
+            self, schema: NodeCfgSchema, flux: Any, md: Any = None
+        ) -> Any:
+            del md
             if result_factory is None:
                 return None
             return result_factory(schema, flux)

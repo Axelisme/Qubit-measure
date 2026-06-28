@@ -123,6 +123,20 @@ def test_flux_source_picker_records_selection(app):
     assert ctrl.get_flux_device() is None
 
 
+def test_flux_sweep_fields_accept_numeric_expressions(app):
+    ctrl, win = app
+    md = ctrl.get_current_md()
+    md.span = 0.004
+    md.count = 2
+
+    win._list._flux_start.setText("span / 2")
+    win._list._flux_stop.setText("-span / 2")
+    win._list._flux_npts.setText("2 * count + 1")
+    win._list._commit_flux()
+
+    assert ctrl.state.flux_values == pytest.approx([0.002, 0.001, 0.0, -0.001, -0.002])
+
+
 def test_predictor_button_opens_shared_predictor_dialog(app):
     # the Predictor… button opens the shared session PredictorDialog (load a
     # FluxoniumPredictor into the context) — runtime port conformance check.

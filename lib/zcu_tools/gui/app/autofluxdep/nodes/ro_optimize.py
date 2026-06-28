@@ -58,6 +58,10 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
+from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import (
+    PI_PULSE_LIBRARY_ALIASES,
+    READOUT_LIBRARY_ALIASES,
+)
 from zcu_tools.gui.app.autofluxdep.nodes.plotters import Landscape2DPlotter
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep2DResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
@@ -293,8 +297,14 @@ class RoOptimizeBuilder(Builder):
         Dependency("best_ro_freq", default=_default_best_freq),
         Dependency("best_ro_gain", default=_default_best_gain),
     )
-    requires_modules = (ModuleDep("pi_pulse", default=_placeholder_pi_pulse),)
-    optional_modules = (ModuleDep("readout", default=_default_readout),)
+    requires_modules = (
+        ModuleDep(
+            "pi_pulse", default=_placeholder_pi_pulse, aliases=PI_PULSE_LIBRARY_ALIASES
+        ),
+    )
+    optional_modules = (
+        ModuleDep("readout", default=_default_readout, aliases=READOUT_LIBRARY_ALIASES),
+    )
 
     def make_default_schema(self) -> NodeCfgSchema:
         """The typed node-knob schema (defaults + types) — the param SSOT.
@@ -327,8 +337,10 @@ class RoOptimizeBuilder(Builder):
             )
         )
 
-    def make_init_result(self, schema: NodeCfgSchema, flux: Any) -> Sweep2DResult:
-        knobs = schema.lower(None)
+    def make_init_result(
+        self, schema: NodeCfgSchema, flux: Any, md: Any = None
+    ) -> Sweep2DResult:
+        knobs = schema.lower(None, md=md)
         freq_expts = int(knobs["freq_expts"])
         gain_expts = int(knobs["gain_expts"])
 
@@ -371,7 +383,7 @@ class RoOptimizeBuilder(Builder):
                 "ro_optimize.make_cfg needs the pi_pulse + readout modules "
                 "(none produced or preset)"
             )
-        knobs = env.schema.lower(ml)
+        knobs = env.schema.lower(ml, md=env.md)
         prev_best_freq = float(snapshot["best_ro_freq"])
         prev_best_gain = float(snapshot["best_ro_gain"])
         t1 = float(snapshot["t1"])

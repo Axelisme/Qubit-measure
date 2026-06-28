@@ -20,8 +20,10 @@ tree) from a field list. ``NodeCfgSchema`` wraps it as the node's param SSOT:
   ``PlacedNode``'s seed dict into its typed schema.
 
 The lowering uses ``md=None``: node knobs are plain scalars / sweeps with no
-``EvalValue``, so no MetaDict is needed to resolve them (ml is passed through for
-symmetry but these flat schemas hold no module/waveform refs).
+``EvalValue`` is allowed on numeric scalar knobs and sweep edges; lowering passes
+the active MetaDict through the shared cfg lowering path so expressions resolve at
+run time. The schema still holds no module/waveform refs, so ``ml`` is only
+threaded through for the shared API.
 """
 
 from __future__ import annotations
@@ -39,13 +41,14 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
+    EvalValue,
     ScalarSpec,
     SweepSpec,
     SweepValue,
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.meta_tool import ModuleLibrary
+    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 
 def sweepcfg_to_axis(sweep: Any) -> NDArray[np.float64]:
@@ -157,10 +160,10 @@ class NodeCfgSchema:
         a real typo (only declared knobs are writable), so it fast-fails.
 
         - A ``SweepSpec`` knob accepts a ``SweepValue`` (stored verbatim).
-        - A ``ScalarSpec`` knob accepts either a ``DirectValue`` (stored verbatim —
-          its value is the type-correct one the form produced) or a raw value
-          (coerced to the field's declared type; a blank/None leaves the leaf
-          unset so the spec default or a node's Fast-Fail guard applies).
+        - A ``ScalarSpec`` knob accepts either a ``DirectValue`` / ``EvalValue``
+          (stored verbatim — the form produced it) or a raw value (coerced to
+          the field's declared type; a blank/None leaves the leaf unset so the
+          spec default or a node's Fast-Fail guard applies).
         """
         if key not in self.schema.spec.fields:
             raise KeyError(
@@ -176,7 +179,7 @@ class NodeCfgSchema:
             self.schema.value.fields[key] = value
             return
         assert isinstance(spec, ScalarSpec)
-        if isinstance(value, DirectValue):
+        if isinstance(value, (DirectValue, EvalValue)):
             self.schema.value.fields[key] = value
             return
         self.schema.value.fields[key] = DirectValue(_coerce_scalar(value, spec.type))
@@ -193,43 +196,61 @@ class NodeCfgSchema:
             self.set_field(key, value)
         return self
 
-    def lower(self, ml: ModuleLibrary | None) -> dict[str, Any]:
+    def lower(
+        self, ml: ModuleLibrary | None, md: MetaDict | None = None
+    ) -> dict[str, Any]:
         """The lowered flat knob dict ``make_cfg`` / ``make_init_result`` read.
 
         Scalars lower to their value; a ``SweepSpec`` lowers to a ``SweepCfg``.
-        ``md`` is ``None``: node knobs hold no ``EvalValue``, so no MetaDict is
-        needed to resolve them.
+        Numeric scalar and sweep-edge ``EvalValue`` leaves resolve against
+        ``md`` through the shared cfg lowering path.
         """
-        return dict(self.schema.to_raw_dict(md=None, ml=ml))
+        return dict(self.schema.to_raw_dict(md=md, ml=ml))
 
     def read_knobs(self) -> dict[str, Any]:
         """The current *un-lowered* user knob values, as a JSON-friendly dict.
 
         Read-only projection of the value tree for an observer (the remote
-        bridge's ``node.cfg``): a scalar knob reads to its plain value (or None
-        when unset), a sweep knob reads to ``{start, stop, expts}``. Unlike
+        bridge's ``node.cfg``): a scalar knob reads to its plain value (or an
+        eval marker), a sweep knob reads to ``{start, stop, expts}``. Unlike
         ``lower``, this does NOT build a ``SweepCfg`` (whose internal axis object
         is not JSON-serialisable) and needs no ``ModuleLibrary`` — it reports
-        exactly what the user set, not the lowered run cfg. Flat node knobs hold
-        no ``EvalValue`` (``lower`` passes ``md=None``), so a ``DirectValue`` here
-        always carries a plain scalar.
+        exactly what the user set, not the lowered run cfg.
         """
         knobs: dict[str, Any] = {}
         for key in self.keys:
             leaf = self.schema.value.fields[key]
             if isinstance(leaf, SweepValue):
                 knobs[key] = {
-                    "start": leaf.start,
-                    "stop": leaf.stop,
+                    "start": _knob_scalar_value(leaf.start),
+                    "stop": _knob_scalar_value(leaf.stop),
                     "expts": leaf.expts,
                 }
             elif isinstance(leaf, DirectValue):
                 knobs[key] = leaf.value
+            elif isinstance(leaf, EvalValue):
+                knobs[key] = _knob_eval_value(leaf)
             else:
-                # The value tree for a flat node holds only DirectValue / SweepValue
-                # leaves (ADR-0010 / ADR-0011); anything else is a contract breach.
+                # The value tree for a flat node holds only DirectValue /
+                # EvalValue / SweepValue leaves; anything else is a contract breach.
                 raise TypeError(
                     f"Knob {key!r} has unexpected value-tree leaf "
-                    f"{type(leaf).__name__}; expected DirectValue or SweepValue"
+                    f"{type(leaf).__name__}; expected DirectValue, EvalValue, "
+                    "or SweepValue"
                 )
         return knobs
+
+
+def _knob_scalar_value(value: object) -> object:
+    if isinstance(value, EvalValue):
+        return _knob_eval_value(value)
+    return value
+
+
+def _knob_eval_value(value: EvalValue) -> dict[str, object]:
+    data: dict[str, object] = {"__kind": "eval", "expr": value.expr}
+    if value.resolved is not None:
+        data["resolved"] = value.resolved
+    if value.error is not None:
+        data["error"] = value.error
+    return data

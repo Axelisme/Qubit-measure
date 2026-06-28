@@ -20,7 +20,7 @@ import ast
 import pathlib
 
 import numpy as np
-from zcu_tools.gui.app.autofluxdep.cfg import SweepSpec
+from zcu_tools.gui.app.autofluxdep.cfg import EvalValue, SweepSpec, SweepValue
 from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import LenRabiBuilder
@@ -30,7 +30,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.ro_optimize import RoOptimizeBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.t1 import T1Builder
 from zcu_tools.gui.app.autofluxdep.nodes.t2echo import T2EchoBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.t2ramsey import T2RamseyBuilder
-from zcu_tools.meta_tool import ModuleLibrary
+from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 _READOUT = {
     "type": "readout/pulse",
@@ -296,6 +296,40 @@ def test_qubit_freq_make_cfg_uses_schema_defaults():
     assert float(cfg.modules.qub_pulse.freq) == 5135.0  # the injected predict_freq
 
 
+def test_qubit_freq_make_cfg_uses_const_waveform_when_named_waveform_missing():
+    builder = QubitFreqBuilder()
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=builder.make_default_schema(),
+        ml=ModuleLibrary(),
+    )
+    snap = Snapshot(
+        {"predict_freq": 5135.0, "fit_kappa": 0.05}, modules={"readout": _READOUT}
+    )
+
+    cfg = builder.make_cfg(env, snap)
+
+    assert cfg.modules.qub_pulse.waveform.style == "const"
+    assert float(cfg.modules.qub_pulse.waveform.length) == 0.1
+
+
+def test_lenrabi_make_cfg_uses_const_waveform_when_named_waveform_missing():
+    builder = LenRabiBuilder()
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=builder.make_default_schema(),
+        ml=ModuleLibrary(),
+    )
+    snap = Snapshot({"qubit_freq": 5135.0}, modules={"opt_readout": _READOUT})
+
+    cfg = builder.make_cfg(env, snap)
+
+    assert cfg.modules.rabi_pulse.waveform.style == "const"
+    assert float(cfg.modules.rabi_pulse.waveform.length) == 0.1
+
+
 def test_mist_make_cfg_uses_schema_defaults():
     ml = ModuleLibrary()
     ml.register_waveform(
@@ -325,6 +359,24 @@ def test_mist_make_cfg_uses_schema_defaults():
     assert int(cfg.modules.mist_pulse.nqz) == 2
 
 
+def test_mist_make_cfg_uses_const_waveform_when_named_waveform_missing():
+    builder = MistBuilder()
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=builder.make_default_schema(),
+        ml=ModuleLibrary(),
+    )
+    snap = Snapshot(
+        {"success": 1.0}, modules={"pi_pulse": _PI_PULSE, "opt_readout": _READOUT}
+    )
+
+    cfg = builder.make_cfg(env, snap)
+
+    assert cfg.modules.mist_pulse.waveform.style == "const"
+    assert float(cfg.modules.mist_pulse.waveform.length) == 0.1
+
+
 # --- 2c. set_field type coercion + unknown-key fast-fail (the 160a bridge) ------
 
 
@@ -335,6 +387,47 @@ def test_set_field_coerces_text_to_type():
     knobs = schema.lower(None)
     assert knobs["reps"] == 250 and isinstance(knobs["reps"], int)
     assert knobs["qub_gain"] == 0.2 and isinstance(knobs["qub_gain"], float)
+
+
+def test_scalar_eval_value_lowers_against_md():
+    md = MetaDict()
+    md.gain = 0.125
+    schema = QubitFreqBuilder().make_default_schema()
+
+    schema.set_field("qub_gain", EvalValue("gain"))
+
+    knobs = schema.lower(None, md=md)
+    assert knobs["qub_gain"] == 0.125
+    assert schema.read_knobs()["qub_gain"] == {
+        "__kind": "eval",
+        "expr": "gain",
+    }
+
+
+def test_sweep_eval_edges_lower_against_md():
+    md = MetaDict()
+    md.center = 10.0
+    schema = QubitFreqBuilder().make_default_schema()
+
+    schema.set_field(
+        "detune_sweep",
+        SweepValue(
+            start=EvalValue("center - 2"),
+            stop=EvalValue("center + 2"),
+            expts=5,
+        ),
+    )
+
+    detune = schema.lower(None, md=md)["detune_sweep"]
+    assert (float(detune.start), float(detune.stop), int(detune.expts)) == (
+        8.0,
+        12.0,
+        5,
+    )
+    assert schema.read_knobs()["detune_sweep"]["start"] == {
+        "__kind": "eval",
+        "expr": "center - 2",
+    }
 
 
 def test_set_field_unknown_key_fast_fails():

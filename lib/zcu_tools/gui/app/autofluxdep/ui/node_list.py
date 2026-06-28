@@ -10,6 +10,8 @@ the right pane follows.
 
 from __future__ import annotations
 
+from typing import Any
+
 from qtpy.QtCore import Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QComboBox,
@@ -18,6 +20,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QLabel,
     QLineEdit,
     QListWidget,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -25,6 +28,11 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 
 from zcu_tools.gui.app.autofluxdep.controller import Controller
 from zcu_tools.gui.app.autofluxdep.registry import available_node_types
+from zcu_tools.gui.session.expression import coerce_eval_result, evaluate_numeric_expr
+from zcu_tools.gui.session.ui.value_source_input import (
+    SessionValueSourceInputHost,
+    ValueSourceInputController,
+)
 
 
 class NodeListPane(QWidget):
@@ -70,6 +78,14 @@ class NodeListPane(QWidget):
         self._flux_start = QLineEdit("2e-3")
         self._flux_stop = QLineEdit("-0.2e-3")
         self._flux_npts = QLineEdit("101")
+        self._flux_input_helpers = tuple(
+            ValueSourceInputController(
+                line_edit,
+                SessionValueSourceInputHost(self._ctrl),
+                parent=line_edit,
+            )
+            for line_edit in (self._flux_start, self._flux_stop, self._flux_npts)
+        )
         for w in (self._flux_start, self._flux_stop, self._flux_npts):
             flux_row.addWidget(w)
         root.addLayout(flux_row)
@@ -189,16 +205,31 @@ class NodeListPane(QWidget):
         if self._running:
             self.stop_requested.emit()
         else:
-            self._commit_flux()
+            try:
+                self._commit_flux()
+            except Exception as exc:
+                QMessageBox.warning(self, "Invalid flux sweep", str(exc))
+                return
             self.run_requested.emit()
 
     def _commit_flux(self) -> None:
         import numpy as np
 
-        start = float(self._flux_start.text())
-        stop = float(self._flux_stop.text())
-        npts = int(self._flux_npts.text())
+        start = self._read_flux_field(self._flux_start, float, label="start")
+        stop = self._read_flux_field(self._flux_stop, float, label="stop")
+        npts = self._read_flux_field(self._flux_npts, int, label="points")
         self._ctrl.set_flux_values(np.linspace(start, stop, npts).tolist())
+
+    def _read_flux_field(self, field: QLineEdit, type_: type, *, label: str) -> Any:
+        expr = field.text().strip()
+        try:
+            return coerce_eval_result(
+                evaluate_numeric_expr(expr, self._ctrl.get_current_md()), type_
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"Flux sweep {label} expression {expr!r}: {exc}"
+            ) from exc
 
     def set_running(self, running: bool) -> None:
         self._running = running

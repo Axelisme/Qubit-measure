@@ -58,9 +58,14 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
+from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import (
+    PI_PULSE_LIBRARY_ALIASES,
+    READOUT_LIBRARY_ALIASES,
+)
 from zcu_tools.gui.app.autofluxdep.nodes.plotters import ColormapLinePlotter
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import ModuleDep
+from zcu_tools.gui.app.autofluxdep.nodes.waveform_defaults import waveform_or_const
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     ProgramV2Cfg,
@@ -231,8 +236,18 @@ class MistBuilder(Builder):
     name = "mist"
     provides = ("success",)
     provides_modules: tuple[str, ...] = ()
-    requires_modules = (ModuleDep("pi_pulse", default=_placeholder_pi_pulse),)
-    optional_modules = (ModuleDep("opt_readout", default=_default_opt_readout),)
+    requires_modules = (
+        ModuleDep(
+            "pi_pulse", default=_placeholder_pi_pulse, aliases=PI_PULSE_LIBRARY_ALIASES
+        ),
+    )
+    optional_modules = (
+        ModuleDep(
+            "opt_readout",
+            default=_default_opt_readout,
+            aliases=READOUT_LIBRARY_ALIASES,
+        ),
+    )
 
     def make_default_schema(self) -> NodeCfgSchema:
         """The typed node-knob schema (defaults + types) — the param SSOT.
@@ -241,8 +256,8 @@ class MistBuilder(Builder):
         defined): its default ``(0, 1, expts=51)`` reproduces the prototype axis.
         The disturbance defaults follow the single-qubit MIST notebooks:
         ``mist_waveform`` on a resonator-like channel/frequency fallback. If a
-        project does not define ``mist_waveform``, ``make_cfg`` still Fast-Fails at
-        the ModuleLibrary boundary instead of fabricating a pulse silently.
+        project does not define that named waveform, ``make_cfg`` uses an inline
+        const waveform with ``mist_length`` so mock-created contexts remain runnable.
         """
         return NodeCfgSchema(
             flat_node_schema(
@@ -281,8 +296,10 @@ class MistBuilder(Builder):
             )
         )
 
-    def make_init_result(self, schema: NodeCfgSchema, flux: Any) -> Sweep1DResult:
-        knobs = schema.lower(None)
+    def make_init_result(
+        self, schema: NodeCfgSchema, flux: Any, md: Any = None
+    ) -> Sweep1DResult:
+        knobs = schema.lower(None, md=md)
         gains = sweepcfg_to_axis(knobs["gain_sweep"])
         return Sweep1DResult.allocate(flux, gains, x_label="gain")
 
@@ -328,20 +345,19 @@ class MistBuilder(Builder):
             raise RuntimeError(
                 "mist.make_cfg needs a readout module (none produced or preset)"
             )
-        knobs = env.schema.lower(ml)
+        knobs = env.schema.lower(ml, md=env.md)
         waveform_name = knobs.get("mist_waveform")
         ch = knobs.get("mist_ch")
-        if not waveform_name or ch is None:
-            raise RuntimeError("mist.make_cfg needs mist_waveform + mist_ch params set")
+        if ch is None:
+            raise RuntimeError("mist.make_cfg needs mist_ch param set")
         return ml.make_cfg(
             {
                 "modules": {
                     "pi_pulse": pi_pulse,
                     "mist_pulse": {
                         "type": "pulse",
-                        "waveform": ml.get_waveform(
-                            waveform_name,
-                            {"length": knobs["mist_length"]},
+                        "waveform": waveform_or_const(
+                            ml, waveform_name, length=knobs["mist_length"]
                         ),
                         "ch": ch,
                         "nqz": knobs["mist_nqz"],

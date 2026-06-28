@@ -71,6 +71,10 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
+from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import (
+    PI2_PULSE_LIBRARY_ALIASES,
+    READOUT_LIBRARY_ALIASES,
+)
 from zcu_tools.gui.app.autofluxdep.nodes.plotters import Decay1DPlotter
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
@@ -170,7 +174,7 @@ class T2RamseyNode(Node):
         # (lower layer: activate_detune = detune_ratio / len_sweep.step).
         length_sweep = axis_to_sweep(times)
         length_param = sweep2param("length", length_sweep)
-        detune_ratio = self._builder.detune_ratio(env.schema)
+        detune_ratio = self._builder.detune_ratio(env.schema, md=env.md)
         activate_detune = detune_ratio / length_sweep.step
         pi2_pulse = cfg.modules.pi2_pulse
 
@@ -246,8 +250,18 @@ class T2RamseyBuilder(Builder):
         Dependency("t1", smooth="ewma", default=_default_t1),
         Dependency("t2r", smooth="ewma", default=_default_t2r),
     )
-    requires_modules = (ModuleDep("pi2_pulse", default=_placeholder_pi2_pulse),)
-    optional_modules = (ModuleDep("opt_readout", default=_default_readout),)
+    requires_modules = (
+        ModuleDep(
+            "pi2_pulse",
+            default=_placeholder_pi2_pulse,
+            aliases=PI2_PULSE_LIBRARY_ALIASES,
+        ),
+    )
+    optional_modules = (
+        ModuleDep(
+            "opt_readout", default=_default_readout, aliases=READOUT_LIBRARY_ALIASES
+        ),
+    )
 
     def make_default_schema(self) -> NodeCfgSchema:
         """The typed node-knob schema (defaults + types) — the param SSOT.
@@ -282,12 +296,14 @@ class T2RamseyBuilder(Builder):
             )
         )
 
-    def detune_ratio(self, schema: NodeCfgSchema) -> float:
+    def detune_ratio(self, schema: NodeCfgSchema, md: Any = None) -> float:
         """The activate-detune ratio for this placement (typed knob, default 0.05)."""
-        return float(schema.lower(None)["detune_ratio"])
+        return float(schema.lower(None, md=md)["detune_ratio"])
 
-    def make_init_result(self, schema: NodeCfgSchema, flux: Any) -> Sweep1DResult:
-        knobs = schema.lower(None)
+    def make_init_result(
+        self, schema: NodeCfgSchema, flux: Any, md: Any = None
+    ) -> Sweep1DResult:
+        knobs = schema.lower(None, md=md)
         times = sweepcfg_to_axis(knobs["sweep_range"])
         return Sweep1DResult.allocate(flux, times, x_label="delay time (us)")
 
@@ -327,7 +343,7 @@ class T2RamseyBuilder(Builder):
             raise RuntimeError(
                 "t2ramsey.make_cfg needs a readout module (none produced or preset)"
             )
-        knobs = env.schema.lower(ml)
+        knobs = env.schema.lower(ml, md=env.md)
         t1 = float(snapshot["t1"])
         t2r = float(snapshot["t2r"])
         return ml.make_cfg(

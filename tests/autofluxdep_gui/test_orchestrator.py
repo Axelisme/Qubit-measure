@@ -10,7 +10,7 @@ builds each provider's Node and calls ``produce``, never an injected callback.
 from __future__ import annotations
 
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
-from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency
+from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.app.autofluxdep.orchestrator import (
     InfoStore,
     Orchestrator,
@@ -18,6 +18,15 @@ from zcu_tools.gui.app.autofluxdep.orchestrator import (
 )
 
 from ._helpers import make_builder, place
+
+
+class _ModuleSource:
+    def __init__(self, modules: dict[str, object]) -> None:
+        self._modules = modules
+
+    def get_module(self, name: str) -> object | None:
+        return self._modules.get(name)
+
 
 # --- latest-available resolution (project_snapshot reads a placed provider) ---
 
@@ -60,6 +69,58 @@ def test_resolve_stored_none_is_a_value_not_missing():
     p = place(make_builder("n", optional=(Dependency("k", default=lambda: 42),)))
     info = InfoStore(point={"k": None})
     assert project_snapshot(p, info) == {"k": None}
+
+
+def test_module_dep_uses_library_alias_order():
+    readout = object()
+    stale_readout = object()
+    p = place(
+        make_builder(
+            "n",
+            optional_modules=(
+                ModuleDep(
+                    "readout",
+                    aliases=("readout_rf", "readout"),
+                    default=lambda: None,
+                ),
+            ),
+        )
+    )
+
+    snap = project_snapshot(
+        p,
+        InfoStore(),
+        ml=_ModuleSource({"readout": stale_readout, "readout_rf": readout}),
+    )
+
+    assert snap is not None
+    assert snap.module("readout") is readout
+
+
+def test_module_dep_prefers_produced_module_over_library_alias():
+    produced = object()
+    library = object()
+    p = place(
+        make_builder(
+            "n",
+            optional_modules=(
+                ModuleDep(
+                    "readout",
+                    aliases=("readout_rf", "readout"),
+                    default=lambda: None,
+                ),
+            ),
+        )
+    )
+
+    snap = project_snapshot(
+        p,
+        InfoStore(module_point={"readout": produced}),
+        ml=_ModuleSource({"readout_rf": library}),
+    )
+
+    assert snap is not None
+    assert snap.module("readout") is produced
 
 
 # --- user-ordered execution (no topo sort) ---

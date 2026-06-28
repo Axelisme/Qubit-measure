@@ -164,7 +164,7 @@ class SnrProbe:
     value: NDArray[np.complex128] | None = None
 
 
-def earlystop_snr(schema: NodeCfgSchema) -> float | None:
+def earlystop_snr(schema: NodeCfgSchema, md: Any = None) -> float | None:
     """The SNR early-stop threshold from a Node's schema, or None (no early-stop).
 
     Mirrors the lower-layer task's ``earlystop_snr``. The knob is an optional
@@ -172,7 +172,7 @@ def earlystop_snr(schema: NodeCfgSchema) -> float | None:
     (no early-stop). A node type without the knob (ro_optimize) likewise yields
     None. No text parsing — the schema already lowered it to ``float | None``.
     """
-    return schema.lower(None).get("earlystop_snr")
+    return schema.lower(None, md=md).get("earlystop_snr")
 
 
 def build_stop_checkers(
@@ -189,7 +189,7 @@ def build_stop_checkers(
     checkers: list[Callable[[], bool]] = []
     if env.should_stop is not None:
         checkers.append(env.should_stop)
-    threshold = earlystop_snr(env.schema)
+    threshold = earlystop_snr(env.schema, md=env.md)
     if threshold is not None:
         check_snr = snr_checker(probe, threshold, signal2real_fn)
 

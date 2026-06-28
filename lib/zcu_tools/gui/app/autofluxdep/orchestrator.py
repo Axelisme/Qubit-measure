@@ -150,7 +150,9 @@ class InfoStore:
 _MISSING = object()
 
 
-def _resolve_module(name: str, info: InfoStore, ml: ModuleSource | None) -> Any:
+def _resolve_module(
+    name: str, aliases: tuple[str, ...], info: InfoStore, ml: ModuleSource | None
+) -> Any:
     """Latest-available module: Node-produced (this/prev point), else ml preset.
 
     Returns ``_MISSING`` if neither a Node nor the ml library provides it.
@@ -159,9 +161,10 @@ def _resolve_module(name: str, info: InfoStore, ml: ModuleSource | None) -> Any:
     if produced is not _MISSING:
         return produced
     if ml is not None:
-        preset = ml.get_module(name)
-        if preset is not None:
-            return preset
+        for module_name in aliases or (name,):
+            preset = ml.get_module(module_name)
+            if preset is not None:
+                return preset
     return _MISSING
 
 
@@ -195,7 +198,7 @@ def project_snapshot(
 
     modules: dict[str, Any] = {}
     for m in provider.all_module_deps():
-        mod = _resolve_module(m.name, info, ml)
+        mod = _resolve_module(m.name, m.aliases, info, ml)
         if mod is _MISSING:
             if m.default is not None:
                 modules[m.name] = m.default()

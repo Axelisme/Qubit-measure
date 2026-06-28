@@ -434,8 +434,9 @@ class Controller(SessionControllerMixin):
         Result for it and the UI builds no figure, with no ``isinstance``.
         """
         results: dict[str, Any] = {}
+        md = self._state.exp_context.md
         for node in self._state.nodes:
-            result = node.builder.make_init_result(node.schema, flux)
+            result = node.builder.make_init_result(node.schema, flux, md=md)
             if result is not None:
                 results[node.name] = result
         return results

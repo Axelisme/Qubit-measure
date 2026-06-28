@@ -85,17 +85,24 @@ class ModuleDep:
 
     ``name`` names the module the provider wants (a cfg component such as a
     readout). It is resolved latest-available across producers, then falls back
-    to the ml library's same-named preset, then to ``default``:
+    to the ml library's same-named preset or declared aliases, then to
+    ``default``:
 
-        Node-produced this point → produced previous point → ml preset → default
+        Node-produced this point → produced previous point → ml preset/alias → default
 
     ``default`` is a zero-arg callable returning a module (lazy, like
     ``Dependency.default``). A required module dep (``default is None``) that
     resolves to nothing anywhere skips the provider for that point.
+
+    ``aliases`` only applies to the library fallback and, when provided, is the
+    full preferred lookup order. Produced modules remain keyed by ``name`` so
+    the workflow's in-memory data contract stays stable even when persisted
+    ModuleLibrary entries use app-specific calibrated names.
     """
 
     name: str
     default: Callable[[], Any] | None = None
+    aliases: tuple[str, ...] = ()
 
     @property
     def is_optional(self) -> bool:

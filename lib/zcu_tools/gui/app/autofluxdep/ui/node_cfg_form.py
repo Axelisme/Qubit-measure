@@ -67,9 +67,8 @@ class NodeCfgForm(QWidget):
         root = QVBoxLayout(self)
 
         # LiveModel draft over the placement's schema (spec + its current value
-        # tree). The env fetches md/ml through the controller (ControllerProtocol);
-        # the flat node schema carries no md-reference / ref fields, so only
-        # get_bus is exercised in practice.
+        # tree). The env fetches md/value sources through the controller so
+        # numeric knobs can use the shared expression mode and @{...} resolver.
         self._model = SectionLiveField(
             node.schema.schema.spec,
             LiveModelEnv(ctrl=controller),

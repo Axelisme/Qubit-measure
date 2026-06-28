@@ -55,9 +55,11 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
+from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import READOUT_LIBRARY_ALIASES
 from zcu_tools.gui.app.autofluxdep.nodes.plotters import ColormapLinePlotter
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
+from zcu_tools.gui.app.autofluxdep.nodes.waveform_defaults import waveform_or_const
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     ProgramV2Cfg,
@@ -216,7 +218,11 @@ class LenRabiBuilder(Builder):
     provides = ("pi_length", "pi2_length", "rabi_freq")
     provides_modules = ("pi_pulse", "pi2_pulse")
     requires = (Dependency("qubit_freq"),)
-    optional_modules = (ModuleDep("opt_readout", default=_default_readout),)
+    optional_modules = (
+        ModuleDep(
+            "opt_readout", default=_default_readout, aliases=READOUT_LIBRARY_ALIASES
+        ),
+    )
 
     def make_default_schema(self) -> NodeCfgSchema:
         """The typed node-knob schema (defaults + types) — the param SSOT.
@@ -225,7 +231,8 @@ class LenRabiBuilder(Builder):
         like qubit_freq's detune). Its default starts away from zero and spans the
         notebook's conservative initial ``5 * pi_len`` window for a 0.1 us pi
         guess. Drive defaults follow the measure-gui qubit-pulse convention:
-        ``qub_flat`` on channel 0. The prototype's dead ``num_expts`` knob (never
+        ``qub_flat`` on channel 0; missing named waveforms lower to an inline const
+        pulse with ``qub_length``. The prototype's dead ``num_expts`` knob (never
         read — the point count came from the axis itself) is dropped.
         """
         return NodeCfgSchema(
@@ -265,8 +272,10 @@ class LenRabiBuilder(Builder):
             )
         )
 
-    def make_init_result(self, schema: NodeCfgSchema, flux: Any) -> Sweep1DResult:
-        knobs = schema.lower(None)
+    def make_init_result(
+        self, schema: NodeCfgSchema, flux: Any, md: Any = None
+    ) -> Sweep1DResult:
+        knobs = schema.lower(None, md=md)
         lengths = sweepcfg_to_axis(knobs["sweep_range"])
         return Sweep1DResult.allocate(flux, lengths, x_label="pulse length (us)")
 
@@ -308,13 +317,11 @@ class LenRabiBuilder(Builder):
             raise RuntimeError(
                 "lenrabi.make_cfg needs a readout module (none produced or preset)"
             )
-        knobs = env.schema.lower(ml)
+        knobs = env.schema.lower(ml, md=env.md)
         waveform_name = knobs.get("qub_waveform")
         ch = knobs.get("qub_ch")
-        if not waveform_name or ch is None:
-            raise RuntimeError(
-                "lenrabi.make_cfg needs qub_waveform + qub_ch params set"
-            )
+        if ch is None:
+            raise RuntimeError("lenrabi.make_cfg needs qub_ch param set")
         qubit_freq = float(snapshot["qubit_freq"])
 
         # the pulse-length extent (start, stop): the Result's trailing axis when a
@@ -331,9 +338,8 @@ class LenRabiBuilder(Builder):
                 "modules": {
                     "rabi_pulse": {
                         "type": "pulse",
-                        "waveform": ml.get_waveform(
-                            waveform_name,
-                            {"length": knobs["qub_length"]},
+                        "waveform": waveform_or_const(
+                            ml, waveform_name, length=knobs["qub_length"]
                         ),
                         "ch": ch,
                         "nqz": knobs["qub_nqz"],

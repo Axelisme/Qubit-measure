@@ -79,6 +79,10 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
+from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import (
+    PI_PULSE_LIBRARY_ALIASES,
+    READOUT_LIBRARY_ALIASES,
+)
 from zcu_tools.gui.app.autofluxdep.nodes.plotters import Decay1DPlotter
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
@@ -248,8 +252,16 @@ class T1Builder(Builder):
     name = "t1"
     provides = ("t1",)
     optional = (Dependency("t1", smooth="ewma", default=_default_t1),)
-    requires_modules = (ModuleDep("pi_pulse", default=_placeholder_pi_pulse),)
-    optional_modules = (ModuleDep("opt_readout", default=_default_readout),)
+    requires_modules = (
+        ModuleDep(
+            "pi_pulse", default=_placeholder_pi_pulse, aliases=PI_PULSE_LIBRARY_ALIASES
+        ),
+    )
+    optional_modules = (
+        ModuleDep(
+            "opt_readout", default=_default_readout, aliases=READOUT_LIBRARY_ALIASES
+        ),
+    )
 
     def make_default_schema(self) -> NodeCfgSchema:
         """The typed node-knob schema (defaults + types) — the param SSOT.
@@ -279,8 +291,10 @@ class T1Builder(Builder):
             )
         )
 
-    def make_init_result(self, schema: NodeCfgSchema, flux: Any) -> Sweep1DResult:
-        knobs = schema.lower(None)
+    def make_init_result(
+        self, schema: NodeCfgSchema, flux: Any, md: Any = None
+    ) -> Sweep1DResult:
+        knobs = schema.lower(None, md=md)
         times = sweepcfg_to_axis(knobs["sweep_range"])
         return Sweep1DResult.allocate(flux, times, x_label="relax time (us)")
 
@@ -317,7 +331,7 @@ class T1Builder(Builder):
             raise RuntimeError(
                 "t1.make_cfg needs a readout module (none produced or preset)"
             )
-        knobs = env.schema.lower(ml)
+        knobs = env.schema.lower(ml, md=env.md)
         smoothed_t1 = float(snapshot["t1"])
         return ml.make_cfg(
             {

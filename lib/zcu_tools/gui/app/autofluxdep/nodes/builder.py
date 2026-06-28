@@ -44,8 +44,8 @@ class RunEnv:
     """The per-flux-point execution environment a Builder curries into a Node.
 
     ``flux`` / ``flux_idx`` — this point. ``schema`` — the placed provider's typed
-    param SSOT (its ``NodeCfgSchema``); a Node lowers it (``schema.lower(ml)``) to
-    the flat knob dict ``make_cfg`` reads. ``soc`` / ``soccfg`` / ``ml`` /
+    param SSOT (its ``NodeCfgSchema``); a Node lowers it (``schema.lower(ml, md)``)
+    to the flat knob dict ``make_cfg`` reads. ``soc`` / ``soccfg`` / ``ml`` /
     ``tools`` — sweep resources: the connected board + its QICK config, the active
     ModuleLibrary (the Builder lowers it into the run cfg, Phase B), and the
     stateful tools.
@@ -148,7 +148,7 @@ class Builder(ABC):
 
     # --- sweep-lived factories (Run start; no-op for pure-compute Services) ---
 
-    def make_init_result(self, schema: NodeCfgSchema, flux: Any) -> Any:
+    def make_init_result(self, schema: NodeCfgSchema, flux: Any, md: Any = None) -> Any:
         """Pre-allocate the empty sweep Result. None = no Result.
 
         ``schema`` is the placement's typed param SSOT — the Builder lowers it to
@@ -159,7 +159,7 @@ class Builder(ABC):
         flux axis as its colormap/line x, which is why the whole array is passed
         (not just the length).
         """
-        del schema, flux  # base is a no-op; measurement Builders override
+        del schema, flux, md  # base is a no-op; measurement Builders override
         return None
 
     def make_plotter(self, figure: Any) -> Any:
