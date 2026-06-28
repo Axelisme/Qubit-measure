@@ -97,11 +97,13 @@ def _ro_landscape(
     return _ro_signal2real(np.asarray(snr, dtype=np.float64).reshape(shape))
 
 
-# Default axis specs: (start, stop, npts)
-_DEFAULT_FREQ: tuple[float, float, int] = (4998.0, 5002.0, 21)
+# Default axis specs: (start, stop, npts). The readout-frequency fallback follows
+# measure-gui's resonator role fallback around 6000 MHz; a calibrated readout or
+# previous ro_optimize result recenters the real run.
+_DEFAULT_FREQ: tuple[float, float, int] = (5998.0, 6002.0, 21)
 _DEFAULT_GAIN: tuple[float, float, int] = (0.3, 0.7, 21)
 
-_DEFAULT_CENTER_FREQ = 5000.0  # MHz — baseline readout resonance
+_DEFAULT_CENTER_FREQ = 6000.0  # MHz — baseline readout resonance fallback
 _DEFAULT_CENTER_GAIN = 0.5
 
 # the cfg sweep-window half-widths (the "設定頭"): the notebook centres the

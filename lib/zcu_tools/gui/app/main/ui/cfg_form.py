@@ -53,10 +53,16 @@ class CfgFormWidget(QWidget):
     # mode). Payload is a freshly built CfgSchema snapshot of the LiveModel.
     schema_changed: Signal = Signal(object)
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        field_label_max_width: int | None = None,
+    ) -> None:
         super().__init__(parent)
         self._model: SectionLiveField | None = None
         self._root_widget: SectionWidget | None = None
+        self._field_label_max_width = field_label_max_width
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -85,7 +91,11 @@ class CfgFormWidget(QWidget):
         model.on_validity_changed.connect(self.validity_changed.emit)
         model.on_change.connect(self._emit_schema_changed)
 
-        self._root_widget = SectionWidget(model, top_level=True)
+        self._root_widget = SectionWidget(
+            model,
+            top_level=True,
+            field_label_max_width=self._field_label_max_width,
+        )
         self._inner_layout.insertWidget(
             self._inner_layout.count() - 1, self._root_widget
         )

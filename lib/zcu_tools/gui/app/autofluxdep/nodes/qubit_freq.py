@@ -68,6 +68,10 @@ from zcu_tools.utils.process import rotate2real
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_QUB_WAVEFORM = "qub_flat"
+_DEFAULT_QUB_CH = 0
+_DEFAULT_EARLYSTOP_SNR = 50.0
+
 
 class QubitFreqCfgTemplate(TwoToneCfg, ExpCfgModel):
     """The base two-tone cfg qubit_freq lowers a context into.
@@ -313,9 +317,11 @@ class QubitFreqBuilder(Builder):
         The hardcoded defaults the prototype carried in ``make_cfg`` now live here.
         ``detune_sweep`` is a ``SweepSpec`` (expts-defined, aligning with the cfg
         editor): its default ``(-20, 50, expts=141)`` reproduces the prototype's
-        ``step=0.5`` axis point-for-point. The drive ``qub_waveform`` / ``qub_ch``
-        are optional (unset → ``make_cfg`` Fast-Fails), mirroring the prototype's
-        guard; ``qub_length`` defaults to the prototype's 0.1 us.
+        ``step=0.5`` axis point-for-point. The drive defaults follow the
+        measure-gui qubit-pulse convention: ``qub_flat`` on channel 0, with
+        ``qub_length`` at 0.1 us. If a project does not define that waveform,
+        ``make_cfg`` still Fast-Fails at the ModuleLibrary boundary instead of
+        fabricating a pulse silently.
         """
         return NodeCfgSchema(
             flat_node_schema(
@@ -331,14 +337,18 @@ class QubitFreqBuilder(Builder):
                     (
                         "earlystop_snr",
                         FloatSpec(label="Early-stop SNR", optional=True),
-                        None,
+                        _DEFAULT_EARLYSTOP_SNR,
                     ),
                     (
                         "qub_waveform",
                         str_scalar_spec("Drive waveform", optional=True),
-                        None,
+                        _DEFAULT_QUB_WAVEFORM,
                     ),
-                    ("qub_ch", IntSpec(label="Drive ch", optional=True), None),
+                    (
+                        "qub_ch",
+                        IntSpec(label="Drive ch", optional=True),
+                        _DEFAULT_QUB_CH,
+                    ),
                     ("qub_nqz", IntSpec(label="Drive nqz"), 2),
                     ("qub_gain", FloatSpec(label="Drive gain"), 0.05),
                     ("qub_length", FloatSpec(label="Drive length (us)"), 0.1),

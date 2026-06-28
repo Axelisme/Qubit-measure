@@ -1,8 +1,8 @@
 """MainWindow — the autofluxdep-gui shell.
 
-A QMainWindow holding a left/right split (``NodeListPane`` + ``NodeDetailPane``)
-with a global flux progress bar in the status bar. It wires the edit↔run state
-switch and owns the liveplot integration:
+A QMainWindow holding a measure-gui-style top session row, a left/right split
+(``NodeListPane`` + ``NodeDetailPane``), and a global flux progress bar in the
+status bar. It wires the edit↔run state switch and owns the liveplot integration:
 
 - At **Run start** it allocates each provider's sweep Result (``Controller
   .prepare_run_results``) and, for every Result, builds a bare matplotlib
@@ -26,9 +26,13 @@ from typing import Any
 from qtpy.QtCore import QObject, Qt, Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QDialog,
+    QHBoxLayout,
+    QLabel,
     QMainWindow,
     QProgressBar,
+    QPushButton,
     QSplitter,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -41,7 +45,12 @@ from zcu_tools.gui.app.autofluxdep.events.run import (
     RunStartedPayload,
     RunStoppedPayload,
 )
-from zcu_tools.gui.session.events import SocChangedPayload
+from zcu_tools.gui.session.events import (
+    ContextSwitchedPayload,
+    DeviceChangedPayload,
+    PredictorChangedPayload,
+    SocChangedPayload,
+)
 
 from .node_detail import NodeDetailPane
 from .node_list import NodeListPane
@@ -95,6 +104,9 @@ class MainWindow(QMainWindow):
         # base auto-refreshes off the shared session event bus, so the open dialog
         # tracks md/ml edits live without this window pushing to it.
         self._inspect_dialog: QDialog | None = None
+        self._setup_dialog: QDialog | None = None
+        self._devices_dialog: QDialog | None = None
+        self._predictor_dialog: QDialog | None = None
         self.setWindowTitle("autofluxdep-gui")
         self.resize(1100, 800)
 
@@ -107,6 +119,44 @@ class MainWindow(QMainWindow):
         self._canvas_park = QWidget(self)
         self._canvas_park.hide()
 
+        central = QWidget()
+        self.setCentralWidget(central)
+        main_layout = QVBoxLayout(central)
+        main_layout.setContentsMargins(4, 4, 4, 4)
+
+        # --- top session row (same global-session placement as measure-gui) ---
+        session_row = QHBoxLayout()
+        session_row.addWidget(QLabel("Context:"))
+        self._ctx_label = QLabel("(none)")
+        session_row.addWidget(self._ctx_label)
+        session_row.addSpacing(24)
+        session_row.addWidget(QLabel("Setup:"))
+        self._setup_label = QLabel("no SoC")
+        session_row.addWidget(self._setup_label)
+        session_row.addSpacing(24)
+        session_row.addWidget(QLabel("Predictor:"))
+        self._predictor_label = QLabel("none")
+        session_row.addWidget(self._predictor_label)
+        session_row.addStretch()
+
+        self._setup_btn = QPushButton("Setup…")
+        self._setup_btn.clicked.connect(self._on_setup_clicked)
+        session_row.addWidget(self._setup_btn)
+
+        self._devices_btn = QPushButton("Devices…")
+        self._devices_btn.clicked.connect(self._on_devices_clicked)
+        session_row.addWidget(self._devices_btn)
+
+        self._predictor_btn = QPushButton("Predictor…")
+        self._predictor_btn.clicked.connect(self._on_predictor_clicked)
+        session_row.addWidget(self._predictor_btn)
+
+        self._inspect_btn = QPushButton("Inspect…")
+        self._inspect_btn.clicked.connect(self._on_inspect)
+        session_row.addWidget(self._inspect_btn)
+
+        main_layout.addLayout(session_row)
+
         split = QSplitter()
         self._list = NodeListPane(ctrl)
         self._detail = NodeDetailPane()
@@ -114,7 +164,7 @@ class MainWindow(QMainWindow):
         split.addWidget(self._list)
         split.addWidget(self._detail)
         split.setStretchFactor(1, 1)
-        self.setCentralWidget(split)
+        main_layout.addWidget(split, stretch=1)
 
         # global flux progress in the status bar
         self._progress = QProgressBar()
@@ -125,7 +175,6 @@ class MainWindow(QMainWindow):
         self._list.selection_changed.connect(self._on_select)
         self._list.run_requested.connect(self._start)
         self._list.stop_requested.connect(self._stop)
-        self._list.inspect_requested.connect(self._on_inspect)
 
         # run bridge (worker thread → main thread)
         self._bridge = _RunBridge(ctrl)
@@ -137,10 +186,15 @@ class MainWindow(QMainWindow):
         self._bridge.run_stopped.connect(self._on_run_done)
         self._bridge.run_failed.connect(self._on_run_failed)
 
-        # a SoC connect (via the shared setup dialog) flips the setup light /
-        # run-enabled state — the run prerequisite is now "a SoC is connected".
-        ctrl.bus.subscribe(SocChangedPayload, lambda p: self._list._refresh_buttons())
+        # Shared session changes refresh the top status row and the flux source
+        # picker (mock setup can auto-provision fake_flux).
+        ctrl.bus.subscribe(SocChangedPayload, self._on_soc_changed)
+        ctrl.bus.subscribe(DeviceChangedPayload, self._on_device_changed)
+        ctrl.bus.subscribe(PredictorChangedPayload, self._on_predictor_changed)
+        ctrl.bus.subscribe(ContextSwitchedPayload, self._on_context_switched)
 
+        self._refresh_toolbar_buttons()
+        self._refresh_session_status()
         self._on_select(self._list.selected_index)
 
     # --- selection ---
@@ -156,6 +210,77 @@ class MainWindow(QMainWindow):
         self._detail.show_run_canvas(canvas)
 
     # --- inspect (non-modal context inspector) ---
+
+    def _on_setup_clicked(self) -> None:
+        from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
+
+        existing = self._setup_dialog
+        if existing is not None:
+            existing.raise_()
+            existing.activateWindow()
+            return
+
+        # Non-blocking open() keeps the Qt event loop (and the control socket)
+        # alive while the dialog is visible. WA_DeleteOnClose + instance ref
+        # prevent premature GC; finished clears the ref and refreshes state.
+        dlg = SetupDialog(self._ctrl, self)
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dlg.finished.connect(
+            lambda _r: (
+                setattr(self, "_setup_dialog", None),
+                self._refresh_session_status(),
+                self._list._refresh_buttons(),
+                self._list.refresh_flux_sources(),
+            )
+        )
+        self._setup_dialog = dlg
+        dlg.open()
+
+    def _on_devices_clicked(self) -> None:
+        from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
+
+        existing = self._devices_dialog
+        if existing is not None:
+            existing.raise_()
+            existing.activateWindow()
+            return
+
+        # The shared device dialog manages all instruments (a flux source among
+        # them) through the same SessionControllerPort the setup dialog uses.
+        dlg = DeviceDialog(self._ctrl, self)
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dlg.finished.connect(
+            lambda _r: (
+                setattr(self, "_devices_dialog", None),
+                self._refresh_session_status(),
+                self._list._refresh_buttons(),
+                self._list.refresh_flux_sources(),
+            )
+        )
+        self._devices_dialog = dlg
+        dlg.open()
+
+    def _on_predictor_clicked(self) -> None:
+        from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
+
+        existing = self._predictor_dialog
+        if existing is not None:
+            existing.raise_()
+            existing.activateWindow()
+            return
+
+        # The shared predictor dialog loads a FluxoniumPredictor into the active
+        # context; the run reads exp_context.predictor.
+        dlg = PredictorDialog(self._ctrl, self)
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dlg.finished.connect(
+            lambda _r: (
+                setattr(self, "_predictor_dialog", None),
+                self._refresh_session_status(),
+            )
+        )
+        self._predictor_dialog = dlg
+        dlg.open()
 
     def _on_inspect(self) -> None:
         """Open the shared context inspector, or raise it if already open.
@@ -232,6 +357,7 @@ class MainWindow(QMainWindow):
     def _on_run_started(self) -> None:
         self._list.set_running(True)
         self._detail.set_running(True)
+        self._refresh_toolbar_buttons()
         self._detail.focus_run()
 
     def _on_node_entered(self, name: str, idx: int) -> None:
@@ -263,6 +389,7 @@ class MainWindow(QMainWindow):
     def _on_run_done(self) -> None:
         self._list.set_running(False)
         self._detail.set_running(False)
+        self._refresh_toolbar_buttons()
 
     def _on_run_failed(self, message: str) -> None:
         """A Node's produce raised mid-sweep → unlock the UI + surface the error.
@@ -274,3 +401,40 @@ class MainWindow(QMainWindow):
 
         self._on_run_done()
         QMessageBox.warning(self, "Run failed", message)
+
+    # --- session status / toolbar state ---
+
+    def _on_soc_changed(self, _payload: SocChangedPayload) -> None:
+        self._refresh_session_status()
+        self._list._refresh_buttons()
+        self._list.refresh_flux_sources()
+
+    def _on_device_changed(self, _payload: DeviceChangedPayload) -> None:
+        self._list.refresh_flux_sources()
+
+    def _on_predictor_changed(self, _payload: PredictorChangedPayload) -> None:
+        self._refresh_session_status()
+
+    def _on_context_switched(self, _payload: ContextSwitchedPayload) -> None:
+        self._refresh_session_status()
+
+    def _refresh_toolbar_buttons(self) -> None:
+        editing = not self._ctrl.is_running
+        self._setup_btn.setEnabled(editing)
+        self._devices_btn.setEnabled(editing)
+        self._predictor_btn.setEnabled(editing)
+        # Inspect stays enabled during a run: the inspector reflects the live
+        # context and is non-modal, so it never blocks the event loop.
+        self._inspect_btn.setEnabled(True)
+
+    def _refresh_session_status(self) -> None:
+        ctx = self._ctrl.state.exp_context
+        if ctx.is_active() and ctx.active_label:
+            ctx_text = ctx.active_label
+        elif ctx.has_context():
+            ctx_text = f"{ctx.chip_name}/{ctx.qub_name} (draft)"
+        else:
+            ctx_text = "(none)"
+        self._ctx_label.setText(ctx_text)
+        self._setup_label.setText("connected" if ctx.has_soc() else "no SoC")
+        self._predictor_label.setText("active" if ctx.predictor is not None else "none")

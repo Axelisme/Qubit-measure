@@ -5,10 +5,10 @@ Three families of test:
 1. **Structure** — each node's ``make_default_schema`` declares exactly the user
    knobs (the typed node settings), and *no* derived/upstream field (predict_freq,
    relax=3·T1, the pi/readout modules) leaks into the spec.
-2. **Defaults** — the lowered default knobs reproduce the prototype's hardcoded
-   ``make_cfg`` values (reps/rounds/relax/the pulse "設定頭"), and a node's
-   ``make_cfg`` built from those defaults yields the same run cfg the prototype's
-   ``params.get(k, default)`` path produced (golden, field-by-field).
+2. **Defaults** — the lowered default knobs provide operator-ready initial values
+   (notebook / measure-gui conventions for the pulse "設定頭"), and a node's
+   ``make_cfg`` built from those defaults yields the expected run cfg
+   (golden, field-by-field).
 3. **Seam invariant** — only the ``cfg/`` seam (``__init__.py`` / ``schema.py`` /
    ``form.py``) may import ``zcu_tools.gui.app.main`` from inside the autofluxdep
    package.
@@ -57,7 +57,7 @@ _PI_PULSE = {
 def _ml() -> ModuleLibrary:
     ml = ModuleLibrary()
     ml.register_waveform(
-        drive_flat={
+        qub_flat={
             "style": "flat_top",
             "length": 2.0,
             "raise_waveform": {"style": "cosine", "length": 0.02},
@@ -170,7 +170,7 @@ def test_no_derived_field_in_any_spec():
         assert keys.isdisjoint(_DERIVED_FORBIDDEN), (builder.name, keys)
 
 
-# --- 2. defaults: the lowered knobs reproduce the prototype's hardcoded values --
+# --- 2. defaults: the lowered knobs provide operator-ready initial values -----
 
 
 def test_qubit_freq_default_knobs():
@@ -178,13 +178,21 @@ def test_qubit_freq_default_knobs():
     assert knobs["reps"] == 1000
     assert knobs["rounds"] == 100
     assert knobs["relax_delay"] == 0.5
+    assert knobs["earlystop_snr"] == 50.0
+    assert knobs["qub_waveform"] == "qub_flat"
+    assert knobs["qub_ch"] == 0
     assert knobs["qub_nqz"] == 2
     assert knobs["qub_gain"] == 0.05
     assert knobs["qub_length"] == 0.1
-    # optional drive waveform/ch + early-stop are unset → omitted (Fast-Fail guard)
-    assert "qub_waveform" not in knobs
-    assert "qub_ch" not in knobs
-    assert "earlystop_snr" not in knobs
+    # clearing an optional default still omits it (preserving the Fast-Fail guard)
+    schema = QubitFreqBuilder().make_default_schema()
+    schema.set_field("qub_waveform", None)
+    schema.set_field("qub_ch", None)
+    schema.set_field("earlystop_snr", None)
+    cleared = schema.lower(None)
+    assert "qub_waveform" not in cleared
+    assert "qub_ch" not in cleared
+    assert "earlystop_snr" not in cleared
     # the detune sweep lowers to the prototype's (-20, 50, step 0.5) axis exactly
     detune = knobs["detune_sweep"]
     axis = np.linspace(float(detune.start), float(detune.stop), int(detune.expts))
@@ -192,13 +200,28 @@ def test_qubit_freq_default_knobs():
     assert np.allclose(axis, old)
 
 
+def test_lenrabi_default_knobs():
+    knobs = LenRabiBuilder().make_default_schema().lower(None)
+    assert knobs["reps"] == 1000
+    assert knobs["rounds"] == 10
+    assert knobs["relax_delay"] == 30.0
+    assert knobs["earlystop_snr"] == 30.0
+    assert knobs["qub_waveform"] == "qub_flat"
+    assert knobs["qub_ch"] == 0
+    sweep = knobs["sweep_range"]
+    assert np.allclose([float(sweep.start), float(sweep.stop)], [0.05, 0.5])
+    assert int(sweep.expts) == 101
+
+
 def test_mist_default_knobs():
     knobs = MistBuilder().make_default_schema().lower(None)
     assert knobs["reps"] == 1000
     assert knobs["rounds"] == 100
-    assert knobs["relax_delay"] == 0.5
+    assert knobs["relax_delay"] == 20.5
+    assert knobs["mist_waveform"] == "mist_waveform"
+    assert knobs["mist_ch"] == 0
     assert knobs["mist_nqz"] == 2
-    assert knobs["mist_freq"] == 0.0
+    assert knobs["mist_freq"] == 6000.0
     assert knobs["mist_gain"] == 0.5
     assert knobs["mist_length"] == 0.1
     gain = knobs["gain_sweep"]
@@ -223,6 +246,7 @@ def test_t1_default_knobs():
     knobs = T1Builder().make_default_schema().lower(None)
     assert knobs["reps"] == 1000
     assert knobs["rounds"] == 10
+    assert knobs["earlystop_snr"] == 20.0
     sweep = knobs["sweep_range"]
     assert (float(sweep.start), float(sweep.stop), int(sweep.expts)) == (0.5, 60.0, 101)
 
@@ -232,7 +256,8 @@ def test_t2_default_knobs():
         knobs = builder.make_default_schema().lower(None)
         assert knobs["reps"] == 1000
         assert knobs["rounds"] == 10
-        assert knobs["detune_ratio"] == 0.2
+        assert knobs["detune_ratio"] == 0.05
+        assert knobs["earlystop_snr"] == 20.0
         sweep = knobs["sweep_range"]
         assert (float(sweep.start), float(sweep.stop), int(sweep.expts)) == (
             0.0,
@@ -243,11 +268,9 @@ def test_t2_default_knobs():
 
 # --- 2b. equivalence: default-knob make_cfg == the prototype's hardcoded cfg ----
 #
-# The prototype lowered make_cfg with ``params.get(k, <hardcoded default>)`` and an
-# empty params dict. Now the defaults live in the schema; building make_cfg from an
-# empty placement (so every knob takes its schema default) must yield the same run
-# cfg, field by field. qubit_freq is the worked golden (TwoToneCfg with the drive
-# "設定頭"); the waveform/ch must be supplied (the prototype Fast-Failed without).
+# The defaults live in the schema; building make_cfg from an empty placement (so
+# every knob takes its schema default) must yield the expected run cfg, field by
+# field. qubit_freq is the worked golden (TwoToneCfg with the drive "設定頭").
 
 
 def test_qubit_freq_make_cfg_uses_schema_defaults():
@@ -256,10 +279,7 @@ def test_qubit_freq_make_cfg_uses_schema_defaults():
     env = RunEnv(
         flux=0.0,
         flux_idx=0,
-        # the rest = defaults
-        schema=builder.make_default_schema().with_overrides(
-            {"qub_waveform": "drive_flat", "qub_ch": 3}
-        ),
+        schema=builder.make_default_schema(),
         ml=ml,
     )
     snap = Snapshot(
@@ -270,6 +290,7 @@ def test_qubit_freq_make_cfg_uses_schema_defaults():
     assert cfg.reps == 1000
     assert cfg.rounds == 100
     assert cfg.relax_delay == 0.5
+    assert int(cfg.modules.qub_pulse.ch) == 0
     assert int(cfg.modules.qub_pulse.nqz) == 2
     assert float(cfg.modules.qub_pulse.gain) == 0.05
     assert float(cfg.modules.qub_pulse.freq) == 5135.0  # the injected predict_freq
@@ -278,7 +299,7 @@ def test_qubit_freq_make_cfg_uses_schema_defaults():
 def test_mist_make_cfg_uses_schema_defaults():
     ml = ModuleLibrary()
     ml.register_waveform(
-        mist_flat={
+        mist_waveform={
             "style": "flat_top",
             "length": 2.0,
             "raise_waveform": {"style": "cosine", "length": 0.02},
@@ -288,10 +309,7 @@ def test_mist_make_cfg_uses_schema_defaults():
     env = RunEnv(
         flux=0.0,
         flux_idx=0,
-        # the rest = defaults
-        schema=builder.make_default_schema().with_overrides(
-            {"mist_waveform": "mist_flat", "mist_ch": 4}
-        ),
+        schema=builder.make_default_schema(),
         ml=ml,
     )
     snap = Snapshot(
@@ -300,9 +318,10 @@ def test_mist_make_cfg_uses_schema_defaults():
     cfg = builder.make_cfg(env, snap)
     assert cfg.reps == 1000
     assert cfg.rounds == 100
-    assert cfg.relax_delay == 0.5
+    assert cfg.relax_delay == 20.5
+    assert int(cfg.modules.mist_pulse.ch) == 0
     assert float(cfg.modules.mist_pulse.gain) == 0.5
-    assert float(cfg.modules.mist_pulse.freq) == 0.0
+    assert float(cfg.modules.mist_pulse.freq) == 6000.0
     assert int(cfg.modules.mist_pulse.nqz) == 2
 
 

@@ -82,7 +82,8 @@ logger = logging.getLogger(__name__)
 _DEFAULT_T1 = 10.0  # us — smoothed t1 fallback
 _DEFAULT_T2E = 5.0  # us — smoothed t2e fallback
 _T2E_WINDOW_FACTOR = 2.5  # notebook: sweep_range = (0, 2.5 * prev_t2e)
-_DEFAULT_DETUNE_RATIO = 0.2  # activate-detune fraction (one fringe per sweep)
+_DEFAULT_DETUNE_RATIO = 0.05  # notebook default activate-detune fraction
+_DEFAULT_EARLYSTOP_SNR = 20.0
 
 
 def _default_t1() -> float:
@@ -277,7 +278,8 @@ class T2EchoBuilder(Builder):
 
         Same shape as t2ramsey: ``sweep_range`` (``SweepSpec``) seeds the initial
         Result delay axis (the cfg's window is derived from the smoothed t2e in
-        ``make_cfg``); ``detune_ratio`` defaults to the prototype's 0.2. The dead
+        ``make_cfg``); ``detune_ratio`` defaults to the notebook's 0.05. Tests
+        that need a one-fringe synthetic trace override it explicitly. The dead
         ``num_expts`` knob (never read) is dropped.
         """
         return NodeCfgSchema(
@@ -298,14 +300,14 @@ class T2EchoBuilder(Builder):
                     (
                         "earlystop_snr",
                         FloatSpec(label="Early-stop SNR", optional=True),
-                        None,
+                        _DEFAULT_EARLYSTOP_SNR,
                     ),
                 )
             )
         )
 
     def detune_ratio(self, schema: NodeCfgSchema) -> float:
-        """The activate-detune ratio for this placement (typed knob, default 0.2)."""
+        """The activate-detune ratio for this placement (typed knob, default 0.05)."""
         return float(schema.lower(None)["detune_ratio"])
 
     def make_init_result(self, schema: NodeCfgSchema, flux: Any) -> Sweep1DResult:

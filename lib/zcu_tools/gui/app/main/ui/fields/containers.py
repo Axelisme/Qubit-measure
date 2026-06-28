@@ -109,9 +109,11 @@ class SectionWidget(BaseLiveWidget):
         field: SectionLiveField,
         top_level: bool = False,
         no_header: bool = False,
+        field_label_max_width: int | None = None,
         parent: QWidget | None = None,
     ):
         super().__init__(field, parent)
+        self._field_label_max_width = field_label_max_width
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -146,7 +148,13 @@ class SectionWidget(BaseLiveWidget):
                 continue
 
             widget_cls = get_widget_cls(child_field)
-            w = widget_cls(child_field)  # type: ignore
+            if widget_cls is SectionWidget:
+                w = SectionWidget(
+                    cast(SectionLiveField, child_field),
+                    field_label_max_width=self._field_label_max_width,
+                )
+            else:
+                w = widget_cls(child_field)  # type: ignore
             self._child_widgets[key] = w
 
             group = getattr(spec, "group", "") or ""
@@ -171,10 +179,18 @@ class SectionWidget(BaseLiveWidget):
         label = child_field.spec.label or key
         if isinstance(child_field, SweepLiveField):
             # Sweep widgets get their own full-width row; label goes on the line above
-            form.addRow(ElidedLabel(f"{label}:"))
+            form.addRow(
+                ElidedLabel(
+                    f"{label}:",
+                    max_width=self._field_label_max_width,
+                )
+            )
             form.addRow(cast(QWidget, w))
         else:
-            form.addRow(ElidedLabel(f"{label}:"), cast(QWidget, w))
+            form.addRow(
+                ElidedLabel(f"{label}:", max_width=self._field_label_max_width),
+                cast(QWidget, w),
+            )
 
     def teardown(self) -> None:
         field = cast(SectionLiveField, self._field)

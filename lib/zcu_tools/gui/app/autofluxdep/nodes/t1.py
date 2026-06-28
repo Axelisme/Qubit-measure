@@ -99,6 +99,7 @@ from zcu_tools.utils.fitting import fit_decay
 logger = logging.getLogger(__name__)
 
 _DEFAULT_T1 = 10.0  # us — md.t1 stand-in (the smoothed-t1 fallback)
+_DEFAULT_EARLYSTOP_SNR = 20.0
 
 
 class T1ModuleCfg(ConfigBase):
@@ -272,7 +273,7 @@ class T1Builder(Builder):
                     (
                         "earlystop_snr",
                         FloatSpec(label="Early-stop SNR", optional=True),
-                        None,
+                        _DEFAULT_EARLYSTOP_SNR,
                     ),
                 )
             )

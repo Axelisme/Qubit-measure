@@ -72,6 +72,11 @@ from zcu_tools.program.v2 import (
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_MIST_WAVEFORM = "mist_waveform"
+_DEFAULT_MIST_CH = 0
+_DEFAULT_MIST_FREQ = 6000.0
+_DEFAULT_RELAX_DELAY = 20.5
+
 
 def _mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     """The MIST state-disturbance magnitude (lower-layer ``mist_signal2real``).
@@ -234,9 +239,10 @@ class MistBuilder(Builder):
 
         ``gain_sweep`` is the disturbance-gain axis as a ``SweepSpec`` (expts-
         defined): its default ``(0, 1, expts=51)`` reproduces the prototype axis.
-        The disturbance ``mist_waveform`` / ``mist_ch`` are optional (unset →
-        ``make_cfg`` Fast-Fails, mirroring the prototype guard); the rest of the
-        "設定頭" default to the prototype's hardcoded values.
+        The disturbance defaults follow the single-qubit MIST notebooks:
+        ``mist_waveform`` on a resonator-like channel/frequency fallback. If a
+        project does not define ``mist_waveform``, ``make_cfg`` still Fast-Fails at
+        the ModuleLibrary boundary instead of fabricating a pulse silently.
         """
         return NodeCfgSchema(
             flat_node_schema(
@@ -248,15 +254,27 @@ class MistBuilder(Builder):
                     ),
                     ("reps", IntSpec(label="Reps"), 1000),
                     ("rounds", IntSpec(label="Rounds"), 100),
-                    ("relax_delay", FloatSpec(label="Relax delay (us)"), 0.5),
+                    (
+                        "relax_delay",
+                        FloatSpec(label="Relax delay (us)"),
+                        _DEFAULT_RELAX_DELAY,
+                    ),
                     (
                         "mist_waveform",
                         str_scalar_spec("Disturbance waveform", optional=True),
-                        None,
+                        _DEFAULT_MIST_WAVEFORM,
                     ),
-                    ("mist_ch", IntSpec(label="Disturbance ch", optional=True), None),
+                    (
+                        "mist_ch",
+                        IntSpec(label="Disturbance ch", optional=True),
+                        _DEFAULT_MIST_CH,
+                    ),
                     ("mist_nqz", IntSpec(label="Disturbance nqz"), 2),
-                    ("mist_freq", FloatSpec(label="Disturbance freq (MHz)"), 0.0),
+                    (
+                        "mist_freq",
+                        FloatSpec(label="Disturbance freq (MHz)"),
+                        _DEFAULT_MIST_FREQ,
+                    ),
                     ("mist_gain", FloatSpec(label="Disturbance gain"), 0.5),
                     ("mist_length", FloatSpec(label="Disturbance length (us)"), 0.1),
                 )

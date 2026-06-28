@@ -73,6 +73,11 @@ from zcu_tools.utils.fitting import fit_rabi
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_QUB_WAVEFORM = "qub_flat"
+_DEFAULT_QUB_CH = 0
+_DEFAULT_RELAX_DELAY = 30.0
+_DEFAULT_EARLYSTOP_SNR = 30.0
+
 
 class LenRabiModuleCfg(ConfigBase):
     """The module bundle lenrabi lowers a context into (mirrors the lower-layer
@@ -217,9 +222,11 @@ class LenRabiBuilder(Builder):
         """The typed node-knob schema (defaults + types) — the param SSOT.
 
         ``sweep_range`` is the pulse-length axis as a ``SweepSpec`` (expts-defined,
-        like qubit_freq's detune): its default ``(0, 6, expts=121)`` reproduces the
-        prototype's ``parse_linear_axis`` axis. The prototype's dead ``num_expts``
-        knob (never read — the point count came from the axis itself) is dropped.
+        like qubit_freq's detune). Its default starts away from zero and spans the
+        notebook's conservative initial ``5 * pi_len`` window for a 0.1 us pi
+        guess. Drive defaults follow the measure-gui qubit-pulse convention:
+        ``qub_flat`` on channel 0. The prototype's dead ``num_expts`` knob (never
+        read — the point count came from the axis itself) is dropped.
         """
         return NodeCfgSchema(
             flat_node_schema(
@@ -227,22 +234,30 @@ class LenRabiBuilder(Builder):
                     (
                         "sweep_range",
                         SweepSpec(label="Pulse length sweep (us)"),
-                        SweepValue(start=0.0, stop=6.0, expts=121),
+                        SweepValue(start=0.05, stop=0.5, expts=101),
                     ),
                     ("reps", IntSpec(label="Reps"), 1000),
                     ("rounds", IntSpec(label="Rounds"), 10),
-                    ("relax_delay", FloatSpec(label="Relax delay (us)"), 0.5),
+                    (
+                        "relax_delay",
+                        FloatSpec(label="Relax delay (us)"),
+                        _DEFAULT_RELAX_DELAY,
+                    ),
                     (
                         "earlystop_snr",
                         FloatSpec(label="Early-stop SNR", optional=True),
-                        None,
+                        _DEFAULT_EARLYSTOP_SNR,
                     ),
                     (
                         "qub_waveform",
                         str_scalar_spec("Drive waveform", optional=True),
-                        None,
+                        _DEFAULT_QUB_WAVEFORM,
                     ),
-                    ("qub_ch", IntSpec(label="Drive ch", optional=True), None),
+                    (
+                        "qub_ch",
+                        IntSpec(label="Drive ch", optional=True),
+                        _DEFAULT_QUB_CH,
+                    ),
                     ("qub_nqz", IntSpec(label="Drive nqz"), 2),
                     ("qub_gain", FloatSpec(label="Drive gain"), 0.05),
                     ("qub_length", FloatSpec(label="Drive length (us)"), 0.1),

@@ -43,16 +43,22 @@ FIELD_LABEL_MAX_WIDTH = 80
 
 
 class ElidedLabel(QLabel):
-    """QLabel that elides text when it exceeds FIELD_LABEL_MAX_WIDTH pixels.
+    """QLabel that elides text when it exceeds the configured label width.
 
     The full text is always shown in the tooltip so the user can read the
     complete field name on hover.
     """
 
-    def __init__(self, text: str, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        text: str,
+        parent: QWidget | None = None,
+        *,
+        max_width: int | None = None,
+    ) -> None:
         super().__init__(parent)
         self._full_text = text
-        self.setMaximumWidth(FIELD_LABEL_MAX_WIDTH)
+        self.setMaximumWidth(FIELD_LABEL_MAX_WIDTH if max_width is None else max_width)
         self.setToolTip(text)
         self._update_elided()
 

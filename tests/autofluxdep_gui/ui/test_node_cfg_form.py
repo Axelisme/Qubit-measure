@@ -22,7 +22,11 @@ from __future__ import annotations
 import pytest
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.cfg import DirectValue, SweepValue
-from zcu_tools.gui.app.autofluxdep.ui.node_cfg_form import NodeCfgForm
+from zcu_tools.gui.app.autofluxdep.ui.node_cfg_form import (
+    NODE_FIELD_LABEL_MAX_WIDTH,
+    NodeCfgForm,
+)
+from zcu_tools.gui.app.main.ui.fields.common import ElidedLabel
 
 
 @pytest.fixture
@@ -41,6 +45,20 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
     try:
         # the LiveModel renders exactly the schema's declared knobs
         assert set(form._model.fields.keys()) == set(node.schema.keys)
+    finally:
+        form.teardown()
+
+
+def test_field_labels_use_autofluxdep_width(ctrl_node, qapp):
+    ctrl, node, index = ctrl_node
+    form = NodeCfgForm(ctrl, node, index)
+    try:
+        labels = form.findChildren(ElidedLabel)
+        assert labels
+        assert all(
+            label.maximumWidth() == NODE_FIELD_LABEL_MAX_WIDTH for label in labels
+        )
+        assert any(label.toolTip() == "Early-stop SNR:" for label in labels)
     finally:
         form.teardown()
 

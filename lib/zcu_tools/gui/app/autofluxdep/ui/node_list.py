@@ -1,16 +1,16 @@
-"""NodeListPane — the left side: node list + flux + Setup + Run/Stop.
+"""NodeListPane — the left side: node list + flux + Run/Stop.
 
 Owns workflow editing (select / add / remove / reorder Nodes), the flux sweep
-fields, the Setup button (+ status light), the Inspect button (a non-modal
-context inspector the MainWindow owns the lifetime of — this pane only requests
-it), and the single Run/Stop toggle button (▶ Run in edit state, ■ Stop while
-running). Drives the Controller; emits a Qt signal when the selection changes so
+fields, the flux-source picker, and the single Run/Stop toggle button (▶ Run in
+edit state, ■ Stop while running). Global session actions (Setup / Devices /
+Predictor / Inspect) live in MainWindow's top toolbar, matching measure-gui's
+layout. Drives the Controller; emits a Qt signal when the selection changes so
 the right pane follows.
 """
 
 from __future__ import annotations
 
-from qtpy.QtCore import Qt, Signal  # type: ignore[attr-defined]
+from qtpy.QtCore import Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QComboBox,
     QHBoxLayout,
@@ -33,7 +33,6 @@ class NodeListPane(QWidget):
     selection_changed = Signal(int)  # selected node index, or -1
     run_requested = Signal()
     stop_requested = Signal()
-    inspect_requested = Signal()  # open the (non-modal) context inspector
 
     def __init__(self, ctrl: Controller, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -65,23 +64,6 @@ class NodeListPane(QWidget):
             btns.addWidget(b)
         root.addLayout(btns)
 
-        # setup
-        setup_row = QHBoxLayout()
-        self._setup_btn = _btn("Setup…", self._on_setup)
-        self._devices_btn = _btn("Devices…", self._on_devices)
-        self._predictor_btn = _btn("Predictor…", self._on_predictor)
-        # Inspect stays enabled during a run: the inspector reflects the live
-        # context (the run reads it; the user may want to peek mid-sweep), and it
-        # is non-modal so it never blocks the event loop the worker needs.
-        self._inspect_btn = _btn("Inspect…", self.inspect_requested.emit)
-        self._setup_light = QLabel("● not set")
-        setup_row.addWidget(self._setup_btn)
-        setup_row.addWidget(self._devices_btn)
-        setup_row.addWidget(self._predictor_btn)
-        setup_row.addWidget(self._inspect_btn)
-        setup_row.addWidget(self._setup_light)
-        root.addLayout(setup_row)
-
         # flux sweep
         root.addWidget(QLabel("flux sweep"))
         flux_row = QHBoxLayout()
@@ -109,7 +91,7 @@ class NodeListPane(QWidget):
 
         self.refresh_list()
         self._refresh_buttons()
-        self._refresh_flux_sources()
+        self.refresh_flux_sources()
 
     # --- list / selection ---
 
@@ -174,54 +156,9 @@ class NodeListPane(QWidget):
             self.refresh_list()
             self.select_index(idx)
 
-    def _on_setup(self) -> None:
-        from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
-
-        # Non-blocking open() keeps the Qt event loop (and the control socket)
-        # alive while the dialog is visible.  WA_DeleteOnClose + instance ref
-        # prevent premature GC; finished clears the ref and refreshes state.
-        dlg = SetupDialog(self._ctrl, self)
-        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dlg.finished.connect(
-            lambda _r: (self._refresh_buttons(), setattr(self, "_setup_dialog", None))
-        )
-        self._setup_dialog = dlg
-        dlg.open()
-
-    def _on_devices(self) -> None:
-        from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
-
-        # The shared device dialog manages all instruments (a flux source among
-        # them) through the same SessionControllerPort the setup dialog uses.
-        # Non-blocking open(); both refreshes run in the finished slot so they
-        # always fire after the dialog closes, whether accepted or rejected.
-        dlg = DeviceDialog(self._ctrl, self)
-        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dlg.finished.connect(
-            lambda _r: (
-                self._refresh_buttons(),
-                self._refresh_flux_sources(),  # a flux source may have (dis)connected
-                setattr(self, "_devices_dialog", None),
-            )
-        )
-        self._devices_dialog = dlg
-        dlg.open()
-
-    def _on_predictor(self) -> None:
-        from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
-
-        # The shared predictor dialog loads a FluxoniumPredictor into the active
-        # context; the run reads exp_context.predictor.
-        # No post-close refresh needed; WA_DeleteOnClose + finished clears the ref.
-        dlg = PredictorDialog(self._ctrl, self)
-        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dlg.finished.connect(lambda _r: setattr(self, "_predictor_dialog", None))
-        self._predictor_dialog = dlg
-        dlg.open()
-
     # --- flux source ---
 
-    def _refresh_flux_sources(self) -> None:
+    def refresh_flux_sources(self) -> None:
         """Repopulate the flux-source combo from the connected devices, keeping
         the current selection if its device is still connected."""
         current = self._ctrl.get_flux_device()
@@ -276,18 +213,14 @@ class NodeListPane(QWidget):
             self._up_btn,
             self._down_btn,
             self._rename_btn,
-            self._setup_btn,
-            self._devices_btn,
-            self._predictor_btn,
             self._flux_start,
             self._flux_stop,
             self._flux_npts,
+            self._flux_source,
         ):
             b.setEnabled(editing)
-        has_setup = self._ctrl.state.has_setup
-        self._setup_light.setText("● ok" if has_setup else "● not set")
         # Run enabled only when set up; Stop always enabled while running
-        self._run_btn.setEnabled(self._running or has_setup)
+        self._run_btn.setEnabled(self._running or self._ctrl.state.has_setup)
 
 
 def _btn(text: str, slot) -> QPushButton:

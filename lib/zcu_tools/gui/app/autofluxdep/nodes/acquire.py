@@ -183,12 +183,22 @@ def build_stop_checkers(
     """The ``stop_checkers`` list every measurement acquire passes to ``.acquire``.
 
     Threads the run's cooperative cancel (``env.should_stop``) + the SNR early-stop
-    (``snr_checker`` reading the running average via ``probe``) — exactly the lower
-    layer's ``stop_checkers=[ctx.is_stop, snr_checker(ctx, ...)]``."""
+    (``snr_checker`` reading the running average via ``probe`` once the first
+    ``round_hook`` has populated it) — exactly the lower layer's
+    ``stop_checkers=[ctx.is_stop, snr_checker(ctx, ...)]`` after data exists."""
     checkers: list[Callable[[], bool]] = []
     if env.should_stop is not None:
         checkers.append(env.should_stop)
-    checkers.append(snr_checker(probe, earlystop_snr(env.schema), signal2real_fn))
+    threshold = earlystop_snr(env.schema)
+    if threshold is not None:
+        check_snr = snr_checker(probe, threshold, signal2real_fn)
+
+        def check_snr_when_ready() -> bool:
+            if probe.value is None:
+                return False
+            return check_snr()
+
+        checkers.append(check_snr_when_ready)
     return checkers
 
 

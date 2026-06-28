@@ -41,6 +41,9 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.autofluxdep.nodes.builder import PlacedNode
 
 
+NODE_FIELD_LABEL_MAX_WIDTH = 180
+
+
 class NodeCfgForm(QWidget):
     """Typed cfg form for one PlacedNode, plus a read-only dep/provides summary.
 
@@ -72,7 +75,7 @@ class NodeCfgForm(QWidget):
             LiveModelEnv(ctrl=controller),
             node.schema.schema.value,
         )
-        self._form = CfgFormWidget()
+        self._form = CfgFormWidget(field_label_max_width=NODE_FIELD_LABEL_MAX_WIDTH)
         self._form.attach(self._model)
         self._form.schema_changed.connect(self._on_schema_changed)
         root.addWidget(self._form, 1)

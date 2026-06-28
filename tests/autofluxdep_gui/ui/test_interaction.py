@@ -73,10 +73,41 @@ def test_devices_button_opens_shared_device_dialog(app):
     from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 
     ctrl, win = app
-    assert hasattr(win._list, "_devices_btn")
+    assert hasattr(win, "_devices_btn")
     dlg = DeviceDialog(ctrl, win)  # must not raise
     assert dlg._ctrl is ctrl
     dlg.deleteLater()
+
+
+def test_session_status_and_buttons_share_top_row(app):
+    # Keep the global session controls dense: status labels on the left, action
+    # buttons on the right, all in the first row.
+    _ctrl, win = app
+    central = win.centralWidget()
+    assert central is not None
+    main_layout = central.layout()
+    assert main_layout is not None
+    first_item = main_layout.itemAt(0)
+    assert first_item is not None
+    row = first_item.layout()
+    assert row is not None
+
+    widgets = []
+    for idx in range(row.count()):
+        item = row.itemAt(idx)
+        if item is None:
+            continue
+        widget = item.widget()
+        if widget is not None:
+            widgets.append(widget)
+
+    assert win._ctx_label in widgets
+    assert win._setup_label in widgets
+    assert win._predictor_label in widgets
+    assert win._setup_btn in widgets
+    assert win._devices_btn in widgets
+    assert win._predictor_btn in widgets
+    assert win._inspect_btn in widgets
 
 
 def test_flux_source_picker_records_selection(app):
@@ -98,7 +129,7 @@ def test_predictor_button_opens_shared_predictor_dialog(app):
     from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
 
     ctrl, win = app
-    assert hasattr(win._list, "_predictor_btn")
+    assert hasattr(win, "_predictor_btn")
     dlg = PredictorDialog(ctrl, win)  # must not raise
     assert dlg._ctrl is ctrl
     dlg.deleteLater()
@@ -111,10 +142,10 @@ def test_inspect_button_opens_single_non_modal_inspector(app):
     from zcu_tools.gui.session.ui.inspect_base import InspectDialogBase
 
     ctrl, win = app
-    assert hasattr(win._list, "_inspect_btn")
+    assert hasattr(win, "_inspect_btn")
     assert win._inspect_dialog is None
 
-    win._list.inspect_requested.emit()  # the button's slot
+    win._inspect_btn.click()  # the toolbar button's slot
     dlg = win._inspect_dialog
     assert dlg is not None
     assert isinstance(dlg, InspectDialogBase)
@@ -123,7 +154,7 @@ def test_inspect_button_opens_single_non_modal_inspector(app):
     assert dlg.isVisible()
 
     # A second request raises the same instance, never a second dialog.
-    win._list.inspect_requested.emit()
+    win._inspect_btn.click()
     assert win._inspect_dialog is dlg
 
     dlg.reject()  # closing drops the reference so the next request rebuilds
@@ -135,7 +166,8 @@ def test_inspect_button_stays_enabled_during_run(app):
     # (unlike the workflow-editing buttons, which lock while running).
     ctrl, win = app
     win._list.set_running(True)
-    assert win._list._inspect_btn.isEnabled()
+    win._refresh_toolbar_buttons()
+    assert win._inspect_btn.isEnabled()
     win._list.set_running(False)
 
 
@@ -160,7 +192,8 @@ def test_run_disabled_until_setup(app):
     connect_mock(ctrl)
     win._list._refresh_buttons()
     assert win._list._run_btn.isEnabled()
-    assert "ok" in win._list._setup_light.text()
+    win._refresh_session_status()
+    assert win._setup_label.text() == "connected"
 
 
 # --- run lifecycle: edit↔run lock, liveplot canvas, progress ---
@@ -268,12 +301,21 @@ def test_run_switches_detail_to_run_tab(app):
     def on_started():
         captured["tab"] = win._detail.current_tab
         captured["btn"] = win._list._run_btn.text()
+        captured["setup_enabled"] = win._setup_btn.isEnabled()
+        captured["devices_enabled"] = win._devices_btn.isEnabled()
+        captured["predictor_enabled"] = win._predictor_btn.isEnabled()
+        captured["inspect_enabled"] = win._inspect_btn.isEnabled()
 
     win._bridge.run_started.connect(on_started)
     _run_to_completion(ctrl, win)
     # the run_started slot (main thread) switched to the run sub-tab + showed Stop
     assert captured.get("tab") == 1
     assert captured.get("btn") == "■ Stop"
+    assert captured.get("setup_enabled") is False
+    assert captured.get("devices_enabled") is False
+    assert captured.get("predictor_enabled") is False
+    assert captured.get("inspect_enabled") is True
+    assert win._setup_btn.isEnabled()
 
 
 def test_multiple_real_experiments_each_get_a_liveplot(qapp):

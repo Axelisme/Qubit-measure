@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-28（value_ref resolve-once cfg edits）
+**Last updated:** 2026-06-28（cfg form label width override）
 
 # `zcu_tools/gui/app/main/` — measure-gui Framework AI Note
 
@@ -62,8 +62,8 @@ gui/
 │       └── dispatch.py     — BoundMethod 綁 handler→METHOD_SPECS；METHOD_REGISTRY
 │       （measure-gui MCP entrypoint 已搬出本套件，住在 zcu_tools/mcp/measure/server.py：guard bridge + override tools + 自己的 stdio loop，建在 gui.remote McpBridge 上）
 └── ui/
-    ├── cfg_form.py         — CfgFormWidget：LiveModel 反應式容器
-    ├── fields/             — 渲染邏輯：registry.py / common.py / containers.py
+    ├── cfg_form.py         — CfgFormWidget：LiveModel 反應式容器；host 可覆寫 field label elide 寬度，預設維持 measure-gui 原寬度
+    ├── fields/             — 渲染邏輯：registry.py / common.py / containers.py（ElidedLabel 保留完整 tooltip）
     ├── inspect_dialog.py   — InspectDialog(InspectDialogBase 子類)：補 Arb Waveforms top-toolbar 入口與 ml create/modify（_MlCreateDialog/_MlModifyDialog 拖 CfgEditor）；md tab + ml view/rename/del 在 base（session）
     ├── arb_waveform_dialog.py — ArbWaveformDialog：管理 qubit-scoped arbitrary waveform `.npz` asset；支援 formula segment insert/delete、normalize toggle、保存、rename/delete、debounced I/Q/Abs preview（debounce 包住昂貴的 render_formula_recipe；data_key 編輯不觸發 render；Normalize 只決定是否 peak-normalized；y 軸一律依目前畫出的資料自動縮放；save 直接用 cheap-path 取得的 FormulaRecipe 交給 service 單次 render 持久化）；新建 draft 預設為兩側 half-Gaussian 的 flat-top recipe；ML waveform 建立仍走 Inspect 的正常 create/modify 流程
     ├── main_window.py      — MainWindow(QMainWindow) 實作 ViewProtocol；toolbar 保留 Setup / Devices / Predictor / Inspect（Arb Waveforms 入口在 Inspect 內）；named dialog registry 對 Predictor 採 persistent hide-on-close（重開不重算曲線），其餘 dialog 仍 close 後釋放；持 FeedbackPanel（`refresh_feedback_widget` 依 (live op 數 且 `ctrl.has_agent_connected()`) 把單一 app-level panel mount 進 target tab 的 plot_layout / unmount；target tab = running tab，無則 active tab；tab 變則 re-mount；`ExpTabWidget.mount_feedback_panel`/`unmount_feedback_panel` 為 host API）+ `open_notify_prompt` 開 NotifyUserDialog
