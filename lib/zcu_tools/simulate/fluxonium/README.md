@@ -1,6 +1,6 @@
 # `simulate/fluxonium` 模塊重點文檔
 
-**Last updated:** 2026-06-29（matrix-element fast-fail）
+**Last updated:** 2026-06-29（floquet golden / matrix-element fast-fail）
 
 基於 [scqubits](https://scqubits.readthedocs.io) 的 Fluxonium 量子比特數值模擬工具集,提供能譜、色散位移、矩陣元、相干時間與實驗參數預測等計算。
 
@@ -98,7 +98,9 @@ floquet 效能要點(design search 的 snr stage 主成本即在此):
   崩潰邊界在 rtol≥5e-2),傳 `None` 回嚴格。`calc_branch_infos_with_tls` 預設嚴格(餵 mist
   精度敏感分析)。
 - 結果 **bit-exact deterministic**(同參數重跑 spread=0),golden 測試見
-  `tests/simulate/fluxonium/branch/test_floquet.py`。
+  `tests/simulate/fluxonium/branch/test_floquet.py`。strict path golden 對目前
+  Python / numpy / qutip / BLAS 組合敏感；依賴組合改變導致 ULP 級漂移時，重錄 golden 並保留
+  `abs=1e-12`，不要用放寬 tolerance 掩蓋演算法變動。
 - 呼叫方契約:design/search 的 `calculate_snr` **只算 `valid==True` 列**(其餘 NaN),
   必須在 `avoid_*` cheap filter 之後呼叫(design.md 已同步順序)。
 
