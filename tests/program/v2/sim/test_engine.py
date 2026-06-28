@@ -37,7 +37,11 @@ from zcu_tools.program.v2.modules.readout import DirectReadoutCfg, PulseReadoutC
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.sim import SimParams
 from zcu_tools.program.v2.sim.engine import _FULL_SCALE, SimCancelledError
-from zcu_tools.program.v2.sim.readout import resonator_freqs, s21
+from zcu_tools.program.v2.sim.readout import (
+    effective_signal_samples,
+    resonator_freqs,
+    s21,
+)
 from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.program.v2.utils import sweep2param
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
@@ -101,6 +105,24 @@ def _rf_g_mhz() -> float:
 
 def _readout(ro_freq_mhz: float) -> Module:
     return DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=ro_freq_mhz).build("ro")
+
+
+def _compiled_sample_times(
+    readout_module: Module, *, sim: SimParams = _SIM
+) -> tuple[int, NDArray[np.float64]]:
+    """Compile a one-readout program and return its ADC sample axis."""
+
+    _soc, soccfg = make_mock_soc(sim=sim)
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=1, rounds=1),
+        modules=[readout_module],
+    )
+    prog.compile()
+    ((ro_ch, ro),) = prog.ro_chs.items()
+    n_samples = int(ro["length"])
+    ts = prog.soccfg.cycles2us(np.arange(n_samples), ro_ch=ro_ch)
+    return n_samples, np.asarray(ts, dtype=np.float64)
 
 
 def _amp(result: list[np.ndarray]) -> np.ndarray:
@@ -477,17 +499,20 @@ def _expected_blob_centers(ro_freq_mhz: float) -> tuple[complex, complex]:
     """The two per-shot blob centres ``(g_center, e_center)`` in raw ADC units.
 
     The engine reads out at probe frequency ``ro_freq_mhz`` and lays out a shot
-    on either the |g>-conditioned blob ``_FULL_SCALE * S21(f_ro; rf_g)`` or the
-    |e>-conditioned blob ``_FULL_SCALE * S21(f_ro; rf_e)``.  These are the exact
-    deterministic centres a noiseless, fully-polarised population would produce,
-    so the singleshot get_raw clusters must land on them.
+    on either the |g>-conditioned blob
+    ``_FULL_SCALE * signal_samples * S21(f_ro; rf_g)`` or the |e>-conditioned
+    blob with ``rf_e``.  These are the integrated raw deterministic centres a
+    noiseless, fully-polarised population would produce, so the singleshot
+    get_raw clusters must land on them.
     """
 
     rf_g, rf_e = resonator_freqs(_SIM, _OPERATING_FLUX)
     freqs = np.array([ro_freq_mhz * 1e-3], dtype=np.float64)  # MHz -> GHz
     s_g = complex(s21(_SIM, freqs, rf_g)[0])
     s_e = complex(s21(_SIM, freqs, rf_e)[0])
-    return _FULL_SCALE * s_g, _FULL_SCALE * s_e
+    _n_samples, sample_times = _compiled_sample_times(_readout(ro_freq_mhz))
+    signal_samples = effective_signal_samples(None, None, sample_times)
+    return _FULL_SCALE * signal_samples * s_g, _FULL_SCALE * signal_samples * s_e
 
 
 def _singleshot_raw(
@@ -533,10 +558,10 @@ def test_engine_singleshot_two_blobs_centers():
     """get_raw shots cluster on the |g> / |e> blob centres set by the init pulse.
 
     A pi pulse (gain*length == pi_gain_len) drives P_e ~ 1, so essentially every
-    shot lands on the |e> blob ``_FULL_SCALE * S21(rf_g; rf_e)``; with no pulse
-    P_e ~ thermal ~ 0, so the shots land on the |g> blob ``_FULL_SCALE *
-    S21(rf_g; rf_g)``.  The cluster medians (robust to the few mis-prepared shots
-    and the Gaussian readout noise) must match the deterministic blob centres.
+    shot lands on the integrated |e> blob; with no pulse P_e ~ thermal ~ 0, so
+    the shots land on the integrated |g> blob.  The cluster medians (robust to
+    the few mis-prepared shots and the Gaussian readout noise) must match the
+    deterministic blob centres.
     """
 
     g_center, e_center = _expected_blob_centers(_rf_g_mhz())
@@ -626,6 +651,48 @@ def test_engine_singleshot_accumulated_mean_invariant():
     # the same quantity computed two ways; they agree to within the shot-noise
     # floor (~ blob_dist * sqrt(0.25 / reps) ~ 0.0035 * blob_dist at reps=20000).
     assert abs(reps_mean - acc_reps_mean) < 0.02 * blob_dist
+
+
+def _normalized_ground_raw_direct(
+    *, ro_length: float, reps: int = 12_000
+) -> tuple[NDArray[np.complex128], int]:
+    """Run a ground-state DirectReadout and return raw samples divided by length."""
+
+    sim = _SIM.model_copy(update={"snr": 25.0, "thermal_pop": 0.0})
+    soc, soccfg = make_mock_soc(sim=sim)
+    ro_freq = _rf_g_mhz()
+    readout = DirectReadoutCfg(ro_ch=0, ro_length=ro_length, ro_freq=ro_freq).build(
+        "ro"
+    )
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=reps, rounds=1),
+        modules=[readout],
+    )
+    prog.acquire(soc, progress=False)
+
+    raw = prog.get_raw()
+    assert raw is not None
+    compiled_length = int(list(prog.ro_chs.values())[0]["length"])
+    samples = raw[0][:, 0, 0] + 1j * raw[0][:, 0, 1]
+    return samples / compiled_length, compiled_length
+
+
+def test_engine_length_normalization_keeps_mean_and_reduces_noise():
+    """Integrated raw sums normalize to stable means and 1/sqrt(length) noise."""
+
+    short, n_short = _normalized_ground_raw_direct(ro_length=0.5)
+    long, n_long = _normalized_ground_raw_direct(ro_length=2.0)
+
+    mean_short = np.mean(short)
+    mean_long = np.mean(long)
+    scale = max(abs(mean_short), abs(mean_long), 1.0)
+    assert abs(mean_short - mean_long) < 0.05 * scale
+
+    std_short = float(np.std(short.real))
+    std_long = float(np.std(long.real))
+    assert std_short > std_long
+    assert std_short / std_long == pytest.approx(np.sqrt(n_long / n_short), rel=0.15)
 
 
 # -------------------------------------------------------------------- round hook
@@ -780,13 +847,21 @@ def test_acquire_stop_checker_does_not_cancel_inside_mock_signal_grid(monkeypatc
         return (4.0, 7.0, 7.01)
 
     def fake_point_signal(
-        self, point: dict[str, int], f_qubit_ghz: float, rf_g: float, rf_e: float
-    ) -> tuple[NDArray[np.complex128], NDArray[np.complex128], float]:
+        self,
+        point: dict[str, int],
+        f_qubit_ghz: float,
+        rf_g: float,
+        rf_e: float,
+        n_samples: int,
+        sample_times_us: NDArray[np.float64],
+    ) -> tuple[NDArray[np.complex128], NDArray[np.complex128], float, float, float]:
         point_calls.append(point)
         return (
             np.array([1.0 + 0.0j], dtype=np.complex128),
             np.array([0.0 + 0.0j], dtype=np.complex128),
             0.0,
+            1.0,
+            1.0,
         )
 
     monkeypatch.setattr(SimEngine, "_operating_signal", fake_operating_signal)
@@ -845,7 +920,7 @@ def test_engine_cancel_during_detune_loop_raises(monkeypatch):
                     thermal_pop=0.0,
                 )
             ],
-            readout=ReadoutPlan(f_ro_ghz=7.0),
+            readout=ReadoutPlan(f_ro_ghz=7.0, ro_length_us=1.0),
         )
 
     def fake_evolve(v0, segments):
@@ -860,8 +935,9 @@ def test_engine_cancel_during_detune_loop_raises(monkeypatch):
     monkeypatch.setattr(engine_module.bloch, "evolve", fake_evolve)
 
     engine = SimEngine(prog, sim, stop_checkers=[stop_after_three_detune_nodes])
+    n_samples, sample_times_us = engine._readout_sample_times_us()
     with pytest.raises(SimCancelledError, match="cancelled"):
-        engine._point_signal({}, 4.0, 7.0, 7.01)
+        engine._point_signal({}, 4.0, 7.0, 7.01, n_samples, sample_times_us)
 
     assert 0 < evolve_calls < len(engine._detune_nodes)
 
@@ -870,7 +946,10 @@ def test_engine_cancel_during_detune_loop_raises(monkeypatch):
 
 
 def _pulse_readout(
-    ro_freq_mhz: float, ro_length: float = 2.0, pulse_length: float | None = None
+    ro_freq_mhz: float,
+    ro_length: float = 2.0,
+    pulse_length: float | None = None,
+    gain: float = 0.1,
 ) -> Module:
     """A PulseReadout (const envelope) for the decimated/lookback path.
 
@@ -882,13 +961,46 @@ def _pulse_readout(
     pulse_cfg = PulseCfg(
         ch=0,
         nqz=1,
-        gain=0.1,
+        gain=gain,
         freq=ro_freq_mhz,
         phase=0.0,
         waveform=ConstWaveformCfg(length=pulse_len),
     )
     ro_cfg = DirectReadoutCfg(ro_ch=0, ro_length=ro_length, ro_freq=ro_freq_mhz)
     return PulseReadoutCfg(pulse_cfg=pulse_cfg, ro_cfg=ro_cfg).build("ro")
+
+
+def _ground_raw_median(readout: Module, *, sim: SimParams) -> complex:
+    """Run one no-pulse readout and return the raw median centre."""
+
+    soc, soccfg = make_mock_soc(sim=sim)
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=2000, rounds=1),
+        modules=[readout],
+    )
+    prog.acquire(soc, progress=False)
+    raw = prog.get_raw()
+    assert raw is not None
+    samples = raw[0][:, 0, 0] + 1j * raw[0][:, 0, 1]
+    return complex(np.median(samples.real) + 1j * np.median(samples.imag))
+
+
+def test_engine_pulse_readout_gain_scales_raw_blob_centers():
+    """PulseReadout raw deterministic centres scale linearly with readout gain."""
+
+    sim = _SIM.model_copy(update={"snr": 1.0e9, "thermal_pop": 0.0})
+    low_gain = 0.05
+    high_gain = 0.20
+
+    low = _ground_raw_median(
+        _pulse_readout(_rf_g_mhz(), ro_length=1.0, gain=low_gain), sim=sim
+    )
+    high = _ground_raw_median(
+        _pulse_readout(_rf_g_mhz(), ro_length=1.0, gain=high_gain), sim=sim
+    )
+
+    assert abs(high) / abs(low) == pytest.approx(high_gain / low_gain, rel=0.01)
 
 
 def test_engine_acquire_decimated_returns_timefly_shifted_trace():
@@ -904,7 +1016,7 @@ def test_engine_acquire_decimated_returns_timefly_shifted_trace():
     prog = ModularProgramV2(
         soccfg,
         ProgramV2Cfg(reps=1, rounds=2),
-        modules=[_pulse_readout(_rf_g_mhz(), ro_length=2.0)],
+        modules=[_pulse_readout(_rf_g_mhz(), ro_length=2.0, gain=1.0)],
     )
 
     result = prog.acquire_decimated(soc, progress=False)
@@ -938,7 +1050,12 @@ def test_engine_acquire_decimated_uses_pulse_length_not_adc_window():
         soccfg,
         ProgramV2Cfg(reps=1, rounds=1),
         modules=[
-            _pulse_readout(_rf_g_mhz(), ro_length=ro_length, pulse_length=pulse_length)
+            _pulse_readout(
+                _rf_g_mhz(),
+                ro_length=ro_length,
+                pulse_length=pulse_length,
+                gain=1.0,
+            )
         ],
     )
 
@@ -952,6 +1069,32 @@ def test_engine_acquire_decimated_uses_pulse_length_not_adc_window():
 
     assert inside.size > 0 and after_pulse.size > 0
     assert inside.mean() > 100.0 * (after_pulse.mean() + 1.0)
+
+
+def test_engine_acquire_decimated_amplitude_scales_with_readout_gain():
+    """Decimated/lookback traces use the same linear readout gain amplitude."""
+
+    sim = _SIM.model_copy(update={"snr": 1.0e9})
+
+    def inside_mean(gain: float) -> float:
+        soc, soccfg = make_mock_soc(sim=sim)
+        prog = ModularProgramV2(
+            soccfg,
+            ProgramV2Cfg(reps=1, rounds=1),
+            modules=[_pulse_readout(_rf_g_mhz(), ro_length=2.0, gain=gain)],
+        )
+        trace = prog.acquire_decimated(soc, progress=False)[0]
+        ts = prog.get_time_axis(ro_index=0)
+        mag = np.abs(trace[:, 0] + 1j * trace[:, 1])
+        inside = mag[(ts > sim.timeFly + 0.1) & (ts < sim.timeFly + 1.5)]
+        assert inside.size > 0
+        return float(np.mean(inside))
+
+    low_gain = 0.05
+    high_gain = 0.20
+    assert inside_mean(high_gain) / inside_mean(low_gain) == pytest.approx(
+        high_gain / low_gain, rel=0.02
+    )
 
 
 # ---------------------------------------------- Phase 2c: Lorentzian dephasing

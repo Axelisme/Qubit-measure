@@ -432,26 +432,36 @@ class TestResetSegments:
 
 
 class TestReadoutPlan:
-    """Readout modules produce a ReadoutPlan with the per-point f_ro (GHz)."""
+    """Readout modules produce a resolved semantic ReadoutPlan per point."""
 
     def test_direct_readout_fixed_freq(self) -> None:
         lp = lower_point(
             [_readout()], None, _SIM, _F_QUBIT_GHZ, {}, _identity_cycles2us
         )
         assert lp.readout.f_ro_ghz == pytest.approx(7.2)
+        assert lp.readout.ro_length_us == pytest.approx(1.0)
+        assert lp.readout.readout_gain == pytest.approx(1.0)
+        assert lp.readout.pulse_cfg is None
+        assert lp.readout.pulse_length_us is None
 
-    def test_pulse_readout_reads_nested_ro_freq(self) -> None:
+    def test_pulse_readout_reads_nested_metadata(self) -> None:
         pulse_cfg = PulseCfg(
             waveform=ConstWaveformCfg(length=1.0),
             ch=0,
             nqz=1,
             freq=7200.0,
-            gain=0.1,
+            gain=0.25,
         )
-        ro_cfg = DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=7200.0)
+        ro_cfg = DirectReadoutCfg(ro_ch=0, ro_length=1.5, ro_freq=7200.0)
         ro = PulseReadoutCfg(pulse_cfg=pulse_cfg, ro_cfg=ro_cfg).build("ro")
         lp = lower_point([ro], None, _SIM, _F_QUBIT_GHZ, {}, _identity_cycles2us)
         assert lp.readout.f_ro_ghz == pytest.approx(7.2)
+        assert lp.readout.ro_length_us == pytest.approx(1.5)
+        assert lp.readout.readout_gain == pytest.approx(0.25)
+        assert lp.readout.pulse_cfg is not None
+        assert lp.readout.pulse_cfg.gain == pytest.approx(0.25)
+        assert lp.readout.pulse_cfg.waveform.length == pytest.approx(1.0)
+        assert lp.readout.pulse_length_us == pytest.approx(1.0)
 
     def test_swept_readout_freq_resolves_per_point(self) -> None:
         # onetone resonator spectroscopy: ro_freq is a sweep.  Lowering resolves
@@ -470,6 +480,46 @@ class TestReadoutPlan:
                 _identity_cycles2us,
             )
             assert lp.readout.f_ro_ghz == pytest.approx(expected_mhz / 1e3)
+
+    def test_swept_pulse_readout_metadata_resolves_per_point(self) -> None:
+        ro_sweep = SweepCfg(start=0.8, stop=1.2, expts=3, step=0.2)
+        gain_sweep = SweepCfg(start=0.1, stop=0.3, expts=3, step=0.1)
+        length_sweep = SweepCfg(start=0.5, stop=0.9, expts=3, step=0.2)
+        freq_sweep = SweepCfg(start=7100.0, stop=7300.0, expts=3, step=100.0)
+
+        pulse_cfg = PulseCfg(
+            waveform=ConstWaveformCfg(length=sweep2param("pulse_length", length_sweep)),
+            ch=0,
+            nqz=1,
+            freq=sweep2param("ro_freq", freq_sweep),
+            gain=sweep2param("gain", gain_sweep),
+        )
+        ro_cfg = DirectReadoutCfg(
+            ro_ch=0,
+            ro_length=sweep2param("ro_length", ro_sweep),
+            ro_freq=sweep2param("ro_freq", freq_sweep),
+        )
+        ro = PulseReadoutCfg(pulse_cfg=pulse_cfg, ro_cfg=ro_cfg).build("ro")
+        sweep = [
+            ("ro_freq", freq_sweep),
+            ("gain", gain_sweep),
+            ("pulse_length", length_sweep),
+            ("ro_length", ro_sweep),
+        ]
+
+        lp = lower_point(
+            [ro],
+            sweep,
+            _SIM,
+            _F_QUBIT_GHZ,
+            {"ro_freq": 2, "gain": 1, "pulse_length": 0, "ro_length": 2},
+            _identity_cycles2us,
+        )
+
+        assert lp.readout.f_ro_ghz == pytest.approx(7.3)
+        assert lp.readout.readout_gain == pytest.approx(0.2)
+        assert lp.readout.pulse_length_us == pytest.approx(0.5)
+        assert lp.readout.ro_length_us == pytest.approx(1.2)
 
 
 class TestEndToEndRotation:

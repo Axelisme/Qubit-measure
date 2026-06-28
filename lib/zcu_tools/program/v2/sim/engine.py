@@ -32,14 +32,15 @@ detection.
 
 Noise model
 -----------
-``SimParams.snr`` is the signal-to-noise ratio of a *single* repetition.  Each
-element of the raw buffer (one rep at one sweep point) gets additive Gaussian
-noise with standard deviation ``_FULL_SCALE / snr`` on each I/Q quadrature.
-Averaging over the ``reps`` axis (and, across rounds, over ``rounds``) then
-improves the effective SNR by ``sqrt(reps * rounds)`` — exactly as on hardware,
-because the round loop reruns the program and software-averages.  ``seed`` makes
-the noise reproducible; each round draws fresh noise so re-running the round loop
-is statistically meaningful (Q1).
+``SimParams.snr`` is the per-sample Gaussian readout scale before integration.
+Each raw buffer element is an integrated ADC sum: the deterministic signal scales
+with the effective signal samples, and the Gaussian noise standard deviation
+scales with ``sqrt(compiled_readout_samples)``. Averaging over the ``reps`` axis
+(and, across rounds, over ``rounds``) then improves the effective SNR by
+``sqrt(reps * rounds)`` — exactly as on hardware, because the round loop reruns
+the program and software-averages.  ``seed`` makes the noise reproducible; each
+round draws fresh noise so re-running the round loop is statistically meaningful
+(Q1).
 """
 
 from __future__ import annotations
@@ -64,7 +65,14 @@ from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 from . import bloch
 from .lowering import LoweredPoint, _resolve_scalar, lower_point
 from .params import SimParams
-from .readout import decimated_trace, resonator_freqs, s21
+from .readout import (
+    decimated_trace,
+    effective_signal_samples,
+    noise_std_sample_scale,
+    readout_drive_amplitude,
+    resonator_freqs,
+    s21,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -183,13 +191,18 @@ class SimEngine:
         self.sim = sim
         self._stop_checkers = tuple(stop_checkers or ())
 
-        # Deterministic per-(sweep-point, read) blob grids ``(s_g, s_e, p_e)``,
-        # each of shape ``(*sweep, nreads)``, built lazily on the first
-        # compute_round and reused across rounds; None until then.  Bernoulli
-        # sampling and noise are NOT cached here — they are redrawn per round
-        # (the docstring's "deterministic grid" invariant).
+        # Deterministic per-(sweep-point, read) blob grids plus integration
+        # scales, each of shape ``(*sweep, nreads)``, built lazily on the first
+        # compute_round and reused across rounds; None until then. Bernoulli
+        # sampling and noise are NOT cached here — they are redrawn per round.
         self._det_grids: (
-            tuple[NDArray[np.complex128], NDArray[np.complex128], NDArray[np.float64]]
+            tuple[
+                NDArray[np.complex128],
+                NDArray[np.complex128],
+                NDArray[np.float64],
+                NDArray[np.float64],
+                NDArray[np.float64],
+            ]
             | None
         ) = None
 
@@ -249,10 +262,17 @@ class SimEngine:
 
     def _signal_grid(
         self, f_qubit_ghz: float, rf_g: float, rf_e: float
-    ) -> tuple[NDArray[np.complex128], NDArray[np.complex128], NDArray[np.float64]]:
+    ) -> tuple[
+        NDArray[np.complex128],
+        NDArray[np.complex128],
+        NDArray[np.float64],
+        NDArray[np.float64],
+        NDArray[np.float64],
+    ]:
         """Compute the deterministic per-(sweep-point, read) blob grids.
 
-        Returns ``(s_g_grid, s_e_grid, p_e_grid)``, each of shape
+        Returns ``(s_g_grid, s_e_grid, p_e_grid, signal_scale_grid,
+        noise_std_scale_grid)``, each of shape
         ``(*sweep_dims, nreads)`` (one readout channel; multi-channel sim is out
         of scope — the engine asserts a single readout channel):
 
@@ -262,6 +282,8 @@ class SimEngine:
           - ``p_e_grid`` is the (ensemble-averaged) excited population at each
             point, the Bernoulli probability that a shot lands on the ``s_e``
             blob.
+          - ``signal_scale_grid`` / ``noise_std_scale_grid`` carry the raw
+            integration factors for deterministic signal and Gaussian noise.
 
         ``compute_round`` draws per-shot Bernoulli(``p_e``) and selects between
         ``s_g`` / ``s_e``; the reps-mean is ``(1−p_e)·s_g + p_e·s_e ==
@@ -278,36 +300,52 @@ class SimEngine:
         axes = self._sweep_axes()
         sweep_dims = tuple(count for _, count in axes)
         nreads = self._nreads()
+        n_samples, sample_times_us = self._readout_sample_times_us()
 
         s_g_grid = np.empty((*sweep_dims, nreads), dtype=np.complex128)
         s_e_grid = np.empty((*sweep_dims, nreads), dtype=np.complex128)
         p_e_grid = np.empty((*sweep_dims, nreads), dtype=np.float64)
+        signal_scale_grid = np.empty((*sweep_dims, nreads), dtype=np.float64)
+        noise_std_scale_grid = np.empty((*sweep_dims, nreads), dtype=np.float64)
 
         index_ranges = [range(count) for _, count in axes]
         for multi_index in itertools.product(*index_ranges):
             self._raise_if_cancelled()
             point = {name: idx for (name, _), idx in zip(axes, multi_index)}
-            s_g, s_e, p_e = self._point_signal(point, f_qubit_ghz, rf_g, rf_e)
+            s_g, s_e, p_e, signal_scale, noise_std_scale = self._point_signal(
+                point, f_qubit_ghz, rf_g, rf_e, n_samples, sample_times_us
+            )
             idx = (*multi_index, slice(None))
             s_g_grid[idx] = s_g
             s_e_grid[idx] = s_e
             p_e_grid[idx] = p_e
+            signal_scale_grid[idx] = signal_scale
+            noise_std_scale_grid[idx] = noise_std_scale
 
-        return s_g_grid, s_e_grid, p_e_grid
+        return (
+            s_g_grid,
+            s_e_grid,
+            p_e_grid,
+            signal_scale_grid,
+            noise_std_scale_grid,
+        )
 
     def _point_signal(
-        self, point: dict[str, int], f_qubit_ghz: float, rf_g: float, rf_e: float
-    ) -> tuple[NDArray[np.complex128], NDArray[np.complex128], float]:
+        self,
+        point: dict[str, int],
+        f_qubit_ghz: float,
+        rf_g: float,
+        rf_e: float,
+        n_samples: int,
+        sample_times_us: NDArray[np.float64],
+    ) -> tuple[NDArray[np.complex128], NDArray[np.complex128], float, float, float]:
         """Deterministic readout blobs at one sweep point (single unified path).
 
-        Returns ``(s_g, s_e, p_e)`` where ``s_g`` / ``s_e`` are the |g>- / |e>-
-        conditioned complex readout blobs at this point's probe frequency
-        (``S21(f_ro; rf_g)`` / ``S21(f_ro; rf_e)``, length-``nreads`` arrays) and
-        ``p_e`` is the (ensemble-averaged) excited population (a scalar).  These
-        are the two per-shot Bernoulli outcomes plus its probability; the engine
-        selects between them per shot in :meth:`compute_round`, and the reps-mean
-        ``(1−p_e)·s_g + p_e·s_e`` equals the accumulated ``mixed_signal`` blend
-        exactly (the invariant that keeps the averaged readout unchanged).
+        Returns ``(s_g, s_e, p_e, signal_scale, noise_std_scale)`` where
+        ``s_g`` / ``s_e`` are the |g>- / |e>-conditioned complex readout blobs at
+        this point's probe frequency (``S21(f_ro; rf_g)`` / ``S21(f_ro; rf_e)``),
+        ``p_e`` is the (ensemble-averaged) excited population, and the two scale
+        values convert the order-unity blobs/noise into integrated raw ADC sums.
 
         Every sweep point follows the *same* physics: lower the module tree,
         evolve the Bloch timeline to an excited population ``P_e``, and read out
@@ -391,7 +429,15 @@ class SimEngine:
         freqs = np.array([zero_lowered.readout.f_ro_ghz], dtype=np.float64)
         s_g = s21(self.sim, freqs, rf_g)
         s_e = s21(self.sim, freqs, rf_e)
-        return s_g, s_e, p_e_mean
+        signal_scale = readout_drive_amplitude(
+            zero_lowered.readout.readout_gain
+        ) * effective_signal_samples(
+            zero_lowered.readout.pulse_cfg,
+            zero_lowered.readout.pulse_length_us,
+            sample_times_us,
+        )
+        noise_std_scale = noise_std_sample_scale(n_samples)
+        return s_g, s_e, p_e_mean, signal_scale, noise_std_scale
 
     def _lower(
         self, point: dict[str, int], f_qubit_ghz: float, detune_offset: float
@@ -423,6 +469,24 @@ class SimEngine:
             )
         (ro,) = ro_chs.values()
         return int(ro["trigs"])
+
+    def _readout_sample_times_us(self) -> tuple[int, NDArray[np.float64]]:
+        """Compiled integration sample count and sample times for one readout."""
+
+        ro_chs = self.program.ro_chs
+        if len(ro_chs) != 1:
+            raise NotImplementedError(
+                f"SimEngine supports exactly one readout channel; program has "
+                f"{len(ro_chs)}"
+            )
+        ((ro_ch, ro),) = ro_chs.items()
+        n_samples = int(ro["length"])
+        if n_samples <= 0:
+            raise ValueError(
+                f"compiled readout length must be positive, got {n_samples}"
+            )
+        ts = self.program.soccfg.cycles2us(np.arange(n_samples), ro_ch=ro_ch)
+        return n_samples, np.asarray(ts, dtype=np.float64)
 
     # ------------------------------------------------------- operating point
     def _reduced_operating_flux(self) -> float:
@@ -525,8 +589,14 @@ class SimEngine:
     # ----------------------------------------------------------- raw assembly
     def _ensure_signal(
         self,
-    ) -> tuple[NDArray[np.complex128], NDArray[np.complex128], NDArray[np.float64]]:
-        """Build (once, cached) the deterministic ``(s_g, s_e, p_e)`` blob grids.
+    ) -> tuple[
+        NDArray[np.complex128],
+        NDArray[np.complex128],
+        NDArray[np.float64],
+        NDArray[np.float64],
+        NDArray[np.float64],
+    ]:
+        """Build (once, cached) deterministic blob grids and integration scales.
 
         The flux, f_qubit and per-point blob grids are independent of the round
         index — only the per-shot Bernoulli draw and the additive noise differ
@@ -536,10 +606,10 @@ class SimEngine:
         is what makes ``compute_round`` lazy: a run that early-stops never
         computes a round it does not poll.
 
-        Returns ``(s_g_grid, s_e_grid, p_e_grid)``, each of shape
-        ``(*sweep, nreads)`` — the order-unity complex |g>/|e> blobs and the
-        excited population.  Bernoulli sampling and the full-scale / noise are
-        applied in :meth:`compute_round`, not cached here.
+        Returns ``(s_g_grid, s_e_grid, p_e_grid, signal_scale_grid,
+        noise_std_scale_grid)``, each of shape ``(*sweep, nreads)``. Bernoulli
+        sampling and random noise are applied in :meth:`compute_round`, not
+        cached here.
         """
 
         self._raise_if_cancelled()
@@ -576,7 +646,13 @@ class SimEngine:
         logger.debug("SimEngine.compute_round: round_idx=%d", round_idx)
 
         self._raise_if_cancelled()
-        s_g_grid, s_e_grid, p_e_grid = self._ensure_signal()
+        (
+            s_g_grid,
+            s_e_grid,
+            p_e_grid,
+            signal_scale_grid,
+            noise_std_scale_grid,
+        ) = self._ensure_signal()
         self._raise_if_cancelled()
 
         loop_dims = self.program.loop_dims
@@ -591,11 +667,11 @@ class SimEngine:
         state = self._rng.binomial(1, p_e_grid, size=full_shape).astype(bool)
         blob = np.where(state, s_e_grid, s_g_grid)  # (reps, *sweep, nreads) complex
 
-        det = _FULL_SCALE * blob
+        det = _FULL_SCALE * signal_scale_grid * blob
         det_iq = np.stack([det.real, det.imag], axis=-1)  # (..., 2)
 
-        noise_std = _FULL_SCALE / self.sim.snr
-        noise = self._rng.normal(0.0, noise_std, size=det_iq.shape)
+        noise_std = (_FULL_SCALE / self.sim.snr) * noise_std_scale_grid
+        noise = self._rng.normal(0.0, noise_std[..., None], size=det_iq.shape)
         acc = np.rint(det_iq + noise).astype(np.int64)
         return [acc]
 
@@ -688,6 +764,7 @@ class SimEngine:
             rf_e,
             p_e,
         )
+        trace = readout_drive_amplitude(lowered.readout.readout_gain) * trace
 
         det = _FULL_SCALE * np.stack([trace.real, trace.imag], axis=-1)  # (n, 2)
         noise_std = _FULL_SCALE / self.sim.snr

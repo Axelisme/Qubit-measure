@@ -542,7 +542,7 @@ def test_lookback_recovers_timefly_as_trig_offset() -> None:
     ro_pulse = PulseCfg(
         ch=0,
         nqz=1,
-        gain=0.1,
+        gain=1.0,
         freq=_rf_g_mhz(),
         phase=0.0,
         waveform=ConstWaveformCfg(length=ro_length),
@@ -629,16 +629,16 @@ def _run_ge(
 def _expected_ge_centers() -> tuple[complex, complex]:
     """The |g>/|e> blob centres in GE analyze (avgiq) units.
 
-    GE_Exp divides the raw per-shot acc_buf by the readout window length, so a
-    fully-polarised cluster sits at ``_FULL_SCALE * S21(rf_g; rf_X) / length``.
-    The mock readout window length at ro_length=1.0 is 307 samples.
+    GE_Exp divides the raw per-shot acc_buf by the compiled readout length.  The
+    test readout uses a full-window const PulseReadout with gain 0.1, so the
+    integrated raw centre normalizes to ``_FULL_SCALE * 0.1 * S21(rf_g; rf_X)``.
     """
 
     rf_g, rf_e = resonator_freqs(_SIM, _OPERATING_FLUX)
     freqs = np.array([_rf_g_mhz() * 1e-3], dtype=np.float64)  # probe at rf_g
-    length = 307  # compiled mock readout window at ro_length=1.0
-    g = _FULL_SCALE * complex(s21(_SIM, freqs, rf_g)[0]) / length
-    e = _FULL_SCALE * complex(s21(_SIM, freqs, rf_e)[0]) / length
+    readout_gain = 0.1
+    g = _FULL_SCALE * readout_gain * complex(s21(_SIM, freqs, rf_g)[0])
+    e = _FULL_SCALE * readout_gain * complex(s21(_SIM, freqs, rf_e)[0])
     return g, e
 
 
@@ -648,9 +648,8 @@ def test_ge_recovers_centers_population_and_fidelity() -> None:
     A low snr (the blobs overlap) drives a genuine PCA + histogram discrimination
     through the real GE_Exp.run -> analyze path:
 
-      - the recovered g_center / e_center land on the deterministic blob centres
-        ``_FULL_SCALE * S21(rf_g / rf_e) / length`` (the two per-shot Bernoulli
-        outcomes the engine produces),
+      - the recovered g_center / e_center land on the gain-scaled deterministic
+        blob centres (the two per-shot Bernoulli outcomes the engine produces),
       - the populations track the preparation: the no-probe scan is mostly |g>,
         the pi-probe scan is mostly |e>,
       - the fidelity is a real (non-trivial) discrimination value in (0.5, 1.0)

@@ -7,8 +7,9 @@ sweep point it walks the module list in execution order and emits:
   - a list of :class:`bloch.Segment` describing the qubit's piecewise-constant
     evolution (reset pulses, drive pulses, idle / free-evolution delays) that
     happen *before* readout, and
-  - a :class:`ReadoutPlan` describing the readout window (fixed probe frequency
-    ``f_ro`` in GHz and whether this experiment sweeps the readout frequency).
+  - a :class:`ReadoutPlan` describing the resolved readout settings at this
+    point: probe frequency, ADC integration window, drive gain, and optional
+    generator pulse-envelope metadata.
 
 Responsibility boundary (kept deliberately narrow):
   - Lowering resolves sweep axes (via ``QickParam.to_array``) and the dmem
@@ -127,9 +128,26 @@ class ReadoutPlan:
         ``ro_freq`` is resolved here to its value at the current sweep index, so
         the engine reads it back point-by-point without needing to know whether
         it is swept or fixed — every experiment goes through one unified path.
+    ro_length_us : float
+        ADC integration window in µs from the semantic readout cfg.  The engine
+        still uses the compiled sample count as the raw-buffer normalization
+        source of truth, but the semantic plan carries this value explicitly.
+    readout_gain : float
+        Resolved generator gain for a ``PulseReadout``.  ``DirectReadout`` has no
+        drive-gain cfg, so it uses unity.
+    pulse_cfg : PulseCfg | None
+        The generator pulse cfg whose envelope defines the effective signal area,
+        or ``None`` for ``DirectReadout``.
+    pulse_length_us : float | None
+        Resolved generator pulse/envelope length in µs, or ``None`` for
+        ``DirectReadout``.
     """
 
     f_ro_ghz: float
+    ro_length_us: float
+    readout_gain: float = 1.0
+    pulse_cfg: PulseCfg | None = None
+    pulse_length_us: float | None = None
 
 
 @dataclass(frozen=True)
@@ -615,15 +633,30 @@ def _readout_plan(
 
     if isinstance(module, DirectReadout):
         ro_freq = module.cfg.ro_freq
+        ro_length = module.cfg.ro_length
+        f_ro_mhz = _resolve_scalar(ro_freq, loop_counts, point)
+        ro_length_us = _resolve_scalar(ro_length, loop_counts, point)
+        return ReadoutPlan(f_ro_ghz=f_ro_mhz / _GHZ_TO_MHZ, ro_length_us=ro_length_us)
     elif isinstance(module, PulseReadout):
         ro_freq = module.cfg.ro_cfg.ro_freq
+        ro_length = module.cfg.ro_cfg.ro_length
+        readout_gain = _resolve_scalar(module.cfg.pulse_cfg.gain, loop_counts, point)
+        pulse_length_us = _resolve_scalar(
+            module.cfg.pulse_cfg.waveform.length, loop_counts, point
+        )
+        f_ro_mhz = _resolve_scalar(ro_freq, loop_counts, point)
+        ro_length_us = _resolve_scalar(ro_length, loop_counts, point)
+        return ReadoutPlan(
+            f_ro_ghz=f_ro_mhz / _GHZ_TO_MHZ,
+            ro_length_us=ro_length_us,
+            readout_gain=readout_gain,
+            pulse_cfg=module.cfg.pulse_cfg,
+            pulse_length_us=pulse_length_us,
+        )
     else:
         raise UnsupportedModuleError(
             f"unsupported readout module {type(module).__name__} for lowering"
         )
-
-    f_ro_mhz = _resolve_scalar(ro_freq, loop_counts, point)
-    return ReadoutPlan(f_ro_ghz=f_ro_mhz / _GHZ_TO_MHZ)
 
 
 def _select_branch(branch: Branch, point: dict[str, int]) -> list[Module]:

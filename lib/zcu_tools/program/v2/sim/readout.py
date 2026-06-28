@@ -15,14 +15,15 @@ engine selects between: ``s21(f_ro; rf_g)`` when the qubit is in |g> and
 which :func:`mixed_signal` provides for the accumulated (reps-averaged) path.
 The per-shot Bernoulli sampling itself lives in the engine (it draws state ~
 Bernoulli(P_e) per shot and picks ``s21`` of the chosen state); this module is
-purely the deterministic physics layer — it returns the per-state ``s21`` blobs
-and their blend, never the random draw.
+the deterministic readout layer — it returns the per-state ``s21`` blobs, their
+blend, and pure readout integration / noise-scale helpers, never random draws.
 
-Responsibility boundary: this file only maps *physical quantities -> IQ signal*.
-It does not touch sweeps, timelines, acc_buf assembly, noise, or the per-shot
-Bernoulli draw — those belong to the lowering / engine layers. All resonator /
-dispersive / hanger physics is delegated to the existing building blocks; no
-physics is re-implemented here.
+Responsibility boundary: this file owns deterministic S21 plus pure readout
+integration / noise-scale helpers. It does not touch sweeps, timelines,
+``acc_buf`` assembly, random noise draws, or the per-shot Bernoulli draw — those
+belong to the lowering / engine layers. All resonator / dispersive / hanger
+physics is delegated to the existing building blocks; no physics is
+re-implemented here.
 
 The only deviation from the repo-wide Fast-Fail principle is the
 ``DressedLabelingError`` fallback in :func:`resonator_freqs` — see Q3 in
@@ -33,6 +34,7 @@ of crashing.
 
 from __future__ import annotations
 
+import math
 import warnings
 from functools import lru_cache
 
@@ -156,6 +158,71 @@ def s21(
         a0=_DEFAULT_A0,
         edelay=_DEFAULT_EDELAY,
     )
+
+
+def readout_drive_amplitude(gain: float | None) -> float:
+    """Return the linear readout drive amplitude for an optional cfg gain."""
+
+    if gain is None:
+        return 1.0
+    amplitude = float(gain)
+    if not math.isfinite(amplitude):
+        raise ValueError(f"readout gain must be finite, got {gain!r}")
+    return amplitude
+
+
+def _validate_sample_times(sample_times_us: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Normalize and validate a readout integration sample axis."""
+
+    ts = np.asarray(sample_times_us, dtype=np.float64)
+    if ts.ndim != 1:
+        raise ValueError(f"sample_times_us must be a 1-D array, got shape {ts.shape}")
+    if ts.size == 0:
+        raise ValueError("sample_times_us must not be empty")
+    if not np.all(np.isfinite(ts)):
+        raise ValueError("sample_times_us must contain only finite values")
+    return ts
+
+
+def effective_signal_samples(
+    readout_cfg: PulseCfg | None,
+    pulse_length_us: float | None,
+    sample_times_us: NDArray[np.float64],
+) -> float:
+    """Return the envelope-weighted signal area in compiled ADC samples.
+
+    ``DirectReadout`` has no generator envelope and therefore contributes one
+    signal unit per integrated sample.  ``PulseReadout`` integrates the resolved
+    generator envelope over the same compiled ADC sample axis.  This helper
+    returns a sample count, not a time integral; QICK's accumulated path
+    normalizes by the compiled readout sample count.
+    """
+
+    ts = _validate_sample_times(sample_times_us)
+    if readout_cfg is None:
+        if pulse_length_us is not None:
+            raise ValueError("pulse_length_us must be None when readout_cfg is None")
+        return float(ts.size)
+
+    if pulse_length_us is None:
+        raise ValueError("pulse_length_us is required when readout_cfg is provided")
+    pulse_length = float(pulse_length_us)
+    if not math.isfinite(pulse_length) or pulse_length <= 0.0:
+        raise ValueError(
+            f"pulse_length_us must be finite and positive, got {pulse_length_us!r}"
+        )
+
+    envelope = envelope_at(readout_cfg, ts, pulse_length)
+    return float(np.sum(envelope))
+
+
+def noise_std_sample_scale(n_samples: int) -> float:
+    """Return the Gaussian raw-noise std scale for an integrated sample count."""
+
+    n = int(n_samples)
+    if n != n_samples or n <= 0:
+        raise ValueError(f"n_samples must be a positive integer, got {n_samples!r}")
+    return math.sqrt(float(n))
 
 
 def mixed_signal(

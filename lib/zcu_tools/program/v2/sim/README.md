@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-06-29 (acquire stop checker boundary)
+**Last updated:** 2026-06-29 (readout integration and gain model)
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -117,16 +117,20 @@ every coupling point.
   eigh-free per-state hanger response (the engine calls it twice per point for the
   `s_g` / `s_e` blobs), and `mixed_signal` is the population-weighted blend (the
   accumulated reps-mean) — both *take* `rf_g` / `rf_e` (so the engine computes the
-  dressed freqs once). Also `value_to_flux`. No sweeps / timelines / acc_buf /
-  noise / the per-shot Bernoulli draw (the engine owns that).
+  dressed freqs once). Also owns pure readout-integration helpers: linear drive
+  amplitude, envelope-weighted effective signal samples, and integrated Gaussian
+  noise sample scaling. Also `value_to_flux`. No sweeps / timelines / acc_buf /
+  random noise / the per-shot Bernoulli draw (the engine owns that).
 - `engine.py` — `SimEngine`: glue. Pins the operating point at reduced flux
   `Phi/Phi0 = 1.0` (R-3; no longer derived from the cfg `dev` map), computes
   f_qubit AND `rf_g` / `rf_e` there ONCE (flux-constant, with a hot cache for
   identical operating points), drives lowering -> bloch -> readout, caches the
-  deterministic `(s_g, s_e, p_e)` blob grids, and per round draws a per-shot
-  `Bernoulli(p_e)` to select a blob and adds per-shot Gaussian noise into the QICK
-  `(*loop_dims, nreads, 2)` int64 buffer (snr / reps / rounds / seed; fresh
-  Bernoulli + noise per round so software-averaging works). The
+  deterministic `(s_g, s_e, p_e)` blob grids plus readout integration scales, and
+  per round draws a per-shot `Bernoulli(p_e)` to select a blob, multiplies the
+  deterministic signal by readout gain and effective signal samples, and adds
+  Gaussian integrated noise into the QICK `(*loop_dims, nreads, 2)` int64 buffer
+  (snr / reps / rounds / seed; fresh Bernoulli + noise per round so
+  software-averaging works). The
   reps-mean is the accumulated `mixed_signal` blend (zero regression); `get_raw`
   sees the two blobs. Owns the Lorentzian quasi-static detune
   ensemble: it averages `P_e` over a deterministic Gauss-Legendre quadrature in `δ`
@@ -165,11 +169,12 @@ every coupling point.
 - **D2 — decimated / lookback supported (model A).** `acquire_decimated` on a sim
   soc routes through the engine just like `acquire`: the engine lowers the single
   lookback point, evolves the Bloch vector to `P_e`, and renders the time-domain
-  trace via `decimated_trace` — the readout envelope scaled by the steady mixed
-  S21, **shifted by `sim.timeFly`** (the readout time of flight). So the trace is
-  ~0 for program-time `< timeFly` and the readout pulse envelope appears at
-  `[timeFly, timeFly + pulse_cfg.waveform.length)`, giving lookback a physical
-  rising edge whose position `analyze` recovers as the trig_offset (`≈ timeFly`).
+  trace via `decimated_trace` — the readout gain times the readout envelope scaled
+  by the steady mixed S21, **shifted by `sim.timeFly`** (the readout time of
+  flight). So the trace is ~0 for program-time `< timeFly` and the readout pulse
+  envelope appears at `[timeFly, timeFly + pulse_cfg.waveform.length)`, giving
+  lookback a physical rising edge whose position `analyze` recovers as the
+  trig_offset (`≈ timeFly`).
   The ADC/readout window length (`ro_cfg.ro_length`) only determines the sampled
   time axis and may outlive the generator envelope. Model A has no resonator
   ring-up transient (the steady S21 applied per sample); the accumulated companion
@@ -185,9 +190,21 @@ every coupling point.
   ambiguous, `resonator_freqs` degrades deterministically to "no dispersive
   shift" (`rf_g = rf_e = bare_rf`) and warns, rather than crashing — a real
   measurement never raises at that physics edge.
-- **Q1 — noise model.** `snr` is per single repetition; fresh Gaussian noise is
-  drawn each round so averaging over reps*rounds improves the effective SNR by
-  `sqrt(reps*rounds)`, as on hardware.
+- **Readout integration model.** Accumulated and singleshot raw `acc_buf` entries
+  are integrated ADC sums. The deterministic raw center is linear in readout gain
+  and in the effective signal samples under the generator envelope; the Gaussian
+  raw-noise standard deviation scales as `sqrt(compiled_readout_samples)`.
+  The real QICK/tracker normalization still divides by compiled `ro["length"]`,
+  so a full-window const readout has roughly length-independent normalized mean
+  and normalized Gaussian noise that decreases as `1/sqrt(length)`.
+- **Q1 — noise model.** `snr` is the per-sample Gaussian readout scale before
+  integration; fresh Gaussian noise is drawn each round so averaging over
+  reps*rounds improves the effective SNR by `sqrt(reps*rounds)`, as on hardware.
+  The first-stage readout model is intentionally linear gain + integration only:
+  no saturation, backaction, resonator ring-up, or trigger-alignment penalty is
+  applied to accumulated raw sums. Without those nonlinear effects, RO optimize
+  gain sweeps and full-window length sweeps are expected to prefer their upper
+  bounds.
 - **Per-shot Bernoulli (singleshot) — one unified path.** The reps axis draws a
   per-shot `Bernoulli(P_e)` selecting the `s_g` / `s_e` blob, not a broadcast
   mean; this is *not* gated on a singleshot mode. Its reps-mean is the

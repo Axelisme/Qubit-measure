@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.waveform import (
     ArbWaveformCfg,
@@ -27,7 +28,10 @@ from zcu_tools.program.v2.modules.waveform import (
 from zcu_tools.program.v2.sim import readout
 from zcu_tools.program.v2.sim.readout import (
     decimated_trace,
+    effective_signal_samples,
     mixed_signal,
+    noise_std_sample_scale,
+    readout_drive_amplitude,
     resonator_freqs,
     s21,
 )
@@ -206,6 +210,76 @@ class TestFastFail:
         rf_g, rf_e = resonator_freqs(_SIM, flux=0.3)
         with pytest.raises(ValueError, match=r"p_e must be in \[0, 1\]"):
             mixed_signal(_SIM, freqs, rf_g, rf_e, p_e=bad_p_e)
+
+
+class TestIntegrationHelpers:
+    """Pure helpers for gain, signal area, and integrated noise scaling."""
+
+    def test_readout_drive_amplitude_defaults_direct_readout_to_unity(self) -> None:
+        assert readout_drive_amplitude(None) == pytest.approx(1.0)
+
+    @pytest.mark.parametrize("gain", [0.0, 0.05, 0.5, -0.25])
+    def test_readout_drive_amplitude_returns_finite_gain(self, gain: float) -> None:
+        assert readout_drive_amplitude(gain) == pytest.approx(gain)
+
+    @pytest.mark.parametrize("gain", [float("nan"), float("inf"), -float("inf")])
+    def test_readout_drive_amplitude_rejects_nonfinite_gain(self, gain: float) -> None:
+        with pytest.raises(ValueError, match="readout gain must be finite"):
+            readout_drive_amplitude(gain)
+
+    def test_effective_signal_samples_direct_readout_counts_window(self) -> None:
+        ts = np.linspace(0.0, 1.0, 11, endpoint=False, dtype=np.float64)
+        assert effective_signal_samples(None, None, ts) == pytest.approx(11.0)
+
+    def test_effective_signal_samples_const_full_window(self) -> None:
+        cfg = _const_readout_cfg(length=1.0)
+        ts = np.linspace(0.0, 1.0, 11, endpoint=False, dtype=np.float64)
+        assert effective_signal_samples(cfg, 1.0, ts) == pytest.approx(11.0)
+
+    def test_effective_signal_samples_const_shorter_than_window(self) -> None:
+        cfg = _const_readout_cfg(length=0.5)
+        ts = np.linspace(0.0, 1.0, 10, endpoint=False, dtype=np.float64)
+        assert effective_signal_samples(cfg, 0.5, ts) == pytest.approx(5.0)
+
+    def test_effective_signal_samples_shaped_pulse_is_finite_and_smaller(self) -> None:
+        cfg = _gauss_readout_cfg(length=1.0, sigma=0.2)
+        ts = np.linspace(0.0, 1.0, 101, endpoint=False, dtype=np.float64)
+        area = effective_signal_samples(cfg, 1.0, ts)
+        assert 0.0 < area < ts.size
+
+    @pytest.mark.parametrize(
+        "sample_times",
+        [
+            np.zeros((2, 3), dtype=np.float64),
+            np.array([0.0, np.nan], dtype=np.float64),
+            np.array([], dtype=np.float64),
+        ],
+    )
+    def test_effective_signal_samples_rejects_bad_sample_axis(
+        self, sample_times: NDArray[np.float64]
+    ) -> None:
+        with pytest.raises(ValueError):
+            effective_signal_samples(None, None, sample_times)
+
+    @pytest.mark.parametrize("pulse_length", [0.0, -1.0, float("nan")])
+    def test_effective_signal_samples_rejects_bad_pulse_length(
+        self, pulse_length: float
+    ) -> None:
+        cfg = _const_readout_cfg(length=1.0)
+        ts = np.array([0.0], dtype=np.float64)
+        with pytest.raises(ValueError, match="pulse_length_us"):
+            effective_signal_samples(cfg, pulse_length, ts)
+
+    def test_noise_std_sample_scale_is_sqrt_sample_count(self) -> None:
+        assert noise_std_sample_scale(1) == pytest.approx(1.0)
+        assert noise_std_sample_scale(16) == pytest.approx(4.0)
+
+    @pytest.mark.parametrize("n_samples", [0, -1, 1.5])
+    def test_noise_std_sample_scale_rejects_bad_sample_count(
+        self, n_samples: int
+    ) -> None:
+        with pytest.raises(ValueError, match="positive integer"):
+            noise_std_sample_scale(n_samples)
 
 
 def _const_readout_cfg(length: float = 1.0) -> PulseCfg:
