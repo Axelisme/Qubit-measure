@@ -136,10 +136,10 @@ class AmpRabiAdapter(
             .scalars(
                 reps=1000, rounds=100, relax_delay=proper_relax(ctx, fallback=30.5)
             )
-            .role("modules.qub_pulse", "qub_probe", Init.INLINE)
-            .role("modules.readout", "readout")
             # optional → None (disabled) when no library reset (ADR-0010)
             .role("modules.reset", "reset", Init.DISABLED)
+            .role("modules.qub_pulse", "qub_probe", Init.INLINE)
+            .role("modules.readout", "readout")
             .set_sweep(
                 "sweep.gain",
                 SweepValue(

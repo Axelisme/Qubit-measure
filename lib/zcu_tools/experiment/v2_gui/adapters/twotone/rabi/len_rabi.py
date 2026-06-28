@@ -125,7 +125,9 @@ class LenRabiAdapter(
         return build_exp_spec(
             modules={
                 "reset": make_reset_module_spec(optional=True),
-                "qub_pulse": make_pulse_module_spec(),
+                "qub_pulse": make_pulse_module_spec().lock_literal(
+                    "waveform.length", 1.0
+                ),
                 "readout": make_readout_module_spec(),
             },
             sweep={"length": SweepSpec(label="Length (us)")},
@@ -140,6 +142,7 @@ class LenRabiAdapter(
             # optional → None (disabled) when no library reset (ADR-0010)
             .role("modules.reset", "reset", Init.DISABLED)
             .role("modules.qub_pulse", "qub_probe", Init.INLINE)
+            .set("modules.qub_pulse.gain", 1.0)
             .role("modules.readout", "readout")
             .set_sweep(
                 "sweep.length",

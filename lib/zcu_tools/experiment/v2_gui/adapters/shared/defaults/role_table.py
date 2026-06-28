@@ -23,7 +23,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 from zcu_tools.gui.app.main.adapter import (
     CfgSectionValue,
@@ -75,7 +75,7 @@ from .helpers import (
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.adapter import CfgSectionSpec, ExpContext
 
-_RefNode = Union[ModuleRefValue, WaveformRefValue]
+_RefNode = ModuleRefValue | WaveformRefValue
 
 # ---------------------------------------------------------------------------
 # Seed value carriers — the md-mechanism today, a ValueSource seam tomorrow.
@@ -112,7 +112,7 @@ TRIG = _Trig.TRIG
 
 #: A seed value in a RoleDef: a raw scalar, an md-linked ``Md``, a registered
 #: ``Source``, or the ``TRIG`` rule (ro_cfg only).
-SeedVal = Union[float, int, str, bool, Md, Source, _Trig]
+SeedVal = float | int | str | bool | Md | Source | _Trig
 
 
 def _resolve(ctx: ExpContext, v: SeedVal) -> ScalarValue:
@@ -275,7 +275,7 @@ def role_ref(
 
 # Shared seed: a blank qubit pulse (q_f / qub_ch). qub_probe, pi_pulse and
 # pi2_pulse all default to this and differ only in their library names.
-_QUB_PULSE: tuple[Pulse, ...] = (Pulse(Md("q_f", 4000.0), Md("qub_ch", 0), 0.05, 0.1),)
+_QUB_PULSE: tuple[Pulse, ...] = (Pulse(Md("q_f", 4000.0), Md("qub_ch", 0), 0.1, 5.1),)
 
 ROLE_TABLE: dict[str, RoleDef] = {
     # qubit / resonator probe pulses

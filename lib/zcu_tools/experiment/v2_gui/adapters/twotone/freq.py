@@ -125,6 +125,8 @@ class FreqAdapter(
             .role("modules.reset", "reset", Init.DISABLED)
             .role("modules.qub_pulse", "qub_probe", Init.INLINE)
             .role("modules.readout", "readout")
+            .set("modules.qub_pulse.waveform.length", 5.0)
+            .set("modules.qub_pulse.gain", 0.1)
             .set_sweep("sweep.freq", proper_qub_freq_range(ctx, 301))
             .build()
         )
