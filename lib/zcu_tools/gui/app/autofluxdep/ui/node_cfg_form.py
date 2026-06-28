@@ -93,7 +93,7 @@ class NodeCfgForm(QWidget):
         from zcu_tools.gui.app.autofluxdep.cfg import CfgSchema
 
         assert isinstance(schema, CfgSchema)
-        params = dict(schema.value.fields)
+        params = self._node.schema.logical_updates_from(schema.value)
         self._ctrl.set_node_params(self._index, params)
 
     def _summary_text(self) -> str:

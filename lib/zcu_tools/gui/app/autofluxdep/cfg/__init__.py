@@ -9,10 +9,9 @@ keeps the app-to-app coupling at one seam: a future lift of the spec/value model
 into a shared layer (``gui/session/cfg`` etc.) only has to retarget this file's
 imports, not every node.
 
-The node-facing spec helpers (``flat_scalar_schema`` + the ``*Spec`` sugar) build
-the *flat* user-knob schema each node lowers (decision: waveforms stay by-name
-string scalars + flat scalar pulse fields, no ModuleRef/WaveformRef — that keeps
-ModuleLibrary the SSOT and ``make_cfg``'s ``ml.get_waveform`` path intact).
+The node-facing helpers build either legacy flat schemas or sectioned schemas
+with stable logical-key projection. Node cfg still uses scalar/sweep leaves only:
+waveforms stay by-name string scalars, and workflow modules stay outside node cfg.
 """
 
 from __future__ import annotations
@@ -33,7 +32,10 @@ from zcu_tools.gui.app.main.adapter import (
 
 from .schema import (
     NodeCfgSchema,
+    NodeFieldSpec,
+    NodeSectionSpec,
     flat_node_schema,
+    sectioned_node_schema,
     str_scalar_spec,
 )
 
@@ -46,9 +48,12 @@ __all__ = [
     "FloatSpec",
     "IntSpec",
     "NodeCfgSchema",
+    "NodeFieldSpec",
+    "NodeSectionSpec",
     "ScalarSpec",
     "SweepSpec",
     "SweepValue",
     "flat_node_schema",
+    "sectioned_node_schema",
     "str_scalar_spec",
 ]

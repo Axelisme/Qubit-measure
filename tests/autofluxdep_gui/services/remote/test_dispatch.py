@@ -189,6 +189,9 @@ def test_node_cfg_reports_knobs():
     assert cfg["name"] == node.name
     assert cfg["type"] == "qubit_freq"
     knobs = cfg["knobs"]
+    assert "acquire" not in knobs
+    assert "sweep" not in knobs
+    assert "drive" not in knobs
     # the edited scalar is reflected
     assert knobs["reps"] == 512
     # a sweep knob serialises to {start, stop, expts}, not a SweepCfg

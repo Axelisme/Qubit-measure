@@ -20,7 +20,21 @@ import ast
 import pathlib
 
 import numpy as np
-from zcu_tools.gui.app.autofluxdep.cfg import EvalValue, SweepSpec, SweepValue
+import pytest
+from zcu_tools.gui.app.autofluxdep.cfg import (
+    CfgSectionSpec,
+    CfgSectionValue,
+    DirectValue,
+    EvalValue,
+    FloatSpec,
+    IntSpec,
+    NodeCfgSchema,
+    NodeFieldSpec,
+    NodeSectionSpec,
+    SweepSpec,
+    SweepValue,
+    sectioned_node_schema,
+)
 from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import LenRabiBuilder
@@ -64,6 +78,66 @@ def _ml() -> ModuleLibrary:
         }
     )
     return ml
+
+
+def _sectioned_test_schema() -> NodeCfgSchema:
+    return sectioned_node_schema(
+        (
+            NodeSectionSpec(
+                key="sweep",
+                label="Sweep",
+                fields=(
+                    NodeFieldSpec(
+                        logical_key="detune_sweep",
+                        section_key="sweep",
+                        field_key="detune",
+                        spec=SweepSpec(label="Detune"),
+                        default=SweepValue(start=-20.0, stop=50.0, expts=141),
+                    ),
+                ),
+            ),
+            NodeSectionSpec(
+                key="acquire",
+                label="Acquisition",
+                fields=(
+                    NodeFieldSpec(
+                        logical_key="reps",
+                        section_key="acquire",
+                        field_key="reps",
+                        spec=IntSpec("Reps"),
+                        default=1000,
+                    ),
+                    NodeFieldSpec(
+                        logical_key="earlystop_snr",
+                        section_key="acquire",
+                        field_key="earlystop_snr",
+                        spec=FloatSpec("Early-stop SNR", optional=True),
+                        default=50.0,
+                    ),
+                ),
+            ),
+            NodeSectionSpec(
+                key="drive",
+                label="Drive",
+                fields=(
+                    NodeFieldSpec(
+                        logical_key="qub_gain",
+                        section_key="drive",
+                        field_key="gain",
+                        spec=FloatSpec("Gain"),
+                        default=0.05,
+                    ),
+                ),
+            ),
+        )
+    )
+
+
+def _assert_no_value_objects(value: object) -> None:
+    assert not isinstance(value, (CfgSectionValue, DirectValue, EvalValue, SweepValue))
+    if isinstance(value, dict):
+        for child in value.values():
+            _assert_no_value_objects(child)
 
 
 # --- 1. structure: knob keys are the declared user knobs, no derived field ------
@@ -121,6 +195,73 @@ _EXPECTED_KEYS = {
     },
 }
 
+_EXPECTED_PATHS = {
+    "qubit_freq": {
+        "detune_sweep": "sweep.detune",
+        "reps": "acquire.reps",
+        "rounds": "acquire.rounds",
+        "relax_delay": "acquire.relax_delay",
+        "earlystop_snr": "acquire.earlystop_snr",
+        "qub_waveform": "drive.waveform",
+        "qub_ch": "drive.ch",
+        "qub_nqz": "drive.nqz",
+        "qub_gain": "drive.gain",
+        "qub_length": "drive.length",
+    },
+    "lenrabi": {
+        "sweep_range": "sweep.length",
+        "reps": "acquire.reps",
+        "rounds": "acquire.rounds",
+        "relax_delay": "acquire.relax_delay",
+        "earlystop_snr": "acquire.earlystop_snr",
+        "qub_waveform": "drive.waveform",
+        "qub_ch": "drive.ch",
+        "qub_nqz": "drive.nqz",
+        "qub_gain": "drive.gain",
+        "qub_length": "drive.length",
+    },
+    "ro_optimize": {
+        "freq_expts": "grid.freq_points",
+        "gain_expts": "grid.gain_points",
+        "reps": "acquire.reps",
+        "rounds": "acquire.rounds",
+        "freq_window": "window.freq_half_width",
+        "gain_window": "window.gain_half_width",
+    },
+    "t1": {
+        "sweep_range": "sweep.delay",
+        "reps": "acquire.reps",
+        "rounds": "acquire.rounds",
+        "earlystop_snr": "acquire.earlystop_snr",
+    },
+    "t2ramsey": {
+        "sweep_range": "sweep.delay",
+        "detune_ratio": "ramsey.detune_ratio",
+        "reps": "acquire.reps",
+        "rounds": "acquire.rounds",
+        "earlystop_snr": "acquire.earlystop_snr",
+    },
+    "t2echo": {
+        "sweep_range": "sweep.delay",
+        "detune_ratio": "echo.detune_ratio",
+        "reps": "acquire.reps",
+        "rounds": "acquire.rounds",
+        "earlystop_snr": "acquire.earlystop_snr",
+    },
+    "mist": {
+        "gain_sweep": "sweep.gain",
+        "reps": "acquire.reps",
+        "rounds": "acquire.rounds",
+        "relax_delay": "acquire.relax_delay",
+        "mist_waveform": "disturbance.waveform",
+        "mist_ch": "disturbance.ch",
+        "mist_nqz": "disturbance.nqz",
+        "mist_freq": "disturbance.freq",
+        "mist_gain": "disturbance.gain",
+        "mist_length": "disturbance.length",
+    },
+}
+
 # The complete derived/upstream set that MUST NOT appear as a user knob (it is
 # injected by make_cfg / produce from the predictor, prev-point fits, or modules).
 _DERIVED_FORBIDDEN = {
@@ -156,6 +297,22 @@ def test_schema_keys_match_declared_knobs():
         assert set(schema.keys) == _EXPECTED_KEYS[builder.name], builder.name
 
 
+def test_schema_paths_match_section_layouts():
+    for builder in (
+        QubitFreqBuilder(),
+        LenRabiBuilder(),
+        RoOptimizeBuilder(),
+        T1Builder(),
+        T2RamseyBuilder(),
+        T2EchoBuilder(),
+        MistBuilder(),
+    ):
+        schema = builder.make_default_schema()
+        assert {
+            logical_key: schema.path_for(logical_key) for logical_key in schema.keys
+        } == _EXPECTED_PATHS[builder.name], builder.name
+
+
 def test_no_derived_field_in_any_spec():
     for builder in (
         QubitFreqBuilder(),
@@ -168,6 +325,190 @@ def test_no_derived_field_in_any_spec():
     ):
         keys = set(builder.make_default_schema().keys)
         assert keys.isdisjoint(_DERIVED_FORBIDDEN), (builder.name, keys)
+
+
+def test_sectioned_schema_lower_projects_logical_keys():
+    schema = _sectioned_test_schema()
+
+    assert schema.keys == ("detune_sweep", "reps", "earlystop_snr", "qub_gain")
+    assert schema.path_for("detune_sweep") == "sweep.detune"
+    assert schema.path_for("qub_gain") == "drive.gain"
+
+    knobs = schema.lower(None)
+
+    assert set(knobs) == {"detune_sweep", "reps", "earlystop_snr", "qub_gain"}
+    assert "sweep" not in knobs
+    assert "acquire" not in knobs
+    detune = knobs["detune_sweep"]
+    assert (float(detune.start), float(detune.stop), int(detune.expts)) == (
+        -20.0,
+        50.0,
+        141,
+    )
+    assert knobs["reps"] == 1000
+    assert knobs["earlystop_snr"] == 50.0
+    assert knobs["qub_gain"] == 0.05
+
+    schema.set_field("earlystop_snr", None)
+    assert "earlystop_snr" not in schema.lower(None)
+
+
+def test_sectioned_schema_set_field_and_with_overrides_write_nested_leaf():
+    md = MetaDict()
+    md.gain = 0.2
+    schema = _sectioned_test_schema()
+
+    schema.set_field("reps", "250")
+    schema.with_overrides(
+        {
+            "detune_sweep": SweepValue(start=-5.0, stop=5.0, expts=11),
+            "qub_gain": EvalValue("gain"),
+        }
+    )
+
+    acquire = schema.schema.value.fields["acquire"]
+    drive = schema.schema.value.fields["drive"]
+    assert isinstance(acquire, CfgSectionValue)
+    assert isinstance(drive, CfgSectionValue)
+    reps = acquire.fields["reps"]
+    assert isinstance(reps, DirectValue)
+    assert reps.value == 250
+    assert isinstance(drive.fields["gain"], EvalValue)
+
+    knobs = schema.lower(None, md=md)
+    detune = knobs["detune_sweep"]
+    assert (float(detune.start), float(detune.stop), int(detune.expts)) == (
+        -5.0,
+        5.0,
+        11,
+    )
+    assert knobs["qub_gain"] == 0.2
+
+
+def test_sectioned_schema_read_knobs_is_flat_json_friendly():
+    schema = _sectioned_test_schema()
+    schema.set_field("qub_gain", EvalValue("gain"))
+    schema.set_field(
+        "detune_sweep",
+        SweepValue(
+            start=EvalValue("center - 2"),
+            stop=EvalValue("center + 2"),
+            expts=5,
+        ),
+    )
+
+    knobs = schema.read_knobs()
+
+    assert set(knobs) == {"detune_sweep", "reps", "earlystop_snr", "qub_gain"}
+    assert "sweep" not in knobs
+    assert "acquire" not in knobs
+    assert knobs["detune_sweep"]["start"] == {
+        "__kind": "eval",
+        "expr": "center - 2",
+    }
+    assert knobs["detune_sweep"]["stop"] == {
+        "__kind": "eval",
+        "expr": "center + 2",
+    }
+    assert knobs["detune_sweep"]["expts"] == 5
+    assert knobs["reps"] == 1000
+    assert knobs["qub_gain"] == {"__kind": "eval", "expr": "gain"}
+    _assert_no_value_objects(knobs)
+
+
+def test_sectioned_schema_read_value_tree_is_nested_json_friendly():
+    schema = _sectioned_test_schema()
+    schema.set_field("qub_gain", EvalValue("gain"))
+    schema.set_field(
+        "detune_sweep",
+        SweepValue(
+            start=EvalValue("center - 2"),
+            stop=EvalValue("center + 2"),
+            expts=5,
+        ),
+    )
+
+    knobs = schema.read_value_tree()
+
+    assert set(knobs) == {"sweep", "acquire", "drive"}
+    assert knobs["sweep"]["detune"]["start"] == {
+        "__kind": "eval",
+        "expr": "center - 2",
+    }
+    assert knobs["sweep"]["detune"]["stop"] == {
+        "__kind": "eval",
+        "expr": "center + 2",
+    }
+    assert knobs["sweep"]["detune"]["expts"] == 5
+    assert knobs["acquire"]["reps"] == 1000
+    assert knobs["drive"]["gain"] == {"__kind": "eval", "expr": "gain"}
+    _assert_no_value_objects(knobs)
+
+
+def test_sectioned_schema_unknown_logical_key_fast_fails():
+    schema = _sectioned_test_schema()
+
+    with pytest.raises(KeyError, match="Unknown node param"):
+        schema.path_for("not_a_knob")
+    with pytest.raises(KeyError, match="Unknown node param"):
+        schema.set_field("not_a_knob", 1)
+    with pytest.raises(KeyError, match="Unknown node param"):
+        schema.with_overrides({"not_a_knob": 1})
+
+
+def test_sectioned_node_schema_unsupported_spec_fast_fails():
+    with pytest.raises(TypeError, match="Unsupported node field spec"):
+        sectioned_node_schema(
+            (
+                NodeSectionSpec(
+                    key="bad",
+                    label="Bad",
+                    fields=(
+                        NodeFieldSpec(
+                            logical_key="nested",
+                            section_key="bad",
+                            field_key="nested",
+                            spec=CfgSectionSpec(),
+                            default=None,
+                        ),
+                    ),
+                ),
+            )
+        )
+
+
+def test_sectioned_node_schema_duplicate_logical_key_fast_fails():
+    with pytest.raises(ValueError, match="Duplicate node logical key"):
+        sectioned_node_schema(
+            (
+                NodeSectionSpec(
+                    key="a",
+                    label="A",
+                    fields=(
+                        NodeFieldSpec(
+                            logical_key="reps",
+                            section_key="a",
+                            field_key="reps",
+                            spec=IntSpec("Reps"),
+                            default=1000,
+                        ),
+                    ),
+                ),
+                NodeSectionSpec(
+                    key="b",
+                    label="B",
+                    fields=(
+                        NodeFieldSpec(
+                            logical_key="reps",
+                            section_key="b",
+                            field_key="rounds",
+                            spec=IntSpec("Rounds"),
+                            default=10,
+                        ),
+                    ),
+                ),
+            )
+        )
 
 
 # --- 2. defaults: the lowered knobs provide operator-ready initial values -----
@@ -238,8 +579,10 @@ def test_ro_optimize_default_knobs():
     assert knobs["gain_window"] == 0.05
     # the window half-widths are flat scalars, NOT a SweepSpec (decision)
     spec = RoOptimizeBuilder().make_default_schema().schema.spec
-    assert not isinstance(spec.fields["freq_window"], SweepSpec)
-    assert not isinstance(spec.fields["gain_window"], SweepSpec)
+    window = spec.fields["window"]
+    assert isinstance(window, CfgSectionSpec)
+    assert not isinstance(window.fields["freq_half_width"], SweepSpec)
+    assert not isinstance(window.fields["gain_half_width"], SweepSpec)
 
 
 def test_t1_default_knobs():
@@ -402,6 +745,10 @@ def test_scalar_eval_value_lowers_against_md():
         "__kind": "eval",
         "expr": "gain",
     }
+    assert schema.read_value_tree()["drive"]["gain"] == {
+        "__kind": "eval",
+        "expr": "gain",
+    }
 
 
 def test_sweep_eval_edges_lower_against_md():
@@ -428,19 +775,19 @@ def test_sweep_eval_edges_lower_against_md():
         "__kind": "eval",
         "expr": "center - 2",
     }
+    assert schema.read_value_tree()["sweep"]["detune"]["start"] == {
+        "__kind": "eval",
+        "expr": "center - 2",
+    }
 
 
 def test_set_field_unknown_key_fast_fails():
-    import pytest
-
     schema = QubitFreqBuilder().make_default_schema()
     with pytest.raises(KeyError, match="Unknown node param"):
         schema.set_field("not_a_knob", 1)
 
 
 def test_with_overrides_unknown_key_fast_fails():
-    import pytest
-
     schema = T1Builder().make_default_schema()
     with pytest.raises(KeyError, match="Unknown node param"):
         schema.with_overrides({"bogus": 1})
@@ -450,7 +797,6 @@ def test_with_overrides_unknown_key_fast_fails():
 
 
 def test_set_node_params_types_and_fast_fails():
-    import pytest
     from zcu_tools.gui.app.autofluxdep.app import build_core
     from zcu_tools.gui.app.autofluxdep.cfg import SweepValue
 

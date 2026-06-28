@@ -43,9 +43,11 @@ from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.gui.app.autofluxdep.cfg import (
     FloatSpec,
     IntSpec,
+    NodeFieldSpec,
+    NodeSectionSpec,
     SweepSpec,
     SweepValue,
-    flat_node_schema,
+    sectioned_node_schema,
     str_scalar_spec,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
@@ -327,36 +329,96 @@ class QubitFreqBuilder(Builder):
         waveform, ``make_cfg`` uses an inline const waveform of that length so
         mock-created contexts remain runnable.
         """
-        return NodeCfgSchema(
-            flat_node_schema(
-                (
-                    (
-                        "detune_sweep",
-                        SweepSpec(label="Detune sweep (MHz)"),
-                        SweepValue(start=-20.0, stop=50.0, expts=141),
+        return sectioned_node_schema(
+            (
+                NodeSectionSpec(
+                    key="sweep",
+                    label="Sweep",
+                    fields=(
+                        NodeFieldSpec(
+                            logical_key="detune_sweep",
+                            section_key="sweep",
+                            field_key="detune",
+                            spec=SweepSpec(label="Detune sweep (MHz)"),
+                            default=SweepValue(start=-20.0, stop=50.0, expts=141),
+                        ),
                     ),
-                    ("reps", IntSpec(label="Reps"), 1000),
-                    ("rounds", IntSpec(label="Rounds"), 100),
-                    ("relax_delay", FloatSpec(label="Relax delay (us)"), 0.5),
-                    (
-                        "earlystop_snr",
-                        FloatSpec(label="Early-stop SNR", optional=True),
-                        _DEFAULT_EARLYSTOP_SNR,
+                ),
+                NodeSectionSpec(
+                    key="acquire",
+                    label="Acquisition",
+                    fields=(
+                        NodeFieldSpec(
+                            logical_key="reps",
+                            section_key="acquire",
+                            field_key="reps",
+                            spec=IntSpec(label="Reps"),
+                            default=1000,
+                        ),
+                        NodeFieldSpec(
+                            logical_key="rounds",
+                            section_key="acquire",
+                            field_key="rounds",
+                            spec=IntSpec(label="Rounds"),
+                            default=100,
+                        ),
+                        NodeFieldSpec(
+                            logical_key="relax_delay",
+                            section_key="acquire",
+                            field_key="relax_delay",
+                            spec=FloatSpec(label="Relax delay (us)"),
+                            default=0.5,
+                        ),
+                        NodeFieldSpec(
+                            logical_key="earlystop_snr",
+                            section_key="acquire",
+                            field_key="earlystop_snr",
+                            spec=FloatSpec(label="Early-stop SNR", optional=True),
+                            default=_DEFAULT_EARLYSTOP_SNR,
+                        ),
                     ),
-                    (
-                        "qub_waveform",
-                        str_scalar_spec("Drive waveform", optional=True),
-                        _DEFAULT_QUB_WAVEFORM,
+                ),
+                NodeSectionSpec(
+                    key="drive",
+                    label="Drive pulse",
+                    fields=(
+                        NodeFieldSpec(
+                            logical_key="qub_waveform",
+                            section_key="drive",
+                            field_key="waveform",
+                            spec=str_scalar_spec("Drive waveform", optional=True),
+                            default=_DEFAULT_QUB_WAVEFORM,
+                        ),
+                        NodeFieldSpec(
+                            logical_key="qub_ch",
+                            section_key="drive",
+                            field_key="ch",
+                            spec=IntSpec(label="Drive ch", optional=True),
+                            default=_DEFAULT_QUB_CH,
+                        ),
+                        NodeFieldSpec(
+                            logical_key="qub_nqz",
+                            section_key="drive",
+                            field_key="nqz",
+                            spec=IntSpec(label="Drive nqz"),
+                            default=2,
+                        ),
+                        NodeFieldSpec(
+                            logical_key="qub_gain",
+                            section_key="drive",
+                            field_key="gain",
+                            spec=FloatSpec(label="Drive gain"),
+                            default=0.05,
+                        ),
+                        NodeFieldSpec(
+                            logical_key="qub_length",
+                            section_key="drive",
+                            field_key="length",
+                            spec=FloatSpec(label="Drive length (us)"),
+                            default=0.1,
+                        ),
                     ),
-                    (
-                        "qub_ch",
-                        IntSpec(label="Drive ch", optional=True),
-                        _DEFAULT_QUB_CH,
-                    ),
-                    ("qub_nqz", IntSpec(label="Drive nqz"), 2),
-                    ("qub_gain", FloatSpec(label="Drive gain"), 0.05),
-                    ("qub_length", FloatSpec(label="Drive length (us)"), 0.1),
-                )
+                ),
             )
         )
 

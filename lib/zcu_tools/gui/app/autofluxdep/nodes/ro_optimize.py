@@ -48,7 +48,9 @@ from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.gui.app.autofluxdep.cfg import (
     FloatSpec,
     IntSpec,
-    flat_node_schema,
+    NodeFieldSpec,
+    NodeSectionSpec,
+    sectioned_node_schema,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
@@ -316,24 +318,68 @@ class RoOptimizeBuilder(Builder):
         sweep grid is 2D and the centres are derived per flux point, not user-set).
         Defaults are the prototype's hardcoded values.
         """
-        return NodeCfgSchema(
-            flat_node_schema(
-                (
-                    ("freq_expts", IntSpec(label="Freq points"), _DEFAULT_FREQ[2]),
-                    ("gain_expts", IntSpec(label="Gain points"), _DEFAULT_GAIN[2]),
-                    ("reps", IntSpec(label="Reps"), 1000),
-                    ("rounds", IntSpec(label="Rounds"), 10),
-                    (
-                        "freq_window",
-                        FloatSpec(label="Freq window half-width (MHz)"),
-                        _DEFAULT_FREQ_WINDOW,
+        return sectioned_node_schema(
+            (
+                NodeSectionSpec(
+                    key="grid",
+                    label="Search grid",
+                    fields=(
+                        NodeFieldSpec(
+                            logical_key="freq_expts",
+                            section_key="grid",
+                            field_key="freq_points",
+                            spec=IntSpec(label="Freq points"),
+                            default=_DEFAULT_FREQ[2],
+                        ),
+                        NodeFieldSpec(
+                            logical_key="gain_expts",
+                            section_key="grid",
+                            field_key="gain_points",
+                            spec=IntSpec(label="Gain points"),
+                            default=_DEFAULT_GAIN[2],
+                        ),
                     ),
-                    (
-                        "gain_window",
-                        FloatSpec(label="Gain window half-width"),
-                        _DEFAULT_GAIN_WINDOW,
+                ),
+                NodeSectionSpec(
+                    key="window",
+                    label="Search window",
+                    fields=(
+                        NodeFieldSpec(
+                            logical_key="freq_window",
+                            section_key="window",
+                            field_key="freq_half_width",
+                            spec=FloatSpec(label="Freq window half-width (MHz)"),
+                            default=_DEFAULT_FREQ_WINDOW,
+                        ),
+                        NodeFieldSpec(
+                            logical_key="gain_window",
+                            section_key="window",
+                            field_key="gain_half_width",
+                            spec=FloatSpec(label="Gain window half-width"),
+                            default=_DEFAULT_GAIN_WINDOW,
+                        ),
                     ),
-                )
+                ),
+                NodeSectionSpec(
+                    key="acquire",
+                    label="Acquisition",
+                    fields=(
+                        NodeFieldSpec(
+                            logical_key="reps",
+                            section_key="acquire",
+                            field_key="reps",
+                            spec=IntSpec(label="Reps"),
+                            default=1000,
+                        ),
+                        NodeFieldSpec(
+                            logical_key="rounds",
+                            section_key="acquire",
+                            field_key="rounds",
+                            spec=IntSpec(label="Rounds"),
+                            default=10,
+                        ),
+                    ),
+                ),
             )
         )
 

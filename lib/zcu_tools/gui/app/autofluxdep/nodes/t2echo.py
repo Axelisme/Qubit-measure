@@ -44,9 +44,11 @@ from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.gui.app.autofluxdep.cfg import (
     FloatSpec,
     IntSpec,
+    NodeFieldSpec,
+    NodeSectionSpec,
     SweepSpec,
     SweepValue,
-    flat_node_schema,
+    sectioned_node_schema,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
@@ -297,27 +299,61 @@ class T2EchoBuilder(Builder):
         that need a one-fringe synthetic trace override it explicitly. The dead
         ``num_expts`` knob (never read) is dropped.
         """
-        return NodeCfgSchema(
-            flat_node_schema(
-                (
-                    (
-                        "sweep_range",
-                        SweepSpec(label="Delay time sweep (us)"),
-                        SweepValue(start=0.0, stop=25.0, expts=121),
+        return sectioned_node_schema(
+            (
+                NodeSectionSpec(
+                    key="sweep",
+                    label="Sweep",
+                    fields=(
+                        NodeFieldSpec(
+                            logical_key="sweep_range",
+                            section_key="sweep",
+                            field_key="delay",
+                            spec=SweepSpec(label="Result axis seed (us)"),
+                            default=SweepValue(start=0.0, stop=25.0, expts=121),
+                        ),
                     ),
-                    (
-                        "detune_ratio",
-                        FloatSpec(label="Detune ratio"),
-                        _DEFAULT_DETUNE_RATIO,
+                ),
+                NodeSectionSpec(
+                    key="echo",
+                    label="Echo",
+                    fields=(
+                        NodeFieldSpec(
+                            logical_key="detune_ratio",
+                            section_key="echo",
+                            field_key="detune_ratio",
+                            spec=FloatSpec(label="Detune ratio"),
+                            default=_DEFAULT_DETUNE_RATIO,
+                        ),
                     ),
-                    ("reps", IntSpec(label="Reps"), 1000),
-                    ("rounds", IntSpec(label="Rounds"), 10),
-                    (
-                        "earlystop_snr",
-                        FloatSpec(label="Early-stop SNR", optional=True),
-                        _DEFAULT_EARLYSTOP_SNR,
+                ),
+                NodeSectionSpec(
+                    key="acquire",
+                    label="Acquisition",
+                    fields=(
+                        NodeFieldSpec(
+                            logical_key="reps",
+                            section_key="acquire",
+                            field_key="reps",
+                            spec=IntSpec(label="Reps"),
+                            default=1000,
+                        ),
+                        NodeFieldSpec(
+                            logical_key="rounds",
+                            section_key="acquire",
+                            field_key="rounds",
+                            spec=IntSpec(label="Rounds"),
+                            default=10,
+                        ),
+                        NodeFieldSpec(
+                            logical_key="earlystop_snr",
+                            section_key="acquire",
+                            field_key="earlystop_snr",
+                            spec=FloatSpec(label="Early-stop SNR", optional=True),
+                            default=_DEFAULT_EARLYSTOP_SNR,
+                        ),
                     ),
-                )
+                ),
             )
         )
 

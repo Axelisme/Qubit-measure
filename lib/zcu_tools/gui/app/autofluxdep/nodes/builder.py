@@ -30,7 +30,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import InitVar, dataclass, field
 from typing import Any, Protocol
 
-from zcu_tools.gui.app.autofluxdep.cfg import NodeCfgSchema, flat_node_schema
+from zcu_tools.gui.app.autofluxdep.cfg import NodeCfgSchema, sectioned_node_schema
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 
@@ -144,7 +144,7 @@ class Builder(ABC):
         Measurement Builders override this to declare their typed knobs. A Service
         (the predictor) has no user knobs, so the base returns an empty schema.
         """
-        return NodeCfgSchema(flat_node_schema(()))
+        return sectioned_node_schema(())
 
     # --- sweep-lived factories (Run start; no-op for pure-compute Services) ---
 
