@@ -5,7 +5,7 @@ description = "Tools for Qubit Measurement on ZCU216"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-  "numpy",
+  "numpy>=2.1,<3",
   "tqdm",
   "matplotlib",
   "sympy",
