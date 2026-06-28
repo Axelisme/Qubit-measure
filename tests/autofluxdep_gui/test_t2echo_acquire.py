@@ -75,7 +75,7 @@ def test_t2echo_acquire_fits_finite_positive_t2():
         f01 = float(predictor.predict_freq(flux))
         pi_pulse, pi2_pulse = _pulses(ml, f01)
         snap = Snapshot(
-            {"t1": 10.0, "t2e": 8.0},
+            {"t1": 20.0, "t2e": 8.0},
             modules={
                 "pi_pulse": pi_pulse,
                 "pi2_pulse": pi2_pulse,

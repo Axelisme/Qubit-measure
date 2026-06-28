@@ -23,6 +23,8 @@ Alignment with FluxoniumPredictor.__init__ (simulate/fluxonium/predict.py):
 
 from __future__ import annotations
 
+import math
+
 from pydantic import field_validator, model_validator
 
 from zcu_tools.cfg_model import ConfigBase
@@ -99,6 +101,11 @@ class SimParams(ConfigBase):
             ``θ = Ω · length = π · gain · length / pi_gain_len``.  The length
             unit must be consistent with the pulse length unit used in the
             timeline.
+        readout_photons_per_gain2 : float or None, optional
+            Calibration from PulseReadout gain² to mean intracavity photon
+            number.  When None, the sim uses the conservative normalized
+            convention "gain=1 reaches the dispersive critical photon number"
+            at the current operating point.
         seed : int or None, optional
             RNG seed for reproducible noise.  None means non-deterministic.
             Defaults to None.
@@ -162,6 +169,9 @@ class SimParams(ConfigBase):
     # pi_gain_len: the gain×length invariant shared by amp_rabi (sweeps gain)
     # and len_rabi (sweeps length).  SimEngine uses Ω = π/pi_gain_len · gain.
     pi_gain_len: float
+    # readout_photons_per_gain2: optional gain->photon calibration for nonlinear
+    # readout. None means gain=1 is normalized to the critical photon number.
+    readout_photons_per_gain2: float | None = None
     # timeFly: readout time-of-flight (µs). The decimated/lookback trace places
     # the readout envelope at program-time == timeFly (the trace is ~0 before it),
     # giving the simulated lookback a physical rising edge to recover as trig_offset.
@@ -175,6 +185,18 @@ class SimParams(ConfigBase):
         if v < 0.0:
             raise ValueError(
                 f"poll_latency must be >= 0.0 (got {v}); use 0.0 to disable pacing"
+            )
+        return v
+
+    @field_validator("readout_photons_per_gain2")
+    @classmethod
+    def _validate_readout_photons_per_gain2(cls, v: float | None) -> float | None:
+        if v is None:
+            return None
+        if not math.isfinite(v) or v <= 0.0:
+            raise ValueError(
+                "readout_photons_per_gain2 must be finite and > 0.0 when set "
+                f"(got {v!r})"
             )
         return v
 

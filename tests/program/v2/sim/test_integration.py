@@ -99,7 +99,14 @@ from zcu_tools.program.v2.modules.readout import DirectReadoutCfg, PulseReadoutC
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg, GaussWaveformCfg
 from zcu_tools.program.v2.sim import SimParams
 from zcu_tools.program.v2.sim.engine import _FULL_SCALE
-from zcu_tools.program.v2.sim.readout import resonator_freqs, s21
+from zcu_tools.program.v2.sim.readout import (
+    apply_readout_visibility,
+    critical_photon_number,
+    readout_drive_amplitude,
+    readout_state_visibility,
+    resonator_freqs,
+    s21,
+)
 from zcu_tools.program.v2.twotone import TwoToneModuleCfg
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
@@ -126,6 +133,8 @@ _SIM = SimParams(
     pi_gain_len=0.4,
     seed=12345,
 )
+
+_RESET_RELAX_DELAY = 10.0 * _SIM.T1
 
 
 def _predictor() -> FluxoniumPredictor:
@@ -218,6 +227,7 @@ def test_freq_recovers_f_qubit() -> None:
                 start=f_qubit - 200.0, stop=f_qubit + 200.0, expts=81, step=400.0 / 80
             )
         ),
+        relax_delay=_RESET_RELAX_DELAY,
     )
 
     exp = FreqExp()
@@ -261,6 +271,7 @@ def test_amp_rabi_recovers_pi_gain() -> None:
         sweep=AmpRabiSweepCfg(
             gain=SweepCfg(start=0.0, stop=1.6, expts=60, step=1.6 / 59)
         ),
+        relax_delay=_RESET_RELAX_DELAY,
     )
 
     exp = AmpRabiExp()
@@ -305,6 +316,7 @@ def test_len_rabi_recovers_gain_scaling() -> None:
             sweep=LenRabiSweepCfg(
                 length=SweepCfg(start=0.05, stop=3.0, expts=25, step=(3.0 - 0.05) / 24)
             ),
+            relax_delay=_RESET_RELAX_DELAY,
         )
         exp = LenRabiExp()
         result = exp.run(soc, soccfg, cfg)
@@ -352,6 +364,7 @@ def test_t1_recovers_t1() -> None:
         sweep=T1SweepCfg(
             length=SweepCfg(start=0.0, stop=80.0, expts=30, step=80.0 / 29)
         ),
+        relax_delay=_RESET_RELAX_DELAY,
     )
 
     exp = T1Exp()
@@ -396,6 +409,7 @@ def _run_ramsey(sim: SimParams, detune: float = 2.0) -> tuple[float, float, floa
         sweep=T2RamseySweepCfg(
             length=SweepCfg(start=0.0, stop=12.0, expts=100, step=12.0 / 99)
         ),
+        relax_delay=_RESET_RELAX_DELAY,
     )
     exp = T2RamseyExp()
     # true_detune is the detune after length rounding; the fringe fit recovers it.
@@ -441,6 +455,7 @@ def _run_echo(sim: SimParams) -> float:
         sweep=T2EchoSweepCfg(
             length=SweepCfg(start=0.0, stop=30.0, expts=40, step=30.0 / 39)
         ),
+        relax_delay=_RESET_RELAX_DELAY,
     )
     exp = T2EchoExp()
     # Echo runs on resonance (detune=0); the pi pulse refocuses the static detune
@@ -630,15 +645,41 @@ def _expected_ge_centers() -> tuple[complex, complex]:
     """The |g>/|e> blob centres in GE analyze (avgiq) units.
 
     GE_Exp divides the raw per-shot acc_buf by the compiled readout length.  The
-    test readout uses a full-window const PulseReadout with gain 0.1, so the
-    integrated raw centre normalizes to ``_FULL_SCALE * 0.1 * S21(rf_g; rf_X)``.
+    test readout is a const PulseReadout with ``trig_offset == 0`` while the mock
+    signal arrives at ``timeFly``; only the overlap of the ADC window with the
+    shifted pulse envelope contributes to the accumulated centre.
     """
 
     rf_g, rf_e = resonator_freqs(_SIM, _OPERATING_FLUX)
     freqs = np.array([_rf_g_mhz() * 1e-3], dtype=np.float64)  # probe at rf_g
     readout_gain = 0.1
-    g = _FULL_SCALE * readout_gain * complex(s21(_SIM, freqs, rf_g)[0])
-    e = _FULL_SCALE * readout_gain * complex(s21(_SIM, freqs, rf_e)[0])
+    ro_length = 1.0
+    pulse_length = 1.0
+    trig_offset = 0.0
+
+    overlap_start = max(0.0, _SIM.timeFly - trig_offset)
+    overlap_stop = min(ro_length, _SIM.timeFly - trig_offset + pulse_length)
+    overlap_scale = max(0.0, overlap_stop - overlap_start) / ro_length
+
+    n_crit = critical_photon_number(_f_qubit_mhz() * 1e-3, _SIM.bare_rf, _SIM.g)
+    drive = readout_drive_amplitude(
+        readout_gain,
+        n_crit=n_crit,
+        photons_per_gain2=_SIM.readout_photons_per_gain2,
+    )
+    visibility = readout_state_visibility(
+        readout_gain,
+        n_crit,
+        _SIM.readout_photons_per_gain2,
+    )
+    s_g, s_e = apply_readout_visibility(
+        s21(_SIM, freqs, rf_g),
+        s21(_SIM, freqs, rf_e),
+        visibility,
+    )
+
+    g = _FULL_SCALE * overlap_scale * drive * complex(s_g[0])
+    e = _FULL_SCALE * overlap_scale * drive * complex(s_e[0])
     return g, e
 
 

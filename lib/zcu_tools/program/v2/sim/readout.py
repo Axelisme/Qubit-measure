@@ -61,6 +61,11 @@ _DEFAULT_PHI: float = 0.0
 _DEFAULT_A0: complex = 1.0 + 0.0j
 _DEFAULT_EDELAY: float = 0.0
 
+# Conservative cQED dispersive operating region.  Literature commonly treats
+# nbar/ncrit ~ 0.1 as the small-parameter guardrail; below it the mock keeps the
+# existing linear readout response.
+_DISPERSIVE_SAFE_PHOTON_RATIO: float = 0.1
+
 
 def value_to_flux(sim: SimParams, device_value: float) -> float:
     """Convert a flux-device setting value to reduced flux (in units of Phi_0).
@@ -160,15 +165,136 @@ def s21(
     )
 
 
-def readout_drive_amplitude(gain: float | None) -> float:
-    """Return the linear readout drive amplitude for an optional cfg gain."""
+def critical_photon_number(
+    f_qubit_ghz: float,
+    resonator_ghz: float,
+    g_ghz: float,
+) -> float:
+    """Return the dispersive critical photon number ``Delta^2 / (4 g^2)``.
+
+    The ratio is unitless, so GHz inputs are fine as long as ``Delta`` and ``g``
+    use the same frequency basis.  The expression is only meaningful in the
+    dispersive regime; non-positive coupling or zero detuning fast-fail because
+    there is no finite safe photon budget to infer from the approximation.
+    """
+
+    f_qubit = float(f_qubit_ghz)
+    resonator = float(resonator_ghz)
+    coupling = float(g_ghz)
+    if not all(math.isfinite(v) for v in (f_qubit, resonator, coupling)):
+        raise ValueError(
+            "f_qubit_ghz, resonator_ghz, and g_ghz must be finite "
+            f"(got {f_qubit_ghz!r}, {resonator_ghz!r}, {g_ghz!r})"
+        )
+    if coupling <= 0.0:
+        raise ValueError(f"g_ghz must be > 0.0, got {g_ghz!r}")
+
+    detuning = abs(f_qubit - resonator)
+    if detuning <= 0.0:
+        raise ValueError(
+            "critical photon number is undefined at zero qubit-resonator detuning"
+        )
+    return (detuning * detuning) / (4.0 * coupling * coupling)
+
+
+def readout_photon_ratio(
+    gain: float | None,
+    n_crit: float,
+    photons_per_gain2: float | None,
+) -> float:
+    """Return ``n_bar / n_crit`` for a PulseReadout gain.
+
+    ``DirectReadout`` has no explicit drive gain (``gain is None``), so it stays
+    on the safe linear path and contributes no nonlinear readout penalty.
+    """
+
+    if gain is None:
+        return 0.0
+
+    amplitude = readout_drive_amplitude(gain)
+    critical = float(n_crit)
+    if not math.isfinite(critical) or critical <= 0.0:
+        raise ValueError(f"n_crit must be finite and > 0.0, got {n_crit!r}")
+
+    if photons_per_gain2 is None:
+        photon_scale = critical
+    else:
+        photon_scale = float(photons_per_gain2)
+        if not math.isfinite(photon_scale) or photon_scale <= 0.0:
+            raise ValueError(
+                "photons_per_gain2 must be finite and > 0.0 when set "
+                f"(got {photons_per_gain2!r})"
+            )
+
+    return (photon_scale * amplitude * amplitude) / critical
+
+
+def readout_drive_amplitude(
+    gain: float | None,
+    *,
+    n_crit: float | None = None,
+    photons_per_gain2: float | None = None,
+) -> float:
+    """Return the readout drive amplitude after dispersive-limit compression."""
 
     if gain is None:
         return 1.0
     amplitude = float(gain)
     if not math.isfinite(amplitude):
         raise ValueError(f"readout gain must be finite, got {gain!r}")
-    return amplitude
+    if n_crit is None:
+        return amplitude
+
+    ratio = _readout_nonlinear_ratio(gain, n_crit, photons_per_gain2)
+    return amplitude / math.sqrt(1.0 + ratio)
+
+
+def readout_state_visibility(
+    gain: float | None,
+    n_crit: float,
+    photons_per_gain2: float | None,
+) -> float:
+    """Return the remaining |g>/|e> readout contrast under high photon number."""
+
+    ratio = _readout_nonlinear_ratio(gain, n_crit, photons_per_gain2)
+    return 1.0 / (1.0 + ratio)
+
+
+def _readout_nonlinear_ratio(
+    gain: float | None,
+    n_crit: float,
+    photons_per_gain2: float | None,
+) -> float:
+    """Return the excess photon ratio above the conservative dispersive guardrail."""
+
+    ratio = readout_photon_ratio(gain, n_crit, photons_per_gain2)
+    return max(0.0, ratio - _DISPERSIVE_SAFE_PHOTON_RATIO)
+
+
+def apply_readout_visibility(
+    s_g: NDArray[np.complex128],
+    s_e: NDArray[np.complex128],
+    visibility: float,
+) -> tuple[NDArray[np.complex128], NDArray[np.complex128]]:
+    """Compress state-conditioned blob separation around its midpoint."""
+
+    vis = float(visibility)
+    if not math.isfinite(vis) or not 0.0 <= vis <= 1.0:
+        raise ValueError(f"visibility must be finite and in [0, 1], got {visibility!r}")
+    center = 0.5 * (s_g + s_e)
+    return center + vis * (s_g - center), center + vis * (s_e - center)
+
+
+def blend_state_responses(
+    s_g: NDArray[np.complex128],
+    s_e: NDArray[np.complex128],
+    p_e: float,
+) -> NDArray[np.complex128]:
+    """Return the validated population-weighted blend of two state responses."""
+
+    if not 0.0 <= p_e <= 1.0:
+        raise ValueError(f"p_e must be in [0, 1], got {p_e}")
+    return s_g + p_e * (s_e - s_g)
 
 
 def _validate_sample_times(sample_times_us: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -266,12 +392,16 @@ def decimated_trace(
     rf_g: float,
     rf_e: float,
     p_e: float,
+    *,
+    pulse_pre_delay_us: float = 0.0,
+    state_visibility: float = 1.0,
 ) -> NDArray[np.complex128]:
     """Time-domain down-converted readout trace (model A) at ADC samples ``ts``.
 
     Model A (.agent_state/plans/mocksim/findings.md, "decimated 支援評估"):
 
-        trace(t) = readout_envelope(t - timeFly) * steady_mixed_S21(f_ro; rf_g, rf_e, p_e)
+        trace(t) = readout_envelope(t - timeFly - pulse_pre_delay)
+                 * steady_mixed_S21(f_ro; rf_g, rf_e, p_e)
 
     i.e. the down-converted readout pulse envelope scaled by the *steady-state*
     population-weighted resonator response at the single probe frequency
@@ -279,15 +409,14 @@ def decimated_trace(
     response is the same complex IQ point :func:`mixed_signal` produces for an
     accumulated readout, applied per sample.
 
-    Time of flight.  The readout module plays its pulse from program ``t = 0``,
-    but the signal only reaches the ADC ``sim.timeFly`` later (the propagation
-    delay), so the envelope is sampled at ``ts - sim.timeFly``: the trace is ~0
+    Time of flight.  A PulseReadout schedules its generator pulse at
+    ``module_t + pulse_pre_delay``; that signal reaches the ADC ``sim.timeFly``
+    later (the propagation delay), so the envelope is sampled at
+    ``ts - sim.timeFly - pulse_pre_delay``.  With zero pre-delay, the trace is ~0
     for ``ts < sim.timeFly`` and the readout pulse appears in
-    ``[timeFly, timeFly + pulse_length)``.  This is the rising edge lookback's
-    ``analyze`` recovers as the trig_offset.  ``ts`` is the program-time axis
+    ``[timeFly, timeFly + pulse_length)``.  ``ts`` is the program-time axis
     (``cycles2us(get_time_axis) + trig_offset``); the trig_offset is already
-    baked into ``ts`` by the engine, so this layer applies no trig_offset shift of
-    its own — only the physical ``timeFly`` delay.
+    baked into ``ts`` by the engine, so this layer applies no trig_offset shift.
 
     Parameters
     ----------
@@ -313,6 +442,12 @@ def decimated_trace(
         :func:`mixed_signal`).
     p_e
         Excited-state population in ``[0, 1]`` (Fast-Fail via ``mixed_signal``).
+    pulse_pre_delay_us
+        Resolved generator pulse pre-delay in µs.  Defaults to 0 for legacy tests
+        and readout configs that do not delay the generator pulse.
+    state_visibility
+        Remaining |g>/|e> readout contrast after nonlinear readout backaction.
+        Defaults to 1.0 for the linear model.
 
     Returns
     -------
@@ -328,11 +463,19 @@ def decimated_trace(
     if ts.ndim != 1:
         raise ValueError(f"ts must be a 1-D array, got shape {ts.shape}")
 
-    # Steady-state mixed S21 at the single probe frequency: reuse the accumulated
-    # blend on a length-1 freq array and take the scalar.
-    steady = mixed_signal(sim, np.array([f_ro_ghz], dtype=np.float64), rf_g, rf_e, p_e)[
-        0
-    ]
+    # Steady-state mixed S21 at the single probe frequency.  Apply the same
+    # high-photon visibility compression as accumulated readout before mixing.
+    freqs = np.array([f_ro_ghz], dtype=np.float64)
+    s_g = s21(sim, freqs, rf_g)
+    s_e = s21(sim, freqs, rf_e)
+    s_g, s_e = apply_readout_visibility(s_g, s_e, state_visibility)
+    steady = blend_state_responses(s_g, s_e, p_e)[0]
 
-    amp = envelope_at(readout_cfg, ts - sim.timeFly, pulse_length)
+    pulse_pre_delay = float(pulse_pre_delay_us)
+    if not math.isfinite(pulse_pre_delay) or pulse_pre_delay < 0.0:
+        raise ValueError(
+            f"pulse_pre_delay_us must be finite and non-negative, got {pulse_pre_delay_us!r}"
+        )
+
+    amp = envelope_at(readout_cfg, ts - sim.timeFly - pulse_pre_delay, pulse_length)
     return (amp * steady).astype(np.complex128)

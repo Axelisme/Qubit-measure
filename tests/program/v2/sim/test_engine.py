@@ -36,7 +36,12 @@ from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import DirectReadoutCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.sim import SimParams
-from zcu_tools.program.v2.sim.engine import _FULL_SCALE, SimCancelledError
+from zcu_tools.program.v2.sim.engine import (
+    _FULL_SCALE,
+    SimCancelledError,
+    SimEngine,
+    _PointModel,
+)
 from zcu_tools.program.v2.sim.readout import (
     effective_signal_samples,
     resonator_freqs,
@@ -73,6 +78,8 @@ _SIM = SimParams(
     pi_gain_len=0.4,
     seed=12345,
 )
+
+_RESET_RELAX_DELAY = 10.0 * _SIM.T1
 
 
 def _f_qubit_mhz() -> float:
@@ -415,7 +422,7 @@ def test_engine_qub_pulse_with_swept_ro_freq_dip_tracks_pe():
 
     The pre-readout π pulse excites P_e≈1, so the dispersive dip rides rf_e; with
     no pulse the qubit stays at ~thermal and the dip rides rf_g.  This is the new
-    case the unified _point_signal path supports — pre-R-1 the swept-ro_freq branch
+    case the unified _point_model path supports — pre-R-1 the swept-ro_freq branch
     ignored the qubit pulse entirely and always probed rf_g.
     """
 
@@ -653,6 +660,74 @@ def test_engine_singleshot_accumulated_mean_invariant():
     assert abs(reps_mean - acc_reps_mean) < 0.02 * blob_dist
 
 
+# ---------------------------------------------------------- rep state carry / nreads
+
+
+def _pi_pulse_prog(relax_delay: float, *, reps: int = 4) -> ModularProgramV2:
+    _soc, soccfg = make_mock_soc(sim=_SIM)
+    f_qubit = _f_qubit_mhz()
+    pulse = PulseCfg(
+        ch=0,
+        nqz=1,
+        gain=1.0,
+        freq=f_qubit,
+        phase=0.0,
+        waveform=ConstWaveformCfg(length=_SIM.pi_gain_len),
+    ).build("pi")
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=reps, rounds=1, relax_delay=relax_delay),
+        modules=[pulse, _readout(_rf_g_mhz())],
+    )
+    prog.compile()
+    return prog
+
+
+def _deterministic_p_e_chain(prog: ModularProgramV2) -> NDArray[np.float64]:
+    engine = SimEngine(prog, _SIM)
+    _s_g, _s_e, p_e, _signal_scale, _noise_scale = engine._ensure_signal()
+    return p_e[:, 0]
+
+
+def test_engine_relax_delay_zero_carries_state_between_reps() -> None:
+    """With no inter-shot relaxation, a repeated pi pulse alternates population."""
+
+    p_e = _deterministic_p_e_chain(_pi_pulse_prog(relax_delay=0.0))
+
+    assert p_e[0] > 0.95
+    assert p_e[1] < 0.05
+    assert p_e[2] > 0.90
+    assert p_e[3] < 0.10
+
+
+def test_engine_long_relax_delay_reprepares_each_rep() -> None:
+    """A long relax_delay passively returns the carried state near ground."""
+
+    p_e = _deterministic_p_e_chain(_pi_pulse_prog(relax_delay=_RESET_RELAX_DELAY))
+
+    assert np.all(p_e > 0.95)
+
+
+def test_engine_compute_round_supports_multiple_read_triggers() -> None:
+    """nreads > 1 broadcasts deterministic readout physics over trigger slots."""
+
+    prog = _pi_pulse_prog(relax_delay=_RESET_RELAX_DELAY, reps=3)
+    ((_, ro),) = prog.ro_chs.items()
+    ro["trigs"] = 2
+
+    engine = SimEngine(prog, _SIM)
+    acc = engine.compute_round(0)[0]
+    _s_g, _s_e, p_e, signal_scale, noise_scale = engine._ensure_signal()
+
+    assert acc.shape == (3, 2, 2)
+    assert p_e.shape == (3, 2)
+    assert signal_scale.shape == (2,)
+    assert noise_scale.shape == (2,)
+    np.testing.assert_allclose(p_e[:, 0], p_e[:, 1])
+    np.testing.assert_allclose(signal_scale[0], signal_scale[1])
+    np.testing.assert_allclose(noise_scale[0], noise_scale[1])
+
+
 def _normalized_ground_raw_direct(
     *, ro_length: float, reps: int = 12_000
 ) -> tuple[NDArray[np.complex128], int]:
@@ -846,7 +921,7 @@ def test_acquire_stop_checker_does_not_cancel_inside_mock_signal_grid(monkeypatc
     def fake_operating_signal(self) -> tuple[float, float, float]:
         return (4.0, 7.0, 7.01)
 
-    def fake_point_signal(
+    def fake_point_model(
         self,
         point: dict[str, int],
         f_qubit_ghz: float,
@@ -854,18 +929,19 @@ def test_acquire_stop_checker_does_not_cancel_inside_mock_signal_grid(monkeypatc
         rf_e: float,
         n_samples: int,
         sample_times_us: NDArray[np.float64],
-    ) -> tuple[NDArray[np.complex128], NDArray[np.complex128], float, float, float]:
+    ) -> _PointModel:
         point_calls.append(point)
-        return (
-            np.array([1.0 + 0.0j], dtype=np.complex128),
-            np.array([0.0 + 0.0j], dtype=np.complex128),
-            0.0,
-            1.0,
-            1.0,
+        return _PointModel(
+            s_g=np.array([1.0 + 0.0j], dtype=np.complex128),
+            s_e=np.array([0.0 + 0.0j], dtype=np.complex128),
+            signal_scale=1.0,
+            noise_std_scale=1.0,
+            pre_readout_props=(np.eye(4, dtype=np.float64),),
+            inter_shot_props=(np.eye(4, dtype=np.float64),),
         )
 
     monkeypatch.setattr(SimEngine, "_operating_signal", fake_operating_signal)
-    monkeypatch.setattr(SimEngine, "_point_signal", fake_point_signal)
+    monkeypatch.setattr(SimEngine, "_point_model", fake_point_model)
 
     soc, soccfg = make_mock_soc(sim=_SIM.model_copy(update={"poll_latency": 0.0}))
     sw = SweepCfg(start=7000.0, stop=7010.0, expts=8, step=10.0 / 7)
@@ -903,7 +979,7 @@ def test_engine_cancel_during_detune_loop_raises(monkeypatch):
     )
     prog.compile()
 
-    evolve_calls = 0
+    propagator_calls = 0
 
     def fake_lower(
         self, point: dict[str, int], f_qubit_ghz: float, detune_offset: float
@@ -923,23 +999,23 @@ def test_engine_cancel_during_detune_loop_raises(monkeypatch):
             readout=ReadoutPlan(f_ro_ghz=7.0, ro_length_us=1.0),
         )
 
-    def fake_evolve(v0, segments):
-        nonlocal evolve_calls
-        evolve_calls += 1
-        return np.array([0.0, 0.0, -1.0], dtype=np.float64)
+    def fake_sequence_propagator(segments):
+        nonlocal propagator_calls
+        propagator_calls += 1
+        return np.eye(4, dtype=np.float64)
 
     def stop_after_three_detune_nodes() -> bool:
-        return evolve_calls >= 3
+        return propagator_calls >= 3
 
     monkeypatch.setattr(SimEngine, "_lower", fake_lower)
-    monkeypatch.setattr(engine_module.bloch, "evolve", fake_evolve)
+    monkeypatch.setattr(engine_module, "_sequence_propagator", fake_sequence_propagator)
 
     engine = SimEngine(prog, sim, stop_checkers=[stop_after_three_detune_nodes])
     n_samples, sample_times_us = engine._readout_sample_times_us()
     with pytest.raises(SimCancelledError, match="cancelled"):
-        engine._point_signal({}, 4.0, 7.0, 7.01, n_samples, sample_times_us)
+        engine._point_model({}, 4.0, 7.0, 7.01, n_samples, sample_times_us)
 
-    assert 0 < evolve_calls < len(engine._detune_nodes)
+    assert 0 < propagator_calls < 2 * len(engine._detune_nodes)
 
 
 # ---------------------------------------------------------------- decimated D2
@@ -950,6 +1026,8 @@ def _pulse_readout(
     ro_length: float = 2.0,
     pulse_length: float | None = None,
     gain: float = 0.1,
+    trig_offset: float = 0.0,
+    pre_delay: float = 0.0,
 ) -> Module:
     """A PulseReadout (const envelope) for the decimated/lookback path.
 
@@ -964,9 +1042,12 @@ def _pulse_readout(
         gain=gain,
         freq=ro_freq_mhz,
         phase=0.0,
+        pre_delay=pre_delay,
         waveform=ConstWaveformCfg(length=pulse_len),
     )
-    ro_cfg = DirectReadoutCfg(ro_ch=0, ro_length=ro_length, ro_freq=ro_freq_mhz)
+    ro_cfg = DirectReadoutCfg(
+        ro_ch=0, ro_length=ro_length, ro_freq=ro_freq_mhz, trig_offset=trig_offset
+    )
     return PulseReadoutCfg(pulse_cfg=pulse_cfg, ro_cfg=ro_cfg).build("ro")
 
 
@@ -1001,6 +1082,116 @@ def test_engine_pulse_readout_gain_scales_raw_blob_centers():
     )
 
     assert abs(high) / abs(low) == pytest.approx(high_gain / low_gain, rel=0.01)
+
+
+def _pulse_readout_blob_gap(gain: float) -> float:
+    _soc, soccfg = make_mock_soc(sim=_SIM)
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=1, rounds=1),
+        modules=[_pulse_readout(_rf_g_mhz(), ro_length=1.0, gain=gain)],
+    )
+    prog.compile()
+    engine = SimEngine(prog, _SIM)
+    s_g, s_e, _p_e, signal_scale, _noise_scale = engine._ensure_signal()
+    return float(abs(signal_scale[0] * (s_e[0] - s_g[0])))
+
+
+def test_engine_high_readout_gain_reduces_blob_contrast() -> None:
+    """Above the dispersive guardrail, more gain no longer improves contrast."""
+
+    low = _pulse_readout_blob_gap(0.2)
+    mid = _pulse_readout_blob_gap(0.6)
+    high = _pulse_readout_blob_gap(1.4)
+
+    assert mid > low
+    assert high < mid
+
+
+def test_engine_pulse_readout_signal_samples_use_trigger_alignment() -> None:
+    """Accumulated PulseReadout integrates only pulse envelope inside the ADC window."""
+
+    sim = _SIM.model_copy(update={"snr": 1.0e9})
+
+    def signal_scale(trig_offset: float) -> float:
+        _soc, soccfg = make_mock_soc(sim=sim)
+        prog = ModularProgramV2(
+            soccfg,
+            ProgramV2Cfg(reps=1, rounds=1),
+            modules=[
+                _pulse_readout(
+                    _rf_g_mhz(),
+                    ro_length=1.0,
+                    pulse_length=0.2,
+                    gain=0.1,
+                    trig_offset=trig_offset,
+                )
+            ],
+        )
+        prog.compile()
+        engine = SimEngine(prog, sim)
+        _s_g, _s_e, _p_e, scale, _noise = engine._ensure_signal()
+        return float(scale[0])
+
+    aligned = signal_scale(sim.timeFly)
+    late = signal_scale(sim.timeFly + 1.0)
+
+    assert aligned > 0.0
+    assert late == pytest.approx(0.0, abs=1e-12)
+
+
+def test_engine_pulse_readout_signal_samples_include_pulse_pre_delay() -> None:
+    """PulseReadout envelope starts after its generator pre_delay."""
+
+    sim = _SIM.model_copy(update={"snr": 1.0e9})
+    pulse_length = 0.2
+    pre_delay = 0.3
+
+    def signal_scale(trig_offset: float) -> float:
+        _soc, soccfg = make_mock_soc(sim=sim)
+        prog = ModularProgramV2(
+            soccfg,
+            ProgramV2Cfg(reps=1, rounds=1),
+            modules=[
+                _pulse_readout(
+                    _rf_g_mhz(),
+                    ro_length=pulse_length,
+                    pulse_length=pulse_length,
+                    gain=0.1,
+                    trig_offset=trig_offset,
+                    pre_delay=pre_delay,
+                )
+            ],
+        )
+        prog.compile()
+        engine = SimEngine(prog, sim)
+        _s_g, _s_e, _p_e, scale, _noise = engine._ensure_signal()
+        return float(scale[0])
+
+    aligned = signal_scale(sim.timeFly + pre_delay)
+    early = signal_scale(sim.timeFly)
+
+    assert aligned > 0.0
+    assert early == pytest.approx(0.0, abs=1e-12)
+
+
+def test_engine_direct_readout_skips_nonlinear_photon_guardrail() -> None:
+    """DirectReadout has no generator gain, so critical-photon checks do not apply."""
+
+    f_qubit_ghz = _f_qubit_mhz() * 1e-3
+    sim = _SIM.model_copy(update={"bare_rf": f_qubit_ghz, "snr": 1.0e9})
+    soc, soccfg = make_mock_soc(sim=sim)
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=3, rounds=1),
+        modules=[
+            DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=_f_qubit_mhz()).build("ro")
+        ],
+    )
+
+    result = prog.acquire(soc, progress=False)
+
+    assert result[0].shape == (1, 2)
 
 
 def test_engine_acquire_decimated_returns_timefly_shifted_trace():
@@ -1166,7 +1357,7 @@ def _echo_envelope(sim: SimParams, stop: float, expts: int) -> np.ndarray:
 
     prog = ModularProgramV2(
         soccfg,
-        ProgramV2Cfg(reps=_ENVELOPE_REPS, rounds=1),
+        ProgramV2Cfg(reps=_ENVELOPE_REPS, rounds=1, relax_delay=10.0 * sim.T1),
         modules=[
             pi_half("p1"),
             Delay("w1", delay=half),
@@ -1207,7 +1398,7 @@ def _ramsey_envelope(sim: SimParams, stop: float, expts: int) -> np.ndarray:
 
     prog = ModularProgramV2(
         soccfg,
-        ProgramV2Cfg(reps=_ENVELOPE_REPS, rounds=1),
+        ProgramV2Cfg(reps=_ENVELOPE_REPS, rounds=1, relax_delay=10.0 * sim.T1),
         modules=[
             pi_half("p1"),
             Delay("wait", delay=delay),

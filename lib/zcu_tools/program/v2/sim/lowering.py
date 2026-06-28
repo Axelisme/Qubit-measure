@@ -132,6 +132,9 @@ class ReadoutPlan:
         ADC integration window in µs from the semantic readout cfg.  The engine
         still uses the compiled sample count as the raw-buffer normalization
         source of truth, but the semantic plan carries this value explicitly.
+    trig_offset_us : float
+        Resolved ADC trigger offset in µs.  Accumulated ``PulseReadout`` uses it
+        to align the integration samples against the generator pulse envelope.
     readout_gain : float
         Resolved generator gain for a ``PulseReadout``.  ``DirectReadout`` has no
         drive-gain cfg, so it uses unity.
@@ -141,13 +144,19 @@ class ReadoutPlan:
     pulse_length_us : float | None
         Resolved generator pulse/envelope length in µs, or ``None`` for
         ``DirectReadout``.
+    pulse_pre_delay_us : float
+        Resolved generator pulse pre-delay in µs.  ``PulseReadout`` triggers its
+        ADC window and generator pulse from the same module time, but the
+        generator pulse itself is played at ``t + pre_delay``.
     """
 
     f_ro_ghz: float
     ro_length_us: float
+    trig_offset_us: float = 0.0
     readout_gain: float = 1.0
     pulse_cfg: PulseCfg | None = None
     pulse_length_us: float | None = None
+    pulse_pre_delay_us: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -634,24 +643,37 @@ def _readout_plan(
     if isinstance(module, DirectReadout):
         ro_freq = module.cfg.ro_freq
         ro_length = module.cfg.ro_length
+        trig_offset = module.cfg.trig_offset
         f_ro_mhz = _resolve_scalar(ro_freq, loop_counts, point)
         ro_length_us = _resolve_scalar(ro_length, loop_counts, point)
-        return ReadoutPlan(f_ro_ghz=f_ro_mhz / _GHZ_TO_MHZ, ro_length_us=ro_length_us)
+        trig_offset_us = _resolve_scalar(trig_offset, loop_counts, point)
+        return ReadoutPlan(
+            f_ro_ghz=f_ro_mhz / _GHZ_TO_MHZ,
+            ro_length_us=ro_length_us,
+            trig_offset_us=trig_offset_us,
+        )
     elif isinstance(module, PulseReadout):
         ro_freq = module.cfg.ro_cfg.ro_freq
         ro_length = module.cfg.ro_cfg.ro_length
+        trig_offset = module.cfg.ro_cfg.trig_offset
         readout_gain = _resolve_scalar(module.cfg.pulse_cfg.gain, loop_counts, point)
         pulse_length_us = _resolve_scalar(
             module.cfg.pulse_cfg.waveform.length, loop_counts, point
         )
+        pulse_pre_delay_us = _resolve_scalar(
+            module.cfg.pulse_cfg.pre_delay, loop_counts, point
+        )
         f_ro_mhz = _resolve_scalar(ro_freq, loop_counts, point)
         ro_length_us = _resolve_scalar(ro_length, loop_counts, point)
+        trig_offset_us = _resolve_scalar(trig_offset, loop_counts, point)
         return ReadoutPlan(
             f_ro_ghz=f_ro_mhz / _GHZ_TO_MHZ,
             ro_length_us=ro_length_us,
+            trig_offset_us=trig_offset_us,
             readout_gain=readout_gain,
             pulse_cfg=module.cfg.pulse_cfg,
             pulse_length_us=pulse_length_us,
+            pulse_pre_delay_us=pulse_pre_delay_us,
         )
     else:
         raise UnsupportedModuleError(
@@ -859,6 +881,36 @@ def lower_point(
         raise UnsupportedModuleError("no readout module found in the timeline")
 
     return LoweredPoint(segments=segments, readout=readout)
+
+
+def inter_shot_relax_segment(
+    modules: Sequence[Module],
+    sweep: Sequence[tuple[str, SweepCfg | int]] | None,
+    sim: SimParams,
+    f_qubit_ghz: float,
+    point: dict[str, int],
+    duration_us: float,
+    detune_offset: float = 0.0,
+) -> Segment | None:
+    """Return the passive free-evolution segment between two body executions.
+
+    QICK's ``final_delay`` / `ProgramV2Cfg.relax_delay` happens after the readout
+    and before the next body execution.  Lowering owns the rotating-frame policy,
+    so the engine asks this helper for the matching idle detuning rather than
+    reconstructing frame state from emitted segments.
+    """
+
+    duration = float(duration_us)
+    if not math.isfinite(duration) or duration < 0.0:
+        raise ValueError(f"relax_delay must be finite and >= 0.0, got {duration_us!r}")
+    if duration == 0.0:
+        return None
+
+    sweep = sweep or []
+    loop_counts = _loop_counts(sweep)
+    f_qubit_mhz = f_qubit_ghz * _GHZ_TO_MHZ
+    frame_detuning = _frame_detuning(modules, f_qubit_mhz, loop_counts, point)
+    return _idle_segment(sim, duration, frame_detuning + detune_offset)
 
 
 def _lower_module(

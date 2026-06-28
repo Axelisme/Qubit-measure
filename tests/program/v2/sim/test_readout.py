@@ -27,11 +27,15 @@ from zcu_tools.program.v2.modules.waveform import (
 )
 from zcu_tools.program.v2.sim import readout
 from zcu_tools.program.v2.sim.readout import (
+    apply_readout_visibility,
+    critical_photon_number,
     decimated_trace,
     effective_signal_samples,
     mixed_signal,
     noise_std_sample_scale,
     readout_drive_amplitude,
+    readout_photon_ratio,
+    readout_state_visibility,
     resonator_freqs,
     s21,
 )
@@ -211,9 +215,37 @@ class TestFastFail:
         with pytest.raises(ValueError, match=r"p_e must be in \[0, 1\]"):
             mixed_signal(_SIM, freqs, rf_g, rf_e, p_e=bad_p_e)
 
+    def test_decimated_trace_rejects_bad_p_e(self) -> None:
+        cfg = _const_readout_cfg(length=1.0)
+        ts = np.linspace(0.0, 1.0, 11, endpoint=False, dtype=np.float64)
+        with pytest.raises(ValueError, match=r"p_e must be in \[0, 1\]"):
+            decimated_trace(
+                _SIM,
+                ts,
+                cfg,
+                1.0,
+                _SIM.bare_rf,
+                _SIM.bare_rf - 0.001,
+                _SIM.bare_rf + 0.001,
+                p_e=1.1,
+            )
+
 
 class TestIntegrationHelpers:
     """Pure helpers for gain, signal area, and integrated noise scaling."""
+
+    def test_critical_photon_number_uses_dispersive_ratio(self) -> None:
+        assert critical_photon_number(8.0, 6.0, 0.1) == pytest.approx(100.0)
+
+    @pytest.mark.parametrize(
+        ("f_qubit", "resonator", "g"),
+        [(6.0, 6.0, 0.1), (8.0, 6.0, 0.0), (8.0, 6.0, float("nan"))],
+    )
+    def test_critical_photon_number_rejects_invalid_inputs(
+        self, f_qubit: float, resonator: float, g: float
+    ) -> None:
+        with pytest.raises(ValueError):
+            critical_photon_number(f_qubit, resonator, g)
 
     def test_readout_drive_amplitude_defaults_direct_readout_to_unity(self) -> None:
         assert readout_drive_amplitude(None) == pytest.approx(1.0)
@@ -226,6 +258,33 @@ class TestIntegrationHelpers:
     def test_readout_drive_amplitude_rejects_nonfinite_gain(self, gain: float) -> None:
         with pytest.raises(ValueError, match="readout gain must be finite"):
             readout_drive_amplitude(gain)
+
+    def test_readout_photon_ratio_defaults_gain_one_to_ncrit(self) -> None:
+        assert readout_photon_ratio(0.5, n_crit=20.0, photons_per_gain2=None) == (
+            pytest.approx(0.25)
+        )
+        assert readout_photon_ratio(1.0, n_crit=20.0, photons_per_gain2=None) == (
+            pytest.approx(1.0)
+        )
+
+    def test_readout_drive_amplitude_soft_saturates_at_ncrit(self) -> None:
+        assert readout_drive_amplitude(
+            0.01, n_crit=10.0, photons_per_gain2=None
+        ) == pytest.approx(0.01, rel=1e-4)
+        assert readout_drive_amplitude(
+            1.0, n_crit=10.0, photons_per_gain2=None
+        ) == pytest.approx(1.0 / np.sqrt(1.9))
+
+    def test_readout_state_visibility_compresses_blob_separation(self) -> None:
+        s_g = np.array([1.0 + 0.0j], dtype=np.complex128)
+        s_e = np.array([-1.0 + 0.0j], dtype=np.complex128)
+        visibility = readout_state_visibility(1.0, n_crit=10.0, photons_per_gain2=None)
+
+        s_g_eff, s_e_eff = apply_readout_visibility(s_g, s_e, visibility)
+
+        assert visibility == pytest.approx(1.0 / 1.9)
+        assert (0.5 * (s_g_eff + s_e_eff))[0] == pytest.approx(0.0 + 0.0j)
+        assert abs(s_g_eff[0] - s_e_eff[0]) == pytest.approx(visibility * 2.0)
 
     def test_effective_signal_samples_direct_readout_counts_window(self) -> None:
         ts = np.linspace(0.0, 1.0, 11, endpoint=False, dtype=np.float64)
@@ -439,6 +498,34 @@ class TestDecimatedTrace:
         steady = s21(_SIM, np.array([f_ro]), rf_g)[0]
         assert trace[0] == pytest.approx(steady)
         assert trace[1] == pytest.approx(0.0)
+
+    def test_trace_window_includes_pulse_pre_delay(self) -> None:
+        rf_g, rf_e = self._rf()
+        f_ro = rf_g
+        tof = _SIM.timeFly
+        pulse_len = 0.2
+        pre_delay = 0.3
+        cfg = _const_readout_cfg(length=pulse_len)
+        ts = np.array(
+            [tof + 0.1, tof + pre_delay + 0.1],
+            dtype=np.float64,
+        )
+
+        trace = decimated_trace(
+            _SIM,
+            ts,
+            cfg,
+            pulse_len,
+            f_ro,
+            rf_g,
+            rf_e,
+            p_e=0.0,
+            pulse_pre_delay_us=pre_delay,
+        )
+
+        steady = s21(_SIM, np.array([f_ro]), rf_g)[0]
+        assert trace[0] == pytest.approx(0.0)
+        assert trace[1] == pytest.approx(steady)
 
     def test_p_e_endpoints_and_midpoint(self) -> None:
         rf_g, rf_e = self._rf()

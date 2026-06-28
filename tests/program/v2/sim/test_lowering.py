@@ -436,10 +436,20 @@ class TestReadoutPlan:
 
     def test_direct_readout_fixed_freq(self) -> None:
         lp = lower_point(
-            [_readout()], None, _SIM, _F_QUBIT_GHZ, {}, _identity_cycles2us
+            [
+                DirectReadoutCfg(
+                    ro_ch=0, ro_length=1.0, ro_freq=7200.0, trig_offset=0.25
+                ).build("ro")
+            ],
+            None,
+            _SIM,
+            _F_QUBIT_GHZ,
+            {},
+            _identity_cycles2us,
         )
         assert lp.readout.f_ro_ghz == pytest.approx(7.2)
         assert lp.readout.ro_length_us == pytest.approx(1.0)
+        assert lp.readout.trig_offset_us == pytest.approx(0.25)
         assert lp.readout.readout_gain == pytest.approx(1.0)
         assert lp.readout.pulse_cfg is None
         assert lp.readout.pulse_length_us is None
@@ -451,17 +461,22 @@ class TestReadoutPlan:
             nqz=1,
             freq=7200.0,
             gain=0.25,
+            pre_delay=0.15,
         )
-        ro_cfg = DirectReadoutCfg(ro_ch=0, ro_length=1.5, ro_freq=7200.0)
+        ro_cfg = DirectReadoutCfg(
+            ro_ch=0, ro_length=1.5, ro_freq=7200.0, trig_offset=0.35
+        )
         ro = PulseReadoutCfg(pulse_cfg=pulse_cfg, ro_cfg=ro_cfg).build("ro")
         lp = lower_point([ro], None, _SIM, _F_QUBIT_GHZ, {}, _identity_cycles2us)
         assert lp.readout.f_ro_ghz == pytest.approx(7.2)
         assert lp.readout.ro_length_us == pytest.approx(1.5)
+        assert lp.readout.trig_offset_us == pytest.approx(0.35)
         assert lp.readout.readout_gain == pytest.approx(0.25)
         assert lp.readout.pulse_cfg is not None
         assert lp.readout.pulse_cfg.gain == pytest.approx(0.25)
         assert lp.readout.pulse_cfg.waveform.length == pytest.approx(1.0)
         assert lp.readout.pulse_length_us == pytest.approx(1.0)
+        assert lp.readout.pulse_pre_delay_us == pytest.approx(0.15)
 
     def test_swept_readout_freq_resolves_per_point(self) -> None:
         # onetone resonator spectroscopy: ro_freq is a sweep.  Lowering resolves

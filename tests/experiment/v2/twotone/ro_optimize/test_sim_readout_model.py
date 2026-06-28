@@ -110,7 +110,7 @@ def _deterministic_readout_contrast(freqs_mhz: np.ndarray) -> np.ndarray:
 
 
 def test_power_exp_linear_gain_prefers_upper_bound() -> None:
-    """With no saturation/backaction, linear readout gain prefers the high edge."""
+    """Small readout gains stay in the linear safe region and prefer the high edge."""
 
     soc, soccfg = make_mock_soc(sim=_SIM)
     cfg = PowerCfg(
@@ -124,6 +124,7 @@ def test_power_exp_linear_gain_prefers_upper_bound() -> None:
         sweep=PowerSweepCfg(
             gain=SweepCfg(start=0.003, stop=0.018, expts=4, step=0.005)
         ),
+        relax_delay=10.0 * _SIM.T1,
     )
 
     exp = PowerExp()
@@ -148,6 +149,7 @@ def test_length_exp_prefers_longer_ro_length_when_pulse_covers_window() -> None:
             readout=_readout(pulse_length=1.4),
         ),
         sweep=LengthSweepCfg(length=SweepCfg(start=0.3, stop=1.2, expts=4, step=0.3)),
+        relax_delay=10.0 * _SIM.T1,
     )
 
     exp = LengthExp()
@@ -184,6 +186,7 @@ def test_freq_gain_exp_tracks_frequency_ridge_and_high_gain_edge() -> None:
             ),
             gain=SweepCfg(start=0.003, stop=0.018, expts=4, step=0.005),
         ),
+        relax_delay=10.0 * _SIM.T1,
     )
 
     exp = FreqGainExp()

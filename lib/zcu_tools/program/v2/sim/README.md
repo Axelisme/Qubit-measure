@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-06-29 (readout integration and gain model)
+**Last updated:** 2026-06-29 (readout nonlinearity and relax-delay carry)
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -34,7 +34,9 @@ For each sweep point the engine drives this chain:
 1. **lower** the semantic module tree (Pulse / Reset / Delay / Readout) into a
    list of piecewise-constant `bloch.Segment` plus a readout plan,
 2. **evolve** the Bloch vector through those segments (4x4 augmented affine
-   propagator via `expm`) to an excited population `P_e`,
+   propagator via `expm`) to an excited population `P_e`; within a round the
+   engine carries each rep's post-readout state through `relax_delay` into the
+   next rep,
 3. **read out** dispersively as two state-conditioned blobs — `s_g = S21(rf_g)`
    (qubit in |g>) and `s_e = S21(rf_e)` (qubit in |e>) — where `rf_g` / `rf_e`
    are the dressed resonator frequencies at the operating flux; the reps axis
@@ -96,7 +98,8 @@ every coupling point.
 ## Module map
 
 - `params.py` — `SimParams`: the physical parameter container (EJ/EC/EL, flux
-  alignment, T1/T2/T2_star/thermal_pop, bare_rf/g/Ql/Qi, snr, pi_gain_len, seed),
+  alignment, T1/T2/T2_star/thermal_pop, bare_rf/g/Ql/Qi, snr, pi_gain_len,
+  `readout_photons_per_gain2`, seed),
   with the `0 < T2_star ≤ T2 ≤ 2·T1` validators and the derived
   `inhomogeneous_rate` (Γ). Also carries `poll_latency` (seconds/element, default
   1e-7): synthetic pacing for `MockQickSoc.poll_data`, not physics — set to 0.0 to
@@ -117,20 +120,22 @@ every coupling point.
   eigh-free per-state hanger response (the engine calls it twice per point for the
   `s_g` / `s_e` blobs), and `mixed_signal` is the population-weighted blend (the
   accumulated reps-mean) — both *take* `rf_g` / `rf_e` (so the engine computes the
-  dressed freqs once). Also owns pure readout-integration helpers: linear drive
-  amplitude, envelope-weighted effective signal samples, and integrated Gaussian
-  noise sample scaling. Also `value_to_flux`. No sweeps / timelines / acc_buf /
-  random noise / the per-shot Bernoulli draw (the engine owns that).
+  dressed freqs once). Also owns pure readout helpers: dispersive critical photon
+  number, unitless-gain photon-ratio calibration, safe-zone drive compression,
+  state-visibility compression, envelope-weighted effective signal samples, and
+  integrated Gaussian noise sample scaling. Also `value_to_flux`. No sweeps /
+  timelines / acc_buf / random noise / the per-shot Bernoulli draw (the engine owns
+  that).
 - `engine.py` — `SimEngine`: glue. Pins the operating point at reduced flux
   `Phi/Phi0 = 1.0` (R-3; no longer derived from the cfg `dev` map), computes
   f_qubit AND `rf_g` / `rf_e` there ONCE (flux-constant, with a hot cache for
   identical operating points), drives lowering -> bloch -> readout, caches the
-  deterministic `(s_g, s_e, p_e)` blob grids plus readout integration scales, and
-  per round draws a per-shot `Bernoulli(p_e)` to select a blob, multiplies the
-  deterministic signal by readout gain and effective signal samples, and adds
-  Gaussian integrated noise into the QICK `(*loop_dims, nreads, 2)` int64 buffer
-  (snr / reps / rounds / seed; fresh Bernoulli + noise per round so
-  software-averaging works). The
+  deterministic `(s_g, s_e)` blob grids plus readout integration scales and a
+  rep-resolved `p_e` grid, then per round draws a per-shot `Bernoulli(p_e)` to
+  select a blob, multiplies the deterministic signal by the compressed readout gain
+  and effective signal samples, and adds Gaussian integrated noise into the QICK
+  `(*loop_dims, nreads, 2)` int64 buffer (snr / reps / rounds / seed; fresh
+  Bernoulli + noise per round so software-averaging works). The
   reps-mean is the accumulated `mixed_signal` blend (zero regression); `get_raw`
   sees the two blobs. Owns the Lorentzian quasi-static detune
   ensemble: it averages `P_e` over a deterministic Gauss-Legendre quadrature in `δ`
@@ -139,6 +144,8 @@ every coupling point.
   onetone) skips the quadrature: with every `omega == 0` the Bloch z-row decouples
   from `δ`, so `P_e` is `δ`-independent and the ensemble mean equals one eval
   exactly — a mathematical identity, not a per-experiment split (R-1 intact).
+  The deterministic state chain reinitializes at each round boundary; inside a
+  round, `relax_delay` passively evolves every detune node from one rep to the next.
 
 ## Design boundaries and known limits
 
@@ -170,10 +177,10 @@ every coupling point.
   soc routes through the engine just like `acquire`: the engine lowers the single
   lookback point, evolves the Bloch vector to `P_e`, and renders the time-domain
   trace via `decimated_trace` — the readout gain times the readout envelope scaled
-  by the steady mixed S21, **shifted by `sim.timeFly`** (the readout time of
-  flight). So the trace is ~0 for program-time `< timeFly` and the readout pulse
-  envelope appears at `[timeFly, timeFly + pulse_cfg.waveform.length)`, giving
-  lookback a physical rising edge whose position `analyze` recovers as the
+  by the steady mixed S21, **shifted by `sim.timeFly + pulse_cfg.pre_delay`**. With
+  zero pulse pre-delay, the trace is ~0 for program-time `< timeFly` and the
+  readout pulse envelope appears at `[timeFly, timeFly + pulse_cfg.waveform.length)`,
+  giving lookback a physical rising edge whose position `analyze` recovers as the
   trig_offset (`≈ timeFly`).
   The ADC/readout window length (`ro_cfg.ro_length`) only determines the sampled
   time axis and may outlive the generator envelope. Model A has no resonator
@@ -192,19 +199,34 @@ every coupling point.
   measurement never raises at that physics edge.
 - **Readout integration model.** Accumulated and singleshot raw `acc_buf` entries
   are integrated ADC sums. The deterministic raw center is linear in readout gain
-  and in the effective signal samples under the generator envelope; the Gaussian
-  raw-noise standard deviation scales as `sqrt(compiled_readout_samples)`.
+  and in the effective signal samples while `nbar/ncrit <= 0.1`; above that
+  dispersive guardrail the readout drive is softly compressed and the |g>/|e> blob
+  separation is compressed around its midpoint. `readout_photons_per_gain2` is the
+  optional mock calibration from PulseReadout gain² to intracavity photons; when it
+  is unset, `gain=1` is normalized to the critical photon number at the operating
+  point. DirectReadout has no explicit generator gain and stays on the linear path.
+  For accumulated `PulseReadout`, effective signal samples are the overlap between
+  the compiled ADC sample axis and the generator envelope after applying
+  `trig_offset - timeFly - pulse_pre_delay`; a readout window that starts before
+  the signal arrival only integrates the later portion of the envelope.
+  The Gaussian raw-noise standard deviation scales as
+  `sqrt(compiled_readout_samples)`.
   The real QICK/tracker normalization still divides by compiled `ro["length"]`,
   so a full-window const readout has roughly length-independent normalized mean
   and normalized Gaussian noise that decreases as `1/sqrt(length)`.
 - **Q1 — noise model.** `snr` is the per-sample Gaussian readout scale before
   integration; fresh Gaussian noise is drawn each round so averaging over
   reps*rounds improves the effective SNR by `sqrt(reps*rounds)`, as on hardware.
-  The first-stage readout model is intentionally linear gain + integration only:
-  no saturation, backaction, resonator ring-up, or trigger-alignment penalty is
-  applied to accumulated raw sums. Without those nonlinear effects, RO optimize
-  gain sweeps and full-window length sweeps are expected to prefer their upper
-  bounds.
+  Full-window length sweeps are still expected to prefer their upper bounds in this
+  first-order model: resonator ring-up and trigger-alignment penalties are not
+  modeled.
+- **`relax_delay` carries state within a round.** A round initializes the qubit
+  state once at thermal equilibrium.  Each rep evolves through the lowered
+  pre-readout timeline, is read out without stochastic collapse in the density-only
+  model, then passively evolves for `ProgramV2Cfg.relax_delay` before the next rep
+  starts. Short `relax_delay` therefore makes repeated pulses a continuous-rep
+  experiment; tests or experiments that intend independent shots must set a long
+  enough delay or use an active reset.
 - **Per-shot Bernoulli (singleshot) — one unified path.** The reps axis draws a
   per-shot `Bernoulli(P_e)` selecting the `s_g` / `s_e` blob, not a broadcast
   mean; this is *not* gated on a singleshot mode. Its reps-mean is the

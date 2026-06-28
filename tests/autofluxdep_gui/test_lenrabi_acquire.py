@@ -37,7 +37,7 @@ _PARAMS = {
     "sweep_range": SweepValue(start=0.05, stop=2.0, expts=41),
     "reps": 100,
     "rounds": 1,
-    "relax_delay": 0.0,
+    "relax_delay": 100.0,
 }
 
 
