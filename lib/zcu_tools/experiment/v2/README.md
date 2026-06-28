@@ -1,6 +1,6 @@
 # QICK Note for `experiment/v2`
 
-**Last updated:** 2026-06-25（legacy migration boundary）
+**Last updated:** 2026-06-29（signal array normalization）
 
 這份筆記整理 `experiment/v2/` 的整體設計，說明 Experiment 層與 Task 層的分工、典型實驗的撰寫範本，以及各子模組的角色。`runner/` 的細節另見 `runner/README.md`。
 
@@ -170,6 +170,7 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):          # 主要 Cfg = program cfg + 
 - **`default_raw2signal_fn`**（`runner/task.py`）：`raw[0][0].dot([1, 1j])` — 取第 0 個 RO channel、該 channel 的第 0 次 readout，再把 IQ 轉成 complex。絕大多數 1D 實驗用這個。
 - **客製化 `raw2signal_fn`**：當 acquire 形狀不同（例如 `acquire_decimated`、多 RO、singleshot 用 `KMeansTracker` / `MomentTracker`）時，在 `Task(raw2signal_fn=...)` 傳入。
 - **`signal2real` 函式**：每個 Exp 檔案會定義 local 的 `xxx_signal2real`（通常 `np.abs`），給 liveplot 用；analyze 階段可能換成 phase / real。
+- **scalar/array 邊界**：座標轉換工具（例如 value↔flux）可接受 scalar 或 ndarray；若後續 plotting/analysis 需要 indexing、min/max 或與另一個 sweep array 對齊，呼叫端在邊界用 `np.asarray(..., dtype=...)` 正規化成 ndarray，而不是用型別宣告假設回傳一定是 array。
 - **peak-picking smoothing**：ro-optimize 與 reset 這類以 SNR/map argmax 找最佳點的分析預設使用 `smooth_method="wavelet"`；`smooth_method="gaussian"` 保留為舊 Gaussian 對照。`smooth` 是通用強度：Gaussian 時是 sigma，wavelet 時是 threshold scale。
 
 ---

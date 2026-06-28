@@ -260,6 +260,7 @@ def search_in_database(
     fig: Figure | None = None
     if plot:
         fig = plt.figure(figsize=(10, 7))
+        assert isinstance(fig, Figure)
         gs = fig.add_gridspec(3, 2, width_ratios=[1.5, 1])
 
         fig.suptitle(

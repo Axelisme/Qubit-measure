@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from zcu_tools.program.v2.base import ProgramV2Cfg
+from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.dmem import LoadValue
@@ -14,8 +15,6 @@ from zcu_tools.program.v2.modules.waveform import (
     FlatTopWaveformCfg,
     GaussWaveformCfg,
 )
-
-from ..conftest import make_mock_soccfg
 
 GEN_CH = 0
 GEN_FREQ = 1000.0

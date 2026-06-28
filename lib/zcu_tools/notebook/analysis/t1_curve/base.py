@@ -160,7 +160,9 @@ def plot_sample_t1(
     """T1s: ns"""
     fig, ax = plt.subplots(constrained_layout=True, figsize=(8, 4))
 
-    s_fluxs = value2flux(s_dev_values, flux_half, flux_period)
+    s_fluxs = np.asarray(
+        value2flux(s_dev_values, flux_half, flux_period), dtype=np.float64
+    )
 
     ax.errorbar(s_fluxs, s_T1s, yerr=s_T1errs, fmt=".", label="Current")
 
@@ -202,7 +204,9 @@ def plot_t1_with_sample(
     **other_noise_options,
 ) -> tuple[Figure, Axes]:
     """T1s: ns"""
-    s_fluxs = value2flux(s_dev_values, flux_half, flux_period)
+    s_fluxs = np.asarray(
+        value2flux(s_dev_values, flux_half, flux_period), dtype=np.float64
+    )
 
     t1_effs = [
         calculate_eff_t1_vs_flux_fast(

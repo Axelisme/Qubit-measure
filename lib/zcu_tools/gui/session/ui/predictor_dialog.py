@@ -318,12 +318,13 @@ class PredictorDialog(QDialog):
             return
         super().reject()
 
-    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+    def closeEvent(self, a0: QCloseEvent | None) -> None:  # noqa: N802
         if self._persistent_on_close:
-            event.ignore()
+            if a0 is not None:
+                a0.ignore()
             self.hide()
             return
-        super().closeEvent(event)
+        super().closeEvent(a0)
 
     def _on_close_requested(self) -> None:
         self.reject()

@@ -5,7 +5,7 @@ import warnings
 import numpy as np
 from qick.asm_v2 import QickParam, QickProgramV2
 
-from ..utils import param2str
+from ..utils import is_qick_param, param2str
 
 
 def get_fclk(prog: QickProgramV2, gen_ch: int | None = None, ro_ch: int | None = None):
@@ -65,8 +65,16 @@ def calc_max_length(
     )
 
     if isinstance(length1, QickParam):
+        if not is_qick_param(length1):
+            raise TypeError(
+                f"unsupported QickParam implementation: {type(length1).__name__}"
+            )
         length1 = length1.maxval()
     if isinstance(length2, QickParam):
+        if not is_qick_param(length2):
+            raise TypeError(
+                f"unsupported QickParam implementation: {type(length2).__name__}"
+            )
         length2 = length2.maxval()
 
     return max(length1, length2)

@@ -1,6 +1,6 @@
 # AI Note for `tests/`
 
-**Last updated:** 2026-06-26 — measure-gui MCP timeout policy
+**Last updated:** 2026-06-29 — Qt wait helper typing
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -50,6 +50,13 @@ def my_widget(qapp):
 
 如果 fixture 持有的是 `Controller`（它持有具體 `BackgroundRunner`），改呼叫
 `ctrl._background_svc.quiesce()`（見 `tests/gui/test_controller.py`）。
+
+### Qt timer waits
+
+`qtpy.QtTest.QTest` 在 PyQt6 runtime 是 C++ namespace，不能實例化；但部分
+stub 會把 `QTest.qWait(ms)` 視為 unbound instance method。GUI 測試需要等待
+debounce timer 時，用本地 helper 包 `QEventLoop + QTimer.singleShot`，不要直接
+呼叫 `QTest.qWait`，也不要用 `cast()` 或 type ignore 壓掉 stub 差異。
 
 ---
 

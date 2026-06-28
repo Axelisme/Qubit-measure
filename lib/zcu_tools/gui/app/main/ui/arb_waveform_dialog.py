@@ -284,6 +284,7 @@ class ArbWaveformDialog(QDialog):
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
         header = self._asset_table.horizontalHeader()
+        assert header is not None
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
@@ -320,6 +321,7 @@ class ArbWaveformDialog(QDialog):
         self._segment_table = QTableWidget(0, 2)
         self._segment_table.setHorizontalHeaderLabels(["duration (us)", "formula"])
         segment_header = self._segment_table.horizontalHeader()
+        assert segment_header is not None
         segment_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         segment_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self._segment_table.cellChanged.connect(self._on_structure_changed)

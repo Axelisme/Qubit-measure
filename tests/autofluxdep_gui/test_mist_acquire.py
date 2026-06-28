@@ -75,6 +75,7 @@ def test_mist_acquire_runs_or_skips_on_simengine_gap():
         patch = builder.build_node(env).produce(snap)
     except Exception as exc:  # SimEngine MIST support pending
         pytest.skip(f"SimEngine MIST support pending: {type(exc).__name__}: {exc}")
+        raise AssertionError("pytest.skip should not return")
 
     # the real acquire ran: success reported + the disturbance row is finite
     assert patch.values().get("success") == 1.0

@@ -13,6 +13,7 @@ import pytest
 from qick.asm_v2 import Label, WriteReg
 from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.macro.loop import OpenInnerLoop
+from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.control import Repeat
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, Join, SoftDelay
@@ -33,8 +34,6 @@ from zcu_tools.program.v2.modules.reset import (
     TwoPulseResetCfg,
 )
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-
-from .conftest import make_mock_soccfg
 
 # ---------------------------------------------------------------------------
 # Constants — valid for the mock soccfg

@@ -33,7 +33,7 @@ def test_snr_stop_checker_waits_until_probe_has_value(monkeypatch: Any):
     checkers = acquire_mod.build_stop_checkers(
         env,
         probe,
-        lambda signals: np.asarray(signals).real,
+        lambda signals: np.asarray(signals, dtype=np.complex128).real,
     )
 
     assert len(checkers) == 1

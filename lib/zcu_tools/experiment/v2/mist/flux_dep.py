@@ -201,7 +201,7 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
         signals = result.signals
 
         if flux_half is not None and flux_period is not None:
-            xs = value2flux(dev_values, flux_half, flux_period)
+            xs = np.asarray(value2flux(dev_values, flux_half, flux_period))
         else:
             xs = dev_values
 
@@ -209,6 +209,7 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
 
         if fig is None:
             fig = go.Figure()
+        assert fig is not None
 
         if flux_half is not None and flux_period is not None:
             xlabel = r"$\phi$ (a.u.)"
@@ -222,6 +223,7 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
         else:
             ys = ac_coeff * gains**2
             ylabel = r"$\bar n$"
+        ys = np.asarray(ys)
         fig.update_yaxes(title_text=ylabel, title_font_size=12)
 
         fig.add_trace(

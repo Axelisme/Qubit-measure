@@ -11,7 +11,7 @@ from typing import Any, ClassVar, Literal
 
 import numpy as np
 import sympy as sp
-from numpy.typing import ArrayLike, NDArray
+from numpy.typing import NDArray
 from sympy.parsing.sympy_parser import parse_expr, standard_transformations
 
 MAX_ARB_WAVEFORM_SAMPLES = 1_000_001
@@ -676,13 +676,6 @@ def _load_npz(path: Path) -> ArbWaveformData:
 
 def _write_npz(path: Path, data: ArbWaveformData) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload: dict[str, ArrayLike] = {
-        "idata": data.idata,
-        "qdata": data.qdata,
-        "time": data.time,
-    }
-    if data.recipe is not None:
-        payload["recipe_json"] = np.array(data.recipe.to_json())
     tmp_name: str | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -693,7 +686,16 @@ def _write_npz(path: Path, data: ArbWaveformData) -> None:
             delete=False,
         ) as tmp:
             tmp_name = tmp.name
-            np.savez(tmp, **payload)
+            if data.recipe is None:
+                np.savez(tmp, idata=data.idata, qdata=data.qdata, time=data.time)
+            else:
+                np.savez(
+                    tmp,
+                    idata=data.idata,
+                    qdata=data.qdata,
+                    time=data.time,
+                    recipe_json=np.array(data.recipe.to_json()),
+                )
         Path(tmp_name).replace(path)
     except Exception:
         if tmp_name is not None:

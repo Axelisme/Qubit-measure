@@ -1,6 +1,6 @@
 # zcu_tools.utils
 
-**Last updated:** 2026-06-25 grouped axes spec boundary
+**Last updated:** 2026-06-29 process helper typing
 
 `utils` 放可被 experiment / GUI 共用、且不反向依賴上層 domain 的 helper。
 實驗資料持久化的 public API 收斂在 `zcu_tools.utils.datasaver` package
@@ -30,3 +30,9 @@ import。
   / orchestration layer 預先決定 unique final path。
 
 `datasaver/` 內部 module 是責任拆分，不是額外 public import path。
+
+## process helpers
+
+`utils.process` 保留 ndarray dtype 形狀的 helper 會優先使用 numpy ufunc
+（例如 `np.subtract`）來表達泛型 array 運算。這比在 `NDArray[T]` 上直接使用
+Python 運算子更容易讓 numpy stub 維持 dtype 關係，也避免用 `cast()` 補洞。

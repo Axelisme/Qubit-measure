@@ -66,6 +66,8 @@ def calculate_n_oper_vs_flux(
                 evals_count=return_dim,
             )
     matrix_elements = spectrum_data.matrixelem_table
+    if matrix_elements is None:
+        raise RuntimeError("scqubits did not produce n_operator matrix elements")
 
     return spectrum_data, matrix_elements[:, :return_dim, :return_dim]
 
@@ -142,9 +144,14 @@ def calculate_system_n_oper_vs_flux(
         idx_1 = [get_idx(1, j) for j in range(return_dim)]
         return dressed_op_data[np.ix_(idx_0, idx_1)]
 
+    if sweep is None:
+        raise RuntimeError("scqubits did not produce a ParameterSweep")
     sweep.add_sweep(get_n_oper, "n_oper")
 
-    return sweep, sweep["n_oper"]
+    n_oper = sweep["n_oper"]
+    if n_oper is None:
+        raise RuntimeError("scqubits did not produce system n_operator matrix elements")
+    return sweep, np.asarray(n_oper, dtype=np.complex128)
 
 
 def calculate_phi_oper(
@@ -200,6 +207,8 @@ def calculate_phi_oper_vs_flux(
                 evals_count=return_dim,
             )
     matrix_elements = spectrum_data.matrixelem_table
+    if matrix_elements is None:
+        raise RuntimeError("scqubits did not produce phi_operator matrix elements")
 
     return spectrum_data, matrix_elements[:, :return_dim, :return_dim]
 
@@ -263,5 +272,7 @@ def calculate_sin_phi_oper_vs_flux(
                 evals_count=return_dim,
             )
     matrix_elements = spectrum_data.matrixelem_table
+    if matrix_elements is None:
+        raise RuntimeError("scqubits did not produce sin_phi_operator matrix elements")
 
     return spectrum_data, matrix_elements[:, :return_dim, :return_dim]

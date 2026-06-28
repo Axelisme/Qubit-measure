@@ -4,10 +4,11 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 import numpy as np
+from matplotlib.axes import Axes
 from matplotlib.collections import PathCollection
 from numpy.typing import NDArray
 
-from .base import AbsSegment, Axes
+from .base import AbsSegment
 
 
 class ScatterSegment(AbsSegment):

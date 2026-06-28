@@ -100,6 +100,7 @@ from zcu_tools.program.v2.modules.waveform import (
     GaussWaveformCfg,
 )
 from zcu_tools.program.v2.sweep import SweepCfg
+from zcu_tools.program.v2.utils import is_qick_param
 
 from .bloch import Segment
 from .params import SimParams
@@ -176,6 +177,8 @@ def _resolve_scalar(
     if not isinstance(value, QickParam):
         return float(value)
 
+    if not is_qick_param(value):
+        raise TypeError(f"unsupported QickParam implementation: {type(value).__name__}")
     array = value.to_array(loop_counts, all_loops=True)
     index = tuple(point[name] if name in value.spans else 0 for name in loop_counts)
     return float(np.asarray(array)[index])

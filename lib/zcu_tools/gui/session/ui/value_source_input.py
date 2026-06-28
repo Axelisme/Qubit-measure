@@ -103,16 +103,18 @@ class ValueSourceInputController(QObject):
         self._install_popup_event_filters()
         self._completer.activated[str].connect(self._on_completion_activated)  # type: ignore[index]
 
-    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:  # noqa: N802
+        if a0 is None or a1 is None:
+            return super().eventFilter(a0, a1)
         if (
-            (watched is self._line_edit or watched in self._popup_filter_targets)
-            and event.type() == QEvent.Type.KeyPress
-            and self._is_completion_accept_key(event)
+            (a0 is self._line_edit or a0 in self._popup_filter_targets)
+            and a1.type() == QEvent.Type.KeyPress
+            and self._is_completion_accept_key(a1)
             and self._complete_first_candidate()
         ):
-            event.accept()
+            a1.accept()
             return True
-        return super().eventFilter(watched, event)
+        return super().eventFilter(a0, a1)
 
     def detach(self) -> None:
         """Disconnect from the line edit and hide any popup."""
@@ -194,8 +196,9 @@ class ValueSourceInputController(QObject):
         if not self._completer.setCurrentRow(0):
             return
         popup = self._completer.popup()
-        if popup is not None:
-            popup.setCurrentIndex(self._completer.completionModel().index(0, 0))
+        model = self._completer.completionModel()
+        if popup is not None and model is not None:
+            popup.setCurrentIndex(model.index(0, 0))
 
     def _complete_first_candidate(self) -> bool:
         text = self._line_edit.text()

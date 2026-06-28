@@ -27,6 +27,8 @@ from pathlib import Path
 import zcu_tools.gui.app.main.services as services_pkg
 import zcu_tools.gui.session.services as session_services_pkg
 
+assert services_pkg.__file__ is not None
+assert session_services_pkg.__file__ is not None
 _SERVICES_DIR = Path(services_pkg.__file__).parent
 _SESSION_SERVICES_DIR = Path(session_services_pkg.__file__).parent
 

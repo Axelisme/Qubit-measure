@@ -1,6 +1,6 @@
 # `simulate/fluxonium` 模塊重點文檔
 
-**Last updated:** 2026-06-25（Fluxonium Prediction engine）
+**Last updated:** 2026-06-29（matrix-element fast-fail）
 
 基於 [scqubits](https://scqubits.readthedocs.io) 的 Fluxonium 量子比特數值模擬工具集,提供能譜、色散位移、矩陣元、相干時間與實驗參數預測等計算。
 
@@ -32,6 +32,8 @@
 - `calculate_phi_oper` / `calculate_phi_oper_vs_flux` — 相位算子 `φ`。
 - `calculate_sin_phi_oper` / `calculate_sin_phi_oper_vs_flux` — `sin(αφ/2 + β)`,用於雜訊模型與特殊耦合。
 - `calculate_system_n_oper_vs_flux` — 在 **qubit+resonator 聯合 Hilbert space** 中計算 n 算子的 dressed 矩陣元,使用 `identity_wrap` 把子系統算子提升到整個空間。
+
+`*_oper_vs_flux` 依賴 scqubits 回填 `matrixelem_table`；若 scqubits 未產生矩陣元，函式會 fast-fail，而不是回傳 `None` 或讓後續 slicing 出現模糊錯誤。`calculate_system_n_oper_vs_flux` 對 sweep 中新增的 `n_oper` 也做存在性檢查，並在回傳前正規化成 `complex128` ndarray。
 
 ### `dispersive.py` — 色散位移 / chi
 

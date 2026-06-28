@@ -414,15 +414,15 @@ def test_channel_cancel_hook_triggers_direct_settle() -> None:
     Ordering: Stop arrives before Settled in the queue, so the consumer
     latches the reason and folds it into the subsequent Settled(cancelled).
     """
-    ch: OperationChannel | None = None
+    channel_holder: dict[str, OperationChannel] = {}
     reason_text = "user said stop"
 
     def direct_settle_hook() -> None:
         # Simulates cancel_interactive: settles the channel as cancelled.
-        assert ch is not None
-        ch.settle(OperationOutcome("cancelled"))
+        channel_holder["ch"].settle(OperationOutcome("cancelled"))
 
     ch = OperationChannel(cancel_hook=direct_settle_hook)
+    channel_holder["ch"] = ch
     ch.stop(reason_text)
     # stop() enqueued Stop BEFORE calling hook; hook settled the channel.
 

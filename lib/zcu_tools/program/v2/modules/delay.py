@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from qick.asm_v2 import QickParam
 
+from ..utils import is_qick_param
 from .base import Module
 from .util import merge_max_length, round_timestamp
 
@@ -125,6 +126,10 @@ class Join(Module):
                 if len(mod_list) == 0:
                     continue  # skip empty branch
                 if isinstance(t, QickParam):
+                    if not is_qick_param(t):
+                        raise TypeError(
+                            f"unsupported QickParam implementation: {type(t).__name__}"
+                        )
                     t = t.minval()
                 if min_i is None or t < min_t:
                     min_i = i

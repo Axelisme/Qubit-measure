@@ -8,7 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter, gaussian_filter1d
 
-T_dtype = TypeVar("T_dtype", bound=np.number)
+T_dtype = TypeVar("T_dtype", bound=np.generic)
 SmoothMethod: TypeAlias = Literal["wavelet", "gaussian"]
 WaveletThresholdMode: TypeAlias = Literal["soft", "hard"]
 
@@ -458,7 +458,7 @@ def calculate_noise(signals: NDArray[T_dtype]) -> tuple[float, NDArray[T_dtype]]
     m_signals = gaussian_filter1d(signals, sigma=1)
     m_signals = cast(NDArray[T_dtype], m_signals)
 
-    return np.abs(signals - m_signals).mean(), m_signals
+    return np.abs(np.subtract(signals, m_signals)).mean(), m_signals
 
 
 def peak_n_avg(

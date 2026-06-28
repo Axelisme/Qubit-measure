@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-06-26 (short-lived modal carve-out)
+**Last updated:** 2026-06-29 (Qt typing invariants)
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -62,3 +62,16 @@ Key invariants:
 The MCP server uses stdout for its JSON-RPC transport, so its logging never
 touches stdout — the helper only adds a stderr handler and the DEBUG file
 handler.
+
+## Qt Typing Invariants
+
+Qt override signatures must match the binding stubs exactly, including nullable
+event parameters and stub parameter names. `closeEvent` implementations use
+`a0: QCloseEvent | None`; `eventFilter` implementations use
+`a0: QObject | None, a1: QEvent | None` and immediately delegate nullable inputs
+to `super()`.
+
+Qt table header accessors are treated as optional by the stubs. Code that
+configures `horizontalHeader()` must assert the header is not `None` before
+calling resize APIs; the assert records the widget invariant and keeps the
+runtime failure explicit if a binding ever violates it.

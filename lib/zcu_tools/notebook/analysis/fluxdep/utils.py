@@ -72,7 +72,7 @@ class FluxDependVisualizer:
     def __init__(self, fig: go.Figure | None = None) -> None:
         if fig is None:
             fig = go.Figure()
-        self.fig = fig
+        self.fig: go.Figure = fig
 
     def get_figure(self) -> go.Figure:
         return self.fig

@@ -407,7 +407,8 @@ def _get_host() -> Any:
 
             def _on_refresh(self, fig: object) -> None:
                 if isinstance(fig, Figure):
-                    fig.canvas.draw_idle()
+                    canvas = fig.canvas
+                    canvas.draw_idle()
 
         _host = _PlotHost()
     return _host

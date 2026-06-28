@@ -1,5 +1,5 @@
 import warnings
-from typing import overload
+from typing import TypeVar
 
 import numpy as np
 from numpy.typing import NDArray
@@ -7,23 +7,17 @@ from numpy.typing import NDArray
 from zcu_tools.meta_tool import ModuleLibrary
 from zcu_tools.program.v2 import PulseCfg
 
-
-@overload
-def check_gains(gains: NDArray[np.float64], name: str) -> NDArray[np.float64]: ...
+T_Gains = TypeVar("T_Gains", float, NDArray[np.float64])
 
 
-@overload
-def check_gains(gains: float, name: str) -> float: ...
-
-
-def check_gains(
-    gains: float | NDArray[np.float64], name: str
-) -> float | NDArray[np.float64]:
+def check_gains(gains: T_Gains, name: str) -> T_Gains:
     if np.any(gains > 1.0):
         warnings.warn(
             f"Some {name} gains are larger than 1.0, force clip to 1.0, which may cause distortion."
         )
-        gains = np.clip(gains, 0.0, 1.0)
+        if isinstance(gains, np.ndarray):
+            return np.clip(gains, 0.0, 1.0)
+        return min(max(gains, 0.0), 1.0)
     return gains
 
 

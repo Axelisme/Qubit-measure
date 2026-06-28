@@ -1,6 +1,6 @@
 # fluxdep 模塊重點文檔
 
-**Last updated:** 2026-06-25（analysis kernel delegation）
+**Last updated:** 2026-06-29（figure typing invariants）
 
 本模塊提供 Fluxonium 通量依賴光譜（flux-dependent spectrum）的擬合、資料處理、
 與互動式標註工具。搭配 `notebook_md/analysis/fluxdep_fit.md` 使用。
@@ -123,6 +123,8 @@ fluxdep/
   - `auto_derive_limits()`：依所有已加入的資料自動決定 x/y 範圍
 
 輔助：`derive_bound(spectrums, convert_fn)` 取 min/max；`add_secondary_xaxis` 加次要 x 軸。
+
+Figure builder 內部把 `self.fig` 視為 concrete `go.Figure`。建構時若 caller 未傳入 figure，就立即建立並儲存具體 figure；Matplotlib path 建圖後用 runtime assert 確認是 `Figure`。不要用 `cast()` 取代這個 invariant。
 
 ## 資料庫產生：`script/generate_fluxonium_sample.py`
 

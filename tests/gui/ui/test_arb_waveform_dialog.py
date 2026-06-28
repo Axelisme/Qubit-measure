@@ -63,6 +63,14 @@ def _qt(qapp):  # noqa: ARG001
     yield
 
 
+def _qwait(ms: int) -> None:
+    from qtpy.QtCore import QEventLoop, QTimer  # type: ignore[attr-defined]
+
+    loop = QEventLoop()
+    QTimer.singleShot(ms, loop.quit)
+    loop.exec()
+
+
 # ---------------------------------------------------------------------------
 # Existing tests (updated for debounce state machine)
 # ---------------------------------------------------------------------------
@@ -72,7 +80,6 @@ def test_dialog_validates_segments_and_saves_preview(  # noqa: ARG001
     qapp, monkeypatch
 ) -> None:
     from qtpy.QtCore import Qt  # type: ignore[attr-defined]
-    from qtpy.QtTest import QTest  # type: ignore[attr-defined]
     from qtpy.QtWidgets import (  # type: ignore[attr-defined]
         QHeaderView,
         QLabel,
@@ -109,7 +116,7 @@ def test_dialog_validates_segments_and_saves_preview(  # noqa: ARG001
     # With the new debounce design, render error surfaces only after the timer fires.
     formula_item.setText("unknown_symbol")
     # Wait for debounce to fire (250 ms + slack).
-    QTest.qWait(300)
+    _qwait(300)
     assert not dlg._save_btn.isEnabled()
     assert not dlg._warning.isHidden()
     assert "unsupported" in dlg._warning.text()
@@ -118,7 +125,7 @@ def test_dialog_validates_segments_and_saves_preview(  # noqa: ARG001
     formula_item.setText("sin(2*pi*t)")
     assert dlg._save_btn.isEnabled()
     assert dlg._warning.isHidden()
-    QTest.qWait(300)
+    _qwait(300)
     assert dlg._preview._i_line is not None
     label = dlg._preview._i_line.get_label()
     assert isinstance(label, str)
@@ -135,6 +142,7 @@ def test_dialog_validates_segments_and_saves_preview(  # noqa: ARG001
     assert duration_item.text() == "1.00"
 
     header = dlg._asset_table.horizontalHeader()
+    assert header is not None
     assert dlg._asset_table.horizontalScrollBarPolicy() == (
         Qt.ScrollBarPolicy.ScrollBarAlwaysOff
     )
@@ -202,13 +210,11 @@ def test_preview_canvas_autoscales_y_axis_for_normalized_and_raw(qapp) -> None: 
 
 def test_A1_cheap_structure_error_is_immediate(qapp) -> None:  # noqa: ARG001
     """Structural errors (empty formula, non-numeric duration) disable Save synchronously."""
-    from qtpy.QtTest import QTest  # type: ignore[attr-defined]
-
     ctrl = _FakeController()
     dlg = ArbWaveformDialog(ctrl)  # type: ignore[arg-type]
 
     # Wait for initial debounce to settle so we start from a known-good state.
-    QTest.qWait(300)
+    _qwait(300)
     assert dlg._save_btn.isEnabled()
 
     duration_item = dlg._segment_table.item(0, 0)
@@ -223,13 +229,11 @@ def test_A1_cheap_structure_error_is_immediate(qapp) -> None:  # noqa: ARG001
 
 def test_A2_deep_render_error_surfaces_after_debounce(qapp) -> None:  # noqa: ARG001
     """Formula that passes structure but fails render → error only after debounce timer."""
-    from qtpy.QtTest import QTest  # type: ignore[attr-defined]
-
     ctrl = _FakeController()
     dlg = ArbWaveformDialog(ctrl)  # type: ignore[arg-type]
 
     # Settle initial render.
-    QTest.qWait(300)
+    _qwait(300)
 
     formula_item = dlg._segment_table.item(0, 1)
     assert formula_item is not None
@@ -241,7 +245,7 @@ def test_A2_deep_render_error_surfaces_after_debounce(qapp) -> None:  # noqa: AR
     assert dlg._render_error is None
 
     # After debounce: render ran and found the unknown symbol.
-    QTest.qWait(300)
+    _qwait(300)
     assert not dlg._save_btn.isEnabled()
     assert not dlg._warning.isHidden()
     assert dlg._render_error is not None
@@ -250,8 +254,6 @@ def test_A2_deep_render_error_surfaces_after_debounce(qapp) -> None:  # noqa: AR
 
 def test_A3_data_key_change_does_not_trigger_render(qapp, monkeypatch) -> None:  # noqa: ARG001
     """Editing data_key must never call render_formula_recipe."""
-    from qtpy.QtTest import QTest  # type: ignore[attr-defined]
-
     ctrl = _FakeController()
     render_call_count = 0
     original_render = render_formula_recipe
@@ -266,12 +268,12 @@ def test_A3_data_key_change_does_not_trigger_render(qapp, monkeypatch) -> None: 
         counting_render,
     )
     dlg = ArbWaveformDialog(ctrl)  # type: ignore[arg-type]
-    QTest.qWait(300)  # let initial render fire
+    _qwait(300)  # let initial render fire
     count_after_init = render_call_count
 
     # Type into data_key field and wait past debounce window.
     dlg._data_key_edit.setText("some_valid_key")
-    QTest.qWait(300)
+    _qwait(300)
 
     assert render_call_count == count_after_init, (
         "data_key edit must not trigger render_formula_recipe"
@@ -289,11 +291,9 @@ def test_A3_data_key_change_does_not_trigger_render(qapp, monkeypatch) -> None: 
 
 def test_A4_save_uses_valid_recipe_without_waiting_for_debounce(qapp) -> None:  # noqa: ARG001
     """Save uses _valid_recipe set by cheap path; service renders once internally."""
-    from qtpy.QtTest import QTest  # type: ignore[attr-defined]
-
     ctrl = _FakeController()
     dlg = ArbWaveformDialog(ctrl)  # type: ignore[arg-type]
-    QTest.qWait(300)  # initial render
+    _qwait(300)  # initial render
 
     # Modify formula; do NOT wait for debounce.
     formula_item = dlg._segment_table.item(0, 1)
@@ -313,17 +313,15 @@ def test_A4_save_uses_valid_recipe_without_waiting_for_debounce(qapp) -> None:  
 
 def test_A5_render_failure_leaves_no_half_baked_state(qapp) -> None:  # noqa: ARG001
     """After a render failure: _valid_data is None, Save disabled, preview unchanged."""
-    from qtpy.QtTest import QTest  # type: ignore[attr-defined]
-
     ctrl = _FakeController()
     dlg = ArbWaveformDialog(ctrl)  # type: ignore[arg-type]
-    QTest.qWait(300)
+    _qwait(300)
     assert dlg._valid_data is not None  # initial render succeeded
 
     formula_item = dlg._segment_table.item(0, 1)
     assert formula_item is not None
     formula_item.setText("unknown_symbol")
-    QTest.qWait(300)
+    _qwait(300)
 
     assert dlg._valid_recipe is not None  # cheap path: structure valid
     assert dlg._valid_data is None  # deep path: render failed, no half-baked data
@@ -332,7 +330,7 @@ def test_A5_render_failure_leaves_no_half_baked_state(qapp) -> None:  # noqa: AR
 
     # Recovery: fix formula.
     formula_item.setText("cos(2*pi*t)")
-    QTest.qWait(300)
+    _qwait(300)
 
     assert dlg._valid_data is not None
     assert dlg._save_btn.isEnabled()
@@ -344,11 +342,9 @@ def test_A6_save_with_deep_invalid_formula_reports_save_failed(
     qapp, monkeypatch
 ) -> None:  # noqa: ARG001
     """Save in the optimistic window with a render-failing formula shows 'Save failed'."""
-    from qtpy.QtTest import QTest  # type: ignore[attr-defined]
-
     ctrl = _FakeController()
     dlg = ArbWaveformDialog(ctrl)  # type: ignore[arg-type]
-    QTest.qWait(300)
+    _qwait(300)
 
     formula_item = dlg._segment_table.item(0, 1)
     assert formula_item is not None
@@ -388,11 +384,9 @@ def test_B7_reload_failure_reports_reload_failed_not_save_failed(
     _on_asset_selection_changed triggered by refresh() can load normally;
     _on_asset_selection_changed only catches ArbWaveformError, not RuntimeError.
     """
-    from qtpy.QtTest import QTest  # type: ignore[attr-defined]
-
     ctrl = _FakeController()
     dlg = ArbWaveformDialog(ctrl)  # type: ignore[arg-type]
-    QTest.qWait(300)
+    _qwait(300)
 
     # Fail only the first call to load_arb_waveform_data after save (simulates a
     # transient disk error exactly at reload time, not at subsequent selection loads).

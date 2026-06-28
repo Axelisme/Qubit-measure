@@ -1,6 +1,6 @@
 # QICK Note for `meta_tool`
 
-**Last updated:** 2026-06-26（prepare_preview_series domain helper）
+**Last updated:** 2026-06-29（ArbWaveform npz write boundary）
 
 這份筆記整理 `meta_tool/` 的設計，說明各類別的職責、同步機制與使用模式。
 
@@ -223,6 +223,7 @@ data = ArbWaveformDatabase.load("my_pulse")
 **約束**：
 
 - `.npz` 必須只有 `idata`、`qdata`、`time`，以及可選的 `recipe_json`；不支援 legacy folder layout 或 `.npy` / `.csv`。
+- `.npz` 寫入路徑固定用明確 keyword (`idata`, `qdata`, `time`, optional `recipe_json`) 呼叫 `np.savez`；不要用 dynamic payload `**dict` 讓 `allow_pickle` overload 判斷變模糊。
 - `idata`、`qdata`、`time` 必須是一維、同長度、finite array；`time[0] == 0` 且嚴格遞增，單位固定為 us。
 - `Abs = hypot(I, Q)` 必須落在 `[0, 1]`；I/Q 可為負值。
 - formula recipe 是可選資料；用 recipe 生成等於完全覆寫原本 data，並把 recipe 一起寫入同一個 `.npz`。

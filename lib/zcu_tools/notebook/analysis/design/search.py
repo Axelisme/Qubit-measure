@@ -9,6 +9,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from joblib import Parallel, delayed
+from numpy.typing import NDArray
 from tqdm.auto import tqdm
 
 from zcu_tools.notebook.persistance import load_result
@@ -19,10 +20,21 @@ DESIGN_CUTOFF = 40
 DESIGN_EVALS_COUNT = 15
 
 
+ParamGridInput = float | np.ndarray | tuple[float, float]
+
+
+def _param_grid_values(value: ParamGridInput, precision: float) -> NDArray[np.float64]:
+    if isinstance(value, tuple):
+        return np.arange(value[0], value[1], precision)
+    if isinstance(value, np.ndarray):
+        return value.astype(np.float64, copy=False)
+    return np.array([float(value)], dtype=np.float64)
+
+
 def generate_params_table(
-    EJ: float | np.ndarray | tuple[float, float],
-    EC: float | np.ndarray | tuple[float, float],
-    EL: float | np.ndarray | tuple[float, float],
+    EJ: ParamGridInput,
+    EC: ParamGridInput,
+    EL: ParamGridInput,
     flux: float = 0.5,
     precision: float = 0.1,
 ) -> pd.DataFrame:
@@ -39,23 +51,9 @@ def generate_params_table(
         DataFrame with columns: flux, EJ, EC, EL
     """
 
-    if isinstance(EJ, float):
-        EJ = np.array([EJ])
-    elif isinstance(EJ, tuple):
-        EJ = np.arange(EJ[0], EJ[1], precision)
-    assert isinstance(EJ, np.ndarray)
-
-    if isinstance(EC, float):
-        EC = np.array([EC])
-    elif isinstance(EC, tuple):
-        EC = np.arange(EC[0], EC[1], precision)
-    assert isinstance(EC, np.ndarray)
-
-    if isinstance(EL, float):
-        EL = np.array([EL])
-    elif isinstance(EL, tuple):
-        EL = np.arange(EL[0], EL[1], precision)
-    assert isinstance(EL, np.ndarray)
+    EJ = _param_grid_values(EJ, precision)
+    EC = _param_grid_values(EC, precision)
+    EL = _param_grid_values(EL, precision)
 
     return pd.DataFrame(
         [

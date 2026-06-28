@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import numpy as np
+from matplotlib.axes import Axes
 from matplotlib.image import AxesImage, NonUniformImage
 from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
 
-from .base import AbsSegment, Axes
+from .base import AbsSegment
 
 
 class Plot2DSegment(AbsSegment):
@@ -64,20 +65,21 @@ class Plot2DSegment(AbsSegment):
     ) -> None:
         if self.im is None:
             raise RuntimeError("Image not initialized.")
+        im = self.im
 
         dx = 0.5 * (xs[-1] - xs[0]) / max(1, (len(xs) - 1))
         dy = 0.5 * (ys[-1] - ys[0]) / max(1, (len(ys) - 1))
         if self.flip:
-            self.im.set_extent((ys[0] - dy, ys[-1] + dy, xs[0] - dx, xs[-1] + dx))
-            self.im.set_data(signals)
+            im.set_extent((ys[0] - dy, ys[-1] + dy, xs[0] - dx, xs[-1] + dx))
+            im.set_data(signals)
         else:
-            self.im.set_extent((xs[0] - dx, xs[-1] + dx, ys[0] - dy, ys[-1] + dy))
-            self.im.set_data(signals.T)
+            im.set_extent((xs[0] - dx, xs[-1] + dx, ys[0] - dy, ys[-1] + dy))
+            im.set_data(signals.T)
 
         if self.vmin is not None or self.vmax is not None:
-            self.im.set_clim(vmin=self.vmin, vmax=self.vmax)
+            im.set_clim(vmin=self.vmin, vmax=self.vmax)
         if self.vmin is None or self.vmax is None:
-            self.im.autoscale()
+            im.autoscale()
 
         if title is not None:
             ax.set_title(title)
@@ -133,20 +135,21 @@ class PlotNonUniform2DSegment(AbsSegment):
     ) -> None:
         if self.im is None:
             raise RuntimeError("Image not initialized.")
+        im = self.im
 
         dx = 0.5 * (xs[-1] - xs[0]) / max(1, len(xs) - 1)
         dy = 0.5 * (ys[-1] - ys[0]) / max(1, len(ys) - 1)
         if self.flip:
-            self.im.set_extent((ys[0] - dy, ys[-1] + dy, xs[0] - dx, xs[-1] + dx))
-            self.im.set_data(ys, xs, signals)
+            im.set_extent((ys[0] - dy, ys[-1] + dy, xs[0] - dx, xs[-1] + dx))
+            im.set_data(ys, xs, signals)
         else:
-            self.im.set_extent((xs[0] - dx, xs[-1] + dx, ys[0] - dy, ys[-1] + dy))
-            self.im.set_data(xs, ys, signals.T)
+            im.set_extent((xs[0] - dx, xs[-1] + dx, ys[0] - dy, ys[-1] + dy))
+            im.set_data(xs, ys, signals.T)
 
         if self.vmin is not None or self.vmax is not None:
-            self.im.set_clim(vmin=self.vmin, vmax=self.vmax)
+            im.set_clim(vmin=self.vmin, vmax=self.vmax)
         if self.vmin is None or self.vmax is None:
-            self.im.autoscale()
+            im.autoscale()
 
         if title is not None:
             ax.set_title(title)

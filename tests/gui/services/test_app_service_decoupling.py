@@ -36,6 +36,7 @@ from pathlib import Path
 
 import zcu_tools.gui.app.main.services as services_pkg
 
+assert services_pkg.__file__ is not None
 _SERVICES_DIR = Path(services_pkg.__file__).parent
 
 # The dotted prefix of the moved services package, used to recognise an absolute

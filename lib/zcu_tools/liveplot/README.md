@@ -1,6 +1,6 @@
 # liveplot 模組重點筆記
 
-**Last updated:** 2026-06-08
+**Last updated:** 2026-06-29
 
 Jupyter 中即時更新的 matplotlib 繪圖工具，在資料擷取過程中邊跑邊畫。
 
@@ -81,6 +81,7 @@ with MultiLivePlot(fig, {
 ## 注意事項
 
 - `Plot1DSegment.update` 對 `signals` 做 `.astype(np.float64)`；複數輸入會丟虛部（依 numpy 轉型規則），呼叫端建議先取 `abs/real/imag`。
+- `segments/` 內的 matplotlib artist 欄位在 `init_ax()` 前是 `None`。`update()` 先 fast-fail，再把 artist 存到 local 變數後使用；不要在 None check 後反覆透過 `self.im` 等 optional 屬性呼叫方法。
 - LivePlot 類若要保留圖（例如後續 `savefig`），請設定 `auto_close=False`。
 - 各個單一 segment 的 LivePlot 包裝層（`LivePlot1D`、`LivePlot2D`、`LivePlotScatter`）刻意保留樣板結構，不做公共基底抽象，理由是 `update()` 簽名各不相同，強行統一會犧牲型別提示。
 - `active_backend()` 每次呼叫都重新解析（不快取），以保留執行期切換 backend 的彈性。`MultiLivePlot.refresh()` 透過 `backend.refresh_figure()` 呼叫，與 `BaseSegmentLivePlot` 一致。
