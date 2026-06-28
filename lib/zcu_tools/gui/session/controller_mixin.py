@@ -27,7 +27,7 @@ Design (Candidate #14, Option B — abstract service accessors):
 
 Each app keeps as its own override the methods whose body genuinely diverges:
 
-- ``apply_startup_project`` — measure returns the resolved-project dict (WIRE-44);
+- ``apply_startup_project`` — measure returns the resolved-project dict (WIRE-48);
   autofluxdep returns ``bool``. Different return contract, kept per-app.
 - ``get_project_root`` — reads the app's own ``self._project_root`` (app state, not
   a session service).
@@ -48,6 +48,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from zcu_tools.device.base import BaseDeviceInfo
+    from zcu_tools.gui.result_scope import ProjectPaths, ResultScope
     from zcu_tools.gui.session.pbar_host import ProgressBarModel
     from zcu_tools.gui.session.services.connection import (
         ConnectRequest,
@@ -107,6 +108,12 @@ class SessionControllerMixin:
 
     def remember_startup_connection(self, req: StartupConnectionRequest) -> None:
         self._startup_svc.remember_connection(req)
+
+    def list_result_scopes(self) -> tuple[ResultScope, ...]:
+        return self._startup_svc.list_result_scopes()
+
+    def derive_project_paths(self, chip_name: str, qub_name: str) -> ProjectPaths:
+        return self._startup_svc.derive_project_paths(chip_name, qub_name)
 
     # --- setup dialog: context switching ---------------------------------
     def use_context(self, label: str) -> None:

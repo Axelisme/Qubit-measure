@@ -651,35 +651,17 @@ def test_batch_tools_reject_malformed_items_before_any_rpc(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_startup_apply_optional_dirs_default_to_project_root(qapp):  # noqa: ARG001
-    """Omitting result_dir/database_path fills the default per-qubit roots
-    (<project_root>/result/<chip>/<qub>) via the RPC — anchored at the injected
-    project root (the repo root), NOT cwd, so a .bat launcher that cd's into
-    script/ still scopes defaults under the repo root. An agent gets a runnable
-    project without knowing the path layout."""
+def test_startup_apply_resolves_generated_scope_under_project_root(qapp, tmp_path):  # noqa: ARG001
+    """Omitting scope_id uses the generated per-qubit result scope under the
+    injected project root, not cwd. The RPC returns the resolved paths."""
     import os
 
     from ._helpers import Fixture
 
-    root = os.path.join(os.sep, "tmp", "fake_repo_root")
+    root = str(tmp_path / "fake_repo_root")
     fx = Fixture(project_root=root)
     fx.start()
     try:
-        captured = {}
-
-        def _apply(req):
-            captured["req"] = req
-            # apply_startup_project now echoes the resolved project dict (no bool);
-            # the dispatch handler returns it verbatim, so it must be a dict.
-            return {
-                "chip_name": req.chip_name,
-                "qub_name": req.qub_name,
-                "res_name": req.res_name,
-                "result_dir": req.result_dir,
-                "database_path": req.database_path,
-            }
-
-        fx.ctrl.apply_startup_project = MagicMock(side_effect=_apply)  # type: ignore[method-assign]
         sock = open_client(fx.service.port)
         try:
             resp = call(
@@ -688,17 +670,52 @@ def test_startup_apply_optional_dirs_default_to_project_root(qapp):  # noqa: ARG
                 {"chip_name": "C", "qub_name": "Q", "res_name": "R"},
             )
             assert resp["ok"] is True
-            req = captured["req"]
-            assert req.chip_name == "C"
+            result = resp["result"]
+            assert result["chip_name"] == "C"
             # Anchored at the injected project root, NOT os.getcwd().
-            assert req.result_dir == os.path.join(root, "result", "C", "Q")
+            assert result["result_dir"] == os.path.join(root, "result", "C", "Q")
+            assert result["params_path"] == os.path.join(
+                root, "result", "C", "Q", "params.json"
+            )
             # database_path carries today's dated data folder (derive owns the date).
             from datetime import datetime
 
             yy, mm, dd = datetime.today().strftime("%Y-%m-%d").split("-")
-            assert req.database_path == os.path.join(
+            assert result["database_path"] == os.path.join(
                 root, "Database", "C", "Q", yy, mm, f"Data_{mm}{dd}"
             )
+            assert os.path.exists(result["params_path"])
+        finally:
+            sock.close()
+    finally:
+        fx.stop()
+
+
+def test_result_scope_list_reports_discovered_params(qapp, tmp_path):  # noqa: ARG001
+    import json
+
+    from ._helpers import Fixture
+
+    params_path = (
+        tmp_path / "fake_repo_root" / "result" / "ChipA" / "Q1" / "params.json"
+    )
+    params_path.parent.mkdir(parents=True)
+    params_path.write_text(
+        json.dumps({"project": {"chip_name": "ChipA", "qubit_name": "Q1"}}),
+        encoding="utf8",
+    )
+    fx = Fixture(project_root=str(tmp_path / "fake_repo_root"))
+    fx.start()
+    try:
+        sock = open_client(fx.service.port)
+        try:
+            resp = call(sock, "result_scope.list", {})
+            assert resp["ok"] is True
+            scopes = resp["result"]["scopes"]
+            assert len(scopes) == 1
+            assert scopes[0]["chip_name"] == "ChipA"
+            assert scopes[0]["qub_name"] == "Q1"
+            assert scopes[0]["params_path"] == str(params_path.resolve())
         finally:
             sock.close()
     finally:

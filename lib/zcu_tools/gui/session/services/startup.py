@@ -15,12 +15,12 @@ owns that), no event bus.
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
+from zcu_tools.gui.result_scope import ProjectPaths, ResultScope, ResultScopeManager
 from zcu_tools.gui.session.ports import DeviceMemoryInfo
 from zcu_tools.gui.session.state import DEFAULT_LEFT_PANEL_WIDTH, StartupPrefs
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
@@ -76,13 +76,8 @@ def derive_project_paths(chip_name: str, qub_name: str, root: str) -> tuple[str,
     Both the setup dialog and the mock/RPC startup helpers derive through here so
     the chip/qub (and date) segments are joined in exactly ONE place —
     ``apply_project`` must not re-scope. ``root`` is the base dir (e.g. cwd)."""
-    from zcu_tools.utils.datasaver import get_datafolder_path
-
-    result_dir = os.path.join(root, "result", chip_name, qub_name)
-    database_path = get_datafolder_path(
-        os.path.join(root, "Database"), os.path.join(chip_name, qub_name)
-    )
-    return result_dir, database_path
+    paths = ResultScopeManager(root).derive_paths(chip_name, qub_name)
+    return paths.result_dir, paths.database_path
 
 
 @dataclass(frozen=True)
@@ -90,12 +85,33 @@ class StartupProjectRequest:
     chip_name: str
     qub_name: str
     res_name: str
-    result_dir: str
-    database_path: str
+    scope_id: str | None = None
 
     def __post_init__(self) -> None:
         if not self.chip_name or not self.qub_name or not self.res_name:
             raise ValueError("Startup project names must be non-empty")
+
+
+@dataclass(frozen=True)
+class ResolvedStartupProject:
+    chip_name: str
+    qub_name: str
+    res_name: str
+    result_dir: str
+    database_path: str
+    params_path: str
+    scope_id: str
+
+    def as_wire_dict(self) -> dict[str, str]:
+        return {
+            "chip_name": self.chip_name,
+            "qub_name": self.qub_name,
+            "res_name": self.res_name,
+            "result_dir": self.result_dir,
+            "database_path": self.database_path,
+            "params_path": self.params_path,
+            "scope_id": self.scope_id,
+        }
 
 
 @dataclass(frozen=True)
@@ -125,38 +141,63 @@ class StartupService:
         context: StartupContextPort,
         devices: RememberedDevicePort,
         state: SessionState,
+        result_scopes: ResultScopeManager,
     ) -> None:
         self._context = context
         self._devices = devices
         self._state = state
+        self._result_scopes = result_scopes
 
     def get_persisted(self) -> PersistedStartup:
         """The current remembered prefs (for the setup dialog's prefill)."""
         return self._project_prefs_to_startup()
 
-    def apply_project(self, req: StartupProjectRequest) -> None:
-        # result_dir / database_path arrive already scoped under chip/qub by the
-        # caller (UI derives them via derive_project_paths; mock uses the same
-        # helper). apply_project does NOT re-scope — that would double the
-        # chip/qub segment.
+    def list_result_scopes(self) -> tuple[ResultScope, ...]:
+        return self._result_scopes.list_scopes()
+
+    def list_result_chip_names(self) -> tuple[str, ...]:
+        return self._result_scopes.list_chip_names()
+
+    def list_result_qub_names(self, chip_name: str) -> tuple[str, ...]:
+        return self._result_scopes.list_qub_names(chip_name)
+
+    def derive_project_paths(self, chip_name: str, qub_name: str) -> ProjectPaths:
+        return self._result_scopes.derive_paths(chip_name, qub_name)
+
+    def apply_project(self, req: StartupProjectRequest) -> ResolvedStartupProject:
+        scope = self._result_scopes.ensure_scope(
+            chip_name=req.chip_name,
+            qub_name=req.qub_name,
+            scope_id=req.scope_id,
+        )
+        paths = self._result_scopes.derive_paths(req.chip_name, req.qub_name)
+        resolved = ResolvedStartupProject(
+            chip_name=req.chip_name,
+            qub_name=req.qub_name,
+            res_name=req.res_name,
+            result_dir=scope.result_dir,
+            database_path=paths.database_path,
+            params_path=scope.params_path,
+            scope_id=scope.scope_id,
+        )
         self._context.set_startup_context(
             MetaDict(),
             ModuleLibrary(),
-            req.chip_name,
-            req.qub_name,
-            req.res_name,
-            req.result_dir,
-            req.database_path,
+            resolved.chip_name,
+            resolved.qub_name,
+            resolved.res_name,
+            resolved.result_dir,
+            resolved.database_path,
         )
-        if req.result_dir:
-            self._context.setup_project(req.result_dir)
+        self._context.setup_project(resolved.result_dir)
         # Remember the just-applied project as the prefill values (write-time).
         prefs = self._state.startup_prefs
-        prefs.chip_name = req.chip_name
-        prefs.qub_name = req.qub_name
-        prefs.res_name = req.res_name
-        prefs.result_dir = req.result_dir
-        prefs.database_path = req.database_path
+        prefs.chip_name = resolved.chip_name
+        prefs.qub_name = resolved.qub_name
+        prefs.res_name = resolved.res_name
+        prefs.result_dir = resolved.result_dir
+        prefs.database_path = resolved.database_path
+        return resolved
 
     def remember_connection(self, req: StartupConnectionRequest) -> None:
         prefs = self._state.startup_prefs

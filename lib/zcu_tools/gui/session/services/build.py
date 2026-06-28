@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from zcu_tools.gui.result_scope import ResultScopeManager
 from zcu_tools.gui.session.services.connection import SoCConnectionService
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.device import DeviceService
@@ -64,6 +65,7 @@ def build_session_services(
     progress: ProgressHub,
     io_manager: ProjectIOPort,
     runner: OperationRunner,
+    project_root: str = "",
     driver_factory: DriverFactoryPort | None = None,
     device_registry: DeviceRegistryPort | None = None,
 ) -> SessionServices:
@@ -73,6 +75,8 @@ def build_session_services(
     off-main executor and progress hub (injected via their session ports);
     ``io_manager`` is the project-IO adapter; ``runner`` is the shared
     OperationRunner (ADR-0026 §1) used by DeviceService for operation lifecycle;
+    ``project_root`` anchors generated result/database paths and result-scope
+    discovery;
     ``driver_factory`` defaults to the device service's built-in hardware factory
     when omitted; ``device_registry`` defaults to the ``GlobalDeviceRegistryAdapter``
     (production singleton) when omitted — tests inject an in-memory fake.
@@ -94,7 +98,7 @@ def build_session_services(
     value_sources = ValueSourceBinder(state=state, bus=bus, registry=value_registry)
     # StartupService bridges the two session services it commands through their
     # ports (context bootstrap + remembered-device registration) + State prefs.
-    startup = StartupService(context, device, state)
+    startup = StartupService(context, device, state, ResultScopeManager(project_root))
     # FLUX-AWARE-MOCK: self-subscribes to SOC_CHANGED + chains the one-shot ramp
     # off device.device_connected — both apps get mock flux provisioning for free.
     # Not exposed on the returned bundle: nothing reads it. Its lifetime is anchored

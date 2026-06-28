@@ -184,6 +184,7 @@ class Controller(SessionControllerMixin):
             progress=self._progress_svc,
             io_manager=self._io_manager,
             runner=self._runner,
+            project_root=self._project_root,
         )
         self._session = session
         self._soc_svc = session.soc_connection
@@ -229,7 +230,7 @@ class Controller(SessionControllerMixin):
 
     # -- setup dialog: project / startup --
     # apply_startup_project diverges (autofluxdep returns bool; measure returns the
-    # resolved-project dict per WIRE-44) so it stays a per-app override. get_bus /
+    # resolved-project dict per WIRE-48) so it stays a per-app override. get_bus /
     # get_project_root also stay per-app (app EventBus subtype / app state). Every
     # other SessionControllerPort forward lives in SessionControllerMixin.
     def apply_startup_project(self, req: StartupProjectRequest) -> bool:

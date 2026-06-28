@@ -408,6 +408,15 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "the resolved result_dir and database_path. Fast-fails with "
         "precondition_failed (no_project) when no project is applied yet.",
     ),
+    "result_scope.list": MethodSpec(
+        10.0,
+        "List discovered result scopes from result/**/params.json. Each scope "
+        "carries {scope_id, chip_name, qub_name, result_dir, params_path, source}; "
+        "startup.apply may pass a returned scope_id to use an existing non-generated "
+        "scope. Existing params.json files are migrated in place to schema v1 "
+        "project identity when needed; this read never creates new params.json files.",
+        tool_name="gui_result_scope_list",
+    ),
     # Qubit-scoped arbitrary waveform assets
     "arb_waveform.list": MethodSpec(
         5.0,
@@ -459,24 +468,19 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "startup.apply": MethodSpec(
         30.0,
-        "Set the project: chip / qubit / resonator names, plus optional "
-        "result_dir and database_path. Omit them to use the default per-qubit "
-        "roots (<cwd>/result/<chip>/<qub> and <cwd>/Database/<chip>/<qub>, the "
-        "same the setup dialog pre-fills) — the project is runnable either way. "
-        "Pass explicit paths to override. Echoes the resolved project: "
-        "{chip_name, qub_name, res_name, result_dir, database_path} (the paths "
-        "are the defaults filled in when omitted).",
+        "Set the project: chip / qubit / resonator names, plus an optional "
+        "scope_id returned by result_scope.list. Omitting scope_id uses or creates "
+        "the generated result scope at <project-root>/result/<chip>/<qub>; explicit "
+        "result_dir/database_path overrides are not accepted. Echoes the resolved "
+        "project: {chip_name, qub_name, res_name, result_dir, database_path, "
+        "params_path, scope_id}.",
         (
             _str("chip_name"),
             _str("qub_name"),
             _str("res_name"),
             _str_opt(
-                "result_dir",
-                "Result directory; omit → default <cwd>/result/<chip>/<qub>",
-            ),
-            _str_opt(
-                "database_path",
-                "Database path; omit → default <cwd>/Database/<chip>/<qub>",
+                "scope_id",
+                "Optional scope_id returned by result_scope.list",
             ),
         ),
         tool_name="gui_project_apply",

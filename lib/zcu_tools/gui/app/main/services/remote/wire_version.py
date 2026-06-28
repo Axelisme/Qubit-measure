@@ -70,12 +70,16 @@ from __future__ import annotations
 #   arb_waveform.list / preview / set with formula recipe persistence.
 # v47: read-only value source RPCs:
 #   value.list / value.read.
-WIRE_VERSION = 47
+# v48: result-scope discovery and startup path override removal:
+#   result_scope.list added; startup.apply replaces result_dir/database_path
+#   optional params with scope_id and echoes params_path/scope_id.
+WIRE_VERSION = 48
 
 # v60: value-source input completion UX and named-device value sources.
+# v61: setup result-scope discovery UI and path-based params.json project migration.
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION (a wire-contract change
 # bumps both; a pure-internal GUI change bumps only this). Git history holds the
 # per-version evolution.
-GUI_VERSION = 60  # value-source input UX and named-device sources
+GUI_VERSION = 61  # result-scope discovery setup flow and path-based migration

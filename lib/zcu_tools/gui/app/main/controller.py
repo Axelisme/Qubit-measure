@@ -237,6 +237,7 @@ class Controller(SessionControllerMixin):
             io_manager=io_manager,
             cfg_editor_ctrl=self,
             progress_transport=transport,
+            project_root=self._project_root,
         )
         self._services = services
         self._operation_gate = services.operation_gate
@@ -950,18 +951,10 @@ class Controller(SessionControllerMixin):
         # Applies the project to the active context AND records it as the
         # remembered prefs (in State); persisted to disk only at close.
         # apply_project always mutates and either succeeds or raises (no no-op
-        # outcome), so we echo the resolved project rather than a bool. req is
-        # already fully resolved (the RPC fills default paths before construction
-        # and apply_project does not re-scope), so its fields are the resolved
-        # project verbatim.
-        self._startup_svc.apply_project(req)
-        return {
-            "chip_name": req.chip_name,
-            "qub_name": req.qub_name,
-            "res_name": req.res_name,
-            "result_dir": req.result_dir,
-            "database_path": req.database_path,
-        }
+        # outcome), so we echo the resolved project rather than a bool.
+        # StartupService owns result-scope resolution so callers cannot inject
+        # arbitrary result/database paths.
+        return self._startup_svc.apply_project(req).as_wire_dict()
 
     def get_flux_dir(self) -> str | None:
         return self._ctx_svc.get_flux_dir()

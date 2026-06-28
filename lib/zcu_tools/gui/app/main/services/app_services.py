@@ -82,6 +82,7 @@ def build_app_services(
     io_manager: IOManager,
     cfg_editor_ctrl: CfgEditorHost,
     progress_transport: ProgressTransport,
+    project_root: str,
 ) -> AppServices:
     """Construct and wire every domain service into a frozen bundle.
 
@@ -107,6 +108,7 @@ def build_app_services(
         progress=progress,
         io_manager=io_manager,
         runner=runner,
+        project_root=project_root,
     )
     context = session.context
     device = session.device

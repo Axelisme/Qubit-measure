@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+from zcu_tools.gui.result_scope import ResultScope, ResultScopeManager
 from zcu_tools.gui.session.services.connection import (
     ConnectMockRequest,
     ConnectRemoteRequest,
@@ -28,6 +29,9 @@ def _make_ctrl(**overrides: object) -> MagicMock:
     ctrl.get_soccfg.return_value = None
     ctrl.apply_startup_project.return_value = True
     ctrl.get_project_root.return_value = "/tmp"
+    ctrl.list_result_scopes.return_value = ()
+    manager = ResultScopeManager("/tmp")
+    ctrl.derive_project_paths.side_effect = manager.derive_paths
     for k, v in overrides.items():
         getattr(ctrl, k).return_value = v
     return ctrl
@@ -53,8 +57,6 @@ def test_setup_dialog_apply_startup_context(qapp):
     dialog._chip_edit.setText("Q1_Chip")
     dialog._qub_edit.setText("Q1")
     dialog._res_edit.setText("R1")
-    dialog._result_dir_edit.setText("/my/result/dir")
-    dialog._db_path_edit.setText("/my/db/dir")
 
     dialog._on_apply_startup_clicked()
 
@@ -63,10 +65,31 @@ def test_setup_dialog_apply_startup_context(qapp):
             chip_name="Q1_Chip",
             qub_name="Q1",
             res_name="R1",
-            result_dir="/my/result/dir",
-            database_path="/my/db/dir",
         )
     )
+
+
+def test_setup_dialog_scope_combo_lists_all_scopes_and_selection_prefills_names(qapp):
+    scope = ResultScope(
+        scope_id="/tmp/result/Q3_2D/Q1",
+        chip_name="Q3_2D",
+        qub_name="Q1",
+        result_dir="/tmp/result/Q3_2D/Q1",
+        params_path="/tmp/result/Q3_2D/Q1/params.json",
+        source="discovered",
+    )
+    ctrl = _make_ctrl(list_result_scopes=(scope,))
+
+    dialog = SetupDialog(ctrl)
+
+    idx = dialog._scope_combo.findData(scope.scope_id)
+    assert idx >= 0
+    assert dialog._scope_combo.itemText(idx) == "Q3_2D/Q1"
+    dialog._scope_combo.setCurrentIndex(idx)
+
+    assert dialog._chip_edit.text() == "Q3_2D"
+    assert dialog._qub_edit.text() == "Q1"
+    assert dialog._result_dir_edit.text() == "/tmp/result/Q3_2D/Q1"
 
 
 def test_setup_dialog_does_not_render_success_when_project_apply_fails(qapp):

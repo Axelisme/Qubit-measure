@@ -7,14 +7,14 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
 
-from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+from qtpy.QtCore import QStringListModel, Qt  # type: ignore[attr-defined]
 from qtpy.QtGui import QFont, QShowEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QCheckBox,
     QComboBox,
+    QCompleter,
     QDialog,
     QDialogButtonBox,
-    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -37,6 +37,7 @@ from zcu_tools.gui.session.services.startup import (
 from zcu_tools.program import describe_soc
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.result_scope import ResultScope
     from zcu_tools.gui.session.controller_port import SessionControllerPort
 
 
@@ -59,6 +60,8 @@ class SetupDialog(QDialog):
         super().__init__(parent)
         self._ctrl = controller
         self._startup_mode = startup_mode
+        self._result_scopes: tuple[ResultScope, ...] = ()
+        self._syncing_scope_selection = False
         self.setWindowTitle("Setup" if startup_mode else "Setup / Context")
         self.resize(900, 600)
 
@@ -81,11 +84,19 @@ class SetupDialog(QDialog):
         self._chip_edit = QLineEdit("unknown_chip")
         self._chip_edit.setPlaceholderText("e.g. Q5_2D")
         self._chip_edit.textChanged.connect(self._on_names_changed)
+        self._chip_completer_model = QStringListModel(self)
+        self._chip_completer = QCompleter(self._chip_completer_model, self)
+        self._chip_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)  # type: ignore[attr-defined]
+        self._chip_edit.setCompleter(self._chip_completer)
         name_form.addRow("Chip name:", self._chip_edit)
 
         self._qub_edit = QLineEdit("unknown_qubit")
         self._qub_edit.setPlaceholderText("e.g. Q1")
         self._qub_edit.textChanged.connect(self._on_names_changed)
+        self._qub_completer_model = QStringListModel(self)
+        self._qub_completer = QCompleter(self._qub_completer_model, self)
+        self._qub_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)  # type: ignore[attr-defined]
+        self._qub_edit.setCompleter(self._qub_completer)
         name_form.addRow("Qubit name:", self._qub_edit)
 
         self._res_edit = QLineEdit("unknown_resonator")
@@ -94,27 +105,31 @@ class SetupDialog(QDialog):
 
         left_layout.addWidget(name_group)
 
-        # derived paths section
-        paths_group = QGroupBox("Derived paths (editable)")
+        # result scope / derived paths section
+        paths_group = QGroupBox("Result scope")
         paths_form = QFormLayout(paths_group)
 
-        result_dir_row = QHBoxLayout()
-        self._result_dir_edit = QLineEdit()
-        self._result_dir_edit.setPlaceholderText("/path/to/result_dir")
-        result_dir_row.addWidget(self._result_dir_edit)
-        browse_dir_btn = QPushButton("Browse…")
-        browse_dir_btn.clicked.connect(self._on_browse_dir)
-        result_dir_row.addWidget(browse_dir_btn)
-        paths_form.addRow("Result dir:", result_dir_row)
+        scope_row = QHBoxLayout()
+        self._scope_combo = QComboBox()
+        self._scope_combo.setMinimumWidth(260)
+        self._scope_combo.currentIndexChanged.connect(self._on_scope_selected)
+        scope_row.addWidget(self._scope_combo)
+        refresh_scopes_btn = QPushButton("↻")
+        refresh_scopes_btn.setFixedWidth(28)
+        refresh_scopes_btn.setToolTip("Refresh result scopes")
+        refresh_scopes_btn.clicked.connect(self._refresh_result_scopes)
+        scope_row.addWidget(refresh_scopes_btn)
+        paths_form.addRow("Scope:", scope_row)
 
-        db_path_row = QHBoxLayout()
+        self._result_dir_edit = QLineEdit()
+        self._result_dir_edit.setReadOnly(True)
+        self._result_dir_edit.setPlaceholderText("Generated result directory")
+        paths_form.addRow("Result dir:", self._result_dir_edit)
+
         self._db_path_edit = QLineEdit()
-        self._db_path_edit.setPlaceholderText("/path/to/database")
-        db_path_row.addWidget(self._db_path_edit)
-        browse_db_btn = QPushButton("Browse…")
-        browse_db_btn.clicked.connect(self._on_browse_db)
-        db_path_row.addWidget(browse_db_btn)
-        paths_form.addRow("Database path:", db_path_row)
+        self._db_path_edit.setReadOnly(True)
+        self._db_path_edit.setPlaceholderText("Generated database path")
+        paths_form.addRow("Database path:", self._db_path_edit)
 
         left_layout.addWidget(paths_group)
 
@@ -221,6 +236,7 @@ class SetupDialog(QDialog):
         root_layout.addWidget(btn_box)
 
         # initialise
+        self._refresh_result_scopes(silent=True)
         self._on_names_changed()
         self._prefill_from_persistence()
         self._refresh_device_list()
@@ -276,6 +292,7 @@ class SetupDialog(QDialog):
             super().showEvent(a0)
             if a0.spontaneous():
                 return
+        self._refresh_result_scopes(silent=True)
         self._prefill_from_persistence()
         self._refresh_context_list()
 
@@ -306,8 +323,6 @@ class SetupDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _prefill_from_persistence(self) -> None:
-        from zcu_tools.gui.session.services.startup import derive_project_paths
-
         data = self._ctrl.get_persisted_startup()
         if data.chip_name:
             self._chip_edit.setText(data.chip_name)
@@ -315,46 +330,127 @@ class SetupDialog(QDialog):
             self._qub_edit.setText(data.qub_name)
         if data.res_name:
             self._res_edit.setText(data.res_name)
-        # Re-derive from chip/qub so the dated database_path lands in *today's*
-        # folder (the persisted one may carry a stale date from a prior session);
-        # fall back to the persisted paths only when chip/qub are absent.
-        if data.chip_name and data.qub_name:
-            result_dir, database_path = derive_project_paths(
-                data.chip_name, data.qub_name, self._ctrl.get_project_root()
-            )
-            self._result_dir_edit.setText(result_dir)
-            self._db_path_edit.setText(database_path)
-        else:
-            if data.result_dir:
-                self._result_dir_edit.setText(data.result_dir)
-            if data.database_path:
-                self._db_path_edit.setText(data.database_path)
+        self._on_names_changed()
         if data.ip:
             self._ip_edit.setText(data.ip)
         if data.port:
             self._port_spin.setValue(data.port)
 
     def _on_names_changed(self) -> None:
-        from zcu_tools.gui.session.services.startup import derive_project_paths
-
+        if self._syncing_scope_selection:
+            return
         chip = self._chip_edit.text().strip()
         qub = self._qub_edit.text().strip()
+        self._update_name_completers(chip)
+        self._update_scope_options(chip, qub)
+
+    def _refresh_result_scopes(
+        self, _checked: bool = False, *, silent: bool = False
+    ) -> None:
+        try:
+            self._result_scopes = tuple(self._ctrl.list_result_scopes())
+        except Exception as exc:
+            logger.warning("Failed to list result scopes: %s", exc)
+            self._result_scopes = ()
+            if not silent:
+                self._set_project_status(
+                    f"Failed to refresh result scopes: {exc}", True
+                )
+        logger.debug(
+            "SetupDialog: refreshed %d result scope(s)", len(self._result_scopes)
+        )
+        self._on_names_changed()
+
+    def _update_name_completers(self, chip: str) -> None:
+        chips = sorted({scope.chip_name for scope in self._result_scopes})
+        qubs = sorted(
+            {
+                scope.qub_name
+                for scope in self._result_scopes
+                if not chip or scope.chip_name == chip
+            }
+        )
+        self._chip_completer_model.setStringList(chips)
+        self._qub_completer_model.setStringList(qubs)
+
+    def _update_scope_options(self, chip: str, qub: str) -> None:
+        self._scope_combo.blockSignals(True)
+        prev_scope_id = self._scope_combo.currentData()
+        self._scope_combo.clear()
+
+        generated_index = -1
+        paths = None
         if chip and qub:
-            result_dir, database_path = derive_project_paths(
-                chip, qub, self._ctrl.get_project_root()
+            paths = self._ctrl.derive_project_paths(chip, qub)
+            self._scope_combo.addItem("(new generated scope)", userData=None)
+            generated_index = 0
+
+        for scope in self._result_scopes:
+            self._scope_combo.addItem(
+                f"{scope.chip_name}/{scope.qub_name}",
+                userData=scope.scope_id,
             )
-            self._result_dir_edit.setText(result_dir)
-            self._db_path_edit.setText(database_path)
 
-    def _on_browse_dir(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, "Select result directory")
-        if path:
-            self._result_dir_edit.setText(path)
+        if paths is not None:
+            matching_ids = {
+                scope.scope_id
+                for scope in self._result_scopes
+                if scope.chip_name == chip and scope.qub_name == qub
+            }
+            if prev_scope_id in matching_ids:
+                idx = self._scope_combo.findData(prev_scope_id)
+            else:
+                idx = -1
+                for scope_id in matching_ids:
+                    idx = self._scope_combo.findData(scope_id)
+                    if idx >= 0:
+                        break
+            self._scope_combo.setCurrentIndex(idx if idx >= 0 else generated_index)
+            scope = self._current_scope()
+            self._result_dir_edit.setText(
+                scope.result_dir if scope else paths.result_dir
+            )
+            self._db_path_edit.setText(paths.database_path)
+        elif self._result_scopes:
+            idx = self._scope_combo.findData(prev_scope_id)
+            self._scope_combo.setCurrentIndex(max(idx, 0))
+            scope = self._current_scope()
+            self._result_dir_edit.setText(scope.result_dir if scope else "")
+            self._db_path_edit.clear()
+        else:
+            self._scope_combo.addItem("(enter chip and qubit)", userData=None)
+            self._result_dir_edit.clear()
+            self._db_path_edit.clear()
 
-    def _on_browse_db(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, "Select database directory")
-        if path:
-            self._db_path_edit.setText(path)
+        self._scope_combo.blockSignals(False)
+
+    def _current_scope(self) -> ResultScope | None:
+        scope_id = self._scope_combo.currentData()
+        if not scope_id:
+            return None
+        for scope in self._result_scopes:
+            if scope.scope_id == scope_id:
+                return scope
+        return None
+
+    def _on_scope_selected(self, _index: int) -> None:
+        chip = self._chip_edit.text().strip()
+        qub = self._qub_edit.text().strip()
+        scope = self._current_scope()
+        if scope is not None:
+            self._syncing_scope_selection = True
+            try:
+                self._chip_edit.setText(scope.chip_name)
+                self._qub_edit.setText(scope.qub_name)
+            finally:
+                self._syncing_scope_selection = False
+            chip = scope.chip_name
+            qub = scope.qub_name
+        if not chip or not qub:
+            return
+        paths = self._ctrl.derive_project_paths(chip, qub)
+        self._result_dir_edit.setText(scope.result_dir if scope else paths.result_dir)
+        self._db_path_edit.setText(paths.database_path)
 
     def _refresh_device_list(self) -> None:
         entries = self._ctrl.list_devices()
@@ -388,18 +484,20 @@ class SetupDialog(QDialog):
         chip = self._chip_edit.text().strip() or "unknown_chip"
         qub = self._qub_edit.text().strip() or "unknown_qubit"
         res = self._res_edit.text().strip() or "unknown_resonator"
-        result_dir = self._result_dir_edit.text().strip()
-        db_path = self._db_path_edit.text().strip()
-        if not self._ctrl.apply_startup_project(
+        scope_id = self._scope_combo.currentData()
+        result = self._ctrl.apply_startup_project(
             StartupProjectRequest(
                 chip_name=chip,
                 qub_name=qub,
                 res_name=res,
-                result_dir=result_dir,
-                database_path=db_path,
+                scope_id=str(scope_id) if scope_id else None,
             )
-        ):
+        )
+        if not result:
             return
+        if isinstance(result, dict):
+            self._result_dir_edit.setText(result.get("result_dir", ""))
+            self._db_path_edit.setText(result.get("database_path", ""))
         self._set_project_status(f"Startup context applied: {chip}/{qub} (res={res})")
         logger.info(
             "SetupDialog: startup context applied chip=%r qub=%r res=%r",
@@ -408,9 +506,11 @@ class SetupDialog(QDialog):
             res,
         )
 
-        if result_dir:
-            self._refresh_context_list()
-            logger.info("SetupDialog: project available result_dir=%r", result_dir)
+        self._refresh_result_scopes(silent=True)
+        self._refresh_context_list()
+        logger.info(
+            "SetupDialog: project available result_dir=%r", self._result_dir_edit.text()
+        )
 
     def _on_switch_clicked(self) -> None:
         item = self._ctx_list.currentItem()

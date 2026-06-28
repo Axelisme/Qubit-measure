@@ -779,7 +779,7 @@ def test_persist_then_restore_app_state(tmp_path):
     schema = _default_fake_schema(cf.state.exp_context)
     cf.ctrl.update_tab_cfg(tab_id, schema)
     cf.ctrl.update_tab_save_paths(tab_id, "/tmp/a.h5", "/tmp/b.png")
-    cf.ctrl.apply_startup_project(StartupProjectRequest("chip", "qub", "res", "", ""))
+    cf.ctrl.apply_startup_project(StartupProjectRequest("chip", "qub", "res"))
     cf.ctrl.persist_all()
 
     cf_restored = ControllerFixture(cache_dir=tmp_path)

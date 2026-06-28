@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     # and the canvas View's pure-read surface via ``adapter.render_view`` (see
     # _render_view). String annotations let pyright check those call sites.
     from zcu_tools.gui.app.main.controller import RenderView
+    from zcu_tools.gui.result_scope import ResultScope
 
     from .service import RemoteControlAdapter
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
@@ -872,6 +873,28 @@ def _h_project_info(
     }
 
 
+def _result_scope_wire(scope: ResultScope) -> dict[str, object]:
+    return {
+        "scope_id": scope.scope_id,
+        "chip_name": scope.chip_name,
+        "qub_name": scope.qub_name,
+        "result_dir": scope.result_dir,
+        "params_path": scope.params_path,
+        "source": scope.source,
+    }
+
+
+def _h_result_scope_list(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    del params
+    scopes = list(adapter.ctrl.list_result_scopes())
+    return {
+        "scopes": [_result_scope_wire(scope) for scope in scopes],
+        "chip_names": sorted({scope.chip_name for scope in scopes}),
+    }
+
+
 def _h_resources_versions(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
@@ -1031,39 +1054,30 @@ def _h_soc_connect(
 def _h_startup_apply(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    # result_dir / database_path are optional. When omitted, the RPC fills the
-    # default per-qubit roots via derive_project_paths(chip, qub, cwd) — the same
-    # paths the setup dialog pre-fills when a user types the chip/qub names — so
-    # an agent gets a runnable project without having to know the chip/qub path
-    # layout. (The setup dialog keeps its own empty-result_dir = DRAFT path for
-    # interactive use; this agent-facing entry intentionally defaults to runnable
-    # rather than DRAFT.)
-    from zcu_tools.gui.session.services.startup import (
-        StartupProjectRequest,
-        derive_project_paths,
-    )
+    from zcu_tools.gui.result_scope import ResultScopeError
+    from zcu_tools.gui.session.services.startup import StartupProjectRequest
 
     chip = str(params["chip_name"])
     qub = str(params["qub_name"])
-    result_dir = str(params["result_dir"] or "")
-    database_path = str(params["database_path"] or "")
-    if not result_dir or not database_path:
-        default_result, default_db = derive_project_paths(
-            chip, qub, adapter.ctrl.get_project_root()
-        )
-        result_dir = result_dir or default_result
-        database_path = database_path or default_db
+    scope_id_raw = params.get("scope_id")
 
     req = StartupProjectRequest(
         chip_name=chip,
         qub_name=qub,
         res_name=str(params["res_name"]),
-        result_dir=result_dir,
-        database_path=database_path,
+        scope_id=str(scope_id_raw) if scope_id_raw else None,
     )
     # Echo the resolved project (apply always mutates and either succeeds or
     # raises — there is no no-op outcome, so no {applied:false} branch).
-    return adapter.ctrl.apply_startup_project(req)
+    try:
+        return adapter.ctrl.apply_startup_project(req)
+    except ResultScopeError as exc:
+        code = (
+            ErrorCode.INVALID_PARAMS
+            if exc.reason_code.startswith("scope_")
+            else ErrorCode.PRECONDITION_FAILED
+        )
+        raise RemoteError(code, str(exc), reason=exc.reason_code) from exc
 
 
 def _h_device_connect(
@@ -2156,6 +2170,7 @@ _HANDLERS: dict[str, Handler] = {
     "state.has_soc": _h_state_has_soc,
     "soc.info": _h_soc_info,
     "project.info": _h_project_info,
+    "result_scope.list": _h_result_scope_list,
     "arb_waveform.list": _h_arb_waveform_list,
     "arb_waveform.preview": _h_arb_waveform_preview,
     "arb_waveform.set": _h_arb_waveform_set,
