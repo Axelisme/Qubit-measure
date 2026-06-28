@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Sequence
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic
 
 import numpy as np
 from numpy.typing import NDArray
+from typing_extensions import TypeVar
 
 from zcu_tools.progress_bar import BaseProgressBar, make_pbar
 

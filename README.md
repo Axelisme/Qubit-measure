@@ -44,6 +44,13 @@ git clone https://github.com/openquantumhardware/qick.git
 
 ### 電腦端
 
+#### Python 版本
+
+電腦端支援兩個 dependency profile：
+
+* Python 3.13（`.python-version` 預設）：GUI 與量測 runtime，使用 NumPy 2.x。
+* Python 3.12：需要 `design` / `quantum-metal` / Ansys stack 時使用，使用 NumPy 1.26.x；也可同時安裝 GUI。
+
 #### 數據分析
 
 如果您只需要數據分析：
@@ -66,10 +73,14 @@ uv sync --extra client
 
 #### 安裝所有功能
 
+Python 3.13 會安裝 GUI/runtime 能支援的功能；`design` 依 dependency marker 自動跳過。需要 `design` 時請使用 Python 3.12。
+
 ```bash
 pip install ".[all]"
 # or
 uv sync --extra all
+# with design stack
+uv sync --python 3.12 --extra all
 ```
 
 ## 基本使用

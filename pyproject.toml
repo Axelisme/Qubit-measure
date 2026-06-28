@@ -3,16 +3,17 @@ name = "zcu-tools"
 version = "0.1.0"
 description = "Tools for Qubit Measurement on ZCU216"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12,<3.14"
 dependencies = [
-  "numpy>=2.1,<3",
+  "numpy>=1.26.4,<2; python_version < '3.13'",
+  "numpy>=2.1,<3; python_version >= '3.13'",
   "tqdm",
   "matplotlib",
   "sympy",
   "jupytext",
   "pydantic>=2",
-  # Only for PEP 728 TypedDict (closed=True / extra_items=), which stdlib
-  # typing lacks on 3.13; everything else imports from typing/collections.abc.
+  # Needed for PEP 696 TypeVar defaults on Python 3.12 and PEP 728 TypedDict
+  # (closed=True / extra_items=) while stdlib typing catches up.
   "typing-extensions",
 ]
 
@@ -47,9 +48,13 @@ gdrive = [
   "google-auth-oauthlib",
   "python-dotenv",
 ]
-design = ["quantum-metal[gui,ansys] @ git+https://github.com/qiskit-community/qiskit-metal.git"]
+# quantum-metal currently pins numpy<2, so the design stack is available only in
+# the Python 3.12 profile. The Python 3.13 profile uses NumPy 2.x for GUI/runtime.
+design = [
+  "quantum-metal[gui,ansys] @ git+https://github.com/qiskit-community/qiskit-metal.git ; python_version < '3.13'"
+]
 gui = ["zcu-tools[client]", "qtpy", "PyQt6"]
-all = ["zcu_tools[client,gdrive,gui,design]"]
+all = ["zcu-tools[client,gdrive,design,gui]"]
 
 [dependency-groups]
 dev = [

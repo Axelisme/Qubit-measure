@@ -1,6 +1,6 @@
 # QICK Note for `experiment/v2/runner`
 
-**Last updated:** 2026-06-24（新增 RetryBatchTask 與 MultiMeasurementExecutor）
+**Last updated:** 2026-06-29（Python 3.12 / 3.13 typing compatibility）
 
 這份筆記整理 `runner/` 的任務執行框架設計，說明各類別的職責、組合方式與執行流程。
 
@@ -85,6 +85,8 @@ Task(
 **`dynamic_pbar`**：若為 `True`（被父節點的 `BatchTask`/`Scan` 等設定），pbar 在 `run()` 內創建並在退出時關閉（leave=False），否則在 `init()` 創建（leave=True）。
 
 **`pbar_n`**：可透過 `task.set_pbar_n(n)` 動態更新（用於 rounds 數在 init 時未知的場景）。
+
+**Generic typing**：`Task` 的 dtype generic default 屬於 PEP 696 契約，透過 `typing_extensions` 在 Python 3.12 / 3.13 維持相同型別介面；runner runtime API 不因 Python profile 改變。
 
 ---
 
@@ -325,6 +327,7 @@ BatchTask({
 
 | 日期 | Codebase commit | 說明 |
 |------|-----------------|------|
+| 2026-06-29 | — | 支援 Python 3.12 / 3.13 雙版本：runner generic default 型別契約在兩個 runtime profile 維持一致。 |
 | 2026-06-24 | — | #10：新增 `RetryBatchTask`（`batch.py`，`BatchTask` 變體，以 `_run_child` hook 對每個子任務套 `run_with_retries` per-child 重試）與 `MultiMeasurementExecutor`（`multi_executor.py`，Executor 共用 scaffold：版面 + `record_animation` FFMpeg facet + `_run_with_plotting`，供 autofluxdep/overnight 繼承）；`BatchTask` 抽出 `_run_child` hook。 |
 | 2026-05-19 | `02b7ac0b` | `ActiveTask` 改為必要參數 `stop_event: threading.Event`，event 由外部建立與持有，移除自動建立邏輯。 |
 | 2026-05-19 | `15b9144f` | 新增跨線程中斷機制：`TaskState._stop_flag` / `is_stop()`、`run_task(stop_flag=...)`、`TaskHandle`、`ActiveTask`；`EarlyStopMixin` 改為 `stop_checkers` 參數；`wrap_earlystop_check` 改寫為 `snr_checker`；容器節點加入 `is_stop()` 短路；runner 測試覆蓋率 84% → 97%。 |

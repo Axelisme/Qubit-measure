@@ -67,7 +67,7 @@
 
 ## 專案概觀
 
-ZCU-Tools 是控制與分析 ZCU216 FPGA 平台上超導量子位元（Fluxonium）量測的 Python 工具集，建構於 [QICK](https://github.com/openquantumhardware/qick) 框架之上。架構分為 ZCU 端 server（跑在 FPGA 板）與 client 端 controller（跑在工作站）。client 端 Python 版本為 3.13（見 `.python-version`）；ZCU 板端跑 PYNQ 自帶的 Python 3.8，只用 `script/start_server.py`（該檔需維持 3.8 相容）。
+ZCU-Tools 是控制與分析 ZCU216 FPGA 平台上超導量子位元（Fluxonium）量測的 Python 工具集，建構於 [QICK](https://github.com/openquantumhardware/qick) 框架之上。架構分為 ZCU 端 server（跑在 FPGA 板）與 client 端 controller（跑在工作站）。client 端支援 Python 3.12 / 3.13；`.python-version` 預設 3.13 供 GUI 與量測 runtime 使用，`design` / `quantum-metal` stack 需使用 Python 3.12；ZCU 板端跑 PYNQ 自帶的 Python 3.8，只用 `script/start_server.py`（該檔需維持 3.8 相容）。
 
 ## 架構（`lib/zcu_tools/`）
 

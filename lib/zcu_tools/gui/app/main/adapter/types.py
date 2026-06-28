@@ -12,8 +12,9 @@ from typing import (
     Protocol,
     Self,
     TypeAlias,
-    TypeVar,
 )
+
+from typing_extensions import TypeVar
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
