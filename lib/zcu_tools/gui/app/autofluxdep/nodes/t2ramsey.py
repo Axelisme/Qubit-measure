@@ -53,10 +53,10 @@ from zcu_tools.experiment.v2.autofluxdep.t2ramsey import T2RamseyModuleCfg
 from zcu_tools.gui.app.autofluxdep.cfg import (
     FloatSpec,
     IntSpec,
-    NodeFieldSpec,
-    NodeSectionSpec,
     SweepSpec,
     SweepValue,
+    node_field,
+    node_section,
     sectioned_node_schema,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
@@ -276,57 +276,46 @@ class T2RamseyBuilder(Builder):
         """
         return sectioned_node_schema(
             (
-                NodeSectionSpec(
-                    key="sweep",
-                    label="Sweep",
-                    fields=(
-                        NodeFieldSpec(
-                            logical_key="sweep_range",
-                            section_key="sweep",
-                            field_key="delay",
-                            spec=SweepSpec(label="Result axis seed (us)"),
-                            default=SweepValue(start=0.0, stop=25.0, expts=121),
-                        ),
+                node_section(
+                    "sweep",
+                    "Sweep",
+                    node_field(
+                        "sweep_range",
+                        "delay",
+                        SweepSpec(label="Result axis seed (us)"),
+                        SweepValue(start=0.0, stop=25.0, expts=121),
                     ),
                 ),
-                NodeSectionSpec(
-                    key="ramsey",
-                    label="Ramsey",
-                    fields=(
-                        NodeFieldSpec(
-                            logical_key="detune_ratio",
-                            section_key="ramsey",
-                            field_key="detune_ratio",
-                            spec=FloatSpec(label="Detune ratio"),
-                            default=_DEFAULT_DETUNE_RATIO,
-                        ),
+                node_section(
+                    "ramsey",
+                    "Ramsey",
+                    node_field(
+                        "detune_ratio",
+                        "detune_ratio",
+                        FloatSpec(label="Detune ratio"),
+                        _DEFAULT_DETUNE_RATIO,
                     ),
                 ),
-                NodeSectionSpec(
-                    key="acquire",
-                    label="Acquisition",
-                    fields=(
-                        NodeFieldSpec(
-                            logical_key="reps",
-                            section_key="acquire",
-                            field_key="reps",
-                            spec=IntSpec(label="Reps"),
-                            default=1000,
-                        ),
-                        NodeFieldSpec(
-                            logical_key="rounds",
-                            section_key="acquire",
-                            field_key="rounds",
-                            spec=IntSpec(label="Rounds"),
-                            default=10,
-                        ),
-                        NodeFieldSpec(
-                            logical_key="earlystop_snr",
-                            section_key="acquire",
-                            field_key="earlystop_snr",
-                            spec=FloatSpec(label="Early-stop SNR", optional=True),
-                            default=_DEFAULT_EARLYSTOP_SNR,
-                        ),
+                node_section(
+                    "acquire",
+                    "Acquisition",
+                    node_field(
+                        "reps",
+                        "reps",
+                        IntSpec(label="Reps"),
+                        1000,
+                    ),
+                    node_field(
+                        "rounds",
+                        "rounds",
+                        IntSpec(label="Rounds"),
+                        10,
+                    ),
+                    node_field(
+                        "earlystop_snr",
+                        "earlystop_snr",
+                        FloatSpec(label="Early-stop SNR", optional=True),
+                        _DEFAULT_EARLYSTOP_SNR,
                     ),
                 ),
             )

@@ -43,10 +43,10 @@ from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.gui.app.autofluxdep.cfg import (
     FloatSpec,
     IntSpec,
-    NodeFieldSpec,
-    NodeSectionSpec,
     SweepSpec,
     SweepValue,
+    node_field,
+    node_section,
     sectioned_node_schema,
     str_scalar_spec,
 )
@@ -263,92 +263,76 @@ class MistBuilder(Builder):
         """
         return sectioned_node_schema(
             (
-                NodeSectionSpec(
-                    key="sweep",
-                    label="Sweep",
-                    fields=(
-                        NodeFieldSpec(
-                            logical_key="gain_sweep",
-                            section_key="sweep",
-                            field_key="gain",
-                            spec=SweepSpec(label="Gain sweep"),
-                            default=SweepValue(start=0.0, stop=1.0, expts=51),
-                        ),
+                node_section(
+                    "sweep",
+                    "Sweep",
+                    node_field(
+                        "gain_sweep",
+                        "gain",
+                        SweepSpec(label="Gain sweep"),
+                        SweepValue(start=0.0, stop=1.0, expts=51),
                     ),
                 ),
-                NodeSectionSpec(
-                    key="acquire",
-                    label="Acquisition",
-                    fields=(
-                        NodeFieldSpec(
-                            logical_key="reps",
-                            section_key="acquire",
-                            field_key="reps",
-                            spec=IntSpec(label="Reps"),
-                            default=1000,
-                        ),
-                        NodeFieldSpec(
-                            logical_key="rounds",
-                            section_key="acquire",
-                            field_key="rounds",
-                            spec=IntSpec(label="Rounds"),
-                            default=100,
-                        ),
-                        NodeFieldSpec(
-                            logical_key="relax_delay",
-                            section_key="acquire",
-                            field_key="relax_delay",
-                            spec=FloatSpec(label="Relax delay (us)"),
-                            default=_DEFAULT_RELAX_DELAY,
-                        ),
+                node_section(
+                    "acquire",
+                    "Acquisition",
+                    node_field(
+                        "reps",
+                        "reps",
+                        IntSpec(label="Reps"),
+                        1000,
+                    ),
+                    node_field(
+                        "rounds",
+                        "rounds",
+                        IntSpec(label="Rounds"),
+                        100,
+                    ),
+                    node_field(
+                        "relax_delay",
+                        "relax_delay",
+                        FloatSpec(label="Relax delay (us)"),
+                        _DEFAULT_RELAX_DELAY,
                     ),
                 ),
-                NodeSectionSpec(
-                    key="disturbance",
-                    label="Disturbance pulse",
-                    fields=(
-                        NodeFieldSpec(
-                            logical_key="mist_waveform",
-                            section_key="disturbance",
-                            field_key="waveform",
-                            spec=str_scalar_spec("Disturbance waveform", optional=True),
-                            default=_DEFAULT_MIST_WAVEFORM,
-                        ),
-                        NodeFieldSpec(
-                            logical_key="mist_ch",
-                            section_key="disturbance",
-                            field_key="ch",
-                            spec=IntSpec(label="Disturbance ch", optional=True),
-                            default=_DEFAULT_MIST_CH,
-                        ),
-                        NodeFieldSpec(
-                            logical_key="mist_nqz",
-                            section_key="disturbance",
-                            field_key="nqz",
-                            spec=IntSpec(label="Disturbance nqz"),
-                            default=2,
-                        ),
-                        NodeFieldSpec(
-                            logical_key="mist_freq",
-                            section_key="disturbance",
-                            field_key="freq",
-                            spec=FloatSpec(label="Disturbance freq (MHz)"),
-                            default=_DEFAULT_MIST_FREQ,
-                        ),
-                        NodeFieldSpec(
-                            logical_key="mist_gain",
-                            section_key="disturbance",
-                            field_key="gain",
-                            spec=FloatSpec(label="Disturbance gain"),
-                            default=0.5,
-                        ),
-                        NodeFieldSpec(
-                            logical_key="mist_length",
-                            section_key="disturbance",
-                            field_key="length",
-                            spec=FloatSpec(label="Disturbance length (us)"),
-                            default=0.1,
-                        ),
+                node_section(
+                    "disturbance",
+                    "Disturbance pulse",
+                    node_field(
+                        "mist_waveform",
+                        "waveform",
+                        str_scalar_spec("Disturbance waveform", optional=True),
+                        _DEFAULT_MIST_WAVEFORM,
+                    ),
+                    node_field(
+                        "mist_ch",
+                        "ch",
+                        IntSpec(label="Disturbance ch", optional=True),
+                        _DEFAULT_MIST_CH,
+                    ),
+                    node_field(
+                        "mist_nqz",
+                        "nqz",
+                        IntSpec(label="Disturbance nqz"),
+                        2,
+                    ),
+                    node_field(
+                        "mist_freq",
+                        "freq",
+                        FloatSpec(label="Disturbance freq (MHz)"),
+                        _DEFAULT_MIST_FREQ,
+                    ),
+                    node_field(
+                        "mist_gain",
+                        "gain",
+                        FloatSpec(label="Disturbance gain"),
+                        0.5,
+                    ),
+                    node_field(
+                        "mist_length",
+                        "length",
+                        FloatSpec(label="Disturbance length (us)"),
+                        0.1,
                     ),
                 ),
             )

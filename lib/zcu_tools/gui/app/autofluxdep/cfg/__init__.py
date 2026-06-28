@@ -32,9 +32,12 @@ from zcu_tools.gui.app.main.adapter import (
 
 from .schema import (
     NodeCfgSchema,
+    NodeFieldDecl,
     NodeFieldSpec,
     NodeSectionSpec,
     flat_node_schema,
+    node_field,
+    node_section,
     sectioned_node_schema,
     str_scalar_spec,
 )
@@ -48,12 +51,15 @@ __all__ = [
     "FloatSpec",
     "IntSpec",
     "NodeCfgSchema",
+    "NodeFieldDecl",
     "NodeFieldSpec",
     "NodeSectionSpec",
     "ScalarSpec",
     "SweepSpec",
     "SweepValue",
     "flat_node_schema",
+    "node_field",
+    "node_section",
     "sectioned_node_schema",
     "str_scalar_spec",
 ]

@@ -111,12 +111,52 @@ class NodeFieldSpec:
 
 
 @dataclass(frozen=True)
+class NodeFieldDecl:
+    """One logical node knob before it is mounted into a UI section."""
+
+    logical_key: str
+    field_key: str
+    spec: CfgNodeSpec
+    default: Any
+
+
+@dataclass(frozen=True)
 class NodeSectionSpec:
     """A UI section grouping one-or-more logical node knobs."""
 
     key: str
     label: str
     fields: tuple[NodeFieldSpec, ...]
+
+
+def node_field(
+    logical_key: str, field_key: str, spec: CfgNodeSpec, default: Any
+) -> NodeFieldDecl:
+    """Declare one node knob without repeating its eventual section key."""
+    return NodeFieldDecl(
+        logical_key=logical_key,
+        field_key=field_key,
+        spec=spec,
+        default=default,
+    )
+
+
+def node_section(key: str, label: str, *fields: NodeFieldDecl) -> NodeSectionSpec:
+    """Mount pending node knob declarations under one UI section key."""
+    return NodeSectionSpec(
+        key=key,
+        label=label,
+        fields=tuple(
+            NodeFieldSpec(
+                logical_key=field.logical_key,
+                section_key=key,
+                field_key=field.field_key,
+                spec=field.spec,
+                default=field.default,
+            )
+            for field in fields
+        ),
+    )
 
 
 def _default_value_for(spec: CfgNodeSpec, default: Any) -> Any:

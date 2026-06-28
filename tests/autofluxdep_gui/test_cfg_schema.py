@@ -33,9 +33,11 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     NodeSectionSpec,
     SweepSpec,
     SweepValue,
+    node_field,
+    node_section,
     sectioned_node_schema,
 )
-from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
+from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import LenRabiBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.mist import MistBuilder
@@ -80,53 +82,56 @@ def _ml() -> ModuleLibrary:
     return ml
 
 
+_BUILDERS: tuple[Builder, ...] = (
+    QubitFreqBuilder(),
+    LenRabiBuilder(),
+    RoOptimizeBuilder(),
+    T1Builder(),
+    T2RamseyBuilder(),
+    T2EchoBuilder(),
+    MistBuilder(),
+)
+
+_BUILDER_IDS = [builder.name for builder in _BUILDERS]
+
+
 def _sectioned_test_schema() -> NodeCfgSchema:
     return sectioned_node_schema(
         (
-            NodeSectionSpec(
-                key="sweep",
-                label="Sweep",
-                fields=(
-                    NodeFieldSpec(
-                        logical_key="detune_sweep",
-                        section_key="sweep",
-                        field_key="detune",
-                        spec=SweepSpec(label="Detune"),
-                        default=SweepValue(start=-20.0, stop=50.0, expts=141),
-                    ),
+            node_section(
+                "sweep",
+                "Sweep",
+                node_field(
+                    "detune_sweep",
+                    "detune",
+                    SweepSpec(label="Detune"),
+                    SweepValue(start=-20.0, stop=50.0, expts=141),
                 ),
             ),
-            NodeSectionSpec(
-                key="acquire",
-                label="Acquisition",
-                fields=(
-                    NodeFieldSpec(
-                        logical_key="reps",
-                        section_key="acquire",
-                        field_key="reps",
-                        spec=IntSpec("Reps"),
-                        default=1000,
-                    ),
-                    NodeFieldSpec(
-                        logical_key="earlystop_snr",
-                        section_key="acquire",
-                        field_key="earlystop_snr",
-                        spec=FloatSpec("Early-stop SNR", optional=True),
-                        default=50.0,
-                    ),
+            node_section(
+                "acquire",
+                "Acquisition",
+                node_field(
+                    "reps",
+                    "reps",
+                    IntSpec("Reps"),
+                    1000,
+                ),
+                node_field(
+                    "earlystop_snr",
+                    "earlystop_snr",
+                    FloatSpec("Early-stop SNR", optional=True),
+                    50.0,
                 ),
             ),
-            NodeSectionSpec(
-                key="drive",
-                label="Drive",
-                fields=(
-                    NodeFieldSpec(
-                        logical_key="qub_gain",
-                        section_key="drive",
-                        field_key="gain",
-                        spec=FloatSpec("Gain"),
-                        default=0.05,
-                    ),
+            node_section(
+                "drive",
+                "Drive",
+                node_field(
+                    "qub_gain",
+                    "gain",
+                    FloatSpec("Gain"),
+                    0.05,
                 ),
             ),
         )
@@ -283,48 +288,24 @@ _DERIVED_FORBIDDEN = {
 }
 
 
-def test_schema_keys_match_declared_knobs():
-    for builder in (
-        QubitFreqBuilder(),
-        LenRabiBuilder(),
-        RoOptimizeBuilder(),
-        T1Builder(),
-        T2RamseyBuilder(),
-        T2EchoBuilder(),
-        MistBuilder(),
-    ):
-        schema = builder.make_default_schema()
-        assert set(schema.keys) == _EXPECTED_KEYS[builder.name], builder.name
+@pytest.mark.parametrize("builder", _BUILDERS, ids=_BUILDER_IDS)
+def test_schema_keys_match_declared_knobs(builder: Builder):
+    schema = builder.make_default_schema()
+    assert set(schema.keys) == _EXPECTED_KEYS[builder.name], builder.name
 
 
-def test_schema_paths_match_section_layouts():
-    for builder in (
-        QubitFreqBuilder(),
-        LenRabiBuilder(),
-        RoOptimizeBuilder(),
-        T1Builder(),
-        T2RamseyBuilder(),
-        T2EchoBuilder(),
-        MistBuilder(),
-    ):
-        schema = builder.make_default_schema()
-        assert {
-            logical_key: schema.path_for(logical_key) for logical_key in schema.keys
-        } == _EXPECTED_PATHS[builder.name], builder.name
+@pytest.mark.parametrize("builder", _BUILDERS, ids=_BUILDER_IDS)
+def test_schema_paths_match_section_layouts(builder: Builder):
+    schema = builder.make_default_schema()
+    assert {
+        logical_key: schema.path_for(logical_key) for logical_key in schema.keys
+    } == _EXPECTED_PATHS[builder.name], builder.name
 
 
-def test_no_derived_field_in_any_spec():
-    for builder in (
-        QubitFreqBuilder(),
-        LenRabiBuilder(),
-        RoOptimizeBuilder(),
-        T1Builder(),
-        T2RamseyBuilder(),
-        T2EchoBuilder(),
-        MistBuilder(),
-    ):
-        keys = set(builder.make_default_schema().keys)
-        assert keys.isdisjoint(_DERIVED_FORBIDDEN), (builder.name, keys)
+@pytest.mark.parametrize("builder", _BUILDERS, ids=_BUILDER_IDS)
+def test_no_derived_field_in_any_spec(builder: Builder):
+    keys = set(builder.make_default_schema().keys)
+    assert keys.isdisjoint(_DERIVED_FORBIDDEN), (builder.name, keys)
 
 
 def test_sectioned_schema_lower_projects_logical_keys():
@@ -460,16 +441,34 @@ def test_sectioned_node_schema_unsupported_spec_fast_fails():
     with pytest.raises(TypeError, match="Unsupported node field spec"):
         sectioned_node_schema(
             (
+                node_section(
+                    "bad",
+                    "Bad",
+                    node_field(
+                        "nested",
+                        "nested",
+                        CfgSectionSpec(),
+                        None,
+                    ),
+                ),
+            )
+        )
+
+
+def test_sectioned_node_schema_section_mismatch_fast_fails():
+    with pytest.raises(ValueError, match="declares section"):
+        sectioned_node_schema(
+            (
                 NodeSectionSpec(
-                    key="bad",
-                    label="Bad",
+                    key="right",
+                    label="Right",
                     fields=(
                         NodeFieldSpec(
-                            logical_key="nested",
-                            section_key="bad",
-                            field_key="nested",
-                            spec=CfgSectionSpec(),
-                            default=None,
+                            logical_key="reps",
+                            section_key="wrong",
+                            field_key="reps",
+                            spec=IntSpec("Reps"),
+                            default=1000,
                         ),
                     ),
                 ),
@@ -481,30 +480,24 @@ def test_sectioned_node_schema_duplicate_logical_key_fast_fails():
     with pytest.raises(ValueError, match="Duplicate node logical key"):
         sectioned_node_schema(
             (
-                NodeSectionSpec(
-                    key="a",
-                    label="A",
-                    fields=(
-                        NodeFieldSpec(
-                            logical_key="reps",
-                            section_key="a",
-                            field_key="reps",
-                            spec=IntSpec("Reps"),
-                            default=1000,
-                        ),
+                node_section(
+                    "a",
+                    "A",
+                    node_field(
+                        "reps",
+                        "reps",
+                        IntSpec("Reps"),
+                        1000,
                     ),
                 ),
-                NodeSectionSpec(
-                    key="b",
-                    label="B",
-                    fields=(
-                        NodeFieldSpec(
-                            logical_key="reps",
-                            section_key="b",
-                            field_key="rounds",
-                            spec=IntSpec("Rounds"),
-                            default=10,
-                        ),
+                node_section(
+                    "b",
+                    "B",
+                    node_field(
+                        "reps",
+                        "rounds",
+                        IntSpec("Rounds"),
+                        10,
                     ),
                 ),
             )

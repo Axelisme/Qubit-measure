@@ -48,8 +48,8 @@ from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.gui.app.autofluxdep.cfg import (
     FloatSpec,
     IntSpec,
-    NodeFieldSpec,
-    NodeSectionSpec,
+    node_field,
+    node_section,
     sectioned_node_schema,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema
@@ -320,64 +320,52 @@ class RoOptimizeBuilder(Builder):
         """
         return sectioned_node_schema(
             (
-                NodeSectionSpec(
-                    key="grid",
-                    label="Search grid",
-                    fields=(
-                        NodeFieldSpec(
-                            logical_key="freq_expts",
-                            section_key="grid",
-                            field_key="freq_points",
-                            spec=IntSpec(label="Freq points"),
-                            default=_DEFAULT_FREQ[2],
-                        ),
-                        NodeFieldSpec(
-                            logical_key="gain_expts",
-                            section_key="grid",
-                            field_key="gain_points",
-                            spec=IntSpec(label="Gain points"),
-                            default=_DEFAULT_GAIN[2],
-                        ),
+                node_section(
+                    "grid",
+                    "Search grid",
+                    node_field(
+                        "freq_expts",
+                        "freq_points",
+                        IntSpec(label="Freq points"),
+                        _DEFAULT_FREQ[2],
+                    ),
+                    node_field(
+                        "gain_expts",
+                        "gain_points",
+                        IntSpec(label="Gain points"),
+                        _DEFAULT_GAIN[2],
                     ),
                 ),
-                NodeSectionSpec(
-                    key="window",
-                    label="Search window",
-                    fields=(
-                        NodeFieldSpec(
-                            logical_key="freq_window",
-                            section_key="window",
-                            field_key="freq_half_width",
-                            spec=FloatSpec(label="Freq window half-width (MHz)"),
-                            default=_DEFAULT_FREQ_WINDOW,
-                        ),
-                        NodeFieldSpec(
-                            logical_key="gain_window",
-                            section_key="window",
-                            field_key="gain_half_width",
-                            spec=FloatSpec(label="Gain window half-width"),
-                            default=_DEFAULT_GAIN_WINDOW,
-                        ),
+                node_section(
+                    "window",
+                    "Search window",
+                    node_field(
+                        "freq_window",
+                        "freq_half_width",
+                        FloatSpec(label="Freq window half-width (MHz)"),
+                        _DEFAULT_FREQ_WINDOW,
+                    ),
+                    node_field(
+                        "gain_window",
+                        "gain_half_width",
+                        FloatSpec(label="Gain window half-width"),
+                        _DEFAULT_GAIN_WINDOW,
                     ),
                 ),
-                NodeSectionSpec(
-                    key="acquire",
-                    label="Acquisition",
-                    fields=(
-                        NodeFieldSpec(
-                            logical_key="reps",
-                            section_key="acquire",
-                            field_key="reps",
-                            spec=IntSpec(label="Reps"),
-                            default=1000,
-                        ),
-                        NodeFieldSpec(
-                            logical_key="rounds",
-                            section_key="acquire",
-                            field_key="rounds",
-                            spec=IntSpec(label="Rounds"),
-                            default=10,
-                        ),
+                node_section(
+                    "acquire",
+                    "Acquisition",
+                    node_field(
+                        "reps",
+                        "reps",
+                        IntSpec(label="Reps"),
+                        1000,
+                    ),
+                    node_field(
+                        "rounds",
+                        "rounds",
+                        IntSpec(label="Rounds"),
+                        10,
                     ),
                 ),
             )

@@ -29,9 +29,9 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     FloatSpec,
     IntSpec,
     NodeCfgSchema,
-    NodeFieldSpec,
-    NodeSectionSpec,
     SweepValue,
+    node_field,
+    node_section,
     sectioned_node_schema,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.form import SectionLiveField
@@ -61,30 +61,24 @@ class _SectionedBuilder(Builder):
     def make_default_schema(self) -> NodeCfgSchema:
         return sectioned_node_schema(
             (
-                NodeSectionSpec(
-                    key="acquire",
-                    label="Acquisition",
-                    fields=(
-                        NodeFieldSpec(
-                            logical_key="reps",
-                            section_key="acquire",
-                            field_key="reps",
-                            spec=IntSpec("Reps"),
-                            default=1000,
-                        ),
+                node_section(
+                    "acquire",
+                    "Acquisition",
+                    node_field(
+                        "reps",
+                        "reps",
+                        IntSpec("Reps"),
+                        1000,
                     ),
                 ),
-                NodeSectionSpec(
-                    key="drive",
-                    label="Drive",
-                    fields=(
-                        NodeFieldSpec(
-                            logical_key="qub_gain",
-                            section_key="drive",
-                            field_key="gain",
-                            spec=FloatSpec("Gain"),
-                            default=0.05,
-                        ),
+                node_section(
+                    "drive",
+                    "Drive",
+                    node_field(
+                        "qub_gain",
+                        "gain",
+                        FloatSpec("Gain"),
+                        0.05,
                     ),
                 ),
             )
