@@ -157,7 +157,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "before dependent inner-path edits (a ref switch removes child paths). "
         "'value' is a JSON scalar, an md-reference eval tag "
         '{"__kind":"eval","expr":"r_f"}, or a registered value-source tag '
-        '{"__kind":"value_ref","key":"device.active_flux.value","type":"float"}; '
+        '{"__kind":"value_ref","key":"device.flux.value","type":"float"}; '
         "value_ref is resolved immediately at set time and stored as a direct "
         "scalar. Discover keys with value.list / value.read. "
         "Returns {valid, removed, added} aggregated across the batch — the same "
@@ -311,7 +311,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "{key, type, owner, description, value}. Optional 'type' is one of "
         "int|float|str|bool and must match the registered source type.",
         (
-            _str("key", "Registered value source key, e.g. device.active_flux.value"),
+            _str("key", "Registered value source key, e.g. device.flux.value"),
             _str_opt("type", "Optional expected type: int, float, str, or bool"),
         ),
     ),
@@ -827,7 +827,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "segment); 'value' is a JSON scalar, or an md-reference expression as "
         '{"__kind":"eval","expr":"r_f - 0.1"} (resolved against MetaDict at '
         "commit), or a registered value source as "
-        '{"__kind":"value_ref","key":"device.active_flux.value","type":"float"} '
+        '{"__kind":"value_ref","key":"device.flux.value","type":"float"} '
         "(resolved immediately at set time and stored as a direct scalar; discover "
         "keys with value.list / value.read). NOTE: eval/value_ref forms are "
         "accepted ONLY on a scalar leaf — a "

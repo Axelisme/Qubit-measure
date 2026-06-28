@@ -203,7 +203,7 @@ def test_eval_value_requires_string_expr(service):
 
 def test_value_ref_resolves_to_concrete_direct_value_on_set_field(service, ctrl, ml):
     ctrl.read_value_source.return_value = (
-        ValueInfo("device.active_flux.value", float, "device"),
+        ValueInfo("device.flux.value", float, "device:flux"),
         6.25,
     )
     editor_id, _ = service.open("module", discriminator="pulse")
@@ -213,14 +213,14 @@ def test_value_ref_resolves_to_concrete_direct_value_on_set_field(service, ctrl,
         "freq",
         {
             "__kind": "value_ref",
-            "key": "device.active_flux.value",
+            "key": "device.flux.value",
             "type": "float",
         },
     )
     service.commit(editor_id, "agent_ref")
 
     assert ml.modules["agent_ref"].to_dict()["freq"] == 6.25
-    ctrl.read_value_source.assert_called_once_with("device.active_flux.value", "float")
+    ctrl.read_value_source.assert_called_once_with("device.flux.value", "float")
 
 
 def test_value_ref_requires_string_key(service):

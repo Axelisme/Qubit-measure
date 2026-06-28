@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-28（cfg form label width override）
+**Last updated:** 2026-06-28（value-source input drill-down）
 
 # `zcu_tools/gui/app/main/` — measure-gui Framework AI Note
 
@@ -63,7 +63,7 @@ gui/
 │       （measure-gui MCP entrypoint 已搬出本套件，住在 zcu_tools/mcp/measure/server.py：guard bridge + override tools + 自己的 stdio loop，建在 gui.remote McpBridge 上）
 └── ui/
     ├── cfg_form.py         — CfgFormWidget：LiveModel 反應式容器；host 可覆寫 field label elide 寬度，預設維持 measure-gui 原寬度
-    ├── fields/             — 渲染邏輯：registry.py / common.py / containers.py（ElidedLabel 保留完整 tooltip）
+    ├── fields/             — 渲染邏輯：registry.py / common.py / containers.py（ElidedLabel 保留完整 tooltip）；ScalarWidget eval mode 使用 session `value_source_input.py` 做分段 `@{key}` 候選、Tab namespace drill-down 與空格提交
     ├── inspect_dialog.py   — InspectDialog(InspectDialogBase 子類)：補 Arb Waveforms top-toolbar 入口與 ml create/modify（_MlCreateDialog/_MlModifyDialog 拖 CfgEditor）；md tab + ml view/rename/del 在 base（session）
     ├── arb_waveform_dialog.py — ArbWaveformDialog：管理 qubit-scoped arbitrary waveform `.npz` asset；支援 formula segment insert/delete、normalize toggle、保存、rename/delete、debounced I/Q/Abs preview（debounce 包住昂貴的 render_formula_recipe；data_key 編輯不觸發 render；Normalize 只決定是否 peak-normalized；y 軸一律依目前畫出的資料自動縮放；save 直接用 cheap-path 取得的 FormulaRecipe 交給 service 單次 render 持久化）；新建 draft 預設為兩側 half-Gaussian 的 flat-top recipe；ML waveform 建立仍走 Inspect 的正常 create/modify 流程
     ├── main_window.py      — MainWindow(QMainWindow) 實作 ViewProtocol；toolbar 保留 Setup / Devices / Predictor / Inspect（Arb Waveforms 入口在 Inspect 內）；named dialog registry 對 Predictor 採 persistent hide-on-close（重開不重算曲線），其餘 dialog 仍 close 後釋放；持 FeedbackPanel（`refresh_feedback_widget` 依 (live op 數 且 `ctrl.has_agent_connected()`) 把單一 app-level panel mount 進 target tab 的 plot_layout / unmount；target tab = running tab，無則 active tab；tab 變則 re-mount；`ExpTabWidget.mount_feedback_panel`/`unmount_feedback_panel` 為 host API）+ `open_notify_prompt` 開 NotifyUserDialog
@@ -194,7 +194,7 @@ measure-gui 不再提供 toolbar「Agent」按鈕、`AgentLaunchDialog` 或 `ser
     - **rename 不遷移引用名**：rename = `delete+register+emit ML_CHANGED 一次`，引用方靠此分流（LINKED→可復原 invalid、MODIFIED→Custom 保值）。md-side EvalValue 懸空**維持 invalid 不 fallback**（無上次值可保、等同輸錯名）。
 - **集中 refresh 邊界**：`CfgFormWidget` 擁有 context/md/inspect/device EventBus subscriptions；`LiveField` 透過 `refresh_external()` 接收外部刷新
 - **Eval scalar value**：scalar value 是 `DirectValue | EvalValue`；`ScalarSpec` 只宣告物理型別；`EvalValue` 可只帶 `expr`（不帶 `resolved`），由 lowering 拿 md 解析。`ScalarLiveField`（及 `SweepLiveField` 經其 edge 子欄位）bind 時 auto-resolve 填 snapshot，故 `= ?` ghost 只在 expr 真的無法解析時顯示。lowering 解析時依**擁有的 `ScalarSpec.type`** 做 `coerce_eval_result`（int spec → int、float spec → float），所以 `EvalValue("ro_ch")` 這種 int channel lower 成 int 而非 float；sweep edge 無 per-edge type、一律 float
-- **ValueRef scalar input**：`ValueRef` 不是 cfg value 型別，只是 `ScalarLiveField.set_value` 的 resolve-once input。agent 走 tagged object、GUI scalar `QLineEdit` 走精確 `@{source.key}`；兩者都立刻經 `ExpContext.values` / controller lookup 讀 registered source，依目標 `ScalarSpec.type` 檢查後寫入 `DirectValue`。失敗保持原草稿，不把 lazy ref 存進 `CfgSchema` 或 md/ml。
+- **ValueRef scalar input**：`ValueRef` 不是 cfg value 型別，只是 `ScalarLiveField.set_value` 的 resolve-once input。agent/wire 走 tagged object，依目標 `ScalarSpec.type` 檢查後寫入 `DirectValue`。GUI scalar 只在 eval mode 的 `QLineEdit` 套 `value_source_input.py`：`@{prefix` 顯示分段 completion（`@{`→頂層、`dev` + Tab→`device.` 並展開下一段、`device.`→下一段）；Tab/Backtab 接受預設候選時，若當前候選全是 namespace 會自動補 `.` drill down，補到完整 key 才加 `}`；輸入 `@{key} ` 後的空格才立即讀 controller lookup 並把 token 替換成普通文字。該文字留在目前 eval 草稿中，不把 lazy ref 存進 `CfgSchema` 或 md/ml。
 - **Channel as scalar**：`ch` / `ro_ch` 使用 `ScalarSpec(type=int)`
 - **Eval UI**：`ScalarWidget` eval mode 限可編輯 numeric scalar 且無 choices；右鍵 menu 切換 direct/eval；expression evaluator 只接受安全 numeric AST 與 MetaDict direct variable names
 - **Invalid state**：validity 屬於 model state，向 parent bubbling
@@ -355,6 +355,7 @@ plot substrate 已抽到頂層共用套件 `lib/zcu_tools/gui/plotting/`（measu
 
 - `ContextService.coerce_md_value(key, text)` 取代 `ast.literal_eval`
 - 已存在 key：強制依現有型別轉換；新 key：只接受 scalar（int/float/bool/str），複合 literal 拒絕
+- Inspect md value input 使用同一個 session value-source helper 先把 `@{key} ` 替換成普通文字，再走 `coerce_md_value` → `set_md_attr`；`ContextService` 只接收原生 scalar，不解析 token/expression。
 - 失敗轉 `MdValueError`
 
 ### Plot Panel Lifecycle

@@ -79,8 +79,8 @@ class FluxDepAdapter(
             "references a ModuleLibrary waveform named 'ro_waveform' when "
             "present. Optionally references a calibrated reset module. Also "
             "needs a flux device reference 'flux_dev' (a connected device, "
-            "defaulting to the active connected flux device, falling back to "
-            "'flux_yoko') — a device, not a library entry."
+            "defaulting to a registered device named 'flux' and falling back "
+            "to 'flux_yoko') — a device, not a library entry."
         ),
         typical_writeback=(
             "Interactive analysis (not a fit): after the run, the user drags "
@@ -136,7 +136,7 @@ class FluxDepAdapter(
             .role("modules.reset", "reset", Init.DISABLED)
             .role("modules.qub_pulse", "qub_probe", Init.INLINE)
             .role("modules.readout", "readout")
-            .value_ref("dev.flux_dev", "device.active_flux.name", default="flux_yoko")
+            .value_ref("dev.flux_dev", "device.flux.name", default="flux_yoko")
             .set_sweep("sweep.flux", proper_flux_range(ctx, 101))
             .set_sweep("sweep.freq", proper_qub_freq_range(ctx, 1001, span_factor=1.0))
             .build()

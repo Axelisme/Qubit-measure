@@ -313,7 +313,7 @@ def test_scalar_widget_eval_mode_marks_unresolved_red(qapp, ctrl):
     assert "red" in w._ghost.styleSheet()
 
 
-def test_scalar_widget_value_ref_text_resolves_to_direct(qapp, ctrl):
+def test_scalar_widget_value_ref_text_resolves_on_space_in_eval_mode(qapp, ctrl):
     from qtpy.QtWidgets import QLineEdit  # type: ignore[attr-defined]
     from zcu_tools.gui.app.main.live_model import LiveModelEnv, ScalarLiveField
     from zcu_tools.gui.app.main.ui.fields.common import ScalarWidget
@@ -324,7 +324,7 @@ def test_scalar_widget_value_ref_text_resolves_to_direct(qapp, ctrl):
     md.r_f = 6000.0
     ctrl.get_current_md.return_value = md
     ctrl.read_value_source.return_value = (
-        ValueInfo("device.active_flux.value", float, "device"),
+        ValueInfo("device.flux.value", float, "device:flux"),
         0.125,
     )
     field = ScalarLiveField(
@@ -336,13 +336,17 @@ def test_scalar_widget_value_ref_text_resolves_to_direct(qapp, ctrl):
     edit = w.findChild(QLineEdit)
     assert edit is not None
 
-    edit.setText("@{device.active_flux.value}")
+    edit.setText("@{device.flux.value} ")
+    edit.setCursorPosition(len(edit.text()))
+    assert w._source_input is not None
+    w._source_input._on_text_edited(edit.text())
 
     val = field.get_value()
-    assert isinstance(val, DirectValue)
-    assert val.value == pytest.approx(0.125)
-    assert w._mode == "direct"
-    ctrl.read_value_source.assert_called_once_with("device.active_flux.value", "float")
+    assert isinstance(val, EvalValue)
+    assert val.expr == "0.125"
+    assert edit.text() == "0.125"
+    assert w._mode == "eval"
+    ctrl.read_value_source.assert_called_once_with("device.flux.value")
 
 
 def test_scalar_widget_eval_menu_extends_standard_line_edit_menu(qapp, ctrl):

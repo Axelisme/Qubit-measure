@@ -19,10 +19,10 @@ def test_value_list_projects_registered_info() -> None:
     ctrl = MagicMock()
     ctrl.list_value_sources.return_value = (
         ValueInfo(
-            "device.active_flux.value",
+            "device.flux.value",
             float,
-            "device:active_flux",
-            "Active flux device cached value.",
+            "device:flux",
+            "Named device cached value.",
         ),
     )
 
@@ -30,10 +30,10 @@ def test_value_list_projects_registered_info() -> None:
 
     assert res["values"] == [
         {
-            "key": "device.active_flux.value",
+            "key": "device.flux.value",
             "type": "float",
-            "owner": "device:active_flux",
-            "description": "Active flux device cached value.",
+            "owner": "device:flux",
+            "description": "Named device cached value.",
         }
     ]
 

@@ -45,6 +45,10 @@ from zcu_tools.gui.session.events import (
     SessionPayload,
 )
 from zcu_tools.gui.session.services.context import MdValueError
+from zcu_tools.gui.session.ui.value_source_input import (
+    SessionValueSourceInputHost,
+    ValueSourceInputController,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus
@@ -70,6 +74,7 @@ class InspectDialogBase(QDialog):
         super().__init__(parent)
         self._ctrl = ctrl
         self._bus = bus
+        self._md_value_source_input: ValueSourceInputController | None = None
         self.setWindowTitle("Inspect Context")
         self.resize(700, 500)
         self.setWindowFlags(
@@ -157,6 +162,14 @@ class InspectDialogBase(QDialog):
         edit_row.addWidget(QLabel("Value:"))
         self._edit_value = QLineEdit()
         self._edit_value.setPlaceholderText("value (Python literal or plain string)")
+        self._md_value_source_input = ValueSourceInputController(
+            self._edit_value,
+            SessionValueSourceInputHost(self._ctrl),
+            parent=self._edit_value,
+        )
+        self._md_value_source_input.resolve_failed.connect(  # type: ignore[attr-defined]
+            self._edit_value.setToolTip
+        )
         edit_row.addWidget(self._edit_value)
         self._set_btn = QPushButton("Set")
         self._set_btn.setEnabled(False)
@@ -435,6 +448,9 @@ class InspectDialogBase(QDialog):
     # ------------------------------------------------------------------
 
     def _cleanup_bus_subscriptions(self, *_args: object) -> None:
+        if self._md_value_source_input is not None:
+            self._md_value_source_input.detach()
+            self._md_value_source_input = None
         if not self._bus_subs_active:
             logger.debug("_cleanup_bus_subscriptions called but already inactive")
             return

@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.device.fake import FakeDeviceInfo
-from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.gui.app.main.adapter import ContextReadiness
 from zcu_tools.gui.app.main.state import ExpContext, State
 from zcu_tools.gui.event_bus import BaseEventBus
@@ -104,6 +102,7 @@ def test_device_sources_read_cached_state_without_polling() -> None:
     )
     bus.emit(DeviceChangedPayload(name="flux"))
 
+    assert registry.get_as("device.flux.name", str) == "flux"
     assert registry.get_as("device.flux.status", str) == "connected"
     assert registry.get_as("device.flux.type", str) == "FakeDevice"
     assert registry.get_as("device.flux.address", str) == "none"
@@ -117,12 +116,12 @@ def test_device_sources_read_cached_state_without_polling() -> None:
         registry.get_as("device.flux.status", str)
 
 
-def test_active_flux_prefers_flux_yoko_and_falls_back_to_first_connected_flux() -> None:
+def test_device_sources_do_not_publish_active_flux_alias() -> None:
     state = _state()
     registry, bus, _ = _binder(state)
     state.put_device(
         DeviceState(
-            name="other_flux",
+            name="flux_yoko",
             type_name="FakeDevice",
             address="none",
             status=DeviceStatus.CONNECTED,
@@ -130,35 +129,8 @@ def test_active_flux_prefers_flux_yoko_and_falls_back_to_first_connected_flux() 
             info=FakeDeviceInfo(address="none", value=0.5),
         )
     )
-    state.put_device(
-        DeviceState(
-            name="flux_yoko",
-            type_name="YOKOGS200",
-            address="GPIB::1",
-            status=DeviceStatus.CONNECTED,
-            remember=True,
-            info=YOKOGS200Info(
-                address="GPIB::1",
-                mode="voltage",
-                value=0.003,
-            ),
-        )
-    )
     bus.emit(DeviceChangedPayload(name=None))
 
-    assert registry.get_as("device.active_flux.name", str) == "flux_yoko"
-    assert registry.get_as("device.active_flux.value", float) == pytest.approx(0.003)
-    assert registry.get_as("device.active_flux.unit", str) == "V"
-
-    state.put_device(
-        dataclasses.replace(
-            cast(DeviceState, state.get_device("flux_yoko")),
-            status=DeviceStatus.MEMORY_ONLY,
-            info=None,
-        )
-    )
-    bus.emit(DeviceChangedPayload(name="flux_yoko"))
-
-    assert registry.get_as("device.active_flux.name", str) == "other_flux"
-    assert registry.get_as("device.active_flux.value", float) == pytest.approx(0.5)
-    assert registry.get_as("device.active_flux.unit", str) == "none"
+    assert registry.get_as("device.flux_yoko.value", float) == pytest.approx(0.5)
+    with pytest.raises(MissingValue):
+        registry.get_as("device.active_flux.value", float)

@@ -8,6 +8,7 @@ import pytest
 
 # Force a deterministic headless-safe backend for GUI tests.
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
+os.environ["QT_QPA_PLATFORMTHEME"] = "generic"
 
 from qtpy.QtWidgets import QApplication
 

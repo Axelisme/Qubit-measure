@@ -89,18 +89,16 @@ def test_context_service_lists_and_reads_value_sources() -> None:
     state = _state()
     registry = ValueRegistry()
     registry.register(
-        ValueKey("device.active_flux.value", float),
+        ValueKey("device.flux.value", float),
         lambda: 0.125,
-        owner="device:active_flux",
-        description="Active flux device cached value.",
+        owner="device:flux",
+        description="Named device cached value.",
     )
     svc = ContextService(state, MagicMock(), MagicMock(), values=registry)
 
-    assert [info.key for info in svc.list_value_sources()] == [
-        "device.active_flux.value"
-    ]
-    info, value = svc.read_value_source("device.active_flux.value", "float")
+    assert [info.key for info in svc.list_value_sources()] == ["device.flux.value"]
+    info, value = svc.read_value_source("device.flux.value", "float")
 
     assert info.type_name == "float"
-    assert info.owner == "device:active_flux"
+    assert info.owner == "device:flux"
     assert value == 0.125

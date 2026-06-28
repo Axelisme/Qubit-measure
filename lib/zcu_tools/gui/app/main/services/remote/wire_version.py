@@ -72,8 +72,10 @@ from __future__ import annotations
 #   value.list / value.read.
 WIRE_VERSION = 47
 
+# v60: value-source input completion UX and named-device value sources.
+
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION (a wire-contract change
 # bumps both; a pure-internal GUI change bumps only this). Git history holds the
 # per-version evolution.
-GUI_VERSION = 59  # value source read-only RPCs
+GUI_VERSION = 60  # value-source input UX and named-device sources

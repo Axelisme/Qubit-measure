@@ -123,13 +123,13 @@ def test_onetone_flux_dep_default_sweep_freq_uses_eval_value() -> None:
     assert freq_sweep.stop.expr == "r_f + rf_w"
 
 
-def test_onetone_flux_dep_default_flux_device_uses_active_source() -> None:
+def test_onetone_flux_dep_default_flux_device_uses_named_device_source() -> None:
     from zcu_tools.gui.app.main.adapter import CfgSectionValue, DirectValue
 
     registry = ValueRegistry()
     registry.register(
-        ValueKey("device.active_flux.name", str),
-        lambda: "other_flux",
+        ValueKey("device.flux.name", str),
+        lambda: "flux",
         owner="test",
     )
     ctx = _make_ctx(_make_ml())
@@ -139,7 +139,7 @@ def test_onetone_flux_dep_default_flux_device_uses_active_source() -> None:
 
     dev = schema.value.fields["dev"]
     assert isinstance(dev, CfgSectionValue)
-    assert dev.fields["flux_dev"] == DirectValue("other_flux")
+    assert dev.fields["flux_dev"] == DirectValue("flux")
 
 
 def test_power_dep_build_exp_cfg_strips_earlystop_snr() -> None:

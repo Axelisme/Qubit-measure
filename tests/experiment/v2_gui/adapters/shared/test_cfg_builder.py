@@ -202,25 +202,25 @@ def _device_spec() -> CfgSectionSpec:
 def test_value_ref_resolves_device_ref_to_direct_value():
     registry = ValueRegistry()
     registry.register(
-        ValueKey("device.active_flux.name", str),
-        lambda: "other_flux",
+        ValueKey("device.flux.name", str),
+        lambda: "flux",
         owner="test",
     )
 
     v = (
         CfgBuilder(_ctx_with_values(registry), _device_spec())
-        .value_ref("dev.flux_dev", "device.active_flux.name")
+        .value_ref("dev.flux_dev", "device.flux.name")
         .build()
     )
 
     dev = cast(CfgSectionValue, v.fields["dev"])
-    assert dev.fields["flux_dev"] == DirectValue("other_flux")
+    assert dev.fields["flux_dev"] == DirectValue("flux")
 
 
 def test_value_ref_uses_default_when_source_is_missing():
     v = (
         CfgBuilder(_ctx_with_values(ValueRegistry()), _device_spec())
-        .value_ref("dev.flux_dev", "device.active_flux.name", default="flux_yoko")
+        .value_ref("dev.flux_dev", "device.flux.name", default="flux_yoko")
         .build()
     )
 

@@ -22,7 +22,10 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.session.value_lookup import ValueLookupError, parse_value_ref_text
+from zcu_tools.gui.session.ui.value_source_input import (
+    SessionValueSourceInputHost,
+    ValueSourceInputController,
+)
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 
 from ...adapter import DirectValue, EvalValue, default_value_for_type
@@ -257,6 +260,7 @@ class ScalarWidget(BaseLiveWidget):
         self._updating = False
         self._input: QWidget | None = None
         self._ghost: QLabel | None = None
+        self._source_input: ValueSourceInputController | None = None
         self._mode = ""
         self._layout = QHBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
@@ -266,6 +270,9 @@ class ScalarWidget(BaseLiveWidget):
         field.on_change.connect(self._on_model_changed)
 
     def teardown(self) -> None:
+        if self._source_input is not None:
+            self._source_input.detach()
+            self._source_input = None
         self._field.on_change.disconnect(self._on_model_changed)
 
     def _on_ui_changed(self, *_: Any) -> None:
@@ -276,8 +283,6 @@ class ScalarWidget(BaseLiveWidget):
             field = cast(ScalarLiveField, self._field)
             inp = self._input
             assert inp is not None
-            if isinstance(inp, QLineEdit) and self._apply_value_ref_text(field, inp):
-                return
             if isinstance(field.get_value(), EvalValue):
                 assert isinstance(inp, QLineEdit)
                 field.set_value(EvalValue(expr=inp.text().strip()))
@@ -298,28 +303,6 @@ class ScalarWidget(BaseLiveWidget):
                 field.set_value(val)
         finally:
             self._updating = False
-
-    def _apply_value_ref_text(self, field: ScalarLiveField, inp: QLineEdit) -> bool:
-        text = inp.text().strip()
-        if text.startswith("@{") and not text.endswith("}"):
-            return True
-        try:
-            ref = parse_value_ref_text(text)
-        except (ValueError, ValueLookupError) as exc:
-            logger.debug("Invalid value_ref text for %s: %s", field.spec.label, exc)
-            return text.startswith("@{")
-        if ref is None:
-            return False
-        try:
-            field.set_value(ref)
-        except ValueLookupError as exc:
-            logger.debug(
-                "Could not resolve value_ref for %s: %s", field.spec.label, exc
-            )
-            inp.setToolTip(str(exc))
-            return True
-        self._rebuild_ui()
-        return True
 
     def _on_model_changed(self, val: Any) -> None:
         next_mode = "eval" if isinstance(val, EvalValue) else "direct"
@@ -370,6 +353,12 @@ class ScalarWidget(BaseLiveWidget):
             inp.setMinimumWidth(FIELD_INPUT_MIN_WIDTH)
             inp.setEnabled(field.spec.editable)
             inp.textChanged.connect(self._on_ui_changed)
+            self._source_input = ValueSourceInputController(
+                inp,
+                SessionValueSourceInputHost(field.env.ctrl),
+                parent=inp,
+            )
+            self._source_input.resolve_failed.connect(inp.setToolTip)  # type: ignore[attr-defined]
             self._layout.addWidget(inp, stretch=1)
 
             self._ghost = QLabel()
@@ -391,6 +380,9 @@ class ScalarWidget(BaseLiveWidget):
         self._install_context_menu(self._input)
 
     def _clear_layout(self) -> None:
+        if self._source_input is not None:
+            self._source_input.detach()
+            self._source_input = None
         while self._layout.count():
             item = self._layout.takeAt(0)
             if item is None:

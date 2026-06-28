@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-28 — value lookup resolve-once defaults
+**Last updated:** 2026-06-28 — named-device value sources and input drill-down
 
 # gui/session/ — 量測 session core（measure + autofluxdep 共用）
 
@@ -41,7 +41,8 @@ session/
     ├── device_dialog.py  — 設備管理；per-device panel lazy-import zcu_tools.device.*；dialog-scoped + selection-scoped QTimer（1s）對當前選取 device 呼 `poll_device_info`，結果經 DEVICE_CHANGED 流回（repaint 由 Phase 1 保留選取路徑接住）；timer 僅可見+有選取時跑，hide/close/無選取即停（不常駐、不全 device 輪詢）
     ├── predictor_dialog.py — FluxoniumPredictor 載入/定義 + 頻率預測（左控制 / 右繪圖兩欄；load/clear/predict + 可編輯 EJ/EC/EL/flux_half/flux_period 欄位 + Apply〔set_predictor_model_params 建+裝〕+「Load params.json→fields」填欄位〔不自動裝〕+ active-model 讀回；PREDICTOR_CHANGED 訂閱；host 可用 `persistent_on_close=True` 讓 Close/視窗 X 只 hide、不 emit finished，保留已算曲線）；右欄 PredictorCurveCanvas 與 Flux value spinbox 雙向連動（debounce）
     ├── predictor_canvas.py — PredictorCurveCanvas：f_ij 曲線 over device value（雙 x 軸 flux/value）+ 可拖動 flux 垂線（方案 B：marker 不折、出窗平移）；主線程同步繪圖不需 marshal
-    └── inspect_base.py   — InspectDialogBase：md tab + ml view/rename/del；hook `_build_extra_toolbar_buttons` 讓子類在 Refresh 左側加 app-specific 入口，hook `_build_extra_ml_buttons` / `_on_ml_selection_changed` 讓子類加 ml create/modify。**consumers**：measure subclass（InspectDialog，加 Arb Waveforms 入口與 CfgEditor create/modify）；autofluxdep **直接用不 subclass**（不要 create/modify）
+    ├── inspect_base.py   — InspectDialogBase：md tab + ml view/rename/del；hook `_build_extra_toolbar_buttons` 讓子類在 Refresh 左側加 app-specific 入口，hook `_build_extra_ml_buttons` / `_on_ml_selection_changed` 讓子類加 ml create/modify。**consumers**：measure subclass（InspectDialog，加 Arb Waveforms 入口與 CfgEditor create/modify）；autofluxdep **直接用不 subclass**（不要 create/modify）
+    └── value_source_input.py — QLineEdit value-source helper：`@{prefix` 顯示分段 completion（`@{`→頂層、`dev`→`device.` 並展開下一段、`device.`→下一段），Tab/Backtab 接受預設候選時若當前候選全是 namespace 會自動補 `.` drill down，補到完整 key 才加 `}`；在 `@{full.key} ` 後輸入空格才立即 resolve 並以文字替換；token 完成或解析後明確 hide popup；依賴 `ValueSourceInputHost` port，不知道 ContextService/LiveModel
 ```
 
 ## 關鍵設計
@@ -52,6 +53,6 @@ session/
 - **startup project return contract**：`SessionControllerPort.apply_startup_project` 允許 `bool | dict[str, str]`。共用 setup dialog 只看 truthiness；measure 的 remote `startup.apply` / `gui_project_apply` 回 resolved project dict（WIRE 44），autofluxdep controller 仍回 bool。
 - **import-clean leaf**（不得拉 Qt/matplotlib/gui.app.*，`tests/gui/test_shared_layer.py` 守）：types/events/operation_handles/ports/state/pbar_host/controller_port。`adapters/` + `ui/*` + `services/*` 是 Qt/重，不列。
 - **wire name 來源**：`SessionEvent.X` 的字串值即 wire event name；measure-gui 的 wire-name lock 測試（`test_remote_event_dialog_view.py`）鎖全集，搬移/改名 payload 不得動字串值。
-- **`ExpContext.values`**：只攜帶 read-only `ValueLookup` facade，供 default generation / resolve-once 讀目前 session 投影；`ContextService.list_value_sources/read_value_source` 是 GUI/remote 共用查詢面，mutable `ValueRegistry` 只在 session composition root / source binder 內使用。`ValueSourceBinder` 以 owner-scoped replace/unregister 維護 `context.*` / `project.*` / `predictor.*` / `device.<name>.*` / `device.active_flux.*`，device provider 只讀 cached `DeviceState.info`、不 poll hardware。`ExpContext` 仍是 live environment facade，不是 snapshot。
+- **`ExpContext.values`**：只攜帶 read-only `ValueLookup` facade，供 default generation / resolve-once 讀目前 session 投影；`ContextService.list_value_sources/read_value_source` 是 GUI/remote 共用查詢面，mutable `ValueRegistry` 只在 session composition root / source binder 內使用。`ValueSourceBinder` 以 owner-scoped replace/unregister 維護 `context.*` / `project.*` / `predictor.*` / `device.<name>.*`；named device source 包含 `device.<name>.name` 與 cached info（如 `value`/`status`），device provider 只讀 cached `DeviceState.info`、不 poll hardware，也不推導 active/flux 語義。`value_source_input.py` 把此查詢面包成可注入的 GUI token helper；它只替換輸入文字，不寫 cfg/md。`ExpContext` 仍是 live environment facade，不是 snapshot。
 
 跨模組設計見 ADR-0002/0004/0005/0006/0019/0020/0021/0025/0026（0021：event ownership——domain module 擁有 enum+payload、app 組裝；0025：跨線程互動 channel——OperationChannel/NotifyChannel；0026：operation abstraction——OperationRunner + scope-as-adapter-input + State write port + ConnectionService 拆 SoC/Predictor + DeviceRegistryPort）。**autofluxdep 已完整複用**（session-core extraction S1–S5：組 session services + 實作 SessionControllerPort + run 讀 exp_context + 用共用 setup/device/predictor dialog；見 ADR-0020 + autofluxdep/README）。

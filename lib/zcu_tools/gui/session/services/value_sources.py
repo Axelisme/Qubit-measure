@@ -16,7 +16,6 @@ from zcu_tools.gui.session.events import (
     DeviceChangedPayload,
     PredictorChangedPayload,
 )
-from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 from zcu_tools.gui.session.value_lookup import (
     UnavailableValue,
     ValueKey,
@@ -26,16 +25,10 @@ from zcu_tools.gui.session.value_lookup import (
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus
-    from zcu_tools.gui.session.state import SessionState
+    from zcu_tools.gui.session.state import DeviceState, SessionState
 
 _CONTEXT_OWNER = "context"
 _PREDICTOR_OWNER = "predictor"
-_ACTIVE_FLUX_OWNER = "device:active_flux"
-_FLUX_DEVICE_DEFAULT_UNITS = {
-    "FakeDevice": "none",
-    "YOKOGS200": "A",
-}
-_ACTIVE_FLUX_PREFERRED_NAMES = ("flux_yoko",)
 
 
 class ValueSourceBinder:
@@ -62,7 +55,6 @@ class ValueSourceBinder:
         self._refresh_context()
         self._refresh_predictor()
         self._refresh_all_devices()
-        self._refresh_active_flux()
 
     def _on_context_switched(self, payload: ContextSwitchedPayload) -> None:
         del payload
@@ -77,7 +69,6 @@ class ValueSourceBinder:
             self._refresh_all_devices()
         else:
             self._refresh_device(payload.name)
-        self._refresh_active_flux()
 
     def _refresh_context(self) -> None:
         self._registry.replace_owner(
@@ -179,7 +170,7 @@ class ValueSourceBinder:
         for info in self._registry.describe():
             if info.owner.startswith("device:"):
                 device_name = info.owner.removeprefix("device:")
-                if device_name not in live_names and device_name != "active_flux":
+                if device_name not in live_names:
                     self._registry.unregister_owner(info.owner)
         for dev in self._state.list_devices():
             self._refresh_device(dev.name)
@@ -192,6 +183,12 @@ class ValueSourceBinder:
             return
 
         specs: list[ValueProviderSpec] = [
+            _str_source(
+                f"device.{name}.name",
+                owner,
+                lambda name=name: name,
+                "registered device name",
+            ),
             _str_source(
                 f"device.{name}.status",
                 owner,
@@ -245,35 +242,6 @@ class ValueSourceBinder:
 
         self._registry.replace_owner(owner, specs)
 
-    def _refresh_active_flux(self) -> None:
-        dev = self._select_active_flux_device()
-        if dev is None:
-            self._registry.unregister_owner(_ACTIVE_FLUX_OWNER)
-            return
-        self._registry.replace_owner(
-            _ACTIVE_FLUX_OWNER,
-            [
-                _str_source(
-                    "device.active_flux.name",
-                    _ACTIVE_FLUX_OWNER,
-                    lambda: self._active_flux_name(),
-                    "selected flux device name",
-                ),
-                _float_source(
-                    "device.active_flux.value",
-                    _ACTIVE_FLUX_OWNER,
-                    lambda: self._active_flux_value(),
-                    "selected flux device cached value",
-                ),
-                _str_source(
-                    "device.active_flux.unit",
-                    _ACTIVE_FLUX_OWNER,
-                    lambda: self._active_flux_unit(),
-                    "selected flux device unit",
-                ),
-            ],
-        )
-
     def _context_string(self, attr: str) -> str:
         ctx = self._state.exp_context
         if not ctx.has_context():
@@ -318,38 +286,6 @@ class ValueSourceBinder:
                 f"device.{name}.{attr}", f"Device {name!r} has no string {attr!r}"
             )
         return value
-
-    def _active_flux_name(self) -> str:
-        return self._require_active_flux().name
-
-    def _active_flux_value(self) -> float:
-        dev = self._require_active_flux()
-        return self._device_float_attr(dev.name, "value")
-
-    def _active_flux_unit(self) -> str:
-        return _device_unit(self._require_active_flux())
-
-    def _select_active_flux_device(self) -> DeviceState | None:
-        candidates = [
-            dev
-            for dev in self._state.list_devices()
-            if _is_flux_capable(dev) and dev.is_connected() and dev.info is not None
-        ]
-        if not candidates:
-            return None
-        for preferred in _ACTIVE_FLUX_PREFERRED_NAMES:
-            for dev in candidates:
-                if dev.name == preferred:
-                    return dev
-        return candidates[0]
-
-    def _require_active_flux(self) -> DeviceState:
-        dev = self._select_active_flux_device()
-        if dev is None:
-            raise UnavailableValue(
-                "device.active_flux.name", "No connected flux-capable device"
-            )
-        return dev
 
     def _require_device(self, name: str) -> DeviceState:
         dev = self._state.get_device(name)
@@ -403,15 +339,3 @@ def _has_numeric_attr(info: Any, attr: str) -> bool:
 
 def _has_string_attr(info: Any, attr: str) -> bool:
     return type(getattr(info, attr, None)) is str
-
-
-def _is_flux_capable(dev: DeviceState) -> bool:
-    return dev.type_name in _FLUX_DEVICE_DEFAULT_UNITS and _has_numeric_attr(
-        dev.info, "value"
-    )
-
-
-def _device_unit(dev: DeviceState) -> str:
-    if dev.type_name == "YOKOGS200" and dev.info is not None:
-        return "V" if getattr(dev.info, "mode", None) == "voltage" else "A"
-    return _FLUX_DEVICE_DEFAULT_UNITS.get(dev.type_name, "none")

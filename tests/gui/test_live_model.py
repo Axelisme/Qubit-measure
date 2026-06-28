@@ -173,20 +173,18 @@ def test_scalar_eval_field_invalid_expression_marks_invalid(env):
 
 def test_scalar_value_ref_resolves_once_to_direct_value(env):
     env.ctrl.read_value_source.return_value = (
-        ValueInfo("device.active_flux.value", float, "device"),
+        ValueInfo("device.flux.value", float, "device:flux"),
         0.125,
     )
     field = ScalarLiveField(ScalarSpec(label="Flux", type=float), env)
 
-    field.set_value(ValueRef("device.active_flux.value"))
+    field.set_value(ValueRef("device.flux.value"))
     field.refresh_external(SessionEvent.DEVICE_CHANGED)
 
     val = field.get_value()
     assert isinstance(val, DirectValue)
     assert val.value == 0.125
-    env.ctrl.read_value_source.assert_called_once_with(
-        "device.active_flux.value", "float"
-    )
+    env.ctrl.read_value_source.assert_called_once_with("device.flux.value", "float")
 
 
 def test_scalar_value_ref_type_mismatch_fails_before_lookup(env):

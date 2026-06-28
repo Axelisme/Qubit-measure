@@ -195,6 +195,37 @@ def test_inspect_dialog_md_edit(qapp):
     ctrl.set_md_attr.assert_called_with("key1", 20)
 
 
+def test_inspect_dialog_md_value_source_resolves_in_value_input(qapp):
+    from zcu_tools.gui.session.value_lookup import ValueInfo
+
+    ctrl = MagicMock()
+    bus = MagicMock()
+
+    mock_md = MagicMock()
+    mock_md.items.return_value = {}.items()
+    ctrl.get_current_md.return_value = mock_md
+    ctrl.get_current_ml.return_value = _make_ml()
+    ctrl.read_value_source.return_value = (
+        ValueInfo("device.flux.value", float, "device:flux"),
+        0.5,
+    )
+    ctrl.coerce_md_value.return_value = 0.5
+    dialog = InspectDialog(ctrl, bus)
+
+    dialog._edit_key.setText("flx_current")
+    dialog._edit_value.setText("@{device.flux.value} ")
+    dialog._edit_value.setCursorPosition(len(dialog._edit_value.text()))
+    assert dialog._md_value_source_input is not None
+    dialog._md_value_source_input._on_text_edited(dialog._edit_value.text())
+
+    assert dialog._edit_value.text() == "0.5"
+    dialog._set_btn.click()
+
+    ctrl.read_value_source.assert_called_once_with("device.flux.value")
+    ctrl.coerce_md_value.assert_called_with("flx_current", "0.5")
+    ctrl.set_md_attr.assert_called_with("flx_current", 0.5)
+
+
 def test_inspect_dialog_md_set_success_clears_value_keeps_key(qapp):
     """After a successful Set, the value field is cleared; the key field is kept."""
     ctrl = MagicMock()

@@ -8,6 +8,7 @@ import pytest
 
 # Force a deterministic headless-safe Qt platform before any QApplication.
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
+os.environ["QT_QPA_PLATFORMTHEME"] = "generic"
 
 from qtpy.QtWidgets import QApplication  # noqa: E402
 

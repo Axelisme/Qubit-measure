@@ -92,10 +92,10 @@ class OneToneFluxDepAdapter(
             "Run after lookback and an initial onetone/freq, before any "
             "twotone flux mapping, to find 'flx_int' / period from the "
             "resonator map. Interactive flux-line pick (no fit). Also set the "
-            "'flux_dev' field — the "
-            "flux-bias device reference (defaults to the active connected flux "
-            "device, falling back to 'flux_yoko') — and confirm it points at a "
-            "connected device. Typical sweep: flux ~101 points "
+            "'flux_dev' field — the flux-bias device reference (defaults to a "
+            "registered device named 'flux', falling back to 'flux_yoko') — "
+            "and confirm it points at a connected device. Typical sweep: "
+            "flux ~101 points "
             "across one period (driven by flx_half/flx_int when calibrated), "
             "frequency r_f ± one linewidth over ~101 points. Start at a low "
             "readout gain (~0.005) to stay below punch-out so the dip tracks "
@@ -145,7 +145,7 @@ class OneToneFluxDepAdapter(
             .role("modules.readout", "readout", Init.INLINE)
             .set("modules.readout.pulse_cfg.gain", 0.05)
             .set("modules.readout.ro_cfg.ro_length", ro_length)
-            .value_ref("dev.flux_dev", "device.active_flux.name", default="flux_yoko")
+            .value_ref("dev.flux_dev", "device.flux.name", default="flux_yoko")
             .set_sweep("sweep.flux", proper_flux_range(ctx, 101))
             .set_sweep("sweep.freq", proper_res_freq_range(ctx, 101, span_factor=1.0))
             .build()
