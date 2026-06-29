@@ -175,6 +175,25 @@ class SimCancelledError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class _PointReadout:
+    """Readout blobs and raw integration scales for one sweep point."""
+
+    s_g: NDArray[np.complex128]
+    s_e: NDArray[np.complex128]
+    signal_scale: float
+    noise_std_scale: float
+    gain_noise_std_scale: float
+
+
+@dataclass(frozen=True)
+class _EvolutionProps:
+    """Deterministic Bloch propagators for one sweep point."""
+
+    pre_readout_props: tuple[NDArray[np.float64], ...]
+    inter_shot_props: tuple[NDArray[np.float64], ...]
+
+
+@dataclass(frozen=True)
 class _PointModel:
     """Cached deterministic data for one sweep point."""
 
@@ -187,9 +206,6 @@ class _PointModel:
     inter_shot_props: tuple[NDArray[np.float64], ...]
 
 
-_EvolutionProps = tuple[
-    tuple[NDArray[np.float64], ...], tuple[NDArray[np.float64], ...]
-]
 _GIL_YIELD_INTERVAL_S = 0.010
 
 
@@ -540,26 +556,31 @@ class SimEngine:
         for multi_index in itertools.product(*index_ranges):
             self._raise_if_cancelled()
             point = {name: idx for (name, _), idx in zip(axes, multi_index)}
-            evolution_key = tuple(point[name] for name in evolution_axis_order)
-            cached_evolution = evolution_cache.get(evolution_key)
-            if cached_evolution is not None:
-                evolution_cache_hits += 1
-            model = self._point_model(
-                point,
+            zero_lowered = self._lower(point, f_qubit_ghz, 0.0)
+            readout = self._point_readout_model(
+                zero_lowered,
                 f_qubit_ghz,
                 rf_g,
                 rf_e,
                 n_samples,
                 sample_times_us,
-                evolution_props=cached_evolution,
-                yield_hook=gil_yield,
             )
-            gil_yield()
-            if cached_evolution is None:
-                evolution_cache[evolution_key] = (
-                    model.pre_readout_props,
-                    model.inter_shot_props,
+
+            evolution_key = tuple(point[name] for name in evolution_axis_order)
+            evolution = evolution_cache.get(evolution_key)
+            if evolution is None:
+                evolution = self._point_evolution_props(
+                    point,
+                    f_qubit_ghz,
+                    zero_lowered,
+                    yield_hook=gil_yield,
                 )
+                evolution_cache[evolution_key] = evolution
+            else:
+                evolution_cache_hits += 1
+
+            model = self._point_model(readout, evolution)
+            gil_yield()
             idx = (*multi_index, slice(None))
             s_g_grid[idx] = model.s_g
             s_e_grid[idx] = model.s_e
@@ -623,68 +644,26 @@ class SimEngine:
             gain_noise_std_scale_grid,
         )
 
-    def _point_model(
+    def _point_readout_model(
         self,
-        point: dict[str, int],
+        lowered: LoweredPoint,
         f_qubit_ghz: float,
         rf_g: float,
         rf_e: float,
         n_samples: int,
         sample_times_us: NDArray[np.float64],
-        *,
-        evolution_props: _EvolutionProps | None = None,
-        yield_hook: Callable[[], None] | None = None,
-    ) -> _PointModel:
-        """Deterministic readout blobs and propagators at one sweep point.
+    ) -> _PointReadout:
+        """Return deterministic readout blobs and integration scales for one point.
 
-        Returns a :class:`_PointModel` where
-        ``s_g`` / ``s_e`` are the |g>- / |e>-conditioned complex readout blobs at
-        this point's probe frequency (``S21(f_ro; rf_g)`` / ``S21(f_ro; rf_e)``),
-        the scale values convert the order-unity blobs/noise into integrated raw
-        ADC sums, and the propagator tuples carry the rep-to-rep deterministic
-        Bloch evolution.
-
-        Every sweep point follows the *same* physics: lower the module tree,
-        evolve the Bloch timeline to an excited population ``P_e``, and read out
-        the dispersive signal at this point's readout probe frequency
-        ``f_ro``.  No experiment type (onetone / twotone / qubit-pulse + swept
-        ``f_ro``) is special-cased — they differ only in what the timeline and
-        the per-point ``f_ro`` happen to be:
-
-          - onetone has no qubit pulse, so the Bloch vector relaxes to ~thermal
-            and ``P_e ≈ thermal_pop`` while the swept ``f_ro`` traces the S21
-            dip near ``rf_g``;
-          - twotone / time-domain drive the qubit (``P_e`` set by the pulse) and
-            read out at a fixed ``f_ro``;
-          - a qubit pulse *with* a swept ``f_ro`` excites ``P_e`` AND sweeps the
-            probe, so the dip rides ``rf_e`` (π pulse) or ``rf_g`` (no pulse).
-
-        ``f_ro`` is taken per point from ``ReadoutPlan.f_ro_ghz``, which
-        ``lower_point`` already resolves to the swept-or-fixed value at this
-        sweep index — so a swept readout frequency flows through naturally
-        without the engine branching on it.
-
-        Under the Lorentzian quasi-static detune model each quadrature node is a
-        deterministic rep chain.  The engine carries each node's post-readout
-        state through the same node's inter-shot relax segment, then averages the
-        resulting ``P_e`` values by node weight before the Bernoulli draw.  This
-        keeps the density-only/no-collapse model deterministic while making
-        ``relax_delay`` physically visible.
-
-        ``rf_g`` / ``rf_e`` are the flux-constant dressed resonator frequencies
-        the caller computed once; they are fed straight into ``s21``, so no
-        fluxonium eigensolve runs per point.
+        ``lowered`` supplies this point's readout frequency and readout pulse
+        geometry. The qubit-state evolution is intentionally not handled here;
+        _signal_grid owns that simulation cache separately.
         """
-
-        # δ=0 lowering supplies this point's f_ro (δ never affects readout) and
-        # serves as the single-node ensemble when Gamma == 0.
-        self._raise_if_cancelled()
-        zero_lowered = self._lower(point, f_qubit_ghz, 0.0)
 
         # The two per-shot blobs: the |g>- and |e>-conditioned dispersive readout
         # at this point's probe frequency.  ``s21`` is the pure (eigh-free) hanger
         # response; rf_g / rf_e arrive pre-computed so no fluxonium solve runs here.
-        freqs = np.array([zero_lowered.readout.f_ro_ghz], dtype=np.float64)
+        freqs = np.array([lowered.readout.f_ro_ghz], dtype=np.float64)
         s_g = s21(self.sim, freqs, rf_g)
         s_e = s21(self.sim, freqs, rf_e)
 
@@ -693,8 +672,8 @@ class SimEngine:
         # SimParams calibration, and DirectReadout (no explicit generator gain) keeps
         # the linear path.
         readout_gain = (
-            zero_lowered.readout.readout_gain
-            if zero_lowered.readout.pulse_cfg is not None
+            lowered.readout.readout_gain
+            if lowered.readout.pulse_cfg is not None
             else None
         )
         if readout_gain is None:
@@ -714,68 +693,95 @@ class SimEngine:
             gain_noise_drive_amplitude = abs(drive_amplitude)
         s_g, s_e = apply_readout_visibility(s_g, s_e, visibility)
         signal_sample_times = sample_times_us
-        if zero_lowered.readout.pulse_cfg is not None:
+        if lowered.readout.pulse_cfg is not None:
             signal_sample_times = (
                 sample_times_us
-                + zero_lowered.readout.trig_offset_us
+                + lowered.readout.trig_offset_us
                 - self.sim.timeFly
-                - zero_lowered.readout.pulse_pre_delay_us
+                - lowered.readout.pulse_pre_delay_us
             )
         signal_scale = drive_amplitude * effective_signal_samples(
-            zero_lowered.readout.pulse_cfg,
-            zero_lowered.readout.pulse_length_us,
+            lowered.readout.pulse_cfg,
+            lowered.readout.pulse_length_us,
             signal_sample_times,
         )
         noise_std_scale = noise_std_sample_scale(n_samples)
         gain_noise_std_scale = gain_noise_drive_amplitude * effective_noise_samples(
-            zero_lowered.readout.pulse_cfg,
-            zero_lowered.readout.pulse_length_us,
+            lowered.readout.pulse_cfg,
+            lowered.readout.pulse_length_us,
             signal_sample_times,
         )
 
-        if evolution_props is None:
-            relax_segment = inter_shot_relax_segment(
-                self.program.modules,
-                self.program.sweep_dict,
-                self.sim,
-                f_qubit_ghz,
-                point,
-                self.program.cfg_model.relax_delay,
-                detune_offset=0.0,
-            )
-
-            pre_readout_props: list[NDArray[np.float64]] = []
-            inter_shot_props: list[NDArray[np.float64]] = []
-            for delta in self._detune_nodes:
-                self._raise_if_cancelled()
-                detune_offset = float(delta)
-                pre_readout_props.append(
-                    _sequence_propagator(
-                        _shift_segments_detuning(zero_lowered.segments, detune_offset)
-                    )
-                )
-                inter_shot_props.append(
-                    np.eye(4, dtype=np.float64)
-                    if relax_segment is None
-                    else _sequence_propagator(
-                        [_shift_segment_detuning(relax_segment, detune_offset)]
-                    )
-                )
-                if yield_hook is not None:
-                    yield_hook()
-            props = (tuple(pre_readout_props), tuple(inter_shot_props))
-        else:
-            props = evolution_props
-
-        pre_readout_props_t, inter_shot_props_t = props
-        return _PointModel(
+        return _PointReadout(
             s_g=s_g,
             s_e=s_e,
             signal_scale=signal_scale,
             noise_std_scale=noise_std_scale,
             gain_noise_std_scale=gain_noise_std_scale,
-            pre_readout_props=pre_readout_props_t,
-            inter_shot_props=inter_shot_props_t,
+        )
+
+    def _point_evolution_props(
+        self,
+        point: dict[str, int],
+        f_qubit_ghz: float,
+        lowered: LoweredPoint,
+        *,
+        yield_hook: Callable[[], None] | None = None,
+    ) -> _EvolutionProps:
+        """Return cached qubit-state propagators for one sweep point.
+
+        The Lorentzian quasi-static detune ensemble is a SimEngine concern: the
+        point is lowered once at delta=0, then each quadrature node applies the
+        equivalent static frame shift to the lowered segments.
+        """
+
+        relax_segment = inter_shot_relax_segment(
+            self.program.modules,
+            self.program.sweep_dict,
+            self.sim,
+            f_qubit_ghz,
+            point,
+            self.program.cfg_model.relax_delay,
+            detune_offset=0.0,
+        )
+
+        pre_readout_props: list[NDArray[np.float64]] = []
+        inter_shot_props: list[NDArray[np.float64]] = []
+        for delta in self._detune_nodes:
+            self._raise_if_cancelled()
+            detune_offset = float(delta)
+            pre_readout_props.append(
+                _sequence_propagator(
+                    _shift_segments_detuning(lowered.segments, detune_offset)
+                )
+            )
+            inter_shot_props.append(
+                np.eye(4, dtype=np.float64)
+                if relax_segment is None
+                else _sequence_propagator(
+                    [_shift_segment_detuning(relax_segment, detune_offset)]
+                )
+            )
+            if yield_hook is not None:
+                yield_hook()
+
+        return _EvolutionProps(
+            pre_readout_props=tuple(pre_readout_props),
+            inter_shot_props=tuple(inter_shot_props),
+        )
+
+    @staticmethod
+    def _point_model(readout: _PointReadout, evolution: _EvolutionProps) -> _PointModel:
+        """Combine readout and evolution internals into one cache item."""
+
+        return _PointModel(
+            s_g=readout.s_g,
+            s_e=readout.s_e,
+            signal_scale=readout.signal_scale,
+            noise_std_scale=readout.noise_std_scale,
+            gain_noise_std_scale=readout.gain_noise_std_scale,
+            pre_readout_props=evolution.pre_readout_props,
+            inter_shot_props=evolution.inter_shot_props,
         )
 
     def _point_population_chain(

@@ -23,8 +23,6 @@ the resonator, exactly as the real path requires.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
 import numpy as np
 import pytest
 from numpy.typing import NDArray
@@ -43,6 +41,7 @@ from zcu_tools.program.v2.sim.engine import (
     SimCancelledError,
     SimEngine,
     _PointModel,
+    _PointReadout,
 )
 from zcu_tools.program.v2.sim.readout import (
     effective_signal_samples,
@@ -424,7 +423,7 @@ def test_engine_qub_pulse_with_swept_ro_freq_dip_tracks_pe():
 
     The pre-readout π pulse excites P_e≈1, so the dispersive dip rides rf_e; with
     no pulse the qubit stays at ~thermal and the dip rides rf_g.  This is the new
-    case the unified _point_model path supports — pre-R-1 the swept-ro_freq branch
+    case the unified SimEngine path supports — pre-R-1 the swept-ro_freq branch
     ignored the qubit pulse entirely and always probed rf_g.
     """
 
@@ -924,40 +923,33 @@ def test_acquire_stop_checker_does_not_cancel_inside_mock_signal_grid(monkeypatc
 
     from zcu_tools.program.v2.sim.engine import SimEngine
 
-    point_calls: list[dict[str, int]] = []
+    readout_calls = 0
 
     def fake_operating_signal(self) -> tuple[float, float, float]:
         return (4.0, 7.0, 7.01)
 
-    def fake_point_model(
+    def fake_point_readout_model(
         self,
-        point: dict[str, int],
+        lowered,
         f_qubit_ghz: float,
         rf_g: float,
         rf_e: float,
         n_samples: int,
         sample_times_us: NDArray[np.float64],
-        *,
-        evolution_props: tuple[
-            tuple[NDArray[np.float64], ...], tuple[NDArray[np.float64], ...]
-        ]
-        | None = None,
-        yield_hook: Callable[[], None] | None = None,
-    ) -> _PointModel:
-        del yield_hook
-        point_calls.append(point)
-        return _PointModel(
+    ) -> _PointReadout:
+        del lowered, f_qubit_ghz, rf_g, rf_e, n_samples, sample_times_us
+        nonlocal readout_calls
+        readout_calls += 1
+        return _PointReadout(
             s_g=np.array([1.0 + 0.0j], dtype=np.complex128),
             s_e=np.array([0.0 + 0.0j], dtype=np.complex128),
             signal_scale=1.0,
             noise_std_scale=1.0,
             gain_noise_std_scale=0.0,
-            pre_readout_props=(np.eye(4, dtype=np.float64),),
-            inter_shot_props=(np.eye(4, dtype=np.float64),),
         )
 
     monkeypatch.setattr(SimEngine, "_operating_signal", fake_operating_signal)
-    monkeypatch.setattr(SimEngine, "_point_model", fake_point_model)
+    monkeypatch.setattr(SimEngine, "_point_readout_model", fake_point_readout_model)
 
     soc, soccfg = make_mock_soc(sim=_SIM.model_copy(update={"poll_latency": 0.0}))
     sw = SweepCfg(start=7000.0, stop=7010.0, expts=8, step=10.0 / 7)
@@ -971,11 +963,11 @@ def test_acquire_stop_checker_does_not_cancel_inside_mock_signal_grid(monkeypatc
     )
 
     def stop_after_two_points() -> bool:
-        return len(point_calls) >= 2
+        return readout_calls >= 2
 
     prog.acquire(soc, progress=False, stop_checkers=[stop_after_two_points])
 
-    assert len(point_calls) == sw.expts
+    assert readout_calls == sw.expts
 
 
 def test_engine_cancel_during_detune_loop_raises(monkeypatch):
@@ -1027,9 +1019,9 @@ def test_engine_cancel_during_detune_loop_raises(monkeypatch):
     monkeypatch.setattr(engine_module, "_sequence_propagator", fake_sequence_propagator)
 
     engine = SimEngine(prog, sim, stop_checkers=[stop_after_three_detune_nodes])
-    n_samples, sample_times_us = engine._readout_sample_times_us()
+    lowered = engine._lower({}, 4.0, 0.0)
     with pytest.raises(SimCancelledError, match="cancelled"):
-        engine._point_model({}, 4.0, 7.0, 7.01, n_samples, sample_times_us)
+        engine._point_evolution_props({}, 4.0, lowered)
 
     assert 0 < propagator_calls < 2 * len(engine._detune_nodes)
 
@@ -1299,7 +1291,12 @@ def test_engine_batched_population_chain_matches_scalar_reference(monkeypatch):
     engine = SimEngine(prog, sim)
     n_samples, sample_times_us = engine._readout_sample_times_us()
     f_qubit_ghz, rf_g, rf_e = engine._operating_signal()
-    model = engine._point_model({}, f_qubit_ghz, rf_g, rf_e, n_samples, sample_times_us)
+    lowered = engine._lower({}, f_qubit_ghz, 0.0)
+    readout = engine._point_readout_model(
+        lowered, f_qubit_ghz, rf_g, rf_e, n_samples, sample_times_us
+    )
+    evolution = engine._point_evolution_props({}, f_qubit_ghz, lowered)
+    model = engine._point_model(readout, evolution)
 
     actual = engine._point_population_chain(model, reps=8, nreads=1)
     monkeypatch.setattr(engine_module, "_population_chain_numba", None)

@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-06-30 (SimEngine performance path)
+**Last updated:** 2026-06-30 (SimEngine internal simulation path)
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -70,13 +70,13 @@ or moves the mock operating flux to a convenience point.  The cache is valid onl
 because the flux is fixed *for that acquire*; a per-point operating flux would have
 to move that call back into the loop.
 
-**Evolution and population-chain work are cached by deterministic propagators.**
-Within one signal-grid build, sweep points that change only readout parameters
-reuse the same pre-readout/inter-shot Bloch propagators and the same rep-resolved
-`P_e` chain because their qubit evolution and detune weights are identical.
-Qubit-drive sweeps still compute distinct chains because their propagators differ.
-The cache is local to the grid build, so it avoids retaining a second copy of
-large `P_e` grids after the acquire setup.
+**Simulation caches stay internal to `SimEngine`.** Within one signal-grid build,
+the engine separates per-point readout blobs/scales from qubit-state evolution:
+sweep points that change only readout parameters reuse the same
+pre-readout/inter-shot Bloch propagators and the same rep-resolved `P_e` chain,
+while qubit-drive sweeps still compute distinct chains because their propagators
+differ. These readout/evolution/population caches are private `SimEngine`
+implementation details, not seams exposed to callers or sibling modules.
 
 **Mocksim CPU loops yield the process GIL cooperatively.** Autofluxdep RUN work is
 submitted to a dedicated `QThread`, but a Python/C-extension-heavy mock simulator
@@ -166,9 +166,11 @@ every coupling point.
 - `engine.py` — `SimEngine`: glue. Pins the operating point at reduced flux
   `Phi/Phi0 = 1.0` (R-3; no longer derived from the cfg `dev` map), computes
   f_qubit AND `rf_g` / `rf_e` there ONCE (flux-constant, with a hot cache for
-  identical operating points), drives lowering -> bloch -> readout, caches the
-  deterministic `(s_g, s_e)` blob grids plus readout integration scales and a
-  rep-resolved `p_e` grid, then per round draws a per-shot `Bernoulli(p_e)` to
+  identical operating points), drives lowering -> bloch -> readout, privately
+  separates point readout blobs from qubit-state evolution so readout-only sweeps
+  reuse deterministic propagators, caches the deterministic `(s_g, s_e)` blob
+  grids plus readout integration scales and a rep-resolved `p_e` grid, then per
+  round draws a per-shot `Bernoulli(p_e)` to
   select a blob, multiplies the deterministic signal by the compressed readout gain
   and effective signal samples, and adds quadrature-combined base plus
   gain-proportional Gaussian integrated noise into the QICK
