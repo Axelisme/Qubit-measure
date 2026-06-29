@@ -31,6 +31,7 @@ generator ``[[M, b], [0, 0]]``; then ``[v_out, 1] = P @ [v_in, 1]``.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from typing import NamedTuple
 
@@ -88,6 +89,36 @@ def bloch_generator(
     return gen
 
 
+def _idle_segment_propagator(
+    delta: float,
+    t: float,
+    t1: float | None,
+    t2: float | None,
+    thermal_pop: float,
+) -> NDArray[np.float64]:
+    """Return the closed-form propagator for an undriven segment."""
+
+    duration = float(t)
+    gamma1 = _rate(t1)
+    gamma2 = _rate(t2)
+    angle = float(delta) * duration
+    xy_decay = math.exp(-gamma2 * duration)
+    z_decay = math.exp(-gamma1 * duration)
+    cos_angle = math.cos(angle)
+    sin_angle = math.sin(angle)
+    z_eq = 2.0 * thermal_pop - 1.0
+
+    prop = np.zeros((4, 4), dtype=np.float64)
+    prop[0, 0] = xy_decay * cos_angle
+    prop[0, 1] = -xy_decay * sin_angle
+    prop[1, 0] = xy_decay * sin_angle
+    prop[1, 1] = xy_decay * cos_angle
+    prop[2, 2] = z_decay
+    prop[2, 3] = z_eq * (1.0 - z_decay)
+    prop[3, 3] = 1.0
+    return prop
+
+
 def segment_propagator(
     omega: float,
     delta: float,
@@ -103,6 +134,9 @@ def segment_propagator(
     duration ``t`` under constant ``(omega, delta, phase)`` and the given
     relaxation.
     """
+
+    if omega == 0.0:
+        return _idle_segment_propagator(delta, t, t1, t2, thermal_pop)
 
     gen = bloch_generator(omega, delta, phase, t1, t2, thermal_pop)
     # expm's stub returns a loose float union; coerce to the float64 we promise.

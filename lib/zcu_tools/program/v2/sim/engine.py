@@ -195,6 +195,26 @@ def _sequence_propagator(segments: list[bloch.Segment]) -> NDArray[np.float64]:
     return prop
 
 
+def _shift_segment_detuning(
+    segment: bloch.Segment, detune_offset: float
+) -> bloch.Segment:
+    """Return ``segment`` with the Lorentzian detune offset applied."""
+
+    if detune_offset == 0.0:
+        return segment
+    return segment._replace(delta=segment.delta + detune_offset)
+
+
+def _shift_segments_detuning(
+    segments: list[bloch.Segment], detune_offset: float
+) -> list[bloch.Segment]:
+    """Return segments with a static global frame shift applied to each delta."""
+
+    if detune_offset == 0.0:
+        return segments
+    return [_shift_segment_detuning(seg, detune_offset) for seg in segments]
+
+
 def _population_chain_cache_key(
     model: _PointModel,
     reps: int,
@@ -568,29 +588,32 @@ class SimEngine:
             signal_sample_times,
         )
 
+        relax_segment = inter_shot_relax_segment(
+            self.program.modules,
+            self.program.sweep_dict,
+            self.sim,
+            f_qubit_ghz,
+            point,
+            self.program.cfg_model.relax_delay,
+            detune_offset=0.0,
+        )
+
         pre_readout_props: list[NDArray[np.float64]] = []
         inter_shot_props: list[NDArray[np.float64]] = []
         for delta in self._detune_nodes:
             self._raise_if_cancelled()
-            lowered = (
-                zero_lowered
-                if delta == 0.0
-                else self._lower(point, f_qubit_ghz, float(delta))
-            )
-            pre_readout_props.append(_sequence_propagator(lowered.segments))
-            relax_segment = inter_shot_relax_segment(
-                self.program.modules,
-                self.program.sweep_dict,
-                self.sim,
-                f_qubit_ghz,
-                point,
-                self.program.cfg_model.relax_delay,
-                detune_offset=float(delta),
+            detune_offset = float(delta)
+            pre_readout_props.append(
+                _sequence_propagator(
+                    _shift_segments_detuning(zero_lowered.segments, detune_offset)
+                )
             )
             inter_shot_props.append(
                 np.eye(4, dtype=np.float64)
                 if relax_segment is None
-                else _sequence_propagator([relax_segment])
+                else _sequence_propagator(
+                    [_shift_segment_detuning(relax_segment, detune_offset)]
+                )
             )
 
         return _PointModel(

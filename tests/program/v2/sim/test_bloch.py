@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from scipy.linalg import expm
 from zcu_tools.program.v2.sim.bloch import (
     Segment,
     bloch_generator,
@@ -25,6 +26,24 @@ def test_no_dynamics_is_identity() -> None:
 
     prop = segment_propagator(0.0, 0.0, 0.0, 1.7, None, None, 0.0)
     assert np.allclose(prop, np.eye(4), atol=1e-12)
+
+
+def test_idle_fast_path_matches_matrix_exponential() -> None:
+    """Undriven free evolution keeps the exact augmented-generator solution."""
+
+    delta = 2.0 * np.pi * 0.7
+    phase = 0.4
+    duration = 0.8
+    t1 = 3.0
+    t2 = 1.2
+    thermal = 0.13
+
+    expected = np.asarray(
+        expm(bloch_generator(0.0, delta, phase, t1, t2, thermal) * duration),
+        dtype=np.float64,
+    )
+    actual = segment_propagator(0.0, delta, phase, duration, t1, t2, thermal)
+    np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-12)
 
 
 def test_steady_state_is_preserved() -> None:

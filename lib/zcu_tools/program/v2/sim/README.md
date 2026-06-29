@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-06-29 (readout noise and photon calibration)
+**Last updated:** 2026-06-30 (SimEngine performance path)
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -34,7 +34,8 @@ For each sweep point the engine drives this chain:
 1. **lower** the semantic module tree (Pulse / Reset / Delay / Readout) into a
    list of piecewise-constant `bloch.Segment` plus a readout plan,
 2. **evolve** the Bloch vector through those segments (4x4 augmented affine
-   propagator via `expm`) to an excited population `P_e`; within a round the
+   propagator, with closed-form free-evolution segments) to an excited population
+   `P_e`; within a round the
    engine carries each rep's post-readout state through `relax_delay` into the
    next rep,
 3. **read out** dispersively as two state-conditioned blobs — `s_g = S21(rf_g)`
@@ -120,8 +121,10 @@ every coupling point.
   `inhomogeneous_rate` (Γ). Also carries `poll_latency` (seconds/element, default
   1e-7): synthetic pacing for `MockQickSoc.poll_data`, not physics — set to 0.0 to
   skip the sleep entirely (e.g. in tests). Data + validation only, no physics logic.
-- `bloch.py` — leaf TLS optical-Bloch propagator: segment generator, `expm`
-  propagator, `evolve`, ground/excited helpers. Imports nothing from the project.
+- `bloch.py` — leaf TLS optical-Bloch propagator: segment generator, segment
+  propagator, `evolve`, ground/excited helpers. Undriven free-evolution segments
+  use the same closed-form affine solution as the full matrix exponential. Imports
+  nothing from the project.
 - `lowering.py` — module tree -> Bloch timeline + readout plan for one sweep
   point. Owns the single-rotating-frame detuning (plus the engine's per-node
   `detune_offset` frame shift), shaped-pulse discretisation, deterministic Branch
