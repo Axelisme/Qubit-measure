@@ -10,15 +10,15 @@ the right pane follows.
 
 from __future__ import annotations
 
-from typing import Any
+import math
 
 from qtpy.QtCore import Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+    QCheckBox,
     QComboBox,
     QHBoxLayout,
     QInputDialog,
     QLabel,
-    QLineEdit,
     QListWidget,
     QMessageBox,
     QPushButton,
@@ -26,13 +26,150 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.gui.app.autofluxdep.cfg import DirectValue, EvalValue, ScalarSpec
+from zcu_tools.gui.app.autofluxdep.cfg.form import (
+    LiveModelEnv,
+    ScalarLiveField,
+    ScalarWidget,
+)
 from zcu_tools.gui.app.autofluxdep.controller import Controller
 from zcu_tools.gui.app.autofluxdep.registry import available_node_types
 from zcu_tools.gui.session.expression import coerce_eval_result, evaluate_numeric_expr
-from zcu_tools.gui.session.ui.value_source_input import (
-    SessionValueSourceInputHost,
-    ValueSourceInputController,
-)
+
+
+class _FluxScalarEditor(QWidget):
+    """Flux-sweep scalar editor backed by the shared ScalarWidget eval UX."""
+
+    textChanged = Signal(str)
+
+    def __init__(
+        self,
+        ctrl: Controller,
+        *,
+        label: str,
+        type_: type,
+        text: str,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._ctrl = ctrl
+        self._label = label
+        self._type = type_
+        self._torn_down = False
+        self._field = ScalarLiveField(
+            ScalarSpec(label=label, type=type_, decimals=6 if type_ is float else None),
+            LiveModelEnv(ctrl=ctrl),
+            initial_val=_flux_value_from_text(text, type_),
+        )
+        self._field.on_change.connect(self._on_field_changed)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self._widget = ScalarWidget(self._field, self)
+        layout.addWidget(self._widget)
+
+    def text(self) -> str:
+        return self.expression_text()
+
+    def setText(self, text: str) -> None:  # noqa: N802 - Qt-style test helper
+        self._field.set_value(_flux_value_from_text(text, self._type))
+
+    def is_expression_mode(self) -> bool:
+        return isinstance(self._field.get_value(), EvalValue)
+
+    def resolved_preview_text(self) -> str | None:
+        value = self._field.get_value()
+        if not isinstance(value, EvalValue):
+            return None
+        if value.resolved is None:
+            return "= ?"
+        if self._type is float and isinstance(value.resolved, (int, float)):
+            raw = f"{value.resolved:.6f}"
+            if "." in raw:
+                raw = raw.rstrip("0")
+                if raw.endswith("."):
+                    raw += "0"
+            return f"= {raw}"
+        return f"= {value.resolved}"
+
+    def expression_text(self) -> str:
+        value = self._field.get_value()
+        if isinstance(value, EvalValue):
+            return value.expr
+        if value.value is None:
+            return ""
+        return str(value.value)
+
+    def resolved_value(self) -> int | float:
+        value = self._field.get_value()
+        if isinstance(value, EvalValue):
+            expr = value.expr.strip()
+            try:
+                return coerce_eval_result(
+                    evaluate_numeric_expr(expr, self._ctrl.get_current_md()),
+                    self._type,
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Flux sweep {self._label} expression {expr!r}: {exc}"
+                ) from exc
+
+        if value.value is None:
+            raise RuntimeError(f"Flux sweep {self._label} value is empty")
+        try:
+            if self._type is int:
+                if isinstance(value.value, bool):
+                    raise TypeError("bool is not an integer point count")
+                return int(value.value)
+            if self._type is float:
+                resolved = float(value.value)
+                if not math.isfinite(resolved):
+                    raise TypeError("value must be finite")
+                return resolved
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(
+                f"Flux sweep {self._label} value {value.value!r}: {exc}"
+            ) from exc
+        raise RuntimeError(f"Unsupported flux field type {self._type!r}")
+
+    def teardown(self) -> None:
+        if self._torn_down:
+            return
+        self._torn_down = True
+        self._field.on_change.disconnect(self._on_field_changed)
+        self._widget.teardown()
+
+    def _on_field_changed(self, value: object) -> None:
+        if isinstance(value, DirectValue) and value.value is None:
+            self._field.set_value(DirectValue(_direct_default_for_type(self._type)))
+            return
+        if not self.signalsBlocked():
+            self.textChanged.emit(self.expression_text())
+
+
+def _flux_value_from_text(text: str, type_: type) -> DirectValue | EvalValue:
+    stripped = text.strip()
+    if stripped == "":
+        return EvalValue(expr="")
+    try:
+        if type_ is int:
+            return DirectValue(int(stripped))
+        if type_ is float:
+            value = float(stripped)
+            if not math.isfinite(value):
+                raise ValueError("value must be finite")
+            return DirectValue(value)
+    except (TypeError, ValueError):
+        return EvalValue(expr=stripped)
+    raise RuntimeError(f"Unsupported flux field type {type_!r}")
+
+
+def _direct_default_for_type(type_: type) -> int | float:
+    if type_ is int:
+        return 0
+    if type_ is float:
+        return 0.0
+    raise RuntimeError(f"Unsupported flux field type {type_!r}")
 
 
 class NodeListPane(QWidget):
@@ -41,11 +178,13 @@ class NodeListPane(QWidget):
     selection_changed = Signal(int)  # selected node index, or -1
     run_requested = Signal()
     stop_requested = Signal()
+    auto_follow_changed = Signal(bool)
 
     def __init__(self, ctrl: Controller, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._ctrl = ctrl
         self._running = False
+        self._torn_down = False
 
         root = QVBoxLayout(self)
 
@@ -76,16 +215,14 @@ class NodeListPane(QWidget):
         root.addWidget(QLabel("flux sweep"))
         flux_row = QHBoxLayout()
         start_expr, stop_expr, npts_expr = self._ctrl.get_flux_sweep_expressions()
-        self._flux_start = QLineEdit(start_expr)
-        self._flux_stop = QLineEdit(stop_expr)
-        self._flux_npts = QLineEdit(npts_expr)
-        self._flux_input_helpers = tuple(
-            ValueSourceInputController(
-                line_edit,
-                SessionValueSourceInputHost(self._ctrl),
-                parent=line_edit,
-            )
-            for line_edit in (self._flux_start, self._flux_stop, self._flux_npts)
+        self._flux_start = _FluxScalarEditor(
+            self._ctrl, label="start", type_=float, text=start_expr
+        )
+        self._flux_stop = _FluxScalarEditor(
+            self._ctrl, label="stop", type_=float, text=stop_expr
+        )
+        self._flux_npts = _FluxScalarEditor(
+            self._ctrl, label="points", type_=int, text=npts_expr
         )
         for w in (self._flux_start, self._flux_stop, self._flux_npts):
             w.textChanged.connect(lambda _text: self._sync_flux_expressions())
@@ -104,6 +241,11 @@ class NodeListPane(QWidget):
         root.addLayout(src_row)
 
         # run/stop toggle (single button)
+        self._auto_follow_tabs = QCheckBox("Auto-follow active tab")
+        self._auto_follow_tabs.setChecked(self._ctrl.get_auto_follow_tabs())
+        self._auto_follow_tabs.toggled.connect(self._on_auto_follow_toggled)
+        root.addWidget(self._auto_follow_tabs)
+
         self._run_btn = _btn("▶ Run", self._on_run_stop)
         root.addWidget(self._run_btn)
 
@@ -118,6 +260,15 @@ class NodeListPane(QWidget):
         self.refresh_list()
         self.refresh_flux_fields()
         self.refresh_flux_sources()
+        self.refresh_preferences()
+
+    def teardown(self) -> None:
+        if self._torn_down:
+            return
+        self._torn_down = True
+        self._flux_start.teardown()
+        self._flux_stop.teardown()
+        self._flux_npts.teardown()
 
     def refresh_list(self) -> None:
         prev = self._list.currentRow()
@@ -154,6 +305,15 @@ class NodeListPane(QWidget):
             field.blockSignals(True)
             field.setText(text)
             field.blockSignals(False)
+
+    def refresh_preferences(self) -> None:
+        self._auto_follow_tabs.blockSignals(True)
+        self._auto_follow_tabs.setChecked(self._ctrl.get_auto_follow_tabs())
+        self._auto_follow_tabs.blockSignals(False)
+
+    def _on_auto_follow_toggled(self, enabled: bool) -> None:
+        self._ctrl.set_auto_follow_tabs(enabled)
+        self.auto_follow_changed.emit(enabled)
 
     def _sync_flux_expressions(self) -> None:
         self._ctrl.set_flux_sweep_expressions(
@@ -242,21 +402,12 @@ class NodeListPane(QWidget):
     def _commit_flux(self) -> None:
         import numpy as np
 
-        start = self._read_flux_field(self._flux_start, float, label="start")
-        stop = self._read_flux_field(self._flux_stop, float, label="stop")
-        npts = self._read_flux_field(self._flux_npts, int, label="points")
+        start = float(self._flux_start.resolved_value())
+        stop = float(self._flux_stop.resolved_value())
+        npts = int(self._flux_npts.resolved_value())
+        if npts < 1:
+            raise RuntimeError("Flux sweep points must be at least 1")
         self._ctrl.set_flux_values(np.linspace(start, stop, npts).tolist())
-
-    def _read_flux_field(self, field: QLineEdit, type_: type, *, label: str) -> Any:
-        expr = field.text().strip()
-        try:
-            return coerce_eval_result(
-                evaluate_numeric_expr(expr, self._ctrl.get_current_md()), type_
-            )
-        except Exception as exc:
-            raise RuntimeError(
-                f"Flux sweep {label} expression {expr!r}: {exc}"
-            ) from exc
 
     def set_running(self, running: bool) -> None:
         self._running = running

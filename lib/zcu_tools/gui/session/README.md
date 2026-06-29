@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-28 — result-scope setup discovery
+**Last updated:** 2026-06-29 — setup dialog project layout
 
 # gui/session/ — 量測 session core（measure + autofluxdep 共用）
 
@@ -37,7 +37,7 @@ session/
 │   └── build.py        — SessionServices bundle（soc_connection/predictor/context/device/startup）+ build_session_services(state,bus,gate,handles,background,progress,io_manager,runner,driver_factory?,device_registry?)
 └── ui/                 — 共用 dialog（吃 SessionControllerPort）
     ├── progress_stack.py — ProgressStack widget（唯一拉 Qt 的 progress 件）
-    ├── setup_dialog.py   — Project + Context + Connection 合併（QSplitter）
+    ├── setup_dialog.py   — Project + Context + Connection 合併（QSplitter）；Project group 先選 Result scope，再填 chip/qubit/res，並在同一 group 提供 Apply startup context
     ├── device_dialog.py  — 設備管理；per-device panel lazy-import zcu_tools.device.*；dialog-scoped + selection-scoped QTimer（1s）對當前選取 device 呼 `poll_device_info`，結果經 DEVICE_CHANGED 流回（repaint 由 Phase 1 保留選取路徑接住）；timer 僅可見+有選取時跑，hide/close/無選取即停（不常駐、不全 device 輪詢）
     ├── predictor_dialog.py — FluxoniumPredictor 載入/定義 + 頻率預測（左控制 / 右繪圖兩欄；load/clear/predict + 可編輯 EJ/EC/EL/flux_half/flux_period 欄位 + Apply〔set_predictor_model_params 建+裝〕+「Load params.json→fields」填欄位〔不自動裝〕+ active-model 讀回；PREDICTOR_CHANGED 訂閱；host 可用 `persistent_on_close=True` 讓 Close/視窗 X 只 hide、不 emit finished，保留已算曲線）；右欄 PredictorCurveCanvas 與 Flux value spinbox 雙向連動（debounce）
     ├── predictor_canvas.py — PredictorCurveCanvas：f_ij 曲線 over device value（雙 x 軸 flux/value）+ 可拖動 flux 垂線（方案 B：marker 不折、出窗平移）；主線程同步繪圖不需 marshal

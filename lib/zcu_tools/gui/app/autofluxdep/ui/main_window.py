@@ -2,7 +2,8 @@
 
 A QMainWindow holding a measure-gui-style top session row, a left/right split
 (``NodeListPane`` + ``NodeDetailPane``), and a global flux progress bar in the
-status bar. It wires the edit↔run state switch and owns the liveplot integration:
+central bottom row. It wires the edit↔run state switch and owns the liveplot
+integration:
 
 - At **Run start** it allocates each provider's sweep Result (``Controller
   .prepare_run_results``) and, for every Result, builds a bare matplotlib
@@ -31,6 +32,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QMainWindow,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -100,6 +102,8 @@ class MainWindow(QMainWindow):
         self._ctrl = ctrl
         # per-provider sweep-lived liveplot state: name -> (canvas, plotter)
         self._plots: dict[str, tuple[QWidget, Any]] = {}
+        self._run_active = False
+        self._active_run_node_name: str | None = None
         # The single live (non-modal) context inspector, or None when closed. The
         # base auto-refreshes off the shared session event bus, so the open dialog
         # tracks md/ml edits live without this window pushing to it.
@@ -166,15 +170,19 @@ class MainWindow(QMainWindow):
         split.setStretchFactor(1, 1)
         main_layout.addWidget(split, stretch=1)
 
-        # global flux progress in the status bar
+        # global flux progress as a central bottom row, matching window width
         self._progress = QProgressBar()
         self._progress.setFormat("flux %v/%m")
-        self.statusBar().addPermanentWidget(self._progress)  # type: ignore[union-attr]
+        self._progress.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        main_layout.addWidget(self._progress)
 
         # selection → right pane follows
         self._list.selection_changed.connect(self._on_select)
         self._list.run_requested.connect(self._start)
         self._list.stop_requested.connect(self._stop)
+        self._list.auto_follow_changed.connect(self._on_auto_follow_changed)
 
         # run bridge (worker thread → main thread)
         self._bridge = _RunBridge(ctrl)
@@ -203,6 +211,7 @@ class MainWindow(QMainWindow):
         self._on_select(self._list.selected_index)
 
     def closeEvent(self, a0: Any) -> None:
+        self._list.teardown()
         self._ctrl.persist_all()
         super().closeEvent(a0)
 
@@ -364,10 +373,12 @@ class MainWindow(QMainWindow):
         self._ctrl.stop_run()
 
     def _on_run_started(self) -> None:
+        self._run_active = True
+        self._active_run_node_name = None
         self._list.set_running(True)
-        self._detail.set_running(True)
+        auto_follow = self._ctrl.get_auto_follow_tabs()
+        self._detail.set_running(True, switch_tab=auto_follow)
         self._refresh_toolbar_buttons()
-        self._detail.focus_run()
 
     def _on_node_entered(self, name: str, idx: int) -> None:
         """Auto-follow: a provider started → select it + show its run tab/plot.
@@ -377,14 +388,31 @@ class MainWindow(QMainWindow):
         provider is already selected, keep the user's current edit/run sub-tab.
         """
         del idx
+        self._active_run_node_name = name
+        if not self._ctrl.get_auto_follow_tabs():
+            return
+        self._follow_run_node(name, force_focus=False)
+
+    def _on_auto_follow_changed(self, enabled: bool) -> None:
+        if not enabled or not self._run_active:
+            return
+        if self._active_run_node_name is None:
+            self._detail.focus_run()
+            return
+        followed = self._follow_run_node(self._active_run_node_name, force_focus=True)
+        if not followed:
+            self._detail.focus_run()
+
+    def _follow_run_node(self, name: str, *, force_focus: bool) -> bool:
         names = self._ctrl.state.node_names()
         if name not in names:
-            return  # a Service (predictor) or unknown name → no navigation
+            return False  # a Service (predictor) or unknown name → no navigation
         target = names.index(name)
         already_selected = self._list.selected_index == target
         self._list.select_index(target)  # → _on_select shows its canvas
-        if not already_selected:
+        if force_focus or not already_selected:
             self._detail.focus_run()
+        return True
 
     def _on_row_updated(self, name: str, idx: int) -> None:
         """Main-thread: a Result row was filled → redraw that provider's Plotter."""
@@ -400,8 +428,10 @@ class MainWindow(QMainWindow):
         self._progress.setValue(idx + 1)
 
     def _on_run_done(self) -> None:
+        self._run_active = False
+        self._active_run_node_name = None
         self._list.set_running(False)
-        self._detail.set_running(False)
+        self._detail.set_running(False, switch_tab=self._ctrl.get_auto_follow_tabs())
         self._refresh_toolbar_buttons()
 
     def _on_run_failed(self, message: str) -> None:

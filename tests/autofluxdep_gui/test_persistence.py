@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.services import (
+    APP_STATE_VERSION,
     AppPersistedState,
     PersistedFluxSweep,
     PersistedNode,
+    PersistedUiPrefs,
     PersistedWorkflow,
     PersistenceCaretaker,
     RestoreReport,
@@ -30,6 +33,7 @@ def test_workflow_persistence_roundtrip(tmp_path: Path):
     ctrl.add_node_by_type("lenrabi")
     ctrl.set_flux_sweep_expressions("span / 2", "-span / 2", "2 * count + 1")
     ctrl.set_flux_values([0.002, 0.001, 0.0, -0.001, -0.002])
+    ctrl.set_auto_follow_tabs(False)
     ctrl.attach_caretaker(PersistenceCaretaker(ctrl, cache_dir=tmp_path))
     ctrl.persist_all()
 
@@ -52,6 +56,37 @@ def test_workflow_persistence_roundtrip(tmp_path: Path):
     assert restored.state.flux_values == pytest.approx(
         [0.002, 0.001, 0.0, -0.001, -0.002]
     )
+    assert restored.get_auto_follow_tabs() is False
+
+
+def test_restore_old_memento_without_ui_defaults_auto_follow_true(tmp_path: Path):
+    ctrl = build_core()
+    ctrl.set_auto_follow_tabs(False)
+    caretaker = PersistenceCaretaker(ctrl, cache_dir=tmp_path)
+    caretaker.state_path.parent.mkdir(parents=True, exist_ok=True)
+    caretaker.state_path.write_text(
+        json.dumps(
+            {
+                "version": APP_STATE_VERSION,
+                "workflow": {"nodes": []},
+                "flux": {
+                    "start_expr": "0.0",
+                    "stop_expr": "1.0",
+                    "npts_expr": "3",
+                    "values": [0.0, 0.5, 1.0],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    ctrl.attach_caretaker(caretaker)
+
+    outcome = ctrl.restore_all()
+
+    assert outcome is not None
+    assert outcome.load_error is None
+    assert ctrl.get_auto_follow_tabs() is True
+    assert ctrl.state.flux_values == pytest.approx([0.0, 0.5, 1.0])
 
 
 def test_restore_rejects_invalid_node_and_keeps_valid_nodes():
@@ -88,6 +123,7 @@ def test_window_restore_workflow_view_updates_list_and_flux_fields(qapp):  # noq
                     npts_expr="n_flux",
                     values=(0.1, 0.2),
                 ),
+                ui=PersistedUiPrefs(auto_follow_tabs=False),
             )
         )
         win.restore_workflow_view()
@@ -96,6 +132,7 @@ def test_window_restore_workflow_view_updates_list_and_flux_fields(qapp):  # noq
         assert win._list._flux_start.text() == "phi0 - span"
         assert win._list._flux_stop.text() == "phi0 + span"
         assert win._list._flux_npts.text() == "n_flux"
+        assert not win._list._auto_follow_tabs.isChecked()
     finally:
         ctrl._background_svc.quiesce()
         win.close()

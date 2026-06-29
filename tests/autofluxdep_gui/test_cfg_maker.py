@@ -222,6 +222,30 @@ def test_ro_optimize_make_cfg_lowers_context():
     assert cfg.relax_delay == 30.0
 
 
+def test_ro_optimize_init_result_uses_window_params():
+    import numpy as np
+    from zcu_tools.gui.app.autofluxdep.nodes.ro_optimize import RoOptimizeBuilder
+
+    builder = RoOptimizeBuilder()
+    schema = _schema(
+        builder,
+        {
+            "freq_expts": 31,
+            "gain_expts": 31,
+            "freq_window": 50.0,
+            "gain_window": 1.0,
+        },
+    )
+    result = builder.make_init_result(schema, np.linspace(0.0, 1.0, 3))
+
+    assert result.n_freq == 31
+    assert result.freq[0] == 5950.0
+    assert result.freq[-1] == 6050.0
+    assert result.n_gain == 31
+    assert result.gain[0] == 0.0
+    assert result.gain[-1] == 1.0
+
+
 def test_ro_optimize_produce_fast_fails_when_context_unconfigured():
     # the real-acquire contract: produce Fast Fails (no synthetic fallback) when ml
     # is None — make_cfg cannot lower the swept readout pulse.

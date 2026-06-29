@@ -77,37 +77,9 @@ class SetupDialog(QDialog):
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(4, 4, 4, 4)
 
-        # chip / qub / res name section
-        name_group = QGroupBox("Chip & Qubit & Resonator")
-        name_form = QFormLayout(name_group)
-
-        self._chip_edit = QLineEdit("unknown_chip")
-        self._chip_edit.setPlaceholderText("e.g. Q5_2D")
-        self._chip_edit.textChanged.connect(self._on_names_changed)
-        self._chip_completer_model = QStringListModel(self)
-        self._chip_completer = QCompleter(self._chip_completer_model, self)
-        self._chip_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)  # type: ignore[attr-defined]
-        self._chip_edit.setCompleter(self._chip_completer)
-        name_form.addRow("Chip name:", self._chip_edit)
-
-        self._qub_edit = QLineEdit("unknown_qubit")
-        self._qub_edit.setPlaceholderText("e.g. Q1")
-        self._qub_edit.textChanged.connect(self._on_names_changed)
-        self._qub_completer_model = QStringListModel(self)
-        self._qub_completer = QCompleter(self._qub_completer_model, self)
-        self._qub_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)  # type: ignore[attr-defined]
-        self._qub_edit.setCompleter(self._qub_completer)
-        name_form.addRow("Qubit name:", self._qub_edit)
-
-        self._res_edit = QLineEdit("unknown_resonator")
-        self._res_edit.setPlaceholderText("e.g. R1")
-        name_form.addRow("Resonator name:", self._res_edit)
-
-        left_layout.addWidget(name_group)
-
-        # result scope / derived paths section
-        paths_group = QGroupBox("Result scope")
-        paths_form = QFormLayout(paths_group)
+        # project identity and result scope
+        project_group = QGroupBox("Project / Result scope")
+        project_form = QFormLayout(project_group)
 
         scope_row = QHBoxLayout()
         self._scope_combo = QComboBox()
@@ -119,26 +91,37 @@ class SetupDialog(QDialog):
         refresh_scopes_btn.setToolTip("Refresh result scopes")
         refresh_scopes_btn.clicked.connect(self._refresh_result_scopes)
         scope_row.addWidget(refresh_scopes_btn)
-        paths_form.addRow("Scope:", scope_row)
+        project_form.addRow("Scope:", scope_row)
 
-        self._result_dir_edit = QLineEdit()
-        self._result_dir_edit.setReadOnly(True)
-        self._result_dir_edit.setPlaceholderText("Generated result directory")
-        paths_form.addRow("Result dir:", self._result_dir_edit)
+        self._chip_edit = QLineEdit("unknown_chip")
+        self._chip_edit.setPlaceholderText("e.g. Q5_2D")
+        self._chip_edit.textChanged.connect(self._on_names_changed)
+        self._chip_completer_model = QStringListModel(self)
+        self._chip_completer = QCompleter(self._chip_completer_model, self)
+        self._chip_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)  # type: ignore[attr-defined]
+        self._chip_edit.setCompleter(self._chip_completer)
+        project_form.addRow("Chip name:", self._chip_edit)
 
-        self._db_path_edit = QLineEdit()
-        self._db_path_edit.setReadOnly(True)
-        self._db_path_edit.setPlaceholderText("Generated database path")
-        paths_form.addRow("Database path:", self._db_path_edit)
+        self._qub_edit = QLineEdit("unknown_qubit")
+        self._qub_edit.setPlaceholderText("e.g. Q1")
+        self._qub_edit.textChanged.connect(self._on_names_changed)
+        self._qub_completer_model = QStringListModel(self)
+        self._qub_completer = QCompleter(self._qub_completer_model, self)
+        self._qub_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)  # type: ignore[attr-defined]
+        self._qub_edit.setCompleter(self._qub_completer)
+        project_form.addRow("Qubit name:", self._qub_edit)
 
-        left_layout.addWidget(paths_group)
+        self._res_edit = QLineEdit("unknown_resonator")
+        self._res_edit.setPlaceholderText("e.g. R1")
+        project_form.addRow("Resonator name:", self._res_edit)
 
         # apply startup context button
         self._apply_btn = QPushButton(
             "Apply & Setup" if startup_mode else "Apply startup context"
         )
         self._apply_btn.clicked.connect(self._on_apply_startup_clicked)
-        left_layout.addWidget(self._apply_btn)
+        project_form.addRow("", self._apply_btn)
+        left_layout.addWidget(project_group)
 
         # context list
         ctx_group = QGroupBox("Contexts (requires file-backed project)")
@@ -379,9 +362,8 @@ class SetupDialog(QDialog):
         self._scope_combo.clear()
 
         generated_index = -1
-        paths = None
-        if chip and qub:
-            paths = self._ctrl.derive_project_paths(chip, qub)
+        has_names = bool(chip and qub)
+        if has_names:
             self._scope_combo.addItem("(new generated scope)", userData=None)
             generated_index = 0
 
@@ -391,7 +373,7 @@ class SetupDialog(QDialog):
                 userData=scope.scope_id,
             )
 
-        if paths is not None:
+        if has_names:
             matching_ids = {
                 scope.scope_id
                 for scope in self._result_scopes
@@ -406,21 +388,11 @@ class SetupDialog(QDialog):
                     if idx >= 0:
                         break
             self._scope_combo.setCurrentIndex(idx if idx >= 0 else generated_index)
-            scope = self._current_scope()
-            self._result_dir_edit.setText(
-                scope.result_dir if scope else paths.result_dir
-            )
-            self._db_path_edit.setText(paths.database_path)
         elif self._result_scopes:
             idx = self._scope_combo.findData(prev_scope_id)
             self._scope_combo.setCurrentIndex(max(idx, 0))
-            scope = self._current_scope()
-            self._result_dir_edit.setText(scope.result_dir if scope else "")
-            self._db_path_edit.clear()
         else:
             self._scope_combo.addItem("(enter chip and qubit)", userData=None)
-            self._result_dir_edit.clear()
-            self._db_path_edit.clear()
 
         self._scope_combo.blockSignals(False)
 
@@ -448,9 +420,6 @@ class SetupDialog(QDialog):
             qub = scope.qub_name
         if not chip or not qub:
             return
-        paths = self._ctrl.derive_project_paths(chip, qub)
-        self._result_dir_edit.setText(scope.result_dir if scope else paths.result_dir)
-        self._db_path_edit.setText(paths.database_path)
 
     def _refresh_device_list(self) -> None:
         entries = self._ctrl.list_devices()
@@ -495,9 +464,6 @@ class SetupDialog(QDialog):
         )
         if not result:
             return
-        if isinstance(result, dict):
-            self._result_dir_edit.setText(result.get("result_dir", ""))
-            self._db_path_edit.setText(result.get("database_path", ""))
         self._set_project_status(f"Startup context applied: {chip}/{qub} (res={res})")
         logger.info(
             "SetupDialog: startup context applied chip=%r qub=%r res=%r",
@@ -508,9 +474,6 @@ class SetupDialog(QDialog):
 
         self._refresh_result_scopes(silent=True)
         self._refresh_context_list()
-        logger.info(
-            "SetupDialog: project available result_dir=%r", self._result_dir_edit.text()
-        )
 
     def _on_switch_clicked(self) -> None:
         item = self._ctx_list.currentItem()

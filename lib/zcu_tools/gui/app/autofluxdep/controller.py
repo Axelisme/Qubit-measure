@@ -49,6 +49,7 @@ from zcu_tools.gui.app.autofluxdep.services.persistence_types import (
     AppPersistedState,
     PersistedFluxSweep,
     PersistedNode,
+    PersistedUiPrefs,
     PersistedWorkflow,
     PersistenceError,
     RestoreIssue,
@@ -267,6 +268,7 @@ class Controller(SessionControllerMixin):
                 npts_expr=self._state.flux_npts_expr,
                 values=tuple(float(v) for v in self._state.flux_values),
             ),
+            ui=PersistedUiPrefs(auto_follow_tabs=self._state.auto_follow_tabs),
         )
 
     def restore_persisted_state(self, state: AppPersistedState) -> RestoreReport:
@@ -295,6 +297,7 @@ class Controller(SessionControllerMixin):
         self._state.flux_stop_expr = state.flux.stop_expr
         self._state.flux_npts_expr = state.flux.npts_expr
         self._state.flux_values = [float(v) for v in state.flux.values]
+        self._state.auto_follow_tabs = state.ui.auto_follow_tabs
         self._state.run_results = {}
         self._state.version.bump(WORKFLOW_VERSION_KEY)
         self._state.version.bump(FLUX_VERSION_KEY)
@@ -488,6 +491,13 @@ class Controller(SessionControllerMixin):
             self._state.flux_stop_expr,
             self._state.flux_npts_expr,
         )
+
+    def set_auto_follow_tabs(self, enabled: bool) -> None:
+        """Persist the UI preference for run-time selection/tab auto-follow."""
+        self._state.auto_follow_tabs = bool(enabled)
+
+    def get_auto_follow_tabs(self) -> bool:
+        return self._state.auto_follow_tabs
 
     def set_flux_device(self, name: str | None) -> None:
         """Designate which connected device the flux sweep is applied through.

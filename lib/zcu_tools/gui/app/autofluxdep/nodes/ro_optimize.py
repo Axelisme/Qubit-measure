@@ -199,13 +199,19 @@ class RoOptimizeNode(Node):
         _ = snapshot.module("readout")  # required — the swept readout pulse
 
         result: Sweep2DResult = env.result
-        freqs = result.freq
-        gains = result.gain
         idx = env.flux_idx
 
         # Lower the active context into the run cfg (Fast Fail if unconfigured: a
         # real acquire needs a concrete pi_pulse + readout pulse).
         cfg = self._builder.make_cfg(env, snapshot)
+        freqs = np.linspace(
+            float(cfg.freq_range[0]), float(cfg.freq_range[1]), result.n_freq
+        )
+        gains = np.linspace(
+            float(cfg.gain_range[0]), float(cfg.gain_range[1]), result.n_gain
+        )
+        result.freq[:] = freqs
+        result.gain[:] = gains
 
         flux_device = require_flux_device(env, "ro_optimize")
         set_flux_by_name(
@@ -213,8 +219,9 @@ class RoOptimizeNode(Node):
         )
         setup_devices(cfg, progress=False)
 
-        # Sweep the readout freq × gain over the Result's axes (lower layer sets the
-        # freq / gain params on the readout pulse).
+        # Sweep the readout freq × gain over the cfg-derived axes (lower layer sets
+        # the freq / gain params on the readout pulse). Keep Result axes in sync so
+        # the plotter shows the same range the program actually sweeps.
         freq_sweep = axis_to_sweep(freqs)
         gain_sweep = axis_to_sweep(gains)
         cfg.modules.readout.set_param("freq", sweep2param("freq", freq_sweep))
@@ -395,11 +402,21 @@ class RoOptimizeBuilder(Builder):
         freq_expts = int(knobs["freq_expts"])
         gain_expts = int(knobs["gain_expts"])
 
-        # freq_range / gain_range are not user knobs (the centres are derived per
-        # flux point); make_init_result allocates the Result grid over the default
-        # endpoints at the chosen point counts.
-        freqs = np.linspace(_DEFAULT_FREQ[0], _DEFAULT_FREQ[1], freq_expts)
-        gains = np.linspace(_DEFAULT_GAIN[0], _DEFAULT_GAIN[1], gain_expts)
+        # The first allocation has no per-flux snapshot yet, so use the same window
+        # widths around the default centres. ``produce`` rebuilds these axes from the
+        # lowered per-point cfg before acquiring and plotting each row.
+        freq_window = abs(float(knobs["freq_window"]))
+        gain_window = abs(float(knobs["gain_window"]))
+        freqs = np.linspace(
+            _DEFAULT_CENTER_FREQ - freq_window,
+            _DEFAULT_CENTER_FREQ + freq_window,
+            freq_expts,
+        )
+        gains = np.linspace(
+            max(0.0, _DEFAULT_CENTER_GAIN - gain_window),
+            min(1.0, _DEFAULT_CENTER_GAIN + gain_window),
+            gain_expts,
+        )
         return Sweep2DResult.allocate(flux, freqs, gains)
 
     def make_plotter(self, figure: Any) -> Landscape2DPlotter:

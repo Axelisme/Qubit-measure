@@ -187,3 +187,11 @@ class Sweep2DResult:
     @property
     def n_flux(self) -> int:
         return self.flux.shape[0]
+
+    @property
+    def n_freq(self) -> int:
+        return self.freq.shape[0]
+
+    @property
+    def n_gain(self) -> int:
+        return self.gain.shape[0]

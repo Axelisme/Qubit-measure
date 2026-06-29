@@ -10,8 +10,9 @@ Shows ONE Node at a time (whichever the left list selects). Inner QTabWidget:
   canvas to show for the selected Node via ``show_run_canvas``.
 
 ``show_node`` rebuilds the edit form for a new selection; ``set_running`` flips
-the edit→run lock and switches to the run tab; ``show_run_canvas`` swaps in the
-selected Node's live canvas (or a placeholder when there is none).
+the edit→run lock and can switch tabs when auto-follow is enabled;
+``show_run_canvas`` swaps in the selected Node's live canvas (or a placeholder
+when there is none).
 """
 
 from __future__ import annotations
@@ -131,11 +132,13 @@ class NodeDetailPane(QWidget):
 
     # --- run state ---
 
-    def set_running(self, running: bool) -> None:
+    def set_running(self, running: bool, *, switch_tab: bool = True) -> None:
         self._running = running
         if self._form is not None:
             self._form.set_read_only(running)
         self._tabs.setTabText(_EDIT_TAB, "編輯·唯讀" if running else "編輯")
+        if not switch_tab:
+            return
         if running:
             self._tabs.setCurrentIndex(_RUN_TAB)
         else:

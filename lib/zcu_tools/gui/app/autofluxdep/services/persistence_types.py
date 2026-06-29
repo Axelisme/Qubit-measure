@@ -37,14 +37,21 @@ class PersistedFluxSweep(BaseModel):
     values: tuple[float, ...] = ()
 
 
+class PersistedUiPrefs(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    auto_follow_tabs: bool = True
+
+
 class AppPersistedState(BaseModel):
-    """The on-disk autofluxdep GUI snapshot: workflow + flux sweep only."""
+    """The on-disk autofluxdep GUI snapshot: workflow + flux sweep + UI prefs."""
 
     model_config = ConfigDict(frozen=True)
 
     version: int = APP_STATE_VERSION
     workflow: PersistedWorkflow = Field(default_factory=PersistedWorkflow)
     flux: PersistedFluxSweep = Field(default_factory=PersistedFluxSweep)
+    ui: PersistedUiPrefs = Field(default_factory=PersistedUiPrefs)
 
 
 @dataclass(frozen=True)
@@ -68,6 +75,7 @@ __all__ = [
     "AppPersistedState",
     "PersistedFluxSweep",
     "PersistedNode",
+    "PersistedUiPrefs",
     "PersistedWorkflow",
     "PersistenceError",
     "RestoreIssue",

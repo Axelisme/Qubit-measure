@@ -13,7 +13,11 @@ two rows for reorder/remove.
 from __future__ import annotations
 
 import pytest
-from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
+from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+    QApplication,
+    QSizePolicy,
+)
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.ui.main_window import MainWindow
 
@@ -110,6 +114,26 @@ def test_session_status_and_buttons_share_top_row(app):
     assert win._inspect_btn in widgets
 
 
+def test_progress_bar_is_central_full_width_row(app):
+    _ctrl, win = app
+    central = win.centralWidget()
+    assert central is not None
+    main_layout = central.layout()
+    assert main_layout is not None
+
+    progress_item = main_layout.itemAt(main_layout.count() - 1)
+    assert progress_item is not None
+    assert progress_item.widget() is win._progress
+    assert win._progress.parentWidget() is central
+    assert win._progress.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Expanding
+
+    win.resize(900, 600)
+    win.show()
+    QApplication.processEvents()
+    assert win._progress.width() > 0
+    assert abs(win._progress.width() - central.width()) <= 16
+
+
 def test_flux_source_picker_records_selection(app):
     # the flux-source combo records which connected device the sweep is applied
     # through (its unit labels the flux axis); with no devices it is just "(none)".
@@ -132,9 +156,64 @@ def test_flux_sweep_fields_accept_numeric_expressions(app):
     win._list._flux_start.setText("span / 2")
     win._list._flux_stop.setText("-span / 2")
     win._list._flux_npts.setText("2 * count + 1")
+
+    assert win._list._flux_start.is_expression_mode()
+    assert win._list._flux_start.resolved_preview_text() == "= 0.002"
+
     win._list._commit_flux()
 
     assert ctrl.state.flux_values == pytest.approx([0.002, 0.001, 0.0, -0.001, -0.002])
+
+
+def test_flux_sweep_rejects_non_integer_npts_expression(app):
+    _ctrl, win = app
+    win._list._flux_start.setText("0.0")
+    win._list._flux_stop.setText("1.0")
+    win._list._flux_npts.setText("2.5")
+
+    with pytest.raises(RuntimeError, match="not an integer"):
+        win._list._commit_flux()
+
+
+def test_flux_sweep_rejects_non_positive_npts(app):
+    _ctrl, win = app
+    win._list._flux_start.setText("0.0")
+    win._list._flux_stop.setText("1.0")
+    win._list._flux_npts.setText("0")
+
+    with pytest.raises(RuntimeError, match="at least 1"):
+        win._list._commit_flux()
+
+
+@pytest.mark.parametrize("expr", ["missing", ""])
+def test_flux_sweep_direct_fallback_from_invalid_or_empty_expression_is_not_empty(
+    app, expr: str
+):
+    ctrl, win = app
+    win._list._flux_start.setText(expr)
+    assert win._list._flux_start.is_expression_mode()
+    assert win._list._flux_start.resolved_preview_text() == "= ?"
+
+    # Mirrors ScalarWidget's unresolved EvalValue -> direct-mode branch.
+    win._list._flux_start._field.set_value(None)
+    win._list._flux_stop.setText("1.0")
+    win._list._flux_npts.setText("2")
+    win._list._commit_flux()
+
+    assert not win._list._flux_start.is_expression_mode()
+    assert ctrl.state.flux_values == pytest.approx([0.0, 1.0])
+
+
+def test_node_list_teardown_is_idempotent_and_called_by_close_event(app):
+    _ctrl, win = app
+
+    win._list.teardown()
+    win._list.teardown()
+
+    win.closeEvent(QCloseEvent())
+    win.closeEvent(QCloseEvent())
+
+    assert win._list._torn_down is True
 
 
 def test_predictor_button_opens_shared_predictor_dialog(app):
@@ -330,6 +409,61 @@ def test_run_switches_detail_to_run_tab(app):
     assert captured.get("predictor_enabled") is False
     assert captured.get("inspect_enabled") is True
     assert win._setup_btn.isEnabled()
+
+
+def test_auto_follow_checkbox_disables_tab_switch_and_navigation(app):
+    ctrl, win = app
+    win._list.select_index(0)
+    win._detail._tabs.setCurrentIndex(0)
+
+    win._list._auto_follow_tabs.setChecked(False)
+
+    assert ctrl.get_auto_follow_tabs() is False
+    win._on_run_started()
+    assert win._detail.current_tab == 0
+    assert win._list._run_btn.text() == "■ Stop"
+
+    win._on_node_entered("probe", 0)
+
+    assert win._list.selected_index == 0
+
+    win._detail._tabs.setCurrentIndex(1)
+    win._on_run_done()
+
+    assert win._detail.current_tab == 1
+    assert win._list._run_btn.text() == "▶ Run"
+
+
+def test_auto_follow_checkbox_can_turn_off_during_run(app):
+    _ctrl, win = app
+    win._list.select_index(0)
+    win._on_run_started()
+
+    win._list._auto_follow_tabs.setChecked(False)
+    win._on_node_entered("probe", 0)
+
+    assert win._list.selected_index == 0
+    win._on_run_done()
+
+
+def test_auto_follow_checkbox_can_turn_on_during_run(app):
+    ctrl, win = app
+    win._list.select_index(0)
+    win._detail._tabs.setCurrentIndex(0)
+    win._list._auto_follow_tabs.setChecked(False)
+    win._on_run_started()
+    win._on_node_entered("probe", 0)
+
+    assert ctrl.get_auto_follow_tabs() is False
+    assert win._list.selected_index == 0
+    assert win._detail.current_tab == 0
+
+    win._list._auto_follow_tabs.setChecked(True)
+
+    assert ctrl.get_auto_follow_tabs() is True
+    assert win._list.selected_index == 1
+    assert win._detail.current_tab == 1
+    win._on_run_done()
 
 
 def test_multiple_real_experiments_each_get_a_liveplot(qapp):

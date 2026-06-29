@@ -70,6 +70,7 @@ class AutoFluxDepState(SessionState):
         self.flux_start_expr: str = "2e-3"
         self.flux_stop_expr: str = "-0.2e-3"
         self.flux_npts_expr: str = "101"
+        self.auto_follow_tabs: bool = True
         # Which connected device the flux sweep is applied through (its unit
         # labels the flux axis; recorded for the run cfg's flux ``dev`` entry).
         # None = unset (the flux values are then bare numbers).

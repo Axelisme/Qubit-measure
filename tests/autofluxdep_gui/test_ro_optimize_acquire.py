@@ -74,6 +74,10 @@ def test_ro_optimize_acquire_finds_best_point():
 
         best_freq = patch.values()["best_ro_freq"]
         best_gain = patch.values()["best_ro_gain"]
+        # produce derives the actual swept axes from make_cfg(), not from stale
+        # allocation defaults. These are centered on the previous best in snap.
+        np.testing.assert_allclose(result.freq[[0, -1]], [5995.0, 6005.0])
+        np.testing.assert_allclose(result.gain[[0, -1]], [0.2, 0.8])
         # finite best point inside the swept window
         assert np.isfinite(best_freq) and np.isfinite(best_gain)
         assert result.freq[0] <= best_freq <= result.freq[-1]

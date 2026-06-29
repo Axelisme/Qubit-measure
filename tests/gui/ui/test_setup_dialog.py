@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+    QFormLayout,
+    QGroupBox,
+    QLabel,
+    QWidget,
+)
 from zcu_tools.gui.result_scope import ResultScope, ResultScopeManager
 from zcu_tools.gui.session.services.connection import (
     ConnectMockRequest,
@@ -37,6 +43,28 @@ def _make_ctrl(**overrides: object) -> MagicMock:
     return ctrl
 
 
+def _nearest_group(widget: QWidget) -> QGroupBox | None:
+    parent = widget.parentWidget()
+    while parent is not None:
+        if isinstance(parent, QGroupBox):
+            return parent
+        parent = parent.parentWidget()
+    return None
+
+
+def _form_label_rows(form: QFormLayout) -> dict[str, int]:
+    rows: dict[str, int] = {}
+    for row in range(form.rowCount()):
+        item = form.itemAt(row, QFormLayout.ItemRole.LabelRole)
+        if item is None:
+            continue
+        widget = item.widget()
+        if not isinstance(widget, QLabel):
+            continue
+        rows[widget.text()] = row
+    return rows
+
+
 def test_setup_dialog_init(qapp):
     ctrl = _make_ctrl(
         get_context_labels=["ctx1", "ctx2"],
@@ -48,6 +76,30 @@ def test_setup_dialog_init(qapp):
     assert dialog._ctx_list.count() == 2
     # The first item should be active (index 0)
     assert dialog._ctx_list.currentRow() == 0
+
+
+def test_setup_dialog_project_scope_names_and_apply_share_group(qapp):
+    ctrl = _make_ctrl()
+    dialog = SetupDialog(ctrl)
+
+    project_group = _nearest_group(dialog._scope_combo)
+    assert project_group is not None
+    for widget in (
+        dialog._chip_edit,
+        dialog._qub_edit,
+        dialog._res_edit,
+        dialog._apply_btn,
+    ):
+        assert _nearest_group(widget) is project_group
+
+    form = project_group.layout()
+    assert isinstance(form, QFormLayout)
+    rows = _form_label_rows(form)
+    assert rows["Scope:"] < rows["Chip name:"]
+    assert rows["Chip name:"] < rows["Qubit name:"]
+    assert rows["Qubit name:"] < rows["Resonator name:"]
+    assert "Result dir:" not in rows
+    assert "Database path:" not in rows
 
 
 def test_setup_dialog_apply_startup_context(qapp):
@@ -89,7 +141,6 @@ def test_setup_dialog_scope_combo_lists_all_scopes_and_selection_prefills_names(
 
     assert dialog._chip_edit.text() == "Q3_2D"
     assert dialog._qub_edit.text() == "Q1"
-    assert dialog._result_dir_edit.text() == "/tmp/result/Q3_2D/Q1"
 
 
 def test_setup_dialog_does_not_render_success_when_project_apply_fails(qapp):
