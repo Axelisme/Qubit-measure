@@ -9,8 +9,11 @@ Shows ONE Node at a time (whichever the left list selects). Inner QTabWidget:
   Figure + Plotter (built at Run start, lifetime = sweep) and hands this pane the
   canvas to show for the selected Node via ``show_run_canvas``.
 
-``show_node`` rebuilds the edit form for a new selection; ``set_running`` flips
-the edit→run lock and can switch tabs when auto-follow is enabled;
+``show_node`` updates the selected node and can defer edit form materialization
+for run auto-follow navigation; during a run, materialized edit forms are cached
+per Node so manual selection does not rebuild the same hidden form repeatedly.
+``set_running`` flips the edit→run lock and can switch tabs when auto-follow is
+enabled;
 ``show_run_canvas`` swaps in the selected Node's live canvas (or a placeholder
 when there is none).
 """
@@ -47,6 +50,10 @@ class NodeDetailPane(QWidget):
         super().__init__(parent)
         self._node: PlacedNode | None = None
         self._form: NodeCfgForm | None = None
+        self._form_node: PlacedNode | None = None
+        self._form_index: int | None = None
+        self._pending_form: tuple[Controller, PlacedNode, int] | None = None
+        self._form_cache: dict[tuple[int, int], NodeCfgForm] = {}
         self._running = False
         self._canvas: QWidget | None = None
         self._programmatic_tab_switch = False
@@ -86,26 +93,124 @@ class NodeDetailPane(QWidget):
         controller: Controller | None,
         node: PlacedNode | None,
         index: int,
+        *,
+        build_edit_form: bool = True,
     ) -> None:
-        """Rebuild the edit form for the selected ``node`` at workflow ``index``.
+        """Show ``node`` at workflow ``index`` and optionally build its edit form.
 
         ``controller`` is the typed-form's commit target + LiveModel env (None only
         when clearing the selection). ``index`` is the placement's list position —
         the key ``set_node_params`` writes through on edit.
+
+        Run auto-follow uses ``build_edit_form=False`` so navigation can keep the
+        run canvas/title current without rebuilding a hidden edit form on every
+        active-node transition. Opening the edit tab materializes the pending form.
         """
         self._node = node
-        # clear old form (detach the CfgFormWidget + drop the LiveModel draft)
-        if self._form is not None:
-            self._form.teardown()
-            self._form.setParent(None)
-            self._form = None
         if node is None or controller is None:
+            self._pending_form = None
+            self._clear_form()
             self._title.setText("(no node selected)")
             return
         self._title.setText(node.name)
-        self._form = NodeCfgForm(controller, node, index)
-        self._form.set_read_only(self._running)
-        self._edit_layout.addWidget(self._form)
+        self._pending_form = (controller, node, index)
+        if build_edit_form or self.current_tab == _EDIT_TAB:
+            self._ensure_edit_form_current()
+
+    def _clear_form(self) -> None:
+        """Destroy the current edit form and every hidden cached form."""
+        current = self._form
+        for form in set(self._form_cache.values()):
+            if form is current:
+                continue
+            self._destroy_form(form)
+        self._form_cache.clear()
+        self._destroy_current_form()
+
+    def _destroy_current_form(self) -> None:
+        """Destroy only the currently displayed edit form."""
+        if self._form is not None:
+            self._destroy_form(self._form)
+            self._form = None
+        self._form_node = None
+        self._form_index = None
+
+    def _destroy_form(self, form: NodeCfgForm) -> None:
+        self._edit_layout.removeWidget(form)
+        form.teardown()
+        form.setParent(None)
+        form.deleteLater()
+
+    def _cache_key(self, node: PlacedNode, index: int) -> tuple[int, int]:
+        return (id(node), index)
+
+    def _cache_current_form(self) -> None:
+        if self._form is None or self._form_node is None or self._form_index is None:
+            return
+        self._form_cache[self._cache_key(self._form_node, self._form_index)] = (
+            self._form
+        )
+
+    def _detach_current_form(self) -> None:
+        """Hide the current form without tearing it down."""
+        if self._form is None:
+            return
+        self._edit_layout.removeWidget(self._form)
+        self._form.hide()
+        self._form.setParent(self._edit_host)
+        self._form = None
+        self._form_node = None
+        self._form_index = None
+
+    def _show_form(self, form: NodeCfgForm, node: PlacedNode, index: int) -> None:
+        if form.parentWidget() is not self._edit_host:
+            form.setParent(self._edit_host)
+        self._form = form
+        self._form_node = node
+        self._form_index = index
+        form.set_read_only(self._running)
+        self._edit_layout.addWidget(form)
+        form.show()
+
+    def _ensure_edit_form_current(self) -> None:
+        """Materialize the pending edit form when the edit tab needs it."""
+        pending = self._pending_form
+        if pending is None:
+            return
+
+        controller, node, index = pending
+        if (
+            self._form is not None
+            and self._form_node is node
+            and self._form_index == index
+        ):
+            self._form.set_read_only(self._running)
+            self._pending_form = None
+            return
+
+        if self._running:
+            self._cache_current_form()
+            self._detach_current_form()
+            key = self._cache_key(node, index)
+            form = self._form_cache.get(key)
+            if form is None:
+                form = NodeCfgForm(controller, node, index)
+                self._form_cache[key] = form
+            self._show_form(form, node, index)
+        else:
+            self._destroy_current_form()
+            form = NodeCfgForm(controller, node, index)
+            self._show_form(form, node, index)
+        self._pending_form = None
+
+    def _drop_hidden_form_cache(self) -> None:
+        current = self._form
+        for key, form in list(self._form_cache.items()):
+            if form is current:
+                continue
+            self._destroy_form(form)
+            del self._form_cache[key]
+        self._form_cache.clear()
 
     def set_canvas_park(self, park: QWidget) -> None:
         """Inject the hidden widget de-selected canvases are parked under.
@@ -138,9 +243,20 @@ class NodeDetailPane(QWidget):
     # --- run state ---
 
     def set_running(self, running: bool, *, switch_tab: bool = True) -> None:
-        self._running = running
-        if self._form is not None:
-            self._form.set_read_only(running)
+        if running:
+            self._running = True
+            self._cache_current_form()
+            for form in set(self._form_cache.values()):
+                form.set_read_only(True)
+            if self._form is not None:
+                self._form.set_read_only(True)
+        else:
+            if switch_tab:
+                self._ensure_edit_form_current()
+            self._running = False
+            if self._form is not None:
+                self._form.set_read_only(False)
+            self._drop_hidden_form_cache()
         self._tabs.setTabText(_EDIT_TAB, "編輯·唯讀" if running else "編輯")
         if not switch_tab:
             return
@@ -161,8 +277,15 @@ class NodeDetailPane(QWidget):
             self._programmatic_tab_switch = False
 
     def _on_tab_changed(self, index: int) -> None:
+        if index == _EDIT_TAB:
+            self._ensure_edit_form_current()
         if not self._programmatic_tab_switch:
             self.user_tab_changed.emit(index)
+
+    def teardown(self) -> None:
+        """Tear down every edit form owned by this pane."""
+        self._pending_form = None
+        self._clear_form()
 
     # --- testing accessors ---
 

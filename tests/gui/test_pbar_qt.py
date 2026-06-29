@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import pytest
 
 pytest.importorskip("qtpy")
@@ -41,6 +43,23 @@ def _make_factory(stack, *, operation_id: int = 1, owner_id: str = "owner"):
 # ---------------------------------------------------------------------------
 # ProgressFactory — main-thread smoke test
 # ---------------------------------------------------------------------------
+
+
+def test_lightweight_progress_bar_format_and_value(qapp):  # noqa: ARG001
+    from zcu_tools.gui.session.ui.progress_bar import LightweightProgressBar
+
+    bar = LightweightProgressBar()
+    bar.setMaximum(10)
+    bar.setValue(3)
+    bar.setFormat("rounds %v/%m %p%")
+
+    assert bar.maximum() == 10
+    assert bar.value() == 3
+    assert bar.format() == "rounds %v/%m %p%"
+    assert bar._text() == "rounds 3/10 30%"
+
+    bar.setValue(99)
+    assert bar.value() == 10
 
 
 def test_factory_push_and_pop_leave_false(qapp):
@@ -158,7 +177,7 @@ def test_total_setter(qapp):
 
 def test_total_change_updates_widget_in_place_no_flicker(qapp):
     """Changing a live bar's ``total`` (e.g. ``Task.set_pbar_n`` between sweep
-    points) must update the existing QProgressBar in place, never remove+re-add
+    points) must update the existing progress widget in place, never remove+re-add
     it. Regression: the total setter used to emit CREATE, which rebuilt the model
     and made render_models reset_all() the stack — the bar flickered out of view
     on every sweep point.
@@ -170,7 +189,7 @@ def test_total_change_updates_widget_in_place_no_flicker(qapp):
 
     pbar = factory(desc="rounds", total=10, leave=True)
     QApplication.processEvents()
-    widget = stack._active[0]  # the specific QProgressBar instance shown
+    widget = stack._active[0]  # the specific progress widget instance shown
 
     # Mutating total many times (simulating per-sweep-point set_pbar_n) keeps the
     # *same* widget object in place — it is never popped back to the pool.
@@ -184,6 +203,55 @@ def test_total_change_updates_widget_in_place_no_flicker(qapp):
 
     pbar.close()
     QApplication.processEvents()
+
+
+def test_progress_stack_skips_unchanged_bar_properties(qapp):
+    stack = _make_stack(qapp)
+    profile_calls: list[tuple[str, float, str]] = []
+    stack.set_profile_callback(
+        lambda label, duration_ms, detail: profile_calls.append(
+            (label, duration_ms, detail)
+        )
+    )
+
+    class FakeBar:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, int | str]] = []
+
+        def setMaximum(self, value: int) -> None:
+            self.calls.append(("maximum", value))
+
+        def setFormat(self, value: str) -> None:
+            self.calls.append(("format", value))
+
+        def setValue(self, value: int) -> None:
+            self.calls.append(("value", value))
+
+    bar = FakeBar()
+    bar_arg = cast(Any, bar)
+
+    stack._apply_bar_snapshot(bar_arg, (10, "rounds %v/%m", 2))
+    assert bar.calls == [
+        ("maximum", 10),
+        ("format", "rounds %v/%m"),
+        ("value", 2),
+    ]
+
+    bar.calls.clear()
+    stack._apply_bar_snapshot(bar_arg, (10, "rounds %v/%m", 2))
+    assert bar.calls == []
+    assert profile_calls[-1][0] == "snapshot_noop"
+
+    stack._apply_bar_snapshot(bar_arg, (10, "rounds %v/%m", 3))
+    assert bar.calls == [("value", 3)]
+
+    bar.calls.clear()
+    stack._apply_bar_snapshot(bar_arg, (20, "rounds %v/%m [0:01]", 3))
+    assert bar.calls == [
+        ("maximum", 20),
+        ("format", "rounds %v/%m [0:01]"),
+    ]
+    assert any(label == "set_format" for label, _duration_ms, _detail in profile_calls)
 
 
 # ---------------------------------------------------------------------------

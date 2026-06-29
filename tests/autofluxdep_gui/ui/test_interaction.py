@@ -403,6 +403,12 @@ def _run_to_completion(ctrl, win):
     _pump_until_done(ctrl, win)
 
 
+def _current_form_node_name(win: MainWindow) -> str:
+    form = win._detail.current_form
+    assert form is not None
+    return form._node.name
+
+
 def test_run_locks_then_unlocks(app):
     ctrl, win = app
     win._list.select_index(0)
@@ -533,6 +539,55 @@ def test_auto_follow_checkbox_can_turn_off_during_run(app):
     win._on_run_done()
 
 
+def test_auto_follow_selection_defers_edit_form_rebuild_while_showing_run_tab(app):
+    _ctrl, win = app
+    win._list.select_index(0)
+    original_form = win._detail.current_form
+    assert original_form is not None
+
+    win._on_run_started()
+    win._on_node_entered("probe", 0)
+
+    assert win._list.selected_index == 1
+    assert win._detail.current_tab == 1
+    assert win._detail._title.text() == "probe"
+    assert win._detail.current_form is original_form
+    assert _current_form_node_name(win) == "qubit_freq"
+    win._on_run_done()
+
+
+def test_deferred_edit_form_materializes_when_user_opens_edit_tab_during_run(app):
+    ctrl, win = app
+    win._list.select_index(0)
+    win._on_run_started()
+    win._on_node_entered("probe", 0)
+    assert _current_form_node_name(win) == "qubit_freq"
+
+    win._detail._tabs.setCurrentIndex(0)
+
+    assert _current_form_node_name(win) == "probe"
+    assert win._detail.current_form is not None
+    assert not win._detail.current_form._form.isEnabled()
+    assert ctrl.get_auto_follow_tabs() is False
+    assert not win._list._auto_follow_tabs.isChecked()
+    win._on_run_done()
+
+
+def test_run_done_materializes_pending_edit_form_after_auto_follow(app):
+    _ctrl, win = app
+    win._list.select_index(0)
+    win._on_run_started()
+    win._on_node_entered("probe", 0)
+    assert _current_form_node_name(win) == "qubit_freq"
+
+    win._on_run_done()
+
+    assert win._detail.current_tab == 0
+    assert _current_form_node_name(win) == "probe"
+    assert win._detail.current_form is not None
+    assert win._detail.current_form._form.isEnabled()
+
+
 def test_auto_follow_checkbox_can_turn_on_during_run(app):
     ctrl, win = app
     win._list.select_index(0)
@@ -550,7 +605,9 @@ def test_auto_follow_checkbox_can_turn_on_during_run(app):
     assert ctrl.get_auto_follow_tabs() is True
     assert win._list.selected_index == 1
     assert win._detail.current_tab == 1
+    assert _current_form_node_name(win) == "qubit_freq"
     win._on_run_done()
+    assert _current_form_node_name(win) == "probe"
 
 
 def test_manual_node_switch_during_run_disables_auto_follow(app):
@@ -562,8 +619,34 @@ def test_manual_node_switch_during_run_disables_auto_follow(app):
 
     assert ctrl.get_auto_follow_tabs() is False
     assert not win._list._auto_follow_tabs.isChecked()
+    assert _current_form_node_name(win) == "probe"
+    assert win._detail.current_form is not None
+    assert not win._detail.current_form._form.isEnabled()
     win._on_node_entered("qubit_freq", 0)
     assert win._list.selected_index == 1
+    win._on_run_done()
+
+
+def test_manual_node_switch_during_run_reuses_materialized_forms(app):
+    _ctrl, win = app
+    win._list.select_index(0)
+    qubit_form = win._detail.current_form
+    assert qubit_form is not None
+    win._on_run_started()
+
+    win._list.select_index(1)
+    probe_form = win._detail.current_form
+    assert probe_form is not None
+    assert probe_form is not qubit_form
+    assert _current_form_node_name(win) == "probe"
+
+    win._list.select_index(0)
+    assert win._detail.current_form is qubit_form
+    assert _current_form_node_name(win) == "qubit_freq"
+
+    win._list.select_index(1)
+    assert win._detail.current_form is probe_form
+    assert _current_form_node_name(win) == "probe"
     win._on_run_done()
 
 
@@ -661,11 +744,13 @@ def test_auto_follow_same_node_preserves_detail_tab(app):
     _ctrl, win = app
     win._list.select_index(0)
     win._detail._tabs.setCurrentIndex(0)
+    original_form = win._detail.current_form
 
     win._on_node_entered("qubit_freq", 0)
 
     assert win._list.selected_index == 0
     assert win._detail.current_tab == 0
+    assert win._detail.current_form is original_form
 
     win._on_node_entered("probe", 0)
 

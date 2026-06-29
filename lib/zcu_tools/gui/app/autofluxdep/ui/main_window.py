@@ -32,7 +32,6 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QHBoxLayout,
     QLabel,
     QMainWindow,
-    QProgressBar,
     QPushButton,
     QSizePolicy,
     QSplitter,
@@ -56,12 +55,14 @@ from zcu_tools.gui.session.events import (
     PredictorChangedPayload,
     SocChangedPayload,
 )
+from zcu_tools.gui.session.ui.progress_bar import LightweightProgressBar
 from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 
 from .node_detail import NodeDetailPane
 from .node_list import NodeListPane
 
 logger = logging.getLogger(__name__)
+_ProgressSnapshot = tuple[int, str, int]
 
 
 class _RunBridge(QObject):
@@ -136,10 +137,21 @@ class MainWindow(QMainWindow):
         self._plots: dict[str, tuple[QWidget, Any]] = {}
         self._row_update_perf = PerfStats("main.row_update", logger, slow_ms=30.0)
         self._progress_perf = PerfStats("main.progress_render", logger, slow_ms=20.0)
+        self._progress_collect_perf = PerfStats(
+            "main.progress_collect", logger, slow_ms=20.0
+        )
+        self._progress_flux_perf = PerfStats(
+            "main.progress_flux_bar", logger, slow_ms=20.0
+        )
+        self._progress_stack_perf = PerfStats(
+            "main.progress_round_stack", logger, slow_ms=20.0
+        )
+        self._progress_stack_step_perf: dict[str, PerfStats] = {}
         self._build_plot_perf = PerfStats("main.build_plots", logger, slow_ms=100.0)
         self._run_active = False
         self._active_run_node_name: str | None = None
         self._auto_follow_navigation = False
+        self._flux_progress_snapshot: _ProgressSnapshot | None = None
         # The single live (non-modal) context inspector, or None when closed. The
         # base auto-refreshes off the shared session event bus, so the open dialog
         # tracks md/ml edits live without this window pushing to it.
@@ -208,12 +220,13 @@ class MainWindow(QMainWindow):
 
         # global flux progress as a central bottom row, matching window width
         self._round_progress = ProgressStack()
+        self._round_progress.set_profile_callback(self._record_progress_stack_step)
         main_layout.addWidget(self._round_progress)
         self._progress_unsub = ctrl.attach_progress(
             RUN_PROGRESS_OWNER_ID, self._on_run_progress_changed
         )
 
-        self._progress = QProgressBar()
+        self._progress = LightweightProgressBar()
         self._progress.setFormat("flux %v/%m")
         self._progress.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
@@ -256,6 +269,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, a0: Any) -> None:
         self._progress_unsub()
         self._list.teardown()
+        self._detail.teardown()
         self._ctrl.persist_all()
         super().closeEvent(a0)
 
@@ -264,7 +278,13 @@ class MainWindow(QMainWindow):
     def _on_select(self, row: int) -> None:
         nodes = self._ctrl.state.nodes
         node = nodes[row] if 0 <= row < len(nodes) else None
-        self._detail.show_node(self._ctrl, node, row)
+        build_edit_form = not (self._run_active and self._auto_follow_navigation)
+        self._detail.show_node(
+            self._ctrl,
+            node,
+            row,
+            build_edit_form=build_edit_form,
+        )
         # show this Node's live canvas (if a run built one)
         canvas = None
         if node is not None and node.name in self._plots:
@@ -378,8 +398,13 @@ class MainWindow(QMainWindow):
 
     def _start(self) -> None:
         self._build_plots()
-        self._progress.setMaximum(max(1, len(self._ctrl.state.flux_values)))
-        self._progress.setValue(0)
+        self._apply_flux_progress_snapshot(
+            (
+                max(1, len(self._ctrl.state.flux_values)),
+                "flux %v/%m",
+                0,
+            )
+        )
         self._ctrl.start_run(notify=self._bridge.notify)
 
     def _build_plots(self) -> None:
@@ -480,9 +505,9 @@ class MainWindow(QMainWindow):
         already_selected = self._list.selected_index == target
         self._auto_follow_navigation = True
         try:
-            self._list.select_index(target)  # → _on_select shows its canvas
             if force_focus or not already_selected:
                 self._detail.focus_run()
+            self._list.select_index(target)  # → _on_select shows its canvas
         finally:
             self._auto_follow_navigation = False
         return True
@@ -508,28 +533,71 @@ class MainWindow(QMainWindow):
             self._bridge.row_rendered(name, idx)
 
     def _on_point_done(self, idx: int) -> None:
-        self._progress.setValue(idx + 1)
+        self._apply_flux_progress_snapshot(
+            (
+                self._progress.maximum(),
+                self._progress.format(),
+                idx + 1,
+            )
+        )
 
     def _on_run_progress_changed(self) -> None:
         profile_start = perf_now()
+        collect_start = perf_now()
         models = tuple(
             model for _handle, model in self._ctrl.progress_bars(RUN_PROGRESS_OWNER_ID)
+        )
+        self._progress_collect_perf.record(
+            elapsed_ms(collect_start),
+            detail=f"bars={len(models)}",
         )
         flux_model = next(
             (model for model in models if model.label == "flux sweep"), None
         )
         if flux_model is not None:
-            self._progress.setMaximum(flux_model.qt_maximum())
-            self._progress.setFormat(flux_model.format())
-            self._progress.setValue(flux_model.qt_value())
+            flux_start = perf_now()
+            maximum = flux_model.qt_maximum()
+            fmt = flux_model.format()
+            value = flux_model.qt_value()
+            self._apply_flux_progress_snapshot((maximum, fmt, value))
+            self._progress_flux_perf.record(
+                elapsed_ms(flux_start),
+                detail=f"value={value} maximum={maximum}",
+            )
 
-        self._round_progress.render_models(
-            tuple(model for model in models if model.label != "flux sweep")
+        round_models = tuple(model for model in models if model.label != "flux sweep")
+        stack_start = perf_now()
+        self._round_progress.render_models(round_models)
+        self._progress_stack_perf.record(
+            elapsed_ms(stack_start),
+            detail=f"bars={len(round_models)}",
         )
         self._progress_perf.record(
             elapsed_ms(profile_start),
             detail=f"bars={len(models)}",
         )
+
+    def _record_progress_stack_step(
+        self, label: str, duration_ms: float, detail: str
+    ) -> None:
+        perf = self._progress_stack_step_perf.get(label)
+        if perf is None:
+            perf = PerfStats(f"main.progress_stack.{label}", logger, slow_ms=20.0)
+            self._progress_stack_step_perf[label] = perf
+        perf.record(duration_ms, detail=detail)
+
+    def _apply_flux_progress_snapshot(self, snapshot: _ProgressSnapshot) -> None:
+        old = self._flux_progress_snapshot
+        if old == snapshot:
+            return
+        maximum, fmt, value = snapshot
+        if old is None or old[0] != maximum:
+            self._progress.setMaximum(maximum)
+        if old is None or old[1] != fmt:
+            self._progress.setFormat(fmt)
+        if old is None or old[2] != value:
+            self._progress.setValue(value)
+        self._flux_progress_snapshot = snapshot
 
     def _on_run_done(self) -> None:
         self._run_active = False
