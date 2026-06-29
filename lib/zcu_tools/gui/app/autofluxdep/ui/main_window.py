@@ -202,9 +202,9 @@ class MainWindow(QMainWindow):
         self._list.refresh_from_state()
         self._on_select(self._list.selected_index)
 
-    def closeEvent(self, event: Any) -> None:
+    def closeEvent(self, a0: Any) -> None:
         self._ctrl.persist_all()
-        super().closeEvent(event)
+        super().closeEvent(a0)
 
     # --- selection ---
 
