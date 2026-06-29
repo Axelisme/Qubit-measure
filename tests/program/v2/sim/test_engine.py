@@ -1025,11 +1025,16 @@ def test_engine_caches_population_chain_for_readout_only_sweep(monkeypatch):
     real_population_chain = SimEngine._point_population_chain
 
     def spy_population_chain(
-        self: SimEngine, model: _PointModel, reps: int, nreads: int
+        self: SimEngine,
+        model: _PointModel,
+        reps: int,
+        nreads: int,
+        *,
+        use_numba: bool = True,
     ) -> NDArray[np.float64]:
         nonlocal calls
         calls += 1
-        return real_population_chain(self, model, reps, nreads)
+        return real_population_chain(self, model, reps, nreads, use_numba=use_numba)
 
     monkeypatch.setattr(SimEngine, "_point_population_chain", spy_population_chain)
 
@@ -1067,11 +1072,16 @@ def test_engine_does_not_reuse_population_chain_for_qubit_sweep(monkeypatch):
     real_population_chain = SimEngine._point_population_chain
 
     def spy_population_chain(
-        self: SimEngine, model: _PointModel, reps: int, nreads: int
+        self: SimEngine,
+        model: _PointModel,
+        reps: int,
+        nreads: int,
+        *,
+        use_numba: bool = True,
     ) -> NDArray[np.float64]:
         nonlocal calls
         calls += 1
-        return real_population_chain(self, model, reps, nreads)
+        return real_population_chain(self, model, reps, nreads, use_numba=use_numba)
 
     monkeypatch.setattr(SimEngine, "_point_population_chain", spy_population_chain)
 
@@ -1101,8 +1111,95 @@ def test_engine_does_not_reuse_population_chain_for_qubit_sweep(monkeypatch):
     assert calls == sw.expts
 
 
-def test_engine_batched_population_chain_matches_scalar_reference():
-    """The vectorized detune-node recurrence preserves the scalar physics."""
+def test_engine_skips_numba_when_population_work_is_small(monkeypatch):
+    """The signal grid avoids numba setup cost for low-work population chains."""
+
+    from zcu_tools.program.v2.sim import engine as engine_module
+
+    def fail_numba(*_args: object, **_kwargs: object) -> NDArray[np.float64]:
+        raise AssertionError("numba kernel should not be used for this signal grid")
+
+    monkeypatch.setattr(engine_module, "_population_chain_numba", fail_numba)
+
+    sim = _SIM.model_copy(update={"T2": 10.0, "T2_star": 5.0})
+    _soc, soccfg = make_mock_soc(sim=sim)
+    f_qubit = _f_qubit_mhz()
+    pulse = PulseCfg(
+        ch=0,
+        nqz=1,
+        gain=0.3,
+        freq=f_qubit,
+        phase=0.0,
+        waveform=ConstWaveformCfg(length=0.5),
+    ).build("qub")
+    sw = SweepCfg(start=_rf_g_mhz() - 2.0, stop=_rf_g_mhz() + 2.0, expts=3, step=2.0)
+    ro_param = sweep2param("ro_freq", sw)
+    readout = DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=ro_param).build("ro")
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=4, rounds=1),
+        modules=[pulse, readout],
+        sweep=[("ro_freq", sw)],
+    )
+    prog.compile()
+
+    engine = SimEngine(prog, sim)
+    engine._ensure_signal()
+
+
+def test_engine_uses_numba_for_large_unique_population_work(monkeypatch):
+    """Large multi-node unique qubit chains are routed through the numba kernel."""
+
+    from zcu_tools.program.v2.sim import engine as engine_module
+
+    calls = 0
+
+    def fake_numba(
+        _pre_props: NDArray[np.float64],
+        _relax_props: NDArray[np.float64],
+        _weights: NDArray[np.float64],
+        _thermal_pop: float,
+        reps: int,
+        nreads: int,
+    ) -> NDArray[np.float64]:
+        nonlocal calls
+        calls += 1
+        return np.zeros((reps, nreads), dtype=np.float64)
+
+    monkeypatch.setattr(engine_module, "_NUMBA_MIN_WORK_UNITS", 1)
+    monkeypatch.setattr(engine_module, "_population_chain_numba", fake_numba)
+
+    sim = _SIM.model_copy(update={"T2": 10.0, "T2_star": 5.0})
+    _soc, soccfg = make_mock_soc(sim=sim)
+    f_qubit = _f_qubit_mhz()
+    sw = SweepCfg(start=0.1, stop=0.3, expts=3, step=0.1)
+    gain_param = sweep2param("gain", sw)
+    pulse = PulseCfg(
+        ch=0,
+        nqz=1,
+        gain=gain_param,
+        freq=f_qubit,
+        phase=0.0,
+        waveform=ConstWaveformCfg(length=0.5),
+    ).build("qub")
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=4, rounds=1),
+        modules=[pulse, _readout(_rf_g_mhz())],
+        sweep=[("gain", sw)],
+    )
+    prog.compile()
+
+    engine = SimEngine(prog, sim)
+    engine._ensure_signal()
+
+    assert calls == sw.expts
+
+
+def test_engine_batched_population_chain_matches_scalar_reference(monkeypatch):
+    """The optimized detune-node recurrence preserves the scalar physics."""
+
+    from zcu_tools.program.v2.sim import engine as engine_module
 
     sim = _SIM.model_copy(update={"T2": 10.0, "T2_star": 5.0})
     _soc, soccfg = make_mock_soc(sim=sim)
@@ -1126,6 +1223,8 @@ def test_engine_batched_population_chain_matches_scalar_reference():
     model = engine._point_model({}, f_qubit_ghz, rf_g, rf_e, n_samples, sample_times_us)
 
     actual = engine._point_population_chain(model, reps=8, nreads=1)
+    monkeypatch.setattr(engine_module, "_population_chain_numba", None)
+    fallback = engine._point_population_chain(model, reps=8, nreads=1)
 
     z0 = 2.0 * sim.thermal_pop - 1.0
     states = [
@@ -1149,6 +1248,7 @@ def test_engine_batched_population_chain_matches_scalar_reference():
         states = next_states
 
     np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(fallback, expected, rtol=1e-12, atol=1e-12)
 
 
 # ---------------------------------------------------------------- decimated D2

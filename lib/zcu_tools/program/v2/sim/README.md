@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-06-29 (readout population-chain performance)
+**Last updated:** 2026-06-29 (readout population-chain numba gate)
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -75,6 +75,14 @@ rep-resolved `P_e` chain because their Bloch propagators and detune weights are
 identical. Qubit-drive sweeps still compute distinct chains because their
 propagators differ. The cache is local to the grid build, so it avoids retaining a
 second copy of large `P_e` grids after the acquire setup.
+
+**Numba is an optional large-work kernel, not a mandatory dependency.** For
+multi-node detune ensembles with many distinct qubit state chains, `SimEngine`
+uses a sim-local numba kernel when the optional `client` dependency is installed;
+otherwise it falls back to the numpy/scalar path. No-dephasing and readout-only
+cached sweeps skip numba to avoid JIT/cache-load overhead. Python-level
+ThreadPool/joblib and numba `prange` parallel paths are not enabled because
+measured scheduling/pickle overhead exceeds the current kernel savings.
 
 **Cooperative stop boundary.** Acquire-level `stop_checkers` stay owned by the
 real round loop's `finish_round()` path, matching hardware semantics: Stop and
@@ -153,8 +161,9 @@ every coupling point.
   exactly — a mathematical identity, not a per-experiment split (R-1 intact).
   The deterministic state chain reinitializes at each round boundary; inside a
   round, `relax_delay` passively evolves every detune node from one rep to the next.
-  Single-node chains use a scalar fast path; multi-node detune ensembles evolve all
-  nodes in one batched recurrence per rep.
+  Single-node chains use a scalar fast path; multi-node detune ensembles use a
+  batched numpy fallback or, for large unique-chain work, the optional numba
+  recurrence kernel.
 
 ## Design boundaries and known limits
 

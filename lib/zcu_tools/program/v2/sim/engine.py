@@ -52,6 +52,7 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import Any, cast
 
 import numpy as np
 from numpy.polynomial.legendre import leggauss
@@ -85,6 +86,18 @@ from .readout import (
 )
 
 logger = logging.getLogger(__name__)
+
+_PopulationChainKernel = Callable[..., NDArray[np.float64]]
+_population_chain_numba: _PopulationChainKernel | None
+
+try:
+    from ._population_numba import population_chain_numba as _population_chain_numba
+except ModuleNotFoundError as exc:  # pragma: no cover - depends on optional extra
+    if exc.name != "numba":
+        raise
+    _population_chain_numba = None
+
+_NUMBA_MIN_WORK_UNITS = 1_000_000
 
 # Default operating flux: reduced flux Phi/Phi0 = 1.0 (R-3).  This is the operating
 # point when no device is bound; the FLUX-AWARE-MOCK path (SimParams.flux_device,
@@ -383,7 +396,7 @@ class SimEngine:
         p_e_grid = np.empty((reps, *sweep_dims, nreads), dtype=np.float64)
         signal_scale_grid = np.empty((*sweep_dims, nreads), dtype=np.float64)
         noise_std_scale_grid = np.empty((*sweep_dims, nreads), dtype=np.float64)
-        population_cache: dict[bytes, NDArray[np.float64]] = {}
+        population_items: list[tuple[tuple[int | slice, ...], bytes, _PointModel]] = []
 
         index_ranges = [range(count) for _, count in axes]
         for multi_index in itertools.product(*index_ranges):
@@ -406,11 +419,25 @@ class SimEngine:
                 self._detune_weights,
                 self.sim.thermal_pop,
             )
+            population_items.append((p_idx, chain_key, model))
+
+        unique_population_keys = {chain_key for _, chain_key, _ in population_items}
+        numba_work_units = (
+            len(unique_population_keys) * reps * int(self._detune_weights.size)
+        )
+        use_numba = (
+            _population_chain_numba is not None
+            and self._detune_weights.size > 1
+            and numba_work_units >= _NUMBA_MIN_WORK_UNITS
+        )
+
+        population_cache: dict[bytes, NDArray[np.float64]] = {}
+        for p_idx, chain_key, model in population_items:
             if chain_key not in population_cache:
                 population_cache[chain_key] = self._point_population_chain(
-                    model, reps, nreads
+                    model, reps, nreads, use_numba=use_numba
                 )
-            p_e_grid[p_idx] = population_cache[chain_key]
+            p_e_grid[cast(Any, p_idx)] = population_cache[chain_key]
 
         return (
             s_g_grid,
@@ -555,7 +582,12 @@ class SimEngine:
         )
 
     def _point_population_chain(
-        self, model: _PointModel, reps: int, nreads: int
+        self,
+        model: _PointModel,
+        reps: int,
+        nreads: int,
+        *,
+        use_numba: bool = True,
     ) -> NDArray[np.float64]:
         """Return rep-resolved ensemble-averaged ``P_e`` for one sweep point."""
 
@@ -589,6 +621,16 @@ class SimEngine:
 
         pre_props = np.stack(model.pre_readout_props, axis=0)
         relax_props = np.stack(model.inter_shot_props, axis=0)
+        if use_numba and _population_chain_numba is not None:
+            return _population_chain_numba(
+                pre_props,
+                relax_props,
+                self._detune_weights,
+                self.sim.thermal_pop,
+                reps,
+                nreads,
+            )
+
         states = np.empty((node_count, 4), dtype=np.float64)
         states[:, 0] = 0.0
         states[:, 1] = 0.0
