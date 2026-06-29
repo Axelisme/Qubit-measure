@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-06-26 (ArbWaveform asset length and decimated envelope)
+**Last updated:** 2026-06-29 (acquire stop checker boundary)
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -67,11 +67,12 @@ or moves the mock operating flux to a convenience point.  The cache is valid onl
 because the flux is fixed *for that acquire*; a per-point operating flux would have
 to move that call back into the loop.
 
-**Cooperative cancellation.** Acquire-level `stop_checkers` are passed into
-`SimEngine`.  The sweep-point loop and the Lorentzian detune ensemble loop check
-them between physics evaluations and raise `SimCancelledError` when cancellation
-is requested, so `MockQickSoc.poll_data` fails fast instead of returning empty data
-while QICK's polling loop is still waiting for shots.
+**Cooperative stop boundary.** Acquire-level `stop_checkers` stay owned by the
+real round loop's `finish_round()` path, matching hardware semantics: Stop and
+SNR early-stop are checked after a round completes, not inside one round's mock
+physics compute.  `SimEngine` still has an engine-local cancellation hook for
+direct/internal callers, but `MyProgramV2.acquire` does not feed acquire-level
+checkers into it.
 
 **FLUX-AWARE-MOCK — operating flux from a live device.** By default the operating
 flux is pinned at reduced flux = 1.0 (R-3).  `SimParams.flux_device` opts into

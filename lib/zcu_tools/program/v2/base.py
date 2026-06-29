@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 
 from qick import QickConfig
 from qick.asm_v2 import AveragerProgramV2
@@ -74,16 +73,16 @@ class MyProgramV2(ImproveAcquireMixin, ImproveAsmV2, AveragerProgramV2, IRCompil
         # through the SimEngine.  We *inject* the engine onto the soc (no eager
         # compute); the real round loop then runs unchanged and the soc's
         # poll_data computes each round lazily off the engine, so round_hook /
-        # stop_checkers / _process_accumulated / _summarize_accumulated / get_raw
-        # are all reused AND an early-stopping run never computes the rounds it
-        # skips.  With no SimParams this branch is skipped entirely and behaviour
-        # is identical to the prior real path (D1).
+        # _process_accumulated / _summarize_accumulated / get_raw are all reused.
+        # ``stop_checkers`` stay owned by the real round loop's finish_round(),
+        # matching hardware's round-boundary stop semantics. With no SimParams this
+        # branch is skipped entirely and behaviour is identical to the prior real
+        # path (D1).
         sim = getattr(soc, "_sim_params", None)
         if sim is not None:
             self._attach_sim_engine(
                 soc,
                 sim,
-                stop_checkers=self._sim_stop_checkers(kwargs),
             )
 
         return super().acquire(soc, *args, rounds=self.cfg_model.rounds, **kwargs)
@@ -107,28 +106,16 @@ class MyProgramV2(ImproveAcquireMixin, ImproveAsmV2, AveragerProgramV2, IRCompil
             self._attach_sim_engine(
                 soc,
                 sim,
-                stop_checkers=self._sim_stop_checkers(kwargs),
             )
 
         return super().acquire_decimated(
             soc, *args, rounds=self.cfg_model.rounds, **kwargs
         )
 
-    def _sim_stop_checkers(self, kwargs: dict) -> list[Callable[[], bool]] | None:
-        stop_checkers = kwargs.get("stop_checkers")
-        if stop_checkers is None:
-            extra_args = kwargs.get("extra_args")
-            if isinstance(extra_args, dict):
-                stop_checkers = extra_args.get("stop_checkers")
-        if stop_checkers is None:
-            return None
-        return list(stop_checkers)
-
     def _attach_sim_engine(
         self,
         soc,
         sim,
-        stop_checkers: list[Callable[[], bool]] | None = None,
     ) -> None:
         """Build the SimEngine and inject it onto the mock soc for poll-time compute.
 
@@ -145,4 +132,4 @@ class MyProgramV2(ImproveAcquireMixin, ImproveAsmV2, AveragerProgramV2, IRCompil
         if self.loop_dims is None or self.avg_level is None:
             self.compile()
 
-        soc.set_sim_engine(SimEngine(self, sim, stop_checkers=stop_checkers))
+        soc.set_sim_engine(SimEngine(self, sim))

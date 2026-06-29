@@ -725,14 +725,52 @@ def test_engine_lazy_compute_respects_early_stop(monkeypatch):
     )
 
 
-def test_engine_cancel_during_signal_grid_raises(monkeypatch):
-    """A stop_checker can cancel inside the first round's sweep-grid compute.
+def test_acquire_stop_checker_is_checked_only_after_mock_round(monkeypatch):
+    """Acquire-level stop_checkers keep hardware-like round-boundary semantics."""
 
-    This covers the path that matters for the GUI: ``MyProgramV2.acquire`` passes
-    the same stop_checkers into the SimEngine, ``MockQickSoc.poll_data`` computes
-    lazily, and cancellation propagates as an explicit exception instead of an
-    empty poll that would leave QICK's count loop spinning.
-    """
+    from zcu_tools.program.v2.sim.engine import SimEngine
+
+    calls: list[int] = []
+    real_compute_round = SimEngine.compute_round
+
+    def spy_compute_round(self, round_idx: int):
+        calls.append(round_idx)
+        return real_compute_round(self, round_idx)
+
+    monkeypatch.setattr(SimEngine, "compute_round", spy_compute_round)
+
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    pulse = PulseCfg(
+        ch=0,
+        nqz=1,
+        gain=0.1,
+        freq=_f_qubit_mhz(),
+        phase=0.0,
+        waveform=ConstWaveformCfg(length=1.0),
+    ).build("qub")
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=20, rounds=5),
+        modules=[pulse, _readout(_rf_g_mhz())],
+    )
+
+    def stop_at_round_boundary() -> bool:
+        return True
+
+    prog.acquire(
+        soc,
+        progress=False,
+        stop_checkers=[stop_at_round_boundary],
+    )
+
+    assert calls == [0], (
+        "acquire-level stop checker should stop after the first completed round, "
+        f"not before mock round compute; got rounds {calls}"
+    )
+
+
+def test_acquire_stop_checker_does_not_cancel_inside_mock_signal_grid(monkeypatch):
+    """Acquire-level stop_checkers do not interrupt one mock round mid-compute."""
 
     from zcu_tools.program.v2.sim.engine import SimEngine
 
@@ -760,7 +798,7 @@ def test_engine_cancel_during_signal_grid_raises(monkeypatch):
     readout = DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=ro_param).build("ro")
     prog = ModularProgramV2(
         soccfg,
-        ProgramV2Cfg(reps=1, rounds=1),
+        ProgramV2Cfg(reps=1, rounds=5),
         modules=[readout],
         sweep=[("ro_freq", sw)],
     )
@@ -768,10 +806,9 @@ def test_engine_cancel_during_signal_grid_raises(monkeypatch):
     def stop_after_two_points() -> bool:
         return len(point_calls) >= 2
 
-    with pytest.raises(SimCancelledError, match="cancelled"):
-        prog.acquire(soc, progress=False, stop_checkers=[stop_after_two_points])
+    prog.acquire(soc, progress=False, stop_checkers=[stop_after_two_points])
 
-    assert 0 < len(point_calls) < sw.expts
+    assert len(point_calls) == sw.expts
 
 
 def test_engine_cancel_during_detune_loop_raises(monkeypatch):

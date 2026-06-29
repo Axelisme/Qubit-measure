@@ -119,6 +119,12 @@ def _default_readout() -> Any | None:
     return None
 
 
+def _drive_pulse_with_length(base: PulseCfg, length: float) -> dict[str, Any]:
+    pulse = base.model_copy(deep=True)
+    pulse.set_param("length", float(length))
+    return pulse.to_dict()
+
+
 class LenRabiNode(Node):
     """One flux point's lenrabi: set flux → real acquire → fit_rabi → fill row → Patch.
 
@@ -156,6 +162,7 @@ class LenRabiNode(Node):
         # layer's sweep2param("length") set on rabi_pulse).
         length_sweep = axis_to_sweep(lengths)
         length_param = sweep2param("length", length_sweep)
+        base_drive_pulse = cfg.modules.rabi_pulse.model_copy(deep=True)
         cfg.modules.rabi_pulse.set_param("length", length_param)
 
         result.flux[idx] = env.flux
@@ -205,8 +212,8 @@ class LenRabiNode(Node):
         patch.set("pi_length", float(pi_x))
         patch.set("pi2_length", float(pi2_x))
         patch.set("rabi_freq", float(freq))
-        patch.set_module("pi_pulse", {"type": "pi", "length": float(pi_x)})
-        patch.set_module("pi2_pulse", {"type": "pi2", "length": float(pi2_x)})
+        patch.set_module("pi_pulse", _drive_pulse_with_length(base_drive_pulse, pi_x))
+        patch.set_module("pi2_pulse", _drive_pulse_with_length(base_drive_pulse, pi2_x))
         return patch
 
 

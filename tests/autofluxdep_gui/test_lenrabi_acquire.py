@@ -17,6 +17,7 @@ from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.cfg import SweepValue
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import LenRabiBuilder
+from zcu_tools.program.v2 import ModuleCfgFactory, PulseCfg
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 from ._helpers import (
@@ -69,7 +70,18 @@ def test_lenrabi_acquire_fits_finite_pi_length():
         )
         patch = builder.build_node(env).produce(snap)
         if "pi_length" in patch.values():
-            pis.append(float(patch.values()["pi_length"]))
+            pi_length = float(patch.values()["pi_length"])
+            pi2_length = float(patch.values()["pi2_length"])
+            modules = patch.modules()
+            pi_pulse = ModuleCfgFactory.from_raw(modules["pi_pulse"], ml=ml)
+            pi2_pulse = ModuleCfgFactory.from_raw(modules["pi2_pulse"], ml=ml)
+            assert isinstance(pi_pulse, PulseCfg)
+            assert isinstance(pi2_pulse, PulseCfg)
+            assert float(pi_pulse.waveform.length) == pi_length
+            assert float(pi2_pulse.waveform.length) == pi2_length
+            assert float(pi_pulse.freq) == float(f01)
+            assert float(pi2_pulse.freq) == float(f01)
+            pis.append(pi_length)
 
     # at least one flux point produced a finite, positive pi length from the real
     # acquire (a constant / noise signal would fail the fit-quality gate and omit it)
