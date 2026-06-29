@@ -466,6 +466,35 @@ def test_auto_follow_checkbox_can_turn_on_during_run(app):
     win._on_run_done()
 
 
+def test_manual_node_switch_during_run_disables_auto_follow(app):
+    ctrl, win = app
+    win._list.select_index(0)
+    win._on_run_started()
+
+    win._list.select_index(1)
+
+    assert ctrl.get_auto_follow_tabs() is False
+    assert not win._list._auto_follow_tabs.isChecked()
+    win._on_node_entered("qubit_freq", 0)
+    assert win._list.selected_index == 1
+    win._on_run_done()
+
+
+def test_manual_detail_tab_switch_during_run_disables_auto_follow(app):
+    ctrl, win = app
+    win._list.select_index(0)
+    win._on_run_started()
+    assert win._detail.current_tab == 1
+
+    win._detail._tabs.setCurrentIndex(0)
+
+    assert ctrl.get_auto_follow_tabs() is False
+    assert not win._list._auto_follow_tabs.isChecked()
+    win._on_node_entered("probe", 0)
+    assert win._list.selected_index == 0
+    win._on_run_done()
+
+
 def test_multiple_real_experiments_each_get_a_liveplot(qapp):
     # a real multi-experiment workflow: each measurement provider gets its own
     # sweep-lived canvas + plotter, and the LivePlot-backed Plotter redraws on the

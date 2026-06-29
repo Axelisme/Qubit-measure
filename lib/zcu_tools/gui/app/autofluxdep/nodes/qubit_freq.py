@@ -63,6 +63,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import READOUT_LIBRARY_ALIASES
+from zcu_tools.gui.app.autofluxdep.nodes.plotters import title_with_snr
 from zcu_tools.gui.app.autofluxdep.nodes.result import QubitFreqResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.app.autofluxdep.nodes.waveform_defaults import waveform_or_const
@@ -264,6 +265,7 @@ class QubitFreqPlotter:
         ax_fit = figure.add_subplot(2, 1, 1)
         ax_2d = figure.add_subplot(2, 2, 3)
         ax_line = figure.add_subplot(2, 2, 4)
+        self._detune_title = "qubit_freq (detune)"
         self._freq_line = ax_line.axvline(np.nan, color="red", linestyle="--")
         self._fit = LivePlot1D(
             "Flux device value",
@@ -276,16 +278,21 @@ class QubitFreqPlotter:
             "Detune (MHz)",
             line_axis=1,
             num_lines=3,
-            title="qubit_freq (detune)",
+            title=self._detune_title,
             existed_axes=[[ax_2d, ax_line]],
         )
         self._fit.__enter__()
         self._detune.__enter__()
 
     def update(self, result: QubitFreqResult, idx: int) -> None:
-        del idx  # the whole accumulated map is redrawn; idx is just the trigger
         self._fit.update(result.flux, result.fit_freq, refresh=False)
-        self._detune.update(result.flux, result.detune, result.signal, refresh=False)
+        self._detune.update(
+            result.flux,
+            result.detune,
+            result.signal,
+            title=title_with_snr(self._detune_title, result, idx),
+            refresh=False,
+        )
         # mark the current fit as a detune offset (freq - predict_freq)
         offset = result.fit_freq - result.predict_freq
         valid = offset[~np.isnan(offset)]

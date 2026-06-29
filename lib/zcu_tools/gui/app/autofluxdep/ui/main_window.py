@@ -104,6 +104,7 @@ class MainWindow(QMainWindow):
         self._plots: dict[str, tuple[QWidget, Any]] = {}
         self._run_active = False
         self._active_run_node_name: str | None = None
+        self._auto_follow_navigation = False
         # The single live (non-modal) context inspector, or None when closed. The
         # base auto-refreshes off the shared session event bus, so the open dialog
         # tracks md/ml edits live without this window pushing to it.
@@ -183,6 +184,7 @@ class MainWindow(QMainWindow):
         self._list.run_requested.connect(self._start)
         self._list.stop_requested.connect(self._stop)
         self._list.auto_follow_changed.connect(self._on_auto_follow_changed)
+        self._detail.user_tab_changed.connect(self._on_user_detail_tab_changed)
 
         # run bridge (worker thread → main thread)
         self._bridge = _RunBridge(ctrl)
@@ -226,6 +228,8 @@ class MainWindow(QMainWindow):
         if node is not None and node.name in self._plots:
             canvas = self._plots[node.name][0]
         self._detail.show_run_canvas(canvas)
+        if not self._auto_follow_navigation:
+            self._disable_auto_follow_from_user_action()
 
     # --- inspect (non-modal context inspector) ---
 
@@ -397,11 +401,29 @@ class MainWindow(QMainWindow):
         if not enabled or not self._run_active:
             return
         if self._active_run_node_name is None:
-            self._detail.focus_run()
+            self._auto_follow_navigation = True
+            try:
+                self._detail.focus_run()
+            finally:
+                self._auto_follow_navigation = False
             return
         followed = self._follow_run_node(self._active_run_node_name, force_focus=True)
         if not followed:
-            self._detail.focus_run()
+            self._auto_follow_navigation = True
+            try:
+                self._detail.focus_run()
+            finally:
+                self._auto_follow_navigation = False
+
+    def _on_user_detail_tab_changed(self, _index: int) -> None:
+        if not self._auto_follow_navigation:
+            self._disable_auto_follow_from_user_action()
+
+    def _disable_auto_follow_from_user_action(self) -> None:
+        if not self._run_active or not self._ctrl.get_auto_follow_tabs():
+            return
+        self._ctrl.set_auto_follow_tabs(False)
+        self._list.refresh_preferences()
 
     def _follow_run_node(self, name: str, *, force_focus: bool) -> bool:
         names = self._ctrl.state.node_names()
@@ -409,9 +431,13 @@ class MainWindow(QMainWindow):
             return False  # a Service (predictor) or unknown name → no navigation
         target = names.index(name)
         already_selected = self._list.selected_index == target
-        self._list.select_index(target)  # → _on_select shows its canvas
-        if force_focus or not already_selected:
-            self._detail.focus_run()
+        self._auto_follow_navigation = True
+        try:
+            self._list.select_index(target)  # → _on_select shows its canvas
+            if force_focus or not already_selected:
+                self._detail.focus_run()
+        finally:
+            self._auto_follow_navigation = False
         return True
 
     def _on_row_updated(self, name: str, idx: int) -> None:

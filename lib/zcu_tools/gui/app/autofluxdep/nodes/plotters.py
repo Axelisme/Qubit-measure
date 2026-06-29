@@ -49,6 +49,7 @@ class Decay1DPlotter:
         self._fig = figure
         ax_scalar = figure.add_subplot(2, 1, 1)
         ax_curve = figure.add_subplot(2, 1, 2)
+        self._curve_title = f"{title} (curve)"
         self._scalar = LivePlot1D(
             "Flux device value",
             value_label,
@@ -63,7 +64,7 @@ class Decay1DPlotter:
             x_label,
             "Signal (a.u.)",
             existed_axes=[[ax_curve]],
-            segment_kwargs=dict(title=f"{title} (curve)", num_lines=2),
+            segment_kwargs=dict(title=self._curve_title, num_lines=2),
         )
         self._scalar.__enter__()
         self._curve.__enter__()
@@ -74,7 +75,12 @@ class Decay1DPlotter:
         n = result.n_flux
         i = idx if 0 <= idx < n else n - 1
         two = np.vstack([result.signal[i], result.fit_curve[i]])
-        self._curve.update(result.x, two, refresh=False)
+        self._curve.update(
+            result.x,
+            two,
+            title=title_with_snr(self._curve_title, result, i),
+            refresh=False,
+        )
         self._fig.canvas.draw_idle()
 
 
@@ -99,6 +105,7 @@ class ColormapLinePlotter:
         from zcu_tools.liveplot import LivePlot2DwithLine
 
         self._fig = figure
+        self._title = title
         ax_2d = figure.add_subplot(1, 2, 1)
         ax_line = figure.add_subplot(1, 2, 2)
         self._marker_of = marker_of
@@ -118,8 +125,13 @@ class ColormapLinePlotter:
         self._plot.__enter__()
 
     def update(self, result: Sweep1DResult, idx: int) -> None:
-        del idx
-        self._plot.update(result.flux, result.x, result.signal, refresh=False)
+        self._plot.update(
+            result.flux,
+            result.x,
+            result.signal,
+            title=title_with_snr(self._title, result, idx),
+            refresh=False,
+        )
         if self._marker is not None and self._marker_of is not None:
             self._marker.set_xdata([float(self._marker_of(result))])
         self._fig.canvas.draw_idle()
@@ -178,3 +190,17 @@ def _latest_best_offset(result: Sweep2DResult, idx: int) -> NDArray[np.float64]:
         [[float(result.best_freq[best_idx]), float(result.best_gain[best_idx])]],
         dtype=np.float64,
     )
+
+
+def title_with_snr(base: str, result: Any, idx: int) -> str:
+    snr = getattr(result, "snr", None)
+    if snr is None:
+        return base
+    values = np.asarray(snr, dtype=np.float64)
+    if values.size == 0:
+        return base
+    i = idx if 0 <= idx < values.shape[0] else values.shape[0] - 1
+    value = float(values[i])
+    if not np.isfinite(value) or value <= 0.0:
+        return base
+    return f"{base} (snr = {value:.1f})"

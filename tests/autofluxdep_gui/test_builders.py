@@ -89,3 +89,46 @@ def test_ro_optimize_plotter_marks_latest_best_point():
 
     offsets = np.asarray(marker.get_offsets(), dtype=np.float64)
     np.testing.assert_allclose(offsets, [[6005.0, 0.8]])
+
+
+def test_qubit_freq_plotter_title_shows_current_snr():
+    from matplotlib.figure import Figure
+    from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import QubitFreqPlotter
+    from zcu_tools.gui.app.autofluxdep.nodes.result import QubitFreqResult
+
+    result = QubitFreqResult.allocate(
+        np.array([0.0, 0.1]),
+        np.array([-1.0, 0.0, 1.0]),
+    )
+    result.signal[:] = 1.0
+    result.snr[1] = 12.34
+
+    figure = Figure()
+    plotter = QubitFreqPlotter(figure)
+    plotter.update(result, 1)
+
+    assert "snr = 12.3" in figure.axes[1].get_title()
+
+
+def test_sweep1d_plotter_title_shows_current_snr():
+    from matplotlib.figure import Figure
+    from zcu_tools.gui.app.autofluxdep.nodes.plotters import ColormapLinePlotter
+    from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
+
+    result = Sweep1DResult.allocate(
+        np.array([0.0, 0.1]),
+        np.array([0.0, 0.5, 1.0]),
+        x_label="pulse length (us)",
+    )
+    result.signal[:] = 1.0
+    result.snr[1] = 23.45
+
+    figure = Figure()
+    plotter = ColormapLinePlotter(
+        figure,
+        title="lenrabi",
+        y_label="Pulse length (us)",
+    )
+    plotter.update(result, 1)
+
+    assert "snr = 23.4" in figure.axes[0].get_title()

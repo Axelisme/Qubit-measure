@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from qtpy.QtCore import Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QLabel,
     QTabWidget,
@@ -40,12 +41,15 @@ _RUN_TAB = 1
 class NodeDetailPane(QWidget):
     """Right pane: edit/run sub-tabs for the currently selected Node."""
 
+    user_tab_changed = Signal(int)
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._node: PlacedNode | None = None
         self._form: NodeCfgForm | None = None
         self._running = False
         self._canvas: QWidget | None = None
+        self._programmatic_tab_switch = False
         # Where a de-selected canvas is parked instead of being left parentless.
         # A parentless QWidget becomes a top-level window the moment it draws —
         # and every Node's Plotter redraws each run point, even off-screen ones —
@@ -59,6 +63,7 @@ class NodeDetailPane(QWidget):
         root.addWidget(self._title)
 
         self._tabs = QTabWidget()
+        self._tabs.currentChanged.connect(self._on_tab_changed)
         root.addWidget(self._tabs, 1)
 
         # Edit tab host (form swapped in per node)
@@ -140,13 +145,24 @@ class NodeDetailPane(QWidget):
         if not switch_tab:
             return
         if running:
-            self._tabs.setCurrentIndex(_RUN_TAB)
+            self._set_current_tab(_RUN_TAB)
         else:
-            self._tabs.setCurrentIndex(_EDIT_TAB)
+            self._set_current_tab(_EDIT_TAB)
 
     def focus_run(self) -> None:
         """Auto-follow: switch to the run tab (the running Node is selected)."""
-        self._tabs.setCurrentIndex(_RUN_TAB)
+        self._set_current_tab(_RUN_TAB)
+
+    def _set_current_tab(self, index: int) -> None:
+        self._programmatic_tab_switch = True
+        try:
+            self._tabs.setCurrentIndex(index)
+        finally:
+            self._programmatic_tab_switch = False
+
+    def _on_tab_changed(self, index: int) -> None:
+        if not self._programmatic_tab_switch:
+            self.user_tab_changed.emit(index)
 
     # --- testing accessors ---
 

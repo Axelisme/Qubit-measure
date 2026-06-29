@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.experiment.v2.utils import snr_checker
+from zcu_tools.experiment.v2.utils import estimate_snr, snr_checker
 from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
 
 if TYPE_CHECKING:
@@ -159,9 +159,11 @@ class SnrProbe:
     """A minimal ``ctx``-shaped shim so the lower-layer ``snr_checker`` can read
     the running acquire trace. ``snr_checker`` only touches ``ctx.value`` — the
     Node updates ``value`` each round so the SNR early-stop sees the latest average.
+    ``snr`` mirrors the same round for the GUI liveplot title.
     """
 
     value: NDArray[np.complex128] | None = None
+    snr: float = np.nan
 
 
 def earlystop_snr(schema: NodeCfgSchema, md: Any = None) -> float | None:
@@ -215,14 +217,19 @@ def make_on_round(
     real, normalised curve, writes it into this flux point's Result row, and fires
     the run's ``round_hook`` so the main thread redraws. When a ``probe`` is given
     its ``value`` is updated each round so the SNR early-stop sees the latest
-    average (the measurement nodes); mist passes ``probe=None`` (no early-stop on a
-    single-round scatter)."""
+    average and records the current SNR in the Result row (the measurement nodes);
+    mist passes ``probe=None`` (no early-stop on a single-round scatter)."""
 
     def on_round(_round_count: int, avg_d: Any) -> None:
         signal = acquire_to_complex(avg_d)
+        real = signal2real_fn(signal)
         if probe is not None:
             probe.value = signal
-        np.copyto(result.signal[idx], signal2real_fn(signal))
+            probe.snr = estimate_snr(real)
+            snr = getattr(result, "snr", None)
+            if snr is not None:
+                snr[idx] = probe.snr
+        np.copyto(result.signal[idx], real)
         if round_hook is not None:
             round_hook(idx)
 

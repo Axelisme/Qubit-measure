@@ -48,6 +48,8 @@ class QubitFreqResult:
     - ``predict_freq`` — (n_flux,) the predicted frequency the detune axis was
       centred on (so the absolute freq of column j at row i is
       ``predict_freq[i] + detune[j]``).
+    - ``snr`` — (n_flux,) latest running-average SNR per row; nan until the first
+      acquire round for that flux point.
 
     A row stays nan where the sweep stopped or a Node was skipped — an honest
     "not measured", never truncated. The Plotter must tolerate a mid-acquire row
@@ -60,6 +62,7 @@ class QubitFreqResult:
     fit_curve: NDArray[np.float64]
     fit_freq: NDArray[np.float64]
     predict_freq: NDArray[np.float64]
+    snr: NDArray[np.float64]
 
     @classmethod
     def allocate(
@@ -81,6 +84,7 @@ class QubitFreqResult:
             fit_curve=np.full((n_flux, n_detune), np.nan, dtype=np.float64),
             fit_freq=np.full(n_flux, np.nan, dtype=np.float64),
             predict_freq=np.full(n_flux, np.nan, dtype=np.float64),
+            snr=np.full(n_flux, np.nan, dtype=np.float64),
         )
 
     @property
@@ -108,6 +112,8 @@ class Sweep1DResult:
       all-nan for mist, which has no fit).
     - ``fit_value`` — (n_flux,) the primary fitted scalar per row (t1 / pi_length
       / t2 …; nan for mist or a failed fit). What the colormap overlay tracks.
+    - ``snr`` — (n_flux,) latest running-average SNR per row; nan for rows not yet
+      acquired and for nodes that do not use SNR early-stop.
     - ``x_label`` — the trailing-axis label (for the Plotter's x axis).
     """
 
@@ -116,6 +122,7 @@ class Sweep1DResult:
     signal: NDArray[np.float64]
     fit_curve: NDArray[np.float64]
     fit_value: NDArray[np.float64]
+    snr: NDArray[np.float64]
     x_label: str = "x"
 
     @classmethod
@@ -131,6 +138,7 @@ class Sweep1DResult:
             signal=np.full((n_flux, n_x), np.nan, dtype=np.float64),
             fit_curve=np.full((n_flux, n_x), np.nan, dtype=np.float64),
             fit_value=np.full(n_flux, np.nan, dtype=np.float64),
+            snr=np.full(n_flux, np.nan, dtype=np.float64),
             x_label=x_label,
         )
 
