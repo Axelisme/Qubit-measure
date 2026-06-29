@@ -173,13 +173,11 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         return (
             CfgBuilder(ctx, self.cfg_spec())
-            .scalars(shots=100000)
-            .set("relax_delay", proper_relax(ctx))
-            .role("modules.probe_pulse", "pi_pulse", Init.INLINE)
-            .role("modules.readout", "readout")
-            # optional → None (disabled) when no library entry (ADR-0010)
+            .scalars(shots=100000, relax_delay=proper_relax(ctx))
             .role("modules.reset", "reset", Init.DISABLED)
             .role("modules.init_pulse", "pi_pulse", Init.DISABLED)
+            .role("modules.probe_pulse", "pi_pulse")
+            .role("modules.readout", "readout")
             .build()
         )
 
