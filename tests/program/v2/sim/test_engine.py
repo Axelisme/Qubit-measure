@@ -1018,6 +1018,139 @@ def test_engine_cancel_during_detune_loop_raises(monkeypatch):
     assert 0 < propagator_calls < 2 * len(engine._detune_nodes)
 
 
+def test_engine_caches_population_chain_for_readout_only_sweep(monkeypatch):
+    """Sweeping only readout parameters reuses the identical qubit state chain."""
+
+    calls = 0
+    real_population_chain = SimEngine._point_population_chain
+
+    def spy_population_chain(
+        self: SimEngine, model: _PointModel, reps: int, nreads: int
+    ) -> NDArray[np.float64]:
+        nonlocal calls
+        calls += 1
+        return real_population_chain(self, model, reps, nreads)
+
+    monkeypatch.setattr(SimEngine, "_point_population_chain", spy_population_chain)
+
+    _soc, soccfg = make_mock_soc(sim=_SIM)
+    f_qubit = _f_qubit_mhz()
+    pulse = PulseCfg(
+        ch=0,
+        nqz=1,
+        gain=0.3,
+        freq=f_qubit,
+        phase=0.0,
+        waveform=ConstWaveformCfg(length=0.5),
+    ).build("qub")
+    sw = SweepCfg(start=_rf_g_mhz() - 5.0, stop=_rf_g_mhz() + 5.0, expts=5, step=2.5)
+    ro_param = sweep2param("ro_freq", sw)
+    readout = DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=ro_param).build("ro")
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=7, rounds=1),
+        modules=[pulse, readout],
+        sweep=[("ro_freq", sw)],
+    )
+    prog.compile()
+
+    engine = SimEngine(prog, _SIM)
+    engine._ensure_signal()
+
+    assert calls == 1
+
+
+def test_engine_does_not_reuse_population_chain_for_qubit_sweep(monkeypatch):
+    """Sweeping qubit drive parameters keeps distinct rep-to-rep state chains."""
+
+    calls = 0
+    real_population_chain = SimEngine._point_population_chain
+
+    def spy_population_chain(
+        self: SimEngine, model: _PointModel, reps: int, nreads: int
+    ) -> NDArray[np.float64]:
+        nonlocal calls
+        calls += 1
+        return real_population_chain(self, model, reps, nreads)
+
+    monkeypatch.setattr(SimEngine, "_point_population_chain", spy_population_chain)
+
+    _soc, soccfg = make_mock_soc(sim=_SIM)
+    f_qubit = _f_qubit_mhz()
+    sw = SweepCfg(start=0.0, stop=0.9, expts=4, step=0.3)
+    gain_param = sweep2param("gain", sw)
+    pulse = PulseCfg(
+        ch=0,
+        nqz=1,
+        gain=gain_param,
+        freq=f_qubit,
+        phase=0.0,
+        waveform=ConstWaveformCfg(length=1.0),
+    ).build("qub")
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=7, rounds=1),
+        modules=[pulse, _readout(_rf_g_mhz())],
+        sweep=[("gain", sw)],
+    )
+    prog.compile()
+
+    engine = SimEngine(prog, _SIM)
+    engine._ensure_signal()
+
+    assert calls == sw.expts
+
+
+def test_engine_batched_population_chain_matches_scalar_reference():
+    """The vectorized detune-node recurrence preserves the scalar physics."""
+
+    sim = _SIM.model_copy(update={"T2": 10.0, "T2_star": 5.0})
+    _soc, soccfg = make_mock_soc(sim=sim)
+    pulse = PulseCfg(
+        ch=0,
+        nqz=1,
+        gain=0.2,
+        freq=_f_qubit_mhz(),
+        phase=0.0,
+        waveform=ConstWaveformCfg(length=0.7),
+    ).build("qub")
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=8, rounds=1, relax_delay=0.1),
+        modules=[pulse, _readout(_rf_g_mhz())],
+    )
+    prog.compile()
+    engine = SimEngine(prog, sim)
+    n_samples, sample_times_us = engine._readout_sample_times_us()
+    f_qubit_ghz, rf_g, rf_e = engine._operating_signal()
+    model = engine._point_model({}, f_qubit_ghz, rf_g, rf_e, n_samples, sample_times_us)
+
+    actual = engine._point_population_chain(model, reps=8, nreads=1)
+
+    z0 = 2.0 * sim.thermal_pop - 1.0
+    states = [
+        np.array([0.0, 0.0, z0, 1.0], dtype=np.float64) for _ in model.pre_readout_props
+    ]
+    expected = np.empty((8, 1), dtype=np.float64)
+    for rep_idx in range(8):
+        p_mean = 0.0
+        next_states: list[NDArray[np.float64]] = []
+        for state, pre_prop, relax_prop, weight in zip(
+            states,
+            model.pre_readout_props,
+            model.inter_shot_props,
+            engine._detune_weights,
+        ):
+            at_readout = pre_prop @ state
+            node_p = 0.5 * (1.0 + float(at_readout[2]))
+            p_mean += float(weight) * min(max(node_p, 0.0), 1.0)
+            next_states.append(relax_prop @ at_readout)
+        expected[rep_idx, :] = p_mean
+        states = next_states
+
+    np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-12)
+
+
 # ---------------------------------------------------------------- decimated D2
 
 

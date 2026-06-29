@@ -45,6 +45,7 @@ round draws fresh noise so re-running the round loop is statistically meaningful
 
 from __future__ import annotations
 
+import hashlib
 import itertools
 import logging
 import math
@@ -176,15 +177,36 @@ def _sequence_propagator(segments: list[bloch.Segment]) -> NDArray[np.float64]:
     return prop
 
 
-def _apply_propagator(
-    prop: NDArray[np.float64], v0: NDArray[np.float64]
-) -> NDArray[np.float64]:
-    """Apply a 4x4 affine Bloch propagator to a 3-vector."""
+def _population_chain_cache_key(
+    model: _PointModel,
+    reps: int,
+    nreads: int,
+    weights: NDArray[np.float64],
+    thermal_pop: float,
+) -> bytes:
+    """Content key for a deterministic population chain within one signal grid."""
 
-    aug = np.empty(4, dtype=np.float64)
-    aug[:3] = v0
-    aug[3] = 1.0
-    return np.asarray(prop @ aug, dtype=np.float64)[:3].copy()
+    hasher = hashlib.blake2b(digest_size=24)
+    header = np.array(
+        [reps, nreads, len(model.pre_readout_props), len(model.inter_shot_props)],
+        dtype=np.int64,
+    )
+    hasher.update(header.tobytes())
+    hasher.update(np.array([thermal_pop], dtype=np.float64).tobytes())
+
+    def update_array(values: NDArray[np.float64]) -> None:
+        contiguous = np.ascontiguousarray(values)
+        hasher.update(repr(contiguous.shape).encode("ascii"))
+        hasher.update(contiguous.dtype.str.encode("ascii"))
+        hasher.update(contiguous.tobytes())
+
+    update_array(weights)
+    for prop in model.pre_readout_props:
+        update_array(prop)
+    for prop in model.inter_shot_props:
+        update_array(prop)
+
+    return hasher.digest()
 
 
 @lru_cache(maxsize=256)
@@ -361,6 +383,7 @@ class SimEngine:
         p_e_grid = np.empty((reps, *sweep_dims, nreads), dtype=np.float64)
         signal_scale_grid = np.empty((*sweep_dims, nreads), dtype=np.float64)
         noise_std_scale_grid = np.empty((*sweep_dims, nreads), dtype=np.float64)
+        population_cache: dict[bytes, NDArray[np.float64]] = {}
 
         index_ranges = [range(count) for _, count in axes]
         for multi_index in itertools.product(*index_ranges):
@@ -376,7 +399,18 @@ class SimEngine:
             noise_std_scale_grid[idx] = model.noise_std_scale
 
             p_idx = (slice(None), *multi_index, slice(None))
-            p_e_grid[p_idx] = self._point_population_chain(model, reps, nreads)
+            chain_key = _population_chain_cache_key(
+                model,
+                reps,
+                nreads,
+                self._detune_weights,
+                self.sim.thermal_pop,
+            )
+            if chain_key not in population_cache:
+                population_cache[chain_key] = self._point_population_chain(
+                    model, reps, nreads
+                )
+            p_e_grid[p_idx] = population_cache[chain_key]
 
         return (
             s_g_grid,
@@ -525,28 +559,50 @@ class SimEngine:
     ) -> NDArray[np.float64]:
         """Return rep-resolved ensemble-averaged ``P_e`` for one sweep point."""
 
-        states = [
-            bloch.ground_state(self.sim.thermal_pop)
-            for _ in range(len(model.pre_readout_props))
-        ]
+        if len(model.pre_readout_props) != len(model.inter_shot_props):
+            raise ValueError("pre-readout and inter-shot propagator counts differ")
+
+        node_count = len(model.pre_readout_props)
+        if node_count != self._detune_weights.size:
+            raise ValueError("detune weights do not match propagator count")
+
         p_e = np.empty((reps, nreads), dtype=np.float64)
+        z0 = 2.0 * self.sim.thermal_pop - 1.0
+
+        if node_count == 1:
+            state = np.array([0.0, 0.0, z0, 1.0], dtype=np.float64)
+            pre_prop = model.pre_readout_props[0]
+            relax_prop = model.inter_shot_props[0]
+
+            for rep_idx in range(reps):
+                self._raise_if_cancelled()
+                at_readout = pre_prop @ state
+                node_p = 0.5 * (1.0 + float(at_readout[2]))
+                if node_p < 0.0:
+                    node_p = 0.0
+                elif node_p > 1.0:
+                    node_p = 1.0
+                p_e[rep_idx, :] = node_p
+                state = relax_prop @ at_readout
+
+            return p_e
+
+        pre_props = np.stack(model.pre_readout_props, axis=0)
+        relax_props = np.stack(model.inter_shot_props, axis=0)
+        states = np.empty((node_count, 4), dtype=np.float64)
+        states[:, 0] = 0.0
+        states[:, 1] = 0.0
+        states[:, 2] = z0
+        states[:, 3] = 1.0
 
         for rep_idx in range(reps):
             self._raise_if_cancelled()
-            p_mean = 0.0
-            next_states: list[NDArray[np.float64]] = []
-            for state, pre_prop, relax_prop, weight in zip(
-                states,
-                model.pre_readout_props,
-                model.inter_shot_props,
-                self._detune_weights,
-            ):
-                at_readout = _apply_propagator(pre_prop, state)
-                node_p = bloch.excited_population(at_readout)
-                p_mean += float(weight) * float(np.clip(node_p, 0.0, 1.0))
-                next_states.append(_apply_propagator(relax_prop, at_readout))
+            at_readout = np.einsum("nij,nj->ni", pre_props, states, optimize=False)
+            node_p = 0.5 * (1.0 + at_readout[:, 2])
+            np.clip(node_p, 0.0, 1.0, out=node_p)
+            p_mean = float(np.dot(self._detune_weights, node_p))
             p_e[rep_idx, :] = p_mean
-            states = next_states
+            states = np.einsum("nij,nj->ni", relax_props, at_readout, optimize=False)
 
         return p_e
 

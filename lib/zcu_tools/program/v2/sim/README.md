@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-06-29 (readout nonlinearity and relax-delay carry)
+**Last updated:** 2026-06-29 (readout population-chain performance)
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -68,6 +68,13 @@ same reduced flux also reuse a small process-local hot cache for the expensive
 or moves the mock operating flux to a convenience point.  The cache is valid only
 because the flux is fixed *for that acquire*; a per-point operating flux would have
 to move that call back into the loop.
+
+**Population-chain work is cached by deterministic propagators.** Within one
+signal-grid build, sweep points that change only readout parameters reuse the same
+rep-resolved `P_e` chain because their Bloch propagators and detune weights are
+identical. Qubit-drive sweeps still compute distinct chains because their
+propagators differ. The cache is local to the grid build, so it avoids retaining a
+second copy of large `P_e` grids after the acquire setup.
 
 **Cooperative stop boundary.** Acquire-level `stop_checkers` stay owned by the
 real round loop's `finish_round()` path, matching hardware semantics: Stop and
@@ -146,6 +153,8 @@ every coupling point.
   exactly — a mathematical identity, not a per-experiment split (R-1 intact).
   The deterministic state chain reinitializes at each round boundary; inside a
   round, `relax_delay` passively evolves every detune node from one rep to the next.
+  Single-node chains use a scalar fast path; multi-node detune ensembles evolve all
+  nodes in one batched recurrence per rep.
 
 ## Design boundaries and known limits
 
