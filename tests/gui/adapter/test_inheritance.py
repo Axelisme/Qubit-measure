@@ -14,6 +14,7 @@ from zcu_tools.gui.app.main.adapter import (
     SweepValue,
     WaveformRefSpec,
     WaveformRefValue,
+    align_locked_literals,
     inherit_from,
     make_default_value,
 )
@@ -371,3 +372,26 @@ def test_inherit_from_preserves_disabled_optional_ref():
     old_val = CfgSectionValue(fields={"reset": None})
     result = inherit_from(old_val, spec, spec)
     assert result.fields["reset"] is None
+
+
+def test_align_locked_literals_projects_linked_ref_into_caller_spec():
+    locked_readout = make_pulse_readout_spec().lock_literal("pulse_cfg.freq", 0.0)
+    spec = CfgSectionSpec(
+        fields={"readout": ModuleRefSpec(allowed=[locked_readout], label="Readout")}
+    )
+    readout_value = make_default_value(make_pulse_readout_spec())
+    pulse_cfg = readout_value.fields["pulse_cfg"]
+    assert isinstance(pulse_cfg, CfgSectionValue)
+    pulse_cfg.fields["freq"] = DirectValue(5998.0)
+    value = CfgSectionValue(
+        fields={"readout": ModuleRefValue("readout_rf", readout_value)}
+    )
+
+    result = align_locked_literals(spec, value)
+
+    assert result is value
+    readout = result.fields["readout"]
+    assert isinstance(readout, ModuleRefValue)
+    pulse_cfg = readout.value.fields["pulse_cfg"]
+    assert isinstance(pulse_cfg, CfgSectionValue)
+    assert pulse_cfg.fields["freq"] == DirectValue(0.0)

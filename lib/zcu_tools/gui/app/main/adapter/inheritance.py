@@ -67,6 +67,96 @@ def make_default_value(spec: CfgSectionSpec) -> CfgSectionValue:
     return CfgSectionValue(fields=fields)
 
 
+def select_ref_value_spec(
+    ref_spec: ModuleRefSpec | WaveformRefSpec,
+    ref_val: ModuleRefValue | WaveformRefValue,
+) -> CfgSectionSpec:
+    """Return the caller-allowed spec matching a ref value's concrete shape.
+
+    Custom refs are selected by their ``<Custom:label>`` key. Linked refs are
+    selected by the value tree's discriminator (``type`` for modules, ``style``
+    for waveforms), so a library value can be projected onto an adapter-local
+    spec that carries extra ``LiteralSpec`` locks.
+    """
+    chosen = ref_val.chosen_key
+    if chosen.startswith("<Custom:"):
+        if not chosen.endswith(">"):
+            raise RuntimeError(f"Invalid custom reference key: {chosen!r}")
+        label = chosen[len("<Custom:") : -1]
+        for spec in ref_spec.allowed:
+            if spec.label == label:
+                return spec
+        allowed = ", ".join(spec.label for spec in ref_spec.allowed)
+        raise RuntimeError(
+            f"Unknown custom reference label {label!r}; allowed labels: {allowed}"
+        )
+
+    disc_key = "type" if isinstance(ref_spec, ModuleRefSpec) else "style"
+    discriminator = _section_discriminator(ref_val.value, disc_key)
+    if discriminator is None:
+        if len(ref_spec.allowed) == 1:
+            return ref_spec.allowed[0]
+        available = ", ".join(
+            repr(getattr(spec.fields.get(disc_key), "value", None))
+            for spec in ref_spec.allowed
+        )
+        raise RuntimeError(
+            f"Reference {chosen!r} has no {disc_key!r} discriminator; "
+            f"available {disc_key}: {available}"
+        )
+
+    for spec in ref_spec.allowed:
+        leaf = spec.fields.get(disc_key)
+        if isinstance(leaf, LiteralSpec) and leaf.value == discriminator:
+            return spec
+
+    available = ", ".join(
+        repr(getattr(spec.fields.get(disc_key), "value", None))
+        for spec in ref_spec.allowed
+    )
+    raise RuntimeError(
+        f"Reference {chosen!r} has {disc_key}={discriminator!r}, but no allowed "
+        f"shape matches (available {disc_key}: {available})"
+    )
+
+
+def align_locked_literals(
+    spec: CfgSectionSpec,
+    value: CfgSectionValue,
+) -> CfgSectionValue:
+    """Mutate ``value`` so every ``LiteralSpec`` leaf matches ``spec.value``.
+
+    This is a projection step, not validation: callers use it when a value tree
+    built outside the adapter-local spec (for example a linked ModuleLibrary
+    entry) enters that spec. Non-literal inconsistencies remain for validate()
+    to catch.
+    """
+    for key, node_spec in spec.fields.items():
+        node_val = value.fields.get(key)
+        if isinstance(node_spec, LiteralSpec):
+            value.fields[key] = DirectValue(node_spec.value)
+        elif isinstance(node_spec, CfgSectionSpec) and isinstance(
+            node_val, CfgSectionValue
+        ):
+            align_locked_literals(node_spec, node_val)
+        elif isinstance(node_spec, ModuleRefSpec) and isinstance(
+            node_val, ModuleRefValue
+        ):
+            chosen_spec = select_ref_value_spec(node_spec, node_val)
+            align_locked_literals(chosen_spec, node_val.value)
+        elif isinstance(node_spec, WaveformRefSpec) and isinstance(
+            node_val, WaveformRefValue
+        ):
+            chosen_spec = select_ref_value_spec(node_spec, node_val)
+            align_locked_literals(chosen_spec, node_val.value)
+    return value
+
+
+def _section_discriminator(value: CfgSectionValue, key: str) -> object:
+    leaf = value.fields.get(key)
+    return getattr(leaf, "value", None)
+
+
 def inherit_from(
     old_val: CfgSectionValue,
     old_spec: CfgSectionSpec,

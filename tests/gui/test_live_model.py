@@ -20,6 +20,7 @@ from zcu_tools.gui.app.main.adapter import (
     SweepValue,
     WaveformRefSpec,
     WaveformRefValue,
+    make_default_value,
 )
 from zcu_tools.gui.app.main.live_model import (
     CallbackList,
@@ -30,10 +31,12 @@ from zcu_tools.gui.app.main.live_model import (
     SectionLiveField,
     SweepLiveField,
 )
+from zcu_tools.gui.app.main.specs.readout import make_pulse_readout_spec
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.events import SessionEvent
 from zcu_tools.gui.session.value_lookup import ValueInfo, ValueRef, ValueTypeError
 from zcu_tools.meta_tool import ModuleLibrary
+from zcu_tools.program.v2 import ModuleCfgFactory
 
 
 @pytest.fixture()
@@ -398,6 +401,61 @@ def test_module_ref_sub_edit_marks_overridden_in_get_value(env, monkeypatch):
     assert out is not None
     assert out.chosen_key == "lib_mod"
     assert out.is_overridden is True
+
+
+def test_linked_ref_normalizes_locked_literals_without_override(env):
+    locked_readout = make_pulse_readout_spec().lock_literal("pulse_cfg.freq", 0.0)
+    spec = CfgSectionSpec(
+        fields={"readout": ModuleRefSpec(allowed=[locked_readout], label="Readout")}
+    )
+    ml = ModuleLibrary()
+    ml.modules["readout_rf"] = ModuleCfgFactory.from_raw(
+        {
+            "type": "readout/pulse",
+            "pulse_cfg": {
+                "type": "pulse",
+                "ch": 0,
+                "nqz": 2,
+                "freq": 5998.382171589952,
+                "phase": 0.0,
+                "gain": 0.1,
+                "pre_delay": 0.0,
+                "post_delay": 0.0,
+                "waveform": {"style": "const", "length": 1.0},
+            },
+            "ro_cfg": {
+                "type": "readout/direct",
+                "ro_ch": 0,
+                "ro_freq": 5998.382171589952,
+                "ro_length": 0.9,
+                "trig_offset": 0.5,
+            },
+        }
+    )
+    env.ctrl.get_current_ml.return_value = ml
+    section = SectionLiveField(
+        spec,
+        env,
+        initial_val=CfgSectionValue(
+            fields={
+                "readout": ModuleRefValue(
+                    "<Custom:Pulse Readout>", make_default_value(locked_readout)
+                )
+            }
+        ),
+    )
+    field = cast(ModuleRefLiveField, section.fields["readout"])
+
+    field.set_chosen_key("readout_rf")
+
+    out = field.get_value()
+    assert out is not None
+    assert out.chosen_key == "readout_rf"
+    assert out.is_overridden is False
+    assert field._binding_state is LibraryBindingState.LINKED
+    pulse_cfg = out.value.fields["pulse_cfg"]
+    assert isinstance(pulse_cfg, CfgSectionValue)
+    assert pulse_cfg.fields["freq"] == DirectValue(0.0)
 
 
 def test_module_ref_overridden_dangling_self_heals_to_custom(env):

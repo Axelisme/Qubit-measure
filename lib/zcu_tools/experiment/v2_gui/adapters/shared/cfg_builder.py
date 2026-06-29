@@ -50,7 +50,6 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
     DeviceRefSpec,
-    DirectValue,
     LiteralSpec,
     ModuleRefSpec,
     ModuleRefValue,
@@ -60,7 +59,7 @@ from zcu_tools.gui.app.main.adapter import (
     SweepValue,
     WaveformRefSpec,
     WaveformRefValue,
-    find_allowed_spec,
+    align_locked_literals,
     make_default_value,
 )
 from zcu_tools.gui.session.value_lookup import (
@@ -271,7 +270,7 @@ class CfgBuilder:
         adapter never restates a locked value (the spec is the single source).
         """
         self._check_mutable()
-        self._align_literals(self._spec, self._value)
+        align_locked_literals(self._spec, self._value)
         self._built = True
         return self._value
 
@@ -302,28 +301,6 @@ class CfgBuilder:
                     f"at segment {seg!r}"
                 )
         node_value.fields[parts[-1]] = node
-
-    def _align_literals(self, spec: CfgSectionSpec, value: CfgSectionValue) -> None:
-        """Recurse spec+value, forcing every LiteralSpec leaf to spec.value.
-
-        Descends nested sections and (via ``find_allowed_spec``) the chosen shape
-        of mounted refs. A disabled optional ref (value ``None``) is skipped —
-        lowering supplies the literal from the spec when an absent-but-required
-        literal field is reached, and a disabled ref contributes nothing.
-        """
-        for key, node_spec in spec.fields.items():
-            node_val = value.fields.get(key)
-            if isinstance(node_spec, LiteralSpec):
-                value.fields[key] = DirectValue(node_spec.value)
-            elif isinstance(node_spec, CfgSectionSpec) and isinstance(
-                node_val, CfgSectionValue
-            ):
-                self._align_literals(node_spec, node_val)
-            elif isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec)) and isinstance(
-                node_val, (ModuleRefValue, WaveformRefValue)
-            ):
-                chosen_spec = find_allowed_spec(node_spec, node_val, self._ctx.ml)
-                self._align_literals(chosen_spec, node_val.value)
 
     def _resolve_leaf_spec(self, parts: list[str], path: str) -> CfgNodeSpec:
         """Descend the spec tree to the spec node at ``path`` (Fast-Fail)."""

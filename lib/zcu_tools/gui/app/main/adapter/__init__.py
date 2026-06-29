@@ -13,7 +13,12 @@ from zcu_tools.gui.session.types import (
 )
 
 from .analyze_params import ParamMeta, describe_analyze_params, reconstruct_params
-from .inheritance import inherit_from, make_default_value
+from .inheritance import (
+    align_locked_literals,
+    inherit_from,
+    make_default_value,
+    select_ref_value_spec,
+)
 from .lowering import find_allowed_spec
 from .protocol import ExpAdapterProtocol
 from .types import (

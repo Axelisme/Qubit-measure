@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from zcu_tools.meta_tool.library import ModuleLibrary
 
-    from .adapter import CfgSectionSpec
+    from ...adapter import CfgSectionSpec
 
 
 def _spec_value_for_chosen(
@@ -41,10 +41,32 @@ def _spec_value_for_chosen(
         if chosen_key in ml.modules:
             cfg = ml.modules[chosen_key]
             logger.debug("_spec_value_for_chosen: matched module key=%r", chosen_key)
-            return module_cfg_to_value(cfg)
+            _, value = module_cfg_to_value(cfg)
+            from ...adapter import (
+                ModuleRefSpec,
+                ModuleRefValue,
+                align_locked_literals,
+                select_ref_value_spec,
+            )
+
+            spec = select_ref_value_spec(
+                ModuleRefSpec(allowed=allowed), ModuleRefValue(chosen_key, value)
+            )
+            return spec, align_locked_literals(spec, value)
         if chosen_key in ml.waveforms:
             cfg = ml.waveforms[chosen_key]
             logger.debug("_spec_value_for_chosen: matched waveform key=%r", chosen_key)
-            return waveform_cfg_to_value(cfg)
+            _, value = waveform_cfg_to_value(cfg)
+            from ...adapter import (
+                WaveformRefSpec,
+                WaveformRefValue,
+                align_locked_literals,
+                select_ref_value_spec,
+            )
+
+            spec = select_ref_value_spec(
+                WaveformRefSpec(allowed=allowed), WaveformRefValue(chosen_key, value)
+            )
+            return spec, align_locked_literals(spec, value)
 
     raise RuntimeError(f"Unknown library reference: {chosen_key!r}")
