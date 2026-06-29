@@ -1082,7 +1082,7 @@ def test_engine_caches_population_chain_for_readout_only_sweep(monkeypatch):
 
 
 def test_engine_reuses_evolution_lowering_for_readout_only_sweep(monkeypatch):
-    """Readout-only axes reuse detune propagators instead of re-lowering all points."""
+    """Readout-only axes avoid per-detune re-lowering while sweeping readout."""
 
     from zcu_tools.program.v2.sim.engine import SimEngine
 
@@ -1126,7 +1126,7 @@ def test_engine_reuses_evolution_lowering_for_readout_only_sweep(monkeypatch):
     engine = SimEngine(prog, sim)
     engine._ensure_signal()
 
-    assert lower_calls == len(engine._detune_nodes) + sw.expts - 1
+    assert lower_calls == sw.expts
 
 
 def test_cooperative_yield_releases_gil(monkeypatch):

@@ -733,33 +733,39 @@ class SimEngine:
             signal_sample_times,
         )
 
-        relax_segment = inter_shot_relax_segment(
-            self.program.modules,
-            self.program.sweep_dict,
-            self.sim,
-            f_qubit_ghz,
-            point,
-            self.program.cfg_model.relax_delay,
-            detune_offset=0.0,
-        )
+        if evolution_props is None:
+            relax_segment = inter_shot_relax_segment(
+                self.program.modules,
+                self.program.sweep_dict,
+                self.sim,
+                f_qubit_ghz,
+                point,
+                self.program.cfg_model.relax_delay,
+                detune_offset=0.0,
+            )
 
-        pre_readout_props: list[NDArray[np.float64]] = []
-        inter_shot_props: list[NDArray[np.float64]] = []
-        for delta in self._detune_nodes:
-            self._raise_if_cancelled()
-            detune_offset = float(delta)
-            pre_readout_props.append(
-                _sequence_propagator(
-                    _shift_segments_detuning(zero_lowered.segments, detune_offset)
+            pre_readout_props: list[NDArray[np.float64]] = []
+            inter_shot_props: list[NDArray[np.float64]] = []
+            for delta in self._detune_nodes:
+                self._raise_if_cancelled()
+                detune_offset = float(delta)
+                pre_readout_props.append(
+                    _sequence_propagator(
+                        _shift_segments_detuning(zero_lowered.segments, detune_offset)
+                    )
                 )
-            )
-            inter_shot_props.append(
-                np.eye(4, dtype=np.float64)
-                if relax_segment is None
-                else _sequence_propagator(
-                    [_shift_segment_detuning(relax_segment, detune_offset)]
+                inter_shot_props.append(
+                    np.eye(4, dtype=np.float64)
+                    if relax_segment is None
+                    else _sequence_propagator(
+                        [_shift_segment_detuning(relax_segment, detune_offset)]
+                    )
                 )
-            )
+                if yield_hook is not None:
+                    yield_hook()
+            props = (tuple(pre_readout_props), tuple(inter_shot_props))
+        else:
+            props = evolution_props
 
         pre_readout_props_t, inter_shot_props_t = props
         return _PointModel(
@@ -768,8 +774,8 @@ class SimEngine:
             signal_scale=signal_scale,
             noise_std_scale=noise_std_scale,
             gain_noise_std_scale=gain_noise_std_scale,
-            pre_readout_props=tuple(pre_readout_props),
-            inter_shot_props=tuple(inter_shot_props),
+            pre_readout_props=pre_readout_props_t,
+            inter_shot_props=inter_shot_props_t,
         )
 
     def _point_population_chain(
