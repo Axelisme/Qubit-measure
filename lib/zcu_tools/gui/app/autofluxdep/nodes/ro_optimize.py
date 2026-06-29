@@ -57,6 +57,7 @@ from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     axis_to_sweep,
     require_flux_device,
+    round_progress,
     set_flux_by_name,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
@@ -231,36 +232,39 @@ class RoOptimizeNode(Node):
 
         tracker = MomentTracker()
 
-        def on_round(_round_count: int, _avg_d: Any) -> None:
-            # the SNR landscape (n_freq, n_gain) accumulated so far → overwrite row
-            landscape = _ro_landscape(
-                tracker,
-                result.signal[idx].shape,
-                skew_penalty=cfg.skew_penalty,
-            )
-            np.copyto(result.signal[idx], landscape)
-            if env.round_hook is not None:
-                env.round_hook(idx)
+        with round_progress(cfg.rounds, "ro_optimize", idx) as update_round_progress:
 
-        ModularProgramV2(
-            env.soccfg,
-            cfg,
-            modules=[
-                Reset("reset", cfg.modules.reset),
-                Branch("ge", [], Pulse("pi_pulse", cfg.modules.pi_pulse)),
-                PulseReadout("readout", cfg.modules.readout),
-            ],
-            sweep=[
-                ("ge", 2),
-                ("freq", freq_sweep),
-                ("gain", gain_sweep),
-            ],
-        ).acquire(
-            env.soc,
-            progress=False,
-            round_hook=on_round,
-            trackers=[tracker],
-        )
+            def on_round(round_count: int, _avg_d: Any) -> None:
+                update_round_progress(round_count)
+                # the SNR landscape (n_freq, n_gain) accumulated so far → overwrite row
+                landscape = _ro_landscape(
+                    tracker,
+                    result.signal[idx].shape,
+                    skew_penalty=cfg.skew_penalty,
+                )
+                np.copyto(result.signal[idx], landscape)
+                if env.round_hook is not None:
+                    env.round_hook(idx)
+
+            ModularProgramV2(
+                env.soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", cfg.modules.reset),
+                    Branch("ge", [], Pulse("pi_pulse", cfg.modules.pi_pulse)),
+                    PulseReadout("readout", cfg.modules.readout),
+                ],
+                sweep=[
+                    ("ge", 2),
+                    ("freq", freq_sweep),
+                    ("gain", gain_sweep),
+                ],
+            ).acquire(
+                env.soc,
+                progress=False,
+                round_hook=on_round,
+                trackers=[tracker],
+            )
 
         landscape = _ro_landscape(
             tracker,

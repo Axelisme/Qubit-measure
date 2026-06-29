@@ -116,6 +116,14 @@ def test_predictor_dialog_default_field_values_no_predictor(qapp):
     assert dialog._flux_bias_spin.value() == pytest.approx(_DEFAULT_FLUX_BIAS)  # 0.0
 
 
+def test_predictor_dialog_param_spinboxes_do_not_pad_trailing_zeros(qapp):
+    ctrl = _make_ctrl(has_predictor=False)
+    dialog = PredictorDialog(ctrl)
+
+    assert dialog._ej_spin.text() == "4.0"
+    assert dialog._flux_period_spin.text() == "0.005"
+
+
 # ---------------------------------------------------------------------------
 # Init / load
 # ---------------------------------------------------------------------------

@@ -12,6 +12,8 @@ two rows for reorder/remove.
 
 from __future__ import annotations
 
+import time
+
 import pytest
 from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
@@ -132,6 +134,29 @@ def test_progress_bar_is_central_full_width_row(app):
     QApplication.processEvents()
     assert win._progress.width() > 0
     assert abs(win._progress.width() - central.width()) <= 16
+
+
+def test_run_progress_updates_flux_bar_and_round_stack(app, monkeypatch):
+    from zcu_tools.gui.session.pbar_host import ProgressBarModel
+
+    ctrl, win = app
+    flux = ProgressBarModel("flux sweep", 10, time.monotonic() - 10.0)
+    flux.set_n(2)
+    rounds = ProgressBarModel("t1 flux 1 rounds", 100, 0.0)
+    captured: list[tuple[ProgressBarModel, ...]] = []
+
+    monkeypatch.setattr(ctrl, "progress_bars", lambda _owner: ((1, flux), (2, rounds)))
+    monkeypatch.setattr(win._round_progress, "render_models", captured.append)
+
+    win._on_run_progress_changed()
+
+    assert win._progress.maximum() == flux.qt_maximum()
+    assert win._progress.value() == flux.qt_value()
+    assert "flux sweep" in win._progress.format()
+    assert "%v/%m" in win._progress.format()
+    assert "[" in win._progress.format()
+    assert "<" in win._progress.format()
+    assert captured == [(rounds,)]
 
 
 def test_flux_source_picker_records_selection(app):
@@ -280,13 +305,39 @@ def test_selection_shows_node_form(app):
 
 
 def test_run_disabled_until_setup(app):
+    from zcu_tools.gui.session.services.mock_flux import FAKE_FLUX_DEVICE_NAME
+
     ctrl, win = app
     assert not win._list._run_btn.isEnabled()  # no setup yet
     connect_mock(ctrl)
-    win._list._refresh_buttons()
+    win._list.refresh_flux_sources()
+    assert not win._list._run_btn.isEnabled()  # setup but no flux source pick
+
+    idx = win._list._flux_source.findData(FAKE_FLUX_DEVICE_NAME)
+    assert idx >= 0
+    win._list._flux_source.setCurrentIndex(idx)
+
     assert win._list._run_btn.isEnabled()
     win._refresh_session_status()
     assert win._setup_label.text() == "connected"
+
+
+def test_run_disabled_without_nodes(qapp):
+    from zcu_tools.gui.session.services.mock_flux import FAKE_FLUX_DEVICE_NAME
+
+    ctrl = build_core()
+    win = MainWindow(ctrl)
+    connect_mock(ctrl)
+    win._list.refresh_flux_sources()
+    idx = win._list._flux_source.findData(FAKE_FLUX_DEVICE_NAME)
+    assert idx >= 0
+    win._list._flux_source.setCurrentIndex(idx)
+
+    assert not win._list._run_btn.isEnabled()
+    assert win._list._run_btn.toolTip() == "Add at least one node"
+    ctrl._background_svc.quiesce()
+    win.close()
+    win.deleteLater()
 
 
 # --- run lifecycle: edit↔run lock, liveplot canvas, progress ---

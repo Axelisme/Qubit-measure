@@ -35,7 +35,6 @@ from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QAbstractItemView,
     QDialog,
-    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -51,6 +50,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.session.ui.predictor_canvas import PredictorCurveCanvas
+from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.controller_port import SessionControllerPort
@@ -177,7 +177,7 @@ class PredictorDialog(QDialog):
         controls_row = QHBoxLayout()
 
         controls_row.addWidget(QLabel("Device value:"))
-        self._predict_value_spin = QDoubleSpinBox()
+        self._predict_value_spin = TrimDoubleSpinBox()
         self._predict_value_spin.setRange(-1e6, 1e6)
         self._predict_value_spin.setDecimals(6)
         self._predict_value_spin.setValue(0.0)
@@ -334,14 +334,14 @@ class PredictorDialog(QDialog):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _make_param_spin(default: float = 0.0) -> QDoubleSpinBox:
+    def _make_param_spin(default: float = 0.0) -> TrimDoubleSpinBox:
         """A wide-range, high-precision spinbox for an editable model param.
 
         Range is intentionally permissive so exploratory inputs (any positive
         energy ratio, arbitrary flux anchors) are accepted; the only hard guard
         (flux_period != 0) lives in _on_apply_model_params, not here.
         """
-        spin = QDoubleSpinBox()
+        spin = TrimDoubleSpinBox()
         spin.setRange(-1e6, 1e6)
         spin.setDecimals(6)
         spin.setValue(default)

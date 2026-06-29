@@ -76,6 +76,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     fill_decay_fit_or_skip,
     make_on_round,
     require_flux_device,
+    round_progress,
     set_flux_by_name,
     signal2real_flip,
 )
@@ -211,27 +212,32 @@ class T1Node(Node):
         result.flux[idx] = env.flux
 
         probe = SnrProbe()
-        on_round = make_on_round(
-            result, idx, signal2real_flip, env.round_hook, probe=probe
-        )
         stop_checkers = build_stop_checkers(env, probe, signal2real_flip)
-
-        raw = ModularProgramV2(
-            env.soccfg,
-            cfg,
-            modules=[
-                Reset("reset", cfg.modules.reset),
-                Pulse("pi_pulse", cfg.modules.pi_pulse),
-                Delay("t1_delay", delay=length_param),
-                Readout("readout", cfg.modules.readout),
-            ],
-            sweep=[("length", length_sweep)],
-        ).acquire(
-            env.soc,
-            progress=False,
-            round_hook=on_round,
-            stop_checkers=stop_checkers,
-        )
+        with round_progress(cfg.rounds, "t1", idx) as update_round_progress:
+            on_round = make_on_round(
+                result,
+                idx,
+                signal2real_flip,
+                env.round_hook,
+                probe=probe,
+                round_progress_hook=update_round_progress,
+            )
+            raw = ModularProgramV2(
+                env.soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", cfg.modules.reset),
+                    Pulse("pi_pulse", cfg.modules.pi_pulse),
+                    Delay("t1_delay", delay=length_param),
+                    Readout("readout", cfg.modules.readout),
+                ],
+                sweep=[("length", length_sweep)],
+            ).acquire(
+                env.soc,
+                progress=False,
+                round_hook=on_round,
+                stop_checkers=stop_checkers,
+            )
         real = signal2real_flip(acquire_to_complex(raw))
 
         t1, _t1err, fit_curve, _ = fit_decay(times, real)

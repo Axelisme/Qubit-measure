@@ -56,6 +56,7 @@ def test_make_on_round_records_current_snr():
     )
     probe = acquire_mod.SnrProbe()
     notified: list[int] = []
+    rounds: list[int] = []
     real = np.array([0.0, 0.2, 0.7, 1.0, 0.8, 0.3, 0.1, 0.0], dtype=np.float64)
     avg_d = [[np.column_stack([real, np.zeros_like(real)])]]
 
@@ -65,11 +66,13 @@ def test_make_on_round_records_current_snr():
         lambda signals: np.asarray(signals, dtype=np.complex128).real,
         notified.append,
         probe=probe,
+        round_progress_hook=rounds.append,
     )
 
-    on_round(1, avg_d)
+    on_round(3, avg_d)
 
     np.testing.assert_allclose(result.signal[0], real)
     assert result.snr[0] == pytest.approx(estimate_snr(real))
     assert probe.snr == pytest.approx(result.snr[0])
     assert notified == [0]
+    assert rounds == [3]

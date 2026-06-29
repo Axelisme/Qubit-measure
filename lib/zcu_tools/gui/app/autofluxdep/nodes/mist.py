@@ -56,6 +56,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     axis_to_sweep,
     make_on_round,
     require_flux_device,
+    round_progress,
     set_flux_by_name,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
@@ -187,28 +188,35 @@ class MistNode(Node):
         result.flux[idx] = env.flux
         # fit_value[idx] and fit_curve[idx] remain nan — mist has no fit scalar.
         # probe=None: a single-round scatter, so there is no SNR early-stop to feed.
-        on_round = make_on_round(result, idx, _mist_signal2real, env.round_hook)
 
         stop_checkers: list[Any] = []
         if env.should_stop is not None:
             stop_checkers.append(env.should_stop)
 
-        raw = ModularProgramV2(
-            env.soccfg,
-            cfg,
-            modules=[
-                Reset("reset", cfg.modules.reset),
-                Pulse("pi_pulse", cfg.modules.pi_pulse),
-                Pulse("mist_pulse", cfg.modules.mist_pulse),
-                Readout("readout", cfg.modules.readout),
-            ],
-            sweep=[("gain", gain_sweep)],
-        ).acquire(
-            env.soc,
-            progress=False,
-            round_hook=on_round,
-            stop_checkers=stop_checkers,
-        )
+        with round_progress(cfg.rounds, "mist", idx) as update_round_progress:
+            on_round = make_on_round(
+                result,
+                idx,
+                _mist_signal2real,
+                env.round_hook,
+                round_progress_hook=update_round_progress,
+            )
+            raw = ModularProgramV2(
+                env.soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", cfg.modules.reset),
+                    Pulse("pi_pulse", cfg.modules.pi_pulse),
+                    Pulse("mist_pulse", cfg.modules.mist_pulse),
+                    Readout("readout", cfg.modules.readout),
+                ],
+                sweep=[("gain", gain_sweep)],
+            ).acquire(
+                env.soc,
+                progress=False,
+                round_hook=on_round,
+                stop_checkers=stop_checkers,
+            )
         curve = _mist_signal2real(acquire_to_complex(raw))
         np.copyto(result.signal[idx], curve)
 

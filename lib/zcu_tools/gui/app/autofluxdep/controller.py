@@ -98,7 +98,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_RUN_OWNER_ID = "autofluxdep-run"
+RUN_PROGRESS_OWNER_ID = "autofluxdep-run"
+_RUN_OWNER_ID = RUN_PROGRESS_OWNER_ID
 
 
 @dataclass(frozen=True)

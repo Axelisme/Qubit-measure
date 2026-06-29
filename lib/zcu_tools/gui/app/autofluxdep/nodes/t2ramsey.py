@@ -68,6 +68,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     is_good_fit,
     make_on_round,
     require_flux_device,
+    round_progress,
     set_flux_by_name,
     signal2real_flip,
 )
@@ -183,33 +184,38 @@ class T2RamseyNode(Node):
         result.flux[idx] = env.flux
 
         probe = SnrProbe()
-        on_round = make_on_round(
-            result, idx, signal2real_flip, env.round_hook, probe=probe
-        )
         stop_checkers = build_stop_checkers(env, probe, signal2real_flip)
-
-        raw = ModularProgramV2(
-            env.soccfg,
-            cfg,
-            modules=[
-                Reset("reset", cfg.modules.reset),
-                Pulse("pi2_pulse1", pi2_pulse),
-                Delay("t2r_delay", delay=length_param),
-                Pulse(
-                    "pi2_pulse2",
-                    pi2_pulse.with_updates(
-                        phase=pi2_pulse.phase + 360 * activate_detune * length_param
+        with round_progress(cfg.rounds, "t2ramsey", idx) as update_round_progress:
+            on_round = make_on_round(
+                result,
+                idx,
+                signal2real_flip,
+                env.round_hook,
+                probe=probe,
+                round_progress_hook=update_round_progress,
+            )
+            raw = ModularProgramV2(
+                env.soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", cfg.modules.reset),
+                    Pulse("pi2_pulse1", pi2_pulse),
+                    Delay("t2r_delay", delay=length_param),
+                    Pulse(
+                        "pi2_pulse2",
+                        pi2_pulse.with_updates(
+                            phase=pi2_pulse.phase + 360 * activate_detune * length_param
+                        ),
                     ),
-                ),
-                Readout("readout", cfg.modules.readout),
-            ],
-            sweep=[("length", length_sweep)],
-        ).acquire(
-            env.soc,
-            progress=False,
-            round_hook=on_round,
-            stop_checkers=stop_checkers,
-        )
+                    Readout("readout", cfg.modules.readout),
+                ],
+                sweep=[("length", length_sweep)],
+            ).acquire(
+                env.soc,
+                progress=False,
+                round_hook=on_round,
+                stop_checkers=stop_checkers,
+            )
         real = signal2real_flip(acquire_to_complex(raw))
 
         t2f, _, detune, _, fit_curve, _ = fit_decay_fringe(times, real)

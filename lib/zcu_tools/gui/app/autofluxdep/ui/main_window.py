@@ -38,7 +38,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.app.autofluxdep.controller import Controller
+from zcu_tools.gui.app.autofluxdep.controller import RUN_PROGRESS_OWNER_ID, Controller
 from zcu_tools.gui.app.autofluxdep.events.run import (
     NodeEnteredPayload,
     PointDonePayload,
@@ -53,6 +53,7 @@ from zcu_tools.gui.session.events import (
     PredictorChangedPayload,
     SocChangedPayload,
 )
+from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 
 from .node_detail import NodeDetailPane
 from .node_list import NodeListPane
@@ -172,6 +173,12 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(split, stretch=1)
 
         # global flux progress as a central bottom row, matching window width
+        self._round_progress = ProgressStack()
+        main_layout.addWidget(self._round_progress)
+        self._progress_unsub = ctrl.attach_progress(
+            RUN_PROGRESS_OWNER_ID, self._on_run_progress_changed
+        )
+
         self._progress = QProgressBar()
         self._progress.setFormat("flux %v/%m")
         self._progress.setSizePolicy(
@@ -213,6 +220,7 @@ class MainWindow(QMainWindow):
         self._on_select(self._list.selected_index)
 
     def closeEvent(self, a0: Any) -> None:
+        self._progress_unsub()
         self._list.teardown()
         self._ctrl.persist_all()
         super().closeEvent(a0)
@@ -452,6 +460,22 @@ class MainWindow(QMainWindow):
 
     def _on_point_done(self, idx: int) -> None:
         self._progress.setValue(idx + 1)
+
+    def _on_run_progress_changed(self) -> None:
+        models = tuple(
+            model for _handle, model in self._ctrl.progress_bars(RUN_PROGRESS_OWNER_ID)
+        )
+        flux_model = next(
+            (model for model in models if model.label == "flux sweep"), None
+        )
+        if flux_model is not None:
+            self._progress.setMaximum(flux_model.qt_maximum())
+            self._progress.setFormat(flux_model.format())
+            self._progress.setValue(flux_model.qt_value())
+
+        self._round_progress.render_models(
+            tuple(model for model in models if model.label != "flux sweep")
+        )
 
     def _on_run_done(self) -> None:
         self._run_active = False

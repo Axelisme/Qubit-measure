@@ -16,13 +16,15 @@ each Node.
 from __future__ import annotations
 
 from collections.abc import Callable, MutableMapping
-from typing import TYPE_CHECKING, Any
+from contextlib import contextmanager
+from typing import TYPE_CHECKING, Any, Iterator
 
 import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.experiment.v2.utils import estimate_snr, snr_checker
 from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
+from zcu_tools.progress_bar import BaseProgressBar, make_pbar
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.autofluxdep.cfg import NodeCfgSchema
@@ -204,12 +206,37 @@ def build_stop_checkers(
     return checkers
 
 
+@contextmanager
+def round_progress(
+    total: int | None,
+    node_name: str,
+    flux_idx: int,
+) -> Iterator[Callable[[int], None]]:
+    """Progress bar matching the notebook Task's rounds progress for one flux row."""
+    pbar: BaseProgressBar = make_pbar(
+        total=total,
+        smoothing=0,
+        desc=f"{node_name} flux {flux_idx + 1} rounds",
+        leave=False,
+        disable=total == 1,
+    )
+
+    def update(round_count: int) -> None:
+        pbar.update(round_count - pbar.n)
+
+    try:
+        yield update
+    finally:
+        pbar.close()
+
+
 def make_on_round(
     result: Any,
     idx: int,
     signal2real_fn: Callable[[np.ndarray], np.ndarray],
     round_hook: Callable[[int], None] | None,
     probe: SnrProbe | None = None,
+    round_progress_hook: Callable[[int], None] | None = None,
 ) -> Callable[[int, Any], None]:
     """Build the per-round ``round_hook`` shared by the 1-D measurement nodes.
 
@@ -230,6 +257,8 @@ def make_on_round(
             if snr is not None:
                 snr[idx] = probe.snr
         np.copyto(result.signal[idx], real)
+        if round_progress_hook is not None:
+            round_progress_hook(_round_count)
         if round_hook is not None:
             round_hook(idx)
 

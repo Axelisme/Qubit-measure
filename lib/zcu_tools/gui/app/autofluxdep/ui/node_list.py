@@ -282,6 +282,7 @@ class NodeListPane(QWidget):
             self._list.setCurrentRow(0)
         self._list.blockSignals(False)
         self._on_row_changed(self._list.currentRow())
+        self._refresh_buttons()
 
     def select_index(self, index: int) -> None:
         if 0 <= index < self._list.count():
@@ -385,6 +386,7 @@ class NodeListPane(QWidget):
         self._ctrl.set_flux_device(name)
         unit = self._ctrl.get_device_unit(name) if name else ""
         self._flux_unit.setText(f"[{unit}]" if unit and unit != "none" else "")
+        self._refresh_buttons()
 
     # --- run / stop ---
 
@@ -428,8 +430,19 @@ class NodeListPane(QWidget):
             self._flux_source,
         ):
             b.setEnabled(editing)
-        # Run enabled only when set up; Stop always enabled while running
-        self._run_btn.setEnabled(self._running or self._ctrl.state.has_setup)
+        reason = self._run_disabled_reason()
+        # Run needs a complete setup; Stop always remains enabled while running.
+        self._run_btn.setEnabled(self._running or reason is None)
+        self._run_btn.setToolTip("" if self._running or reason is None else reason)
+
+    def _run_disabled_reason(self) -> str | None:
+        if not self._ctrl.state.has_setup:
+            return "Setup required"
+        if not self._ctrl.state.nodes:
+            return "Add at least one node"
+        if self._ctrl.get_flux_device() is None:
+            return "Select a flux source"
+        return None
 
 
 def _btn(text: str, slot) -> QPushButton:
