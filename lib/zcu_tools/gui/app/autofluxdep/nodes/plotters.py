@@ -29,6 +29,7 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+from numpy.typing import NDArray
 
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult, Sweep2DResult
 
@@ -137,7 +138,6 @@ class Landscape2DPlotter:
 
         self._fig = figure
         ax = figure.add_subplot(1, 1, 1)
-        self._best = ax.scatter([np.nan], [np.nan], color="red", label="Best", zorder=3)
         self._plot = LivePlot2D(
             "Frequency (MHz)",
             "Gain (a.u.)",
@@ -145,12 +145,36 @@ class Landscape2DPlotter:
             segment_kwargs=dict(title=title),
         )
         self._plot.__enter__()
+        ax = self._plot.get_ax()
+        self._best = ax.scatter(
+            [np.nan],
+            [np.nan],
+            color="red",
+            edgecolors="white",
+            linewidths=0.8,
+            label="Latest best",
+            zorder=3,
+        )
 
     def update(self, result: Sweep2DResult, idx: int) -> None:
         n = result.n_flux
         i = idx if 0 <= idx < n else n - 1
         self._plot.update(result.freq, result.gain, result.signal[i], refresh=False)
-        bf, bg = result.best_freq[i], result.best_gain[i]
-        if not (np.isnan(bf) or np.isnan(bg)):
-            self._best.set_offsets([[float(bf), float(bg)]])
+        best = _latest_best_offset(result, i)
+        self._best.set_offsets(best)
         self._fig.canvas.draw_idle()
+
+
+def _latest_best_offset(result: Sweep2DResult, idx: int) -> NDArray[np.float64]:
+    """Return the latest finite best point at or before ``idx`` as scatter offsets."""
+    if result.n_flux == 0:
+        return np.array([[np.nan, np.nan]], dtype=np.float64)
+    hi = min(max(idx, 0), result.n_flux - 1) + 1
+    finite = np.isfinite(result.best_freq[:hi]) & np.isfinite(result.best_gain[:hi])
+    if not np.any(finite):
+        return np.array([[np.nan, np.nan]], dtype=np.float64)
+    best_idx = int(np.flatnonzero(finite)[-1])
+    return np.array(
+        [[float(result.best_freq[best_idx]), float(result.best_gain[best_idx])]],
+        dtype=np.float64,
+    )

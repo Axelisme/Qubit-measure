@@ -10,6 +10,7 @@ axes).
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 # --- registry exposes all migrated measurement types ---
@@ -56,3 +57,35 @@ def test_make_plotter_builds_aligned_subplots(type_name, n_axes):
     plotter = builder.make_plotter(figure)
     assert plotter is not None
     assert len(figure.axes) == n_axes
+
+
+def test_ro_optimize_plotter_marks_latest_best_point():
+    from matplotlib.figure import Figure
+    from zcu_tools.gui.app.autofluxdep.nodes.plotters import Landscape2DPlotter
+    from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep2DResult
+
+    result = Sweep2DResult.allocate(
+        np.array([0.0, 0.1, 0.2]),
+        np.array([5995.0, 6000.0, 6005.0]),
+        np.array([0.2, 0.5, 0.8]),
+    )
+    result.signal[:] = 1.0
+    result.best_freq[0] = 5995.0
+    result.best_gain[0] = 0.2
+    result.best_freq[1] = 6000.0
+    result.best_gain[1] = 0.5
+
+    figure = Figure()
+    plotter = Landscape2DPlotter(figure)
+    plotter.update(result, 2)
+
+    marker = figure.axes[0].collections[-1]
+    offsets = np.asarray(marker.get_offsets(), dtype=np.float64)
+    np.testing.assert_allclose(offsets, [[6000.0, 0.5]])
+
+    result.best_freq[2] = 6005.0
+    result.best_gain[2] = 0.8
+    plotter.update(result, 2)
+
+    offsets = np.asarray(marker.get_offsets(), dtype=np.float64)
+    np.testing.assert_allclose(offsets, [[6005.0, 0.8]])
