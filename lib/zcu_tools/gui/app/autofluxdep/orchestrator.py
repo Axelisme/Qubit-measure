@@ -50,9 +50,11 @@ from zcu_tools.gui.app.autofluxdep.nodes.io import (
     Snapshot,
     validate_patch,
 )
+from zcu_tools.gui.app.autofluxdep.profiling import PerfStats, elapsed_ms, perf_now
 from zcu_tools.gui.app.autofluxdep.tools import Tools
 
 logger = logging.getLogger(__name__)
+_PRODUCE_PERF = PerfStats("worker.node_produce", logger, slow_ms=500.0)
 
 
 class ModuleSource(Protocol):
@@ -351,6 +353,7 @@ class Orchestrator:
                 if on_node is not None:
                     on_node(provider.name, idx)
                 node = provider.builder.build_node(self._make_env(provider, idx, flux))
+                profile_start = perf_now()
                 try:
                     patch = node.produce(snapshot)
                 except Exception as exc:  # a real acquire can Fast-Fail (e.g.
@@ -360,8 +363,16 @@ class Orchestrator:
                     logger.exception(
                         "produce failed for %r at flux idx %d", provider.name, idx
                     )
+                    _PRODUCE_PERF.record(
+                        elapsed_ms(profile_start),
+                        detail=f"node={provider.name} idx={idx} failed=1",
+                    )
                     self.run_error = exc
                     return info
+                _PRODUCE_PERF.record(
+                    elapsed_ms(profile_start),
+                    detail=f"node={provider.name} idx={idx}",
+                )
                 validate_patch(
                     patch, provider.provides, provider.provides_modules
                 )  # provides / provides_modules = the output contract

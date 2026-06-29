@@ -86,3 +86,57 @@ def test_ro_optimize_acquire_finds_best_point():
         assert not np.isnan(result.signal[idx]).all()
         # a tuned readout module flows downstream
         assert "opt_readout" in patch.modules()
+
+
+def test_ro_optimize_acquire_threads_stop_checker(monkeypatch):
+    ctrl = build_core()
+    connect_mock(ctrl)
+    ml = ctrl.state.exp_context.ml
+    pi_pulse = _pi_pulse(ml)
+
+    captured: dict[str, object] = {}
+
+    class FakeProgram:
+        def __init__(self, *args, **kwargs):
+            del args, kwargs
+
+        def acquire(self, *args, **kwargs):
+            del args
+            captured["stop_checkers"] = kwargs.get("stop_checkers")
+            return None
+
+    def fake_landscape(_tracker, shape, *, skew_penalty):
+        del _tracker, skew_penalty
+        values = np.zeros(shape, dtype=float)
+        values[0, 0] = 1.0
+        return values
+
+    from zcu_tools.gui.app.autofluxdep.nodes import ro_optimize as ro_mod
+
+    monkeypatch.setattr(ro_mod, "ModularProgramV2", FakeProgram)
+    monkeypatch.setattr(ro_mod, "_ro_landscape", fake_landscape)
+
+    builder = RoOptimizeBuilder()
+    schema = node_schema(builder, {**_PARAMS, "rounds": 2})
+    result = builder.make_init_result(schema, np.asarray([0.0]))
+
+    def should_stop() -> bool:
+        return False
+
+    env = make_acquire_env(
+        ctrl,
+        flux=0.0,
+        flux_idx=0,
+        schema=schema,
+        ml=ml,
+        result=result,
+        should_stop=should_stop,
+    )
+    snap = Snapshot(
+        {"best_ro_freq": 6000.0, "best_ro_gain": 0.5, "t1": 10.0},
+        modules={"pi_pulse": pi_pulse, "readout": _READOUT},
+    )
+
+    builder.build_node(env).produce(snap)
+
+    assert captured["stop_checkers"] == [should_stop]

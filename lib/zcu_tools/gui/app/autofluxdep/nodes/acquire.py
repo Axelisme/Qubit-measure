@@ -15,6 +15,7 @@ each Node.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, MutableMapping
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Iterator
@@ -24,6 +25,7 @@ from numpy.typing import NDArray
 
 from zcu_tools.experiment.v2.utils import estimate_snr, snr_checker
 from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
+from zcu_tools.gui.app.autofluxdep.profiling import PerfStats, elapsed_ms, perf_now
 from zcu_tools.progress_bar import BaseProgressBar, make_pbar
 
 if TYPE_CHECKING:
@@ -37,6 +39,8 @@ from zcu_tools.utils.process import rotate2real
 # seeds this onto a GUI-placed Node; a directly-constructed Node (tests) overrides
 # it via params. Kept here (the real-acquire home) rather than scattered in cfg.
 DEFAULT_ROUNDS = 10
+logger = logging.getLogger(__name__)
+_ROUND_HOOK_PERF = PerfStats("worker.round_hook", logger, slow_ms=20.0)
 
 
 def parse_linear_axis(
@@ -248,6 +252,7 @@ def make_on_round(
     mist passes ``probe=None`` (no early-stop on a single-round scatter)."""
 
     def on_round(_round_count: int, avg_d: Any) -> None:
+        profile_start = perf_now()
         signal = acquire_to_complex(avg_d)
         real = signal2real_fn(signal)
         if probe is not None:
@@ -261,6 +266,10 @@ def make_on_round(
             round_progress_hook(_round_count)
         if round_hook is not None:
             round_hook(idx)
+        _ROUND_HOOK_PERF.record(
+            elapsed_ms(profile_start),
+            detail=f"idx={idx} round={_round_count}",
+        )
 
     return on_round
 
