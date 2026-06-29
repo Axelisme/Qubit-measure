@@ -149,7 +149,7 @@ class RoOptAutoAdapter(
             .role("modules.qub_pulse", "pi_pulse")
             .role("modules.readout", "readout")
             .set_sweep("sweep.freq", proper_res_freq_range(ctx, 51, span_factor=0.2))
-            .sweep("sweep.gain", 0.1, 0.25, 51)
+            .sweep("sweep.gain", 0.01, 0.25, 51)
             .sweep("sweep.length", 5.0, 10.0, 51)
             .build()
         )

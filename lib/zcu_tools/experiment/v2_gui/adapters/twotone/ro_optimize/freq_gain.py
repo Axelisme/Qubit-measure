@@ -138,7 +138,7 @@ class RoOptFreqGainAdapter(
             .role("modules.qub_pulse", "pi_pulse")
             .role("modules.readout", "readout")
             .set_sweep("sweep.freq", proper_res_freq_range(ctx, 31, span_factor=0.5))
-            .sweep("sweep.gain", 0.0, 0.2, 31)
+            .sweep("sweep.gain", 0.01, 0.5, 31)
             .build()
         )
 
