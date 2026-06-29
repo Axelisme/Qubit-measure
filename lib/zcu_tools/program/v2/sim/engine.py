@@ -51,7 +51,8 @@ import hashlib
 import itertools
 import logging
 import math
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, cast
@@ -59,15 +60,19 @@ from typing import Any, cast
 import numpy as np
 from numpy.polynomial.legendre import leggauss
 from numpy.typing import NDArray
+from qick.asm_v2 import QickParam
 
+from zcu_tools.program.v2.modules.control import Branch
 from zcu_tools.program.v2.modules.readout import (
     AbsReadout,
     DirectReadout,
     PulseReadout,
 )
+from zcu_tools.program.v2.utils import is_qick_param
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 from . import bloch
+from ._profiling import PerfStats, elapsed_ms, perf_now
 from .lowering import (
     LoweredPoint,
     _resolve_scalar,
@@ -90,6 +95,11 @@ from .readout import (
 )
 
 logger = logging.getLogger(__name__)
+_OPERATING_SIGNAL_PERF = PerfStats("worker.sim.operating_signal", logger, slow_ms=50.0)
+_SIGNAL_GRID_PERF = PerfStats("worker.sim.signal_grid", logger, slow_ms=50.0)
+_POPULATION_CHAIN_PERF = PerfStats("worker.sim.population_chain", logger, slow_ms=20.0)
+_ENSURE_SIGNAL_PERF = PerfStats("worker.sim.ensure_signal", logger, slow_ms=50.0)
+_COMPUTE_ROUND_PERF = PerfStats("worker.sim.compute_round", logger, slow_ms=50.0)
 
 _PopulationChainKernel = Callable[..., NDArray[np.float64]]
 _population_chain_numba: _PopulationChainKernel | None
@@ -175,6 +185,93 @@ class _PointModel:
     gain_noise_std_scale: float
     pre_readout_props: tuple[NDArray[np.float64], ...]
     inter_shot_props: tuple[NDArray[np.float64], ...]
+
+
+_EvolutionProps = tuple[
+    tuple[NDArray[np.float64], ...], tuple[NDArray[np.float64], ...]
+]
+_GIL_YIELD_INTERVAL_S = 0.010
+
+
+class _CooperativeYield:
+    """Release the GIL occasionally during mocksim CPU loops.
+
+    The autofluxdep run already executes in a dedicated QThread, but the mock
+    simulator can still hold Python's process-wide GIL long enough to delay the
+    Qt main thread's Python slots. A time-based yield keeps the GUI responsive
+    without making the physics path depend on Qt.
+    """
+
+    def __init__(self, interval_s: float = _GIL_YIELD_INTERVAL_S) -> None:
+        self._interval_s = interval_s
+        self._last = time.perf_counter()
+        self.count = 0
+
+    def __call__(self) -> None:
+        now = time.perf_counter()
+        if now - self._last < self._interval_s:
+            return
+        time.sleep(0)
+        self.count += 1
+        self._last = time.perf_counter()
+
+
+def _qick_param_spans(value: Any, seen: set[int] | None = None) -> set[str]:
+    """Return sweep-axis names referenced by QickParams inside ``value``."""
+
+    if seen is None:
+        seen = set()
+
+    if isinstance(value, QickParam):
+        if not is_qick_param(value):
+            raise TypeError(
+                f"unsupported QickParam implementation: {type(value).__name__}"
+            )
+        return set(value.spans)
+
+    if value is None or isinstance(value, str | bytes | int | float | bool):
+        return set()
+
+    obj_id = id(value)
+    if obj_id in seen:
+        return set()
+    seen.add(obj_id)
+
+    spans: set[str] = set()
+    if isinstance(value, dict):
+        items = value.values()
+    elif isinstance(value, list | tuple | set | frozenset):
+        items = value
+    elif hasattr(value, "__dict__"):
+        items = vars(value).values()
+    else:
+        return set()
+
+    for item in items:
+        spans.update(_qick_param_spans(item, seen))
+    return spans
+
+
+def _evolution_axis_names(modules: Sequence[Any]) -> set[str]:
+    """Sweep axes that can affect pre-readout qubit evolution.
+
+    Readout modules affect only the dispersive blobs/integration scale in this
+    density-only mock model. Excluding their axes lets a freq/gain readout sweep
+    reuse the same Bloch propagators while still computing a distinct readout
+    response for every point.
+    """
+
+    axes: set[str] = set()
+    for module in modules:
+        if isinstance(module, AbsReadout):
+            continue
+        if isinstance(module, Branch):
+            axes.add(module.compare_reg)
+            for branch in module.branches:
+                axes.update(_evolution_axis_names(branch))
+            continue
+        axes.update(_qick_param_spans(module))
+    return axes
 
 
 def _sequence_propagator(segments: list[bloch.Segment]) -> NDArray[np.float64]:
@@ -414,6 +511,7 @@ class SimEngine:
         :meth:`_ensure_signal`).
         """
 
+        profile_start = perf_now()
         axes = self._sweep_axes()
         sweep_dims = tuple(count for _, count in axes)
         nreads = self._nreads()
@@ -429,14 +527,39 @@ class SimEngine:
         noise_std_scale_grid = np.empty((*sweep_dims, nreads), dtype=np.float64)
         gain_noise_std_scale_grid = np.empty((*sweep_dims, nreads), dtype=np.float64)
         population_items: list[tuple[tuple[int | slice, ...], bytes, _PointModel]] = []
+        evolution_axis_names = _evolution_axis_names(self.program.modules)
+        evolution_axis_order = [
+            name for name, _count in axes if name in evolution_axis_names
+        ]
+        evolution_cache: dict[tuple[int, ...], _EvolutionProps] = {}
+        evolution_cache_hits = 0
+        gil_yield = _CooperativeYield()
 
         index_ranges = [range(count) for _, count in axes]
+        point_model_start = perf_now()
         for multi_index in itertools.product(*index_ranges):
             self._raise_if_cancelled()
             point = {name: idx for (name, _), idx in zip(axes, multi_index)}
+            evolution_key = tuple(point[name] for name in evolution_axis_order)
+            cached_evolution = evolution_cache.get(evolution_key)
+            if cached_evolution is not None:
+                evolution_cache_hits += 1
             model = self._point_model(
-                point, f_qubit_ghz, rf_g, rf_e, n_samples, sample_times_us
+                point,
+                f_qubit_ghz,
+                rf_g,
+                rf_e,
+                n_samples,
+                sample_times_us,
+                evolution_props=cached_evolution,
+                yield_hook=gil_yield,
             )
+            gil_yield()
+            if cached_evolution is None:
+                evolution_cache[evolution_key] = (
+                    model.pre_readout_props,
+                    model.inter_shot_props,
+                )
             idx = (*multi_index, slice(None))
             s_g_grid[idx] = model.s_g
             s_e_grid[idx] = model.s_e
@@ -453,6 +576,7 @@ class SimEngine:
                 self.sim.thermal_pop,
             )
             population_items.append((p_idx, chain_key, model))
+        point_model_ms = elapsed_ms(point_model_start)
 
         unique_population_keys = {chain_key for _, chain_key, _ in population_items}
         numba_work_units = (
@@ -465,12 +589,30 @@ class SimEngine:
         )
 
         population_cache: dict[bytes, NDArray[np.float64]] = {}
+        population_start = perf_now()
         for p_idx, chain_key, model in population_items:
+            gil_yield()
             if chain_key not in population_cache:
                 population_cache[chain_key] = self._point_population_chain(
                     model, reps, nreads, use_numba=use_numba
                 )
             p_e_grid[cast(Any, p_idx)] = population_cache[chain_key]
+        population_ms = elapsed_ms(population_start)
+
+        _SIGNAL_GRID_PERF.record(
+            elapsed_ms(profile_start),
+            detail=(
+                f"axes={axes} reps={reps} points={len(population_items)} "
+                f"unique_population={len(unique_population_keys)} "
+                f"evolution_axes={evolution_axis_order} "
+                f"evolution_cache_size={len(evolution_cache)} "
+                f"evolution_cache_hits={evolution_cache_hits} "
+                f"detune_nodes={self._detune_weights.size} use_numba={use_numba} "
+                f"point_model_ms={point_model_ms:.1f} "
+                f"population_ms={population_ms:.1f} "
+                f"gil_yields={gil_yield.count}"
+            ),
+        )
 
         return (
             s_g_grid,
@@ -489,6 +631,9 @@ class SimEngine:
         rf_e: float,
         n_samples: int,
         sample_times_us: NDArray[np.float64],
+        *,
+        evolution_props: _EvolutionProps | None = None,
+        yield_hook: Callable[[], None] | None = None,
     ) -> _PointModel:
         """Deterministic readout blobs and propagators at one sweep point.
 
@@ -616,6 +761,7 @@ class SimEngine:
                 )
             )
 
+        pre_readout_props_t, inter_shot_props_t = props
         return _PointModel(
             s_g=s_g,
             s_e=s_e,
@@ -643,55 +789,69 @@ class SimEngine:
         if node_count != self._detune_weights.size:
             raise ValueError("detune weights do not match propagator count")
 
+        profile_start = perf_now()
         p_e = np.empty((reps, nreads), dtype=np.float64)
         z0 = 2.0 * self.sim.thermal_pop - 1.0
+        actual_use_numba = False
 
-        if node_count == 1:
-            state = np.array([0.0, 0.0, z0, 1.0], dtype=np.float64)
-            pre_prop = model.pre_readout_props[0]
-            relax_prop = model.inter_shot_props[0]
+        try:
+            if node_count == 1:
+                state = np.array([0.0, 0.0, z0, 1.0], dtype=np.float64)
+                pre_prop = model.pre_readout_props[0]
+                relax_prop = model.inter_shot_props[0]
+
+                for rep_idx in range(reps):
+                    self._raise_if_cancelled()
+                    at_readout = pre_prop @ state
+                    node_p = 0.5 * (1.0 + float(at_readout[2]))
+                    if node_p < 0.0:
+                        node_p = 0.0
+                    elif node_p > 1.0:
+                        node_p = 1.0
+                    p_e[rep_idx, :] = node_p
+                    state = relax_prop @ at_readout
+
+                return p_e
+
+            pre_props = np.stack(model.pre_readout_props, axis=0)
+            relax_props = np.stack(model.inter_shot_props, axis=0)
+            if use_numba and _population_chain_numba is not None:
+                actual_use_numba = True
+                return _population_chain_numba(
+                    pre_props,
+                    relax_props,
+                    self._detune_weights,
+                    self.sim.thermal_pop,
+                    reps,
+                    nreads,
+                )
+
+            states = np.empty((node_count, 4), dtype=np.float64)
+            states[:, 0] = 0.0
+            states[:, 1] = 0.0
+            states[:, 2] = z0
+            states[:, 3] = 1.0
 
             for rep_idx in range(reps):
                 self._raise_if_cancelled()
-                at_readout = pre_prop @ state
-                node_p = 0.5 * (1.0 + float(at_readout[2]))
-                if node_p < 0.0:
-                    node_p = 0.0
-                elif node_p > 1.0:
-                    node_p = 1.0
-                p_e[rep_idx, :] = node_p
-                state = relax_prop @ at_readout
+                at_readout = np.einsum("nij,nj->ni", pre_props, states, optimize=False)
+                node_p = 0.5 * (1.0 + at_readout[:, 2])
+                np.clip(node_p, 0.0, 1.0, out=node_p)
+                p_mean = float(np.dot(self._detune_weights, node_p))
+                p_e[rep_idx, :] = p_mean
+                states = np.einsum(
+                    "nij,nj->ni", relax_props, at_readout, optimize=False
+                )
 
             return p_e
-
-        pre_props = np.stack(model.pre_readout_props, axis=0)
-        relax_props = np.stack(model.inter_shot_props, axis=0)
-        if use_numba and _population_chain_numba is not None:
-            return _population_chain_numba(
-                pre_props,
-                relax_props,
-                self._detune_weights,
-                self.sim.thermal_pop,
-                reps,
-                nreads,
+        finally:
+            _POPULATION_CHAIN_PERF.record(
+                elapsed_ms(profile_start),
+                detail=(
+                    f"reps={reps} nreads={nreads} detune_nodes={node_count} "
+                    f"use_numba={actual_use_numba}"
+                ),
             )
-
-        states = np.empty((node_count, 4), dtype=np.float64)
-        states[:, 0] = 0.0
-        states[:, 1] = 0.0
-        states[:, 2] = z0
-        states[:, 3] = 1.0
-
-        for rep_idx in range(reps):
-            self._raise_if_cancelled()
-            at_readout = np.einsum("nij,nj->ni", pre_props, states, optimize=False)
-            node_p = 0.5 * (1.0 + at_readout[:, 2])
-            np.clip(node_p, 0.0, 1.0, out=node_p)
-            p_mean = float(np.dot(self._detune_weights, node_p))
-            p_e[rep_idx, :] = p_mean
-            states = np.einsum("nij,nj->ni", relax_props, at_readout, optimize=False)
-
-        return p_e
 
     def _lower(
         self, point: dict[str, int], f_qubit_ghz: float, detune_offset: float
@@ -814,6 +974,7 @@ class SimEngine:
         if self._operating is not None:
             return self._operating
 
+        profile_start = perf_now()
         self._raise_if_cancelled()
         reduced_flux = self._reduced_operating_flux()
         f_qubit_ghz = _cached_predict_freq_ghz(
@@ -838,6 +999,13 @@ class SimEngine:
         )
 
         self._operating = (f_qubit_ghz, rf_g, rf_e)
+        _OPERATING_SIGNAL_PERF.record(
+            elapsed_ms(profile_start),
+            detail=(
+                f"flux={reduced_flux:.6g} f_qubit_ghz={f_qubit_ghz:.6g} "
+                f"rf_g={rf_g:.6g} rf_e={rf_e:.6g}"
+            ),
+        )
         return self._operating
 
     # ----------------------------------------------------------- raw assembly
@@ -868,12 +1036,20 @@ class SimEngine:
         applied in :meth:`compute_round`, not cached here.
         """
 
+        profile_start = perf_now()
         self._raise_if_cancelled()
+        cache_hit = self._det_grids is not None
         if self._det_grids is not None:
+            _ENSURE_SIGNAL_PERF.record(
+                elapsed_ms(profile_start), detail="cache_hit=True"
+            )
             return self._det_grids
 
         f_qubit_ghz, rf_g, rf_e = self._operating_signal()
         self._det_grids = self._signal_grid(f_qubit_ghz, rf_g, rf_e)
+        _ENSURE_SIGNAL_PERF.record(
+            elapsed_ms(profile_start), detail=f"cache_hit={cache_hit}"
+        )
         return self._det_grids
 
     def compute_round(self, round_idx: int) -> list[NDArray[np.int64]]:
@@ -901,7 +1077,10 @@ class SimEngine:
 
         logger.debug("SimEngine.compute_round: round_idx=%d", round_idx)
 
+        profile_start = perf_now()
         self._raise_if_cancelled()
+        ensure_start = perf_now()
+        cache_hit = self._det_grids is not None
         (
             s_g_grid,
             s_e_grid,
@@ -910,11 +1089,13 @@ class SimEngine:
             noise_std_scale_grid,
             gain_noise_std_scale_grid,
         ) = self._ensure_signal()
+        ensure_ms = elapsed_ms(ensure_start)
         self._raise_if_cancelled()
 
         # Per-shot Bernoulli: 1 -> excited blob (s_e), 0 -> ground blob (s_g).
         # ``p_e_grid`` is already rep-resolved, while the blob grids broadcast over
         # the reps axis.
+        sample_start = perf_now()
         state = self._rng.binomial(1, p_e_grid, size=p_e_grid.shape).astype(bool)
         blob = np.where(state, s_e_grid, s_g_grid)  # (reps, *sweep, nreads) complex
 
@@ -930,6 +1111,15 @@ class SimEngine:
         noise_std = np.hypot(base_noise_std, gain_noise_std)
         noise = self._rng.normal(0.0, noise_std[..., None], size=det_iq.shape)
         acc = np.rint(det_iq + noise).astype(np.int64)
+        sample_ms = elapsed_ms(sample_start)
+        _COMPUTE_ROUND_PERF.record(
+            elapsed_ms(profile_start),
+            detail=(
+                f"round_idx={round_idx} cache_hit={cache_hit} "
+                f"shape={p_e_grid.shape} ensure_ms={ensure_ms:.1f} "
+                f"sample_ms={sample_ms:.1f}"
+            ),
+        )
         return [acc]
 
     # ------------------------------------------------------ decimated assembly

@@ -12,16 +12,18 @@ two rows for reorder/remove.
 
 from __future__ import annotations
 
+import threading
 import time
 
 import pytest
+from qtpy.QtCore import QObject  # type: ignore[attr-defined]
 from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QApplication,
     QSizePolicy,
 )
 from zcu_tools.gui.app.autofluxdep.app import build_core
-from zcu_tools.gui.app.autofluxdep.ui.main_window import MainWindow
+from zcu_tools.gui.app.autofluxdep.ui.main_window import MainWindow, _RunBridge
 
 from .._helpers import connect_mock, make_builder, make_measurement_builder
 
@@ -46,6 +48,40 @@ def _list_labels(win: MainWindow) -> list[str]:
     lst = win._list._list
     items = [lst.item(i) for i in range(lst.count())]
     return [it.text() for it in items if it is not None]
+
+
+class _RowReceiver(QObject):
+    def __init__(self, bridge: _RunBridge) -> None:
+        super().__init__()
+        self.bridge = bridge
+        self.rows: list[tuple[str, int]] = []
+
+    def on_row(self, name: str, idx: int, _emitted_at: float) -> None:
+        self.rows.append((name, idx))
+        self.bridge.row_rendered(name, idx)
+
+
+def test_run_bridge_coalesces_redundant_row_updates(qapp):
+    ctrl = build_core()
+    bridge = _RunBridge(ctrl)
+    receiver = _RowReceiver(bridge)
+    bridge.row_updated.connect(receiver.on_row)
+
+    def worker_emit() -> None:
+        bridge.notify("node", 0)
+        bridge.notify("node", 0)
+        bridge.notify("node", 0)
+
+    thread = threading.Thread(target=worker_emit)
+    thread.start()
+    thread.join(timeout=1.0)
+    assert not thread.is_alive()
+
+    deadline = time.monotonic() + 1.0
+    while len(receiver.rows) < 2 and time.monotonic() < deadline:
+        qapp.processEvents()
+
+    assert receiver.rows == [("node", 0), ("node", 0)]
 
 
 # --- workflow editing reflects in the list ---

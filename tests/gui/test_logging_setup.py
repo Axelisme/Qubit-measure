@@ -45,6 +45,7 @@ _WATCHED = (
     "",  # root
     "zcu_tools.gui",
     "zcu_tools.experiment.v2_gui",
+    "zcu_tools.program.v2",
 )
 
 
@@ -97,6 +98,26 @@ def test_sibling_namespace_record_reaches_file(tmp_path: Path) -> None:
         assert "marker-zcu_tools.gui.plotting.host" in contents
         assert "marker-zcu_tools.gui.remote.control_service" in contents
         assert "marker-zcu_tools.gui.session.services.connection" in contents
+    finally:
+        _detach(snap)
+
+
+def test_extra_namespace_record_reaches_file(tmp_path: Path) -> None:
+    snap = _snapshot(_WATCHED)
+    try:
+        target = setup_gui_logging(
+            app_name="autofluxdep",
+            log_root=tmp_path,
+            extra_namespaces=("zcu_tools.program.v2",),
+        )
+        assert target is not None
+
+        logging.getLogger("zcu_tools.program.v2.sim.engine").error("sim-marker")
+        for handler in logging.getLogger("zcu_tools.program.v2").handlers:
+            handler.flush()
+
+        contents = target.read_text(encoding="utf-8")
+        assert "sim-marker" in contents
     finally:
         _detach(snap)
 

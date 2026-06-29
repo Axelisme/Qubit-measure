@@ -70,12 +70,21 @@ or moves the mock operating flux to a convenience point.  The cache is valid onl
 because the flux is fixed *for that acquire*; a per-point operating flux would have
 to move that call back into the loop.
 
-**Population-chain work is cached by deterministic propagators.** Within one
-signal-grid build, sweep points that change only readout parameters reuse the same
-rep-resolved `P_e` chain because their Bloch propagators and detune weights are
-identical. Qubit-drive sweeps still compute distinct chains because their
-propagators differ. The cache is local to the grid build, so it avoids retaining a
-second copy of large `P_e` grids after the acquire setup.
+**Evolution and population-chain work are cached by deterministic propagators.**
+Within one signal-grid build, sweep points that change only readout parameters
+reuse the same pre-readout/inter-shot Bloch propagators and the same rep-resolved
+`P_e` chain because their qubit evolution and detune weights are identical.
+Qubit-drive sweeps still compute distinct chains because their propagators differ.
+The cache is local to the grid build, so it avoids retaining a second copy of
+large `P_e` grids after the acquire setup.
+
+**Mocksim CPU loops yield the process GIL cooperatively.** Autofluxdep RUN work is
+submitted to a dedicated `QThread`, but a Python/C-extension-heavy mock simulator
+still shares the same interpreter and can delay the Qt main thread's Python slots.
+Long signal-grid loops use a time-based `sleep(0)` yield so queued UI progress and
+redraw events can run while the worker continues computing. This is only a
+responsiveness boundary; it does not make the mocksim path Qt-dependent or change
+the generated data.
 
 **Numba is an optional large-work kernel, not a mandatory dependency.** For
 multi-node detune ensembles with many distinct qubit state chains, `SimEngine`
@@ -91,6 +100,14 @@ SNR early-stop are checked after a round completes, not inside one round's mock
 physics compute.  `SimEngine` still has an engine-local cancellation hook for
 direct/internal callers, but `MyProgramV2.acquire` does not feed acquire-level
 checkers into it.
+
+**Profiling is opt-in and observational.** `ZCU_AUTOFLUXDEP_PROFILE=1` enables
+MockSoc timing logs for the GUI stutter investigation without changing the
+simulation schedule or data path. The probes split `poll_data`, `compute_round`,
+signal-grid construction, operating-point lookup, and population-chain work so a
+run log can distinguish Qt redraw delay from worker-side mock physics compute.
+Each record includes the Python thread label; signal-grid logs also include the
+cooperative GIL yield count.
 
 **FLUX-AWARE-MOCK — operating flux from a live device.** By default the operating
 flux is pinned at reduced flux = 1.0 (R-3).  `SimParams.flux_device` opts into

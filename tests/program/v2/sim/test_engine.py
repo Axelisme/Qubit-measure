@@ -23,6 +23,8 @@ the resonator, exactly as the real path requires.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import numpy as np
 import pytest
 from numpy.typing import NDArray
@@ -935,7 +937,14 @@ def test_acquire_stop_checker_does_not_cancel_inside_mock_signal_grid(monkeypatc
         rf_e: float,
         n_samples: int,
         sample_times_us: NDArray[np.float64],
+        *,
+        evolution_props: tuple[
+            tuple[NDArray[np.float64], ...], tuple[NDArray[np.float64], ...]
+        ]
+        | None = None,
+        yield_hook: Callable[[], None] | None = None,
     ) -> _PointModel:
+        del yield_hook
         point_calls.append(point)
         return _PointModel(
             s_g=np.array([1.0 + 0.0j], dtype=np.complex128),
@@ -1070,6 +1079,69 @@ def test_engine_caches_population_chain_for_readout_only_sweep(monkeypatch):
     engine._ensure_signal()
 
     assert calls == 1
+
+
+def test_engine_reuses_evolution_lowering_for_readout_only_sweep(monkeypatch):
+    """Readout-only axes reuse detune propagators instead of re-lowering all points."""
+
+    from zcu_tools.program.v2.sim.engine import SimEngine
+
+    sim = _SIM.model_copy(update={"T2": 10.0, "T2_star": 5.0})
+    _soc, soccfg = make_mock_soc(sim=sim)
+    f_qubit = _f_qubit_mhz()
+    pulse = PulseCfg(
+        ch=0,
+        nqz=1,
+        gain=0.3,
+        freq=f_qubit,
+        phase=0.0,
+        waveform=ConstWaveformCfg(length=0.5),
+    ).build("qub")
+    sw = SweepCfg(start=_rf_g_mhz() - 5.0, stop=_rf_g_mhz() + 5.0, expts=5, step=2.5)
+    ro_param = sweep2param("ro_freq", sw)
+    readout = DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=ro_param).build("ro")
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=7, rounds=1),
+        modules=[pulse, readout],
+        sweep=[("ro_freq", sw)],
+    )
+    prog.compile()
+
+    lower_calls = 0
+    real_lower = SimEngine._lower
+
+    def spy_lower(
+        self: SimEngine,
+        point: dict[str, int],
+        f_qubit_ghz: float,
+        detune_offset: float,
+    ):
+        nonlocal lower_calls
+        lower_calls += 1
+        return real_lower(self, point, f_qubit_ghz, detune_offset)
+
+    monkeypatch.setattr(SimEngine, "_lower", spy_lower)
+
+    engine = SimEngine(prog, sim)
+    engine._ensure_signal()
+
+    assert lower_calls == len(engine._detune_nodes) + sw.expts - 1
+
+
+def test_cooperative_yield_releases_gil(monkeypatch):
+    """The mocksim CPU-loop yield hook explicitly releases the process-wide GIL."""
+
+    from zcu_tools.program.v2.sim import engine as engine_module
+
+    sleep_calls: list[float] = []
+    monkeypatch.setattr(engine_module.time, "sleep", sleep_calls.append)
+
+    yielder = engine_module._CooperativeYield(interval_s=0.0)
+    yielder()
+
+    assert sleep_calls == [0]
+    assert yielder.count == 1
 
 
 def test_engine_does_not_reuse_population_chain_for_qubit_sweep(monkeypatch):

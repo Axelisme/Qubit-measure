@@ -72,6 +72,7 @@ if __name__ == "__main__":
         log_root=PROJECT_ROOT,
         to_file=not args.no_log,
         log_file=Path(args.log_file) if args.log_file else None,
+        extra_namespaces=("zcu_tools.program.v2",),
     )
 
     # Force a NON-interactive backend BEFORE any pyplot import. Unlike

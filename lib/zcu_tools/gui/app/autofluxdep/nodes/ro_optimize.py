@@ -69,6 +69,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import (
 from zcu_tools.gui.app.autofluxdep.nodes.plotters import Landscape2DPlotter
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep2DResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
+from zcu_tools.gui.app.autofluxdep.profiling import PerfStats, elapsed_ms, perf_now
 from zcu_tools.program.v2 import (
     Branch,
     ModularProgramV2,
@@ -84,6 +85,11 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.process import smooth_signal_nd
 
 logger = logging.getLogger(__name__)
+_RO_LANDSCAPE_PERF = PerfStats("worker.ro_optimize.landscape", logger, slow_ms=20.0)
+_RO_PROGRAM_BUILD_PERF = PerfStats(
+    "worker.ro_optimize.program_build", logger, slow_ms=50.0
+)
+_RO_ACQUIRE_PERF = PerfStats("worker.ro_optimize.acquire", logger, slow_ms=50.0)
 
 
 def _ro_signal2real(signals: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -102,8 +108,18 @@ def _ro_landscape(
     ``ge_axis=1``. ``snr_as_signal`` reduces the ge axis to a
     per-(freq, gain) SNR; we reshape it to the Result's row shape (dropping the
     singleton) and smooth."""
+    profile_start = perf_now()
+    snr_start = perf_now()
     snr = snr_as_signal([tracker], ge_axis=1, skew_penalty=skew_penalty)
-    return _ro_signal2real(np.asarray(snr, dtype=np.float64).reshape(shape))
+    snr_ms = elapsed_ms(snr_start)
+    smooth_start = perf_now()
+    landscape = _ro_signal2real(np.asarray(snr, dtype=np.float64).reshape(shape))
+    smooth_ms = elapsed_ms(smooth_start)
+    _RO_LANDSCAPE_PERF.record(
+        elapsed_ms(profile_start),
+        detail=f"shape={shape} snr_ms={snr_ms:.1f} smooth_ms={smooth_ms:.1f}",
+    )
+    return landscape
 
 
 # Default axis specs: (start, stop, npts). The readout-frequency fallback follows
@@ -246,7 +262,8 @@ class RoOptimizeNode(Node):
                 if env.round_hook is not None:
                     env.round_hook(idx)
 
-            ModularProgramV2(
+            program_start = perf_now()
+            program = ModularProgramV2(
                 env.soccfg,
                 cfg,
                 modules=[
@@ -259,11 +276,31 @@ class RoOptimizeNode(Node):
                     ("freq", freq_sweep),
                     ("gain", gain_sweep),
                 ],
-            ).acquire(
+            )
+            _RO_PROGRAM_BUILD_PERF.record(
+                elapsed_ms(program_start),
+                detail=(
+                    f"idx={idx} reps={cfg.reps} rounds={cfg.rounds} "
+                    f"freq_points={result.n_freq} gain_points={result.n_gain}"
+                ),
+            )
+
+            acquire_start = perf_now()
+            program.acquire(
                 env.soc,
                 progress=False,
                 round_hook=on_round,
                 trackers=[tracker],
+                stop_checkers=[env.should_stop]
+                if env.should_stop is not None
+                else None,
+            )
+            _RO_ACQUIRE_PERF.record(
+                elapsed_ms(acquire_start),
+                detail=(
+                    f"idx={idx} reps={cfg.reps} rounds={cfg.rounds} "
+                    f"freq_points={result.n_freq} gain_points={result.n_gain}"
+                ),
             )
 
         landscape = _ro_landscape(
@@ -281,6 +318,8 @@ class RoOptimizeNode(Node):
 
         result.best_freq[idx] = best_freq
         result.best_gain[idx] = best_gain
+        if env.round_hook is not None:
+            env.round_hook(idx)
 
         logger.debug(
             "ro_optimize @flux%d: best_freq=%.3f best_gain=%.3f",

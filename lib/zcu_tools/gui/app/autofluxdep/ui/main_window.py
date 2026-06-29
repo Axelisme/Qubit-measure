@@ -22,9 +22,11 @@ builds a MockSoc + FakeDevice + a SimplePredictor.
 
 from __future__ import annotations
 
+import logging
+import threading
 from typing import Any
 
-from qtpy.QtCore import QObject, Qt, Signal  # type: ignore[attr-defined]
+from qtpy.QtCore import QObject, Qt, QTimer, Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QDialog,
     QHBoxLayout,
@@ -47,6 +49,7 @@ from zcu_tools.gui.app.autofluxdep.events.run import (
     RunStartedPayload,
     RunStoppedPayload,
 )
+from zcu_tools.gui.app.autofluxdep.profiling import PerfStats, elapsed_ms, perf_now
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
     DeviceChangedPayload,
@@ -57,6 +60,8 @@ from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 
 from .node_detail import NodeDetailPane
 from .node_list import NodeListPane
+
+logger = logging.getLogger(__name__)
 
 
 class _RunBridge(QObject):
@@ -75,10 +80,13 @@ class _RunBridge(QObject):
     run_finished = Signal()
     run_stopped = Signal()
     run_failed = Signal(str)
-    row_updated = Signal(str, int)
+    row_updated = Signal(str, int, float)
 
     def __init__(self, ctrl: Controller) -> None:
         super().__init__()
+        self._row_lock = threading.Lock()
+        self._pending_rows: set[tuple[str, int]] = set()
+        self._dirty_rows: set[tuple[str, int]] = set()
         bus = ctrl.bus
         bus.subscribe(RunStartedPayload, lambda p: self.run_started.emit())
         bus.subscribe(NodeEnteredPayload, self._on_node_entered)
@@ -92,7 +100,30 @@ class _RunBridge(QObject):
 
     def notify(self, name: str, idx: int) -> None:
         """The worker-thread notify callback — re-emits as a queued Qt signal."""
-        self.row_updated.emit(name, idx)
+        key = (name, idx)
+        with self._row_lock:
+            if key in self._pending_rows:
+                self._dirty_rows.add(key)
+                return
+            self._pending_rows.add(key)
+        self.row_updated.emit(name, idx, perf_now())
+
+    def row_rendered(self, name: str, idx: int) -> None:
+        """Main-thread callback after a queued row update has been consumed."""
+        key = (name, idx)
+        with self._row_lock:
+            if key in self._dirty_rows:
+                self._dirty_rows.remove(key)
+                emit_again = True
+            else:
+                self._pending_rows.discard(key)
+                emit_again = False
+
+        if emit_again:
+            QTimer.singleShot(
+                0,
+                lambda n=name, i=idx: self.row_updated.emit(n, i, perf_now()),
+            )
 
 
 class MainWindow(QMainWindow):
@@ -103,6 +134,9 @@ class MainWindow(QMainWindow):
         self._ctrl = ctrl
         # per-provider sweep-lived liveplot state: name -> (canvas, plotter)
         self._plots: dict[str, tuple[QWidget, Any]] = {}
+        self._row_update_perf = PerfStats("main.row_update", logger, slow_ms=30.0)
+        self._progress_perf = PerfStats("main.progress_render", logger, slow_ms=20.0)
+        self._build_plot_perf = PerfStats("main.build_plots", logger, slow_ms=100.0)
         self._run_active = False
         self._active_run_node_name: str | None = None
         self._auto_follow_navigation = False
@@ -358,6 +392,7 @@ class MainWindow(QMainWindow):
         from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
         from matplotlib.figure import Figure
 
+        profile_start = perf_now()
         # tear down any previous run's canvases (detach the shown one first, then
         # destroy every canvas — they are discarded, never drawn again)
         self._detail.show_run_canvas(None)
@@ -380,6 +415,10 @@ class MainWindow(QMainWindow):
             self._plots[node.name] = (canvas, plotter)
         # show the currently selected Node's fresh canvas
         self._on_select(self._list.selected_index)
+        self._build_plot_perf.record(
+            elapsed_ms(profile_start),
+            detail=f"nodes={len(self._plots)}",
+        )
 
     def _stop(self) -> None:
         self._ctrl.stop_run()
@@ -448,20 +487,31 @@ class MainWindow(QMainWindow):
             self._auto_follow_navigation = False
         return True
 
-    def _on_row_updated(self, name: str, idx: int) -> None:
+    def _on_row_updated(self, name: str, idx: int, emitted_at: float) -> None:
         """Main-thread: a Result row was filled → redraw that provider's Plotter."""
-        entry = self._plots.get(name)
-        if entry is None:
-            return
-        plotter = entry[1]
-        result = self._ctrl.state.run_results.get(name)
-        if result is not None and plotter is not None:
-            plotter.update(result, idx)
+        try:
+            queue_ms = elapsed_ms(emitted_at)
+            entry = self._plots.get(name)
+            if entry is None:
+                return
+            plotter = entry[1]
+            result = self._ctrl.state.run_results.get(name)
+            if result is not None and plotter is not None:
+                profile_start = perf_now()
+                plotter.update(result, idx)
+                self._row_update_perf.record(
+                    elapsed_ms(profile_start),
+                    queue_ms=queue_ms,
+                    detail=f"node={name} idx={idx}",
+                )
+        finally:
+            self._bridge.row_rendered(name, idx)
 
     def _on_point_done(self, idx: int) -> None:
         self._progress.setValue(idx + 1)
 
     def _on_run_progress_changed(self) -> None:
+        profile_start = perf_now()
         models = tuple(
             model for _handle, model in self._ctrl.progress_bars(RUN_PROGRESS_OWNER_ID)
         )
@@ -475,6 +525,10 @@ class MainWindow(QMainWindow):
 
         self._round_progress.render_models(
             tuple(model for model in models if model.label != "flux sweep")
+        )
+        self._progress_perf.record(
+            elapsed_ms(profile_start),
+            detail=f"bars={len(models)}",
         )
 
     def _on_run_done(self) -> None:
