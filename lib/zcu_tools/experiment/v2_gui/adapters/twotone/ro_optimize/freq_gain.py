@@ -20,6 +20,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_module_spec,
     make_pulse_readout_module_spec,
     make_reset_module_spec,
+    proper_relax,
     proper_res_freq_range,
 )
 from zcu_tools.gui.app.main.adapter import (
@@ -29,6 +30,7 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
     ExpContext,
+    FloatSpec,
     MetaDictWriteback,
     ParamMeta,
     SweepSpec,
@@ -120,15 +122,21 @@ class RoOptFreqGainAdapter(
                 "freq": SweepSpec(label="Readout freq (MHz)"),
                 "gain": SweepSpec(label="Readout gain (a.u.)"),
             },
+            extra={"skew_penalty": FloatSpec(label="Skew penalty", decimals=3)},
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         return (
             CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=100, rounds=1000, relax_delay=1.0)
-            .role("modules.qub_pulse", "qub_probe", Init.INLINE)
-            .role("modules.readout", "readout")
+            .scalars(
+                reps=100,
+                rounds=1000,
+                relax_delay=proper_relax(ctx),
+                skew_penalty=0.0,
+            )
             .role("modules.reset", "reset", Init.DISABLED)
+            .role("modules.qub_pulse", "pi_pulse")
+            .role("modules.readout", "readout")
             .set_sweep("sweep.freq", proper_res_freq_range(ctx, 31, span_factor=0.5))
             .sweep("sweep.gain", 0.0, 0.2, 31)
             .build()

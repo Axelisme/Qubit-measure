@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import Field
 from typing_extensions import (
     TypedDict,  # closed/extra_items (PEP 728) not in stdlib 3.13
 )
@@ -57,6 +58,7 @@ class RO_OptCfgTemplate(ProgramV2Cfg, ExpCfgModel):
     modules: RO_OptModuleCfg
     freq_range: tuple[float, float]
     gain_range: tuple[float, float]
+    skew_penalty: float = Field(default=0.0, ge=0.0)
 
 
 class RO_OptSweepCfg(ConfigBase):
@@ -67,6 +69,7 @@ class RO_OptSweepCfg(ConfigBase):
 class RO_OptCfg(ProgramV2Cfg, FluxDepCfg):
     modules: RO_OptModuleCfg
     sweep: RO_OptSweepCfg
+    skew_penalty: float = Field(default=0.0, ge=0.0)
 
 
 class RO_OptResult(TypedDict, closed=True):
@@ -95,6 +98,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
         self.gain_expts = gain_expts
         self.cfg_maker = cfg_maker
         self.last_cfg = None
+        self.skew_penalty = 0.0
 
         def measure_ro_fn(
             ctx: TaskState[NDArray[np.float64], T_RootResult, RO_OptCfg],
@@ -142,7 +146,9 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
         self.gains = np.linspace(0, 1, gain_expts)  # initial array
         self.task = Task[T_RootResult, list[MomentTracker], RO_OptCfg, np.float64](
             measure_fn=measure_ro_fn,
-            raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
+            raw2signal_fn=lambda raw: snr_as_signal(
+                raw, ge_axis=0, skew_penalty=self.skew_penalty
+            ),
             result_shape=(freq_expts, gain_expts),
             dtype=np.float64,
         )
@@ -170,6 +176,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
         )
         cfg = RO_OptCfg.model_validate(cfg)
         self.last_cfg = cfg
+        self.skew_penalty = cfg.skew_penalty
         modules = cfg.modules
 
         self.freqs = sweep2array(

@@ -39,6 +39,7 @@ from typing import Any, cast
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import Field
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -90,16 +91,17 @@ def _ro_signal2real(signals: NDArray[np.float64]) -> NDArray[np.float64]:
 
 
 def _ro_landscape(
-    tracker: MomentTracker, shape: tuple[int, ...]
+    tracker: MomentTracker, shape: tuple[int, ...], *, skew_penalty: float
 ) -> NDArray[np.float64]:
     """The smoothed (n_freq, n_gain) SNR landscape from the readout-channel tracker.
 
     The sweep is ``[("ge", 2), ("freq", n), ("gain", m)]`` plus a soft-average
     axis, so the tracker mean carries a leading reps singleton and the ge axis at
     index 1 — same layout the measure-side ``freq_gain`` ro_optimize reduces with
-    ``ge_axis=1``. ``snr_as_signal`` reduces the ge axis to a per-(freq, gain) SNR;
-    we reshape it to the Result's row shape (dropping the singleton) and smooth."""
-    snr = snr_as_signal([tracker], ge_axis=1)
+    ``ge_axis=1``. ``snr_as_signal`` reduces the ge axis to a
+    per-(freq, gain) SNR; we reshape it to the Result's row shape (dropping the
+    singleton) and smooth."""
+    snr = snr_as_signal([tracker], ge_axis=1, skew_penalty=skew_penalty)
     return _ro_signal2real(np.asarray(snr, dtype=np.float64).reshape(shape))
 
 
@@ -149,6 +151,7 @@ class RoOptimizeCfgTemplate(ProgramV2Cfg, ExpCfgModel):
     modules: RoOptimizeModuleCfg
     freq_range: tuple[float, float]
     gain_range: tuple[float, float]
+    skew_penalty: float = Field(default=0.0, ge=0.0)
 
 
 def _default_t1() -> float:
@@ -178,8 +181,8 @@ class RoOptimizeNode(Node):
     Mirrors the lower-layer ``RO_OptTask`` ``measure_ro_fn`` + ``run``: a
     ``ModularProgramV2`` (Reset → ge-Branch(pi_pulse) → PulseReadout) sweeps the
     readout freq × gain (interleaved with the ge axis), a ``MomentTracker``
-    accumulates per-shot moments, and ``snr_as_signal`` turns them into an SNR
-    landscape whose argmax is the best (freq, gain). No fit step.
+    accumulates per-shot moments, and ``snr_as_signal`` turns them
+    into an SNR landscape whose argmax is the best (freq, gain). No fit step.
     """
 
     def __init__(self, env: RunEnv, builder: RoOptimizeBuilder) -> None:
@@ -223,7 +226,11 @@ class RoOptimizeNode(Node):
 
         def on_round(_round_count: int, _avg_d: Any) -> None:
             # the SNR landscape (n_freq, n_gain) accumulated so far → overwrite row
-            landscape = _ro_landscape(tracker, result.signal[idx].shape)
+            landscape = _ro_landscape(
+                tracker,
+                result.signal[idx].shape,
+                skew_penalty=cfg.skew_penalty,
+            )
             np.copyto(result.signal[idx], landscape)
             if env.round_hook is not None:
                 env.round_hook(idx)
@@ -248,7 +255,11 @@ class RoOptimizeNode(Node):
             trackers=[tracker],
         )
 
-        landscape = _ro_landscape(tracker, result.signal[idx].shape)
+        landscape = _ro_landscape(
+            tracker,
+            result.signal[idx].shape,
+            skew_penalty=cfg.skew_penalty,
+        )
         np.copyto(result.signal[idx], landscape)
 
         # argmax: project onto each axis and take the index of the max
@@ -367,6 +378,12 @@ class RoOptimizeBuilder(Builder):
                         IntSpec(label="Rounds"),
                         10,
                     ),
+                    node_field(
+                        "skew_penalty",
+                        "skew_penalty",
+                        FloatSpec(label="Skew penalty", decimals=3),
+                        0.0,
+                    ),
                 ),
             )
         )
@@ -432,6 +449,7 @@ class RoOptimizeBuilder(Builder):
                 "relax_delay": 3.0 * t1,
                 "reps": knobs["reps"],
                 "rounds": knobs["rounds"],
+                "skew_penalty": knobs["skew_penalty"],
                 "freq_range": (
                     prev_best_freq - freq_window,
                     prev_best_freq + freq_window,

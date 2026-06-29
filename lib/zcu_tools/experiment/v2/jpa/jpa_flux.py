@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from pydantic import Field
 from scipy.ndimage import gaussian_filter1d
 
 from zcu_tools.cfg_model import ConfigBase
@@ -62,6 +63,7 @@ class FluxSweepCfg(ConfigBase):
 class FluxCfg(ProgramV2Cfg, ExpCfgModel):
     modules: FluxModuleCfg
     sweep: FluxSweepCfg
+    skew_penalty: float = Field(default=0.0, ge=0.0)
 
 
 class FluxExp(PersistableExperiment[FluxResult, FluxCfg]):
@@ -113,7 +115,9 @@ class FluxExp(PersistableExperiment[FluxResult, FluxCfg]):
             signals = run_task(
                 task=Task(
                     measure_fn=measure_fn,
-                    raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
+                    raw2signal_fn=lambda raw: snr_as_signal(
+                        raw, ge_axis=0, skew_penalty=cfg.skew_penalty
+                    ),
                     dtype=np.float64,
                     pbar_n=cfg.rounds,
                 ).scan(

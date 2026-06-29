@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from pydantic import Field
 from skopt import Optimizer
 from skopt.space import Real
 
@@ -117,6 +118,7 @@ class AutoOptSweepCfg(ConfigBase):
 class AutoOptCfg(ProgramV2Cfg, ExpCfgModel):
     modules: AutoOptModuleCfg
     sweep: AutoOptSweepCfg
+    skew_penalty: float = Field(default=0.0, ge=0.0)
 
 
 RO_AUTO_READOUT_FREQ_ROLE = "readout_freq"
@@ -384,7 +386,9 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
             results = run_task(
                 task=Task(
                     measure_fn=measure_fn,
-                    raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=1),
+                    raw2signal_fn=lambda raw: snr_as_signal(
+                        raw, ge_axis=1, skew_penalty=cfg.skew_penalty
+                    ),
                     dtype=np.float64,
                     pbar_n=cfg.rounds,
                 ).scan(

@@ -28,6 +28,7 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
     ExpContext,
+    FloatSpec,
     MetaDictWriteback,
     ParamMeta,
     SweepSpec,
@@ -120,15 +121,16 @@ class RoOptLengthAdapter(
                 ),
             },
             sweep={"length": SweepSpec(label="Readout length (us)")},
+            extra={"skew_penalty": FloatSpec(label="Skew penalty", decimals=3)},
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         return (
             CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=10000, rounds=1, relax_delay=1.0)
-            .role("modules.qub_pulse", "qub_probe", Init.INLINE)
-            .role("modules.readout", "readout")
+            .scalars(reps=10000, rounds=1, relax_delay=1.0, skew_penalty=0.0)
             .role("modules.reset", "reset", Init.DISABLED)
+            .role("modules.qub_pulse", "pi_pulse")
+            .role("modules.readout", "readout")
             .sweep("sweep.length", 0.01, 3.5, 51)
             .build()
         )

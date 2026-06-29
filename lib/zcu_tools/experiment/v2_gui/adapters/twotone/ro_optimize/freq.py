@@ -30,6 +30,7 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
     ExpContext,
+    FloatSpec,
     MetaDictWriteback,
     ParamMeta,
     SweepSpec,
@@ -114,17 +115,21 @@ class RoOptFreqAdapter(
                 .lock_literal("ro_cfg.ro_freq", 0.0),
             },
             sweep={"freq": SweepSpec(label="Readout freq (MHz)")},
+            extra={"skew_penalty": FloatSpec(label="Skew penalty", decimals=3)},
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         return (
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(
-                reps=1000, rounds=100, relax_delay=proper_relax(ctx, fallback=30.5)
+                reps=1000,
+                rounds=100,
+                relax_delay=proper_relax(ctx, fallback=30.5),
+                skew_penalty=0.0,
             )
-            .role("modules.qub_pulse", "qub_probe", Init.INLINE)
-            .role("modules.readout", "readout")
             .role("modules.reset", "reset", Init.DISABLED)
+            .role("modules.qub_pulse", "pi_pulse")
+            .role("modules.readout", "readout")
             .set_sweep("sweep.freq", proper_res_freq_range(ctx, 301, span_factor=1.0))
             .build()
         )

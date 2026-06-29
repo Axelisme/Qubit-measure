@@ -6,12 +6,34 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 from scipy.signal import savgol_filter
-from scipy.special import erf
 
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 
-DISC_WEIGHT = 1.0
-SYM_WEIGHT = 8.0
+DEFAULT_SKEW_PENALTY = 0.0
+
+
+def _project_ge_stats(
+    mean_d: NDArray[np.float64],
+    cov_d: NDArray[np.float64],
+    ge_axis: int,
+) -> tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]
+]:
+    mean_g = np.take(mean_d, 0, axis=ge_axis)
+    mean_e = np.take(mean_d, 1, axis=ge_axis)
+    cov_g = np.take(cov_d, 0, axis=ge_axis)
+    cov_e = np.take(cov_d, 1, axis=ge_axis)
+
+    axis_vec = mean_e - mean_g
+    delta_mu = np.linalg.norm(axis_vec, axis=-1)
+    axis = axis_vec / np.clip(delta_mu, 1e-24, None)[..., None]
+
+    var_g = np.clip(np.einsum("...i,...ij,...j->...", axis, cov_g, axis), 1e-24, None)
+    var_e = np.clip(np.einsum("...i,...ij,...j->...", axis, cov_e, axis), 1e-24, None)
+    sigma_g = np.sqrt(var_g)
+    sigma_e = np.sqrt(var_e)
+
+    return axis, delta_mu, sigma_g, sigma_e
 
 
 def estimate_snr(real_signals: NDArray[np.float64]) -> float:
@@ -39,73 +61,63 @@ def calc_snr(
     m3_d: NDArray[np.float64],
     ge_axis: int = 0,
     *,
-    disc_weight: float = DISC_WEIGHT,
-    sym_weight: float = SYM_WEIGHT,
+    skew_penalty: float = DEFAULT_SKEW_PENALTY,
 ) -> NDArray[np.float64]:
-    """SNR score combining a discrimination term and a symmetry term.
+    """Compute shape-aware g/e separation SNR.
 
     Inputs:
         mean_d: shape (..., 2, 2)        — per-state mean on ge_axis
         cov_d:  shape (..., 2, 2, 2)     — per-state 2x2 covariance
         m3_d:   shape (..., 2, 2, 2, 2)  — per-state 3rd central moment tensor
 
-    Returns weighted score in [0, 1]:
-        disc = ½·(erf(Δμ / (2√2 σ_g)) + erf(Δμ / (2√2 σ_e)))
-        sym  = exp(−½·(skew_g + skew_e)² − ½·ln²(σ_g / σ_e))
-        snr  = disc**disc_weight * sym**sym_weight
-    with all σ/skew computed on the 1D projection onto the g→e axis.
-    """
-    if disc_weight < 0.0 or sym_weight < 0.0:
-        raise ValueError("disc_weight and sym_weight must be non-negative")
+    Returns:
+        snr = Δμ / sqrt(0.5 * (σ_g² + σ_e²))
+        shape_cost = ln²(σ_g / σ_e) + (skew_g + skew_e)²
+        score = snr / (1 + skew_penalty * shape_cost)
 
-    mean_g = np.take(mean_d, 0, axis=ge_axis)
-    mean_e = np.take(mean_d, 1, axis=ge_axis)
-    cov_g = np.take(cov_d, 0, axis=ge_axis)
-    cov_e = np.take(cov_d, 1, axis=ge_axis)
+    ``skew_penalty=0`` gives pure, unbounded separation SNR. Larger values
+    gradually down-weight one-sided skew and g/e shape mismatch without the
+    cliff-like exponential penalty of the previous bounded score.
+    """
+    if skew_penalty < 0.0:
+        raise ValueError("skew_penalty must be non-negative")
+
     m3_g = np.take(m3_d, 0, axis=ge_axis)
     m3_e = np.take(m3_d, 1, axis=ge_axis)
 
-    axis_vec = mean_e - mean_g  # (..., 2)
-    delta_mu = np.linalg.norm(axis_vec, axis=-1)  # (...)
-    axis = axis_vec / np.clip(delta_mu, 1e-24, None)[..., None]
-
-    var_g = np.clip(np.einsum("...i,...ij,...j->...", axis, cov_g, axis), 1e-24, None)
-    var_e = np.clip(np.einsum("...i,...ij,...j->...", axis, cov_e, axis), 1e-24, None)
-    sigma_g = np.sqrt(var_g)
-    sigma_e = np.sqrt(var_e)
-
-    inv_sqrt2 = 1.0 / np.sqrt(2.0)
-    disc = 0.5 * (
-        erf((delta_mu / (4.0 * sigma_g)) * inv_sqrt2)
-        + erf((delta_mu / (4.0 * sigma_e)) * inv_sqrt2)
-    )
-    disc = np.clip(disc, 0.0, 1.0)
+    axis, delta_mu, sigma_g, sigma_e = _project_ge_stats(mean_d, cov_d, ge_axis)
+    pooled_sigma = np.sqrt(0.5 * (sigma_g**2 + sigma_e**2))
+    snr = delta_mu / np.clip(pooled_sigma, 1e-24, None)
+    if skew_penalty == 0.0:
+        return snr
 
     proj_m3_g = np.einsum("...i,...j,...k,...ijk->...", axis, axis, axis, m3_g)
     proj_m3_e = np.einsum("...i,...j,...k,...ijk->...", axis, axis, axis, m3_e)
     skew_g = proj_m3_g / (sigma_g**3)
     skew_e = proj_m3_e / (sigma_e**3)
 
-    d_sym = 0.5 * (skew_g + skew_e) ** 2 + 0.5 * np.log(sigma_g / sigma_e) ** 2
-    sym = np.exp(-d_sym)
-
-    return (disc**disc_weight) * (sym**sym_weight)
+    shape_cost = np.log(sigma_g / sigma_e) ** 2 + (skew_g + skew_e) ** 2
+    return snr / (1.0 + skew_penalty * shape_cost)
 
 
 def snr_as_signal(
     raw: Sequence[MomentTracker],
     ge_axis: int = 0,
+    *,
+    skew_penalty: float = DEFAULT_SKEW_PENALTY,
 ) -> NDArray[np.float64]:
-    """Compute SNR from the first readout channel tracker."""
+    """Compute shape-aware SNR from the first readout channel tracker."""
     tracker = raw[0]
     mean_d = tracker.mean
     cov_d = tracker.covariance
     m3_d = tracker.third_moment
     assert mean_d is not None
+    assert cov_d is not None
+    assert m3_d is not None
     assert mean_d.shape[ge_axis] == 2, (
         f"Expected dim=2 along ge_axis, got shape {mean_d.shape} with ge_axis={ge_axis}"
     )
-    return calc_snr(mean_d, cov_d, m3_d, ge_axis=ge_axis)
+    return calc_snr(mean_d, cov_d, m3_d, ge_axis=ge_axis, skew_penalty=skew_penalty)
 
 
 def snr_checker(

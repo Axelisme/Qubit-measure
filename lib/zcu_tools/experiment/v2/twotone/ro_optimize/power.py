@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from pydantic import Field
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
@@ -62,6 +63,7 @@ class PowerSweepCfg(ConfigBase):
 class PowerCfg(ProgramV2Cfg, ExpCfgModel):
     modules: PowerModuleCfg
     sweep: PowerSweepCfg
+    skew_penalty: float = Field(default=0.0, ge=0.0)
 
 
 RawResult: TypeAlias = list[MomentTracker]
@@ -134,7 +136,9 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
             signals = run_task(
                 task=Task(
                     measure_fn=measure_fn,
-                    raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=1),
+                    raw2signal_fn=lambda raw: snr_as_signal(
+                        raw, ge_axis=1, skew_penalty=cfg.skew_penalty
+                    ),
                     result_shape=(len(gains),),
                     dtype=np.float64,
                     pbar_n=cfg.rounds,

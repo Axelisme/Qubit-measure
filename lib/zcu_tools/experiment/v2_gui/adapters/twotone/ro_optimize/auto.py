@@ -30,6 +30,7 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
     ExpContext,
+    FloatSpec,
     IntSpec,
     MetaDictWriteback,
     RunRequest,
@@ -128,16 +129,25 @@ class RoOptAutoAdapter(
                 "gain": SweepSpec(label="Readout gain (a.u.)"),
                 "length": SweepSpec(label="Readout length (us)"),
             },
-            extra={"num_points": IntSpec(label="Optimizer points")},
+            extra={
+                "num_points": IntSpec(label="Optimizer points"),
+                "skew_penalty": FloatSpec(label="Skew penalty", decimals=3),
+            },
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         return (
             CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=1000, rounds=10, relax_delay=1.0, num_points=1000)
-            .role("modules.qub_pulse", "qub_probe", Init.INLINE)
-            .role("modules.readout", "readout")
+            .scalars(
+                reps=1000,
+                rounds=10,
+                relax_delay=1.0,
+                num_points=1000,
+                skew_penalty=0.0,
+            )
             .role("modules.reset", "reset", Init.DISABLED)
+            .role("modules.qub_pulse", "pi_pulse")
+            .role("modules.readout", "readout")
             .set_sweep("sweep.freq", proper_res_freq_range(ctx, 51, span_factor=0.2))
             .sweep("sweep.gain", 0.1, 0.25, 51)
             .sweep("sweep.length", 5.0, 10.0, 51)

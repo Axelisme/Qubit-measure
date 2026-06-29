@@ -12,6 +12,12 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
+from zcu_tools.experiment.v2.twotone.ro_optimize.freq import (
+    FreqCfg,
+    FreqExp,
+    FreqModuleCfg,
+    FreqSweepCfg,
+)
 from zcu_tools.experiment.v2.twotone.ro_optimize.freq_gain import (
     FreqGainCfg,
     FreqGainExp,
@@ -159,6 +165,46 @@ def test_length_exp_prefers_longer_ro_length_when_pulse_covers_window() -> None:
 
     assert result.signals[-1] > result.signals[0]
     assert best_length == pytest.approx(float(result.lengths[-1]))
+
+
+def test_freq_exp_tracks_frequency_ridge() -> None:
+    """Real FreqExp should follow the deterministic S21 readout contrast."""
+
+    rf_g, rf_e = resonator_freqs(_SIM, _OPERATING_FLUX)
+    high_rf_mhz = max(rf_g, rf_e) * 1e3
+    freq_step = 2.0
+
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    cfg = FreqCfg(
+        reps=1600,
+        rounds=1,
+        modules=FreqModuleCfg(
+            reset=None,
+            qub_pulse=_probe_pulse(),
+            readout=_readout(),
+        ),
+        sweep=FreqSweepCfg(
+            freq=SweepCfg(
+                start=high_rf_mhz - 8.0,
+                stop=high_rf_mhz + 4.0,
+                expts=7,
+                step=freq_step,
+            ),
+        ),
+        relax_delay=10.0 * _SIM.T1,
+    )
+
+    exp = FreqExp()
+    result = exp.run(soc, soccfg, cfg)
+    best_freq, fig = exp.analyze(result, smooth=0.01, smooth_method="gaussian")
+    plt.close(fig)
+
+    contrast = _deterministic_readout_contrast(result.freqs)
+    expected_freq = float(result.freqs[int(np.argmax(contrast))])
+    actual_step = float(abs(result.freqs[1] - result.freqs[0]))
+
+    assert np.nanmax(result.signals) > 0.5
+    assert abs(best_freq - expected_freq) <= 2.0 * actual_step
 
 
 def test_freq_gain_exp_tracks_frequency_ridge_and_high_gain_edge() -> None:

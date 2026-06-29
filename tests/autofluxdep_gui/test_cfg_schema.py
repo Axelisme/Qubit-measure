@@ -182,6 +182,7 @@ _EXPECTED_KEYS = {
         "rounds",
         "freq_window",
         "gain_window",
+        "skew_penalty",
     },
     "t1": {"sweep_range", "reps", "rounds", "earlystop_snr"},
     "t2ramsey": {"sweep_range", "detune_ratio", "reps", "rounds", "earlystop_snr"},
@@ -232,6 +233,7 @@ _EXPECTED_PATHS = {
         "rounds": "acquire.rounds",
         "freq_window": "window.freq_half_width",
         "gain_window": "window.gain_half_width",
+        "skew_penalty": "acquire.skew_penalty",
     },
     "t1": {
         "sweep_range": "sweep.delay",
@@ -570,6 +572,7 @@ def test_ro_optimize_default_knobs():
     assert knobs["rounds"] == 10
     assert knobs["freq_window"] == 1.0
     assert knobs["gain_window"] == 0.05
+    assert knobs["skew_penalty"] == 0.0
     # the window half-widths are flat scalars, NOT a SweepSpec (decision)
     spec = RoOptimizeBuilder().make_default_schema().schema.spec
     window = spec.fields["window"]

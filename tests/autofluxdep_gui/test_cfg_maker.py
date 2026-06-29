@@ -204,6 +204,7 @@ def test_ro_optimize_make_cfg_lowers_context():
                 "rounds": 10,
                 "freq_window": 1.0,
                 "gain_window": 0.05,
+                "skew_penalty": 0.25,
             },
         ),
         ml=ml,
@@ -216,6 +217,7 @@ def test_ro_optimize_make_cfg_lowers_context():
     # the readout the cfg sweeps over comes whole from the snapshot
     assert float(cfg.modules.readout.pulse_cfg.freq) == 7444.6
     assert cfg.reps == 1000 and cfg.rounds == 10
+    assert cfg.skew_penalty == 0.25
     # relax_delay = 3 * (smoothed) T1
     assert cfg.relax_delay == 30.0
 

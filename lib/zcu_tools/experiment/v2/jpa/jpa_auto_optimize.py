@@ -80,6 +80,7 @@ class JPAOptCfg(ProgramV2Cfg, ExpCfgModel):
     # default from ExpCfgModel — intentional Pydantic pattern (type: ignore[override]).
     dev: Mapping[str, DeviceInfo] = Field(...)  # type: ignore[override]
     sweep: JPAOptSweepCfg
+    skew_penalty: float = Field(default=0.0, ge=0.0)
 
 
 JPA_AUTO_FLUX_ROLE = "jpa_flux"
@@ -373,7 +374,9 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
             results = run_task(
                 task=Task(
                     measure_fn=measure_fn,
-                    raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
+                    raw2signal_fn=lambda raw: snr_as_signal(
+                        raw, ge_axis=0, skew_penalty=cfg.skew_penalty
+                    ),
                     dtype=np.float64,
                     pbar_n=cfg.rounds,
                 ).scan(

@@ -28,6 +28,7 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
     ExpContext,
+    FloatSpec,
     MetaDictWriteback,
     ParamMeta,
     SweepSpec,
@@ -116,15 +117,16 @@ class RoOptPowerAdapter(
                 ),
             },
             sweep={"gain": SweepSpec(label="Readout gain (a.u.)")},
+            extra={"skew_penalty": FloatSpec(label="Skew penalty", decimals=3)},
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         return (
             CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=1000, rounds=100, relax_delay=1.0)
-            .role("modules.qub_pulse", "qub_probe", Init.INLINE)
-            .role("modules.readout", "readout")
+            .scalars(reps=1000, rounds=100, relax_delay=1.0, skew_penalty=0.0)
             .role("modules.reset", "reset", Init.DISABLED)
+            .role("modules.qub_pulse", "pi_pulse")
+            .role("modules.readout", "readout")
             .sweep("sweep.gain", 0.001, 0.2, 101)
             .build()
         )

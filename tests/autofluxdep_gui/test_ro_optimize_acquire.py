@@ -36,6 +36,7 @@ _PARAMS = {
     "rounds": 1,
     "freq_window": 5.0,
     "gain_window": 0.3,
+    "skew_penalty": 0.0,
 }
 
 

@@ -1,6 +1,6 @@
 # AI Note for `tests/`
 
-**Last updated:** 2026-06-29 — Qt wait helper typing
+**Last updated:** 2026-06-29 — readout SNR scorer tests
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -173,6 +173,10 @@ result = _optimize_tree(root, [SomePass()], ctx)
 ```
 
 `_optimize_tree()` 對 `BlockNode` 做 in-place mutation（`result is root`），不要依賴返回值是否為新物件來判斷 `changed`。
+
+### SNR scorer helpers
+
+`tests/experiment/v2/utils/test_snr.py` 用解析的 g/e `mean` / `covariance` / `third_moment` fixture 測 `snr_as_signal` 與 `skew_penalty`，不靠隨機 samples 或 Monte Carlo 閾值；這能直接驗證 pooled-sigma SNR、shape mismatch penalty 與 one-sided skew penalty 的公式語意。
 
 ### 補充 — `make_mock_soc()`（`lib/zcu_tools/program/v2/mocksoc.py`）
 

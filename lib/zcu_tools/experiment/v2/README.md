@@ -1,6 +1,6 @@
 # QICK Note for `experiment/v2`
 
-**Last updated:** 2026-06-29（signal array normalization）
+**Last updated:** 2026-06-29（readout optimization skew penalty）
 
 這份筆記整理 `experiment/v2/` 的整體設計，說明 Experiment 層與 Task 層的分工、典型實驗的撰寫範本，以及各子模組的角色。`runner/` 的細節另見 `runner/README.md`。
 
@@ -204,7 +204,7 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):          # 主要 Cfg = program cfg + 
 - **`sweep2array(sweep_cfg, name, {"soccfg", "gen_ch", "ro_ch"})`** — 展開 `SweepCfg` 為 numpy array，已套 ZCU 量化（`round_zcu_freq/time/gain/phase`）。Exp 幾乎都靠這個產生 x 軸。
 - **`round_zcu_*`** — 單點版本的量化函式；`round_sweep_dict` 同時處理整個 sweep dict。時間的量化有特殊處理：預先減去 `0.5 * one_cycle` 以匹配 QICK sweep 用 `np.trunc` 的行為。多點 sweep 的 step 若在量化後變成 0，會 fast-fail 並要求放大 span 或減少 expts，避免 GUI/agent 看到低階 `SweepCfg` 一致性錯誤。
 - **`merge_result_list(list_of_results)`** — 把 `list[dict[name, ndarray]]` 遞迴轉成 `dict[name, ndarray]`（外層 list 變成最外層維度）。Executor 取得 `Scan` 結果後呼叫它把 `list` 轉成 stacked array。
-- **`estimate_snr` / `snr_as_signal` / `snr_checker`** — SNR 估計與 early-stop：當 SNR 達門檻時提前結束測量，節省時間。`snr_as_signal` 給 singleshot（吃 `MomentTracker` 的 raw）用。
+- **`estimate_snr` / `snr_as_signal` / `snr_checker`** — SNR 估計與 early-stop：`estimate_snr` 搭配 `snr_checker` 用於曲線 early-stop；`snr_as_signal(raw, ge_axis, skew_penalty=0.0)` 從 `MomentTracker` 的 g/e IQ moments 計算 pooled-sigma separation SNR。`skew_penalty=0.0` 是純 SNR；提高 `skew_penalty` 會以連續 rational penalty 降低 projected skew 與 g/e shape mismatch 較大的候選點，供 readout optimization 與 JPA optimization 共用。
 
 ---
 

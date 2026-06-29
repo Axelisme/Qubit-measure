@@ -60,6 +60,7 @@ def test_ro_opt_1d_build_exp_cfg_delegates(
     raw = _lower(adapter.make_default_cfg(_make_ctx(ml)), _make_req(ml))
 
     assert "modules" in raw
+    assert raw["skew_penalty"] == 0.0
     modules = cast(dict[str, Any], raw["modules"])
     assert "readout" in modules
     assert "qub_pulse" in modules
@@ -78,6 +79,7 @@ def test_ro_opt_freq_gain_build_exp_cfg_delegates() -> None:
     sweep = cast(dict[str, Any], raw["sweep"])
     assert isinstance(sweep["freq"], SweepCfg)
     assert isinstance(sweep["gain"], SweepCfg)
+    assert raw["skew_penalty"] == 0.0
 
     cfg = adapter.build_exp_cfg(raw, _make_req(ml))
     assert isinstance(cfg, FreqGainCfg)
@@ -92,6 +94,7 @@ def test_ro_opt_auto_pops_num_points_before_make_cfg() -> None:
     raw = _lower(adapter.make_default_cfg(_make_ctx(ml)), _make_req(ml))
 
     assert "num_points" in raw  # present in the lowered cfg
+    assert raw["skew_penalty"] == 0.0
     sweep = cast(dict[str, Any], raw["sweep"])
     assert isinstance(sweep["freq"], SweepCfg)
     assert isinstance(sweep["gain"], SweepCfg)
@@ -100,6 +103,7 @@ def test_ro_opt_auto_pops_num_points_before_make_cfg() -> None:
     adapter.build_exp_cfg(raw, _make_req(ml))
     passed_raw = ml.make_cfg.call_args.args[0]
     assert "num_points" not in passed_raw  # stripped before make_cfg
+    assert passed_raw["skew_penalty"] == 0.0
     assert ml.make_cfg.call_args.args[1] is AutoOptCfg
 
 
