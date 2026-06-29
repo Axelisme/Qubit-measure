@@ -139,6 +139,7 @@ class AmpRabiAdapter(
             # optional → None (disabled) when no library reset (ADR-0010)
             .role("modules.reset", "reset", Init.DISABLED)
             .role("modules.qub_pulse", "qub_probe", Init.INLINE)
+            .set("modules.qub_pulse.waveform.length", 1.1)
             .role("modules.readout", "readout")
             .set_sweep(
                 "sweep.gain",
