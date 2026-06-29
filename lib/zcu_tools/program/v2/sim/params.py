@@ -84,8 +84,13 @@ class SimParams(ConfigBase):
 
     Noise and calibration:
         snr : float
-            Signal-to-noise ratio per single repetition.  Determines the
-            additive Gaussian noise scale applied to each shot.
+            Base per-sample Gaussian readout-noise scale.  The accumulated SNR
+            still emerges from the readout gain, integration length, and the
+            gain-proportional noise term below.
+        readout_gain_noise_per_gain : float, optional
+            Per-sample Gaussian readout noise added in quadrature with the base
+            noise, proportional to the compressed PulseReadout drive amplitude.
+            Defaults to 0.0.
         timeFly : float, optional
             Time of flight in µs: the readout-signal propagation delay.  The
             readout pulse program plays from program ``t = 0``, but the signal is
@@ -101,11 +106,10 @@ class SimParams(ConfigBase):
             ``θ = Ω · length = π · gain · length / pi_gain_len``.  The length
             unit must be consistent with the pulse length unit used in the
             timeline.
-        readout_photons_per_gain2 : float or None, optional
+        readout_photons_per_gain2 : float, optional
             Calibration from PulseReadout gain² to mean intracavity photon
-            number.  When None, the sim uses the conservative normalized
-            convention "gain=1 reaches the dispersive critical photon number"
-            at the current operating point.
+            number.  Defaults to 100.0; ``None`` is rejected so the readout
+            power calibration is explicit.
         seed : int or None, optional
             RNG seed for reproducible noise.  None means non-deterministic.
             Defaults to None.
@@ -166,12 +170,17 @@ class SimParams(ConfigBase):
 
     # --- noise and calibration ---
     snr: float
+    # readout_gain_noise_per_gain: per-sample Gaussian noise coefficient for the
+    # readout-drive-proportional noise source.  It is combined in quadrature with
+    # the snr-derived base noise inside SimEngine.
+    readout_gain_noise_per_gain: float = 0.0
     # pi_gain_len: the gain×length invariant shared by amp_rabi (sweeps gain)
     # and len_rabi (sweeps length).  SimEngine uses Ω = π/pi_gain_len · gain.
     pi_gain_len: float
-    # readout_photons_per_gain2: optional gain->photon calibration for nonlinear
-    # readout. None means gain=1 is normalized to the critical photon number.
-    readout_photons_per_gain2: float | None = None
+    # readout_photons_per_gain2: gain->photon calibration for nonlinear readout.
+    # None is intentionally not accepted; the default mock calibration is
+    # 100 photons / gain^2.
+    readout_photons_per_gain2: float = 100.0
     # timeFly: readout time-of-flight (µs). The decimated/lookback trace places
     # the readout envelope at program-time == timeFly (the trace is ~0 before it),
     # giving the simulated lookback a physical rising edge to recover as trig_offset.
@@ -188,15 +197,28 @@ class SimParams(ConfigBase):
             )
         return v
 
+    @field_validator("snr")
+    @classmethod
+    def _validate_snr(cls, v: float) -> float:
+        if not math.isfinite(v) or v <= 0.0:
+            raise ValueError(f"snr must be finite and > 0.0 (got {v!r})")
+        return v
+
+    @field_validator("readout_gain_noise_per_gain")
+    @classmethod
+    def _validate_readout_gain_noise_per_gain(cls, v: float) -> float:
+        if not math.isfinite(v) or v < 0.0:
+            raise ValueError(
+                f"readout_gain_noise_per_gain must be finite and >= 0.0 (got {v!r})"
+            )
+        return v
+
     @field_validator("readout_photons_per_gain2")
     @classmethod
-    def _validate_readout_photons_per_gain2(cls, v: float | None) -> float | None:
-        if v is None:
-            return None
+    def _validate_readout_photons_per_gain2(cls, v: float) -> float:
         if not math.isfinite(v) or v <= 0.0:
             raise ValueError(
-                "readout_photons_per_gain2 must be finite and > 0.0 when set "
-                f"(got {v!r})"
+                f"readout_photons_per_gain2 must be finite and > 0.0 (got {v!r})"
             )
         return v
 

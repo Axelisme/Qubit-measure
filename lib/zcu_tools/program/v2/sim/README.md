@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-06-29 (readout population-chain numba gate)
+**Last updated:** 2026-06-29 (readout noise and photon calibration)
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -113,7 +113,8 @@ every coupling point.
 ## Module map
 
 - `params.py` — `SimParams`: the physical parameter container (EJ/EC/EL, flux
-  alignment, T1/T2/T2_star/thermal_pop, bare_rf/g/Ql/Qi, snr, pi_gain_len,
+  alignment, T1/T2/T2_star/thermal_pop, bare_rf/g/Ql/Qi, base `snr`,
+  `readout_gain_noise_per_gain`, pi_gain_len, explicit
   `readout_photons_per_gain2`, seed),
   with the `0 < T2_star ≤ T2 ≤ 2·T1` validators and the derived
   `inhomogeneous_rate` (Γ). Also carries `poll_latency` (seconds/element, default
@@ -136,9 +137,10 @@ every coupling point.
   `s_g` / `s_e` blobs), and `mixed_signal` is the population-weighted blend (the
   accumulated reps-mean) — both *take* `rf_g` / `rf_e` (so the engine computes the
   dressed freqs once). Also owns pure readout helpers: dispersive critical photon
-  number, unitless-gain photon-ratio calibration, safe-zone drive compression,
-  state-visibility compression, envelope-weighted effective signal samples, and
-  integrated Gaussian noise sample scaling. Also `value_to_flux`. No sweeps /
+  number, explicit unitless-gain photon-ratio calibration, safe-zone drive
+  compression, state-visibility compression, envelope-weighted effective signal
+  samples, envelope-RMS readout noise scaling, and integrated Gaussian noise
+  sample scaling. Also `value_to_flux`. No sweeps /
   timelines / acc_buf / random noise / the per-shot Bernoulli draw (the engine owns
   that).
 - `engine.py` — `SimEngine`: glue. Pins the operating point at reduced flux
@@ -148,9 +150,10 @@ every coupling point.
   deterministic `(s_g, s_e)` blob grids plus readout integration scales and a
   rep-resolved `p_e` grid, then per round draws a per-shot `Bernoulli(p_e)` to
   select a blob, multiplies the deterministic signal by the compressed readout gain
-  and effective signal samples, and adds Gaussian integrated noise into the QICK
-  `(*loop_dims, nreads, 2)` int64 buffer (snr / reps / rounds / seed; fresh
-  Bernoulli + noise per round so software-averaging works). The
+  and effective signal samples, and adds quadrature-combined base plus
+  gain-proportional Gaussian integrated noise into the QICK
+  `(*loop_dims, nreads, 2)` int64 buffer (noise parameters / reps / rounds / seed;
+  fresh Bernoulli + noise per round so software-averaging works). The
   reps-mean is the accumulated `mixed_signal` blend (zero regression); `get_raw`
   sees the two blobs. Owns the Lorentzian quasi-static detune
   ensemble: it averages `P_e` over a deterministic Gauss-Legendre quadrature in `δ`
@@ -220,24 +223,30 @@ every coupling point.
   and in the effective signal samples while `nbar/ncrit <= 0.1`; above that
   dispersive guardrail the readout drive is softly compressed and the |g>/|e> blob
   separation is compressed around its midpoint. `readout_photons_per_gain2` is the
-  optional mock calibration from PulseReadout gain² to intracavity photons; when it
-  is unset, `gain=1` is normalized to the critical photon number at the operating
-  point. DirectReadout has no explicit generator gain and stays on the linear path.
+  explicit mock calibration from PulseReadout gain² to intracavity photons; its
+  default is `100.0`, and `None` is rejected so the power calibration cannot
+  silently depend on the current critical photon number. DirectReadout has no
+  explicit generator gain and stays on the linear path.
   For accumulated `PulseReadout`, effective signal samples are the overlap between
   the compiled ADC sample axis and the generator envelope after applying
   `trig_offset - timeFly - pulse_pre_delay`; a readout window that starts before
   the signal arrival only integrates the later portion of the envelope.
-  The Gaussian raw-noise standard deviation scales as
-  `sqrt(compiled_readout_samples)`.
+  The base Gaussian raw-noise standard deviation scales as
+  `sqrt(compiled_readout_samples)`. The optional gain-proportional Gaussian source
+  uses the same readout envelope sampled on the ADC axis and scales with the
+  compressed PulseReadout drive amplitude; independent sources are combined in
+  quadrature.
   The real QICK/tracker normalization still divides by compiled `ro["length"]`,
   so a full-window const readout has roughly length-independent normalized mean
   and normalized Gaussian noise that decreases as `1/sqrt(length)`.
-- **Q1 — noise model.** `snr` is the per-sample Gaussian readout scale before
-  integration; fresh Gaussian noise is drawn each round so averaging over
-  reps*rounds improves the effective SNR by `sqrt(reps*rounds)`, as on hardware.
-  Full-window length sweeps are still expected to prefer their upper bounds in this
-  first-order model: resonator ring-up and trigger-alignment penalties are not
-  modeled.
+- **Q1 — noise model.** `snr` is only the base per-sample Gaussian readout scale,
+  not a fixed final SNR. PulseReadout may add a second Gaussian source through
+  `readout_gain_noise_per_gain`; this term is proportional to the compressed
+  readout drive amplitude and is combined with the base source in quadrature.
+  Fresh Gaussian noise is drawn each round so averaging over reps*rounds improves
+  the effective SNR by `sqrt(reps*rounds)`, as on hardware. Full-window length
+  sweeps are still expected to prefer their upper bounds in this first-order
+  model: resonator ring-up and trigger-alignment penalties are not modeled.
 - **`relax_delay` carries state within a round.** A round initializes the qubit
   state once at thermal equilibrium.  Each rep evolves through the lowered
   pre-readout timeline, is read out without stochastic collapse in the density-only
@@ -252,9 +261,10 @@ every coupling point.
   exposes two Gaussian blobs (`GE_Exp` classifies them host-side via PCA +
   histogram). Two consequences: (1) the accumulated path now carries genuine shot
   noise `~ sqrt(P_e(1−P_e)/reps)`, so slow low-contrast fits (echo T2) need enough
-  reps to average it down — only reps, not snr, suppresses it; (2) a DEFAULT
-  snr=300 fully separates the blobs (fidelity ~ 1), so a *meaningful* singleshot
-  fidelity test must lower snr (~5–10) to overlap the blobs.
+  reps to average it down — only reps, not the Gaussian noise parameters,
+  suppresses it; (2) a DEFAULT base snr=300 fully separates the blobs (fidelity
+  ~ 1), so a *meaningful* singleshot fidelity test must lower snr (~5–10) to
+  overlap the blobs.
 
 ## Mock soccfg gotchas (when driving real experiments)
 

@@ -30,10 +30,12 @@ from zcu_tools.program.v2.sim.readout import (
     apply_readout_visibility,
     critical_photon_number,
     decimated_trace,
+    effective_noise_samples,
     effective_signal_samples,
     mixed_signal,
     noise_std_sample_scale,
     readout_drive_amplitude,
+    readout_envelope_samples,
     readout_photon_ratio,
     readout_state_visibility,
     resonator_freqs,
@@ -259,26 +261,30 @@ class TestIntegrationHelpers:
         with pytest.raises(ValueError, match="readout gain must be finite"):
             readout_drive_amplitude(gain)
 
-    def test_readout_photon_ratio_defaults_gain_one_to_ncrit(self) -> None:
-        assert readout_photon_ratio(0.5, n_crit=20.0, photons_per_gain2=None) == (
+    def test_readout_photon_ratio_uses_explicit_gain_calibration(self) -> None:
+        assert readout_photon_ratio(0.5, n_crit=20.0, photons_per_gain2=20.0) == (
             pytest.approx(0.25)
         )
-        assert readout_photon_ratio(1.0, n_crit=20.0, photons_per_gain2=None) == (
+        assert readout_photon_ratio(1.0, n_crit=20.0, photons_per_gain2=20.0) == (
             pytest.approx(1.0)
         )
 
+    def test_readout_photon_ratio_rejects_missing_pulse_calibration(self) -> None:
+        with pytest.raises(ValueError, match="photons_per_gain2 must be provided"):
+            readout_photon_ratio(0.5, n_crit=20.0, photons_per_gain2=None)  # type: ignore[arg-type]
+
     def test_readout_drive_amplitude_soft_saturates_at_ncrit(self) -> None:
         assert readout_drive_amplitude(
-            0.01, n_crit=10.0, photons_per_gain2=None
+            0.01, n_crit=10.0, photons_per_gain2=10.0
         ) == pytest.approx(0.01, rel=1e-4)
         assert readout_drive_amplitude(
-            1.0, n_crit=10.0, photons_per_gain2=None
+            1.0, n_crit=10.0, photons_per_gain2=10.0
         ) == pytest.approx(1.0 / np.sqrt(1.9))
 
     def test_readout_state_visibility_compresses_blob_separation(self) -> None:
         s_g = np.array([1.0 + 0.0j], dtype=np.complex128)
         s_e = np.array([-1.0 + 0.0j], dtype=np.complex128)
-        visibility = readout_state_visibility(1.0, n_crit=10.0, photons_per_gain2=None)
+        visibility = readout_state_visibility(1.0, n_crit=10.0, photons_per_gain2=10.0)
 
         s_g_eff, s_e_eff = apply_readout_visibility(s_g, s_e, visibility)
 
@@ -289,6 +295,10 @@ class TestIntegrationHelpers:
     def test_effective_signal_samples_direct_readout_counts_window(self) -> None:
         ts = np.linspace(0.0, 1.0, 11, endpoint=False, dtype=np.float64)
         assert effective_signal_samples(None, None, ts) == pytest.approx(11.0)
+
+    def test_readout_envelope_samples_direct_readout_is_unity(self) -> None:
+        ts = np.linspace(0.0, 1.0, 11, endpoint=False, dtype=np.float64)
+        np.testing.assert_allclose(readout_envelope_samples(None, None, ts), 1.0)
 
     def test_effective_signal_samples_const_full_window(self) -> None:
         cfg = _const_readout_cfg(length=1.0)
@@ -305,6 +315,18 @@ class TestIntegrationHelpers:
         ts = np.linspace(0.0, 1.0, 101, endpoint=False, dtype=np.float64)
         area = effective_signal_samples(cfg, 1.0, ts)
         assert 0.0 < area < ts.size
+
+    def test_effective_noise_samples_uses_envelope_rms(self) -> None:
+        cfg = _const_readout_cfg(length=0.5)
+        ts = np.linspace(0.0, 1.0, 10, endpoint=False, dtype=np.float64)
+        assert effective_noise_samples(cfg, 0.5, ts) == pytest.approx(np.sqrt(5.0))
+
+    def test_effective_noise_samples_shaped_pulse_is_below_signal_area(self) -> None:
+        cfg = _gauss_readout_cfg(length=1.0, sigma=0.2)
+        ts = np.linspace(0.0, 1.0, 101, endpoint=False, dtype=np.float64)
+        noise_scale = effective_noise_samples(cfg, 1.0, ts)
+        signal_area = effective_signal_samples(cfg, 1.0, ts)
+        assert 0.0 < noise_scale < signal_area
 
     @pytest.mark.parametrize(
         "sample_times",

@@ -200,12 +200,13 @@ def critical_photon_number(
 def readout_photon_ratio(
     gain: float | None,
     n_crit: float,
-    photons_per_gain2: float | None,
+    photons_per_gain2: float,
 ) -> float:
     """Return ``n_bar / n_crit`` for a PulseReadout gain.
 
     ``DirectReadout`` has no explicit drive gain (``gain is None``), so it stays
-    on the safe linear path and contributes no nonlinear readout penalty.
+    on the safe linear path and contributes no nonlinear readout penalty.  A
+    PulseReadout must pass an explicit gain² -> photon calibration.
     """
 
     if gain is None:
@@ -217,14 +218,12 @@ def readout_photon_ratio(
         raise ValueError(f"n_crit must be finite and > 0.0, got {n_crit!r}")
 
     if photons_per_gain2 is None:
-        photon_scale = critical
-    else:
-        photon_scale = float(photons_per_gain2)
-        if not math.isfinite(photon_scale) or photon_scale <= 0.0:
-            raise ValueError(
-                "photons_per_gain2 must be finite and > 0.0 when set "
-                f"(got {photons_per_gain2!r})"
-            )
+        raise ValueError("photons_per_gain2 must be provided for PulseReadout")
+    photon_scale = float(photons_per_gain2)
+    if not math.isfinite(photon_scale) or photon_scale <= 0.0:
+        raise ValueError(
+            f"photons_per_gain2 must be finite and > 0.0 (got {photons_per_gain2!r})"
+        )
 
     return (photon_scale * amplitude * amplitude) / critical
 
@@ -233,7 +232,7 @@ def readout_drive_amplitude(
     gain: float | None,
     *,
     n_crit: float | None = None,
-    photons_per_gain2: float | None = None,
+    photons_per_gain2: float = 100.0,
 ) -> float:
     """Return the readout drive amplitude after dispersive-limit compression."""
 
@@ -252,7 +251,7 @@ def readout_drive_amplitude(
 def readout_state_visibility(
     gain: float | None,
     n_crit: float,
-    photons_per_gain2: float | None,
+    photons_per_gain2: float,
 ) -> float:
     """Return the remaining |g>/|e> readout contrast under high photon number."""
 
@@ -263,7 +262,7 @@ def readout_state_visibility(
 def _readout_nonlinear_ratio(
     gain: float | None,
     n_crit: float,
-    photons_per_gain2: float | None,
+    photons_per_gain2: float,
 ) -> float:
     """Return the excess photon ratio above the conservative dispersive guardrail."""
 
@@ -310,25 +309,24 @@ def _validate_sample_times(sample_times_us: NDArray[np.float64]) -> NDArray[np.f
     return ts
 
 
-def effective_signal_samples(
+def readout_envelope_samples(
     readout_cfg: PulseCfg | None,
     pulse_length_us: float | None,
     sample_times_us: NDArray[np.float64],
-) -> float:
-    """Return the envelope-weighted signal area in compiled ADC samples.
+) -> NDArray[np.float64]:
+    """Return the readout envelope sampled on the ADC integration axis.
 
     ``DirectReadout`` has no generator envelope and therefore contributes one
-    signal unit per integrated sample.  ``PulseReadout`` integrates the resolved
-    generator envelope over the same compiled ADC sample axis.  This helper
-    returns a sample count, not a time integral; QICK's accumulated path
-    normalizes by the compiled readout sample count.
+    unit per integrated sample.  ``PulseReadout`` returns the resolved generator
+    envelope over the same compiled ADC sample axis.  The returned values are
+    dimensionless and peak-normalized.
     """
 
     ts = _validate_sample_times(sample_times_us)
     if readout_cfg is None:
         if pulse_length_us is not None:
             raise ValueError("pulse_length_us must be None when readout_cfg is None")
-        return float(ts.size)
+        return np.ones(ts.shape, dtype=np.float64)
 
     if pulse_length_us is None:
         raise ValueError("pulse_length_us is required when readout_cfg is provided")
@@ -338,8 +336,39 @@ def effective_signal_samples(
             f"pulse_length_us must be finite and positive, got {pulse_length_us!r}"
         )
 
-    envelope = envelope_at(readout_cfg, ts, pulse_length)
+    return envelope_at(readout_cfg, ts, pulse_length)
+
+
+def effective_signal_samples(
+    readout_cfg: PulseCfg | None,
+    pulse_length_us: float | None,
+    sample_times_us: NDArray[np.float64],
+) -> float:
+    """Return the envelope-weighted signal area in compiled ADC samples.
+
+    This helper returns a sample count, not a time integral; QICK's accumulated
+    path normalizes by the compiled readout sample count.
+    """
+
+    envelope = readout_envelope_samples(readout_cfg, pulse_length_us, sample_times_us)
     return float(np.sum(envelope))
+
+
+def effective_noise_samples(
+    readout_cfg: PulseCfg | None,
+    pulse_length_us: float | None,
+    sample_times_us: NDArray[np.float64],
+) -> float:
+    """Return the envelope-weighted Gaussian-noise scale in ADC samples.
+
+    This is the square-root of the sampled envelope power.  It is used for the
+    readout-drive-proportional noise source: constant full-window readout gives
+    ``sqrt(n_samples)``, while shaped or partially clipped readout pulses only
+    contribute where their envelope overlaps the ADC window.
+    """
+
+    envelope = readout_envelope_samples(readout_cfg, pulse_length_us, sample_times_us)
+    return math.sqrt(float(np.sum(envelope * envelope)))
 
 
 def noise_std_sample_scale(n_samples: int) -> float:

@@ -685,7 +685,9 @@ def _pi_pulse_prog(relax_delay: float, *, reps: int = 4) -> ModularProgramV2:
 
 def _deterministic_p_e_chain(prog: ModularProgramV2) -> NDArray[np.float64]:
     engine = SimEngine(prog, _SIM)
-    _s_g, _s_e, p_e, _signal_scale, _noise_scale = engine._ensure_signal()
+    _s_g, _s_e, p_e, _signal_scale, _noise_scale, _gain_noise_scale = (
+        engine._ensure_signal()
+    )
     return p_e[:, 0]
 
 
@@ -717,15 +719,19 @@ def test_engine_compute_round_supports_multiple_read_triggers() -> None:
 
     engine = SimEngine(prog, _SIM)
     acc = engine.compute_round(0)[0]
-    _s_g, _s_e, p_e, signal_scale, noise_scale = engine._ensure_signal()
+    _s_g, _s_e, p_e, signal_scale, noise_scale, gain_noise_scale = (
+        engine._ensure_signal()
+    )
 
     assert acc.shape == (3, 2, 2)
     assert p_e.shape == (3, 2)
     assert signal_scale.shape == (2,)
     assert noise_scale.shape == (2,)
+    assert gain_noise_scale.shape == (2,)
     np.testing.assert_allclose(p_e[:, 0], p_e[:, 1])
     np.testing.assert_allclose(signal_scale[0], signal_scale[1])
     np.testing.assert_allclose(noise_scale[0], noise_scale[1])
+    np.testing.assert_allclose(gain_noise_scale[0], gain_noise_scale[1])
 
 
 def _normalized_ground_raw_direct(
@@ -936,6 +942,7 @@ def test_acquire_stop_checker_does_not_cancel_inside_mock_signal_grid(monkeypatc
             s_e=np.array([0.0 + 0.0j], dtype=np.complex128),
             signal_scale=1.0,
             noise_std_scale=1.0,
+            gain_noise_std_scale=0.0,
             pre_readout_props=(np.eye(4, dtype=np.float64),),
             inter_shot_props=(np.eye(4, dtype=np.float64),),
         )
@@ -1300,10 +1307,33 @@ def _ground_raw_median(readout: Module, *, sim: SimParams) -> complex:
     return complex(np.median(samples.real) + 1j * np.median(samples.imag))
 
 
+def _ground_normalized_raw_std(readout: Module, *, sim: SimParams) -> float:
+    """Run one no-pulse readout and return normalized I-quadrature scatter."""
+
+    soc, soccfg = make_mock_soc(sim=sim)
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=6000, rounds=1),
+        modules=[readout],
+    )
+    prog.acquire(soc, progress=False)
+    raw = prog.get_raw()
+    assert raw is not None
+    compiled_length = int(list(prog.ro_chs.values())[0]["length"])
+    samples = (raw[0][:, 0, 0] + 1j * raw[0][:, 0, 1]) / compiled_length
+    return float(np.std(samples.real))
+
+
 def test_engine_pulse_readout_gain_scales_raw_blob_centers():
     """PulseReadout raw deterministic centres scale linearly with readout gain."""
 
-    sim = _SIM.model_copy(update={"snr": 1.0e9, "thermal_pop": 0.0})
+    sim = _SIM.model_copy(
+        update={
+            "snr": 1.0e9,
+            "thermal_pop": 0.0,
+            "readout_photons_per_gain2": 1.0,
+        }
+    )
     low_gain = 0.05
     high_gain = 0.20
 
@@ -1317,6 +1347,28 @@ def test_engine_pulse_readout_gain_scales_raw_blob_centers():
     assert abs(high) / abs(low) == pytest.approx(high_gain / low_gain, rel=0.01)
 
 
+def test_engine_readout_gain_noise_scales_with_pulse_readout_gain() -> None:
+    """The second Gaussian source is proportional to compressed readout drive."""
+
+    sim = _SIM.model_copy(
+        update={
+            "snr": 1.0e9,
+            "thermal_pop": 0.0,
+            "readout_gain_noise_per_gain": 0.03,
+        }
+    )
+    low = _ground_normalized_raw_std(
+        _pulse_readout(_rf_g_mhz(), ro_length=1.0, gain=0.02),
+        sim=sim,
+    )
+    high = _ground_normalized_raw_std(
+        _pulse_readout(_rf_g_mhz(), ro_length=1.0, gain=0.08),
+        sim=sim,
+    )
+
+    assert high > 2.5 * low
+
+
 def _pulse_readout_blob_gap(gain: float) -> float:
     _soc, soccfg = make_mock_soc(sim=_SIM)
     prog = ModularProgramV2(
@@ -1326,16 +1378,18 @@ def _pulse_readout_blob_gap(gain: float) -> float:
     )
     prog.compile()
     engine = SimEngine(prog, _SIM)
-    s_g, s_e, _p_e, signal_scale, _noise_scale = engine._ensure_signal()
+    s_g, s_e, _p_e, signal_scale, _noise_scale, _gain_noise_scale = (
+        engine._ensure_signal()
+    )
     return float(abs(signal_scale[0] * (s_e[0] - s_g[0])))
 
 
 def test_engine_high_readout_gain_reduces_blob_contrast() -> None:
     """Above the dispersive guardrail, more gain no longer improves contrast."""
 
-    low = _pulse_readout_blob_gap(0.2)
-    mid = _pulse_readout_blob_gap(0.6)
-    high = _pulse_readout_blob_gap(1.4)
+    low = _pulse_readout_blob_gap(0.02)
+    mid = _pulse_readout_blob_gap(0.08)
+    high = _pulse_readout_blob_gap(0.40)
 
     assert mid > low
     assert high < mid
@@ -1344,7 +1398,7 @@ def test_engine_high_readout_gain_reduces_blob_contrast() -> None:
 def test_engine_pulse_readout_signal_samples_use_trigger_alignment() -> None:
     """Accumulated PulseReadout integrates only pulse envelope inside the ADC window."""
 
-    sim = _SIM.model_copy(update={"snr": 1.0e9})
+    sim = _SIM.model_copy(update={"snr": 1.0e9, "readout_photons_per_gain2": 1.0})
 
     def signal_scale(trig_offset: float) -> float:
         _soc, soccfg = make_mock_soc(sim=sim)
@@ -1363,7 +1417,7 @@ def test_engine_pulse_readout_signal_samples_use_trigger_alignment() -> None:
         )
         prog.compile()
         engine = SimEngine(prog, sim)
-        _s_g, _s_e, _p_e, scale, _noise = engine._ensure_signal()
+        _s_g, _s_e, _p_e, scale, _noise, _gain_noise = engine._ensure_signal()
         return float(scale[0])
 
     aligned = signal_scale(sim.timeFly)
@@ -1376,7 +1430,7 @@ def test_engine_pulse_readout_signal_samples_use_trigger_alignment() -> None:
 def test_engine_pulse_readout_signal_samples_include_pulse_pre_delay() -> None:
     """PulseReadout envelope starts after its generator pre_delay."""
 
-    sim = _SIM.model_copy(update={"snr": 1.0e9})
+    sim = _SIM.model_copy(update={"snr": 1.0e9, "readout_photons_per_gain2": 1.0})
     pulse_length = 0.2
     pre_delay = 0.3
 
@@ -1398,7 +1452,7 @@ def test_engine_pulse_readout_signal_samples_include_pulse_pre_delay() -> None:
         )
         prog.compile()
         engine = SimEngine(prog, sim)
-        _s_g, _s_e, _p_e, scale, _noise = engine._ensure_signal()
+        _s_g, _s_e, _p_e, scale, _noise, _gain_noise = engine._ensure_signal()
         return float(scale[0])
 
     aligned = signal_scale(sim.timeFly + pre_delay)
@@ -1498,7 +1552,7 @@ def test_engine_acquire_decimated_uses_pulse_length_not_adc_window():
 def test_engine_acquire_decimated_amplitude_scales_with_readout_gain():
     """Decimated/lookback traces use the same linear readout gain amplitude."""
 
-    sim = _SIM.model_copy(update={"snr": 1.0e9})
+    sim = _SIM.model_copy(update={"snr": 1.0e9, "readout_photons_per_gain2": 1.0})
 
     def inside_mean(gain: float) -> float:
         soc, soccfg = make_mock_soc(sim=sim)

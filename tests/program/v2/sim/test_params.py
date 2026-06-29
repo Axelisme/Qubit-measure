@@ -51,12 +51,14 @@ class TestSimParamsConstruction:
         assert p.Ql == 5000.0
         assert p.Qi == 50000.0
         assert p.snr == 10.0
+        assert p.readout_gain_noise_per_gain == 0.0
         assert p.pi_gain_len == 0.4
 
     def test_optional_defaults(self) -> None:
         p = SimParams(**_VALID)
         assert p.flux_bias == 0.0
         assert p.thermal_pop == 0.0
+        assert p.readout_photons_per_gain2 == 100.0
         assert p.seed is None
         # FLUX-AWARE-MOCK: flux_device defaults to None (fixed reduced flux = 1.0,
         # zero regression for existing sim configs).
@@ -133,6 +135,38 @@ class TestSimParamsValidation:
         ok = {**_VALID, "T2": 30.0, "T2_star": 30.0}
         p = SimParams(**ok)
         assert p.T2_star == p.T2
+
+    @pytest.mark.parametrize("snr", [0.0, -1.0, float("nan"), float("inf")])
+    def test_invalid_snr_raises(self, snr: float) -> None:
+        with pytest.raises(ValidationError, match="snr must be finite and > 0.0"):
+            SimParams(**{**_VALID, "snr": snr})
+
+    @pytest.mark.parametrize(
+        "readout_gain_noise_per_gain",
+        [-1.0, float("nan"), float("inf")],
+    )
+    def test_invalid_readout_gain_noise_per_gain_raises(
+        self, readout_gain_noise_per_gain: float
+    ) -> None:
+        with pytest.raises(
+            ValidationError,
+            match="readout_gain_noise_per_gain must be finite and >= 0.0",
+        ):
+            SimParams(
+                **_VALID,
+                readout_gain_noise_per_gain=readout_gain_noise_per_gain,
+            )
+
+    @pytest.mark.parametrize(
+        "readout_photons_per_gain2",
+        [None, 0.0, -1.0, float("nan"), float("inf")],
+    )
+    def test_invalid_readout_photons_per_gain2_raises(
+        self, readout_photons_per_gain2: float | None
+    ) -> None:
+        bad = {**_VALID, "readout_photons_per_gain2": readout_photons_per_gain2}
+        with pytest.raises(ValidationError):
+            SimParams(**bad)
 
 
 class TestSimParamsCoherenceHelpers:
