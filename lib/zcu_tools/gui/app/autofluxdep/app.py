@@ -79,6 +79,12 @@ def run_app(
 
     ctrl = build_core(project, project_root=repo_root)
     window = MainWindow(ctrl)
+    from zcu_tools.gui.app.autofluxdep.services import PersistenceCaretaker
+
+    caretaker = PersistenceCaretaker(ctrl)
+    ctrl.attach_caretaker(caretaker)
+    ctrl.restore_all()
+    window.restore_workflow_view()
     window.show()
 
     # Start the read-only remote-control adapter in-place (decision 6: app-local

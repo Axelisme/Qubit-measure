@@ -95,6 +95,10 @@ def str_scalar_spec(
 NodeField = tuple[str, CfgNodeSpec, Any]
 
 
+class NodeCfgPersistenceError(RuntimeError):
+    """Invalid persisted node cfg payload."""
+
+
 @dataclass(frozen=True)
 class NodeFieldSpec:
     """One logical node knob mounted as a leaf inside a UI section."""
@@ -381,6 +385,24 @@ class NodeCfgSchema:
     def read_value_tree(self) -> dict[str, Any]:
         """The sectioned value tree, JSON-friendly, for UI/debug assertions."""
         return _jsonify_value_tree(self.schema.value)
+
+    def to_persisted_raw(self) -> dict[str, object]:
+        """Encode the value tree using the shared cfg persistence codec."""
+        from zcu_tools.gui.app.main.services.session_codec import schema_to_raw
+
+        return schema_to_raw(self.schema)
+
+    def restore_persisted_raw(self, raw: Mapping[str, object]) -> None:
+        """Restore the value tree from the shared cfg persistence raw shape."""
+        from zcu_tools.gui.app.main.services.session_codec import (
+            SessionCodecError,
+            raw_to_schema,
+        )
+
+        try:
+            self.schema = raw_to_schema(self.schema, dict(raw))
+        except SessionCodecError as exc:
+            raise NodeCfgPersistenceError(str(exc)) from exc
 
     def logical_updates_from(self, value: CfgSectionValue) -> dict[str, Any]:
         """Project a full UI draft value tree back into logical-key updates."""

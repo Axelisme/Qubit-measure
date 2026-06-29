@@ -1,9 +1,34 @@
 """App-local service sub-packages for autofluxdep-gui.
 
-Currently holds only the read-only ``remote`` bridge (the RPC/MCP face onto the
-Controller). The session services (connection / context / device / startup) are
-the shared ones composed in the Controller, not app-local; this package is the
-home for autofluxdep's own service code, of which the remote bridge is the first.
+Holds the read-only ``remote`` bridge (the RPC/MCP face onto the Controller) and
+the app-local workflow persistence caretaker. The session services (connection /
+context / device / startup) are the shared ones composed in the Controller, not
+app-local.
 """
 
 from __future__ import annotations
+
+from .caretaker import PersistenceCaretaker, RestoreOutcome
+from .persistence_types import (
+    APP_STATE_VERSION,
+    AppPersistedState,
+    PersistedFluxSweep,
+    PersistedNode,
+    PersistedWorkflow,
+    PersistenceError,
+    RestoreIssue,
+    RestoreReport,
+)
+
+__all__ = [
+    "APP_STATE_VERSION",
+    "AppPersistedState",
+    "PersistedFluxSweep",
+    "PersistedNode",
+    "PersistedWorkflow",
+    "PersistenceCaretaker",
+    "PersistenceError",
+    "RestoreIssue",
+    "RestoreOutcome",
+    "RestoreReport",
+]

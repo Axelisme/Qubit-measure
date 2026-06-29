@@ -75,9 +75,10 @@ class NodeListPane(QWidget):
         # flux sweep
         root.addWidget(QLabel("flux sweep"))
         flux_row = QHBoxLayout()
-        self._flux_start = QLineEdit("2e-3")
-        self._flux_stop = QLineEdit("-0.2e-3")
-        self._flux_npts = QLineEdit("101")
+        start_expr, stop_expr, npts_expr = self._ctrl.get_flux_sweep_expressions()
+        self._flux_start = QLineEdit(start_expr)
+        self._flux_stop = QLineEdit(stop_expr)
+        self._flux_npts = QLineEdit(npts_expr)
         self._flux_input_helpers = tuple(
             ValueSourceInputController(
                 line_edit,
@@ -87,6 +88,7 @@ class NodeListPane(QWidget):
             for line_edit in (self._flux_start, self._flux_stop, self._flux_npts)
         )
         for w in (self._flux_start, self._flux_stop, self._flux_npts):
+            w.textChanged.connect(lambda _text: self._sync_flux_expressions())
             flux_row.addWidget(w)
         root.addLayout(flux_row)
 
@@ -111,6 +113,12 @@ class NodeListPane(QWidget):
 
     # --- list / selection ---
 
+    def refresh_from_state(self) -> None:
+        """Refresh all view state after a controller-level workflow restore."""
+        self.refresh_list()
+        self.refresh_flux_fields()
+        self.refresh_flux_sources()
+
     def refresh_list(self) -> None:
         prev = self._list.currentRow()
         self._list.blockSignals(True)
@@ -134,6 +142,25 @@ class NodeListPane(QWidget):
 
     def _on_row_changed(self, row: int) -> None:
         self.selection_changed.emit(row)
+
+    def refresh_flux_fields(self) -> None:
+        start_expr, stop_expr, npts_expr = self._ctrl.get_flux_sweep_expressions()
+        fields = (
+            (self._flux_start, start_expr),
+            (self._flux_stop, stop_expr),
+            (self._flux_npts, npts_expr),
+        )
+        for field, text in fields:
+            field.blockSignals(True)
+            field.setText(text)
+            field.blockSignals(False)
+
+    def _sync_flux_expressions(self) -> None:
+        self._ctrl.set_flux_sweep_expressions(
+            self._flux_start.text(),
+            self._flux_stop.text(),
+            self._flux_npts.text(),
+        )
 
     # --- workflow editing ---
 

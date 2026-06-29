@@ -20,6 +20,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgPersistenceError
 from zcu_tools.gui.app.autofluxdep.derivation import DerivationService
 from zcu_tools.gui.app.autofluxdep.events.run import (
     NodeEnteredPayload,
@@ -44,6 +45,15 @@ from zcu_tools.gui.app.autofluxdep.orchestrator import (
     Orchestrator,
 )
 from zcu_tools.gui.app.autofluxdep.registry import create_placement
+from zcu_tools.gui.app.autofluxdep.services.persistence_types import (
+    AppPersistedState,
+    PersistedFluxSweep,
+    PersistedNode,
+    PersistedWorkflow,
+    PersistenceError,
+    RestoreIssue,
+    RestoreReport,
+)
 from zcu_tools.gui.app.autofluxdep.state import (
     FLUX_VERSION_KEY,
     WORKFLOW_VERSION_KEY,
@@ -75,6 +85,10 @@ from zcu_tools.gui.session.services.io_manager import IOManager
 from zcu_tools.gui.session.services.progress import ProgressService
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.app.autofluxdep.services.caretaker import (
+        PersistenceCaretaker,
+        RestoreOutcome,
+    )
     from zcu_tools.gui.session.ports import ProgressTransport
     from zcu_tools.gui.session.services.startup import (
         StartupProjectRequest,
@@ -138,6 +152,7 @@ class Controller(SessionControllerMixin):
         self._active_run_token: int | None = None
         self._run_stop_event: threading.Event | None = None
         self._last_run_info: InfoStore | None = None
+        self._caretaker: PersistenceCaretaker | None = None
 
         # Base directory default result/database paths are anchored under (the
         # entry script injects the repo root). None falls back to cwd — fine for
@@ -227,6 +242,91 @@ class Controller(SessionControllerMixin):
 
     def get_bus(self) -> EventBus:
         return self._bus
+
+    # -- Memento Originator (workflow persistence) -----------------------------
+
+    def attach_caretaker(self, caretaker: PersistenceCaretaker) -> None:
+        """Wire the app-level persistence caretaker built by the composition root."""
+        self._caretaker = caretaker
+
+    def capture_persisted_state(self) -> AppPersistedState:
+        """Snapshot the persistent autofluxdep workflow state, without disk I/O."""
+        nodes = tuple(
+            PersistedNode(
+                type_name=node.type_name,
+                name=node.name,
+                cfg_raw=node.schema.to_persisted_raw(),
+            )
+            for node in self._state.nodes
+        )
+        return AppPersistedState(
+            workflow=PersistedWorkflow(nodes=nodes),
+            flux=PersistedFluxSweep(
+                start_expr=self._state.flux_start_expr,
+                stop_expr=self._state.flux_stop_expr,
+                npts_expr=self._state.flux_npts_expr,
+                values=tuple(float(v) for v in self._state.flux_values),
+            ),
+        )
+
+    def restore_persisted_state(self, state: AppPersistedState) -> RestoreReport:
+        """Apply a persisted workflow snapshot, rejecting only invalid nodes."""
+        rejected: list[RestoreIssue] = []
+        self._state.nodes = []
+
+        for index, persisted in enumerate(state.workflow.nodes):
+            subject = f"node[{index}] {persisted.name!r}"
+            try:
+                node = create_placement(persisted.type_name)
+                node.name = self._unique_name(persisted.name or node.name)
+                node.schema.restore_persisted_raw(persisted.cfg_raw)
+            except (
+                KeyError,
+                NodeCfgPersistenceError,
+                TypeError,
+                ValueError,
+                RuntimeError,
+            ) as exc:
+                rejected.append(RestoreIssue(subject=subject, message=str(exc)))
+                continue
+            self._state.nodes.append(node)
+
+        self._state.flux_start_expr = state.flux.start_expr
+        self._state.flux_stop_expr = state.flux.stop_expr
+        self._state.flux_npts_expr = state.flux.npts_expr
+        self._state.flux_values = [float(v) for v in state.flux.values]
+        self._state.run_results = {}
+        self._state.version.bump(WORKFLOW_VERSION_KEY)
+        self._state.version.bump(FLUX_VERSION_KEY)
+        self._bus.emit(WorkflowChangedPayload(name=None))
+        self._bus.emit(FluxChangedPayload(count=len(self._state.flux_values)))
+        return RestoreReport(
+            restored_nodes=len(self._state.nodes),
+            rejected_nodes=tuple(rejected),
+        )
+
+    def restore_all(self, *, load: bool = True) -> RestoreOutcome | None:
+        if self._caretaker is None:
+            return None
+        outcome = self._caretaker.restore_all(load=load)
+        if outcome.load_error is not None:
+            logger.warning("%s", outcome.load_error)
+        report = outcome.report
+        if isinstance(report, RestoreReport) and report.rejected_nodes:
+            logger.warning(
+                "autofluxdep persistence rejected %d node(s): %s",
+                len(report.rejected_nodes),
+                "; ".join(f"{i.subject}: {i.message}" for i in report.rejected_nodes),
+            )
+        return outcome
+
+    def persist_all(self) -> None:
+        if self._caretaker is None:
+            return
+        try:
+            self._caretaker.flush()
+        except PersistenceError:
+            logger.exception("autofluxdep settings save failed")
 
     # -- setup dialog: project / startup --
     # apply_startup_project diverges (autofluxdep returns bool; measure returns the
@@ -372,6 +472,22 @@ class Controller(SessionControllerMixin):
         else:
             logger.debug("set_flux_values: cleared")
         self._bus.emit(FluxChangedPayload(count=len(values)))
+
+    def set_flux_sweep_expressions(
+        self, start_expr: str, stop_expr: str, npts_expr: str
+    ) -> None:
+        """Remember the user's editable flux sweep expressions."""
+        self._state.flux_start_expr = start_expr
+        self._state.flux_stop_expr = stop_expr
+        self._state.flux_npts_expr = npts_expr
+        self._state.version.bump(FLUX_VERSION_KEY)
+
+    def get_flux_sweep_expressions(self) -> tuple[str, str, str]:
+        return (
+            self._state.flux_start_expr,
+            self._state.flux_stop_expr,
+            self._state.flux_npts_expr,
+        )
 
     def set_flux_device(self, name: str | None) -> None:
         """Designate which connected device the flux sweep is applied through.

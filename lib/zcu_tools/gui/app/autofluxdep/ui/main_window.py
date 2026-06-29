@@ -197,6 +197,15 @@ class MainWindow(QMainWindow):
         self._refresh_session_status()
         self._on_select(self._list.selected_index)
 
+    def restore_workflow_view(self) -> None:
+        """Refresh list/detail/flux widgets after controller-level restore."""
+        self._list.refresh_from_state()
+        self._on_select(self._list.selected_index)
+
+    def closeEvent(self, event: Any) -> None:
+        self._ctrl.persist_all()
+        super().closeEvent(event)
+
     # --- selection ---
 
     def _on_select(self, row: int) -> None:
