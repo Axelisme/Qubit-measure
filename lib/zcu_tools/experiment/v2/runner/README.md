@@ -1,6 +1,6 @@
-# QICK Note for `experiment/v2/runner`
+# `zcu_tools.experiment.v2.runner` — task runner
 
-**Last updated:** 2026-06-29（Python 3.12 / 3.13 typing compatibility）
+**Last updated:** 2026-07-01
 
 這份筆記整理 `runner/` 的任務執行框架設計，說明各類別的職責、組合方式與執行流程。
 
@@ -320,17 +320,3 @@ BatchTask({
 - 結果陣列以 `np.nan` 初始化，可在 liveplot 中安全顯示（未完成的點保持 NaN）。
 - `run_task` 捕捉 `KeyboardInterrupt` 時只 log 不 re-raise（早停），但其他 Exception 會 re-raise，讓呼叫端可以感知失敗。
 - `run_with_retries` 可獨立呼叫，也是 `ReTryIfFail` 的底層實作，共用相同的重試邏輯。
-
----
-
-## 更新紀錄
-
-| 日期 | Codebase commit | 說明 |
-|------|-----------------|------|
-| 2026-06-29 | — | 支援 Python 3.12 / 3.13 雙版本：runner generic default 型別契約在兩個 runtime profile 維持一致。 |
-| 2026-06-24 | — | #10：新增 `RetryBatchTask`（`batch.py`，`BatchTask` 變體，以 `_run_child` hook 對每個子任務套 `run_with_retries` per-child 重試）與 `MultiMeasurementExecutor`（`multi_executor.py`，Executor 共用 scaffold：版面 + `record_animation` FFMpeg facet + `_run_with_plotting`，供 autofluxdep/overnight 繼承）；`BatchTask` 抽出 `_run_child` hook。 |
-| 2026-05-19 | `02b7ac0b` | `ActiveTask` 改為必要參數 `stop_event: threading.Event`，event 由外部建立與持有，移除自動建立邏輯。 |
-| 2026-05-19 | `15b9144f` | 新增跨線程中斷機制：`TaskState._stop_flag` / `is_stop()`、`run_task(stop_flag=...)`、`TaskHandle`、`ActiveTask`；`EarlyStopMixin` 改為 `stop_checkers` 參數；`wrap_earlystop_check` 改寫為 `snr_checker`；容器節點加入 `is_stop()` 短路；runner 測試覆蓋率 84% → 97%。 |
-| 2026-04-29 | `f2f30ae1` | 對齊 `Scan` 介面：統一 `before_each` 簽名為 `(i, state, v)` 必要參數。 |
-| 2026-04-27 | `3f9bb55f` | 對齊近 30 天 runner 介面：修正 `BatchTask`/`Scan` 說明中舊的 `init(state, ...)` 呼叫，改為 `init(dynamic_pbar=...)`。 |
-| 2026-04-26 | `cd0bc869` | `init()` 移除 `state` 參數；`TaskState` 新增 `child_with_cfg` / `_trigger_update_hook`；`Task` 新增 `pbar_n` / `set_pbar_n`；`run_task` 例外處理語意修正 |

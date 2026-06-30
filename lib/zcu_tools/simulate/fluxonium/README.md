@@ -1,6 +1,6 @@
 # `simulate/fluxonium` 模塊重點文檔
 
-**Last updated:** 2026-06-29（floquet golden / matrix-element fast-fail）
+**Last updated:** 2026-07-01
 
 基於 [scqubits](https://scqubits.readthedocs.io) 的 Fluxonium 量子比特數值模擬工具集,提供能譜、色散位移、矩陣元、相干時間與實驗參數預測等計算。
 
@@ -131,17 +131,3 @@ f01 = predictor.predict_freq(current_value)                    # MHz
 - `calculate_energy_vs_flux` 的去重邏輯 **只對 `fluxs % 1` 後落在 [0, 0.5] 的範圍有效**;若需要跨週期非對稱量(如電流偏移),請使用 `FluxoniumPredictor` 處理座標。
 - sweep 類函式內部切換 `scq_settings.PROGRESSBAR_DISABLED`,可藉 `progress=False` 靜音。
 - `_with` 變體能大幅降低批次呼叫成本 — 優先使用。
-
----
-
-## 更新紀錄
-
-| 日期 | Codebase commit | 說明 |
-|------|-----------------|------|
-| （未知） | — | 初始建立，尚未追蹤更新歷程；下次修改時請補上對應 commit |
-| 2026-04-26 | `cd0bc869` | 初次建立更新紀錄（本次全面審閱，內容與 codebase 相符） |
-| 2026-04-27 | `5e09cf1c` | 修正 Markdown 結構：合併重複的「更新紀錄」區塊。 |
-| 2026-06-05 | `7f918a77` | `calculate_dispersive_vs_flux_fast` 抽 flux-independent operators 到 `_fluxonium_operators` @lru_cache，GUI live tuning 拖動 84→0.6ms（numerically identical）。 |
-| 2026-06-05 | `2c241b25` | 新增 `coherence_fast.py`：`calculate_eff_t1_vs_flux_fast`（scqubits-free，~60x，逐點對齊 1e-13）。繞掉 eigensolve（cos/sin 預算）+ flux-dep 算子的 per-flux `sinm`（三角拆解）+ 5 noise 公式逐字移植。 |
-| 2026-06-12 | — | coherence_fast：`_t1_operators` @lru_cache 消固定成本 + per-flux loop 批次化（batched eigh + 向量化 rates）。predict：array 輸入改走 energies/matrix_element 批次路徑（freq ~7x），補數值單測 `test_predict.py`。 |
-| 2026-06-12 | — | branch/floquet：photon 層 joblib 移除（serial 快 2x）+ solver options 可注入（snr 入口預設 rtol=1e-3、analysis 類別預設嚴格）；design search snr stage 端到端 ~9.6x（含呼叫方 staged+cell 平行）。golden 測試 `branch/test_floquet.py`。 |

@@ -1,6 +1,6 @@
 # liveplot 模組重點筆記
 
-**Last updated:** 2026-06-29
+**Last updated:** 2026-07-01
 
 Jupyter 中即時更新的 matplotlib 繪圖工具，在資料擷取過程中邊跑邊畫。
 
@@ -86,22 +86,6 @@ with MultiLivePlot(fig, {
 - 各個單一 segment 的 LivePlot 包裝層（`LivePlot1D`、`LivePlot2D`、`LivePlotScatter`）刻意保留樣板結構，不做公共基底抽象，理由是 `update()` 簽名各不相同，強行統一會犧牲型別提示。
 - `active_backend()` 每次呼叫都重新解析（不快取），以保留執行期切換 backend 的彈性。`MultiLivePlot.refresh()` 透過 `backend.refresh_figure()` 呼叫，與 `BaseSegmentLivePlot` 一致。
 - GUI 模式下 LivePlot 嵌進 tab，靠的是 GUI run worker **註冊** `QtLivePlotBackend`（`set_liveplot_backend`），非 liveplot 偵測 routing context。liveplot 對 GUI 零認知。
-- 純桌面 `qtagg`（非 GUI、非 notebook）跑 LivePlot **刻意走 `FallbackBackend`**（`fig.show` + `draw_idle` 已足夠），非另設專屬 qt backend；要 qt 特化再 `set_liveplot_backend` 註冊即可。liveplot 本身不再有 `qt` backend（已搬成 GUI 的 `QtLivePlotBackend`）。
+- 純桌面 `qtagg`（非 GUI、非 notebook）跑 LivePlot **刻意走 `FallbackBackend`**（`fig.show` + `draw_idle` 已足夠），非另設專屬 qt backend；要 qt 特化再 `set_liveplot_backend` 註冊即可。GUI 的 Qt 整合由 `QtLivePlotBackend` 提供。
 - `LivePlot` run 與 pyplot analysis **共用同一條渲染路徑**：兩者都經 `plt.subplots`/`plt.figure` → GUI custom mpl backend（`GuiFigureManager`）→ attach 進 `FigureContainer`。worker 端的 `draw_idle` 由 `GuiFigureCanvas` 覆寫 marshalling 到主線程，故不會遞迴建圖。
 - Qt bridge 的初始化 thread 很重要；若 bridge 首次在 worker thread 建立，Qt canvas 可能被當成獨立視窗或 attach 失敗，因此 `FigureContainer` 需要在 GUI thread 提前確立 host bridge。
-
----
-
-## 更新紀錄
-
-| 日期 | Codebase commit | 說明 |
-|------|-----------------|------|
-| （未知） | — | 初始建立，尚未追蹤更新歷程；下次修改時請補上對應 commit |
-| 2026-04-26 | `cd0bc869` | 初次建立更新紀錄（本次全面審閱，內容與 codebase 相符） |
-| 2026-04-27 | `5e09cf1c` | 修正 Markdown 結構：合併重複的「更新紀錄」區塊。 |
-| 2026-05-19 | `77c6aa2a` | 修正三個 bug（Plot2DSegment autoscale、clear 後狀態損壞、MultiLivePlot 繞過 backend）；補充設計決策說明。 |
-| 2026-05-23 | `b81a7a89` | Qt helper 改為委派 `gui.plot_host`；backend 選擇新增 active `FigureContainer` 判斷，讓 GUI 可在 `agg` 下嵌入 LivePlot。 |
-| 2026-05-23 | `0843e5bc` | GUI app 引入 custom pyplot backend，但 liveplot 仍保留 helper 路徑；兩者共享 `plot_host` 作為 GUI 宿主邊界。 |
-| 2026-05-23 | `4aa97d7a` | plotting routing 改為 task-local `ContextVar[current_container]`；`qt` helper 改依賴 `plot_routing + plot_host`，並強化 GUI thread bridge 邊界。 |
-| 2026-06-01 | `69c18922` | `instant_plot` 提升為 backend-dispatch（jupyter display / qt no-op / fallback show），給自建 gridspec figure 用；`BaseSegmentLivePlot.__enter__`/`clear` 對 external-hosted（`fig is None`）plotter 不再 self-refresh（host 負責），修 GUI 下「no own figure」raise。 |
-| 2026-06-03 | `c76e5fef` | liveplot 去 gui 認知化：`LivePlotBackend` ABC（`backend/base.py`）+ `set_liveplot_backend`/`set_default_liveplot_backend` 註冊（ContextVar），active backend 選擇改「註冊優先 → 名稱兜底」（不再看 routing container）；jupyter/fallback 改 class、純 matplotlib；Qt backend 搬到 `gui/adapters/qt_liveplot_backend.py`（gui 註冊、方向 gui→liveplot）；統一渲染路徑（run liveplot/裸 plt/analysis 全走 plt→mpl_backend→attach，刪 `create_figure_in_current_container`，跨線程由 `GuiFigureCanvas.draw_idle` 覆寫吸收）。**import liveplot 零 gui 牽連。** |

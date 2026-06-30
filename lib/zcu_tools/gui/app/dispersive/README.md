@@ -1,10 +1,10 @@
-**Last updated:** 2026-06-25（Fluxonium Prediction engine delegation）
+**Last updated:** 2026-07-01
 
-# `zcu_tools/gui/app/dispersive/` — Fluxonium Dispersive-Shift Analysis GUI AI Note
+# `zcu_tools.gui.app.dispersive` — dispersive-shift analysis GUI
 
-> **MCP 搬遷（2026-06-08, c8eb1a03）**：MCP server entry 與共用傳輸 `McpBridge` 已搬出 `gui/` 到 `zcu_tools/mcp/`——`McpBridge`→`zcu_tools/mcp/core/bridge`、本 app entry（原 `services/remote/mcp_server.py`）→`zcu_tools/mcp/dispersive/server.py`；`MCPBridgeConfig` 拆出基底 `McpServerConfig`（無 launch 欄位）。`mcp` 是 `gui.remote` wire 層的**使用方**（非 leaf）。本筆記內 `gui/remote/mcp_bridge`、`(services/remote/)mcp_server.py`、`parents[6/7]=lib/repo`（現為 `parents[3/4]`）等舊位置/深度按此對映。
-
-> **位置**：第三個 tool_gui app，與 `app/fluxdep/`、`app/main/` 並列。import 一律 `zcu_tools.gui.app.dispersive.X`；同子目錄內相對、跨子目錄絕對。「以後不再搬遷」。
+MCP server entry 位於 `zcu_tools.mcp.dispersive.server`；本 package 只包含 GUI app、
+state/services/UI 與 GUI-process remote adapter。Import path 固定為
+`zcu_tools.gui.app.dispersive.*`。
 
 ## Module Purpose
 

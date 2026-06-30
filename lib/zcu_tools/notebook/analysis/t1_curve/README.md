@@ -1,6 +1,6 @@
 # `t1_curve` 模塊重點文檔
 
-**Last updated:** 2026-06-29
+**Last updated:** 2026-07-01
 
 Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道的品質因子 (Q) / 準粒子密度 (x_qp)，並與理論 T1 曲線比對作圖。
 
@@ -64,13 +64,3 @@ Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道
 - 所有 `*_vs_omega` 的「Q」是 `T1 · dipole` 的直接乘積；若 dipole 定義改（例如用 `sin(φ/2)` vs `n̂`），同一 T1 會得到不同 Q。
 - `plot_t1_with_sample` 的 `other_noise_options` 以 `**kwargs` 傳給 `calculate_eff_t1_vs_flux_fast`（fast 版接受 `i`/`j`/`cutoff`/`qub_dim` 與 per-channel 選項；**fast 版固定 `total=True`，傳 `total=False` 或任何不支援的 kwarg 會 raise `UnsupportedNoiseOptionError`（不靜默丟棄）**——要 `total=False` 得用舊 scqubits `_with` 版）。
 - `Qqp` 的 `calc_qp_oper` 和其他 Q 通道不同：需要自己先算 `sin(φ/2)` 矩陣元，不能直接丟 `n_elements` / `phi_elements`。
-
----
-
-## 更新紀錄
-
-| 日期 | Codebase commit | 說明 |
-|------|-----------------|------|
-| （未知） | — | 初始建立，尚未追蹤更新歷程；下次修改時請補上對應 commit |
-| 2026-04-26 | `cd0bc869` | 初次建立更新紀錄（本次全面審閱，內容與 codebase 相符） |
-| 2026-04-27 | `5e09cf1c` | 修正 Markdown 結構：合併重複的「更新紀錄」區塊。 |

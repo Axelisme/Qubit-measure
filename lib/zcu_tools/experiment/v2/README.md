@@ -1,6 +1,6 @@
-# QICK Note for `experiment/v2`
+# `zcu_tools.experiment.v2` — experiment runtime
 
-**Last updated:** 2026-06-29（readout optimization skew penalty）
+**Last updated:** 2026-07-01
 
 這份筆記整理 `experiment/v2/` 的整體設計，說明 Experiment 層與 Task 層的分工、典型實驗的撰寫範本，以及各子模組的角色。`runner/` 的細節另見 `runner/README.md`。
 
@@ -192,12 +192,12 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):          # 主要 Cfg = program cfg + 
 
 ## `experiment/utils/` 子模組重點
 
-新增了 `comment.py`，提供兩個函式：
+`comment.py` 提供兩個函式：
 
 - **`make_comment(cfg, comment=None)`** — 把 `ConfigBase` 轉成 JSON 字串（含 cfg dump、可選文字說明、timestamp），用於實驗存檔時的 comment 欄位。
 - **`parse_comment(comment)`** — 解析 `make_comment` 產生的 JSON，回傳 `(cfg_dict, comment_str, timestamp_str)`；若 JSON 解析失敗則全部回傳 `None`。
 
-這兩個函式已透過 `experiment/utils/__init__.py` 直接 export。
+這兩個函式透過 `experiment/utils/__init__.py` 直接 export。
 
 ## `utils/` 子模組重點
 
@@ -243,25 +243,3 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):          # 主要 Cfg = program cfg + 
 5. 持久化由 `AXES_SPEC` 宣告：每個 `Axis` 帶 `scale`（頻率 `MHZ_TO_HZ`、時間 `US_TO_S`）讓盤上是 SI 單位、記憶體內維持習慣單位，`tag` 取有層次的名字（`"twotone/rabi/len"`），axes 以 inner-first 排列；繼承的 `save` / `load` 自動依 spec 做單位轉換與恒等逆 round-trip，無需自行寫 save/load。
 6. 如果有多個 sweep 軸，考慮用 `Task.scan()` 或直接在 `ModularProgramV2(sweep=[...])` 裡放多個 sweep。
 7. 如果要在樹的外層疊 flux / time sweep，改繼承 `AbsTask`（或 `MeasurementTask`）而不是 `AbsExperiment`，再由 Executor 組起來。
-
----
-
-## 更新紀錄
-
-| 日期 | Codebase commit | 說明 |
-|------|-----------------|------|
-| 2026-06-25 | — | legacy 單檔案 load 相容性集中到 `zcu_tools.experiment.legacy_migration`：migration script 與 GUI adapter fallback 共用白名單 converter；experiment runtime `load()` 仍只接受 canonical HDF5。修正 `onetone/flux_dep` canonical axes 為 `(freqs, values)`，與 Result-native `(Nflux, Nfreq)` 一致。 |
-| 2026-06-25 | — | Grouped persistence 第一批改由 `GroupedAxesSpec` / `RoleSpec` 宣告 roles、axes、z field mapping、dtype / unit / scale 與 typed builder；`CPMG_Exp`、RO auto-optimize、JPA auto-optimize 不再各自手寫 grouped payload construction / axis validation / cfg reconstruction。 |
-| 2026-06-25 | — | Config 組合慣例補上 `cfg_assembler` 邊界：`assemble_experiment_cfg` 是 stateless materializer，`make_cfg` 是薄 wrapper，`ModuleLibrary` 不再擁有 live device snapshot / materialization 責任。 |
-| 2026-06-25 | — | RO auto-optimize 與 JPA auto-optimize 持久化為單一 grouped HDF5：RO roles 為 `readout_freq` / `readout_gain` / `readout_length` / `snr`，JPA roles 為 `jpa_flux` / `jpa_freq` / `jpa_power` / `jpa_phase` / `snr`；legacy sidecar 只透過 `script/migrate_experiment_data.py` converter 轉換。 |
-| 2026-06-25 | — | singleshot `ac_stark`、MIST `power_freq`、`t1`、`t1_with_tone` 與 `t1_with_tone_sweep` 持久化為 single-role canonical HDF5：`population_states` / `initial_states` 是普通 axes，不是 Dataset Roles；`t1_with_tone_sweep` canonical Result 只存 g/e components，legacy zero-filled `other` 只屬 migration 邊界。 |
-| 2026-06-25 | — | singleshot `len_rabi` 與 MIST `power` / `freq` / `pre_freq` 持久化為 single-role canonical HDF5：`population_states=[0, 1]` 是 inner axis，sweep axis 是 outer axis，Result-native z shape 為 `(Nsweep, 2)`；legacy `(2, Nsweep)` population HDF5 只透過 `script/migrate_experiment_data.py` 轉換。 |
-| 2026-06-25 | — | `GE_Exp` 與 bath reset `LengthExp` 持久化為 single-role canonical HDF5：GE 使用 `shot_indices` / `prepared_states` axes，bath length 使用 `phases` / `lengths` axes；runtime `load()` 嚴格驗證 canonical axis/z metadata 與 shape，legacy GE / bath length 檔只透過 migration script 轉換。 |
-| 2026-06-24 | — | `CKP_Exp` 持久化為 single-role 3D HDF5，`initial_states=[0, 1]` 是第三個 axis；runtime 不再寫/讀 `_ground` / `_excited` sidecar，legacy sidecar 透過 `script/migrate_experiment_data.py --experiment twotone/ckp` 轉換。 |
-| 2026-06-24 | — | bath reset `freq_gain` 持久化為 single-role 3D HDF5，phase 是同一 Result 的第三個 sweep axis；legacy phase sidecar artifact 不走 runtime save/load。 |
-| 2026-06-24 | — | ADR-0027 Phase 002：`CPMG_Exp.save/load` 改為單一 grouped `.hdf5`，roles 固定為 `lengths` / `signals`；legacy `.npz` 只透過 `script/migrate_experiment_data.py --experiment twotone/cpmg` 轉換。 |
-| 2026-06-24 | — | ADR-0027 持久化遷移：實驗資料改走 labber_io 原生 axes-list，刪除 datasaver dict 殼（`save_data` / `load_data`）；新增 `PersistableExperiment` opt-in 基底 + class-level `AXES_SPEC`（`AxesSpec` / `Axis` / `ZSpec`，inner-first、SI scale、load = save 恒等逆），實驗只留宣告式 spec 與 `record_result` / `retrieve_result` decorator，不再各自手寫 save/load；新增「持久化」一節並改寫合約／範本／Checklist。#10：`FluxDepExecutor` / `OvernightExecutor` 抽出共用基底 `MultiMeasurementExecutor`（版面 + `record_animation` FFMpeg facet + `_run_with_plotting`），兩者改用 `RetryBatchTask`，更新「Executor 模式」一節。 |
-| 2026-06-05 | `cfc86975` | 移除所有非 executor 實驗的 `self.last_cfg` 中介屬性，cfg 統一由 Result 的 `cfg_snapshot` 攜帶；`run()` 改用開頭 `orig_cfg = deepcopy(cfg)` 快照；補上 `onetone/flux_dep`、`twotone/ckp`、`twotone/fluxdep` 缺失的 cfg_snapshot；修正 `len_rabi`/`t2echo`/`t2ramsey` 的 load() 把 cfg 誤存 last_cfg 導致 cfg_snapshot 永遠為 None 的 bug；改寫範本與 Checklist 第 3 項。再把各實驗 `run()` body 頂層的 `modules.xxx.set_param(...)` 副本外 mutation 一律搬進 `measure_fn`（作用於 `ctx.cfg`），只保留 device-setup 與 singleshot reps/rounds 兩類有意例外（見「sweep 參數 mutation 的歸屬」）。autofluxdep/overnight Executor 不在此變更範圍。 |
-| 2026-05-25 | `fb0ffc22` | 為所有 Task 框架內的 acquire() 加入 stop_checkers=[ctx.is_stop]，支援外部中斷；新增「外部中斷支援」章節；Checklist 新增第 4 項。 |
-| 2026-04-27 | `3f9bb55f` | 對齊近 30 天變更：`runner/QICK_NOTE.md` 改為 `runner/AI_NOTE.md`，`ConfigBase` 匯入路徑改為 `zcu_tools.cfg_model`，Checklist 改為繼承 `ConfigBase`。 |
-| 2026-04-26 | `cd0bc869` | Config 慣例改用 `ConfigBase`；`SweepCfg` 移至 `program/v2`；新增 `experiment/utils/comment.py` 說明 |

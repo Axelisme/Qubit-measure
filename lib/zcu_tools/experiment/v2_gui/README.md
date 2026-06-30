@@ -1,6 +1,6 @@
-# QICK Note for `experiment/v2_gui`
+# `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-06-29（role default golden）
+**Last updated:** 2026-07-01
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -71,9 +71,9 @@ analyze hooks。`get_analyze_params()` 只在 analyze-params **無法全 default
 不更新 writeback draft，writeback 仍只由 primary `analyze()` result 經 `get_writeback_items()`
 產生。
 
-Adapter guide 是 prose，不是 machine contract。Phase B 保留 guide prose 在各 adapter 檔案內，
-避免新增/刪除實驗時跨檔同步；只把重複的 `@classmethod guide()` 樣板收斂為 local
-`guide_text` class var。GUI / MCP 仍只呼叫 `guide()`，不認得 `guide_text` 儲存細節。
+Adapter guide 是 prose，不是 machine contract。Guide prose 放在各 adapter 檔案內，避免
+新增或刪除實驗時跨檔同步；adapter 以 local `guide_text` class var 提供內容，
+GUI / MCP 只呼叫 `guide()`。
 
 ro-optimize 與 reset 的 peak-picking adapter 以 `smooth_method` 提供 `wavelet` / `gaussian`
 選擇，預設 `wavelet`；`smooth` 在 GUI 標為 smoothing strength，不再只代表 Gaussian sigma。

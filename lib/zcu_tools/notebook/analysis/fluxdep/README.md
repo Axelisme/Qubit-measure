@@ -1,6 +1,6 @@
 # fluxdep 模塊重點文檔
 
-**Last updated:** 2026-06-29（figure typing invariants）
+**Last updated:** 2026-07-01
 
 本模塊提供 Fluxonium 通量依賴光譜（flux-dependent spectrum）的擬合、資料處理、
 與互動式標註工具。搭配 `notebook_md/analysis/fluxdep_fit.md` 使用。
@@ -142,16 +142,3 @@ Figure builder 內部把 `self.fig` 視為 concrete `go.Figure`。建構時若 c
 - 新增躍遷類型：同時更新 `energy2linearform` 與 `energy2transition`，
   並確保 `count_max_evals` 能正確從新 key 推出需要的能級數。
 - 自訂擬合度量：改 `fitting.py` 裡 `eval_dist`（`@njit` 簽章固定，改時要同步改 decorator）。
-
----
-
-## 更新紀錄
-
-| 日期 | Codebase commit | 說明 |
-|------|-----------------|------|
-| （未知） | — | 初始建立，尚未追蹤更新歷程；下次修改時請補上對應 commit |
-| 2026-04-26 | `cd0bc869` | 初次建立更新紀錄（本次全面審閱，內容與 codebase 相符） |
-| 2026-04-27 | `5e09cf1c` | 修正 Markdown 結構：合併重複的「更新紀錄」區塊。 |
-| 2026-06-05 | `7f918a77` | `search_in_database` 加 `load_database` 檔案快取 + referenced-level 插值（介面不變、bit-identical）；補 profiling。同步 njit-kernel 現況、移除過時 sharedmem 描述。 |
-| 2026-06-05 | `08a1fcd3` | `search_in_database` 加 **exact LB-prune**（演算法層，4–15x、與 full exact bit-identical）；預設 `fuzzy` True→False。njit.py 加 `entry_lower_bound`/`_lower_bound_kernel`/`search_one_entry`。 |
-| 2026-06-05 | `f1c61ba8` | **移除舊 fuzzy 啟發式**，統一只剩精確 LB-prune：刪 `smart_fuzzy_search` + `_search_kernel` + `fuzzy` 參數（含 overloads）；刪 3 個 `test_sfs_*`、bench 改用 `entry_lower_bound`。GUI 無感（本就用預設）。net −268 行。 |

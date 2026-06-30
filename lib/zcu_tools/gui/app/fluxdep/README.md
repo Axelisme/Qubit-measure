@@ -1,20 +1,19 @@
-**Last updated:** 2026-06-25（fluxdep analysis kernel delegation）
+**Last updated:** 2026-07-01
 
-# `zcu_tools/gui/app/fluxdep/` — Fluxonium Flux-Dependence Analysis GUI AI Note
+# `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
-> **MCP 搬遷（2026-06-08, c8eb1a03）**：MCP server entry 與共用傳輸 `McpBridge` 已搬出 `gui/` 到 `zcu_tools/mcp/`——`McpBridge`→`zcu_tools/mcp/core/bridge`、本 app entry（原 `services/remote/mcp_server.py`）→`zcu_tools/mcp/fluxdep/server.py`；`MCPBridgeConfig` 拆出基底 `McpServerConfig`（無 launch 欄位）。`mcp` 是 `gui.remote` wire 層的**使用方**（非 leaf）。本筆記內 `gui/remote/mcp_bridge`、`mcp_server.py` 等舊位置按此對映。
-
-> **位置**：此套件 2026-06-04 從 `zcu_tools/fluxdep_gui/` 純搬遷到 `zcu_tools/gui/app/fluxdep/`（Phase 133 步驟 A，與 measure-gui 搬進 `app/main/` 對稱，只搬不抽共用層）。import 一律 `zcu_tools.gui.app.fluxdep.X`；同子目錄內相對、跨子目錄絕對。本筆記與 memory 中殘留的 `zcu_tools.fluxdep_gui.X` 舊路徑請按此對映。
+MCP server entry 位於 `zcu_tools.mcp.fluxdep.server`；本 package 只包含 GUI app、
+state/services/UI 與 GUI-process remote adapter。Import path 固定為
+`zcu_tools.gui.app.fluxdep.*`。
 
 ## Module Purpose
 
 獨立的分析型 GUI，把 `notebook_md/analysis/fluxdep_fit.md` 的 fluxonium 能譜擬合
 流程移植成 Qt 桌面工具。**領域層獨立於 measure-gui**：自己的 state / services /
 互動 widget / skill，與 measure-gui 領域零耦合。**共用機制（transport + event）已
-上提到 `gui/remote`（`NdjsonRpcEndpoint`、`McpBridge`、`MethodSpec`）與
+上提到 `gui/remote`（`NdjsonRpcEndpoint`、`MethodSpec`）與
 `gui/event_bus`（`BaseEventBus`/`BasePayload`），三個 app 共用一份**；domain 仍各
-app 自帶（version table、worker 模式等仍 per-app）。version table 等領域機制日後是否
-再上提見 `.agent_state/plans/tool_gui/`（gitignored）。
+app 自帶（version table、worker 模式等仍 per-app）。
 
 定位是**可選工具**，measure-gui 不含它。
 
@@ -76,7 +75,7 @@ view 只暴露查詢，不暴露 mutation。
   一份供 find_points/result_preview。
 - **`services/remote/`** — `RemoteControlAdapter` subclass 共用 `RemoteControlServiceBase`
   （`gui/remote/control_service`，零 policy 覆寫），讓 agent **只讀**觀測（無任何 mutation RPC）。MCP
-  entrypoint 已搬出此目錄，位於 `zcu_tools/mcp/fluxdep/server.py`；`McpBridge` 在
+  entrypoint 位於 `zcu_tools/mcp/fluxdep/server.py`；`McpBridge` 在
   `zcu_tools/mcp/core/bridge`。
 
 ## Key Design Decisions
@@ -96,7 +95,7 @@ LoadService 用底層 `load_data`(utils/datasaver) + `format_rawdata`(persistanc
 measure plot_host 的單向顯示流方向相反）。`InteractiveMplWidget`(base) 提供 canvas +
 可覆寫的 on_press/move/release + 控制項區 + `finished` signal。
 
-**v2 search 診斷圖走共用 plot substrate**（`zcu_tools.gui.plotting`，Phase 133 步驟 B+ 抽出，與 measure 共用）：notebook 的
+**v2 search 診斷圖走共用 plot substrate**（`zcu_tools.gui.plotting`，與 measure 共用）：notebook 的
 `search_in_database(plot=True)` 內部用 pyplot（`plt.figure()`/`plt.show()`）——要在 worker
 跑且**不改 fitting.py**，就靠攔截 pyplot 路由內嵌。共用套件:
 - `plotting/backend.py`（client）：`module://zcu_tools.gui.plotting.backend`，攔 `plt.figure()` →

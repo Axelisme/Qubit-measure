@@ -1,6 +1,6 @@
-# AI Note for `tests/`
+# `tests/` — test suite
 
-**Last updated:** 2026-06-29 — readout SNR scorer tests
+**Last updated:** 2026-07-01
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 

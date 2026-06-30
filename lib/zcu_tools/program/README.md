@@ -1,6 +1,6 @@
-# QICK Note for `program`
+# `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-06-08
+**Last updated:** 2026-07-01
 
 這份筆記整理 `lib/zcu_tools/program` 對 QICK 的實際依賴，目的是讓後續開發能快速定位「應該看哪個 QICK 類別/方法」，而不用每次從頭追。
 
@@ -71,25 +71,10 @@
 - `/.venv/lib/python3.13/site-packages/qick/__init__.py`
   - `QickConfig`, `AveragerProgram`/`RAveragerProgram`/`NDAveragerProgram` 匯出入口
 
-## 維護建議（給未來自己）
+## 維護建議
 
 - 若 QICK 升版後 `AcquireMixin` 介面變動，優先比對：
   - `acquire_params` 欄位名稱
   - `finish_round()` 回傳語意（是否仍為「還有下一 round」）
   - `_average_buf()` 的輸入 shape 假設
-- 你目前 mixin 疊加順序是有語意的（`RoundHookMixin, TrackerMixin, SingleShotMixin, EarlyStopMixin`），改順序前請先檢查 MRO 對 `finish_round()`/`acquire()` 的影響。
-
----
-
-## 更新紀錄
-
-| 日期 | Codebase commit | 說明 |
-|------|-----------------|------|
-| （未知） | — | 初始建立，尚未追蹤更新歷程；下次修改時請補上對應 commit |
-| 2026-04-26 | `cd0bc869` | 初次建立更新紀錄（本次全面審閱，內容與 codebase 相符） |
-| 2026-04-27 | `5e09cf1c` | 修正 Markdown 結構：合併重複的「更新紀錄」區塊。 |
-| 2026-04-27 | `3f9bb55f` | 對齊現況：`StatisticMixin/CallbackMixin` 更名為 `TrackerMixin/RoundHookMixin`，並更新 mixin 疊加順序。 |
-| 2026-05-01 | `1f23b1a7` | 補充 QICK asm v2 label definition/reference dict 形狀，避免 IR parser 誤判 jump/call。 |
-| 2026-05-01 | `0e195063` | 補充 IR pass 保守語意：branch case metadata normalize、explicit loop unroll、hoist/peephole/timing pass 限制。 |
-| 2026-05-01 | `48d54c3b` | 補充 timeline passes 保守語意：zero-delay DCE 與 adjacent positive `TIME inc_ref` merge 限制。 |
-| 2026-06-08 | `e26b200a` | 新增 `describe_soc`（soccfg 精簡 channel 表格，ZCU216-only port label）。 |
+- mixin 疊加順序有語意（`RoundHookMixin, TrackerMixin, SingleShotMixin, EarlyStopMixin`）；改順序前先檢查 MRO 對 `finish_round()` / `acquire()` 的影響。

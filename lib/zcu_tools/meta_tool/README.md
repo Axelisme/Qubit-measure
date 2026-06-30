@@ -1,6 +1,6 @@
-# QICK Note for `meta_tool`
+# `zcu_tools.meta_tool` — persistent experiment metadata
 
-**Last updated:** 2026-06-29（ArbWaveform npz write boundary）
+**Last updated:** 2026-07-01
 
 這份筆記整理 `meta_tool/` 的設計，說明各類別的職責、同步機制與使用模式。
 
@@ -283,16 +283,3 @@ SampleTable          (獨立，供 notebook 記錄量測結果用)
 - `MetaDict` 的 `_dirty` + `sync()` 表示每次 `__setattr__` 都會立即寫回磁碟（兩次 `sync()`：設定前確保最新，設定後立即寫回）。
 - `ModuleLibrary.get_waveform()` / `get_module()` 回傳 deepcopy，修改回傳值不影響 library 內部狀態（需透過 `register_*` / `update_*` 才能持久化）。
 - experiment cfg materialization 每次呼叫都使用 caller 傳入的 current `ml` 與 device snapshot；active context 切換不應被長壽 object 綁住。
-
----
-
-## 更新紀錄
-
-| 日期 | Codebase commit | 說明 |
-|------|-----------------|------|
-| 2026-06-25 | — | `ModuleLibrary` 與 experiment cfg materialization 劃清：核心改由 stateless `assemble_experiment_cfg` 擁有，`make_cfg` 是薄 wrapper，`ModuleLibrary.make_cfg` 只作過渡 forwarding。 |
-| 2026-05-21 | `d957bc8c` | `new_flux`/`_auto_label` 新增 `unit="none"` 支援：無物理單位的純 flux 數值以 fixed-point + SI 前綴格式化（u/m/空/k/M/G/T），不附加物理單位字串；`unit` 預設值從 `"A"` 改為 `"none"`。 |
-| 2026-04-29 | `f2f30ae1` | 對齊現況：`ModuleCfgFactory`/`WaveformCfgFactory` 改為 TypeAdapter 薄封裝，移除「registry + register」敘述；補充 `SyncFile` 無 file lock 的衝突語意。 |
-| 2026-04-26 | `cd0bc869` | `make_cfg()` 新增 sweep auto-format 步驟；回傳型別改為 `T_ExpCfg`（bound to `ExpCfgModel`） |
-| 2026-04-26 | `254bd29c` | `library.py` 移除 `UnionModuleCfg` / `UnionWaveformCfg` import 與模組級 `TypeAdapter`，5 個解析點改用 `ModuleCfg.from_raw(raw, ml=self)` / `WaveformCfg.from_raw(raw, ml=self)` |
-| 2026-04-27 | `5e09cf1c` | 把 `ModuleCfg` / `WaveformCfg` 的 registry / `from_raw` 搬到新的 `ModuleCfgFactory` / `WaveformCfgFactory`（顯式註冊取代 `__pydantic_init_subclass__` 自動收集）。`library.py` 5 個解析點改用 `*Factory.from_raw(...)` |
