@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.19.4
   kernelspec:
-    display_name: .venv
+    display_name: zcu-tools
     language: python
     name: python3
 ---

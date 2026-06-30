@@ -12,8 +12,6 @@ dependencies = [
   "sympy",
   "jupytext",
   "pydantic>=2",
-  # Needed for PEP 696 TypeVar defaults on Python 3.12 and PEP 728 TypedDict
-  # (closed=True / extra_items=) while stdlib typing catches up.
   "typing-extensions",
 ]
 
@@ -51,7 +49,10 @@ gdrive = [
 # quantum-metal currently pins numpy<2, so the design stack is available only in
 # the Python 3.12 profile. The Python 3.13 profile uses NumPy 2.x for GUI/runtime.
 design = [
-  "quantum-metal[gui,ansys] @ git+https://github.com/qiskit-community/qiskit-metal.git ; python_version < '3.13'"
+  "quantum-metal[gui,ansys] @ git+https://github.com/qiskit-community/qiskit-metal.git ; python_version < '3.13'",
+  "ipykernel",
+  "ipywidgets",
+  "ipympl"
 ]
 gui = ["zcu-tools[client]", "qtpy", "PyQt6"]
 all = ["zcu-tools[client,gdrive,design,gui]"]
