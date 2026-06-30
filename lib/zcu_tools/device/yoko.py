@@ -70,7 +70,7 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
     # ==========================================================================#
 
     def _check_voltage(self, voltage: float) -> None:
-        CHECK_VOLTAGE_LIMIT = 7
+        CHECK_VOLTAGE_LIMIT = 20
         if abs(voltage) > CHECK_VOLTAGE_LIMIT:
             raise RuntimeError(
                 f"Try to set voltage to over {CHECK_VOLTAGE_LIMIT}V, are you sure you want to do this?"
@@ -129,13 +129,16 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
                     f"One can only set voltage when the device is in voltage mode. but it is in {mode} mode."
                 )
 
-            self.output_on()
+            if self.get_output() != "on" and voltage != 0.0:
+                raise RuntimeError(
+                    "Output is off, please turn on the output before setting voltage"
+                )
             self._set_voltage_smart(voltage, progress=progress, stop_event=stop_event)
 
             return self.get_voltage()
 
     def _check_current(self, current: float) -> None:
-        CHECK_CURRENT_LIMIT = 7e-3
+        CHECK_CURRENT_LIMIT = 20e-3
         if abs(current) > CHECK_CURRENT_LIMIT:
             raise RuntimeError(
                 f"Try to set current to over {CHECK_CURRENT_LIMIT}A, are you sure you want to do this?"
@@ -196,7 +199,10 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
                     f"One can only set current when the device is in current mode. but it is in {mode} mode."
                 )
 
-            self.output_on()
+            if self.get_output() != "on" and current != 0.0:
+                raise RuntimeError(
+                    "Output is off, please turn on the output before setting current"
+                )
             self._set_current_smart(current, progress=progress, stop_event=stop_event)
 
             return self.get_current()
