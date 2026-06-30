@@ -61,9 +61,8 @@ class GlobalDeviceManager:
                 (cls._devices[name], cfg) for name, cfg in dev_cfg.items()
             ]
 
-        # Per-instance lock (BaseDevice._lock) serializes each setup() call.
-        # Busy devices raise DeviceBusyError immediately (fail-fast); we do not
-        # swallow that error.
+        # Per-instance op_lock serializes each setup() call. Busy devices raise
+        # DeviceBusyError immediately (fail-fast); we do not swallow that error.
         for device, cfg in snapshot:
             device.setup(cfg, progress=progress)
 

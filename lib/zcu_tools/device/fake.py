@@ -8,9 +8,9 @@ import numpy as np
 
 from zcu_tools.progress_bar import make_pbar
 
-from .base import BaseDevice, BaseDeviceInfo
+from .base import BaseDevice, BaseDeviceInfo, device_operation
 
-DEFAULT_RAMPSTEP = 0.01
+DEFAULT_RAMPSTEP = 0.001
 RAMP_INTERVAL = 0.01  # seconds between steps (skipped in fast_mode)
 
 
@@ -44,37 +44,35 @@ class FakeDevice(BaseDevice[FakeDeviceInfo]):
         self._fast_mode = fast_mode
 
         # FakeDevice bypasses BaseDevice.__init__ (no pyvisa session), so it must
-        # create the per-instance lock itself to honor the same serialization
-        # invariant as the real devices.
-        self._lock = threading.RLock()
+        # create the same per-instance operation lock as real devices.
+        self._init_locks()
 
     def get_output(self) -> Literal["on", "off"]:
-        with self._lock:
-            return self.output
+        return self.output
 
+    @device_operation
     def set_output(self, status: Literal["on", "off"]) -> None:
-        with self._lock:
-            self.output = status
+        self.output = status
 
+    @device_operation
     def output_on(self) -> None:
-        with self._lock:
-            self.set_output("on")
+        self.set_output("on")
 
+    @device_operation
     def output_off(self) -> None:
-        with self._lock:
-            self.set_output("off")
+        self.set_output("off")
 
     # ==========================================================================#
 
     def get_value(self) -> float:
-        with self._lock:
-            return self.value
+        return self.value
 
+    @device_operation
     def set_value(self, value: float) -> float:
-        with self._lock:
-            self.value = value
-            return self.value
+        self.value = value
+        return self.value
 
+    @device_operation
     def close(self) -> None:
         """Fake devices own no external session."""
 
@@ -84,13 +82,14 @@ class FakeDevice(BaseDevice[FakeDeviceInfo]):
         progress: bool = False,
         stop_event: threading.Event | None = None,
     ) -> None:
-        if self.value == value:
+        current_value = self.get_value()
+        if current_value == value:
             return
 
-        dist = abs(self.value - value)
+        dist = abs(current_value - value)
         step = 10 * self._rampstep
         steps = max(1, round(dist / step))
-        targets = np.linspace(self.value, value, num=steps + 1, endpoint=True)
+        targets = np.linspace(current_value, value, num=steps + 1, endpoint=True)
 
         total = round(dist, 6)
         pbar = make_pbar(
@@ -99,11 +98,12 @@ class FakeDevice(BaseDevice[FakeDeviceInfo]):
             leave=False,
             disable=not progress,
         )
-        start = self.value
+        start = current_value
         for target in targets[1:]:  # skip first (current value)
             if stop_event is not None and stop_event.is_set():
                 break
             self.value = float(target)
+            current_value = self.value
             if not self._fast_mode:
                 time.sleep(RAMP_INTERVAL)
             # Anchor the bar to absolute distance covered (set n directly via a
@@ -111,7 +111,7 @@ class FakeDevice(BaseDevice[FakeDeviceInfo]):
             # of each step's |Δ| does not telescope back to `total`, so summing
             # could push the cumulative past `total` and trip tqdm's "clamping
             # frac" warning. min() guards the final fp residue.
-            covered = min(round(abs(self.value - start), 6), total)
+            covered = min(round(abs(current_value - start), 6), total)
             pbar.update(covered - pbar.n)
         pbar.close()
 
@@ -129,10 +129,9 @@ class FakeDevice(BaseDevice[FakeDeviceInfo]):
         self._set_value_smart(cfg.value, progress=progress, stop_event=stop_event)
 
     def get_info(self) -> FakeDeviceInfo:
-        with self._lock:
-            return FakeDeviceInfo(
-                address=self.address,
-                output=self.output,
-                value=self.value,
-                rampstep=self._rampstep,
-            )
+        return FakeDeviceInfo(
+            address=self.address,
+            output=self.output,
+            value=self.value,
+            rampstep=self._rampstep,
+        )

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TypeAlias, Union
+from typing import TypeAlias
 
 from .base import BaseDevice, BaseDeviceInfo, DeviceBusyError
 from .fake import FakeDevice, FakeDeviceInfo

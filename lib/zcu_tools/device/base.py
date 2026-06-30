@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import functools
+import logging
 import sys
 import threading
+import time
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Generic, Literal, Self, TypeVar
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Generic, Literal, Self, TypeVar, cast
 
 from zcu_tools.cfg_model import ConfigBase
 
@@ -12,9 +16,12 @@ if TYPE_CHECKING:
 
 
 class DeviceBusyError(RuntimeError):
-    """Raised by BaseDevice.setup() when the device lock is already held by another
-    thread.  setup() is fail-fast: it never queues behind an in-progress operation.
-    Use is_busy() to inspect status for display/diagnostic purposes only."""
+    """Raised when a device operation lock is already held by another thread.
+
+    Mutating public operations are fail-fast: they never queue behind an
+    in-progress operation. Use is_busy() to inspect status for display/diagnostic
+    purposes only.
+    """
 
 
 class BaseDeviceInfo(ConfigBase):
@@ -63,6 +70,56 @@ class BaseDeviceInfo(ConfigBase):
 
 
 T_DeviceInfo = TypeVar("T_DeviceInfo", bound=BaseDeviceInfo)
+T_Return = TypeVar("T_Return")
+
+
+def device_operation(method: Callable[..., T_Return]) -> Callable[..., T_Return]:
+    """Guard a public mutating device operation with op_lock and logging."""
+
+    @functools.wraps(method)
+    def wrapper(self: Any, *args: Any, **kwargs: Any) -> T_Return:
+        operation = f"{self.__class__.__name__}.{method.__name__}"
+        acquired = self._op_lock.acquire(blocking=False)
+        if not acquired:
+            message = (
+                f"{self.__class__.__name__} at {self.address!r}: another thread is "
+                "operating this device"
+            )
+            self._logger.info("device operation busy: %s", operation)
+            raise DeviceBusyError(message)
+
+        outer = self._op_depth == 0
+        start: float | None = None
+        if outer:
+            start = time.monotonic()
+            self._logger.info("device operation started: %s", operation)
+
+        self._op_depth += 1
+        try:
+            result = method(self, *args, **kwargs)
+        except BaseException:
+            if outer and start is not None:
+                elapsed = time.monotonic() - start
+                self._logger.exception(
+                    "device operation failed: %s elapsed=%.3fs",
+                    operation,
+                    elapsed,
+                )
+            raise
+        else:
+            if outer and start is not None:
+                elapsed = time.monotonic() - start
+                self._logger.info(
+                    "device operation finished: %s elapsed=%.3fs",
+                    operation,
+                    elapsed,
+                )
+            return result
+        finally:
+            self._op_depth -= 1
+            self._op_lock.release()
+
+    return cast(Callable[..., T_Return], wrapper)
 
 
 class BaseDevice(ABC, Generic[T_DeviceInfo]):
@@ -74,14 +131,7 @@ class BaseDevice(ABC, Generic[T_DeviceInfo]):
 
     def __init__(self, address: str, rm: ResourceManager) -> None:
         self.address = address
-
-        # Per-instance reentrant lock serializing every public operation on this
-        # device. RLock (not Lock) is required because public entry points nest on
-        # the same thread: setup() -> _setup() -> set_current()/set_voltage() ->
-        # output_on()/query(). The GlobalDeviceManager lock only guards the registry
-        # (which instance answers to a name), not concurrent access to one instance's
-        # SCPI session, so a separate per-instance lock is needed here.
-        self._lock = threading.RLock()
+        self._init_locks()
 
         import pyvisa as visa
 
@@ -98,28 +148,36 @@ class BaseDevice(ABC, Generic[T_DeviceInfo]):
 
     # ----- helper methods -----
 
+    def _init_locks(self) -> None:
+        # op_lock guards logical mutating operations and must be reentrant because
+        # setup() calls public setters. io_lock guards only one session transaction.
+        self._op_lock = threading.RLock()
+        self._io_lock = threading.Lock()
+        self._op_depth = 0
+        self._logger = logging.getLogger(type(self).__module__)
+
     def connect_message(self) -> None:
         """Queries and prints the IDN to confirm connection."""
         import pyvisa
 
-        with self._lock:
-            try:
-                idn = self.query("*IDN?")
-                print(f"Connected to: {idn}")
-            except pyvisa.Error as e:
-                print(f"Could not query IDN. Error: {e}")
+        try:
+            idn = self.query("*IDN?")
+            print(f"Connected to: {idn}")
+        except pyvisa.Error as e:
+            print(f"Could not query IDN. Error: {e}")
 
+    @device_operation
     def close(self) -> None:
-        with self._lock:
+        with self._io_lock:
             print(f"Disconnecting from {self.session.resource_name}")
             self.session.close()
 
     def write(self, cmd: str) -> None:
-        with self._lock:
+        with self._io_lock:
             self.session.write(cmd)  # type: ignore
 
     def query(self, cmd: str) -> str:
-        with self._lock:
+        with self._io_lock:
             return self.session.query(cmd).strip()  # type: ignore
 
     # ----- abstract methods -----
@@ -133,6 +191,7 @@ class BaseDevice(ABC, Generic[T_DeviceInfo]):
         stop_event: threading.Event | None = None,
     ) -> None: ...
 
+    @device_operation
     def setup(
         self,
         cfg: T_DeviceInfo,
@@ -143,9 +202,10 @@ class BaseDevice(ABC, Generic[T_DeviceInfo]):
         """Setup the device with the given configuration.
 
         Fail-fast: if another thread is already operating this device (i.e. holds
-        ``self._lock``), raises ``DeviceBusyError`` immediately instead of queuing.
-        RLock semantics guarantee that the owning thread can still call ``setup()``
-        from within its own operation sequence (reentrant), so nested calls are safe.
+        ``self._op_lock``), raises ``DeviceBusyError`` immediately instead of
+        queuing. RLock semantics guarantee that the owning thread can still call
+        ``setup()`` from within its own operation sequence (reentrant), so nested
+        calls are safe.
         """
 
         if cfg.address != self.address:
@@ -158,19 +218,7 @@ class BaseDevice(ABC, Generic[T_DeviceInfo]):
                 f"Trying to setup device of type {self.__class__.__name__} with cfg of type {type(cfg)}"
             )
 
-        # Non-blocking acquire: fails immediately if another thread holds the lock.
-        # RLock allows reentry by the same thread, so nested setup() within an
-        # already-locked operation sequence is not affected.
-        acquired = self._lock.acquire(blocking=False)
-        if not acquired:
-            raise DeviceBusyError(
-                f"{self.__class__.__name__} at {self.address!r}: another thread is "
-                "operating this device"
-            )
-        try:
-            self._setup(cfg, progress=progress, stop_event=stop_event)
-        finally:
-            self._lock.release()
+        self._setup(cfg, progress=progress, stop_event=stop_event)
 
     def is_busy(self) -> bool:
         """Return True when another thread is currently operating this device.
@@ -180,12 +228,12 @@ class BaseDevice(ABC, Generic[T_DeviceInfo]):
         change between ``is_busy()`` and ``setup()``.  Control flow must rely on
         catching ``DeviceBusyError`` from ``setup()`` instead.
 
-        Note: a thread that already holds the lock (i.e. is the current operator)
+        Note: a thread that already holds op_lock (i.e. is the current operator)
         will see False here, because RLock reentry by the owner succeeds.
         """
-        acquired = self._lock.acquire(blocking=False)
+        acquired = self._op_lock.acquire(blocking=False)
         if acquired:
-            self._lock.release()
+            self._op_lock.release()
             return False
         return True
 
