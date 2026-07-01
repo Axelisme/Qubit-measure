@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-01 - dialog registry helper
+**Last updated:** 2026-07-01 - feedback dock helper
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -88,6 +88,9 @@ hand-write those values.
 - `OperationChannel` is the ordered cross-thread channel for terminal state,
   user messages, and Send & Stop.
 - `NotifyChannel` mirrors the same pattern for `gui_prompt_user`.
+- `FeedbackDockController` owns the docked feedback panel, target-tab
+  resolution, and op-count plus agent-presence gate; `MainWindow` keeps the
+  public render-view refresh façade.
 - Generic `operation.await` / `operation.poll` report only status and progress;
   products such as figures or fit summaries are read through typed getters.
 

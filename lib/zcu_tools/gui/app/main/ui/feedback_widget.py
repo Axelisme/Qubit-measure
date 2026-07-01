@@ -2,14 +2,14 @@
 
 A ``_CollapsibleSection`` (the same ▼/▶ header idiom as the in-tab
 Analysis/Writeback sections) that holds a one-line message input plus
-"Send" / "Send & Stop" buttons. MainWindow mounts it directly below the
-figure of the target tab (running tab if any, else the active tab) and
-unmounts it again, so it docks under the plot rather than floating over it.
+"Send" / "Send & Stop" buttons. FeedbackDockController mounts it directly
+below the figure of the target tab (running tab if any, else the active tab)
+and unmounts it again, so it docks under the plot rather than floating over it.
 
-Visibility (the C3 gate, ADR-0025) is owned by MainWindow: the panel is
-mounted only while at least one live operation is in progress AND at least
-one MCP control client is connected. MainWindow drives mount/unmount via
-refresh_feedback_widget(), called from both op-start/finish bus handlers and
+Visibility (the C3 gate, ADR-0025) is owned by FeedbackDockController: the
+panel is mounted only while at least one live operation is in progress AND at
+least one MCP control client is connected. MainWindow keeps the public
+refresh_feedback_widget() facade for bus handlers and
 RemoteControlAdapter._on_client_count_changed() so both triggers converge on
 the same idempotent decision.
 
@@ -19,7 +19,7 @@ unchanged (ADR-0025).
 
 Stop-gating: 'Send & Stop' is enabled only when the active operation has a
 cancel hook registered (ADR-0025 §Stop-gating). Gating is refreshed by
-MainWindow each time the op count or op type changes.
+FeedbackDockController each time the op count or op type changes.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 class FeedbackPanel(_CollapsibleSection):
     """Collapsible 'Send to agent' panel docked below the figure.
 
-    Public API (called by MainWindow):
+    Public API (called by the dock controller):
     - refresh_gating(): re-read can_cancel_active_operation() and
       enable/disable 'Send & Stop' accordingly.
     - clear_input(): wipe the text field (called on unmount).

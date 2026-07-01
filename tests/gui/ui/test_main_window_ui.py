@@ -1207,8 +1207,16 @@ def _panel_docked_below_stack(window, tab_w) -> bool:
     """True iff the window's feedback panel sits at plot_layout index 1, i.e.
     directly below the plot stack (index 0)."""
     layout = tab_w._plot_layout
-    panel = window._feedback_widget
+    panel = _feedback_panel(window)
     return layout.indexOf(panel) == 1 and layout.indexOf(tab_w._plot_stack) == 0
+
+
+def _feedback_panel(window):
+    return window._feedback_dock.panel
+
+
+def _feedback_host_tab(window):
+    return window._feedback_dock.host_tab
 
 
 def test_feedback_panel_unmounted_when_op_active_but_no_agent(qapp):
@@ -1217,8 +1225,8 @@ def test_feedback_panel_unmounted_when_op_active_but_no_agent(qapp):
         qapp, op_count=1, agent_connected=False, active_tab_id="tab-1"
     )
     window.refresh_feedback_widget()
-    assert window._feedback_host_tab is None
-    assert tabs["tab-1"]._plot_layout.indexOf(window._feedback_widget) == -1
+    assert _feedback_host_tab(window) is None
+    assert tabs["tab-1"]._plot_layout.indexOf(_feedback_panel(window)) == -1
 
 
 def test_feedback_panel_unmounted_when_agent_connected_but_no_op(qapp):
@@ -1227,8 +1235,8 @@ def test_feedback_panel_unmounted_when_agent_connected_but_no_op(qapp):
         qapp, op_count=0, agent_connected=True, active_tab_id="tab-1"
     )
     window.refresh_feedback_widget()
-    assert window._feedback_host_tab is None
-    assert tabs["tab-1"]._plot_layout.indexOf(window._feedback_widget) == -1
+    assert _feedback_host_tab(window) is None
+    assert tabs["tab-1"]._plot_layout.indexOf(_feedback_panel(window)) == -1
 
 
 def test_feedback_panel_unmounted_when_no_op_and_no_agent(qapp):
@@ -1237,14 +1245,14 @@ def test_feedback_panel_unmounted_when_no_op_and_no_agent(qapp):
         qapp, op_count=0, agent_connected=False, active_tab_id="tab-1"
     )
     window.refresh_feedback_widget()
-    assert window._feedback_host_tab is None
+    assert _feedback_host_tab(window) is None
 
 
 def test_feedback_panel_unmounted_when_no_tabs(qapp):
     """Edge case: gate true but no target tab → panel stays unmounted."""
     window, _ = _gate_window(qapp, op_count=1, agent_connected=True)
     window.refresh_feedback_widget()
-    assert window._feedback_host_tab is None
+    assert _feedback_host_tab(window) is None
 
 
 def test_feedback_panel_mounted_below_figure_when_gate_true(qapp):
@@ -1256,14 +1264,15 @@ def test_feedback_panel_mounted_below_figure_when_gate_true(qapp):
     window.refresh_feedback_widget()
 
     tab_w = tabs["tab-1"]
-    assert window._feedback_host_tab is tab_w
+    panel = _feedback_panel(window)
+    assert _feedback_host_tab(window) is tab_w
     assert _panel_docked_below_stack(window, tab_w)
     # Default EXPANDED: the collapsible body is not collapsed (toggle checked,
     # body visible relative to the panel — the window itself is not shown in the
     # test, so absolute isVisible() would be False).
-    assert window._feedback_widget._toggle_btn is not None
-    assert window._feedback_widget._toggle_btn.isChecked()
-    assert window._feedback_widget._body.isVisibleTo(window._feedback_widget)
+    assert panel._toggle_btn is not None
+    assert panel._toggle_btn.isChecked()
+    assert panel._body.isVisibleTo(panel)
 
 
 def test_feedback_panel_targets_running_tab_over_active(qapp):
@@ -1276,8 +1285,8 @@ def test_feedback_panel_targets_running_tab_over_active(qapp):
         active_tab_id="act-tab",
     )
     window.refresh_feedback_widget()
-    assert window._feedback_host_tab is tabs["run-tab"]
-    assert tabs["act-tab"]._plot_layout.indexOf(window._feedback_widget) == -1
+    assert _feedback_host_tab(window) is tabs["run-tab"]
+    assert tabs["act-tab"]._plot_layout.indexOf(_feedback_panel(window)) == -1
 
 
 def test_feedback_panel_unmounts_and_clears_input_when_gate_drops(qapp):
@@ -1286,15 +1295,16 @@ def test_feedback_panel_unmounts_and_clears_input_when_gate_drops(qapp):
         qapp, op_count=1, agent_connected=True, active_tab_id="tab-1"
     )
     window.refresh_feedback_widget()
-    window._feedback_widget._input.setText("pending message")
-    assert window._feedback_host_tab is tabs["tab-1"]
+    panel = _feedback_panel(window)
+    panel._input.setText("pending message")
+    assert _feedback_host_tab(window) is tabs["tab-1"]
 
     cast(MagicMock, window._ctrl).has_agent_connected.return_value = False
     window.refresh_feedback_widget()
 
-    assert window._feedback_host_tab is None
-    assert tabs["tab-1"]._plot_layout.indexOf(window._feedback_widget) == -1
-    assert window._feedback_widget._input.text() == ""
+    assert _feedback_host_tab(window) is None
+    assert tabs["tab-1"]._plot_layout.indexOf(panel) == -1
+    assert panel._input.text() == ""
 
 
 def test_feedback_panel_remounts_on_target_tab_change(qapp):
@@ -1311,7 +1321,7 @@ def test_feedback_panel_remounts_on_target_tab_change(qapp):
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
     window.refresh_feedback_widget()
-    assert window._feedback_host_tab is tabs["tab-a"]
+    assert _feedback_host_tab(window) is tabs["tab-a"]
 
     # Run finishes: no running tab now, active tab becomes the target.
     cast(MagicMock, window._ctrl).get_running_tab_id.return_value = None
@@ -1321,6 +1331,6 @@ def test_feedback_panel_remounts_on_target_tab_change(qapp):
         window._tab_widgets["tab-b"] = tab_b
     window.refresh_feedback_widget()
 
-    assert window._feedback_host_tab is tabs["tab-b"]
-    assert tabs["tab-a"]._plot_layout.indexOf(window._feedback_widget) == -1
+    assert _feedback_host_tab(window) is tabs["tab-b"]
+    assert tabs["tab-a"]._plot_layout.indexOf(_feedback_panel(window)) == -1
     assert _panel_docked_below_stack(window, tabs["tab-b"])

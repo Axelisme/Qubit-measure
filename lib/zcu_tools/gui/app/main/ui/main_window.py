@@ -74,6 +74,7 @@ from .analyze_form import AnalyzeFormWidget
 from .cfg_form import (
     CfgFormWidget,
 )
+from .feedback_dock import FeedbackDockController
 from .fields import (
     _CollapsibleSection,
 )
@@ -376,9 +377,9 @@ class ExpTabWidget(QWidget):
 
         # ── Right pane: Plot ─────────────────────────────────────────────
         plot_panel = QWidget()
-        # Kept as an attribute so MainWindow can dock the feedback panel below
-        # the figure (mount_feedback_panel inserts it at index 1, directly under
-        # the plot stack).
+        # Kept as an attribute so the feedback dock host can insert the panel
+        # below the figure (mount_feedback_panel inserts it at index 1, directly
+        # under the plot stack).
         self._plot_layout = QVBoxLayout(plot_panel)
         self._plot_layout.setContentsMargins(0, 0, 0, 0)
 
@@ -1007,14 +1008,14 @@ class MainWindow(QMainWindow):
         self._bus_subs.subscribe(bus, DeviceChangedPayload, self._on_bus_device_changed)
 
         # Docked feedback panel (built after bus wiring; mounted under the
-        # target tab's figure only while the C3 gate holds — see
-        # refresh_feedback_widget).
-        from .feedback_widget import FeedbackPanel
-
-        self._feedback_widget = FeedbackPanel(self._ctrl, parent=self)
-        self._feedback_widget.hide()
-        # The tab the panel is currently docked under (None when unmounted).
-        self._feedback_host_tab: ExpTabWidget | None = None
+        # target tab's figure only while the C3 gate holds).
+        self._feedback_dock = FeedbackDockController(
+            self._ctrl,
+            parent=self,
+            tab_by_id=lambda tab_id: self._tab_widgets.get(tab_id),
+            running_tab_id=self._ctrl.get_running_tab_id,
+            active_tab_id=self._ctrl.get_active_tab_id,
+        )
 
         # Cleanup on destroy
         self.destroyed.connect(self._cleanup_bus_subscriptions)
@@ -1161,62 +1162,22 @@ class MainWindow(QMainWindow):
     # Docked feedback panel (ADR-0025 C3)
     # ------------------------------------------------------------------
 
-    def _feedback_target_tab(self) -> ExpTabWidget | None:
-        """The tab whose figure the feedback panel docks under.
-
-        The running tab if one is running, else the active (focused) tab. When
-        neither exists (no tabs at all), returns None — the panel stays
-        unmounted (no figure to sit under).
-        """
-        tab_id = self._ctrl.get_running_tab_id() or self._ctrl.get_active_tab_id()
-        if tab_id is None:
-            return None
-        return self._tab_widgets.get(tab_id)
-
     def _refresh_feedback_widget(self) -> None:
         """Mount/unmount the feedback panel (internal bus-handler trampoline).
 
         Idempotent: all bus handlers that may change op-count or agent-presence
-        call this; the decision is centralised in refresh_feedback_widget().
+        call this; the decision is centralized in refresh_feedback_widget().
         """
         self.refresh_feedback_widget()
 
     def refresh_feedback_widget(self) -> None:
         """Mount/unmount the docked feedback panel on op count + agent presence.
 
-        ADR-0025 C3 gate: mount only when at least one op is live AND at least
-        one MCP control client is connected. Either condition going false
-        unmounts the panel and clears its input. The panel docks under the
-        target tab's figure (running tab if any, else the active tab); if the
-        target tab changes while mounted, the panel re-mounts under the new tab.
         Called by both bus handlers (op count change) and
         RemoteControlAdapter._on_client_count_changed() (agent presence change).
         Both callers run on the Qt main thread — no thread guard needed.
         """
-        count = self._ctrl.active_operation_count()
-        agent = self._ctrl.has_agent_connected()
-        target = self._feedback_target_tab() if (count > 0 and agent) else None
-
-        if target is None:
-            self._unmount_feedback_panel()
-            return
-
-        if self._feedback_host_tab is not target:
-            # Target tab changed (or first mount): move the panel under it.
-            if self._feedback_host_tab is not None:
-                self._feedback_host_tab.unmount_feedback_panel(self._feedback_widget)
-            target.mount_feedback_panel(self._feedback_widget)
-            self._feedback_host_tab = target
-
-        self._feedback_widget.refresh_gating()
-
-    def _unmount_feedback_panel(self) -> None:
-        """Detach the panel from its host tab and clear its input (idempotent)."""
-        if self._feedback_host_tab is not None:
-            self._feedback_host_tab.unmount_feedback_panel(self._feedback_widget)
-            self._feedback_host_tab = None
-        self._feedback_widget.hide()
-        self._feedback_widget.clear_input()
+        self._feedback_dock.refresh()
 
     # ------------------------------------------------------------------
     # ViewProtocol implementation
