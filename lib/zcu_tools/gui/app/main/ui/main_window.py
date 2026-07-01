@@ -6,7 +6,7 @@ Implements ViewProtocol; all state lives in Controller/State, never here.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from zcu_tools.gui.app.main.adapter import AnalysisMode, CfgSchema
@@ -38,22 +38,6 @@ from zcu_tools.gui.session.events import (
 from zcu_tools.gui.widgets import DialogRefStore
 
 logger = logging.getLogger(__name__)
-
-_PERSISTENT_DIALOGS: frozenset[DialogName] = frozenset({DialogName.PREDICTOR})
-
-
-def _visible_dialog_names(dialogs: Mapping[DialogName, object]) -> list[DialogName]:
-    visible: list[DialogName] = []
-    for name, dialog in dialogs.items():
-        is_visible = getattr(dialog, "isVisible", None)
-        if is_visible is None:
-            continue
-        try:
-            if bool(is_visible()):
-                visible.append(name)
-        except RuntimeError:
-            continue
-    return visible
 
 
 from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
@@ -93,6 +77,7 @@ from .cfg_form import (
 from .fields import (
     _CollapsibleSection,
 )
+from .main_dialog_registry import MainDialogRegistry
 from .writeback_widget import WritebackWidget
 
 if TYPE_CHECKING:
@@ -924,11 +909,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._ctrl = controller
         self._tab_widgets: dict[str, ExpTabWidget] = {}
-        # ``DialogName -> QDialog`` registry. Most entries are live visible dialogs
-        # removed on close; persistent entries may remain hidden for fast reopen.
-        # ``InspectDialog`` is also tracked through this dict (the legacy
-        # ``_inspect_dialog`` attribute is gone — there is now exactly one entry point).
-        self._open_dialogs: dict[DialogName, QDialog] = {}
+        self._dialog_registry = MainDialogRegistry(self._ctrl, parent=self)
         self._dialog_refs = DialogRefStore()
         self._bus_subs = EventSubscriptions()
         # True once _perform_close has begun the actual teardown, so the second
@@ -1379,7 +1360,7 @@ class MainWindow(QMainWindow):
                 self._set_tab_running(tab_w, self._ctrl.get_tab_snapshot(tab_id))
 
     def refresh_inspect_panel(self) -> None:
-        inspect = self._open_dialogs.get(DialogName.INSPECT)
+        inspect = self._dialog_registry.dialog(DialogName.INSPECT)
         if inspect is not None and inspect.isVisible():
             # InspectDialog defines ``refresh``; cast through ``Any`` to avoid
             # importing the concrete class in the hot signature surface.
@@ -1715,88 +1696,21 @@ class MainWindow(QMainWindow):
     # Dialog API — single entry point shared by UI clicks and remote control
     # ------------------------------------------------------------------
 
-    def _build_dialog(self, name: DialogName) -> QDialog:
-        """Construct a fresh QDialog for ``name``.
-
-        Per-name imports are deferred to avoid heavy front-loading and to
-        keep test fixtures from pulling in unused dialog modules.
-        """
-        if name is DialogName.SETUP:
-            from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
-
-            return SetupDialog(self._ctrl, parent=self)
-        if name is DialogName.DEVICE:
-            from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
-
-            return DeviceDialog(self._ctrl, parent=self)
-        if name is DialogName.PREDICTOR:
-            from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
-
-            return PredictorDialog(self._ctrl, parent=self, persistent_on_close=True)
-        if name is DialogName.INSPECT:
-            from .inspect_dialog import InspectDialog
-
-            return InspectDialog(self._ctrl, bus=self._ctrl.get_bus(), parent=self)
-        if name is DialogName.ARB_WAVEFORM:
-            from .arb_waveform_dialog import ArbWaveformDialog
-
-            return ArbWaveformDialog(self._ctrl, parent=self)
-        if name is DialogName.STARTUP:
-            # STARTUP dialog needs ``startup_mode=True`` and is normally opened
-            # by the application bootstrap, not by this generic factory. We
-            # still build one here so a remote ``dialog.open STARTUP`` works
-            # after the initial bootstrap has dismissed the original.
-            from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
-
-            return SetupDialog(self._ctrl, parent=self, startup_mode=True)
-        raise ValueError(f"Unknown DialogName: {name!r}")  # pragma: no cover
-
     def open_dialog(self, name: DialogName) -> None:
         """Open the named dialog non-modally, or raise it if already open.
 
         Idempotent: a second ``open_dialog(name)`` while the dialog exists
         raises it if visible, or shows a hidden persistent instance.
         """
-        existing = self._open_dialogs.get(name)
-        if existing is not None:
-            try:
-                existing.raise_()
-                existing.activateWindow()
-                if not existing.isVisible():
-                    existing.show()
-                return
-            except RuntimeError:
-                # Underlying Qt object was destroyed but registry was not
-                # cleaned up — drop the stale entry and fall through to
-                # rebuild.
-                self._open_dialogs.pop(name, None)
-
-        dlg = self._build_dialog(name)
-        if name not in _PERSISTENT_DIALOGS:
-            dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        self._open_dialogs[name] = dlg
-        if name not in _PERSISTENT_DIALOGS:
-            # ``finished`` fires for both accept and reject; the lambda must
-            # tolerate signal payload (status code) being passed through.
-            dlg.finished.connect(
-                lambda _status, n=name: self._open_dialogs.pop(n, None)
-            )
-        dlg.open()
+        self._dialog_registry.open(name)
 
     def close_dialog(self, name: DialogName) -> None:
         """Close or hide the named dialog if it is currently open."""
-        existing = self._open_dialogs.get(name)
-        if existing is None:
-            return
-        try:
-            existing.reject()
-        except RuntimeError:
-            # Dialog already destroyed; tidy the registry.
-            self._open_dialogs.pop(name, None)
+        self._dialog_registry.close(name)
 
     def list_open_dialogs(self) -> list[DialogName]:
         """Return dialogs that are currently visible on screen."""
-        return _visible_dialog_names(self._open_dialogs)
+        return self._dialog_registry.visible_names()
 
     def register_dialog(self, name: DialogName, dialog: QDialog) -> None:
         """Register a dialog that was constructed outside ``open_dialog``.
@@ -1807,8 +1721,7 @@ class MainWindow(QMainWindow):
         (WA_DeleteOnClose)`` and for ``open()`` / ``show()`` — this helper
         only wires the registry cleanup on ``finished``.
         """
-        self._open_dialogs[name] = dialog
-        dialog.finished.connect(lambda _status, n=name: self._open_dialogs.pop(n, None))
+        self._dialog_registry.register(name, dialog)
 
     # ------------------------------------------------------------------
     # Remote view query helpers
@@ -1843,9 +1756,7 @@ class MainWindow(QMainWindow):
                 self._predictor_label.text() if self._predictor_label else ""
             ),
             "status": self._status_bar.currentMessage() if self._status_bar else "",
-            "open_dialogs": [
-                n.value for n in _visible_dialog_names(self._open_dialogs)
-            ],
+            "open_dialogs": [name.value for name in self.list_open_dialogs()],
         }
 
     def take_figure_screenshot(self, tab_id: str) -> bytes:
@@ -1872,19 +1783,7 @@ class MainWindow(QMainWindow):
 
     def take_dialog_screenshot(self, dialog_name: DialogName) -> bytes:
         """Grab a currently-open dialog and return raw PNG bytes."""
-        from qtpy.QtCore import QBuffer, QIODevice  # type: ignore[attr-defined]
-
-        dlg = self._open_dialogs.get(dialog_name)
-        if dlg is None or not dlg.isVisible():
-            raise RuntimeError(f"dialog {dialog_name.value!r} is not currently open")
-        pixmap = dlg.grab()
-        buf = QBuffer()
-        buf.open(QIODevice.OpenModeFlag.WriteOnly)
-        if not pixmap.save(buf, "PNG"):
-            raise RuntimeError(
-                f"Qt failed to encode {dialog_name.value!r} dialog as PNG"
-            )
-        return bytes(buf.data().data())  # type: ignore[arg-type]
+        return self._dialog_registry.take_screenshot(dialog_name)
 
     def take_window_screenshot(self) -> bytes:
         """Grab the WHOLE main window (client area + child widgets) as PNG bytes.

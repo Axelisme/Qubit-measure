@@ -17,6 +17,7 @@ import types
 from typing import Any
 from unittest.mock import MagicMock
 
+from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
 from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
 # ---------------------------------------------------------------------------
@@ -43,6 +44,7 @@ def _make_snapshot_shell(
     state_tab_ids: list[str],
     tab_widgets: dict[str, Any],
     current_widget: object | None = None,
+    open_dialogs: list[DialogName] | None = None,
 ) -> Any:
     """Build a duck-typed shell that satisfies get_view_snapshot's attribute reads.
 
@@ -64,7 +66,7 @@ def _make_snapshot_shell(
         _ctx_label=None,
         _predictor_label=None,
         _status_bar=None,
-        _open_dialogs={},
+        list_open_dialogs=lambda: list(open_dialogs or []),
     )
     return shell
 
@@ -205,3 +207,16 @@ def test_snapshot_contains_required_keys() -> None:
         "open_dialogs",
     }
     assert expected_keys == set(snap.keys())
+
+
+def test_open_dialogs_come_from_named_dialog_facade() -> None:
+    """Only the MainWindow named-dialog facade contributes snapshot dialog names."""
+    shell = _make_snapshot_shell(
+        state_tab_ids=["tab-A"],
+        tab_widgets={"tab-A": object()},
+        open_dialogs=[DialogName.PREDICTOR, DialogName.STARTUP],
+    )
+
+    snap = _snapshot(shell)
+
+    assert snap["open_dialogs"] == ["predictor", "startup"]

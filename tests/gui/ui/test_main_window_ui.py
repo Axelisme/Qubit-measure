@@ -448,62 +448,32 @@ def test_main_window_toolbar_does_not_show_arb_waveforms(qapp):
     assert "Arb Waveforms…" not in texts
 
 
-def test_main_window_reuses_hidden_predictor_dialog(qapp):
-    from qtpy.QtWidgets import QApplication, QDialog
+def test_main_window_named_dialog_facade_delegates_to_registry(qapp):
+    from qtpy.QtWidgets import QDialog
     from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
     ctrl = _apply_window_defaults(MagicMock())
     ctrl.get_bus.return_value = EventBus()
     window = MainWindow(ctrl)
-    created: list[QDialog] = []
-
-    def build_dialog(name: DialogName) -> QDialog:
-        assert name is DialogName.PREDICTOR
-        dialog = QDialog(window)
-        created.append(dialog)
-        return dialog
-
-    window._build_dialog = MagicMock(side_effect=build_dialog)  # type: ignore[method-assign]
-
-    window.open_dialog(DialogName.PREDICTOR)
-    QApplication.processEvents()
-    first = created[0]
-    assert first.isVisible() is True
+    registry = MagicMock()
+    registry.visible_names.return_value = [DialogName.PREDICTOR]
+    registry.take_screenshot.return_value = b"png"
+    window._dialog_registry = registry
 
     window.close_dialog(DialogName.PREDICTOR)
-    QApplication.processEvents()
-    assert first.isVisible() is False
-    assert window._open_dialogs[DialogName.PREDICTOR] is first
-    assert window.list_open_dialogs() == []
-
     window.open_dialog(DialogName.PREDICTOR)
-    QApplication.processEvents()
-
-    assert created == [first]
-    assert first.isVisible() is True
     assert window.list_open_dialogs() == [DialogName.PREDICTOR]
 
+    dialog = QDialog(window)
+    window.register_dialog(DialogName.STARTUP, dialog)
+    assert window.take_dialog_screenshot(DialogName.STARTUP) == b"png"
 
-def test_main_window_nonpersistent_dialog_close_clears_registry(qapp):
-    from qtpy.QtWidgets import QApplication, QDialog
-    from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
-    from zcu_tools.gui.app.main.ui.main_window import MainWindow
-
-    ctrl = _apply_window_defaults(MagicMock())
-    ctrl.get_bus.return_value = EventBus()
-    window = MainWindow(ctrl)
-    window._build_dialog = MagicMock(  # type: ignore[method-assign]
-        return_value=QDialog(window)
-    )
-
-    window.open_dialog(DialogName.SETUP)
-    QApplication.processEvents()
-    window.close_dialog(DialogName.SETUP)
-    QApplication.processEvents()
-
-    assert DialogName.SETUP not in window._open_dialogs
-    assert window.list_open_dialogs() == []
+    registry.close.assert_called_once_with(DialogName.PREDICTOR)
+    registry.open.assert_called_once_with(DialogName.PREDICTOR)
+    registry.visible_names.assert_called_once_with()
+    registry.register.assert_called_once_with(DialogName.STARTUP, dialog)
+    registry.take_screenshot.assert_called_once_with(DialogName.STARTUP)
 
 
 def test_show_error_dialog_retains_until_close(qapp):
@@ -524,7 +494,7 @@ def test_show_error_dialog_retains_until_close(qapp):
     ]
     assert len(dialogs) == 1
     assert len(window._dialog_refs) == 1
-    assert window._open_dialogs == {}
+    assert window.list_open_dialogs() == []
 
     dialogs[0].reject()
     qapp.processEvents()
@@ -547,7 +517,7 @@ def test_open_notify_prompt_retains_until_close(qapp):
     assert len(dialogs) == 1
     assert dialogs[0]._token == 17
     assert len(window._dialog_refs) == 1
-    assert window._open_dialogs == {}
+    assert window.list_open_dialogs() == []
 
     dialogs[0].reject()
     qapp.processEvents()

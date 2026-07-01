@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-01 - remote spec import boundary
+**Last updated:** 2026-07-01 - dialog registry helper
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -126,11 +126,13 @@ Dialogs that can live across operations use `open()`, not `exec()`, and keep a
 Python reference until they close. Blocking modal helpers are limited to short
 direct user actions that do not wait on worker completion.
 
-`MainWindow.open_dialog` / `close_dialog` is the registry path shared by toolbar
-actions and remote screenshots. Predictor dialog is persistent hide-on-close;
-other dialogs are released when closed. Transient non-modal dialogs that are not
-part of the remote named-dialog surface use the shared dialog lifecycle helper
-for reference retention and `finished` / `destroyed` cleanup.
+`MainWindow.open_dialog` / `close_dialog` is the public registry façade shared by
+toolbar actions and remote screenshots. The named-dialog registry helper owns
+lazy dialog construction, visible-name listing, persistent predictor caching, and
+per-dialog screenshots; `MainWindow` remains the `RenderView` façade. Transient
+non-modal dialogs that are not part of the remote named-dialog surface use the
+shared dialog lifecycle helper for reference retention and `finished` /
+`destroyed` cleanup.
 
 ## Adapter-Facing Rules
 
