@@ -1,8 +1,9 @@
+import threading
 from typing import Any
 
 import numpy as np
 import pytest
-from zcu_tools.experiment.v2.runner import MeasureSession, MeasureStep
+from zcu_tools.experiment.v2.runner import ActiveTask, MeasureSession, MeasureStep
 from zcu_tools.experiment.v2.runner.state import TaskState
 
 from .conftest import DictCfg
@@ -123,6 +124,39 @@ def test_buffer_at_mixed_plain_index_and_step_uses_step_cfg():
         assert _extras(run.cfg)["marker"] == "root"
 
 
+def test_buffer_at_slice_and_step_writes_back_to_buffer():
+    cfg = DictCfg.model_validate({"marker": "root"})
+    seen_markers: list[int] = []
+
+    with MeasureSession(cfg) as run:
+        buffer = run.buffer((2, 2), dtype=np.float64)
+
+        for step in run.scan("freq", [10, 20]):
+            _extras(step.cfg)["marker"] = step.value
+
+            def measure_fn(ctx: TaskState, hook):
+                marker = _extras(ctx.cfg)["marker"]
+                seen_markers.append(marker)
+                return np.asarray([marker, marker + 1], dtype=np.float64)
+
+            buffer[:, step].measure(
+                measure_fn,
+                raw2signal_fn=lambda raw: raw,
+            )
+
+        assert seen_markers == [10, 20]
+        assert np.allclose(buffer.array, [[10.0, 20.0], [11.0, 21.0]])
+        assert _extras(run.cfg)["marker"] == "root"
+
+
+def test_buffer_at_advanced_indexing_fast_fails():
+    with MeasureSession(DictCfg()) as run:
+        buffer = run.buffer((2,), dtype=np.float64)
+
+        with pytest.raises(ValueError, match="writable view"):
+            buffer[[0, 1]]
+
+
 def test_scan_stop_short_circuits_later_steps():
     seen_values: list[int] = []
 
@@ -132,6 +166,27 @@ def test_scan_stop_short_circuits_later_steps():
             run.set_stop()
 
     assert seen_values == [1]
+
+
+def test_measure_session_uses_active_task_stop_flag_by_default():
+    stop_event = threading.Event()
+
+    with ActiveTask(stop_event) as handle:
+        handle.cancel()
+
+        with MeasureSession(DictCfg()) as run:
+            assert run.is_stop()
+
+
+def test_measure_session_explicit_stop_flag_overrides_active_task_scope():
+    active_stop_event = threading.Event()
+    explicit_stop_event = threading.Event()
+
+    with ActiveTask(active_stop_event) as handle:
+        handle.cancel()
+
+        with MeasureSession(DictCfg(), stop_flag=explicit_stop_event) as run:
+            assert not run.is_stop()
 
 
 def test_repeat_sets_repeat_idx_in_shared_env():

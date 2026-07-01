@@ -21,6 +21,7 @@ from numpy.typing import DTypeLike, NDArray
 from zcu_tools.progress_bar import make_pbar
 from zcu_tools.utils.func_tools import MinIntervalFunc, min_interval
 
+from .base import current_stop_flag
 from .repeat import run_with_retries
 from .state import T_Cfg, TaskState
 from .task import Task, default_raw2signal_fn
@@ -57,7 +58,13 @@ class MeasureSession(Generic[T_Cfg]):
         self._has_unnamed_root_buffer = False
         self._update_interval = update_interval
         self._on_update = min_interval(on_update, update_interval)
-        self._stop_flag = stop_flag if stop_flag is not None else threading.Event()
+        active_stop_flag = current_stop_flag()
+        if stop_flag is not None:
+            self._stop_flag = stop_flag
+        elif active_stop_flag is not None:
+            self._stop_flag = active_stop_flag
+        else:
+            self._stop_flag = threading.Event()
 
     def __enter__(self) -> MeasureSession[T_Cfg]:
         return self
@@ -533,6 +540,8 @@ def _writable_view(array: NDArray[Any], index: tuple[Any, ...]) -> NDArray[Any]:
 
     direct = array[index]
     if isinstance(direct, np.ndarray):
+        if not np.shares_memory(direct, array):
+            raise ValueError("MeasureSlot indexing must select a writable view")
         return direct
 
     scalar_index: list[slice] = []

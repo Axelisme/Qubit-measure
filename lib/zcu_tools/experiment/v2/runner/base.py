@@ -24,6 +24,10 @@ T_RootResult = TypeVar("T_RootResult", bound=Result)
 _current_stop_flag: threading.Event | None = None
 
 
+def current_stop_flag() -> threading.Event | None:
+    return _current_stop_flag
+
+
 class AbsTask(ABC, Generic[T_Result, T_RootResult, T_Cfg]):
     def init(self, dynamic_pbar: bool = False) -> None:
         """Initialize the task.
