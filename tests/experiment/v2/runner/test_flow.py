@@ -11,10 +11,6 @@ from zcu_tools.experiment.v2.runner import (
     StopSignal,
     schedule_stop_scope,
 )
-from zcu_tools.experiment.v2.runner.multi_executor import (
-    MeasurementContext,
-    context_signal_buffer,
-)
 from zcu_tools.program.v2 import Module, ProgramV2Cfg
 
 
@@ -230,19 +226,30 @@ def test_schedule_stop_scope_supplies_default_stop_signal() -> None:
         assert not sched.is_stop()
 
 
-def test_context_signal_buffer_syncs_root_data_without_throttling() -> None:
-    root = np.full((1,), np.nan)
-    ctx: MeasurementContext[np.ndarray, np.ndarray, FlowCfg] = MeasurementContext(
+def test_schedule_child_buffer_syncs_root_data_without_throttling() -> None:
+    root = {"task": {"signals": np.full((1,), np.nan)}}
+    updates: list[tuple[tuple[Any, ...], np.ndarray]] = []
+
+    def child(step):
+        signals_step = step.child("signals")
+        buffer = signals_step.buffer((1,), dtype=np.float64)
+        buffer.set(np.array([1.0]))
+        buffer.set(np.array([2.0]))
+
+    with Schedule(
+        _cfg(),
         root_data=root,
-        cfg=_cfg(),
-    )
-    buffer = context_signal_buffer(ctx, (1,), dtype=np.float64)
+        on_update=lambda step: updates.append(
+            (step.path, root["task"]["signals"].copy())
+        ),
+        update_interval=None,
+    ) as sched:
+        sched.batch({"task": child})
 
-    buffer.set(np.array([1.0]))
-    buffer.set(np.array([2.0]))
-
-    np.testing.assert_allclose(buffer.array, np.array([2.0]))
-    np.testing.assert_allclose(root, np.array([2.0]))
+    np.testing.assert_allclose(root["task"]["signals"], np.array([2.0]))
+    assert [path for path, _ in updates] == [("task", "signals"), ("task", "signals")]
+    np.testing.assert_allclose(updates[0][1], np.array([1.0]))
+    np.testing.assert_allclose(updates[1][1], np.array([2.0]))
 
 
 def test_program_builder_build_returns_program_with_isolated_cfg():
@@ -258,6 +265,7 @@ def test_program_builder_build_returns_program_with_isolated_cfg():
         )
         program = builder.build()
         assert isinstance(program, FakeProgram)
+        assert type(program.cfg_model) is FlowCfg
         program.cfg_model.reps = 99
         assert getattr(sched.cfg, "reps") == 5
 
@@ -279,6 +287,64 @@ def test_program_builder_build_returns_program_with_isolated_cfg():
 
     assert isinstance(fresh_program, FakeProgram)
     assert fresh_program.reps == 5
+
+
+def test_program_builder_projects_mapping_cfg_to_program_cfg() -> None:
+    FakeProgram.instances.clear()
+    init_cfg = {"reps": 3, "rounds": 4, "experiment_only": "ignored"}
+
+    with Schedule(init_cfg, SignalBuffer((1,), dtype=np.float64)) as sched:
+        program = (
+            sched.prog_builder("soc", "soccfg", program_cls=FakeProgram, marker="kw")
+            .add(FakeModule("readout"))
+            .build()
+        )
+
+    assert isinstance(program.cfg_model, ProgramV2Cfg)
+    assert type(program.cfg_model) is ProgramV2Cfg
+    assert program.reps == 3
+    assert program.rounds == 4
+    assert not hasattr(program.cfg_model, "experiment_only")
+
+
+def test_program_builder_rejects_cfg_without_program_fields() -> None:
+    with Schedule(
+        {"experiment_only": "ignored"},
+        SignalBuffer((1,), dtype=np.float64),
+    ) as sched:
+        builder = sched.prog_builder(
+            "soc", "soccfg", program_cls=FakeProgram, marker="kw"
+        ).add(FakeModule("readout"))
+        try:
+            builder.build()
+        except TypeError as exc:
+            assert "ProgramV2Cfg" in str(exc)
+        else:
+            raise AssertionError(
+                "ProgramBuilder should reject cfg without runtime fields"
+            )
+
+
+def test_program_builder_accepts_cfg_override() -> None:
+    FakeProgram.instances.clear()
+
+    with Schedule(
+        {"reps": 1, "rounds": 1}, SignalBuffer((1,), dtype=np.float64)
+    ) as sched:
+        program = (
+            sched.prog_builder(
+                "soc",
+                "soccfg",
+                cfg=_cfg(reps=8, rounds=9),
+                program_cls=FakeProgram,
+                marker="kw",
+            )
+            .add(FakeModule("readout"))
+            .build()
+        )
+
+    assert program.reps == 8
+    assert program.rounds == 9
 
 
 def test_build_and_acquire_builds_program_and_updates_buffer():
@@ -472,6 +538,29 @@ def test_schedule_operations_require_context():
         raise AssertionError("Schedule operations should require context manager")
 
 
+def test_schedule_step_data_operations_require_context() -> None:
+    root = {"child": {"signals": np.full((1,), np.nan)}}
+
+    with Schedule(_cfg(), root_data=root) as sched:
+        step = next(iter(sched.batch({"child": lambda child: child}).values()))
+        assert step.path == ("child",)
+
+    for operation in (
+        lambda: step.data,
+        lambda: step.set_data({"signals": np.array([1.0])}),
+        lambda: step.child("signals"),
+        step.trigger_update,
+    ):
+        try:
+            operation()
+        except RuntimeError as exc:
+            assert "with Schedule" in str(exc)
+        else:
+            raise AssertionError(
+                "ScheduleStep operations should require active context"
+            )
+
+
 def test_schedule_requires_explicit_modules():
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
@@ -640,6 +729,94 @@ def test_schedule_batch_string_key_default_program_target_has_clear_error():
             assert "SignalBuffer slot" in str(exc)
         else:
             raise AssertionError("batch string key default target should fail clearly")
+
+
+def test_schedule_batch_string_key_uses_child_local_default_buffer():
+    root = {"child": {"signals": np.full((1,), np.nan)}}
+
+    def child(step):
+        signals_step = step.child("signals")
+        signals_step.buffer((1,), dtype=np.float64)
+        setattr(signals_step.cfg, "value", 6.0)
+        signals_step.prog_builder(
+            "soc",
+            "soccfg",
+            program_cls=FakeScalarProgram,
+        ).add(FakeModule("readout")).build_and_acquire(
+            raw2signal_fn=_identity_array,
+        )
+
+    with Schedule(_cfg(rounds=1), root_data=root) as sched:
+        sched.batch({"child": child})
+
+    assert np.allclose(root["child"]["signals"], [6.0])
+
+
+def test_schedule_child_buffer_validates_target_before_acquire() -> None:
+    root = {
+        "child": {
+            "signals": np.full((2,), np.nan),
+            "metadata": {"value": 0},
+        }
+    }
+
+    def child(step):
+        signals_step = step.child("signals")
+        try:
+            signals_step.buffer((1,), dtype=np.float64)
+        except ValueError as exc:
+            assert "shape" in str(exc)
+        else:
+            raise AssertionError("buffer should reject shape mismatch")
+
+        metadata_step = step.child("metadata")
+        try:
+            metadata_step.buffer((1,), dtype=np.float64)
+        except ValueError as exc:
+            assert "NDArray" in str(exc)
+        else:
+            raise AssertionError("buffer should reject non-array targets")
+
+    with Schedule(_cfg(), root_data=root) as sched:
+        sched.batch({"child": child})
+
+
+def test_schedule_child_local_buffers_are_cleared_after_batch() -> None:
+    root = {"child": {"signals": np.full((1,), np.nan)}}
+
+    with Schedule(_cfg(), root_data=root) as sched:
+
+        def child(step):
+            signals_step = step.child("signals")
+            buffer = signals_step.buffer((1,), dtype=np.float64)
+            assert ("child", "signals") in sched._local_buffers
+            buffer.set(np.array([3.0]))
+
+        sched.batch({"child": child})
+        assert sched._local_buffers == {}
+
+    np.testing.assert_allclose(root["child"]["signals"], np.array([3.0]))
+
+
+def test_schedule_child_local_buffer_can_be_recreated_on_retry():
+    root = {"child": {"signals": np.full((1,), np.nan)}}
+    attempts = 0
+
+    def child(step):
+        nonlocal attempts
+        attempts += 1
+        signals_step = step.child("signals")
+        buffer = signals_step.buffer((1,), dtype=np.float64)
+        buffer.set(np.array([float(attempts)]))
+        if attempts == 1:
+            raise RuntimeError("temporary failure after buffer creation")
+        return attempts
+
+    with Schedule(_cfg(), root_data=root) as sched:
+        results = sched.batch({"child": child}, retry=1)
+
+    assert results == {"child": 2}
+    assert np.allclose(root["child"]["signals"], [2.0])
 
 
 def test_schedule_batch_does_not_retry_keyboard_interrupt():

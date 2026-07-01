@@ -114,7 +114,7 @@ tests/
 │           ├── test_registry.py
 │           └── test_util.py
 ├── experiment/v2/                  # Experiment runtime、persistence / analysis tests
-│   └── runner/                     # Schedule runtime 與尚未移除的 runner 狀態機測試
+│   └── runner/                     # Schedule runtime 與 executor root-data tests
 ├── analysis/
 │   └── fluxdep/                    # Flux-Dependence Analysis kernel tests
 ├── mcp/                            # MCP bridge、call-log、timeout policy、remote schema / ARRAY param regression tests

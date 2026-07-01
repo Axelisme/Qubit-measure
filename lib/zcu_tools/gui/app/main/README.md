@@ -102,8 +102,8 @@ Cancellation is operation-specific through the registered cancel hook. Run
 cancellation sets the operation `stop_event`; worker thunks expose it to
 Schedule-based experiments and executors through
 `schedule_stop_scope(StopSignal(stop_event))`, so `ProgramBuilder`,
-`Schedule.repeat/scan/batch`, and executor `MeasurementContext` observe Stop
-without a global task runner context.
+`Schedule.repeat/scan/batch`, and executor root schedules observe Stop without a
+global task runner context.
 
 ## Progress And Plotting
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Generic, TypeVar, cast
+from typing import Any, Generic, TypeVar, cast
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -14,11 +14,7 @@ from typing_extensions import (
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
-from zcu_tools.experiment.v2.runner import Schedule
-from zcu_tools.experiment.v2.runner.multi_executor import (
-    MeasurementContext,
-    context_signal_buffer,
-)
+from zcu_tools.experiment.v2.runner import ScheduleStep
 from zcu_tools.experiment.v2.singleshot.util import correct_populations
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, LivePlot2D
@@ -270,52 +266,45 @@ class T1Task(
 
     def run(
         self,
-        state: MeasurementContext[T1Result, T_RootResult, OvernightCfg],
+        state: ScheduleStep[OvernightCfg, Any],
     ) -> None:
         self.lengths = sweep2array(
             self.cfg.sweep.length, "time", {"soccfg": state.env["soccfg"]}
         )
-        pop_ctx = state.child_with_cfg(
-            "populations", self.cfg, child_type=NDArray[np.float64]
-        )
-        populations_buffer = context_signal_buffer(
-            pop_ctx, (2, len(self.lengths), 2), dtype=np.float64
-        )
-        with Schedule(
-            self.cfg, populations_buffer, env_dict=state.env, stop=state.stop
-        ) as sched:
-            cfg = sched.cfg
-            modules = cfg.modules
-            length_sweep = cfg.sweep.length
-            len_param = sweep2param("length", length_sweep)
+        populations_step = state.child("populations", cfg=self.cfg)
+        _ = populations_step.buffer((2, len(self.lengths), 2), dtype=np.float64)
+        cfg = populations_step.cfg
+        modules = cfg.modules
+        length_sweep = cfg.sweep.length
+        len_param = sweep2param("length", length_sweep)
 
-            _ = (
-                sched.prog_builder(state.env["soc"], state.env["soccfg"])
-                .add(
-                    Reset("reset", modules.reset),
-                    Branch(
-                        "ge",
-                        [],
-                        [
-                            Pulse("pi_pulse", modules.pi_pulse),
-                            Delay("t1_delay", delay=len_param),
-                        ],
-                    ),
-                    Readout("readout", modules.readout),
-                )
-                .declare_sweep("ge", 2)
-                .declare_sweep("length", length_sweep)
-                .build_and_acquire(
-                    raw2signal_fn=lambda raw: raw[0][0],
-                    **self.acquire_kwargs,
-                )
+        _ = (
+            populations_step.prog_builder(state.env["soc"], state.env["soccfg"])
+            .add(
+                Reset("reset", modules.reset),
+                Branch(
+                    "ge",
+                    [],
+                    [
+                        Pulse("pi_pulse", modules.pi_pulse),
+                        Delay("t1_delay", delay=len_param),
+                    ],
+                ),
+                Readout("readout", modules.readout),
             )
+            .declare_sweep("ge", 2)
+            .declare_sweep("length", length_sweep)
+            .build_and_acquire(
+                raw2signal_fn=lambda raw: raw[0][0],
+                **self.acquire_kwargs,
+            )
+        )
 
         with MinIntervalFunc.force_execute():
-            state.set_value(
+            state.set_data(
                 T1Result(
                     lengths=self.lengths,
-                    populations=state.value["populations"],
+                    populations=populations_step.array_data,
                 )
             )
 
@@ -367,53 +356,46 @@ class T1WithToneTask(
 
     def run(
         self,
-        state: MeasurementContext[T1Result, T_RootResult, OvernightCfg],
+        state: ScheduleStep[OvernightCfg, Any],
     ) -> None:
         self.lengths = sweep2array(
             self.cfg.sweep.length, "time", {"soccfg": state.env["soccfg"]}
         )
-        pop_ctx = state.child_with_cfg(
-            "populations", self.cfg, child_type=NDArray[np.float64]
-        )
-        populations_buffer = context_signal_buffer(
-            pop_ctx, (2, len(self.lengths), 2), dtype=np.float64
-        )
-        with Schedule(
-            self.cfg, populations_buffer, env_dict=state.env, stop=state.stop
-        ) as sched:
-            cfg = sched.cfg
-            modules = cfg.modules
-            length_sweep = cfg.sweep.length
-            length_param = sweep2param("length", length_sweep)
-            modules.probe_pulse.set_param("length", length_param)
+        populations_step = state.child("populations", cfg=self.cfg)
+        _ = populations_step.buffer((2, len(self.lengths), 2), dtype=np.float64)
+        cfg = populations_step.cfg
+        modules = cfg.modules
+        length_sweep = cfg.sweep.length
+        length_param = sweep2param("length", length_sweep)
+        modules.probe_pulse.set_param("length", length_param)
 
-            _ = (
-                sched.prog_builder(state.env["soc"], state.env["soccfg"])
-                .add(
-                    Reset("reset", modules.reset),
-                    Branch(
-                        "ge",
-                        Pulse("probe_pulse_g", modules.probe_pulse),
-                        [
-                            Pulse("pi_pulse", modules.pi_pulse),
-                            Pulse("probe_pulse", modules.probe_pulse),
-                        ],
-                    ),
-                    Readout("readout", modules.readout),
-                )
-                .declare_sweep("ge", 2)
-                .declare_sweep("length", length_sweep)
-                .build_and_acquire(
-                    raw2signal_fn=lambda raw: raw[0][0],
-                    **self.acquire_kwargs,
-                )
+        _ = (
+            populations_step.prog_builder(state.env["soc"], state.env["soccfg"])
+            .add(
+                Reset("reset", modules.reset),
+                Branch(
+                    "ge",
+                    Pulse("probe_pulse_g", modules.probe_pulse),
+                    [
+                        Pulse("pi_pulse", modules.pi_pulse),
+                        Pulse("probe_pulse", modules.probe_pulse),
+                    ],
+                ),
+                Readout("readout", modules.readout),
             )
+            .declare_sweep("ge", 2)
+            .declare_sweep("length", length_sweep)
+            .build_and_acquire(
+                raw2signal_fn=lambda raw: raw[0][0],
+                **self.acquire_kwargs,
+            )
+        )
 
         with MinIntervalFunc.force_execute():
-            state.set_value(
+            state.set_data(
                 T1Result(
                     lengths=self.lengths,
-                    populations=state.value["populations"],
+                    populations=populations_step.array_data,
                 )
             )
 

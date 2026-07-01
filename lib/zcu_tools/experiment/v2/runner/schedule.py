@@ -9,6 +9,7 @@ from collections.abc import (
     Iterable,
     Iterator,
     Mapping,
+    MutableMapping,
     Sequence,
     Sized,
 )
@@ -16,6 +17,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass
+from numbers import Number
 from typing import Any, Generic, Literal, Protocol, Self, TypeAlias, TypeVar, overload
 
 import numpy as np
@@ -36,7 +38,8 @@ from zcu_tools.program.v2 import (
 from zcu_tools.progress_bar import BaseProgressBar, make_pbar
 from zcu_tools.utils.func_tools import min_interval
 
-T_Cfg = TypeVar("T_Cfg", bound=ProgramV2Cfg)
+T_Cfg = TypeVar("T_Cfg")
+T_ChildCfg = TypeVar("T_ChildCfg")
 
 T_Raw = TypeVar("T_Raw")
 T_Value = TypeVar("T_Value")
@@ -180,10 +183,16 @@ class Schedule(Generic[T_Cfg]):
         *buffers: SignalBuffer,
         env_dict: dict[str, Any] | None = None,
         stop: StopSignal | None = None,
+        root_data: Any | None = None,
+        on_update: Callable[[ScheduleStep[Any, Any]], None] | None = None,
+        update_interval: float | None = 0.1,
     ) -> None:
         self.cfg = deepcopy(init_cfg)
         self.env = env_dict if env_dict is not None else {}
         self._buffers = list(buffers)
+        self._local_buffers: dict[tuple[Hashable, ...], SignalBuffer] = {}
+        self._explicit_root_data = root_data
+        self._throttled_update = min_interval(on_update, update_interval)
         self._is_active = False
         self._is_closed = False
         resolved_stop = stop if stop is not None else _current_stop_signal.get()
@@ -204,15 +213,27 @@ class Schedule(Generic[T_Cfg]):
 
     @property
     def root_data(self) -> Any:
+        if self._explicit_root_data is not None:
+            return self._explicit_root_data
         if len(self._buffers) == 1:
             return self._buffers[0].array
         return tuple(buffer.array for buffer in self._buffers)
+
+    @property
+    def data(self) -> Any:
+        return self._get_data(self)
 
     def register_buffer(self, *buffers: SignalBuffer) -> None:
         self._ensure_active()
         if not buffers:
             raise ValueError("register_buffer requires at least one SignalBuffer")
         self._buffers.extend(buffers)
+
+    def trigger_update(self) -> None:
+        self._trigger_update(self)
+
+    def set_data(self, value: Any) -> None:
+        self._set_data(self, value)
 
     @property
     def path(self) -> tuple[Hashable, ...]:
@@ -260,9 +281,10 @@ class Schedule(Generic[T_Cfg]):
         soc: object,
         soccfg: object,
         *,
+        cfg: object | None = None,
         program_cls: None = None,
         **program_kwargs: object,
-    ) -> ProgramBuilder[T_Cfg, ModularProgramV2]: ...
+    ) -> ProgramBuilder[ModularProgramV2]: ...
 
     @overload
     def prog_builder(
@@ -270,24 +292,27 @@ class Schedule(Generic[T_Cfg]):
         soc: object,
         soccfg: object,
         *,
+        cfg: object | None = None,
         program_cls: ProgramFactory[T_Program],
         **program_kwargs: object,
-    ) -> ProgramBuilder[T_Cfg, T_Program]: ...
+    ) -> ProgramBuilder[T_Program]: ...
 
     def prog_builder(
         self,
         soc: object,
         soccfg: object,
         *,
+        cfg: object | None = None,
         program_cls: ProgramFactory[T_Program] | None = None,
         **program_kwargs: object,
-    ) -> ProgramBuilder[T_Cfg, T_Program] | ProgramBuilder[T_Cfg, ModularProgramV2]:
+    ) -> ProgramBuilder[T_Program] | ProgramBuilder[ModularProgramV2]:
         self._ensure_active()
         if program_cls is None:
             return ProgramBuilder(
                 owner=self,
                 soc=soc,
                 soccfg=soccfg,
+                cfg=self.cfg if cfg is None else cfg,
                 program_cls=ModularProgramV2,
                 program_kwargs=program_kwargs,
             )
@@ -295,6 +320,7 @@ class Schedule(Generic[T_Cfg]):
             owner=self,
             soc=soc,
             soccfg=soccfg,
+            cfg=self.cfg if cfg is None else cfg,
             program_cls=program_cls,
             program_kwargs=program_kwargs,
         )
@@ -338,7 +364,10 @@ class Schedule(Generic[T_Cfg]):
                     cfg=deepcopy(parent.cfg),
                     path=parent.path + (index,),
                 )
-                yield value, step
+                try:
+                    yield value, step
+                finally:
+                    self._clear_local_buffers(step.path)
                 pbar.update()
         finally:
             pbar.close()
@@ -393,7 +422,10 @@ class Schedule(Generic[T_Cfg]):
                     cfg=deepcopy(parent.cfg),
                     path=parent.path + (index,),
                 )
-                yield index, step
+                try:
+                    yield index, step
+                finally:
+                    self._clear_local_buffers(step.path)
                 iter_pbar.update()
                 start_t = time.time()
         finally:
@@ -435,16 +467,20 @@ class Schedule(Generic[T_Cfg]):
                         cfg=deepcopy(parent.cfg),
                         path=parent.path + (key,),
                     )
+                    self._clear_local_buffers(step.path)
                     try:
                         result = child_fn(step)
                     except KeyboardInterrupt:
+                        self._clear_local_buffers(step.path)
                         self.set_stop()
                         break
                     except Exception:
+                        self._clear_local_buffers(step.path)
                         if attempt == retry:
                             raise
                         continue
 
+                    self._clear_local_buffers(step.path)
                     results[key] = result
                     completed = True
                     break
@@ -458,9 +494,94 @@ class Schedule(Generic[T_Cfg]):
 
         return results
 
+    def _get_data(self, owner: Schedule[Any] | ScheduleStep[Any, Any]) -> Any:
+        self._ensure_active()
+        target = self.root_data
+        path = owner.path
+        for depth, seg in enumerate(path):
+            if isinstance(target, Mapping):
+                target = target[seg]
+            elif isinstance(target, list):
+                if not isinstance(seg, int):
+                    raise ValueError(f"Expected int index for list, got {type(seg)}")
+                target = target[seg]
+            elif isinstance(target, np.ndarray):
+                return _writable_view(target, path[depth:])
+            else:
+                raise ValueError(
+                    f"Expected Mapping, list, or NDArray, got {type(target)}"
+                )
+        return target
+
+    def _set_data(
+        self, owner: Schedule[Any] | ScheduleStep[Any, Any], value: Any
+    ) -> None:
+        target = self._get_data(owner)
+        if isinstance(target, MutableMapping):
+            if not isinstance(value, Mapping):
+                raise ValueError(f"Expected Mapping, got {type(value)}")
+            target.update(value)
+        elif isinstance(target, list):
+            if not isinstance(value, list):
+                raise ValueError(f"Expected list, got {type(value)}")
+            target.clear()
+            target.extend(value)
+        elif isinstance(target, np.ndarray):
+            if isinstance(value, np.ndarray):
+                np.copyto(dst=target, src=value)
+            elif isinstance(value, Number):
+                np.copyto(dst=target, src=np.asarray(value))
+            else:
+                raise ValueError(f"Expected NDArray or number, got {type(value)}")
+        else:
+            raise ValueError(f"Expected Mapping, list, or NDArray, got {type(target)}")
+        self._trigger_update(owner)
+
+    def _register_local_buffer(
+        self, owner: Schedule[Any] | ScheduleStep[Any, Any], buffer: SignalBuffer
+    ) -> None:
+        self._ensure_active()
+        target = self._get_data(owner)
+        if not isinstance(target, np.ndarray):
+            raise ValueError(
+                "ScheduleStep.buffer target must point to an NDArray in root_data, "
+                f"got {type(target)} at path {owner.path}"
+            )
+        if target.shape != buffer.array.shape:
+            raise ValueError(
+                "ScheduleStep.buffer shape must match root_data target shape; "
+                f"target shape={target.shape}, buffer shape={buffer.array.shape}"
+            )
+        self._local_buffers[owner.path] = buffer
+
+    def _trigger_update(self, owner: Schedule[Any] | ScheduleStep[Any, Any]) -> None:
+        self._ensure_active()
+        if self._throttled_update is None:
+            return
+        if isinstance(owner, ScheduleStep):
+            step = owner
+        else:
+            step = ScheduleStep(
+                schedule=self,
+                name="root",
+                index=(),
+                value=None,
+                cfg=self.cfg,
+                path=(),
+            )
+        self._throttled_update(step)
+
+    def _clear_local_buffers(self, prefix: tuple[Hashable, ...]) -> None:
+        for path in list(self._local_buffers):
+            if path[: len(prefix)] == prefix:
+                self._local_buffers.pop(path, None)
+
     def _default_slot(
         self, owner: Schedule[T_Cfg] | ScheduleStep[T_Cfg, Any]
     ) -> SignalSlot:
+        self._ensure_active()
+        if owner.path in self._local_buffers:
+            return self._local_buffers[owner.path].at()
         if len(self._buffers) != 1:
             raise ValueError(
                 "Schedule default acquire target requires exactly one SignalBuffer"
@@ -486,11 +607,77 @@ class ScheduleStep(Generic[T_Cfg, T_Value]):
     def env(self) -> dict[str, Any]:
         return self.schedule.env
 
+    @property
+    def root_data(self) -> Any:
+        return self.schedule.root_data
+
+    @property
+    def data(self) -> Any:
+        return self.schedule._get_data(self)
+
+    @property
+    def array_data(self) -> NDArray[Any]:
+        data = self.data
+        if not isinstance(data, np.ndarray):
+            raise TypeError(
+                f"ScheduleStep.array_data requires NDArray data, got {type(data)}"
+            )
+        return data
+
+    @property
+    def stop(self) -> StopSignal:
+        return self.schedule.stop
+
     def is_stop(self) -> bool:
         return self.schedule.is_stop()
 
     def set_stop(self) -> None:
         self.schedule.set_stop()
+
+    def set_data(self, value: Any) -> None:
+        self.schedule._set_data(self, value)
+
+    def trigger_update(self) -> None:
+        self.schedule._trigger_update(self)
+
+    @overload
+    def child(
+        self, addr: Hashable, *, cfg: None = None
+    ) -> ScheduleStep[T_Cfg, Hashable]: ...
+
+    @overload
+    def child(
+        self, addr: Hashable, *, cfg: T_ChildCfg
+    ) -> ScheduleStep[T_ChildCfg, Hashable]: ...
+
+    def child(
+        self, addr: Hashable, *, cfg: object | None = None
+    ) -> ScheduleStep[Any, Hashable]:
+        self.schedule._ensure_active()
+        return ScheduleStep(
+            schedule=self.schedule,
+            name=str(addr),
+            index=addr,
+            value=addr,
+            cfg=deepcopy(self.cfg if cfg is None else cfg),
+            path=self.path + (addr,),
+        )
+
+    def buffer(
+        self,
+        shape: int | Sequence[int],
+        *,
+        dtype: DTypeLike = np.complex128,
+    ) -> SignalBuffer:
+        self.schedule._ensure_active()
+        buffer = SignalBuffer(
+            shape,
+            dtype=dtype,
+            on_update=lambda data: self.set_data(data),
+            update_interval=None,
+        )
+        self.schedule._register_local_buffer(self, buffer)
+        return buffer
 
     def scan(
         self, name: str, values: Iterable[T_NestedValue]
@@ -523,9 +710,10 @@ class ScheduleStep(Generic[T_Cfg, T_Value]):
         soc: object,
         soccfg: object,
         *,
+        cfg: object | None = None,
         program_cls: None = None,
         **program_kwargs: object,
-    ) -> ProgramBuilder[T_Cfg, ModularProgramV2]: ...
+    ) -> ProgramBuilder[ModularProgramV2]: ...
 
     @overload
     def prog_builder(
@@ -533,24 +721,27 @@ class ScheduleStep(Generic[T_Cfg, T_Value]):
         soc: object,
         soccfg: object,
         *,
+        cfg: object | None = None,
         program_cls: ProgramFactory[T_Program],
         **program_kwargs: object,
-    ) -> ProgramBuilder[T_Cfg, T_Program]: ...
+    ) -> ProgramBuilder[T_Program]: ...
 
     def prog_builder(
         self,
         soc: object,
         soccfg: object,
         *,
+        cfg: object | None = None,
         program_cls: ProgramFactory[T_Program] | None = None,
         **program_kwargs: object,
-    ) -> ProgramBuilder[T_Cfg, T_Program] | ProgramBuilder[T_Cfg, ModularProgramV2]:
+    ) -> ProgramBuilder[T_Program] | ProgramBuilder[ModularProgramV2]:
         self.schedule._ensure_active()
         if program_cls is None:
             return ProgramBuilder(
                 owner=self,
                 soc=soc,
                 soccfg=soccfg,
+                cfg=self.cfg if cfg is None else cfg,
                 program_cls=ModularProgramV2,
                 program_kwargs=program_kwargs,
             )
@@ -558,6 +749,7 @@ class ScheduleStep(Generic[T_Cfg, T_Value]):
             owner=self,
             soc=soc,
             soccfg=soccfg,
+            cfg=self.cfg if cfg is None else cfg,
             program_cls=program_cls,
             program_kwargs=program_kwargs,
         )
@@ -577,15 +769,16 @@ class ModuleFacade(ABC):
         return self.add(Readout(name, cfg))
 
 
-class ProgramBuilder(ModuleFacade, Generic[T_Cfg, T_Program]):
+class ProgramBuilder(ModuleFacade, Generic[T_Program]):
     """Build and acquire a single QICK program within a Schedule scope."""
 
     def __init__(
         self,
         *,
-        owner: Schedule[T_Cfg] | ScheduleStep[T_Cfg, Any],
+        owner: Schedule[Any] | ScheduleStep[Any, Any],
         soc: object,
         soccfg: object,
+        cfg: object,
         program_cls: ProgramFactory[T_Program],
         program_kwargs: dict[str, object],
     ) -> None:
@@ -593,6 +786,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Cfg, T_Program]):
         self._schedule = owner if isinstance(owner, Schedule) else owner.schedule
         self._soc = soc
         self._soccfg = soccfg
+        self._cfg = cfg
         self._program_cls = program_cls
         self._program_kwargs = dict(program_kwargs)
         self._modules: list[Module] = []
@@ -804,10 +998,10 @@ class ProgramBuilder(ModuleFacade, Generic[T_Cfg, T_Program]):
         if not self._modules:
             raise ValueError("ProgramBuilder requires explicit modules")
 
-    def _isolated_cfg(self) -> T_Cfg:
-        return deepcopy(self._owner.cfg)
+    def _isolated_cfg(self) -> ProgramV2Cfg:
+        return deepcopy(_program_cfg_from(self._cfg))
 
-    def _build_program(self, cfg: T_Cfg) -> T_Program:
+    def _build_program(self, cfg: ProgramV2Cfg) -> T_Program:
         program_kwargs = dict(self._program_kwargs)
         program_kwargs["modules"] = deepcopy(self._modules)
         return self._program_cls(
@@ -848,6 +1042,23 @@ class ProgramBuilder(ModuleFacade, Generic[T_Cfg, T_Program]):
 
     def _default_slot(self) -> SignalSlot:
         return self._schedule._default_slot(self._owner)
+
+
+def _program_cfg_from(cfg: object) -> ProgramV2Cfg:
+    if isinstance(cfg, ProgramV2Cfg):
+        return cfg
+    program_fields = ProgramV2Cfg.model_fields
+    if isinstance(cfg, Mapping):
+        data = {key: cfg[key] for key in program_fields if key in cfg}
+    else:
+        data = {key: getattr(cfg, key) for key in program_fields if hasattr(cfg, key)}
+    if not data:
+        raise TypeError(
+            "ProgramBuilder cfg must be ProgramV2Cfg or provide at least one "
+            "ProgramV2Cfg field; pass ProgramV2Cfg() for default program runtime "
+            "settings"
+        )
+    return ProgramV2Cfg.model_validate(data)
 
 
 def _make_nan_array(shape: int | Sequence[int], dtype: DTypeLike) -> NDArray[Any]:

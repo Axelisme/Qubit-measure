@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -12,11 +13,7 @@ from typing_extensions import (
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
-from zcu_tools.experiment.v2.runner import Schedule
-from zcu_tools.experiment.v2.runner.multi_executor import (
-    MeasurementContext,
-    context_signal_buffer,
-)
+from zcu_tools.experiment.v2.runner import ScheduleStep
 from zcu_tools.experiment.v2.utils import snr_checker, sweep2array
 from zcu_tools.liveplot import LivePlot1D, LivePlot2DwithLine
 from zcu_tools.meta_tool import ModuleLibrary
@@ -85,7 +82,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
         detune_sweep: SweepCfg,
         cfg_maker: Callable[
             [
-                MeasurementContext[QubitFreqResult, T_RootResult, FluxDepCfg],
+                ScheduleStep[FluxDepCfg, Any],
                 ModuleLibrary,
             ],
             QubitFreqCfgTemplate | None,
@@ -105,7 +102,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
 
     def run(
         self,
-        state: MeasurementContext[QubitFreqResult, T_RootResult, FluxDepCfg],
+        state: ScheduleStep[FluxDepCfg, Any],
     ) -> None:
         predictor: FluxoniumPredictor = state.env["predictor"]
         info: FluxDepInfoDict = state.env["info"]
@@ -141,41 +138,35 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
             {"soccfg": state.env["soccfg"], "gen_ch": modules.qub_pulse.ch},
         )
 
-        raw_ctx = state.child_with_cfg(
-            "raw_signals", cfg, child_type=NDArray[np.complex128]
-        )
-        signals_buffer = context_signal_buffer(raw_ctx, self.detune_sweep.expts)
-        with Schedule(
-            cfg, signals_buffer, env_dict=state.env, stop=state.stop
-        ) as sched:
-            cfg = sched.cfg
-            modules = cfg.modules
-            setup_devices(cfg, progress=False)
+        raw_step = state.child("raw_signals", cfg=cfg)
+        signals_buffer = raw_step.buffer(self.detune_sweep.expts)
+        cfg = raw_step.cfg
+        modules = cfg.modules
+        setup_devices(cfg, progress=False)
 
-            detune_sweep = cfg.sweep.detune
-            detune_param = sweep2param("detune", detune_sweep)
-            modules.qub_pulse.set_param("freq", modules.qub_pulse.freq + detune_param)
+        detune_sweep = cfg.sweep.detune
+        detune_param = sweep2param("detune", detune_sweep)
+        modules.qub_pulse.set_param("freq", modules.qub_pulse.freq + detune_param)
 
-            _ = (
-                sched.prog_builder(state.env["soc"], state.env["soccfg"])
-                .add_reset("reset", modules.reset)
-                .add_pulse("init_pulse", modules.init_pulse)
-                .add_pulse("qubit_pulse", modules.qub_pulse)
-                .add_readout("readout", modules.readout)
-                .declare_sweep("detune", detune_sweep)
-                .build_and_acquire(
-                    stop_checkers=[
-                        snr_checker(
-                            signals_buffer.at(),
-                            self.earlystop_snr,
-                            qubitfreq_signal2real,
-                        )
-                    ],
-                )
+        _ = (
+            raw_step.prog_builder(state.env["soc"], state.env["soccfg"])
+            .add_reset("reset", modules.reset)
+            .add_pulse("init_pulse", modules.init_pulse)
+            .add_pulse("qubit_pulse", modules.qub_pulse)
+            .add_readout("readout", modules.readout)
+            .declare_sweep("detune", detune_sweep)
+            .build_and_acquire(
+                stop_checkers=[
+                    snr_checker(
+                        signals_buffer.at(),
+                        self.earlystop_snr,
+                        qubitfreq_signal2real,
+                    )
+                ],
             )
+        )
 
-        raw_signals = state.value["raw_signals"]
-        assert isinstance(raw_signals, np.ndarray)
+        raw_signals = raw_step.array_data
 
         real_signals = qubitfreq_signal2real(raw_signals)
 
@@ -224,7 +215,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
             )
 
         with MinIntervalFunc.force_execute():
-            state.set_value(
+            state.set_data(
                 QubitFreqResult(
                     raw_signals=raw_signals,
                     predict_freq=np.array(center_freq),
@@ -279,7 +270,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
     def update_plotter(
         self,
         plotters,
-        ctx: MeasurementContext[NDArray[np.complex128], T_RootResult, FluxDepCfg],
+        ctx: ScheduleStep[Any, Any],
         signals: QubitFreqResult,
     ) -> None:
         flux_values = ctx.env["flux_values"]

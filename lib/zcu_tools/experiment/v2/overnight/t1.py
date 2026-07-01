@@ -13,11 +13,7 @@ from typing_extensions import (
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
-from zcu_tools.experiment.v2.runner import Schedule
-from zcu_tools.experiment.v2.runner.multi_executor import (
-    MeasurementContext,
-    context_signal_buffer,
-)
+from zcu_tools.experiment.v2.runner import ScheduleStep
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.program.v2 import (
@@ -211,42 +207,37 @@ class T1Task(
 
     def run(
         self,
-        state: MeasurementContext[T1Result, T_RootResult, OvernightCfg],
+        state: ScheduleStep[OvernightCfg, Any],
     ) -> None:
         self.lengths = sweep2array(
             self.lengths, "time", {"soccfg": state.env["soccfg"]}
         )
         self.last_cfg = self.cfg
 
-        signals_ctx = state.child_with_cfg(
-            "signals", self.cfg, child_type=NDArray[np.complex128]
-        )
-        signals_buffer = context_signal_buffer(signals_ctx, len(self.lengths))
-        with Schedule(
-            self.cfg, signals_buffer, env_dict=state.env, stop=state.stop
-        ) as sched:
-            cfg = sched.cfg
-            modules = cfg.modules
-            length_sweep = cfg.sweep.length
-            length_param = sweep2param("length", length_sweep)
+        signals_step = state.child("signals", cfg=self.cfg)
+        _ = signals_step.buffer(len(self.lengths))
+        cfg = signals_step.cfg
+        modules = cfg.modules
+        length_sweep = cfg.sweep.length
+        length_param = sweep2param("length", length_sweep)
 
-            _ = (
-                sched.prog_builder(state.env["soc"], state.env["soccfg"])
-                .add(
-                    Reset("reset", modules.reset),
-                    Pulse("pi_pulse", modules.pi_pulse),
-                    Delay("t1_delay", delay=length_param),
-                    Readout("readout", modules.readout),
-                )
-                .declare_sweep("length", length_sweep)
-                .build_and_acquire(**self.acquire_kwargs)
+        _ = (
+            signals_step.prog_builder(state.env["soc"], state.env["soccfg"])
+            .add(
+                Reset("reset", modules.reset),
+                Pulse("pi_pulse", modules.pi_pulse),
+                Delay("t1_delay", delay=length_param),
+                Readout("readout", modules.readout),
             )
+            .declare_sweep("length", length_sweep)
+            .build_and_acquire(**self.acquire_kwargs)
+        )
 
         with MinIntervalFunc.force_execute():
-            state.set_value(
+            state.set_data(
                 T1Result(
                     lengths=self.lengths,
-                    signals=state.value["signals"],
+                    signals=signals_step.array_data,
                 )
             )
 
@@ -294,7 +285,7 @@ class T1WithToneTask(
 
     def run(
         self,
-        state: MeasurementContext[T1Result, T_RootResult, OvernightCfg],
+        state: ScheduleStep[OvernightCfg, Any],
     ) -> None:
         self.lengths = sweep2array(
             self.lengths,
@@ -306,35 +297,30 @@ class T1WithToneTask(
         )
         self.last_cfg = self.cfg
 
-        signals_ctx = state.child_with_cfg(
-            "signals", self.cfg, child_type=NDArray[np.complex128]
-        )
-        signals_buffer = context_signal_buffer(signals_ctx, len(self.lengths))
-        with Schedule(
-            self.cfg, signals_buffer, env_dict=state.env, stop=state.stop
-        ) as sched:
-            cfg = sched.cfg
-            modules = cfg.modules
-            length_sweep = cfg.sweep.length
-            length_param = sweep2param("length", length_sweep)
-            modules.probe_pulse.set_param("length", length_param)
+        signals_step = state.child("signals", cfg=self.cfg)
+        _ = signals_step.buffer(len(self.lengths))
+        cfg = signals_step.cfg
+        modules = cfg.modules
+        length_sweep = cfg.sweep.length
+        length_param = sweep2param("length", length_sweep)
+        modules.probe_pulse.set_param("length", length_param)
 
-            _ = (
-                sched.prog_builder(state.env["soc"], state.env["soccfg"])
-                .add(
-                    Reset("reset", modules.reset),
-                    Pulse("pi_pulse", modules.pi_pulse),
-                    Pulse("probe_pulse", modules.probe_pulse),
-                    Readout("readout", modules.readout),
-                )
-                .declare_sweep("length", length_sweep)
-                .build_and_acquire(**self.acquire_kwargs)
+        _ = (
+            signals_step.prog_builder(state.env["soc"], state.env["soccfg"])
+            .add(
+                Reset("reset", modules.reset),
+                Pulse("pi_pulse", modules.pi_pulse),
+                Pulse("probe_pulse", modules.probe_pulse),
+                Readout("readout", modules.readout),
             )
+            .declare_sweep("length", length_sweep)
+            .build_and_acquire(**self.acquire_kwargs)
+        )
 
-        state.set_value(
+        state.set_data(
             T1Result(
                 lengths=self.lengths,
-                signals=state.value["signals"],
+                signals=signals_step.array_data,
             )
         )
 

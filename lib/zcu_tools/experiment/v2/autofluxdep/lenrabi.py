@@ -14,11 +14,7 @@ from typing_extensions import (
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
-from zcu_tools.experiment.v2.runner import Schedule
-from zcu_tools.experiment.v2.runner.multi_executor import (
-    MeasurementContext,
-    context_signal_buffer,
-)
+from zcu_tools.experiment.v2.runner import ScheduleStep
 from zcu_tools.experiment.v2.utils import snr_checker, sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.meta_tool import ModuleLibrary
@@ -126,7 +122,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
         self,
         num_expts: int,
         cfg_maker: Callable[
-            [MeasurementContext[LenRabiResult, Any, FluxDepCfg], ModuleLibrary],
+            [ScheduleStep[FluxDepCfg, Any], ModuleLibrary],
             LenRabiCfgTemplate | None,
         ],
         earlystop_snr: float | None = None,
@@ -143,7 +139,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
 
     def run(
         self,
-        state: MeasurementContext[LenRabiResult, Any, FluxDepCfg],
+        state: ScheduleStep[FluxDepCfg, Any],
     ) -> None:
         cfg_temp = self.cfg_maker(state, state.env["ml"])
         if cfg_temp is None:
@@ -162,38 +158,34 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
         self.last_cfg = cfg
 
         rabi_pulse = cfg.modules.rabi_pulse
-        raw_ctx = state.child_with_cfg(
-            "raw_signals", cfg, child_type=NDArray[np.complex128]
-        )
-        signals_buffer = context_signal_buffer(raw_ctx, self.num_expts)
-        with Schedule(
-            cfg, signals_buffer, env_dict=state.env, stop=state.stop
-        ) as sched:
-            cfg = sched.cfg
-            modules = cfg.modules
-            setup_devices(cfg, progress=False)
+        raw_step = state.child("raw_signals", cfg=cfg)
+        signals_buffer = raw_step.buffer(self.num_expts)
+        cfg = raw_step.cfg
+        modules = cfg.modules
+        setup_devices(cfg, progress=False)
 
-            len_sweep = cfg.sweep.length
-            modules.rabi_pulse.set_param("length", sweep2param("length", len_sweep))
+        len_sweep = cfg.sweep.length
+        modules.rabi_pulse.set_param("length", sweep2param("length", len_sweep))
 
-            _ = (
-                sched.prog_builder(state.env["soc"], state.env["soccfg"])
-                .add_reset("reset", modules.reset)
-                .add_pulse("rabi_pulse", modules.rabi_pulse)
-                .add_readout("readout", modules.readout)
-                .declare_sweep("length", len_sweep)
-                .build_and_acquire(
-                    stop_checkers=[
-                        snr_checker(
-                            signals_buffer.at(),
-                            self.earlystop_snr,
-                            lenrabi_signal2real,
-                        )
-                    ],
-                )
+        _ = (
+            raw_step.prog_builder(state.env["soc"], state.env["soccfg"])
+            .add_reset("reset", modules.reset)
+            .add_pulse("rabi_pulse", modules.rabi_pulse)
+            .add_readout("readout", modules.readout)
+            .declare_sweep("length", len_sweep)
+            .build_and_acquire(
+                stop_checkers=[
+                    snr_checker(
+                        signals_buffer.at(),
+                        self.earlystop_snr,
+                        lenrabi_signal2real,
+                    )
+                ],
             )
+        )
 
-        real_signals = lenrabi_signal2real(state.value["raw_signals"])
+        raw_signals = raw_step.array_data
+        real_signals = lenrabi_signal2real(raw_signals)
 
         self.lengths = sweep2array(
             len_sweep, "time", {"soccfg": state.env["soccfg"], "gen_ch": rabi_pulse.ch}
@@ -234,9 +226,9 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
             info["lenrabi_success_idx"] = info["flux_idx"]
 
         with MinIntervalFunc.force_execute():
-            state.set_value(
+            state.set_data(
                 LenRabiResult(
-                    raw_signals=state.value["raw_signals"],
+                    raw_signals=raw_signals,
                     length=self.lengths.copy(),
                     pi_length=np.array(pi_len),
                     pi2_length=np.array(pi2_len),
@@ -277,7 +269,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
     def update_plotter(
         self,
         plotters,
-        ctx: MeasurementContext[NDArray[np.complex128], Any, FluxDepCfg],
+        ctx: ScheduleStep[Any, Any],
         signals,
     ) -> None:
         flux_values = ctx.env["flux_values"]

@@ -16,13 +16,13 @@ from pydantic import Field
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, setup_devices
-from zcu_tools.experiment.v2.runner.multi_executor import (
-    MeasurementContext,
+from zcu_tools.experiment.v2.runner import (
     MultiMeasurementExecutor,
+    Schedule,
+    ScheduleStep,
 )
 from zcu_tools.experiment.v2.utils import Result, merge_result_list
 from zcu_tools.liveplot import AbsLivePlot
-from zcu_tools.progress_bar import make_pbar
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 
 T_PlotDict = TypeVar("T_PlotDict", bound=Mapping[str, AbsLivePlot])
@@ -45,9 +45,7 @@ class MeasurementTask(
     def init(self, dynamic_pbar: bool = False) -> None: ...
 
     @abstractmethod
-    def run(
-        self, state: MeasurementContext[T_Result, T_RootResult, FluxDepCfg]
-    ) -> None: ...
+    def run(self, state: ScheduleStep[FluxDepCfg, Any]) -> None: ...
 
     def cleanup(self) -> None: ...
 
@@ -64,7 +62,7 @@ class MeasurementTask(
     def update_plotter(
         self,
         plotters: T_PlotDict,
-        ctx: MeasurementContext[Any, Any, Any],
+        ctx: ScheduleStep[Any, Any],
         signals: T_Result,
     ) -> None: ...
 
@@ -131,9 +129,7 @@ class FluxDepExecutor(MultiMeasurementExecutor[MeasurementTask, FluxDepCfg]):
 
         def update_flux_context(
             i: int,
-            ctx: MeasurementContext[
-                dict[str, Result], list[dict[str, Result]], FluxDepCfg
-            ],
+            ctx: ScheduleStep[FluxDepCfg, Any],
             flux: float,
         ) -> None:
             info: FluxDepInfoDict = ctx.env["info"]
@@ -156,31 +152,12 @@ class FluxDepExecutor(MultiMeasurementExecutor[MeasurementTask, FluxDepCfg]):
             self._default_batch_result() for _ in range(len(self.flux_values))
         ]
 
-        def run_loop(
-            root_ctx: MeasurementContext[
-                list[dict[str, Result]], list[dict[str, Result]], FluxDepCfg
-            ],
-        ) -> None:
-            pbar = make_pbar(
-                total=len(self.flux_values), smoothing=0, desc="flux", leave=True
-            )
-            try:
-                for i, flux in enumerate(self.flux_values.tolist()):
-                    if root_ctx.is_stop():
-                        break
-                    flux_ctx = root_ctx.child(i)
-                    update_flux_context(i, flux_ctx, flux)
-
-                    for name, measurement in self.measurements.items():
-                        if root_ctx.is_stop():
-                            break
-                        measurement_ctx = flux_ctx.child(name)
-                        self._run_measurement_with_retries(
-                            measurement, measurement_ctx, retry_time
-                        )
-                    pbar.update()
-            finally:
-                pbar.close()
+        def run_loop(root_sched: Schedule[FluxDepCfg]) -> None:
+            for i, (flux, flux_step) in enumerate(
+                root_sched.scan("flux", self.flux_values)
+            ):
+                update_flux_context(i, flux_step, flux)
+                self._run_measurement_batch(flux_step, retry_time)
 
         results = self._run_with_plotting(init_result, cfg, env_dict, run_loop)
 

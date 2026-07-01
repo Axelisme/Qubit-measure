@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from copy import deepcopy
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -14,11 +15,7 @@ from typing_extensions import (
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
-from zcu_tools.experiment.v2.runner import Schedule
-from zcu_tools.experiment.v2.runner.multi_executor import (
-    MeasurementContext,
-    context_signal_buffer,
-)
+from zcu_tools.experiment.v2.runner import ScheduleStep
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.liveplot import LivePlot2D
@@ -93,7 +90,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
         freq_expts: int,
         gain_expts: int,
         cfg_maker: Callable[
-            [MeasurementContext[RO_OptResult, T_RootResult, FluxDepCfg], ModuleLibrary],
+            [ScheduleStep[FluxDepCfg, Any], ModuleLibrary],
             RO_OptCfgTemplate | None,
         ],
     ) -> None:
@@ -111,7 +108,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
 
     def run(
         self,
-        state: MeasurementContext[RO_OptResult, T_RootResult, FluxDepCfg],
+        state: ScheduleStep[FluxDepCfg, Any],
     ) -> None:
         info: FluxDepInfoDict = state.env["info"]
 
@@ -153,47 +150,37 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
             },
         )
 
-        raw_ctx = state.child_with_cfg(
-            "raw_signals", cfg, child_type=NDArray[np.float64]
-        )
-        signals_buffer = context_signal_buffer(
-            raw_ctx, (self.freq_expts, self.gain_expts), dtype=np.float64
-        )
-        with Schedule(
-            cfg, signals_buffer, env_dict=state.env, stop=state.stop
-        ) as sched:
-            cfg = sched.cfg
-            modules = cfg.modules
-            setup_devices(cfg, progress=False)
+        raw_step = state.child("raw_signals", cfg=cfg)
+        _ = raw_step.buffer((self.freq_expts, self.gain_expts), dtype=np.float64)
+        cfg = raw_step.cfg
+        modules = cfg.modules
+        setup_devices(cfg, progress=False)
 
-            freq_sweep = cfg.sweep.freq
-            gain_sweep = cfg.sweep.gain
+        freq_sweep = cfg.sweep.freq
+        gain_sweep = cfg.sweep.gain
 
-            modules.readout.set_param("freq", sweep2param("freq", freq_sweep))
-            modules.readout.set_param("gain", sweep2param("gain", gain_sweep))
+        modules.readout.set_param("freq", sweep2param("freq", freq_sweep))
+        modules.readout.set_param("gain", sweep2param("gain", gain_sweep))
 
-            tracker = MomentTracker()
+        tracker = MomentTracker()
 
-            def tracker_signal(_raw) -> NDArray[np.float64]:
-                return snr_as_signal(
-                    [tracker], ge_axis=0, skew_penalty=self.skew_penalty
-                )
+        def tracker_signal(_raw) -> NDArray[np.float64]:
+            return snr_as_signal([tracker], ge_axis=0, skew_penalty=self.skew_penalty)
 
-            _ = (
-                sched.prog_builder(state.env["soc"], state.env["soccfg"])
-                .add(
-                    Reset("reset", modules.reset),
-                    Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
-                    PulseReadout("readout", modules.readout),
-                )
-                .declare_sweep("ge", 2)
-                .declare_sweep("freq", freq_sweep)
-                .declare_sweep("gain", gain_sweep)
-                .build_and_acquire(raw2signal_fn=tracker_signal, trackers=[tracker])
+        _ = (
+            raw_step.prog_builder(state.env["soc"], state.env["soccfg"])
+            .add(
+                Reset("reset", modules.reset),
+                Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
+                PulseReadout("readout", modules.readout),
             )
+            .declare_sweep("ge", 2)
+            .declare_sweep("freq", freq_sweep)
+            .declare_sweep("gain", gain_sweep)
+            .build_and_acquire(raw2signal_fn=tracker_signal, trackers=[tracker])
+        )
 
-        raw_signals = state.value["raw_signals"]
-        assert isinstance(raw_signals, np.ndarray)
+        raw_signals = raw_step.array_data
 
         real_signals = ro_opt_signal2real(raw_signals)
 
@@ -212,7 +199,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
         info["opt_readout"] = readout_cfg
 
         with MinIntervalFunc.force_execute():
-            state.set_value(
+            state.set_data(
                 RO_OptResult(
                     raw_signals=raw_signals,
                     freqs=self.freqs,
@@ -255,7 +242,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
     def update_plotter(
         self,
         plotters,
-        ctx: MeasurementContext[NDArray[np.float64], T_RootResult, FluxDepCfg],
+        ctx: ScheduleStep[Any, Any],
         signals: RO_OptResult,
     ) -> None:
         info: FluxDepInfoDict = ctx.env["info"]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -12,11 +13,7 @@ from typing_extensions import (
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
-from zcu_tools.experiment.v2.runner import Schedule
-from zcu_tools.experiment.v2.runner.multi_executor import (
-    MeasurementContext,
-    context_signal_buffer,
-)
+from zcu_tools.experiment.v2.runner import ScheduleStep
 from zcu_tools.experiment.v2.utils import snr_checker, sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.meta_tool import ModuleLibrary
@@ -102,7 +99,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
         self,
         num_expts: int,
         cfg_maker: Callable[
-            [MeasurementContext[T1Result, T_RootResult, FluxDepCfg], ModuleLibrary],
+            [ScheduleStep[FluxDepCfg, Any], ModuleLibrary],
             T1CfgTemplate | None,
         ],
         earlystop_snr: float | None = None,
@@ -119,7 +116,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
 
     def run(
         self,
-        state: MeasurementContext[T1Result, T_RootResult, FluxDepCfg],
+        state: ScheduleStep[FluxDepCfg, Any],
     ) -> None:
         info: FluxDepInfoDict = state.env["info"]
 
@@ -142,40 +139,32 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
 
         self.last_cfg = cfg
 
-        raw_ctx = state.child_with_cfg(
-            "raw_signals", cfg, child_type=NDArray[np.complex128]
-        )
-        signals_buffer = context_signal_buffer(raw_ctx, self.num_expts)
-        with Schedule(
-            cfg, signals_buffer, env_dict=state.env, stop=state.stop
-        ) as sched:
-            cfg = sched.cfg
-            modules = cfg.modules
-            setup_devices(cfg, progress=False)
+        raw_step = state.child("raw_signals", cfg=cfg)
+        signals_buffer = raw_step.buffer(self.num_expts)
+        cfg = raw_step.cfg
+        modules = cfg.modules
+        setup_devices(cfg, progress=False)
 
-            length_sweep = cfg.sweep.length
-            length_param = sweep2param("length", length_sweep)
+        length_sweep = cfg.sweep.length
+        length_param = sweep2param("length", length_sweep)
 
-            _ = (
-                sched.prog_builder(state.env["soc"], state.env["soccfg"])
-                .add(
-                    Reset("reset", modules.reset),
-                    Pulse("pi_pulse", modules.pi_pulse),
-                    Delay("t1_delay", delay=length_param),
-                    Readout("readout", modules.readout),
-                )
-                .declare_sweep("length", length_sweep)
-                .build_and_acquire(
-                    stop_checkers=[
-                        snr_checker(
-                            signals_buffer.at(), self.earlystop_snr, t1_signal2real
-                        )
-                    ],
-                )
+        _ = (
+            raw_step.prog_builder(state.env["soc"], state.env["soccfg"])
+            .add(
+                Reset("reset", modules.reset),
+                Pulse("pi_pulse", modules.pi_pulse),
+                Delay("t1_delay", delay=length_param),
+                Readout("readout", modules.readout),
             )
+            .declare_sweep("length", length_sweep)
+            .build_and_acquire(
+                stop_checkers=[
+                    snr_checker(signals_buffer.at(), self.earlystop_snr, t1_signal2real)
+                ],
+            )
+        )
 
-        raw_signals = state.value["raw_signals"]
-        assert isinstance(raw_signals, np.ndarray)
+        raw_signals = raw_step.array_data
 
         real_signals = t1_signal2real(raw_signals)
 
@@ -192,7 +181,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
             info["smooth_t1"] = 0.5 * (info.last.get("smooth_t1", t1) + t1)
 
         with MinIntervalFunc.force_execute():
-            state.set_value(
+            state.set_data(
                 T1Result(
                     raw_signals=raw_signals,
                     length=self.lengths.copy(),
@@ -238,7 +227,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
     def update_plotter(
         self,
         plotters,
-        ctx: MeasurementContext[NDArray[np.complex128], T_RootResult, FluxDepCfg],
+        ctx: ScheduleStep[Any, Any],
         signals: T1Result,
     ) -> None:
         flux_values = ctx.env["flux_values"]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -12,11 +13,7 @@ from typing_extensions import (
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
-from zcu_tools.experiment.v2.runner import Schedule
-from zcu_tools.experiment.v2.runner.multi_executor import (
-    MeasurementContext,
-    context_signal_buffer,
-)
+from zcu_tools.experiment.v2.runner import ScheduleStep
 from zcu_tools.experiment.v2.utils import snr_checker, sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.meta_tool import ModuleLibrary
@@ -105,7 +102,7 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotDic
         detune_ratio: float,
         cfg_maker: Callable[
             [
-                MeasurementContext[T2RamseyResult, T_RootResult, FluxDepCfg],
+                ScheduleStep[FluxDepCfg, Any],
                 ModuleLibrary,
             ],
             T2RamseyCfgTemplate | None,
@@ -125,7 +122,7 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotDic
 
     def run(
         self,
-        state: MeasurementContext[T2RamseyResult, T_RootResult, FluxDepCfg],
+        state: ScheduleStep[FluxDepCfg, Any],
     ) -> None:
         info: FluxDepInfoDict = state.env["info"]
 
@@ -148,49 +145,43 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotDic
         cfg = T2RamseyCfg.model_validate(cfg)
         self.last_cfg = cfg
 
-        raw_ctx = state.child_with_cfg(
-            "raw_signals", cfg, child_type=NDArray[np.complex128]
-        )
-        signals_buffer = context_signal_buffer(raw_ctx, self.num_expts)
-        with Schedule(
-            cfg, signals_buffer, env_dict=state.env, stop=state.stop
-        ) as sched:
-            cfg = sched.cfg
-            modules = cfg.modules
-            setup_devices(cfg, progress=False)
+        raw_step = state.child("raw_signals", cfg=cfg)
+        signals_buffer = raw_step.buffer(self.num_expts)
+        cfg = raw_step.cfg
+        modules = cfg.modules
+        setup_devices(cfg, progress=False)
 
-            detune = cfg.activate_detune
-            length_sweep = cfg.sweep.length
-            length_param = sweep2param("length", length_sweep)
+        detune = cfg.activate_detune
+        length_sweep = cfg.sweep.length
+        length_param = sweep2param("length", length_sweep)
 
-            _ = (
-                sched.prog_builder(state.env["soc"], state.env["soccfg"])
-                .add(
-                    Reset("reset", modules.reset),
-                    Pulse("pi2_pulse1", modules.pi2_pulse),
-                    Delay("t2r_delay", delay=length_param),
-                    Pulse(
-                        name="pi2_pulse2",
-                        cfg=modules.pi2_pulse.with_updates(
-                            phase=modules.pi2_pulse.phase + 360 * detune * length_param
-                        ),
+        _ = (
+            raw_step.prog_builder(state.env["soc"], state.env["soccfg"])
+            .add(
+                Reset("reset", modules.reset),
+                Pulse("pi2_pulse1", modules.pi2_pulse),
+                Delay("t2r_delay", delay=length_param),
+                Pulse(
+                    name="pi2_pulse2",
+                    cfg=modules.pi2_pulse.with_updates(
+                        phase=modules.pi2_pulse.phase + 360 * detune * length_param
                     ),
-                    Readout("readout", modules.readout),
-                )
-                .declare_sweep("length", length_sweep)
-                .build_and_acquire(
-                    stop_checkers=[
-                        snr_checker(
-                            signals_buffer.at(),
-                            self.earlystop_snr,
-                            t2ramsey_signal2real,
-                        )
-                    ],
-                )
+                ),
+                Readout("readout", modules.readout),
             )
+            .declare_sweep("length", length_sweep)
+            .build_and_acquire(
+                stop_checkers=[
+                    snr_checker(
+                        signals_buffer.at(),
+                        self.earlystop_snr,
+                        t2ramsey_signal2real,
+                    )
+                ],
+            )
+        )
 
-        raw_signals = state.value["raw_signals"]
-        assert isinstance(raw_signals, np.ndarray)
+        raw_signals = raw_step.array_data
 
         real_signals = t2ramsey_signal2real(raw_signals)
 
@@ -214,7 +205,7 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotDic
             info["smooth_t2r"] = 0.5 * (info.last.get("smooth_t2r", t2r) + t2r)
 
         with MinIntervalFunc.force_execute():
-            state.set_value(
+            state.set_data(
                 T2RamseyResult(
                     raw_signals=raw_signals,
                     length=self.lengths.copy(),
@@ -264,7 +255,7 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotDic
     def update_plotter(
         self,
         plotters,
-        ctx: MeasurementContext[NDArray[np.complex128], T_RootResult, FluxDepCfg],
+        ctx: ScheduleStep[Any, Any],
         signals: T2RamseyResult,
     ) -> None:
         flux_values = ctx.env["flux_values"]

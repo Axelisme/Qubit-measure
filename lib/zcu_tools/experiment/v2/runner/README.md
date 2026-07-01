@@ -1,11 +1,12 @@
 # `zcu_tools.experiment.v2.runner` — experiment runtime
 
-**Last updated:** 2026-07-02 — Schedule-only runtime
+**Last updated:** 2026-07-02 — unified Schedule executor runtime
 
 `runner/` 提供 experiment/v2 的 Python-like acquisition runtime。一般實驗用
 `SignalBuffer` / `Schedule` / `ProgramBuilder` 編排 host-side loop 與 program
-acquire；executor 類流程用 `MultiMeasurementExecutor` / `MeasurementContext` 共用
-liveplot、retry 與 stop scaffold。舊 Task tree runtime 不再保留。
+acquire；executor 類流程也用同一個 `Schedule` 持有 root result tree，並用
+`MultiMeasurementExecutor` 共用 liveplot、retry 與 measurement lifecycle。舊 Task tree
+runtime 不再保留。
 
 ---
 
@@ -45,6 +46,9 @@ with Schedule(cfg, signals_buffer) as sched:
     )
 ```
 
+- `Schedule` 的 cfg 是泛型，可以是 experiment cfg；`ProgramBuilder` 只會把 builder
+  cfg 投影成 `ProgramV2Cfg` 給 program。若 cfg 已是 `ProgramV2Cfg` instance/subclass
+  則保留原型別；若 mapping/object 沒有任何 `ProgramV2Cfg` 欄位，builder 會 fast-fail。
 - `sched.scan(...)` / `step.scan(...)` 表示 host-side Python loop。
 - `sched.repeat(name, times, interval)` 表示 host-side repeat；等待期間會檢查
   `StopSignal`，需要刷新 liveplot 時由 caller 呼叫相關 buffer 的 `trigger_update()`。
@@ -52,6 +56,12 @@ with Schedule(cfg, signals_buffer) as sched:
   per-child，child 取得獨立 deepcopy cfg 與共享 env。
 - `ScheduleStep.path` 會累積巢狀 host loop index，所以預設 single-buffer acquire 可
   依 owner path 自動寫入對應 slot，不需要 `into=` 參數。
+- `Schedule(root_data=..., on_update=...)` 可持有 executor result tree；
+  `step.child("field", cfg=program_cfg).buffer(shape)` 會建立 child-local default
+  `SignalBuffer`，buffer 寫入時同步回 `root_data` 並觸發 update。
+- `ScheduleStep.value` 是 scan/repeat/batch 的 control-flow coordinate；result tree 由
+  `step.data` 讀取、`step.set_data(...)` 寫入，需要 ndarray slot 時用 `step.array_data`
+  做型別邊界。
 
 ### `ProgramBuilder`
 
@@ -64,6 +74,10 @@ with Schedule(cfg, signals_buffer) as sched:
   `build_and_acquire_decimated()`。
 - `build_and_acquire(...)` / `run_program(...)` 不接受 `reps` / `rounds`；builder
   建出的 program 讀取 cfg-owned `program.cfg_model.reps` / `rounds`。
+- `prog_builder(..., cfg=...)` 可覆寫 program cfg；未指定時繼承 owner cfg。若 cfg 已是
+  `ProgramV2Cfg` instance 則原樣 deepcopy；若是 mapping / object，builder 只抽取
+  `ProgramV2Cfg` 定義的 runtime 欄位；沒有 runtime 欄位時會要求 caller 明確傳入
+  `ProgramV2Cfg()` 或有效 program cfg。
 - `set_raw2signal_fn(...)` 或 acquire 方法的 `raw2signal_fn=...` 可覆寫 raw
   conversion；integrated acquire 預設使用 `default_raw2signal_fn`，decimated acquire
   預設使用 `default_decimated_raw2signal_fn`。
@@ -74,29 +88,37 @@ with Schedule(cfg, signals_buffer) as sched:
 ## Executor Scaffold
 
 `MultiMeasurementExecutor` 服務 `autofluxdep` / `overnight` 這類外層 workflow：
-它負責 combined liveplot layout、FFmpeg animation、root `MeasurementContext` 建立、
-measurement init/cleanup，以及 per-measurement retry helper。
+它負責 combined liveplot layout、FFmpeg animation、measurement init/cleanup，以及
+per-measurement retry helper；root result tree、path、env、stop 與 update callback 則由
+`Schedule` 持有。
 
-`MeasurementContext` 是 executor-local context，語意接近 `Schedule`：
+典型 executor 格式：
 
-- `root_data` 指向整個結果樹。
-- `path` 定位目前 measurement 的結果節點。
-- `cfg` 在 child context 中 deepcopy 隔離。
-- `env` 是 executor run 內共享 mutable dict。
-- `stop` 是 `StopSignal`，與 leaf `Schedule(..., stop=state.stop)` 共用。
-- `set_value(...)` in-place 更新目前結果節點並觸發 throttled plot update。
+```python
+def run_loop(root_sched: Schedule[FluxDepCfg]) -> None:
+    for i, (flux, flux_step) in enumerate(root_sched.scan("flux", flux_values)):
+        update_flux_context(i, flux_step, flux)
+        flux_step.batch(
+            {
+                name: lambda child, measurement=measurement: (
+                    self._run_measurement_with_retries(measurement, child, retry_time)
+                )
+                for name, measurement in self.measurements.items()
+            }
+        )
+```
 
-`context_signal_buffer(ctx, shape, ...)` 建立與 `MeasurementContext` 綁定的
-`SignalBuffer`；buffer 寫入時會自動同步到 context 的目前結果節點。executor leaf
-measurement 仍用 `Schedule` 做 program acquire，外層 flux/time loop 則保留直接 Python
-loop，因為 executor cfg (`FluxDepCfg` / `OvernightCfg`) 不是 `ProgramV2Cfg`。
+leaf measurement 取得 `ScheduleStep` 後，通常用
+`raw_step = state.child("raw_signals", cfg=program_cfg)` 建立 program-owned cfg scope，再用
+`raw_step.buffer(shape, dtype=...)` 建立與 result tree 綁定的 acquire buffer；接著直接
+呼叫 `raw_step.prog_builder(...).build_and_acquire()`。
 
 ---
 
 ## Stop 與 Retry
 
 - `StopSignal` 是唯一 stop token；GUI worker 用 `schedule_stop_scope(StopSignal(event))`
-  讓 scope 內所有 `Schedule` 與 executor context 共用同一個 stop event。
+  讓 scope 內所有 `Schedule` 共用同一個 stop event。
 - `Schedule` 的 scan/repeat/batch 會在 host step 前檢查 stop；`ProgramBuilder` 會把
   `sched.is_stop` 注入 program acquire 的 `stop_checkers`，中斷粒度為 round-level。
 - `Schedule.batch(..., retry=N)` 支援一般 `ProgramV2Cfg` schedule 的 replayable child
