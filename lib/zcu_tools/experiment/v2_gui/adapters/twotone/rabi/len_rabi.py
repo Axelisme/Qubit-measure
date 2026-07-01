@@ -58,8 +58,7 @@ class LenRabiAnalyzeResult(AnalyzeResultBase):
     pi_len_err: float
     pi2_len: float
     pi2_len_err: float
-    # Rabi oscillation frequency in MHz (1/us), captured from the fit but
-    # previously discarded; now preserved for writeback as 'rabi_f'.
+    # Rabi oscillation frequency in MHz (1/us), preserved for writeback as 'rabi_f'.
     rabi_f: float
     rabi_f_err: float
     figure: Figure

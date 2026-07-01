@@ -1,10 +1,10 @@
 """Controller façade for autofluxdep-gui.
 
 State + EventBus coordinator, mirroring fluxdep/dispersive. Owns the workflow
-definition commands (add/remove/reorder Nodes, set flux, set Node params), a
-Setup that builds a MockSoc + FakeDevice flux board (the prototype's offline
-resources), and a cancellable run that drives the orchestrator over the user's
-ordered providers (with the predictor Service prepended). Each provider's Node
+definition commands (add/remove/reorder Nodes, set flux, set Node params), setup
+resources (including MockSoc + FakeDevice for offline runs), and a cancellable
+run that drives the orchestrator over the user's ordered providers (with the
+predictor Service prepended). Each provider's Node
 ``produce`` runs a real acquire (against a flux-aware MockSoc offline or real
 hardware), fits it, fills the provider's sweep Result in place, and notifies the
 main thread to redraw. ``dry_run`` runs
@@ -444,10 +444,10 @@ class Controller(SessionControllerMixin):
     def set_node_params(self, index: int, params: Mapping[str, Any]) -> None:
         """Write one-or-more knob leaves of the Node at ``index`` into its schema SSOT.
 
-        Phase 160b typed entry: each incoming key writes directly into the
-        placement's own ``NodeCfgSchema`` (the per-placement value tree, the SSOT).
-        A scalar value is coerced to the field's declared type; a ``SweepValue`` is
-        accepted for a ``SweepSpec`` knob (the typed sweep widget now edits those).
+        Each incoming key writes directly into the placement's own
+        ``NodeCfgSchema`` (the per-placement value tree, the SSOT). A scalar value
+        is coerced to the field's declared type; a ``SweepValue`` is accepted for a
+        ``SweepSpec`` knob.
         An unknown key fast-fails — the form only renders declared knobs, so an
         undeclared key is a real typo, not a silent extra. State writes happen on
         the main thread (the UI calls this), preserving the State main-thread

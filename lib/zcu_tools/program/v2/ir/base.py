@@ -43,7 +43,7 @@ class IRCompileMixin(QickProgramV2):
         linker = IRLinker()
         logical_insts = linker.unlink(insts, labels, meta_infos)
 
-        # dmem dispatch tables (Phase 7) are appended after the IR layer; tell
+        # dmem dispatch tables are appended after the IR layer; tell
         # the pipeline where in dmem they may start (current buffer length).
         dmem_base = len(getattr(self, "_dmem_buffer", []))
 

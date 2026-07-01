@@ -7,9 +7,9 @@ the injected physics within tolerance.  Unlike ``test_engine.py`` (which builds
 ``ModularProgramV2`` directly and only checks feature *shape*), every test here
 drives the full ``experiment/v2`` path end to end and checks recovered *values*.
 
-Phase-1 covers freq / amp_rabi / len_rabi / T1 / T2-Ramsey / T2-echo recovery;
-Phase 2 adds the dephasing-model proof: with ``T2 != T2_star`` the echo recovers
-the homogeneous ``T2`` (and is insensitive to the inhomogeneous rate Gamma) while
+The suite covers freq / amp_rabi / len_rabi / T1 / T2-Ramsey / T2-echo recovery
+and the dephasing-model proof: with ``T2 != T2_star`` the echo recovers the
+homogeneous ``T2`` (and is insensitive to the inhomogeneous rate Gamma) while
 Ramsey recovers ``T2_star``, and Ramsey decays faster than echo — exactly the
 Lorentzian quasi-static detune model the engine averages over.
 
@@ -187,8 +187,8 @@ def _sim_dephasing(*, T2: float, T2_star: float) -> SimParams:
     ``T2 != T2_star`` makes the inhomogeneous rate Gamma = ``1/T2_star - 1/T2``
     nonzero, which is what separates the echo (recovers ``T2``) from the Ramsey
     (recovers ``T2_star``) recovery.  All other physics (operating point, readout,
-    snr, seed) is inherited so the only difference vs the Phase-1 tests is the
-    dephasing split.  ``0 < T2_star <= T2 <= 2*T1`` is enforced by SimParams.
+    snr, seed) is inherited so the only intended difference is the dephasing
+    split.  ``0 < T2_star <= T2 <= 2*T1`` is enforced by SimParams.
     """
 
     return _SIM.model_copy(update={"T2": T2, "T2_star": T2_star})
@@ -377,7 +377,7 @@ def test_t1_recovers_t1() -> None:
 
 # --------------------------------------------------------------- T2 Ramsey / echo runners
 #
-# Phase 2 injects an asymmetric coherence split (T2 != T2_star) so the two
+# The asymmetric coherence split (T2 != T2_star) makes the two
 # experiments recover *different* times: Ramsey -> T2_star, echo -> T2.  The run
 # logic is factored into helpers so the value-recover tests and the cross-checks
 # (Gamma-insensitivity, Ramsey-faster-than-echo) share one definition.
@@ -440,7 +440,7 @@ def _run_echo(sim: SimParams) -> float:
         phase=0.0,
         waveform=ConstWaveformCfg(length=0.4),  # pi
     )
-    # reps is high (2000) because the engine now draws a per-shot Bernoulli(P_e)
+    # reps is high (2000) because the engine draws a per-shot Bernoulli(P_e)
     # so the accumulated readout carries genuine shot noise ~ sqrt(P_e(1-P_e)/reps).
     # The echo decay is slow (T2 ~ 15 µs) with little contrast in its tail, so the
     # exp fit is sensitive to that shot noise; reps=2000 averages it down enough to

@@ -195,8 +195,8 @@ def load_spectrums(path: str) -> dict[str, SpectrumResult]:
                     "freqs": points_grp["freqs"][()],  # type: ignore
                 },
             )
-            # ``type`` is optional and absent in legacy files (written as a group
-            # attribute since the type-persistence fix); only set it when present.
+            # ``type`` is optional for older spectrum files; current files store it
+            # as a group attribute.
             if "type" in grp.attrs:
                 result["type"] = str(grp.attrs["type"])
             spectrums[name] = result

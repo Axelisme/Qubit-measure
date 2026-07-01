@@ -1,4 +1,4 @@
-"""Phase 6 Validation tests for the Two-Tier Optimization Pipeline.
+"""Validation tests for the two-tier optimization pipeline.
 
 Validation 1: Dispatch-table island invariants
   Assert that only dispatch-table stubs are fixed-width, while body copies
@@ -131,9 +131,8 @@ def _run_full_pipeline_capture_ctx(
 def test_v1_dispatch_uses_dmem_table_no_pmem_stubs():
     """k>=3 dispatch is lowered by DmemDispatchPass to a dmem address table.
 
-    No fixed-width pmem stub island is produced — the disable_opt invariant is
-    gone; case bodies stay free. (Phase 7: dmem dispatch replaces the pmem
-    table island for k>=3.)
+    No fixed-width pmem stub island is produced; case bodies stay free because
+    dmem dispatch replaces the pmem table island for k>=3.
     """
     k = 4
     body_words = 3

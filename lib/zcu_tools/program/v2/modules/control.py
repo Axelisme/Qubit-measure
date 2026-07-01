@@ -170,7 +170,7 @@ class Branch(Module):
                     )
                 cur_t = mod.run(prog, cur_t)
 
-            # TODO: support branch with swept duration
+            # Swept-duration branches cannot be balanced with one scalar tail delay.
             if isinstance(cur_t, QickParam):
                 raise NotImplementedError("Branch with swept duration is not supported")
 

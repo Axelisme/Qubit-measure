@@ -42,7 +42,7 @@ def _load_database_cached(
     with File(datapath, "r") as file:
         if "fluxs" in file:
             f_fluxs = file["fluxs"][:]  # (P,) # type: ignore[index]
-        elif "flxs" in file:  # legacy typo
+        elif "flxs" in file:  # accepted misspelling in existing database files
             f_fluxs = file["flxs"][:]  # (P,) # type: ignore[index]
         else:
             raise KeyError("Database file must contain 'fluxs' or 'flxs' dataset.")
@@ -359,7 +359,7 @@ def fit_spectrum(
         scq_settings.PROGRESSBAR_DISABLED = old
         pbar.close()
 
-    if isinstance(res, np.ndarray):  # old version
+    if isinstance(res, np.ndarray):  # alternate scipy/test double return shape
         best_params = res
     else:
         best_params = res.x

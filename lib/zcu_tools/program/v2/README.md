@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-06-29 - QickParam type guard
+**Last updated:** 2026-07-01
 
 ## Testing & Type Checking Conventions
 
@@ -51,7 +51,7 @@ The IR is divided into three layers to decouple high-level program structure fro
 
 `MetaMacro` accepts an optional `regs: dict[str, str]` field.  Each entry maps an `info` key to a logical register name (e.g. a QICK loop name like `"reset_sel"`).  At `translate()` time, each name is resolved to its hardware ASM address via `prog._get_reg()` and written into `resolved_info` before `_add_meta()` is called.
 
-**Why needed:** `MetaMacro.translate()` does not go through QICK's normal macro `expand()` path, so loop names stored in `info` are never resolved automatically.  Any caller that passes a loop name (or other logical register alias) as a register reference in `info` must use `regs` to trigger resolution — otherwise the IR layer receives an unrecognisable string and the assembler raises `Source Data not Recognized`.
+**Design constraint:** `MetaMacro.translate()` does not go through QICK's normal macro `expand()` path, so loop names stored in `info` are never resolved automatically.  Any caller that passes a loop name (or other logical register alias) as a register reference in `info` must use `regs` to trigger resolution — otherwise the IR layer receives an unrecognisable string and the assembler raises `Source Data not Recognized`.
 
 **Usage pattern:**
 
@@ -73,7 +73,7 @@ wmem_reg = dmem[addr_reg]          # starting wmem index for this candidate
 pulse_by_reg(ch, wmem_reg, ...)
 ```
 
-**為何改用 dmem 方案**：舊方案要求 candidate waveform 的 wmem index 必須連續，與 `PulseRegistry` 去重機制潛在衝突。dmem table 直接存儲每個候選的起始 index，無連續性假設。
+**dmem table 設計約束**：candidate waveform 的 wmem index 不保證連續，因為 `PulseRegistry` 會去重。dmem table 直接存儲每個候選的起始 index，無連續性假設。
 
 **flat_top**：table 中存的是每個 flat_top 候選的**第一個** wmem entry（ramp_up），`pulse_by_reg(flat_top_pulse=True)` 從此 index 自動連讀 3 個 entry（ramp_up / flat / ramp_down）。
 

@@ -148,8 +148,8 @@ class LabberPayload:
 class LabberData:
     """Single-file Labber dataset with payload plus metadata.
 
-    The constructor keeps the historical ``LabberData(data, axes, ...)`` form
-    while also accepting explicit ``payload=`` and ``metadata=`` values.
+    The constructor accepts either the compact ``LabberData(data, axes, ...)`` form
+    or explicit ``payload=`` and ``metadata=`` values.
     """
 
     __slots__ = ("payload", "metadata")

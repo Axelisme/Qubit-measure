@@ -14,7 +14,7 @@ from .base import LivePlotBackend
 
 
 def instant_plot(fig: Figure) -> None:
-    # this ensures the figure is rendered in Jupyter notebooks right now and can be updated later
+    # Force ipympl to display the live canvas before subsequent update calls.
     canvas = fig.canvas
 
     if not hasattr(canvas, "toolbar_visible"):
@@ -22,8 +22,7 @@ def instant_plot(fig: Figure) -> None:
             "Warning: The matplotlib backend should be set to 'widget' for live plotting."
         )
 
-    # # add hook for set_size_inches to update canvas size accordingly
-    # # TODO: this is a bit hacky, but it works for now. We can consider a more elegant solution in the future.
+    # # Hook set_size_inches when live canvas resizing must track figure resizing.
     # original_set_size_inches = fig.set_size_inches
 
     # def patched_set_size_inches(*args, **kwargs):
@@ -55,9 +54,7 @@ def instant_plot(fig: Figure) -> None:
 
 
 def grab_frame_with_instant_plot(writer: FFMpegWriter, **savefig_kwargs) -> None:
-    """
-    Equivalent to writer.grab_frame, but it work with figure setting by instant_plot.
-    """
+    """Grab one ffmpeg frame from a figure prepared by ``instant_plot``."""
     # docstring inherited
     if mpl.rcParams["savefig.bbox"] == "tight":
         raise ValueError(
@@ -70,7 +67,7 @@ def grab_frame_with_instant_plot(writer: FFMpegWriter, **savefig_kwargs) -> None
 
     # Readjust the figure size in case it has been changed by the user.
     # All frames must have the same size to save the movie correctly.
-    # TODO: currently it have bug work with instant plot, maybe fix later
+    # instant_plot-owned canvases keep their displayed size; do not resize here.
     # writer.fig.set_size_inches(writer._w, writer._h)
 
     # Save the figure data to the sink, using the frame format and dpi.

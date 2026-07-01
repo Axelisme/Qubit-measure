@@ -121,8 +121,8 @@ class SimParams(ConfigBase):
             value at acquire time and maps it through ``value_to_flux`` (using this
             SimParams' flux_half / flux_period / flux_bias) to the reduced flux for
             f_qubit / dispersive prediction; only a ``FakeDevice`` is supported.
-            When None (default), the operating flux is fixed at reduced flux = 1.0
-            (zero regression).  Defaults to None.
+            When None (default), the operating flux is fixed at reduced flux = 1.0.
+            Defaults to None.
     """
 
     # --- qubit Hamiltonian (GHz) ---
@@ -159,9 +159,9 @@ class SimParams(ConfigBase):
 
     # --- runtime flux binding (FLUX-AWARE-MOCK) ---
     # flux_device: name of a connected device in GlobalDeviceManager whose live
-    # value drives the operating flux of the simulation.  When None (the default,
-    # zero-regression), the engine pins the operating point at reduced flux = 1.0
-    # (R-3); when set, the engine reads that device's value at acquire time and
+    # value drives the operating flux of the simulation.  When None (the default),
+    # the engine pins the operating point at reduced flux = 1.0 (R-3); when set,
+    # the engine reads that device's value at acquire time and
     # maps it through this SimParams' affine (value_to_flux) to the reduced flux
     # used for f_qubit / dispersive prediction.  Only a FakeDevice is supported as
     # the source (see engine._operating_signal).  This is a *runtime* binding, not
@@ -284,8 +284,7 @@ DEFAULT_SIMPARAM: SimParams = SimParams(
     # sweep range (~±4e-3).  With flux_half=0.0 and flux_bias=0.0, sweeping v in
     # [-4e-3, 4e-3] maps reduced_flux across ~1.6 periods (sweet spot at v=0 =
     # reduced_flux 0.5), producing a clearly visible flux-dependent dispersion in
-    # the mock 2D plot.  The previous value (1.0) made the sweep cover only
-    # ~0.8% of a period → flat colour map.
+    # the mock 2D plot instead of a near-flat map.
     flux_period=5e-3,
     flux_half=0.0,
     flux_bias=0.0,

@@ -19,7 +19,7 @@
 ```
 _path         ─── 對應的磁碟路徑（None 表示純記憶體模式）
 _modify_time  ─── 上次讀/寫時的 mtime（nanoseconds）
-_dirty        ─── 記憶體資料已修改、尚未寫回磁碟
+_dirty        ─── 記憶體資料有未寫回磁碟的修改
 _readonly     ─── 禁止任何寫回操作
 ```
 
@@ -95,7 +95,7 @@ modules:
 | `register_waveform(**wav_kwargs)` | 新增/覆蓋波形設定並寫回 |
 | `register_module(**mod_kwargs)` | 新增/覆蓋模組設定並寫回 |
 | `update_module(name, override_cfg)` | 部分更新既有模組設定 |
-| `make_cfg(exp_cfg, cfg_model, **kwargs)` | 過渡 thin wrapper；轉呼 `zcu_tools.experiment.cfg_assembler.make_cfg(..., ml=self, ...)` |
+| `make_cfg(exp_cfg, cfg_model, **kwargs)` | thin wrapper；轉呼 `zcu_tools.experiment.cfg_assembler.make_cfg(..., ml=self, ...)` |
 
 **Experiment cfg materialization 邊界**：
 
@@ -107,7 +107,7 @@ modules:
 2. `raw_cfg` 已是 concrete dict；GUI 的 `CfgSchema` / `EvalValue` / md lowering 在 adapter 層完成，不進 assembler。
 3. caller 在每次 run / notebook call 當下傳入 current `ml` 與 `device_snapshot`。核心不持有 active context，也不直接讀 `GlobalDeviceManager`。
 4. `make_cfg(raw_cfg, cfg_model, *, ml, overrides=None, device_snapshot=None)` 是薄 wrapper；若未傳 `device_snapshot`，在呼叫當下讀 `GlobalDeviceManager.get_all_info()`，再轉呼 `assemble_experiment_cfg`。
-5. `ModuleLibrary.make_cfg(...)` 只保留為過渡 forwarding wrapper，避免形成第二套 materialization implementation；caller migration 完成後刪除。
+5. `ModuleLibrary.make_cfg(...)` 是 forwarding wrapper，避免形成第二套 materialization implementation；新呼叫點優先使用 `zcu_tools.experiment.cfg_assembler.make_cfg(...)`。
 
 **Cfg 解析 API**（統一走 Factory wrapper）：
 
@@ -222,7 +222,7 @@ data = ArbWaveformDatabase.load("my_pulse")
 
 **約束**：
 
-- `.npz` 必須只有 `idata`、`qdata`、`time`，以及可選的 `recipe_json`；不支援 legacy folder layout 或 `.npy` / `.csv`。
+- `.npz` 必須只有 `idata`、`qdata`、`time`，以及可選的 `recipe_json`；folder layout、`.npy` 與 `.csv` 不屬於支援格式。
 - `.npz` 寫入路徑固定用明確 keyword (`idata`, `qdata`, `time`, optional `recipe_json`) 呼叫 `np.savez`；不要用 dynamic payload `**dict` 讓 `allow_pickle` overload 判斷變模糊。
 - `idata`、`qdata`、`time` 必須是一維、同長度、finite array；`time[0] == 0` 且嚴格遞增，單位固定為 us。
 - `Abs = hypot(I, Q)` 必須落在 `[0, 1]`；I/Q 可為負值。

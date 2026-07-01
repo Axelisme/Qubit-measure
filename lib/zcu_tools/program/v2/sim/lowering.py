@@ -48,11 +48,10 @@ segment, drive *and* idle, precesses about z at the same frame detuning
     pulse's ``pulse.freq`` *is* ``f_ref``, that equals the frame detuning.
   - idle / free-evolution segments (delays, pre/post idle) must carry the *same*
     frame detuning, NOT 0.  A zero idle detuning would freeze the Bloch vector
-    between pulses and kill Ramsey fringes (the bug this model fixes).
+    between pulses and kill Ramsey fringes.
 
 When the qubit is driven on resonance (``f_ref == f_qubit``) the frame detuning
-is 0 and idle segments are static, exactly as before — so T1, on-resonance Rabi
-and twotone are unchanged.  A Ramsey experiment that detunes the control pulses
+is 0 and idle segments are static.  A Ramsey experiment that detunes the control pulses
 (``f_ref = f_qubit + detuning``) gets idle precession at the detuning, producing
 fringes at the detuning frequency.
 
@@ -358,7 +357,7 @@ def _pulse_segments(
     ``detune_offset`` (rad/µs) is a static, global frame shift added to every
     segment's delta (drive and the pre/post idle); see ``lower_point``.  The
     engine uses it to sample the Lorentzian quasi-static detune ensemble
-    (ADR Phase-2 dephasing model) without lowering having to know about the
+    without lowering having to know about the
     ensemble — lowering only shifts the frame.
     """
 
@@ -808,10 +807,9 @@ def lower_point(
         A static, global rotating-frame shift in rad/µs (same unit as
         ``Segment.delta``), added to every segment's detuning — both drives and
         idle/free segments.  Responsibility boundary: the engine owns the
-        Lorentzian quasi-static detune ensemble / quadrature (Phase-2 dephasing
-        model) and feeds each ensemble node's static δ in here; lowering only
-        applies the frame shift.  The default ``0.0`` reproduces the
-        pre-ensemble timeline exactly (zero regression).
+        Lorentzian quasi-static detune ensemble / quadrature and feeds each
+        ensemble node's static δ in here; lowering only applies the frame shift.
+        The default ``0.0`` is the no-detune timeline.
 
     Returns
     -------

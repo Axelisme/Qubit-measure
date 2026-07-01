@@ -60,8 +60,7 @@ class TestSimParamsConstruction:
         assert p.thermal_pop == 0.0
         assert p.readout_photons_per_gain2 == 100.0
         assert p.seed is None
-        # FLUX-AWARE-MOCK: flux_device defaults to None (fixed reduced flux = 1.0,
-        # zero regression for existing sim configs).
+        # FLUX-AWARE-MOCK: flux_device defaults to None (fixed reduced flux = 1.0).
         assert p.flux_device is None
 
     def test_flux_device_explicit(self) -> None:
@@ -110,7 +109,7 @@ class TestSimParamsValidation:
         with pytest.raises(ValidationError, match="Qi must be greater than Ql"):
             SimParams(**bad)
 
-    # --- coherence validators (Phase 2a) ---
+    # --- coherence validators ---
 
     def test_t2_greater_than_2t1_raises(self) -> None:
         # T2 > 2*T1 violates the T1-limit upper bound on homogeneous T2.
@@ -170,7 +169,7 @@ class TestSimParamsValidation:
 
 
 class TestSimParamsCoherenceHelpers:
-    """Tests for derived coherence properties (Phase 2a)."""
+    """Tests for derived coherence properties."""
 
     def test_inhomogeneous_rate_nonzero(self) -> None:
         # γ = 1/T2_star - 1/T2; verify the formula with known inputs.
@@ -228,8 +227,8 @@ class TestSimParamsParamsJsonRoundTrip:
             },
         }
 
-    Phase 2 will implement a proper loader; this test only validates that the
-    field names align so that unpacking is straightforward.
+    This test validates that field names align so external loaders can unpack
+    params.json data into SimParams without translation glue.
     """
 
     _PARAMS_JSON: dict = {
@@ -282,7 +281,7 @@ class TestSimParamsParamsJsonRoundTrip:
 
 
 # ---------------------------------------------------------------------------
-# DEFAULT_SIMPARAM — realistic mock flux_period (BUG: flat flux_dep 2D map fix)
+# DEFAULT_SIMPARAM — realistic mock flux_period for visible flux_dep maps
 # ---------------------------------------------------------------------------
 
 
@@ -292,8 +291,8 @@ class TestDefaultSimParamFluxPeriod:
     The guide default flux sweep is ~[-4e-3, 4e-3].  With flux_half=0 and
     flux_bias=0, the formula value_to_flux(v) = v/flux_period + 0.5 must map that
     sweep across at least one full period so the mock 2D flux_dep plot shows
-    visible dispersion.  A flux_period >> the sweep span (e.g. the old 1.0) would
-    cover only a tiny fraction of a period → flat colour map (the bug we fix).
+    visible dispersion.  A flux_period much larger than the sweep span would cover
+    only a tiny fraction of a period and produce a flat colour map.
     """
 
     def test_flux_period_is_realistic(self) -> None:

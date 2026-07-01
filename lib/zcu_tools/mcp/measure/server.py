@@ -119,7 +119,7 @@ Tools are tiered: prefer RECOMMENDED; reach for ON-DEMAND when the bundles don't
 fit; DEV tools are for debugging the GUI/MCP itself, not for measuring.
 
 RECOMMENDED — the primary flow:
-  - The 4-phase bundle (breadcrumb open -> run -> analyze_review -> commit):
+  - The recommended bundle flow (breadcrumb open -> run -> analyze_review -> commit):
     gui_tab_open (new tab + adapter guide) -> gui_tab_run (configure + run) ->
     gui_tab_analyze_review (analyze + writeback preview) -> gui_tab_commit
     (writeback + optional save). Each folds the cross-tool reads you would
@@ -544,7 +544,7 @@ def _fold_tab_editing_context(tab_id: str, reply: dict[str, Any]) -> dict[str, A
     After tab.new the agent always reads tab.snapshot (for the editor_id) and
     tab.get_cfg (the settable cfg tree) before it can edit cfg. Folding those
     reads collapses the calls into one. Pure mcp-side fan-out over EXISTING wire
-    reads. Reused by gui_tab_open (Phase ①). Adds {editor_id, tree}; the
+    reads. Reused by gui_tab_open (step 1). Adds {editor_id, tree}; the
     caller owns ``tab_id`` and ``adapter`` in ``reply``. tab.get_cfg returns a
     nested current-value tree, so the settable paths and their current values
     arrive in one ``tree``.
@@ -1572,7 +1572,7 @@ def _fold_writeback_preview(tab_id: str, reply: dict[str, Any]) -> dict[str, Any
     A FIT analyze recomputes the persistent writeback draft (the proposed md/ml/wf
     values + apply targets); surfacing it next to the fit summary lets the agent
     review the fit AND the proposed writeback in one call before
-    gui_tab_writeback_apply (Phase ③). Only acts on ``reply['status'] ==
+    gui_tab_writeback_apply (step 3). Only acts on ``reply['status'] ==
     'finished'`` (an INTERACTIVE 'pending' has not produced a draft yet). The wire
     tab.writeback_preview reply is {has_draft, items}; we surface that object
     verbatim under 'writeback_preview' (has_draft is false when no draft exists
@@ -1592,7 +1592,7 @@ def _fold_writeback_preview(tab_id: str, reply: dict[str, Any]) -> dict[str, Any
 
 
 # ---------------------------------------------------------------------------
-# Bundle tools — the four-phase recommended flow
+# Bundle tools — the recommended four-step flow
 # (gui_tab_open -> run -> analyze_review -> commit)
 #
 # Each bundle composes several BASE operations into the agent's natural decision
@@ -1606,7 +1606,7 @@ def _fold_writeback_preview(tab_id: str, reply: dict[str, Any]) -> dict[str, Any
 
 
 def tool_gui_tab_open(arguments: dict[str, Any]) -> dict[str, Any]:
-    """open (Phase ①): create a tab for ``adapter_name`` and fold its editing
+    """open (step 1): create a tab for ``adapter_name`` and fold its editing
     context + the adapter guide into one reply.
 
     Composes tab.new with the fan-out reads the agent always makes before editing
@@ -1615,9 +1615,9 @@ def tool_gui_tab_open(arguments: dict[str, Any]) -> dict[str, Any]:
 
     The guide is included BY DEFAULT so that any fresh agent context, sub-agent,
     or context-reset session receives the orientation text it needs without having
-    to remember to pass a flag. The server no longer tracks whether the guide was
-    previously sent — that decision belongs to the caller (the agent), which is the
-    only one who knows whether its context already contains the guide.
+    to remember to pass a flag. The server does not track duplicate guide delivery;
+    that decision belongs to the caller (the agent), which is the only one who knows
+    whether its context already contains the guide.
 
     Pass ``skip_guide=true`` to suppress the guide fetch when you know the guide is
     already in your context (e.g. you already opened a tab for the same adapter
@@ -1648,7 +1648,7 @@ def tool_gui_tab_open(arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 def tool_gui_tab_run(arguments: dict[str, Any]) -> dict[str, Any]:
-    """run (Phase ②): apply ``edits`` then run the existing ``tab_id``, STOPPING
+    """run (step 2): apply ``edits`` then run the existing ``tab_id``, STOPPING
     before analyze.
 
     Applies ``edits`` via gui_tab_set_cfg (single wire call carrying the whole
@@ -1696,7 +1696,7 @@ def tool_gui_tab_run(arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 def tool_gui_tab_analyze_review(arguments: dict[str, Any]) -> dict[str, Any]:
-    """analyze_review (Phase ③): analyze ``tab_id`` and fold the fit review into
+    """analyze_review (step 3): analyze ``tab_id`` and fold the fit review into
     one reply.
 
     Composes gui_tab_analyze_start; a finished FIT reply ({status, handle, summary})
@@ -1732,7 +1732,7 @@ def tool_gui_tab_analyze_review(arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 def tool_gui_tab_commit(arguments: dict[str, Any]) -> dict[str, Any]:
-    """commit (Phase ④): apply the tab's writeback draft, optionally saving.
+    """commit (step 4): apply the tab's writeback draft, optionally saving.
 
     Composes tab.writeback_apply (applies the currently-selected draft items;
     returns {applied_ids, written, context_version}); ``save`` selects an optional
@@ -1971,7 +1971,7 @@ _NON_GENERATED_METHODS = frozenset(
         # hand-written short-wait degrade (FIT-only worker, mirrors tab.analyze).
         "tab.post_analyze",
         # internal-only wire method: _assemble_overview calls it directly to fetch
-        # the running tab id; no agent-facing MCP tool is generated (Phase 170b).
+        # the running tab id; no agent-facing MCP tool is generated.
         "run.running_tab",
         # internal-only wire method: _assemble_overview folds the project identity
         # + paths into its `project` sub-object (the single orientation SSOT), so
@@ -2498,7 +2498,7 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
     "gui_tab_open": {
         "handler": tool_gui_tab_open,
         "description": (
-            "Phase ① of the recommended flow (open -> run -> analyze_review -> "
+            "Step 1 of the recommended flow (open -> run -> analyze_review -> "
             "commit) — open. = tab.new + tab.snapshot + tab.get_cfg + adapter.guide. "
             "Create a tab for 'adapter_name' (see gui_adapter_list) and fold its "
             "editing context (tab.snapshot for editor_id, tab.get_cfg for the "
@@ -2544,7 +2544,7 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
     "gui_tab_run": {
         "handler": tool_gui_tab_run,
         "description": (
-            "Phase ② of the recommended flow (open -> run -> analyze_review -> "
+            "Step 2 of the recommended flow (open -> run -> analyze_review -> "
             "commit) — run. = gui_tab_set_cfg + gui_tab_run_start. Apply 'edits' "
             "then run the already-created 'tab_id' (from gui_tab_open), then STOP "
             "before analyze. 'edits' is an OPTIONAL ORDERED list of {path, value} "
@@ -2597,7 +2597,7 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
     "gui_tab_analyze_review": {
         "handler": tool_gui_tab_analyze_review,
         "description": (
-            "Phase ③ of the recommended flow (open -> run -> analyze_review -> "
+            "Step 3 of the recommended flow (open -> run -> analyze_review -> "
             "commit) — analyze_review. = gui_tab_analyze_start + "
             "gui_tab_writeback_list. Analyze 'tab_id' and fold the writeback "
             "review into ONE reply. A finished FIT returns {status:'finished', "
@@ -2637,7 +2637,7 @@ _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
     "gui_tab_commit": {
         "handler": tool_gui_tab_commit,
         "description": (
-            "Phase ④ of the recommended flow (open -> run -> analyze_review -> "
+            "Step 4 of the recommended flow (open -> run -> analyze_review -> "
             "commit) — commit. = gui_tab_writeback_apply + (optionally) gui_tab_save. "
             "Apply the tab's writeback draft (edit it first via "
             "gui_tab_writeback_set_item / gui_editor_*), optionally saving afterwards. "
@@ -3149,7 +3149,7 @@ TOOLS: dict[str, dict[str, Any]] = assemble_tools(
     _OVERRIDE_NAMES,
 )
 
-# Wrap every top-level handler for call logging (Phase 166).  Transparent
+# Wrap every top-level handler for call logging. Transparent
 # side-effect only: same args in, same result out (or re-raised exception);
 # only writes one JSONL line per invocation.  Applied after assemble_tools so
 # generated + override + bundle tools are all covered in a single pass.

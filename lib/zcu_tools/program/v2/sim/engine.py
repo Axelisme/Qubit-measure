@@ -136,8 +136,8 @@ _MHZ_TO_GHZ = 1e-3
 # noise (via snr) carries physical meaning.
 _FULL_SCALE = 1.0e4
 
-# Number of Gauss-Legendre nodes for the Lorentzian quasi-static detune ensemble
-# (Phase-2 dephasing model).  The substitution ``delta = Gamma * tan(theta)``
+# Number of Gauss-Legendre nodes for the Lorentzian quasi-static detune ensemble.
+# The substitution ``delta = Gamma * tan(theta)``
 # maps the Lorentzian weight to a *uniform* weight on ``theta in (-pi/2, pi/2)``,
 # so a fixed Gauss-Legendre rule on that interval integrates the ensemble average
 # deterministically.  41 nodes reproduce the analytic FID ``exp(-Gamma|t|)`` to
@@ -444,12 +444,12 @@ class SimEngine:
         )
         self._rng = np.random.default_rng(sim.seed)
 
-        # Lorentzian quasi-static detune ensemble (Phase-2 dephasing model).
+        # Lorentzian quasi-static detune ensemble.
         # Gamma is the Lorentzian HWHM in rad/µs (numerically == the
         # inhomogeneous rate in 1/µs).  Gamma == 0 (T2_star == T2) means no
-        # inhomogeneous broadening: a single node at delta == 0 reproduces the
-        # Phase-1 single-eval timeline exactly (bit-identical signal, RNG
-        # untouched).  Only when Gamma > 0 do we spend the quadrature.
+        # inhomogeneous broadening: a single node at delta == 0 uses the same
+        # deterministic timeline and leaves the RNG stream untouched. Only when
+        # Gamma > 0 do we spend the quadrature.
         self._gamma = sim.inhomogeneous_rate
         if self._gamma > 0.0:
             theta, weights = _lorentzian_quadrature(_ENSEMBLE_NODES)
@@ -943,8 +943,7 @@ class SimEngine:
 
         flux_device = self.sim.flux_device
         if flux_device is None:
-            # Zero-regression path: no binding -> the historical fixed operating
-            # point (reduced flux = 1.0, R-3).
+            # No binding -> fixed operating point (reduced flux = 1.0, R-3).
             return _SIM_OPERATING_FLUX
 
         # Lazy local import (FLUX-AWARE-MOCK): keep the device dependency off the

@@ -69,7 +69,7 @@ class InteractiveSelector:
             )
         )
 
-        # 新增: 用於儲存暫時性圓圈和計時器的變數
+        # Transient brush-feedback marker and its cleanup timer.
         self.temp_circle = None
         self.temp_circle_timer = None
 
@@ -220,17 +220,17 @@ class InteractiveSelector:
         if event.inaxes != self.ax or self.is_finished:
             return
 
-        # 計算靠近滑鼠點擊的點
+        # Toggle points inside the normalized brush around the click.
         width = self.width_slider.value
         self.toggle_near_mask(event.xdata, event.ydata, width)
 
-        # 新增: 顯示暫時性圓圈（並取消舊的計時器）
+        # Show the brush footprint and cancel any pending marker cleanup.
         self.show_temp_circle(event.xdata, event.ydata, width)
         self.apply_filter_and_redraw()
 
     def show_temp_circle(self, x, y, width) -> None:
-        """顯示暫時性圓圈，一秒後消失"""
-        # 移除現有的暫時性圓圈和計時器
+        """Show a one-second brush footprint marker."""
+        # Replace the active marker/timer pair.
         if self.temp_circle is not None:
             self.temp_circle.remove()
             self.temp_circle = None
@@ -238,32 +238,32 @@ class InteractiveSelector:
             self.temp_circle_timer.cancel()
             self.temp_circle_timer = None
 
-        # 計算圓圈的寬度和高度（考慮座標軸比例）
+        # Scale the normalized brush radius to the data coordinate ranges.
         x_range = self.flux_bound[1] - self.flux_bound[0]
         y_range = self.freq_bound[1] - self.freq_bound[0]
 
-        # 根據當前模式決定顏色
+        # Use color to indicate the current operation.
         circle_color = "yellow" if self.operation_tb.value == "Select" else "black"
 
-        # 使用 Ellipse 確保視覺上是正圓
+        # Ellipse compensates for unequal axis scales.
         self.temp_circle = Ellipse(
             (x, y),
-            width=width * x_range * 2,  # 直徑 = 半徑 * 2
+            width=width * x_range * 2,
             height=width * y_range * 2,
             angle=0,
             fill=False,
-            color=circle_color,  # 修改這裡，根據模式選擇顏色
+            color=circle_color,
             linestyle="--",
             linewidth=1,
         )
         self.ax.add_patch(self.temp_circle)
 
-        # 設置計時器一秒後移除圓圈
+        # Remove the feedback marker after one second.
         self.temp_circle_timer = Timer(1.0, self.remove_temp_circle)
         self.temp_circle_timer.start()
 
     def remove_temp_circle(self) -> None:
-        """移除暫時性圓圈"""
+        """Remove the transient brush marker."""
         if self.temp_circle is not None:
             self.temp_circle.remove()
             self.temp_circle = None

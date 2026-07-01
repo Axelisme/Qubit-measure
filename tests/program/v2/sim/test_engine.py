@@ -1,8 +1,8 @@
 """Tests for sim/engine.py — SimEngine assembly + MyProgramV2.acquire dispatch.
 
 Covers:
-- D1 zero-regression: ``make_mock_soc()`` with no SimParams runs the unchanged
-  white-noise accumulated path (same shapes, random data).
+- D1 fallback: ``make_mock_soc()`` with no SimParams runs the white-noise
+  accumulated path (same shapes, random data).
 - Engine smoke (real path): a sim soc running real experiment programs
   (twotone freq, amp_rabi, T1, T2 ramsey) produces physically-structured data,
   not white noise — a peak/dip at f_qubit, gain-driven Rabi oscillation, a T1
@@ -10,7 +10,7 @@ Covers:
 - Singleshot get_raw shape ``(reps, 1, 2)`` is usable on the sim path, and the
   per-shot Bernoulli blobs are correct: the shots cluster on the |g>/|e> blob
   centres set by the init pulse, a pi/2 pulse puts ~half on the excited blob, and
-  the reps-mean of the blobs equals the accumulated readout (zero-regression).
+  the reps-mean of the blobs equals the accumulated readout.
 - round_hook is invoked once per round.
 - acquire_decimated on a sim soc returns a physically-structured time-domain
   trace (model A): a timeFly-shifted readout envelope, ~0 before timeFly.
@@ -613,9 +613,9 @@ def test_engine_singleshot_population_ratio():
 def test_engine_singleshot_accumulated_mean_invariant():
     """The reps-mean of the per-shot blobs equals the accumulated readout.
 
-    This is the load-bearing zero-regression invariant: averaging the two per-shot
-    Bernoulli blobs over reps must reproduce the deterministic accumulated readout
-    the old path broadcast directly.  Run the *same* pi/2 program twice on the same
+    This is the load-bearing accumulated-readout invariant: averaging the two per-shot
+    Bernoulli blobs over reps must reproduce the deterministic accumulated readout.
+    Run the *same* pi/2 program twice on the same
     sim soc — once read shot-by-shot via get_raw, once read averaged via acquire —
     and check the get_raw reps-mean lands on the acquire value.  Deriving the
     reference from acquire (rather than an assumed P_e) makes this test the pure
@@ -1644,7 +1644,7 @@ def test_engine_acquire_decimated_amplitude_scales_with_readout_gain():
     )
 
 
-# ---------------------------------------------- Phase 2c: Lorentzian dephasing
+# ---------------------------------------------- Lorentzian dephasing
 #
 # The engine averages the deterministic per-point signal over a Lorentzian
 # quasi-static detune ensemble (HWHM Gamma == SimParams.inhomogeneous_rate,
@@ -1653,13 +1653,13 @@ def test_engine_acquire_decimated_amplitude_scales_with_readout_gain():
 # average deterministically (no RNG).  This block tests the four physics gates:
 # the quadrature reproduces the analytic FID, echo refocuses to the homogeneous
 # T2 (Gamma-insensitive), Ramsey decays faster than echo, and Gamma == 0 reduces
-# to the Phase-1 single-eval path bit-for-bit.
+# to the single-node deterministic path bit-for-bit.
 
 
-# reps for the coherence-envelope helpers.  The engine now draws a per-shot
+# reps for the coherence-envelope helpers.  The engine draws a per-shot
 # Bernoulli(P_e), so the accumulated readout carries shot noise ~
 # sqrt(P_e(1-P_e)/reps) even at snr=1e9 (snr only scales the Gaussian readout
-# noise, not the Bernoulli shot noise).  reps=1 (the old single-eval path) would
+# noise, not the Bernoulli shot noise).  reps=1 would
 # return a raw 0/1 blob, not the mean; 2000 reps averages the shot noise down so
 # the reps-mean is the deterministic coherence envelope these gates read.
 _ENVELOPE_REPS = 2000
@@ -1855,13 +1855,13 @@ def test_engine_ramsey_decays_faster_than_echo():
 
 
 def test_engine_gamma_zero_zero_regression():
-    """Gamma == 0 (T2_star == T2) reproduces the Phase-1 single-eval output.
+    """Gamma == 0 (T2_star == T2) reproduces the single-node output.
 
     The _SIM fixture already has T2_star == T2, so its inhomogeneous_rate is 0
     and the ensemble collapses to a single delta = 0 node.  Two runs at the same
     seed must be bit-identical (deterministic signal + identical RNG stream), and
     a T1 program's output must match a hand-rolled single Bloch eval — i.e. the
-    quadrature path does not perturb the established Phase-1 numbers.
+    quadrature path does not perturb the no-inhomogeneous-broadening numbers.
     """
 
     assert _SIM.inhomogeneous_rate == 0.0
@@ -1898,7 +1898,7 @@ def test_engine_gamma_zero_zero_regression():
     np.testing.assert_array_equal(first, second)
 
 
-# ------------------------------------------------ Phase 2: deterministic Branch
+# ------------------------------------------------ Deterministic Branch
 #
 # The lowering layer's deterministic-Branch selection (a sub-sequence chosen by a
 # registered sweep-loop counter, modelling g/e prep) has thorough unit coverage in

@@ -1,6 +1,6 @@
-"""Qt UI for autofluxdep-gui (Phase C prototype).
+"""Qt UI for autofluxdep-gui.
 
 ``MainWindow`` (node list + node detail + flux progress) wires the edit↔run
-state switch and auto-follow. Prototype: Setup builds fake resources, Run drives
-the orchestrator on fake data, the run tab shows a liveplot placeholder.
+state switch and auto-follow. Setup, workflow editing, run progress, and read-only
+inspection stay in the GUI; MCP observes over the remote bridge.
 """

@@ -122,7 +122,8 @@ def fit_ge_decay(
 
     g_t1 = g_params[2]
     e_t1 = e_params[2]
-    # TODO: handle the error of the shared t1, consider the correlation between the two t1s
+    # Shared-T1 fits return per-trace covariance blocks; cross-trace correlation is
+    # not represented in this error estimate.
     g_t1err = np.sqrt(g_pCov[2, 2])
     e_t1err = np.sqrt(e_pCov[2, 2])
 

@@ -2,7 +2,7 @@
 
 # gui/session/ — 量測 session core（measure + autofluxdep 共用）
 
-把 measure-gui 的「量測 session core」（context 系統 + SoC 連線 + 多 device + setup/device/inspect/predictor dialog）提到的共用層。對標 `gui/remote`、`gui/plotting`。每個 measurement-session app 注入自己的 app-local infra（gate + background）複用這層；session 模組**永不**反向 import `gui.app.*`。measure 與 autofluxdep **都已完整複用**這層。
+measure-gui 的「量測 session core」（context 系統 + SoC 連線 + 多 device + setup/device/inspect/predictor dialog）抽成共用層。對標 `gui/remote`、`gui/plotting`。每個 measurement-session app 注入自己的 app-local infra（gate + background）複用這層；session 模組**永不**反向 import `gui.app.*`。measure 與 autofluxdep 共用這層。
 
 ## 結構
 
@@ -48,7 +48,7 @@ session/
 
 ## 關鍵設計
 
-- **app 注入 infra 經 port**：concrete `OperationGate`（衝突 policy，app-local）+ 共用 `BackgroundRunner`（`gui/background.py`，純 off-main 執行器，三 app 共用同一 class——owner 直接持具體 runner 才能呼 anti-segfault 的 `quiesce()`）各自建；`ProgressService`/`IOManager`/`QtProgressTransport` 已 promote 成**共用**。session service 只依賴 `ExclusionGate`/`BackgroundExecutor`（只宣告 `submit`，`quiesce` 不進 port）/`ProgressHub`/`ProjectIOPort` port。
+- **app 注入 infra 經 port**：concrete `OperationGate`（衝突 policy，app-local）+ 共用 `BackgroundRunner`（`gui/background.py`，純 off-main 執行器，三 app 共用同一 class——owner 直接持具體 runner 才能呼 anti-segfault 的 `quiesce()`）各自建；`ProgressService`/`IOManager`/`QtProgressTransport` 是共用 session service。session service 只依賴 `ExclusionGate`/`BackgroundExecutor`（只宣告 `submit`，`quiesce` 不進 port）/`ProgressHub`/`ProjectIOPort` port。
 - **ExclusionGate str-keyed**：session `OperationKind`（soc/device kinds）+ app 自己的 kind（measure/autofluxdep 各自 `RUN`）用 wire 字串比較，故兩 enum 同一 gate。
 - **app 繼承/實作**：measure `State(SessionState)`、autofluxdep `AutoFluxDepState(SessionState)`；兩 Controller 結構上實作 `SessionControllerPort`（pyright 在各自 dialog call site 驗證 conformance）。
 - **startup project return contract**：`SessionControllerPort.apply_startup_project` 允許 `bool | dict[str, str]`。共用 setup dialog 只看 truthiness；measure 的 remote `startup.apply` / `gui_project_apply` 回 resolved project dict（WIRE 48，含 `result_dir` / `database_path` / `params_path` / `scope_id`），autofluxdep controller 仍回 bool。
@@ -57,4 +57,4 @@ session/
 - **wire name 來源**：`SessionEvent.X` 的字串值即 wire event name；measure-gui 的 wire-name lock 測試（`test_remote_event_dialog_view.py`）鎖全集，搬移/改名 payload 不得動字串值。
 - **`ExpContext.values`**：只攜帶 read-only `ValueLookup` facade，供 default generation / resolve-once 讀目前 session 投影；`ContextService.list_value_sources/read_value_source` 是 GUI/remote 共用查詢面，mutable `ValueRegistry` 只在 session composition root / source binder 內使用。`ValueSourceBinder` 以 owner-scoped replace/unregister 維護 `context.*` / `project.*` / `predictor.*` / `device.<name>.*`；named device source 包含 `device.<name>.name` 與 cached info（如 `value`/`status`），device provider 只讀 cached `DeviceState.info`、不 poll hardware，也不推導 active/flux 語義。`value_source_input.py` 把此查詢面包成可注入的 GUI token helper；它只替換輸入文字，不寫 cfg/md。`ExpContext` 仍是 live environment facade，不是 snapshot。
 
-跨模組設計見 ADR-0002/0004/0005/0006/0019/0020/0021/0025/0026（0021：event ownership——domain module 擁有 enum+payload、app 組裝；0025：跨線程互動 channel——OperationChannel/NotifyChannel；0026：operation abstraction——OperationRunner + scope-as-adapter-input + State write port + ConnectionService 拆 SoC/Predictor + DeviceRegistryPort）。**autofluxdep 已完整複用**（session-core extraction S1–S5：組 session services + 實作 SessionControllerPort + run 讀 exp_context + 用共用 setup/device/predictor dialog；見 ADR-0020 + autofluxdep/README）。
+跨模組設計見 ADR-0002/0004/0005/0006/0019/0020/0021/0025/0026（0021：event ownership——domain module 擁有 enum+payload、app 組裝；0025：跨線程互動 channel——OperationChannel/NotifyChannel；0026：operation abstraction——OperationRunner + scope-as-adapter-input + State write port + ConnectionService 拆 SoC/Predictor + DeviceRegistryPort）。autofluxdep 走同一組 session services、`SessionControllerPort`、`exp_context` 與共用 setup/device/predictor dialog；見 ADR-0020 + autofluxdep/README。

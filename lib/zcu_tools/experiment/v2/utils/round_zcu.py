@@ -24,10 +24,8 @@ def round_zcu_time(
     one_cycle = soccfg.cycles2us(1, gen_ch=gen_ch, ro_ch=ro_ch)
 
     def _convert_time(t: float) -> float:
-        # us2cycles use np.round to convert time to cycles
-        # but qick implementation of sweep  use np.trunc to convert step size
-        # pre substract 0.5 cycle to perform truncation instead of rounding
-        # TODO: is there better way to handle the rounding issue
+        # QICK scalar us2cycles rounds, while sweep step conversion truncates.
+        # Shift by half a cycle so scalar preview follows the sweep grid.
         return (
             soccfg.cycles2us(
                 soccfg.us2cycles(

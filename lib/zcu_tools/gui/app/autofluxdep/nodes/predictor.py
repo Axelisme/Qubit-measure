@@ -8,19 +8,16 @@ Result / round_hook / Plotter), and the Node's ``produce`` computes
 is indistinguishable from a measurement provider — same ``provides`` /
 ``requires`` / ``produce`` three-interface surface, zero ``isinstance``.
 
-This is exactly the coupling fix from CONTEXT.md: the predictor used to leak
-into the orchestrator (a ``pre_point`` seeding ``predict_freq`` and an
-experiment-specific update_bias), which gave the orchestrator knowledge of the
-qubit_freq experiment. As a Service it is loaded only because some Node
+The predictor stays out of the orchestrator: it is loaded only because some Node
 (qubit_freq) requires ``predict_freq``, and it participates purely through
 requirement resolution.
 
 The actual prediction is delegated to the sweep-lived ``tools.predictor`` (a
-``Predictor``; the prototype binds a ``SimplePredictor`` flux→freq stand-in,
-Phase B a real ``FluxoniumPredictor``) — its ``bias`` is the cross-flux-point
-state a short-lived Node cannot hold, which is precisely why it lives in Tools.
-The *calibration* face (qubit_freq handing its measured freq back to adjust the
-prediction) is a Tools method a Node triggers, deferred past the prototype.
+``Predictor``; either a ``SimplePredictor`` fallback or a real
+``FluxoniumPredictor`` adapter) — its ``bias`` is the cross-flux-point state a
+short-lived Node cannot hold, which is precisely why it lives in Tools. The
+*calibration* face (qubit_freq handing its measured freq back to adjust the
+prediction) is a Tools method a Node triggers.
 """
 
 from __future__ import annotations

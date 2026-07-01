@@ -1,6 +1,6 @@
 # `zcu_tools.analysis.fluxdep` 模塊重點文檔
 
-**Last updated:** 2026-06-25（first kernel slice）
+**Last updated:** 2026-07-01
 
 本模塊是 Flux-Dependence Analysis 的 notebook-neutral kernel，對應 ADR-0028。它承接 notebook
 與 Qt GUI 共用的互動選點、filtering、line selection、one-tone peak detection 規則；adapter
@@ -15,6 +15,6 @@
 
 ## 邊界
 
-第一批 kernel 不包含 database search、search 診斷圖、plotly/matplotlib export 圖、params.json export，
-也不負責 GUI/ipywidgets lifecycle。Notebook 舊 module 與 Qt interactive widget 只透過 re-export 或
+本 kernel 不包含 database search、search 診斷圖、plotly/matplotlib export 圖、params.json export，
+也不負責 GUI/ipywidgets lifecycle。Notebook module 與 Qt interactive widget 透過 re-export 或
 thin adapter 使用本 kernel。

@@ -1,4 +1,4 @@
-**Last updated:** 2026-06-28 (value refs in cfg edits)
+**Last updated:** 2026-07-01 (GUI bridge wording)
 
 # `zcu_tools/mcp/measure/`
 

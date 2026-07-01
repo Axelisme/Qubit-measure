@@ -52,8 +52,8 @@ from .waveform import (
     WaveformCfgFactory,
 )
 
-# TODO: waiting qick official implementation
-# Monkey patching: implement __str__ and __repr__ methods for qick.asm_v2.QickParam
+# QickParam lacks readable formatting in supported QICK versions; patch repr/str
+# so diagnostics and warnings show sweep expressions.
 
 
 ModuleCfg: TypeAlias = Annotated[

@@ -9,7 +9,7 @@ from ..utils import is_qick_param, param2str
 
 
 def get_fclk(prog: QickProgramV2, gen_ch: int | None = None, ro_ch: int | None = None):
-    # TODO: a better way to get fclk for tproc?
+    # QICK stores timing clocks under different soccfg sections by channel type.
     if gen_ch is not None and ro_ch is not None:
         raise RuntimeError("can't specify both gen_ch and ro_ch!")
     if gen_ch is not None:
@@ -31,7 +31,7 @@ def round_timestamp(
 
     round_fn = np.ceil if take_ceil else np.floor
 
-    # TODO: non-hacky way to round QickParam timestamps?
+    # QickParam has no public rounding hook; round start/spans in cycle units.
     cycles_t = t * fclk
     if isinstance(cycles_t, QickParam):
         cycles_t.start = int(round_fn(cycles_t.start))

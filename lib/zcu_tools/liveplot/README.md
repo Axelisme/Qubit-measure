@@ -4,7 +4,7 @@
 
 Jupyter 中即時更新的 matplotlib 繪圖工具，在資料擷取過程中邊跑邊畫。
 
-## 目前模組分層
+## 模組分層
 
 1. `base.py` / `multi.py` — 介面與多圖組合
    - `AbsLivePlot`：所有 live plotter 的抽象基底（`clear / update / refresh` + context manager）。
@@ -50,7 +50,7 @@ Jupyter 中即時更新的 matplotlib 繪圖工具，在資料擷取過程中邊
 
 ## 對外 API 與匯出
 
-- 根模組 `liveplot/__init__.py` 目前匯出：
+- 根模組 `liveplot/__init__.py` 匯出：
   - `backend`
   - `make_plot_frame`
   - `AbsLivePlot`、`DummyPlot`

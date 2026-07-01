@@ -11,8 +11,8 @@ across the whole sweep:
   face (``calibrate``) is a method a Node triggers, never the orchestrator.
 
 The predictor lives in Tools (lifetime = the sweep) and is curried into Nodes via
-the ``RunEnv.tools`` field. A Node never constructs it. The prototype binds a
-``SimplePredictor`` stand-in; Phase B a real ``FluxoniumPredictor`` (scqubits).
+the ``RunEnv.tools`` field. A Node never constructs it. The bound predictor is
+either a ``SimplePredictor`` fallback or a real ``FluxoniumPredictor`` adapter.
 
 ``Smoother`` (pure smoothing mechanism) also lives here, but it is NOT curried
 into Nodes — Nodes report raw values and never smooth. Smoothing is a
@@ -61,7 +61,7 @@ class Predictor(Protocol):
 
 @dataclass
 class SimplePredictor:
-    """A prototype flux→freq stand-in (no scqubits, no FluxoniumPredictor).
+    """A lightweight flux→freq fallback (no scqubits, no FluxoniumPredictor).
 
     Mirrors the real predictor's *structure*, not its physics: a linear physical
     base (``base + slope * flux``) plus a learned IDW error correction. Each
@@ -141,7 +141,7 @@ class Smoother:
     - ``step_weighted``: ``w = decay**num_step; (1-w)*cur + w*prev`` where
       ``num_step`` is how many flux points since this quantity last updated —
       so a long gap (failed points) trusts the new value more. A mode the
-      notebook uses for gap-aware tuning; no prototype Node declares it yet
+      notebook uses for gap-aware tuning; no current Node declares it
       (the smoothed kappa in qubit_freq uses ``ewma``).
 
     ``update(name, idx, cur, mode=...)`` folds ``cur`` into the running estimate
@@ -187,11 +187,9 @@ class Tools:
 
     The controller builds this once per sweep (from the Setup resources) and the
     orchestrator curries it into every Node via ``RunEnv.tools``. ``predictor``
-    is optional (the prototype binds a SimplePredictor; Phase B a real
-    FluxoniumPredictor). Smoothing is deliberately NOT here — it is a
+    is optional (SimplePredictor fallback or real FluxoniumPredictor adapter).
+    Smoothing is deliberately NOT here — it is a
     DerivationService that runs after Nodes, not a tool Nodes call.
     """
 
     predictor: Predictor | None = None
-    # an IDW error-corrector / freq-error model joins here in Phase B, alongside
-    # the real FluxoniumPredictor.

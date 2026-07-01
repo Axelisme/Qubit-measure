@@ -13,17 +13,17 @@
   - 提前停止（`EarlyStopMixin`）：透過 `stop_checkers`（callable list）在 `finish_round()` 內中止後續 rounds。
   - 每輪 callback（`RoundHookMixin`）與 single-shot population/threshold（`SingleShotMixin`）。
 
-## `AcquireMixin` 行為對照（你目前程式最常踩到）
+## `AcquireMixin` 行為對照（常見踩點）
 
 - 生命週期：
   - `acquire()`/`acquire_decimated()` 先建立 `acquire_params`，再進入 `prepare_round()` + `finish_round()` 迴圈。
   - `finish_acquire()` 負責 rounds 聚合（accumulated 或 decimated）。
-- 你的擴充掛點：
+- 擴充掛點：
   - `TrackerMixin.finish_round()`：利用原生 `self.acc_buf`、`self.ro_chs`、`self.avg_level` 更新 tracker。
   - `RoundHookMixin.finish_round()`：每 round 呼叫 `round_hook`，輸入增量摘要資料。
   - `SingleShotMixin._process_accumulated()`：覆寫原生 threshold 路徑，新增 population radius 分類。
 - 相容性關鍵：
-  - 你保留 `AcquireMixin` 的 `extra_args` 傳遞模式，避免破壞原生 acquire 參數流。
+  - 擴充層維持 `AcquireMixin` 的 `extra_args` 傳遞模式，避免破壞原生 acquire 參數流。
   - 若非 `accumulated` 或有 threshold 時，部分統計路徑會顯式 `NotImplementedError`，這是刻意防呆。
 
 ## soccfg 摘要顯示（`describe_soc`）
@@ -56,7 +56,7 @@
 
 ## 原始碼出處
 
-### 你專案中的對應實作
+### 本專案中的對應實作
 
 - `lib/zcu_tools/program/base/improve_acquire.py`
 - `lib/zcu_tools/program/base/__init__.py`

@@ -59,7 +59,7 @@ fluxdep/
 
 ### 1. `search_in_database(fluxs, freqs, datapath, transitions, EJb, ECb, ELb)`
 
-在預先生成的 Fluxonium 資料庫中做搜尋（**唯一一條精確路徑**，舊 fuzzy 啟發式已移除）：
+在預先生成的 Fluxonium 資料庫中做精確搜尋：
 
 - **資料庫結構**（由 `script/generate_fluxonium_sample.py` 產生）：
   - `fluxs`：(N_flux,) 通量點
@@ -73,12 +73,11 @@ fluxdep/
 - 回傳 `(EJ, EC, EL)` 與診斷圖（預測 vs 目標頻率 + 3 個參數的 distance 散點圖；prune 下未搜 entry 的散點用 LB 當距離下界）。
 - `n_jobs` 設 LB pass 的 numba 執行緒（`-1`=全核心）。
 
-**效能（profiling，10091-entry DB、300-pt cloud）**：三個優化（前兩個 **bit-identical**，第三個讓精確解變預設）：
+**效能（profiling，10091-entry DB、300-pt cloud）**：
 - **`load_database()` + `_load_database_cached` LRU**（keyed on path+mtime+size）：GUI 對同 DB 重複跑 search，省 cold-read ~0.13s/call。
 - **只插值 referenced levels**：`used_levels = unique(tr_pairs)`、remap pairs 到 reduced index 後才 `_apply_interp`（15→~3 level，intermediate 363→73MB，插值 35→8ms，更好並行）。plot 分支重建 best entry 的 full-level energies。
-- **exact LB-prune（演算法層）**：見上，4–15x 且精確（取代舊 fuzzy 預設）。等價測試 `test_prune_is_identical_to_full_exact_scan`（noisy cloud 0 mismatch）+ `test_entry_lower_bound_is_a_valid_floor`。
-- **移除的舊 fuzzy 啟發式**：`smart_fuzzy_search`（直方圖密度 + 降採樣）+ 分支用的 `_search_kernel` 已刪 —— 它本身就是近似（noisy cloud 跟 exact 在 17/60 案例不同），LB-prune 精確版又更快，故統一掉。`candidate_breakpoint_search`/`eval_dist_bounded` 保留（精確搜尋核心）。
-- **走過的死路**：coarse-to-fine 降採點 screen 雖 8x 但選到不同 DB entry、relerr 高達 240%（DB Fibonacci-lattice 樣本太密集退化）；向量化全候選比 njit 慢 88x（branch-prune 太有效 + (M,N,K) materialize 太大）。
+- **exact LB-prune（演算法層）**：見上，4–15x 且精確。等價測試 `test_prune_is_identical_to_full_exact_scan`（noisy cloud 0 mismatch）+ `test_entry_lower_bound_is_a_valid_floor`。
+- `candidate_breakpoint_search` / `eval_dist_bounded` 是精確搜尋核心；近似 fuzzy screen 不屬於 public API。
 
 ### 2. `fit_spectrum(fluxs, freqs, init_params, transitions, param_b, maxfun)`
 
@@ -92,7 +91,7 @@ fluxdep/
 路徑；共用 domain 規則不在 notebook adapter 內維護。
 
 - `cast2real_and_norm(signals, use_phase=True, sigma=1, smooth_method="wavelet")`：
-  預設減去每列平均（去除 flux-independent background），沿頻率軸做 wavelet smoothing 後取 `|signal|` 並按列 std 歸一化；`smooth_method="gaussian"` 保留為舊行為對照。`use_phase=False` 退回純 magnitude 模式。
+  預設減去每列平均（去除 flux-independent background），沿頻率軸做 wavelet smoothing 後取 `|signal|` 並按列 std 歸一化；`smooth_method="gaussian"` 提供 Gaussian smoothing 對照。`use_phase=False` 退回純 magnitude 模式。
 - `spectrum2d_findpoint(dev_values, freqs, real_signals, threshold, weight=None)`：
   對每個通量（每列）呼叫 `scipy.signal.find_peaks`，最多保留 3 個最高峰。回傳打平的 `(fluxs, freqs)`。
 - `downsample_points(xs, ys, threshold)`：2D 空間去密集點（同一 x 下的點保留為一組）。

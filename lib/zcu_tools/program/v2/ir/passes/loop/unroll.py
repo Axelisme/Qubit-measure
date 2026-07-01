@@ -1,4 +1,4 @@
-"""UnrollLoopPass: scheduled-window-driven loop unrolling (Phase 8).
+"""UnrollLoopPass: scheduled-window-driven loop unrolling.
 
 Purpose
 -------
@@ -154,7 +154,7 @@ def _floor_pow2(x: int) -> int:
 def _analyze_unroll(
     body_insts: list[IRNode], loop_overhead: int, ctx: PipeLineContext
 ) -> UnrollAnalysis:
-    """Joint k selection (Phase 8 design).
+    """Joint k selection from timing slack and pmem budget.
 
     slack       = scheduled_ticks - body_cost
     if slack <= 0:

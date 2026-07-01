@@ -58,7 +58,7 @@ _PRODUCE_PERF = PerfStats("worker.node_produce", logger, slow_ms=500.0)
 
 
 class ModuleSource(Protocol):
-    """The ml library's read-only module lookup (a ModuleLibrary in Phase B).
+    """The ml library's read-only module lookup.
 
     ``get_module(name)`` returns the named preset module, or None if absent —
     the orchestrator then falls back to a provider's declared module default.

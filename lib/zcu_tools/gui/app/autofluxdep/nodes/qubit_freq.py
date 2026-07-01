@@ -90,7 +90,7 @@ class QubitFreqCfgTemplate(TwoToneCfg, ExpCfgModel):
     """
 
 
-# --- placeholder external bindings (Phase B: inject from project/metadata) ---
+# --- default external bindings (project metadata can override) ---
 def _default_kappa() -> float:
     # notebook: md.qf_w — the smoothed kappa estimate's fallback; lazy so the
     # real md is bound at build time. (Drives the drive-gain guess.)
@@ -337,10 +337,9 @@ class QubitFreqBuilder(Builder):
     def make_default_schema(self) -> NodeCfgSchema:
         """The typed node-knob schema (defaults + types) — the param SSOT.
 
-        The hardcoded defaults the prototype carried in ``make_cfg`` now live here.
         ``detune_sweep`` is a ``SweepSpec`` (expts-defined, aligning with the cfg
-        editor): its default ``(-20, 50, expts=141)`` reproduces the prototype's
-        ``step=0.5`` axis point-for-point. The drive defaults follow the
+        editor): its default ``(-20, 50, expts=141)`` gives a 0.5 MHz step. The
+        drive defaults follow the
         measure-gui qubit-pulse convention: ``qub_flat`` on channel 0, with
         ``qub_length`` at 0.1 us. If a project does not define that named
         waveform, ``make_cfg`` uses an inline const waveform of that length so

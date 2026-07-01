@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-06-30 (SimEngine internal simulation path)
+**Last updated:** 2026-07-01
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -8,12 +8,12 @@ architecture, and design boundaries only.
 
 ## Purpose
 
-Upgrade the mock soc from a white-noise stub into a **physically-realistic**
-data source, so the whole stack (experiment run -> analyze -> recover) can be
-validated end to end offline. A `SimParams` injected into `make_mock_soc(sim=...)`
-makes the mock soc return I/Q that, when fitted by the real experiment analyze
-code, recovers the injected physics (f_qubit, pi gain, T1, T2, detuning) — and,
-via the per-shot two-blob model, the singleshot |g>/|e> discrimination fidelity.
+`SimParams` turns the mock soc into a **physically-realistic** data source, so the
+whole stack (experiment run -> analyze -> recover) can be validated end to end
+offline. A `SimParams` injected into `make_mock_soc(sim=...)` makes the mock soc
+return I/Q that, when fitted by the real experiment analyze code, recovers the
+injected physics (f_qubit, pi gain, T1, T2, detuning) — and, via the per-shot
+two-blob model, the singleshot |g>/|e> discrimination fidelity.
 
 ## Injection architecture (layer A, hybrid)
 
@@ -23,7 +23,8 @@ and routes through the `SimEngine`: the engine pre-computes the per-round raw
 unchanged — `start_readout` / `poll_data` serve the budget, and
 `_process_accumulated` / `_summarize_accumulated` / `round_hook` /
 `stop_checkers` / `get_raw` are all reused. With no `SimParams` the branch is
-skipped and behaviour is byte-for-byte the prior real path (design boundary D1).
+skipped and the white-noise fallback path remains byte-for-byte stable (design
+boundary D1).
 This is why injecting params and running a real experiment class exercises the
 genuine acquire pipeline, not a parallel mock path.
 
@@ -46,10 +47,10 @@ For each sweep point the engine drives this chain:
 **One unified path serves accumulated and singleshot.** The per-shot Bernoulli
 is not gated on any "singleshot mode": its reps-mean is
 `(1−P_e)·s_g + P_e·s_e == S21(rf_g) + P_e·[S21(rf_e) − S21(rf_g)]` (the
-`mixed_signal` blend), so the accumulated (reps-averaged) readout is **unchanged**
-(zero regression), while `get_raw` exposes the two Gaussian blobs a singleshot
+`mixed_signal` blend), so the accumulated (reps-averaged) readout follows the same
+mean path, while `get_raw` exposes the two Gaussian blobs a singleshot
 experiment classifies (`GE_Exp` → PCA + histogram on the host). The accumulated
-path now carries genuine shot noise `~ sqrt(P_e(1−P_e)/reps)`, so a slow
+path carries genuine shot noise `~ sqrt(P_e(1−P_e)/reps)`, so a slow
 low-contrast fit (e.g. echo T2) needs enough reps to average it down — only reps
 (not snr, which scales the Gaussian readout noise) suppresses the Bernoulli shot
 noise.
@@ -176,7 +177,7 @@ every coupling point.
   gain-proportional Gaussian integrated noise into the QICK
   `(*loop_dims, nreads, 2)` int64 buffer (noise parameters / reps / rounds / seed;
   fresh Bernoulli + noise per round so software-averaging works). The
-  reps-mean is the accumulated `mixed_signal` blend (zero regression); `get_raw`
+  reps-mean is the accumulated `mixed_signal` blend; `get_raw`
   sees the two blobs. Owns the Lorentzian quasi-static detune
   ensemble: it averages `P_e` over a deterministic Gauss-Legendre quadrature in `δ`
   (lowering applies each node as a frame shift via `detune_offset`), so T2\* emerges
@@ -193,7 +194,7 @@ every coupling point.
 ## Design boundaries and known limits
 
 - **D1 — no `SimParams` => white-noise fallback.** `make_mock_soc()` without a
-  sim is the unchanged stub; the sim path is fully opt-in.
+  sim uses the white-noise stub; the sim path is fully opt-in.
 - **Single rotating frame.** The whole timeline lives in one frame whose carrier
   is the qubit control pulses' frequency. Idle segments carry the frame detuning
   (not 0), which is what makes Ramsey fringes appear. Qubit pulses that disagree
@@ -279,9 +280,9 @@ every coupling point.
 - **Per-shot Bernoulli (singleshot) — one unified path.** The reps axis draws a
   per-shot `Bernoulli(P_e)` selecting the `s_g` / `s_e` blob, not a broadcast
   mean; this is *not* gated on a singleshot mode. Its reps-mean is the
-  `mixed_signal` blend, so the accumulated readout is unchanged, while `get_raw`
+  `mixed_signal` blend, so the accumulated readout follows the same mean path, while `get_raw`
   exposes two Gaussian blobs (`GE_Exp` classifies them host-side via PCA +
-  histogram). Two consequences: (1) the accumulated path now carries genuine shot
+  histogram). Two consequences: (1) the accumulated path carries genuine shot
   noise `~ sqrt(P_e(1−P_e)/reps)`, so slow low-contrast fits (echo T2) need enough
   reps to average it down — only reps, not the Gaussian noise parameters,
   suppresses it; (2) a DEFAULT base snr=300 fully separates the blobs (fidelity
@@ -320,8 +321,9 @@ every coupling point.
   the singleshot per-shot blobs (get_raw clusters on the |g>/|e> centres, pi/2 puts
   ~half on the excited blob, reps-mean == accumulated readout), the Lorentzian
   dephasing gates (quadrature reproduces the analytic FID, echo refocuses to T2,
-  Ramsey decays faster, Γ=0 zero-regression), and a deterministic Branch smoke. The
-  coherence-envelope helpers run at `reps=2000` to average the per-shot shot noise.
+  Ramsey decays faster, Γ=0 no-inhomogeneous-broadening), and a deterministic
+  Branch smoke. The coherence-envelope helpers run at `reps=2000` to average the
+  per-shot shot noise.
 - `test_integration.py` — cross-experiment inject -> recover: real experiment
   `run` + `analyze` recover the injected f_qubit / pi gain / gain scaling / T1 /
   T2 + detuning, the dephasing proof (echo -> T2 and Γ-insensitive, Ramsey -> T2\*,

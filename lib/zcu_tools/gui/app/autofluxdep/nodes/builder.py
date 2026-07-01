@@ -47,8 +47,7 @@ class RunEnv:
     param SSOT (its ``NodeCfgSchema``); a Node lowers it (``schema.lower(ml, md)``)
     to the flat knob dict ``make_cfg`` reads. ``soc`` / ``soccfg`` / ``ml`` /
     ``tools`` — sweep resources: the connected board + its QICK config, the active
-    ModuleLibrary (the Builder lowers it into the run cfg, Phase B), and the
-    stateful tools.
+    ModuleLibrary (the Builder lowers it into the run cfg), and the stateful tools.
     ``flux_device`` — the name of the connected device the flux value is applied
     through (the user's flux-source pick, ``state.flux_device_name``); a real
     acquire writes ``flux`` into ``cfg.dev[flux_device]`` so ``setup_devices``
@@ -186,11 +185,11 @@ class PlacedNode:
     order, and the instance ``name``; ``produce``/Result/Plotter are domain code
     they never edit.
 
-    ``schema`` is the placement's own ``NodeCfgSchema`` — the SSOT physicalised in
-    Phase 160b: a per-placement mutable value tree (the old sparse ``params`` dict
-    is gone). It is built from the Builder's defaults in ``__post_init__`` and seeded
-    by the ``overrides`` constructor kwarg (a flat dict, fast-failing unknown keys);
-    after construction the GUI / controller write leaves through ``schema.set_field``.
+    ``schema`` is the placement's own ``NodeCfgSchema``: a per-placement mutable
+    value tree. It is built from the Builder's defaults in ``__post_init__`` and
+    seeded by the ``overrides`` constructor kwarg (a flat dict, fast-failing unknown
+    keys); after construction the GUI / controller write leaves through
+    ``schema.set_field``.
     Two placements of the same Builder get independent schemas (cloned defaults), so
     editing one never bleeds into the other.
 

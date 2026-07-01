@@ -207,7 +207,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         (_str("tab_id"),),
         tool_name="gui_tab_analyze_cancel",
     ),
-    # Save (under tab.* namespace — Phase 170c)
+    # Save methods under the tab.* namespace.
     "tab.save_data": MethodSpec(
         30.0,
         "Save data file",
@@ -745,8 +745,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "fit summary with gui_tab_get_post_analyze_result.",
         (_str("tab_id"), _obj_default("updates", "Post-analysis param updates")),
     ),
-    # Writeback workflow (under tab.* namespace — Phase 170c) — a persistent
-    # draft computed once at analyze time.
+    # Writeback workflow under tab.*: a persistent draft computed once at analyze time.
     "tab.writeback_preview": MethodSpec(
         5.0,
         "List the tab's persistent writeback draft (pure read — not a dry-run; the "

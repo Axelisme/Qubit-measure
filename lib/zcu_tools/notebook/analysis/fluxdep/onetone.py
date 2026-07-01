@@ -33,10 +33,10 @@ class InteractiveOneTone:
         self.fig.tight_layout()
         plt.ion()
 
-        # 顯示頻譜
+        # Initialize the spectrum and peak markers.
         self.init_plots(threshold)
 
-        # 創建控制元件
+        # Build controls after the plot artists exist.
         self.threshold_slider = widgets.FloatSlider(
             value=threshold, min=0.0, max=5.0, step=0.01, description="Threshold:"
         )
@@ -47,7 +47,7 @@ class InteractiveOneTone:
         )
         self.finish_button.on_click(self.on_finish)
 
-        # 顯示 widget
+        # Display the plot and controls together in the notebook.
         display(
             widgets.HBox(
                 [
@@ -63,8 +63,8 @@ class InteractiveOneTone:
         )
 
     def init_plots(self, threshold: float) -> None:
-        """初始化圖表"""
-        # 顯示2D頻譜
+        """Initialize the spectrum and selected one-tone slice."""
+        # Show the 2D spectrum.
         self.real_signals = np.abs(self.signals)  # (mAs, freqs)
 
         self.max_freq_idx = max_dispersion_freq_index(self.signals, self.freqs)
@@ -86,43 +86,43 @@ class InteractiveOneTone:
             label="max freqs",
         )
 
-        # 顯示1D切面
+        # Show the 1D slice at the maximum-dispersion frequency.
         self.real_signals_slice = self.real_signals[:, self.max_freq_idx]  # (mAs,)
         self.smoothed_real_signals = smoothed_slice(self.signals, self.max_freq_idx)
 
         (self.curve,) = self.axes[1].plot(self.dev_values, self.smoothed_real_signals)
         self.axes[1].set_xlim(self.dev_values[0], self.dev_values[-1])
 
-        # 找峰值並顯示
+        # Draw initial peak markers.
         self.update_peaks(threshold)
 
-        # 設置軸標籤
+        # Set axis labels.
         self.axes[0].set_ylabel("Frequency (GHz)")
         self.axes[1].set_xlabel("Current (mA)")
         self.axes[1].set_ylabel("Normalized Amplitude")
 
     def update_peaks(self, threshold: float) -> None:
-        """更新峰值點"""
+        """Refresh peak markers for the current threshold."""
 
-        # 找出峰值
+        # Detect peaks on the smoothed one-tone slice.
         peaks = detect_peaks(self.smoothed_real_signals, threshold)
 
-        # 獲取對應的 mAs 和 freqs
+        # Store selected device values and their common frequency.
         self.s_dev_values = self.dev_values[peaks]
         self.s_freqs = np.full_like(self.s_dev_values, self.freqs[self.max_freq_idx])
 
-        # 更新圖表上的峰值標記
+        # Replace existing peak markers.
         if hasattr(self, "scatter1"):
             self.scatter1.remove()
         if hasattr(self, "scatter2"):
             self.scatter2.remove()
 
-        # 在上圖中標記所選點
+        # Mark selected points on the 2D spectrum.
         self.scatter1 = self.axes[0].scatter(
             self.s_dev_values, self.s_freqs, color="red", s=30, zorder=5
         )
 
-        # 在下圖中標記峰值
+        # Mark peaks on the 1D slice.
         self.scatter2 = self.axes[1].scatter(
             self.s_dev_values,
             self.smoothed_real_signals[peaks],
@@ -131,26 +131,26 @@ class InteractiveOneTone:
             zorder=5,
         )
 
-        # 更新圖表
+        # Redraw after marker replacement.
         self.fig.canvas.draw_idle()
 
     def on_threshold_change(self, change: Any) -> None:
-        """當閾值變更時更新圖表"""
+        """Handle threshold-slider changes."""
         if self.is_finished:
             return
 
         self.update_peaks(change.new)
 
     def on_finish(self, _: Any) -> None:
-        """完成按鈕的回調函數"""
+        """Handle the Finish button."""
         plt.close(self.fig)
         self.is_finished = True
 
-        # also clear the output
+        # Clear the widget output after closing the figure.
         clear_output(wait=False)
 
     def get_positions(self) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-        """返回找到的點位置"""
+        """Return selected ``(dev_values, freqs)`` points."""
         if not self.is_finished:
             self.on_finish(None)
         return self.s_dev_values, self.s_freqs

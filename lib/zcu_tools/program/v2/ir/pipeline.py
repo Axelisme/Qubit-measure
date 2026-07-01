@@ -37,7 +37,7 @@ class PipeLineConfig:
     max_opt_iterations: int = 8
 
     # Hard cap on the unroll factor k. For register-driven loops k is also
-    # rounded down to the nearest power of 2 (Phase 8D).
+    # rounded down to the nearest power of 2.
     max_unroll_factor: int = 32
 
     # Unified cycle cost model
@@ -58,7 +58,7 @@ class PipeLineContext:
     available_regs: set[str] = field(default_factory=set)
     allocated_names: set[str] = field(default_factory=set)
 
-    # dmem dispatch tables (Phase 7). `dmem_base_offset` is the dmem index at
+    # dmem dispatch tables. `dmem_base_offset` is the dmem index at
     # which IR-generated dispatch tables start (set by the caller from the
     # current dmem buffer length). `dmem_tables` is filled by the resolve step:
     # an ordered list of each table's entry-label list, contiguous from

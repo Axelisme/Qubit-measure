@@ -6,7 +6,7 @@ core). ``run_app`` adds the Qt MainWindow and runs the event loop.
 The app composes the shared session services (connection / context / device /
 startup) and uses the shared setup / device / predictor dialogs; the run drives
 the orchestrator over the node graph, each node building its run cfg from the
-active context and simulating the acquire (no hardware in this phase).
+active context and acquiring through either the selected hardware path or MockSoc.
 """
 
 from __future__ import annotations

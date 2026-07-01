@@ -1,5 +1,5 @@
 """
-Comprehensive tests for typed Instruction classes (Phase 2).
+Comprehensive tests for typed Instruction classes.
 
 Tests include:
 - Construction and dispatcher routing for all typed Instruction types
@@ -311,7 +311,7 @@ class TestRegWriteInstruction:
         assert inst.dst.name == "r0"
 
     def test_dispatch_legacy_dmem_rd_raises(self):
-        """DMEM_RD opcode is NO LONGER recognized."""
+        """DMEM_RD opcode is outside the supported tProc v2 instruction set."""
         d = {"CMD": "DMEM_RD", "DST": "r1", "ADDR": "s15"}
         with pytest.raises(ValueError, match="Unknown instruction opcode"):
             BaseInst.from_dict(d)

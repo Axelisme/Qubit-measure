@@ -337,8 +337,9 @@ class ArbWaveformDatabase:
     def get(cls, name: str) -> tuple[NDArray, NDArray | None, NDArray]:
         """Load a waveform by key for the program layer.
 
-        Returns qdata as None when the stored Q channel is all zero, preserving the
-        old runtime contract while using the new single-file asset layout.
+        Returns qdata as None when the stored Q channel is all zero, matching the
+        program-layer runtime contract while the repository stores one `.npz` asset
+        per waveform.
         """
         data = cls.load(name)
         qdata_out: NDArray | None = None if not data.has_q else data.qdata
@@ -378,7 +379,7 @@ class ArbWaveformDatabase:
         """Notebook-friendly raw save wrapper.
 
         For the explicit collision policy use `import_data(..., overwrite=...)`.
-        This historical convenience API overwrites the named raw asset.
+        This convenience API always overwrites the named raw asset.
         """
         qdata_save = np.zeros_like(idata) if qdata is None else qdata
         cls.import_data(name, idata=idata, qdata=qdata_save, time=time, overwrite=True)

@@ -54,10 +54,10 @@ Role default characterization golden 跟隨 `ROLE_TABLE` 與 `make_default_value
 `BaseAdapter.load` 是 GUI load path 的 canonical result seam：預設建構 `exp_cls()` 並呼
 `exp.load(filepath=...)`，與 `BaseAdapter.save` 的 canonical persistence 對稱。需要 constructor
 參數、非 canonical/manual save、grouped data，或需要額外 metadata 才能安全分析/writeback 的
-adapter 必須 override `load()` 或讓預設路徑以明確 `NotImplementedError` fast-fail。暫時相容
-legacy 單檔案資料時，adapter 只能透過 `legacy_migration_experiment` 指向白名單 converter；
+adapter 必須 override `load()` 或讓預設路徑以明確 `NotImplementedError` fast-fail。legacy
+單檔案資料相容只在 adapter migration 邊界提供，adapter 只能透過 `legacy_migration_experiment` 指向白名單 converter；
 流程是 canonical load 先失敗，才把原檔 read-only 轉成 `/tmp` canonical HDF5 後再呼同一個
-`exp.load()`。這是可刪除的 adapter 邊界，不是 experiment runtime compatibility。第一版 load
+`exp.load()`。這是 adapter 邊界，不是 experiment runtime compatibility。load
 不把 `result.cfg_snapshot` 反填回 Config tab；`cfg_snapshot is None` 時 module writeback 維持
 graceful skip。
 

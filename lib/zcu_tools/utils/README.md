@@ -1,6 +1,6 @@
 # zcu_tools.utils
 
-**Last updated:** 2026-06-29 process helper typing
+**Last updated:** 2026-07-01
 
 `utils` 放可被 experiment / GUI 共用、且不反向依賴上層 domain 的 helper。
 實驗資料持久化的 public API 收斂在 `zcu_tools.utils.datasaver` package

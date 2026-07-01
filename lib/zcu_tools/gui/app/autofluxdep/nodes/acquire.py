@@ -48,9 +48,9 @@ def parse_linear_axis(
 ) -> NDArray[np.float64]:
     """Parse a free-text "start,stop,npts" sweep axis (or a 3-tuple) to a linspace.
 
-    The prototype's sweep fields are free text; a malformed value degrades to
-    ``default`` rather than failing the sweep (shared by t1 / lenrabi / t2ramsey /
-    t2echo / mist, whose trailing axis is a simple linspace)."""
+    Some sweep knobs accept free text; a malformed value degrades to ``default``
+    rather than failing the sweep (shared by t1 / lenrabi / t2ramsey / t2echo /
+    mist, whose trailing axis is a simple linspace)."""
     try:
         if isinstance(spec, str) and spec.strip():
             start, stop, npts = spec.split(",")
@@ -176,9 +176,9 @@ def earlystop_snr(schema: NodeCfgSchema, md: Any = None) -> float | None:
     """The SNR early-stop threshold from a Node's schema, or None (no early-stop).
 
     Mirrors the lower-layer task's ``earlystop_snr``. The knob is an optional
-    ``FloatSpec`` (Phase 160b): unset → the lowered dict omits the key → None
-    (no early-stop). A node type without the knob (ro_optimize) likewise yields
-    None. No text parsing — the schema already lowered it to ``float | None``.
+    ``FloatSpec``: unset → the lowered dict omits the key → None (no early-stop).
+    A node type without the knob (ro_optimize) likewise yields None. No text
+    parsing — the schema already lowered it to ``float | None``.
     """
     return schema.lower(None, md=md).get("earlystop_snr")
 

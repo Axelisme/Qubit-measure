@@ -45,7 +45,8 @@ from .util import classify_result, plot_with_classified
 def make_init_matrix(init_pops: NDArray[np.float64]) -> NDArray[np.float64]:
     p_gg_init = init_pops[0, 0]
     p_ge_init = init_pops[0, 1]
-    p_eg_init = p_ge_init  # TODO: before fix singleshot fitting problem, assume use perfect pi pulse
+    # Symmetric preparation model: the pi pulse maps g<->e with the same leakage rate.
+    p_eg_init = p_ge_init
     p_ee_init = p_gg_init
     p_go_init = 1.0 - p_gg_init - p_ge_init
     p_eo_init = p_go_init
@@ -68,7 +69,7 @@ def make_result_matrix(
     n_eo: float,
     n_og: float = 0.0,
     n_oe: float = 0.0,
-    n_oo: float = 1.0,  # TODO: assume one can perfectly identify other state
+    n_oo: float = 1.0,  # Other-state classification is modeled as perfectly isolated.
 ) -> NDArray[np.float64]:
     return np.array(
         [

@@ -68,10 +68,10 @@ class InteractiveLines:
         self.freqs = freqs
         self.signals = signals
 
-        # 僅使用振幅 (magnitude) 模式，預設為 False
+        # Display-mode flag; mirror-loss scoring still uses the selected signal view.
         self.only_use_magnitude: bool = False
 
-        # 根據 only_use_magnitude 計算顯示用資料
+        # Precompute the image shown in the main spectrum view.
         self.real_signals = cast2real_and_norm(
             signals, use_phase=not self.only_use_magnitude
         )
@@ -81,7 +81,7 @@ class InteractiveLines:
         self.prev_mouse_x = None
         self.prev_mouse_y = None
 
-        # Flag to確認滑鼠是否真的移動過，用於減少 update_zoom_view 次數
+        # Throttle loss-view redraws to actual mouse movement.
         self._mouse_moved = False
 
         self.create_widgets()
@@ -136,7 +136,7 @@ class InteractiveLines:
             value=False, description="Conjugate Line"
         )
 
-        # 新增: 僅使用振幅顯示的切換開關
+        # Display the background with magnitude only when checked.
         self.only_use_magnitude_checkbox = widgets.Checkbox(
             value=self.only_use_magnitude, description="Magnitude Only"
         )
@@ -160,7 +160,7 @@ class InteractiveLines:
         self.swap_button.on_click(self.swap_lines)
         self.auto_align_button.on_click(self.auto_align_lines)
 
-        # 綁定 magnitude 顯示模式切換
+        # Bind the magnitude-only display toggle.
         self.only_use_magnitude_checkbox.observe(
             self.on_toggle_magnitude, names="value"
         )
@@ -381,8 +381,7 @@ class InteractiveLines:
         pbar = None
         start_t = time.time()
         for i, candidate in enumerate(candidates):
-            # 計算該位置的mirror loss
-            # 總是使用spectrum來計算(包含phase資訊)
+            # Score each candidate against the active signal view.
             diff_amps = diff_mirror(self.dev_values, real_signals, candidate)
             valid_amps = diff_amps[diff_amps != 0.0]
 
@@ -487,7 +486,7 @@ class InteractiveLines:
         # reset flag
         self._mouse_moved = False
 
-        # 總是使用spectrum來計算(包含phase資訊)
+        # The loss preview uses the raw complex spectrum independent of display mode.
         mirror_loss = diff_mirror(self.dev_values, self.signals, x)
         self.loss_im.set_data(mirror_loss.T)
         self.loss_im.autoscale()

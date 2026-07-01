@@ -293,7 +293,7 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
             cur_params = optimizer.next_params(i, last_snr)
 
             if cur_params is None:
-                # TODO: Better way to early stop
+                # Exhausting the optimizer stops the task through the existing interrupt path.
                 raise KeyboardInterrupt("No more parameters to optimize.")
 
             params[i, :] = cur_params
