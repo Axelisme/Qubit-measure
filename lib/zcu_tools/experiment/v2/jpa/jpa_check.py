@@ -28,7 +28,7 @@ from zcu_tools.experiment.utils import (
     set_output_in_dev_cfg,
     setup_devices,
 )
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
@@ -130,29 +130,23 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
         with LivePlot1D(
             "Frequency (MHz)", "Magnitude", segment_kwargs=dict(num_lines=2)
         ) as viewer:
-            signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    result_shape=(len(freqs),),
-                    pbar_n=cfg.rounds,
-                ).scan(
-                    "JPA on/off",
-                    outputs.tolist(),
-                    before_each=lambda _, ctx, output: (
-                        (dev := ctx.cfg.dev) is not None
-                        and set_output_in_dev_cfg(
-                            dev,
-                            self.OUTPUT_MAP[output],  # type: ignore
+            with MeasureSession(cfg) as run:
+                signals_buffer = run.buffer(
+                    (len(outputs), len(freqs)),
+                    dtype=np.complex128,
+                    on_update=lambda data: viewer.update(
+                        freqs, check_signal2real(data)
+                    ),
+                )
+                for step in run.scan("JPA on/off", outputs.tolist()):
+                    if step.cfg.dev is not None:
+                        set_output_in_dev_cfg(
+                            step.cfg.dev,
+                            self.OUTPUT_MAP[step.value],  # type: ignore[index]
                             label="jpa_rf_dev",
                         )
-                    ),
-                ),
-                init_cfg=cfg,
-                on_update=lambda ctx: viewer.update(
-                    freqs, check_signal2real(np.asarray(ctx.root_data))
-                ),
-            )
-            signals = np.asarray(signals)
+                    signals_buffer[step].measure(measure_fn, pbar_n=step.cfg.rounds)
+                signals = signals_buffer.array
 
         return CheckResult(
             outputs=outputs, freqs=freqs, signals=signals, cfg_snapshot=cfg

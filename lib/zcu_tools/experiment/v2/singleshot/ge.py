@@ -23,7 +23,7 @@ from zcu_tools.experiment import (
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.utils.single_shot import GE_FitResult, singleshot_ge_analysis
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     ProgramV2Cfg,
@@ -263,22 +263,16 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
 
             return signals
 
-        signals = run_task(
-            task=Task(
-                measure_fn=measure_fn,
-                raw2signal_fn=raw2signal_fn,
-                result_shape=(cfg.shots,),
-                pbar_n=1,
-            ).scan(
-                "w/o probe pulse",
-                [False, True],
-                before_each=lambda _, ctx, with_probe: ctx.env.update(
-                    with_probe=with_probe
-                ),
-            ),
-            init_cfg=cfg,
-        )
-        signals = np.asarray(signals)
+        with MeasureSession(cfg) as run:
+            signals_buffer = run.buffer((2, cfg.shots), dtype=np.complex128)
+            for step in run.scan("w/o probe pulse", [False, True]):
+                run.env.update(with_probe=step.value)
+                signals_buffer[step].measure(
+                    measure_fn,
+                    raw2signal_fn=raw2signal_fn,
+                    pbar_n=1,
+                )
+            signals = signals_buffer.array
 
         return GE_Result(
             signals=signals,

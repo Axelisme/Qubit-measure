@@ -25,7 +25,7 @@ from zcu_tools.experiment.utils import (
     set_flux_in_dev_cfg,
     setup_devices,
 )
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.notebook.analysis.fluxdep import add_secondary_xaxis
@@ -158,24 +158,18 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
             num_lines=5,
             title="MIST over FLux",
         ) as viewer:
-            signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    result_shape=(len(gains),),
-                    pbar_n=cfg.rounds,
-                ).scan(
-                    "flux",
-                    values.tolist(),
-                    before_each=lambda _, ctx, value: set_flux_in_dev_cfg(
-                        ctx.cfg.dev, value
+            with MeasureSession(cfg) as run:
+                signals_buffer = run.buffer(
+                    (len(values), len(gains)),
+                    dtype=np.complex128,
+                    on_update=lambda data: viewer.update(
+                        values, gains, mist_signal2real(data)
                     ),
-                ),
-                init_cfg=cfg,
-                on_update=lambda ctx: viewer.update(
-                    values, gains, mist_signal2real(np.asarray(ctx.root_data))
-                ),
-            )
-            signals = np.asarray(signals)
+                )
+                for step in run.scan("flux", values.tolist()):
+                    set_flux_in_dev_cfg(step.cfg.dev, step.value)
+                    signals_buffer[step].measure(measure_fn, pbar_n=step.cfg.rounds)
+                signals = signals_buffer.array
 
         return FluxDepResult(
             values=values, gains=gains, signals=signals, cfg_snapshot=cfg

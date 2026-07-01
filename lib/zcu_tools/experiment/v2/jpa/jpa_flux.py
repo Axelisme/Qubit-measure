@@ -25,7 +25,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.liveplot import LivePlot1D
@@ -112,26 +112,29 @@ class FluxExp(PersistableExperiment[FluxResult, FluxCfg]):
             return [tracker]
 
         with LivePlot1D("JPA Flux value (a.u.)", "Signal Difference") as viewer:
-            signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    raw2signal_fn=lambda raw: snr_as_signal(
-                        raw, ge_axis=0, skew_penalty=cfg.skew_penalty
-                    ),
+            with MeasureSession(cfg) as run:
+                signals_buffer = run.buffer(
+                    (len(jpa_fluxs),),
                     dtype=np.float64,
-                    pbar_n=cfg.rounds,
-                ).scan(
-                    "JPA Flux value",
-                    jpa_fluxs.tolist(),
-                    before_each=lambda _, ctx, flux: (
-                        (dev := ctx.cfg.dev) is not None
-                        and set_flux_in_dev_cfg(dev, flux, label="jpa_flux_dev")
-                    ),
-                ),
-                init_cfg=cfg,
-                on_update=lambda ctx: viewer.update(jpa_fluxs, np.abs(ctx.root_data)),
-            )
-            signals = np.asarray(signals)
+                    on_update=lambda data: viewer.update(jpa_fluxs, np.abs(data)),
+                )
+                for step in run.scan("JPA Flux value", jpa_fluxs.tolist()):
+                    if step.cfg.dev is not None:
+                        set_flux_in_dev_cfg(
+                            step.cfg.dev,
+                            step.value,
+                            label="jpa_flux_dev",
+                        )
+                    signals_buffer[step].measure(
+                        measure_fn,
+                        raw2signal_fn=lambda raw: snr_as_signal(
+                            raw,
+                            ge_axis=0,
+                            skew_penalty=run.cfg.skew_penalty,
+                        ),
+                        pbar_n=step.cfg.rounds,
+                    )
+                signals = signals_buffer.array
 
         return FluxResult(fluxes=jpa_fluxs, signals=signals, cfg_snapshot=cfg)
 

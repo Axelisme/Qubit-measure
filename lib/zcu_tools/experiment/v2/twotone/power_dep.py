@@ -21,7 +21,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.program.v2 import (
@@ -117,24 +117,18 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
         with LivePlot2DwithLine(
             "Pulse Gain (a.u.)", "Frequency (MHz)", line_axis=1, num_lines=2
         ) as viewer:
-            signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    result_shape=(len(freqs),),
-                    pbar_n=cfg.rounds,
-                ).scan(
-                    "gain",
-                    gains.tolist(),
-                    before_each=lambda i, ctx, gain: (
-                        ctx.cfg.modules.qub_pulse.set_param("gain", gain)
+            with MeasureSession(cfg) as run:
+                signals_buffer = run.buffer(
+                    (len(gains), len(freqs)),
+                    dtype=np.complex128,
+                    on_update=lambda data: viewer.update(
+                        gains, freqs, gain_signal2real(data)
                     ),
-                ),
-                init_cfg=cfg,
-                on_update=lambda ctx: viewer.update(
-                    gains, freqs, gain_signal2real(np.asarray(ctx.root_data))
-                ),
-            )
-            signals = np.asarray(signals)
+                )
+                for step in run.scan("gain", gains.tolist()):
+                    step.cfg.modules.qub_pulse.set_param("gain", step.value)
+                    signals_buffer[step].measure(measure_fn, pbar_n=step.cfg.rounds)
+                signals = signals_buffer.array
 
         return PowerResult(
             gains=gains, freqs=freqs, signals=signals, cfg_snapshot=orig_cfg

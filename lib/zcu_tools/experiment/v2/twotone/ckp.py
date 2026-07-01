@@ -23,7 +23,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D, MultiLivePlot, make_plot_frame
 from zcu_tools.program.v2 import (
@@ -221,10 +221,8 @@ class CKP_Exp(PersistableExperiment[CKP_Result, CKP_Cfg]):
             ),
         ) as viewer:
 
-            def plot_fn(
-                ctx: TaskState[NDArray[np.complex128], NDArray[np.complex128], CKP_Cfg],
-            ) -> None:
-                real_signal = ckp_signal2real(ctx.root_data)
+            def plot_fn(data: NDArray[np.complex128]) -> None:
+                real_signal = ckp_signal2real(data)
 
                 viewer.get_plotter("ground").update(
                     res_freqs, qub_freqs, real_signal[0], refresh=False
@@ -234,15 +232,14 @@ class CKP_Exp(PersistableExperiment[CKP_Result, CKP_Cfg]):
                 )
                 viewer.refresh()
 
-            signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    result_shape=(2, len(res_freqs), len(qub_freqs)),
-                    pbar_n=cfg.rounds,
-                ),
-                init_cfg=cfg,
-                on_update=plot_fn,
-            )
+            with MeasureSession(cfg) as run:
+                signals_buffer = run.buffer(
+                    (2, len(res_freqs), len(qub_freqs)),
+                    dtype=np.complex128,
+                    on_update=plot_fn,
+                )
+                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
+                signals = signals_buffer.array
         plt.close(fig)
 
         return CKP_Result(

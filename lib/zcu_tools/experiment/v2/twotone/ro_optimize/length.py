@@ -23,7 +23,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.liveplot import LivePlot1D
@@ -124,25 +124,24 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
             return [tracker]
 
         with LivePlot1D("Readout Length (us)", "SNR") as viewer:
-            signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    raw2signal_fn=lambda raw: snr_as_signal(
-                        raw, ge_axis=1, skew_penalty=cfg.skew_penalty
-                    ),
+            with MeasureSession(cfg) as run:
+                signals_buffer = run.buffer(
+                    (len(lengths),),
                     dtype=np.float64,
-                    pbar_n=cfg.rounds,
-                ).scan(
-                    "length",
-                    lengths.tolist(),
-                    before_each=lambda _, ctx, length: (
-                        ctx.cfg.modules.readout.set_param("ro_length", length)
-                    ),
-                ),
-                init_cfg=cfg,
-                on_update=lambda ctx: viewer.update(lengths, np.abs(ctx.root_data)),
-            )
-            signals = np.asarray(signals)
+                    on_update=lambda data: viewer.update(lengths, np.abs(data)),
+                )
+                for step in run.scan("length", lengths.tolist()):
+                    step.cfg.modules.readout.set_param("ro_length", step.value)
+                    signals_buffer[step].measure(
+                        measure_fn,
+                        raw2signal_fn=lambda raw: snr_as_signal(
+                            raw,
+                            ge_axis=1,
+                            skew_penalty=run.cfg.skew_penalty,
+                        ),
+                        pbar_n=step.cfg.rounds,
+                    )
+                signals = signals_buffer.array
 
         return LengthResult(lengths, signals, cfg_snapshot=original_cfg)
 

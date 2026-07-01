@@ -23,7 +23,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program.v2 import (
@@ -180,20 +180,18 @@ class ZigZagScanExp(PersistableExperiment[ZigZagScanResult, ZigZagScanCfg]):
             )
 
         with LivePlot2D("Times", x_info["name"]) as viewer:
-            signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    result_shape=(len(times), len(values)),
-                    pbar_n=cfg.rounds,
-                ),
-                init_cfg=cfg,
-                on_update=lambda ctx: viewer.update(
-                    times.astype(np.float64),
-                    values,
-                    zigzag_signal2real(np.asarray(ctx.root_data)),
-                ),
-            )
-            signals = np.asarray(signals, dtype=np.complex128)
+            with MeasureSession(cfg) as run:
+                signals_buffer = run.buffer(
+                    (len(times), len(values)),
+                    dtype=np.complex128,
+                    on_update=lambda data: viewer.update(
+                        times.astype(np.float64),
+                        values,
+                        zigzag_signal2real(data),
+                    ),
+                )
+                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
+                signals = signals_buffer.array
 
         return ZigZagScanResult(
             times=times, values=values, signals=signals, cfg_snapshot=orig_cfg

@@ -21,7 +21,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program.v2 import (
@@ -142,17 +142,16 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
             )
 
         with LivePlot2D("Gain1 (a.u.)", "Gain2 (a.u.)") as viewer:
-            signals = run_task(
-                task=Task(
-                    pbar_n=cfg.rounds,
-                    measure_fn=measure_fn,
-                    result_shape=(len(gains1), len(gains2)),
-                ),
-                init_cfg=cfg,
-                on_update=lambda ctx: viewer.update(
-                    gains1, gains2, dual_reset_gain_signal2real(ctx.root_data)
-                ),
-            )
+            with MeasureSession(cfg) as run:
+                signals_buffer = run.buffer(
+                    (len(gains1), len(gains2)),
+                    dtype=np.complex128,
+                    on_update=lambda data: viewer.update(
+                        gains1, gains2, dual_reset_gain_signal2real(data)
+                    ),
+                )
+                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
+                signals = signals_buffer.array
 
         return PowerResult(gains1, gains2, signals, cfg_snapshot=cfg)
 

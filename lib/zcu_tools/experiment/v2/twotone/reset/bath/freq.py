@@ -24,7 +24,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program.v2 import (
@@ -163,17 +163,16 @@ class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
             )
 
         with LivePlot2D("Cavity Frequency (MHz)", "Cavity drive Gain (a.u.)") as viewer:
-            signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    result_shape=(4, len(gains), len(freqs)),
-                    pbar_n=cfg.rounds,
-                ),
-                init_cfg=cfg,
-                on_update=lambda ctx: viewer.update(
-                    freqs, gains, bathreset_signal2real(ctx.root_data).T
-                ),
-            )
+            with MeasureSession(cfg) as run:
+                signals_buffer = run.buffer(
+                    (4, len(gains), len(freqs)),
+                    dtype=np.complex128,
+                    on_update=lambda data: viewer.update(
+                        freqs, gains, bathreset_signal2real(data).T
+                    ),
+                )
+                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
+                signals = signals_buffer.array
 
         return FreqGainResult(
             gains=gains,

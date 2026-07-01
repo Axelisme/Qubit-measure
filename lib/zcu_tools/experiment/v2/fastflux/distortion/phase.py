@@ -22,7 +22,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program.v2 import (
@@ -151,17 +151,16 @@ class PhaseExp(PersistableExperiment[PhaseResult, PhaseCfg]):
             )
 
         with LivePlot2D("Time (us)", "Phase (deg)") as viewer:
-            signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    result_shape=(len(lengths), len(phases)),
-                    pbar_n=cfg.rounds,
-                ),
-                init_cfg=cfg,
-                on_update=lambda ctx: viewer.update(
-                    lengths, phases, phase_signal2real(ctx.root_data)
-                ),
-            )
+            with MeasureSession(cfg) as run:
+                signals_buffer = run.buffer(
+                    (len(lengths), len(phases)),
+                    dtype=np.complex128,
+                    on_update=lambda data: viewer.update(
+                        lengths, phases, phase_signal2real(data)
+                    ),
+                )
+                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
+                signals = signals_buffer.array
 
         return PhaseResult(lengths, phases, signals, cfg_snapshot=orig_cfg)
 

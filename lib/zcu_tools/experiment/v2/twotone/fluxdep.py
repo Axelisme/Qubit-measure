@@ -22,7 +22,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.notebook.analysis.fluxdep.interactive import (
@@ -112,24 +112,22 @@ class FreqFluxExp(PersistableExperiment[FreqFluxResult, FreqFluxCfg]):
         with LivePlot2DwithLine(
             "Flux device value", "Frequency (MHz)", line_axis=1, num_lines=2
         ) as viewer:
-            signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn, result_shape=(len(freqs),), pbar_n=cfg.rounds
-                )
-                .auto_retry(max_retries=fail_retry)
-                .scan(
-                    "flux",
-                    dev_values.tolist(),
-                    before_each=lambda _, ctx, flux: set_flux_in_dev_cfg(
-                        ctx.cfg.dev, flux
+            with MeasureSession(cfg) as run:
+                signals_buffer = run.buffer(
+                    (len(dev_values), len(freqs)),
+                    dtype=np.complex128,
+                    on_update=lambda data: viewer.update(
+                        dev_values, freqs, freqflux_signal2real(data)
                     ),
-                ),
-                init_cfg=cfg,
-                on_update=lambda ctx: viewer.update(
-                    dev_values, freqs, freqflux_signal2real(np.asarray(ctx.root_data))
-                ),
-            )
-            signals = np.asarray(signals)
+                )
+                for step in run.scan("flux", dev_values.tolist()):
+                    set_flux_in_dev_cfg(step.cfg.dev, step.value)
+                    signals_buffer[step].measure(
+                        measure_fn,
+                        pbar_n=step.cfg.rounds,
+                        retry=fail_retry,
+                    )
+                signals = signals_buffer.array
 
         return FreqFluxResult(
             values=dev_values, freqs=freqs, signals=signals, cfg_snapshot=orig_cfg

@@ -23,7 +23,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
@@ -110,19 +110,20 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
             )
 
         with LivePlot1D("Length (us)", "Signal") as viewer:
-            signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    result_shape=(len(lengths),),
-                    pbar_n=cfg.rounds,
-                ),
-                init_cfg=cfg,
-                on_update=lambda ctx: viewer.update(
-                    lengths, rabi_signal2real(ctx.root_data)
-                ),
-            )
-
-        return LenRabiResult(lengths=lengths, signals=signals, cfg_snapshot=orig_cfg)
+            with MeasureSession(cfg) as run:
+                signals_buffer = run.buffer(
+                    (len(lengths),),
+                    dtype=np.complex128,
+                    on_update=lambda data: viewer.update(
+                        lengths, rabi_signal2real(data)
+                    ),
+                )
+                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
+                return LenRabiResult(
+                    lengths=lengths,
+                    signals=signals_buffer.array,
+                    cfg_snapshot=orig_cfg,
+                )
 
     def _run_for_arb(
         self,
@@ -170,9 +171,7 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
                 **(acquire_kwargs or {}),
             )
 
-        def average_round(
-            signals: list[list[NDArray[np.complex128]]],
-        ) -> NDArray[np.complex128]:
+        def average_round(signals: NDArray[np.complex128]) -> NDArray[np.complex128]:
             _signals = np.asarray(signals)  # shape: (rounds, len(lengths))
             mask = np.any(~np.isnan(_signals), axis=0)
             mean_signals = np.full(_signals.shape[1], np.nan, dtype=np.complex128)
@@ -180,24 +179,23 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
             return mean_signals
 
         with LivePlot1D("Length (us)", "Signal") as viewer:
-            signals = run_task(
-                task=Task(measure_fn=measure_fn, pbar_n=1)
-                .scan(
-                    "length",
-                    lengths.tolist(),
-                    before_each=lambda _, ctx, length: (
-                        ctx.cfg.modules.qub_pulse.set_param("length", length)
+            with MeasureSession(_cfg) as run:
+                signals_buffer = run.buffer(
+                    (rounds, len(lengths)),
+                    dtype=np.complex128,
+                    on_update=lambda data: viewer.update(
+                        lengths, rabi_signal2real(average_round(data))
                     ),
                 )
-                .repeat("round", rounds),
-                init_cfg=_cfg,
-                on_update=lambda ctx: viewer.update(
-                    lengths, rabi_signal2real(average_round(ctx.root_data))
-                ),
-            )
-            signals = average_round(signals)
-
-        return LenRabiResult(lengths=lengths, signals=signals, cfg_snapshot=orig_cfg)
+                for rep in run.repeat("round", rounds):
+                    for step in rep.scan("length", lengths.tolist()):
+                        step.cfg.modules.qub_pulse.set_param("length", step.value)
+                        signals_buffer[rep.index, step].measure(measure_fn, pbar_n=1)
+                return LenRabiResult(
+                    lengths=lengths,
+                    signals=average_round(signals_buffer.array),
+                    cfg_snapshot=orig_cfg,
+                )
 
     @record_result
     def run(

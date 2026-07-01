@@ -23,7 +23,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
@@ -155,19 +155,20 @@ class FreqDepExp(PersistableExperiment[FreqResult, FreqCfg]):
         ) as viewer:
             viewer.get_ax().set_ylim(0.0, 1.0)
 
-            signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    raw2signal_fn=lambda raw: raw[0][0],
-                    result_shape=(len(freqs), 2),
+            with MeasureSession(cfg) as run:
+                buffer = run.buffer(
+                    (len(freqs), 2),
                     dtype=np.float64,
+                    on_update=lambda data: viewer.update(
+                        freqs, calc_populations(data).T
+                    ),
+                )
+                buffer.measure(
+                    measure_fn,
+                    raw2signal_fn=lambda raw: raw[0][0],
                     pbar_n=1,
-                ),
-                init_cfg=cfg,
-                on_update=lambda ctx: viewer.update(
-                    freqs, calc_populations(ctx.root_data).T
-                ),
-            )
+                )
+                signals = buffer.array
 
         return FreqResult(freqs=freqs, signals=signals, cfg_snapshot=cfg)
 

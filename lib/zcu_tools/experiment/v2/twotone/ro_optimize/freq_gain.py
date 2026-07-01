@@ -25,7 +25,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.liveplot import LivePlot2D
@@ -148,21 +148,22 @@ class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
             return [tracker]
 
         with LivePlot2D("Frequency (MHz)", "Gain (a.u.)") as viewer:
-            signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    raw2signal_fn=lambda raw: snr_as_signal(
-                        raw, ge_axis=1, skew_penalty=cfg.skew_penalty
-                    ),
-                    result_shape=(len(freqs), len(gains)),
+            with MeasureSession(cfg) as run:
+                signals_buffer = run.buffer(
+                    (len(freqs), len(gains)),
                     dtype=np.float64,
-                    pbar_n=cfg.rounds,
-                ),
-                init_cfg=cfg,
-                on_update=lambda ctx: viewer.update(
-                    freqs, gains, np.abs(ctx.root_data)
-                ),
-            )
+                    on_update=lambda data: viewer.update(freqs, gains, np.abs(data)),
+                )
+                signals_buffer.measure(
+                    measure_fn,
+                    raw2signal_fn=lambda raw: snr_as_signal(
+                        raw,
+                        ge_axis=1,
+                        skew_penalty=run.cfg.skew_penalty,
+                    ),
+                    pbar_n=run.cfg.rounds,
+                )
+                signals = signals_buffer.array
 
         return FreqGainResult(freqs, gains, signals, cfg_snapshot=original_cfg)
 

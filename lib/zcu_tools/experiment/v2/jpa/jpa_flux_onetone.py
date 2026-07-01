@@ -25,7 +25,7 @@ from zcu_tools.experiment.utils import (
     set_flux_in_dev_cfg,
     setup_devices,
 )
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.program.v2 import (
@@ -126,25 +126,22 @@ class OneToneFluxExp(PersistableExperiment[OneToneFluxResult, OneToneFluxCfg]):
             line_axis=1,
             num_lines=5,
         ) as viewer:
-            signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    result_shape=(len(freqs),),
-                    pbar_n=cfg.rounds,
-                ).scan(
-                    "JPA Flux value",
-                    jpa_fluxs.tolist(),
-                    before_each=lambda _, ctx, flux: (
-                        (dev := ctx.cfg.dev) is not None
-                        and set_flux_in_dev_cfg(dev, flux, label="jpa_flux_dev")
+            with MeasureSession(cfg) as run:
+                signals_buffer = run.buffer(
+                    (len(jpa_fluxs), len(freqs)),
+                    dtype=np.complex128,
+                    on_update=lambda data: viewer.update(
+                        jpa_fluxs, freqs, np.abs(data)
                     ),
-                ),
-                init_cfg=cfg,
-                on_update=lambda ctx: viewer.update(
-                    jpa_fluxs, freqs, np.abs(np.asarray(ctx.root_data))
-                ),
-            )
-            signals = np.asarray(signals)
+                )
+                for step in run.scan("JPA Flux value", jpa_fluxs.tolist()):
+                    set_flux_in_dev_cfg(
+                        step.cfg.dev,
+                        step.value,
+                        label="jpa_flux_dev",
+                    )
+                    signals_buffer[step].measure(measure_fn, pbar_n=step.cfg.rounds)
+                signals = signals_buffer.array
 
         return OneToneFluxResult(
             fluxes=jpa_fluxs, freqs=freqs, signals=signals, cfg_snapshot=cfg

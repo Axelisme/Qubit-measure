@@ -25,7 +25,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
@@ -104,7 +104,7 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
-        rounds = cfg.rounds  # implemented round loop by scan, see measure_fn
+        rounds = cfg.rounds  # round loop is driven by MeasureSession.repeat below
 
         length_sweep = cfg.sweep.length
         tested_reset = modules.tested_reset
@@ -159,31 +159,33 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
                 **(acquire_kwargs or {}),
             )
 
-        def update_length(i: int, ctx: TaskState, length: float) -> None:
-            modules = ctx.cfg.modules
-            modules.tested_reset.set_param("qub_length", length)
-            modules.tested_reset.set_param("res_length", length + length_diff)
-
         def average_signals(
-            signals: list[list[NDArray[np.complex128]]],
+            signals: NDArray[np.complex128],
         ) -> NDArray[np.complex128]:
-            _signals = np.array(signals)  # shape: (rounds, lengths, 4)
+            _signals = np.asarray(signals)  # shape: (rounds, lengths, 4)
             mean_signals = np.full_like(_signals[0], fill_value=np.nan)
             mask = np.any(np.isfinite(_signals), axis=0)
             mean_signals[mask] = np.nanmean(_signals[:, mask], axis=0)
             return mean_signals  # (lengths, 4)
 
         with LivePlot1D("Length (us)", "Signal (a.u.)") as viewer:
-            signals = run_task(
-                task=Task(measure_fn=measure_fn, result_shape=(4,), pbar_n=1)
-                .scan("length", lengths.tolist(), before_each=update_length)
-                .repeat("rounds", rounds),
-                init_cfg=cfg,
-                on_update=lambda ctx: viewer.update(
-                    lengths, bathreset_signal2real(average_signals(ctx.root_data))
-                ),
-            )
-            signals = average_signals(signals)
+            with MeasureSession(cfg) as run:
+                buffer = run.buffer(
+                    (rounds, len(lengths), 4),
+                    dtype=np.complex128,
+                    on_update=lambda data: viewer.update(
+                        lengths, bathreset_signal2real(average_signals(data))
+                    ),
+                )
+                for rep in run.repeat("rounds", rounds):
+                    for step in rep.scan("length", lengths.tolist()):
+                        modules = step.cfg.modules
+                        modules.tested_reset.set_param("qub_length", step.value)
+                        modules.tested_reset.set_param(
+                            "res_length", step.value + length_diff
+                        )
+                        buffer[rep.index, step].measure(measure_fn, pbar_n=1)
+                signals = average_signals(buffer.array)
 
         return LengthResult(
             lengths=lengths,

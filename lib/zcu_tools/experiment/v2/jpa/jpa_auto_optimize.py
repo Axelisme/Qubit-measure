@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -32,7 +32,7 @@ from zcu_tools.experiment.utils import (
     set_power_in_dev_cfg,
     setup_devices,
 )
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.liveplot import LivePlotScatter, MultiLivePlot
@@ -292,27 +292,6 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
             )
             return [tracker]
 
-        def update_fn(i, ctx: TaskState[Any, Any, JPAOptCfg], _) -> None:
-            ctx.env["index"] = i
-
-            last_snr = None
-            if i > 0:
-                last_snr = np.abs(ctx.root_data[i - 1])
-            cur_params = optimizer.next_params(i, last_snr)
-
-            if cur_params is None:
-                # Exhausting the optimizer stops the task through the existing interrupt path.
-                raise KeyboardInterrupt("No more parameters to optimize.")
-
-            params[i, :] = cur_params
-            phases[i] = optimizer.phase
-
-            dev = ctx.cfg.dev
-            assert dev is not None, "JPA auto optimize requires cfg.dev"
-            set_flux_in_dev_cfg(dev, params[i, 0], label="jpa_flux_dev")
-            set_freq_in_dev_cfg(dev, 1e6 * params[i, 1], label="jpa_rf_dev")
-            set_power_in_dev_cfg(dev, params[i, 2], label="jpa_rf_dev")
-
         # initialize figure and axes
         figsize = (8, 5)
         fig = plt.figure(figsize=figsize)
@@ -344,50 +323,70 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                 ),
             ),
         ) as viewer:
+            with MeasureSession(cfg) as run:
 
-            def plot_fn(ctx: TaskState) -> None:
-                idx: int = ctx.env["index"]
-                snrs = np.abs(ctx.root_data)  # (num_points, )
+                def plot_fn(data: NDArray[np.float64]) -> None:
+                    idx = int(run.env.get("index", 0))
+                    snrs = np.abs(data)  # (num_points, )
 
-                cur_flux, cur_freq, cur_gain = params[idx, :]
+                    cur_flux, cur_freq, cur_gain = params[idx, :]
 
-                fig.suptitle(
-                    f"Iteration {idx}, Phase {phases[idx]}, Flux: {1e3 * cur_flux:.2g} (mA), Freq: {1e-3 * cur_freq:.4g} (GHz), Power: {cur_gain:.2g} (dBm)"
-                )
+                    fig.suptitle(
+                        f"Iteration {idx}, Phase {phases[idx]}, Flux: {1e3 * cur_flux:.2g} (mA), Freq: {1e-3 * cur_freq:.4g} (GHz), Power: {cur_gain:.2g} (dBm)"
+                    )
 
-                colors = phases
+                    colors = phases
 
-                viewer.get_plotter("iter_scatter").update(
-                    np.arange(num_points), snrs, colors=colors, refresh=False
-                )
-                viewer.get_plotter("flux_scatter").update(
-                    1e3 * params[:, 0], snrs, colors=colors, refresh=False
-                )
-                viewer.get_plotter("freq_scatter").update(
-                    params[:, 1], snrs, colors=colors, refresh=False
-                )
-                viewer.get_plotter("power_scatter").update(
-                    params[:, 2], snrs, colors=colors, refresh=False
-                )
-                viewer.refresh()
+                    viewer.get_plotter("iter_scatter").update(
+                        np.arange(num_points), snrs, colors=colors, refresh=False
+                    )
+                    viewer.get_plotter("flux_scatter").update(
+                        1e3 * params[:, 0], snrs, colors=colors, refresh=False
+                    )
+                    viewer.get_plotter("freq_scatter").update(
+                        params[:, 1], snrs, colors=colors, refresh=False
+                    )
+                    viewer.get_plotter("power_scatter").update(
+                        params[:, 2], snrs, colors=colors, refresh=False
+                    )
+                    viewer.refresh()
 
-            results = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    raw2signal_fn=lambda raw: snr_as_signal(
-                        raw, ge_axis=0, skew_penalty=cfg.skew_penalty
-                    ),
+                signals_buffer = run.buffer(
+                    (num_points,),
                     dtype=np.float64,
-                    pbar_n=cfg.rounds,
-                ).scan(
-                    "Iteration",
-                    list(range(num_points)),
-                    before_each=update_fn,
-                ),
-                init_cfg=cfg,
-                on_update=plot_fn,
-            )
-            signals = np.asarray(results)
+                    on_update=plot_fn,
+                )
+                for step in run.scan("Iteration", list(range(num_points))):
+                    idx = cast(int, step.index)
+                    run.env["index"] = idx
+
+                    last_snr = None
+                    if idx > 0:
+                        last_snr = np.abs(signals_buffer.array[idx - 1])
+                    cur_params = optimizer.next_params(idx, last_snr)
+
+                    if cur_params is None:
+                        run.set_stop()
+                        break
+
+                    params[idx, :] = cur_params
+                    phases[idx] = optimizer.phase
+
+                    dev = step.cfg.dev
+                    assert dev is not None, "JPA auto optimize requires cfg.dev"
+                    set_flux_in_dev_cfg(dev, params[idx, 0], label="jpa_flux_dev")
+                    set_freq_in_dev_cfg(dev, 1e6 * params[idx, 1], label="jpa_rf_dev")
+                    set_power_in_dev_cfg(dev, params[idx, 2], label="jpa_rf_dev")
+                    signals_buffer[step].measure(
+                        measure_fn,
+                        raw2signal_fn=lambda raw: snr_as_signal(
+                            raw,
+                            ge_axis=0,
+                            skew_penalty=run.cfg.skew_penalty,
+                        ),
+                        pbar_n=step.cfg.rounds,
+                    )
+                signals = signals_buffer.array
 
         plt.close(fig)
 

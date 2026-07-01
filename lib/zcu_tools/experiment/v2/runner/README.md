@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runner` — task runner
 
-**Last updated:** 2026-07-01
+**Last updated:** 2026-07-01 — MeasureSession frontend
 
 這份筆記整理 `runner/` 的任務執行框架設計，說明各類別的職責、組合方式與執行流程。
 
@@ -8,7 +8,7 @@
 
 ## 架構總覽（一句話版）
 
-`runner/` 以 **Composite 模式** 把測量任務組成樹狀結構：`AbsTask` 是抽象節點，`Task` 是葉節點（實際呼叫硬體），`BatchTask`/`RetryBatchTask`/`Scan`/`RepeatOverTime`/`ReTryIfFail` 是中間節點（組合或修飾子任務）。結果也以同構樹（`Result`）儲存，`TaskState` 攜帶當前在樹中的位置。`MultiMeasurementExecutor`（`multi_executor.py`）是 runner 層的 Executor 共用 scaffold（非樹節點）。
+`runner/` 以 **Composite 模式** 把測量任務組成樹狀結構：`AbsTask` 是抽象節點，`Task` 是葉節點（實際呼叫硬體），`BatchTask`/`RetryBatchTask`/`Scan`/`RepeatOverTime`/`ReTryIfFail` 是中間節點（組合或修飾子任務）。結果也以同構樹（`Result`）儲存，`TaskState` 攜帶當前在樹中的位置。`MeasureSession`（`session.py`）是在相同葉節點 seam 上方的可選 Python-like frontend；`MultiMeasurementExecutor`（`multi_executor.py`）是 runner 層的 Executor 共用 scaffold（非樹節點）。
 
 ---
 
@@ -180,6 +180,40 @@ task.auto_retry(max_retries=3)
 - 提供：`add_measurements`、`record_animation(path)`（FFMpeg facet，缺 `ffmpeg` 即 Fast-Fail）、`make_ax_layout` / `make_plotter`（依各量測 `num_axes()` 自動排版 subplot），以及 `_run_with_plotting(task, cfg, env_dict)`（在 plotter context 內呼叫 `run_task`，並在 `finally` 收尾動畫）。
 - 子類別只負責各自的 `run()`（不同的外層 driver 與 cfg/env 前置），共用此處的版面 / plotter / 錄製機器。
 - 對 task 的需求以結構性 `PlottableMeasurement` Protocol 表達（`num_axes` / `make_plotter` / `update_plotter`），讓基底不必把兩個 app 的 `MeasurementTask` ABC 強行合併。
+
+---
+
+### `MeasureSession` frontend（`session.py`）
+
+`MeasureSession` 是可選的 orchestration frontend，讓新的實驗可以用一般 Python `for` loop 寫 scan / repeat / batch，同時保留既有葉節點 seam：
+
+```python
+with MeasureSession(cfg) as run:
+    signals_buffer = run.buffer(
+        (len(values),),
+        dtype=np.complex128,
+        on_update=lambda data: plot(values, data),
+    )
+    for step in run.scan("gain", values):
+        step.cfg.modules.readout.set_param("gain", step.value)
+        signals_buffer[step].measure(measure_fn, pbar_n=step.cfg.rounds)
+```
+
+責任邊界：
+
+- `MeasureSession` 在入口 `deepcopy(init_cfg)`；`scan` / `repeat` / `batch` child 也各自 deepcopy parent cfg，讓 step mutation 不外洩。
+- `env` 是整個 session 共用的 mutable dict；`repeat` 設定 `env["repeat_idx"]`。
+- `MeasureBuffer` 管 ndarray result；`buffer.measure(...)` 量整個 buffer，`buffer[index_or_step].measure(...)` 量 view。傳入 `MeasureStep` 時，slot 使用該 step 的 isolated cfg；`.at(...)` 保留為等價的顯式方法。
+- `MeasureBuffer(on_update=...)` 是常規 liveplot seam，callback 接收該 buffer 的 full ndarray。`MeasureSession(on_update=...)` 則是進階 snapshot hook，提供 full `root_data`、目前 cfg 與 shared env view；slot partial update 仍透過既有 `TaskState.set_value()` 寫入 ndarray view。
+- `batch({name: callable}, retry=N)` 只接受 replayable child callable；retry 是 per-child，不能用不可重放的 `with` block 模式實作 retry。
+- `KeyboardInterrupt` 在 leaf / batch child 視為 early stop，不 retry，保留 partial data；一般 `Exception` 依 leaf 或 batch child retry budget 重試。
+- 同一 session 只允許一個 unnamed root buffer；多個 root result 使用 named buffers 或 batch dict root。
+
+Scope boundary：
+
+- 一般 `experiment/v2` run orchestration 使用 `MeasureSession`；Task tree 仍作為 runner 內部模型與 executor contract 並存。
+- 不支援 / 不遷移 `autofluxdep` 與 `overnight` executors；這些仍由各自 executor + `MultiMeasurementExecutor` scaffold 擁有。
+- `MeasureStep.buffer(...)` 的 unnamed child buffer 用於 replayable batch child；scan / repeat loop 的常規寫法是先在 session root 預配置 buffer，再用 `buffer[step]` 寫入。
 
 ---
 

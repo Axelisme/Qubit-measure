@@ -21,7 +21,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D, MultiLivePlot, make_plot_frame
 from zcu_tools.program.v2 import (
@@ -176,8 +176,8 @@ class FreqPowerExp(PersistableExperiment[FreqPowerResult, FreqPowerCfg]):
             ),
         ) as viewer:
 
-            def plot_fn(ctx) -> None:
-                populations = calc_populations(np.asarray(ctx.root_data))
+            def plot_fn(data: NDArray[np.float64]) -> None:
+                populations = calc_populations(data)
 
                 viewer.get_plotter("plot_2d_g").update(
                     gains, freqs, populations[..., 0], refresh=False
@@ -191,24 +191,20 @@ class FreqPowerExp(PersistableExperiment[FreqPowerResult, FreqPowerCfg]):
 
                 viewer.refresh()
 
-            signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    raw2signal_fn=lambda raw: raw[0][0],
-                    result_shape=(len(freqs), 2),
+            with MeasureSession(cfg) as run:
+                buffer = run.buffer(
+                    (len(gains), len(freqs), 2),
                     dtype=np.float64,
-                    pbar_n=1,
-                ).scan(
-                    "gain",
-                    gains.tolist(),
-                    before_each=lambda i, ctx, gain: (
-                        ctx.cfg.modules.probe_pulse.set_param("gain", gain)
-                    ),
-                ),
-                init_cfg=cfg,
-                on_update=plot_fn,
-            )
-            signals = np.asarray(signals)
+                    on_update=plot_fn,
+                )
+                for step in run.scan("gain", gains.tolist()):
+                    step.cfg.modules.probe_pulse.set_param("gain", step.value)
+                    buffer[step].measure(
+                        measure_fn,
+                        raw2signal_fn=lambda raw: raw[0][0],
+                        pbar_n=1,
+                    )
+                signals = buffer.array
 
         # record the last result
         self.last_result = FreqPowerResult(

@@ -24,7 +24,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program.v2 import (
@@ -155,17 +155,16 @@ class MistExp(PersistableExperiment[MistResult, MistCfg]):
             )
 
         with LivePlot2D("Flux Pulse Gain (a.u.)", "Mist Pulse Gain (a.u.)") as viewer:
-            signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    result_shape=(len(flux_gains), len(mist_gains)),
-                    pbar_n=cfg.rounds,
-                ),
-                init_cfg=cfg,
-                on_update=lambda ctx: viewer.update(
-                    flux_gains, mist_gains, mist_signal2real(ctx.root_data)
-                ),
-            )
+            with MeasureSession(cfg) as run:
+                signals_buffer = run.buffer(
+                    (len(flux_gains), len(mist_gains)),
+                    dtype=np.complex128,
+                    on_update=lambda data: viewer.update(
+                        flux_gains, mist_gains, mist_signal2real(data)
+                    ),
+                )
+                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
+                signals = signals_buffer.array
 
         return MistResult(flux_gains, mist_gains, signals, cfg_snapshot=orig_cfg)
 

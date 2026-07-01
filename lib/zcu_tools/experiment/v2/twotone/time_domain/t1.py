@@ -26,7 +26,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, LivePlot2DwithLine
 from zcu_tools.program.v2 import (
@@ -151,17 +151,14 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
             )
 
         with LivePlot1D("Time (us)", "Amplitude") as viewer:
-            signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    result_shape=(len(lengths),),
-                    pbar_n=cfg.rounds,
-                ),
-                init_cfg=cfg,
-                on_update=lambda ctx: viewer.update(
-                    lengths, t1_signal2real(ctx.root_data)
-                ),
-            )
+            with MeasureSession(cfg) as run:
+                signals_buffer = run.buffer(
+                    (len(lengths),),
+                    dtype=np.complex128,
+                    on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
+                )
+                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
+                signals = signals_buffer.array
 
         return T1Result(times=lengths, signals=signals, cfg_snapshot=original_cfg)
 
@@ -209,17 +206,14 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
                     **(acquire_kwargs or {}),
                 )
 
-            signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    result_shape=(len(lengths),),
-                    pbar_n=cfg.rounds,
-                ),
-                init_cfg=cfg,
-                on_update=lambda ctx: viewer.update(
-                    lengths, t1_signal2real(ctx.root_data)
-                ),
-            )
+            with MeasureSession(cfg) as run:
+                signals_buffer = run.buffer(
+                    (len(lengths),),
+                    dtype=np.complex128,
+                    on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
+                )
+                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
+                signals = signals_buffer.array
 
         return T1Result(times=lengths, signals=signals, cfg_snapshot=original_cfg)
 
@@ -364,17 +358,14 @@ class T1WithToneExp(PersistableExperiment[T1Result, T1WithToneCfg]):
         with LivePlot1D(
             "Time (us)", "Amplitude", segment_kwargs={"title": "T1 relaxation"}
         ) as viewer:
-            signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    result_shape=(len(lengths),),
-                    pbar_n=cfg.rounds,
-                ),
-                init_cfg=cfg,
-                on_update=lambda ctx: viewer.update(
-                    lengths, t1_signal2real(ctx.root_data)
-                ),
-            )
+            with MeasureSession(cfg) as run:
+                signals_buffer = run.buffer(
+                    (len(lengths),),
+                    dtype=np.complex128,
+                    on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
+                )
+                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
+                signals = signals_buffer.array
 
         return T1Result(times=lengths, signals=signals, cfg_snapshot=deepcopy(cfg))
 
@@ -512,24 +503,18 @@ class ScanT1WithToneExp(PersistableExperiment[ScanT1WithToneResult, ScanT1WithTo
         with LivePlot2DwithLine(
             "gain", "Time (us)", line_axis=1, num_lines=5
         ) as viewer:
-            signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    result_shape=(len(lengths),),
-                    pbar_n=cfg.rounds,
-                ).scan(
-                    "gain",
-                    gains.tolist(),
-                    before_each=lambda _, ctx, gain: (
-                        ctx.cfg.modules.test_pulse.set_param("gain", gain)
+            with MeasureSession(cfg) as run:
+                signals_buffer = run.buffer(
+                    (len(gains), len(lengths)),
+                    dtype=np.complex128,
+                    on_update=lambda data: viewer.update(
+                        gains, lengths, t1_with_tone_signal2real(data)
                     ),
-                ),
-                init_cfg=cfg,
-                on_update=lambda ctx: viewer.update(
-                    gains, lengths, t1_with_tone_signal2real(np.asarray(ctx.root_data))
-                ),
-            )
-            signals = np.asarray(signals)
+                )
+                for step in run.scan("gain", gains.tolist()):
+                    step.cfg.modules.test_pulse.set_param("gain", step.value)
+                    signals_buffer[step].measure(measure_fn, pbar_n=step.cfg.rounds)
+                signals = signals_buffer.array
 
         return ScanT1WithToneResult(
             values=gains, times=lengths, signals=signals, cfg_snapshot=deepcopy(cfg)

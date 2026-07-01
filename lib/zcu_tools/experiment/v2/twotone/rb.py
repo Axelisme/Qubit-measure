@@ -24,7 +24,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
@@ -364,7 +364,8 @@ class RB_Exp(PersistableExperiment[RB_Result, RBCfg]):
 
         with LivePlot1D("Depth", "Signal") as viewer:
 
-            def update_seq_seed(si: int, ctx: TaskState, entropy: int) -> None:
+            def update_seq_seed(step) -> None:
+                entropy = int(step.value)
                 child = np.random.SeedSequence(entropy)
                 rng = np.random.Generator(np.random.PCG64(child))
                 clifford_idxs = rng.integers(0, NUM_CLIFFORDS, size=max_depth)
@@ -377,29 +378,29 @@ class RB_Exp(PersistableExperiment[RB_Result, RBCfg]):
                         state = GATE_EFFECT_MAP[gate][state]
                     cum_states.append(state)
 
-                ctx.env["seed"] = entropy
+                step.session.env["seed"] = entropy
                 rand_gate_seq, prefix_len_by_depth, recovery_gate_by_depth = (
                     build_seed_program_tables(
                         clifford_idxs.tolist(), cum_states, depths
                     )
                 )
-                ctx.env["rand_gate_seq"] = rand_gate_seq
-                ctx.env["prefix_len_by_depth"] = prefix_len_by_depth
-                ctx.env["recovery_gate_by_depth"] = recovery_gate_by_depth
+                step.session.env["rand_gate_seq"] = rand_gate_seq
+                step.session.env["prefix_len_by_depth"] = prefix_len_by_depth
+                step.session.env["recovery_gate_by_depth"] = recovery_gate_by_depth
 
-            signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    result_shape=(len(depths),),
-                    pbar_n=cfg.rounds,
-                ).scan("seed", entropys.tolist(), before_each=update_seq_seed),
-                init_cfg=cfg,
-                on_update=lambda ctx: viewer.update(
-                    depths.astype(np.float64),
-                    rb_signal2real(np.asarray(ctx.root_data, dtype=np.complex128)),
-                ),
-            )
-            signals2D = np.asarray(signals, dtype=np.complex128)  # (n_seeds, n_depths)
+            with MeasureSession(cfg) as run:
+                signals_buffer = run.buffer(
+                    (len(entropys), len(depths)),
+                    dtype=np.complex128,
+                    on_update=lambda data: viewer.update(
+                        depths.astype(np.float64),
+                        rb_signal2real(data),
+                    ),
+                )
+                for step in run.scan("seed", entropys.tolist()):
+                    update_seq_seed(step)
+                    signals_buffer[step].measure(measure_fn, pbar_n=step.cfg.rounds)
+                signals2D = signals_buffer.array  # (n_seeds, n_depths)
 
         self.last_result = RB_Result(
             sub_seeds=entropys,

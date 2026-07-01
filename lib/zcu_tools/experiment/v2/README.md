@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — experiment runtime
 
-**Last updated:** 2026-07-01
+**Last updated:** 2026-07-01 — MeasureSession frontend
 
 這份筆記整理 `experiment/v2/` 的整體設計，說明 Experiment 層與 Task 層的分工、典型實驗的撰寫範本，以及各子模組的角色。`runner/` 的細節另見 `runner/README.md`。
 
@@ -16,8 +16,11 @@
   - `ExperimentProtocol`：結構性合約（runtime_checkable），描述所有實驗共有的 `last_result` / `run` / `analyze` / `save` / `load` 表面，刻意開放讓實驗自行擴充方法。
 - `Task` 層：`AbsTask` / `Task` / `BatchTask` / `RetryBatchTask` / `Scan` / `RepeatOverTime`（`runner/`）
   - 內部執行樹：驅動硬體、更新 liveplot、串接 sweep/repeat/retry
+  - 可選 `MeasureSession` frontend：保留 `measure_fn(ctx, update_hook)` 葉節點 seam，但讓新實驗用 Python `with MeasureSession(...)`、`for step in run.scan(...)`、`signals_buffer[step].measure(...)` 寫 orchestration；既有 Task tree 與 Executor 模式仍維持原責任。
 
-Experiment 是使用者（notebook）呼叫的入口；Task 是 Experiment 內部組裝出的執行樹。多數 `*Exp` 類別在 `run()` 裡組一棵 Task tree，然後交給 `run_task()` 執行。
+Experiment 是使用者（notebook）呼叫的入口；一般 `*Exp.run()` 以 `MeasureSession` 做單次 run orchestration，把 scan / repeat / buffer targeting 留在 Python control flow 中。Task tree 仍是 runner 的底層模型，也是 executor-owned 流程的 public contract。
+
+`MeasureSession` 適合 leaf measurement、soft scan、nested repeat/scan、batch/retry 與 custom raw conversion 這類單一 run 內的 orchestration。`autofluxdep` / `overnight` 這類 executor-owned 多任務流程仍使用 Task tree 與 `MultiMeasurementExecutor`。
 
 ---
 
@@ -108,11 +111,14 @@ def run(self, soc, soccfg, cfg: FreqCfg) -> FreqResult:
         )
 
     with LivePlot1D("Frequency (MHz)", "Amplitude") as viewer:   # 4. 即時繪圖
-        signals = run_task(
-            task=Task(measure_fn=measure_fn, result_shape=(len(freqs),)),
-            init_cfg=cfg,
-            on_update=lambda ctx: viewer.update(freqs, signal2real(ctx.root_data)),
-        )
+        with MeasureSession(cfg) as run:
+            signals_buffer = run.buffer(
+                (len(freqs),),
+                dtype=np.complex128,
+                on_update=lambda data: viewer.update(freqs, signal2real(data)),
+            )
+            signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
+            signals = signals_buffer.array
 
     return FreqResult(                                          # 5. 回傳（cfg 走 cfg_snapshot）
         freqs=freqs, signals=signals, cfg_snapshot=orig_cfg
@@ -123,8 +129,8 @@ def run(self, soc, soccfg, cfg: FreqCfg) -> FreqResult:
 
 1. **`orig_cfg = deepcopy(cfg)`**：在方法最開頭就拍下執行前快照，最後以 `cfg_snapshot=orig_cfg` 寫進 Result。不另存 `last_cfg`，cfg 一律由 Result 攜帶（見「AbsExperiment 與 Result 合約」）。`run()` 的輸入 `cfg` 是 `CfgModel` 型別（型別即驗證），不在方法內重做 `model_validate`。
 2. **`sweep2array`**（`utils/round_zcu.py`）把 `SweepCfg` 展成實際會量到的點（已套 ZCU 的 freq/time/gain 量化），用來畫圖 / 存檔。
-3. **`measure_fn(ctx, update_hook)`** 是傳給 `Task` 的單次測量函式；`update_hook` 是 round-level callback，每個 round 結束時被 QICK 呼叫以更新 pbar 與 liveplot。task runner（`run_task` 的 `init_cfg`）內部會 `deepcopy` 一份，`measure_fn`/`before_each` 裡的 mutation 都作用在那份副本（`ctx.cfg`）上，不會汙染 `orig_cfg`。
-4. **LivePlot**：`LivePlot1D` / `LivePlot2D` 是 context manager，`on_update` 裡每次都以當前 `ctx.root_data` 重畫。
+3. **`measure_fn(ctx, update_hook)`** 是傳給 runner leaf 的單次測量函式；`update_hook` 是 round-level callback，每個 round 結束時被 QICK 呼叫以更新 pbar 與 liveplot。`MeasureSession` 內部會 `deepcopy` 一份 cfg，`measure_fn` / `step` loop 裡的 mutation 都作用在該副本或 step child 副本（`ctx.cfg` / `step.cfg`）上，不會汙染 `orig_cfg`。
+4. **LivePlot**：`LivePlot1D` / `LivePlot2D` 是 context manager，常規寫法是在 `MeasureBuffer(on_update=...)` 裡每次以當前完整 buffer ndarray 重畫。
 5. **回傳 Result**：`run()` 直接 `return XxxResult(...)`，由 `@record_result` decorator 寫入 `last_result`（給 `analyze` / `save` 使用），Result 內部攜帶 `cfg_snapshot`。
 
 ### sweep 參數 mutation 的歸屬：搬進 `measure_fn`
@@ -237,7 +243,7 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):          # 主要 Cfg = program cfg + 
 
 1. 定義 `XxxModuleCfg` / `XxxSweepCfg`（通常繼承 `ConfigBase`）與 `XxxCfg = ProgramV2Cfg + ExpCfgModel + 自己欄位`。
 2. 繼承 `PersistableExperiment[T_Result, XxxCfg]`（要有持久化）並宣告 class-level `AXES_SPEC`（`AxesSpec`）即繼承 `save` / `load`；只需自行實作 `run`（套 `@record_result`）/ `analyze`（套 `@retrieve_result`）。Result dataclass 須有 `cfg_snapshot` 欄位。
-3. `run()` 模板：開頭 `orig_cfg = deepcopy(cfg)` → `sweep2array` → 組 `measure_fn` → `with LivePlot: run_task(Task(...))` → 回傳 `XxxResult(..., cfg_snapshot=orig_cfg)`（`@record_result` 自動寫入 `last_result`，不存 `last_cfg`）。
+3. `run()` 模板：開頭 `orig_cfg = deepcopy(cfg)` → `sweep2array` → 組 `measure_fn` → `with LivePlot` + `with MeasureSession(cfg) as run` → `signals_buffer = run.buffer(..., on_update=...)` → `signals_buffer.measure(...)` 或 `signals_buffer[step].measure(...)` → 回傳 `XxxResult(..., cfg_snapshot=orig_cfg)`（`@record_result` 自動寫入 `last_result`，不存 `last_cfg`）。
 4. `measure_fn` 內的 `acquire()` 必須傳入 `stop_checkers=[ctx.is_stop]`（可加 SNR checker）。
 5. 持久化由 `AXES_SPEC` 宣告：每個 `Axis` 帶 `scale`（頻率 `MHZ_TO_HZ`、時間 `US_TO_S`）讓盤上是 SI 單位、記憶體內維持習慣單位，`tag` 取有層次的名字（`"twotone/rabi/len"`），axes 以 inner-first 排列；繼承的 `save` / `load` 自動依 spec 做單位轉換與恒等逆 round-trip，無需自行寫 save/load。
 6. 如果有多個 sweep 軸，考慮用 `Task.scan()` 或直接在 `ModularProgramV2(sweep=[...])` 裡放多個 sweep。

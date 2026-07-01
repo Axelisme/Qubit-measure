@@ -23,9 +23,8 @@ from zcu_tools.experiment import (
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, setup_devices
 from zcu_tools.experiment.v2.runner import (
-    Task,
+    MeasureSession,
     TaskState,
-    run_task,
 )
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
@@ -283,25 +282,6 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
         # (num_points, [freq, gain, length])
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
 
-        def update_fn(i: int, ctx: TaskState[Any, Any, AutoOptCfg], _) -> None:
-            ctx.env["index"] = i
-
-            last_snr = None
-            if i > 0:
-                last_snr = np.abs(ctx.root_data[i - 1])
-                # last_snr /= np.sqrt(params[i - 1, 2])
-            cur_params = optimizer.next_params(i, last_snr)
-
-            if cur_params is None:
-                # Exhausting the optimizer stops the task through the existing interrupt path.
-                raise KeyboardInterrupt("No more parameters to optimize.")
-
-            params[i, :] = cur_params
-            modules = ctx.cfg.modules
-            modules.readout.set_param("freq", cur_params[0])
-            modules.readout.set_param("gain", cur_params[1])
-            modules.readout.set_param("length", cur_params[2])
-
         # initialize figure and axes
         figsize = (8, 5)
         fig = plt.figure(figsize=figsize)
@@ -334,30 +314,6 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
             ),
         ) as viewer:
 
-            def plot_fn(ctx: TaskState[Any, Any, AutoOptCfg]) -> None:
-                idx: int = ctx.env["index"]
-                snrs = np.abs(ctx.root_data)  # (num_points, )
-
-                cur_freq, cur_gain, cur_len = params[idx, :]
-
-                fig.suptitle(
-                    f"Iteration {idx}, Frequency: {1e-3 * cur_freq:.4g} (GHz), Gain: {cur_gain:.2g} (a.u.), Length: {cur_len:.2g} (us)"
-                )
-
-                viewer.get_plotter("iter_scatter").update(
-                    np.arange(num_points), snrs, refresh=False
-                )
-                viewer.get_plotter("freq_scatter").update(
-                    params[:, 0], snrs, refresh=False
-                )
-                viewer.get_plotter("gain_scatter").update(
-                    params[:, 1], snrs, refresh=False
-                )
-                viewer.get_plotter("len_scatter").update(
-                    params[:, 2], snrs, refresh=False
-                )
-                viewer.refresh()
-
             def measure_fn(
                 ctx: TaskState[NDArray[np.float64], Any, AutoOptCfg], update_hook
             ):
@@ -383,23 +339,65 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
                 )
                 return [tracker]
 
-            results = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    raw2signal_fn=lambda raw: snr_as_signal(
-                        raw, ge_axis=1, skew_penalty=cfg.skew_penalty
-                    ),
+            with MeasureSession(cfg) as run:
+
+                def plot_fn(data: NDArray[np.float64]) -> None:
+                    idx = int(run.env.get("index", 0))
+                    snrs = np.abs(data)  # (num_points, )
+
+                    cur_freq, cur_gain, cur_len = params[idx, :]
+
+                    fig.suptitle(
+                        f"Iteration {idx}, Frequency: {1e-3 * cur_freq:.4g} (GHz), Gain: {cur_gain:.2g} (a.u.), Length: {cur_len:.2g} (us)"
+                    )
+
+                    viewer.get_plotter("iter_scatter").update(
+                        np.arange(num_points), snrs, refresh=False
+                    )
+                    viewer.get_plotter("freq_scatter").update(
+                        params[:, 0], snrs, refresh=False
+                    )
+                    viewer.get_plotter("gain_scatter").update(
+                        params[:, 1], snrs, refresh=False
+                    )
+                    viewer.get_plotter("len_scatter").update(
+                        params[:, 2], snrs, refresh=False
+                    )
+                    viewer.refresh()
+
+                signals_buffer = run.buffer(
+                    (num_points,),
                     dtype=np.float64,
-                    pbar_n=cfg.rounds,
-                ).scan(
-                    "Iteration",
-                    list(range(num_points)),
-                    before_each=update_fn,
-                ),
-                init_cfg=cfg,
-                on_update=plot_fn,
-            )
-            signals = np.asarray(results)
+                    on_update=plot_fn,
+                )
+                for step in run.scan("Iteration", list(range(num_points))):
+                    idx = cast(int, step.index)
+                    run.env["index"] = idx
+
+                    last_snr = None
+                    if idx > 0:
+                        last_snr = np.abs(signals_buffer.array[idx - 1])
+                    cur_params = optimizer.next_params(idx, last_snr)
+
+                    if cur_params is None:
+                        run.set_stop()
+                        break
+
+                    params[idx, :] = cur_params
+                    modules = step.cfg.modules
+                    modules.readout.set_param("freq", cur_params[0])
+                    modules.readout.set_param("gain", cur_params[1])
+                    modules.readout.set_param("length", cur_params[2])
+                    signals_buffer[step].measure(
+                        measure_fn,
+                        raw2signal_fn=lambda raw: snr_as_signal(
+                            raw,
+                            ge_axis=1,
+                            skew_penalty=run.cfg.skew_penalty,
+                        ),
+                        pbar_n=step.cfg.rounds,
+                    )
+                signals = signals_buffer.array
         close_figure(fig)
 
         # record the last result

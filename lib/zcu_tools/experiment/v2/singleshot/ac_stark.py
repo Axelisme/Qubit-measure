@@ -23,7 +23,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.experiment.v2.singleshot.util import (
     calc_populations,
     correct_populations,
@@ -199,30 +199,6 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
             ),
         ) as viewer:
 
-            def update_fn(i, ctx, gain) -> None:
-                ctx.cfg.modules.stark_pulse1.set_param("gain", gain)
-                ctx.env["idx"] = i
-
-            def plot_fn(ctx) -> None:
-                i = ctx.env["idx"]
-
-                populations = calc_populations(np.asarray(ctx.root_data))
-
-                viewer.get_plotter("g_2d").update(
-                    gains, freqs, populations[..., 0], refresh=False
-                )
-                viewer.get_plotter("e_2d").update(
-                    gains, freqs, populations[..., 1], refresh=False
-                )
-                viewer.get_plotter("o_2d").update(
-                    gains, freqs, populations[..., 2], refresh=False
-                )
-                viewer.get_plotter("cur_1d").update(
-                    freqs, populations[i, :].T, refresh=False
-                )
-
-                viewer.refresh()
-
             def measure_fn(
                 ctx: TaskState[NDArray[np.float64], Any, AcStarkCfg], update_hook
             ) -> list[NDArray[float64]]:
@@ -248,22 +224,42 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
                     ge_radius=radius,
                 )
 
-            signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    raw2signal_fn=lambda raw: raw[0][0],
-                    result_shape=(len(freqs), 2),
+            with MeasureSession(cfg) as run:
+
+                def plot_fn(data: NDArray[np.float64]) -> None:
+                    i = int(run.env.get("idx", 0))
+
+                    populations = calc_populations(data)
+
+                    viewer.get_plotter("g_2d").update(
+                        gains, freqs, populations[..., 0], refresh=False
+                    )
+                    viewer.get_plotter("e_2d").update(
+                        gains, freqs, populations[..., 1], refresh=False
+                    )
+                    viewer.get_plotter("o_2d").update(
+                        gains, freqs, populations[..., 2], refresh=False
+                    )
+                    viewer.get_plotter("cur_1d").update(
+                        freqs, populations[i, :].T, refresh=False
+                    )
+
+                    viewer.refresh()
+
+                buffer = run.buffer(
+                    (len(gains), len(freqs), 2),
                     dtype=np.float64,
-                    pbar_n=1,
-                ).scan(
-                    "resonator gain",
-                    gains.tolist(),
-                    before_each=update_fn,
-                ),
-                init_cfg=cfg,
-                on_update=plot_fn,
-            )
-            signals = np.asarray(signals)
+                    on_update=plot_fn,
+                )
+                for step in run.scan("resonator gain", gains.tolist()):
+                    step.cfg.modules.stark_pulse1.set_param("gain", step.value)
+                    run.env["idx"] = step.index
+                    buffer[step].measure(
+                        measure_fn,
+                        raw2signal_fn=lambda raw: raw[0][0],
+                        pbar_n=1,
+                    )
+                signals = buffer.array
         plt.close(fig)
 
         # Cache results

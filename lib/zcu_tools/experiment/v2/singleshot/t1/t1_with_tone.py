@@ -21,7 +21,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, MultiLivePlot, make_plot_frame
 from zcu_tools.program.v2 import (
@@ -191,8 +191,8 @@ class T1WithToneExp(PersistableExperiment[T1WithToneResult, T1WithToneCfg]):
                     ge_radius=radius,
                 )
 
-            def plot_fn(ctx: TaskState) -> None:
-                populations = calc_populations(np.asarray(ctx.root_data))  # (N, 2, 3)
+            def plot_fn(data: NDArray[np.float64]) -> None:
+                populations = calc_populations(data)  # (N, 2, 3)
                 viewer.get_plotter("init_g").update(
                     lengths, populations[:, 0].T, refresh=False
                 )
@@ -201,17 +201,18 @@ class T1WithToneExp(PersistableExperiment[T1WithToneResult, T1WithToneCfg]):
                 )
                 viewer.refresh()
 
-            populations = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    raw2signal_fn=lambda raw: raw[0][0],
-                    result_shape=(len(lengths), 2, 2),
+            with MeasureSession(cfg) as run:
+                buffer = run.buffer(
+                    (len(lengths), 2, 2),
                     dtype=np.float64,
-                    pbar_n=cfg.rounds,
-                ),
-                init_cfg=cfg,
-                on_update=plot_fn,
-            )
+                    on_update=plot_fn,
+                )
+                buffer.measure(
+                    measure_fn,
+                    raw2signal_fn=lambda raw: raw[0][0],
+                    pbar_n=run.cfg.rounds,
+                )
+                populations = buffer.array
         plt.close(fig)
 
         self.last_result = T1WithToneResult(
@@ -290,8 +291,8 @@ class T1WithToneExp(PersistableExperiment[T1WithToneResult, T1WithToneCfg]):
                     ge_radius=radius,
                 )
 
-            def plot_fn(ctx: TaskState) -> None:
-                populations = calc_populations(np.asarray(ctx.root_data))  # (N, 2, 3)
+            def plot_fn(data: NDArray[np.float64]) -> None:
+                populations = calc_populations(data)  # (N, 2, 3)
                 viewer.get_plotter("init_g").update(
                     lengths, populations[:, 0].T, refresh=False
                 )
@@ -300,17 +301,18 @@ class T1WithToneExp(PersistableExperiment[T1WithToneResult, T1WithToneCfg]):
                 )
                 viewer.refresh()
 
-            populations = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    raw2signal_fn=lambda raw: raw[0][0],
-                    result_shape=(len(lengths), 2, 2),
+            with MeasureSession(cfg) as run:
+                buffer = run.buffer(
+                    (len(lengths), 2, 2),
                     dtype=np.float64,
-                    pbar_n=cfg.rounds,
-                ),
-                init_cfg=cfg,
-                on_update=plot_fn,
-            )
+                    on_update=plot_fn,
+                )
+                buffer.measure(
+                    measure_fn,
+                    raw2signal_fn=lambda raw: raw[0][0],
+                    pbar_n=run.cfg.rounds,
+                )
+                populations = buffer.array
         plt.close(fig)
 
         self.last_result = T1WithToneResult(

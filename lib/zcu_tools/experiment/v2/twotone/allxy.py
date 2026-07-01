@@ -24,7 +24,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
     ComputedPulse,
@@ -232,18 +232,17 @@ class AllXY_Exp(PersistableExperiment[AllXY_Result, AllXYCfg]):
             ax.set_xticks(np.arange(len(ALLXY_SEQUENCE)))
             ax.set_xticklabels(gate_labels, rotation=30, ha="right", fontsize=8)
 
-            signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    result_shape=(len(ALLXY_SEQUENCE),),
-                    pbar_n=cfg.rounds,
-                ),
-                init_cfg=cfg,
-                on_update=lambda ctx: viewer.update(
-                    np.arange(len(ALLXY_SEQUENCE), dtype=np.float64),
-                    allxy_signal2real(ctx.root_data),
-                ),
-            )
+            with MeasureSession(cfg) as run:
+                signals_buffer = run.buffer(
+                    (len(ALLXY_SEQUENCE),),
+                    dtype=np.complex128,
+                    on_update=lambda data: viewer.update(
+                        np.arange(len(ALLXY_SEQUENCE), dtype=np.float64),
+                        allxy_signal2real(data),
+                    ),
+                )
+                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
+                signals = signals_buffer.array
 
         return AllXY_Result(
             gate_idxs=np.arange(len(ALLXY_SEQUENCE), dtype=np.int64),

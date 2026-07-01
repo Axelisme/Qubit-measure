@@ -22,7 +22,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.experiment.v2.singleshot.util import (
     calc_populations,
     correct_populations,
@@ -247,58 +247,53 @@ class T1WithToneSweepExp(
         fig, viewer = self._make_viewer_ctx(sweep_name)
 
         with viewer:
+            with MeasureSession(cfg) as run:
 
-            def update_fn(i, ctx, value) -> None:
-                ctx.cfg.modules.probe_pulse.set_param(sweep_name, value)
-                ctx.env["idx"] = i
+                def plot_fn(data: NDArray[np.float64]) -> None:
+                    i = int(run.env.get("idx", 0))
+                    populations = calc_populations(data)
 
-            def plot_fn(ctx) -> None:
-                i = ctx.env["idx"]
-                populations = calc_populations(np.asarray(ctx.root_data))
+                    viewer.get_plotter("gg_2d").update(
+                        xs, lengths, populations[:, 0, :, 0], refresh=False
+                    )
+                    viewer.get_plotter("ge_2d").update(
+                        xs, lengths, populations[:, 0, :, 1], refresh=False
+                    )
+                    viewer.get_plotter("go_2d").update(
+                        xs, lengths, populations[:, 0, :, 2], refresh=False
+                    )
+                    viewer.get_plotter("g_1d").update(
+                        lengths, populations[i, 0].T, refresh=False
+                    )
+                    viewer.get_plotter("eg_2d").update(
+                        xs, lengths, populations[:, 1, :, 0], refresh=False
+                    )
+                    viewer.get_plotter("ee_2d").update(
+                        xs, lengths, populations[:, 1, :, 1], refresh=False
+                    )
+                    viewer.get_plotter("eo_2d").update(
+                        xs, lengths, populations[:, 1, :, 2], refresh=False
+                    )
+                    viewer.get_plotter("e_1d").update(
+                        lengths, populations[i, 1].T, refresh=False
+                    )
 
-                viewer.get_plotter("gg_2d").update(
-                    xs, lengths, populations[:, 0, :, 0], refresh=False
-                )
-                viewer.get_plotter("ge_2d").update(
-                    xs, lengths, populations[:, 0, :, 1], refresh=False
-                )
-                viewer.get_plotter("go_2d").update(
-                    xs, lengths, populations[:, 0, :, 2], refresh=False
-                )
-                viewer.get_plotter("g_1d").update(
-                    lengths, populations[i, 0].T, refresh=False
-                )
-                viewer.get_plotter("eg_2d").update(
-                    xs, lengths, populations[:, 1, :, 0], refresh=False
-                )
-                viewer.get_plotter("ee_2d").update(
-                    xs, lengths, populations[:, 1, :, 1], refresh=False
-                )
-                viewer.get_plotter("eo_2d").update(
-                    xs, lengths, populations[:, 1, :, 2], refresh=False
-                )
-                viewer.get_plotter("e_1d").update(
-                    lengths, populations[i, 1].T, refresh=False
-                )
+                    viewer.refresh()
 
-                viewer.refresh()
-
-            populations = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    raw2signal_fn=lambda raw: raw[0][0],
-                    result_shape=(2, len(lengths), 2),
+                buffer = run.buffer(
+                    (len(xs), 2, len(lengths), 2),
                     dtype=np.float64,
-                    pbar_n=cfg.rounds,
-                ).scan(
-                    sweep_name,
-                    xs.tolist(),
-                    before_each=update_fn,
-                ),
-                init_cfg=cfg,
-                on_update=plot_fn,
-            )
-            populations = np.asarray(populations)
+                    on_update=plot_fn,
+                )
+                for step in run.scan(sweep_name, xs.tolist()):
+                    step.cfg.modules.probe_pulse.set_param(sweep_name, step.value)
+                    run.env["idx"] = step.index
+                    buffer[step].measure(
+                        measure_fn,
+                        raw2signal_fn=lambda raw: raw[0][0],
+                        pbar_n=step.cfg.rounds,
+                    )
+                populations = buffer.array
         plt.close(fig)
 
         self.last_result = T1WithToneSweepResult(
@@ -382,58 +377,53 @@ class T1WithToneSweepExp(
         fig, viewer = self._make_viewer_ctx(sweep_name)
 
         with viewer:
+            with MeasureSession(cfg) as run:
 
-            def update_fn(i, ctx, value) -> None:
-                ctx.cfg.modules.probe_pulse.set_param(sweep_name, value)
-                ctx.env["idx"] = i
+                def plot_fn(data: NDArray[np.float64]) -> None:
+                    i = int(run.env.get("idx", 0))
+                    populations = calc_populations(data)
 
-            def plot_fn(ctx) -> None:
-                i = ctx.env["idx"]
-                populations = calc_populations(np.asarray(ctx.root_data))
+                    viewer.get_plotter("gg_2d").update(
+                        xs, lengths, populations[:, 0, :, 0], refresh=False
+                    )
+                    viewer.get_plotter("ge_2d").update(
+                        xs, lengths, populations[:, 0, :, 1], refresh=False
+                    )
+                    viewer.get_plotter("go_2d").update(
+                        xs, lengths, populations[:, 0, :, 2], refresh=False
+                    )
+                    viewer.get_plotter("g_1d").update(
+                        lengths, populations[i, 0].T, refresh=False
+                    )
+                    viewer.get_plotter("eg_2d").update(
+                        xs, lengths, populations[:, 1, :, 0], refresh=False
+                    )
+                    viewer.get_plotter("ee_2d").update(
+                        xs, lengths, populations[:, 1, :, 1], refresh=False
+                    )
+                    viewer.get_plotter("eo_2d").update(
+                        xs, lengths, populations[:, 1, :, 2], refresh=False
+                    )
+                    viewer.get_plotter("e_1d").update(
+                        lengths, populations[i, 1].T, refresh=False
+                    )
 
-                viewer.get_plotter("gg_2d").update(
-                    xs, lengths, populations[:, 0, :, 0], refresh=False
-                )
-                viewer.get_plotter("ge_2d").update(
-                    xs, lengths, populations[:, 0, :, 1], refresh=False
-                )
-                viewer.get_plotter("go_2d").update(
-                    xs, lengths, populations[:, 0, :, 2], refresh=False
-                )
-                viewer.get_plotter("g_1d").update(
-                    lengths, populations[i, 0].T, refresh=False
-                )
-                viewer.get_plotter("eg_2d").update(
-                    xs, lengths, populations[:, 1, :, 0], refresh=False
-                )
-                viewer.get_plotter("ee_2d").update(
-                    xs, lengths, populations[:, 1, :, 1], refresh=False
-                )
-                viewer.get_plotter("eo_2d").update(
-                    xs, lengths, populations[:, 1, :, 2], refresh=False
-                )
-                viewer.get_plotter("e_1d").update(
-                    lengths, populations[i, 1].T, refresh=False
-                )
+                    viewer.refresh()
 
-                viewer.refresh()
-
-            populations = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    raw2signal_fn=lambda raw: np.transpose(raw[0][0], (1, 0, 2)),
-                    result_shape=(2, len(lengths), 2),
+                buffer = run.buffer(
+                    (len(xs), 2, len(lengths), 2),
                     dtype=np.float64,
-                    pbar_n=cfg.rounds,
-                ).scan(
-                    sweep_name,
-                    xs.tolist(),
-                    before_each=update_fn,
-                ),
-                init_cfg=cfg,
-                on_update=plot_fn,
-            )
-            populations = np.asarray(populations)
+                    on_update=plot_fn,
+                )
+                for step in run.scan(sweep_name, xs.tolist()):
+                    step.cfg.modules.probe_pulse.set_param(sweep_name, step.value)
+                    run.env["idx"] = step.index
+                    buffer[step].measure(
+                        measure_fn,
+                        raw2signal_fn=lambda raw: np.transpose(raw[0][0], (1, 0, 2)),
+                        pbar_n=step.cfg.rounds,
+                    )
+                populations = buffer.array
         plt.close(fig)
 
         self.last_result = T1WithToneSweepResult(

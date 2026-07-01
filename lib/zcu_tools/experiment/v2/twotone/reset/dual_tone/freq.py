@@ -22,7 +22,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D, LivePlot2DwithLine
 from zcu_tools.program.v2 import (
@@ -150,24 +150,18 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         with LivePlot2DwithLine(
             "Frequency1 (MHz)", "Frequency2 (MHz)", line_axis=0
         ) as viewer:
-            signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    result_shape=(len(freqs1),),
-                    pbar_n=cfg.rounds,
-                ).scan(
-                    "freq2",
-                    freqs2.tolist(),
-                    before_each=lambda _, ctx, freq2: (
-                        ctx.cfg.modules.tested_reset.set_param("freq2", freq2)
+            with MeasureSession(cfg) as run:
+                signals_buffer = run.buffer(
+                    (len(freqs1), len(freqs2)),
+                    dtype=np.complex128,
+                    on_update=lambda data: viewer.update(
+                        freqs1, freqs2, dual_reset_signal2real(data)
                     ),
-                ),
-                init_cfg=cfg,
-                on_update=lambda ctx: viewer.update(
-                    freqs1, freqs2, dual_reset_signal2real(np.asarray(ctx.root_data).T)
-                ),
-            )
-            signals = np.asarray(signals).T
+                )
+                for step in run.scan("freq2", freqs2.tolist()):
+                    step.cfg.modules.tested_reset.set_param("freq2", step.value)
+                    signals_buffer[:, step].measure(measure_fn, pbar_n=step.cfg.rounds)
+                signals = signals_buffer.array
 
         return FreqResult(freqs1, freqs2, signals, cfg_snapshot=cfg)
 
@@ -226,18 +220,16 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             )
 
         with LivePlot2D("Frequency1 (MHz)", "Frequency2 (MHz)") as viewer:
-            signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    result_shape=(len(freqs1), len(freqs2)),
-                    pbar_n=cfg.rounds,
-                ),
-                init_cfg=cfg,
-                on_update=lambda ctx: viewer.update(
-                    freqs1, freqs2, dual_reset_signal2real(ctx.root_data)
-                ),
-            )
-            signals = np.asarray(signals)
+            with MeasureSession(cfg) as run:
+                signals_buffer = run.buffer(
+                    (len(freqs1), len(freqs2)),
+                    dtype=np.complex128,
+                    on_update=lambda data: viewer.update(
+                        freqs1, freqs2, dual_reset_signal2real(data)
+                    ),
+                )
+                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
+                signals = signals_buffer.array
 
         return FreqResult(freqs1, freqs2, signals, cfg_snapshot=cfg)
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -24,7 +24,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.experiment.v2.utils import snr_checker, sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.notebook.utils import make_sweep
@@ -333,32 +333,32 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         with LivePlot2DwithLine(
             "Number of Pi", "Time idxs", line_axis=1, num_lines=2
         ) as viewer:
+            with MeasureSession(cfg) as run:
 
-            def update_fn(
-                i: int, ctx: TaskState[Any, Any, CPMG_Cfg], time: float
-            ) -> None:
-                ctx.env.update(time=int(time), length_idx=i)
-                ctx.cfg.sweep.length = make_sweep(
-                    start=length_ranges[i, 0],
-                    stop=length_ranges[i, 1],
-                    expts=ctx.cfg.length_expts,
+                def update_viewer(data: NDArray[np.complex128]) -> None:
+                    length_idx = int(run.env.get("length_idx", 0))
+                    viewer.update(
+                        times.astype(np.float64),
+                        lengths[length_idx],
+                        cpmg_signal2real(data),
+                        title=f"snr = {current_snr:.1f}" if current_snr else None,
+                    )
+
+                signals_buffer = run.buffer(
+                    (len(times), len(length_idxs)),
+                    dtype=np.complex128,
+                    on_update=update_viewer,
                 )
-
-            signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    result_shape=(len(length_idxs),),
-                    pbar_n=cfg.rounds,
-                ).scan("times", times.tolist(), before_each=update_fn),
-                init_cfg=cfg,
-                on_update=lambda ctx: viewer.update(
-                    times.astype(np.float64),
-                    lengths[ctx.env["length_idx"]],
-                    cpmg_signal2real(np.asarray(ctx.root_data)),
-                    title=f"snr = {current_snr:.1f}" if current_snr else None,
-                ),
-            )
-            signals = np.asarray(signals)
+                for step in run.scan("times", times.tolist()):
+                    idx = cast(int, step.index)
+                    run.env.update(time=int(step.value), length_idx=idx)
+                    step.cfg.sweep.length = make_sweep(
+                        start=length_ranges[idx, 0],
+                        stop=length_ranges[idx, 1],
+                        expts=step.cfg.length_expts,
+                    )
+                    signals_buffer[step].measure(measure_fn, pbar_n=step.cfg.rounds)
+                signals = signals_buffer.array
 
         # record result
         self.last_result = CPMG_Result(

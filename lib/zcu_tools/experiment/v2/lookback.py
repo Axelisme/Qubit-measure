@@ -24,7 +24,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
     ModularProgramV2,
@@ -102,20 +102,24 @@ class LookbackExp(PersistableExperiment[LookbackResult, LookbackCfg]):
             )
 
         with LivePlot1D("Time (us)", "Amplitude") as viewer:
-            signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
+            with MeasureSession(cfg) as run:
+                signals_buffer = run.buffer(
+                    (len(Ts),),
+                    dtype=np.complex128,
+                    on_update=lambda data: viewer.update(
+                        Ts, lookback_signal2real(data)
+                    ),
+                )
+                signals_buffer.measure(
+                    measure_fn,
                     raw2signal_fn=lambda raw: raw[0].dot([1, 1j]),
-                    result_shape=(len(Ts),),
-                    pbar_n=cfg.rounds,
-                ),
-                init_cfg=cfg,
-                on_update=lambda ctx: viewer.update(
-                    Ts, lookback_signal2real(ctx.root_data)
-                ),
-            )
-
-        return LookbackResult(times=Ts, signals=signals, cfg_snapshot=orig_cfg)
+                    pbar_n=run.cfg.rounds,
+                )
+                return LookbackResult(
+                    times=Ts,
+                    signals=signals_buffer.array,
+                    cfg_snapshot=orig_cfg,
+                )
 
     @retrieve_result
     def analyze(

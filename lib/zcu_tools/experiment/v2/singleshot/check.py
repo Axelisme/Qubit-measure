@@ -21,7 +21,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     ProgramV2Cfg,
@@ -106,15 +106,14 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
             i0, q0 = avgiq[..., 0, 0], avgiq[..., 0, 1]  # (reps, )
             return np.array(i0 + 1j * q0)  # (reps, )
 
-        signals = run_task(
-            task=Task(
-                measure_fn=measure_fn,
+        with MeasureSession(cfg) as run:
+            signals_buffer = run.buffer((cfg.shots,), dtype=np.complex128)
+            signals_buffer.measure(
+                measure_fn,
                 raw2signal_fn=raw2signal_fn,
-                result_shape=(cfg.shots,),
                 pbar_n=1,
-            ),
-            init_cfg=cfg,
-        )
+            )
+            signals = signals_buffer.array
 
         # Cache results
         shots = np.arange(cfg.shots, dtype=np.int64)

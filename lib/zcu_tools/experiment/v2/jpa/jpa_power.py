@@ -27,7 +27,7 @@ from zcu_tools.experiment.utils import (
     set_power_in_dev_cfg,
     setup_devices,
 )
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.liveplot import LivePlotScatter
@@ -119,25 +119,28 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
             return [tracker]
 
         with LivePlotScatter("Power (dBm)", "Signal Difference") as viewer:
-            signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    raw2signal_fn=lambda raw: snr_as_signal(
-                        raw, ge_axis=0, skew_penalty=cfg.skew_penalty
-                    ),
+            with MeasureSession(cfg) as run:
+                signals_buffer = run.buffer(
+                    (len(jpa_powers),),
                     dtype=np.float64,
-                    pbar_n=cfg.rounds,
-                ).scan(
-                    "power (dBm)",
-                    jpa_powers.tolist(),
-                    before_each=lambda _, ctx, gain: set_power_in_dev_cfg(
-                        ctx.cfg.dev, gain, label="jpa_rf_dev"
-                    ),
-                ),
-                init_cfg=cfg,
-                on_update=lambda ctx: viewer.update(jpa_powers, np.abs(ctx.root_data)),
-            )
-            signals = np.asarray(signals)
+                    on_update=lambda data: viewer.update(jpa_powers, np.abs(data)),
+                )
+                for step in run.scan("power (dBm)", jpa_powers.tolist()):
+                    set_power_in_dev_cfg(
+                        step.cfg.dev,
+                        step.value,
+                        label="jpa_rf_dev",
+                    )
+                    signals_buffer[step].measure(
+                        measure_fn,
+                        raw2signal_fn=lambda raw: snr_as_signal(
+                            raw,
+                            ge_axis=0,
+                            skew_penalty=run.cfg.skew_penalty,
+                        ),
+                        pbar_n=step.cfg.rounds,
+                    )
+                signals = signals_buffer.array
 
         return PowerResult(powers=jpa_powers, signals=signals, cfg_snapshot=cfg)
 
