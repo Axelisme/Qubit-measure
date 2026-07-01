@@ -188,7 +188,7 @@ def test_post_content_refresh_populates_form_and_figure(qapp, monkeypatch):
 
     captured: dict[str, object] = {}
     monkeypatch.setattr(
-        "zcu_tools.gui.app.main.ui.main_window.attach_existing_figure_to_container",
+        "zcu_tools.gui.app.main.ui.exp_tab_widget.attach_existing_figure_to_container",
         lambda fig, container: (
             captured.setdefault("container", container) or MagicMock()
         ),
@@ -221,7 +221,7 @@ def test_post_figure_refresh_is_noop_on_invalidation(qapp, monkeypatch):
 
     attached: list[object] = []
     monkeypatch.setattr(
-        "zcu_tools.gui.app.main.ui.main_window.attach_existing_figure_to_container",
+        "zcu_tools.gui.app.main.ui.exp_tab_widget.attach_existing_figure_to_container",
         lambda fig, container: attached.append(container) or MagicMock(),
     )
 

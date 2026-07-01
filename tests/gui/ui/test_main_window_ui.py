@@ -1115,7 +1115,7 @@ def test_show_analysis_figure_draws_canvas(qapp, monkeypatch):
     canvas = MagicMock()
 
     monkeypatch.setattr(
-        "zcu_tools.gui.app.main.ui.main_window.attach_existing_figure_to_container",
+        "zcu_tools.gui.app.main.ui.exp_tab_widget.attach_existing_figure_to_container",
         lambda fig, container: canvas,
     )
 
