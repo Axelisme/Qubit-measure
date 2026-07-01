@@ -41,6 +41,41 @@ def _apply_window_defaults(ctrl: MagicMock) -> MagicMock:
 _DEFAULT_PARAMS = object()
 
 
+class _RecordingTabActions:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def refresh_interaction(self, tab_id: str) -> None:
+        self.calls.append(("refresh_interaction", tab_id))
+
+    def run_or_stop(self, tab_id: str) -> None:
+        self.calls.append(("run_or_stop", tab_id))
+
+    def load_data(self, tab_id: str) -> None:
+        self.calls.append(("load_data", tab_id))
+
+    def analyze(self, tab_id: str) -> None:
+        self.calls.append(("analyze", tab_id))
+
+    def post_analyze(self, tab_id: str) -> None:
+        self.calls.append(("post_analyze", tab_id))
+
+    def apply_writeback(self, tab_id: str) -> None:
+        self.calls.append(("apply_writeback", tab_id))
+
+    def save_data(self, tab_id: str) -> None:
+        self.calls.append(("save_data", tab_id))
+
+    def save_image(self, tab_id: str) -> None:
+        self.calls.append(("save_image", tab_id))
+
+    def save_result(self, tab_id: str) -> None:
+        self.calls.append(("save_result", tab_id))
+
+    def save_post_image(self, tab_id: str) -> None:
+        self.calls.append(("save_post_image", tab_id))
+
+
 def _snapshot(
     tab_id: str,
     *,
@@ -54,8 +89,11 @@ def _snapshot(
     has_run_result: bool = True,
     has_analyze_result: bool = True,
     has_figure: bool = True,
+    has_post_analyze_result: bool = False,
     supports_analysis: bool = True,
+    supports_post_analysis: bool = False,
     analyze_params: object = _DEFAULT_PARAMS,
+    post_analyze_params: object | None = None,
 ) -> TabSnapshot:
     return TabSnapshot(
         adapter_name="fake",
@@ -71,15 +109,18 @@ def _snapshot(
             has_run_result=has_run_result,
             has_analyze_result=has_analyze_result,
             has_figure=has_figure,
+            has_post_analyze_result=has_post_analyze_result,
         ),
         cfg_schema=MagicMock(),
         save_paths_override=None,
         capabilities=AdapterCapabilities(
-            analysis=AnalysisMode.FIT if supports_analysis else AnalysisMode.NONE
+            analysis=AnalysisMode.FIT if supports_analysis else AnalysisMode.NONE,
+            post_analysis=supports_post_analysis,
         ),
         analyze_params=MagicMock()
         if analyze_params is _DEFAULT_PARAMS
         else analyze_params,
+        post_analyze_params=post_analyze_params,
         writeback_items=(),
         save_paths=None,
         figure=None,
@@ -448,6 +489,44 @@ def test_main_window_toolbar_does_not_show_arb_waveforms(qapp):
     assert "Arb Waveforms…" not in texts
 
 
+def test_main_window_tab_actions_forward_to_private_handlers(qapp, monkeypatch):
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+
+    ctrl = _apply_window_defaults(MagicMock())
+    ctrl.get_bus.return_value = EventBus()
+    window = MainWindow(ctrl)
+    handlers = {
+        "refresh_tab_interaction": MagicMock(),
+        "_on_run_stop_clicked": MagicMock(),
+        "_on_load_data_clicked": MagicMock(),
+        "_on_analyze_clicked": MagicMock(),
+        "_on_post_analyze_clicked": MagicMock(),
+        "_on_writeback_inline_apply": MagicMock(),
+        "_on_save_data_clicked": MagicMock(),
+        "_on_save_image_clicked": MagicMock(),
+        "_on_save_result_clicked": MagicMock(),
+        "_on_post_save_image_clicked": MagicMock(),
+    }
+    for name, handler in handlers.items():
+        monkeypatch.setattr(window, name, handler)
+
+    action_to_handler = [
+        ("refresh_interaction", "refresh_tab_interaction"),
+        ("run_or_stop", "_on_run_stop_clicked"),
+        ("load_data", "_on_load_data_clicked"),
+        ("analyze", "_on_analyze_clicked"),
+        ("post_analyze", "_on_post_analyze_clicked"),
+        ("apply_writeback", "_on_writeback_inline_apply"),
+        ("save_data", "_on_save_data_clicked"),
+        ("save_image", "_on_save_image_clicked"),
+        ("save_result", "_on_save_result_clicked"),
+        ("save_post_image", "_on_post_save_image_clicked"),
+    ]
+    for action_name, handler_name in action_to_handler:
+        getattr(window._tab_actions, action_name)("tab-1")
+        handlers[handler_name].assert_called_once_with("tab-1")
+
+
 def test_main_window_named_dialog_facade_delegates_to_registry(qapp):
     from qtpy.QtWidgets import QDialog
     from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
@@ -762,12 +841,12 @@ def _pulse_schema():
 def test_exp_tab_opens_cfg_editor_on_attach(qapp):
     import dataclasses
 
-    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget, MainWindow
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
     ctrl = _editor_wiring_ctrl()
     tab = ExpTabWidget("tab-1", ctrl)
     snapshot = dataclasses.replace(_snapshot("tab-1"), cfg_schema=_pulse_schema())
-    tab.attach(snapshot, MainWindow(ctrl))
+    tab.attach(snapshot, _RecordingTabActions())
 
     # Opened a gc=False seeded session keyed by the tab id, and attached the
     # widget to the service-owned model.
@@ -782,16 +861,70 @@ def test_exp_tab_opens_cfg_editor_on_attach(qapp):
 def test_exp_tab_tears_down_cfg_editor_on_detach(qapp):
     import dataclasses
 
-    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget, MainWindow
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
     ctrl = _editor_wiring_ctrl()
     tab = ExpTabWidget("tab-1", ctrl)
     snapshot = dataclasses.replace(_snapshot("tab-1"), cfg_schema=_pulse_schema())
-    tab.attach(snapshot, MainWindow(ctrl))
+    tab.attach(snapshot, _RecordingTabActions())
     tab.detach()
 
     ctrl.teardown_cfg_editor.assert_called_once_with("editor-tab1")
     assert tab._cfg_editor_id is None
+
+
+def test_exp_tab_buttons_dispatch_public_tab_actions(qapp):
+    import dataclasses
+
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
+
+    ctrl = _editor_wiring_ctrl()
+    tab = ExpTabWidget("tab-1", ctrl)
+    actions = _RecordingTabActions()
+    snapshot = dataclasses.replace(
+        _snapshot(
+            "tab-1",
+            has_run_result=True,
+            has_analyze_result=True,
+            has_figure=True,
+            has_post_analyze_result=True,
+            supports_post_analysis=True,
+        ),
+        cfg_schema=_pulse_schema(),
+    )
+    tab.attach(snapshot, actions)
+
+    assert tab.run_btn.isEnabled() is True
+    assert tab.load_data_btn.isEnabled() is True
+    assert tab.analyze_btn.isEnabled() is True
+    assert tab.post_analyze_btn.isEnabled() is True
+    assert tab.save_data_btn.isEnabled() is True
+    assert tab.save_image_btn.isEnabled() is True
+    assert tab.save_result_btn.isEnabled() is True
+    assert tab.post_save_image_btn.isEnabled() is True
+
+    actions.calls.clear()
+    tab.run_btn.click()
+    tab.load_data_btn.click()
+    tab.analyze_btn.click()
+    tab.post_analyze_btn.click()
+    tab.writeback_widget.apply_requested.emit()
+    tab.save_data_btn.click()
+    tab.save_image_btn.click()
+    tab.save_result_btn.click()
+    tab.post_save_image_btn.click()
+
+    assert actions.calls == [
+        ("run_or_stop", "tab-1"),
+        ("load_data", "tab-1"),
+        ("analyze", "tab-1"),
+        ("post_analyze", "tab-1"),
+        ("apply_writeback", "tab-1"),
+        ("save_data", "tab-1"),
+        ("save_image", "tab-1"),
+        ("save_result", "tab-1"),
+        ("save_post_image", "tab-1"),
+    ]
 
 
 def _make_pulse_model(ctrl):
@@ -809,7 +942,7 @@ def test_exp_tab_reset_reseeds_cfg_editor_session(qapp, monkeypatch):
     import dataclasses
 
     from qtpy.QtWidgets import QMessageBox
-    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget, MainWindow
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
     # Simulate the user clicking Yes in the confirmation dialog.
     monkeypatch.setattr(
@@ -821,8 +954,9 @@ def test_exp_tab_reset_reseeds_cfg_editor_session(qapp, monkeypatch):
     ctrl = _editor_wiring_ctrl()
     first_model = ctrl.get_cfg_editor_root.return_value
     tab = ExpTabWidget("tab-1", ctrl)
+    actions = _RecordingTabActions()
     snapshot = dataclasses.replace(_snapshot("tab-1"), cfg_schema=_pulse_schema())
-    tab.attach(snapshot, MainWindow(ctrl))
+    tab.attach(snapshot, actions)
 
     # After attach: a second session for the reset, returning a NEW model.
     reset_schema = _pulse_schema()
@@ -845,6 +979,7 @@ def test_exp_tab_reset_reseeds_cfg_editor_session(qapp, monkeypatch):
     # The form now views the new model (root widget rebuilt).
     assert tab.cfg_form.get_live_root() is second_model
     assert tab.cfg_form.get_live_root() is not first_model
+    assert actions.calls[-1] == ("refresh_interaction", "tab-1")
 
 
 def test_exp_tab_reset_confirm_no_does_not_reset(qapp, monkeypatch):
@@ -852,7 +987,7 @@ def test_exp_tab_reset_confirm_no_does_not_reset(qapp, monkeypatch):
     import dataclasses
 
     from qtpy.QtWidgets import QMessageBox
-    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget, MainWindow
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
     # Simulate the user clicking No.
     monkeypatch.setattr(
@@ -863,17 +998,20 @@ def test_exp_tab_reset_confirm_no_does_not_reset(qapp, monkeypatch):
 
     ctrl = _editor_wiring_ctrl()
     tab = ExpTabWidget("tab-1", ctrl)
+    actions = _RecordingTabActions()
     snapshot = dataclasses.replace(_snapshot("tab-1"), cfg_schema=_pulse_schema())
-    tab.attach(snapshot, MainWindow(ctrl))
+    tab.attach(snapshot, actions)
 
     ctrl.reset_tab_cfg.reset_mock()
     ctrl.open_seeded_cfg_editor.reset_mock()
+    actions.calls.clear()
 
     tab._on_reset_cfg_clicked()
 
     # Controller must not be touched when the user cancels.
     ctrl.reset_tab_cfg.assert_not_called()
     ctrl.open_seeded_cfg_editor.assert_not_called()
+    assert actions.calls == []
 
 
 def test_exp_tab_reset_btn_idle_only_enable(qapp):
@@ -901,7 +1039,7 @@ def test_exp_tab_reset_does_not_double_connect_schema_changed(qapp, monkeypatch)
     import dataclasses
 
     from qtpy.QtWidgets import QMessageBox
-    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget, MainWindow
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
     # Simulate the user clicking Yes in the confirmation dialog.
     monkeypatch.setattr(
@@ -912,8 +1050,9 @@ def test_exp_tab_reset_does_not_double_connect_schema_changed(qapp, monkeypatch)
 
     ctrl = _editor_wiring_ctrl()
     tab = ExpTabWidget("tab-1", ctrl)
+    actions = _RecordingTabActions()
     snapshot = dataclasses.replace(_snapshot("tab-1"), cfg_schema=_pulse_schema())
-    tab.attach(snapshot, MainWindow(ctrl))
+    tab.attach(snapshot, actions)
 
     reset_schema = _pulse_schema()
     second_model = _make_pulse_model(ctrl)

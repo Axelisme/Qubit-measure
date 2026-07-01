@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-01 - exp tab widget ownership
+**Last updated:** 2026-07-01 - tab action boundary
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -18,6 +18,9 @@ framework 只看 `ExpAdapterProtocol`。
 - `state.py`：tab/device/result/save-path/version-table SSOT 與主線程 mutators。
 - `ui/`：Qt widgets、MainWindow top-level façade、tab-local `ExpTabWidget`、
   cfg form、writeback view、feedback/prompt widgets。
+  `ExpTabWidget` owns tab-local rendering and receives tab actions through a
+  narrow `TabActions` port; `MainWindow` adapts those actions to top-level
+  handlers.
 - `services/remote/`：GUI process 內的 NDJSON RPC handler；MCP bridge 不在本 package。
 - `adapters/`：Qt/liveplot/shutdown 等 driven adapters。
 

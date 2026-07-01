@@ -49,28 +49,28 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.main.services import TabSnapshot
 
 
-class TabActionHost(Protocol):
-    """Callbacks supplied by MainWindow without importing it at runtime."""
+class TabActions(Protocol):
+    """Tab-level actions supplied by the top-level window boundary."""
 
-    def refresh_tab_interaction(self, tab_id: str) -> None: ...
+    def refresh_interaction(self, tab_id: str) -> None: ...
 
-    def _on_run_stop_clicked(self, tab_id: str) -> None: ...
+    def run_or_stop(self, tab_id: str) -> None: ...
 
-    def _on_load_data_clicked(self, tab_id: str) -> None: ...
+    def load_data(self, tab_id: str) -> None: ...
 
-    def _on_analyze_clicked(self, tab_id: str) -> None: ...
+    def analyze(self, tab_id: str) -> None: ...
 
-    def _on_post_analyze_clicked(self, tab_id: str) -> None: ...
+    def post_analyze(self, tab_id: str) -> None: ...
 
-    def _on_writeback_inline_apply(self, tab_id: str) -> None: ...
+    def apply_writeback(self, tab_id: str) -> None: ...
 
-    def _on_save_data_clicked(self, tab_id: str) -> None: ...
+    def save_data(self, tab_id: str) -> None: ...
 
-    def _on_save_image_clicked(self, tab_id: str) -> None: ...
+    def save_image(self, tab_id: str) -> None: ...
 
-    def _on_save_result_clicked(self, tab_id: str) -> None: ...
+    def save_result(self, tab_id: str) -> None: ...
 
-    def _on_post_save_image_clicked(self, tab_id: str) -> None: ...
+    def save_post_image(self, tab_id: str) -> None: ...
 
 
 # ---------------------------------------------------------------------------
@@ -143,8 +143,8 @@ class ExpTabWidget(QWidget):
         # editor_id of this tab's shared cfg-editor session (set on bind, when
         # the cfg_form's live model exists). Exposed to agents via tab.snapshot.
         self._cfg_editor_id: str | None = None
-        # The action host is retained for Reset; button slots close over it.
-        self._action_host: TabActionHost | None = None
+        # The action boundary is retained for Reset; button slots close over it.
+        self._actions: TabActions | None = None
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(4, 4, 4, 4)
@@ -509,7 +509,7 @@ class ExpTabWidget(QWidget):
 
     # ── attach / detach (whole-tab, snapshot-driven) ──────────────────────
 
-    def attach(self, snapshot: TabSnapshot, host: TabActionHost) -> None:
+    def attach(self, snapshot: TabSnapshot, actions: TabActions) -> None:
         """Bring this tab widget to life from one snapshot (mirrors
         ``CfgFormWidget.attach`` at the whole-tab scale): seed every sub-view
         from the snapshot's live fields, then wire the controller signals.
@@ -525,7 +525,7 @@ class ExpTabWidget(QWidget):
                 snapshot.save_paths.data_path, snapshot.save_paths.image_path
             )
         self.update_interaction_state(snapshot)
-        self._bind_to_controller(host)
+        self._bind_to_controller(actions)
 
     def _populate_cfg(self, schema: CfgSchema, ctrl: Controller) -> None:
         # The cfg LiveModel is owned by the CfgEditorService (ADR-0008): open a
@@ -663,10 +663,10 @@ class ExpTabWidget(QWidget):
             return
         # Controller regenerates + commits the adapter-default cfg (and gates a
         # running tab); we just re-seed the form over the new committed schema.
-        assert self._action_host is not None, "reset clicked before bind"
+        assert self._actions is not None, "reset clicked before bind"
         schema = self._ctrl.reset_tab_cfg(self.tab_id)
         self._reseed_cfg(schema)
-        self._action_host.refresh_tab_interaction(self.tab_id)
+        self._actions.refresh_interaction(self.tab_id)
 
     def _reseed_cfg(self, schema: CfgSchema) -> None:
         """Swap the cfg form onto a fresh service-owned session for ``schema``.
@@ -789,14 +789,14 @@ class ExpTabWidget(QWidget):
                 idle and state.has_active_context and state.has_post_analyze_result
             )
 
-    def _bind_to_controller(self, host: TabActionHost) -> None:
+    def _bind_to_controller(self, actions: TabActions) -> None:
         tab_id = self.tab_id
         # Held so the Reset handler can refresh interaction state after re-seeding
-        # (the only post-bind path that needs the host off a button slot).
-        self._action_host = host
+        # (the only post-bind path that needs the actions off a button slot).
+        self._actions = actions
 
         def validity_cb(_valid: bool) -> None:
-            host.refresh_tab_interaction(tab_id)
+            actions.refresh_interaction(tab_id)
 
         def schema_cb(schema_obj: CfgSchema) -> None:
             self._ctrl.update_tab_cfg(tab_id, schema_obj)
@@ -827,22 +827,18 @@ class ExpTabWidget(QWidget):
         self._data_path_edit.textChanged.connect(save_paths_cb)
         self._image_path_edit.textChanged.connect(save_paths_cb)
         self.reset_btn.clicked.connect(self._on_reset_cfg_clicked)
-        self.run_btn.clicked.connect(lambda: host._on_run_stop_clicked(tab_id))
-        self.load_data_btn.clicked.connect(lambda: host._on_load_data_clicked(tab_id))
-        self.analyze_btn.clicked.connect(lambda: host._on_analyze_clicked(tab_id))
-        self.post_analyze_btn.clicked.connect(
-            lambda: host._on_post_analyze_clicked(tab_id)
-        )
+        self.run_btn.clicked.connect(lambda: actions.run_or_stop(tab_id))
+        self.load_data_btn.clicked.connect(lambda: actions.load_data(tab_id))
+        self.analyze_btn.clicked.connect(lambda: actions.analyze(tab_id))
+        self.post_analyze_btn.clicked.connect(lambda: actions.post_analyze(tab_id))
         self.writeback_widget.apply_requested.connect(
-            lambda: host._on_writeback_inline_apply(tab_id)
+            lambda: actions.apply_writeback(tab_id)
         )
-        self.save_data_btn.clicked.connect(lambda: host._on_save_data_clicked(tab_id))
-        self.save_image_btn.clicked.connect(lambda: host._on_save_image_clicked(tab_id))
-        self.save_result_btn.clicked.connect(
-            lambda: host._on_save_result_clicked(tab_id)
-        )
+        self.save_data_btn.clicked.connect(lambda: actions.save_data(tab_id))
+        self.save_image_btn.clicked.connect(lambda: actions.save_image(tab_id))
+        self.save_result_btn.clicked.connect(lambda: actions.save_result(tab_id))
         self.post_save_image_btn.clicked.connect(
-            lambda: host._on_post_save_image_clicked(tab_id)
+            lambda: actions.save_post_image(tab_id)
         )
 
         self._validity_cb = validity_cb

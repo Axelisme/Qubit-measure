@@ -50,7 +50,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from .exp_tab_widget import ExpTabWidget
+from .exp_tab_widget import ExpTabWidget, TabActions
 from .feedback_dock import FeedbackDockController
 from .main_dialog_registry import MainDialogRegistry
 
@@ -66,6 +66,43 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
+class _MainWindowTabActions:
+    """Adapt the tab action port to MainWindow's existing private handlers."""
+
+    def __init__(self, window: MainWindow) -> None:
+        self._window = window
+
+    def refresh_interaction(self, tab_id: str) -> None:
+        self._window.refresh_tab_interaction(tab_id)
+
+    def run_or_stop(self, tab_id: str) -> None:
+        self._window._on_run_stop_clicked(tab_id)
+
+    def load_data(self, tab_id: str) -> None:
+        self._window._on_load_data_clicked(tab_id)
+
+    def analyze(self, tab_id: str) -> None:
+        self._window._on_analyze_clicked(tab_id)
+
+    def post_analyze(self, tab_id: str) -> None:
+        self._window._on_post_analyze_clicked(tab_id)
+
+    def apply_writeback(self, tab_id: str) -> None:
+        self._window._on_writeback_inline_apply(tab_id)
+
+    def save_data(self, tab_id: str) -> None:
+        self._window._on_save_data_clicked(tab_id)
+
+    def save_image(self, tab_id: str) -> None:
+        self._window._on_save_image_clicked(tab_id)
+
+    def save_result(self, tab_id: str) -> None:
+        self._window._on_save_result_clicked(tab_id)
+
+    def save_post_image(self, tab_id: str) -> None:
+        self._window._on_post_save_image_clicked(tab_id)
+
+
 class MainWindow(QMainWindow):
     """Top-level window; implements ViewProtocol for Controller callbacks."""
 
@@ -73,6 +110,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._ctrl = controller
         self._tab_widgets: dict[str, ExpTabWidget] = {}
+        self._tab_actions: TabActions = _MainWindowTabActions(self)
         self._dialog_registry = MainDialogRegistry(self._ctrl, parent=self)
         self._dialog_refs = DialogRefStore()
         self._bus_subs = EventSubscriptions()
@@ -262,7 +300,7 @@ class MainWindow(QMainWindow):
         # CfgFormWidget.attach.
         snapshot = self._ctrl.get_tab_snapshot(tab_id)
         self._new_tab_btn.setEnabled(self._ctrl.get_running_tab_id() is None)
-        tab_w.attach(snapshot, self)
+        tab_w.attach(snapshot, self._tab_actions)
 
     def _on_bus_tab_closed(self, payload: TabClosedPayload) -> None:
         tab_id = payload.tab_id
