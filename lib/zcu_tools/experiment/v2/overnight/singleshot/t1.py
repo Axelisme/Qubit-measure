@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 from typing import Generic, TypeVar, cast
 
@@ -15,14 +14,17 @@ from typing_extensions import (
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState
+from zcu_tools.experiment.v2.runner import Schedule
+from zcu_tools.experiment.v2.runner.multi_executor import (
+    MeasurementContext,
+    context_signal_buffer,
+)
 from zcu_tools.experiment.v2.singleshot.util import correct_populations
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, LivePlot2D
 from zcu_tools.program.v2 import (
     Branch,
     Delay,
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -257,21 +259,39 @@ class T1Task(
 
         # initial values, may be rounded later
         self.lengths = sweep2array(self.cfg.sweep.length)
+        self.acquire_kwargs = {
+            "g_center": g_center,
+            "e_center": e_center,
+            "ge_radius": radius,
+        }
 
-        def measure_t1_fn(
-            ctx: TaskState[NDArray[np.float64], T_RootResult, T1Cfg],
-            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
+    def init(self, dynamic_pbar: bool = False) -> None:
+        pass
+
+    def run(
+        self,
+        state: MeasurementContext[T1Result, T_RootResult, OvernightCfg],
+    ) -> None:
+        self.lengths = sweep2array(
+            self.cfg.sweep.length, "time", {"soccfg": state.env["soccfg"]}
+        )
+        pop_ctx = state.child_with_cfg(
+            "populations", self.cfg, child_type=NDArray[np.float64]
+        )
+        populations_buffer = context_signal_buffer(
+            pop_ctx, (2, len(self.lengths), 2), dtype=np.float64
+        )
+        with Schedule(
+            self.cfg, populations_buffer, env_dict=state.env, stop=state.stop
+        ) as sched:
+            cfg = sched.cfg
             modules = cfg.modules
-
             length_sweep = cfg.sweep.length
             len_param = sweep2param("length", length_sweep)
 
-            return ModularProgramV2(
-                ctx.env["soccfg"],
-                cfg,
-                modules=[
+            _ = (
+                sched.prog_builder(state.env["soc"], state.env["soccfg"])
+                .add(
                     Reset("reset", modules.reset),
                     Branch(
                         "ge",
@@ -282,37 +302,14 @@ class T1Task(
                         ],
                     ),
                     Readout("readout", modules.readout),
-                ],
-                sweep=[("ge", 2), ("length", length_sweep)],
-            ).acquire(
-                ctx.env["soc"],
-                progress=False,
-                round_hook=update_hook,
-                g_center=g_center,
-                e_center=e_center,
-                ge_radius=radius,
+                )
+                .declare_sweep("ge", 2)
+                .declare_sweep("length", length_sweep)
+                .build_and_acquire(
+                    raw2signal_fn=lambda raw: raw[0][0],
+                    **self.acquire_kwargs,
+                )
             )
-
-        self.task = Task[T_RootResult, list[NDArray[np.float64]], T1Cfg, np.float64](
-            measure_fn=measure_t1_fn,
-            raw2signal_fn=lambda raw: raw[0][0],
-            result_shape=(2, len(self.lengths), 2),
-            dtype=np.float64,
-            pbar_n=self.cfg.rounds,
-        )
-
-    def init(self, dynamic_pbar: bool = False) -> None:
-        self.task.init(dynamic_pbar=dynamic_pbar)
-
-    def run(self, state: TaskState[T1Result, T_RootResult, OvernightCfg]) -> None:
-        self.lengths = sweep2array(
-            self.cfg.sweep.length, "time", {"soccfg": state.env["soccfg"]}
-        )
-        self.task.run(
-            state.child_with_cfg(
-                "populations", self.cfg, child_type=NDArray[np.float64]
-            )
-        )
 
         with MinIntervalFunc.force_execute():
             state.set_value(
@@ -325,11 +322,11 @@ class T1Task(
     def get_default_result(self) -> T1Result:
         return T1Result(
             lengths=self.lengths,
-            populations=self.task.get_default_result(),
+            populations=np.full((2, len(self.lengths), 2), np.nan, dtype=np.float64),
         )
 
     def cleanup(self) -> None:
-        self.task.cleanup()
+        pass
 
 
 class T1WithToneModuleCfg(ConfigBase):
@@ -359,22 +356,40 @@ class T1WithToneTask(
 
         # initial values, may be rounded later
         self.lengths = sweep2array(self.cfg.sweep.length)
+        self.acquire_kwargs = {
+            "g_center": g_center,
+            "e_center": e_center,
+            "ge_radius": radius,
+        }
 
-        def measure_t1_fn(
-            ctx: TaskState[NDArray[np.float64], T_RootResult, T1WithToneCfg],
-            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
+    def init(self, dynamic_pbar: bool = False) -> None:
+        pass
+
+    def run(
+        self,
+        state: MeasurementContext[T1Result, T_RootResult, OvernightCfg],
+    ) -> None:
+        self.lengths = sweep2array(
+            self.cfg.sweep.length, "time", {"soccfg": state.env["soccfg"]}
+        )
+        pop_ctx = state.child_with_cfg(
+            "populations", self.cfg, child_type=NDArray[np.float64]
+        )
+        populations_buffer = context_signal_buffer(
+            pop_ctx, (2, len(self.lengths), 2), dtype=np.float64
+        )
+        with Schedule(
+            self.cfg, populations_buffer, env_dict=state.env, stop=state.stop
+        ) as sched:
+            cfg = sched.cfg
             modules = cfg.modules
-
             length_sweep = cfg.sweep.length
             length_param = sweep2param("length", length_sweep)
             modules.probe_pulse.set_param("length", length_param)
 
-            return ModularProgramV2(
-                ctx.env["soccfg"],
-                cfg,
-                modules=[
+            _ = (
+                sched.prog_builder(state.env["soc"], state.env["soccfg"])
+                .add(
                     Reset("reset", modules.reset),
                     Branch(
                         "ge",
@@ -385,39 +400,14 @@ class T1WithToneTask(
                         ],
                     ),
                     Readout("readout", modules.readout),
-                ],
-                sweep=[("ge", 2), ("length", length_sweep)],
-            ).acquire(
-                ctx.env["soc"],
-                progress=False,
-                round_hook=update_hook,
-                g_center=g_center,
-                e_center=e_center,
-                ge_radius=radius,
+                )
+                .declare_sweep("ge", 2)
+                .declare_sweep("length", length_sweep)
+                .build_and_acquire(
+                    raw2signal_fn=lambda raw: raw[0][0],
+                    **self.acquire_kwargs,
+                )
             )
-
-        self.task = Task[
-            T_RootResult, list[NDArray[np.float64]], T1WithToneCfg, np.float64
-        ](
-            measure_fn=measure_t1_fn,
-            raw2signal_fn=lambda raw: raw[0][0],
-            result_shape=(2, len(self.lengths), 2),
-            dtype=np.float64,
-            pbar_n=self.cfg.rounds,
-        )
-
-    def init(self, dynamic_pbar: bool = False) -> None:
-        self.task.init(dynamic_pbar=dynamic_pbar)
-
-    def run(self, state: TaskState[T1Result, T_RootResult, OvernightCfg]) -> None:
-        self.lengths = sweep2array(
-            self.cfg.sweep.length, "time", {"soccfg": state.env["soccfg"]}
-        )
-        self.task.run(
-            state.child_with_cfg(
-                "populations", self.cfg, child_type=NDArray[np.float64]
-            )
-        )
 
         with MinIntervalFunc.force_execute():
             state.set_value(
@@ -430,8 +420,8 @@ class T1WithToneTask(
     def get_default_result(self) -> T1Result:
         return T1Result(
             lengths=self.lengths,
-            populations=self.task.get_default_result(),
+            populations=np.full((2, len(self.lengths), 2), np.nan, dtype=np.float64),
         )
 
     def cleanup(self) -> None:
-        self.task.cleanup()
+        pass

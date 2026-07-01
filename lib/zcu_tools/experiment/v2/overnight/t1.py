@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Generic, TypeVar, cast
 
@@ -14,12 +13,15 @@ from typing_extensions import (
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState
+from zcu_tools.experiment.v2.runner import Schedule
+from zcu_tools.experiment.v2.runner.multi_executor import (
+    MeasurementContext,
+    context_signal_buffer,
+)
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.program.v2 import (
     Delay,
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -202,52 +204,43 @@ class T1Task(
 
         # initial values, may be rounded later
         self.lengths = sweep2array(self.cfg.sweep.length)
-
-        def measure_t1_fn(
-            ctx: TaskState[NDArray[np.complex128], T_RootResult, T1Cfg],
-            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            length_sweep = cfg.sweep.length
-            length_param = sweep2param("length", length_sweep)
-
-            return ModularProgramV2(
-                ctx.env["soccfg"],
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    Pulse("pi_pulse", modules.pi_pulse),
-                    Delay("t1_delay", delay=length_param),
-                    Readout("readout", modules.readout),
-                ],
-                sweep=[("length", length_sweep)],
-            ).acquire(
-                ctx.env["soc"],
-                progress=False,
-                round_hook=update_hook,
-                **(acquire_kwargs or {}),
-            )
-
-        self.task = Task[T_RootResult, list[NDArray[np.float64]], T1Cfg](
-            measure_fn=measure_t1_fn,
-            result_shape=(len(self.lengths),),
-            pbar_n=self.cfg.rounds,
-        )
+        self.acquire_kwargs = acquire_kwargs or {}
 
     def init(self, dynamic_pbar=False) -> None:
-        self.task.init(dynamic_pbar=dynamic_pbar)
+        pass
 
-    def run(self, state: TaskState[T1Result, T_RootResult, OvernightCfg]) -> None:
+    def run(
+        self,
+        state: MeasurementContext[T1Result, T_RootResult, OvernightCfg],
+    ) -> None:
         self.lengths = sweep2array(
             self.lengths, "time", {"soccfg": state.env["soccfg"]}
         )
         self.last_cfg = self.cfg
 
-        self.task.run(
-            state.child_with_cfg("signals", self.cfg, child_type=NDArray[np.complex128])
+        signals_ctx = state.child_with_cfg(
+            "signals", self.cfg, child_type=NDArray[np.complex128]
         )
+        signals_buffer = context_signal_buffer(signals_ctx, len(self.lengths))
+        with Schedule(
+            self.cfg, signals_buffer, env_dict=state.env, stop=state.stop
+        ) as sched:
+            cfg = sched.cfg
+            modules = cfg.modules
+            length_sweep = cfg.sweep.length
+            length_param = sweep2param("length", length_sweep)
+
+            _ = (
+                sched.prog_builder(state.env["soc"], state.env["soccfg"])
+                .add(
+                    Reset("reset", modules.reset),
+                    Pulse("pi_pulse", modules.pi_pulse),
+                    Delay("t1_delay", delay=length_param),
+                    Readout("readout", modules.readout),
+                )
+                .declare_sweep("length", length_sweep)
+                .build_and_acquire(**self.acquire_kwargs)
+            )
 
         with MinIntervalFunc.force_execute():
             state.set_value(
@@ -260,11 +253,11 @@ class T1Task(
     def get_default_result(self) -> T1Result:
         return T1Result(
             lengths=self.lengths,
-            signals=self.task.get_default_result(),
+            signals=np.full((len(self.lengths),), np.nan, dtype=np.complex128),
         )
 
     def cleanup(self) -> None:
-        self.task.cleanup()
+        pass
 
 
 class T1WithToneModuleCfg(ConfigBase):
@@ -294,45 +287,15 @@ class T1WithToneTask(
 
         # initial values, may be rounded later
         self.lengths = sweep2array(self.cfg.sweep.length)
-
-        def measure_t1_fn(
-            ctx: TaskState[NDArray[np.complex128], T_RootResult, T1WithToneCfg],
-            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            length_sweep = cfg.sweep.length
-            length_param = sweep2param("length", length_sweep)
-            modules.probe_pulse.set_param("length", length_param)
-
-            return ModularProgramV2(
-                ctx.env["soccfg"],
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    Pulse("pi_pulse", modules.pi_pulse),
-                    Pulse("probe_pulse", modules.probe_pulse),
-                    Readout("readout", modules.readout),
-                ],
-                sweep=[("length", length_sweep)],
-            ).acquire(
-                ctx.env["soc"],
-                progress=False,
-                round_hook=update_hook,
-                **(acquire_kwargs or {}),
-            )
-
-        self.task = Task[T_RootResult, list[NDArray[np.float64]], T1WithToneCfg](
-            measure_fn=measure_t1_fn,
-            result_shape=(len(self.lengths),),
-            pbar_n=self.cfg.rounds,
-        )
+        self.acquire_kwargs = acquire_kwargs or {}
 
     def init(self, dynamic_pbar=False) -> None:
-        self.task.init(dynamic_pbar=dynamic_pbar)
+        pass
 
-    def run(self, state) -> None:
+    def run(
+        self,
+        state: MeasurementContext[T1Result, T_RootResult, OvernightCfg],
+    ) -> None:
         self.lengths = sweep2array(
             self.lengths,
             "time",
@@ -343,9 +306,30 @@ class T1WithToneTask(
         )
         self.last_cfg = self.cfg
 
-        self.task.run(
-            state.child_with_cfg("signals", self.cfg, child_type=NDArray[np.complex128])
+        signals_ctx = state.child_with_cfg(
+            "signals", self.cfg, child_type=NDArray[np.complex128]
         )
+        signals_buffer = context_signal_buffer(signals_ctx, len(self.lengths))
+        with Schedule(
+            self.cfg, signals_buffer, env_dict=state.env, stop=state.stop
+        ) as sched:
+            cfg = sched.cfg
+            modules = cfg.modules
+            length_sweep = cfg.sweep.length
+            length_param = sweep2param("length", length_sweep)
+            modules.probe_pulse.set_param("length", length_param)
+
+            _ = (
+                sched.prog_builder(state.env["soc"], state.env["soccfg"])
+                .add(
+                    Reset("reset", modules.reset),
+                    Pulse("pi_pulse", modules.pi_pulse),
+                    Pulse("probe_pulse", modules.probe_pulse),
+                    Readout("readout", modules.readout),
+                )
+                .declare_sweep("length", length_sweep)
+                .build_and_acquire(**self.acquire_kwargs)
+            )
 
         state.set_value(
             T1Result(
@@ -357,8 +341,8 @@ class T1WithToneTask(
     def get_default_result(self) -> T1Result:
         return T1Result(
             lengths=self.lengths,
-            signals=self.task.get_default_result(),
+            signals=np.full((len(self.lengths),), np.nan, dtype=np.complex128),
         )
 
     def cleanup(self) -> None:
-        self.task.cleanup()
+        pass

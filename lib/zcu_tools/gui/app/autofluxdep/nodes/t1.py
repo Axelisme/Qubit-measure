@@ -172,7 +172,7 @@ def _resolve_relax_delay(smoothed_t1: float) -> float:
 class T1Node(Node):
     """One flux point's t1: set flux → real acquire → fit_decay → fill row → Patch.
 
-    Mirrors the lower-layer ``T1Task`` ``measure_t1_fn`` + ``run``: a
+    Mirrors the lower-layer T1 Schedule acquire + ``run``: a
     ``ModularProgramV2`` (Reset → pi_pulse → variable Delay → Readout) sweeps the
     relax delay (its axis spans ``5 × smoothed_t1``, from ``make_cfg``), and
     ``fit_decay`` recovers T1.

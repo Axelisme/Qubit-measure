@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-07-02 — Schedule cfg-owned reps/rounds
 
-這份筆記整理 `experiment/v2/` 的整體設計，說明 Experiment 層與 Task 層的分工、典型實驗的撰寫範本，以及各子模組的角色。`runner/` 的細節另見 `runner/README.md`。
+這份筆記整理 `experiment/v2/` 的整體設計，說明 Experiment 層與 runtime 層的分工、典型實驗的撰寫範本，以及各子模組的角色。`runner/` 的細節另見 `runner/README.md`。
 
 ---
 
@@ -14,13 +14,13 @@
   - `AbsExperiment[T_Result, T_Config]`：最小基底，只提供 `last_result` 快取（不保留 `last_cfg`），`run` / `analyze` 由各子類別自行實作。
   - `PersistableExperiment[T_Result, T_Config]`：opt-in 持久化基底，宣告 class-level `AXES_SPEC`（`AxesSpec`）後即繼承共用的 `save()` / `load()`（見「持久化」一節）。
   - `ExperimentProtocol`：結構性合約（runtime_checkable），描述所有實驗共有的 `last_result` / `run` / `analyze` / `save` / `load` 表面，刻意開放讓實驗自行擴充方法。
-- `Task` 層：`AbsTask` / `Task` / `BatchTask` / `RetryBatchTask` / `Scan` / `RepeatOverTime`（`runner/`）
-  - executor 執行樹：驅動硬體、更新 executor liveplot、串接外層 sweep/repeat/retry
-  - Python-like runtime：以 `SignalBuffer` / `Schedule` / `ProgramBuilder` 表達一般 Experiment acquire；Task tree 仍暫留給尚未遷移的 executor-owned 流程。
+- runtime 層（`runner/`）
+  - 一般 Experiment：`SignalBuffer` / `Schedule` / `ProgramBuilder` 表達 Python-like acquire、host loop、batch/retry 與 stop。
+  - executor workflow：`MultiMeasurementExecutor` / `MeasurementContext` 提供 combined liveplot、outer loop context、retry helper 與 stop 共享。
 
-Experiment 是使用者（notebook）呼叫的入口；一般 `*Exp.run()` 以 `with Schedule(cfg, signals_buffer) as sched` 做單次 run orchestration，把 scan / buffer targeting 留在 Python control flow 中。`Schedule` 負責 cfg deepcopy、shared env 與 `StopSignal`；`SignalBuffer` 負責 update throttling 與 live update callback；`ProgramBuilder.build_and_acquire(...)` 直接建立 program、執行 acquire 並更新 buffer，不再把 leaf acquire 包成 `Task`。
+Experiment 是使用者（notebook）呼叫的入口；一般 `*Exp.run()` 以 `with Schedule(cfg, signals_buffer) as sched` 做單次 run orchestration，把 scan / buffer targeting 留在 Python control flow 中。`Schedule` 負責 cfg deepcopy、shared env 與 `StopSignal`；`SignalBuffer` 負責 update throttling 與 live update callback；`ProgramBuilder.build_and_acquire(...)` 直接建立 program、執行 acquire 並更新 buffer。
 
-`SignalBuffer` + `Schedule` + `ProgramBuilder` 支援一般 program acquire、decimated trace、program-side sweep、host-side scan、repeat、replayable batch、per-child retry、caller-owned program reuse、SNR early stop 與 custom raw conversion。需要取得 raw shots 的 singleshot `GE` / `Check` path 使用同一個 `Schedule` scope 做 cfg/stop/buffer orchestration，但 leaf 端改由 `ProgramBuilder.build()` 取得 program 後直接呼叫 `program.acquire(...)`，再把 `program.get_raw()` 轉入 `SignalBuffer`。`autofluxdep` / `overnight` 這類 executor-owned 多任務流程是下一段遷移目標，完成後移除 Task tree。
+`SignalBuffer` + `Schedule` + `ProgramBuilder` 支援一般 program acquire、decimated trace、program-side sweep、host-side scan、repeat、replayable batch、per-child retry、caller-owned program reuse、SNR early stop 與 custom raw conversion。需要取得 raw shots 的 singleshot `GE` / `Check` path 使用同一個 `Schedule` scope 做 cfg/stop/buffer orchestration，但 leaf 端改由 `ProgramBuilder.build()` 取得 program 後直接呼叫 `program.acquire(...)`，再把 `program.get_raw()` 轉入 `SignalBuffer`。`autofluxdep` / `overnight` 這類 executor-owned 多任務流程的外層 driver 使用直接 Python loop 與 `MeasurementContext`，leaf acquire 仍使用 `Schedule`。
 
 ---
 
@@ -30,7 +30,7 @@ Experiment 是使用者（notebook）呼叫的入口；一般 `*Exp.run()` 以 `
 experiment/v2/
 ├── __init__.py              # 暴露 onetone / twotone / singleshot / ... 子模組與 LookbackExp
 ├── lookback.py              # LookbackExp（decimated readout trace，用來校準 trig_offset）
-├── runner/                  # 任務執行框架（見 runner/README.md）
+├── runner/                  # experiment runtime（見 runner/README.md）
 ├── utils/                   # 共用工具（merge_result_list, sweep2array, round_zcu_*, SNR）+ tracker/（KMeansTracker / MomentTracker）
 ├── onetone/                 # Readout 光譜：freq, power_dep, flux_dep, SA
 ├── twotone/                 # Qubit 光譜 + 時域（rabi, time_domain, reset, ro_optimize, rb, ...）
@@ -38,8 +38,8 @@ experiment/v2/
 ├── fastflux/                # 快速 flux 掃描（t1, mist, twotone, distortion）
 ├── mist/                    # MIST（measurement-induced state transition）flux/power dep
 ├── jpa/                     # JPA 校準（flux/freq/power/自動最佳化）
-├── overnight/               # 隔夜穩定度量測（OvernightExecutor + singleshot/t1 task）
-└── autofluxdep/             # FluxDepExecutor：多 task 自動 flux 掃描（搭配 FluxoniumPredictor）
+├── overnight/               # 隔夜穩定度量測（OvernightExecutor + measurement leaves）
+└── autofluxdep/             # FluxDepExecutor：多 measurement 自動 flux 掃描（搭配 FluxoniumPredictor）
 ```
 
 ---
@@ -130,11 +130,11 @@ def run(self, soc, soccfg, cfg: FreqCfg) -> FreqResult:
 4. **LivePlot**：`LivePlot1D` / `LivePlot2D` 是 context manager，常規寫法是在 `SignalBuffer(on_update=...)` 裡每次以當前完整 buffer ndarray 重畫；`SignalBuffer.set(...)` / `SignalSlot.set(...)` 寫入後自動觸發 update，`trigger_update()` 可手動刷新。
 5. **回傳 Result**：`run()` 直接 `return XxxResult(...)`，由 `@record_result` decorator 寫入 `last_result`（給 `analyze` / `save` 使用），Result 內部攜帶 `cfg_snapshot`。
 
-目前所有非 executor Experiment 均走新 runtime 或直接 `SignalBuffer` path，包含 `lookback.py`、`fake.py`、`onetone/*`、`twotone/*`、`singleshot/*`、`jpa/*`、`fastflux/*` 與 `mist/*`。`autofluxdep/*`、`overnight/*` 與 `runner/*` 自身仍保留 Task tree。
+目前所有 Experiment 均走新 runtime 或直接 `SignalBuffer` path，包含 `lookback.py`、`fake.py`、`onetone/*`、`twotone/*`、`singleshot/*`、`jpa/*`、`fastflux/*`、`mist/*`、`autofluxdep/*` 與 `overnight/*`。
 
 ### sweep 參數 mutation 的歸屬：搬進 runner-owned cfg
 
-把 sweep 參數綁到 pulse（`modules.xxx.set_param("freq"/"gain"/"length", ...)`）一律在 runner-owned cfg 上做：Schedule 寫法改 `sched.cfg` 或 `step.cfg`；executor Task leaf 才在 `measure_fn` 內改 `ctx.cfg`。不要在 `run()` 頂層直接改 caller 傳入的 `cfg`。`sweep2array` 只讀 `cfg.sweep.*`（sweep 定義）與通道，不依賴 pulse param，所以 `set_param` 不需要提前到外層。
+把 sweep 參數綁到 pulse（`modules.xxx.set_param("freq"/"gain"/"length", ...)`）一律在 runner-owned cfg 上做：Schedule 寫法改 `sched.cfg` 或 `step.cfg`；executor leaf 先從 `MeasurementContext.cfg` 建立 `Schedule`，再改 `sched.cfg` 或 `step.cfg`。不要在 `run()` 頂層直接改 caller 傳入的 `cfg`。`sweep2array` 只讀 `cfg.sweep.*`（sweep 定義）與通道，不依賴 pulse param，所以 `set_param` 不需要提前到外層。
 
 只有兩類「副本外操作」是有意保留的：
 
@@ -171,8 +171,8 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):          # 主要 Cfg = program cfg + 
 ## Signal/Raw 處理慣例
 
 - **`raw` 格式**：QICK 回傳的 raw 一般是 `list[ndarray]`，第一個元素 shape 為 `(nro, ..., 2)`（IQ 兩個實數）。
-- **`default_raw2signal_fn`**：新 Schedule 路徑使用 `runner/schedule.py` 的預設轉換；舊 Task 路徑使用 `runner/task.py` 的同名預設。兩者都是 `raw[0][0].dot([1, 1j])`，取第 0 個 RO channel、該 channel 的第 0 次 readout，再把 IQ 轉成 complex。
-- **客製化 `raw2signal_fn`**：integrated acquire 用 `build_and_acquire(raw2signal_fn=...)` / `run_program(raw2signal_fn=...)`；decimated trace 用 `build_and_acquire_decimated(raw2signal_fn=...)` / `run_program_decimated(raw2signal_fn=...)`。`ProgramBuilder.set_raw2signal_fn(...)` 可設定同一個 builder 的預設轉換；尚未遷移的 executor Task leaf 才在 `Task(raw2signal_fn=...)` 傳入。
+- **`default_raw2signal_fn`**：Schedule 路徑使用 `runner/schedule.py` 的預設轉換：`raw[0][0].dot([1, 1j])`，取第 0 個 RO channel、該 channel 的第 0 次 readout，再把 IQ 轉成 complex。
+- **客製化 `raw2signal_fn`**：integrated acquire 用 `build_and_acquire(raw2signal_fn=...)` / `run_program(raw2signal_fn=...)`；decimated trace 用 `build_and_acquire_decimated(raw2signal_fn=...)` / `run_program_decimated(raw2signal_fn=...)`。`ProgramBuilder.set_raw2signal_fn(...)` 可設定同一個 builder 的預設轉換。
 - **`signal2real` 函式**：每個 Exp 檔案會定義 local 的 `xxx_signal2real`（通常 `np.abs`），給 liveplot 用；analyze 階段可能換成 phase / real。
 - **scalar/array 邊界**：座標轉換工具（例如 value↔flux）可接受 scalar 或 ndarray；若後續 plotting/analysis 需要 indexing、min/max 或與另一個 sweep array 對齊，呼叫端在邊界用 `np.asarray(..., dtype=...)` 正規化成 ndarray，而不是用型別宣告假設回傳一定是 array。
 - **peak-picking smoothing**：ro-optimize 與 reset 這類以 SNR/map argmax 找最佳點的分析預設使用 `smooth_method="wavelet"`；`smooth_method="gaussian"` 保留為舊 Gaussian 對照。`smooth` 是通用強度：Gaussian 時是 sigma，wavelet 時是 threshold scale。
@@ -183,14 +183,14 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):          # 主要 Cfg = program cfg + 
 
 當要在外層再疊一層「sweep 多個子實驗」的場景（例如掃 flux × {freq, t1, t2echo, ...}），會用 Executor。
 
-兩個 Executor 共用同一個基底 `MultiMeasurementExecutor`（`runner/multi_executor.py`，見 `runner/README.md`），由它提供版面排版（`make_ax_layout` / `make_plotter`）、`record_animation` 的 FFMpeg facet 與 `_run_with_plotting`（包 `run_task` + 動畫錄製）；子類別只各自實作 `run()`（不同的外層 driver 與 cfg/env 前置）。
+兩個 Executor 共用同一個基底 `MultiMeasurementExecutor`（`runner/multi_executor.py`，見 `runner/README.md`），由它提供版面排版（`make_ax_layout` / `make_plotter`）、`record_animation` 的 FFMpeg facet、root `MeasurementContext` 建立、plot update 節流與 per-measurement retry helper；子類別只各自實作 `run()`（不同的外層 driver 與 cfg/env 前置）。
 
-- `FluxDepExecutor`（`autofluxdep/executor.py`）：註冊多個 `MeasurementTask`，組一棵 `RetryBatchTask(tasks).scan("flux", ...)`，並與 `FluxoniumPredictor` 協作（`before_each` 內依模型預測下一個 flux 點並設 flux device）。
-- `OvernightExecutor`（`overnight/executor.py`）：類似概念，但改用 `RetryBatchTask(tasks).repeat("Iter", ...)` 在時間軸上重複。
+- `FluxDepExecutor`（`autofluxdep/executor.py`）：註冊多個 `MeasurementTask`，用直接 Python loop 掃 flux，並與 `FluxoniumPredictor` 協作，於每個 flux 點依模型預測子實驗 cfg、設定 flux device，再逐一執行 measurement。
+- `OvernightExecutor`（`overnight/executor.py`）：用直接 Python loop 在時間軸上重複 measurement batch，並在 interval 等待期間檢查 stop 與刷新 liveplot。
 
-兩者用的 `RetryBatchTask` 會對每個子 task 套上重試（`retry_time` 預算）；`record_animation(mp4_path)` 需要 `ffmpeg`。
+兩者的 `retry_time` 是 per-measurement、per-flux/time-step 預算；`record_animation(mp4_path)` 需要 `ffmpeg`。
 
-executor task 會改成直接使用 `Schedule.batch(...)` / `Schedule.scan(...)` / `Schedule.repeat(...)` 的 child callable，不再新增 Task tree leaf。既有 `MeasurementTask` ABC 只保留到 executor 遷移完成。
+executor leaf measurement 仍保留 app-local `MeasurementTask` ABC 作為 plotting/acquire contract，但它不是 runner task tree 節點；每個 leaf 的 QICK acquire 用 `Schedule` 與 `ProgramBuilder` 直接執行。
 
 ---
 
@@ -207,7 +207,7 @@ executor task 會改成直接使用 `Schedule.batch(...)` / `Schedule.scan(...)`
 
 - **`sweep2array(sweep_cfg, name, {"soccfg", "gen_ch", "ro_ch"})`** — 展開 `SweepCfg` 為 numpy array，已套 ZCU 量化（`round_zcu_freq/time/gain/phase`）。Exp 幾乎都靠這個產生 x 軸。
 - **`round_zcu_*`** — 單點版本的量化函式；`round_sweep_dict` 同時處理整個 sweep dict。時間的量化有特殊處理：預先減去 `0.5 * one_cycle` 以匹配 QICK sweep 用 `np.trunc` 的行為。多點 sweep 的 step 若在量化後變成 0，會 fast-fail 並要求放大 span 或減少 expts，避免 GUI/agent 看到低階 `SweepCfg` 一致性錯誤。
-- **`merge_result_list(list_of_results)`** — 把 `list[dict[name, ndarray]]` 遞迴轉成 `dict[name, ndarray]`（外層 list 變成最外層維度）。Executor 取得 `Scan` 結果後呼叫它把 `list` 轉成 stacked array。
+- **`merge_result_list(list_of_results)`** — 把 `list[dict[name, ndarray]]` 遞迴轉成 `dict[name, ndarray]`（外層 list 變成最外層維度）。Executor outer loop 取得 list result 後呼叫它把資料轉成 stacked array 給 liveplot。
 - **`estimate_snr` / `snr_as_signal` / `snr_checker`** — SNR 估計與 early-stop：`estimate_snr` 搭配 `snr_checker` 用於曲線 early-stop；`snr_as_signal(raw, ge_axis, skew_penalty=0.0)` 從 `MomentTracker` 的 g/e IQ moments 計算 pooled-sigma separation SNR。`skew_penalty=0.0` 是純 SNR；提高 `skew_penalty` 會以連續 rational penalty 降低 projected skew 與 g/e shape mismatch 較大的候選點，供 readout optimization 與 JPA optimization 共用。
 
 ---
@@ -224,13 +224,13 @@ executor task 會改成直接使用 `Schedule.batch(...)` / `Schedule.scan(...)`
 - RB 量測採「每個 seed 一個 program」的結構：在 program 內用 sweep index 遍歷 depth，而不是在 host 端對 `(seed, depth)` 重複建立程式。
 - seed 對應的 random gate prefix 長度與 recovery gate id 以 `LoadValue` 從 dmem 查表；random 段用 register-driven `Repeat`，最後 recovery 用獨立 `ComputedPulse`。
 - random 段 `Repeat` 固定使用 `n="rand_len"`；當 random 序列可為空時，交由 `LoadValue(values=[])` 的 no-op 行為吸收，不在 RB 層做 sentinel value 邏輯。
-- rounds 交給 `acquire()` 原生流程處理，`Task` 層只掃 seed。
+- rounds 交給 `acquire()` 原生流程處理，host 層只掃 seed。
 
 ---
 
 ## 外部中斷支援（stop_checkers）
 
-新 Schedule 寫法由 `ProgramBuilder.build_and_acquire()` / `run_program(...)` 自動注入 `sched.is_stop` checker；直接呼叫 `program.acquire(...)` 的 raw-shot path 應傳入 `stop_checkers=[sched.is_stop]` 或 `[step.is_stop]`。尚未遷移的 executor Task leaf 的 `measure_fn` 內呼叫 `acquire()` 時仍應傳入 `stop_checkers=[ctx.is_stop]`，使其能感知 Task runner 的中斷信號。中斷以 round-level 粒度生效（每個 round 結束後檢查），不影響正在執行中的 round。
+新 Schedule 寫法由 `ProgramBuilder.build_and_acquire()` / `run_program(...)` 自動注入 `sched.is_stop` checker；直接呼叫 `program.acquire(...)` 的 raw-shot path 應傳入 `stop_checkers=[sched.is_stop]` 或 `[step.is_stop]`，executor leaf 則把 `MeasurementContext.stop` 傳入 leaf `Schedule`。中斷以 round-level 粒度生效（每個 round 結束後檢查），不影響正在執行中的 round。
 
 - 若使用 SNR early stop，再加入 `snr_checker(signals_buffer[step], threshold, signal2real_fn)` 作為額外 checker；`ProgramBuilder` 會和 Schedule stop checker 合併。
 - `singleshot/ge.py`、`singleshot/check.py` 的 raw-shot acquire path 不經 `ProgramBuilder.run_program(...)`，因此在實驗邊界直接傳入 `stop_checkers=[sched.is_stop]`。
@@ -242,7 +242,7 @@ executor task 會改成直接使用 `Schedule.batch(...)` / `Schedule.scan(...)`
 1. 定義 `XxxModuleCfg` / `XxxSweepCfg`（通常繼承 `ConfigBase`）與 `XxxCfg = ProgramV2Cfg + ExpCfgModel + 自己欄位`。
 2. 繼承 `PersistableExperiment[T_Result, XxxCfg]`（要有持久化）並宣告 class-level `AXES_SPEC`（`AxesSpec`）即繼承 `save` / `load`；只需自行實作 `run`（套 `@record_result`）/ `analyze`（套 `@retrieve_result`）。Result dataclass 須有 `cfg_snapshot` 欄位。
 3. `run()` 模板：開頭 `orig_cfg = deepcopy(cfg)` → `sweep2array` → `with LivePlot` → 宣告 `signals_buffer = SignalBuffer(..., on_update=...)`（預設 complex dtype 省略 `dtype=`）→ `with Schedule(cfg, signals_buffer) as sched` → 用 `_ = (sched.prog_builder(...).declare_sweep(...).build_and_acquire())` 或 host `sched.scan(...)` 量測 → 回傳 `XxxResult(..., cfg_snapshot=orig_cfg)`（`@record_result` 自動寫入 `last_result`，不存 `last_cfg`）。
-4. `ProgramBuilder.build_and_acquire()` / `run_program(...)` 自動注入 Schedule stop checker；若直接呼叫 `program.acquire(...)`，必須明確傳入 `stop_checkers=[sched.is_stop]` 或 `[step.is_stop]`（可加 SNR checker）。尚未遷移的 executor Task leaf 才使用 `measure_fn` / `ctx.is_stop`。
+4. `ProgramBuilder.build_and_acquire()` / `run_program(...)` 自動注入 Schedule stop checker；若直接呼叫 `program.acquire(...)`，必須明確傳入 `stop_checkers=[sched.is_stop]` 或 `[step.is_stop]`（可加 SNR checker）。
 5. 持久化由 `AXES_SPEC` 宣告：每個 `Axis` 帶 `scale`（頻率 `MHZ_TO_HZ`、時間 `US_TO_S`）讓盤上是 SI 單位、記憶體內維持習慣單位，`AXES_SPEC.tag` 取有層次的 on-disk 名字（`"twotone/rabi/len"`），axes 以 inner-first 排列；繼承的 `save` / `load` 自動依 spec 做單位轉換與恒等逆 round-trip，無需自行寫 save/load。
 6. 如果有多個 sweep 軸，先區分 host loop 與 program loop：host loop 用 `sched.scan(...)` / `sched.repeat(...)` / `sched.batch(...)`，program loop 用 `ProgramBuilder.declare_sweep(...)`；batch child 必須是 replayable callable，buffer 寫入由 child 明確指定。host soft sweep 若需要重用每個點的 program，在 `run()` 裡維護 dict：cache miss 時 `builder.build()`，每次量測時 `builder.run_program(program)`。
-7. 如果要在樹的外層疊 flux / time sweep，優先用 Executor 擁有的 `Schedule.scan(...)` / `Schedule.repeat(...)` / `Schedule.batch(...)` 編排；不要再新增 Task tree 依賴。
+7. 如果要在 Experiment 外層疊 flux / time sweep，優先讓 Executor 擁有直接 Python outer loop 與 `MeasurementContext`；leaf acquire 仍用 `Schedule`。

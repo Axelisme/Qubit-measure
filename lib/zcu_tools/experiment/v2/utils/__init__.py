@@ -1,5 +1,5 @@
 from . import tracker
-from .helper import merge_result_list
+from .helper import Result, merge_result_list
 from .round_zcu import (
     round_sweep_dict,
     round_zcu_freq,
@@ -14,6 +14,7 @@ __all__ = [
     # module
     "tracker",
     # helper
+    "Result",
     "merge_result_list",
     # round zcu
     "round_sweep_dict",

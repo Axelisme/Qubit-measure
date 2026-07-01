@@ -12,14 +12,17 @@ from typing_extensions import (
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState
+from zcu_tools.experiment.v2.runner import Schedule
+from zcu_tools.experiment.v2.runner.multi_executor import (
+    MeasurementContext,
+    context_signal_buffer,
+)
 from zcu_tools.experiment.v2.utils import snr_checker, sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.meta_tool import ModuleLibrary
 from zcu_tools.notebook.utils import make_sweep
 from zcu_tools.program.v2 import (
     Delay,
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -99,7 +102,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
         self,
         num_expts: int,
         cfg_maker: Callable[
-            [TaskState[T1Result, T_RootResult, FluxDepCfg], ModuleLibrary],
+            [MeasurementContext[T1Result, T_RootResult, FluxDepCfg], ModuleLibrary],
             T1CfgTemplate | None,
         ],
         earlystop_snr: float | None = None,
@@ -109,51 +112,15 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
         self.earlystop_snr = earlystop_snr
         self.last_cfg = None
 
-        def measure_t1_fn(
-            ctx: TaskState[NDArray[np.complex128], T_RootResult, T1Cfg],
-            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            setup_devices(cfg, progress=False)
-
-            assert update_hook is not None
-
-            length_sweep = cfg.sweep.length
-
-            length_param = sweep2param("length", length_sweep)
-            prog = ModularProgramV2(
-                ctx.env["soccfg"],
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    Pulse("pi_pulse", modules.pi_pulse),
-                    Delay("t1_delay", delay=length_param),
-                    Readout("readout", modules.readout),
-                ],
-                sweep=[("length", length_sweep)],
-            )
-            return prog.acquire(
-                ctx.env["soc"],
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[
-                    ctx.is_stop,
-                    snr_checker(ctx, self.earlystop_snr, t1_signal2real),
-                ],
-            )
-
         self.lengths = np.linspace(0, 1, num_expts)
-        self.task = Task[T_RootResult, list[NDArray[np.float64]], T1Cfg](
-            measure_fn=measure_t1_fn,
-            result_shape=(num_expts,),
-        )
 
     def init(self, dynamic_pbar=False) -> None:
-        self.task.init(dynamic_pbar=dynamic_pbar)
+        pass
 
-    def run(self, state: TaskState[T1Result, T_RootResult, FluxDepCfg]) -> None:
+    def run(
+        self,
+        state: MeasurementContext[T1Result, T_RootResult, FluxDepCfg],
+    ) -> None:
         info: FluxDepInfoDict = state.env["info"]
 
         cfg_temp = self.cfg_maker(state, state.env["ml"])
@@ -175,10 +142,37 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
 
         self.last_cfg = cfg
 
-        self.task.set_pbar_n(cfg.rounds)
-        self.task.run(
-            state.child_with_cfg("raw_signals", cfg, child_type=NDArray[np.complex128])
+        raw_ctx = state.child_with_cfg(
+            "raw_signals", cfg, child_type=NDArray[np.complex128]
         )
+        signals_buffer = context_signal_buffer(raw_ctx, self.num_expts)
+        with Schedule(
+            cfg, signals_buffer, env_dict=state.env, stop=state.stop
+        ) as sched:
+            cfg = sched.cfg
+            modules = cfg.modules
+            setup_devices(cfg, progress=False)
+
+            length_sweep = cfg.sweep.length
+            length_param = sweep2param("length", length_sweep)
+
+            _ = (
+                sched.prog_builder(state.env["soc"], state.env["soccfg"])
+                .add(
+                    Reset("reset", modules.reset),
+                    Pulse("pi_pulse", modules.pi_pulse),
+                    Delay("t1_delay", delay=length_param),
+                    Readout("readout", modules.readout),
+                )
+                .declare_sweep("length", length_sweep)
+                .build_and_acquire(
+                    stop_checkers=[
+                        snr_checker(
+                            signals_buffer.at(), self.earlystop_snr, t1_signal2real
+                        )
+                    ],
+                )
+            )
 
         raw_signals = state.value["raw_signals"]
         assert isinstance(raw_signals, np.ndarray)
@@ -210,7 +204,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
 
     def get_default_result(self) -> T1Result:
         return T1Result(
-            raw_signals=self.task.get_default_result(),
+            raw_signals=np.full((self.num_expts,), np.nan, dtype=np.complex128),
             length=self.lengths.copy(),
             t1=np.array(np.nan),
             t1_err=np.array(np.nan),
@@ -218,7 +212,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
         )
 
     def cleanup(self) -> None:
-        self.task.cleanup()
+        pass
 
     def num_axes(self) -> dict[str, int]:
         return dict(t1=1, t1_curve=1)
@@ -241,7 +235,12 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
             ),
         )
 
-    def update_plotter(self, plotters, ctx: TaskState, signals: T1Result) -> None:
+    def update_plotter(
+        self,
+        plotters,
+        ctx: MeasurementContext[NDArray[np.complex128], T_RootResult, FluxDepCfg],
+        signals: T1Result,
+    ) -> None:
         flux_values = ctx.env["flux_values"]
         info: FluxDepInfoDict = ctx.env["info"]
 

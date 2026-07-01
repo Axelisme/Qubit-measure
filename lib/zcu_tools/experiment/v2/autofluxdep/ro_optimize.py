@@ -14,7 +14,11 @@ from typing_extensions import (
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState
+from zcu_tools.experiment.v2.runner import Schedule
+from zcu_tools.experiment.v2.runner.multi_executor import (
+    MeasurementContext,
+    context_signal_buffer,
+)
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.liveplot import LivePlot2D
@@ -22,7 +26,6 @@ from zcu_tools.meta_tool import ModuleLibrary
 from zcu_tools.notebook.utils import make_sweep
 from zcu_tools.program.v2 import (
     Branch,
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -90,7 +93,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
         freq_expts: int,
         gain_expts: int,
         cfg_maker: Callable[
-            [TaskState[RO_OptResult, T_RootResult, FluxDepCfg], ModuleLibrary],
+            [MeasurementContext[RO_OptResult, T_RootResult, FluxDepCfg], ModuleLibrary],
             RO_OptCfgTemplate | None,
         ],
     ) -> None:
@@ -100,63 +103,16 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
         self.last_cfg = None
         self.skew_penalty = 0.0
 
-        def measure_ro_fn(
-            ctx: TaskState[NDArray[np.float64], T_RootResult, RO_OptCfg],
-            update_hook: Callable | None,
-        ) -> list[MomentTracker]:
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            setup_devices(cfg, progress=False)
-
-            freq_sweep = cfg.sweep.freq
-            gain_sweep = cfg.sweep.gain
-
-            freq_param = sweep2param("freq", freq_sweep)
-            gain_param = sweep2param("gain", gain_sweep)
-            modules.readout.set_param("freq", freq_param)
-            modules.readout.set_param("gain", gain_param)
-
-            assert update_hook is not None
-
-            prog = ModularProgramV2(
-                ctx.env["soccfg"],
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
-                    PulseReadout("readout", modules.readout),
-                ],
-                sweep=[
-                    ("ge", 2),
-                    ("freq", freq_sweep),
-                    ("gain", gain_sweep),
-                ],
-            )
-            tracker = MomentTracker()
-            prog.acquire(
-                ctx.env["soc"],
-                progress=False,
-                round_hook=lambda i, avg_d: update_hook(i, [tracker]),
-                trackers=[tracker],
-            )
-            return [tracker]
-
         self.freqs = np.linspace(0, 1, freq_expts)  # initial array
         self.gains = np.linspace(0, 1, gain_expts)  # initial array
-        self.task = Task[T_RootResult, list[MomentTracker], RO_OptCfg, np.float64](
-            measure_fn=measure_ro_fn,
-            raw2signal_fn=lambda raw: snr_as_signal(
-                raw, ge_axis=0, skew_penalty=self.skew_penalty
-            ),
-            result_shape=(freq_expts, gain_expts),
-            dtype=np.float64,
-        )
 
     def init(self, dynamic_pbar=False) -> None:
-        self.task.init(dynamic_pbar=dynamic_pbar)
+        pass
 
-    def run(self, state: TaskState[RO_OptResult, T_RootResult, FluxDepCfg]) -> None:
+    def run(
+        self,
+        state: MeasurementContext[RO_OptResult, T_RootResult, FluxDepCfg],
+    ) -> None:
         info: FluxDepInfoDict = state.env["info"]
 
         cfg_temp = self.cfg_maker(state, state.env["ml"])
@@ -197,10 +153,44 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
             },
         )
 
-        self.task.set_pbar_n(cfg.rounds)
-        self.task.run(
-            state.child_with_cfg("raw_signals", cfg, child_type=NDArray[np.float64])
+        raw_ctx = state.child_with_cfg(
+            "raw_signals", cfg, child_type=NDArray[np.float64]
         )
+        signals_buffer = context_signal_buffer(
+            raw_ctx, (self.freq_expts, self.gain_expts), dtype=np.float64
+        )
+        with Schedule(
+            cfg, signals_buffer, env_dict=state.env, stop=state.stop
+        ) as sched:
+            cfg = sched.cfg
+            modules = cfg.modules
+            setup_devices(cfg, progress=False)
+
+            freq_sweep = cfg.sweep.freq
+            gain_sweep = cfg.sweep.gain
+
+            modules.readout.set_param("freq", sweep2param("freq", freq_sweep))
+            modules.readout.set_param("gain", sweep2param("gain", gain_sweep))
+
+            tracker = MomentTracker()
+
+            def tracker_signal(_raw) -> NDArray[np.float64]:
+                return snr_as_signal(
+                    [tracker], ge_axis=0, skew_penalty=self.skew_penalty
+                )
+
+            _ = (
+                sched.prog_builder(state.env["soc"], state.env["soccfg"])
+                .add(
+                    Reset("reset", modules.reset),
+                    Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
+                    PulseReadout("readout", modules.readout),
+                )
+                .declare_sweep("ge", 2)
+                .declare_sweep("freq", freq_sweep)
+                .declare_sweep("gain", gain_sweep)
+                .build_and_acquire(raw2signal_fn=tracker_signal, trackers=[tracker])
+            )
 
         raw_signals = state.value["raw_signals"]
         assert isinstance(raw_signals, np.ndarray)
@@ -234,7 +224,9 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
 
     def get_default_result(self) -> RO_OptResult:
         return RO_OptResult(
-            raw_signals=self.task.get_default_result(),
+            raw_signals=np.full(
+                (self.freq_expts, self.gain_expts), np.nan, dtype=np.float64
+            ),
             freqs=self.freqs.copy(),
             gains=self.gains.copy(),
             best_freq=np.array(np.nan),
@@ -242,7 +234,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
         )
 
     def cleanup(self) -> None:
-        self.task.cleanup()
+        pass
 
     def num_axes(self) -> dict[str, int]:
         return dict(snr=1)
@@ -260,7 +252,12 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
             ),
         )
 
-    def update_plotter(self, plotters, ctx: TaskState, signals: RO_OptResult) -> None:
+    def update_plotter(
+        self,
+        plotters,
+        ctx: MeasurementContext[NDArray[np.float64], T_RootResult, FluxDepCfg],
+        signals: RO_OptResult,
+    ) -> None:
         info: FluxDepInfoDict = ctx.env["info"]
         i = info["flux_idx"]
 

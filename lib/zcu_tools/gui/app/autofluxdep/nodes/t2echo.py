@@ -166,7 +166,7 @@ class T2EchoCfgTemplate(ProgramV2Cfg, ExpCfgModel):
 class T2EchoNode(Node):
     """One flux point's t2echo: set flux → real acquire → fit_decay_fringe → Patch.
 
-    Mirrors the lower-layer ``T2EchoTask`` ``measure_t2echo_fn`` + ``run``: a
+    Mirrors the lower-layer T2Echo Schedule acquire + ``run``: a
     Hahn-echo sequence (pi/2 → τ/2 → pi → τ/2 → detuned pi/2) sweeps the total delay
     τ, the second pi/2 carries the activate-detune phase ramp, and
     ``fit_decay_fringe`` recovers T2Echo.

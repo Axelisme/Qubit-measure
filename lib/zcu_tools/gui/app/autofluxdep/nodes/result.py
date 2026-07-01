@@ -7,8 +7,8 @@ for saving. Both come from the same per-point fit, so they cannot disagree.
 
 A Result is **sweep-lived and flux-aware**: the flux axis is always the first
 dimension, pre-allocated nan-filled at Run start (``Builder.make_init_result``)
-and filled in place one flux row at a time by ``Node.produce``. Unlike a runner
-Task it is NOT list-and-merged — the Node knows the workflow sweeps flux and
+and filled in place one flux row at a time by ``Node.produce``. Unlike a generic
+list-and-merge runner result, the Node knows the workflow sweeps flux and
 carries the flux axis directly.
 
 The trailing dimensions and the drawing differ by Node type — which is why each

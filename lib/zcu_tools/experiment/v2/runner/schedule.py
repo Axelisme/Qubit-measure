@@ -424,7 +424,7 @@ class Schedule(Generic[T_Cfg]):
                 if self.is_stop():
                     break
 
-                pbar.set_description(f"Task [{str(key)}]")
+                pbar.set_description(f"Batch [{str(key)}]")
                 completed = False
                 for attempt in range(retry + 1):
                     step: ScheduleStep[T_Cfg, Hashable] = ScheduleStep(

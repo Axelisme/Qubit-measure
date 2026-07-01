@@ -195,7 +195,7 @@ def _default_readout() -> Any | None:
 class RoOptimizeNode(Node):
     """One flux point's ro_optimize: set flux → real acquire → SNR argmax → Patch.
 
-    Mirrors the lower-layer ``RO_OptTask`` ``measure_ro_fn`` + ``run``: a
+    Mirrors the lower-layer RO optimize Schedule acquire + ``run``: a
     ``ModularProgramV2`` (Reset → ge-Branch(pi_pulse) → PulseReadout) sweeps the
     readout freq × gain (interleaved with the ge axis), a ``MomentTracker``
     accumulates per-shot moments, and ``snr_as_signal`` turns them

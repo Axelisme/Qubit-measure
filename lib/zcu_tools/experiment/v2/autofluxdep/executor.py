@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from collections import UserDict
 from collections.abc import Mapping
 from copy import deepcopy
@@ -16,10 +16,13 @@ from pydantic import Field
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, setup_devices
-from zcu_tools.experiment.v2.runner import AbsTask, Result, RetryBatchTask, TaskState
-from zcu_tools.experiment.v2.runner.multi_executor import MultiMeasurementExecutor
-from zcu_tools.experiment.v2.utils import merge_result_list
+from zcu_tools.experiment.v2.runner.multi_executor import (
+    MeasurementContext,
+    MultiMeasurementExecutor,
+)
+from zcu_tools.experiment.v2.utils import Result, merge_result_list
 from zcu_tools.liveplot import AbsLivePlot
+from zcu_tools.progress_bar import make_pbar
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 
 T_PlotDict = TypeVar("T_PlotDict", bound=Mapping[str, AbsLivePlot])
@@ -36,9 +39,21 @@ class FluxDepCfg(ExpCfgModel):
 
 
 class MeasurementTask(
-    AbsTask[T_Result, T_RootResult, FluxDepCfg],
+    ABC,
     Generic[T_Result, T_RootResult, T_PlotDict],
 ):
+    def init(self, dynamic_pbar: bool = False) -> None: ...
+
+    @abstractmethod
+    def run(
+        self, state: MeasurementContext[T_Result, T_RootResult, FluxDepCfg]
+    ) -> None: ...
+
+    def cleanup(self) -> None: ...
+
+    @abstractmethod
+    def get_default_result(self) -> T_Result: ...
+
     @abstractmethod
     def num_axes(self) -> dict[str, int]: ...
 
@@ -47,7 +62,10 @@ class MeasurementTask(
 
     @abstractmethod
     def update_plotter(
-        self, plotters: T_PlotDict, ctx: TaskState, signals: T_Result
+        self,
+        plotters: T_PlotDict,
+        ctx: MeasurementContext[Any, Any, Any],
+        signals: T_Result,
     ) -> None: ...
 
     @abstractmethod
@@ -111,7 +129,13 @@ class FluxDepExecutor(MultiMeasurementExecutor[MeasurementTask, FluxDepCfg]):
             info=FluxDepInfoDict(),
         )
 
-        def update_fn(i: int, ctx: TaskState, flux: float) -> None:
+        def update_flux_context(
+            i: int,
+            ctx: MeasurementContext[
+                dict[str, Result], list[dict[str, Result]], FluxDepCfg
+            ],
+            flux: float,
+        ) -> None:
             info: FluxDepInfoDict = ctx.env["info"]
             predictor: FluxoniumPredictor = ctx.env["predictor"]
 
@@ -128,13 +152,37 @@ class FluxDepExecutor(MultiMeasurementExecutor[MeasurementTask, FluxDepCfg]):
         set_flux_in_dev_cfg(cfg.dev, self.flux_values[0], label="flux_dev")
         setup_devices(cfg, progress=True)
 
-        task = RetryBatchTask(self.measurements, retry_time=retry_time).scan(
-            "flux",
-            self.flux_values.tolist(),
-            before_each=update_fn,
-        )
+        init_result = [
+            self._default_batch_result() for _ in range(len(self.flux_values))
+        ]
 
-        results = self._run_with_plotting(task, cfg, env_dict)
+        def run_loop(
+            root_ctx: MeasurementContext[
+                list[dict[str, Result]], list[dict[str, Result]], FluxDepCfg
+            ],
+        ) -> None:
+            pbar = make_pbar(
+                total=len(self.flux_values), smoothing=0, desc="flux", leave=True
+            )
+            try:
+                for i, flux in enumerate(self.flux_values.tolist()):
+                    if root_ctx.is_stop():
+                        break
+                    flux_ctx = root_ctx.child(i)
+                    update_flux_context(i, flux_ctx, flux)
+
+                    for name, measurement in self.measurements.items():
+                        if root_ctx.is_stop():
+                            break
+                        measurement_ctx = flux_ctx.child(name)
+                        self._run_measurement_with_retries(
+                            measurement, measurement_ctx, retry_time
+                        )
+                    pbar.update()
+            finally:
+                pbar.close()
+
+        results = self._run_with_plotting(init_result, cfg, env_dict, run_loop)
 
         signals_dict = merge_result_list(results)
 

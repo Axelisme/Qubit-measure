@@ -61,7 +61,7 @@ def work(pbar_factory):
 ```
 
 - 通用 ambient 拆成兩個 helper，尊重層次：**`progress_ambient`（session 層**，純 `progress_bar` ContextVar，無 Qt——run 與 device setup 用）＋ **`figure_ambient`（app 層**，routing + `QtLivePlotBackend`，Qt——run 與 analyze 用）。session 層的 device 只能用 `progress_ambient`，不會跨層拉 Qt。
-- **op 專屬**的 `stop_event → schedule_stop_scope(StopSignal(...))` 由 **run policy** 的 work thunk 接——experiment runner 的 cancellation 語義只留在 run policy 一處，不再外洩 bg。Task-tree 過渡期內，`run_task` / `MeasureSession` 會讀同一個 ambient stop scope，避免 GUI cancel 與底層執行路徑分叉。
+- **op 專屬**的 `stop_event → schedule_stop_scope(StopSignal(...))` 由 **run policy** 的 work thunk 接——experiment runner 的 cancellation 語義只留在 run policy 一處，不再外洩 bg。`Schedule` 與 executor `MeasurementContext` 都讀同一個 ambient stop scope，避免 GUI cancel 與底層執行路徑分叉。
 - 不需要 figure / 不接受 stop 的 op（analyze thunk 只用 `figure_ambient`、device thunk 只用 `progress_ambient`、connect 兩者都不用）**靜默不用**對應 helper 即可：每個 work thunk 對內有定義行為的自由，對 bg 統一成無參 thunk。
 
 ### 3. State → 窄 write port

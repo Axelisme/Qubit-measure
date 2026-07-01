@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import TypeVar
+from collections.abc import Mapping, Sequence
+from typing import Any, TypeAlias, TypeVar
 
 import numpy as np
+from numpy.typing import NDArray
 
-from zcu_tools.experiment.v2.runner import Result
+Result: TypeAlias = Sequence["Result"] | Mapping[Any, "Result"] | NDArray[Any]
 
 T_Result = TypeVar("T_Result", bound=Result)
 

@@ -137,7 +137,7 @@ def _default_readout() -> Any | None:
 class T2RamseyNode(Node):
     """One flux point's t2ramsey: set flux → real acquire → fit_decay_fringe → Patch.
 
-    Mirrors the lower-layer ``T2RamseyTask`` ``measure_ramsey_fn`` + ``run``: two
+    Mirrors the lower-layer T2Ramsey Schedule acquire + ``run``: two
     pi/2 pulses bracket a swept delay, the second carries an activate-detune phase
     ramp (``360·detune·length``) so the fringe is resolvable, and
     ``fit_decay_fringe`` recovers T2Ramsey + the measured detune (the activate

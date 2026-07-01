@@ -1,7 +1,7 @@
 """Shared real-acquire helpers for the measurement Nodes (RB-2).
 
 Every measurement Node's ``produce`` follows the same lower-layer recipe
-(``experiment/v2/autofluxdep`` ``measure_fn`` + ``run``): write this flux point's
+(``experiment/v2/autofluxdep`` Schedule acquire + ``run``): write this flux point's
 value into ``cfg.dev`` BY NAME → ``setup_devices`` to push it → build a
 ``ModularProgramV2`` module list with the swept axis → ``.acquire`` with a
 running-average ``round_hook`` + cooperative-stop / SNR-early-stop
@@ -216,7 +216,7 @@ def round_progress(
     node_name: str,
     flux_idx: int,
 ) -> Iterator[Callable[[int], None]]:
-    """Progress bar matching the notebook Task's rounds progress for one flux row."""
+    """Progress bar matching the notebook acquire rounds for one flux row."""
     pbar: BaseProgressBar = make_pbar(
         total=total,
         smoothing=0,

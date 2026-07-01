@@ -11,6 +11,10 @@ from zcu_tools.experiment.v2.runner import (
     StopSignal,
     schedule_stop_scope,
 )
+from zcu_tools.experiment.v2.runner.multi_executor import (
+    MeasurementContext,
+    context_signal_buffer,
+)
 from zcu_tools.program.v2 import Module, ProgramV2Cfg
 
 
@@ -224,6 +228,21 @@ def test_schedule_stop_scope_supplies_default_stop_signal() -> None:
 
     with Schedule(_cfg()) as sched:
         assert not sched.is_stop()
+
+
+def test_context_signal_buffer_syncs_root_data_without_throttling() -> None:
+    root = np.full((1,), np.nan)
+    ctx: MeasurementContext[np.ndarray, np.ndarray, FlowCfg] = MeasurementContext(
+        root_data=root,
+        cfg=_cfg(),
+    )
+    buffer = context_signal_buffer(ctx, (1,), dtype=np.float64)
+
+    buffer.set(np.array([1.0]))
+    buffer.set(np.array([2.0]))
+
+    np.testing.assert_allclose(buffer.array, np.array([2.0]))
+    np.testing.assert_allclose(root, np.array([2.0]))
 
 
 def test_program_builder_build_returns_program_with_isolated_cfg():

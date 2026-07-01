@@ -129,7 +129,7 @@ def _drive_pulse_with_length(base: PulseCfg, length: float) -> dict[str, Any]:
 class LenRabiNode(Node):
     """One flux point's lenrabi: set flux → real acquire → fit_rabi → fill row → Patch.
 
-    Mirrors the lower-layer ``LenRabiTask`` ``measure_fn`` + ``run``: the on-resonance
+    Mirrors the lower-layer LenRabi Schedule acquire + ``run``: the on-resonance
     drive sweeps its pulse length, ``ModularProgramV2`` (Reset → rabi_pulse → Readout)
     acquires per round, and ``fit_rabi`` recovers the pi / pi2 lengths + Rabi freq.
     """

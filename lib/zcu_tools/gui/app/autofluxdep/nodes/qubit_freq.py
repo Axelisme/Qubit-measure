@@ -14,8 +14,8 @@ translates the notebook's ``cfg_maker`` lambda + ``ctx.env`` walrus chain into:
   fills the Result's flux-idx row in place, notifies via the round_hook, and
   returns the raw qubit_freq / fit_detune / fit_kappa Patch.
 
-Mirrors the lower-layer ground truth ``experiment/v2/autofluxdep/qubit_freq.py``
-(``QubitFreqTask.run`` + ``measure_fn``): predict-centred drive freq, detune
+Mirrors the lower-layer ground truth ``experiment/v2/autofluxdep/qubit_freq.py``:
+predict-centred drive freq, detune
 sweep via ``sweep2param``, ``setup_devices`` to push the flux, ``.acquire`` with
 ``round_hook`` + ``stop_checkers`` (cooperative stop + SNR early-stop), and the
 predictor calibration closed loop.

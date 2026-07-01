@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -16,12 +15,15 @@ from typing_extensions import (
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState
+from zcu_tools.experiment.v2.runner import Schedule
+from zcu_tools.experiment.v2.runner.multi_executor import (
+    MeasurementContext,
+    context_signal_buffer,
+)
 from zcu_tools.experiment.v2.singleshot.util import correct_populations
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, LivePlot2D
 from zcu_tools.program.v2 import (
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -326,59 +328,53 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
 
         # initial values, may be rounded later
         self.gains = sweep2array(self.cfg.sweep.gain)
-
-        def measure_mist_fn(
-            ctx: TaskState[NDArray[np.float64], T_RootResult, MistCfg],
-            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            gain_sweep = cfg.sweep.gain
-            gain_param = sweep2param("gain", gain_sweep)
-            modules.probe_pulse.set_param("gain", gain_param)
-
-            return ModularProgramV2(
-                ctx.env["soccfg"],
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", cfg=modules.init_pulse),
-                    Pulse("probe_pulse", cfg=modules.probe_pulse),
-                    Readout("readout", modules.readout),
-                ],
-                sweep=[("gain", gain_sweep)],
-            ).acquire(
-                ctx.env["soc"],
-                progress=False,
-                round_hook=update_hook,
-                g_center=g_center,
-                e_center=e_center,
-                ge_radius=radius,
-            )
-
-        self.task = Task[T_RootResult, list[NDArray[np.float64]], MistCfg, np.float64](
-            measure_fn=measure_mist_fn,
-            raw2signal_fn=lambda raw: raw[0][0],
-            result_shape=(len(self.gains), 2),
-            dtype=np.float64,
-            pbar_n=self.cfg.rounds,
-        )
+        self.acquire_kwargs = {
+            "g_center": g_center,
+            "e_center": e_center,
+            "ge_radius": radius,
+        }
 
     def init(self, dynamic_pbar: bool = False) -> None:
-        self.task.init(dynamic_pbar=dynamic_pbar)
+        pass
 
-    def run(self, state: TaskState[MistResult, T_RootResult, OvernightCfg]) -> None:
+    def run(
+        self,
+        state: MeasurementContext[MistResult, T_RootResult, OvernightCfg],
+    ) -> None:
         self.gains = sweep2array(
             self.gains,
             "gain",
             {"soccfg": state.env["soccfg"], "gen_ch": self.cfg.modules.probe_pulse.ch},
         )
-        self.task.run(
-            state.child_with_cfg(
-                "populations", self.cfg, child_type=NDArray[np.float64]
-            )
+        pop_ctx = state.child_with_cfg(
+            "populations", self.cfg, child_type=NDArray[np.float64]
         )
+        populations_buffer = context_signal_buffer(
+            pop_ctx, (len(self.gains), 2), dtype=np.float64
+        )
+        with Schedule(
+            self.cfg, populations_buffer, env_dict=state.env, stop=state.stop
+        ) as sched:
+            cfg = sched.cfg
+            modules = cfg.modules
+
+            gain_sweep = cfg.sweep.gain
+            modules.probe_pulse.set_param("gain", sweep2param("gain", gain_sweep))
+
+            _ = (
+                sched.prog_builder(state.env["soc"], state.env["soccfg"])
+                .add(
+                    Reset("reset", modules.reset),
+                    Pulse("init_pulse", cfg=modules.init_pulse),
+                    Pulse("probe_pulse", cfg=modules.probe_pulse),
+                    Readout("readout", modules.readout),
+                )
+                .declare_sweep("gain", gain_sweep)
+                .build_and_acquire(
+                    raw2signal_fn=lambda raw: raw[0][0],
+                    **self.acquire_kwargs,
+                )
+            )
 
         with MinIntervalFunc.force_execute():
             state.set_value(
@@ -391,11 +387,11 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
     def get_default_result(self) -> MistResult:
         return MistResult(
             gains=self.gains,
-            populations=self.task.get_default_result(),
+            populations=np.full((len(self.gains), 2), np.nan, dtype=np.float64),
         )
 
     def cleanup(self) -> None:
-        self.task.cleanup()
+        pass
 
     def num_axes(self) -> dict[str, int]:
         return dict(populations_g=1, populations_e=1, populations_o=1, current=1)
@@ -445,7 +441,12 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
             ),
         )
 
-    def update_plotter(self, plotters, ctx: TaskState, results: MistResult) -> None:
+    def update_plotter(
+        self,
+        plotters,
+        ctx: MeasurementContext[NDArray[np.float64], T_RootResult, OvernightCfg],
+        results: MistResult,
+    ) -> None:
         iters = ctx.env["iters"]
         i = ctx.env["repeat_idx"]
 

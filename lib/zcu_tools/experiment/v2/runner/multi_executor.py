@@ -2,26 +2,194 @@ from __future__ import annotations
 
 import shutil
 from collections import OrderedDict, defaultdict
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Hashable, Mapping
+from copy import deepcopy
+from dataclasses import dataclass, field
+from numbers import Number
 from pathlib import Path
-from typing import Any, Generic, Protocol, Self, TypeVar
+from typing import Any, Generic, Protocol, Self, TypeVar, cast, overload
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FFMpegWriter
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+from numpy.typing import DTypeLike, NDArray
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.v2.utils import merge_result_list
+from zcu_tools.experiment.v2.runner.schedule import (
+    SignalBuffer,
+    StopSignal,
+    current_stop_signal,
+)
+from zcu_tools.experiment.v2.utils import Result, merge_result_list
 from zcu_tools.liveplot import AbsLivePlot, MultiLivePlot, make_plot_frame
 from zcu_tools.liveplot.backend.jupyter import grab_frame_with_instant_plot
-
-from .base import AbsTask, run_task
-from .state import Result, TaskState
+from zcu_tools.utils.debug import print_traceback
+from zcu_tools.utils.func_tools import min_interval
 
 T_Cfg = TypeVar("T_Cfg", bound=ExpCfgModel)
+T_ChildCfg = TypeVar("T_ChildCfg", bound=ExpCfgModel)
+T_Result = TypeVar("T_Result", bound=Result)
 T_RootResult = TypeVar("T_RootResult", bound=Result)
+T_ChildResult = TypeVar("T_ChildResult", bound=Result)
+T_MappingResult = TypeVar("T_MappingResult", bound=Mapping[Any, Any])
+
+
+@dataclass
+class MeasurementContext(Generic[T_Result, T_RootResult, T_Cfg]):
+    root_data: T_RootResult
+    cfg: T_Cfg
+    env: dict[str, Any] = field(default_factory=dict)
+    on_update: Callable[[MeasurementContext[Any, T_RootResult, Any]], object] | None = (
+        None
+    )
+    path: tuple[int | Hashable, ...] = field(default_factory=tuple)
+    stop: StopSignal = field(default_factory=StopSignal)
+
+    def is_stop(self) -> bool:
+        return self.stop.is_stop()
+
+    def set_stop(self) -> None:
+        self.stop.set_stop()
+
+    @overload
+    def child(
+        self: MeasurementContext[list[T_ChildResult], T_RootResult, T_Cfg],
+        addr: int,
+        child_type: None = None,
+    ) -> MeasurementContext[T_ChildResult, T_RootResult, T_Cfg]: ...
+
+    @overload
+    def child(
+        self: MeasurementContext[T_MappingResult, T_RootResult, T_Cfg],
+        addr: Hashable,
+        child_type: type[T_ChildResult],
+    ) -> MeasurementContext[T_ChildResult, T_RootResult, T_Cfg]: ...
+
+    @overload
+    def child(
+        self: MeasurementContext[T_MappingResult, T_RootResult, T_Cfg],
+        addr: Hashable,
+        child_type: None = None,
+    ) -> MeasurementContext[Any, T_RootResult, T_Cfg]: ...
+
+    def child(
+        self,
+        addr: int | Hashable,
+        child_type: type[T_ChildResult] | None = None,
+    ) -> MeasurementContext[Any, T_RootResult, T_Cfg]:
+        return MeasurementContext(
+            root_data=self.root_data,
+            cfg=deepcopy(self.cfg),
+            env=self.env,
+            on_update=self.on_update,
+            path=self.path + (addr,),
+            stop=self.stop,
+        )
+
+    @overload
+    def child_with_cfg(
+        self: MeasurementContext[list[T_ChildResult], T_RootResult, T_Cfg],
+        addr: int,
+        new_cfg: T_ChildCfg,
+        child_type: None = None,
+    ) -> MeasurementContext[T_ChildResult, T_RootResult, T_ChildCfg]: ...
+
+    @overload
+    def child_with_cfg(
+        self: MeasurementContext[T_MappingResult, T_RootResult, T_Cfg],
+        addr: Hashable,
+        new_cfg: T_ChildCfg,
+        child_type: type[T_ChildResult],
+    ) -> MeasurementContext[T_ChildResult, T_RootResult, T_ChildCfg]: ...
+
+    @overload
+    def child_with_cfg(
+        self: MeasurementContext[T_MappingResult, T_RootResult, T_Cfg],
+        addr: Hashable,
+        new_cfg: T_ChildCfg,
+        child_type: None = None,
+    ) -> MeasurementContext[Any, T_RootResult, T_ChildCfg]: ...
+
+    def child_with_cfg(
+        self,
+        addr: int | Hashable,
+        new_cfg: T_ChildCfg,
+        child_type: type[T_ChildResult] | None = None,
+    ) -> MeasurementContext[Any, T_RootResult, T_ChildCfg]:
+        return MeasurementContext(
+            root_data=self.root_data,
+            cfg=deepcopy(new_cfg),
+            env=self.env,
+            on_update=self.on_update,
+            path=self.path + (addr,),
+            stop=self.stop,
+        )
+
+    @property
+    def value(self) -> T_Result:
+        return cast("T_Result", self._get_target())
+
+    def set_value(self, value: T_Result) -> None:
+        target = self._get_target()
+        if isinstance(target, dict):
+            if not isinstance(value, dict):
+                raise ValueError(f"Expected dict, got {type(value)}")
+            target.update(value)
+        elif isinstance(target, list):
+            if not isinstance(value, list):
+                raise ValueError(f"Expected list, got {type(value)}")
+            target.clear()
+            target.extend(value)
+        elif isinstance(target, np.ndarray):
+            if isinstance(value, np.ndarray):
+                np.copyto(dst=target, src=value)
+            elif isinstance(value, Number):
+                np.copyto(dst=target, src=np.asarray(value))
+            else:
+                raise ValueError(f"Expected NDArray or number, got {type(value)}")
+        else:
+            raise ValueError(f"Expected Mapping, list, or NDArray, got {type(target)}")
+        self.trigger_update()
+
+    def trigger_update(self) -> None:
+        if self.on_update is not None:
+            snapshot = MeasurementContext[Result, T_RootResult, T_Cfg](
+                root_data=self.root_data,
+                cfg=self.cfg,
+                env=self.env,
+                path=self.path,
+                stop=self.stop,
+            )
+            self.on_update(snapshot)
+
+    def _get_target(self) -> Result:
+        target: Result = self.root_data
+        for seg in self.path:
+            if isinstance(target, Mapping):
+                target = target[seg]  # type: ignore[index]
+            elif isinstance(target, list):
+                if not isinstance(seg, int):
+                    raise ValueError(f"Expected int index for list, got {type(seg)}")
+                target = target[seg]
+            else:
+                raise ValueError(f"Expected Mapping or list, got {type(target)}")
+        return target
+
+
+def context_signal_buffer(
+    ctx: MeasurementContext[NDArray[Any], Any, Any],
+    shape: int | tuple[int, ...],
+    *,
+    dtype: DTypeLike = np.complex128,
+) -> SignalBuffer:
+    return SignalBuffer(
+        shape,
+        dtype=dtype,
+        on_update=lambda data: ctx.set_value(data),
+        update_interval=None,
+    )
 
 
 class PlottableMeasurement(Protocol):
@@ -41,10 +209,18 @@ class PlottableMeasurement(Protocol):
     def update_plotter(
         self,
         plotters: Any,
-        ctx: TaskState,
+        ctx: MeasurementContext[Any, Any, Any],
         results: Any,
         /,
     ) -> None: ...
+
+    def init(self, dynamic_pbar: bool = False) -> None: ...
+
+    def run(self, state: MeasurementContext[Any, Any, Any], /) -> None: ...
+
+    def cleanup(self) -> None: ...
+
+    def get_default_result(self) -> Result: ...
 
 
 T_Measurement = TypeVar("T_Measurement", bound=PlottableMeasurement)
@@ -118,7 +294,7 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg]):
     ) -> tuple[
         Figure,
         MultiLivePlot[tuple[str, str]],
-        Callable[[TaskState], None],
+        Callable[[MeasurementContext[Any, Any, T_Cfg]], None],
         FFMpegWriter | None,
     ]:
         fig, axs_map = self.make_ax_layout()
@@ -147,13 +323,14 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg]):
 
         plotter = MultiLivePlot(fig, flatten_dict(plotters_map))
 
-        def plot_fn(ctx: TaskState) -> None:
+        def plot_fn(ctx: MeasurementContext[Any, Any, T_Cfg]) -> None:
             if len(ctx.path) < 2:
                 cur_tasks = list(self.measurements.keys())
             else:
                 assert isinstance(ctx.path[1], str)
                 cur_tasks = [ctx.path[1]]
 
+            assert isinstance(ctx.root_data, list)
             results = merge_result_list(ctx.root_data)
 
             assert isinstance(results, dict)
@@ -172,24 +349,64 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg]):
 
     def _run_with_plotting(
         self,
-        task: AbsTask[T_RootResult, T_RootResult, T_Cfg],
+        init_result: T_RootResult,
         cfg: T_Cfg,
         env_dict: dict[str, Any],
+        run_fn: Callable[[MeasurementContext[T_RootResult, T_RootResult, T_Cfg]], None],
     ) -> T_RootResult:
         fig, plotter, plot_fn, writer = self.make_plotter()
+        stop = current_stop_signal() or StopSignal()
+        state: MeasurementContext[T_RootResult, T_RootResult, T_Cfg] = (
+            MeasurementContext(
+                root_data=init_result,
+                cfg=deepcopy(cfg),
+                env=env_dict,
+                on_update=min_interval(plot_fn, 0.1),
+                stop=stop,
+            )
+        )
 
         with plotter:
             try:
-                results: T_RootResult = run_task(
-                    task=task,
-                    init_cfg=cfg,
-                    env_dict=env_dict,
-                    on_update=plot_fn,
-                )
+                for measurement in self.measurements.values():
+                    measurement.init(dynamic_pbar=True)
+                run_fn(state)
+            except KeyboardInterrupt:
+                state.set_stop()
+            except Exception:
+                print_traceback()
+                raise
             finally:
+                for measurement in self.measurements.values():
+                    measurement.cleanup()
                 if self.record_path is not None:
                     assert writer is not None
                     writer.finish()
         plt.close(fig)
 
-        return results
+        return state.root_data
+
+    def _default_batch_result(self) -> dict[str, Result]:
+        return {name: ms.get_default_result() for name, ms in self.measurements.items()}
+
+    def _run_measurement_with_retries(
+        self,
+        measurement: T_Measurement,
+        state: MeasurementContext[Any, Any, T_Cfg],
+        retry_time: int,
+    ) -> None:
+        if retry_time < 0:
+            raise ValueError("retry_time must be non-negative")
+        for attempt in range(retry_time + 1):
+            try:
+                measurement.run(state)
+            except KeyboardInterrupt:
+                state.set_stop()
+                break
+            except Exception:
+                if attempt == retry_time:
+                    raise
+                measurement.cleanup()
+                measurement.init(dynamic_pbar=True)
+                continue
+            break

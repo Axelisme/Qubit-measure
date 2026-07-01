@@ -14,19 +14,19 @@ from typing_extensions import (
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskState
+from zcu_tools.experiment.v2.runner import Schedule
+from zcu_tools.experiment.v2.runner.multi_executor import (
+    MeasurementContext,
+    context_signal_buffer,
+)
 from zcu_tools.experiment.v2.utils import snr_checker, sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.meta_tool import ModuleLibrary
 from zcu_tools.notebook.utils import make_sweep
 from zcu_tools.program.v2 import (
-    ModularProgramV2,
     ProgramV2Cfg,
-    Pulse,
     PulseCfg,
-    Readout,
     ReadoutCfg,
-    Reset,
     ResetCfg,
     SweepCfg,
     sweep2param,
@@ -126,7 +126,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
         self,
         num_expts: int,
         cfg_maker: Callable[
-            [TaskState[LenRabiResult, Any, FluxDepCfg], ModuleLibrary],
+            [MeasurementContext[LenRabiResult, Any, FluxDepCfg], ModuleLibrary],
             LenRabiCfgTemplate | None,
         ],
         earlystop_snr: float | None = None,
@@ -136,50 +136,15 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
         self.earlystop_snr = earlystop_snr
         self.last_cfg = None
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, LenRabiCfg],
-            update_hook: Callable | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            modules = cfg.modules
-            len_sweep = cfg.sweep.length
-
-            setup_devices(cfg, progress=False)
-
-            assert update_hook is not None
-
-            len_params = sweep2param("length", len_sweep)
-            modules.rabi_pulse.set_param("length", len_params)
-
-            prog = ModularProgramV2(
-                ctx.env["soccfg"],
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    Pulse("rabi_pulse", modules.rabi_pulse),
-                    Readout("readout", modules.readout),
-                ],
-                sweep=[("length", len_sweep)],
-            )
-            return prog.acquire(
-                ctx.env["soc"],
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[
-                    ctx.is_stop,
-                    snr_checker(ctx, self.earlystop_snr, lenrabi_signal2real),
-                ],
-            )
-
         self.lengths = np.linspace(0, 1, num_expts)
-        self.task = Task[Any, list[NDArray[np.float64]], LenRabiCfg](
-            measure_fn, result_shape=(num_expts,)
-        )
 
     def init(self, dynamic_pbar: bool = False) -> None:
-        self.task.init(dynamic_pbar=dynamic_pbar)
+        pass
 
-    def run(self, state: TaskState[LenRabiResult, Any, FluxDepCfg]) -> None:
+    def run(
+        self,
+        state: MeasurementContext[LenRabiResult, Any, FluxDepCfg],
+    ) -> None:
         cfg_temp = self.cfg_maker(state, state.env["ml"])
         if cfg_temp is None:
             return  # skip this task
@@ -197,10 +162,36 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
         self.last_cfg = cfg
 
         rabi_pulse = cfg.modules.rabi_pulse
-        self.task.set_pbar_n(cfg.rounds)
-        self.task.run(
-            state.child_with_cfg("raw_signals", cfg, child_type=NDArray[np.complex128])
+        raw_ctx = state.child_with_cfg(
+            "raw_signals", cfg, child_type=NDArray[np.complex128]
         )
+        signals_buffer = context_signal_buffer(raw_ctx, self.num_expts)
+        with Schedule(
+            cfg, signals_buffer, env_dict=state.env, stop=state.stop
+        ) as sched:
+            cfg = sched.cfg
+            modules = cfg.modules
+            setup_devices(cfg, progress=False)
+
+            len_sweep = cfg.sweep.length
+            modules.rabi_pulse.set_param("length", sweep2param("length", len_sweep))
+
+            _ = (
+                sched.prog_builder(state.env["soc"], state.env["soccfg"])
+                .add_reset("reset", modules.reset)
+                .add_pulse("rabi_pulse", modules.rabi_pulse)
+                .add_readout("readout", modules.readout)
+                .declare_sweep("length", len_sweep)
+                .build_and_acquire(
+                    stop_checkers=[
+                        snr_checker(
+                            signals_buffer.at(),
+                            self.earlystop_snr,
+                            lenrabi_signal2real,
+                        )
+                    ],
+                )
+            )
 
         real_signals = lenrabi_signal2real(state.value["raw_signals"])
 
@@ -256,7 +247,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
 
     def get_default_result(self) -> LenRabiResult:
         return LenRabiResult(
-            raw_signals=self.task.get_default_result(),
+            raw_signals=np.full((self.num_expts,), np.nan, dtype=np.complex128),
             length=self.lengths.copy(),
             pi_length=np.array(np.nan),
             pi2_length=np.array(np.nan),
@@ -265,7 +256,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
         )
 
     def cleanup(self) -> None:
-        self.task.cleanup()
+        pass
 
     def num_axes(self) -> dict[str, int]:
         return dict(rabi_curve=2)
@@ -283,7 +274,12 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
             ),
         )
 
-    def update_plotter(self, plotters, ctx: TaskState, signals) -> None:
+    def update_plotter(
+        self,
+        plotters,
+        ctx: MeasurementContext[NDArray[np.complex128], Any, FluxDepCfg],
+        signals,
+    ) -> None:
         flux_values = ctx.env["flux_values"]
 
         self.pi_line.set_xdata([ctx.env["info"].get("pi_length", np.nan)])

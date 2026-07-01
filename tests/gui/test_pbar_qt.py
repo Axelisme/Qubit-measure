@@ -176,8 +176,8 @@ def test_total_setter(qapp):
 
 
 def test_total_change_updates_widget_in_place_no_flicker(qapp):
-    """Changing a live bar's ``total`` (e.g. ``Task.set_pbar_n`` between sweep
-    points) must update the existing progress widget in place, never remove+re-add
+    """Changing a live bar's ``total`` between sweep points must update the existing
+    progress widget in place, never remove+re-add
     it. Regression: the total setter used to emit CREATE, which rebuilt the model
     and made render_models reset_all() the stack — the bar flickered out of view
     on every sweep point.
@@ -292,7 +292,7 @@ def test_fake_freq_adapter_run_with_qt_pbar(qapp):
 
     assert len(run_result.freqs) == 5
     assert len(run_result.signals) == 5
-    # run_task uses leave=True pbar; reset_all clears it
+    # Top-level experiment progress can leave bars behind; reset_all clears them.
     stack.reset_all()
     assert len(stack._active) == 0
 

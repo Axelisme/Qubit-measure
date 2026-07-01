@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from abc import abstractmethod
+import time
+from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Generic, TypeVar
@@ -11,10 +12,14 @@ from matplotlib.axes import Axes
 from numpy.typing import NDArray
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.v2.runner import AbsTask, Result, RetryBatchTask, TaskState
-from zcu_tools.experiment.v2.runner.multi_executor import MultiMeasurementExecutor
-from zcu_tools.experiment.v2.utils import merge_result_list
+from zcu_tools.experiment.v2.runner.multi_executor import (
+    MeasurementContext,
+    MultiMeasurementExecutor,
+)
+from zcu_tools.experiment.v2.utils import Result, merge_result_list
 from zcu_tools.liveplot import AbsLivePlot
+from zcu_tools.progress_bar import make_pbar
+from zcu_tools.utils.func_tools import MinIntervalFunc
 
 T_PlotDict = TypeVar("T_PlotDict", bound=Mapping[str, AbsLivePlot])
 
@@ -28,9 +33,21 @@ class OvernightCfg(ExpCfgModel):
 
 
 class MeasurementTask(
-    AbsTask[T_Result, T_RootResult, OvernightCfg],
+    ABC,
     Generic[T_Result, T_RootResult, T_PlotDict],
 ):
+    def init(self, dynamic_pbar: bool = False) -> None: ...
+
+    @abstractmethod
+    def run(
+        self, state: MeasurementContext[T_Result, T_RootResult, OvernightCfg]
+    ) -> None: ...
+
+    def cleanup(self) -> None: ...
+
+    @abstractmethod
+    def get_default_result(self) -> T_Result: ...
+
     @abstractmethod
     def num_axes(self) -> dict[str, int]: ...
 
@@ -41,7 +58,7 @@ class MeasurementTask(
     def update_plotter(
         self,
         plotters: T_PlotDict,
-        ctx: TaskState,
+        ctx: MeasurementContext[Any, Any, Any],
         results: T_Result,
     ) -> None: ...
 
@@ -64,6 +81,11 @@ class OvernightExecutor(
     def __init__(self, num_times: int, interval: float) -> None:
         super().__init__()
 
+        if num_times < 0:
+            raise ValueError("num_times must be non-negative")
+        if interval < 0.0:
+            raise ValueError("interval must be non-negative")
+
         self.num_times = num_times
         self.interval = interval
 
@@ -83,12 +105,58 @@ class OvernightExecutor(
 
         cfg = OvernightCfg()
 
-        batch: RetryBatchTask[str, Result, list[dict[str, Result]], OvernightCfg] = (
-            RetryBatchTask(self.measurements, retry_time=fail_retry)
-        )
-        task = batch.repeat("Iter", self.num_times, self.interval)
+        init_result = [self._default_batch_result() for _ in range(self.num_times)]
 
-        results = self._run_with_plotting(task, cfg, env_dict)
+        def run_loop(
+            root_ctx: MeasurementContext[
+                list[dict[str, Result]], list[dict[str, Result]], OvernightCfg
+            ],
+        ) -> None:
+            iter_pbar = make_pbar(
+                total=self.num_times, smoothing=0, desc="Iter", leave=True
+            )
+            time_pbar = make_pbar(
+                total=self.interval,
+                smoothing=0,
+                desc="Passing Time",
+                leave=True,
+                miniters=0.2,
+                bar_format="{desc}: {bar} {n:.1f}/{total:.1f} s",
+                disable=self.interval == 0.0,
+            )
+            start_t = time.time() - 2 * self.interval
+            try:
+                for i in range(self.num_times):
+                    if root_ctx.is_stop():
+                        break
+                    while time.time() - start_t < self.interval:
+                        if root_ctx.is_stop():
+                            break
+                        passed_time = round(time.time() - start_t, 1)
+                        time_pbar.update(passed_time - time_pbar.n)
+                        time.sleep(0.1)
+                    time_pbar.reset()
+                    if root_ctx.is_stop():
+                        break
+
+                    start_t = time.time()
+                    root_ctx.env["repeat_idx"] = i
+                    iter_ctx = root_ctx.child(i)
+                    for name, measurement in self.measurements.items():
+                        if root_ctx.is_stop():
+                            break
+                        measurement_ctx = iter_ctx.child(name)
+                        self._run_measurement_with_retries(
+                            measurement, measurement_ctx, fail_retry
+                        )
+                    iter_pbar.update()
+                    with MinIntervalFunc.force_execute():
+                        root_ctx.trigger_update()
+            finally:
+                iter_pbar.close()
+                time_pbar.close()
+
+        results = self._run_with_plotting(init_result, cfg, env_dict, run_loop)
 
         signals_dict = merge_result_list(results)
 

@@ -2,17 +2,15 @@
 
 A control-type GUI that runs an automated flux-dependence workflow: a sweep over
 flux × an ordered list of measurement Nodes, each Node declaring its
-dependencies and the information it produces. Replaces the runner-based
-`experiment.v2.autofluxdep` module's `cfg_maker` lambdas + `ctx.env["info"]`
-chains with an explicit, declarative model.
+dependencies and the information it produces. Replaces the notebook-style
+`experiment.v2.autofluxdep` cfg-maker lambdas + `ctx.env["info"]` chains with an
+explicit, declarative model.
 
-The mechanisms the runner module got right are kept (in-place accumulation,
-sweep-lived plotters fed one flux point at a time, result merging). What is
-rejected is its **Task-tree structure**: domain logic forced into `AbsTask.run`,
-wedged between an outer BatchTask (the flux scan) and an inner Task (one
-acquire), so a measurement had to masquerade as a Task. Here a Node is NOT a
-Task — it does not inherit an execution protocol. The kind of provider is a
-**Builder** (one subclass per experiment) that, per flux point, produces a
+The mechanisms the lower-layer module gets right are kept (in-place
+accumulation, sweep-lived plotters fed one flux point at a time, result merging).
+The GUI still keeps orchestration separate from acquisition: a Node is NOT a
+runner object and does not inherit an execution protocol. The kind of provider is
+a **Builder** (one subclass per experiment) that, per flux point, produces a
 short-lived **Node** with a narrow `produce` interface; the orchestrator drives
 those uniformly.
 
@@ -137,9 +135,8 @@ orchestrator never calibrates.
 A Node's domain output, distinct from its **Patch**. It is **sweep-lived and
 flux-aware**: a Node knows the workflow sweeps flux, so its Result carries the
 flux axis directly, filled in place one flux row at a time. This is unlike a
-runner Task, which pretends not to know about the flux scan and returns one
-point at a time for a BatchTask to collect into a `list[Result]` and merge — the
-Node has no such constraint, so there is no list-and-merge.
+generic list-and-merge runner result: the Node has direct flux workflow context,
+so there is no per-point result list to merge.
 _Avoid_: signals (too generic); "per-point result" (the Result spans the sweep).
 
 The **flux axis is always the first dimension**, but the trailing dimensions and
