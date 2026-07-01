@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-07-01
+**Last updated:** 2026-07-01 - remote dispatch/spec split
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals GUI-owned work onto
@@ -15,8 +15,12 @@ not declare MCP tools and does not own stdio transport.
 - `service.py`：`RemoteControlAdapter`, a measure-gui subclass of shared
   `RemoteControlServiceBase`; owns client context, guard hooks, diagnostics, and
   editor cleanup.
-- `dispatch.py`：wire method handlers bound to controller calls.
-- `method_specs.py`：wire method schema, timeouts, and MCP generation metadata.
+- `dispatch.py`：method registry composition root; keeps the public
+  `METHOD_REGISTRY` import path stable.
+- `handlers/`：grouped wire method handlers bound to controller/render-view calls.
+- `method_specs.py`：Qt-free public aggregator for wire method schema, timeouts,
+  and MCP generation metadata.
+- `method_spec_groups/`：grouped `MethodSpec` tables and `ParamSpec` shorthands.
 - `events.py`：domain payload type to wire event serializer mapping.
 - `dialogs.py`：wire-stable dialog names.
 - `path_resolver.py`：dotted-path mutation and settable-tree projection for

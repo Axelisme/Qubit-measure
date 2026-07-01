@@ -12,8 +12,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from zcu_tools.gui.app.main.services.remote.dispatch import (
-    METHOD_REGISTRY,
+from zcu_tools.gui.app.main.services.remote.dispatch import METHOD_REGISTRY
+from zcu_tools.gui.app.main.services.remote.handlers.notify import (
     _h_notify_await,
     _h_notify_open,
 )

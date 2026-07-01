@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.main.services.load import LoadDataError, LoadTabResultOutcome
-from zcu_tools.gui.app.main.services.remote.dispatch import _h_tab_load_data
+from zcu_tools.gui.app.main.services.remote.handlers.run_save import _h_tab_load_data
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 

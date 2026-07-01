@@ -1,15 +1,15 @@
-"""Unit tests for the typed-request coercion helpers in dispatch.py.
+"""Unit tests for the typed-request coercion helpers in connection_device handlers.
 
 These ``coerce_*`` builders turn a raw RPC params mapping into a typed
-connection/device domain request. They live in ``dispatch.py`` (beside their
-only callers) rather than in the transport-pure ``wire.py``; the field-level
+connection/device domain request. They live beside their only callers rather
+than in the transport-pure ``wire.py``; the field-level
 ``_require_*``/``_optional_*`` primitives they compose still live in wire.
 """
 
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.app.main.services.remote.dispatch import (
+from zcu_tools.gui.app.main.services.remote.handlers.connection_device import (
     coerce_connect_device_request,
     coerce_connect_request,
     coerce_disconnect_device_request,
@@ -171,7 +171,9 @@ def test_field_type_choices_typing_optional_unwraps():
     """Baseline: typing.Optional[float] is unwrapped to ('float', None)."""
     from typing import Optional
 
-    from zcu_tools.gui.app.main.services.remote.dispatch import _field_type_and_choices
+    from zcu_tools.gui.app.main.services.remote.handlers.connection_device import (
+        _field_type_and_choices,
+    )
 
     result = _field_type_and_choices(Optional[float])  # noqa: UP045 — runtime arg not annotation
     assert result == ("float", None)
@@ -181,7 +183,9 @@ def test_field_type_choices_pep604_optional_unwraps():
     """PEP 604: float | None must also be unwrapped to ('float', None)."""
     import types  # noqa: F401 — ensure types.UnionType is available
 
-    from zcu_tools.gui.app.main.services.remote.dispatch import _field_type_and_choices
+    from zcu_tools.gui.app.main.services.remote.handlers.connection_device import (
+        _field_type_and_choices,
+    )
 
     # Construct the PEP 604 union at runtime (not via annotation string eval).
     annotation = float | None  # type: ignore[operator]
@@ -191,7 +195,9 @@ def test_field_type_choices_pep604_optional_unwraps():
 
 def test_field_type_choices_pep604_optional_int_unwraps():
     """PEP 604: int | None must also be unwrapped to ('int', None)."""
-    from zcu_tools.gui.app.main.services.remote.dispatch import _field_type_and_choices
+    from zcu_tools.gui.app.main.services.remote.handlers.connection_device import (
+        _field_type_and_choices,
+    )
 
     annotation = int | None  # type: ignore[operator]
     result = _field_type_and_choices(annotation)

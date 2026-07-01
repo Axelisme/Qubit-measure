@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-01
+**Last updated:** 2026-07-01 - remote spec import boundary
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -13,7 +13,8 @@ framework 只看 `ExpAdapterProtocol`。
   params、adapter validation。
 - `specs/`：program module cfg 的 GUI spec factory。
 - `services/`：app service layer。Service 依賴 ports，不直接 import sibling service
-  implementation。
+  implementation；package `__init__` 只做 lazy public re-export，讓
+  `services.remote.method_specs` public import path 不載入 Qt-bound service code。
 - `state.py`：tab/device/result/save-path/version-table SSOT 與主線程 mutators。
 - `ui/`：Qt widgets、MainWindow、cfg form、writeback view、feedback/prompt widgets。
 - `services/remote/`：GUI process 內的 NDJSON RPC handler；MCP bridge 不在本 package。
