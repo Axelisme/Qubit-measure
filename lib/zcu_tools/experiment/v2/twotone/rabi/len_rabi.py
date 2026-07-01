@@ -180,6 +180,7 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
 
         with LivePlot1D("Length (us)", "Signal") as viewer:
             with MeasureSession(_cfg) as run:
+                length_values = lengths.tolist()
                 signals_buffer = run.buffer(
                     (rounds, len(lengths)),
                     dtype=np.complex128,
@@ -188,7 +189,7 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
                     ),
                 )
                 for rep in run.repeat("round", rounds):
-                    for step in rep.scan("length", lengths.tolist()):
+                    for step in rep.scan("length", length_values):
                         step.cfg.modules.qub_pulse.set_param("length", step.value)
                         signals_buffer[rep.index, step].measure(measure_fn, pbar_n=1)
                 return LenRabiResult(

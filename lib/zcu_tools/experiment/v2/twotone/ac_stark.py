@@ -227,7 +227,7 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
                         title=f"snr = {current_snr:.1f}" if current_snr else None,
                     ),
                 )
-                for step in run.scan("resonator gain", list(gains.tolist())):
+                for step in run.scan("resonator gain", gains):
                     step.cfg.modules.stark_pulse1.set_param("gain", step.value)
                     signals_buffer[step].measure(measure_fn, pbar_n=step.cfg.rounds)
                 signals = signals_buffer.array
@@ -443,7 +443,7 @@ class AcStarkRamseyExp(PersistableExperiment[AcStarkRamseyResult, AcStarkRamseyC
                         acstark_ramsey_signal2real(data),
                     ),
                 )
-                for step in run.scan("resonator gain", list[float](gains.tolist())):
+                for step in run.scan("resonator gain", gains):
                     step.cfg.modules.stark_pulse.set_param("gain", step.value)
                     signals_buffer[step].measure(measure_fn, pbar_n=step.cfg.rounds)
                 signals = signals_buffer.array

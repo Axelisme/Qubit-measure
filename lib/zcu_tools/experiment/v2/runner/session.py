@@ -5,10 +5,12 @@ import time
 from collections.abc import (
     Callable,
     Hashable,
+    Iterable,
     Iterator,
     Mapping,
     MutableMapping,
     Sequence,
+    Sized,
 )
 from copy import deepcopy
 from dataclasses import dataclass
@@ -30,6 +32,7 @@ T_Raw = TypeVar("T_Raw")
 T_Value = TypeVar("T_Value")
 T_NestedValue = TypeVar("T_NestedValue")
 T_BatchResult = TypeVar("T_BatchResult")
+T_Index = TypeVar("T_Index", bound=Hashable)
 
 
 @dataclass(frozen=True)
@@ -107,19 +110,19 @@ class MeasureSession(Generic[T_Cfg]):
         )
 
     def scan(
-        self, name: str, values: Sequence[T_Value]
-    ) -> Iterator[MeasureStep[T_Cfg, T_Value]]:
+        self, name: str, values: Iterable[T_Value]
+    ) -> Iterator[MeasureStep[T_Cfg, int, T_Value]]:
         yield from self._scan(parent=self, name=name, values=values)
 
     def repeat(
         self, name: str, times: int, interval: float = 0.0
-    ) -> Iterator[MeasureStep[T_Cfg, int]]:
+    ) -> Iterator[MeasureStep[T_Cfg, int, int]]:
         yield from self._repeat(parent=self, name=name, times=times, interval=interval)
 
     def batch(
         self,
         tasks: Mapping[
-            Hashable, Callable[[MeasureStep[T_Cfg, Hashable]], T_BatchResult]
+            Hashable, Callable[[MeasureStep[T_Cfg, Hashable, Hashable]], T_BatchResult]
         ],
         *,
         retry: int = 0,
@@ -141,7 +144,7 @@ class MeasureSession(Generic[T_Cfg]):
                 completed = False
                 for attempt in range(retry + 1):
                     root.pop(key, None)
-                    step: MeasureStep[T_Cfg, Hashable] = MeasureStep(
+                    step: MeasureStep[T_Cfg, Hashable, Hashable] = MeasureStep(
                         session=self,
                         name=str(key),
                         index=key,
@@ -162,7 +165,8 @@ class MeasureSession(Generic[T_Cfg]):
                         continue
 
                     results[key] = result
-                    root[key] = result
+                    if key not in root:
+                        root[key] = result
                     self._trigger_update(step.cfg)
                     completed = True
                     break
@@ -180,13 +184,20 @@ class MeasureSession(Generic[T_Cfg]):
     def _scan(
         self,
         *,
-        parent: MeasureSession[T_Cfg] | MeasureStep[T_Cfg, Any],
+        parent: MeasureSession[T_Cfg] | MeasureStep[T_Cfg, Any, Any],
         name: str,
-        values: Sequence[T_Value],
-    ) -> Iterator[MeasureStep[T_Cfg, T_Value]]:
-        sweep_values = list(values)
+        values: Iterable[T_Value],
+    ) -> Iterator[MeasureStep[T_Cfg, int, T_Value]]:
+        if isinstance(values, Sized):
+            total = len(values)
+            sweep_values = values
+        else:
+            materialized_values = list(values)
+            total = len(materialized_values)
+            sweep_values = materialized_values
+
         pbar = make_pbar(
-            total=len(sweep_values),
+            total=total,
             smoothing=0,
             desc=name,
             leave=_leave_pbar(parent),
@@ -214,11 +225,11 @@ class MeasureSession(Generic[T_Cfg]):
     def _repeat(
         self,
         *,
-        parent: MeasureSession[T_Cfg] | MeasureStep[T_Cfg, Any],
+        parent: MeasureSession[T_Cfg] | MeasureStep[T_Cfg, Any, Any],
         name: str,
         times: int,
         interval: float,
-    ) -> Iterator[MeasureStep[T_Cfg, int]]:
+    ) -> Iterator[MeasureStep[T_Cfg, int, int]]:
         if times < 0:
             raise ValueError("times must be non-negative")
         if interval < 0.0:
@@ -352,10 +363,10 @@ class MeasureSession(Generic[T_Cfg]):
 
 
 @dataclass
-class MeasureStep(Generic[T_Cfg, T_Value]):
+class MeasureStep(Generic[T_Cfg, T_Index, T_Value]):
     session: MeasureSession[T_Cfg]
     name: str
-    index: int | Hashable
+    index: T_Index
     value: T_Value
     cfg: T_Cfg
     path: tuple[Hashable, ...]
@@ -398,13 +409,13 @@ class MeasureStep(Generic[T_Cfg, T_Value]):
         )
 
     def scan(
-        self, name: str, values: Sequence[T_NestedValue]
-    ) -> Iterator[MeasureStep[T_Cfg, T_NestedValue]]:
+        self, name: str, values: Iterable[T_NestedValue]
+    ) -> Iterator[MeasureStep[T_Cfg, int, T_NestedValue]]:
         yield from self.session._scan(parent=self, name=name, values=values)
 
     def repeat(
         self, name: str, times: int, interval: float = 0.0
-    ) -> Iterator[MeasureStep[T_Cfg, int]]:
+    ) -> Iterator[MeasureStep[T_Cfg, int, int]]:
         yield from self.session._repeat(
             parent=self, name=name, times=times, interval=interval
         )
@@ -413,7 +424,7 @@ class MeasureStep(Generic[T_Cfg, T_Value]):
 @dataclass
 class MeasureBuffer(Generic[T_Cfg]):
     session: MeasureSession[T_Cfg]
-    owner: MeasureSession[T_Cfg] | MeasureStep[T_Cfg, Any]
+    owner: MeasureSession[T_Cfg] | MeasureStep[T_Cfg, Any, Any]
     array: NDArray[Any]
     on_update: Callable[[NDArray[Any]], None] | None = None
 
@@ -467,7 +478,7 @@ class MeasureBuffer(Generic[T_Cfg]):
 @dataclass
 class MeasureSlot(Generic[T_Cfg]):
     session: MeasureSession[T_Cfg]
-    job: MeasureSession[T_Cfg] | MeasureStep[T_Cfg, Any]
+    job: MeasureSession[T_Cfg] | MeasureStep[T_Cfg, Any, Any]
     buffer: MeasureBuffer[T_Cfg]
     view: NDArray[Any]
 
@@ -557,16 +568,16 @@ def _writable_view(array: NDArray[Any], index: tuple[Any, ...]) -> NDArray[Any]:
     return array[tuple(scalar_index)].reshape(())
 
 
-def _dynamic_pbar(job: MeasureSession[T_Cfg] | MeasureStep[T_Cfg, Any]) -> bool:
+def _dynamic_pbar(job: MeasureSession[T_Cfg] | MeasureStep[T_Cfg, Any, Any]) -> bool:
     return isinstance(job, MeasureStep) and job.dynamic_pbar
 
 
-def _leave_pbar(parent: MeasureSession[T_Cfg] | MeasureStep[T_Cfg, Any]) -> bool:
+def _leave_pbar(parent: MeasureSession[T_Cfg] | MeasureStep[T_Cfg, Any, Any]) -> bool:
     return isinstance(parent, MeasureSession)
 
 
 def _extend_path(
-    parent: MeasureSession[T_Cfg] | MeasureStep[T_Cfg, Any],
+    parent: MeasureSession[T_Cfg] | MeasureStep[T_Cfg, Any, Any],
     name: str,
     index: int,
 ) -> tuple[Hashable, ...]:

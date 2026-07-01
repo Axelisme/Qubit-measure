@@ -170,6 +170,7 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
 
         with LivePlot1D("Length (us)", "Signal (a.u.)") as viewer:
             with MeasureSession(cfg) as run:
+                length_values = lengths.tolist()
                 buffer = run.buffer(
                     (rounds, len(lengths), 4),
                     dtype=np.complex128,
@@ -178,7 +179,7 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
                     ),
                 )
                 for rep in run.repeat("rounds", rounds):
-                    for step in rep.scan("length", lengths.tolist()):
+                    for step in rep.scan("length", length_values):
                         modules = step.cfg.modules
                         modules.tested_reset.set_param("qub_length", step.value)
                         modules.tested_reset.set_param(

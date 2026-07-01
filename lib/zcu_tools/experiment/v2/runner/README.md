@@ -201,11 +201,11 @@ with MeasureSession(cfg) as run:
 
 責任邊界：
 
-- `MeasureSession` 在入口 `deepcopy(init_cfg)`；`scan` / `repeat` / `batch` child 也各自 deepcopy parent cfg，讓 step mutation 不外洩。
+- `MeasureSession` 在入口 `deepcopy(init_cfg)`；`scan` / `repeat` / `batch` child 也各自 deepcopy parent cfg，讓 step mutation 不外洩。`scan` 接受一般 iterable；caller 不需要為 ndarray sweep values 預先 `.tolist()`。
 - `env` 是整個 session 共用的 mutable dict；`repeat` 設定 `env["repeat_idx"]`。
 - `MeasureBuffer` 管 ndarray result；`buffer.measure(...)` 量整個 buffer，`buffer[index_or_step].measure(...)` 量 view。傳入 `MeasureStep` 時，slot 使用該 step 的 isolated cfg；`.at(...)` 保留為等價的顯式方法。
 - `MeasureBuffer(on_update=...)` 是常規 liveplot seam，callback 接收該 buffer 的 full ndarray。`MeasureSession(on_update=...)` 則是進階 snapshot hook，提供 full `root_data`、目前 cfg 與 shared env view；slot partial update 仍透過既有 `TaskState.set_value()` 寫入 ndarray view。
-- `batch({name: callable}, retry=N)` 只接受 replayable child callable；retry 是 per-child，不能用不可重放的 `with` block 模式實作 retry。
+- `batch({name: callable}, retry=N)` 只接受 replayable child callable；retry 是 per-child，不能用不可重放的 `with` block 模式實作 retry。child return value 會進 `batch()` 的回傳 dict；若 child 也建立 buffer，`root_data[name]` 保留該 buffer subtree。
 - `KeyboardInterrupt` 在 leaf / batch child 視為 early stop，不 retry，保留 partial data；一般 `Exception` 依 leaf 或 batch child retry budget 重試。
 - 同一 session 只允許一個 unnamed root buffer；多個 root result 使用 named buffers 或 batch dict root。
 

@@ -250,7 +250,7 @@ class T1WithToneSweepExp(
             with MeasureSession(cfg) as run:
 
                 def plot_fn(data: NDArray[np.float64]) -> None:
-                    i = int(run.env.get("idx", 0))
+                    i = int(run.env["idx"])
                     populations = calc_populations(data)
 
                     viewer.get_plotter("gg_2d").update(
@@ -380,7 +380,7 @@ class T1WithToneSweepExp(
             with MeasureSession(cfg) as run:
 
                 def plot_fn(data: NDArray[np.float64]) -> None:
-                    i = int(run.env.get("idx", 0))
+                    i = int(run.env["idx"])
                     populations = calc_populations(data)
 
                     viewer.get_plotter("gg_2d").update(

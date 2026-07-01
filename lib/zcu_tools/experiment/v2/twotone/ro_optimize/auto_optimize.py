@@ -342,7 +342,7 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
             with MeasureSession(cfg) as run:
 
                 def plot_fn(data: NDArray[np.float64]) -> None:
-                    idx = int(run.env.get("index", 0))
+                    idx = int(run.env["index"])
                     snrs = np.abs(data)  # (num_points, )
 
                     cur_freq, cur_gain, cur_len = params[idx, :]
@@ -370,8 +370,8 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
                     dtype=np.float64,
                     on_update=plot_fn,
                 )
-                for step in run.scan("Iteration", list(range(num_points))):
-                    idx = cast(int, step.index)
+                for step in run.scan("Iteration", range(num_points)):
+                    idx = step.index
                     run.env["index"] = idx
 
                     last_snr = None

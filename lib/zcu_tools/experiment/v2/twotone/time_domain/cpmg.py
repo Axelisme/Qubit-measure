@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -336,7 +336,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
             with MeasureSession(cfg) as run:
 
                 def update_viewer(data: NDArray[np.complex128]) -> None:
-                    length_idx = int(run.env.get("length_idx", 0))
+                    length_idx = int(run.env["length_idx"])
                     viewer.update(
                         times.astype(np.float64),
                         lengths[length_idx],
@@ -349,8 +349,8 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                     dtype=np.complex128,
                     on_update=update_viewer,
                 )
-                for step in run.scan("times", times.tolist()):
-                    idx = cast(int, step.index)
+                for step in run.scan("times", times):
+                    idx = step.index
                     run.env.update(time=int(step.value), length_idx=idx)
                     step.cfg.sweep.length = make_sweep(
                         start=length_ranges[idx, 0],

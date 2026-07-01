@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -326,7 +326,7 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
             with MeasureSession(cfg) as run:
 
                 def plot_fn(data: NDArray[np.float64]) -> None:
-                    idx = int(run.env.get("index", 0))
+                    idx = int(run.env["index"])
                     snrs = np.abs(data)  # (num_points, )
 
                     cur_flux, cur_freq, cur_gain = params[idx, :]
@@ -356,8 +356,8 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                     dtype=np.float64,
                     on_update=plot_fn,
                 )
-                for step in run.scan("Iteration", list(range(num_points))):
-                    idx = cast(int, step.index)
+                for step in run.scan("Iteration", range(num_points)):
+                    idx = step.index
                     run.env["index"] = idx
 
                     last_snr = None

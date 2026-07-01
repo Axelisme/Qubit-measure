@@ -157,6 +157,26 @@ def test_buffer_at_advanced_indexing_fast_fails():
             buffer[[0, 1]]
 
 
+def test_scan_accepts_numpy_array_values():
+    cfg = DictCfg.model_validate({"marker": "root"})
+    values = np.asarray([10.0, 20.0], dtype=np.float64)
+    seen_values: list[float] = []
+
+    with MeasureSession(cfg) as run:
+        buffer = run.buffer((2,), dtype=np.float64)
+
+        for step in run.scan("gain", values):
+            seen_values.append(float(step.value))
+            _extras(step.cfg)["marker"] = step.value
+            buffer[step].measure(
+                lambda ctx, hook: np.asarray(_extras(ctx.cfg)["marker"]),
+                raw2signal_fn=lambda raw: raw,
+            )
+
+        assert seen_values == [10.0, 20.0]
+        assert np.allclose(buffer.array, [10.0, 20.0])
+
+
 def test_scan_stop_short_circuits_later_steps():
     seen_values: list[int] = []
 
@@ -271,6 +291,22 @@ def test_batch_runs_child_callables_sequentially_and_returns_results():
         assert np.allclose(run.root_data["b"], [2.0])
 
 
+def test_batch_preserves_named_child_buffers_when_child_returns_result():
+    def child(job: MeasureStep):
+        buffer = job.buffer((1,), dtype=np.float64, name="signal")
+        buffer.measure(
+            lambda ctx, hook: np.array([1.0]),
+            raw2signal_fn=lambda raw: raw,
+        )
+        return "ok"
+
+    with MeasureSession(DictCfg()) as run:
+        results = run.batch({"a": child})
+
+        assert results == {"a": "ok"}
+        assert np.allclose(run.root_data["a"]["signal"], [1.0])
+
+
 def test_batch_return_value_triggers_update():
     updates: list[dict[str, Any]] = []
 
@@ -346,6 +382,27 @@ def test_custom_raw2signal_applies_to_partial_and_final_raw():
         assert np.allclose(updates[0], [3.0])
         assert np.allclose(updates[-1], [5.0])
         assert np.allclose(buffer.array, [5.0])
+
+
+def test_measure_uses_default_raw2signal_when_not_provided():
+    updates: list[np.ndarray] = []
+    partial_iq = np.array([[0.5, 1.5], [2.5, 3.5]])
+    final_iq = np.array([[1.0, 2.0], [3.0, 4.0]])
+
+    def measure_fn(ctx: TaskState, hook):
+        hook(1, [[partial_iq]])
+        return [[final_iq]]
+
+    with MeasureSession(DictCfg(), update_interval=None) as run:
+        buffer = run.buffer(
+            (2,),
+            dtype=np.complex128,
+            on_update=lambda data: updates.append(data.copy()),
+        )
+        buffer.measure(measure_fn, pbar_n=2)
+
+        assert np.allclose(updates[0], [0.5 + 1.5j, 2.5 + 3.5j])
+        assert np.allclose(buffer.array, [1.0 + 2.0j, 3.0 + 4.0j])
 
 
 def test_multiple_unnamed_buffers_fast_fail():
