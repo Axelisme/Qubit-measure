@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
@@ -24,13 +23,12 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import set_freq_in_dev_cfg, setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.liveplot import LivePlotScatter
 from zcu_tools.program.v2 import (
     Branch,
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -77,66 +75,47 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
 
     @record_result
     def run(self, soc, soccfg, cfg: FreqCfg) -> FreqResult:
-        cfg = deepcopy(cfg)
+        orig_cfg = deepcopy(cfg)
         jpa_freqs = sweep2array(cfg.sweep.jpa_freq, allow_array=True)
         np.random.shuffle(jpa_freqs[1:-1])  # randomize permutation
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.float64], Any, FreqCfg],
-            update_hook: Callable[[int, list[MomentTracker]], None] | None,
-        ) -> list[MomentTracker]:
-            cfg = ctx.cfg
-            setup_devices(cfg, progress=False)
-            modules = cfg.modules
-
-            assert update_hook is not None
-
-            prog = ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
-                    Readout("readout", modules.readout),
-                ],
-                sweep=[("ge", 2)],
-            )
-            tracker = MomentTracker()
-            prog.acquire(
-                soc,
-                progress=False,
-                round_hook=lambda i, _avg_d: update_hook(i, [tracker]),
-                trackers=[tracker],
-                stop_checkers=[ctx.is_stop],
-            )
-            return [tracker]
-
         with LivePlotScatter("JPA Frequency (MHz)", "Signal Difference") as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(jpa_freqs),),
-                    dtype=np.float64,
-                    on_update=lambda data: viewer.update(jpa_freqs, np.abs(data)),
-                )
-                for step in run.scan("JPA Frequency", jpa_freqs.tolist()):
+            signals_buffer = SignalBuffer(
+                (len(jpa_freqs),),
+                dtype=np.float64,
+                on_update=lambda data: viewer.update(jpa_freqs, np.abs(data)),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                for jpa_freq, step in sched.scan("JPA Frequency", jpa_freqs.tolist()):
                     if step.cfg.dev is not None:
                         set_freq_in_dev_cfg(
                             step.cfg.dev,
-                            step.value * 1e6,
+                            jpa_freq * 1e6,
                             label="jpa_rf_dev",
                         )
-                    signals_buffer[step].measure(
-                        measure_fn,
-                        raw2signal_fn=lambda raw: snr_as_signal(
-                            raw,
-                            ge_axis=0,
-                            skew_penalty=run.cfg.skew_penalty,
-                        ),
-                        pbar_n=step.cfg.rounds,
+                    setup_devices(step.cfg, progress=False)
+                    modules = step.cfg.modules
+                    tracker = MomentTracker()
+                    _ = (
+                        step.prog_builder(soc, soccfg)
+                        .add(
+                            Reset("reset", modules.reset),
+                            Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
+                            Readout("readout", modules.readout),
+                        )
+                        .declare_sweep("ge", 2)
+                        .build_and_acquire(
+                            raw2signal_fn=lambda raw: snr_as_signal(
+                                [tracker],
+                                ge_axis=0,
+                                skew_penalty=sched.cfg.skew_penalty,
+                            ),
+                            trackers=[tracker],
+                        )
                     )
                 signals = signals_buffer.array
 
-        return FreqResult(freqs=jpa_freqs, signals=signals, cfg_snapshot=cfg)
+        return FreqResult(freqs=jpa_freqs, signals=signals, cfg_snapshot=orig_cfg)
 
     @retrieve_result
     def analyze(self, result: FreqResult | None = None) -> tuple[float, Figure]:

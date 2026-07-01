@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-01
+**Last updated:** 2026-07-02 — Schedule runtime tests
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -113,7 +113,8 @@ tests/
 │           ├── test_waveform.py
 │           ├── test_registry.py
 │           └── test_util.py
-├── experiment/v2/runner/           # 高層 runner / task 狀態機測試
+├── experiment/v2/                  # Experiment runtime、persistence / analysis tests
+│   └── runner/                     # Schedule runtime 與尚未移除的 runner 狀態機測試
 ├── analysis/
 │   └── fluxdep/                    # Flux-Dependence Analysis kernel tests
 ├── mcp/                            # MCP bridge、call-log、timeout policy、remote schema / ARRAY param regression tests
@@ -177,6 +178,10 @@ result = _optimize_tree(root, [SomePass()], ctx)
 ### SNR scorer helpers
 
 `tests/experiment/v2/utils/test_snr.py` 用解析的 g/e `mean` / `covariance` / `third_moment` fixture 測 `snr_as_signal` 與 `skew_penalty`，不靠隨機 samples 或 Monte Carlo 閾值；這能直接驗證 pooled-sigma SNR、shape mismatch penalty 與 one-sided skew penalty 的公式語意。
+
+### Experiment v2 Schedule runtime tests
+
+`tests/experiment/v2/runner/test_flow.py` 覆蓋 `SignalBuffer` / `Schedule` / `ProgramBuilder` 的 host scan、program-side sweep、buffer shape、stop checker、retry、batch 與 raw conversion contract。個別 experiment module 更接近資料編排，不新增 migration-specific tests；若要測 QICK compile 行為，放到 `tests/program/v2/` 或既有 sim integration 測試。
 
 ### 補充 — `make_mock_soc()`（`lib/zcu_tools/program/v2/mocksoc.py`）
 

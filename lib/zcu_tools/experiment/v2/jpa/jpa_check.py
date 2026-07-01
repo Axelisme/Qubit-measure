@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar, Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -28,11 +28,10 @@ from zcu_tools.experiment.utils import (
     set_output_in_dev_cfg,
     setup_devices,
 )
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
-    ModularProgramV2,
     ProgramV2Cfg,
     PulseReadout,
     PulseReadoutCfg,
@@ -73,7 +72,7 @@ class CheckCfg(ProgramV2Cfg, ExpCfgModel):
 
 
 class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
-    OUTPUT_MAP = {0: "off", 1: "on"}
+    OUTPUT_MAP: ClassVar[dict[int, Literal["off", "on"]]] = {0: "off", 1: "on"}
 
     # freqs stored as Hz on disk -> scale=MHZ_TO_HZ; outputs are int JPA labels.
     AXES_SPEC = AxesSpec(
@@ -89,7 +88,7 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
 
     @record_result
     def run(self, soc, soccfg, cfg: CheckCfg) -> CheckResult:
-        cfg = deepcopy(cfg)
+        orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -100,56 +99,39 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
             {"soccfg": soccfg, "gen_ch": modules.readout.pulse_cfg.ch},
         )
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, CheckCfg],
-            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            setup_devices(cfg, progress=False)
-            modules = cfg.modules
-
-            freq_sweep = cfg.sweep.freq
-            freq_param = sweep2param("freq", freq_sweep)
-            modules.readout.set_param("freq", freq_param)
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    PulseReadout("readout", modules.readout),
-                ],
-                sweep=[("freq", freq_sweep)],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-            )
-
         with LivePlot1D(
             "Frequency (MHz)", "Magnitude", segment_kwargs=dict(num_lines=2)
         ) as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(outputs), len(freqs)),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        freqs, check_signal2real(data)
-                    ),
-                )
-                for step in run.scan("JPA on/off", outputs.tolist()):
+            signals_buffer = SignalBuffer(
+                (len(outputs), len(freqs)),
+                on_update=lambda data: viewer.update(freqs, check_signal2real(data)),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                for output, step in sched.scan("JPA on/off", outputs.tolist()):
                     if step.cfg.dev is not None:
                         set_output_in_dev_cfg(
                             step.cfg.dev,
-                            self.OUTPUT_MAP[step.value],  # type: ignore[index]
+                            self.OUTPUT_MAP[output],
                             label="jpa_rf_dev",
                         )
-                    signals_buffer[step].measure(measure_fn, pbar_n=step.cfg.rounds)
+                    setup_devices(step.cfg, progress=False)
+                    modules = step.cfg.modules
+                    modules.readout.set_param(
+                        "freq", sweep2param("freq", step.cfg.sweep.freq)
+                    )
+                    _ = (
+                        step.prog_builder(soc, soccfg)
+                        .add(
+                            Reset("reset", modules.reset),
+                            PulseReadout("readout", modules.readout),
+                        )
+                        .declare_sweep("freq", step.cfg.sweep.freq)
+                        .build_and_acquire()
+                    )
                 signals = signals_buffer.array
 
         return CheckResult(
-            outputs=outputs, freqs=freqs, signals=signals, cfg_snapshot=cfg
+            outputs=outputs, freqs=freqs, signals=signals, cfg_snapshot=orig_cfg
         )
 
     @retrieve_result

@@ -64,7 +64,7 @@ status: accepted
 - **OffMainScopes** = 三個正交、可 None 的 ambient scope,worker thread 內才 enter:
   - `figure_container` —— **routing ContextVar 與 QtLivePlotBackend 是同一 facet**:liveplot backend 的 `make_plot_frame` 就是 `plt.subplots()` 走同一 routing,且沒 active container 會 `require_current_container()` crash(co-dependent),故由同一參數一起驅動,不拆兩 scope。
   - `pbar_factory` —— `use_pbar_factory`（Progress facet 的注入點,由 owner service bound to token 後傳入）。
-  - `stop_event` —— `ActiveTask`（Cancel facet 的 off-main 實作）。
+  - `stop_event` —— run policy closure 內轉成 `schedule_stop_scope(StopSignal(...))`（Cancel facet 的 off-main 實作）。
 - `RunWorker` / `AnalyzeWorker` / `SaveDataWorker` + 三 runner **收斂成一個 generic worker + bg**;scope 下沉成 service 建好的 thunk;**cancel 判讀上移 domain service**（持 stop_event 者在 `on_done`/`on_error` 自判 finished vs cancelled+partial,worker 只回 done/failed）。
 - interactive widget 經**窄 `InteractiveHostEnv` port**(目前只含 `run_background`,由 ctrl 實作)用 bg 的 pool strategy;**不持整個 ctrl**(command-surface 才持 ctrl,passive host 收窄注入,測試塞 fake port)。
 
@@ -92,7 +92,7 @@ status: accepted
 
 - **Phase A（GUI 22 / Phase 146）** —— 抽 `BackgroundService`(OffMain strategy)+ `InteractiveHostEnv` port + `OffMainScopes`;三 worker/三 runner（`runner.py`）收斂成一個 generic worker;cancel 判讀上移 RunService。範圍 run / analyze / save / interactive。
 - **Phase B（GUI 23 / Phase 147）** —— `OperationGate` 瘦成純 Exclusion（`ensure_can_start`/`register`/`release`）;新 `operation_handles.OperationHandles`（`create` mint token、`settle`/`await_outcome`/`poll`/`cancel`/`cancel_all`/`live_count`）成 sibling;analyze/interactive 改**只拿 Handle 不拿 lease**;run/device/connect 組合兩 leaf;`ShutdownCoordinator`/`QtShutdownDriver`/`Controller.await_operation` 改吃 `OperationHandles`;`active_operation_count = handles.live_count`（現含 analyze/interactive）。
-- **device execution 統一（GUI 24 / Phase 148）** —— device 的 `_DeviceCommandWorker`/`_DeviceSetupWorker` 兩個 QThread 也收斂進 `bg.submit`（connect/disconnect 無 scope；setup 帶 progress scope，stop_event 由 work closure 捕捉、driver 直接 poll，**非** ActiveTask scope；cancel 判讀進 `DeviceService._on_setup_done`，「setup 可不可取消」改讀 `_active_kind`）。至此 run/analyze/save/interactive/device 全走同一個 OffMain strategy 機制。
+- **device execution 統一（GUI 24 / Phase 148）** —— device 的 `_DeviceCommandWorker`/`_DeviceSetupWorker` 兩個 QThread 也收斂進 `bg.submit`（connect/disconnect 無 scope；setup 帶 progress scope，stop_event 由 work closure 捕捉、driver 直接 poll，**非** experiment schedule scope；cancel 判讀進 `DeviceService._on_setup_done`，「setup 可不可取消」改讀 `_active_kind`）。至此 run/analyze/save/interactive/device 全走同一個 OffMain strategy 機制。
 - 三階段 WIRE 皆不變、皆全綠驗證。
 
 ## 範圍

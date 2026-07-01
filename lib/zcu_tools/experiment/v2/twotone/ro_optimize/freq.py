@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, TypeAlias
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -24,13 +23,12 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
     Branch,
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -67,9 +65,6 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):
     skew_penalty: float = Field(default=0.0, ge=0.0)
 
 
-RawResult: TypeAlias = list[MomentTracker]
-
-
 class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
     # freq stores Hz on disk -> scale=MHZ_TO_HZ (disk = memory * 1e6)
     AXES_SPEC = AxesSpec(
@@ -99,55 +94,37 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             {"soccfg": soccfg, "gen_ch": modules.readout.pulse_cfg.ch},
         )
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.float64], Any, FreqCfg],
-            update_hook: Callable[[int, RawResult], None] | None,
-        ) -> RawResult:
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            assert update_hook is not None, "update_hook is required for measure_fn"
-
-            freq_sweep = cfg.sweep.freq
-            freq_param = sweep2param("freq", freq_sweep)
-            modules.readout.set_param("freq", freq_param)
-
-            prog = ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    Branch("ge", [], Pulse("qub_pulse", modules.qub_pulse)),
-                    Readout("readout", modules.readout),
-                ],
-                sweep=[("ge", 2), ("freq", freq_sweep)],
-            )
-            tracker = MomentTracker()
-            prog.acquire(
-                soc,
-                progress=False,
-                round_hook=lambda i, avg_d: update_hook(i, [tracker]),
-                trackers=[tracker],
-                stop_checkers=[ctx.is_stop],
-                **(acquire_kwargs or {}),
-            )
-            return [tracker]
-
         with LivePlot1D("Frequency (MHz)", "SNR") as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(freqs),),
-                    dtype=np.float64,
-                    on_update=lambda data: viewer.update(freqs, np.abs(data)),
-                )
-                signals_buffer.measure(
-                    measure_fn,
-                    raw2signal_fn=lambda raw: snr_as_signal(
-                        raw,
-                        ge_axis=1,
-                        skew_penalty=run.cfg.skew_penalty,
-                    ),
-                    pbar_n=run.cfg.rounds,
+            signals_buffer = SignalBuffer(
+                (len(freqs),),
+                dtype=np.float64,
+                on_update=lambda data: viewer.update(freqs, np.abs(data)),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                modules = sched.cfg.modules
+                freq_sweep = sched.cfg.sweep.freq
+                freq_param = sweep2param("freq", freq_sweep)
+                modules.readout.set_param("freq", freq_param)
+                tracker = MomentTracker()
+
+                _ = (
+                    sched.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", cfg=modules.reset),
+                        Branch("ge", [], Pulse("qub_pulse", cfg=modules.qub_pulse)),
+                        Readout("readout", cfg=modules.readout),
+                    )
+                    .declare_sweep("ge", 2)
+                    .declare_sweep("freq", freq_sweep)
+                    .build_and_acquire(
+                        raw2signal_fn=lambda _raw: snr_as_signal(
+                            [tracker],
+                            ge_axis=1,
+                            skew_penalty=sched.cfg.skew_penalty,
+                        ),
+                        trackers=[tracker],
+                        **(acquire_kwargs or {}),
+                    )
                 )
                 signals = signals_buffer.array
 

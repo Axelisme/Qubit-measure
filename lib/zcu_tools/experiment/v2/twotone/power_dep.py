@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
@@ -21,13 +20,12 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.program.v2 import (
     SweepCfg,
     TwoToneCfg,
-    TwoToneProgram,
     sweep2param,
 )
 from zcu_tools.utils.process import minus_background
@@ -95,43 +93,41 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
             {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, PowerCfg],
-            update_hook: Callable | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            freq_sweep = cfg.sweep.freq
-            freq_param = sweep2param("freq", freq_sweep)
-            modules.qub_pulse.set_param("freq", freq_param)
-
-            return TwoToneProgram(soccfg, cfg, sweep=[("freq", freq_sweep)]).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-                **(acquire_kwargs or {}),
-            )
-
         with LivePlot2DwithLine(
             "Pulse Gain (a.u.)", "Frequency (MHz)", line_axis=1, num_lines=2
         ) as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(gains), len(freqs)),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        gains, freqs, gain_signal2real(data)
-                    ),
-                )
-                for step in run.scan("gain", gains.tolist()):
-                    step.cfg.modules.qub_pulse.set_param("gain", step.value)
-                    signals_buffer[step].measure(measure_fn, pbar_n=step.cfg.rounds)
-                signals = signals_buffer.array
+            signals_buffer = SignalBuffer(
+                (len(gains), len(freqs)),
+                on_update=lambda data: viewer.update(
+                    gains, freqs, gain_signal2real(data)
+                ),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                for _, step in sched.scan("gain", gains.tolist()):
+                    cfg = step.cfg
+                    modules = cfg.modules
+
+                    modules.qub_pulse.set_param("gain", step.value)
+                    freq_sweep = cfg.sweep.freq
+                    modules.qub_pulse.set_param("freq", sweep2param("freq", freq_sweep))
+
+                    _ = (
+                        step.prog_builder(soc, soccfg)
+                        .add_reset("reset", modules.reset)
+                        .add_pulse("init_pulse", modules.init_pulse)
+                        .add_pulse("qubit_pulse", modules.qub_pulse)
+                        .add_readout("readout", modules.readout)
+                        .declare_sweep("freq", freq_sweep)
+                        .build_and_acquire(
+                            **(acquire_kwargs or {}),
+                        )
+                    )
 
         return PowerResult(
-            gains=gains, freqs=freqs, signals=signals, cfg_snapshot=orig_cfg
+            gains=gains,
+            freqs=freqs,
+            signals=signals_buffer.array,
+            cfg_snapshot=orig_cfg,
         )
 
     @retrieve_result

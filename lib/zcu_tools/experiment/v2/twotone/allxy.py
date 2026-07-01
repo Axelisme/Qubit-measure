@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
@@ -24,12 +23,11 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
     ComputedPulse,
     LoadValue,
-    ModularProgramV2,
     ProgramV2Cfg,
     PulseCfg,
     Readout,
@@ -159,55 +157,6 @@ class AllXY_Exp(PersistableExperiment[AllXY_Result, AllXYCfg]):
 
         setup_devices(cfg, progress=True)
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, AllXYCfg],
-            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            I_pulse = modules.I_pulse
-            X180_pulse = modules.X180_pulse
-            X90_pulse = modules.X90_pulse
-            Y180_pulse = X180_pulse.with_updates(phase=X180_pulse.phase + 90)
-            Y90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 90)
-
-            if I_pulse is None:
-                I_pulse = X90_pulse.with_updates(gain=0.0)
-
-            # Order must match GATE_LIST = ["I", "X90", "Y90", "X180", "Y180"]
-            gate_pulses = [I_pulse, X90_pulse, Y90_pulse, X180_pulse, Y180_pulse]
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    LoadValue(
-                        "load_gate1_idx",
-                        values=ALLXY_GATE1_IDX,
-                        idx_reg="allxy_idx",
-                        val_reg="gate_idx1",
-                    ),
-                    LoadValue(
-                        "load_gate2_idx",
-                        values=ALLXY_GATE2_IDX,
-                        idx_reg="allxy_idx",
-                        val_reg="gate_idx2",
-                    ),
-                    Reset("reset", modules.reset),
-                    ComputedPulse("gate1", val_reg="gate_idx1", pulses=gate_pulses),
-                    ComputedPulse("gate2", val_reg="gate_idx2", pulses=gate_pulses),
-                    Readout("readout", modules.readout),
-                ],
-                sweep=[("allxy_idx", len(ALLXY_SEQUENCE))],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-                **(acquire_kwargs or {}),
-            )
-
         with LivePlot1D(
             xlabel="Gate",
             ylabel="Signal",
@@ -232,16 +181,52 @@ class AllXY_Exp(PersistableExperiment[AllXY_Result, AllXYCfg]):
             ax.set_xticks(np.arange(len(ALLXY_SEQUENCE)))
             ax.set_xticklabels(gate_labels, rotation=30, ha="right", fontsize=8)
 
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(ALLXY_SEQUENCE),),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        np.arange(len(ALLXY_SEQUENCE), dtype=np.float64),
-                        allxy_signal2real(data),
-                    ),
+            signals_buffer = SignalBuffer(
+                (len(ALLXY_SEQUENCE),),
+                on_update=lambda data: viewer.update(
+                    np.arange(len(ALLXY_SEQUENCE), dtype=np.float64),
+                    allxy_signal2real(data),
+                ),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                modules = sched.cfg.modules
+                I_pulse = modules.I_pulse
+                X180_pulse = modules.X180_pulse
+                X90_pulse = modules.X90_pulse
+                Y180_pulse = X180_pulse.with_updates(phase=X180_pulse.phase + 90)
+                Y90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 90)
+
+                if I_pulse is None:
+                    I_pulse = X90_pulse.with_updates(gain=0.0)
+
+                # Order must match GATE_LIST = ["I", "X90", "Y90", "X180", "Y180"]
+                gate_pulses = [I_pulse, X90_pulse, Y90_pulse, X180_pulse, Y180_pulse]
+
+                _ = (
+                    sched.prog_builder(soc, soccfg)
+                    .add(
+                        LoadValue(
+                            "load_gate1_idx",
+                            values=ALLXY_GATE1_IDX,
+                            idx_reg="allxy_idx",
+                            val_reg="gate_idx1",
+                        ),
+                        LoadValue(
+                            "load_gate2_idx",
+                            values=ALLXY_GATE2_IDX,
+                            idx_reg="allxy_idx",
+                            val_reg="gate_idx2",
+                        ),
+                        Reset("reset", cfg=modules.reset),
+                        ComputedPulse("gate1", val_reg="gate_idx1", pulses=gate_pulses),
+                        ComputedPulse("gate2", val_reg="gate_idx2", pulses=gate_pulses),
+                        Readout("readout", cfg=modules.readout),
+                    )
+                    .declare_sweep("allxy_idx", len(ALLXY_SEQUENCE))
+                    .build_and_acquire(
+                        **(acquire_kwargs or {}),
+                    )
                 )
-                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
                 signals = signals_buffer.array
 
         return AllXY_Result(

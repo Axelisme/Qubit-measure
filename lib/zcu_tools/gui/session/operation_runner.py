@@ -96,7 +96,7 @@ class OperationSpec:
       non-cancellable ops (FIT-analyze, connect).
     - ``work``: the off-main thunk. Receives the minted progress factory (or
       ``None`` if ``wants_progress`` is False) — all other ambient scopes
-      (figure_ambient, ActiveTask, …) are baked into the closure by the policy.
+      (figure_ambient, schedule stop scope, …) are baked into the closure by the policy.
     - ``run_in_pool``: selects pool vs dedicated thread in the bg executor.
     - ``on_terminal``: called on the main thread when the bg work completes or
       errors. Receives (BgResult, SettleFn); the policy performs domain side-

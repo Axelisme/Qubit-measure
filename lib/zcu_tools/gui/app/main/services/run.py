@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
-from zcu_tools.experiment.v2.runner.base import ActiveTask
+from zcu_tools.experiment.v2.runner import StopSignal, schedule_stop_scope
 from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
 from zcu_tools.gui.plotting import FigureContainer
@@ -97,10 +97,10 @@ class RunService(QObject):
         def work(factory: Any) -> Any:
             # Run is the OffMain-thread strategy with all three scopes (ADR-0026 §2):
             # figure routing+liveplot (figure_ambient, app layer), progress
-            # (progress_ambient, session layer), and cancel (ActiveTask).
+            # (progress_ambient, session layer), and cancel (Schedule StopSignal).
             with figure_ambient(live_container):
                 with progress_ambient(factory):
-                    with ActiveTask(stop_event):
+                    with schedule_stop_scope(StopSignal(stop_event)):
                         return adapter.run(request, schema)
 
         def on_terminal(bg: BgResult, settle: SettleFn) -> None:

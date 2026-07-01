@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -21,23 +19,19 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D, MultiLivePlot, make_plot_frame
 from zcu_tools.program.v2 import (
-    ModularProgramV2,
     ProgramV2Cfg,
-    Pulse,
     PulseCfg,
-    Readout,
     ReadoutCfg,
-    Reset,
     ResetCfg,
     SweepCfg,
     sweep2param,
 )
 
-from ..util import calc_populations, correct_populations
+from ..util import calc_populations, correct_populations, raw_population_signal
 
 
 def _default_population_states() -> NDArray[np.int64]:
@@ -100,7 +94,7 @@ class FreqPowerExp(PersistableExperiment[FreqPowerResult, FreqPowerCfg]):
         e_center: complex,
         radius: float,
     ) -> FreqPowerResult:
-        cfg = deepcopy(cfg)
+        orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -118,37 +112,6 @@ class FreqPowerExp(PersistableExperiment[FreqPowerResult, FreqPowerCfg]):
             "freq",
             {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
         )
-
-        def measure_fn(
-            ctx: TaskState[NDArray[np.float64], Any, FreqPowerCfg],
-            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            freq_sweep = cfg.sweep.freq
-            freq_param = sweep2param("freq", freq_sweep)
-            modules.probe_pulse.set_param("freq", freq_param)
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
-                    Pulse("probe_pulse", modules.probe_pulse),
-                    Readout("readout", modules.readout),
-                ],
-                sweep=[("freq", freq_sweep)],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-                g_center=g_center,
-                e_center=e_center,
-                ge_radius=radius,
-            )
 
         fig, axs = make_plot_frame(3, 1, plot_instant=True, figsize=(12, 6))
 
@@ -191,24 +154,37 @@ class FreqPowerExp(PersistableExperiment[FreqPowerResult, FreqPowerCfg]):
 
                 viewer.refresh()
 
-            with MeasureSession(cfg) as run:
-                buffer = run.buffer(
-                    (len(gains), len(freqs), 2),
-                    dtype=np.float64,
-                    on_update=plot_fn,
+            buffer = SignalBuffer(
+                (len(gains), len(freqs), 2),
+                dtype=np.float64,
+                on_update=plot_fn,
+            )
+            with Schedule(cfg, buffer) as sched:
+                sched.cfg.modules.probe_pulse.set_param(
+                    "freq", sweep2param("freq", sched.cfg.sweep.freq)
                 )
-                for step in run.scan("gain", gains.tolist()):
-                    step.cfg.modules.probe_pulse.set_param("gain", step.value)
-                    buffer[step].measure(
-                        measure_fn,
-                        raw2signal_fn=lambda raw: raw[0][0],
-                        pbar_n=1,
+                for gain, step in sched.scan("gain", gains.tolist()):
+                    modules = step.cfg.modules
+                    modules.probe_pulse.set_param("gain", gain)
+                    _ = (
+                        step.prog_builder(soc, soccfg)
+                        .add_reset("reset", modules.reset)
+                        .add_pulse("init_pulse", modules.init_pulse)
+                        .add_pulse("probe_pulse", modules.probe_pulse)
+                        .add_readout("readout", modules.readout)
+                        .declare_sweep("freq", step.cfg.sweep.freq)
+                        .build_and_acquire(
+                            raw2signal_fn=raw_population_signal,
+                            g_center=g_center,
+                            e_center=e_center,
+                            ge_radius=radius,
+                        )
                     )
-                signals = buffer.array
+            signals = buffer.array
 
         # record the last result
         self.last_result = FreqPowerResult(
-            gains=gains, freqs=freqs, signals=signals, cfg_snapshot=cfg
+            gains=gains, freqs=freqs, signals=signals, cfg_snapshot=orig_cfg
         )
 
         return self.last_result

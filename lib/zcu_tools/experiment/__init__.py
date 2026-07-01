@@ -20,9 +20,11 @@ from .base import (
     record_result,
     retrieve_result,
 )
+from .cfg_model import ExpCfgModel
 
 __all__ = [
     "config",
+    "ExpCfgModel",
     "AbsExperiment",
     "PersistableExperiment",
     "ExperimentProtocol",

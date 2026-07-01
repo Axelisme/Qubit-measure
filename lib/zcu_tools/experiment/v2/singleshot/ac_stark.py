@@ -2,14 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.image import NonUniformImage
-from numpy import float64
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
@@ -23,21 +21,18 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.singleshot.util import (
     calc_populations,
     correct_populations,
+    raw_population_signal,
 )
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, LivePlot2D, MultiLivePlot, make_plot_frame
 from zcu_tools.program.v2 import (
-    ModularProgramV2,
     ProgramV2Cfg,
-    Pulse,
     PulseCfg,
-    Readout,
     ReadoutCfg,
-    Reset,
     ResetCfg,
     SweepCfg,
     sweep2param,
@@ -140,7 +135,7 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
         e_center: complex,
         radius: float,
     ) -> AcStarkResult:
-        cfg = deepcopy(cfg)
+        orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -158,9 +153,6 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
         gains = sweep2array(
             gains, "gain", {"soccfg": soccfg, "gen_ch": modules.stark_pulse1.ch}
         )
-
-        freq_param = sweep2param("freq", cfg.sweep.freq)
-        modules.stark_pulse2.set_param("freq", freq_param)
 
         fig, axs = make_plot_frame(2, 2, plot_instant=True, figsize=(8, 6))
 
@@ -198,73 +190,68 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
                 cur_1d=make_plotter1d(axs[1][1]),
             ),
         ) as viewer:
+            env = {"idx": 0}
 
-            def measure_fn(
-                ctx: TaskState[NDArray[np.float64], Any, AcStarkCfg], update_hook
-            ) -> list[NDArray[float64]]:
-                modules = ctx.cfg.modules
-                return ModularProgramV2(
-                    soccfg,
-                    ctx.cfg,
-                    modules=[
-                        Reset("reset", modules.reset),
-                        Pulse("init_pulse", modules.init_pulse),
-                        Pulse("stark_pulse1", modules.stark_pulse1, block_mode=False),
-                        Pulse("stark_pulse2", modules.stark_pulse2),
-                        Readout("readout", modules.readout),
-                    ],
-                    sweep=[("freq", ctx.cfg.sweep.freq)],
-                ).acquire(
-                    soc,
-                    progress=False,
-                    round_hook=update_hook,
-                    stop_checkers=[ctx.is_stop],
-                    g_center=g_center,
-                    e_center=e_center,
-                    ge_radius=radius,
+            def plot_fn(data: NDArray[np.float64]) -> None:
+                i = int(env["idx"])
+
+                populations = calc_populations(data)
+
+                viewer.get_plotter("g_2d").update(
+                    gains, freqs, populations[..., 0], refresh=False
+                )
+                viewer.get_plotter("e_2d").update(
+                    gains, freqs, populations[..., 1], refresh=False
+                )
+                viewer.get_plotter("o_2d").update(
+                    gains, freqs, populations[..., 2], refresh=False
+                )
+                viewer.get_plotter("cur_1d").update(
+                    freqs, populations[i, :].T, refresh=False
                 )
 
-            with MeasureSession(cfg) as run:
+                viewer.refresh()
 
-                def plot_fn(data: NDArray[np.float64]) -> None:
-                    i = int(run.env["idx"])
-
-                    populations = calc_populations(data)
-
-                    viewer.get_plotter("g_2d").update(
-                        gains, freqs, populations[..., 0], refresh=False
-                    )
-                    viewer.get_plotter("e_2d").update(
-                        gains, freqs, populations[..., 1], refresh=False
-                    )
-                    viewer.get_plotter("o_2d").update(
-                        gains, freqs, populations[..., 2], refresh=False
-                    )
-                    viewer.get_plotter("cur_1d").update(
-                        freqs, populations[i, :].T, refresh=False
-                    )
-
-                    viewer.refresh()
-
-                buffer = run.buffer(
-                    (len(gains), len(freqs), 2),
-                    dtype=np.float64,
-                    on_update=plot_fn,
+            buffer = SignalBuffer(
+                (len(gains), len(freqs), 2),
+                dtype=np.float64,
+                on_update=plot_fn,
+            )
+            with Schedule(cfg, buffer, env_dict=env) as sched:
+                sched.cfg.modules.stark_pulse2.set_param(
+                    "freq", sweep2param("freq", sched.cfg.sweep.freq)
                 )
-                for step in run.scan("resonator gain", gains.tolist()):
-                    step.cfg.modules.stark_pulse1.set_param("gain", step.value)
-                    run.env["idx"] = step.index
-                    buffer[step].measure(
-                        measure_fn,
-                        raw2signal_fn=lambda raw: raw[0][0],
-                        pbar_n=1,
+                for gain_idx, (gain, step) in enumerate(
+                    sched.scan("resonator gain", gains.tolist())
+                ):
+                    modules = step.cfg.modules
+                    modules.stark_pulse1.set_param("gain", gain)
+                    env["idx"] = gain_idx
+                    _ = (
+                        step.prog_builder(soc, soccfg)
+                        .add_reset("reset", modules.reset)
+                        .add_pulse("init_pulse", modules.init_pulse)
+                        .add_pulse(
+                            "stark_pulse1",
+                            modules.stark_pulse1,
+                            block_mode=False,
+                        )
+                        .add_pulse("stark_pulse2", modules.stark_pulse2)
+                        .add_readout("readout", modules.readout)
+                        .declare_sweep("freq", step.cfg.sweep.freq)
+                        .build_and_acquire(
+                            raw2signal_fn=raw_population_signal,
+                            g_center=g_center,
+                            e_center=e_center,
+                            ge_radius=radius,
+                        )
                     )
-                signals = buffer.array
+            signals = buffer.array
         plt.close(fig)
 
         # Cache results
         self.last_result = AcStarkResult(
-            gains=gains, freqs=freqs, populations=signals, cfg_snapshot=cfg
+            gains=gains, freqs=freqs, populations=signals, cfg_snapshot=orig_cfg
         )
 
         return self.last_result

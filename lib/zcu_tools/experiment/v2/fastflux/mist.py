@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -24,12 +23,11 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program.v2 import (
     Join,
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -115,55 +113,38 @@ class MistExp(PersistableExperiment[MistResult, MistCfg]):
             {"soccfg": soccfg, "gen_ch": modules.mist_pulse.ch},
         )
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, MistCfg],
-            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg: MistCfg = cast(MistCfg, ctx.cfg)
-            modules = cfg.modules
-
-            flux_gain_sweep = cfg.sweep.flux_gain
-            mist_gain_sweep = cfg.sweep.mist_gain
-
-            flux_gain_param = sweep2param("flux_gain", flux_gain_sweep)
-            mist_gain_param = sweep2param("mist_gain", mist_gain_sweep)
-            modules.flux_pulse.set_param("gain", flux_gain_param)
-            modules.mist_pulse.set_param("gain", mist_gain_param)
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
-                    Join(
-                        Pulse("flux_pulse", modules.flux_pulse),
-                        Pulse("mist_pulse", modules.mist_pulse),
-                    ),
-                    Readout("readout", modules.readout),
-                ],
-                sweep=[
-                    ("flux_gain", flux_gain_sweep),
-                    ("mist_gain", mist_gain_sweep),
-                ],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-                **(acquire_kwargs or {}),
-            )
-
         with LivePlot2D("Flux Pulse Gain (a.u.)", "Mist Pulse Gain (a.u.)") as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(flux_gains), len(mist_gains)),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        flux_gains, mist_gains, mist_signal2real(data)
-                    ),
+            signals_buffer = SignalBuffer(
+                (len(flux_gains), len(mist_gains)),
+                on_update=lambda data: viewer.update(
+                    flux_gains, mist_gains, mist_signal2real(data)
+                ),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                modules = sched.cfg.modules
+                modules.flux_pulse.set_param(
+                    "gain", sweep2param("flux_gain", sched.cfg.sweep.flux_gain)
                 )
-                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
+                modules.mist_pulse.set_param(
+                    "gain", sweep2param("mist_gain", sched.cfg.sweep.mist_gain)
+                )
+                _ = (
+                    sched.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", modules.reset),
+                        Pulse("init_pulse", modules.init_pulse),
+                        Join(
+                            Pulse("flux_pulse", modules.flux_pulse),
+                            Pulse("mist_pulse", modules.mist_pulse),
+                        ),
+                        Readout("readout", modules.readout),
+                    )
+                    .declare_sweep("flux_gain", sched.cfg.sweep.flux_gain)
+                    .declare_sweep("mist_gain", sched.cfg.sweep.mist_gain)
+                    .build_and_acquire(
+                        **(acquire_kwargs or {}),
+                    )
+                )
                 signals = signals_buffer.array
 
         return MistResult(flux_gains, mist_gains, signals, cfg_snapshot=orig_cfg)

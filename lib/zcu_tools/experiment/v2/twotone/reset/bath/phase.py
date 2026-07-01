@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
@@ -21,13 +20,12 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
     BathReset,
     BathResetCfg,
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -100,42 +98,31 @@ class PhaseExp(PersistableExperiment[PhaseResult, PhaseCfg]):
             },
         )
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, PhaseCfg],
-            update_hook: Callable | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            modules = cfg.modules
-            phase_param = sweep2param("phase", cfg.sweep.phase)
-            modules.tested_reset.set_param("pi2_phase", phase_param)
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                sweep=[("phase", cfg.sweep.phase)],
-                modules=[
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
-                    BathReset("tested_reset", modules.tested_reset),
-                    Readout("readout", modules.readout),
-                ],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-                **(acquire_kwargs or {}),
-            )
-
         with LivePlot1D("Phase (deg)", "Signal (a.u.)") as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(phases),),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        phases, bathreset_signal2real(data)
-                    ),
+            signals_buffer = SignalBuffer(
+                (len(phases),),
+                on_update=lambda data: viewer.update(
+                    phases, bathreset_signal2real(data)
+                ),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                modules = sched.cfg.modules
+                modules.tested_reset.set_param(
+                    "pi2_phase", sweep2param("phase", sched.cfg.sweep.phase)
                 )
-                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
+                _ = (
+                    sched.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", modules.reset),
+                        Pulse("init_pulse", modules.init_pulse),
+                        BathReset("tested_reset", modules.tested_reset),
+                        Readout("readout", modules.readout),
+                    )
+                    .declare_sweep("phase", sched.cfg.sweep.phase)
+                    .build_and_acquire(
+                        **(acquire_kwargs or {}),
+                    )
+                )
                 signals = signals_buffer.array
 
         return PhaseResult(phases, signals, cfg_snapshot=orig_cfg)

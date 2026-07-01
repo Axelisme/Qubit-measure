@@ -23,13 +23,12 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
     Branch,
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -95,51 +94,36 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
             {"soccfg": soccfg, "ro_ch": readout_cfg.ro_cfg.ro_ch},
         )
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.float64], Any, LengthCfg], update_hook
-        ):
-            cfg = ctx.cfg
-            modules = cfg.modules
-            modules.readout.set_param("length", lengths.max() + 0.11)
-
-            prog = ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    Branch("ge", [], Pulse("qub_pulse", modules.qub_pulse)),
-                    PulseReadout("readout", modules.readout),
-                ],
-                sweep=[("ge", 2)],
-            )
-            tracker = MomentTracker()
-            prog.acquire(
-                soc,
-                progress=False,
-                round_hook=lambda i, avg_d: update_hook(i, [tracker]),
-                trackers=[tracker],
-                stop_checkers=[ctx.is_stop],
-                **(acquire_kwargs or {}),
-            )
-            return [tracker]
-
         with LivePlot1D("Readout Length (us)", "SNR") as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(lengths),),
-                    dtype=np.float64,
-                    on_update=lambda data: viewer.update(lengths, np.abs(data)),
-                )
-                for step in run.scan("length", lengths.tolist()):
-                    step.cfg.modules.readout.set_param("ro_length", step.value)
-                    signals_buffer[step].measure(
-                        measure_fn,
-                        raw2signal_fn=lambda raw: snr_as_signal(
-                            raw,
-                            ge_axis=1,
-                            skew_penalty=run.cfg.skew_penalty,
-                        ),
-                        pbar_n=step.cfg.rounds,
+            signals_buffer = SignalBuffer(
+                (len(lengths),),
+                dtype=np.float64,
+                on_update=lambda data: viewer.update(lengths, np.abs(data)),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                for _, step in sched.scan("length", lengths.tolist()):
+                    modules = step.cfg.modules
+                    modules.readout.set_param("ro_length", step.value)
+                    modules.readout.set_param("length", lengths.max() + 0.11)
+                    tracker = MomentTracker()
+
+                    _ = (
+                        step.prog_builder(soc, soccfg)
+                        .add(
+                            Reset("reset", cfg=modules.reset),
+                            Branch("ge", [], Pulse("qub_pulse", cfg=modules.qub_pulse)),
+                            PulseReadout("readout", cfg=modules.readout),
+                        )
+                        .declare_sweep("ge", 2)
+                        .build_and_acquire(
+                            raw2signal_fn=lambda _raw: snr_as_signal(
+                                [tracker],
+                                ge_axis=1,
+                                skew_penalty=step.cfg.skew_penalty,
+                            ),
+                            trackers=[tracker],
+                            **(acquire_kwargs or {}),
+                        )
                     )
                 signals = signals_buffer.array
 

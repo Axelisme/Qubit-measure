@@ -5,10 +5,10 @@ import numpy as np
 import pytest
 from zcu_tools.experiment.v2.runner.base import (
     AbsTask,
-    ActiveTask,
     TaskHandle,
     run_task,
 )
+from zcu_tools.experiment.v2.runner.schedule import StopSignal, schedule_stop_scope
 from zcu_tools.experiment.v2.runner.state import Result, TaskState
 
 from .conftest import DictCfg
@@ -88,25 +88,7 @@ def test_task_handle_cancel_and_is_cancelled():
     assert flag.is_set()
 
 
-def test_active_task_provides_handle_and_clears_on_exit():
-    import zcu_tools.experiment.v2.runner.base as base_mod
-
-    event = threading.Event()
-    with ActiveTask(event) as handle:
-        assert base_mod._current_stop_flag is event
-        assert not handle.is_cancelled()
-
-    assert base_mod._current_stop_flag is None
-
-
-def test_active_task_nested_raises():
-    with ActiveTask(threading.Event()):
-        with pytest.raises(RuntimeError, match="nested"):
-            with ActiveTask(threading.Event()):
-                pass
-
-
-def test_run_task_uses_active_task_stop_flag():
+def test_run_task_uses_explicit_stop_flag():
     t = _mock_task()
     seen_stop: list[bool] = []
 
@@ -116,14 +98,13 @@ def test_run_task_uses_active_task_stop_flag():
     t.run.side_effect = _run
 
     event = threading.Event()
-    with ActiveTask(event) as handle:
-        handle.cancel()
-        run_task(t, init_cfg=DictCfg())
+    event.set()
+    run_task(t, init_cfg=DictCfg(), stop_flag=event)
 
     assert seen_stop == [True]
 
 
-def test_run_task_explicit_stop_flag_overrides_active_task():
+def test_run_task_uses_schedule_stop_scope_when_stop_flag_omitted():
     t = _mock_task()
     seen_stop: list[bool] = []
 
@@ -132,12 +113,12 @@ def test_run_task_explicit_stop_flag_overrides_active_task():
 
     t.run.side_effect = _run
 
-    explicit_flag = threading.Event()
-    with ActiveTask(threading.Event()):
-        # explicit_flag is not set; ActiveTask's flag is irrelevant
-        run_task(t, init_cfg=DictCfg(), stop_flag=explicit_flag)
+    stop = StopSignal()
+    stop.set_stop()
+    with schedule_stop_scope(stop):
+        run_task(t, init_cfg=DictCfg())
 
-    assert seen_stop == [False]
+    assert seen_stop == [True]
 
 
 # ------------------------------------------------------------------

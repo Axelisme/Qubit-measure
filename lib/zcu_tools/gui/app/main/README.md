@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-01 - tab action boundary
+**Last updated:** 2026-07-02 - Schedule stop scope
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -58,7 +58,7 @@ Key ownership rules:
 2. The tab owns a cfg editor draft backed by `LiveModel`.
 3. `GuardService` validates static preconditions and materializes a permit.
 4. The operation policy builds worker thunks with the needed ambient scopes:
-   plotting, progress, and `ActiveTask` cancellation.
+   plotting, progress, and `Schedule` cancellation.
 5. `BackgroundRunner` executes blocking work off the Qt main thread and marshals
    terminal callbacks back to the main thread.
 6. State write ports record run/analyze/post-analyze results and bump versions.
@@ -99,8 +99,11 @@ hand-write those values.
   products such as figures or fit summaries are read through typed getters.
 
 Cancellation is operation-specific through the registered cancel hook. Run
-cancellation sets the `ActiveTask` stop event; experiments that call QICK through
-the task runner pass `stop_checkers=[ctx.is_stop]` into `acquire()`.
+cancellation sets the operation `stop_event`; worker thunks expose it to
+Schedule-based experiments through `schedule_stop_scope(StopSignal(stop_event))`,
+so `ProgramBuilder` and `Schedule.repeat/scan/batch` observe Stop without a
+global task runner context. Legacy Task-tree executors still use explicit
+`run_task(..., stop_flag=...)` until that path is migrated away.
 
 ## Progress And Plotting
 

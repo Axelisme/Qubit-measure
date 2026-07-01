@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -22,11 +22,10 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D, LivePlot2DwithLine
 from zcu_tools.program.v2 import (
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -91,15 +90,10 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         tag="twotone/reset/dual_tone/freq",
     )
 
-    @record_result
     def run_soft(
-        self,
-        soc,
-        soccfg,
-        cfg: FreqCfg,
-        *,
-        acquire_kwargs: dict[str, Any] | None = None,
+        self, soc, soccfg, cfg: FreqCfg, *, acquire_kwargs: dict[str, Any] | None = None
     ) -> FreqResult:
+        orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -119,53 +113,38 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             allow_array=True,
         )
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, FreqCfg],
-            update_hook: Callable | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            freq1_param = sweep2param("freq1", cfg.sweep.freq1)
-            modules.tested_reset.set_param("freq1", freq1_param)
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                sweep=[("freq1", cfg.sweep.freq1)],
-                modules=[
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
-                    TwoPulseReset("tested_reset", modules.tested_reset),
-                    Readout("readout", modules.readout),
-                ],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-                **(acquire_kwargs or {}),
-            )
-
         with LivePlot2DwithLine(
             "Frequency1 (MHz)", "Frequency2 (MHz)", line_axis=0
         ) as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(freqs1), len(freqs2)),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        freqs1, freqs2, dual_reset_signal2real(data)
-                    ),
-                )
-                for step in run.scan("freq2", freqs2.tolist()):
-                    step.cfg.modules.tested_reset.set_param("freq2", step.value)
-                    signals_buffer[:, step].measure(measure_fn, pbar_n=step.cfg.rounds)
-                signals = signals_buffer.array
+            signals_buffer = SignalBuffer(
+                (len(freqs2), len(freqs1)),
+                on_update=lambda data: viewer.update(
+                    freqs1, freqs2, dual_reset_signal2real(data.T)
+                ),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                for freq2, step in sched.scan("freq2", freqs2.tolist()):
+                    modules = step.cfg.modules
+                    modules.tested_reset.set_param("freq2", freq2)
+                    modules.tested_reset.set_param(
+                        "freq1", sweep2param("freq1", step.cfg.sweep.freq1)
+                    )
+                    _ = (
+                        step.prog_builder(soc, soccfg)
+                        .add(
+                            Reset("reset", modules.reset),
+                            Pulse("init_pulse", modules.init_pulse),
+                            TwoPulseReset("tested_reset", modules.tested_reset),
+                            Readout("readout", modules.readout),
+                        )
+                        .declare_sweep("freq1", step.cfg.sweep.freq1)
+                        .build_and_acquire(
+                            **(acquire_kwargs or {}),
+                        )
+                    )
 
-        return FreqResult(freqs1, freqs2, signals, cfg_snapshot=cfg)
+        return FreqResult(freqs1, freqs2, signals_buffer.array.T, cfg_snapshot=orig_cfg)
 
-    @record_result
     def run_hard(
         self,
         soc,
@@ -174,6 +153,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         *,
         acquire_kwargs: dict[str, Any] | None = None,
     ) -> FreqResult:
+        orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -189,50 +169,41 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             {"soccfg": soccfg, "gen_ch": reset_cfg.pulse2_cfg.ch},
         )
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, FreqCfg],
-            update_hook: Callable | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            modules = cfg.modules
+        with LivePlot2D("Frequency1 (MHz)", "Frequency2 (MHz)") as viewer:
+            signals_buffer = SignalBuffer(
+                (len(freqs1), len(freqs2)),
+                on_update=lambda data: viewer.update(
+                    freqs1, freqs2, dual_reset_signal2real(data)
+                ),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                modules = sched.cfg.modules
+                modules.tested_reset.set_param(
+                    "freq1", sweep2param("freq1", sched.cfg.sweep.freq1)
+                )
+                modules.tested_reset.set_param(
+                    "freq2", sweep2param("freq2", sched.cfg.sweep.freq2)
+                )
+                _ = (
+                    sched.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", modules.reset),
+                        Pulse("init_pulse", modules.init_pulse),
+                        TwoPulseReset("tested_reset", modules.tested_reset),
+                        Readout("readout", modules.readout),
+                    )
+                    .declare_sweep("freq1", sched.cfg.sweep.freq1)
+                    .declare_sweep("freq2", sched.cfg.sweep.freq2)
+                    .build_and_acquire(
+                        **(acquire_kwargs or {}),
+                    )
+                )
 
-            freq1_param = sweep2param("freq1", cfg.sweep.freq1)
-            freq2_param = sweep2param("freq2", cfg.sweep.freq2)
-            modules.tested_reset.set_param("freq1", freq1_param)
-            modules.tested_reset.set_param("freq2", freq2_param)
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                sweep=[("freq1", cfg.sweep.freq1), ("freq2", cfg.sweep.freq2)],
-                modules=[
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
-                    TwoPulseReset("tested_reset", modules.tested_reset),
-                    Readout("readout", modules.readout),
-                ],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-                **(acquire_kwargs or {}),
+            return FreqResult(
+                freqs1, freqs2, signals_buffer.array, cfg_snapshot=orig_cfg
             )
 
-        with LivePlot2D("Frequency1 (MHz)", "Frequency2 (MHz)") as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(freqs1), len(freqs2)),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        freqs1, freqs2, dual_reset_signal2real(data)
-                    ),
-                )
-                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
-                signals = signals_buffer.array
-
-        return FreqResult(freqs1, freqs2, signals, cfg_snapshot=cfg)
-
+    @record_result
     def run(
         self,
         soc,

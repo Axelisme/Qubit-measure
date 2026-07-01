@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
@@ -22,11 +22,10 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -81,13 +80,9 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
 
     @record_result
     def run(
-        self,
-        soc,
-        soccfg,
-        cfg: FreqCfg,
-        *,
-        acquire_kwargs: dict[str, Any] | None = None,
+        self, soc, soccfg, cfg: FreqCfg, *, acquire_kwargs: dict[str, Any] | None = None
     ) -> FreqResult:
+        orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -98,46 +93,32 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             {"soccfg": soccfg, "gen_ch": reset_cfg.pulse_cfg.ch},
         )
 
-        def measure_fn(
-            ctx: TaskState, update_hook: Callable | None
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            freq_param = sweep2param("freq", cfg.sweep.freq)
-            modules.tested_reset.set_param("freq", freq_param)
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                sweep=[("freq", cfg.sweep.freq)],
-                modules=[
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
-                    PulseReset("tested_reset", modules.tested_reset),
-                    Readout("readout", modules.readout),
-                ],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-                **(acquire_kwargs or {}),
-            )
-
         with LivePlot1D("Frequency (MHz)", "Amplitude") as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(freqs),),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        freqs, reset_signal2real(data)
-                    ),
+            signals_buffer = SignalBuffer(
+                (len(freqs),),
+                on_update=lambda data: viewer.update(freqs, reset_signal2real(data)),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                modules = sched.cfg.modules
+                modules.tested_reset.set_param(
+                    "freq", sweep2param("freq", sched.cfg.sweep.freq)
                 )
-                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
+                _ = (
+                    sched.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", modules.reset),
+                        Pulse("init_pulse", modules.init_pulse),
+                        PulseReset("tested_reset", modules.tested_reset),
+                        Readout("readout", modules.readout),
+                    )
+                    .declare_sweep("freq", sched.cfg.sweep.freq)
+                    .build_and_acquire(
+                        **(acquire_kwargs or {}),
+                    )
+                )
                 signals = signals_buffer.array
 
-        return FreqResult(freqs, signals, cfg_snapshot=cfg)
+        return FreqResult(freqs, signals, cfg_snapshot=orig_cfg)
 
     @retrieve_result
     def analyze(self, result: FreqResult | None = None) -> tuple[float, float, Figure]:

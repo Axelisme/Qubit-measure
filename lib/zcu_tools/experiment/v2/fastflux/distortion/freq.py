@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -24,12 +23,11 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program.v2 import (
     Join,
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -131,57 +129,39 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             freq_sweep, "freq", {"soccfg": soccfg, "gen_ch": qub_pulse.ch}
         )
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, FreqCfg],
-            update_hook: Callable | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg: FreqCfg = cast(FreqCfg, ctx.cfg)
-            modules = cfg.modules
-
-            length_sweep = cfg.sweep.length
-            freq_sweep = cfg.sweep.freq
-
-            length_params = sweep2param("length", length_sweep)
-            freq_params = sweep2param("freq", freq_sweep)
-            modules.qub_pulse.set_param("freq", freq_params)
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    Join(
-                        Pulse("flux_pulse", modules.flux_pulse),
-                        [
-                            SoftDelay("wait_time", delay=length_params),
-                            Pulse("qub_pulse", modules.qub_pulse),
-                        ],
-                        SoftDelay("readout_t", cfg.readout_t),
-                    ),
-                    Readout("readout", modules.readout),
-                ],
-                sweep=[
-                    ("length", length_sweep),
-                    ("freq", freq_sweep),
-                ],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-                **(acquire_kwargs or {}),
-            )
-
         with LivePlot2D("Time (us)", "Frequency (MHz)") as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(lengths), len(freqs)),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        lengths, freqs, freq_signal2real(data)
-                    ),
+            signals_buffer = SignalBuffer(
+                (len(lengths), len(freqs)),
+                on_update=lambda data: viewer.update(
+                    lengths, freqs, freq_signal2real(data)
+                ),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                modules = sched.cfg.modules
+                length_param = sweep2param("length", sched.cfg.sweep.length)
+                modules.qub_pulse.set_param(
+                    "freq", sweep2param("freq", sched.cfg.sweep.freq)
                 )
-                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
+                _ = (
+                    sched.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", modules.reset),
+                        Join(
+                            Pulse("flux_pulse", modules.flux_pulse),
+                            [
+                                SoftDelay("wait_time", delay=length_param),
+                                Pulse("qub_pulse", modules.qub_pulse),
+                            ],
+                            SoftDelay("readout_t", sched.cfg.readout_t),
+                        ),
+                        Readout("readout", modules.readout),
+                    )
+                    .declare_sweep("length", sched.cfg.sweep.length)
+                    .declare_sweep("freq", sched.cfg.sweep.freq)
+                    .build_and_acquire(
+                        **(acquire_kwargs or {}),
+                    )
+                )
                 signals = signals_buffer.array
 
         return FreqResult(lengths, freqs, signals, cfg_snapshot=orig_cfg)

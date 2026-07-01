@@ -22,12 +22,11 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
     Delay,
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -114,59 +113,48 @@ class T2RamseyExp(PersistableExperiment[T2RamseyResult, T2RamseyCfg]):
         else:
             true_detune = 0.0
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, T2RamseyCfg], update_hook
-        ):
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            length_sweep = cfg.sweep.length
-            length_param = sweep2param("length", length_sweep)
-            detune_param = 360 * detune * length_param
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    Pulse("pi2_pulse1", modules.pi2_pulse),
-                    Delay("t2_delay", delay=length_param),
-                    Pulse(
-                        name="pi2_pulse2",
-                        cfg=modules.pi2_pulse.with_updates(
-                            phase=modules.pi2_pulse.phase + detune_param
-                        ),
-                    ),
-                    Readout("readout", modules.readout),
-                ],
-                sweep=[("length", length_sweep)],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-                **(acquire_kwargs or {}),
-            )
-
         title = f"T2 Ramsey - detune {detune:.2f} MHz"
         with LivePlot1D(
             "Time (us)", "Real Signal", segment_kwargs={"title": title}
         ) as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(lengths),),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        lengths, t2ramsey_signal2real(data)
-                    ),
+            signals_buffer = SignalBuffer(
+                (len(lengths),),
+                on_update=lambda data: viewer.update(
+                    lengths, t2ramsey_signal2real(data)
+                ),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                cfg = sched.cfg
+                modules = cfg.modules
+
+                length_sweep = cfg.sweep.length
+                length_param = sweep2param("length", length_sweep)
+                detune_param = 360 * detune * length_param
+
+                _ = (
+                    sched.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", modules.reset),
+                        Pulse("pi2_pulse1", modules.pi2_pulse),
+                        Delay("t2_delay", delay=length_param),
+                        Pulse(
+                            name="pi2_pulse2",
+                            cfg=modules.pi2_pulse.with_updates(
+                                phase=modules.pi2_pulse.phase + detune_param
+                            ),
+                        ),
+                        Readout("readout", modules.readout),
+                    )
+                    .declare_sweep("length", length_sweep)
+                    .build_and_acquire(
+                        **(acquire_kwargs or {}),
+                    )
                 )
-                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
-                signals = signals_buffer.array
 
         # record result
         return T2RamseyResult(
             times=lengths,
-            signals=signals,
+            signals=signals_buffer.array,
             cfg_snapshot=orig_cfg,
             true_activate_detune=true_detune,
         )

@@ -1,3 +1,4 @@
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Optional, cast
 
@@ -22,17 +23,13 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, setup_devices
-from zcu_tools.experiment.v2.runner import (
-    MeasureSession,
-    TaskState,
-)
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.liveplot import LivePlotScatter, MultiLivePlot, instant_plot
 from zcu_tools.liveplot.backend import close_figure
 from zcu_tools.program.v2 import (
     Branch,
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -271,11 +268,13 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
         num_points: int,
         acquire_kwargs: dict[str, Any] | None = None,
     ) -> AutoOptResult:
-        setup_devices(cfg, progress=True)
+        orig_cfg = deepcopy(cfg)
+        run_cfg = deepcopy(cfg)
+        setup_devices(run_cfg, progress=True)
 
-        freq_sweep = cfg.sweep.freq
-        gain_sweep = cfg.sweep.gain
-        len_sweep = cfg.sweep.length
+        freq_sweep = run_cfg.sweep.freq
+        gain_sweep = run_cfg.sweep.gain
+        len_sweep = run_cfg.sweep.length
 
         optimizer = ReadoutOptimizer(freq_sweep, gain_sweep, len_sweep, num_points)
 
@@ -313,66 +312,42 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
                 ),
             ),
         ) as viewer:
+            env: dict[str, Any] = {}
 
-            def measure_fn(
-                ctx: TaskState[NDArray[np.float64], Any, AutoOptCfg], update_hook
-            ):
-                modules = ctx.cfg.modules
-                prog = ModularProgramV2(
-                    soccfg,
-                    ctx.cfg,
-                    modules=[
-                        Reset("reset", modules.reset),
-                        Branch("ge", [], Pulse("qub_pulse", modules.qub_pulse)),
-                        Readout("readout", modules.readout),
-                    ],
-                    sweep=[("ge", 2)],
+            def plot_fn(data: NDArray[np.float64]) -> None:
+                idx = int(env["index"])
+                snrs = np.abs(data)  # (num_points, )
+
+                cur_freq, cur_gain, cur_len = params[idx, :]
+
+                fig.suptitle(
+                    f"Iteration {idx}, Frequency: {1e-3 * cur_freq:.4g} (GHz), Gain: {cur_gain:.2g} (a.u.), Length: {cur_len:.2g} (us)"
                 )
-                tracker = MomentTracker()
-                prog.acquire(
-                    soc,
-                    progress=False,
-                    round_hook=lambda i, avg_d: update_hook(i, [tracker]),
-                    trackers=[tracker],
-                    stop_checkers=[ctx.is_stop],
-                    **(acquire_kwargs or {}),
+
+                viewer.get_plotter("iter_scatter").update(
+                    np.arange(num_points), snrs, refresh=False
                 )
-                return [tracker]
-
-            with MeasureSession(cfg) as run:
-
-                def plot_fn(data: NDArray[np.float64]) -> None:
-                    idx = int(run.env["index"])
-                    snrs = np.abs(data)  # (num_points, )
-
-                    cur_freq, cur_gain, cur_len = params[idx, :]
-
-                    fig.suptitle(
-                        f"Iteration {idx}, Frequency: {1e-3 * cur_freq:.4g} (GHz), Gain: {cur_gain:.2g} (a.u.), Length: {cur_len:.2g} (us)"
-                    )
-
-                    viewer.get_plotter("iter_scatter").update(
-                        np.arange(num_points), snrs, refresh=False
-                    )
-                    viewer.get_plotter("freq_scatter").update(
-                        params[:, 0], snrs, refresh=False
-                    )
-                    viewer.get_plotter("gain_scatter").update(
-                        params[:, 1], snrs, refresh=False
-                    )
-                    viewer.get_plotter("len_scatter").update(
-                        params[:, 2], snrs, refresh=False
-                    )
-                    viewer.refresh()
-
-                signals_buffer = run.buffer(
-                    (num_points,),
-                    dtype=np.float64,
-                    on_update=plot_fn,
+                viewer.get_plotter("freq_scatter").update(
+                    params[:, 0], snrs, refresh=False
                 )
-                for step in run.scan("Iteration", range(num_points)):
-                    idx = step.index
-                    run.env["index"] = idx
+                viewer.get_plotter("gain_scatter").update(
+                    params[:, 1], snrs, refresh=False
+                )
+                viewer.get_plotter("len_scatter").update(
+                    params[:, 2], snrs, refresh=False
+                )
+                viewer.refresh()
+
+            signals_buffer = SignalBuffer(
+                (num_points,),
+                dtype=np.float64,
+                on_update=plot_fn,
+            )
+            with Schedule(run_cfg, signals_buffer, env_dict=env) as sched:
+                for idx, (_, step) in enumerate(
+                    sched.scan("Iteration", range(num_points))
+                ):
+                    sched.env["index"] = idx
 
                     last_snr = None
                     if idx > 0:
@@ -380,7 +355,7 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
                     cur_params = optimizer.next_params(idx, last_snr)
 
                     if cur_params is None:
-                        run.set_stop()
+                        sched.set_stop()
                         break
 
                     params[idx, :] = cur_params
@@ -388,20 +363,30 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
                     modules.readout.set_param("freq", cur_params[0])
                     modules.readout.set_param("gain", cur_params[1])
                     modules.readout.set_param("length", cur_params[2])
-                    signals_buffer[step].measure(
-                        measure_fn,
-                        raw2signal_fn=lambda raw: snr_as_signal(
-                            raw,
-                            ge_axis=1,
-                            skew_penalty=run.cfg.skew_penalty,
-                        ),
-                        pbar_n=step.cfg.rounds,
+                    tracker = MomentTracker()
+                    _ = (
+                        step.prog_builder(soc, soccfg)
+                        .add(
+                            Reset("reset", cfg=modules.reset),
+                            Branch("ge", [], Pulse("qub_pulse", cfg=modules.qub_pulse)),
+                            Readout("readout", cfg=modules.readout),
+                        )
+                        .declare_sweep("ge", 2)
+                        .build_and_acquire(
+                            raw2signal_fn=lambda _raw: snr_as_signal(
+                                [tracker],
+                                ge_axis=1,
+                                skew_penalty=sched.cfg.skew_penalty,
+                            ),
+                            trackers=[tracker],
+                            **(acquire_kwargs or {}),
+                        )
                     )
                 signals = signals_buffer.array
         close_figure(fig)
 
         # record the last result
-        self.last_result = AutoOptResult(params, signals, cfg_snapshot=cfg)
+        self.last_result = AutoOptResult(params, signals, cfg_snapshot=orig_cfg)
 
         return self.last_result
 

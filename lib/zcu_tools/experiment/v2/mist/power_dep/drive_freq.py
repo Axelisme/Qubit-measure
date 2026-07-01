@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
@@ -25,11 +24,10 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program.v2 import (
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -112,48 +110,35 @@ class DriveFreqExp(PersistableExperiment[DriveFreqResult, DriveFreqCfg]):
             gain_sweep, "gain", {"soccfg": soccfg, "gen_ch": probe_pulse.ch}
         )
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, DriveFreqCfg],
-            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            freq_sweep = cfg.sweep.freq
-            gain_sweep = cfg.sweep.gain
-            freq_param = sweep2param("freq", freq_sweep)
-            gain_param = sweep2param("gain", gain_sweep)
-            modules.probe_pulse.set_param("freq", freq_param)
-            modules.probe_pulse.set_param("gain", gain_param)
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
-                    Pulse("probe_pulse", modules.probe_pulse),
-                    Readout("readout", modules.readout),
-                ],
-                sweep=[("freq", freq_sweep), ("gain", gain_sweep)],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-                **(acquire_kwargs or {}),
-            )
-
         with LivePlot2D("Pulse frequency (MHz)", "Pulse gain (a.u.)") as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(freqs), len(gains)),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        freqs, gains, drivefreq_signal2real(data)
-                    ),
+            signals_buffer = SignalBuffer(
+                (len(freqs), len(gains)),
+                on_update=lambda data: viewer.update(
+                    freqs, gains, drivefreq_signal2real(data)
+                ),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                modules = sched.cfg.modules
+                modules.probe_pulse.set_param(
+                    "freq", sweep2param("freq", sched.cfg.sweep.freq)
                 )
-                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
+                modules.probe_pulse.set_param(
+                    "gain", sweep2param("gain", sched.cfg.sweep.gain)
+                )
+                _ = (
+                    sched.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", modules.reset),
+                        Pulse("init_pulse", modules.init_pulse),
+                        Pulse("probe_pulse", modules.probe_pulse),
+                        Readout("readout", modules.readout),
+                    )
+                    .declare_sweep("freq", sched.cfg.sweep.freq)
+                    .declare_sweep("gain", sched.cfg.sweep.gain)
+                    .build_and_acquire(
+                        **(acquire_kwargs or {}),
+                    )
+                )
                 signals = signals_buffer.array
 
         return DriveFreqResult(

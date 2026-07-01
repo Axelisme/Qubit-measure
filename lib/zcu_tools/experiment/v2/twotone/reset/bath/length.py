@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
@@ -25,12 +24,11 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
     BathReset,
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -104,7 +102,7 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
-        rounds = cfg.rounds  # round loop is driven by MeasureSession.repeat below
+        rounds = cfg.rounds  # round loop is driven by Schedule.repeat below
 
         length_sweep = cfg.sweep.length
         tested_reset = modules.tested_reset
@@ -120,44 +118,7 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
         orig_qub_length = tested_reset.qubit_tone_cfg.waveform.length
         length_diff = orig_res_length - orig_qub_length
 
-        prog_cache: dict[float, ModularProgramV2] = {}
-
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, LengthCfg],
-            update_hook: Callable | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            cfg.rounds = 1  # round loop is driven by the scan's .repeat("rounds", ...)
-            modules = cfg.modules
-
-            tested_reset = modules.tested_reset
-
-            phase_param = QickSweep1D("phase", 0.0, 270.0)
-            tested_reset.set_param("pi2_phase", phase_param)
-
-            length = float(tested_reset.qubit_tone_cfg.waveform.length)
-            if length not in prog_cache:
-                prog_cache[length] = ModularProgramV2(
-                    soccfg,
-                    cfg,
-                    modules=[
-                        Reset("reset", modules.reset),
-                        Pulse("init_pulse", modules.init_pulse),
-                        BathReset("tested_reset", tested_reset),
-                        Readout("readout", modules.readout),
-                    ],
-                    sweep=[
-                        ("phase", 4),  # (0, 90, 180, 270)
-                    ],
-                )
-
-            return prog_cache[length].acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-                **(acquire_kwargs or {}),
-            )
+        prog_cache: dict[float, Any] = {}
 
         def average_signals(
             signals: NDArray[np.complex128],
@@ -169,23 +130,42 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
             return mean_signals  # (lengths, 4)
 
         with LivePlot1D("Length (us)", "Signal (a.u.)") as viewer:
-            with MeasureSession(cfg) as run:
+            buffer = SignalBuffer(
+                (rounds, len(lengths), 4),
+                on_update=lambda data: viewer.update(
+                    lengths, bathreset_signal2real(average_signals(data))
+                ),
+            )
+            with Schedule(cfg, buffer) as sched:
                 length_values = lengths.tolist()
-                buffer = run.buffer(
-                    (rounds, len(lengths), 4),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        lengths, bathreset_signal2real(average_signals(data))
-                    ),
-                )
-                for rep in run.repeat("rounds", rounds):
-                    for step in rep.scan("length", length_values):
+                for _, rep in sched.repeat("rounds", rounds):
+                    for length, step in rep.scan("length", length_values):
+                        step.cfg.rounds = 1
                         modules = step.cfg.modules
-                        modules.tested_reset.set_param("qub_length", step.value)
-                        modules.tested_reset.set_param(
-                            "res_length", step.value + length_diff
+                        tested_reset = modules.tested_reset
+                        tested_reset.set_param("qub_length", length)
+                        tested_reset.set_param("res_length", length + length_diff)
+                        tested_reset.set_param(
+                            "pi2_phase", QickSweep1D("phase", 0.0, 270.0)
                         )
-                        buffer[rep.index, step].measure(measure_fn, pbar_n=1)
+
+                        cache_key = float(tested_reset.qubit_tone_cfg.waveform.length)
+                        builder = step.prog_builder(soc, soccfg)
+                        program = prog_cache.get(cache_key)
+                        if program is None:
+                            program = (
+                                builder.add(
+                                    Reset("reset", modules.reset),
+                                    Pulse("init_pulse", modules.init_pulse),
+                                    BathReset("tested_reset", tested_reset),
+                                    Readout("readout", modules.readout),
+                                )
+                                .declare_sweep("phase", 4)
+                                .build()
+                            )
+                            prog_cache[cache_key] = program
+
+                        _ = builder.run_program(program, **(acquire_kwargs or {}))
                 signals = average_signals(buffer.array)
 
         return LengthResult(

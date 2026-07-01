@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -22,23 +20,19 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
-    ModularProgramV2,
     ProgramV2Cfg,
-    Pulse,
     PulseCfg,
-    Readout,
     ReadoutCfg,
-    Reset,
     ResetCfg,
     SweepCfg,
     sweep2param,
 )
 
-from ..util import calc_populations, correct_populations
+from ..util import calc_populations, correct_populations, raw_population_signal
 
 
 def _default_population_states() -> NDArray[np.int64]:
@@ -99,7 +93,7 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
         e_center: complex,
         radius: float,
     ) -> PowerResult:
-        cfg = deepcopy(cfg)
+        orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -108,40 +102,6 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
             "gain",
             {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
         )
-
-        gain_param = sweep2param("gain", cfg.sweep.gain)
-        modules.probe_pulse.set_param("gain", gain_param)
-
-        def measure_fn(
-            ctx: TaskState[NDArray[np.float64], Any, PowerCfg],
-            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            gain_sweep = cfg.sweep.gain
-            gain_param = sweep2param("gain", gain_sweep)
-            modules.probe_pulse.set_param("gain", gain_param)
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    Pulse(name="init_pulse", cfg=modules.init_pulse),
-                    Pulse(name="probe_pulse", cfg=modules.probe_pulse),
-                    Readout("readout", modules.readout),
-                ],
-                sweep=[("gain", gain_sweep)],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-                g_center=g_center,
-                e_center=e_center,
-                ge_radius=radius,
-            )
 
         with LivePlot1D(
             "Pulse gain",
@@ -157,22 +117,33 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
         ) as viewer:
             viewer.get_ax().set_ylim(0.0, 1.0)
 
-            with MeasureSession(cfg) as run:
-                buffer = run.buffer(
-                    (len(gains), 2),
-                    dtype=np.float64,
-                    on_update=lambda data: viewer.update(
-                        gains, calc_populations(data).T
-                    ),
+            buffer = SignalBuffer(
+                (len(gains), 2),
+                dtype=np.float64,
+                on_update=lambda data: viewer.update(gains, calc_populations(data).T),
+            )
+            with Schedule(cfg, buffer) as sched:
+                run_cfg = sched.cfg
+                modules = run_cfg.modules
+                gain_sweep = run_cfg.sweep.gain
+                modules.probe_pulse.set_param("gain", sweep2param("gain", gain_sweep))
+                _ = (
+                    sched.prog_builder(soc, soccfg)
+                    .add_reset("reset", modules.reset)
+                    .add_pulse("init_pulse", modules.init_pulse)
+                    .add_pulse("probe_pulse", modules.probe_pulse)
+                    .add_readout("readout", modules.readout)
+                    .declare_sweep("gain", gain_sweep)
+                    .build_and_acquire(
+                        raw2signal_fn=raw_population_signal,
+                        g_center=g_center,
+                        e_center=e_center,
+                        ge_radius=radius,
+                    )
                 )
-                buffer.measure(
-                    measure_fn,
-                    raw2signal_fn=lambda raw: raw[0][0],
-                    pbar_n=1,
-                )
-                signals = buffer.array
+            signals = buffer.array
 
-        return PowerResult(gains=gains, signals=signals, cfg_snapshot=cfg)
+        return PowerResult(gains=gains, signals=signals, cfg_snapshot=orig_cfg)
 
     @retrieve_result
     def analyze(

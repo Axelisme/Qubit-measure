@@ -23,13 +23,13 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
-from zcu_tools.program.v2 import SweepCfg, TwoToneCfg, TwoToneProgram, sweep2param
+from zcu_tools.program.v2 import SweepCfg, TwoToneCfg, sweep2param
 from zcu_tools.program.v2.twotone import TwoToneModuleCfg
 
-from .util import calc_populations, correct_populations
+from .util import calc_populations, correct_populations, raw_population_signal
 
 
 def _default_population_states() -> NDArray[np.int64]:
@@ -83,7 +83,7 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
         e_center: complex,
         radius: float,
     ) -> LenRabiResult:
-        cfg = deepcopy(cfg)
+        orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -96,9 +96,6 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
             "time",
             {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
-
-        length_param = sweep2param("length", cfg.sweep.length)
-        modules.qub_pulse.set_param("length", length_param)
 
         with LivePlot1D(
             "Length (us)",
@@ -114,39 +111,37 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
         ) as viewer:
             viewer.get_ax().set_ylim(0.0, 1.0)
 
-            def measure_fn(
-                ctx: TaskState[NDArray[np.float64], Any, LenRabiCfg], update_hook
-            ):
-                return TwoToneProgram(
-                    soccfg,
-                    ctx.cfg,
-                    sweep=[("length", ctx.cfg.sweep.length)],
-                ).acquire(
-                    soc,
-                    progress=False,
-                    round_hook=update_hook,
-                    stop_checkers=[ctx.is_stop],
-                    g_center=g_center,
-                    e_center=e_center,
-                    ge_radius=radius,
+            buffer = SignalBuffer(
+                (len(lengths), 2),
+                dtype=np.float64,
+                on_update=lambda data: viewer.update(lengths, calc_populations(data).T),
+            )
+            with Schedule(cfg, buffer) as sched:
+                run_cfg = sched.cfg
+                modules = run_cfg.modules
+                length_sweep = run_cfg.sweep.length
+                modules.qub_pulse.set_param(
+                    "length", sweep2param("length", length_sweep)
                 )
+                _ = (
+                    sched.prog_builder(soc, soccfg)
+                    .add_reset("reset", modules.reset)
+                    .add_pulse("init_pulse", modules.init_pulse)
+                    .add_pulse("qubit_pulse", modules.qub_pulse)
+                    .add_readout("readout", modules.readout)
+                    .declare_sweep("length", length_sweep)
+                    .build_and_acquire(
+                        raw2signal_fn=raw_population_signal,
+                        g_center=g_center,
+                        e_center=e_center,
+                        ge_radius=radius,
+                    )
+                )
+            populations = buffer.array
 
-            with MeasureSession(cfg) as run:
-                buffer = run.buffer(
-                    (len(lengths), 2),
-                    dtype=np.float64,
-                    on_update=lambda data: viewer.update(
-                        lengths, calc_populations(data).T
-                    ),
-                )
-                buffer.measure(
-                    measure_fn,
-                    raw2signal_fn=lambda raw: raw[0][0],
-                    pbar_n=1,
-                )
-                populations = buffer.array
-
-        return LenRabiResult(lengths=lengths, signals=populations, cfg_snapshot=cfg)
+        return LenRabiResult(
+            lengths=lengths, signals=populations, cfg_snapshot=orig_cfg
+        )
 
     @retrieve_result
     def analyze(

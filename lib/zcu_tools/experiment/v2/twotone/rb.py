@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import IntEnum
@@ -24,13 +23,12 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
     ComputedPulse,
     LoadValue,
-    ModularProgramV2,
     ProgramV2Cfg,
     PulseCfg,
     Readout,
@@ -260,107 +258,20 @@ class RB_Exp(PersistableExperiment[RB_Result, RBCfg]):
         *,
         acquire_kwargs: dict[str, Any] | None = None,
     ) -> RB_Result:
-        cfg = deepcopy(cfg)
-        setup_devices(cfg, progress=True)
+        orig_cfg = deepcopy(cfg)
+        run_cfg = deepcopy(cfg)
+        setup_devices(run_cfg, progress=True)
 
-        depths = sweep2array(cfg.sweep.depth, allow_array=True).astype(np.int64)
+        depths = sweep2array(run_cfg.sweep.depth, allow_array=True).astype(np.int64)
 
         max_depth = int(np.max(depths))
 
-        ss = np.random.SeedSequence(cfg.seed)
+        ss = np.random.SeedSequence(run_cfg.seed)
         entropys = np.array(
-            [child.entropy for child in ss.spawn(cfg.n_seeds)], dtype=np.int64
+            [child.entropy for child in ss.spawn(run_cfg.n_seeds)], dtype=np.int64
         )
 
-        prog_cache: dict[int, ModularProgramV2] = {}
-
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, RBCfg],
-            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            seed: int = ctx.env["seed"]
-
-            if seed not in prog_cache:
-                rand_gate_seq: list[int] = ctx.env["rand_gate_seq"]
-                prefix_len_by_depth: list[int] = ctx.env["prefix_len_by_depth"]
-                recovery_gate_by_depth: list[int] = ctx.env["recovery_gate_by_depth"]
-                max_rand_len = max(prefix_len_by_depth, default=0)
-
-                Id_pulse = modules.I_pulse
-                X90_pulse = modules.X90_pulse
-                X180_pulse = modules.X180_pulse
-                MX90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 180.0)
-                Y90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 90.0)
-                Y180_pulse = X180_pulse.with_updates(phase=X180_pulse.phase + 90.0)
-                MY90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase - 90.0)
-
-                if Id_pulse is None:
-                    Id_pulse = X90_pulse.with_updates(gain=0.0)
-
-                gate_pulses = [
-                    Id_pulse,
-                    X90_pulse,
-                    X180_pulse,
-                    MX90_pulse,
-                    Y90_pulse,
-                    Y180_pulse,
-                    MY90_pulse,
-                ]
-
-                prog_cache[seed] = ModularProgramV2(
-                    soccfg,
-                    cfg,
-                    modules=[
-                        LoadValue(
-                            "load_rand_len",
-                            values=prefix_len_by_depth,
-                            idx_reg="depth_idx",
-                            val_reg="rand_len",
-                        ),
-                        LoadValue(
-                            "load_recovery_gate",
-                            values=recovery_gate_by_depth,
-                            idx_reg="depth_idx",
-                            val_reg="recovery_gate",
-                        ),
-                        Reset("reset", modules.reset),
-                        Repeat(
-                            "rand_gate_idx", "rand_len", range_hint=(0, max_rand_len)
-                        ).add_content(
-                            [
-                                LoadValue(
-                                    "load_rand_gate",
-                                    values=rand_gate_seq,
-                                    idx_reg="rand_gate_idx",
-                                    val_reg="gate_idx",
-                                ),
-                                ComputedPulse(
-                                    "basic_gate",
-                                    val_reg="gate_idx",
-                                    pulses=gate_pulses,
-                                ),
-                            ]
-                        ),
-                        ComputedPulse(
-                            "recovery_gate",
-                            val_reg="recovery_gate",
-                            pulses=gate_pulses,
-                        ),
-                        Readout("readout", modules.readout),
-                    ],
-                    sweep=[("depth_idx", len(depths))],
-                )
-
-            return prog_cache[seed].acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-                **(acquire_kwargs or {}),
-            )
+        prog_cache: dict[int, Any] = {}
 
         with LivePlot1D("Depth", "Signal") as viewer:
 
@@ -378,35 +289,121 @@ class RB_Exp(PersistableExperiment[RB_Result, RBCfg]):
                         state = GATE_EFFECT_MAP[gate][state]
                     cum_states.append(state)
 
-                step.session.env["seed"] = entropy
+                step.env["seed"] = entropy
                 rand_gate_seq, prefix_len_by_depth, recovery_gate_by_depth = (
                     build_seed_program_tables(
                         clifford_idxs.tolist(), cum_states, depths
                     )
                 )
-                step.session.env["rand_gate_seq"] = rand_gate_seq
-                step.session.env["prefix_len_by_depth"] = prefix_len_by_depth
-                step.session.env["recovery_gate_by_depth"] = recovery_gate_by_depth
+                step.env["rand_gate_seq"] = rand_gate_seq
+                step.env["prefix_len_by_depth"] = prefix_len_by_depth
+                step.env["recovery_gate_by_depth"] = recovery_gate_by_depth
 
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(entropys), len(depths)),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        depths.astype(np.float64),
-                        rb_signal2real(data),
-                    ),
-                )
-                for step in run.scan("seed", entropys.tolist()):
+            signals_buffer = SignalBuffer(
+                (len(entropys), len(depths)),
+                on_update=lambda data: viewer.update(
+                    depths.astype(np.float64),
+                    rb_signal2real(data),
+                ),
+            )
+            with Schedule(run_cfg, signals_buffer) as sched:
+                for _, step in sched.scan("seed", entropys.tolist()):
                     update_seq_seed(step)
-                    signals_buffer[step].measure(measure_fn, pbar_n=step.cfg.rounds)
+
+                    seed: int = step.env["seed"]
+                    builder = step.prog_builder(soc, soccfg)
+                    if seed not in prog_cache:
+                        modules = step.cfg.modules
+                        rand_gate_seq: list[int] = step.env["rand_gate_seq"]
+                        prefix_len_by_depth: list[int] = step.env["prefix_len_by_depth"]
+                        recovery_gate_by_depth: list[int] = step.env[
+                            "recovery_gate_by_depth"
+                        ]
+                        max_rand_len = max(prefix_len_by_depth, default=0)
+
+                        Id_pulse = modules.I_pulse
+                        X90_pulse = modules.X90_pulse
+                        X180_pulse = modules.X180_pulse
+                        MX90_pulse = X90_pulse.with_updates(
+                            phase=X90_pulse.phase + 180.0
+                        )
+                        Y90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 90.0)
+                        Y180_pulse = X180_pulse.with_updates(
+                            phase=X180_pulse.phase + 90.0
+                        )
+                        MY90_pulse = X90_pulse.with_updates(
+                            phase=X90_pulse.phase - 90.0
+                        )
+
+                        if Id_pulse is None:
+                            Id_pulse = X90_pulse.with_updates(gain=0.0)
+
+                        gate_pulses = [
+                            Id_pulse,
+                            X90_pulse,
+                            X180_pulse,
+                            MX90_pulse,
+                            Y90_pulse,
+                            Y180_pulse,
+                            MY90_pulse,
+                        ]
+
+                        prog_cache[seed] = (
+                            builder.add(
+                                LoadValue(
+                                    "load_rand_len",
+                                    values=prefix_len_by_depth,
+                                    idx_reg="depth_idx",
+                                    val_reg="rand_len",
+                                ),
+                                LoadValue(
+                                    "load_recovery_gate",
+                                    values=recovery_gate_by_depth,
+                                    idx_reg="depth_idx",
+                                    val_reg="recovery_gate",
+                                ),
+                                Reset("reset", cfg=modules.reset),
+                                Repeat(
+                                    "rand_gate_idx",
+                                    "rand_len",
+                                    range_hint=(0, max_rand_len),
+                                ).add_content(
+                                    [
+                                        LoadValue(
+                                            "load_rand_gate",
+                                            values=rand_gate_seq,
+                                            idx_reg="rand_gate_idx",
+                                            val_reg="gate_idx",
+                                        ),
+                                        ComputedPulse(
+                                            "basic_gate",
+                                            val_reg="gate_idx",
+                                            pulses=gate_pulses,
+                                        ),
+                                    ]
+                                ),
+                                ComputedPulse(
+                                    "recovery_gate",
+                                    val_reg="recovery_gate",
+                                    pulses=gate_pulses,
+                                ),
+                                Readout("readout", cfg=modules.readout),
+                            )
+                            .declare_sweep("depth_idx", len(depths))
+                            .build()
+                        )
+
+                    _ = builder.run_program(
+                        prog_cache[seed],
+                        **(acquire_kwargs or {}),
+                    )
                 signals2D = signals_buffer.array  # (n_seeds, n_depths)
 
         self.last_result = RB_Result(
             sub_seeds=entropys,
             depths=depths,
             signals2D=signals2D,
-            cfg_snapshot=cfg,
+            cfg_snapshot=orig_cfg,
         )
 
         return self.last_result

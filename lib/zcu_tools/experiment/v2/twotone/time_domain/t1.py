@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
@@ -26,14 +25,13 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, LivePlot2DwithLine
 from zcu_tools.program.v2 import (
     Delay,
     DelayAuto,
     LoadValue,
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -118,49 +116,39 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
             [soccfg.cycles2us(int(cycle)) for cycle in length_cycles], dtype=np.float64
         )
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, T1Cfg],
-            update_hook: Callable | None,
-        ):
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    LoadValue(
-                        "load_t1_delay",
-                        values=list(length_cycles),
-                        idx_reg="length_idx",
-                        val_reg="t1_delay_cycle",
-                        auto_compress=False,
-                    ),
-                    Reset("reset", modules.reset),
-                    Pulse("pi_pulse", modules.pi_pulse),
-                    DelayAuto("t1_delay", t="t1_delay_cycle"),
-                    Readout("readout", modules.readout),
-                ],
-                sweep=[("length_idx", len(length_cycles))],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-                **(acquire_kwargs or {}),
-            )
-
         with LivePlot1D("Time (us)", "Amplitude") as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(lengths),),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
-                )
-                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
-                signals = signals_buffer.array
+            signals_buffer = SignalBuffer(
+                (len(lengths),),
+                on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                cfg = sched.cfg
+                modules = cfg.modules
 
-        return T1Result(times=lengths, signals=signals, cfg_snapshot=original_cfg)
+                _ = (
+                    sched.prog_builder(soc, soccfg)
+                    .add(
+                        LoadValue(
+                            "load_t1_delay",
+                            values=list(length_cycles),
+                            idx_reg="length_idx",
+                            val_reg="t1_delay_cycle",
+                            auto_compress=False,
+                        ),
+                        Reset("reset", modules.reset),
+                        Pulse("pi_pulse", modules.pi_pulse),
+                        DelayAuto("t1_delay", t="t1_delay_cycle"),
+                        Readout("readout", modules.readout),
+                    )
+                    .declare_sweep("length_idx", len(length_cycles))
+                    .build_and_acquire(
+                        **(acquire_kwargs or {}),
+                    )
+                )
+
+        return T1Result(
+            times=lengths, signals=signals_buffer.array, cfg_snapshot=original_cfg
+        )
 
     def _run_uniform(
         self,
@@ -177,45 +165,36 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
         with LivePlot1D(
             "Time (us)", "Amplitude", segment_kwargs={"title": "T1 relaxation"}
         ) as viewer:
-
-            def measure_fn(
-                ctx: TaskState[NDArray[np.complex128], Any, T1Cfg],
-                update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
-            ) -> list[NDArray[np.float64]]:
-                modules = ctx.cfg.modules
-                length_sweep = ctx.cfg.sweep.length
+            signals_buffer = SignalBuffer(
+                (len(lengths),),
+                on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                cfg = sched.cfg
+                modules = cfg.modules
+                length_sweep = cfg.sweep.length
                 assert isinstance(length_sweep, SweepCfg), (
                     "uniform mode requires SweepCfg"
                 )
                 length_param = sweep2param("length", length_sweep)
-                return ModularProgramV2(
-                    soccfg,
-                    ctx.cfg,
-                    modules=[
+
+                _ = (
+                    sched.prog_builder(soc, soccfg)
+                    .add(
                         Reset("reset", modules.reset),
                         Pulse("pi_pulse", modules.pi_pulse),
                         Delay("t1_delay", length_param),
                         Readout("readout", modules.readout),
-                    ],
-                    sweep=[("length", length_sweep)],
-                ).acquire(
-                    soc,
-                    progress=False,
-                    round_hook=update_hook,
-                    stop_checkers=[ctx.is_stop],
-                    **(acquire_kwargs or {}),
+                    )
+                    .declare_sweep("length", length_sweep)
+                    .build_and_acquire(
+                        **(acquire_kwargs or {}),
+                    )
                 )
 
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(lengths),),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
-                )
-                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
-                signals = signals_buffer.array
-
-        return T1Result(times=lengths, signals=signals, cfg_snapshot=original_cfg)
+        return T1Result(
+            times=lengths, signals=signals_buffer.array, cfg_snapshot=original_cfg
+        )
 
     @record_result
     def run(
@@ -317,6 +296,7 @@ class T1WithToneExp(PersistableExperiment[T1Result, T1WithToneCfg]):
         *,
         acquire_kwargs: dict[str, Any] | None = None,
     ) -> T1Result:
+        orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -326,48 +306,38 @@ class T1WithToneExp(PersistableExperiment[T1Result, T1WithToneCfg]):
             {"soccfg": soccfg, "gen_ch": modules.test_pulse.ch},
         )
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, T1WithToneCfg],
-            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            length_sweep = cfg.sweep.length
-            length_param = sweep2param("length", length_sweep)
-            modules.test_pulse.set_param("length", length_param)
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    Pulse(name="pi_pulse", cfg=modules.pi_pulse),
-                    Pulse(name="test_pulse", cfg=modules.test_pulse),
-                    Readout("readout", modules.readout),
-                ],
-                sweep=[("length", length_sweep)],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-                **(acquire_kwargs or {}),
-            )
-
         with LivePlot1D(
             "Time (us)", "Amplitude", segment_kwargs={"title": "T1 relaxation"}
         ) as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(lengths),),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
-                )
-                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
-                signals = signals_buffer.array
+            signals_buffer = SignalBuffer(
+                (len(lengths),),
+                on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                cfg = sched.cfg
+                modules = cfg.modules
 
-        return T1Result(times=lengths, signals=signals, cfg_snapshot=deepcopy(cfg))
+                length_sweep = cfg.sweep.length
+                length_param = sweep2param("length", length_sweep)
+                modules.test_pulse.set_param("length", length_param)
+
+                _ = (
+                    sched.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", modules.reset),
+                        Pulse(name="pi_pulse", cfg=modules.pi_pulse),
+                        Pulse(name="test_pulse", cfg=modules.test_pulse),
+                        Readout("readout", modules.readout),
+                    )
+                    .declare_sweep("length", length_sweep)
+                    .build_and_acquire(
+                        **(acquire_kwargs or {}),
+                    )
+                )
+
+        return T1Result(
+            times=lengths, signals=signals_buffer.array, cfg_snapshot=orig_cfg
+        )
 
     @retrieve_result
     def analyze(
@@ -456,6 +426,7 @@ class ScanT1WithToneExp(PersistableExperiment[ScanT1WithToneResult, ScanT1WithTo
         *,
         acquire_kwargs: dict[str, Any] | None = None,
     ) -> ScanT1WithToneResult:
+        orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -471,53 +442,44 @@ class ScanT1WithToneExp(PersistableExperiment[ScanT1WithToneResult, ScanT1WithTo
             {"soccfg": soccfg, "gen_ch": modules.test_pulse.ch},
         )
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, ScanT1WithToneCfg],
-            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            length_sweep = cfg.sweep.length
-            length_param = sweep2param("length", length_sweep)
-            modules.test_pulse.set_param("length", length_param)
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    Pulse("pi_pulse", modules.pi_pulse),
-                    Pulse("test_pulse", modules.test_pulse),
-                    Readout("readout", modules.readout),
-                ],
-                sweep=[("length", length_sweep)],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-                **(acquire_kwargs or {}),
-            )
-
         with LivePlot2DwithLine(
             "gain", "Time (us)", line_axis=1, num_lines=5
         ) as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(gains), len(lengths)),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        gains, lengths, t1_with_tone_signal2real(data)
-                    ),
-                )
-                for step in run.scan("gain", gains.tolist()):
-                    step.cfg.modules.test_pulse.set_param("gain", step.value)
-                    signals_buffer[step].measure(measure_fn, pbar_n=step.cfg.rounds)
-                signals = signals_buffer.array
+            signals_buffer = SignalBuffer(
+                (len(gains), len(lengths)),
+                on_update=lambda data: viewer.update(
+                    gains, lengths, t1_with_tone_signal2real(data)
+                ),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                for _, step in sched.scan("gain", gains.tolist()):
+                    cfg = step.cfg
+                    modules = cfg.modules
+
+                    modules.test_pulse.set_param("gain", step.value)
+                    length_sweep = cfg.sweep.length
+                    length_param = sweep2param("length", length_sweep)
+                    modules.test_pulse.set_param("length", length_param)
+
+                    _ = (
+                        step.prog_builder(soc, soccfg)
+                        .add(
+                            Reset("reset", modules.reset),
+                            Pulse("pi_pulse", modules.pi_pulse),
+                            Pulse("test_pulse", modules.test_pulse),
+                            Readout("readout", modules.readout),
+                        )
+                        .declare_sweep("length", length_sweep)
+                        .build_and_acquire(
+                            **(acquire_kwargs or {}),
+                        )
+                    )
 
         return ScanT1WithToneResult(
-            values=gains, times=lengths, signals=signals, cfg_snapshot=deepcopy(cfg)
+            values=gains,
+            times=lengths,
+            signals=signals_buffer.array,
+            cfg_snapshot=orig_cfg,
         )
 
     @retrieve_result

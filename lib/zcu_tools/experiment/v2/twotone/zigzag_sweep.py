@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -23,12 +22,11 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program.v2 import (
     LoadValue,
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -127,70 +125,59 @@ class ZigZagScanExp(PersistableExperiment[ZigZagScanResult, ZigZagScanCfg]):
             {"soccfg": soccfg, "gen_ch": repeat_pulse.ch},
         )
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, ZigZagScanCfg],
-            update_hook: Callable | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            X90_pulse = deepcopy(modules.X90_pulse)
-            repeat_pulse = getattr(modules, repeat_on)
-            if repeat_pulse is None:
-                raise ValueError(f"Repeat on pulse {repeat_on} not found")
-
-            x_sweep = getattr(cfg.sweep, x_key)
-            assert x_sweep is not None
-            x_param = sweep2param(x_info["param_key"], x_sweep)
-            repeat_pulse.set_param(x_info["param_key"], x_param)
-
-            # Convert to plain int list: LoadValue.values expects Sequence[int],
-            # and numpy 2.x scalar types (int_) are not considered int by pyright.
-            loop_n: list[int] = [
-                int(x) for x in (2 * times if repeat_on == "X90_pulse" else times)
-            ]
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    LoadValue(
-                        "load_repeat_count",
-                        values=loop_n,
-                        idx_reg="times",
-                        val_reg="repeat_count",
-                    ),
-                    Reset("reset", modules.reset),
-                    Pulse("X90_pulse", X90_pulse),
-                    Repeat(
-                        "zigzag_loop",
-                        n="repeat_count",
-                        # int() cast: numpy scalar types are not plain int to pyright.
-                        range_hint=(int(min(times)), int(max(times))),
-                    ).add_content(Pulse(f"loop_{repeat_on}", repeat_pulse)),
-                    Readout("readout", modules.readout),
-                ],
-                sweep=[("times", len(times)), (x_key, x_sweep)],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-                **(acquire_kwargs or {}),
-            )
-
         with LivePlot2D("Times", x_info["name"]) as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(times), len(values)),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        times.astype(np.float64),
-                        values,
-                        zigzag_signal2real(data),
-                    ),
+            signals_buffer = SignalBuffer(
+                (len(times), len(values)),
+                on_update=lambda data: viewer.update(
+                    times.astype(np.float64),
+                    values,
+                    zigzag_signal2real(data),
+                ),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                modules = sched.cfg.modules
+
+                X90_pulse = deepcopy(modules.X90_pulse)
+                repeat_pulse = getattr(modules, repeat_on)
+                if repeat_pulse is None:
+                    raise ValueError(f"Repeat on pulse {repeat_on} not found")
+
+                x_sweep = getattr(sched.cfg.sweep, x_key)
+                assert x_sweep is not None
+                x_param = sweep2param(x_info["param_key"], x_sweep)
+                repeat_pulse.set_param(x_info["param_key"], x_param)
+
+                # Convert to plain int list: LoadValue.values expects Sequence[int],
+                # and numpy 2.x scalar types (int_) are not considered int by pyright.
+                loop_n: list[int] = [
+                    int(x) for x in (2 * times if repeat_on == "X90_pulse" else times)
+                ]
+
+                _ = (
+                    sched.prog_builder(soc, soccfg)
+                    .add(
+                        LoadValue(
+                            "load_repeat_count",
+                            values=loop_n,
+                            idx_reg="times",
+                            val_reg="repeat_count",
+                        ),
+                        Reset("reset", cfg=modules.reset),
+                        Pulse("X90_pulse", cfg=X90_pulse),
+                        Repeat(
+                            "zigzag_loop",
+                            n="repeat_count",
+                            # int() cast: numpy scalar types are not plain int to pyright.
+                            range_hint=(int(min(times)), int(max(times))),
+                        ).add_content(Pulse(f"loop_{repeat_on}", cfg=repeat_pulse)),
+                        Readout("readout", cfg=modules.readout),
+                    )
+                    .declare_sweep("times", len(times))
+                    .declare_sweep(x_key, x_sweep)
+                    .build_and_acquire(
+                        **(acquire_kwargs or {}),
+                    )
                 )
-                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
                 signals = signals_buffer.array
 
         return ZigZagScanResult(

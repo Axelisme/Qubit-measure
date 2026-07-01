@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
@@ -25,11 +25,10 @@ from zcu_tools.experiment.utils import (
     set_flux_in_dev_cfg,
     setup_devices,
 )
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.program.v2 import (
-    ModularProgramV2,
     ProgramV2Cfg,
     PulseReadout,
     PulseReadoutCfg,
@@ -81,7 +80,7 @@ class OneToneFluxExp(PersistableExperiment[OneToneFluxResult, OneToneFluxCfg]):
 
     @record_result
     def run(self, soc, soccfg, cfg: OneToneFluxCfg) -> OneToneFluxResult:
-        cfg = deepcopy(cfg)
+        orig_cfg = deepcopy(cfg)
         modules = cfg.modules
         jpa_flux_sweep = cfg.sweep.jpa_flux
 
@@ -93,58 +92,41 @@ class OneToneFluxExp(PersistableExperiment[OneToneFluxResult, OneToneFluxCfg]):
             allow_array=True,
         )
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, OneToneFluxCfg],
-            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            setup_devices(cfg, progress=False)
-            modules = cfg.modules
-
-            freq_sweep = cfg.sweep.freq
-            freq_param = sweep2param("freq", freq_sweep)
-            modules.readout.set_param("freq", freq_param)
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    PulseReadout("readout", modules.readout),
-                ],
-                sweep=[("freq", freq_sweep)],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-            )
-
         with LivePlot2DwithLine(
             "JPA Flux value (a.u.)",
             "Readout frequency (MHz)",
             line_axis=1,
             num_lines=5,
         ) as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(jpa_fluxs), len(freqs)),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        jpa_fluxs, freqs, np.abs(data)
-                    ),
-                )
-                for step in run.scan("JPA Flux value", jpa_fluxs.tolist()):
+            signals_buffer = SignalBuffer(
+                (len(jpa_fluxs), len(freqs)),
+                on_update=lambda data: viewer.update(jpa_fluxs, freqs, np.abs(data)),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                for jpa_flux, step in sched.scan("JPA Flux value", jpa_fluxs.tolist()):
                     set_flux_in_dev_cfg(
                         step.cfg.dev,
-                        step.value,
+                        jpa_flux,
                         label="jpa_flux_dev",
                     )
-                    signals_buffer[step].measure(measure_fn, pbar_n=step.cfg.rounds)
+                    setup_devices(step.cfg, progress=False)
+                    modules = step.cfg.modules
+                    modules.readout.set_param(
+                        "freq", sweep2param("freq", step.cfg.sweep.freq)
+                    )
+                    _ = (
+                        step.prog_builder(soc, soccfg)
+                        .add(
+                            Reset("reset", modules.reset),
+                            PulseReadout("readout", modules.readout),
+                        )
+                        .declare_sweep("freq", step.cfg.sweep.freq)
+                        .build_and_acquire()
+                    )
                 signals = signals_buffer.array
 
         return OneToneFluxResult(
-            fluxes=jpa_fluxs, freqs=freqs, signals=signals, cfg_snapshot=cfg
+            fluxes=jpa_fluxs, freqs=freqs, signals=signals, cfg_snapshot=orig_cfg
         )
 
     @retrieve_result

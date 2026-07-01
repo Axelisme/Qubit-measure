@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import cast
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -25,16 +25,14 @@ from zcu_tools.experiment.utils import (
     set_flux_in_dev_cfg,
     setup_devices,
 )
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.notebook.analysis.fluxdep.interactive import InteractiveLines
 from zcu_tools.program.v2 import (
-    ModularProgramV2,
     ProgramV2Cfg,
     PulseReadout,
     PulseReadoutCfg,
-    Reset,
     ResetCfg,
     SweepCfg,
     sweep2param,
@@ -86,7 +84,14 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
     )
 
     @record_result
-    def run(self, soc, soccfg, cfg: FluxDepCfg) -> FluxDepResult:
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: FluxDepCfg,
+        *,
+        acquire_kwargs: dict[str, Any] | None = None,
+    ) -> FluxDepResult:
         orig_cfg = deepcopy(cfg)
         modules = cfg.modules
         freq_sweep = cfg.sweep.freq
@@ -106,56 +111,44 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
         set_flux_in_dev_cfg(cfg.dev, dev_values[0])
         setup_devices(cfg, progress=True)
 
-        def measure_fn(
-            ctx: TaskState, update_hook: Callable | None
-        ) -> list[NDArray[np.float64]]:
-            cfg = cast(FluxDepCfg, ctx.cfg)
-            setup_devices(cfg, progress=False)
-            modules = cfg.modules
-
-            freq_sweep = cfg.sweep.freq
-            freq_param = sweep2param("freq", freq_sweep)
-            modules.readout.set_param("freq", freq_param)
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    PulseReadout("readout", modules.readout),
-                ],
-                sweep=[("freq", freq_sweep)],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-            )
-
         with LivePlot2DwithLine(
             "Flux device value", "Frequency (MHz)", line_axis=1, num_lines=10
         ) as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(dev_values), len(freqs)),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        dev_values,
-                        freqs,
-                        fluxdep_signal2real(data),
-                    ),
-                )
+            signals_buffer = SignalBuffer(
+                (len(dev_values), len(freqs)),
+                on_update=lambda data: viewer.update(
+                    dev_values,
+                    freqs,
+                    fluxdep_signal2real(data),
+                ),
+            )
 
-                for step in run.scan("flux", dev_values.tolist()):
-                    set_flux_in_dev_cfg(step.cfg.dev, step.value)
-                    signals_buffer[step].measure(measure_fn, pbar_n=step.cfg.rounds)
+            with Schedule(cfg, signals_buffer) as sched:
+                for _, step in sched.scan("flux", dev_values.tolist()):
+                    cfg = step.cfg
+                    set_flux_in_dev_cfg(cfg.dev, step.value)
+                    setup_devices(cfg, progress=False)
+                    modules = cfg.modules
 
-                return FluxDepResult(
-                    values=dev_values,
-                    freqs=freqs,
-                    signals=signals_buffer.array,
-                    cfg_snapshot=orig_cfg,
-                )
+                    freq_sweep = cfg.sweep.freq
+                    modules.readout.set_param("freq", sweep2param("freq", freq_sweep))
+
+                    _ = (
+                        step.prog_builder(soc, soccfg)
+                        .add_reset("reset", modules.reset)
+                        .add(PulseReadout("readout", modules.readout))
+                        .declare_sweep("freq", freq_sweep)
+                        .build_and_acquire(
+                            **(acquire_kwargs or {}),
+                        )
+                    )
+
+            return FluxDepResult(
+                values=dev_values,
+                freqs=freqs,
+                signals=signals_buffer.array,
+                cfg_snapshot=orig_cfg,
+            )
 
     @retrieve_result
     def analyze(

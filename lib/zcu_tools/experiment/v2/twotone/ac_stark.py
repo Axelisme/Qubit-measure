@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
@@ -24,7 +24,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import (
     round_zcu_gain,
     snr_checker,
@@ -33,7 +33,6 @@ from zcu_tools.experiment.v2.utils import (
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.program.v2 import (
     Join,
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -149,6 +148,7 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
         earlystop_snr: float | None = None,
         acquire_kwargs: dict[str, Any] | None = None,
     ) -> AcStarkResult:
+        orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -167,47 +167,9 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
 
         current_snr = 0.0
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, AcStarkCfg],
-            update_hook: Callable[[int, list[NDArray[np.float64]]], None],
-        ) -> list[NDArray[np.float64]]:
+        def update_snr(snr: float) -> None:
             nonlocal current_snr
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            freq_sweep = cfg.sweep.freq
-            freq_param = sweep2param("freq", freq_sweep)
-            modules.stark_pulse2.set_param("freq", freq_param)
-
-            def update_snr(snr: float) -> None:
-                nonlocal current_snr
-                current_snr = snr
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    Pulse("stark_pulse1", modules.stark_pulse1, block_mode=False),
-                    Pulse("stark_pulse2", modules.stark_pulse2),
-                    Readout("readout", modules.readout),
-                ],
-                sweep=[("freq", freq_sweep)],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[
-                    ctx.is_stop,
-                    snr_checker(
-                        ctx,
-                        earlystop_snr,
-                        lambda x: rotate2real(x).real,
-                        after_check=update_snr,
-                    ),
-                ],
-                **(acquire_kwargs or {}),
-            )
+            current_snr = snr
 
         with LivePlot2DwithLine(
             "Stark Pulse Gain (a.u.)",
@@ -216,23 +178,51 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
             num_lines=2,
             uniform=False,
         ) as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(gains), len(freqs)),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        gains,
-                        freqs,
-                        acstark_signal2real(data),
-                        title=f"snr = {current_snr:.1f}" if current_snr else None,
-                    ),
-                )
-                for step in run.scan("resonator gain", gains):
-                    step.cfg.modules.stark_pulse1.set_param("gain", step.value)
-                    signals_buffer[step].measure(measure_fn, pbar_n=step.cfg.rounds)
-                signals = signals_buffer.array
+            signals_buffer = SignalBuffer(
+                (len(gains), len(freqs)),
+                on_update=lambda data: viewer.update(
+                    gains,
+                    freqs,
+                    acstark_signal2real(data),
+                    title=f"snr = {current_snr:.1f}" if current_snr else None,
+                ),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                for _, step in sched.scan("resonator gain", gains.tolist()):
+                    step_cfg = step.cfg
+                    modules = step_cfg.modules
 
-        return AcStarkResult(gains, freqs, signals, cfg_snapshot=cfg)
+                    modules.stark_pulse1.set_param("gain", step.value)
+                    freq_sweep = step_cfg.sweep.freq
+                    modules.stark_pulse2.set_param(
+                        "freq", sweep2param("freq", freq_sweep)
+                    )
+
+                    _ = (
+                        step.prog_builder(soc, soccfg)
+                        .add(
+                            Reset("reset", modules.reset),
+                            Pulse(
+                                "stark_pulse1", modules.stark_pulse1, block_mode=False
+                            ),
+                            Pulse("stark_pulse2", modules.stark_pulse2),
+                            Readout("readout", modules.readout),
+                        )
+                        .declare_sweep("freq", freq_sweep)
+                        .build_and_acquire(
+                            stop_checkers=[
+                                snr_checker(
+                                    signals_buffer[step],
+                                    earlystop_snr,
+                                    lambda x: rotate2real(x).real,
+                                    after_check=update_snr,
+                                )
+                            ],
+                            **(acquire_kwargs or {}),
+                        )
+                    )
+
+        return AcStarkResult(gains, freqs, signals_buffer.array, cfg_snapshot=orig_cfg)
 
     @retrieve_result
     def analyze(
@@ -370,6 +360,7 @@ class AcStarkRamseyExp(PersistableExperiment[AcStarkRamseyResult, AcStarkRamseyC
         detune: float = 0.0,
         acquire_kwargs: dict[str, Any] | None = None,
     ) -> AcStarkRamseyResult:
+        orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -385,47 +376,6 @@ class AcStarkRamseyExp(PersistableExperiment[AcStarkRamseyResult, AcStarkRamseyC
         )
         gains = round_zcu_gain(gains, soccfg, modules.stark_pulse.ch)
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, AcStarkRamseyCfg],
-            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            length_sweep = cfg.sweep.length
-            length_param = sweep2param("length", length_sweep)
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    Join(
-                        Pulse("stark_pulse", modules.stark_pulse),
-                        [
-                            SoftDelay("wait_delay", delay=cfg.wait_delay),
-                            Pulse("pi2_pulse1", modules.pi2_pulse),
-                            SoftDelay("t2_delay", delay=length_param),
-                            Pulse(
-                                name="pi2_pulse2",
-                                cfg=modules.pi2_pulse.with_updates(
-                                    phase=modules.pi2_pulse.phase
-                                    + 360 * detune * length_param
-                                ),
-                            ),
-                        ],
-                    ),
-                    Readout("readout", modules.readout),
-                ],
-                sweep=[("length", length_sweep)],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-                **(acquire_kwargs or {}),
-            )
-
         with LivePlot2DwithLine(
             "Stark Pulse Gain (a.u.)",
             "Time (us)",
@@ -433,22 +383,53 @@ class AcStarkRamseyExp(PersistableExperiment[AcStarkRamseyResult, AcStarkRamseyC
             num_lines=2,
             uniform=False,
         ) as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(gains), len(lengths)),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        gains,
-                        lengths,
-                        acstark_ramsey_signal2real(data),
-                    ),
-                )
-                for step in run.scan("resonator gain", gains):
-                    step.cfg.modules.stark_pulse.set_param("gain", step.value)
-                    signals_buffer[step].measure(measure_fn, pbar_n=step.cfg.rounds)
-                signals = signals_buffer.array
+            signals_buffer = SignalBuffer(
+                (len(gains), len(lengths)),
+                on_update=lambda data: viewer.update(
+                    gains,
+                    lengths,
+                    acstark_ramsey_signal2real(data),
+                ),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                for _, step in sched.scan("resonator gain", gains.tolist()):
+                    step_cfg = step.cfg
+                    modules = step_cfg.modules
 
-        return AcStarkRamseyResult(gains, lengths, signals, cfg_snapshot=cfg)
+                    modules.stark_pulse.set_param("gain", step.value)
+                    length_sweep = step_cfg.sweep.length
+                    length_param = sweep2param("length", length_sweep)
+
+                    _ = (
+                        step.prog_builder(soc, soccfg)
+                        .add(
+                            Reset("reset", modules.reset),
+                            Join(
+                                Pulse("stark_pulse", modules.stark_pulse),
+                                [
+                                    SoftDelay("wait_delay", delay=step_cfg.wait_delay),
+                                    Pulse("pi2_pulse1", modules.pi2_pulse),
+                                    SoftDelay("t2_delay", delay=length_param),
+                                    Pulse(
+                                        name="pi2_pulse2",
+                                        cfg=modules.pi2_pulse.with_updates(
+                                            phase=modules.pi2_pulse.phase
+                                            + 360 * detune * length_param
+                                        ),
+                                    ),
+                                ],
+                            ),
+                            Readout("readout", modules.readout),
+                        )
+                        .declare_sweep("length", length_sweep)
+                        .build_and_acquire(
+                            **(acquire_kwargs or {}),
+                        )
+                    )
+
+        return AcStarkRamseyResult(
+            gains, lengths, signals_buffer.array, cfg_snapshot=orig_cfg
+        )
 
     @retrieve_result
     def analyze(

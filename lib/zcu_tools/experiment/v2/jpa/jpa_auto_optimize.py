@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
@@ -32,14 +32,13 @@ from zcu_tools.experiment.utils import (
     set_power_in_dev_cfg,
     setup_devices,
 )
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.liveplot import LivePlotScatter, MultiLivePlot
 from zcu_tools.liveplot.backend.jupyter import instant_plot
 from zcu_tools.program.v2 import (
     Branch,
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -253,7 +252,7 @@ JPA_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
 
 class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
     def run(self, soc, soccfg, cfg: JPAOptCfg, num_points: int) -> JPAOptimizeResult:
-        cfg = deepcopy(cfg)
+        orig_cfg = deepcopy(cfg)
         flux_sweep = cfg.sweep.jpa_flux
         freq_sweep = cfg.sweep.jpa_freq
         gain_sweep = cfg.sweep.jpa_power
@@ -263,34 +262,6 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
         # (num_points, [flux, freq, power])
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
         phases = np.zeros(num_points, dtype=np.int32)
-
-        def measure_fn(
-            ctx: TaskState[NDArray[np.float64], Any, JPAOptCfg], update_hook: Callable
-        ) -> list[MomentTracker]:
-            cfg = ctx.cfg
-            setup_devices(cfg, progress=False)
-            modules = cfg.modules
-
-            prog = ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
-                    Readout("readout", modules.readout),
-                ],
-                sweep=[("ge", 2)],
-            )
-
-            tracker = MomentTracker()
-            prog.acquire(
-                soc,
-                progress=False,
-                round_hook=lambda i, avg_d: update_hook(i, [tracker]),
-                trackers=[tracker],
-                stop_checkers=[ctx.is_stop],
-            )
-            return [tracker]
 
         # initialize figure and axes
         figsize = (8, 5)
@@ -323,42 +294,42 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                 ),
             ),
         ) as viewer:
-            with MeasureSession(cfg) as run:
+            env: dict[str, Any] = {}
 
-                def plot_fn(data: NDArray[np.float64]) -> None:
-                    idx = int(run.env["index"])
-                    snrs = np.abs(data)  # (num_points, )
+            def plot_fn(data: NDArray[np.float64]) -> None:
+                idx = int(env["index"])
+                snrs = np.abs(data)  # (num_points, )
 
-                    cur_flux, cur_freq, cur_gain = params[idx, :]
+                cur_flux, cur_freq, cur_gain = params[idx, :]
 
-                    fig.suptitle(
-                        f"Iteration {idx}, Phase {phases[idx]}, Flux: {1e3 * cur_flux:.2g} (mA), Freq: {1e-3 * cur_freq:.4g} (GHz), Power: {cur_gain:.2g} (dBm)"
-                    )
-
-                    colors = phases
-
-                    viewer.get_plotter("iter_scatter").update(
-                        np.arange(num_points), snrs, colors=colors, refresh=False
-                    )
-                    viewer.get_plotter("flux_scatter").update(
-                        1e3 * params[:, 0], snrs, colors=colors, refresh=False
-                    )
-                    viewer.get_plotter("freq_scatter").update(
-                        params[:, 1], snrs, colors=colors, refresh=False
-                    )
-                    viewer.get_plotter("power_scatter").update(
-                        params[:, 2], snrs, colors=colors, refresh=False
-                    )
-                    viewer.refresh()
-
-                signals_buffer = run.buffer(
-                    (num_points,),
-                    dtype=np.float64,
-                    on_update=plot_fn,
+                fig.suptitle(
+                    f"Iteration {idx}, Phase {phases[idx]}, Flux: {1e3 * cur_flux:.2g} (mA), Freq: {1e-3 * cur_freq:.4g} (GHz), Power: {cur_gain:.2g} (dBm)"
                 )
-                for step in run.scan("Iteration", range(num_points)):
-                    idx = step.index
-                    run.env["index"] = idx
+
+                colors = phases
+
+                viewer.get_plotter("iter_scatter").update(
+                    np.arange(num_points), snrs, colors=colors, refresh=False
+                )
+                viewer.get_plotter("flux_scatter").update(
+                    1e3 * params[:, 0], snrs, colors=colors, refresh=False
+                )
+                viewer.get_plotter("freq_scatter").update(
+                    params[:, 1], snrs, colors=colors, refresh=False
+                )
+                viewer.get_plotter("power_scatter").update(
+                    params[:, 2], snrs, colors=colors, refresh=False
+                )
+                viewer.refresh()
+
+            signals_buffer = SignalBuffer(
+                (num_points,),
+                dtype=np.float64,
+                on_update=plot_fn,
+            )
+            with Schedule(cfg, signals_buffer, env_dict=env) as sched:
+                for idx, step in sched.scan("Iteration", range(num_points)):
+                    sched.env["index"] = idx
 
                     last_snr = None
                     if idx > 0:
@@ -366,7 +337,7 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                     cur_params = optimizer.next_params(idx, last_snr)
 
                     if cur_params is None:
-                        run.set_stop()
+                        sched.set_stop()
                         break
 
                     params[idx, :] = cur_params
@@ -377,21 +348,32 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                     set_flux_in_dev_cfg(dev, params[idx, 0], label="jpa_flux_dev")
                     set_freq_in_dev_cfg(dev, 1e6 * params[idx, 1], label="jpa_rf_dev")
                     set_power_in_dev_cfg(dev, params[idx, 2], label="jpa_rf_dev")
-                    signals_buffer[step].measure(
-                        measure_fn,
-                        raw2signal_fn=lambda raw: snr_as_signal(
-                            raw,
-                            ge_axis=0,
-                            skew_penalty=run.cfg.skew_penalty,
-                        ),
-                        pbar_n=step.cfg.rounds,
+                    setup_devices(step.cfg, progress=False)
+                    modules = step.cfg.modules
+                    tracker = MomentTracker()
+                    _ = (
+                        step.prog_builder(soc, soccfg)
+                        .add(
+                            Reset("reset", modules.reset),
+                            Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
+                            Readout("readout", modules.readout),
+                        )
+                        .declare_sweep("ge", 2)
+                        .build_and_acquire(
+                            raw2signal_fn=lambda raw: snr_as_signal(
+                                [tracker],
+                                ge_axis=0,
+                                skew_penalty=sched.cfg.skew_penalty,
+                            ),
+                            trackers=[tracker],
+                        )
                     )
                 signals = signals_buffer.array
 
         plt.close(fig)
 
         self.last_result = JPAOptimizeResult(
-            params=params, phases=phases, signals=signals, cfg_snapshot=cfg
+            params=params, phases=phases, signals=signals, cfg_snapshot=orig_cfg
         )
 
         return self.last_result

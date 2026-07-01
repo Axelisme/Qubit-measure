@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
@@ -25,12 +24,11 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
     Branch,
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -112,51 +110,39 @@ class DispersiveExp(PersistableExperiment[DispersiveResult, DispersiveCfg]):
             {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
 
-        def measure_fn(ctx: TaskState, update_hook: Callable | None):
-            cfg = ctx.cfg
-            freq_param = sweep2param("freq", cfg.sweep.freq)
-            cfg.modules.readout.set_param("freq", freq_param)
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    Reset("reset", cfg.modules.reset),
-                    Pulse("init_pulse", cfg.modules.init_pulse),
-                    Branch(
-                        "ge",
-                        [],
-                        Pulse("qub_pulse", cfg.modules.qub_pulse),
-                    ),
-                    PulseReadout("readout", cfg.modules.readout),
-                ],
-                sweep=[
-                    ("ge", 2),
-                    ("freq", cfg.sweep.freq),
-                ],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-                **(acquire_kwargs or {}),
-            )
-
         with LivePlot1D(
             "Frequency (MHz)", "Amplitude", segment_kwargs=dict(num_lines=2)
         ) as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (2, len(freqs)),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        freqs, dispersive_signal2real(data)
-                    ),
-                )
-                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
-                signals = signals_buffer.array
+            signals_buffer = SignalBuffer(
+                (2, len(freqs)),
+                on_update=lambda data: viewer.update(
+                    freqs, dispersive_signal2real(data)
+                ),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                cfg = sched.cfg
+                modules = cfg.modules
+                freq_sweep = cfg.sweep.freq
+                modules.readout.set_param("freq", sweep2param("freq", freq_sweep))
 
-        return DispersiveResult(freqs=freqs, signals=signals, cfg_snapshot=orig_cfg)
+                _ = (
+                    sched.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", modules.reset),
+                        Pulse("init_pulse", modules.init_pulse),
+                        Branch("ge", [], Pulse("qub_pulse", modules.qub_pulse)),
+                        PulseReadout("readout", modules.readout),
+                    )
+                    .declare_sweep("ge", 2)
+                    .declare_sweep("freq", freq_sweep)
+                    .build_and_acquire(
+                        **(acquire_kwargs or {}),
+                    )
+                )
+
+        return DispersiveResult(
+            freqs=freqs, signals=signals_buffer.array, cfg_snapshot=orig_cfg
+        )
 
     @retrieve_result
     def analyze(

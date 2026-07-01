@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -25,11 +24,10 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program.v2 import (
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -108,52 +106,35 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
         gains = sweep2array(gain_sweep, "gain", {"soccfg": soccfg, "gen_ch": lf_ch})
         lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg, "gen_ch": lf_ch})
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, T1Cfg],
-            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg: T1Cfg = cast(T1Cfg, ctx.cfg)
-            modules = cfg.modules
-
-            gain_sweep = cfg.sweep.gain
-            length_sweep = cfg.sweep.length
-
-            gain_param = sweep2param("gain", gain_sweep)
-            length_param = sweep2param("length", length_sweep)
-            modules.flux_pulse.set_param("gain", gain_param)
-            modules.flux_pulse.set_param("length", length_param)
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    Pulse("pi_pulse", modules.pi_pulse),
-                    Pulse("flux_pulse", modules.flux_pulse),
-                    Readout("readout", modules.readout),
-                ],
-                sweep=[
-                    ("gain", gain_sweep),
-                    ("length", length_sweep),
-                ],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-                **(acquire_kwargs or {}),
-            )
-
         with LivePlot2D("Flux Pulse Gain (a.u.)", "Time (us)") as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(gains), len(lengths)),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        gains, lengths, t1_signal2real(data)
-                    ),
+            signals_buffer = SignalBuffer(
+                (len(gains), len(lengths)),
+                on_update=lambda data: viewer.update(
+                    gains, lengths, t1_signal2real(data)
+                ),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                modules = sched.cfg.modules
+                modules.flux_pulse.set_param(
+                    "gain", sweep2param("gain", sched.cfg.sweep.gain)
                 )
-                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
+                modules.flux_pulse.set_param(
+                    "length", sweep2param("length", sched.cfg.sweep.length)
+                )
+                _ = (
+                    sched.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", modules.reset),
+                        Pulse("pi_pulse", modules.pi_pulse),
+                        Pulse("flux_pulse", modules.flux_pulse),
+                        Readout("readout", modules.readout),
+                    )
+                    .declare_sweep("gain", sched.cfg.sweep.gain)
+                    .declare_sweep("length", sched.cfg.sweep.length)
+                    .build_and_acquire(
+                        **(acquire_kwargs or {}),
+                    )
+                )
                 signals = signals_buffer.array
 
         return T1Result(gains, lengths, signals, cfg_snapshot=orig_cfg)

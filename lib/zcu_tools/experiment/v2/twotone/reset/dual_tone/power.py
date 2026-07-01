@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
@@ -21,11 +21,10 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program.v2 import (
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -88,6 +87,7 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
         *,
         acquire_kwargs: dict[str, Any] | None = None,
     ) -> PowerResult:
+        orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
 
         # Check that reset pulse is dual pulse type
@@ -111,49 +111,38 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
             ref_j = 0 if gains2[0] < gains2[-1] else -1
             return np.abs(signals - signals[ref_i, ref_j])
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, PowerCfg],
-            update_hook: Callable | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            gain1_param = sweep2param("gain1", cfg.sweep.gain1)
-            gain2_param = sweep2param("gain2", cfg.sweep.gain2)
-            modules.tested_reset.set_param("gain1", gain1_param)
-            modules.tested_reset.set_param("gain2", gain2_param)
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                sweep=[("gain1", cfg.sweep.gain1), ("gain2", cfg.sweep.gain2)],
-                modules=[
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
-                    TwoPulseReset("tested_reset", modules.tested_reset),
-                    Readout("readout", modules.readout),
-                ],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-                **(acquire_kwargs or {}),
-            )
-
         with LivePlot2D("Gain1 (a.u.)", "Gain2 (a.u.)") as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(gains1), len(gains2)),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        gains1, gains2, dual_reset_gain_signal2real(data)
-                    ),
+            signals_buffer = SignalBuffer(
+                (len(gains1), len(gains2)),
+                on_update=lambda data: viewer.update(
+                    gains1, gains2, dual_reset_gain_signal2real(data)
+                ),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                modules = sched.cfg.modules
+                modules.tested_reset.set_param(
+                    "gain1", sweep2param("gain1", sched.cfg.sweep.gain1)
                 )
-                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
+                modules.tested_reset.set_param(
+                    "gain2", sweep2param("gain2", sched.cfg.sweep.gain2)
+                )
+                _ = (
+                    sched.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", modules.reset),
+                        Pulse("init_pulse", modules.init_pulse),
+                        TwoPulseReset("tested_reset", modules.tested_reset),
+                        Readout("readout", modules.readout),
+                    )
+                    .declare_sweep("gain1", sched.cfg.sweep.gain1)
+                    .declare_sweep("gain2", sched.cfg.sweep.gain2)
+                    .build_and_acquire(
+                        **(acquire_kwargs or {}),
+                    )
+                )
                 signals = signals_buffer.array
 
-        return PowerResult(gains1, gains2, signals, cfg_snapshot=cfg)
+        return PowerResult(gains1, gains2, signals, cfg_snapshot=orig_cfg)
 
     @retrieve_result
     def analyze(

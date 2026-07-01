@@ -511,7 +511,7 @@ class DeviceService(QObject):
 
         def work(factory: Any) -> Any:
             # Setup is the OffMain-thread strategy with the progress scope only (no
-            # figure routing, no ActiveTask — the driver's setup() polls stop_event
+            # figure routing; the driver's setup() polls stop_event
             # directly). progress_ambient is session-layer (no Qt) so device.py
             # can import it without crossing the session→app boundary (ADR-0026 §2).
             with progress_ambient(factory):

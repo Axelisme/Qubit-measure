@@ -78,7 +78,7 @@ class PostAnalyzeService(_StagedAnalyzeService):
         adapter = tab.adapter
 
         def work(factory: Any) -> Any:  # factory is None (wants_progress=False)
-            # Post-analyze uses only figure_ambient (no pbar, no ActiveTask — ADR-0026 §2).
+            # Post-analyze uses only figure_ambient (no pbar or cancellation scope — ADR-0026 §2).
             with figure_ambient(figure_container):
                 return adapter.post_analyze(req)
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
@@ -23,13 +22,12 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D, MultiLivePlot, make_plot_frame
 from zcu_tools.program.v2 import (
     Branch,
     Join,
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -162,45 +160,6 @@ class CKP_Exp(PersistableExperiment[CKP_Result, CKP_Cfg]):
             {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], NDArray[np.complex128], CKP_Cfg],
-            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            res_freq_sweep = cfg.sweep.res_freq
-            qub_freq_sweep = cfg.sweep.qub_freq
-            res_freq_param = sweep2param("res_freq", res_freq_sweep)
-            qub_freq_param = sweep2param("qub_freq", qub_freq_sweep)
-            modules.res_pulse.set_param("freq", res_freq_param)
-            modules.qub_pulse.set_param("freq", qub_freq_param)
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
-                    Join(
-                        Pulse("res_pulse", modules.res_pulse),
-                        Pulse("qub_pulse", modules.qub_pulse),
-                    ),
-                    Readout("readout", modules.readout),
-                ],
-                sweep=[
-                    ("ge", 2),
-                    ("res_freq", cfg.sweep.res_freq),
-                    ("qub_freq", cfg.sweep.qub_freq),
-                ],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-                **(acquire_kwargs or {}),
-            )
-
         fig, axs = make_plot_frame(1, 2, plot_instant=True, figsize=(10, 4))
 
         with MultiLivePlot(
@@ -232,13 +191,35 @@ class CKP_Exp(PersistableExperiment[CKP_Result, CKP_Cfg]):
                 )
                 viewer.refresh()
 
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (2, len(res_freqs), len(qub_freqs)),
-                    dtype=np.complex128,
-                    on_update=plot_fn,
+            signals_buffer = SignalBuffer(
+                (2, len(res_freqs), len(qub_freqs)),
+                on_update=plot_fn,
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                modules = sched.cfg.modules
+                res_freq_param = sweep2param("res_freq", sched.cfg.sweep.res_freq)
+                qub_freq_param = sweep2param("qub_freq", sched.cfg.sweep.qub_freq)
+                modules.res_pulse.set_param("freq", res_freq_param)
+                modules.qub_pulse.set_param("freq", qub_freq_param)
+
+                _ = (
+                    sched.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", cfg=modules.reset),
+                        Branch("ge", [], Pulse("pi_pulse", cfg=modules.pi_pulse)),
+                        Join(
+                            Pulse("res_pulse", cfg=modules.res_pulse),
+                            Pulse("qub_pulse", cfg=modules.qub_pulse),
+                        ),
+                        Readout("readout", cfg=modules.readout),
+                    )
+                    .declare_sweep("ge", 2)
+                    .declare_sweep("res_freq", sched.cfg.sweep.res_freq)
+                    .declare_sweep("qub_freq", sched.cfg.sweep.qub_freq)
+                    .build_and_acquire(
+                        **(acquire_kwargs or {}),
+                    )
                 )
-                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
                 signals = signals_buffer.array
         plt.close(fig)
 

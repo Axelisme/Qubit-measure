@@ -22,14 +22,14 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.notebook.analysis.fluxdep.interactive import (
     InteractiveFindPoints,
     InteractiveLines,
 )
-from zcu_tools.program.v2 import SweepCfg, TwoToneCfg, TwoToneProgram, sweep2param
+from zcu_tools.program.v2 import SweepCfg, TwoToneCfg, sweep2param
 from zcu_tools.utils.process import minus_background
 
 
@@ -89,48 +89,44 @@ class FreqFluxExp(PersistableExperiment[FreqFluxResult, FreqFluxCfg]):
             freq_sweep, "freq", {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch}
         )
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, FreqFluxCfg], update_hook
-        ):
-            cfg = ctx.cfg
-            modules = cfg.modules
-            setup_devices(cfg, progress=False)
-
-            # Frequency is swept by FPGA (hard sweep)
-            freq_sweep = cfg.sweep.freq
-            freq_param = sweep2param("freq", freq_sweep)
-            modules.qub_pulse.set_param("freq", freq_param)
-
-            return TwoToneProgram(soccfg, cfg, sweep=[("freq", freq_sweep)]).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-                **(acquire_kwargs or {}),
-            )
-
         with LivePlot2DwithLine(
             "Flux device value", "Frequency (MHz)", line_axis=1, num_lines=2
         ) as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(dev_values), len(freqs)),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        dev_values, freqs, freqflux_signal2real(data)
-                    ),
-                )
-                for step in run.scan("flux", dev_values.tolist()):
-                    set_flux_in_dev_cfg(step.cfg.dev, step.value)
-                    signals_buffer[step].measure(
-                        measure_fn,
-                        pbar_n=step.cfg.rounds,
-                        retry=fail_retry,
+            signals_buffer = SignalBuffer(
+                (len(dev_values), len(freqs)),
+                on_update=lambda data: viewer.update(
+                    dev_values, freqs, freqflux_signal2real(data)
+                ),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                for _, step in sched.scan("flux", dev_values.tolist()):
+                    cfg = step.cfg
+                    set_flux_in_dev_cfg(cfg.dev, step.value)
+                    setup_devices(cfg, progress=False)
+                    modules = cfg.modules
+
+                    # Frequency is swept by FPGA (hard sweep)
+                    freq_sweep = cfg.sweep.freq
+                    modules.qub_pulse.set_param("freq", sweep2param("freq", freq_sweep))
+
+                    _ = (
+                        step.prog_builder(soc, soccfg)
+                        .add_reset("reset", modules.reset)
+                        .add_pulse("init_pulse", modules.init_pulse)
+                        .add_pulse("qubit_pulse", modules.qub_pulse)
+                        .add_readout("readout", modules.readout)
+                        .declare_sweep("freq", freq_sweep)
+                        .build_and_acquire(
+                            retry=fail_retry,
+                            **(acquire_kwargs or {}),
+                        )
                     )
-                signals = signals_buffer.array
 
         return FreqFluxResult(
-            values=dev_values, freqs=freqs, signals=signals, cfg_snapshot=orig_cfg
+            values=dev_values,
+            freqs=freqs,
+            signals=signals_buffer.array,
+            cfg_snapshot=orig_cfg,
         )
 
     @retrieve_result

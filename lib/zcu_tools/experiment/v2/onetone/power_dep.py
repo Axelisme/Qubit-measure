@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
@@ -21,15 +20,13 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import snr_checker, sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.program.v2 import (
-    ModularProgramV2,
     ProgramV2Cfg,
     PulseReadout,
     PulseReadoutCfg,
-    Reset,
     ResetCfg,
     SweepCfg,
     sweep2param,
@@ -79,7 +76,13 @@ class PowerDepExp(PersistableExperiment[PowerDepResult, PowerDepCfg]):
 
     @record_result
     def run(
-        self, soc, soccfg, cfg: PowerDepCfg, *, earlystop_snr: float | None = None
+        self,
+        soc,
+        soccfg,
+        cfg: PowerDepCfg,
+        *,
+        earlystop_snr: float | None = None,
+        acquire_kwargs: dict[str, Any] | None = None,
     ) -> PowerDepResult:
         orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
@@ -106,66 +109,54 @@ class PowerDepExp(PersistableExperiment[PowerDepResult, PowerDepCfg]):
 
         current_snr = 0.0
 
-        def measure_fn(
-            ctx: TaskState[Any, Any, PowerDepCfg], update_hook: Callable | None
-        ) -> list[NDArray[np.float64]]:
+        def update_snr(snr: float) -> None:
             nonlocal current_snr
+            current_snr = snr
 
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            assert update_hook is not None
-
-            freq_sweep = cfg.sweep.freq
-            freq_param = sweep2param("freq", freq_sweep)
-            modules.readout.set_param("freq", freq_param)
-
-            def update_snr(snr: float) -> None:
-                nonlocal current_snr
-                current_snr = snr
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    PulseReadout("readout", modules.readout),
-                ],
-                sweep=[("freq", freq_sweep)],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[
-                    ctx.is_stop,
-                    snr_checker(
-                        ctx, earlystop_snr, gaindep_signal2real, after_check=update_snr
-                    ),
-                ],
-            )
-
-        # run experiment
         with LivePlot2DwithLine(
             "Power (a.u.)", "Frequency (MHz)", line_axis=1, num_lines=10
         ) as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(gains), len(freqs)),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        gains,
-                        freqs,
-                        gaindep_signal2real(data),
-                        title=f"snr = {current_snr:.1f}" if current_snr else None,
-                    ),
-                )
-                for step in run.scan("gain", gains.tolist()):
-                    step.cfg.modules.readout.set_param("gain", step.value)
-                    signals_buffer[step].measure(measure_fn, pbar_n=step.cfg.rounds)
-                signals = signals_buffer.array
+            signals_buffer = SignalBuffer(
+                (len(gains), len(freqs)),
+                on_update=lambda data: viewer.update(
+                    gains,
+                    freqs,
+                    gaindep_signal2real(data),
+                    title=f"snr = {current_snr:.1f}" if current_snr else None,
+                ),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                for _, step in sched.scan("gain", gains.tolist()):
+                    cfg = step.cfg
+                    modules = cfg.modules
+
+                    modules.readout.set_param("gain", step.value)
+                    freq_sweep = cfg.sweep.freq
+                    modules.readout.set_param("freq", sweep2param("freq", freq_sweep))
+
+                    _ = (
+                        step.prog_builder(soc, soccfg)
+                        .add_reset("reset", modules.reset)
+                        .add(PulseReadout("readout", modules.readout))
+                        .declare_sweep("freq", freq_sweep)
+                        .build_and_acquire(
+                            stop_checkers=[
+                                snr_checker(
+                                    signals_buffer[step],
+                                    earlystop_snr,
+                                    gaindep_signal2real,
+                                    after_check=update_snr,
+                                )
+                            ],
+                            **(acquire_kwargs or {}),
+                        )
+                    )
 
         return PowerDepResult(
-            gains=gains, freqs=freqs, signals=signals, cfg_snapshot=orig_cfg
+            gains=gains,
+            freqs=freqs,
+            signals=signals_buffer.array,
+            cfg_snapshot=orig_cfg,
         )
 
     @retrieve_result

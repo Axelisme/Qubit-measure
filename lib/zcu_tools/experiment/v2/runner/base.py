@@ -21,12 +21,6 @@ logger = logging.getLogger(__name__)
 T_Result = TypeVar("T_Result", bound=Result)
 T_RootResult = TypeVar("T_RootResult", bound=Result)
 
-_current_stop_flag: threading.Event | None = None
-
-
-def current_stop_flag() -> threading.Event | None:
-    return _current_stop_flag
-
 
 class AbsTask(ABC, Generic[T_Result, T_RootResult, T_Cfg]):
     def init(self, dynamic_pbar: bool = False) -> None:
@@ -88,38 +82,6 @@ class TaskHandle:
         return self._stop_flag.is_set()
 
 
-class ActiveTask:
-    """Context manager that registers a global stop flag for the current task scope.
-
-    Usage::
-
-        stop_event = threading.Event()
-        with ActiveTask(stop_event) as handle:
-            exp.run(soc, soccfg, cfg)  # run_task inside picks up the stop flag automatically
-
-        # from another thread:
-        stop_event.set()  # or handle.cancel()
-
-    Nesting ActiveTask is not allowed and raises RuntimeError.
-    """
-
-    def __init__(self, stop_event: threading.Event) -> None:
-        self._stop_event = stop_event
-
-    def __enter__(self) -> TaskHandle:
-        global _current_stop_flag
-        if _current_stop_flag is not None:
-            raise RuntimeError(
-                "ActiveTask cannot be nested: an active task scope is already running"
-            )
-        _current_stop_flag = self._stop_event
-        return TaskHandle(_current_stop_flag)
-
-    def __exit__(self, *args: object) -> None:
-        global _current_stop_flag
-        _current_stop_flag = None
-
-
 def run_task(
     task: AbsTask[T_Result, T_Result, T_Cfg],
     init_cfg: T_Cfg,
@@ -141,15 +103,19 @@ def run_task(
         env_dict = dict()
 
     on_update = min_interval(on_update, update_interval)
+    if stop_flag is None:
+        from .schedule import current_stop_signal
 
-    effective_stop_flag = stop_flag if stop_flag is not None else _current_stop_flag
+        stop_signal = current_stop_signal()
+        if stop_signal is not None:
+            stop_flag = stop_signal.event
 
     state: TaskState[T_Result, T_Result, T_Cfg] = TaskState(
         root_data=init_result,
         cfg=cfg,
         env=env_dict,
         on_update=on_update,
-        _stop_flag=effective_stop_flag,
+        _stop_flag=stop_flag,
     )
 
     cfg_keys = list(cfg.keys()) if isinstance(cfg, Mapping) else [type(cfg).__name__]

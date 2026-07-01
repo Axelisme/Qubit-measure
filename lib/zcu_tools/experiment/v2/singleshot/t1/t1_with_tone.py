@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -21,7 +19,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, MultiLivePlot, make_plot_frame
 from zcu_tools.program.v2 import (
@@ -39,8 +37,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.fitting.multi_decay import calc_lambdas, fit_dual_transition_rates
 
-from ..util import calc_populations, correct_populations
-from .util import measure_with_sweep
+from ..util import calc_populations, correct_populations, raw_population_signal
 
 
 def _default_initial_states() -> NDArray[np.int64]:
@@ -49,6 +46,17 @@ def _default_initial_states() -> NDArray[np.int64]:
 
 def _default_population_states() -> NDArray[np.int64]:
     return np.array([0, 1], dtype=np.int64)
+
+
+def _average_rounds(data: NDArray[np.float64]) -> NDArray[np.float64]:
+    values = np.asarray(data)
+    valid_axes = tuple(range(2, values.ndim))
+    valid = np.any(~np.isnan(values), axis=valid_axes)
+    completed = np.any(valid, axis=0)
+    averaged = np.full(values.shape[1:], np.nan, dtype=np.float64)
+    if np.any(completed):
+        averaged[completed] = np.nanmean(values[:, completed], axis=0)
+    return averaged
 
 
 @dataclass(frozen=True)
@@ -142,7 +150,7 @@ class T1WithToneExp(PersistableExperiment[T1WithToneResult, T1WithToneCfg]):
         e_center: complex,
         radius: float,
     ) -> T1WithToneResult:
-        cfg = deepcopy(cfg)
+        orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -158,39 +166,6 @@ class T1WithToneExp(PersistableExperiment[T1WithToneResult, T1WithToneCfg]):
 
         with viewer:
 
-            def measure_fn(
-                ctx: TaskState[NDArray[np.float64], Any, T1WithToneCfg],
-                update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
-            ) -> list[NDArray[np.float64]]:
-                modules = ctx.cfg.modules
-                inner_length_sweep = ctx.cfg.sweep.length
-                assert isinstance(inner_length_sweep, SweepCfg), (
-                    "uniform mode requires SweepCfg"
-                )
-                length_param = sweep2param("length", inner_length_sweep)
-                modules.probe_pulse.set_param("length", length_param)
-
-                return ModularProgramV2(
-                    soccfg,
-                    ctx.cfg,
-                    modules=[
-                        Reset("reset", modules.reset),
-                        Pulse("init_pulse", modules.init_pulse),
-                        Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
-                        Pulse("probe_pulse", modules.probe_pulse),
-                        Readout("readout", modules.readout),
-                    ],
-                    sweep=[("length", inner_length_sweep), ("ge", 2)],
-                ).acquire(
-                    soc,
-                    progress=False,
-                    round_hook=update_hook,
-                    stop_checkers=[ctx.is_stop],
-                    g_center=g_center,
-                    e_center=e_center,
-                    ge_radius=radius,
-                )
-
             def plot_fn(data: NDArray[np.float64]) -> None:
                 populations = calc_populations(data)  # (N, 2, 3)
                 viewer.get_plotter("init_g").update(
@@ -201,22 +176,44 @@ class T1WithToneExp(PersistableExperiment[T1WithToneResult, T1WithToneCfg]):
                 )
                 viewer.refresh()
 
-            with MeasureSession(cfg) as run:
-                buffer = run.buffer(
-                    (len(lengths), 2, 2),
-                    dtype=np.float64,
-                    on_update=plot_fn,
+            buffer = SignalBuffer(
+                (len(lengths), 2, 2),
+                dtype=np.float64,
+                on_update=plot_fn,
+            )
+            with Schedule(cfg, buffer) as sched:
+                run_cfg = sched.cfg
+                modules = run_cfg.modules
+                inner_length_sweep = run_cfg.sweep.length
+                assert isinstance(inner_length_sweep, SweepCfg), (
+                    "uniform mode requires SweepCfg"
                 )
-                buffer.measure(
-                    measure_fn,
-                    raw2signal_fn=lambda raw: raw[0][0],
-                    pbar_n=run.cfg.rounds,
+                modules.probe_pulse.set_param(
+                    "length", sweep2param("length", inner_length_sweep)
                 )
-                populations = buffer.array
+                _ = (
+                    sched.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", modules.reset),
+                        Pulse("init_pulse", modules.init_pulse),
+                        Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
+                        Pulse("probe_pulse", modules.probe_pulse),
+                        Readout("readout", modules.readout),
+                    )
+                    .declare_sweep("length", inner_length_sweep)
+                    .declare_sweep("ge", 2)
+                    .build_and_acquire(
+                        raw2signal_fn=raw_population_signal,
+                        g_center=g_center,
+                        e_center=e_center,
+                        ge_radius=radius,
+                    )
+                )
+            populations = buffer.array
         plt.close(fig)
 
         self.last_result = T1WithToneResult(
-            lengths=lengths, signals=populations, cfg_snapshot=cfg
+            lengths=lengths, signals=populations, cfg_snapshot=orig_cfg
         )
 
         return self.last_result
@@ -230,6 +227,7 @@ class T1WithToneExp(PersistableExperiment[T1WithToneResult, T1WithToneCfg]):
         e_center: complex,
         radius: float,
     ) -> T1WithToneResult:
+        orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -256,41 +254,6 @@ class T1WithToneExp(PersistableExperiment[T1WithToneResult, T1WithToneCfg]):
 
         with viewer:
 
-            def measure_fn(
-                ctx: TaskState[NDArray[np.float64], Any, T1WithToneCfg],
-                update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
-            ) -> list[NDArray[np.float64]]:
-                def prog_maker(cfg: T1WithToneCfg, length_param) -> ModularProgramV2:
-                    _cfg = deepcopy(cfg)
-                    modules = _cfg.modules
-                    modules.probe_pulse.set_param("length", length_param)
-
-                    return ModularProgramV2(
-                        soccfg,
-                        _cfg,
-                        modules=[
-                            Reset("reset", modules.reset),
-                            Pulse("init_pulse", modules.init_pulse),
-                            Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
-                            Pulse("probe_pulse", modules.probe_pulse),
-                            Readout("readout", modules.readout),
-                        ],
-                        sweep=[("ge", 2)],
-                    )
-
-                return measure_with_sweep(
-                    ctx,
-                    prog_maker,
-                    lengths.tolist(),
-                    sweep_shape=(2,),
-                    soc=soc,
-                    progress=False,
-                    round_hook=update_hook,
-                    g_center=g_center,
-                    e_center=e_center,
-                    ge_radius=radius,
-                )
-
             def plot_fn(data: NDArray[np.float64]) -> None:
                 populations = calc_populations(data)  # (N, 2, 3)
                 viewer.get_plotter("init_g").update(
@@ -301,22 +264,42 @@ class T1WithToneExp(PersistableExperiment[T1WithToneResult, T1WithToneCfg]):
                 )
                 viewer.refresh()
 
-            with MeasureSession(cfg) as run:
-                buffer = run.buffer(
-                    (len(lengths), 2, 2),
-                    dtype=np.float64,
-                    on_update=plot_fn,
-                )
-                buffer.measure(
-                    measure_fn,
-                    raw2signal_fn=lambda raw: raw[0][0],
-                    pbar_n=run.cfg.rounds,
-                )
-                populations = buffer.array
+            rounds = cfg.rounds
+            run_cfg = cfg.model_copy(deep=True)
+            run_cfg.rounds = 1
+            round_buffer = SignalBuffer(
+                (rounds, len(lengths), 2, 2),
+                dtype=np.float64,
+                on_update=lambda data: plot_fn(_average_rounds(data)),
+            )
+            programs: dict[float, ModularProgramV2] = {}
+            with Schedule(run_cfg, round_buffer) as sched:
+                for _, rep in sched.repeat("round", rounds):
+                    for length, step in rep.scan("length", lengths.tolist()):
+                        modules = step.cfg.modules
+                        modules.probe_pulse.set_param("length", length)
+                        builder = step.prog_builder(soc, soccfg).add(
+                            Reset("reset", modules.reset),
+                            Pulse("init_pulse", modules.init_pulse),
+                            Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
+                            Pulse("probe_pulse", modules.probe_pulse),
+                            Readout("readout", modules.readout),
+                        )
+                        length_key = float(length)
+                        if length_key not in programs:
+                            programs[length_key] = builder.build()
+                        _ = builder.run_program(
+                            programs[length_key],
+                            raw2signal_fn=raw_population_signal,
+                            g_center=g_center,
+                            e_center=e_center,
+                            ge_radius=radius,
+                        )
+            populations = _average_rounds(round_buffer.array)
         plt.close(fig)
 
         self.last_result = T1WithToneResult(
-            lengths=lengths, signals=populations, cfg_snapshot=cfg
+            lengths=lengths, signals=populations, cfg_snapshot=orig_cfg
         )
 
         return self.last_result

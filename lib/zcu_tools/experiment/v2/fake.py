@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 
@@ -9,10 +8,9 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
-from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AbsExperiment, ExpCfgModel
 from zcu_tools.experiment.utils import make_comment
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import SignalBuffer
 from zcu_tools.liveplot import LivePlot1D, make_plot_frame
 
 
@@ -39,11 +37,14 @@ class FakeExp(AbsExperiment[FakeResult, FakeCfg]):
 
         round_n = 100
 
-        def measure_fn(
-            ctx: TaskState, update_hook: Callable | None
-        ) -> NDArray[np.complex128]:
+        # run experiment
+        with LivePlot1D("Frequency (MHz)", "Amplitude") as viewer:
+            signals_buffer = SignalBuffer(
+                (len(freqs),),
+                on_update=lambda data: viewer.update(freqs, fake_signal2real(data)),
+            )
             signal_buffer = []
-            for i in range(round_n):
+            for _ in range(round_n):
                 # Simulate the measurement of the signal at the given frequency
                 raw_signal = (
                     np.exp(-((freqs - 5.0) ** 2) / (2 * 0.1**2))
@@ -51,28 +52,9 @@ class FakeExp(AbsExperiment[FakeResult, FakeCfg]):
                     + 1j * 0.1 * np.random.randn()
                 )
                 signal_buffer.append(raw_signal)
-
-                # Update the context with the new signal
-                if update_hook is not None:
-                    update_hook(i, np.mean(signal_buffer, axis=0))
-
+                signals_buffer.set(np.mean(signal_buffer, axis=0))
                 time.sleep(0.01)  # Simulate time delay for measurement
-            return np.mean(signal_buffer, axis=0)
-
-        # run experiment
-        with LivePlot1D("Frequency (MHz)", "Amplitude") as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(freqs),),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(freqs, fake_signal2real(data)),
-                )
-                signals_buffer.measure(
-                    measure_fn,
-                    raw2signal_fn=lambda x: x,
-                    pbar_n=round_n,
-                )
-                signals = signals_buffer.array
+            signals = signals_buffer.array
 
         # record result
         self.last_result = FakeResult(

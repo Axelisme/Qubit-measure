@@ -19,7 +19,7 @@ worker), so callers settle State / handles there without touching worker-owned
 state — the State main-thread invariant.
 
 This module imports ONLY ``qtpy`` + stdlib; the app-specific scopes (routing,
-liveplot, ActiveTask, pbar) live with the callers that need them.
+liveplot, stop scopes, pbar) live with the callers that need them.
 """
 
 from __future__ import annotations

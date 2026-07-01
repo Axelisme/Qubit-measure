@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import warnings
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 
@@ -24,10 +23,9 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -72,49 +70,37 @@ class LookbackExp(PersistableExperiment[LookbackResult, LookbackCfg]):
     @record_result
     def run(self, soc, soccfg, cfg: LookbackCfg) -> LookbackResult:
         orig_cfg = deepcopy(cfg)
+        run_cfg = deepcopy(cfg)
 
-        setup_devices(cfg, progress=True)
-
-        if cfg.reps != 1:
+        if run_cfg.reps != 1:
             warnings.warn("reps is not 1 in config, this will be ignored.")
-            cfg.reps = 1
+            run_cfg.reps = 1
 
-        modules = cfg.modules
-
-        prog = ModularProgramV2(
-            soccfg,
-            cfg,
-            [
-                Reset("reset", cfg=modules.reset),
-                Pulse("init_pulse", cfg=modules.init_pulse, tag="init_pulse"),
-                Readout("readout", cfg=modules.readout),
-            ],
-        )
-        Ts = prog.get_time_axis(ro_index=0) + cfg.modules.readout.ro_cfg.trig_offset
-        assert isinstance(Ts, np.ndarray)
-
-        def measure_fn(ctx: TaskState, update_hook: Callable | None):
-            return prog.acquire_decimated(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-            )
+        setup_devices(run_cfg, progress=True)
 
         with LivePlot1D("Time (us)", "Amplitude") as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
+            with Schedule(run_cfg) as sched:
+                modules = sched.cfg.modules
+                builder = sched.prog_builder(soc, soccfg).add(
+                    Reset("reset", cfg=modules.reset),
+                    Pulse("init_pulse", cfg=modules.init_pulse),
+                    Readout("readout", cfg=modules.readout),
+                )
+                program = builder.build()
+                Ts = (
+                    program.get_time_axis(ro_index=0)
+                    + sched.cfg.modules.readout.ro_cfg.trig_offset
+                )
+                assert isinstance(Ts, np.ndarray)
+
+                signals_buffer = SignalBuffer(
                     (len(Ts),),
-                    dtype=np.complex128,
                     on_update=lambda data: viewer.update(
                         Ts, lookback_signal2real(data)
                     ),
                 )
-                signals_buffer.measure(
-                    measure_fn,
-                    raw2signal_fn=lambda raw: raw[0].dot([1, 1j]),
-                    pbar_n=run.cfg.rounds,
-                )
+                sched.register_buffer(signals_buffer)
+                _ = builder.run_program_decimated(program)
                 return LookbackResult(
                     times=Ts,
                     signals=signals_buffer.array,

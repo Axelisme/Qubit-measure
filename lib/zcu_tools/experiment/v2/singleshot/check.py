@@ -3,7 +3,6 @@ from __future__ import annotations
 import warnings
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -21,9 +20,8 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.program.v2 import (
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -33,7 +31,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
 )
 
-from .util import classify_result, plot_with_classified
+from .util import classify_result, plot_with_classified, raw_shots_to_signal
 
 
 @dataclass(frozen=True)
@@ -78,41 +76,21 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
 
         setup_devices(cfg, progress=True)
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, CheckCfg], _
-        ) -> NDArray[np.float64]:
-            modules = ctx.cfg.modules
-            prog = ModularProgramV2(
-                soccfg,
-                ctx.cfg,
-                modules=[
+        signals_buffer = SignalBuffer((cfg.shots,))
+        with Schedule(cfg, signals_buffer) as sched:
+            modules = sched.cfg.modules
+            program = (
+                sched.prog_builder(soc, soccfg)
+                .add(
                     Reset("reset", modules.reset),
                     Pulse("init_pulse", modules.init_pulse),
                     Pulse("probe_pulse", modules.probe_pulse),
                     Readout("readout", modules.readout),
-                ],
+                )
+                .build()
             )
-            prog.acquire(soc, progress=True, stop_checkers=[ctx.is_stop])
-
-            acc_buf = prog.get_raw()
-            assert acc_buf is not None
-
-            length = cast(int, list(prog.ro_chs.values())[0]["length"])
-            avgiq = acc_buf[0] / length  # (reps, 1, 2)
-
-            return avgiq
-
-        def raw2signal_fn(avgiq: NDArray[np.float64]) -> NDArray[np.complex128]:
-            i0, q0 = avgiq[..., 0, 0], avgiq[..., 0, 1]  # (reps, )
-            return np.array(i0 + 1j * q0)  # (reps, )
-
-        with MeasureSession(cfg) as run:
-            signals_buffer = run.buffer((cfg.shots,), dtype=np.complex128)
-            signals_buffer.measure(
-                measure_fn,
-                raw2signal_fn=raw2signal_fn,
-                pbar_n=1,
-            )
+            program.acquire(soc, progress=True, stop_checkers=[sched.is_stop])
+            signals_buffer.set(raw_shots_to_signal(program))
             signals = signals_buffer.array
 
         # Cache results

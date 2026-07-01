@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import warnings
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
@@ -24,11 +23,10 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -117,51 +115,37 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
             )
         lengths = pulse1_lengths  # Use pulse1 lengths as the x-axis values
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, LengthCfg],
-            update_hook: Callable | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            tested_reset_cfg = modules.tested_reset
-            pulse1_cfg = tested_reset_cfg.pulse1_cfg
-            pulse2_cfg = tested_reset_cfg.pulse2_cfg
-
-            length_diff = pulse2_cfg.waveform.length - pulse1_cfg.waveform.length
-            length1_param = sweep2param("length", length_sweep)
-
-            pulse1_cfg.set_param("length", length1_param)
-            pulse2_cfg.set_param("length", length1_param + length_diff)
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                sweep=[("length", length_sweep)],
-                modules=[
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
-                    TwoPulseReset("tested_reset", tested_reset_cfg),
-                    Readout("readout", modules.readout),
-                ],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-                **(acquire_kwargs or {}),
-            )
-
         with LivePlot1D("Length (us)", "Amplitude") as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(lengths),),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        lengths, reset_length_signal2real(data)
-                    ),
+            signals_buffer = SignalBuffer(
+                (len(lengths),),
+                on_update=lambda data: viewer.update(
+                    lengths, reset_length_signal2real(data)
+                ),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                modules = sched.cfg.modules
+                tested_reset_cfg = modules.tested_reset
+                pulse1_cfg = tested_reset_cfg.pulse1_cfg
+                pulse2_cfg = tested_reset_cfg.pulse2_cfg
+
+                length_diff = pulse2_cfg.waveform.length - pulse1_cfg.waveform.length
+                length1_param = sweep2param("length", sched.cfg.sweep.length)
+                pulse1_cfg.set_param("length", length1_param)
+                pulse2_cfg.set_param("length", length1_param + length_diff)
+
+                _ = (
+                    sched.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", modules.reset),
+                        Pulse("init_pulse", modules.init_pulse),
+                        TwoPulseReset("tested_reset", tested_reset_cfg),
+                        Readout("readout", modules.readout),
+                    )
+                    .declare_sweep("length", sched.cfg.sweep.length)
+                    .build_and_acquire(
+                        **(acquire_kwargs or {}),
+                    )
                 )
-                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
                 signals = signals_buffer.array
 
         return LengthResult(lengths, signals, cfg_snapshot=orig_cfg)

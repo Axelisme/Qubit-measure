@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
@@ -23,13 +22,12 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
     SweepCfg,
     TwoToneCfg,
-    TwoToneProgram,
     sweep2param,
 )
 from zcu_tools.utils.fitting import fit_rabi
@@ -88,42 +86,35 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
             {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, LenRabiCfg],
-            update_hook: Callable | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            length_sweep = cfg.sweep.length
-            length_param = sweep2param("length", length_sweep)
-            modules.qub_pulse.set_param("length", length_param)
-
-            return TwoToneProgram(
-                soccfg, cfg, sweep=[("length", length_sweep)]
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-                **(acquire_kwargs or {}),
-            )
-
         with LivePlot1D("Length (us)", "Signal") as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(lengths),),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        lengths, rabi_signal2real(data)
-                    ),
+            signals_buffer = SignalBuffer(
+                (len(lengths),),
+                on_update=lambda data: viewer.update(lengths, rabi_signal2real(data)),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                cfg = sched.cfg
+                modules = cfg.modules
+                length_sweep = cfg.sweep.length
+                modules.qub_pulse.set_param(
+                    "length", sweep2param("length", length_sweep)
                 )
-                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
-                return LenRabiResult(
-                    lengths=lengths,
-                    signals=signals_buffer.array,
-                    cfg_snapshot=orig_cfg,
+
+                _ = (
+                    sched.prog_builder(soc, soccfg)
+                    .add_reset("reset", modules.reset)
+                    .add_pulse("init_pulse", modules.init_pulse)
+                    .add_pulse("qubit_pulse", modules.qub_pulse)
+                    .add_readout("readout", modules.readout)
+                    .declare_sweep("length", length_sweep)
+                    .build_and_acquire(
+                        **(acquire_kwargs or {}),
+                    )
                 )
+            return LenRabiResult(
+                lengths=lengths,
+                signals=signals_buffer.array,
+                cfg_snapshot=orig_cfg,
+            )
 
     def _run_for_arb(
         self,
@@ -150,26 +141,7 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
         )
         lengths = np.unique(lengths)  # remove duplicates
 
-        prog_cache: dict[float, TwoToneProgram] = {}
-
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, LenRabiCfg], update_hook
-        ):
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            length = float(modules.qub_pulse.waveform.length)
-
-            if length not in prog_cache:
-                prog_cache[length] = TwoToneProgram(soccfg, cfg)
-
-            return prog_cache[length].acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-                **(acquire_kwargs or {}),
-            )
+        programs: dict[float, Any] = {}
 
         def average_round(signals: NDArray[np.complex128]) -> NDArray[np.complex128]:
             _signals = np.asarray(signals)  # shape: (rounds, len(lengths))
@@ -179,24 +151,37 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
             return mean_signals
 
         with LivePlot1D("Length (us)", "Signal") as viewer:
-            with MeasureSession(_cfg) as run:
-                length_values = lengths.tolist()
-                signals_buffer = run.buffer(
-                    (rounds, len(lengths)),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        lengths, rabi_signal2real(average_round(data))
-                    ),
-                )
-                for rep in run.repeat("round", rounds):
-                    for step in rep.scan("length", length_values):
-                        step.cfg.modules.qub_pulse.set_param("length", step.value)
-                        signals_buffer[rep.index, step].measure(measure_fn, pbar_n=1)
-                return LenRabiResult(
-                    lengths=lengths,
-                    signals=average_round(signals_buffer.array),
-                    cfg_snapshot=orig_cfg,
-                )
+            length_values = lengths.tolist()
+            signals_buffer = SignalBuffer(
+                (rounds, len(lengths)),
+                on_update=lambda data: viewer.update(
+                    lengths, rabi_signal2real(average_round(data))
+                ),
+            )
+            with Schedule(_cfg, signals_buffer) as sched:
+                for _, rep in sched.repeat("round", rounds):
+                    for length, step in rep.scan("length", length_values):
+                        modules = step.cfg.modules
+                        modules.qub_pulse.set_param("length", length)
+                        builder = (
+                            step.prog_builder(soc, soccfg)
+                            .add_reset("reset", modules.reset)
+                            .add_pulse("init_pulse", modules.init_pulse)
+                            .add_pulse("qubit_pulse", modules.qub_pulse)
+                            .add_readout("readout", modules.readout)
+                        )
+                        length_key = float(length)
+                        if length_key not in programs:
+                            programs[length_key] = builder.build()
+                        _ = builder.run_program(
+                            programs[length_key],
+                            **(acquire_kwargs or {}),
+                        )
+            return LenRabiResult(
+                lengths=lengths,
+                signals=average_round(signals_buffer.array),
+                cfg_snapshot=orig_cfg,
+            )
 
     @record_result
     def run(

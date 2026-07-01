@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
@@ -25,12 +25,11 @@ from zcu_tools.experiment.utils import (
     set_flux_in_dev_cfg,
     setup_devices,
 )
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.notebook.analysis.fluxdep import add_secondary_xaxis
 from zcu_tools.program.v2 import (
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -108,7 +107,7 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
         *,
         acquire_kwargs: dict[str, Any] | None = None,
     ) -> FluxDepResult:
-        cfg = deepcopy(cfg)
+        orig_cfg = deepcopy(cfg)
         modules = cfg.modules
 
         # predict sweep points
@@ -119,38 +118,6 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
             {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
         )
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, FluxDepCfg],
-            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            setup_devices(cfg, progress=False)
-            modules = cfg.modules
-
-            assert update_hook is not None
-
-            gain_sweep = cfg.sweep.gain
-            gain_param = sweep2param("gain", gain_sweep)
-            modules.probe_pulse.set_param("gain", gain_param)
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
-                    Pulse("probe_pulse", modules.probe_pulse),
-                    Readout("readout", modules.readout),
-                ],
-                sweep=[("gain", gain_sweep)],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-                **(acquire_kwargs or {}),
-            )
-
         with LivePlot2DwithLine(
             "Flux device value",
             "Readout power (a.u.)",
@@ -158,21 +125,37 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
             num_lines=5,
             title="MIST over FLux",
         ) as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(values), len(gains)),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        values, gains, mist_signal2real(data)
-                    ),
-                )
-                for step in run.scan("flux", values.tolist()):
-                    set_flux_in_dev_cfg(step.cfg.dev, step.value)
-                    signals_buffer[step].measure(measure_fn, pbar_n=step.cfg.rounds)
+            signals_buffer = SignalBuffer(
+                (len(values), len(gains)),
+                on_update=lambda data: viewer.update(
+                    values, gains, mist_signal2real(data)
+                ),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                for flux, step in sched.scan("flux", values.tolist()):
+                    set_flux_in_dev_cfg(step.cfg.dev, flux)
+                    setup_devices(step.cfg, progress=False)
+                    modules = step.cfg.modules
+                    modules.probe_pulse.set_param(
+                        "gain", sweep2param("gain", step.cfg.sweep.gain)
+                    )
+                    _ = (
+                        step.prog_builder(soc, soccfg)
+                        .add(
+                            Reset("reset", modules.reset),
+                            Pulse("init_pulse", modules.init_pulse),
+                            Pulse("probe_pulse", modules.probe_pulse),
+                            Readout("readout", modules.readout),
+                        )
+                        .declare_sweep("gain", step.cfg.sweep.gain)
+                        .build_and_acquire(
+                            **(acquire_kwargs or {}),
+                        )
+                    )
                 signals = signals_buffer.array
 
         return FluxDepResult(
-            values=values, gains=gains, signals=signals, cfg_snapshot=cfg
+            values=values, gains=gains, signals=signals, cfg_snapshot=orig_cfg
         )
 
     @retrieve_result

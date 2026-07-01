@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
@@ -22,12 +21,11 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program.v2 import (
     Join,
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -108,58 +106,43 @@ class PhaseExp(PersistableExperiment[PhaseResult, PhaseCfg]):
             phase_sweep, "phase", {"soccfg": soccfg, "gen_ch": pi2_pulse.ch}
         )
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, PhaseCfg],
-            update_hook: Callable[[int, list[NDArray[np.float64]]], None] | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            length_sweep = cfg.sweep.length
-            phase_sweep = cfg.sweep.phase
-            length_param = sweep2param("length", length_sweep)
-            phase_param = sweep2param("phase", phase_sweep)
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    Join(
-                        Pulse("flux_pulse", modules.flux_pulse),
-                        [
-                            SoftDelay("wait_time", delay=length_param),
-                            Pulse("pi2_pulse1", modules.pi2_pulse),
-                            Pulse(
-                                name="pi2_pulse2",
-                                cfg=modules.pi2_pulse.with_updates(phase=phase_param),
-                            ),
-                        ],
-                        SoftDelay("readout_t", cfg.readout_t),
-                    ),
-                    Readout("readout", modules.readout),
-                ],
-                sweep=[
-                    ("length", length_sweep),
-                    ("phase", phase_sweep),
-                ],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-            )
-
         with LivePlot2D("Time (us)", "Phase (deg)") as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(lengths), len(phases)),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        lengths, phases, phase_signal2real(data)
-                    ),
+            signals_buffer = SignalBuffer(
+                (len(lengths), len(phases)),
+                on_update=lambda data: viewer.update(
+                    lengths, phases, phase_signal2real(data)
+                ),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                modules = sched.cfg.modules
+                length_param = sweep2param("length", sched.cfg.sweep.length)
+                phase_param = sweep2param("phase", sched.cfg.sweep.phase)
+                _ = (
+                    sched.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", modules.reset),
+                        Join(
+                            Pulse("flux_pulse", modules.flux_pulse),
+                            [
+                                SoftDelay("wait_time", delay=length_param),
+                                Pulse("pi2_pulse1", modules.pi2_pulse),
+                                Pulse(
+                                    name="pi2_pulse2",
+                                    cfg=modules.pi2_pulse.with_updates(
+                                        phase=phase_param
+                                    ),
+                                ),
+                            ],
+                            SoftDelay("readout_t", sched.cfg.readout_t),
+                        ),
+                        Readout("readout", modules.readout),
+                    )
+                    .declare_sweep("length", sched.cfg.sweep.length)
+                    .declare_sweep("phase", sched.cfg.sweep.phase)
+                    .build_and_acquire(
+                        **(acquire_kwargs or {}),
+                    )
                 )
-                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
                 signals = signals_buffer.array
 
         return PhaseResult(lengths, phases, signals, cfg_snapshot=orig_cfg)

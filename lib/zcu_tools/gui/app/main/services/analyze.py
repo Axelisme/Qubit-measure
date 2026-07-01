@@ -90,7 +90,7 @@ class AnalyzeService(_StagedAnalyzeService):
         adapter = tab.adapter
 
         def work(factory: Any) -> Any:  # factory is None (wants_progress=False)
-            # Analyze uses only figure_ambient (no pbar, no ActiveTask — ADR-0026 §2).
+            # Analyze uses only figure_ambient (no pbar or cancellation scope — ADR-0026 §2).
             with figure_ambient(figure_container):
                 return adapter.analyze(req)
 

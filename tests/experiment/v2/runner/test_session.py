@@ -3,7 +3,12 @@ from typing import Any
 
 import numpy as np
 import pytest
-from zcu_tools.experiment.v2.runner import ActiveTask, MeasureSession, MeasureStep
+from zcu_tools.experiment.v2.runner import (
+    MeasureSession,
+    MeasureStep,
+    StopSignal,
+    schedule_stop_scope,
+)
 from zcu_tools.experiment.v2.runner.state import TaskState
 
 from .conftest import DictCfg
@@ -188,25 +193,21 @@ def test_scan_stop_short_circuits_later_steps():
     assert seen_values == [1]
 
 
-def test_measure_session_uses_active_task_stop_flag_by_default():
+def test_measure_session_uses_explicit_stop_flag():
     stop_event = threading.Event()
+    stop_event.set()
 
-    with ActiveTask(stop_event) as handle:
-        handle.cancel()
+    with MeasureSession(DictCfg(), stop_flag=stop_event) as run:
+        assert run.is_stop()
 
+
+def test_measure_session_uses_schedule_stop_scope_when_stop_flag_omitted():
+    stop = StopSignal()
+    stop.set_stop()
+
+    with schedule_stop_scope(stop):
         with MeasureSession(DictCfg()) as run:
             assert run.is_stop()
-
-
-def test_measure_session_explicit_stop_flag_overrides_active_task_scope():
-    active_stop_event = threading.Event()
-    explicit_stop_event = threading.Event()
-
-    with ActiveTask(active_stop_event) as handle:
-        handle.cancel()
-
-        with MeasureSession(DictCfg(), stop_flag=explicit_stop_event) as run:
-            assert not run.is_stop()
 
 
 def test_repeat_sets_repeat_idx_in_shared_env():

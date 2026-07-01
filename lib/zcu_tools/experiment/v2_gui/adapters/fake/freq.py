@@ -1,15 +1,15 @@
 """FakeFreqAdapter — simulates a one-tone frequency sweep using HangerModel.
 
-FakeFreqExp mirrors the structure of FreqExp exactly (run_task + Task + LivePlot1D),
-with a measure_fn that generates HangerModel signals plus Gaussian noise instead of
-calling real hardware.  FakeFreqAdapter wraps FakeFreqExp and converts its flat
-CfgSchema into the FakeFreqCfg that FakeFreqExp expects.
+FakeFreqExp mirrors the user-facing FreqExp flow while generating HangerModel
+signals plus Gaussian noise instead of calling real hardware. FakeFreqAdapter
+wraps FakeFreqExp and converts its flat CfgSchema into the FakeFreqCfg that
+FakeFreqExp expects.
 """
 
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias, cast
 
@@ -27,7 +27,7 @@ from zcu_tools.experiment.v2.onetone.freq import (
     FreqResult,
     FreqSweepCfg,
 )
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
@@ -145,7 +145,7 @@ class FakeFreqAnalyzeParams:
 
 
 # ---------------------------------------------------------------------------
-# FakeFreqExp — same run structure as FreqExp, fake measure_fn
+# FakeFreqExp — same run surface as FreqExp, fake signal source
 # ---------------------------------------------------------------------------
 
 
@@ -181,37 +181,26 @@ class FakeFreqExp(AbsExperiment[FreqResult, FakeFreqCfg]):
         sigma = self._params.noise_scale / np.sqrt(cfg.reps * cfg.rounds)
         rng = np.random.default_rng()
 
-        def measure_fn(
-            ctx: TaskState,
-            update_hook: Callable[[int, NDArray[np.complex128]], None] | None,
-        ) -> NDArray[np.complex128]:
-            accumulated = np.zeros(len(freqs), dtype=np.complex128)
-            rounds_done = 0
-            for r in range(cfg.rounds):
-                if ctx.is_stop():
-                    break
-                noise = rng.normal(0, sigma * np.sqrt(cfg.rounds), len(freqs))
-                noise_i = rng.normal(0, sigma * np.sqrt(cfg.rounds), len(freqs))
-                accumulated += clean + noise + 1j * noise_i
-                rounds_done += 1
-                if not cfg.fast_mode:
-                    for _ in range(len(freqs)):
-                        time.sleep(0.0005)
-                if update_hook is not None:
-                    update_hook(r + 1, accumulated / rounds_done)
-            return accumulated / max(rounds_done, 1)
-
         with LivePlot1D("Frequency (MHz)", "Amplitude", auto_close=False) as viewer:
-            signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    raw2signal_fn=lambda raw: raw,
-                    result_shape=(len(freqs),),
-                    pbar_n=cfg.rounds,
-                ),
-                init_cfg=cfg,
-                on_update=lambda ctx: viewer.update(freqs, np.abs(ctx.root_data)),
+            signals_buffer = SignalBuffer(
+                (len(freqs),),
+                on_update=lambda data: viewer.update(freqs, np.abs(data)),
             )
+            with Schedule(cfg, signals_buffer) as sched:
+                accumulated = np.zeros(len(freqs), dtype=np.complex128)
+                rounds_done = 0
+                for _round_idx, _step in sched.repeat("round", cfg.rounds):
+                    noise = rng.normal(0, sigma * np.sqrt(cfg.rounds), len(freqs))
+                    noise_i = rng.normal(0, sigma * np.sqrt(cfg.rounds), len(freqs))
+                    accumulated += clean + noise + 1j * noise_i
+                    rounds_done += 1
+                    if not cfg.fast_mode:
+                        for _ in range(len(freqs)):
+                            time.sleep(0.0005)
+                    signals_buffer.set(accumulated / rounds_done)
+                if rounds_done == 0:
+                    signals_buffer.set(accumulated)
+                signals = signals_buffer.array
 
         return FreqResult(freqs=freqs, signals=signals)
 

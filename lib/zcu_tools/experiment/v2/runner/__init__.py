@@ -1,6 +1,15 @@
-from .base import AbsTask, ActiveTask, TaskHandle, run_task
+from .base import AbsTask, TaskHandle, run_task
 from .batch import BatchTask, RetryBatchTask
 from .repeat import run_with_retries
+from .schedule import (
+    ProgramBuilder,
+    Schedule,
+    ScheduleStep,
+    SignalBuffer,
+    StopSignal,
+    current_stop_signal,
+    schedule_stop_scope,
+)
 from .session import (
     MeasureBuffer,
     MeasureSession,
@@ -17,9 +26,16 @@ __all__ = [
     "TaskState",
     # base
     "AbsTask",
-    "ActiveTask",
     "TaskHandle",
     "run_task",
+    # schedule
+    "ProgramBuilder",
+    "Schedule",
+    "ScheduleStep",
+    "SignalBuffer",
+    "StopSignal",
+    "current_stop_signal",
+    "schedule_stop_scope",
     # batch
     "BatchTask",
     "RetryBatchTask",

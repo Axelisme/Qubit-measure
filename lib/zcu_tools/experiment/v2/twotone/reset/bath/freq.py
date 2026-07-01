@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
@@ -24,13 +23,12 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program.v2 import (
     BathReset,
     BathResetCfg,
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -121,57 +119,42 @@ class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
             {"soccfg": soccfg, "gen_ch": reset_cfg.cavity_tone_cfg.ch},
         )
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any, FreqGainCfg],
-            update_hook: Callable | None,
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            tested_reset = modules.tested_reset
-
-            gain_sweep = cfg.sweep.gain
-            freq_sweep = cfg.sweep.freq
-            gain_param = sweep2param("gain", gain_sweep)
-            freq_param = sweep2param("freq", freq_sweep)
-            tested_reset.set_param("res_gain", gain_param)
-            tested_reset.set_param("res_freq", freq_param)
-
-            phase_param = QickSweep1D("phase", 0.0, 270.0) + tested_reset.pi2_cfg.phase
-            tested_reset.set_param("pi2_phase", phase_param)
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
-                    BathReset("tested_reset", tested_reset),
-                    Readout("readout", modules.readout),
-                ],
-                sweep=[
-                    ("phase", 4),  # 0, 90, 180, 270 degrees
-                    ("gain", gain_sweep),
-                    ("freq", freq_sweep),
-                ],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                stop_checkers=[ctx.is_stop],
-                **(acquire_kwargs or {}),
-            )
-
         with LivePlot2D("Cavity Frequency (MHz)", "Cavity drive Gain (a.u.)") as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (4, len(gains), len(freqs)),
-                    dtype=np.complex128,
-                    on_update=lambda data: viewer.update(
-                        freqs, gains, bathreset_signal2real(data).T
-                    ),
+            signals_buffer = SignalBuffer(
+                (4, len(gains), len(freqs)),
+                on_update=lambda data: viewer.update(
+                    freqs, gains, bathreset_signal2real(data).T
+                ),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                modules = sched.cfg.modules
+                tested_reset = modules.tested_reset
+                tested_reset.set_param(
+                    "res_gain", sweep2param("gain", sched.cfg.sweep.gain)
                 )
-                signals_buffer.measure(measure_fn, pbar_n=run.cfg.rounds)
+                tested_reset.set_param(
+                    "res_freq", sweep2param("freq", sched.cfg.sweep.freq)
+                )
+                phase_param = (
+                    QickSweep1D("phase", 0.0, 270.0) + tested_reset.pi2_cfg.phase
+                )
+                tested_reset.set_param("pi2_phase", phase_param)
+
+                _ = (
+                    sched.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", modules.reset),
+                        Pulse("init_pulse", modules.init_pulse),
+                        BathReset("tested_reset", tested_reset),
+                        Readout("readout", modules.readout),
+                    )
+                    .declare_sweep("phase", 4)
+                    .declare_sweep("gain", sched.cfg.sweep.gain)
+                    .declare_sweep("freq", sched.cfg.sweep.freq)
+                    .build_and_acquire(
+                        **(acquire_kwargs or {}),
+                    )
+                )
                 signals = signals_buffer.array
 
         return FreqGainResult(

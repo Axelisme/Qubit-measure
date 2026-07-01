@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
@@ -27,13 +27,12 @@ from zcu_tools.experiment.utils import (
     set_power_in_dev_cfg,
     setup_devices,
 )
-from zcu_tools.experiment.v2.runner import MeasureSession, TaskState
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.liveplot import LivePlotScatter
 from zcu_tools.program.v2 import (
     Branch,
-    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -83,66 +82,46 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
 
     @record_result
     def run(self, soc, soccfg, cfg: PowerCfg) -> PowerResult:
-        cfg = deepcopy(cfg)
+        orig_cfg = deepcopy(cfg)
         jpa_powers = sweep2array(cfg.sweep.jpa_power, allow_array=True)
         np.random.shuffle(jpa_powers[1:-1])
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.float64], Any, PowerCfg],
-            update_hook: Callable[[int, list[MomentTracker]], None] | None,
-        ) -> list[MomentTracker]:
-            cfg = ctx.cfg
-            setup_devices(cfg, progress=False)
-            modules = cfg.modules
-
-            assert update_hook is not None
-
-            prog = ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
-                    Readout("readout", modules.readout),
-                ],
-                sweep=[("ge", 2)],
-            )
-
-            tracker = MomentTracker()
-            prog.acquire(
-                soc,
-                progress=False,
-                round_hook=lambda i, _avg_d: update_hook(i, [tracker]),
-                trackers=[tracker],
-                stop_checkers=[ctx.is_stop],
-            )
-            return [tracker]
-
         with LivePlotScatter("Power (dBm)", "Signal Difference") as viewer:
-            with MeasureSession(cfg) as run:
-                signals_buffer = run.buffer(
-                    (len(jpa_powers),),
-                    dtype=np.float64,
-                    on_update=lambda data: viewer.update(jpa_powers, np.abs(data)),
-                )
-                for step in run.scan("power (dBm)", jpa_powers.tolist()):
+            signals_buffer = SignalBuffer(
+                (len(jpa_powers),),
+                dtype=np.float64,
+                on_update=lambda data: viewer.update(jpa_powers, np.abs(data)),
+            )
+            with Schedule(cfg, signals_buffer) as sched:
+                for jpa_power, step in sched.scan("power (dBm)", jpa_powers.tolist()):
                     set_power_in_dev_cfg(
                         step.cfg.dev,
-                        step.value,
+                        jpa_power,
                         label="jpa_rf_dev",
                     )
-                    signals_buffer[step].measure(
-                        measure_fn,
-                        raw2signal_fn=lambda raw: snr_as_signal(
-                            raw,
-                            ge_axis=0,
-                            skew_penalty=run.cfg.skew_penalty,
-                        ),
-                        pbar_n=step.cfg.rounds,
+                    setup_devices(step.cfg, progress=False)
+                    modules = step.cfg.modules
+                    tracker = MomentTracker()
+                    _ = (
+                        step.prog_builder(soc, soccfg)
+                        .add(
+                            Reset("reset", modules.reset),
+                            Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
+                            Readout("readout", modules.readout),
+                        )
+                        .declare_sweep("ge", 2)
+                        .build_and_acquire(
+                            raw2signal_fn=lambda raw: snr_as_signal(
+                                [tracker],
+                                ge_axis=0,
+                                skew_penalty=sched.cfg.skew_penalty,
+                            ),
+                            trackers=[tracker],
+                        )
                     )
                 signals = signals_buffer.array
 
-        return PowerResult(powers=jpa_powers, signals=signals, cfg_snapshot=cfg)
+        return PowerResult(powers=jpa_powers, signals=signals, cfg_snapshot=orig_cfg)
 
     @retrieve_result
     def analyze(self, result: PowerResult | None = None) -> tuple[float, Figure]:

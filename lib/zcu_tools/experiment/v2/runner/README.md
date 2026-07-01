@@ -1,6 +1,6 @@
-# `zcu_tools.experiment.v2.runner` — task runner
+# `zcu_tools.experiment.v2.runner` — experiment run runtime
 
-**Last updated:** 2026-07-01 — MeasureSession frontend
+**Last updated:** 2026-07-02 — Schedule cfg-owned reps/rounds
 
 這份筆記整理 `runner/` 的任務執行框架設計，說明各類別的職責、組合方式與執行流程。
 
@@ -8,7 +8,7 @@
 
 ## 架構總覽（一句話版）
 
-`runner/` 以 **Composite 模式** 把測量任務組成樹狀結構：`AbsTask` 是抽象節點，`Task` 是葉節點（實際呼叫硬體），`BatchTask`/`RetryBatchTask`/`Scan`/`RepeatOverTime`/`ReTryIfFail` 是中間節點（組合或修飾子任務）。結果也以同構樹（`Result`）儲存，`TaskState` 攜帶當前在樹中的位置。`MeasureSession`（`session.py`）是在相同葉節點 seam 上方的可選 Python-like frontend；`MultiMeasurementExecutor`（`multi_executor.py`）是 runner 層的 Executor 共用 scaffold（非樹節點）。
+`runner/` 目前同時支援兩條路徑：舊路徑以 **Composite 模式** 把測量任務組成 `AbsTask` 樹，結果以同構樹（`Result`）儲存；新路徑以 `SignalBuffer` / `Schedule` / `ProgramBuilder` 提供 Python-like 寫法，讓常規實驗用一般 Python 編排，leaf acquire 直接建立 program 並保留 partial update、progress、retry 與 stop checker 語意。`MultiMeasurementExecutor`（`multi_executor.py`）是 runner 層的 Executor 共用 scaffold（非樹節點）。
 
 ---
 
@@ -173,6 +173,53 @@ task.auto_retry(max_retries=3)
 
 ---
 
+### `SignalBuffer` / `Schedule` / `ProgramBuilder`（`schedule.py`）
+
+`Schedule` 是新的 run scope：入口 deepcopy cfg、共享 env、持有 `StopSignal`，並提供 host-side `scan(...)` 與 leaf `prog_builder(...)`。`SignalBuffer` 是 result storage、liveplot update surface 與 update 節流 owner；對外保留 `buffer` / `signals_buffer` 名稱，因為它不是裸 numpy array。`ProgramBuilder` 是 direct acquire builder，負責建立 `ModularProgramV2`、注入 `round_hook` / stop checkers、執行 retry 並透過 buffer/slot 寫回結果；它不再把 acquire 包成 `measure_fn` / `Task`。
+
+```python
+signals_buffer = SignalBuffer(
+    (len(freqs),),
+    on_update=lambda data: viewer.update(freqs, signal2real(data)),
+)
+with Schedule(cfg, signals_buffer) as sched:
+    freq_sweep = sched.cfg.sweep.freq
+    sched.cfg.modules.readout.set_param("freq", sweep2param("freq", freq_sweep))
+
+    _ = (
+        sched.prog_builder(soc, soccfg)
+        .add_reset(
+            "reset",
+            sched.cfg.modules.reset,
+        )
+        .add(
+            PulseReadout("readout", sched.cfg.modules.readout),
+        )
+        .declare_sweep("freq", freq_sweep)
+        .build_and_acquire()
+    )
+```
+
+- `sched.scan(...)` / `sched.repeat(...)` 表示 host-side Python loop；`ProgramBuilder.declare_sweep(...)` 表示 program-side QICK loop，兩者不混用。
+- `sched.repeat(name, times, interval)` 會在每步設定 `env["repeat_idx"]`，並在 interval 等待期間檢查 `StopSignal`；若等待期間需要強制刷新 liveplot，由 caller 對相關 `SignalBuffer` 呼叫 `trigger_update()`。
+- `sched.batch({key: callable}, retry=N)` 執行 replayable child callable，retry 是 per-child；每個 child 收到獨立 deepcopy cfg 與共享 env，`KeyboardInterrupt` 視為 stop，不 retry 且不繼續後續 child。`batch()` 回傳 child return value dict，buffer 寫入仍由 child 透過 `SignalBuffer` / `SignalSlot` 顯式完成。
+- `ProgramBuilder.build()` 回傳已建立的 program；`run_program(program)` 執行 caller 傳入的既有 integrated-acquire program 並更新 owner 對應的 buffer slot；`build_and_acquire()` 是先 build 再 run 的 convenience。
+- Decimated trace 使用獨立方法：`run_program_decimated(program)` 與 `build_and_acquire_decimated()`。不要用字串或 flag 在同一個 acquire 方法裡切換 `acquire` / `acquire_decimated`。
+- `Schedule.register_buffer(...)` 只用於 program build 後才知道 buffer shape 的案例（例如 decimated trace 需要 `program.get_time_axis(...)`）；它只把 caller 建好的 `SignalBuffer` 納入 default acquire target，不接管 `on_update`。
+- host soft sweep 若需要 per-point program cache，由實驗在 `run()` 裡維護 dict：cache miss 時 `builder.build()`，每次 acquire 時 `builder.run_program(program)`。`ProgramBuilder` 不擁有 cache，也不判斷 cache key 的 cfg/module 等價性。
+- `build_and_acquire(...)` / `run_program(...)` 不接受 `reps` / `rounds` 參數；builder 先從 owner cfg 建出 program，再由 `program.cfg_model.rounds` 驅動 pbar 與 acquire round 數。需要不同 reps/rounds 時，先在 `sched.cfg` 或 `step.cfg` 上改欄位再 build。
+- `ProgramBuilder` 要求顯式 `.add(...)` / `.add_reset(...)` / `.add_pulse(...)` / `.add_readout(...)` 宣告 modules，並把 modules 傳給 `ModularProgramV2`；不再支援未宣告 modules 時由 `OneToneProgram` / `TwoToneProgram` / custom program 自行從 cfg 生成 modules。
+- `sched.prog_builder(..., program_cls=...)` 是窄口徑 test seam；常規實驗不傳此參數，預設使用 `ModularProgramV2`。
+- 預設只有一個 `SignalBuffer` 時，leaf acquire 會依目前 builder owner 的 path 寫入對應 slot；top-level builder 寫整個 buffer，step builder 寫該 step view，因此 public acquire API 不需要 `into=` 參數。
+- 巢狀 host loop 的 `ScheduleStep.path` 已包含父層 index，所以內層 step 仍用 `signals_buffer[step]`；不要再額外寫成 `signals_buffer[parent.index, step]`。
+- `SignalBuffer(on_update=...)` 是唯一 live update callback 入口；`SignalBuffer.set(...)` / `SignalSlot.set(...)` 寫入後自動觸發 update，也可用 `trigger_update()` 手動刷新。
+- `SignalBuffer` 預設使用 complex128；常規 signal buffer 省略 `dtype=`，只有非預設 dtype 才顯式宣告。
+- `SignalSlot.value` 回傳目前 writable view，供 `snr_checker(...)` 這類只需讀取目前 slot 的 utility 沿用，不代表 slot 擁有獨立結果生命週期。
+- `Schedule` 不讀 Task runner 的 global state；需要跨 thread stop 時，把同一個 `StopSignal` 傳給 `Schedule(..., stop=stop)`，或在 worker closure 外層使用 `schedule_stop_scope(StopSignal(stop_event))` 讓 scope 內新建的 `Schedule` 共用 stop signal。scope 內也可呼叫 `sched.set_stop()`。尚未移除的 `run_task(...)` / `MeasureSession(...)` 在沒有顯式 `stop_flag` 時也會讀同一個 `schedule_stop_scope`，這只是 Task tree 遷移期的相容橋。
+- `set_raw2signal_fn(...)` 或 acquire 方法的 `raw2signal_fn=...` 可覆寫 raw-to-signal；integrated acquire 未指定時使用 `default_raw2signal_fn`，decimated acquire 未指定時使用 `default_decimated_raw2signal_fn`。
+
+---
+
 ### `MultiMeasurementExecutor`（`multi_executor.py`）
 
 不是 task tree 節點，而是 **Executor 共用 scaffold**：把「同時跑多個量測 + 合併 live plot（可選錄 FFmpeg 動畫）」的共用機制收在一處，供 `autofluxdep` / `overnight` 的 Executor 繼承（這兩個子類別與各自的 `MeasurementTask` ABC 住在 app 模組，不在 runner）。
@@ -185,13 +232,12 @@ task.auto_retry(max_retries=3)
 
 ### `MeasureSession` frontend（`session.py`）
 
-`MeasureSession` 是可選的 orchestration frontend，讓新的實驗可以用一般 Python `for` loop 寫 scan / repeat / batch，同時保留既有葉節點 seam：
+`MeasureSession` 是既有 orchestration frontend，讓 caller 可以用一般 Python `for` loop 寫 scan / repeat / batch，同時保留 `Task + measure_fn` 葉節點 seam。一般 `experiment/v2` 實驗不再使用它；它保留為 runner 層的已測試舊 frontend 與低階 Task API 參考。
 
 ```python
 with MeasureSession(cfg) as run:
     signals_buffer = run.buffer(
         (len(values),),
-        dtype=np.complex128,
         on_update=lambda data: plot(values, data),
     )
     for step in run.scan("gain", values):
@@ -211,8 +257,8 @@ with MeasureSession(cfg) as run:
 
 Scope boundary：
 
-- 一般 `experiment/v2` run orchestration 使用 `MeasureSession`；Task tree 仍作為 runner 內部模型與 executor contract 並存。
-- 不支援 / 不遷移 `autofluxdep` 與 `overnight` executors；這些仍由各自 executor + `MultiMeasurementExecutor` scaffold 擁有。
+- 一般 `experiment/v2` run orchestration 使用 `SignalBuffer` + `Schedule` + `ProgramBuilder`，raw-shot path 也使用 `Schedule` 做 cfg/stop/buffer orchestration。
+- `autofluxdep` 與 `overnight` executors 仍由各自 executor + `MultiMeasurementExecutor` scaffold 擁有，並保留 Task tree。
 - `MeasureStep.buffer(...)` 的 unnamed child buffer 用於 replayable batch child；scan / repeat loop 的常規寫法是先在 session root 預配置 buffer，再用 `buffer[step]` 寫入。
 
 ---
@@ -245,7 +291,7 @@ result = run_task(
 
 中斷機制由三層組成：
 
-**1. `TaskHandle` / `ActiveTask`（runner 層）**
+**1. `TaskHandle` / `run_task(stop_flag=...)`（Task tree 路徑）**
 
 ```python
 import threading
@@ -262,31 +308,33 @@ handle.cancel()          # 設置 stop_event
 handle.is_cancelled()    # 查詢是否已取消
 ```
 
-`TaskHandle` 是 `threading.Event` 的薄包裝。`stop_flag` 注入 `state._stop_flag`，透過 `child()` 傳遞到整棵任務樹。
+`TaskHandle` 是 `threading.Event` 的薄包裝。`stop_flag` 注入 `state._stop_flag`，透過 `child()` 傳遞到整棵任務樹。若 `run_task(...)` 沒有收到顯式 `stop_flag`，但 worker 已位於 `schedule_stop_scope(StopSignal(stop_event))` 內，runner 會使用該 `StopSignal` 的底層 event；這讓 GUI Stop 在 Task tree 移除前仍能覆蓋過渡路徑。
 
-**2. `ActiveTask` — 全域 stop_flag context manager**
+**2. `StopSignal` / `schedule_stop_scope(...)`（Schedule 路徑）**
 
-實驗呼叫端如果無法直接傳 `stop_flag` 給 `run_task`（例如 GUI 把 `run_task` 包在另一個 helper 內），可使用 `ActiveTask`。stop_event 必須由外部建立並傳入，`ActiveTask` 不自動建立：
+一般 Experiment 的 `run()` 內部會自行建立 `Schedule`；GUI 這類外層呼叫端若要把 Stop 按鈕的 `threading.Event` 傳進所有 Schedule，可在 worker closure 外包一層 `schedule_stop_scope(...)`：
 
 ```python
 import threading
-from zcu_tools.experiment.v2.runner import ActiveTask
+from zcu_tools.experiment.v2.runner import StopSignal, schedule_stop_scope
 
 stop_event = threading.Event()
-with ActiveTask(stop_event) as handle:
-    result = run_task(task, cfg)   # 自動拿到 stop_event
+with schedule_stop_scope(StopSignal(stop_event)):
+    result = adapter.run(request, schema)
 
 # 另一個 thread（如 GUI 按下停止鍵）：
-stop_event.set()   # 或 handle.cancel()
+stop_event.set()
 ```
 
-`run_task` 在 `stop_flag=None` 時自動讀取模組級 `_current_stop_flag`（即 `ActiveTask` 設置的 Event）。`ActiveTask` 不允許巢狀使用，第二次進入會拋出 `RuntimeError`。
+scope 內新建的 `Schedule` 若沒有顯式 `stop=` 參數，會使用目前 context 的 `StopSignal`；scope 結束後 context 會恢復。若 caller 直接擁有 Schedule，也可用 `Schedule(cfg, buffer, stop=StopSignal(stop_event))` 明確注入。
 
 ---
 
 **3. 容器節點短路**
 
-`BatchTask`、`Scan`、`RepeatOverTime` 在每個子任務開始前各自呼叫 `state.is_stop()`，若已設置則立即 `break`（不繼續剩餘子任務）。`RepeatOverTime` 的等待迴圈也加入 `is_stop()` 檢查，確保 interval 等待期間也能及時退出。
+Task tree 的 `BatchTask`、`Scan`、`RepeatOverTime` 在每個子任務開始前各自呼叫 `state.is_stop()`，若已設置則立即 `break`（不繼續剩餘子任務）。`RepeatOverTime` 的等待迴圈也加入 `is_stop()` 檢查，確保 interval 等待期間也能及時退出。
+
+Schedule path 的 `sched.scan(...)`、`sched.repeat(...)`、`sched.batch(...)` 也在每個 host step 前檢查 `sched.is_stop()`；`repeat` 的 interval 等待期間同樣會檢查 stop。
 
 中斷後，`run_task` 回傳 `state.root_data`（已完成的子節點有真實資料，未完成的保持 NaN）。
 
@@ -294,7 +342,7 @@ stop_event.set()   # 或 handle.cancel()
 
 **4. `EarlyStopMixin.finish_round()`（program 層）**
 
-`measure_fn` 在建構 program 後、呼叫 `acquire()` 前，將 `ctx.is_stop` 加入 `stop_checkers`：
+Schedule 的 `ProgramBuilder` 會自動把 `sched.is_stop` 加入 acquire 的 `stop_checkers`。Task leaf 的 `measure_fn` 在建構 program 後、呼叫 `acquire()` 前，將 `ctx.is_stop` 加入 `stop_checkers`：
 
 ```python
 def measure_fn(ctx, update_hook):
