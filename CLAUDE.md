@@ -62,6 +62,7 @@
 - sub-agent 長報告寫到主 checkout 的 `.agent_state/worktrees/reports/<task-id>/<lane-id>/<agent-id>.md`；不要寫在 task worktree 裡，因為 untracked 檔不會跨 worktree 同步。
 - 多個 sub-agent 可以共用同一個 lane worktree，但 orchestrator 必須明確排序或分配不重疊 write scope；多 lane 之間也必須避免重疊 write scope，同檔案或同 API contract 的工作應放回同一 lane 序列化；不要假設 Codex/Claude 內建 sub-agent 會自動使用獨立 worktree。
 - 多 lane task 的唯一主線 preview / final merge 來源是 parent integration branch `agent/<task-id>`；lane branch `agent/<task-id>--<lane-id>` 完成後依序 rebase 到目前的 parent branch，再 fast-forward parent branch。
+- orchestrator 要把 sub-agent 報告視為待驗證證據：根據風險親自抽查 planner / reviewer 的關鍵結論；體量小、scope 清楚的 item 可由 orchestrator 自己 self-plan / self-review，不必為形式委派。
 - 每個 task item、lane 或 Phase 告一段落時要做整合決策並關閉對應 worktree；不要把 task worktree 當長期常駐 checkout，避免 branch、ignored inputs、reports 與 base branch 失同步。
 - live singleton 資源（ZCU 板、GUI、固定 port）不靠通用 lock；需要時由 orchestrator 人工序列化，MEASUREMENT 角色仍遵循量測 skill 與 agent-memory。
 
