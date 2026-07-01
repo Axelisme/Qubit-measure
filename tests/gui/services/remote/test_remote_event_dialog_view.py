@@ -225,17 +225,21 @@ def test_writer_queue_overflow_eventually_closes_wedged_client(fx, caplog):
 
 
 def test_stop_unsubscribes_event_bus(qapp):  # noqa: ARG001
+    from zcu_tools.gui.app.main.services.remote.events import EVENT_SERIALIZERS
+
     f = Fixture()
     f.start()
     # Confirm at least one subscription is installed.
     subs = f.bus._subs  # type: ignore[attr-defined]
     assert subs.get(RunFinishedPayload), "service should have subscribed"
+    assert len(f.service._bus_subs) == len(EVENT_SERIALIZERS)
     f.stop()
     subs_after = f.bus._subs  # type: ignore[attr-defined]
     # The RemoteEventService's subscriptions are gone after stop. RUN_FINISHED
     # is remote-event-specific, so it must be empty. (MD_CHANGED is *also* held
     # permanently by CfgEditorService for owned-model refresh — ADR-0008 — so it
     # is not a clean proxy for the remote view's teardown.)
+    assert len(f.service._bus_subs) == 0
     assert not subs_after.get(RunFinishedPayload)
 
 

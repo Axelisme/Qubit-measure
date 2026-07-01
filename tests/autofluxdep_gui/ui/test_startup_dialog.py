@@ -7,6 +7,7 @@ so the user is immediately prompted to configure the project/connection.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from unittest.mock import patch
 
 import pytest
@@ -34,12 +35,25 @@ def test_show_startup_dialog_opens_setup_dialog(app):
 
     opened_dialogs: list[object] = []
 
+    class _Signal:
+        def __init__(self) -> None:
+            self._callbacks: list[Callable[..., None]] = []
+
+        def connect(self, callback: Callable[..., None]) -> None:
+            self._callbacks.append(callback)
+
+        def emit(self, *args: object) -> None:
+            for callback in list(self._callbacks):
+                callback(*args)
+
     class _TrackedSetupDialog:
         """Spy that records ``open()`` calls without blocking the event loop."""
 
         def __init__(self, ctrl, parent, startup_mode):
             self._startup_mode = startup_mode
             self._opened = False
+            self.finished = _Signal()
+            self.destroyed = _Signal()
             opened_dialogs.append(self)
 
         def setAttribute(self, attr) -> None:
@@ -61,3 +75,8 @@ def test_show_startup_dialog_opens_setup_dialog(app):
     assert isinstance(dlg, _TrackedSetupDialog)
     assert dlg._startup_mode is True, "Dialog must be opened with startup_mode=True"
     assert dlg._opened is True, "Dialog must be opened non-modally via open()"
+    assert win._setup_dialog is dlg
+
+    dlg.finished.emit(0)
+
+    assert win._setup_dialog is None

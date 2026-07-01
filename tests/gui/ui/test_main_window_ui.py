@@ -506,6 +506,55 @@ def test_main_window_nonpersistent_dialog_close_clears_registry(qapp):
     assert window.list_open_dialogs() == []
 
 
+def test_show_error_dialog_retains_until_close(qapp):
+    from qtpy.QtWidgets import QMessageBox
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+
+    ctrl = _apply_window_defaults(MagicMock())
+    ctrl.get_bus.return_value = EventBus()
+    window = MainWindow(ctrl)
+
+    window.show_error_dialog("Broken", "Something failed")
+    qapp.processEvents()
+
+    dialogs = [
+        dialog
+        for dialog in window.findChildren(QMessageBox)
+        if dialog.windowTitle() == "Broken"
+    ]
+    assert len(dialogs) == 1
+    assert len(window._dialog_refs) == 1
+    assert window._open_dialogs == {}
+
+    dialogs[0].reject()
+    qapp.processEvents()
+
+    assert len(window._dialog_refs) == 0
+
+
+def test_open_notify_prompt_retains_until_close(qapp):
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+    from zcu_tools.gui.app.main.ui.notify_dialog import NotifyUserDialog
+
+    ctrl = _apply_window_defaults(MagicMock())
+    ctrl.get_bus.return_value = EventBus()
+    window = MainWindow(ctrl)
+
+    window.open_notify_prompt(17, "Need input", timeout=60.0)
+    qapp.processEvents()
+
+    dialogs = window.findChildren(NotifyUserDialog)
+    assert len(dialogs) == 1
+    assert dialogs[0]._token == 17
+    assert len(window._dialog_refs) == 1
+    assert window._open_dialogs == {}
+
+    dialogs[0].reject()
+    qapp.processEvents()
+
+    assert len(window._dialog_refs) == 0
+
+
 def test_main_window_load_data_dialog_cancel_is_noop(qapp, monkeypatch):
     from qtpy.QtWidgets import QFileDialog
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
@@ -995,6 +1044,59 @@ def test_main_window_persists_session_on_close_when_idle(qapp):
 
     ctrl.begin_shutdown.assert_called_once_with(window._perform_close)
     ctrl.persist_all.assert_called_once_with()
+
+
+def test_main_window_close_removes_event_bus_subscriptions(qapp):
+    from qtpy.QtCore import QCoreApplication
+    from qtpy.QtGui import QCloseEvent
+    from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
+    from zcu_tools.gui.app.main.events.tab import (
+        TabAddedPayload,
+        TabClosedPayload,
+        TabContentChangedPayload,
+        TabInteractionChangedPayload,
+    )
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+    from zcu_tools.gui.session.events import (
+        ContextSwitchedPayload,
+        DeviceChangedPayload,
+        DeviceSetupFinishedPayload,
+        DeviceSetupStartedPayload,
+        MlChangedPayload,
+        PredictorChangedPayload,
+        SocChangedPayload,
+    )
+
+    ctrl = MagicMock()
+    bus = EventBus()
+    ctrl.get_bus.return_value = bus
+    ctrl.active_operation_count.return_value = 0
+    ctrl.begin_shutdown.side_effect = lambda on_closed: on_closed()
+    window = MainWindow(ctrl)
+
+    payload_types = (
+        TabInteractionChangedPayload,
+        RunStartedPayload,
+        RunFinishedPayload,
+        ContextSwitchedPayload,
+        MlChangedPayload,
+        TabAddedPayload,
+        TabClosedPayload,
+        TabContentChangedPayload,
+        PredictorChangedPayload,
+        SocChangedPayload,
+        DeviceSetupStartedPayload,
+        DeviceSetupFinishedPayload,
+        DeviceChangedPayload,
+    )
+    for payload_type in payload_types:
+        assert bus._subs.get(payload_type)
+
+    window.closeEvent(QCloseEvent())
+    QCoreApplication.processEvents()
+
+    for payload_type in payload_types:
+        assert bus._subs.get(payload_type, []) == []
 
 
 def test_new_tab_menu_supports_nested_paths(qapp, monkeypatch):

@@ -20,7 +20,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import ClassVar, TypeVar
+from typing import Any, ClassVar, Generic, TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,49 @@ class BasePayload:
 P = TypeVar("P", bound=BasePayload)
 
 
+@dataclass
+class EventSubscription(Generic[P]):
+    """Handle returned by ``BaseEventBus.subscribe`` for lifecycle cleanup."""
+
+    _bus: BaseEventBus
+    _payload_type: type[P]
+    _cb: Callable[[P], None]
+    _active: bool = True
+
+    def unsubscribe(self) -> None:
+        """Remove this subscription once; safe to call repeatedly."""
+        if not self._active:
+            return
+        self._active = False
+        self._bus.unsubscribe(self._payload_type, self._cb)
+
+
+class EventSubscriptions:
+    """Small owner-side group for EventBus subscription cleanup."""
+
+    def __init__(self) -> None:
+        self._handles: list[EventSubscription[Any]] = []
+
+    def add(self, handle: EventSubscription[P]) -> EventSubscription[P]:
+        self._handles.append(handle)
+        return handle
+
+    def subscribe(
+        self, bus: BaseEventBus, payload_type: type[P], cb: Callable[[P], None]
+    ) -> EventSubscription[P]:
+        return self.add(bus.subscribe(payload_type, cb))
+
+    def unsubscribe_all(self, *_args: object) -> None:
+        """Unsubscribe every handle; accepts Qt signal arguments."""
+        handles = self._handles
+        self._handles = []
+        for handle in reversed(handles):
+            handle.unsubscribe()
+
+    def __len__(self) -> int:
+        return len(self._handles)
+
+
 class BaseEventBus:
     """Main-thread publish/subscribe keyed by payload type.
 
@@ -51,8 +94,11 @@ class BaseEventBus:
     def __init__(self) -> None:
         self._subs: dict[type[BasePayload], list[Callable[..., None]]] = {}
 
-    def subscribe(self, payload_type: type[P], cb: Callable[[P], None]) -> None:
+    def subscribe(
+        self, payload_type: type[P], cb: Callable[[P], None]
+    ) -> EventSubscription[P]:
         self._subs.setdefault(payload_type, []).append(cb)
+        return EventSubscription(self, payload_type, cb)
 
     def unsubscribe(self, payload_type: type[P], cb: Callable[[P], None]) -> None:
         subs = self._subs.get(payload_type)

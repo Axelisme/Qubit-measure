@@ -52,6 +52,7 @@ from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import FindPointsWidge
 from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.onetone import OneToneWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import ResultPreviewWidget
+from zcu_tools.gui.event_bus import EventSubscriptions
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,7 @@ class MainWindow(QMainWindow):
     def __init__(self, ctrl: Controller) -> None:
         super().__init__()
         self._ctrl = ctrl
+        self._bus_subs = EventSubscriptions()
         self.setWindowTitle("fluxdep-gui")
         self.resize(1100, 700)
 
@@ -146,10 +148,16 @@ class MainWindow(QMainWindow):
 
     def _subscribe_events(self) -> None:
         bus = self._ctrl.bus
-        bus.subscribe(SpectrumAddedPayload, lambda _p: self._refresh_list())
-        bus.subscribe(SpectrumRemovedPayload, self._on_spectrum_removed)
-        bus.subscribe(SpectrumChangedPayload, self._on_spectrum_changed)
-        bus.subscribe(ActiveSpectrumChangedPayload, self._on_active_changed)
+        self._bus_subs.subscribe(bus, SpectrumAddedPayload, self._on_spectrum_added)
+        self._bus_subs.subscribe(bus, SpectrumRemovedPayload, self._on_spectrum_removed)
+        self._bus_subs.subscribe(bus, SpectrumChangedPayload, self._on_spectrum_changed)
+        self._bus_subs.subscribe(
+            bus, ActiveSpectrumChangedPayload, self._on_active_changed
+        )
+        self.destroyed.connect(self._bus_subs.unsubscribe_all)
+
+    def _on_spectrum_added(self, _payload: SpectrumAddedPayload) -> None:
+        self._refresh_list()
 
     def _on_spectrum_removed(self, _payload: SpectrumRemovedPayload) -> None:
         self._refresh_list()
@@ -490,6 +498,7 @@ class MainWindow(QMainWindow):
         closes and owns both a search runner and an embedded SelectorWidget runner —
         both must be joined before Qt destroys the child objects.
         """
+        self._bus_subs.unsubscribe_all()
         if self._current_editor is not None and hasattr(
             self._current_editor, "quiesce"
         ):

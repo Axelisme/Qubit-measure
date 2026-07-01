@@ -137,10 +137,5 @@ def _show_startup_dialog(
     this lets background session operations (mock-soc connect, device setup)
     complete without deadlocking.
     """
-    from qtpy.QtCore import Qt  # type: ignore[attr-defined]
-
-    from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
-
-    dlg = SetupDialog(ctrl, parent=parent, startup_mode=True)
-    dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-    dlg.open()
+    del ctrl
+    parent.open_setup_dialog(startup_mode=True)

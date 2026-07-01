@@ -127,7 +127,9 @@ direct user actions that do not wait on worker completion.
 
 `MainWindow.open_dialog` / `close_dialog` is the registry path shared by toolbar
 actions and remote screenshots. Predictor dialog is persistent hide-on-close;
-other dialogs are released when closed.
+other dialogs are released when closed. Transient non-modal dialogs that are not
+part of the remote named-dialog surface use the shared dialog lifecycle helper
+for reference retention and `finished` / `destroyed` cleanup.
 
 ## Adapter-Facing Rules
 

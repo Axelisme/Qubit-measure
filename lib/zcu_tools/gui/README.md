@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-06-29 (Qt typing invariants)
+**Last updated:** 2026-07-01 (lifecycle helpers)
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -29,6 +29,19 @@ thread. Its nested modal loop still services the control socket's queued
 notifier, so it neither stalls startup nor deadlocks cross-thread
 marshalling. The `open()` rule still governs every dialog that hosts a
 long-running flow or can surface while an operation is running.
+
+Non-modal dialogs opened with `open()` use the shared dialog lifecycle helper,
+or an equivalent named registry when remote screenshot/list semantics require
+stable names. Either path keeps a Python reference until `finished` / `destroyed`
+cleanup runs.
+
+## EventBus Lifecycle
+
+`BaseEventBus` stays Qt-free and payload-type keyed. `subscribe()` returns an
+idempotent cleanup handle, and long-lived windows / bridges group those handles
+so close/stop tears down callbacks explicitly. Event delivery rules are
+unchanged: callbacks for the concrete payload type run in order, and one
+subscriber raising is logged without aborting later subscribers.
 
 ## Logging (`logging_setup.py`)
 

@@ -72,7 +72,8 @@ view 只暴露查詢，不暴露 mutation。
   row/transpose/preview/OK-gate，`_build_options` 掛 Type/Inherit combo、`result_request`
   回 `LoadRequest`）；`error_messages` 用共用 `gui/error_messages` framework（domain rule
   各 app）；`ui/paths.nearest_existing` 來自 `gui/project`；`ui/interactive/display.contrast_limits`
-  一份供 find_points/result_preview。
+  一份供 find_points/result_preview。MainWindow 擁有的 EventBus subscriptions 在 window close
+  釋放，避免分析 view 被 bus callback 保活。
 - **`services/remote/`** — `RemoteControlAdapter` subclass 共用 `RemoteControlServiceBase`
   （`gui/remote/control_service`，零 policy 覆寫），讓 agent **只讀**觀測（無任何 mutation RPC）。MCP
   entrypoint 位於 `zcu_tools/mcp/fluxdep/server.py`；`McpBridge` 在

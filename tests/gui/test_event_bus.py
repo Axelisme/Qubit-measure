@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.session.events import (
     MdChangedPayload,
     MlChangedPayload,
@@ -73,3 +74,45 @@ def test_event_bus_unsubscribe() -> None:
     bus.emit(MlChangedPayload(ml=ModuleLibrary()))
 
     assert received == []
+
+
+def test_event_bus_subscription_handle_unsubscribes_lambda() -> None:
+    """A subscribe() handle can remove callbacks that have no external name."""
+    bus = EventBus()
+    received: list[str] = []
+    handle = bus.subscribe(MlChangedPayload, lambda _p: received.append("hit"))
+
+    bus.emit(MlChangedPayload(ml=ModuleLibrary()))
+    handle.unsubscribe()
+    bus.emit(MlChangedPayload(ml=ModuleLibrary()))
+
+    assert received == ["hit"]
+
+
+def test_event_bus_subscription_handle_is_idempotent() -> None:
+    bus = EventBus()
+    received: list[MlChangedPayload] = []
+    handle = bus.subscribe(MlChangedPayload, received.append)
+
+    handle.unsubscribe()
+    handle.unsubscribe()
+    bus.emit(MlChangedPayload(ml=ModuleLibrary()))
+
+    assert received == []
+
+
+def test_event_subscription_group_unsubscribes_all_repeatedly() -> None:
+    bus = EventBus()
+    group = EventSubscriptions()
+    md_received: list[MdChangedPayload] = []
+    ml_received: list[MlChangedPayload] = []
+    group.subscribe(bus, MdChangedPayload, md_received.append)
+    group.subscribe(bus, MlChangedPayload, ml_received.append)
+
+    group.unsubscribe_all("ignored signal payload")
+    group.unsubscribe_all()
+    bus.emit(MdChangedPayload(md=MetaDict()))
+    bus.emit(MlChangedPayload(ml=ModuleLibrary()))
+
+    assert md_received == []
+    assert ml_received == []

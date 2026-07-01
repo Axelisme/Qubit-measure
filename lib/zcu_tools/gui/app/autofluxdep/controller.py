@@ -20,6 +20,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from qtpy.QtCore import QObject, Qt, QThread, Signal  # type: ignore[attr-defined]
+
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgPersistenceError
 from zcu_tools.gui.app.autofluxdep.derivation import DerivationService
 from zcu_tools.gui.app.autofluxdep.events.run import (
@@ -138,6 +140,37 @@ class _MlModuleSource:
         return getattr(self._ml, attr)
 
 
+class _RunEventEmitter(QObject):
+    """Deliver worker-originated run events on the controller's Qt thread."""
+
+    point_done = Signal(int)
+    node_entered = Signal(str, int)
+
+    def __init__(self, owner: Controller) -> None:
+        super().__init__()
+        self._owner = owner
+        self.point_done.connect(  # type: ignore[call-arg]
+            owner._emit_point_done_on_main,
+            type=Qt.ConnectionType.BlockingQueuedConnection,
+        )
+        self.node_entered.connect(  # type: ignore[call-arg]
+            owner._emit_node_entered_on_main,
+            type=Qt.ConnectionType.BlockingQueuedConnection,
+        )
+
+    def emit_point_done(self, idx: int) -> None:
+        if QThread.currentThread() == self.thread():
+            self._owner._emit_point_done_on_main(idx)
+            return
+        self.point_done.emit(idx)
+
+    def emit_node_entered(self, name: str, idx: int) -> None:
+        if QThread.currentThread() == self.thread():
+            self._owner._emit_node_entered_on_main(name, idx)
+            return
+        self.node_entered.emit(name, idx)
+
+
 class Controller(SessionControllerMixin):
     def __init__(
         self,
@@ -151,6 +184,7 @@ class Controller(SessionControllerMixin):
         self._state = state
         self._bus = bus
         self._cur_idx = 0  # current flux index during a run (for POINT_DONE)
+        self._run_events = _RunEventEmitter(self)
         self._active_run_token: int | None = None
         self._run_stop_event: threading.Event | None = None
         self._last_run_info: InfoStore | None = None
@@ -552,6 +586,13 @@ class Controller(SessionControllerMixin):
         )
         return Tools(predictor=predictor)
 
+    def _emit_point_done_on_main(self, idx: int) -> None:
+        self._cur_idx = idx
+        self._bus.emit(PointDonePayload(idx=idx))
+
+    def _emit_node_entered_on_main(self, name: str, idx: int) -> None:
+        self._bus.emit(NodeEnteredPayload(name=name, idx=idx))
+
     def _allocate_results(self, flux: Any) -> dict[str, Any]:
         """Pre-allocate each user provider's sweep Result on the main thread.
 
@@ -612,8 +653,7 @@ class Controller(SessionControllerMixin):
 
         def on_point(idx: int, flux: float, info: InfoStore) -> None:
             del flux, info  # POINT_DONE carries only the index
-            self._cur_idx = idx
-            self._bus.emit(PointDonePayload(idx=idx))
+            self._run_events.emit_point_done(idx)
 
         user_node_names = {n.name for n in self._state.nodes}
 
@@ -624,7 +664,7 @@ class Controller(SessionControllerMixin):
             # forwards user-list Nodes — the predictor Service has no list row to
             # navigate to.
             if name in user_node_names:
-                self._bus.emit(NodeEnteredPayload(name=name, idx=idx))
+                self._run_events.emit_node_entered(name, idx)
 
         # Build the sweep's adaptive predictor once and stash it as run-lived
         # state (like run_results) so an Info dialog / a test can inspect the

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import threading
 import time
+from typing import Any
 
 import pytest
 from qtpy.QtCore import QObject  # type: ignore[attr-defined]
@@ -23,7 +24,21 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QSizePolicy,
 )
 from zcu_tools.gui.app.autofluxdep.app import build_core
+from zcu_tools.gui.app.autofluxdep.events.run import (
+    NodeEnteredPayload,
+    PointDonePayload,
+    RunFailedPayload,
+    RunFinishedPayload,
+    RunStartedPayload,
+    RunStoppedPayload,
+)
 from zcu_tools.gui.app.autofluxdep.ui.main_window import MainWindow, _RunBridge
+from zcu_tools.gui.session.events import (
+    ContextSwitchedPayload,
+    DeviceChangedPayload,
+    PredictorChangedPayload,
+    SocChangedPayload,
+)
 
 from .._helpers import connect_mock, make_builder, make_measurement_builder
 
@@ -82,6 +97,35 @@ def test_run_bridge_coalesces_redundant_row_updates(qapp):
         qapp.processEvents()
 
     assert receiver.rows == [("node", 0), ("node", 0)]
+    bridge.teardown()
+
+
+def test_run_bridge_teardown_removes_event_bus_subscriptions(qapp):
+    ctrl = build_core()
+    bridge = _RunBridge(ctrl)
+
+    for payload_type in (
+        RunStartedPayload,
+        NodeEnteredPayload,
+        PointDonePayload,
+        RunFinishedPayload,
+        RunStoppedPayload,
+        RunFailedPayload,
+    ):
+        assert ctrl.bus._subs.get(payload_type)
+
+    bridge.teardown()
+
+    for payload_type in (
+        RunStartedPayload,
+        NodeEnteredPayload,
+        PointDonePayload,
+        RunFinishedPayload,
+        RunStoppedPayload,
+        RunFailedPayload,
+    ):
+        assert ctrl.bus._subs.get(payload_type, []) == []
+    bridge.deleteLater()
 
 
 # --- workflow editing reflects in the list ---
@@ -275,6 +319,54 @@ def test_node_list_teardown_is_idempotent_and_called_by_close_event(app):
     win.closeEvent(QCloseEvent())
 
     assert win._list._torn_down is True
+
+
+def test_main_window_close_removes_event_bus_subscriptions(app):
+    ctrl, win = app
+
+    def has_owner(payload_type: type[Any], owner: object) -> bool:
+        return any(
+            getattr(callback, "__self__", None) is owner
+            for callback in ctrl.bus._subs.get(payload_type, [])
+        )
+
+    for payload_type in (
+        SocChangedPayload,
+        DeviceChangedPayload,
+        PredictorChangedPayload,
+        ContextSwitchedPayload,
+    ):
+        assert has_owner(payload_type, win)
+
+    for payload_type in (
+        RunStartedPayload,
+        NodeEnteredPayload,
+        PointDonePayload,
+        RunFinishedPayload,
+        RunStoppedPayload,
+        RunFailedPayload,
+    ):
+        assert has_owner(payload_type, win._bridge)
+
+    win.closeEvent(QCloseEvent())
+
+    for payload_type in (
+        SocChangedPayload,
+        DeviceChangedPayload,
+        PredictorChangedPayload,
+        ContextSwitchedPayload,
+    ):
+        assert not has_owner(payload_type, win)
+
+    for payload_type in (
+        RunStartedPayload,
+        NodeEnteredPayload,
+        PointDonePayload,
+        RunFinishedPayload,
+        RunStoppedPayload,
+        RunFailedPayload,
+    ):
+        assert not has_owner(payload_type, win._bridge)
 
 
 def test_predictor_button_opens_shared_predictor_dialog(app):

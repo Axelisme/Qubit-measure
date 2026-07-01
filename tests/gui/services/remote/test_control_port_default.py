@@ -10,7 +10,7 @@ Covers three guarantees:
 3. Port-collision fast-fail: when ``NdjsonRpcEndpoint.start()`` raises
    ``RuntimeError`` (simulating an EADDRINUSE bind failure), the adapter's
    ``start()`` re-raises the same RuntimeError so the app-level handler can
-   print a user-friendly message and exit.
+   print a user-friendly message and exit, after rolling back app-side listeners.
 """
 
 from __future__ import annotations
@@ -199,20 +199,23 @@ def test_ndjson_endpoint_bind_failure_raises_runtime_error(qapp) -> None:  # noq
         blocker.close()
 
 
-def test_remote_control_adapter_start_propagates_bind_error(qapp) -> None:
-    """RemoteControlServiceBase.start() propagates the bind RuntimeError upward.
+def test_remote_control_adapter_start_rolls_back_bind_error(qapp) -> None:
+    """RemoteControlServiceBase.start() rolls back, then propagates bind errors.
 
     The app-level try/except in run_app / autofluxdep app.py catches this and
-    prints a user-friendly message.  This test confirms the error is not swallowed
-    at the service layer.
+    prints a user-friendly message. This test confirms the error is not swallowed
+    at the service layer and measure-gui's extra listeners are not leaked.
     """
 
     # Import the measure-gui adapter (representative of all four).
     from zcu_tools.gui.app.main.services.remote import RemoteControlAdapter
+    from zcu_tools.gui.app.main.services.remote.events import EVENT_SERIALIZERS
+    from zcu_tools.gui.event_bus import BaseEventBus
     from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
 
+    bus = BaseEventBus()
     ctrl_mock = MagicMock()
-    ctrl_mock.bus = MagicMock()
+    ctrl_mock.get_bus.return_value = bus
     render_view_mock = MagicMock()
 
     opts = ControlOptions(port=0)  # valid opts; we'll patch the underlying endpoint
@@ -227,9 +230,55 @@ def test_remote_control_adapter_start_propagates_bind_error(qapp) -> None:
         "NdjsonRpcEndpoint bind 127.0.0.1:0 failed: [Errno 98] Address already in use"
     )
 
-    with patch.object(adapter._endpoint, "start", side_effect=bind_error):
+    with (
+        patch.object(adapter._endpoint, "start", side_effect=bind_error),
+        patch.object(adapter._endpoint, "stop") as endpoint_stop,
+    ):
         with pytest.raises(RuntimeError, match="bind"):
             adapter.start()
+
+    endpoint_stop.assert_not_called()
+    assert len(adapter._bus_subs) == 0
+    assert all(not bus._subs.get(event_key) for event_key in EVENT_SERIALIZERS)
+    assert ctrl_mock.set_cfg_editor_change_listener.call_args_list[-1].args == (None,)
+    ctrl_mock.add_diagnostic_sink.assert_called_once_with(adapter)
+    ctrl_mock.remove_diagnostic_sink.assert_called_once_with(adapter)
+    assert ctrl_mock.set_agent_connected_query.call_args_list[-1].args == (None,)
+
+
+def test_remote_control_adapter_start_rolls_back_advertise_error(qapp) -> None:
+    """RemoteControlServiceBase.start() also rolls back after advertise failure."""
+
+    from zcu_tools.gui.app.main.services.remote import RemoteControlAdapter
+    from zcu_tools.gui.app.main.services.remote.events import EVENT_SERIALIZERS
+    from zcu_tools.gui.event_bus import BaseEventBus
+    from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
+
+    bus = BaseEventBus()
+    ctrl_mock = MagicMock()
+    ctrl_mock.get_bus.return_value = bus
+    adapter = RemoteControlAdapter(
+        controller=ctrl_mock,
+        opts=ControlOptions(port=0, app_slug="measure"),
+        render_view=MagicMock(),
+    )
+    advertise_error = RuntimeError("discovery write failed")
+
+    with (
+        patch.object(adapter._endpoint, "start", return_value=12345),
+        patch.object(adapter._endpoint, "stop") as endpoint_stop,
+        patch.object(adapter, "_advertise_session", side_effect=advertise_error),
+    ):
+        with pytest.raises(RuntimeError, match="discovery write failed"):
+            adapter.start()
+
+    endpoint_stop.assert_called_once_with()
+    assert len(adapter._bus_subs) == 0
+    assert all(not bus._subs.get(event_key) for event_key in EVENT_SERIALIZERS)
+    assert ctrl_mock.set_cfg_editor_change_listener.call_args_list[-1].args == (None,)
+    ctrl_mock.add_diagnostic_sink.assert_called_once_with(adapter)
+    ctrl_mock.remove_diagnostic_sink.assert_called_once_with(adapter)
+    assert ctrl_mock.set_agent_connected_query.call_args_list[-1].args == (None,)
 
 
 # ---------------------------------------------------------------------------

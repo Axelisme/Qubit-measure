@@ -42,6 +42,7 @@ from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from typing import Any
 
+from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.framing import encode_line
 from zcu_tools.gui.remote.method_spec import BoundMethod
@@ -120,7 +121,7 @@ class RemoteControlServiceBase:
         )
         # EventBus subscriptions registered in start(); unsubscribed in stop().
         self._bus: Any = None
-        self._bus_subs: list[tuple[Any, Callable[[Any], None]]] = []
+        self._bus_subs = EventSubscriptions()
 
     # ------------------------------------------------------------------
     # Policy seams (overridable; defaults give the read-only behaviour)
@@ -184,10 +185,23 @@ class RemoteControlServiceBase:
         known, advertise it via session discovery so an agent can find this GUI
         without being told the port.
         """
+        endpoint_started = False
         self._subscribe_event_bus()
-        self._extra_start()
-        port = self._endpoint.start()
-        self._advertise_session(port)
+        try:
+            self._extra_start()
+            port = self._endpoint.start()
+            endpoint_started = True
+            self._advertise_session(port)
+        except Exception:
+            try:
+                if endpoint_started:
+                    self._endpoint.stop()
+            finally:
+                try:
+                    self._extra_stop()
+                finally:
+                    self._unsubscribe_event_bus()
+            raise
         return port
 
     def stop(self) -> None:
@@ -408,29 +422,25 @@ class RemoteControlServiceBase:
         """Subscribe one callback per serialised event key on the main thread."""
         bus = self._get_bus()
         self._bus = bus
+        subscribed_keys: list[Any] = []
         for key in self._event_serializers:
             cb = self._make_bus_callback(key)
             try:
-                bus.subscribe(key, cb)
+                self._bus_subs.subscribe(bus, key, cb)
             except Exception:  # pragma: no cover — bus.subscribe is straightforward
                 logger.exception("Failed to subscribe %s on EventBus", key)
                 continue
-            self._bus_subs.append((key, cb))
+            subscribed_keys.append(key)
         logger.debug(
             "event-flow: subscribed %d EventBus events for push: %s",
-            len(self._bus_subs),
-            [self._wire_event_name(k) for k, _ in self._bus_subs],
+            len(subscribed_keys),
+            [self._wire_event_name(k) for k in subscribed_keys],
         )
 
     def _unsubscribe_event_bus(self) -> None:
         if self._bus is None:
             return
-        for key, cb in self._bus_subs:
-            try:
-                self._bus.unsubscribe(key, cb)
-            except Exception:  # pragma: no cover
-                logger.exception("Failed to unsubscribe %s on EventBus", key)
-        self._bus_subs.clear()
+        self._bus_subs.unsubscribe_all()
         self._bus = None
 
     def _make_bus_callback(self, key: Any) -> Callable[[Any], None]:

@@ -6,3 +6,7 @@ app needs to vary (e.g. a label string), not forked. Unlike ``zcu_tools.gui``
 itself this package DOES pull in Qt — import a widget only after the matplotlib
 backend is selected (i.e. when building the UI).
 """
+
+from zcu_tools.gui.widgets.dialog_lifecycle import DialogRefStore
+
+__all__ = ["DialogRefStore"]

@@ -11,10 +11,11 @@ integration:
   sweep-lived, so auto-follow can show any provider's plot at any time.
 - It calls ``Controller.start_run`` as an OperationRunner client, passing a
   ``notify(name, idx)`` callback. The shared BackgroundRunner fills the Result
-  rows in place and fires ``notify``; ``notify`` and the EventBus run events are
-  marshalled to the Qt main thread by ``_RunBridge``. A main-thread slot then calls
-  ``plotter.update(result, idx)`` — all drawing stays on the main thread
-  (ADR-0017: the worker never touches matplotlib).
+  rows in place and fires ``notify``. The controller-owned run relay emits
+  EventBus run payloads on the Qt main thread, while ``_RunBridge`` fans those
+  payloads into UI signals and keeps ``notify`` row redraws coalesced. A
+  main-thread slot then calls ``plotter.update(result, idx)`` — all drawing stays
+  on the main thread (ADR-0017: the worker never touches matplotlib).
 
 The run acquires against a flux-aware MockSoc (offline) or real hardware; Setup
 builds a MockSoc + FakeDevice + a SimplePredictor.
@@ -49,6 +50,7 @@ from zcu_tools.gui.app.autofluxdep.events.run import (
     RunStoppedPayload,
 )
 from zcu_tools.gui.app.autofluxdep.profiling import PerfStats, elapsed_ms, perf_now
+from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
     DeviceChangedPayload,
@@ -57,6 +59,7 @@ from zcu_tools.gui.session.events import (
 )
 from zcu_tools.gui.session.ui.progress_bar import LightweightProgressBar
 from zcu_tools.gui.session.ui.progress_stack import ProgressStack
+from zcu_tools.gui.widgets import DialogRefStore
 
 from .node_detail import NodeDetailPane
 from .node_list import NodeListPane
@@ -66,13 +69,12 @@ _ProgressSnapshot = tuple[int, str, int]
 
 
 class _RunBridge(QObject):
-    """Marshals worker-thread run events + row notifications onto the main thread.
+    """Projects main-thread run events and coalesced row notifications to UI signals.
 
-    The controller emits EventBus events on the worker thread; this bridge
-    subscribes and re-emits as Qt signals (delivered on the main thread because
-    they are connected there). ``row_updated`` is the row-updated notification
-    the worker's round_hook fires (a provider name + flux index — no figure);
-    ``node_entered`` is the auto-follow notification (a provider started running).
+    The controller emits EventBus run-domain payloads on the Qt main thread.
+    This bridge fans them out as UI-facing signals. ``row_updated`` stays as the
+    worker round-hook path: it carries only a provider name + flux index and is
+    coalesced locally so high-frequency redraws never become EventBus traffic.
     """
 
     run_started = Signal()
@@ -88,16 +90,36 @@ class _RunBridge(QObject):
         self._row_lock = threading.Lock()
         self._pending_rows: set[tuple[str, int]] = set()
         self._dirty_rows: set[tuple[str, int]] = set()
+        self._bus_subs = EventSubscriptions()
         bus = ctrl.bus
-        bus.subscribe(RunStartedPayload, lambda p: self.run_started.emit())
-        bus.subscribe(NodeEnteredPayload, self._on_node_entered)
-        bus.subscribe(PointDonePayload, lambda p: self.point_done.emit(p.idx))
-        bus.subscribe(RunFinishedPayload, lambda p: self.run_finished.emit())
-        bus.subscribe(RunStoppedPayload, lambda p: self.run_stopped.emit())
-        bus.subscribe(RunFailedPayload, lambda p: self.run_failed.emit(p.message))
+        self._bus_subs.subscribe(bus, RunStartedPayload, self._on_run_started_payload)
+        self._bus_subs.subscribe(bus, NodeEnteredPayload, self._on_node_entered)
+        self._bus_subs.subscribe(bus, PointDonePayload, self._on_point_done_payload)
+        self._bus_subs.subscribe(bus, RunFinishedPayload, self._on_run_finished_payload)
+        self._bus_subs.subscribe(bus, RunStoppedPayload, self._on_run_stopped_payload)
+        self._bus_subs.subscribe(bus, RunFailedPayload, self._on_run_failed_payload)
+        self.destroyed.connect(self.teardown)
+
+    def teardown(self, *_args: object) -> None:
+        self._bus_subs.unsubscribe_all()
+
+    def _on_run_started_payload(self, _payload: RunStartedPayload) -> None:
+        self.run_started.emit()
 
     def _on_node_entered(self, p: NodeEnteredPayload) -> None:
         self.node_entered.emit(p.name, p.idx)
+
+    def _on_point_done_payload(self, payload: PointDonePayload) -> None:
+        self.point_done.emit(payload.idx)
+
+    def _on_run_finished_payload(self, _payload: RunFinishedPayload) -> None:
+        self.run_finished.emit()
+
+    def _on_run_stopped_payload(self, _payload: RunStoppedPayload) -> None:
+        self.run_stopped.emit()
+
+    def _on_run_failed_payload(self, payload: RunFailedPayload) -> None:
+        self.run_failed.emit(payload.message)
 
     def notify(self, name: str, idx: int) -> None:
         """The worker-thread notify callback — re-emits as a queued Qt signal."""
@@ -133,6 +155,8 @@ class MainWindow(QMainWindow):
     def __init__(self, ctrl: Controller, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._ctrl = ctrl
+        self._bus_subs = EventSubscriptions()
+        self._dialog_refs = DialogRefStore()
         # per-provider sweep-lived liveplot state: name -> (canvas, plotter)
         self._plots: dict[str, tuple[QWidget, Any]] = {}
         self._row_update_perf = PerfStats("main.row_update", logger, slow_ms=30.0)
@@ -252,10 +276,17 @@ class MainWindow(QMainWindow):
 
         # Shared session changes refresh the top status row and the flux source
         # picker (mock setup can auto-provision fake_flux).
-        ctrl.bus.subscribe(SocChangedPayload, self._on_soc_changed)
-        ctrl.bus.subscribe(DeviceChangedPayload, self._on_device_changed)
-        ctrl.bus.subscribe(PredictorChangedPayload, self._on_predictor_changed)
-        ctrl.bus.subscribe(ContextSwitchedPayload, self._on_context_switched)
+        self._bus_subs.subscribe(ctrl.bus, SocChangedPayload, self._on_soc_changed)
+        self._bus_subs.subscribe(
+            ctrl.bus, DeviceChangedPayload, self._on_device_changed
+        )
+        self._bus_subs.subscribe(
+            ctrl.bus, PredictorChangedPayload, self._on_predictor_changed
+        )
+        self._bus_subs.subscribe(
+            ctrl.bus, ContextSwitchedPayload, self._on_context_switched
+        )
+        self.destroyed.connect(self._cleanup_bus_subscriptions)
 
         self._refresh_toolbar_buttons()
         self._refresh_session_status()
@@ -267,11 +298,16 @@ class MainWindow(QMainWindow):
         self._on_select(self._list.selected_index)
 
     def closeEvent(self, a0: Any) -> None:
+        self._cleanup_bus_subscriptions()
+        self._bridge.teardown()
         self._progress_unsub()
         self._list.teardown()
         self._detail.teardown()
         self._ctrl.persist_all()
         super().closeEvent(a0)
+
+    def _cleanup_bus_subscriptions(self, *_args: object) -> None:
+        self._bus_subs.unsubscribe_all()
 
     # --- selection ---
 
@@ -296,6 +332,9 @@ class MainWindow(QMainWindow):
     # --- inspect (non-modal context inspector) ---
 
     def _on_setup_clicked(self) -> None:
+        self.open_setup_dialog(startup_mode=False)
+
+    def open_setup_dialog(self, *, startup_mode: bool = False) -> None:
         from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 
         existing = self._setup_dialog
@@ -307,18 +346,16 @@ class MainWindow(QMainWindow):
         # Non-blocking open() keeps the Qt event loop (and the control socket)
         # alive while the dialog is visible. WA_DeleteOnClose + instance ref
         # prevent premature GC; finished clears the ref and refreshes state.
-        dlg = SetupDialog(self._ctrl, self)
-        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dlg.finished.connect(
-            lambda _r: (
-                setattr(self, "_setup_dialog", None),
-                self._refresh_session_status(),
-                self._list._refresh_buttons(),
-                self._list.refresh_flux_sources(),
-            )
-        )
+        dlg = SetupDialog(self._ctrl, self, startup_mode=startup_mode)
+
+        def _on_finished(_status: int) -> None:
+            self._setup_dialog = None
+            self._refresh_session_status()
+            self._list._refresh_buttons()
+            self._list.refresh_flux_sources()
+
         self._setup_dialog = dlg
-        dlg.open()
+        self._dialog_refs.open_named("setup", dlg, on_finished=_on_finished)
 
     def _on_devices_clicked(self) -> None:
         from zcu_tools.gui.session.ui.device_dialog import DeviceDialog

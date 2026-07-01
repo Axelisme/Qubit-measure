@@ -19,6 +19,7 @@ from zcu_tools.gui.app.main.events.tab import (
 )
 from zcu_tools.gui.app.main.services.load import LoadDataError
 from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
+from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.plotting import (
     FigureContainer,
     attach_existing_figure_to_container,
@@ -34,6 +35,7 @@ from zcu_tools.gui.session.events import (
     PredictorChangedPayload,
     SocChangedPayload,
 )
+from zcu_tools.gui.widgets import DialogRefStore
 
 logger = logging.getLogger(__name__)
 
@@ -927,6 +929,8 @@ class MainWindow(QMainWindow):
         # ``InspectDialog`` is also tracked through this dict (the legacy
         # ``_inspect_dialog`` attribute is gone — there is now exactly one entry point).
         self._open_dialogs: dict[DialogName, QDialog] = {}
+        self._dialog_refs = DialogRefStore()
+        self._bus_subs = EventSubscriptions()
         # True once _perform_close has begun the actual teardown, so the second
         # closeEvent (triggered by _perform_close's self.close()) passes straight
         # through instead of re-entering the cancel-and-wait coordination.
@@ -990,26 +994,36 @@ class MainWindow(QMainWindow):
 
         # EventBus subscriptions
         bus = self._ctrl.get_bus()
-        bus.subscribe(
-            TabInteractionChangedPayload, self._on_bus_tab_interaction_changed
+        self._bus_subs.subscribe(
+            bus, TabInteractionChangedPayload, self._on_bus_tab_interaction_changed
         )
-        bus.subscribe(RunStartedPayload, self._on_bus_run_started)
-        bus.subscribe(RunFinishedPayload, self._on_bus_run_finished)
-        bus.subscribe(ContextSwitchedPayload, self._on_bus_context_switched)
-        bus.subscribe(MlChangedPayload, self._on_bus_ml_changed)
-        bus.subscribe(TabAddedPayload, self._on_bus_tab_added)
-        bus.subscribe(TabClosedPayload, self._on_bus_tab_closed)
-        bus.subscribe(TabContentChangedPayload, self._on_bus_tab_content_changed)
-        bus.subscribe(PredictorChangedPayload, self._on_bus_predictor_changed)
-        bus.subscribe(SocChangedPayload, self._on_bus_soc_changed)
+        self._bus_subs.subscribe(bus, RunStartedPayload, self._on_bus_run_started)
+        self._bus_subs.subscribe(bus, RunFinishedPayload, self._on_bus_run_finished)
+        self._bus_subs.subscribe(
+            bus, ContextSwitchedPayload, self._on_bus_context_switched
+        )
+        self._bus_subs.subscribe(bus, MlChangedPayload, self._on_bus_ml_changed)
+        self._bus_subs.subscribe(bus, TabAddedPayload, self._on_bus_tab_added)
+        self._bus_subs.subscribe(bus, TabClosedPayload, self._on_bus_tab_closed)
+        self._bus_subs.subscribe(
+            bus, TabContentChangedPayload, self._on_bus_tab_content_changed
+        )
+        self._bus_subs.subscribe(
+            bus, PredictorChangedPayload, self._on_bus_predictor_changed
+        )
+        self._bus_subs.subscribe(bus, SocChangedPayload, self._on_bus_soc_changed)
         # Device setup ops: bus events let us track op start/finish for the
         # feedback widget (B1 approach — refresh at every op count change).
-        bus.subscribe(DeviceSetupStartedPayload, self._on_bus_device_setup_started)
-        bus.subscribe(DeviceSetupFinishedPayload, self._on_bus_device_setup_finished)
+        self._bus_subs.subscribe(
+            bus, DeviceSetupStartedPayload, self._on_bus_device_setup_started
+        )
+        self._bus_subs.subscribe(
+            bus, DeviceSetupFinishedPayload, self._on_bus_device_setup_finished
+        )
         # Device connect/disconnect ops: DeviceChangedPayload fires when the
         # device state changes (after op start and after op finish), covering
         # both starts and completions of connect/disconnect ops.
-        bus.subscribe(DeviceChangedPayload, self._on_bus_device_changed)
+        self._bus_subs.subscribe(bus, DeviceChangedPayload, self._on_bus_device_changed)
 
         # Docked feedback panel (built after bus wiring; mounted under the
         # target tab's figure only while the C3 gate holds — see
@@ -1024,23 +1038,8 @@ class MainWindow(QMainWindow):
         # Cleanup on destroy
         self.destroyed.connect(self._cleanup_bus_subscriptions)
 
-    def _cleanup_bus_subscriptions(self) -> None:
-        bus = self._ctrl.get_bus()
-        bus.unsubscribe(
-            TabInteractionChangedPayload, self._on_bus_tab_interaction_changed
-        )
-        bus.unsubscribe(RunStartedPayload, self._on_bus_run_started)
-        bus.unsubscribe(RunFinishedPayload, self._on_bus_run_finished)
-        bus.unsubscribe(ContextSwitchedPayload, self._on_bus_context_switched)
-        bus.unsubscribe(MlChangedPayload, self._on_bus_ml_changed)
-        bus.unsubscribe(TabAddedPayload, self._on_bus_tab_added)
-        bus.unsubscribe(TabClosedPayload, self._on_bus_tab_closed)
-        bus.unsubscribe(TabContentChangedPayload, self._on_bus_tab_content_changed)
-        bus.unsubscribe(PredictorChangedPayload, self._on_bus_predictor_changed)
-        bus.unsubscribe(SocChangedPayload, self._on_bus_soc_changed)
-        bus.unsubscribe(DeviceSetupStartedPayload, self._on_bus_device_setup_started)
-        bus.unsubscribe(DeviceSetupFinishedPayload, self._on_bus_device_setup_finished)
-        bus.unsubscribe(DeviceChangedPayload, self._on_bus_device_changed)
+    def _cleanup_bus_subscriptions(self, *_args: object) -> None:
+        self._bus_subs.unsubscribe_all()
 
     def _on_bus_tab_interaction_changed(
         self, payload: TabInteractionChangedPayload
@@ -1487,10 +1486,7 @@ class MainWindow(QMainWindow):
         msg_box.setText(message)
         # Non-blocking: don't stall the Qt event loop (and the RPC control
         # socket) waiting for the user to dismiss the dialog.
-        # WA_DeleteOnClose ensures the C++ object is freed on close even
-        # though ``self`` (parent) already holds a reference.
-        msg_box.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        msg_box.open()
+        self._dialog_refs.open_transient(msg_box)
 
     def show_plot(self, tab_id: str, fig: Any) -> None:  # Phase 11
         logger.debug("show_plot: tab_id=%r fig=%s", tab_id, type(fig).__name__)
@@ -1917,7 +1913,7 @@ class MainWindow(QMainWindow):
         from .notify_dialog import NotifyUserDialog
 
         dlg = NotifyUserDialog(token, message, timeout, self._ctrl, parent=self)
-        dlg.open()  # non-modal — does not stall the event loop
+        self._dialog_refs.open_transient(dlg)
 
     def request_shutdown(self) -> None:
         """Programmatic close (the app.shutdown RPC). Runs on the Qt main thread
@@ -1939,6 +1935,7 @@ class MainWindow(QMainWindow):
         the Controller's shutdown coordinator. Shared by closeEvent (user) and
         request_shutdown (RPC)."""
         self._closing = True
+        self._cleanup_bus_subscriptions()
         self._ctrl.persist_all()
         set_shutting_down(True)
         # Tear down remote control before the Qt main loop exits so any in-flight

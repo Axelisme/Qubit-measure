@@ -11,6 +11,12 @@ import os
 import numpy as np
 import pytest
 from zcu_tools.gui.app.fluxdep.controller import Controller
+from zcu_tools.gui.app.fluxdep.event_bus import (
+    ActiveSpectrumChangedPayload,
+    SpectrumAddedPayload,
+    SpectrumChangedPayload,
+    SpectrumRemovedPayload,
+)
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
 
@@ -32,6 +38,26 @@ def _list_labels(win: MainWindow) -> list[str]:
 def test_window_builds_empty(window):
     assert window._list.count() == 0
     assert window.windowTitle() == "fluxdep-gui"
+
+
+def test_window_close_removes_event_bus_subscriptions(window):
+    for payload_type in (
+        SpectrumAddedPayload,
+        SpectrumRemovedPayload,
+        SpectrumChangedPayload,
+        ActiveSpectrumChangedPayload,
+    ):
+        assert window._ctrl.bus._subs.get(payload_type)
+
+    window.close()
+
+    for payload_type in (
+        SpectrumAddedPayload,
+        SpectrumRemovedPayload,
+        SpectrumChangedPayload,
+        ActiveSpectrumChangedPayload,
+    ):
+        assert window._ctrl.bus._subs.get(payload_type, []) == []
 
 
 def test_load_refreshes_list(window, spectrum_hdf5):

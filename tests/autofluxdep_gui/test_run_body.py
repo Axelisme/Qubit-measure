@@ -10,6 +10,9 @@ mechanics fast and decoupled from any acquire.
 
 from __future__ import annotations
 
+import threading
+from collections.abc import Callable
+
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency
@@ -50,6 +53,74 @@ def test_controller_run_drives_predictor_service_then_consumer():
     # consumer produced its derived key off it
     assert "predict_freq" in info.point
     assert info.point["measured"] == info.point["predict_freq"] + 0.5
+
+
+def test_run_event_bus_payloads_emit_on_main_thread(qapp):
+    from zcu_tools.gui.app.autofluxdep.events.run import (
+        NodeEnteredPayload,
+        PointDonePayload,
+        RunFailedPayload,
+        RunFinishedPayload,
+        RunStartedPayload,
+        RunStoppedPayload,
+    )
+
+    main_thread = threading.get_ident()
+    ctrl = build_core()
+    ctrl.add_node(_fake_consumer())
+    ctrl.set_flux_values([0.0, 1.0])
+    seen: list[tuple[str, int]] = []
+
+    def record(label: str) -> Callable[[object], None]:
+        def _inner(_payload: object) -> None:
+            seen.append((label, threading.get_ident()))
+
+        return _inner
+
+    ctrl.bus.subscribe(RunStartedPayload, record("started"))
+    ctrl.bus.subscribe(NodeEnteredPayload, record("node"))
+    ctrl.bus.subscribe(PointDonePayload, record("point"))
+    ctrl.bus.subscribe(RunFinishedPayload, record("finished"))
+    ctrl.bus.subscribe(RunStoppedPayload, record("stopped"))
+    ctrl.bus.subscribe(RunFailedPayload, record("failed"))
+
+    run_controller_to_completion(ctrl)
+    qapp.processEvents()
+    qapp.processEvents()
+
+    labels = [label for label, _thread_id in seen]
+    assert "started" in labels
+    assert "node" in labels
+    assert labels.count("point") == 2
+    assert "finished" in labels
+    assert all(thread_id == main_thread for _label, thread_id in seen)
+
+
+def test_run_event_emitter_uses_direct_path_on_owner_thread(qapp):
+    from zcu_tools.gui.app.autofluxdep.controller import _RunEventEmitter
+    from zcu_tools.gui.app.autofluxdep.events.run import (
+        NodeEnteredPayload,
+        PointDonePayload,
+    )
+
+    main_thread = threading.get_ident()
+    ctrl = build_core()
+    seen: list[tuple[str, int | str, int]] = []
+    ctrl.bus.subscribe(
+        PointDonePayload,
+        lambda p: seen.append(("point", p.idx, threading.get_ident())),
+    )
+    ctrl.bus.subscribe(
+        NodeEnteredPayload,
+        lambda p: seen.append(("node", p.name, threading.get_ident())),
+    )
+
+    emitter = _RunEventEmitter(ctrl)
+    emitter.emit_point_done(3)
+    emitter.emit_node_entered("consumer", 3)
+
+    assert seen == [("point", 3, main_thread), ("node", "consumer", main_thread)]
+    assert ctrl._cur_idx == 3
 
 
 def test_run_threads_flux_into_env():
