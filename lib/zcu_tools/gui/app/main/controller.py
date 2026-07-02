@@ -63,7 +63,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.ports import ProgressTransport
     from zcu_tools.meta_tool import ArbWaveformData, ArbWaveformInfo
 
-    from .adapters.qt_shutdown_driver import QtShutdownDriver
+    from .driven.qt_shutdown_driver import QtShutdownDriver
     from .services.guard import AnalyzePermit
 
 
@@ -744,7 +744,7 @@ class Controller(SessionControllerMixin):
         (ADR-0005), built lazily here so the Controller stays importable without
         a Qt loop. ``on_closed`` always runs on the main thread."""
         if self._shutdown_driver is None:
-            from .adapters.qt_shutdown_driver import QtShutdownDriver
+            from .driven.qt_shutdown_driver import QtShutdownDriver
 
             self._shutdown_driver = QtShutdownDriver(self._operation_handles)
         self._shutdown_driver.begin(on_closed)

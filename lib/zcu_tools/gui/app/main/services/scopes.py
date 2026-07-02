@@ -37,7 +37,7 @@ def figure_ambient(figure_container: Any | None) -> Iterator[None]:
             yield
         return
 
-    from zcu_tools.gui.app.main.adapters.qt_liveplot_backend import QtLivePlotBackend
+    from zcu_tools.gui.app.main.driven.qt_liveplot_backend import QtLivePlotBackend
     from zcu_tools.gui.plotting import routing_scope
     from zcu_tools.liveplot.backend import set_liveplot_backend
 

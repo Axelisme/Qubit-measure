@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-02 - Schedule stop scope
+**Last updated:** 2026-07-02 - driven adapter package
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -22,7 +22,8 @@ framework 只看 `ExpAdapterProtocol`。
   narrow `TabActions` port; `MainWindow` adapts those actions to top-level
   handlers.
 - `services/remote/`：GUI process 內的 NDJSON RPC handler；MCP bridge 不在本 package。
-- `adapters/`：Qt/liveplot/shutdown 等 driven adapters。
+- `driven/`：Qt/liveplot/shutdown 等 driven adapters；與 `adapter/` 的 experiment
+  framework contract 分開命名。
 
 Shared layers:
 

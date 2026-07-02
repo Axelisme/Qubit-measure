@@ -1,6 +1,6 @@
 # liveplot 模組重點筆記
 
-**Last updated:** 2026-07-01
+**Last updated:** 2026-07-02 - GUI driven backend path
 
 Jupyter 中即時更新的 matplotlib 繪圖工具，在資料擷取過程中邊跑邊畫。
 
@@ -19,7 +19,7 @@ Jupyter 中即時更新的 matplotlib 繪圖工具，在資料擷取過程中邊
      3. 都沒有時，依 matplotlib backend 名稱兜底（`nbagg` → `JupyterBackend`，其餘 → `FallbackBackend`）。
    - 內建 backend（純 matplotlib，**零 gui/Qt 認知**）：`JupyterBackend`（notebook display）、`FallbackBackend`（`plt.subplots` / `draw_idle`）。
    - 對外統一入口（皆 dispatch 到 `active_backend()`）：`make_plot_frame` / `instant_plot` / `refresh_figure` / `close_figure`。
-   - GUI 的 backend（`QtLivePlotBackend`）**住在 `gui/app/main/adapters/`、不在 liveplot**：它靠註冊進來，故合法認識 gui（`plot_host`），依賴方向 gui → liveplot。它的 `make_plot_frame` 走 `plt.subplots`（被 GUI custom mpl backend 攔截、attach 進 `FigureContainer`），與裸 `plt.subplots()` 及 analysis figure 同一條渲染路徑；`refresh` marshalling 到主線程；`instant_plot`/`close` no-op（figure 建圖當下已 attach、生命週期歸 container）。
+   - GUI 的 backend（`QtLivePlotBackend`）**住在 `gui/app/main/driven/`、不在 liveplot**：它靠註冊進來，故合法認識 gui（`plot_host`），依賴方向 gui → liveplot。它的 `make_plot_frame` 走 `plt.subplots`（被 GUI custom mpl backend 攔截、attach 進 `FigureContainer`），與裸 `plt.subplots()` 及 analysis figure 同一條渲染路徑；`refresh` marshalling 到主線程；`instant_plot`/`close` no-op（figure 建圖當下已 attach、生命週期歸 container）。
    - `jupyter` 另保留 module-level `instant_plot` / `grab_frame_with_instant_plot`（notebook 動畫特例直接 import 用）。
 
 3. `segments/` — 與 backend 解耦的純繪圖單元（只吃 `Axes`）
