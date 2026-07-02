@@ -111,7 +111,7 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
             self._set_voltage_direct(tempvolt)
 
             cur_dist = abs(tempvolt - voltage)
-            pbar.update(round(dist - cur_dist, 2) - pbar.n)
+            pbar.set_progress(round(dist - cur_dist, 2))
 
         pbar.close()
 
@@ -179,7 +179,7 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
             self._set_current_direct(tempcurrent)
 
             cur_dist = 1e3 * abs(tempcurrent - current)
-            pbar.update(round(dist - cur_dist, 2) - pbar.n)
+            pbar.set_progress(round(dist - cur_dist, 2))
 
         pbar.close()
 

@@ -149,14 +149,9 @@ class _RunEventEmitter(QObject):
     def __init__(self, owner: Controller) -> None:
         super().__init__()
         self._owner = owner
-        self.point_done.connect(  # type: ignore[call-arg]
-            owner._emit_point_done_on_main,
-            type=Qt.ConnectionType.BlockingQueuedConnection,
-        )
-        self.node_entered.connect(  # type: ignore[call-arg]
-            owner._emit_node_entered_on_main,
-            type=Qt.ConnectionType.BlockingQueuedConnection,
-        )
+        blocking = Qt.ConnectionType.BlockingQueuedConnection
+        self.point_done.connect(owner._emit_point_done_on_main, type=blocking)  # type: ignore[call-arg]
+        self.node_entered.connect(owner._emit_node_entered_on_main, type=blocking)  # type: ignore[call-arg]
 
     def emit_point_done(self, idx: int) -> None:
         if QThread.currentThread() == self.thread():
@@ -687,7 +682,7 @@ class Controller(SessionControllerMixin):
                 def on_point_with_progress(
                     idx: int, flux: float, info: InfoStore
                 ) -> None:
-                    pbar.update((idx + 1) - pbar.n)
+                    pbar.set_progress(idx + 1)
                     on_point(idx, flux, info)
 
                 try:

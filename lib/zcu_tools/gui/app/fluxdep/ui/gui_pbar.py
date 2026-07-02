@@ -73,6 +73,10 @@ class GuiProgressBar(BaseProgressBar):
         self._n += value
         self._publish()
 
+    def set_progress(self, value: ProgressValue) -> None:
+        self._n = value
+        self._publish()
+
     def set_description(self, description: str) -> None:
         self._desc = description
         self._publish(force=True)

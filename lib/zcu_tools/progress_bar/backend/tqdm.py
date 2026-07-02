@@ -12,6 +12,9 @@ class TQDMProgressBar(BaseProgressBar):
     def update(self, value: ProgressValue = 1) -> None:
         self.pbar.update(value)
 
+    def set_progress(self, value: ProgressValue) -> None:
+        self.pbar.update(value - self.pbar.n)
+
     def reset(self) -> None:
         self.pbar.reset()
 

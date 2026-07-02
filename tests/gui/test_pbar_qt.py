@@ -77,6 +77,10 @@ def test_factory_push_and_pop_leave_false(qapp):
     QApplication.processEvents()
     assert pbar.n == 3
 
+    pbar.set_progress(7)
+    QApplication.processEvents()
+    assert pbar.n == 7
+
     pbar.close()
     QApplication.processEvents()
     assert len(stack._active) == 0  # bar was popped
@@ -341,6 +345,8 @@ def test_disabled_pbar_internal_state_updates(qapp):
     pbar.update(3)
     pbar.update(2)
     assert pbar.n == 5
+    pbar.set_progress(8)
+    assert pbar.n == 8
 
     pbar.total = 20
     assert pbar.total == 20

@@ -414,7 +414,7 @@ class Schedule(Generic[T_Cfg, T_Env]):
                     if self.is_stop():
                         break
                     passed_time = round(time.time() - start_t, 1)
-                    time_pbar.update(passed_time - time_pbar.n)
+                    time_pbar.set_progress(passed_time)
                     time.sleep(0.1)
                 time_pbar.reset()
 
@@ -997,7 +997,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
                         raise
                     continue
 
-                pbar.update(rounds - pbar.n)
+                pbar.set_progress(rounds)
                 slot.set(signal_fn(raw))
                 break
         except KeyboardInterrupt:
@@ -1046,7 +1046,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         pbar: BaseProgressBar,
     ) -> T_Raw:
         def update_hook(ir: int, raw: T_Raw) -> None:
-            pbar.update(ir - pbar.n)
+            pbar.set_progress(ir)
             slot.set(signal_fn(raw))
 
         return acquire(

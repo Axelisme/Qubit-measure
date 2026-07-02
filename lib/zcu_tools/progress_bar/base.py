@@ -16,6 +16,10 @@ class BaseProgressBar(ABC):
         pass
 
     @abstractmethod
+    def set_progress(self, value: ProgressValue) -> None:
+        pass
+
+    @abstractmethod
     def reset(self) -> None:
         pass
 

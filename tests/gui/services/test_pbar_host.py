@@ -52,6 +52,19 @@ def test_live_model_computes_format_and_percent_on_query():
     assert "%v/%m" in fmt  # int total → Qt %v/%m placeholders
 
 
+def test_set_progress_sets_absolute_value():
+    svc, factory = _service_and_factory()
+    pbar = factory(desc="Rounds", total=100, leave=False)
+
+    pbar.update(23)
+    pbar.set_progress(40)
+    pbar.refresh()
+
+    ((_, live),) = svc.bars_for_owner("tab-1")
+    assert pbar.n == 40
+    assert live.n == 40
+
+
 def test_live_model_elapsed_advances_with_wall_clock(monkeypatch):
     """elapsed()/format() use wall-clock at read time, not a frozen value."""
     import zcu_tools.gui.session.services.progress as prog

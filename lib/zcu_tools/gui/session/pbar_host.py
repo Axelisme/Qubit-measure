@@ -168,6 +168,11 @@ class ProgressBar(BaseProgressBar):
         if not self._disabled:
             self._publish()
 
+    def set_progress(self, value: ProgressValue) -> None:
+        self._n = value
+        if not self._disabled:
+            self._publish()
+
     def reset(self) -> None:
         self._n = 0
         if not self._disabled:

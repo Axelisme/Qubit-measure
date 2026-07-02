@@ -106,13 +106,12 @@ class FakeDevice(BaseDevice[FakeDeviceInfo]):
             current_value = self.value
             if not self._fast_mode:
                 time.sleep(RAMP_INTERVAL)
-            # Anchor the bar to absolute distance covered (set n directly via a
-            # delta) instead of summing per-step increments: independent rounding
+            # Anchor the bar to absolute distance covered: independent rounding
             # of each step's |Δ| does not telescope back to `total`, so summing
             # could push the cumulative past `total` and trip tqdm's "clamping
             # frac" warning. min() guards the final fp residue.
             covered = min(round(abs(current_value - start), 6), total)
-            pbar.update(covered - pbar.n)
+            pbar.set_progress(covered)
         pbar.close()
 
     # ==========================================================================#

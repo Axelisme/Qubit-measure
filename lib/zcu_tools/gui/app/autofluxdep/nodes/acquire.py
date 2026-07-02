@@ -226,7 +226,7 @@ def round_progress(
     )
 
     def update(round_count: int) -> None:
-        pbar.update(round_count - pbar.n)
+        pbar.set_progress(round_count)
 
     try:
         yield update
