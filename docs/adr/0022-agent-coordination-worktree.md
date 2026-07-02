@@ -9,13 +9,14 @@
 採 **orchestrator-owned Git worktree protocol**，不使用 taskboard MCP 或 `agent-taskboard` skill。
 
 - **一般單 agent 工作**：直接在目前 checkout 修改、測試、回報，不需要額外協調。
-- **多 agent / 長線 orchestration**：一個 task item 對應一個 Git worktree，位置固定為 `.agent_state/worktrees/trees/<task-id>/`；branch 慣例為 `agent/<task-id>`。
+- **多 agent / 長線 orchestration**：`task-id` 錨定計劃、reports namespace 與 parent integration branch；同一 task 可依需要拆成多個 `lane-id`，每個 lane 對應一個 Git worktree。單 lane 預設 `.agent_state/worktrees/trees/<task-id>/`，多 lane 使用 `.agent_state/worktrees/trees/<task-id>--<lane-id>/`；branch 慣例同樣使用 `agent/<worktree-id>`。
 - **orchestrator ownership**：worktree 與 branch 由 orchestrator 建立、指派、驗證、合併與移除；sub-agent 不自行創建新工作樹。
-- **state source of truth**：`.agent_state/worktrees/state.json`（gitignored）記錄 task id、status、area、branch、worktree path、base branch/commit、reports dir、agents、commits、created/updated timestamps。
-- **reports**：sub-agent 長報告寫到主 checkout 的 `.agent_state/worktrees/reports/<task-id>/<agent-id>.md`，不要寫進 task worktree；untracked 檔不會跨 worktree 同步。
-- **plans**：舊 `task_plans/<area>/` 三件套遷移到 `.agent_state/plans/<area>/`，同樣 gitignored，不進 commit。跨模組、需要長期追蹤的設計決策仍寫入 `docs/adr/`。
-- **ignored inputs**：worktree 只自動包含 Git-tracked content。若 task 需要 `.agent_state/plans/<area>/`、本地設定、scratch fixtures、未追蹤資料檔等 gitignored inputs，orchestrator 建立 worktree 時必須明確複製到 task worktree，或把主 checkout 絕對路徑交給 sub-agent 只讀使用，並在 state/report 中記錄。
-- **多 sub-agent 同 task**：可以共用同一個 task worktree，但 orchestrator 必須明確序列化或分配不重疊 write scope。
+- **state source of truth**：`.agent_state/worktrees/state.json`（gitignored）記錄多個 task 與各 task 的 lane/worktree checkpoint；它不保存 repo-wide `active_task` 或 `current_task`，每次操作都必須明確指定 `task-id`。
+- **merge queue**：`.agent_state/worktrees/merge_queue.json`（gitignored）序列化主 checkout 的 merge preview / final fast-forward；每次只能有一個 task 進入主 checkout merge critical section。
+- **reports**：sub-agent 長報告寫到主 checkout 的 `.agent_state/worktrees/reports/<task-id>/<lane-id>/<agent-id>.md`，不要寫進 task worktree；untracked 檔不會跨 worktree 同步。
+- **plans**：舊 `task_plans/<task-id>/` 三件套遷移到 `.agent_state/plans/<task-id>/`，同樣 gitignored，不進 commit。跨模組、需要長期追蹤的設計決策仍寫入 `docs/adr/`。
+- **ignored inputs**：worktree 只自動包含 Git-tracked content。若 task 需要 `.agent_state/plans/<task-id>/`、本地設定、scratch fixtures、未追蹤資料檔等 gitignored inputs，orchestrator 建立 worktree 時必須明確複製到 task worktree，或把主 checkout 絕對路徑交給 sub-agent 只讀使用，並在 state/report 中記錄。
+- **多 sub-agent 同 task**：可以共用同一個 lane worktree，但 orchestrator 必須明確序列化或分配不重疊 write scope；跨 lane 也必須避免重疊 write scope。
 - **Phase/task closure**：每個 task item 或 Phase 告一段落時，orchestrator 必須做整合決策（merge / abandon / blocked）並移除 worktree；task worktree 不作為長期常駐 checkout 使用。
 - **runtime 假設**：不要假設 Codex、Claude Code、opencode 或其他 agent runtime 內建 sub-agent isolation 會自動使用 worktree；需要隔離時，由 orchestrator 顯式建立並把 workdir 傳給 agent。
 
@@ -23,10 +24,14 @@
 
 ```text
 .agent_state/
-  plans/<area>/{task_plan.md,findings.md,progress.md,archive.md}
-  worktrees/state.json
-  worktrees/reports/<task-id>/<agent-id>.md
-  worktrees/trees/<task-id>/
+  plans/
+    archives/<task-id>/
+    <task-id>/{task_plan.md,findings.md,progress.md,archive.md}
+  worktrees/
+    state.json
+    merge_queue.json
+    reports/<task-id>/<lane-id>/<agent-id>.md
+    trees/<worktree-id>/
 ```
 
 不使用 `.agents/` 存放這些專案工作狀態，因為 `.agents/` 也可能是 opencode、Antigravity 或其他工具的 config/search target；把 project-local agent state 放在獨立 `.agent_state/` 可降低工具誤解設定檔的風險。
@@ -35,27 +40,55 @@
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "tasks": {
     "<task-id>": {
       "status": "active",
-      "area": "<area>",
-      "branch": "agent/<task-id>",
-      "worktree_path": ".agent_state/worktrees/trees/<task-id>",
       "base_branch": "main",
       "base_commit": "<sha>",
-      "reports_dir": ".agent_state/worktrees/reports/<task-id>",
-      "ignored_inputs": [],
-      "agents": [],
-      "commits": [],
-      "created_at": "YYYY-MM-DDTHH:MM:SSZ",
-      "updated_at": "YYYY-MM-DDTHH:MM:SSZ"
+      "integration_branch": "agent/<task-id>",
+      "worktrees": {
+        "<lane-id>": {
+          "status": "active",
+          "role": "lane",
+          "branch": "agent/<worktree-id>",
+          "worktree_path": ".agent_state/worktrees/trees/<worktree-id>",
+          "reports_dir": ".agent_state/worktrees/reports/<task-id>/<lane-id>",
+          "write_scope": ["lib/..."],
+          "ignored_inputs": []
+        }
+      }
     }
   }
 }
 ```
 
-`status` 可用：`planned`、`active`、`reviewing`、`merged`、`blocked`、`abandoned`。
+`status` 可用：`active`、`reviewing`、`merge_preview`、`blocked`。task-level `status` 是整體狀態；lane-level `status` 是該 worktree 的狀態。merged / abandoned 的 task 在更新 progress 並清理 worktree / branch 後直接從 `state.json` 移除。
+
+`state.json` 不包含 `active_task`。多個 task 可以同時 active；orchestrator 每次讀寫 plan、state、report、branch 或 queue entry 都以明確 `task-id` 定位。
+
+## Merge Queue Contract
+
+```json
+{
+  "version": 1,
+  "queue": [
+    {
+      "task_id": "<task-id>",
+      "branch": "agent/<task-id>",
+      "base_branch": "main",
+      "action": "preview",
+      "status": "queued",
+      "requested_by": "<agent-or-thread>",
+      "enqueued_at": "YYYY-MM-DDTHH:MM:SSZ",
+      "started_at": null,
+      "note": ""
+    }
+  ]
+}
+```
+
+`action` 可用 `preview` 或 `final`；`status` 可用 `queued`、`merging`、`blocked`。任何 task 在主 checkout 執行 `git merge --no-commit --no-ff agent/<task-id>` 或 `git merge --ff-only agent/<task-id>` 前都先登記 queue。只有 queue 第一個 entry 可把狀態改成 `merging` 並進入 merge critical section；preview 開著時該 entry 仍持有 queue。完成、abort、blocked 或 abandoned 後才釋放 entry。queue 第一個 entry 若 blocked，後面的 task 不可跳過；需先解決或 abort 該 task 的主 checkout merge 狀態。
 
 ## Live Resource Coordination
 
@@ -72,5 +105,5 @@ Git worktree 只隔離檔案，不隔離 ZCU 板、GUI subprocess、固定 MCP p
 - 人類與 agent 共同閱讀的長線計劃位於 `.agent_state/plans/`；因為 gitignored，不進 diff/commit。
 - Sub-agent reports 固定寫入主 checkout 的 `.agent_state/worktrees/reports/`，避免 worktree 間 untracked 檔不可見。
 - Task-specific gitignored inputs 要由 orchestrator 明確 copy/reference；sub-agent 不猜測未追蹤檔在 task worktree 中存在。
-- Merge 仍由 orchestrator 控制；若用戶未授權 commit/merge，工作停在 task worktree diff 與 reports。
+- Merge 仍由 orchestrator 控制；主 checkout preview / final fast-forward 由 `merge_queue.json` 序列化。若用戶未授權 commit/merge，工作停在 task worktree diff 與 reports，不佔用 merge queue。
 - Phase/task 收尾時 worktree 會被移除，避免長期殘留 checkout 形成新的同步負擔。
