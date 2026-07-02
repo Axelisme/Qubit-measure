@@ -9,7 +9,6 @@ from collections.abc import (
     Iterable,
     Iterator,
     Mapping,
-    MutableMapping,
     Sequence,
     Sized,
 )
@@ -17,7 +16,6 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass
-from numbers import Number
 from typing import Any, Generic, Literal, Protocol, Self, TypeAlias, cast, overload
 
 import numpy as np
@@ -38,6 +36,8 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.progress_bar import BaseProgressBar, make_pbar
 from zcu_tools.utils.func_tools import min_interval
+
+from ._path import get_path, set_target, writable_view
 
 T_Cfg = TypeVar("T_Cfg")
 T_ChildCfg = TypeVar("T_ChildCfg")
@@ -160,7 +160,7 @@ class SignalBuffer:
 
     def at(self, *index_or_step: Any) -> SignalSlot:
         return SignalSlot(
-            buffer=self, view=_writable_view(self.array, _resolve_index(index_or_step))
+            buffer=self, view=writable_view(self.array, _resolve_index(index_or_step))
         )
 
     def __getitem__(self, index_or_step: Any) -> SignalSlot:
@@ -503,22 +503,7 @@ class Schedule(Generic[T_Cfg, T_Env]):
 
     def _get_data(self, owner: Schedule[Any, Any] | ScheduleStep[Any, Any, Any]) -> Any:
         self._ensure_active()
-        target = self._data_root()
-        path = owner.path
-        for depth, seg in enumerate(path):
-            if isinstance(target, Mapping):
-                target = target[seg]
-            elif isinstance(target, list):
-                if not isinstance(seg, int):
-                    raise ValueError(f"Expected int index for list, got {type(seg)}")
-                target = target[seg]
-            elif isinstance(target, np.ndarray):
-                return _writable_view(target, path[depth:])
-            else:
-                raise ValueError(
-                    f"Expected Mapping, list, or NDArray, got {type(target)}"
-                )
-        return target
+        return get_path(self._data_root(), owner.path)
 
     def _data_root(self) -> Any:
         if len(self._buffers) == 1:
@@ -533,24 +518,7 @@ class Schedule(Generic[T_Cfg, T_Env]):
         flush: bool = False,
     ) -> None:
         target = self._get_data(owner)
-        if isinstance(target, MutableMapping):
-            if not isinstance(value, Mapping):
-                raise ValueError(f"Expected Mapping, got {type(value)}")
-            target.update(value)
-        elif isinstance(target, list):
-            if not isinstance(value, list):
-                raise ValueError(f"Expected list, got {type(value)}")
-            target.clear()
-            target.extend(value)
-        elif isinstance(target, np.ndarray):
-            if isinstance(value, np.ndarray):
-                np.copyto(dst=target, src=value)
-            elif isinstance(value, Number):
-                np.copyto(dst=target, src=np.asarray(value))
-            else:
-                raise ValueError(f"Expected NDArray or number, got {type(value)}")
-        else:
-            raise ValueError(f"Expected Mapping, list, or NDArray, got {type(target)}")
+        set_target(target, value)
         self._trigger_update(owner, flush=flush)
 
     def _register_local_buffer(
@@ -1097,26 +1065,3 @@ def _resolve_index(index_or_step: tuple[Any, ...]) -> tuple[Any, ...]:
         else:
             resolved.append(part)
     return tuple(resolved)
-
-
-def _writable_view(array: NDArray[Any], index: tuple[Any, ...]) -> NDArray[Any]:
-    if not index:
-        return array
-
-    direct = array[index]
-    if isinstance(direct, np.ndarray):
-        if not np.shares_memory(direct, array):
-            raise ValueError("SignalBuffer indexing must select a writable view")
-        return direct
-
-    scalar_index: list[slice] = []
-    for axis, part in enumerate(index):
-        if not isinstance(part, int):
-            raise ValueError("Scalar SignalBuffer indexing only supports integer axes")
-        axis_size = array.shape[axis]
-        normalized = part + axis_size if part < 0 else part
-        if normalized < 0 or normalized >= axis_size:
-            raise IndexError(f"index {part} is out of bounds for axis {axis}")
-        scalar_index.append(slice(normalized, normalized + 1))
-
-    return array[tuple(scalar_index)].reshape(())

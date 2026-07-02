@@ -38,12 +38,15 @@ path，並觸發該 buffer 的 update hook。
 `list[dict[measurement_name, Result]]`。它提供：
 
 - `ResultNode` typed handle：`tree.at(i).child("task").child("field")` 可定位 result
-  subtree，`set(value, flush=True)` 可直接寫入並觸發 update。
+  subtree，`set(value, flush=True)` 可直接寫入並觸發 update；若該 update 會送到
+  subscriber，`ResultTree` 必須有 run env（executor 會在建構時傳入），否則 fast-fail。
 - child-local buffer：executor leaf 以 `state.child("raw_signals", cfg=cfg).buffer(...)`
   建立 `SignalBuffer`，buffer 寫入時會回填 ResultTree leaf。
 - per-measurement subscription：executor plotter 訂閱 `tree.measurement_node(name)`，
   callback 收 `ResultUpdateEvent`，包含 `measurement_name`、`outer_index`、
   `outer_value`、`env`、`node`、stacked `result` 與 `flush`。
+- root-level `ResultTree.trigger_update(flush=True)` 會對所有已訂閱 measurement 廣播
+  flush event；step-level update 只觸發 path 對應的 measurement。
 - per-measurement cache：`measurement_result(name)` 只 merge 該 measurement；更新某個
   measurement 時只 invalidates 該 measurement cache。
 

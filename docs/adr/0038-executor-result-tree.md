@@ -33,9 +33,9 @@ status: accepted
 
    Leaf task 的 `update_plotter(...)` 只接 event 與該 measurement 的 stacked result，不再讀 `ctx.path[1]` 或自建 `iteration_index()`。
 
-3. **flush 是 result event 語意**。`ScheduleStep.set_data(..., flush=True)` / `trigger_update(flush=True)` 把 flush 傳給 buffer；`ResultTree` 用 flush bypass subscription throttle。一般 `SignalBuffer` 接受同一 keyword 但維持原本 public `on_update(data)` 形狀與節流行為。leaf task 不再使用 liveplot throttle helper。
+3. **flush 是 result event 語意**。`ScheduleStep.set_data(..., flush=True)` / `trigger_update(flush=True)` 把 flush 傳給 buffer；`ResultTree` 用 flush bypass subscription throttle。step-level update 只觸發 path 對應的 measurement，root-level `ResultTree.trigger_update(flush=True)` 對所有已訂閱 measurement 廣播。一般 `SignalBuffer` 接受同一 keyword 但維持原本 public `on_update(data)` 形狀與節流行為。leaf task 不再使用 liveplot throttle helper。
 
-4. **`MultiMeasurementExecutor` 擁有 common run lifecycle**。base executor 建立 default outer result、plotter/writer、`ResultTree` subscription、`Schedule` scope、measurement init/cleanup、retry、stop handling、writer finish、figure close、`last_cfg` 與 `last_result`。`FluxDepExecutor` / `OvernightExecutor` 只提供 cfg/env 建立與 outer-loop policy。
+4. **`MultiMeasurementExecutor` 擁有 common run lifecycle**。base executor 建立 default outer result、plotter/writer、帶 run env 的 `ResultTree` subscription、`Schedule` scope、measurement init/cleanup、retry、stop handling、writer finish、figure close、`last_cfg` 與 `last_result`。若 caller 直接用 `ResultNode.set(...)` 觸發 subscribed update，`ResultTree` 必須持有 env；否則在寫入前 fast-fail，避免 plotter 才以 `env=None` 爆炸。`FluxDepExecutor` / `OvernightExecutor` 只提供 cfg/env 建立與 outer-loop policy。
 
 5. **runner 擁有唯一 task/bundle contract**。`runner/task.py` 定義 `Acquirer`、`TaskPlotter`、`TaskPersister`、`MeasurementBundle` 與 direct-implementation convenience `MeasurementTask`；`ComposedMeasurementBundle` 可把 acquire / plot / persistence 三段 component 組成 executor leaf。`MultiMeasurementExecutor` 只依賴 `MeasurementBundle`，不依賴 app-local ABC。
 

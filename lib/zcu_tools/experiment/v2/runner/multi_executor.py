@@ -139,12 +139,13 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg, T_Env, T_Axis]):
         self,
         data: list[dict[str, Result]],
         *,
+        env: T_Env,
         outer_values: T_Axis,
         plotter: MultiLivePlot[tuple[str, str]],
         plotters_map: Mapping[str, Mapping[str, AbsLivePlot]],
         writer: FFMpegWriter | None,
     ) -> ResultTree[T_Env]:
-        tree: ResultTree[T_Env] = ResultTree(data, outer_values=outer_values)
+        tree: ResultTree[T_Env] = ResultTree(data, outer_values=outer_values, env=env)
 
         def make_callback(
             name: str,
@@ -170,7 +171,6 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg, T_Env, T_Axis]):
         cfg: T_Cfg,
         env: T_Env,
         outer_values: T_Axis,
-        retry_time: int,
         run_loop: Callable[[Schedule[T_Cfg, T_Env]], None],
     ) -> Mapping[str, Result]:
         if len(self.measurements) == 0:
@@ -182,6 +182,7 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg, T_Env, T_Axis]):
         stop = current_stop_signal() or StopSignal()
         result_tree = self._make_result_tree(
             init_result,
+            env=env,
             outer_values=outer_values,
             plotter=plotter,
             plotters_map=plotters_map,

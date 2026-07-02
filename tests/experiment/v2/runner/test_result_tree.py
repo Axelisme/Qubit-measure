@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, TypeAlias, cast
 
 import numpy as np
+import pytest
 from numpy.typing import NDArray
 from zcu_tools.experiment.v2.runner import ResultTree, ResultUpdateEvent, Schedule
 from zcu_tools.experiment.v2.utils import Result
@@ -44,6 +45,51 @@ def test_result_tree_node_set_updates_nested_data() -> None:
     np.testing.assert_allclose(freq_row["fit"], np.array(7.0))
     result = cast(LeafResult, tree.measurement_result("freq"))
     np.testing.assert_allclose(result["fit"], np.array([7.0, np.nan]))
+
+
+def test_result_node_set_uses_tree_env_for_subscription_event() -> None:
+    env = TreeEnv(label="direct", flux_values=np.array([0.25, 0.5]))
+    data = cast(list[dict[str, Result]], [_row(), _row()])
+    tree = ResultTree[TreeEnv](data, outer_values=env.flux_values, env=env)
+    events: list[ResultUpdateEvent[TreeEnv, Any]] = []
+    tree.measurement_node("freq").subscribe(events.append)
+
+    tree.at(0).child("freq").child("fit").set(np.array(8.0), flush=True)
+
+    assert len(events) == 1
+    event = events[0]
+    assert event.env is env
+    assert event.outer_index == 0
+    assert event.outer_value == 0.25
+    assert event.flush is True
+    np.testing.assert_allclose(event.result["fit"], np.array([8.0, np.nan]))
+
+
+def test_result_node_set_with_subscriber_requires_env() -> None:
+    tree = _tree()
+    tree.measurement_node("freq").subscribe(lambda event: None)
+
+    with pytest.raises(RuntimeError, match="without env"):
+        tree.at(0).child("freq").child("fit").set(np.array(8.0), flush=True)
+
+    freq_row = cast(LeafResult, tree.data[0]["freq"])
+    np.testing.assert_allclose(freq_row["fit"], np.array(np.nan))
+
+
+def test_result_tree_root_trigger_broadcasts_subscribed_measurements() -> None:
+    env = TreeEnv(label="root", flux_values=np.array([0.25, 0.5]))
+    data = cast(list[dict[str, Result]], [_row(), _row()])
+    tree = ResultTree[TreeEnv](data, outer_values=env.flux_values, env=env)
+    events: list[ResultUpdateEvent[TreeEnv, Any]] = []
+    tree.measurement_node("freq").subscribe(events.append)
+    tree.measurement_node("t1").subscribe(events.append)
+
+    tree.trigger_update(flush=True)
+
+    assert [event.measurement_name for event in events] == ["freq", "t1"]
+    assert [event.outer_index for event in events] == [None, None]
+    assert [event.env for event in events] == [env, env]
+    assert [event.flush for event in events] == [True, True]
 
 
 def test_result_tree_schedule_set_emits_per_measurement_event() -> None:

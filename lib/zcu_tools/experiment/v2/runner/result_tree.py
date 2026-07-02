@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Hashable, Mapping, MutableMapping, Sequence
+from collections.abc import Callable, Hashable, Sequence
 from dataclasses import dataclass
-from numbers import Number
 from typing import Any, Generic
 
 import numpy as np
@@ -12,6 +11,7 @@ from typing_extensions import TypeVar
 from zcu_tools.experiment.v2.utils import Result, merge_result_list
 from zcu_tools.utils.func_tools import min_interval
 
+from ._path import get_path, set_target
 from .schedule import SignalBuffer
 
 T_Env = TypeVar("T_Env", default=dict[str, Any])
@@ -54,10 +54,12 @@ class ResultTree(Generic[T_Env]):
         data: list[dict[str, Result]],
         *,
         outer_values: Sequence[Any] | NDArray[Any] | None = None,
+        env: T_Env | None = None,
         update_interval: float | None = 0.1,
     ) -> None:
         self._data = data
         self._outer_values = outer_values
+        self._env = env
         self._update_interval = update_interval
         self._subscriptions: dict[str, list[_Subscription[T_Env]]] = {}
         self._result_cache: dict[str, Result] = {}
@@ -94,22 +96,9 @@ class ResultTree(Generic[T_Env]):
         flush: bool = False,
     ) -> None:
         if step is None:
+            self._emit_path_update((), self._env, flush=flush)
             return
-
-        names = self._measurement_names_for_path(step.path)
-        for name in names:
-            self._result_cache.pop(name, None)
-            event = ResultUpdateEvent(
-                measurement_name=name,
-                outer_index=self._outer_index_for_path(step.path),
-                outer_value=self._outer_value_for_path(step.path),
-                env=step.env,
-                node=self.measurement_node(name),
-                result=self.measurement_result(name),
-                flush=flush,
-            )
-            for subscription in self._subscriptions.get(name, ()):
-                subscription.emit(event)
+        self._emit_path_update(step.path, step.env, flush=flush)
 
     def get_path(self, path: tuple[Hashable, ...]) -> Any:
         if self._is_measurement_view_path(path):
@@ -119,20 +108,63 @@ class ResultTree(Generic[T_Env]):
                     f"Expected measurement name, got {type(measurement_name)}"
                 )
             return self.measurement_result(measurement_name)
-        return _get_path(self._data, path)
+        return get_path(self._data, path)
 
     def set_path(self, path: tuple[Hashable, ...], value: Any) -> None:
         target = self.get_path(path)
-        _set_target(target, value)
+        set_target(target, value)
         measurement_name = self._measurement_name_for_path(path)
-        if measurement_name is not None:
+        if measurement_name is None:
+            self._result_cache.clear()
+        else:
             self._result_cache.pop(measurement_name, None)
+
+    def _emit_path_update(
+        self,
+        path: tuple[Hashable, ...],
+        env: T_Env | None,
+        *,
+        flush: bool,
+    ) -> None:
+        names = self._measurement_names_for_path(path)
+        for name in names:
+            self._result_cache.pop(name, None)
+            subscriptions = self._subscriptions.get(name, ())
+            if not subscriptions:
+                continue
+            if env is None:
+                raise RuntimeError(
+                    "ResultTree cannot emit subscription events without env; "
+                    "construct ResultTree with env=... or trigger updates through "
+                    "a Schedule scope"
+                )
+            event = ResultUpdateEvent(
+                measurement_name=name,
+                outer_index=self._outer_index_for_path(path),
+                outer_value=self._outer_value_for_path(path),
+                env=env,
+                node=self.measurement_node(name),
+                result=self.measurement_result(name),
+                flush=flush,
+            )
+            for subscription in subscriptions:
+                subscription.emit(event)
 
     def _measurement_names_for_path(self, path: tuple[Hashable, ...]) -> list[str]:
         measurement_name = self._measurement_name_for_path(path)
         if measurement_name is not None:
             return [measurement_name]
         return list(self._subscriptions)
+
+    def _ensure_direct_update_can_emit(self, path: tuple[Hashable, ...]) -> None:
+        if self._env is not None:
+            return
+        names = self._measurement_names_for_path(path)
+        if any(self._subscriptions.get(name) for name in names):
+            raise RuntimeError(
+                "ResultNode.set cannot emit subscription events without env; "
+                "construct ResultTree with env=... or write through Schedule"
+            )
 
     def _measurement_name_for_path(self, path: tuple[Hashable, ...]) -> str | None:
         if self._is_measurement_view_path(path):
@@ -193,8 +225,9 @@ class ResultNode(Generic[T_Env]):
     def set(self, value: Any, *, flush: bool = False) -> None:
         if self.measurement_name is not None:
             raise ValueError("measurement subscription nodes are read-only")
+        self._tree._ensure_direct_update_can_emit(self.path)
         self._tree.set_path(self.path, value)
-        self._tree.trigger_update(_ResultNodeStep(self.path), flush=flush)
+        self._tree._emit_path_update(self.path, self._tree._env, flush=flush)
 
     def buffer(
         self,
@@ -220,60 +253,3 @@ class ResultNode(Generic[T_Env]):
                 f"target shape={target.shape}, buffer shape={buffer.array.shape}"
             )
         return buffer
-
-
-class _ResultNodeStep:
-    def __init__(self, path: tuple[Hashable, ...]) -> None:
-        self.path = path
-        self.env: Any = None
-
-
-def _get_path(root: Any, path: tuple[Hashable, ...]) -> Any:
-    target = root
-    for depth, seg in enumerate(path):
-        if isinstance(target, Mapping):
-            target = target[seg]
-        elif isinstance(target, list):
-            if not isinstance(seg, int):
-                raise ValueError(f"Expected int index for list, got {type(seg)}")
-            target = target[seg]
-        elif isinstance(target, np.ndarray):
-            return _writable_view(target, path[depth:])
-        else:
-            raise ValueError(f"Expected Mapping, list, or NDArray, got {type(target)}")
-    return target
-
-
-def _set_target(target: Any, value: Any) -> None:
-    if isinstance(target, MutableMapping):
-        if not isinstance(value, Mapping):
-            raise ValueError(f"Expected Mapping, got {type(value)}")
-        target.update(value)
-    elif isinstance(target, list):
-        if not isinstance(value, list):
-            raise ValueError(f"Expected list, got {type(value)}")
-        target.clear()
-        target.extend(value)
-    elif isinstance(target, np.ndarray):
-        if isinstance(value, np.ndarray):
-            np.copyto(dst=target, src=value)
-        elif isinstance(value, Number):
-            np.copyto(dst=target, src=np.asarray(value))
-        else:
-            raise ValueError(f"Expected NDArray or number, got {type(value)}")
-    else:
-        raise ValueError(f"Expected Mapping, list, or NDArray, got {type(target)}")
-
-
-def _writable_view(array: NDArray[Any], path: tuple[Hashable, ...]) -> NDArray[Any]:
-    if not path:
-        return array
-    index_parts: list[int] = []
-    for part in path:
-        if not isinstance(part, int):
-            raise ValueError(
-                f"NDArray result paths must be integer-indexed; got path suffix {path}"
-            )
-        index_parts.append(part)
-    index = tuple(index_parts)
-    return array[index]

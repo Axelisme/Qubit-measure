@@ -156,7 +156,6 @@ class FakeExecutor(
                     cfg=cfg,
                     env=env,
                     outer_values=self.outer_values,
-                    retry_time=retry_time,
                     run_loop=run_loop,
                 )
             ),

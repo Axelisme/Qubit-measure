@@ -65,7 +65,6 @@ class OvernightExecutor(
             cfg=cfg,
             env=env,
             outer_values=iters,
-            retry_time=fail_retry,
             run_loop=run_loop,
         )
 
