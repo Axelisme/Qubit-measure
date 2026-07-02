@@ -172,17 +172,17 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg]):
                     )
                 cur_tasks = [cur_task]
 
-            root_data = ctx.root_data
-            if not isinstance(root_data, list):
+            result_data = ctx.schedule.data
+            if not isinstance(result_data, list):
                 raise TypeError(
-                    f"Expected executor root_data to be list, got {type(root_data)}"
+                    f"Expected executor result data to be list, got {type(result_data)}"
                 )
             for cur_task in cur_tasks:
                 task_rows: list[Any] = []
-                for row in root_data:
+                for row in result_data:
                     if not isinstance(row, Mapping):
                         raise TypeError(
-                            "Expected executor root_data rows to be mappings, "
+                            "Expected executor result data rows to be mappings, "
                             f"got {type(row)}"
                         )
                     task_rows.append(row[cur_task])

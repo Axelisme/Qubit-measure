@@ -234,14 +234,6 @@ class Schedule(Generic[T_Cfg]):
         return False
 
     @property
-    def root_data(self) -> Any:
-        if self._result_buffer is not None:
-            return self._result_buffer.data
-        if len(self._buffers) == 1:
-            return self._buffers[0].array
-        return tuple(buffer.array for buffer in self._buffers)
-
-    @property
     def data(self) -> Any:
         return self._get_data(self)
 
@@ -518,7 +510,7 @@ class Schedule(Generic[T_Cfg]):
 
     def _get_data(self, owner: Schedule[Any] | ScheduleStep[Any, Any]) -> Any:
         self._ensure_active()
-        target = self.root_data
+        target = self._data_root()
         path = owner.path
         for depth, seg in enumerate(path):
             if isinstance(target, Mapping):
@@ -534,6 +526,13 @@ class Schedule(Generic[T_Cfg]):
                     f"Expected Mapping, list, or NDArray, got {type(target)}"
                 )
         return target
+
+    def _data_root(self) -> Any:
+        if self._result_buffer is not None:
+            return self._result_buffer.data
+        if len(self._buffers) == 1:
+            return self._buffers[0].array
+        return tuple(buffer.array for buffer in self._buffers)
 
     def _set_data(
         self, owner: Schedule[Any] | ScheduleStep[Any, Any], value: Any
@@ -629,10 +628,6 @@ class ScheduleStep(Generic[T_Cfg, T_Value]):
     @property
     def env(self) -> dict[str, Any]:
         return self.schedule.env
-
-    @property
-    def root_data(self) -> Any:
-        return self.schedule.root_data
 
     @property
     def data(self) -> Any:

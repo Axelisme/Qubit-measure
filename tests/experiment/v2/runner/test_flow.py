@@ -227,7 +227,7 @@ def test_schedule_stop_scope_supplies_default_stop_signal() -> None:
         assert not sched.is_stop()
 
 
-def test_schedule_child_buffer_syncs_root_data_without_throttling() -> None:
+def test_schedule_child_buffer_syncs_result_buffer_without_throttling() -> None:
     root = {"task": {"signals": np.full((1,), np.nan)}}
     updates: list[tuple[tuple[Any, ...], np.ndarray]] = []
     result_buffer = ResultBuffer(

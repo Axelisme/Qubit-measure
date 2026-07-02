@@ -28,7 +28,7 @@ runtime 不再保留。
 
 `ResultBuffer(data, on_update=...)` 是 structured result tree 的 storage 與 update
 owner，主要給 executor workflow 使用。`Schedule` 可以接收一個 `ResultBuffer`，但
-不直接宣告 `root_data` / `on_update`；child-local `SignalBuffer` 寫入時同步更新
+不直接宣告 result tree / update callback；child-local `SignalBuffer` 寫入時同步更新
 `ResultBuffer.data` 中對應 path，並觸發 `ResultBuffer` 的 update hook。
 
 ### `Schedule`
