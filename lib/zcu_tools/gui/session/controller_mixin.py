@@ -4,32 +4,30 @@ Both measurement-session app Controllers (measure: ``gui/app/main/controller``;
 autofluxdep: ``gui/app/autofluxdep/controller``) implement
 :class:`~zcu_tools.gui.session.controller_port.SessionControllerPort` as a wall of
 one-line forwards into the same four session services (soc_connection / context /
-device / startup) plus app-local progress helpers. Those forwards
-were byte-identical across the two apps; this mixin holds the single copy.
+device / startup). Those forwards were byte-identical across the two apps; this
+mixin holds the single copy.
 
 Design (Candidate #14, Option B — abstract service accessors):
 
 - The mixin declares a small set of **abstract accessors** for the services it
   forwards into (``_soc_svc`` / ``_ctx_svc`` / ``_dev_svc`` /
-  ``_startup_svc`` / ``_progress_svc``), as annotation-only attribute declarations
-  with explicit service types. pyright treats each as an attribute the concrete
-  Controller must supply, and enforces the declared service type at every forward.
-  Each app satisfies them however its own attribute layout already provides the
-  service — both measure and autofluxdep keep the same flat ``self._soc_svc`` etc.
-  they already assign (measure from ``build_app_services``; autofluxdep aliased off
-  its ``SessionServices`` bundle), so NO rename of the controllers' existing
+  ``_startup_svc``), as annotation-only attribute declarations with explicit
+  service types. pyright treats each as an attribute the concrete Controller must
+  supply, and enforces the declared service type at every forward. Each app
+  satisfies them however its own attribute layout already provides the service —
+  both measure and autofluxdep keep the same flat ``self._soc_svc`` etc. they
+  already assign (measure from ``build_app_services``; autofluxdep aliased off its
+  ``SessionServices`` bundle), so NO rename of the controllers' existing
   attributes is needed. (Annotation-only rather than ``@property``: a ``property``
   is a data descriptor whose ``__set__`` raises ``AttributeError``, so the
-  controllers' existing ``self._soc_svc = ...`` assignments would crash at runtime;
-  a bare annotation gives the identical pyright enforcement with no name clash and
-  no churn across the ~130 existing call sites.)
+  controllers' existing ``self._soc_svc = ...`` assignments would crash at
+  runtime; a bare annotation gives the identical pyright enforcement with no name
+  clash and no churn across the ~130 existing call sites.)
 - The mixin provides every **identical** forward reading those accessors.
 
 The device dialog lifecycle/query surface lives on ``DeviceControlPort``; the
 predictor dialog load/query/compute surface lives on ``PredictorControlPort``.
-This mixin still keeps ``attach_progress`` / ``progress_bars`` because non-device
-app-local callers (run tab and autofluxdep run progress) call those controller
-helpers directly.
+App-local run progress widgets use ``ProgressControlPort`` directly.
 
 Each app keeps as its own override the methods whose body genuinely diverges:
 
@@ -54,7 +52,6 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from zcu_tools.gui.result_scope import ProjectPaths, ResultScope
-    from zcu_tools.gui.session.pbar_host import ProgressBarModel
     from zcu_tools.gui.session.services.connection import (
         ConnectRequest,
         SoCConnectionService,
@@ -64,7 +61,6 @@ if TYPE_CHECKING:
         DeviceEntry,
         DeviceService,
     )
-    from zcu_tools.gui.session.services.progress import ProgressService
     from zcu_tools.gui.session.services.startup import (
         PersistedStartup,
         StartupConnectionRequest,
@@ -90,7 +86,6 @@ class SessionControllerMixin:
     _ctx_svc: ContextService
     _dev_svc: DeviceService
     _startup_svc: StartupService
-    _progress_svc: ProgressService
 
     # --- setup dialog: startup -------------------------------------------
     def get_persisted_startup(self) -> PersistedStartup:
@@ -178,21 +173,6 @@ class SessionControllerMixin:
     # --- setup dialog: device list/unit lookup ----------------------------
     def list_devices(self) -> list[DeviceEntry]:
         return self._dev_svc.list_devices()
-
-    # --- app-local progress helpers --------------------------------------
-    def attach_progress(
-        self, owner_id: str, listener: Callable[[], None]
-    ) -> Callable[[], None]:
-        """A View subscribes (by its own tab_id / device_name) to progress changes
-        for that owner; returns a disposer. The listener fires whenever the owner's
-        live operation's bars change (and across operation rotation), and re-reads
-        via ``progress_bars``."""
-        return self._progress_svc.attach_by_owner(owner_id, listener)
-
-    def progress_bars(self, owner_id: str) -> tuple[tuple[int, ProgressBarModel], ...]:
-        """Live (handle_id, ProgressBarModel) pairs for the owner's current
-        operation (empty if none live)."""
-        return self._progress_svc.bars_for_owner(owner_id)
 
     # --- inspect dialog: md edit + ml view/rename/delete ------------------
     def get_current_md(self) -> MetaDict:

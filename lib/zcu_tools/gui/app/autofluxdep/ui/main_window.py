@@ -155,6 +155,7 @@ class MainWindow(QMainWindow):
     def __init__(self, ctrl: Controller, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._ctrl = ctrl
+        self._progress_control = ctrl.progress_control
         self._bus_subs = EventSubscriptions()
         self._dialog_refs = DialogRefStore()
         # per-provider sweep-lived liveplot state: name -> (canvas, plotter)
@@ -246,7 +247,7 @@ class MainWindow(QMainWindow):
         self._round_progress = ProgressStack()
         self._round_progress.set_profile_callback(self._record_progress_stack_step)
         main_layout.addWidget(self._round_progress)
-        self._progress_unsub = ctrl.attach_progress(
+        self._progress_unsub = self._progress_control.attach_progress(
             RUN_PROGRESS_OWNER_ID, self._on_run_progress_changed
         )
 
@@ -586,7 +587,10 @@ class MainWindow(QMainWindow):
         profile_start = perf_now()
         collect_start = perf_now()
         models = tuple(
-            model for _handle, model in self._ctrl.progress_bars(RUN_PROGRESS_OWNER_ID)
+            model
+            for _handle, model in self._progress_control.progress_bars(
+                RUN_PROGRESS_OWNER_ID
+            )
         )
         self._progress_collect_perf.record(
             elapsed_ms(collect_start),

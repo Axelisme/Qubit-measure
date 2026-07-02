@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-02 - predictor-control facet
+**Last updated:** 2026-07-02 - progress-control facet
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -39,7 +39,7 @@ Shared layers:
 `build_app_services()` constructs the app-local services and injects their driven
 ports. `Controller` is a facade over the service bundle; UI and remote code use
 the controller for app-specific workflow and the exposed session control facets
-for device/predictor domains.
+for device/predictor/progress domains.
 
 Key ownership rules:
 
@@ -113,7 +113,9 @@ Progress is operation-scoped:
 
 - Workers emit Qt-free `ProgressEvent` objects through a `ProgressTransport`.
 - `ProgressService` owns per-operation containers and owner-to-operation mapping.
-- GUI widgets attach by owner id (`tab_id` or device name).
+- GUI widgets attach by owner id (`tab_id` or device name) through the relevant
+  control facet; run tabs use `ProgressControlPort`, device panels use
+  `DeviceControlPort`.
 - Agent polling reads by operation id.
 
 Plotting uses the shared `gui.plotting` backend. Worker-created matplotlib

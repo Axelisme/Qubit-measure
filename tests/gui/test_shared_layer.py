@@ -44,6 +44,9 @@ _SHARED_MODULES = [
     # PredictorControlPort is the shared predictor-domain facet: heavy service
     # request/result types are type-only; runtime imports stay Qt/app clean.
     "zcu_tools.gui.session.predictor_control",
+    # ProgressControlPort is the shared owner-keyed progress facet: the service
+    # type is type-only, runtime imports stay Qt/app clean.
+    "zcu_tools.gui.session.progress_control",
     # The shared body of that port (identical service-forward methods); same
     # import-clean invariant — every service/request type is TYPE_CHECKING-only.
     "zcu_tools.gui.session.controller_mixin",

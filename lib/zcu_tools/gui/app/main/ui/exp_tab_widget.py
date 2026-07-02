@@ -139,6 +139,7 @@ class ExpTabWidget(QWidget):
         super().__init__(parent)
         self.tab_id = tab_id
         self._ctrl = ctrl
+        self._progress_control = ctrl.progress_control
         self._writeback_count: int = 0
         # editor_id of this tab's shared cfg-editor session (set on bind, when
         # the cfg_form's live model exists). Exposed to agents via tab.snapshot.
@@ -164,7 +165,7 @@ class ExpTabWidget(QWidget):
         # Subscribe once by our own tab_id (the run operation's owner); the
         # listener re-reads the live bars on every change and follows the tab
         # across successive runs. Disposed in teardown.
-        self._progress_unsub = self._ctrl.attach_progress(
+        self._progress_unsub = self._progress_control.attach_progress(
             self.tab_id, self._on_progress_changed
         )
 
@@ -847,7 +848,7 @@ class ExpTabWidget(QWidget):
     def _on_progress_changed(self) -> None:
         # Main-thread callback from ProgressService; re-render the live bars of
         # this tab's current run (empty when no run is live).
-        models = tuple(m for _, m in self._ctrl.progress_bars(self.tab_id))
+        models = tuple(m for _, m in self._progress_control.progress_bars(self.tab_id))
         self.progress_stack.render_models(models)
 
     def detach(self) -> None:

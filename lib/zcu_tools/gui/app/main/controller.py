@@ -63,6 +63,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.ports import ProgressTransport
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
+    from zcu_tools.gui.session.progress_control import ProgressControlPort
     from zcu_tools.meta_tool import ArbWaveformData, ArbWaveformInfo
 
     from .driven.qt_shutdown_driver import QtShutdownDriver
@@ -254,6 +255,7 @@ class Controller(SessionControllerMixin):
         self._soc_svc: SoCConnectionService = services.soc_connection
         self._pred_svc = services.predictor
         self._predictor_control = services.predictor_control
+        self._progress_control = services.progress_control
         self._ctx_svc = services.context
         self._tab_svc = services.tab
         self._load_svc = services.load
@@ -441,6 +443,10 @@ class Controller(SessionControllerMixin):
     @property
     def predictor_control(self) -> PredictorControlPort:
         return self._predictor_control
+
+    @property
+    def progress_control(self) -> ProgressControlPort:
+        return self._progress_control
 
     def attach_caretaker(self, caretaker: PersistenceCaretaker) -> None:
         """Wire the app-level PersistenceCaretaker (built by run_app). The

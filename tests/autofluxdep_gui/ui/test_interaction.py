@@ -224,7 +224,11 @@ def test_run_progress_updates_flux_bar_and_round_stack(app, monkeypatch):
     rounds = ProgressBarModel("t1 flux 1 rounds", 100, 0.0)
     captured: list[tuple[ProgressBarModel, ...]] = []
 
-    monkeypatch.setattr(ctrl, "progress_bars", lambda _owner: ((1, flux), (2, rounds)))
+    monkeypatch.setattr(
+        ctrl.progress_control,
+        "progress_bars",
+        lambda _owner: ((1, flux), (2, rounds)),
+    )
     monkeypatch.setattr(win._round_progress, "render_models", captured.append)
 
     win._on_run_progress_changed()

@@ -95,6 +95,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.ports import ProgressTransport
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
+    from zcu_tools.gui.session.progress_control import ProgressControlPort
     from zcu_tools.gui.session.services.startup import (
         StartupProjectRequest,
     )
@@ -238,6 +239,7 @@ class Controller(SessionControllerMixin):
         self._soc_svc = session.soc_connection
         self._pred_svc = session.predictor
         self._predictor_control = session.predictor_control
+        self._progress_control = session.progress_control
         self._ctx_svc = session.context
         self._dev_svc = session.device
         self._device_control = session.device_control
@@ -260,6 +262,10 @@ class Controller(SessionControllerMixin):
     @property
     def predictor_control(self) -> PredictorControlPort:
         return self._predictor_control
+
+    @property
+    def progress_control(self) -> ProgressControlPort:
+        return self._progress_control
 
     @property
     def is_running(self) -> bool:
