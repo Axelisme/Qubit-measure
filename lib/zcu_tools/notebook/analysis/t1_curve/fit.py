@@ -12,10 +12,17 @@ from zcu_tools.progress_bar import make_pbar
 from zcu_tools.progress_bar.base import BaseProgressBar
 from zcu_tools.simulate.fluxonium import calculate_eff_t1_vs_flux_fast
 
+NoiseParameterName = Literal["Q_cap", "x_qp", "Q_ind"]
 ParameterName = Literal["Q_cap", "x_qp", "Q_ind", "Temp"]
 ResidualMode = Literal["log", "linear"]
 
+_NOISE_PARAMETER_NAMES: tuple[NoiseParameterName, ...] = ("Q_cap", "x_qp", "Q_ind")
 _PARAMETER_NAMES: tuple[ParameterName, ...] = ("Q_cap", "x_qp", "Q_ind", "Temp")
+_NOISE_CHANNELS: dict[NoiseParameterName, tuple[str, str]] = {
+    "Q_cap": ("t1_capacitive", "Q_cap"),
+    "x_qp": ("t1_quasiparticle_tunneling", "x_qp"),
+    "Q_ind": ("t1_inductive", "Q_ind"),
+}
 _TINY_POSITIVE = np.finfo(np.float64).tiny
 _DEFAULT_BOUNDS: dict[ParameterName, tuple[float, float]] = {
     "Q_cap": (_TINY_POSITIVE, np.inf),
@@ -25,12 +32,12 @@ _DEFAULT_BOUNDS: dict[ParameterName, tuple[float, float]] = {
 }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class T1FitParams:
-    Q_cap: float
-    x_qp: float
-    Q_ind: float
     Temp: float
+    Q_cap: float | None = None
+    x_qp: float | None = None
+    Q_ind: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,31 +76,31 @@ def fit_t1_noise_params(
     j: int = 0,
     progress: bool = False,
 ) -> T1FitResult:
-    """Fit Q_cap, x_qp, Q_ind, and Temp against measured T1 vs normalized flux.
+    """Fit active T1 noise parameters against measured T1 vs normalized flux.
 
     ``fluxs`` are normalized flux values (phi_ext/phi0), ``T1s`` and ``T1errs`` are
-    in ns, and ``params`` is ``(EJ, EC, EL)`` in GHz.
+    in ns, and ``params`` is ``(EJ, EC, EL)`` in GHz. ``Temp`` is always required;
+    ``Q_cap``, ``x_qp``, and ``Q_ind`` are white-listed by providing non-``None``
+    values in ``init``.
     """
     fluxs_arr, T1s_arr, T1errs_arr = _validate_data(fluxs, T1s, T1errs)
     if residual_mode not in ("log", "linear"):
         raise ValueError("residual_mode must be 'log' or 'linear'")
-    fixed_names = _validate_fixed(fixed)
-    free_names = tuple(name for name in _PARAMETER_NAMES if name not in fixed_names)
-    lower, upper = _validate_bounds(bounds)
-    init_values = _params_to_array(init)
+    active_names = _active_parameter_names(init)
+    fixed_names = _validate_fixed(fixed, active_names)
+    free_names: tuple[ParameterName, ...] = tuple(
+        name for name in active_names if name not in fixed_names
+    )
+    lower, upper = _validate_bounds(bounds, active_names)
+    init_values = _params_to_values(init, active_names)
     _validate_init(init_values, lower, upper)
 
-    free_mask = np.array([name in free_names for name in _PARAMETER_NAMES])
-    lower_log = np.log(lower[free_mask])
-    upper_log = np.log(upper[free_mask])
-    init_log = np.log(init_values[free_mask])
+    lower_log = np.log(np.array([lower[name] for name in free_names]))
+    upper_log = np.log(np.array([upper[name] for name in free_names]))
+    init_log = np.log(np.array([init_values[name] for name in free_names]))
 
     def model(current: T1FitParams) -> NDArray[np.float64]:
-        noise_channels = [
-            ("t1_capacitive", {"Q_cap": current.Q_cap}),
-            ("t1_quasiparticle_tunneling", {"x_qp": current.x_qp}),
-            ("t1_inductive", {"Q_ind": current.Q_ind}),
-        ]
+        noise_channels = _noise_channels_from_params(current, active_names)
         return calculate_eff_t1_vs_flux_fast(
             params,
             fluxs_arr,
@@ -118,7 +125,7 @@ def fit_t1_noise_params(
         cost = _cost(residuals)
         return T1FitResult(
             params=init,
-            stderr=T1FitParams(0.0, 0.0, 0.0, 0.0),
+            stderr=_zero_stderr(active_names),
             fixed=fixed_names,
             free=free_names,
             model_T1s=fixed_model,
@@ -137,8 +144,9 @@ def fit_t1_noise_params(
         nonlocal best_cost
 
         current_values = init_values.copy()
-        current_values[free_mask] = np.exp(log_free_values)
-        residuals = residual_from_params(_array_to_params(current_values))
+        for name, value in zip(free_names, np.exp(log_free_values), strict=True):
+            current_values[name] = float(value)
+        residuals = residual_from_params(_values_to_params(current_values))
         if pbar is not None:
             best_cost = min(best_cost, _cost(residuals))
             pbar.set_description(f"T1 fit cost={best_cost:.3g}")
@@ -164,14 +172,15 @@ def fit_t1_noise_params(
             pbar.close()
 
     fit_values = init_values.copy()
-    fit_values[free_mask] = np.exp(opt.x)
-    fit_params = _array_to_params(fit_values)
+    for name, value in zip(free_names, np.exp(opt.x), strict=True):
+        fit_values[name] = float(value)
+    fit_params = _values_to_params(fit_values)
     fit_model = model(fit_params)
     residuals = _calc_residuals(
         fit_model, T1s_arr, T1errs_arr, residual_mode=residual_mode
     )
     cost = _cost(residuals)
-    stderr = _estimate_stderr(opt, fit_values, free_mask, len(residuals))
+    stderr = _estimate_stderr(opt, fit_values, active_names, free_names, len(residuals))
 
     return T1FitResult(
         params=fit_params,
@@ -218,46 +227,74 @@ def _validate_data(
     return fluxs_arr, T1s_arr, T1errs_arr
 
 
-def _validate_fixed(fixed: Iterable[str]) -> tuple[ParameterName, ...]:
+def _active_parameter_names(init: T1FitParams) -> tuple[ParameterName, ...]:
+    active_names: list[ParameterName] = []
+    for name in _PARAMETER_NAMES:
+        if name == "Temp" or _param_value(init, name) is not None:
+            active_names.append(name)
+    if len(active_names) == 1:
+        raise ValueError("at least one T1 noise parameter must be provided")
+    return tuple(active_names)
+
+
+def _validate_fixed(
+    fixed: Iterable[str], active_names: tuple[ParameterName, ...]
+) -> tuple[ParameterName, ...]:
     fixed_list = list(fixed)
     if len(set(fixed_list)) != len(fixed_list):
         raise ValueError("fixed contains duplicate parameter names")
     unknown = set(fixed_list) - set(_PARAMETER_NAMES)
     if unknown:
         raise ValueError(f"unknown fixed parameter(s): {sorted(unknown)}")
-    return tuple(name for name in _PARAMETER_NAMES if name in fixed_list)
+    inactive = set(fixed_list) - set(active_names)
+    if inactive:
+        raise ValueError(f"fixed contains inactive parameter(s): {sorted(inactive)}")
+    return tuple(name for name in active_names if name in fixed_list)
 
 
 def _validate_bounds(
     bounds: Mapping[str, tuple[float, float]] | None,
-) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    active_names: tuple[ParameterName, ...],
+) -> tuple[dict[ParameterName, float], dict[ParameterName, float]]:
     merged = dict(_DEFAULT_BOUNDS)
     if bounds is not None:
         unknown = set(bounds) - set(_PARAMETER_NAMES)
         if unknown:
             raise ValueError(f"unknown bound parameter(s): {sorted(unknown)}")
+        inactive = set(bounds) - set(active_names)
+        if inactive:
+            raise ValueError(
+                f"bounds contain inactive parameter(s): {sorted(inactive)}"
+            )
         merged.update(bounds)  # type: ignore[arg-type]
 
-    lower = np.array([merged[name][0] for name in _PARAMETER_NAMES], dtype=np.float64)
-    upper = np.array([merged[name][1] for name in _PARAMETER_NAMES], dtype=np.float64)
-    if np.any(~np.isfinite(lower)) or np.any(lower <= 0.0):
+    lower: dict[ParameterName, float] = {}
+    upper: dict[ParameterName, float] = {}
+    for name in active_names:
+        lower[name] = float(merged[name][0])
+        upper[name] = float(merged[name][1])
+    lower_arr = np.array(list(lower.values()), dtype=np.float64)
+    upper_arr = np.array(list(upper.values()), dtype=np.float64)
+    if np.any(~np.isfinite(lower_arr)) or np.any(lower_arr <= 0.0):
         raise ValueError("all lower bounds must be finite and positive")
-    if np.any(np.isnan(upper)) or np.any(upper <= 0.0):
+    if np.any(np.isnan(upper_arr)) or np.any(upper_arr <= 0.0):
         raise ValueError("all upper bounds must be positive or infinity")
-    if np.any(lower >= upper):
+    if np.any(lower_arr >= upper_arr):
         raise ValueError("lower bounds must be lower than upper bounds")
     return lower, upper
 
 
 def _validate_init(
-    init_values: NDArray[np.float64],
-    lower: NDArray[np.float64],
-    upper: NDArray[np.float64],
+    init_values: Mapping[ParameterName, float],
+    lower: Mapping[ParameterName, float],
+    upper: Mapping[ParameterName, float],
 ) -> None:
-    if np.any(~np.isfinite(init_values)) or np.any(init_values <= 0.0):
+    values = np.array(list(init_values.values()), dtype=np.float64)
+    if np.any(~np.isfinite(values)) or np.any(values <= 0.0):
         raise ValueError("initial T1 fit parameters must be finite and positive")
-    if np.any(init_values < lower) or np.any(init_values > upper):
-        raise ValueError("initial T1 fit parameters must be within bounds")
+    for name, value in init_values.items():
+        if value < lower[name] or value > upper[name]:
+            raise ValueError("initial T1 fit parameters must be within bounds")
 
 
 def _calc_residuals(
@@ -294,40 +331,86 @@ def _nan_as_unweighted(values: NDArray[np.float64]) -> NDArray[np.float64]:
 
 def _estimate_stderr(
     opt: OptimizeResult,
-    fit_values: NDArray[np.float64],
-    free_mask: NDArray[np.bool_],
+    fit_values: Mapping[ParameterName, float],
+    active_names: tuple[ParameterName, ...],
+    free_names: tuple[ParameterName, ...],
     n_residuals: int,
 ) -> T1FitParams:
-    stderr = np.zeros(len(_PARAMETER_NAMES), dtype=np.float64)
-    n_free = int(np.sum(free_mask))
+    stderr_values: dict[ParameterName, float] = {name: 0.0 for name in active_names}
+    n_free = len(free_names)
     if n_free == 0:
-        return _array_to_params(stderr)
+        return _values_to_params(stderr_values)
 
     try:
         jac = np.asarray(opt.jac, dtype=np.float64)
         cov_log = np.linalg.pinv(jac.T @ jac)
         cov_log *= _reduced_chi2(float(opt.cost), n_residuals, n_free)
         log_stderr = np.sqrt(np.maximum(np.diag(cov_log), 0.0))
-        stderr[free_mask] = fit_values[free_mask] * log_stderr
+        for name, value in zip(free_names, log_stderr, strict=True):
+            stderr_values[name] = fit_values[name] * float(value)
     except Exception:
-        stderr[free_mask] = np.inf
+        for name in free_names:
+            stderr_values[name] = np.inf
 
-    return _array_to_params(stderr)
-
-
-def _params_to_array(params: T1FitParams) -> NDArray[np.float64]:
-    return np.array(
-        [params.Q_cap, params.x_qp, params.Q_ind, params.Temp], dtype=np.float64
-    )
+    return _values_to_params(stderr_values)
 
 
-def _array_to_params(values: NDArray[np.float64]) -> T1FitParams:
+def _noise_channels_from_params(
+    params: T1FitParams, active_names: tuple[ParameterName, ...]
+) -> list[tuple[str, dict[str, float]]]:
+    noise_channels: list[tuple[str, dict[str, float]]] = []
+    for name in _NOISE_PARAMETER_NAMES:
+        if name not in active_names:
+            continue
+        value = _param_value(params, name)
+        if value is None:
+            raise ValueError(f"active T1 fit parameter {name} is missing")
+        channel_name, option_name = _NOISE_CHANNELS[name]
+        noise_channels.append((channel_name, {option_name: value}))
+    return noise_channels
+
+
+def _param_value(params: T1FitParams, name: ParameterName) -> float | None:
+    if name == "Q_cap":
+        return params.Q_cap
+    if name == "x_qp":
+        return params.x_qp
+    if name == "Q_ind":
+        return params.Q_ind
+    return params.Temp
+
+
+def _params_to_values(
+    params: T1FitParams, active_names: tuple[ParameterName, ...]
+) -> dict[ParameterName, float]:
+    values: dict[ParameterName, float] = {}
+    for name in active_names:
+        value = _param_value(params, name)
+        if value is None:
+            raise ValueError(f"active T1 fit parameter {name} is missing")
+        values[name] = float(value)
+    return values
+
+
+def _values_to_params(values: Mapping[ParameterName, float]) -> T1FitParams:
     return T1FitParams(
-        Q_cap=float(values[0]),
-        x_qp=float(values[1]),
-        Q_ind=float(values[2]),
-        Temp=float(values[3]),
+        Temp=float(values["Temp"]),
+        Q_cap=_optional_value(values, "Q_cap"),
+        x_qp=_optional_value(values, "x_qp"),
+        Q_ind=_optional_value(values, "Q_ind"),
     )
+
+
+def _optional_value(
+    values: Mapping[ParameterName, float], name: NoiseParameterName
+) -> float | None:
+    value = values.get(name)
+    return None if value is None else float(value)
+
+
+def _zero_stderr(active_names: tuple[ParameterName, ...]) -> T1FitParams:
+    values: dict[ParameterName, float] = {name: 0.0 for name in active_names}
+    return _values_to_params(values)
 
 
 def _cost(residuals: NDArray[np.float64]) -> float:

@@ -187,10 +187,10 @@ def test_set_t1_curve_fit_preserves_independent_sections_and_round_trips(
     params.set_t1_curve_fit(
         T1CurveFit(
             params=T1CurveFitParams(
+                Temp=0.055,
                 Q_cap=7.2e5,
                 x_qp=1.8e-6,
                 Q_ind=2.4e7,
-                Temp=0.055,
             ),
             stderr=T1CurveFitUncertainty(
                 Q_cap=1.1e4,
@@ -208,10 +208,10 @@ def test_set_t1_curve_fit_preserves_independent_sections_and_round_trips(
             loss="soft_l1",
             max_nfev=200,
             init=T1CurveFitParams(
+                Temp=0.08,
                 Q_cap=5.0e5,
                 x_qp=2.5e-6,
                 Q_ind=2.4e7,
-                Temp=0.08,
             ),
             bounds={
                 "Q_cap": (1.0e4, 1.0e8),
@@ -231,10 +231,10 @@ def test_set_t1_curve_fit_preserves_independent_sections_and_round_trips(
 
     assert QubitParams(path).require_t1_curve_fit() == T1CurveFit(
         params=T1CurveFitParams(
+            Temp=0.055,
             Q_cap=7.2e5,
             x_qp=1.8e-6,
             Q_ind=2.4e7,
-            Temp=0.055,
         ),
         stderr=T1CurveFitUncertainty(
             Q_cap=1.1e4,
@@ -252,10 +252,10 @@ def test_set_t1_curve_fit_preserves_independent_sections_and_round_trips(
         loss="soft_l1",
         max_nfev=200,
         init=T1CurveFitParams(
+            Temp=0.08,
             Q_cap=5.0e5,
             x_qp=2.5e-6,
             Q_ind=2.4e7,
-            Temp=0.08,
         ),
         bounds={
             "Q_cap": (1.0e4, 1.0e8),
@@ -267,10 +267,99 @@ def test_set_t1_curve_fit_preserves_independent_sections_and_round_trips(
     )
 
 
+def test_set_t1_curve_fit_round_trips_partial_noise_whitelist(tmp_path) -> None:
+    path = tmp_path / "params.json"
+    params = QubitParams(path)
+    params.ensure_project(ParamsProject("ChipA", "Q1"))
+    params.set_fluxdep_fit(_fit())
+
+    params.set_t1_curve_fit(
+        T1CurveFit(
+            params=T1CurveFitParams(
+                Temp=0.055,
+                Q_cap=7.2e5,
+                x_qp=1.8e-6,
+            ),
+            stderr=T1CurveFitUncertainty(
+                Q_cap=1.1e4,
+                x_qp=2.0e-8,
+                Temp=0.0,
+            ),
+            fixed=("Temp",),
+            free=("Q_cap", "x_qp"),
+            cost=1.25,
+            reduced_chi2=0.42,
+            success=True,
+            message="converged",
+            residual_mode="log",
+            loss="soft_l1",
+            max_nfev=200,
+            init=T1CurveFitParams(
+                Temp=0.08,
+                Q_cap=5.0e5,
+                x_qp=2.5e-6,
+            ),
+            bounds={
+                "Q_cap": (1.0e4, 1.0e8),
+                "x_qp": (1.0e-9, 1.0e-3),
+                "Temp": (10e-3, 300e-3),
+            },
+        )
+    )
+
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    timestamp = _assert_timestamp(raw["t1_curve_fit"]["timestamp"])
+    section = raw["t1_curve_fit"]
+    assert "Q_ind" not in section["params"]
+    assert "Q_ind" not in section["stderr"]
+    assert "Q_ind" not in section["init"]
+    assert "Q_ind" not in section["bounds"]
+
+    assert QubitParams(path).require_t1_curve_fit() == T1CurveFit(
+        params=T1CurveFitParams(
+            Temp=0.055,
+            Q_cap=7.2e5,
+            x_qp=1.8e-6,
+        ),
+        stderr=T1CurveFitUncertainty(
+            Q_cap=1.1e4,
+            x_qp=2.0e-8,
+            Temp=0.0,
+        ),
+        fixed=("Temp",),
+        free=("Q_cap", "x_qp"),
+        cost=1.25,
+        reduced_chi2=0.42,
+        success=True,
+        message="converged",
+        residual_mode="log",
+        loss="soft_l1",
+        max_nfev=200,
+        init=T1CurveFitParams(
+            Temp=0.08,
+            Q_cap=5.0e5,
+            x_qp=2.5e-6,
+        ),
+        bounds={
+            "Q_cap": (1.0e4, 1.0e8),
+            "x_qp": (1.0e-9, 1.0e-3),
+            "Temp": (10e-3, 300e-3),
+        },
+        timestamp=timestamp,
+    )
+
+
 def test_t1_curve_fit_missing_and_orphan_writes_fast_fail(tmp_path) -> None:
     path = tmp_path / "params.json"
     path.write_text(json.dumps({"name": "ChipA/Q1"}), encoding="utf-8")
-    fit = T1CurveFit(params=T1CurveFitParams(7.2e5, 1.8e-6, 2.4e7, 0.055))
+    fit = T1CurveFit(
+        params=T1CurveFitParams(
+            Temp=0.055,
+            Q_cap=7.2e5,
+            x_qp=1.8e-6,
+            Q_ind=2.4e7,
+        )
+    )
 
     with pytest.raises(QubitParamsError, match="t1_curve_fit"):
         QubitParams(path).require_t1_curve_fit()
@@ -287,8 +376,32 @@ def test_t1_curve_fit_rejects_unknown_bound_on_write(tmp_path) -> None:
     with pytest.raises(QubitParamsError, match="known T1 fit parameter"):
         params.set_t1_curve_fit(
             T1CurveFit(
-                params=T1CurveFitParams(7.2e5, 1.8e-6, 2.4e7, 0.055),
+                params=T1CurveFitParams(
+                    Temp=0.055,
+                    Q_cap=7.2e5,
+                    x_qp=1.8e-6,
+                    Q_ind=2.4e7,
+                ),
                 bounds={"bad": (1.0, 2.0)},
+            )
+        )
+
+
+def test_t1_curve_fit_rejects_inactive_metadata_on_write(tmp_path) -> None:
+    path = tmp_path / "params.json"
+    params = QubitParams(path)
+    params.ensure_project(ParamsProject("ChipA", "Q1"))
+    params.set_fluxdep_fit(_fit())
+
+    with pytest.raises(QubitParamsError, match="inactive"):
+        params.set_t1_curve_fit(
+            T1CurveFit(
+                params=T1CurveFitParams(
+                    Temp=0.055,
+                    Q_cap=7.2e5,
+                    x_qp=1.8e-6,
+                ),
+                fixed=("Q_ind",),
             )
         )
 

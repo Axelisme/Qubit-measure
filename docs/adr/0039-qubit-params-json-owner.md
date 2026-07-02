@@ -30,6 +30,7 @@ status: accepted
 - `set_fluxdep_fit(...)`、`set_dispersive_fit(...)` 與 `set_t1_curve_fit(...)` 都會在自己的 section 寫入 `timestamp`，記錄最後修改時間。
 - `set_dispersive_fit(...)` 要求檔案已存在且已有 `fluxdep_fit`，避免建立沒有 upstream handoff 的半成品。
 - `set_t1_curve_fit(...)` 要求檔案已存在且已有 `fluxdep_fit`，並只保存後續模擬 handoff 需要的 fit params 與 metadata，不把 sample arrays 或 dense model curves 放進 `params.json`。
+- `t1_curve_fit.params` 使用 white-list noise channel 語義：`Temp` 必填，`Q_cap` / `x_qp` / `Q_ind` 只在該 channel 納入 all-in-one fit 時出現；`fixed`、`free`、`bounds`、`init` 與 `stderr` 只能提到 active params。
 - Project identity migration 屬於 `QubitParams`：canonical `project.{chip_name, qubit_name}` 優先；缺 canonical project 時，result-scope discovery 才用 `result/` 下路徑推導 identity。
 - `gui.result_scope` 只負責掃描 / path derivation / scope mismatch policy；它委派 `QubitParams` 做 `params.json` migration。
 - `FluxoniumPredictor.from_file()` 與 predictor dialog 不解析 JSON；它們只要求 `QubitParams.require_fluxonium_model(...)`。

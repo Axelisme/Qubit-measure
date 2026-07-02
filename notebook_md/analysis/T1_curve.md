@@ -132,7 +132,7 @@ fig.savefig(os.path.join(image_dir, "T1s.png"))
 plt.close(fig)
 ```
 
-# Simulation
+# T1 curve
 
 ```python
 t_flxs = np.linspace(0.0, 1.0, 100)
@@ -140,8 +140,6 @@ t_flxs = np.linspace(0.0, 1.0, 100)
 s_n_spectrum_data = None
 s_phi_spectrum_data = None
 ```
-
-# T1 curve
 
 ```python
 Temp = 60e-3
@@ -408,18 +406,19 @@ plt.close(fig)
 
 ```python
 fit_init = zt1.T1FitParams(
+    Temp=Temp,
     Q_cap=Q_cap,
     x_qp=x_qp,
-    Q_ind=Q_ind,
-    Temp=Temp,
+    # Q_ind=Q_ind,
 )
 
-fit_bounds = {
-    "Q_cap": (fit_init.Q_cap / 100, fit_init.Q_cap * 100),
-    "x_qp": (fit_init.x_qp / 100, fit_init.x_qp * 100),
-    "Q_ind": (fit_init.Q_ind / 100, fit_init.Q_ind * 100),
-    "Temp": (10e-3, 300e-3),
-}
+fit_bounds = {"Temp": (10e-3, 300e-3)}
+if fit_init.Q_cap is not None:
+    fit_bounds["Q_cap"] = (fit_init.Q_cap / 100, fit_init.Q_cap * 100)
+if fit_init.x_qp is not None:
+    fit_bounds["x_qp"] = (fit_init.x_qp / 100, fit_init.x_qp * 100)
+if fit_init.Q_ind is not None:
+    fit_bounds["Q_ind"] = (fit_init.Q_ind / 100, fit_init.Q_ind * 100)
 
 fit_result = zt1.fit_t1_noise_params(
     s_flxs,
@@ -427,7 +426,7 @@ fit_result = zt1.fit_t1_noise_params(
     params,
     init=fit_init,
     bounds=fit_bounds,
-    # fixed=("Temp", "Q_ind"),
+    # fixed=("Temp",),
     T1errs=s_T1errs,
     residual_mode="log",
     loss="soft_l1",
@@ -440,17 +439,22 @@ fit_x_qp = fit_result.params.x_qp
 fit_Q_ind = fit_result.params.Q_ind
 fit_Temp = fit_result.params.Temp
 
-fit_noise = [
-    ("t1_capacitive", dict(Q_cap=fit_Q_cap)),
-    ("t1_quasiparticle_tunneling", dict(x_qp=fit_x_qp)),
-    ("t1_inductive", dict(Q_ind=fit_Q_ind)),
-]
+fit_noise = []
+if fit_Q_cap is not None:
+    fit_noise.append(("t1_capacitive", dict(Q_cap=fit_Q_cap)))
+if fit_x_qp is not None:
+    fit_noise.append(("t1_quasiparticle_tunneling", dict(x_qp=fit_x_qp)))
+if fit_Q_ind is not None:
+    fit_noise.append(("t1_inductive", dict(Q_ind=fit_Q_ind)))
 
 print("fit success =", fit_result.success)
 print("fit message =", fit_result.message)
-print(f"Q_cap = {fit_Q_cap:.3e} +/- {fit_result.stderr.Q_cap:.1e}")
-print(f"x_qp = {fit_x_qp:.3e} +/- {fit_result.stderr.x_qp:.1e}")
-print(f"Q_ind = {fit_Q_ind:.3e} +/- {fit_result.stderr.Q_ind:.1e}")
+if fit_Q_cap is not None:
+    print(f"Q_cap = {fit_Q_cap:.3e} +/- {fit_result.stderr.Q_cap:.1e}")
+if fit_x_qp is not None:
+    print(f"x_qp = {fit_x_qp:.3e} +/- {fit_result.stderr.x_qp:.1e}")
+if fit_Q_ind is not None:
+    print(f"Q_ind = {fit_Q_ind:.3e} +/- {fit_result.stderr.Q_ind:.1e}")
 print(f"Temp = {fit_Temp * 1e3:.2f} +/- {fit_result.stderr.Temp * 1e3:.2f} mK")
 print("fixed =", fit_result.fixed)
 print("free =", fit_result.free)
@@ -464,10 +468,10 @@ fit_image_path = os.path.join(image_dir, "T1s_fit_all_in_once.png")
 QubitParams(os.path.join(result_dir, "params.json")).set_t1_curve_fit(
     T1CurveFit(
         params=T1CurveFitParams(
+            Temp=fit_Temp,
             Q_cap=fit_Q_cap,
             x_qp=fit_x_qp,
             Q_ind=fit_Q_ind,
-            Temp=fit_Temp,
         ),
         stderr=T1CurveFitUncertainty(
             Q_cap=fit_result.stderr.Q_cap,
@@ -485,10 +489,10 @@ QubitParams(os.path.join(result_dir, "params.json")).set_t1_curve_fit(
         loss="soft_l1",
         max_nfev=200,
         init=T1CurveFitParams(
+            Temp=fit_init.Temp,
             Q_cap=fit_init.Q_cap,
             x_qp=fit_init.x_qp,
             Q_ind=fit_init.Q_ind,
-            Temp=fit_init.Temp,
         ),
         bounds=fit_bounds,
     )
@@ -508,13 +512,15 @@ fig, ax = zt1.plot_eff_t1_with_sample(
 )
 
 fit_annotation = "\n".join(
-    [
-        f"Q_cap = {fit_Q_cap:.3e}",
-        f"x_qp = {fit_x_qp:.3e}",
-        f"Q_ind = {fit_Q_ind:.3e}",
+    line
+    for line in [
+        None if fit_Q_cap is None else f"Q_cap = {fit_Q_cap:.3e}",
+        None if fit_x_qp is None else f"x_qp = {fit_x_qp:.3e}",
+        None if fit_Q_ind is None else f"Q_ind = {fit_Q_ind:.3e}",
         f"Temp = {fit_Temp * 1e3:.2f} mK",
         f"reduced chi2 = {fit_result.reduced_chi2:.3g}",
     ]
+    if line is not None
 )
 ax.text(
     1.02,

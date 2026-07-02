@@ -26,16 +26,17 @@ def _fake_t1_model(
     **kwargs: Any,  # noqa: ARG001
 ) -> NDArray[np.float64]:
     opts = {name: values for name, values in noise_channels}
-    q_cap = opts["t1_capacitive"]["Q_cap"]
-    x_qp = opts["t1_quasiparticle_tunneling"]["x_qp"]
-    q_ind = opts["t1_inductive"]["Q_ind"]
     fluxs = np.asarray(fluxs, dtype=np.float64)
-    rate = (
-        (1.0 + 0.3 * fluxs) / q_cap
-        + (0.3 + fluxs**2) * x_qp
-        + (2.0 - fluxs) * 20.0 / q_ind
-        + (1.2 + np.sin(5.0 * fluxs)) * Temp * 1e-4
-    )
+    rate = (1.2 + np.sin(5.0 * fluxs)) * Temp * 1e-4
+    if "t1_capacitive" in opts:
+        q_cap = opts["t1_capacitive"]["Q_cap"]
+        rate += (1.0 + 0.3 * fluxs) / q_cap
+    if "t1_quasiparticle_tunneling" in opts:
+        x_qp = opts["t1_quasiparticle_tunneling"]["x_qp"]
+        rate += (0.3 + fluxs**2) * x_qp
+    if "t1_inductive" in opts:
+        q_ind = opts["t1_inductive"]["Q_ind"]
+        rate += (2.0 - fluxs) * 20.0 / q_ind
     return 1.0 / rate
 
 
@@ -93,6 +94,51 @@ def test_fit_t1_noise_params_keeps_fixed_values(
     assert result.params.Temp == true_params.Temp
     assert result.stderr.Q_ind == 0.0
     assert result.stderr.Temp == 0.0
+
+
+def test_fit_t1_noise_params_uses_provided_noise_params_as_whitelist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_channels: list[Sequence[tuple[str, dict[str, float]]]] = []
+
+    def capture_model(
+        params: tuple[float, float, float],
+        fluxs: NDArray[np.float64],
+        noise_channels: Sequence[tuple[str, dict[str, float]]],
+        Temp: float,
+        **kwargs: Any,
+    ) -> NDArray[np.float64]:
+        captured_channels.append(noise_channels)
+        return _fake_t1_model(params, fluxs, noise_channels, Temp, **kwargs)
+
+    monkeypatch.setattr(fit_mod, "calculate_eff_t1_vs_flux_fast", capture_model)
+    true_params = T1FitParams(Temp=0.055, Q_cap=7e5, x_qp=1.8e-6)
+    fluxs = _sample_fluxs()
+    T1s = _fake_t1_model(_PARAMS, fluxs, _noise_channels(true_params), true_params.Temp)
+
+    result = fit_t1_noise_params(
+        fluxs,
+        T1s,
+        _PARAMS,
+        init=T1FitParams(Temp=0.08, Q_cap=5e5, x_qp=2.5e-6),
+        bounds={"Temp": (20e-3, 120e-3)},
+        cutoff=12,
+        qub_dim=4,
+    )
+
+    assert result.success
+    assert result.fixed == ()
+    assert result.free == ("Q_cap", "x_qp", "Temp")
+    assert result.params.Q_ind is None
+    assert result.stderr.Q_ind is None
+    assert result.params.Q_cap == pytest.approx(true_params.Q_cap, rel=2e-3)
+    assert result.params.x_qp == pytest.approx(true_params.x_qp, rel=2e-3)
+    assert result.params.Temp == pytest.approx(true_params.Temp, rel=2e-3)
+    assert captured_channels
+    assert all(
+        "t1_inductive" not in {name for name, _ in noise_channels}
+        for noise_channels in captured_channels
+    )
 
 
 def test_fit_t1_noise_params_accepts_x_qp_public_convention(
@@ -209,6 +255,38 @@ def test_fit_t1_noise_params_validates_params_and_bounds(
 
 
 @pytest.mark.parametrize(
+    ("init", "kwargs", "match"),
+    [
+        (T1FitParams(Temp=0.06), {}, "at least one T1 noise parameter"),
+        (
+            T1FitParams(Temp=0.06, Q_cap=8e5, x_qp=1.5e-6),
+            {"fixed": ("Q_ind",)},
+            "inactive",
+        ),
+        (
+            T1FitParams(Temp=0.06, Q_cap=8e5, x_qp=1.5e-6),
+            {"bounds": {"Q_ind": (1.0e5, 1.0e10)}},
+            "inactive",
+        ),
+    ],
+)
+def test_fit_t1_noise_params_validates_whitelist_metadata(
+    init: T1FitParams, kwargs: dict[str, Any], match: str
+) -> None:
+    fluxs = _sample_fluxs()
+    T1s = np.full_like(fluxs, 1e5)
+
+    with pytest.raises(ValueError, match=match):
+        fit_t1_noise_params(
+            fluxs,
+            T1s,
+            _PARAMS,
+            init=init,
+            **kwargs,
+        )
+
+
+@pytest.mark.parametrize(
     ("fluxs", "T1s", "T1errs", "match"),
     [
         (np.array([0.1, 0.2]), np.array([1.0]), None, "same shape"),
@@ -236,11 +314,14 @@ def test_fit_t1_noise_params_validates_data(
 def _noise_channels(
     params: T1FitParams,
 ) -> list[tuple[str, dict[str, float]]]:
-    return [
-        ("t1_capacitive", {"Q_cap": params.Q_cap}),
-        ("t1_quasiparticle_tunneling", {"x_qp": params.x_qp}),
-        ("t1_inductive", {"Q_ind": params.Q_ind}),
-    ]
+    channels: list[tuple[str, dict[str, float]]] = []
+    if params.Q_cap is not None:
+        channels.append(("t1_capacitive", {"Q_cap": params.Q_cap}))
+    if params.x_qp is not None:
+        channels.append(("t1_quasiparticle_tunneling", {"x_qp": params.x_qp}))
+    if params.Q_ind is not None:
+        channels.append(("t1_inductive", {"Q_ind": params.Q_ind}))
+    return channels
 
 
 class _RecordingProgressBar:

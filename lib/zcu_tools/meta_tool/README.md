@@ -1,6 +1,6 @@
 # `zcu_tools.meta_tool` — persistent experiment metadata
 
-**Last updated:** 2026-07-02 — QubitParams t1_curve_fit section
+**Last updated:** 2026-07-02 — QubitParams t1_curve_fit white-list channels
 
 這份筆記整理 `meta_tool/` 的設計，說明各類別的職責、同步機制與使用模式。
 
@@ -85,7 +85,7 @@ print(md.qubit_freq)      # 自動 sync + 讀取
 | `require_t1_curve_fit()` | 讀出 T1 curve fit 的 noise params、stderr 與 fit metadata |
 | `require_fluxonium_model(flux_bias=...)` | 讀出 `FluxoniumPredictor` / sim 需要的 `(EJ, EC, EL, flux_half, flux_period, flux_bias)` |
 
-**獨立 section 與 timestamp**：`fluxdep_fit`、`dispersive` 與 `t1_curve_fit` 是獨立 module section；寫入其中一個不會刪除另一個。每次 typed 寫入會更新該 section 的 `timestamp`，供 caller 判斷最後修改時間。`t1_curve_fit` 只保存後續模擬需要的 fit params 與 metadata；sample arrays 和 dense model curves 不放進 `params.json`。
+**獨立 section 與 timestamp**：`fluxdep_fit`、`dispersive` 與 `t1_curve_fit` 是獨立 module section；寫入其中一個不會刪除另一個。每次 typed 寫入會更新該 section 的 `timestamp`，供 caller 判斷最後修改時間。`t1_curve_fit` 只保存後續模擬需要的 fit params 與 metadata；sample arrays 和 dense model curves 不放進 `params.json`。`t1_curve_fit.params` 中 `Temp` 必填，`Q_cap` / `x_qp` / `Q_ind` 只保存 active noise channel；省略某個 noise key 表示該 channel 未納入 all-in-one fit。
 
 **未知 section preservation**：typed 寫入只更新自己的 section，其它未知 section 會保留。`to_raw()` / `replace_raw()` / `update_raw()` 只供 `notebook.persistance` 舊 helper 過渡使用；新 caller 應使用 typed 方法。
 
@@ -324,4 +324,5 @@ SampleTable          (獨立，供 notebook 記錄量測結果用)
 - experiment cfg materialization 每次呼叫都使用 caller 傳入的 current `ml` 與 device snapshot；active context 切換不應被長壽 object 綁住。
 - `QubitParams.set_dispersive_fit()` 會要求 `params.json` 已有 `fluxdep_fit`；dispersive export 不能建立沒有 fluxdep handoff 的半成品檔案。
 - `QubitParams.set_t1_curve_fit()` 會要求 `params.json` 已有 `fluxdep_fit`；T1 curve fit section 是 downstream handoff，不建立沒有 fluxonium fit 的半成品。
+- `t1_curve_fit.params` 以 white-list 表達 active noise channels：`Temp` 必填，`Q_cap` / `x_qp` / `Q_ind` 可省略；`fixed`、`free`、`bounds`、`init` 與 `stderr` 只能提到 active params。
 - `QubitParams.set_fluxdep_fit()` 不會刪除 `dispersive` 或 `t1_curve_fit`；這些 section 以各自的 `timestamp` 表示最後修改時間。

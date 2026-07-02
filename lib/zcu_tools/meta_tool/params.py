@@ -14,7 +14,8 @@ from .syncfile import SyncFile
 PARAMS_SCHEMA_VERSION = 1
 UNKNOWN_PROJECT_NAME = "unknown"
 UNKNOWN_RESONATOR_NAME = "unknown"
-_T1_CURVE_FIT_PARAM_NAMES = ("Q_cap", "x_qp", "Q_ind", "Temp")
+_T1_CURVE_FIT_NOISE_PARAM_NAMES = ("Q_cap", "x_qp", "Q_ind")
+_T1_CURVE_FIT_PARAM_NAMES = (*_T1_CURVE_FIT_NOISE_PARAM_NAMES, "Temp")
 
 
 class QubitParamsError(ValueError):
@@ -119,20 +120,51 @@ class DispersiveFitInputs:
     bare_rf_seed: float
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class T1CurveFitParams:
-    Q_cap: float
-    x_qp: float
-    Q_ind: float
     Temp: float
+    Q_cap: float | None = None
+    x_qp: float | None = None
+    Q_ind: float | None = None
+
+    @property
+    def active_noise_names(self) -> tuple[str, ...]:
+        names: list[str] = []
+        if self.Q_cap is not None:
+            names.append("Q_cap")
+        if self.x_qp is not None:
+            names.append("x_qp")
+        if self.Q_ind is not None:
+            names.append("Q_ind")
+        return tuple(names)
+
+    @property
+    def active_param_names(self) -> tuple[str, ...]:
+        return (*self.active_noise_names, "Temp")
 
     def to_json_params(self) -> dict[str, float]:
-        return {
-            "Q_cap": _json_required_float(self.Q_cap, path="t1_curve_fit.params.Q_cap"),
-            "x_qp": _json_required_float(self.x_qp, path="t1_curve_fit.params.x_qp"),
-            "Q_ind": _json_required_float(self.Q_ind, path="t1_curve_fit.params.Q_ind"),
-            "Temp": _json_required_float(self.Temp, path="t1_curve_fit.params.Temp"),
-        }
+        if not self.active_noise_names:
+            raise QubitParamsError(
+                "t1_curve_fit.params must include at least one noise parameter",
+                reason_code="params_value_invalid",
+            )
+        params: dict[str, float] = {}
+        if self.Q_cap is not None:
+            params["Q_cap"] = _json_required_float(
+                self.Q_cap, path="t1_curve_fit.params.Q_cap"
+            )
+        if self.x_qp is not None:
+            params["x_qp"] = _json_required_float(
+                self.x_qp, path="t1_curve_fit.params.x_qp"
+            )
+        if self.Q_ind is not None:
+            params["Q_ind"] = _json_required_float(
+                self.Q_ind, path="t1_curve_fit.params.Q_ind"
+            )
+        params["Temp"] = _json_required_float(
+            self.Temp, path="t1_curve_fit.params.Temp"
+        )
+        return params
 
 
 @dataclass(frozen=True)
@@ -142,13 +174,16 @@ class T1CurveFitUncertainty:
     Q_ind: float | None = None
     Temp: float | None = None
 
-    def to_json_params(self) -> dict[str, float | None]:
-        return {
+    def to_json_params(
+        self, *, active_param_names: tuple[str, ...] = _T1_CURVE_FIT_PARAM_NAMES
+    ) -> dict[str, float | None]:
+        values = {
             "Q_cap": _json_nullable_float(self.Q_cap),
             "x_qp": _json_nullable_float(self.x_qp),
             "Q_ind": _json_nullable_float(self.Q_ind),
             "Temp": _json_nullable_float(self.Temp),
         }
+        return {name: values[name] for name in active_param_names}
 
 
 @dataclass(frozen=True)
@@ -169,13 +204,31 @@ class T1CurveFit:
     timestamp: str | None = None
 
     def to_json_section(self) -> dict[str, Any]:
+        active_param_names = self.params.active_param_names
+        _validate_t1_curve_fit_names(
+            self.fixed, path="t1_curve_fit.fixed", active_param_names=active_param_names
+        )
+        _validate_t1_curve_fit_names(
+            self.free, path="t1_curve_fit.free", active_param_names=active_param_names
+        )
+        if self.init is not None:
+            _validate_t1_curve_fit_init(
+                self.init,
+                active_noise_names=self.params.active_noise_names,
+                path="t1_curve_fit.init",
+            )
         section: dict[str, Any] = {
             "params": self.params.to_json_params(),
             "fixed": list(self.fixed),
             "free": list(self.free),
         }
         if self.stderr is not None:
-            section["stderr"] = self.stderr.to_json_params()
+            _validate_t1_curve_fit_uncertainty(
+                self.stderr, active_param_names=active_param_names
+            )
+            section["stderr"] = self.stderr.to_json_params(
+                active_param_names=active_param_names
+            )
         if self.cost is not None:
             section["cost"] = _json_nullable_float(self.cost)
         if self.reduced_chi2 is not None:
@@ -198,6 +251,11 @@ class T1CurveFit:
                 if name not in _T1_CURVE_FIT_PARAM_NAMES:
                     raise QubitParamsError(
                         f"t1_curve_fit.bounds.{name} is not a known T1 fit parameter",
+                        reason_code="params_value_invalid",
+                    )
+                if name not in active_param_names:
+                    raise QubitParamsError(
+                        f"t1_curve_fit.bounds.{name} is not an active T1 fit parameter",
                         reason_code="params_value_invalid",
                     )
                 bounds[name] = [
@@ -361,34 +419,101 @@ def _parse_string_tuple(raw: object, *, path: str) -> tuple[str, ...]:
     return tuple(values)
 
 
+def _validate_t1_curve_fit_names(
+    names: tuple[str, ...], *, path: str, active_param_names: tuple[str, ...]
+) -> None:
+    unknown = set(names) - set(_T1_CURVE_FIT_PARAM_NAMES)
+    if unknown:
+        raise QubitParamsError(
+            f"{path} contains unknown T1 fit parameter(s): {sorted(unknown)}",
+            reason_code="params_value_invalid",
+        )
+    inactive = set(names) - set(active_param_names)
+    if inactive:
+        raise QubitParamsError(
+            f"{path} contains inactive T1 fit parameter(s): {sorted(inactive)}",
+            reason_code="params_value_invalid",
+        )
+
+
+def _validate_t1_curve_fit_init(
+    init: T1CurveFitParams, *, active_noise_names: tuple[str, ...], path: str
+) -> None:
+    if init.active_noise_names != active_noise_names:
+        raise QubitParamsError(
+            f"{path} active noise parameters must match t1_curve_fit.params",
+            reason_code="params_value_invalid",
+        )
+
+
+def _validate_t1_curve_fit_uncertainty(
+    uncertainty: T1CurveFitUncertainty, *, active_param_names: tuple[str, ...]
+) -> None:
+    values = {
+        "Q_cap": uncertainty.Q_cap,
+        "x_qp": uncertainty.x_qp,
+        "Q_ind": uncertainty.Q_ind,
+        "Temp": uncertainty.Temp,
+    }
+    inactive_with_values = [
+        name
+        for name, value in values.items()
+        if name not in active_param_names and value is not None
+    ]
+    if inactive_with_values:
+        raise QubitParamsError(
+            "t1_curve_fit.stderr contains inactive T1 fit parameter(s): "
+            f"{inactive_with_values}",
+            reason_code="params_value_invalid",
+        )
+
+
+def _optional_t1_curve_fit_param(
+    section: Mapping[str, Any], name: str, *, path: str
+) -> float | None:
+    if name not in section:
+        return None
+    return _coerce_float(section[name], path=f"{path}.{name}")
+
+
 def _parse_t1_curve_fit_params(raw: object, *, path: str) -> T1CurveFitParams:
     section = _mapping(raw, path=path)
-    return T1CurveFitParams(
-        Q_cap=_coerce_float(
-            _require_key(section, "Q_cap", path=path),
-            path=f"{path}.Q_cap",
-        ),
-        x_qp=_coerce_float(
-            _require_key(section, "x_qp", path=path),
-            path=f"{path}.x_qp",
-        ),
-        Q_ind=_coerce_float(
-            _require_key(section, "Q_ind", path=path),
-            path=f"{path}.Q_ind",
-        ),
+    params = T1CurveFitParams(
         Temp=_coerce_float(
             _require_key(section, "Temp", path=path),
             path=f"{path}.Temp",
         ),
+        Q_cap=_optional_t1_curve_fit_param(section, "Q_cap", path=path),
+        x_qp=_optional_t1_curve_fit_param(section, "x_qp", path=path),
+        Q_ind=_optional_t1_curve_fit_param(section, "Q_ind", path=path),
     )
+    if not params.active_noise_names:
+        raise QubitParamsError(
+            f"{path} must include at least one noise parameter",
+            reason_code="params_value_invalid",
+        )
+    return params
 
 
 def _parse_t1_curve_fit_uncertainty(
     raw: object,
     *,
     path: str,
+    active_param_names: tuple[str, ...],
 ) -> T1CurveFitUncertainty:
     section = _mapping(raw, path=path)
+    unknown = set(section) - set(_T1_CURVE_FIT_PARAM_NAMES)
+    if unknown:
+        raise QubitParamsError(
+            f"{path} contains unknown T1 fit parameter(s): {sorted(unknown)}",
+            reason_code="params_value_invalid",
+        )
+    inactive = set(section) - set(active_param_names)
+    if inactive:
+        raise QubitParamsError(
+            f"{path} contains inactive T1 fit parameter(s): {sorted(inactive)}",
+            reason_code="params_value_invalid",
+        )
     return T1CurveFitUncertainty(
         Q_cap=_parse_nullable_float(section.get("Q_cap"), path=f"{path}.Q_cap"),
         x_qp=_parse_nullable_float(section.get("x_qp"), path=f"{path}.x_qp"),
@@ -401,6 +526,7 @@ def _parse_t1_curve_bounds(
     raw: object,
     *,
     path: str,
+    active_param_names: tuple[str, ...],
 ) -> dict[str, tuple[float, float]]:
     section = _mapping(raw, path=path)
     bounds: dict[str, tuple[float, float]] = {}
@@ -408,6 +534,11 @@ def _parse_t1_curve_bounds(
         if name not in _T1_CURVE_FIT_PARAM_NAMES:
             raise QubitParamsError(
                 f"{path}.{name} is not a known T1 fit parameter",
+                reason_code="params_value_invalid",
+            )
+        if name not in active_param_names:
+            raise QubitParamsError(
+                f"{path}.{name} is not an active T1 fit parameter",
                 reason_code="params_value_invalid",
             )
         if not isinstance(raw_bound, list | tuple) or len(raw_bound) != 2:
@@ -723,23 +854,55 @@ class QubitParams(SyncFile):
     @staticmethod
     def _parse_t1_curve_fit(raw: object) -> T1CurveFit:
         section = _mapping(raw, path="t1_curve_fit")
+        params = _parse_t1_curve_fit_params(
+            _require_key(section, "params", path="t1_curve_fit"),
+            path="t1_curve_fit.params",
+        )
+        active_param_names = params.active_param_names
+        fixed = _parse_string_tuple(section.get("fixed", ()), path="t1_curve_fit.fixed")
+        free = _parse_string_tuple(section.get("free", ()), path="t1_curve_fit.free")
+        _validate_t1_curve_fit_names(
+            fixed, path="t1_curve_fit.fixed", active_param_names=active_param_names
+        )
+        _validate_t1_curve_fit_names(
+            free, path="t1_curve_fit.free", active_param_names=active_param_names
+        )
+        init = (
+            _parse_t1_curve_fit_params(
+                section["init"],
+                path="t1_curve_fit.init",
+            )
+            if "init" in section
+            else None
+        )
+        if init is not None:
+            _validate_t1_curve_fit_init(
+                init,
+                active_noise_names=params.active_noise_names,
+                path="t1_curve_fit.init",
+            )
+        bounds = (
+            _parse_t1_curve_bounds(
+                section["bounds"],
+                path="t1_curve_fit.bounds",
+                active_param_names=active_param_names,
+            )
+            if "bounds" in section
+            else {}
+        )
         return T1CurveFit(
-            params=_parse_t1_curve_fit_params(
-                _require_key(section, "params", path="t1_curve_fit"),
-                path="t1_curve_fit.params",
-            ),
+            params=params,
             stderr=(
                 _parse_t1_curve_fit_uncertainty(
                     section["stderr"],
                     path="t1_curve_fit.stderr",
+                    active_param_names=active_param_names,
                 )
                 if "stderr" in section
                 else None
             ),
-            fixed=_parse_string_tuple(
-                section.get("fixed", ()), path="t1_curve_fit.fixed"
-            ),
-            free=_parse_string_tuple(section.get("free", ()), path="t1_curve_fit.free"),
+            fixed=fixed,
+            free=free,
             cost=_parse_nullable_float(section.get("cost"), path="t1_curve_fit.cost"),
             reduced_chi2=_parse_nullable_float(
                 section.get("reduced_chi2"),
@@ -762,21 +925,7 @@ class QubitParams(SyncFile):
                 section.get("max_nfev"),
                 path="t1_curve_fit.max_nfev",
             ),
-            init=(
-                _parse_t1_curve_fit_params(
-                    section["init"],
-                    path="t1_curve_fit.init",
-                )
-                if "init" in section
-                else None
-            ),
-            bounds=(
-                _parse_t1_curve_bounds(
-                    section["bounds"],
-                    path="t1_curve_fit.bounds",
-                )
-                if "bounds" in section
-                else {}
-            ),
+            init=init,
+            bounds=bounds,
             timestamp=_optional_timestamp(section, path="t1_curve_fit"),
         )
