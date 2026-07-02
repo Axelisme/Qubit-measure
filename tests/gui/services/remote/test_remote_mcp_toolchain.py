@@ -1159,12 +1159,18 @@ def test_connect_folds_overview_into_reply(monkeypatch):
     same tool_gui_connect.)"""
     from zcu_tools.mcp.measure import server as mcp_server
 
-    monkeypatch.setattr(mcp_server, "resolve_connect_port", lambda cfg, req: 8765)
-    monkeypatch.setattr(mcp_server._BRIDGE, "connect", lambda port, token=None: "ok")
+    ports: list[int] = []
+    monkeypatch.setattr(mcp_server, "resolve_connect_port", lambda cfg, req: 9911)
+    monkeypatch.setattr(
+        mcp_server._BRIDGE,
+        "connect",
+        lambda port, token=None: ports.append(port) or "ok",
+    )
     monkeypatch.setattr(mcp_server, "_assemble_overview", lambda: {"sentinel": True})
 
     out = mcp_server.TOOLS["gui_bridge_connect"]["handler"]({})
     assert out == {"note": "ok", "overview": {"sentinel": True}}
+    assert ports == [9911]
 
 
 def test_analyze_settled_returns_summary_and_figure(monkeypatch):

@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-01 (GUI bridge wording)
+**Last updated:** 2026-07-02 (MCP tool domain split)
 
 # `zcu_tools/mcp/measure/`
 
@@ -7,8 +7,15 @@ RemoteControlAdapter。此 package 是 app-local policy 層，不是共用 trans
 
 ## 邊界
 
-- `server.py` 保留 agent-facing tool declarations、override tool schema、stdio loop
-  hooks，以及 lifecycle tool 的薄委派。
+- `server.py` 是 MCP bootstrap / aggregation facade：保留 standalone preflight、
+  server instructions/config、session/bridge setup、guarded `send_gui_rpc`、
+  compatibility exports、domain tool table aggregation、stdio loop hooks。
+- `tool_context.py` 提供 override handlers 的 late-bound runtime context 與共用 helper。
+  hand-written override handlers 透過 context provider 解析目前的
+  `server.send_gui_rpc`；generated tools 仍由 `generate_tools(..., send_gui_rpc)`
+  維持 import-time capture。
+- `tools_*.py` 依 domain 共置 hand-written handler、override schema 與
+  non-generated method policy；`server.py` 只聚合這些 domain tables。
 - `session.py` 擁有 measure-only policy state：diagnostics piggyback queue、
   optimistic-concurrency baseline、guarded send flow、operation handle capture，以及
   `gui_debug_operations` 使用的 latest-handle projection。
