@@ -1,29 +1,27 @@
 from __future__ import annotations
 
 from collections.abc import Hashable
-from typing import Generic, TypeVar
+from typing import Generic
 
 from matplotlib.figure import Figure
+from typing_extensions import TypeVar
 
 from .backend import refresh_figure
 from .base import AbsLivePlot
 
 PlotKey_T = TypeVar("PlotKey_T", bound=Hashable)
+Plotter_T = TypeVar("Plotter_T", bound=AbsLivePlot, default=AbsLivePlot)
 
 
-class MultiLivePlot(AbsLivePlot, Generic[PlotKey_T]):
+class MultiLivePlot(AbsLivePlot, Generic[PlotKey_T, Plotter_T]):
     """
-    A wrapper for multiple live plotters.
-
-    This class need a dispatch function to dispatch the arguments to the plotters.
-    The dispatch function should return a dictionary of arguments for each plotter.
-    If the argument is None, the corresponding plotter will not be updated.
+    A lifecycle and refresh group for multiple live plotters.
     """
 
     def __init__(
         self,
         fig: Figure,
-        plotters: dict[PlotKey_T, AbsLivePlot],
+        plotters: dict[PlotKey_T, Plotter_T],
     ) -> None:
         self.fig = fig
         self.plotters = plotters
@@ -32,16 +30,10 @@ class MultiLivePlot(AbsLivePlot, Generic[PlotKey_T]):
         for plotter in self.plotters.values():
             plotter.clear()
 
-    def update(self, plot_args: dict[PlotKey_T, tuple], refresh: bool = True) -> None:
-        for key, args in plot_args.items():
-            self.plotters[key].update(*args, refresh=False)
-        if refresh:
-            self.refresh()
-
     def refresh(self) -> None:
         refresh_figure(self.fig)
 
-    def __enter__(self) -> MultiLivePlot[PlotKey_T]:
+    def __enter__(self) -> MultiLivePlot[PlotKey_T, Plotter_T]:
         for plotter in self.plotters.values():
             plotter.__enter__()
 
@@ -53,5 +45,5 @@ class MultiLivePlot(AbsLivePlot, Generic[PlotKey_T]):
         for plotter in self.plotters.values():
             plotter.__exit__(exc_type, exc_value, traceback)
 
-    def get_plotter(self, key: PlotKey_T) -> AbsLivePlot:
+    def get_plotter(self, key: PlotKey_T) -> Plotter_T:
         return self.plotters[key]

@@ -1,14 +1,14 @@
 # liveplot 模組重點筆記
 
-**Last updated:** 2026-07-02 - fast-fail cleanup
+**Last updated:** 2026-07-02 - lifecycle contract cleanup
 
 Jupyter 中即時更新的 matplotlib 繪圖工具，在資料擷取過程中邊跑邊畫。
 
 ## 模組分層
 
 1. `base.py` / `multi.py` — 介面與多圖組合
-   - `AbsLivePlot`：所有 live plotter 的抽象基底（`clear / update / refresh` + context manager）。
-   - `MultiLivePlot[PlotKey_T]`：組合多個 plotter，用 key 分發 `update(plot_args={key: (args...)})`；`refresh()` 呼叫 `refresh_figure(self.fig)`，由 active backend 決定具體重繪行為（JupyterBackend 用 `canvas.draw()`，FallbackBackend 用 `draw_idle`）。
+   - `AbsLivePlot`：所有 live plotter 的 lifecycle 抽象基底（`clear / refresh` + context manager）；各 plotter 的 `update()` 保留各自 typed 方法，不放在 ABC 共用契約。
+   - `MultiLivePlot[PlotKey_T]`：組合多個 plotter，用於群組 context-manager 進出、`clear()`、`refresh()` 與 `get_plotter(key)` 查找；它不分發 `update()`。`refresh()` 呼叫 `refresh_figure(self.fig)`，由 active backend 決定具體重繪行為（JupyterBackend 用 `canvas.draw()`，FallbackBackend 用 `draw_idle`）。
 
 2. `backend/` — backend 契約、註冊與內建 backend
    - `backend/base.py`：`LivePlotBackend` ABC，四個 abstractmethod（`make_plot_frame` / `instant_plot` / `refresh_figure` / `close_figure`）。**liveplot 對前端無認知**：它只驅動「當前 active backend」，不知道也不偵測誰是 GUI。
@@ -82,7 +82,7 @@ with MultiLivePlot(fig, {
 - `Plot1DSegment.update` 只接受 real-valued `signals`；複數輸入會 fast-fail，呼叫端需先取 `abs/real/imag`。
 - `segments/` 內的 matplotlib artist 欄位在 `init_ax()` 前是 `None`。`update()` 先 fast-fail，再把 artist 存到 local 變數後使用；不要在 None check 後反覆透過 `self.im` 等 optional 屬性呼叫方法。
 - LivePlot 類若要保留圖（例如後續 `savefig`），請設定 `auto_close=False`。
-- 各個單一 segment 的 LivePlot 包裝層（`LivePlot1D`、`LivePlot2D`、`LivePlotScatter`）刻意保留樣板結構，不做公共基底抽象，理由是 `update()` 簽名各不相同，強行統一會犧牲型別提示。
+- 各個單一 segment 的 LivePlot 包裝層（`LivePlot1D`、`LivePlot2D`、`LivePlotScatter`）刻意保留樣板結構，不把 `update()` 放進公共基底，理由是 `update()` 簽名各不相同，強行統一會犧牲型別提示。
 - `active_backend()` 每次呼叫都重新解析（不快取），以保留執行期切換 backend 的彈性。`MultiLivePlot.refresh()` 透過 `backend.refresh_figure()` 呼叫，與 `BaseSegmentLivePlot` 一致。
 - GUI 模式下 LivePlot 嵌進 tab，靠的是 GUI run worker **註冊** `QtLivePlotBackend`（`set_liveplot_backend`），非 liveplot 偵測 routing context。liveplot 對 GUI 零認知。
 - 純桌面 `qtagg`（非 GUI、非 notebook）跑 LivePlot **刻意走 `FallbackBackend`**（`fig.show` + `draw_idle` 已足夠），非另設專屬 qt backend；要 qt 特化再 `set_liveplot_backend` 註冊即可。GUI 的 Qt 整合由 `QtLivePlotBackend` 提供。

@@ -276,6 +276,7 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
         ax_power = fig.add_subplot(gs[2, 1])
 
         instant_plot(fig)  # show the figure immediately
+        point_indices = np.arange(num_points, dtype=np.float64)
 
         with MultiLivePlot(
             fig,
@@ -306,10 +307,10 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                     f"Iteration {idx}, Phase {phases[idx]}, Flux: {1e3 * cur_flux:.2g} (mA), Freq: {1e-3 * cur_freq:.4g} (GHz), Power: {cur_gain:.2g} (dBm)"
                 )
 
-                colors = phases
+                colors = phases.astype(np.float64)
 
                 viewer.get_plotter("iter_scatter").update(
-                    np.arange(num_points), snrs, colors=colors, refresh=False
+                    point_indices, snrs, colors=colors, refresh=False
                 )
                 viewer.get_plotter("flux_scatter").update(
                     1e3 * params[:, 0], snrs, colors=colors, refresh=False

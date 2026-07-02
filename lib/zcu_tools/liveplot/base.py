@@ -17,11 +17,6 @@ class AbsLivePlot(ABC):
         pass
 
     @abstractmethod
-    def update(self, *args, refresh: bool = True, **kwargs) -> None:
-        """Update the plot with new data."""
-        pass
-
-    @abstractmethod
     def refresh(self) -> None:
         """Refresh the plot to reflect the latest data."""
         pass

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
+from typing import cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -190,6 +191,10 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
                 cur_1d=make_plotter1d(axs[1][1]),
             ),
         ) as viewer:
+            g_2d = cast(LivePlot2D, viewer.get_plotter("g_2d"))
+            e_2d = cast(LivePlot2D, viewer.get_plotter("e_2d"))
+            o_2d = cast(LivePlot2D, viewer.get_plotter("o_2d"))
+            cur_1d = cast(LivePlot1D, viewer.get_plotter("cur_1d"))
             current_index = 0
 
             def plot_fn(data: NDArray[np.float64]) -> None:
@@ -197,18 +202,10 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
 
                 populations = calc_populations(data)
 
-                viewer.get_plotter("g_2d").update(
-                    gains, freqs, populations[..., 0], refresh=False
-                )
-                viewer.get_plotter("e_2d").update(
-                    gains, freqs, populations[..., 1], refresh=False
-                )
-                viewer.get_plotter("o_2d").update(
-                    gains, freqs, populations[..., 2], refresh=False
-                )
-                viewer.get_plotter("cur_1d").update(
-                    freqs, populations[i, :].T, refresh=False
-                )
+                g_2d.update(gains, freqs, populations[..., 0], refresh=False)
+                e_2d.update(gains, freqs, populations[..., 1], refresh=False)
+                o_2d.update(gains, freqs, populations[..., 2], refresh=False)
+                cur_1d.update(freqs, populations[i, :].T, refresh=False)
 
                 viewer.refresh()
 

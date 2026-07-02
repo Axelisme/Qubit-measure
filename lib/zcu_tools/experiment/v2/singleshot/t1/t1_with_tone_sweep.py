@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
+from typing import cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -219,36 +220,28 @@ class T1WithToneSweepExp(
         fig, viewer = self._make_viewer_ctx(sweep_name)
 
         with viewer:
+            gg_2d = cast(LivePlot2D, viewer.get_plotter("gg_2d"))
+            ge_2d = cast(LivePlot2D, viewer.get_plotter("ge_2d"))
+            go_2d = cast(LivePlot2D, viewer.get_plotter("go_2d"))
+            g_1d = cast(LivePlot1D, viewer.get_plotter("g_1d"))
+            eg_2d = cast(LivePlot2D, viewer.get_plotter("eg_2d"))
+            ee_2d = cast(LivePlot2D, viewer.get_plotter("ee_2d"))
+            eo_2d = cast(LivePlot2D, viewer.get_plotter("eo_2d"))
+            e_1d = cast(LivePlot1D, viewer.get_plotter("e_1d"))
             current_index = 0
 
             def plot_fn(data: NDArray[np.float64]) -> None:
                 i = current_index
                 populations = calc_populations(data)
 
-                viewer.get_plotter("gg_2d").update(
-                    xs, lengths, populations[:, 0, :, 0], refresh=False
-                )
-                viewer.get_plotter("ge_2d").update(
-                    xs, lengths, populations[:, 0, :, 1], refresh=False
-                )
-                viewer.get_plotter("go_2d").update(
-                    xs, lengths, populations[:, 0, :, 2], refresh=False
-                )
-                viewer.get_plotter("g_1d").update(
-                    lengths, populations[i, 0].T, refresh=False
-                )
-                viewer.get_plotter("eg_2d").update(
-                    xs, lengths, populations[:, 1, :, 0], refresh=False
-                )
-                viewer.get_plotter("ee_2d").update(
-                    xs, lengths, populations[:, 1, :, 1], refresh=False
-                )
-                viewer.get_plotter("eo_2d").update(
-                    xs, lengths, populations[:, 1, :, 2], refresh=False
-                )
-                viewer.get_plotter("e_1d").update(
-                    lengths, populations[i, 1].T, refresh=False
-                )
+                gg_2d.update(xs, lengths, populations[:, 0, :, 0], refresh=False)
+                ge_2d.update(xs, lengths, populations[:, 0, :, 1], refresh=False)
+                go_2d.update(xs, lengths, populations[:, 0, :, 2], refresh=False)
+                g_1d.update(lengths, populations[i, 0].T, refresh=False)
+                eg_2d.update(xs, lengths, populations[:, 1, :, 0], refresh=False)
+                ee_2d.update(xs, lengths, populations[:, 1, :, 1], refresh=False)
+                eo_2d.update(xs, lengths, populations[:, 1, :, 2], refresh=False)
+                e_1d.update(lengths, populations[i, 1].T, refresh=False)
 
                 viewer.refresh()
 
@@ -339,36 +332,28 @@ class T1WithToneSweepExp(
         fig, viewer = self._make_viewer_ctx(sweep_name)
 
         with viewer:
+            gg_2d = cast(LivePlot2D, viewer.get_plotter("gg_2d"))
+            ge_2d = cast(LivePlot2D, viewer.get_plotter("ge_2d"))
+            go_2d = cast(LivePlot2D, viewer.get_plotter("go_2d"))
+            g_1d = cast(LivePlot1D, viewer.get_plotter("g_1d"))
+            eg_2d = cast(LivePlot2D, viewer.get_plotter("eg_2d"))
+            ee_2d = cast(LivePlot2D, viewer.get_plotter("ee_2d"))
+            eo_2d = cast(LivePlot2D, viewer.get_plotter("eo_2d"))
+            e_1d = cast(LivePlot1D, viewer.get_plotter("e_1d"))
             current_index = 0
 
             def plot_fn(data: NDArray[np.float64]) -> None:
                 i = current_index
                 populations = calc_populations(data)
 
-                viewer.get_plotter("gg_2d").update(
-                    xs, lengths, populations[:, 0, :, 0], refresh=False
-                )
-                viewer.get_plotter("ge_2d").update(
-                    xs, lengths, populations[:, 0, :, 1], refresh=False
-                )
-                viewer.get_plotter("go_2d").update(
-                    xs, lengths, populations[:, 0, :, 2], refresh=False
-                )
-                viewer.get_plotter("g_1d").update(
-                    lengths, populations[i, 0].T, refresh=False
-                )
-                viewer.get_plotter("eg_2d").update(
-                    xs, lengths, populations[:, 1, :, 0], refresh=False
-                )
-                viewer.get_plotter("ee_2d").update(
-                    xs, lengths, populations[:, 1, :, 1], refresh=False
-                )
-                viewer.get_plotter("eo_2d").update(
-                    xs, lengths, populations[:, 1, :, 2], refresh=False
-                )
-                viewer.get_plotter("e_1d").update(
-                    lengths, populations[i, 1].T, refresh=False
-                )
+                gg_2d.update(xs, lengths, populations[:, 0, :, 0], refresh=False)
+                ge_2d.update(xs, lengths, populations[:, 0, :, 1], refresh=False)
+                go_2d.update(xs, lengths, populations[:, 0, :, 2], refresh=False)
+                g_1d.update(lengths, populations[i, 0].T, refresh=False)
+                eg_2d.update(xs, lengths, populations[:, 1, :, 0], refresh=False)
+                ee_2d.update(xs, lengths, populations[:, 1, :, 1], refresh=False)
+                eo_2d.update(xs, lengths, populations[:, 1, :, 2], refresh=False)
+                e_1d.update(lengths, populations[i, 1].T, refresh=False)
 
                 viewer.refresh()
 

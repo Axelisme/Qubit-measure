@@ -294,6 +294,7 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
         ax_len = fig.add_subplot(gs[2, 1])
 
         instant_plot(fig)  # show the figure immediately
+        point_indices = np.arange(num_points, dtype=np.float64)
 
         with MultiLivePlot(
             fig,
@@ -325,7 +326,7 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
                 )
 
                 viewer.get_plotter("iter_scatter").update(
-                    np.arange(num_points), snrs, refresh=False
+                    point_indices, snrs, refresh=False
                 )
                 viewer.get_plotter("freq_scatter").update(
                     params[:, 0], snrs, refresh=False
