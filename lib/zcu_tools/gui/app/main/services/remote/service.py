@@ -17,10 +17,11 @@ layers measure-gui's own dispatch policy on top by overriding the base seams:
     out-of-band diagnostic channel (``notify_diagnostic``), both pushed via
     ``endpoint.broadcast`` independent of EventBus.
 
-Handlers receive *this adapter* (not the bare ctrl), so they reach commands
-through ``adapter.ctrl.<façade>`` and View-side surfaces (render/snapshot)
-through ``adapter.render_view``. Construct after ``Controller`` / ``MainWindow``
-exist; inert until ``start()``.
+Handlers receive *this adapter* (not the bare ctrl), so they reach app commands
+through ``adapter.ctrl.<façade>``, device commands through
+``adapter.device_control``, and View-side surfaces (render/snapshot) through
+``adapter.render_view``. Construct after ``Controller`` / ``MainWindow`` exist;
+inert until ``start()``.
 """
 
 from __future__ import annotations
@@ -44,6 +45,7 @@ if TYPE_CHECKING:
     # (controller.py imports remote.dialogs). String annotation keeps pyright
     # checking handler/ctrl method names while the runtime import never happens.
     from zcu_tools.gui.app.main.controller import Controller, RenderView, Severity
+    from zcu_tools.gui.session.device_control import DeviceControlPort
 
 from .dispatch import METHOD_REGISTRY
 from .events import EVENT_SERIALIZERS, wire_event_name
@@ -78,14 +80,16 @@ def _ctx(link: ClientLink) -> _ClientCtx:
 class RemoteControlAdapter(RemoteControlServiceBase):
     """Driving adapter: an NDJSON RPC face onto the measure-gui ``Controller``.
 
-    Holds the concrete ``Controller`` (command face) and pulls EventBus from it
-    via ``get_bus()``. Dispatch handlers reach commands through ``adapter.ctrl``
-    and the canvas-bearing View's pure-read surface through ``adapter.render_view``
-    (screenshot / snapshot / dialog). ``render_view`` is None in a headless
-    process; render handlers fail-fast then.
+    Holds the concrete ``Controller`` (app command face), exposes the shared
+    device-control facet, and pulls EventBus from it via ``get_bus()``. Dispatch
+    handlers reach app commands through ``adapter.ctrl``, device commands through
+    ``adapter.device_control``, and the canvas-bearing View's pure-read surface
+    through ``adapter.render_view`` (screenshot / snapshot / dialog).
+    ``render_view`` is None in a headless process; render handlers fail-fast then.
     """
 
     ctrl: Controller
+    device_control: DeviceControlPort
 
     def __init__(
         self,
@@ -104,6 +108,7 @@ class RemoteControlAdapter(RemoteControlServiceBase):
             wire_event_name=wire_event_name,
         )
         self.render_view = render_view
+        self.device_control = controller.device_control
 
     # ------------------------------------------------------------------
     # Base seams

@@ -4,8 +4,8 @@ Both measurement-session app Controllers (measure: ``gui/app/main/controller``;
 autofluxdep: ``gui/app/autofluxdep/controller``) implement
 :class:`~zcu_tools.gui.session.controller_port.SessionControllerPort` as a wall of
 one-line forwards into the same five session services (soc_connection / predictor
-/ context / device / startup) plus the progress service. Those forwards were
-byte-identical across the two apps; this mixin holds the single copy.
+/ context / device / startup) plus app-local progress helpers. Those forwards
+were byte-identical across the two apps; this mixin holds the single copy.
 
 Design (Candidate #14, Option B — abstract service accessors):
 
@@ -24,6 +24,11 @@ Design (Candidate #14, Option B — abstract service accessors):
   a bare annotation gives the identical pyright enforcement with no name clash and
   no churn across the ~130 existing call sites.)
 - The mixin provides every **identical** forward reading those accessors.
+
+The device dialog lifecycle/query surface lives on ``DeviceControlPort``. This
+mixin still keeps ``attach_progress`` / ``progress_bars`` because non-device
+app-local callers (run tab and autofluxdep run progress) call those controller
+helpers directly.
 
 Each app keeps as its own override the methods whose body genuinely diverges:
 
@@ -47,7 +52,6 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from zcu_tools.device.base import BaseDeviceInfo
     from zcu_tools.gui.result_scope import ProjectPaths, ResultScope
     from zcu_tools.gui.session.pbar_host import ProgressBarModel
     from zcu_tools.gui.session.services.connection import (
@@ -56,12 +60,8 @@ if TYPE_CHECKING:
     )
     from zcu_tools.gui.session.services.context import ContextService
     from zcu_tools.gui.session.services.device import (
-        ConnectDeviceRequest,
         DeviceEntry,
         DeviceService,
-        DeviceSnapshot,
-        DisconnectDeviceRequest,
-        SetupDeviceRequest,
     )
     from zcu_tools.gui.session.services.predictor import (
         LoadPredictorRequest,
@@ -209,44 +209,11 @@ class SessionControllerMixin:
     def get_predictor_info(self) -> dict | None:
         return self._pred_svc.get_predictor_info()
 
-    # --- device dialog: lifecycle ----------------------------------------
-    def start_connect_device(self, req: ConnectDeviceRequest) -> int:
-        return self._dev_svc.start_connect_device(req)
-
-    def start_disconnect_device(self, req: DisconnectDeviceRequest) -> int:
-        return self._dev_svc.start_disconnect_device(req)
-
-    def start_reconnect_device(self, name: str) -> int:
-        return self._dev_svc.start_reconnect_device(name)
-
-    def start_setup_device(self, req: SetupDeviceRequest) -> int:
-        return self._dev_svc.start_setup_device(req)
-
-    def forget_device(self, name: str) -> None:
-        self._dev_svc.forget_device(name)
-
-    def cancel_device_operation(self, name: str) -> None:
-        self._dev_svc.cancel_device_operation(name)
-
-    # --- device dialog: queries ------------------------------------------
+    # --- setup dialog: device list/unit lookup ----------------------------
     def list_devices(self) -> list[DeviceEntry]:
         return self._dev_svc.list_devices()
 
-    def get_device_snapshot(self, name: str) -> DeviceSnapshot | None:
-        return self._dev_svc.get_device_snapshot(name)
-
-    def get_device_info(self, name: str) -> BaseDeviceInfo | None:
-        return self._dev_svc.get_device_info(name)
-
-    def poll_device_info(self, name: str) -> None:
-        # Dialog-scoped off-main live-read (best-effort); result flows back via
-        # DEVICE_CHANGED. DeviceService owns the worker/main-thread split.
-        self._dev_svc.poll_device_info(name)
-
-    def is_memory_device(self, name: str) -> bool:
-        return self._dev_svc.is_memory_device(name)
-
-    # --- device dialog: progress -----------------------------------------
+    # --- app-local progress helpers --------------------------------------
     def attach_progress(
         self, owner_id: str, listener: Callable[[], None]
     ) -> Callable[[], None]:

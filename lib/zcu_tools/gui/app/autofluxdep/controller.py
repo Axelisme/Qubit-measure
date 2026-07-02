@@ -92,6 +92,7 @@ if TYPE_CHECKING:
         PersistenceCaretaker,
         RestoreOutcome,
     )
+    from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.ports import ProgressTransport
     from zcu_tools.gui.session.services.startup import (
         StartupProjectRequest,
@@ -237,6 +238,7 @@ class Controller(SessionControllerMixin):
         self._pred_svc = session.predictor
         self._ctx_svc = session.context
         self._dev_svc = session.device
+        self._device_control = session.device_control
         self._startup_svc = session.startup
 
     # --- read-only accessors for the UI ---
@@ -248,6 +250,10 @@ class Controller(SessionControllerMixin):
     @property
     def bus(self) -> EventBus:
         return self._bus
+
+    @property
+    def device_control(self) -> DeviceControlPort:
+        return self._device_control
 
     @property
     def is_running(self) -> bool:
@@ -264,11 +270,11 @@ class Controller(SessionControllerMixin):
         return self._last_run_info
 
     # ------------------------------------------------------------------
-    # SessionControllerPort — the surface the shared setup / device / inspect
-    # dialogs depend on (gui/session/controller_port). The identical forwards live
-    # in SessionControllerMixin (read through the _*_svc accessors, supplied below
-    # in __init__); only the methods whose body diverges are kept here. pyright
-    # verifies conformance at the dialog call sites.
+    # SessionControllerPort — the surface the shared setup / predictor / inspect
+    # dialogs depend on (device dialog uses device_control). The identical
+    # forwards live in SessionControllerMixin (read through the _*_svc accessors,
+    # supplied below in __init__); only the methods whose body diverges are kept
+    # here. pyright verifies conformance at the dialog call sites.
     # ------------------------------------------------------------------
 
     def get_bus(self) -> EventBus:

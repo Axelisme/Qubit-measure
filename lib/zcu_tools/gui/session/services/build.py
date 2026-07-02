@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.result_scope import ResultScopeManager
+from zcu_tools.gui.session.device_control import DeviceControlFacet
 from zcu_tools.gui.session.services.connection import SoCConnectionService
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.device import DeviceService
@@ -29,6 +30,7 @@ from zcu_tools.gui.session.value_lookup import ValueLookup, ValueRegistry
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus
+    from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.operation_handles import OperationHandles
     from zcu_tools.gui.session.operation_runner import OperationRunner
     from zcu_tools.gui.session.ports import (
@@ -36,9 +38,9 @@ if TYPE_CHECKING:
         DeviceRegistryPort,
         DriverFactoryPort,
         ExclusionGate,
-        ProgressHub,
         ProjectIOPort,
     )
+    from zcu_tools.gui.session.services.progress import ProgressService
     from zcu_tools.gui.session.state import SessionState
 
 
@@ -50,6 +52,7 @@ class SessionServices:
     predictor: PredictorService
     context: ContextService
     device: DeviceService
+    device_control: DeviceControlPort
     startup: StartupService
     values: ValueLookup
     value_sources: ValueSourceBinder
@@ -62,7 +65,7 @@ def build_session_services(
     gate: ExclusionGate,
     handles: OperationHandles,
     background: BackgroundExecutor,
-    progress: ProgressHub,
+    progress: ProgressService,
     io_manager: ProjectIOPort,
     runner: OperationRunner,
     project_root: str = "",
@@ -71,8 +74,9 @@ def build_session_services(
 ) -> SessionServices:
     """Construct the session services from the app-provided infrastructure.
 
-    ``gate`` / ``background`` / ``progress`` are the app's concrete exclusion gate,
-    off-main executor and progress hub (injected via their session ports);
+    ``gate`` / ``background`` are the app's concrete exclusion gate and off-main
+    executor (injected via their session ports); ``progress`` is the shared
+    ProgressService used by operation clients and the device-control facet;
     ``io_manager`` is the project-IO adapter; ``runner`` is the shared
     OperationRunner (ADR-0026 §1) used by DeviceService for operation lifecycle;
     ``project_root`` anchors generated result/database paths and result-scope
@@ -92,6 +96,7 @@ def build_session_services(
         driver_factory=driver_factory,
         device_registry=device_registry,
     )
+    device_control = DeviceControlFacet(bus=bus, device=device, progress=progress)
     soc_connection = SoCConnectionService(state, bus, gate, handles, runner)
     predictor = PredictorService(state, bus)
     context = ContextService(state, io_manager, bus, values=value_registry)
@@ -111,6 +116,7 @@ def build_session_services(
         predictor=predictor,
         context=context,
         device=device,
+        device_control=device_control,
         startup=startup,
         values=value_registry,
         value_sources=value_sources,

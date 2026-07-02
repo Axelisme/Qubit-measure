@@ -366,9 +366,13 @@ class MainWindow(QMainWindow):
             existing.activateWindow()
             return
 
-        # The shared device dialog manages all instruments (a flux source among
-        # them) through the same SessionControllerPort the setup dialog uses.
-        dlg = DeviceDialog(self._ctrl, self)
+        # The shared device dialog manages instruments through the narrow device
+        # facet; context lookup is injected separately for eval-mode fields.
+        dlg = DeviceDialog(
+            self._ctrl.device_control,
+            md_provider=self._ctrl.get_current_md,
+            parent=self,
+        )
         dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dlg.finished.connect(
             lambda _r: (

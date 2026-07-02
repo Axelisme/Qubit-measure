@@ -9,6 +9,7 @@ from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.events import (
     DeviceChangedPayload,
     DeviceSetupFinishedPayload,
+    DeviceSetupStartedPayload,
 )
 from zcu_tools.gui.session.services.device import (
     ConnectDeviceRequest,
@@ -35,13 +36,35 @@ def _entry(
 
 def _make_ctrl() -> MagicMock:
     ctrl = MagicMock()
-    ctrl.get_bus.return_value = EventBus()
+    bus = EventBus()
+    ctrl.get_bus.return_value = bus
+    ctrl._event_disposers = []
+
+    def _subscribe(payload_type: type, handler):
+        handle = bus.subscribe(payload_type, handler)
+        dispose = MagicMock(side_effect=handle.unsubscribe)
+        ctrl._event_disposers.append(dispose)
+        return dispose
+
+    ctrl.on_device_changed.side_effect = lambda handler: _subscribe(
+        DeviceChangedPayload, handler
+    )
+    ctrl.on_device_setup_started.side_effect = lambda handler: _subscribe(
+        DeviceSetupStartedPayload, handler
+    )
+    ctrl.on_device_setup_finished.side_effect = lambda handler: _subscribe(
+        DeviceSetupFinishedPayload, handler
+    )
     ctrl.progress_bars.return_value = ()
     ctrl.list_devices.return_value = []
     ctrl.is_memory_device.return_value = False
     ctrl.get_memory_device_address.return_value = None
     ctrl.get_device_snapshot.return_value = None
     return ctrl
+
+
+def _make_dialog(ctrl: MagicMock) -> DeviceDialog:
+    return DeviceDialog(ctrl, md_provider=ctrl.get_current_md)
 
 
 def _connected_snapshot(name: str, info: object) -> DeviceSnapshot:
@@ -76,7 +99,7 @@ def test_device_dialog_init(qapp):
     info = FakeDeviceInfo(address="none")
     ctrl.get_device_snapshot.return_value = _connected_snapshot("fakedevice", info)
 
-    dialog = DeviceDialog(ctrl)
+    dialog = _make_dialog(ctrl)
 
     # list_devices should be called during init (Phase C also reads it in
     # _setup_device_names, so just assert it was used, not the exact count).
@@ -92,7 +115,7 @@ def test_device_dialog_init(qapp):
 def test_device_dialog_add_device_dispatches_request(qapp):
     ctrl = _make_ctrl()
 
-    dialog = DeviceDialog(ctrl)
+    dialog = _make_dialog(ctrl)
     dialog._type_combo.setCurrentText("FakeDevice")
     dialog._addr_edit.setText("TCPIP::127.0.0.1::INSTR")
     dialog._name_edit.setText("fakedevice")
@@ -110,7 +133,7 @@ def test_device_dialog_add_device_dispatches_request(qapp):
 
 def test_device_dialog_add_device_does_not_persist_before_async_success(qapp):
     ctrl = _make_ctrl()
-    dialog = DeviceDialog(ctrl)
+    dialog = _make_dialog(ctrl)
     dialog._add_btn.click()
 
 
@@ -119,7 +142,7 @@ def test_device_dialog_add_device_propagates_unexpected_errors(qapp):
     ctrl = _make_ctrl()
     ctrl.start_connect_device.side_effect = ValueError("contract violation")
 
-    dialog = DeviceDialog(ctrl)
+    dialog = _make_dialog(ctrl)
     dialog._type_combo.setCurrentText("FakeDevice")
     dialog._addr_edit.setText("addr")
     with pytest.raises(ValueError, match="contract violation"):
@@ -135,7 +158,7 @@ def test_device_dialog_drop_device(qapp):
     info = YOKOGS200Info(address="GPIB::1")
     ctrl.get_device_snapshot.return_value = _connected_snapshot("yoko", info)
 
-    dialog = DeviceDialog(ctrl)
+    dialog = _make_dialog(ctrl)
 
     assert dialog._list.count() == 1
     dialog._list.setCurrentRow(0)
@@ -159,7 +182,7 @@ def test_device_dialog_forget_memory_device_dispatches_single_transaction(qapp):
         status=DeviceStatus.MEMORY_ONLY,
     )
 
-    dialog = DeviceDialog(ctrl)
+    dialog = _make_dialog(ctrl)
     dialog._list.setCurrentRow(0)
     dialog._drop_btn.click()
 
@@ -178,7 +201,7 @@ def test_device_dialog_refresh_reloads_selected_device_info(qapp):
     ctrl.get_device_snapshot.side_effect = lambda _n: _connected_snapshot(
         "fd", FakeDeviceInfo(address="none", value=box["value"])
     )
-    dialog = DeviceDialog(ctrl)
+    dialog = _make_dialog(ctrl)
     dialog._list.setCurrentRow(0)
     panel = dialog._stack.currentWidget()
     assert isinstance(panel, _FakeDevicePanel)
@@ -204,7 +227,7 @@ def test_device_changed_repaints_selected_panel(qapp):
         "fd", FakeDeviceInfo(address="none", value=box["value"])
     )
 
-    dialog = DeviceDialog(ctrl)
+    dialog = _make_dialog(ctrl)
     dialog._list.setCurrentRow(0)
     panel = dialog._stack.currentWidget()
     assert isinstance(panel, _FakeDevicePanel)
@@ -227,7 +250,7 @@ def test_device_changed_for_other_device_keeps_selection(qapp):
         n, FakeDeviceInfo(address="none")
     )
 
-    dialog = DeviceDialog(ctrl)
+    dialog = _make_dialog(ctrl)
     dialog._list.setCurrentRow(0)
     item = dialog._list.currentItem()
     assert item is not None and item.data(256) == "A"
@@ -249,7 +272,7 @@ def test_device_changed_surfaces_device_when_none_selected(qapp):
         n, FakeDeviceInfo(address="none")
     )
 
-    dialog = DeviceDialog(ctrl)
+    dialog = _make_dialog(ctrl)
     dialog._list.setCurrentRow(-1)
 
     ctrl.get_bus.return_value.emit(DeviceChangedPayload(name="fd"))
@@ -270,7 +293,7 @@ def test_poll_timer_runs_only_when_visible_and_selected(qapp):
         n, FakeDeviceInfo(address="none")
     )
 
-    dialog = DeviceDialog(ctrl)
+    dialog = _make_dialog(ctrl)
     try:
         # Hidden + nothing selected → stopped.
         assert not dialog._poll_timer.isActive()
@@ -303,7 +326,7 @@ def test_poll_tick_polls_selected_device(qapp):
         n, FakeDeviceInfo(address="none")
     )
 
-    dialog = DeviceDialog(ctrl)
+    dialog = _make_dialog(ctrl)
     try:
         dialog._list.setCurrentRow(1)  # select "B"
         dialog._on_poll_tick()
@@ -318,7 +341,7 @@ def test_poll_tick_with_no_selection_stops_timer(qapp):
     ctrl = _make_ctrl()
     ctrl.list_devices.return_value = []
 
-    dialog = DeviceDialog(ctrl)
+    dialog = _make_dialog(ctrl)
     try:
         dialog._poll_timer.start()  # force-running with no selection
         dialog._on_poll_tick()
@@ -338,13 +361,13 @@ def test_poll_timer_stops_on_dialog_close(qapp):
         n, FakeDeviceInfo(address="none")
     )
 
-    dialog = DeviceDialog(ctrl)
+    dialog = _make_dialog(ctrl)
     dialog.show()
     qapp.processEvents()
     dialog._list.setCurrentRow(0)
     assert dialog._poll_timer.isActive()
 
-    dialog.accept()  # finished → _cleanup_bus_subscriptions stops the timer
+    dialog.accept()  # finished → _cleanup_event_subscriptions stops the timer
     qapp.processEvents()
     assert not dialog._poll_timer.isActive()
 
@@ -358,7 +381,7 @@ def test_device_dialog_apply_changes(qapp):
     info = FakeDeviceInfo(address="none")
     ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
     ctrl.get_device_info.return_value = info
-    dialog = DeviceDialog(ctrl)
+    dialog = _make_dialog(ctrl)
     dialog._list.setCurrentRow(0)
 
     assert dialog._stack.currentIndex() == 1  # FakeDevice page
@@ -389,7 +412,7 @@ def test_device_dialog_restores_background_setup_and_stops_it(qapp):
         info=info,  # type: ignore[arg-type]
     )
 
-    dialog = DeviceDialog(ctrl)
+    dialog = _make_dialog(ctrl)
     # Opened mid-setup with nothing pre-selected → the setup owner is surfaced.
     item = dialog._list.currentItem()
     assert item is not None
@@ -449,7 +472,7 @@ def _setup_two_device_dialog(qapp):
     non-owner fd_b. Returns (dialog, ctrl, setting_up_set)."""
     setting_up = {"fd_a"}
     ctrl = _two_device_ctrl(setting_up)
-    dialog = DeviceDialog(ctrl)
+    dialog = _make_dialog(ctrl)
     dialog._list.setCurrentRow(1)  # "fd_b"
     return dialog, ctrl, setting_up
 
@@ -528,7 +551,7 @@ def test_two_concurrent_setups_each_show_stop_and_cancel_independently(qapp):
     cancels only itself."""
     setting_up = {"fd_a", "fd_b"}
     ctrl = _two_device_ctrl(setting_up)
-    dialog = DeviceDialog(ctrl)
+    dialog = _make_dialog(ctrl)
 
     dialog._list.setCurrentRow(0)  # fd_a
     assert dialog._apply_btn.text() == "Stop"
@@ -546,7 +569,7 @@ def test_two_concurrent_setups_subscribe_progress_per_owner(qapp):
     the merged stack is shown."""
     setting_up = {"fd_a", "fd_b"}
     ctrl = _two_device_ctrl(setting_up)
-    dialog = DeviceDialog(ctrl)
+    dialog = _make_dialog(ctrl)
 
     owners = {call.args[0] for call in ctrl.attach_progress.call_args_list}
     assert owners == {"fd_a", "fd_b"}
@@ -559,7 +582,7 @@ def test_one_of_two_setups_finishing_keeps_the_other(qapp):
     disposed but the other survives."""
     setting_up = {"fd_a", "fd_b"}
     ctrl = _two_device_ctrl(setting_up)
-    dialog = DeviceDialog(ctrl)
+    dialog = _make_dialog(ctrl)
     assert set(dialog._progress_unsubs) == {"fd_a", "fd_b"}
 
     # fd_a finishes (back to CONNECTED); fd_b still setting up.
@@ -635,12 +658,14 @@ def test_device_dialog_close_keeps_setup_running_and_unsubscribes(qapp):
     ctrl.get_device_snapshot.return_value = _setting_up_snapshot(
         "fd", FakeDeviceInfo(address="none")
     )
-    dialog = DeviceDialog(ctrl)
+    dialog = _make_dialog(ctrl)
 
     dialog.accept()
 
     ctrl.cancel_device_operation.assert_not_called()
-    assert ctrl.get_bus.return_value._subs[DeviceSetupFinishedPayload] == []
+    assert ctrl._event_disposers
+    for dispose in ctrl._event_disposers:
+        dispose.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -672,7 +697,7 @@ def test_eval_apply_resolves_expression_to_float(qapp):
     ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
     ctrl.get_device_info.return_value = info
 
-    dialog = DeviceDialog(ctrl)
+    dialog = _make_dialog(ctrl)
     dialog._list.setCurrentRow(0)
 
     panel = dialog._stack.currentWidget()
@@ -704,7 +729,7 @@ def test_eval_apply_fast_fails_on_undefined_name(qapp):
     ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
     ctrl.get_device_info.return_value = info
 
-    dialog = DeviceDialog(ctrl)
+    dialog = _make_dialog(ctrl)
     dialog._list.setCurrentRow(0)
 
     panel = dialog._stack.currentWidget()
@@ -730,7 +755,7 @@ def test_eval_apply_fast_fails_on_syntax_error(qapp):
     ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
     ctrl.get_device_info.return_value = info
 
-    dialog = DeviceDialog(ctrl)
+    dialog = _make_dialog(ctrl)
     dialog._list.setCurrentRow(0)
 
     panel = dialog._stack.currentWidget()
@@ -756,7 +781,7 @@ def test_eval_apply_no_context_fast_fails(qapp):
     ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
     ctrl.get_device_info.return_value = info
 
-    dialog = DeviceDialog(ctrl)
+    dialog = _make_dialog(ctrl)
     dialog._list.setCurrentRow(0)
 
     panel = dialog._stack.currentWidget()
@@ -780,7 +805,7 @@ def test_direct_mode_apply_unchanged(qapp):
     ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
     ctrl.get_device_info.return_value = info
 
-    dialog = DeviceDialog(ctrl)
+    dialog = _make_dialog(ctrl)
     dialog._list.setCurrentRow(0)
 
     dialog._apply_btn.click()
@@ -809,7 +834,7 @@ def test_eval_apply_out_of_range_fast_fails(qapp):
     ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
     ctrl.get_device_info.return_value = info
 
-    dialog = DeviceDialog(ctrl)
+    dialog = _make_dialog(ctrl)
     dialog._list.setCurrentRow(0)
 
     panel = dialog._stack.currentWidget()
@@ -836,7 +861,7 @@ def test_eval_apply_in_range_sends_setup(qapp):
     ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
     ctrl.get_device_info.return_value = info
 
-    dialog = DeviceDialog(ctrl)
+    dialog = _make_dialog(ctrl)
     dialog._list.setCurrentRow(0)
 
     panel = dialog._stack.currentWidget()
@@ -866,7 +891,7 @@ def test_choice_field_unaffected_by_eval_mode(qapp):
     ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
     ctrl.get_device_info.return_value = info
 
-    dialog = DeviceDialog(ctrl)
+    dialog = _make_dialog(ctrl)
     dialog._list.setCurrentRow(0)
 
     panel = dialog._stack.currentWidget()

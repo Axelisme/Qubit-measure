@@ -154,14 +154,13 @@ def test_remove_node(app):
 
 def test_devices_button_opens_shared_device_dialog(app):
     # the Devices… button opens the shared session DeviceDialog, which depends
-    # only on the SessionControllerPort the autofluxdep Controller implements —
-    # constructing it with the live controller is the runtime conformance check.
+    # only on the device-control facet exposed by the autofluxdep Controller.
     from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 
     ctrl, win = app
     assert hasattr(win, "_devices_btn")
-    dlg = DeviceDialog(ctrl, win)  # must not raise
-    assert dlg._ctrl is ctrl
+    dlg = DeviceDialog(ctrl.device_control, md_provider=ctrl.get_current_md, parent=win)
+    assert dlg._dev is ctrl.device_control
     dlg.deleteLater()
 
 

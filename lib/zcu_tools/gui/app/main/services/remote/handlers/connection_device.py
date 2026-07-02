@@ -117,8 +117,9 @@ def _h_device_connect(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     req = coerce_connect_device_request(params)
+    dev = adapter.device_control
     try:
-        operation_id = adapter.ctrl.start_connect_device(req)
+        operation_id = dev.start_connect_device(req)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -132,8 +133,9 @@ def _h_device_disconnect(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     req = coerce_disconnect_device_request(params)
+    dev = adapter.device_control
     try:
-        operation_id = adapter.ctrl.start_disconnect_device(req)
+        operation_id = dev.start_disconnect_device(req)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -147,8 +149,9 @@ def _h_device_reconnect(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
+    dev = adapter.device_control
     try:
-        operation_id = adapter.ctrl.start_reconnect_device(name)
+        operation_id = dev.start_reconnect_device(name)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -164,8 +167,9 @@ def _h_device_forget(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
+    dev = adapter.device_control
     try:
-        adapter.ctrl.forget_device(name)
+        dev.forget_device(name)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -182,8 +186,9 @@ def _h_device_setup(
 ) -> Mapping[str, object]:
     name = str(params["name"])
     updates = cast(dict, params["updates"])  # ParamSpec(_obj)-validated
+    dev = adapter.device_control
     try:
-        info = adapter.ctrl.get_device_info(name)
+        info = dev.get_device_info(name)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -200,7 +205,7 @@ def _h_device_setup(
     except ValueError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     try:
-        operation_id = adapter.ctrl.start_setup_device(
+        operation_id = dev.start_setup_device(
             SetupDeviceRequest(name=name, info=updated)
         )
     except RuntimeError as exc:
@@ -248,8 +253,9 @@ def _h_device_setup_spec(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
+    dev = adapter.device_control
     try:
-        info = adapter.ctrl.get_device_info(name)
+        info = dev.get_device_info(name)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -280,8 +286,9 @@ def _h_device_cancel_operation(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
+    dev = adapter.device_control
     try:
-        adapter.ctrl.cancel_device_operation(name)
+        dev.cancel_device_operation(name)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -297,6 +304,7 @@ def _h_device_active_operations(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
+    dev = adapter.device_control
     # Phase C concurrency: enumerate *every* in-flight device operation (sorted
     # by name), each tagged with its kind (connect / disconnect / setup) and its
     # operation 'handle' so the agent can drive gui_op_poll / gui_op_wait per op.
@@ -312,7 +320,7 @@ def _h_device_active_operations(
                 "status": op.snapshot.status.value,
                 "error": op.snapshot.error,
             }
-            for op in adapter.ctrl.get_active_device_operations()
+            for op in dev.get_active_device_operations()
         ]
     }
 
@@ -321,6 +329,7 @@ def _h_device_list(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
+    dev = adapter.device_control
     # Project the fine-grained status (DeviceEntry.status), consistent with the
     # snapshot/active_operations projections (single-status SSOT, FC7).
     devices = [
@@ -329,7 +338,7 @@ def _h_device_list(
             "type_name": e.type_name,
             "status": e.status,
         }
-        for e in adapter.ctrl.list_devices()
+        for e in dev.list_devices()
     ]
     return {"devices": devices}
 
@@ -338,7 +347,8 @@ def _h_device_snapshot(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
-    snap = adapter.ctrl.get_device_snapshot(name)
+    dev = adapter.device_control
+    snap = dev.get_device_snapshot(name)
     if snap is None:
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown device: {name!r}")
     # ``info`` is a ``BaseDeviceInfo`` (a pydantic ``ConfigBase``); ``to_dict()``

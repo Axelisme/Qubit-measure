@@ -44,7 +44,7 @@ from zcu_tools.gui.session.ui.eval_field import EvalNumericField
 from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.session.controller_port import SessionControllerPort
+    from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.meta_tool import MetaDict
 
 
@@ -253,10 +253,14 @@ class DeviceDialog(QDialog):
     """Resizable dialog combining device listing (left) and detail control (right)."""
 
     def __init__(
-        self, controller: SessionControllerPort, parent: QWidget | None = None
+        self,
+        device: DeviceControlPort,
+        md_provider: Callable[[], MetaDict],
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self._ctrl = controller
+        self._dev = device
+        self._md_provider = md_provider
         self.setWindowTitle("Manage Hardware Devices")
         self.resize(800, 500)
 
@@ -309,12 +313,11 @@ class DeviceDialog(QDialog):
 
         # Panels receive md_provider so their EvalNumericField widgets can show
         # a live ghost preview while the user composes an expression.
-        _md = self._ctrl.get_current_md
         self._stack = QStackedWidget()
         self._stack.addWidget(QLabel("Select a device to configure."))  # Page 0: Idle
-        self._stack.addWidget(_FakeDevicePanel(_md))  # Page 1
-        self._stack.addWidget(_YOKOGS200Panel(_md))  # Page 2
-        self._stack.addWidget(_SGS100APanel(_md))  # Page 3
+        self._stack.addWidget(_FakeDevicePanel(md_provider))  # Page 1
+        self._stack.addWidget(_YOKOGS200Panel(md_provider))  # Page 2
+        self._stack.addWidget(_SGS100APanel(md_provider))  # Page 3
         self._memory_panel = _MemoryDevicePanel()
         self._stack.addWidget(self._memory_panel)  # Page 4: memory-only
         right_layout.addWidget(self._stack, stretch=1)
@@ -346,19 +349,20 @@ class DeviceDialog(QDialog):
         self._progress = ProgressStack()
         layout.addWidget(self._progress)
 
-        bus = self._ctrl.get_bus()
-        bus.subscribe(DeviceChangedPayload, self._on_device_changed)
-        bus.subscribe(DeviceSetupStartedPayload, self._on_setup_started)
-        bus.subscribe(DeviceSetupFinishedPayload, self._on_setup_finished)
-        self._bus_subs_active = True
+        self._event_unsubs = [
+            self._dev.on_device_changed(self._on_device_changed),
+            self._dev.on_device_setup_started(self._on_setup_started),
+            self._dev.on_device_setup_finished(self._on_setup_finished),
+        ]
+        self._event_subs_active = True
         # Phase C: concurrent setups. Progress is now multi-owner — every device
         # currently setting up has its own ProgressService subscription, keyed by
         # device name. _sync_progress_subscriptions diffs the live setup set
         # against these on every setup start/finish; _on_progress_changed merges
         # all owners' bars into the single ProgressStack.
         self._progress_unsubs: dict[str, Callable[[], None]] = {}
-        self.finished.connect(self._cleanup_bus_subscriptions)
-        self.destroyed.connect(self._cleanup_bus_subscriptions)
+        self.finished.connect(self._cleanup_event_subscriptions)
+        self.destroyed.connect(self._cleanup_event_subscriptions)
 
         # Dialog-scoped + selection-scoped live poller (Phase 2): while the
         # dialog is visible AND a connected device is selected, tick once a
@@ -382,19 +386,15 @@ class DeviceDialog(QDialog):
         # dialog may open mid-setup, possibly with several concurrent setups).
         self._sync_progress_subscriptions()
 
-    def _cleanup_bus_subscriptions(self, *_args: object) -> None:
-        if not self._bus_subs_active:
+    def _cleanup_event_subscriptions(self, *_args: object) -> None:
+        if not self._event_subs_active:
             return
-        self._ctrl.get_bus().unsubscribe(
-            DeviceSetupStartedPayload, self._on_setup_started
-        )
-        self._ctrl.get_bus().unsubscribe(
-            DeviceSetupFinishedPayload, self._on_setup_finished
-        )
-        self._ctrl.get_bus().unsubscribe(DeviceChangedPayload, self._on_device_changed)
+        for unsubscribe in reversed(self._event_unsubs):
+            unsubscribe()
+        self._event_unsubs.clear()
         self._detach_all_progress()
         self._poll_timer.stop()
-        self._bus_subs_active = False
+        self._event_subs_active = False
 
     # --- live-value poller (dialog-scoped + selection-scoped) ----------------
 
@@ -430,7 +430,7 @@ class DeviceDialog(QDialog):
             # Selection vanished between decisions — stop rather than poll None.
             self._poll_timer.stop()
             return
-        self._ctrl.poll_device_info(name)
+        self._dev.poll_device_info(name)
 
     def _refresh_list(self, select_name: str | None = None) -> None:
         # Rebuilding the list clears the selection; preserve the user's current
@@ -441,7 +441,7 @@ class DeviceDialog(QDialog):
         # connected device when nothing is selected yet).
         current_name = self._selected_device_name()
         self._list.clear()
-        entries = self._ctrl.list_devices()
+        entries = self._dev.list_devices()
         for entry in entries:
             # "Connected" for the list label keeps the prior is_connected bool
             # semantics: a settled or in-mutation live driver (connected /
@@ -490,7 +490,7 @@ class DeviceDialog(QDialog):
             return
 
         name = item.data(Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
-        snapshot = self._ctrl.get_device_snapshot(name)
+        snapshot = self._dev.get_device_snapshot(name)
         if snapshot is None:
             return
 
@@ -535,8 +535,8 @@ class DeviceDialog(QDialog):
         the same set via the ``device.active_setups`` enumerator, but the dialog
         reads snapshot status directly rather than going through it."""
         names: set[str] = set()
-        for entry in self._ctrl.list_devices():
-            snapshot = self._ctrl.get_device_snapshot(entry.name)
+        for entry in self._dev.list_devices():
+            snapshot = self._dev.get_device_snapshot(entry.name)
             if snapshot is not None and snapshot.status is DeviceStatus.SETTING_UP:
                 names.add(entry.name)
         return names
@@ -574,7 +574,7 @@ class DeviceDialog(QDialog):
             return
 
         if snapshot is None:
-            snapshot = self._ctrl.get_device_snapshot(selected_name)
+            snapshot = self._dev.get_device_snapshot(selected_name)
         is_memory = snapshot is not None and snapshot.status is DeviceStatus.MEMORY_ONLY
         is_busy = snapshot is not None and snapshot.status not in {
             DeviceStatus.MEMORY_ONLY,
@@ -632,7 +632,7 @@ class DeviceDialog(QDialog):
         return f"{base}_{i}"
 
     def _on_type_changed(self, dtype: str) -> None:
-        existing = {e.name for e in self._ctrl.list_devices()}
+        existing = {e.name for e in self._dev.list_devices()}
         self._name_edit.setText(self._unique_name(dtype.lower(), existing))
 
     def _on_add_clicked(self) -> None:
@@ -641,7 +641,7 @@ class DeviceDialog(QDialog):
         addr = self._addr_edit.text().strip()
         self._add_status.setText("")
 
-        self._ctrl.start_connect_device(
+        self._dev.start_connect_device(
             ConnectDeviceRequest(type_name=dtype, name=name, address=addr)
         )
         self._add_status.setStyleSheet("color: gray;")
@@ -652,18 +652,18 @@ class DeviceDialog(QDialog):
         if item is None:
             return
         name = item.data(Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
-        if self._ctrl.is_memory_device(name):
+        if self._dev.is_memory_device(name):
             # Remove from memory entirely — won't appear after restart
-            self._ctrl.forget_device(name)
+            self._dev.forget_device(name)
         else:
             # Disconnect only — keep in startup memory so it reappears as gray on next launch
-            self._ctrl.start_disconnect_device(DisconnectDeviceRequest(name=name))
+            self._dev.start_disconnect_device(DisconnectDeviceRequest(name=name))
 
     def _on_refresh_clicked(self) -> None:
         item = self._list.currentItem()
         if item is not None:
             name = item.data(Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
-            self._ctrl.get_device_info(name)
+            self._dev.get_device_info(name)
         self._on_selection_changed(self._list.currentRow())
 
     def _on_apply_or_stop_clicked(self) -> None:
@@ -675,14 +675,14 @@ class DeviceDialog(QDialog):
         # Phase C: the button means Stop only for the selected device's OWN
         # in-flight setup (the same device that shows the red Stop). A different
         # device's concurrent setup never makes this button a Stop.
-        snapshot = self._ctrl.get_device_snapshot(name)
+        snapshot = self._dev.get_device_snapshot(name)
         if snapshot is not None and snapshot.status is DeviceStatus.SETTING_UP:
-            self._ctrl.cancel_device_operation(name)
+            self._dev.cancel_device_operation(name)
             return
 
-        if self._ctrl.is_memory_device(name):
+        if self._dev.is_memory_device(name):
             self._add_status.setText("")
-            self._ctrl.start_reconnect_device(name)
+            self._dev.start_reconnect_device(name)
             self._add_status.setStyleSheet("color: gray;")
             self._add_status.setText(f"Reconnecting {name}...")
             return
@@ -705,7 +705,7 @@ class DeviceDialog(QDialog):
 
         if any(isinstance(v, EvalRef) for v in updates.values()):
             try:
-                md = self._ctrl.get_current_md()
+                md = self._md_provider()
             except Exception as exc:
                 self._add_status.setStyleSheet("color: red;")
                 self._add_status.setText(f"{name}: {exc}")
@@ -738,7 +738,7 @@ class DeviceDialog(QDialog):
             # All fields are direct values — pass through unchanged, no md access.
             resolved_updates = dict(updates)
 
-        info = self._ctrl.get_device_info(name)
+        info = self._dev.get_device_info(name)
         if info is None:
             return
         from zcu_tools.device.base import BaseDeviceInfo
@@ -746,7 +746,7 @@ class DeviceDialog(QDialog):
         if not isinstance(info, BaseDeviceInfo):
             return
         new_info = info.with_updates(**resolved_updates)
-        self._ctrl.start_setup_device(SetupDeviceRequest(name=name, info=new_info))
+        self._dev.start_setup_device(SetupDeviceRequest(name=name, info=new_info))
 
     def _on_device_changed(self, payload: DeviceChangedPayload) -> None:
         name = payload.name
@@ -759,7 +759,7 @@ class DeviceDialog(QDialog):
         self._refresh_list(select_name=select)
         if name is None:
             return
-        snapshot = self._ctrl.get_device_snapshot(name)
+        snapshot = self._dev.get_device_snapshot(name)
         if snapshot is None:
             return
         if snapshot.error is not None:
@@ -813,7 +813,7 @@ class DeviceDialog(QDialog):
                     break
         # Subscribe newly-started setups.
         for name in live - set(self._progress_unsubs):
-            self._progress_unsubs[name] = self._ctrl.attach_progress(
+            self._progress_unsubs[name] = self._dev.attach_progress(
                 name, self._on_progress_changed
             )
         # Dispose finished ones.
@@ -835,5 +835,5 @@ class DeviceDialog(QDialog):
         # (sorted by name so the order is stable across ticks).
         models: list[Any] = []
         for name in sorted(self._progress_unsubs):
-            models.extend(m for _, m in self._ctrl.progress_bars(name))
+            models.extend(m for _, m in self._dev.progress_bars(name))
         self._progress.render_models(tuple(models))

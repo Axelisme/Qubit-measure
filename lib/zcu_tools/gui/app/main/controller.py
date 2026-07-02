@@ -60,6 +60,7 @@ from .services.remote.dialogs import DialogName
 from .state import State
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.ports import ProgressTransport
     from zcu_tools.meta_tool import ArbWaveformData, ArbWaveformInfo
 
@@ -248,6 +249,7 @@ class Controller(SessionControllerMixin):
         self._progress_svc = services.progress
         self._guard_svc = services.guard
         self._dev_svc = services.device
+        self._device_control = services.device_control
         self._soc_svc: SoCConnectionService = services.soc_connection
         self._pred_svc = services.predictor
         self._ctx_svc = services.context
@@ -429,6 +431,10 @@ class Controller(SessionControllerMixin):
 
     def get_bus(self) -> EventBus:
         return self._bus
+
+    @property
+    def device_control(self) -> DeviceControlPort:
+        return self._device_control
 
     def attach_caretaker(self, caretaker: PersistenceCaretaker) -> None:
         """Wire the app-level PersistenceCaretaker (built by run_app). The
@@ -653,7 +659,7 @@ class Controller(SessionControllerMixin):
         ops = self.get_active_device_operations()
         if ops:
             name = ops[0].device_name
-            self.cancel_device_operation(name)
+            self._dev_svc.cancel_device_operation(name)
             return f"device:{name}"
         return None
 

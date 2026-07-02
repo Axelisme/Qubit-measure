@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.main.registry import Registry
     from zcu_tools.gui.app.main.state import State
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+    from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.ports import ProgressTransport
     from zcu_tools.gui.session.services.io_manager import IOManager
 
@@ -58,6 +59,7 @@ class AppServices:
     progress: ProgressService
     guard: GuardService
     device: DeviceService
+    device_control: DeviceControlPort
     soc_connection: SoCConnectionService
     predictor: PredictorService
     context: ContextService
@@ -135,6 +137,7 @@ def build_app_services(
         progress=progress,
         guard=GuardService(state),
         device=device,
+        device_control=session.device_control,
         soc_connection=session.soc_connection,
         predictor=session.predictor,
         context=context,

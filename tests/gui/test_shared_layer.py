@@ -38,6 +38,9 @@ _SHARED_MODULES = [
     # The Controller port the shared dialogs depend on — pure Protocol, all
     # collaborator types are TYPE_CHECKING-only.
     "zcu_tools.gui.session.controller_port",
+    # DeviceControlPort is the shared device-domain facet: service types are
+    # type-only, runtime imports stay Qt/app clean.
+    "zcu_tools.gui.session.device_control",
     # The shared body of that port (identical service-forward methods); same
     # import-clean invariant — every service/request type is TYPE_CHECKING-only.
     "zcu_tools.gui.session.controller_mixin",

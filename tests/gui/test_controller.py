@@ -612,7 +612,7 @@ def test_device_connect_handler_is_ui_only_no_persistence_coordination(cf):
     loop = QEventLoop()
     cf.ctrl._dev_svc.device_connected.connect(lambda _request: loop.quit())
 
-    cf.ctrl.start_connect_device(
+    cf.ctrl.device_control.start_connect_device(
         ConnectDeviceRequest(type_name="FakeDevice", name="flux", address="addr")
     )
     loop.exec()

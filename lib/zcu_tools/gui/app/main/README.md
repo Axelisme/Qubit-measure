@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-02 - driven adapter package
+**Last updated:** 2026-07-02 - device-control facet
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -124,7 +124,10 @@ logical sizes so saved images and agent screenshots do not depend on window size
 
 `services/remote` is GUI-process policy: method registry, event serialization,
 main-thread dispatch, resource-version guard, editor lifecycle, and diagnostics.
-It exposes the same controller behavior as the Qt UI.
+It exposes the same behavior as the Qt UI. Device RPC handlers use the
+controller-exposed `DeviceControlPort` facet for device lifecycle/query/progress;
+SoC/startup handlers remain on the app controller façade because they are not
+device-domain control.
 
 `zcu_tools.mcp.measure` is the agent-facing bridge: tool declarations,
 short-wait wrappers, diagnostics piggyback, operation-handle bookkeeping, stale

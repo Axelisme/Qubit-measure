@@ -48,7 +48,11 @@ class MainDialogRegistry:
         if name is DialogName.DEVICE:
             from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 
-            return DeviceDialog(self._ctrl, parent=self._parent)
+            return DeviceDialog(
+                self._ctrl.device_control,
+                md_provider=self._ctrl.get_current_md,
+                parent=self._parent,
+            )
         if name is DialogName.PREDICTOR:
             from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
 

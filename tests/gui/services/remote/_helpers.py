@@ -169,7 +169,12 @@ def dispatch_handler(ctrl: Any, method: str, params: dict) -> Mapping[str, objec
 
     from zcu_tools.gui.app.main.services.remote.dispatch import METHOD_REGISTRY
 
-    adapter = cast(RemoteControlAdapter, SimpleNamespace(ctrl=ctrl))
+    adapter = cast(
+        RemoteControlAdapter,
+        SimpleNamespace(
+            ctrl=ctrl, device_control=getattr(ctrl, "device_control", ctrl)
+        ),
+    )
     return METHOD_REGISTRY[method].handler(adapter, params)
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -16,8 +17,11 @@ from zcu_tools.gui.session.events import (
 from zcu_tools.gui.session.ports import OperationKind
 from zcu_tools.gui.session.services.device import (
     ActiveDeviceOperation,
+    ConnectDeviceRequest,
+    DeviceEntry,
     DeviceSnapshot,
     DeviceStatus,
+    DisconnectDeviceRequest,
     SetupDeviceRequest,
 )
 from zcu_tools.mcp.measure.server import TOOLS
@@ -64,7 +68,7 @@ def test_device_setup_started_and_finished_push(fx):
 def test_device_active_operations_enumerate_with_kind(fx):
     # Phase C: active_operations lists EVERY in-flight op, each tagged with its
     # kind + device_name so the agent knows which device and which operation.
-    fx.ctrl.get_active_device_operations = MagicMock(  # type: ignore[method-assign]
+    fx.service.device_control.get_active_device_operations = MagicMock(  # type: ignore[method-assign]
         return_value=(
             ActiveDeviceOperation(
                 device_name="bias",
@@ -208,15 +212,15 @@ def test_operation_progress_unknown_total_has_null_percent(fx):
 
 
 def test_device_setup_builds_request_from_live_info_and_updates(fx):
-    fx.ctrl.get_device_info = MagicMock(  # type: ignore[method-assign]
+    fx.service.device_control.get_device_info = MagicMock(  # type: ignore[method-assign]
         return_value=FakeDeviceInfo(address="none", value=0.0)
     )
-    fx.ctrl.start_setup_device = MagicMock(return_value=7)  # type: ignore[method-assign]
+    fx.service.device_control.start_setup_device = MagicMock(return_value=7)  # type: ignore[method-assign]
     sock = open_client(fx.service.port)
     try:
         resp = call(sock, "device.setup", {"name": "bias", "updates": {"value": 1.5}})
         assert resp["ok"] is True
-        req = fx.ctrl.start_setup_device.call_args.args[0]
+        req = fx.service.device_control.start_setup_device.call_args.args[0]
         assert isinstance(req, SetupDeviceRequest)
         assert req.name == "bias"
         assert isinstance(req.info, FakeDeviceInfo)
@@ -227,7 +231,7 @@ def test_device_setup_builds_request_from_live_info_and_updates(fx):
 
 
 def test_device_setup_rejects_protected_info_update(fx):
-    fx.ctrl.get_device_info = MagicMock(  # type: ignore[method-assign]
+    fx.service.device_control.get_device_info = MagicMock(  # type: ignore[method-assign]
         return_value=FakeDeviceInfo(address="none", value=0.0)
     )
     sock = open_client(fx.service.port)
@@ -240,7 +244,7 @@ def test_device_setup_rejects_protected_info_update(fx):
 
 
 def test_device_setup_spec_lists_settable_fields_with_current(fx):
-    fx.ctrl.get_device_info = MagicMock(  # type: ignore[method-assign]
+    fx.service.device_control.get_device_info = MagicMock(  # type: ignore[method-assign]
         return_value=FakeDeviceInfo(address="none", value=2.5)
     )
     sock = open_client(fx.service.port)
@@ -262,7 +266,7 @@ def test_device_setup_spec_lists_settable_fields_with_current(fx):
 
 def test_device_setup_spec_exposes_literal_choices(fx):
     # A driver with Literal enum fields (YOKO output/mode) → choices surfaced.
-    fx.ctrl.get_device_info = MagicMock(  # type: ignore[method-assign]
+    fx.service.device_control.get_device_info = MagicMock(  # type: ignore[method-assign]
         return_value=YOKOGS200Info(address="x", type="YOKOGS200")
     )
     sock = open_client(fx.service.port)
@@ -278,7 +282,7 @@ def test_device_setup_spec_exposes_literal_choices(fx):
 
 
 def test_device_setup_spec_requires_live_info(fx):
-    fx.ctrl.get_device_info = MagicMock(return_value=None)  # type: ignore[method-assign]
+    fx.service.device_control.get_device_info = MagicMock(return_value=None)  # type: ignore[method-assign]
     sock = open_client(fx.service.port)
     try:
         resp = call(sock, "device.setup_spec", {"name": "ghost"})
@@ -286,6 +290,129 @@ def test_device_setup_spec_requires_live_info(fx):
         assert resp["error"]["code"] == "precondition_failed"
     finally:
         sock.close()
+
+
+def test_device_setup_spec_uses_device_control_facet(fx):
+    ctrl_get = MagicMock(side_effect=AssertionError("broad controller used"))
+    setattr(fx.ctrl, "get_device_info", ctrl_get)
+    facet_get = MagicMock(return_value=FakeDeviceInfo(address="none", value=2.5))
+    fx.service.device_control.get_device_info = facet_get  # type: ignore[method-assign]
+
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "device.setup_spec", {"name": "bias"})
+        assert resp["ok"] is True
+        fields = {f["name"]: f for f in resp["result"]["fields"]}
+        assert fields["value"]["current"] == 2.5
+        ctrl_get.assert_not_called()
+        facet_get.assert_called_once_with("bias")
+    finally:
+        sock.close()
+
+
+class _PoisonController:
+    def __getattr__(self, name: str) -> object:
+        raise AssertionError(f"broad controller used for {name}")
+
+
+def _dispatch_with_device_control(
+    method: str, params: dict[str, object], device_control: MagicMock
+) -> dict[str, object]:
+    adapter = SimpleNamespace(
+        ctrl=_PoisonController(),
+        device_control=device_control,
+    )
+    return dict(METHOD_REGISTRY[method].handler(adapter, params))
+
+
+def test_device_handlers_dispatch_only_through_device_control_facet():
+    dev = MagicMock()
+    dev.start_connect_device.return_value = 101
+    dev.start_disconnect_device.return_value = 102
+    dev.start_reconnect_device.return_value = 103
+    dev.start_setup_device.return_value = 104
+    dev.get_device_info.return_value = FakeDeviceInfo(address="none", value=0.0)
+    dev.get_active_device_operations.return_value = (
+        ActiveDeviceOperation(
+            device_name="bias",
+            kind=OperationKind.DEVICE_SETUP,
+            snapshot=DeviceSnapshot(
+                name="bias",
+                type_name="FakeDevice",
+                address="none",
+                status=DeviceStatus.SETTING_UP,
+            ),
+            token=105,
+        ),
+    )
+    dev.list_devices.return_value = [
+        DeviceEntry("bias", "FakeDevice", DeviceStatus.CONNECTED.value)
+    ]
+    dev.get_device_snapshot.return_value = DeviceSnapshot(
+        name="bias",
+        type_name="FakeDevice",
+        address="none",
+        status=DeviceStatus.CONNECTED,
+        info=FakeDeviceInfo(address="none", value=1.0),
+    )
+
+    assert _dispatch_with_device_control(
+        "device.connect",
+        {
+            "type_name": "FakeDevice",
+            "name": "bias",
+            "address": "none",
+        },
+        dev,
+    ) == {"operation_id": 101}
+    assert isinstance(dev.start_connect_device.call_args.args[0], ConnectDeviceRequest)
+
+    assert _dispatch_with_device_control(
+        "device.disconnect", {"name": "bias"}, dev
+    ) == {"operation_id": 102}
+    assert isinstance(
+        dev.start_disconnect_device.call_args.args[0], DisconnectDeviceRequest
+    )
+
+    assert _dispatch_with_device_control("device.reconnect", {"name": "bias"}, dev) == {
+        "operation_id": 103
+    }
+    assert _dispatch_with_device_control("device.forget", {"name": "bias"}, dev) == {
+        "forgotten": "bias"
+    }
+
+    assert _dispatch_with_device_control(
+        "device.setup", {"name": "bias", "updates": {"value": 2.0}}, dev
+    ) == {"operation_id": 104}
+    assert isinstance(dev.start_setup_device.call_args.args[0], SetupDeviceRequest)
+
+    assert "fields" in _dispatch_with_device_control(
+        "device.setup_spec", {"name": "bias"}, dev
+    )
+    assert _dispatch_with_device_control(
+        "device.cancel_operation", {"name": "bias"}, dev
+    ) == {"ok": True, "cancelled": True}
+    assert _dispatch_with_device_control("device.active_operations", {}, dev) == {
+        "operations": [
+            {
+                "handle": 105,
+                "device_name": "bias",
+                "kind": "device_setup",
+                "type_name": "FakeDevice",
+                "address": "none",
+                "status": "setting_up",
+                "error": None,
+            }
+        ]
+    }
+    assert _dispatch_with_device_control("device.list", {}, dev) == {
+        "devices": [{"name": "bias", "type_name": "FakeDevice", "status": "connected"}]
+    }
+    snapshot = _dispatch_with_device_control("device.snapshot", {"name": "bias"}, dev)[
+        "snapshot"
+    ]
+    assert isinstance(snapshot, dict)
+    assert snapshot["info"]["value"] == 1.0
 
 
 # ---------------------------------------------------------------------------

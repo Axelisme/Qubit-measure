@@ -13,17 +13,11 @@ The port is the union of exactly the methods the two dialogs call:
   (``use_context`` / ``new_context`` / ``get_context_labels`` /
   ``get_active_context_label``), connection (``start_connect`` /
   ``bind_connection_outcome`` / ``remember_startup_connection`` /
-  ``get_soccfg``), device unit lookup.
+  ``get_soccfg``), device list/unit lookup for flux binding.
 - **predictor dialog**: FluxoniumPredictor load / clear / frequency predict
   (``load_predictor`` / ``set_predictor_model_params`` / ``clear_predictor`` /
   ``predict_freq`` / ``get_predictor_info``). ``set_predictor_model_params``
   builds+installs a predictor straight from typed EJ/EC/EL + flux params.
-- **device dialog**: device lifecycle (``start_connect_device`` /
-  ``start_disconnect_device`` / ``start_reconnect_device`` /
-  ``start_setup_device`` / ``forget_device`` / ``cancel_device_operation``),
-  device queries (``list_devices`` / ``get_device_snapshot`` /
-  ``get_device_info`` / ``is_memory_device``),
-  and progress attach/read (``attach_progress`` / ``progress_bars``).
 - **inspect dialog base**: md read/edit (``get_current_md`` / ``coerce_md_value``
   / ``set_md_attr`` / ``del_md_attr``) + ml view/rename/delete
   (``get_current_ml`` / ``rename_ml_*`` / ``del_ml_*``). The ml create/modify
@@ -45,17 +39,11 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
-    from zcu_tools.device.base import BaseDeviceInfo
     from zcu_tools.gui.event_bus import BaseEventBus
     from zcu_tools.gui.result_scope import ProjectPaths, ResultScope
-    from zcu_tools.gui.session.pbar_host import ProgressBarModel
     from zcu_tools.gui.session.services.connection import ConnectRequest
     from zcu_tools.gui.session.services.device import (
-        ConnectDeviceRequest,
         DeviceEntry,
-        DeviceSnapshot,
-        DisconnectDeviceRequest,
-        SetupDeviceRequest,
     )
     from zcu_tools.gui.session.services.predictor import (
         LoadPredictorRequest,
@@ -114,6 +102,7 @@ class SessionControllerPort(Protocol):
     ) -> None: ...
     def remember_startup_connection(self, req: StartupConnectionRequest) -> None: ...
     def get_soccfg(self) -> SocCfgHandle | None: ...
+    def list_devices(self) -> list[DeviceEntry]: ...
     def get_device_unit(self, name: str) -> str: ...
 
     # --- predictor dialog: load / clear / predict --------------------------
@@ -126,29 +115,6 @@ class SessionControllerPort(Protocol):
         self, req: PredictMatrixCurveRequest
     ) -> PredictMatrixCurveResult: ...
     def get_predictor_info(self) -> dict | None: ...
-
-    # --- device dialog: lifecycle ------------------------------------------
-    def start_connect_device(self, req: ConnectDeviceRequest) -> int: ...
-    def start_disconnect_device(self, req: DisconnectDeviceRequest) -> int: ...
-    def start_reconnect_device(self, name: str) -> int: ...
-    def start_setup_device(self, req: SetupDeviceRequest) -> int: ...
-    def forget_device(self, name: str) -> None: ...
-    def cancel_device_operation(self, name: str) -> None: ...
-
-    # --- device dialog: queries --------------------------------------------
-    def list_devices(self) -> list[DeviceEntry]: ...
-    def get_device_snapshot(self, name: str) -> DeviceSnapshot | None: ...
-    def get_device_info(self, name: str) -> BaseDeviceInfo | None: ...
-    def poll_device_info(self, name: str) -> None: ...
-    def is_memory_device(self, name: str) -> bool: ...
-
-    # --- device dialog: progress -------------------------------------------
-    def attach_progress(
-        self, owner_id: str, listener: Callable[[], None]
-    ) -> Callable[[], None]: ...
-    def progress_bars(
-        self, owner_id: str
-    ) -> tuple[tuple[int, ProgressBarModel], ...]: ...
 
     # --- inspect dialog: md edit + ml view/rename/delete --------------------
     # (the ml create/modify path drags the CfgEditor and stays measure-only,
