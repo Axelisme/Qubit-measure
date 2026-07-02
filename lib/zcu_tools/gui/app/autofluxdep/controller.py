@@ -92,6 +92,7 @@ if TYPE_CHECKING:
         PersistenceCaretaker,
         RestoreOutcome,
     )
+    from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.ports import ProgressTransport
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
@@ -241,6 +242,7 @@ class Controller(SessionControllerMixin):
         self._predictor_control = session.predictor_control
         self._progress_control = session.progress_control
         self._ctx_svc = session.context
+        self._context_control = session.context_control
         self._dev_svc = session.device
         self._device_control = session.device_control
         self._startup_svc = session.startup
@@ -268,6 +270,10 @@ class Controller(SessionControllerMixin):
         return self._progress_control
 
     @property
+    def context_control(self) -> ContextControlPort:
+        return self._context_control
+
+    @property
     def is_running(self) -> bool:
         return self._active_run_token is not None
 
@@ -282,8 +288,8 @@ class Controller(SessionControllerMixin):
         return self._last_run_info
 
     # ------------------------------------------------------------------
-    # SessionControllerPort — the surface the shared setup / inspect dialogs
-    # depend on (device/predictor dialogs use control facets). The identical
+    # SessionControllerPort — the surface the shared setup dialog depends on
+    # (inspect/device/predictor dialogs use control facets). The identical
     # forwards live in SessionControllerMixin (read through the _*_svc accessors,
     # supplied below in __init__); only the methods whose body diverges are kept
     # here. pyright verifies conformance at the dialog call sites.
@@ -383,7 +389,7 @@ class Controller(SessionControllerMixin):
     # apply_startup_project diverges (autofluxdep returns bool; measure returns the
     # resolved-project dict per WIRE-48) so it stays a per-app override. get_bus /
     # get_project_root also stay per-app (app EventBus subtype / app state). Every
-    # other SessionControllerPort forward lives in SessionControllerMixin.
+    # other setup-controller forward lives in SessionControllerMixin.
     def apply_startup_project(self, req: StartupProjectRequest) -> bool:
         self._startup_svc.apply_project(req)
         return True

@@ -41,6 +41,9 @@ _SHARED_MODULES = [
     # DeviceControlPort is the shared device-domain facet: service types are
     # type-only, runtime imports stay Qt/app clean.
     "zcu_tools.gui.session.device_control",
+    # ContextControlPort is the shared context/md/ml/value-source facet:
+    # service types are type-only, runtime imports stay Qt/app clean.
+    "zcu_tools.gui.session.context_control",
     # PredictorControlPort is the shared predictor-domain facet: heavy service
     # request/result types are type-only; runtime imports stay Qt/app clean.
     "zcu_tools.gui.session.predictor_control",

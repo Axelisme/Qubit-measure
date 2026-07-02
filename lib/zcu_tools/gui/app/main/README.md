@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-02 - progress-control facet
+**Last updated:** 2026-07-02 - context-control facet
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -39,7 +39,7 @@ Shared layers:
 `build_app_services()` constructs the app-local services and injects their driven
 ports. `Controller` is a facade over the service bundle; UI and remote code use
 the controller for app-specific workflow and the exposed session control facets
-for device/predictor/progress domains.
+for context/device/predictor/progress domains.
 
 Key ownership rules:
 
@@ -127,11 +127,12 @@ logical sizes so saved images and agent screenshots do not depend on window size
 
 `services/remote` is GUI-process policy: method registry, event serialization,
 main-thread dispatch, resource-version guard, editor lifecycle, and diagnostics.
-It exposes the same behavior as the Qt UI. Device RPC handlers use the
-controller-exposed `DeviceControlPort` facet for device lifecycle/query/progress;
-predictor RPC handlers use `PredictorControlPort` for predictor load/query/compute.
-SoC/startup handlers remain on the app controller façade because they are not
-device-domain or predictor-domain control.
+It exposes the same behavior as the Qt UI. Context/value/md/ml RPC handlers use
+the controller-exposed `ContextControlPort` facet; device RPC handlers use
+`DeviceControlPort` for device lifecycle/query/progress; predictor RPC handlers
+use `PredictorControlPort` for predictor load/query/compute. SoC/startup
+handlers remain on the app controller façade because they span project setup and
+connection policy rather than a single session-control domain.
 
 `zcu_tools.mcp.measure` is the agent-facing bridge: tool declarations,
 short-wait wrappers, diagnostics piggyback, operation-handle bookkeeping, stale
@@ -151,6 +152,10 @@ per-dialog screenshots; `MainWindow` remains the `RenderView` façade. Transient
 non-modal dialogs that are not part of the remote named-dialog surface use the
 shared dialog lifecycle helper for reference retention and `finished` /
 `destroyed` cleanup.
+
+`InspectDialog` adapts the measure controller into the shared
+`InspectDialogBase` by passing `context_control`; the subclass keeps the concrete
+controller only for measure-only CfgEditor create/modify and role-catalog actions.
 
 ## Adapter-Facing Rules
 

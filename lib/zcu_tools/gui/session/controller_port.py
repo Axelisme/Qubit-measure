@@ -1,13 +1,12 @@
-"""SessionControllerPort — the Controller surface the session-core dialogs need.
+"""SessionControllerPort — the Controller surface the setup dialog needs.
 
-The shared dialogs in ``gui/session/ui`` (setup / device) never reach into a
-concrete ``gui.app.*`` Controller; they depend on this narrow Protocol and each
-app's Controller implements it structurally (measure: ``Controller``;
-autofluxdep: its own controller). This keeps the dialogs app-agnostic and
-prevents a back-edge from the session core to any app package.
+The shared setup dialog in ``gui/session/ui`` never reaches into a concrete
+``gui.app.*`` Controller; it depends on this narrow Protocol and each app's
+Controller implements it structurally (measure: ``Controller``; autofluxdep: its
+own controller). This keeps the dialog app-agnostic and prevents a back-edge
+from the session core to any app package.
 
-The port is the union of exactly the setup / inspect methods the shared dialogs
-call:
+The port is the union of exactly the setup methods the shared dialog calls:
 
 - **setup dialog**: project/startup bootstrap (``apply_startup_project`` /
   ``get_persisted_startup`` / ``get_project_root``), context switching
@@ -15,14 +14,9 @@ call:
   ``get_active_context_label``), connection (``start_connect`` /
   ``bind_connection_outcome`` / ``remember_startup_connection`` /
   ``get_soccfg``), device list/unit lookup for flux binding.
-- **inspect dialog base**: md read/edit (``get_current_md`` / ``coerce_md_value``
-  / ``set_md_attr`` / ``del_md_attr``) + ml view/rename/delete
-  (``get_current_ml`` / ``rename_ml_*`` / ``del_ml_*``). The ml create/modify
-  path drags the CfgEditor and stays measure-only (the ``InspectDialog``
-  subclass), so it is deliberately absent here.
 
-Setup / inspect share ``get_bus`` (the event bus they subscribe to for live
-updates). The predictor and device dialogs use their own narrow facets.
+The setup dialog uses ``get_bus`` for live updates. The device, predictor,
+progress, and context/inspect surfaces use their own narrow facets.
 
 Return types are declared against the **shared base** (``BaseEventBus``) so an
 app's richer concrete type (measure's ``EventBus``) satisfies the port
@@ -34,7 +28,7 @@ site.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus
@@ -49,12 +43,10 @@ if TYPE_CHECKING:
         StartupProjectRequest,
     )
     from zcu_tools.gui.session.types import SocCfgHandle
-    from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
-    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 
 class SessionControllerPort(Protocol):
-    """Narrow Controller surface the shared setup / inspect dialogs depend on."""
+    """Narrow Controller surface the shared setup dialog depends on."""
 
     # --- shared ------------------------------------------------------------
     def get_bus(self) -> BaseEventBus: ...
@@ -77,11 +69,6 @@ class SessionControllerPort(Protocol):
     ) -> None: ...
     def get_context_labels(self) -> list[str]: ...
     def get_active_context_label(self) -> str | None: ...
-    def list_value_sources(self) -> tuple[ValueInfo, ...]: ...
-    def read_value_source(
-        self, key: str, type_name: str | None = None
-    ) -> tuple[ValueInfo, ScalarValue]: ...
-
     # --- setup dialog: connection ------------------------------------------
     def start_connect(self, req: ConnectRequest) -> int: ...
     def bind_connection_outcome(
@@ -93,16 +80,3 @@ class SessionControllerPort(Protocol):
     def get_soccfg(self) -> SocCfgHandle | None: ...
     def list_devices(self) -> list[DeviceEntry]: ...
     def get_device_unit(self, name: str) -> str: ...
-
-    # --- inspect dialog: md edit + ml view/rename/delete --------------------
-    # (the ml create/modify path drags the CfgEditor and stays measure-only,
-    # in the InspectDialog subclass — these are the app-agnostic operations.)
-    def get_current_md(self) -> MetaDict: ...
-    def get_current_ml(self) -> ModuleLibrary: ...
-    def coerce_md_value(self, key: str, text: str) -> Any: ...
-    def set_md_attr(self, key: str, value: Any) -> None: ...
-    def del_md_attr(self, key: str) -> None: ...
-    def rename_ml_module(self, old: str, new: str) -> None: ...
-    def rename_ml_waveform(self, old: str, new: str) -> None: ...
-    def del_ml_module(self, name: str) -> None: ...
-    def del_ml_waveform(self, name: str) -> None: ...

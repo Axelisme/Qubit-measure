@@ -5,7 +5,7 @@ the ModuleLibrary tab's *view / rename / delete*. App-specific actions live in
 subclasses; this base exposes template-method hooks for the top toolbar and the
 ModuleLibrary button row so the base never learns app-local concerns.
 
-Depends only on ``SessionControllerPort`` + the shared event bus, so every
+Depends only on ``ContextControlPort`` + the shared event bus, so every
 measurement-session app reuses it (measure adds ml-edit; autofluxdep can use it
 as-is or subclass too).
 """
@@ -52,7 +52,7 @@ from zcu_tools.gui.session.ui.value_source_input import (
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus
-    from zcu_tools.gui.session.controller_port import SessionControllerPort
+    from zcu_tools.gui.session.context_control import ContextControlPort
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +67,7 @@ class InspectDialogBase(QDialog):
 
     def __init__(
         self,
-        ctrl: SessionControllerPort,
+        ctrl: ContextControlPort,
         bus: BaseEventBus,
         parent: QWidget | None = None,
     ) -> None:

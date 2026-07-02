@@ -33,8 +33,14 @@ def _make_ml() -> ModuleLibrary:
     return ml
 
 
-def _make_ctrl_with_ml(ml: ModuleLibrary) -> MagicMock:
+def _make_ctrl() -> MagicMock:
     ctrl = MagicMock()
+    ctrl.context_control = ctrl
+    return ctrl
+
+
+def _make_ctrl_with_ml(ml: ModuleLibrary) -> MagicMock:
+    ctrl = _make_ctrl()
     ctrl.get_current_ml.return_value = ml
     ctrl.get_current_md.return_value = None
     ctrl.get_bus.return_value = MagicMock()
@@ -102,7 +108,7 @@ def _wire_cfg_editor(ctrl: MagicMock) -> None:
 
 
 def test_inspect_dialog_init_and_refresh(qapp):
-    ctrl = MagicMock()
+    ctrl = _make_ctrl()
     bus = MagicMock()
 
     # Setup mock returns
@@ -175,7 +181,7 @@ def test_C9_inspect_dialog_raises_when_parent_has_no_open_dialog(qapp):
 
 
 def test_inspect_dialog_md_edit(qapp):
-    ctrl = MagicMock()
+    ctrl = _make_ctrl()
     bus = MagicMock()
 
     mock_md = MagicMock()
@@ -198,7 +204,7 @@ def test_inspect_dialog_md_edit(qapp):
 def test_inspect_dialog_md_value_source_resolves_in_value_input(qapp):
     from zcu_tools.gui.session.value_lookup import ValueInfo
 
-    ctrl = MagicMock()
+    ctrl = _make_ctrl()
     bus = MagicMock()
 
     mock_md = MagicMock()
@@ -228,7 +234,7 @@ def test_inspect_dialog_md_value_source_resolves_in_value_input(qapp):
 
 def test_inspect_dialog_md_set_success_clears_value_keeps_key(qapp):
     """After a successful Set, the value field is cleared; the key field is kept."""
-    ctrl = MagicMock()
+    ctrl = _make_ctrl()
     bus = MagicMock()
 
     mock_md = MagicMock()
@@ -257,7 +263,7 @@ def test_inspect_dialog_md_set_failure_preserves_value(qapp, monkeypatch):
 
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
 
-    ctrl = MagicMock()
+    ctrl = _make_ctrl()
     bus = MagicMock()
 
     mock_md = MagicMock()
@@ -282,7 +288,7 @@ def test_inspect_dialog_md_set_failure_preserves_value(qapp, monkeypatch):
 def test_inspect_dialog_ml_delete(qapp, monkeypatch):
     from qtpy.QtWidgets import QMessageBox
 
-    ctrl = MagicMock()
+    ctrl = _make_ctrl()
     bus = MagicMock()
 
     ctrl.get_current_ml.return_value = _make_ml()
@@ -314,7 +320,7 @@ def test_inspect_dialog_ml_delete(qapp, monkeypatch):
 def test_inspect_dialog_ml_delete_no(qapp, monkeypatch):
     from qtpy.QtWidgets import QMessageBox
 
-    ctrl = MagicMock()
+    ctrl = _make_ctrl()
     bus = MagicMock()
 
     ml = ModuleLibrary()
@@ -443,7 +449,7 @@ def _catalog():
 
 
 def test_create_dialog_populates_roles_and_creates(qapp):
-    ctrl = MagicMock()
+    ctrl = _make_ctrl()
     ctrl.get_role_catalog.return_value = _catalog()
     ctrl.has_ml_entry.side_effect = lambda kind, name: False
 
@@ -468,7 +474,7 @@ def test_create_dialog_populates_roles_and_creates(qapp):
 def _ctrl_with_catalog(existing: set[tuple[str, str]] | None = None) -> MagicMock:
     """Mock controller exposing the real role catalog + a controllable ml."""
     have = existing or set()
-    ctrl = MagicMock()
+    ctrl = _make_ctrl()
     ctrl.get_role_catalog.return_value = _catalog()
     ctrl.has_ml_entry.side_effect = lambda kind, name: (kind, name) in have
     return ctrl
@@ -611,7 +617,7 @@ def test_create_dialog_rejects_empty_name(qapp, monkeypatch):
     from qtpy.QtWidgets import QMessageBox
 
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
-    ctrl = MagicMock()
+    ctrl = _make_ctrl()
     ctrl.get_role_catalog.return_value = _catalog()
     ctrl.has_ml_entry.side_effect = lambda kind, name: False
 

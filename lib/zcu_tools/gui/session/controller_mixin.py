@@ -1,11 +1,12 @@
-"""SessionControllerMixin — the body of SessionControllerPort, shared by apps.
+"""SessionControllerMixin — shared Controller forwards used by both apps.
 
 Both measurement-session app Controllers (measure: ``gui/app/main/controller``;
-autofluxdep: ``gui/app/autofluxdep/controller``) implement
-:class:`~zcu_tools.gui.session.controller_port.SessionControllerPort` as a wall of
-one-line forwards into the same four session services (soc_connection / context /
-device / startup). Those forwards were byte-identical across the two apps; this
-mixin holds the single copy.
+autofluxdep: ``gui/app/autofluxdep/controller``) expose a wall of one-line
+forwards into the same four session services (soc_connection / context / device /
+startup). The setup subset structurally satisfies
+:class:`~zcu_tools.gui.session.controller_port.SessionControllerPort`; app-local
+and compatibility callers may still use the remaining forwards. The byte-identical
+implementation lives here.
 
 Design (Candidate #14, Option B — abstract service accessors):
 
@@ -27,7 +28,8 @@ Design (Candidate #14, Option B — abstract service accessors):
 
 The device dialog lifecycle/query surface lives on ``DeviceControlPort``; the
 predictor dialog load/query/compute surface lives on ``PredictorControlPort``.
-App-local run progress widgets use ``ProgressControlPort`` directly.
+App-local run progress widgets use ``ProgressControlPort`` directly. Shared
+inspect/remote context consumers use ``ContextControlPort`` directly.
 
 Each app keeps as its own override the methods whose body genuinely diverges:
 
@@ -72,7 +74,7 @@ if TYPE_CHECKING:
 
 
 class SessionControllerMixin:
-    """The shared body of ``SessionControllerPort`` (identical forwards).
+    """Shared identical forwards backed by session services.
 
     A Controller mixes this in and supplies the abstract service accessors as its
     own attributes; the forwards then read the services through the accessors.

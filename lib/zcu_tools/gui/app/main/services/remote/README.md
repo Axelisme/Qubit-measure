@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-07-02 - remote method entries, MCP exposure policy, predictor-control facet
+**Last updated:** 2026-07-02 - remote method entries, MCP exposure policy, context-control facet
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals GUI-owned work onto
@@ -17,7 +17,7 @@ not declare MCP tools and does not own stdio transport.
   editor cleanup.
 - `dispatch.py`：runtime method registry projection; keeps the public
   `METHOD_REGISTRY` import path stable.
-- `handlers/`：grouped wire method handlers bound to controller, control-facet,
+- `handlers/`：grouped wire method handlers bound to controller, control facets,
   or render-view calls.
 - `method_specs.py`：Qt-free public projection for wire method schema, timeouts,
   and MCP generation metadata.
@@ -117,7 +117,8 @@ raw counters.
 The wire surface is grouped by ownership:
 
 - `startup.*` / `result_scope.*`：project and result-scope setup.
-- `context.*`：MetaDict / ModuleLibrary / active context operations.
+- `context.*`：MetaDict / ModuleLibrary / active context operations through
+  `ContextControlPort`; role-catalog create/list stays on the app controller.
 - `soc.*`：mock or remote SoC connection.
 - `device.*`：device connect/disconnect/setup/snapshot through `DeviceControlPort`.
 - `predictor.*`：Fluxonium predictor load, edit, clear, and predictions through
@@ -128,7 +129,7 @@ The wire surface is grouped by ownership:
 - `editor.*`：headless cfg-editor session lifecycle.
 - `operation.*` / `notify.*`：generic waits, polls, progress, prompt replies.
 - `arb_waveform.*`：qubit-scoped arbitrary waveform asset operations.
-- `value.*`：read-only session value lookup.
+- `value.*`：read-only session value lookup through `ContextControlPort`.
 
 `method_entries/` is the registration SSOT. Adding an agent-visible method
 requires one entry containing the wire method name, handler ref, method spec, MCP

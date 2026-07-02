@@ -371,7 +371,7 @@ class MainWindow(QMainWindow):
         # facet; context lookup is injected separately for eval-mode fields.
         dlg = DeviceDialog(
             self._ctrl.device_control,
-            md_provider=self._ctrl.get_current_md,
+            md_provider=self._ctrl.context_control.get_current_md,
             parent=self,
         )
         dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
@@ -428,7 +428,9 @@ class MainWindow(QMainWindow):
 
         from zcu_tools.gui.session.ui.inspect_base import InspectDialogBase
 
-        dlg = InspectDialogBase(self._ctrl, self._ctrl.get_bus(), parent=self)
+        dlg = InspectDialogBase(
+            self._ctrl.context_control, self._ctrl.get_bus(), parent=self
+        )
         dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         # ``finished`` fires for both accept and reject; drop the reference so the
         # next request rebuilds a fresh dialog (the C++ object is deleted on close).

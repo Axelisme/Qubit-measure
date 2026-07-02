@@ -60,6 +60,7 @@ from .services.remote.dialogs import DialogName
 from .state import State
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.ports import ProgressTransport
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
@@ -176,10 +177,11 @@ class ViewProtocol(DiagnosticSink, RenderHost, RenderView, Protocol):
 class Controller(SessionControllerMixin):
     """Façade for the GUI application. Delegates to domain services.
 
-    The identical SessionControllerPort forwards live in SessionControllerMixin
+    The identical shared setup/controller forwards live in SessionControllerMixin
     (read through the _*_svc accessors assigned in __init__); only the methods whose
     body diverges from autofluxdep are kept here (apply_startup_project /
-    get_project_root / get_bus, plus everything outside the port).
+    get_project_root / get_bus, plus everything outside the setup port). Context /
+    inspect / value-md-ml consumers use ContextControlPort instead of this facade.
     """
 
     def __init__(
@@ -257,6 +259,7 @@ class Controller(SessionControllerMixin):
         self._predictor_control = services.predictor_control
         self._progress_control = services.progress_control
         self._ctx_svc = services.context
+        self._context_control = services.context_control
         self._tab_svc = services.tab
         self._load_svc = services.load
         self._run_svc = services.run
@@ -447,6 +450,10 @@ class Controller(SessionControllerMixin):
     @property
     def progress_control(self) -> ProgressControlPort:
         return self._progress_control
+
+    @property
+    def context_control(self) -> ContextControlPort:
+        return self._context_control
 
     def attach_caretaker(self, caretaker: PersistenceCaretaker) -> None:
         """Wire the app-level PersistenceCaretaker (built by run_app). The

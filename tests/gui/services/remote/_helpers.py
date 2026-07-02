@@ -178,6 +178,7 @@ def dispatch_handler(ctrl: Any, method: str, params: dict) -> Mapping[str, objec
         RemoteControlAdapter,
         SimpleNamespace(
             ctrl=ctrl,
+            context_control=_facet_or_self("context_control"),
             device_control=_facet_or_self("device_control"),
             predictor_control=_facet_or_self("predictor_control"),
         ),

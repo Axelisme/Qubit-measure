@@ -36,6 +36,7 @@ from .cfg_form import CfgFormWidget
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.controller import Controller
+    from zcu_tools.gui.event_bus import BaseEventBus
 
 logger = logging.getLogger(__name__)
 
@@ -281,9 +282,17 @@ class InspectDialog(InspectDialogBase):
     two template-method hooks.
     """
 
-    # Narrow the base's SessionControllerPort to the concrete Controller, whose
-    # CfgEditor methods (open/commit/teardown) the edit dialogs below call.
-    _ctrl: Controller
+    def __init__(
+        self,
+        ctrl: Controller,
+        bus: BaseEventBus,
+        parent: QWidget | None = None,
+    ) -> None:
+        # The base only needs the shared context facet. This subclass keeps the
+        # concrete app controller for measure-only CfgEditor and role-catalog
+        # commands that deliberately stay outside session core.
+        self._app_ctrl = ctrl
+        super().__init__(ctrl.context_control, bus, parent=parent)
 
     def _build_extra_toolbar_buttons(self, toolbar: QHBoxLayout) -> None:
         self._arb_waveform_btn = QPushButton("Arb Waveforms…")
@@ -314,7 +323,7 @@ class InspectDialog(InspectDialogBase):
         self._modify_ml_btn.setEnabled(enabled)
 
     def _on_create_clicked(self) -> None:
-        dlg = _MlCreateDialog(self._ctrl, parent=self)
+        dlg = _MlCreateDialog(self._app_ctrl, parent=self)
         dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         # On a successful create, chain straight into Modify so the user can
         # immediately tweak the freshly-seeded entry. Open Modify only after the
@@ -341,17 +350,21 @@ class InspectDialog(InspectDialogBase):
         # Shared by selection-driven Modify and the auto-open after Create. Re-read
         # the live ml so a just-created entry's cfg is present (create -> ML_CHANGED
         # already refreshed the store).
-        ml = self._ctrl.get_current_ml()
+        ml = self._app_ctrl.get_current_ml()
         if ml is None:
             return
 
         if group == "modules":
             dlg = _MlModifyDialog(
-                self._ctrl, "module", name=name, cfg=ml.modules[name], parent=self
+                self._app_ctrl, "module", name=name, cfg=ml.modules[name], parent=self
             )
         else:
             dlg = _MlModifyDialog(
-                self._ctrl, "waveform", name=name, cfg=ml.waveforms[name], parent=self
+                self._app_ctrl,
+                "waveform",
+                name=name,
+                cfg=ml.waveforms[name],
+                parent=self,
             )
         dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dlg.finished.connect(lambda _: dlg.clear())

@@ -50,7 +50,7 @@ class MainDialogRegistry:
 
             return DeviceDialog(
                 self._ctrl.device_control,
-                md_provider=self._ctrl.get_current_md,
+                md_provider=self._ctrl.context_control.get_current_md,
                 parent=self._parent,
             )
         if name is DialogName.PREDICTOR:

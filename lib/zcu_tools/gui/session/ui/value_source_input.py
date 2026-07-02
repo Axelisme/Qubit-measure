@@ -57,7 +57,7 @@ class SessionValueSourcePort(Protocol):
 
 
 class SessionValueSourceInputHost:
-    """Adapter from SessionControllerPort to ValueSourceInputHost."""
+    """Adapter from SessionValueSourcePort to ValueSourceInputHost."""
 
     def __init__(self, ctrl: SessionValueSourcePort) -> None:
         self._ctrl = ctrl

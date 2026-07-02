@@ -5,8 +5,8 @@ measure-only ml create/modify path is excluded). These tests drive the *real*
 controller + shared session ``ContextService`` + shared ``BaseEventBus`` so the
 emit→auto-refresh path is exercised end to end, not mocked:
 
-- the controller structurally satisfies ``SessionControllerPort`` (the surface
-  the base dialog depends on),
+- the controller exposes ``ContextControlPort`` (the surface the base dialog
+  depends on),
 - the dialog opens and shows the live md / ml,
 - a md edit through the dialog writes back through the controller,
 - an ml rename / delete routes through the controller,
@@ -26,7 +26,7 @@ from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.autofluxdep.controller import Controller
-    from zcu_tools.gui.session.controller_port import SessionControllerPort
+    from zcu_tools.gui.session.context_control import ContextControlPort
 
 
 def _seed_context(ctrl: Controller) -> tuple[MetaDict, ModuleLibrary]:
@@ -69,7 +69,7 @@ def ctrl(qapp):
 @pytest.fixture
 def dialog(qapp, ctrl):
     _seed_context(ctrl)
-    dlg = InspectDialogBase(ctrl, ctrl.get_bus())
+    dlg = InspectDialogBase(ctrl.context_control, ctrl.get_bus())
     yield dlg
     dlg.reject()  # fires ``finished`` → unsubscribes from the bus
     dlg.deleteLater()
@@ -78,21 +78,21 @@ def dialog(qapp, ctrl):
 # --- port conformance --------------------------------------------------------
 
 
-def test_controller_conforms_to_session_port(ctrl):
-    """The controller satisfies the inspect surface the base dialog depends on.
+def test_controller_exposes_context_control_port(ctrl):
+    """The controller exposes the inspect surface the base dialog depends on.
 
-    A typed sink (``_accept``) binds the controller to ``SessionControllerPort``;
-    pyright enforces structural conformance statically, and constructing the base
-    dialog against it is the runtime proof the surface is callable.
+    A typed sink (``_accept``) binds ``ctrl.context_control`` to
+    ``ContextControlPort``; pyright enforces structural conformance statically,
+    and constructing the base dialog against it is the runtime proof the surface
+    is callable.
     """
 
-    def _accept(_port: SessionControllerPort) -> None:
+    def _accept(_port: ContextControlPort) -> None:
         return None
 
-    _accept(ctrl)  # static: must type-check as a SessionControllerPort
+    _accept(ctrl.context_control)  # static: must type-check as ContextControlPort
 
     for method in (
-        "get_bus",
         "get_current_md",
         "get_current_ml",
         "coerce_md_value",
@@ -103,7 +103,7 @@ def test_controller_conforms_to_session_port(ctrl):
         "del_ml_module",
         "del_ml_waveform",
     ):
-        assert callable(getattr(ctrl, method)), method
+        assert callable(getattr(ctrl.context_control, method)), method
 
 
 # --- open + display ----------------------------------------------------------
@@ -188,7 +188,7 @@ def test_bus_md_change_refreshes_open_dialog(dialog, ctrl):
 def test_bus_subscriptions_cleaned_on_close(qapp, ctrl):
     _seed_context(ctrl)
     bus = ctrl.get_bus()
-    dlg = InspectDialogBase(ctrl, bus)
+    dlg = InspectDialogBase(ctrl.context_control, bus)
     assert dlg._bus_subs_active
 
     # ``finished`` (the base's cleanup trigger) fires on reject/accept — the same

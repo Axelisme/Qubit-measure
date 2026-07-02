@@ -27,17 +27,18 @@ logger = logging.getLogger(__name__)
 def _h_context_use(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
+    ctx = adapter.context_control
     # A context lives under a project; without one there are no labels to switch
     # to. Map that precondition to agent language rather than leaking a controller
     # error (mirror _h_context_new).
-    if not adapter.ctrl.has_project():
+    if not ctx.has_project():
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
             "No project applied yet; apply a project first (gui_project_apply).",
             reason="no_project",
         )
     label = str(params["label"])
-    available = list(adapter.ctrl.get_context_labels())
+    available = list(ctx.get_context_labels())
     if label not in available:
         # Fast-fail an unknown label with the valid choices so the agent can
         # correct without a separate gui_context_list round-trip.
@@ -45,21 +46,23 @@ def _h_context_use(
             ErrorCode.INVALID_PARAMS,
             f"unknown context label: {label!r}; available: {available}",
         )
-    adapter.ctrl.use_context(label)
+    ctx.use_context(label)
+    active = ctx.get_active_context_label()
     return {
-        "label": adapter.ctrl.get_active_context_label(),
-        "has_active_context": adapter.ctrl.get_active_context_label() is not None,
+        "label": active,
+        "has_active_context": active is not None,
     }
 
 
 def _h_context_new(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
+    ctx = adapter.context_control
     # A context lives under a project's experiment dir; without a project the
     # IOManager has no dir to create it in. Translate that precondition into
     # agent language here rather than leaking the internal "IOManager not set
     # up" RuntimeError as a controller_error.
-    if not adapter.ctrl.has_project():
+    if not ctx.has_project():
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
             "No project applied yet; apply a project first (gui_project_apply).",
@@ -67,13 +70,13 @@ def _h_context_new(
         )
     bind_device = params["bind_device"]
     clone_from = params["clone_from"]
-    adapter.ctrl.new_context(
+    ctx.new_context(
         bind_device=str(bind_device) if bind_device is not None else None,
         clone_from=str(clone_from) if clone_from is not None else None,
     )
     # new_context makes the new context active — return its label so the agent
     # knows what was created without a follow-up read.
-    label = adapter.ctrl.get_active_context_label()
+    label = ctx.get_active_context_label()
     return {"label": label, "has_active_context": label is not None}
 
 
@@ -81,21 +84,21 @@ def _h_context_labels(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    return {"labels": list(adapter.ctrl.get_context_labels())}
+    return {"labels": list(adapter.context_control.get_context_labels())}
 
 
 def _h_context_active(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    return {"label": adapter.ctrl.get_active_context_label()}
+    return {"label": adapter.context_control.get_active_context_label()}
 
 
 def _h_context_md_get(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    md = adapter.ctrl.get_current_md()
+    md = adapter.context_control.get_current_md()
     return {"keys": sorted(str(k) for k in md.keys())}
 
 
@@ -103,7 +106,7 @@ def _h_context_md_get_attr(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     key = str(params["key"])
-    md = adapter.ctrl.get_current_md()
+    md = adapter.context_control.get_current_md()
     sentinel = object()
     value = md.get(key, sentinel)
     if value is sentinel:
@@ -126,7 +129,8 @@ def _h_value_list(
     del params
     return {
         "values": [
-            _value_info_to_wire(info) for info in adapter.ctrl.list_value_sources()
+            _value_info_to_wire(info)
+            for info in adapter.context_control.list_value_sources()
         ]
     }
 
@@ -140,7 +144,7 @@ def _h_value_read(
         raise RemoteError(ErrorCode.INVALID_PARAMS, "'type' must be a string")
     type_name = cast(str | None, raw_type)
     try:
-        info, value = adapter.ctrl.read_value_source(key, type_name)
+        info, value = adapter.context_control.read_value_source(key, type_name)
     except (MissingValue, ValueTypeError, ValueError) as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     except UnavailableValue as exc:
@@ -154,7 +158,7 @@ def _h_context_ml_get(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    ml = adapter.ctrl.get_current_ml()
+    ml = adapter.context_control.get_current_ml()
     # Each stored cfg is a pydantic discriminated-union value: modules tag on
     # 'type' (e.g. 'pulse', 'reset/bath'), waveforms on 'style' (e.g. 'gauss').
     # Surface the discriminator so the agent can tell entry kinds apart without
@@ -224,7 +228,7 @@ def _h_context_md_set_attr(
     key = str(params["key"])
     value = params["value"]
     try:
-        adapter.ctrl.set_md_attr(key, value)
+        adapter.context_control.set_md_attr(key, value)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -239,7 +243,7 @@ def _h_context_md_del_attr(
 ) -> Mapping[str, object]:
     key = str(params["key"])
     try:
-        adapter.ctrl.del_md_attr(key)
+        adapter.context_control.del_md_attr(key)
     except (AttributeError, RuntimeError) as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -254,7 +258,7 @@ def _h_context_ml_del_module(
 ) -> Mapping[str, object]:
     name = str(params["name"])
     try:
-        adapter.ctrl.del_ml_module(name)
+        adapter.context_control.del_ml_module(name)
     except (KeyError, RuntimeError) as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -270,7 +274,7 @@ def _h_context_ml_rename_module(
     old = str(params["old"])
     new = str(params["new"])
     try:
-        adapter.ctrl.rename_ml_module(old, new)
+        adapter.context_control.rename_ml_module(old, new)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -286,7 +290,7 @@ def _h_context_ml_rename_waveform(
     old = str(params["old"])
     new = str(params["new"])
     try:
-        adapter.ctrl.rename_ml_waveform(old, new)
+        adapter.context_control.rename_ml_waveform(old, new)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -301,7 +305,7 @@ def _h_context_ml_del_waveform(
 ) -> Mapping[str, object]:
     name = str(params["name"])
     try:
-        adapter.ctrl.del_ml_waveform(name)
+        adapter.context_control.del_ml_waveform(name)
     except (KeyError, RuntimeError) as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,

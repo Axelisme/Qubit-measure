@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.result_scope import ResultScopeManager
+from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.device_control import DeviceControlFacet
 from zcu_tools.gui.session.predictor_control import PredictorControlFacet
 from zcu_tools.gui.session.progress_control import ProgressControlFacet
@@ -32,6 +33,7 @@ from zcu_tools.gui.session.value_lookup import ValueLookup, ValueRegistry
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus
+    from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.operation_handles import OperationHandles
     from zcu_tools.gui.session.operation_runner import OperationRunner
@@ -57,6 +59,7 @@ class SessionServices:
     predictor_control: PredictorControlPort
     progress_control: ProgressControlPort
     context: ContextService
+    context_control: ContextControlPort
     device: DeviceService
     device_control: DeviceControlPort
     startup: StartupService
@@ -106,8 +109,9 @@ def build_session_services(
     predictor = PredictorService(state, bus)
     predictor_control = PredictorControlFacet(bus=bus, predictor=predictor)
     progress_control = ProgressControlFacet(progress)
-    device_control = DeviceControlFacet(bus=bus, device=device, progress=progress)
     context = ContextService(state, io_manager, bus, values=value_registry)
+    context_control = ContextControlFacet(context=context, device=device)
+    device_control = DeviceControlFacet(bus=bus, device=device, progress=progress)
     value_sources = ValueSourceBinder(state=state, bus=bus, registry=value_registry)
     # StartupService bridges the two session services it commands through their
     # ports (context bootstrap + remembered-device registration) + State prefs.
@@ -125,6 +129,7 @@ def build_session_services(
         predictor_control=predictor_control,
         progress_control=progress_control,
         context=context,
+        context_control=context_control,
         device=device,
         device_control=device_control,
         startup=startup,

@@ -159,7 +159,11 @@ def test_devices_button_opens_shared_device_dialog(app):
 
     ctrl, win = app
     assert hasattr(win, "_devices_btn")
-    dlg = DeviceDialog(ctrl.device_control, md_provider=ctrl.get_current_md, parent=win)
+    dlg = DeviceDialog(
+        ctrl.device_control,
+        md_provider=ctrl.context_control.get_current_md,
+        parent=win,
+    )
     assert dlg._dev is ctrl.device_control
     dlg.deleteLater()
 

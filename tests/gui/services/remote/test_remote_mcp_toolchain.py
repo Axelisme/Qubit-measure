@@ -493,16 +493,17 @@ def test_context_md_write_and_delete(fx):
 
 def test_context_ml_delete_delegates(fx):
     # ADR-0006: there is no raw-dict context.set_ml_* RPC anymore (ml entries are
-    # built/edited via the editor session). Delete still delegates to the ctrl.
-    fx.ctrl.del_ml_module = MagicMock()  # type: ignore[method-assign]
-    fx.ctrl.del_ml_waveform = MagicMock()  # type: ignore[method-assign]
+    # built/edited via the editor session). Delete still delegates to the context
+    # control facet, not the wider controller.
+    fx.service.context_control.del_ml_module = MagicMock()  # type: ignore[method-assign]
+    fx.service.context_control.del_ml_waveform = MagicMock()  # type: ignore[method-assign]
     sock = open_client(fx.service.port)
     try:
         assert call(sock, "context.ml_del_module", {"name": "m"})["ok"]
-        fx.ctrl.del_ml_module.assert_called_once_with("m")
+        fx.service.context_control.del_ml_module.assert_called_once_with("m")
 
         assert call(sock, "context.ml_del_waveform", {"name": "w"}, rid="2")["ok"]
-        fx.ctrl.del_ml_waveform.assert_called_once_with("w")
+        fx.service.context_control.del_ml_waveform.assert_called_once_with("w")
     finally:
         sock.close()
 
