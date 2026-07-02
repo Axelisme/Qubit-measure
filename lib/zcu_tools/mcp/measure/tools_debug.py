@@ -53,13 +53,6 @@ def tool_gui_debug_operations(arguments: dict[str, Any]) -> dict[str, Any]:
     return _SESSION.debug_operations()
 
 
-NON_GENERATED_METHODS = frozenset(
-    {
-        "resources.versions",
-    }
-)
-
-
 OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
     "gui_debug_resource_versions": {
         "handler": tool_gui_debug_resource_versions,

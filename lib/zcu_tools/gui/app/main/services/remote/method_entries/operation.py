@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.remote.method_spec import MethodSpec
+from zcu_tools.gui.remote.method_spec import McpMethodPolicy, MethodSpec
 
 from ._params import (
     _int,
@@ -22,6 +22,11 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _num_default("timeout", 120.0, "Seconds to wait"),
             ),
             off_main_thread=True,
+            mcp=McpMethodPolicy.override(
+                "gui_op_wait",
+                "gui_op_poll",
+                reason="manual MCP tools expose blocking wait and nonblocking poll semantics",
+            ),
         ),
     ),
     method_entry(
@@ -35,6 +40,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "(Qt-scaled), percent (0-100, null when total unknown), raw n/total. "
             "Internal: agents read progress folded into the gui_*_poll reply.",
             (_int("operation_id", "Operation handle returned by the start op"),),
+            mcp=McpMethodPolicy.internal("folded into gui_op_poll running replies"),
         ),
     ),
 )

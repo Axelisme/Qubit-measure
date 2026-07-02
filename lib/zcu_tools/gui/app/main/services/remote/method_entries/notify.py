@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.remote.method_spec import MethodSpec
+from zcu_tools.gui.remote.method_spec import McpMethodPolicy, MethodSpec
 
 from ._params import (
     _int,
@@ -22,6 +22,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _str("message", "Message to display to the user"),
                 _num_default("timeout", 600.0, "Prompt auto-close timeout in seconds"),
             ),
+            mcp=McpMethodPolicy.override(
+                "gui_prompt_user",
+                reason="manual MCP tool composes open and await into one blocking prompt",
+            ),
         ),
     ),
     method_entry(
@@ -39,6 +43,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _num_default("timeout", 600.0, "Consumer backstop timeout in seconds"),
             ),
             off_main_thread=True,
+            mcp=McpMethodPolicy.override(
+                "gui_prompt_user",
+                reason="manual MCP tool composes open and await into one blocking prompt",
+            ),
         ),
     ),
 )

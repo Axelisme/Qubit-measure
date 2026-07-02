@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-07-02 - remote method entry registry
+**Last updated:** 2026-07-02 - remote method entries and MCP exposure policy
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals GUI-owned work onto
@@ -21,8 +21,8 @@ not declare MCP tools and does not own stdio transport.
 - `method_specs.py`：Qt-free public projection for wire method schema, timeouts,
   and MCP generation metadata.
 - `method_entries/`：single registration source for method name, handler ref,
-  `MethodSpec`, and `ParamSpec` shorthands. Handler refs are resolved only by
-  the dispatch projection.
+  `MethodSpec`, MCP exposure policy, and `ParamSpec` shorthands. Handler refs
+  are resolved only by the dispatch projection.
 - `events.py`：domain payload type to wire event serializer mapping.
 - `dialogs.py`：wire-stable dialog names.
 - `path_resolver.py`：dotted-path mutation and settable-tree projection for

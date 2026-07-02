@@ -92,6 +92,9 @@ from zcu_tools.mcp.measure import (  # noqa: E402
     tools_soc,
     tools_tab,
 )
+from zcu_tools.mcp.measure.exposure import (  # noqa: E402
+    build_mcp_exposure_plan,
+)
 from zcu_tools.mcp.measure.session import (  # noqa: E402
     GuiRpcError,
     MeasureMcpSession,
@@ -514,18 +517,22 @@ def _merge_override_tools() -> dict[str, dict[str, Any]]:
     return merged
 
 
-_NON_GENERATED_METHODS = frozenset().union(
-    *(module.NON_GENERATED_METHODS for module in _TOOL_MODULES)
-)
 _OVERRIDE_TOOLS: dict[str, dict[str, Any]] = _merge_override_tools()
 _OVERRIDE_NAMES = frozenset(_OVERRIDE_TOOLS)
+_MCP_EXPOSURE = build_mcp_exposure_plan(_CONFIG, METHOD_SPECS, _OVERRIDE_TOOLS)
+_NON_GENERATED_METHODS = _MCP_EXPOSURE.non_generated_methods
 
 
 # Generated tools (schema from the ParamSpec SSOT, forwarding through the guarded
 # send_gui_rpc) overlaid with the hand-written override subset (lifecycle /
 # fan-out / file-write / coercion). assemble_tools fails fast on a name collision.
 TOOLS: dict[str, dict[str, Any]] = assemble_tools(
-    generate_tools(_CONFIG, METHOD_SPECS, _NON_GENERATED_METHODS, send_gui_rpc),
+    generate_tools(
+        _CONFIG,
+        METHOD_SPECS,
+        _MCP_EXPOSURE.non_generated_methods,
+        send_gui_rpc,
+    ),
     _OVERRIDE_TOOLS,
     _OVERRIDE_NAMES,
 )

@@ -129,18 +129,6 @@ def tool_gui_context_ml_inspect(arguments: dict[str, Any]) -> dict[str, Any]:
         send_gui_rpc("editor.discard", {"editor_id": editor_id})
 
 
-NON_GENERATED_METHODS = frozenset(
-    {
-        "context.active",
-        "context.labels",
-        "context.md_get",
-        "context.md_get_attr",
-        "context.md_set_attr",
-        "context.md_del_attr",
-    }
-)
-
-
 OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
     "gui_context_list": {
         "handler": tool_gui_context_list,

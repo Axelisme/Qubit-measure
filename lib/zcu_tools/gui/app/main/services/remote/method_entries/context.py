@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.remote.method_spec import MethodSpec
+from zcu_tools.gui.remote.method_spec import McpMethodPolicy, MethodSpec
 
 from ._params import (
     _json,
@@ -48,22 +48,47 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "context.labels",
         "context:_h_context_labels",
-        MethodSpec(5.0, "List context labels"),
+        MethodSpec(
+            5.0,
+            "List context labels",
+            mcp=McpMethodPolicy.internal("folded into gui_context_list"),
+        ),
     ),
     method_entry(
         "context.active",
         "context:_h_context_active",
-        MethodSpec(5.0, "Active context label"),
+        MethodSpec(
+            5.0,
+            "Active context label",
+            mcp=McpMethodPolicy.internal(
+                "folded into gui_context_list and gui_overview"
+            ),
+        ),
     ),
     method_entry(
         "context.md_get",
         "context:_h_context_md_get",
-        MethodSpec(5.0, "List MetaDict keys"),
+        MethodSpec(
+            5.0,
+            "List MetaDict keys",
+            mcp=McpMethodPolicy.override(
+                "gui_context_md_read",
+                reason="merged MCP read covers key listing and per-key reads",
+            ),
+        ),
     ),
     method_entry(
         "context.md_get_attr",
         "context:_h_context_md_get_attr",
-        MethodSpec(5.0, "Read one MetaDict attribute", (_str("key", "MetaDict key"),)),
+        MethodSpec(
+            5.0,
+            "Read one MetaDict attribute",
+            (_str("key", "MetaDict key"),),
+            mcp=McpMethodPolicy.override(
+                "gui_context_md_read",
+                reason="merged MCP read covers key listing and per-key reads",
+            ),
+        ),
     ),
     method_entry(
         "value.list",
@@ -110,13 +135,23 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Set one MetaDict attribute",
             (_str("key", "MetaDict key"), _json("value", "JSON-safe value")),
+            mcp=McpMethodPolicy.override(
+                "gui_context_md_write",
+                reason="batch MCP write preserves ordered MetaDict updates",
+            ),
         ),
     ),
     method_entry(
         "context.md_del_attr",
         "context:_h_context_md_del_attr",
         MethodSpec(
-            5.0, "Delete one MetaDict attribute", (_str("key", "MetaDict key"),)
+            5.0,
+            "Delete one MetaDict attribute",
+            (_str("key", "MetaDict key"),),
+            mcp=McpMethodPolicy.override(
+                "gui_context_md_delete",
+                reason="batch MCP delete preserves ordered MetaDict deletes",
+            ),
         ),
     ),
     method_entry(

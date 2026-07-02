@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.remote.method_spec import MethodSpec
+from zcu_tools.gui.remote.method_spec import McpMethodPolicy, MethodSpec
 
 from ._params import (
     _obj_default,
@@ -52,6 +52,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "a concurrent save/edit returns precondition_failed until it settles. "
             "Read the fit summary with gui_tab_get_analyze_result.",
             (_str("tab_id"), _obj_default("updates", "Analyze param updates")),
+            mcp=McpMethodPolicy.override(
+                "gui_tab_analyze_start",
+                reason="manual MCP tool adds short-wait handle and fit-result folding",
+            ),
         ),
     ),
     method_entry(
@@ -79,6 +83,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "overrides post params (see gui_tab_get_post_analyze_params). Read the "
             "fit summary with gui_tab_get_post_analyze_result.",
             (_str("tab_id"), _obj_default("updates", "Post-analysis param updates")),
+            mcp=McpMethodPolicy.override(
+                "gui_tab_post_analyze_start",
+                reason="manual MCP tool adds short-wait handle and summary folding",
+            ),
         ),
     ),
 )

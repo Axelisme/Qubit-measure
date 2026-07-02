@@ -77,13 +77,6 @@ def tool_gui_stop(arguments: dict[str, Any]) -> dict[str, Any]:
     return {"stopped": result["exited"], "note": result["note"]}
 
 
-NON_GENERATED_METHODS = frozenset(
-    {
-        "app.shutdown",
-    }
-)
-
-
 OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
     "gui_bridge_connect": {
         "handler": tool_gui_connect,

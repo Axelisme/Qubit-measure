@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.remote.method_spec import MethodSpec
+from zcu_tools.gui.remote.method_spec import McpMethodPolicy, MethodSpec
 
 from ._params import (
     _json,
@@ -109,6 +109,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             (
                 _str("tab_id"),
                 _json("edits", "Ordered list of {path, value} edits"),
+            ),
+            mcp=McpMethodPolicy.override(
+                "gui_tab_set_cfg",
+                reason="batch MCP tool preserves ordered edits and untyped JSON value schema",
             ),
         ),
     ),

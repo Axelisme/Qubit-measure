@@ -17,13 +17,66 @@ own handlers, which is assignable to this one.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Self
 
 from .param_spec import ParamSpec
 
 # The adapter that hosts a handler is app-specific, so this shared alias does
 # not name it; the return is always a wire dict.
 Handler = Callable[..., Mapping[str, object]]
+
+
+class McpExposure(str, Enum):
+    """How one wire method participates in generated MCP tool exposure."""
+
+    GENERATED = "generated"
+    INTERNAL = "internal"
+    OVERRIDE = "override"
+
+
+@dataclass(frozen=True)
+class McpMethodPolicy:
+    """Agent-facing MCP exposure policy for a wire method."""
+
+    exposure: McpExposure = McpExposure.GENERATED
+    override_tool_names: tuple[str, ...] = ()
+    reason: str = ""
+
+    @classmethod
+    def generated(cls) -> Self:
+        return cls()
+
+    @classmethod
+    def internal(cls, reason: str) -> Self:
+        return cls(exposure=McpExposure.INTERNAL, reason=reason)
+
+    @classmethod
+    def override(cls, *tool_names: str, reason: str) -> Self:
+        return cls(
+            exposure=McpExposure.OVERRIDE,
+            override_tool_names=tool_names,
+            reason=reason,
+        )
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.exposure, McpExposure):
+            raise TypeError(f"unknown MCP exposure policy: {self.exposure!r}")
+        if any(
+            not isinstance(name, str) or not name for name in self.override_tool_names
+        ):
+            raise ValueError("override MCP tool names must be non-empty strings")
+        if self.exposure in {McpExposure.GENERATED, McpExposure.INTERNAL}:
+            if self.override_tool_names:
+                raise ValueError(
+                    f"{self.exposure.value} MCP policy cannot declare override tools"
+                )
+        if self.exposure is McpExposure.OVERRIDE and not self.override_tool_names:
+            raise ValueError("override MCP policy requires at least one tool name")
+        if self.exposure in {McpExposure.INTERNAL, McpExposure.OVERRIDE}:
+            if not self.reason:
+                raise ValueError(f"{self.exposure.value} MCP policy requires a reason")
 
 
 @dataclass(frozen=True)
@@ -50,6 +103,7 @@ class MethodSpec:
     params: tuple[ParamSpec, ...] = ()
     tool_name: str = ""
     off_main_thread: bool = False
+    mcp: McpMethodPolicy = field(default_factory=McpMethodPolicy.generated)
 
 
 @dataclass(frozen=True)

@@ -617,7 +617,10 @@ def test_mcp_wrappers_map_to_expected_rpc():
         return {}
 
     tools = generate_tools(
-        mcp_server._CONFIG, METHOD_SPECS, mcp_server._NON_GENERATED_METHODS, fake_send
+        mcp_server._CONFIG,
+        METHOD_SPECS,
+        mcp_server._MCP_EXPOSURE.non_generated_methods,
+        fake_send,
     )
 
     # gui_context_switch / gui_device_snapshot are GENERATED forwarders. P2 retired
@@ -1514,7 +1517,10 @@ def test_tab_new_is_pure_generated_forwarder():
         return {"tab_id": "tw-1"}
 
     tools = generate_tools(
-        mcp_server._CONFIG, METHOD_SPECS, mcp_server._NON_GENERATED_METHODS, fake_send
+        mcp_server._CONFIG,
+        METHOD_SPECS,
+        mcp_server._MCP_EXPOSURE.non_generated_methods,
+        fake_send,
     )
     out = tools["gui_tab_new"]["handler"]({"adapter_name": "fake/freq"})
 
@@ -1731,7 +1737,10 @@ def test_writeback_apply_is_pure_generated_forwarder():
         return {"applied_ids": ["md-0", "ml-1"]}
 
     tools = generate_tools(
-        mcp_server._CONFIG, METHOD_SPECS, mcp_server._NON_GENERATED_METHODS, fake_send
+        mcp_server._CONFIG,
+        METHOD_SPECS,
+        mcp_server._MCP_EXPOSURE.non_generated_methods,
+        fake_send,
     )
     out = tools["gui_tab_writeback_apply"]["handler"]({"tab_id": "t1"})
 
@@ -2320,7 +2329,10 @@ def test_explicit_adapter_guide_tool_still_works():
         return {"guide": {"behavior": "measures X"}}
 
     tools = generate_tools(
-        mcp_server._CONFIG, METHOD_SPECS, mcp_server._NON_GENERATED_METHODS, fake_send
+        mcp_server._CONFIG,
+        METHOD_SPECS,
+        mcp_server._MCP_EXPOSURE.non_generated_methods,
+        fake_send,
     )
     out = tools["gui_adapter_guide"]["handler"]({"adapter_name": "amp_rabi"})
     assert out == {"guide": {"behavior": "measures X"}}

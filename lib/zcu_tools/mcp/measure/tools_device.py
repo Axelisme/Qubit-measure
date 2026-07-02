@@ -78,16 +78,6 @@ def tool_gui_device_setup(arguments: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-NON_GENERATED_METHODS = frozenset(
-    {
-        "device.connect",
-        "device.disconnect",
-        "device.setup",
-        "device.reconnect",
-    }
-)
-
-
 OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
     "gui_device_connect": {
         "handler": tool_gui_device_connect,

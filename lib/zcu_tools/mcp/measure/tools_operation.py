@@ -278,14 +278,6 @@ def tool_gui_op_wait(arguments: dict[str, Any]) -> dict[str, Any]:
     return _await_operation_by_handle(handle, "operation", timeout)
 
 
-NON_GENERATED_METHODS = frozenset(
-    {
-        "operation.await",
-        "operation.progress",
-    }
-)
-
-
 OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
     "gui_op_poll": {
         "handler": tool_gui_op_poll,

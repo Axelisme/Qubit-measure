@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.remote.method_spec import MethodSpec
+from zcu_tools.gui.remote.method_spec import McpMethodPolicy, MethodSpec
 
 from ._params import (
     _bool_default,
@@ -32,6 +32,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _str("kind", "'mock' or 'remote'"),
                 _str_opt("ip", "Board IP (required when kind='remote')"),
                 _int_opt("port", "Board port (required when kind='remote')"),
+            ),
+            mcp=McpMethodPolicy.override(
+                "gui_soc_connect",
+                reason="manual MCP tool uses the synchronous SoC connect timeout policy",
             ),
         ),
     ),
@@ -78,6 +82,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     "Persist device across sessions (default true)",
                 ),
             ),
+            mcp=McpMethodPolicy.override(
+                "gui_device_connect",
+                reason="manual MCP tool adds short-wait handle semantics",
+            ),
         ),
     ),
     method_entry(
@@ -96,6 +104,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     "Keep device in persistent storage (default true)",
                 ),
             ),
+            mcp=McpMethodPolicy.override(
+                "gui_device_disconnect",
+                reason="manual MCP tool adds short-wait handle semantics",
+            ),
         ),
     ),
     method_entry(
@@ -108,6 +120,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "asynchronously. Wire-only: the MCP layer reaches this via "
             "gui_device_connect with type_name/address omitted.",
             (_str("name", "Device name"),),
+            mcp=McpMethodPolicy.override(
+                "gui_device_connect",
+                reason="manual connect tool folds reconnect-by-name mode",
+            ),
         ),
     ),
     method_entry(
@@ -126,6 +142,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             30.0,
             "Setup device",
             (_str("name", "Device name"), _obj("updates", "Field updates")),
+            mcp=McpMethodPolicy.override(
+                "gui_device_apply",
+                reason="manual MCP tool adds short-wait handle semantics",
+            ),
         ),
     ),
     method_entry(

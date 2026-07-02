@@ -129,16 +129,6 @@ def tool_gui_tab_set_cfg(arguments: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-NON_GENERATED_METHODS = frozenset(
-    {
-        "editor.new",
-        "editor.get",
-        "editor.set_field",
-        "tab.set_cfg",
-    }
-)
-
-
 OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
     "gui_editor_open": {
         "handler": tool_gui_editor_open,

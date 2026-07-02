@@ -88,19 +88,6 @@ def tool_gui_overview(arguments: dict[str, Any]) -> dict[str, Any]:
     return _assemble_overview()
 
 
-NON_GENERATED_METHODS = frozenset(
-    {
-        "state.has_project",
-        "state.has_context",
-        "state.has_active_context",
-        "state.has_soc",
-        "run.running_tab",
-        "project.info",
-        "view.snapshot",
-    }
-)
-
-
 OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
     "gui_overview": {
         "handler": tool_gui_overview,

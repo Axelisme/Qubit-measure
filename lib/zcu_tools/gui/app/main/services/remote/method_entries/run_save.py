@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.remote.method_spec import MethodSpec
+from zcu_tools.gui.remote.method_spec import McpMethodPolicy, MethodSpec
 
 from ._params import (
     _comment,
@@ -17,7 +17,13 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "tab.run_start",
         "run_save:_h_tab_run_start",
         MethodSpec(
-            5.0, "Start a run (fire-and-forget)", (_str("tab_id"), _expected_versions())
+            5.0,
+            "Start a run (fire-and-forget)",
+            (_str("tab_id"), _expected_versions()),
+            mcp=McpMethodPolicy.override(
+                "gui_tab_run_start",
+                reason="manual MCP tool adds short-wait handle and figure folding",
+            ),
         ),
     ),
     method_entry(
@@ -51,7 +57,13 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "run.running_tab",
         "run_save:_h_run_running_tab",
-        MethodSpec(5.0, "Current running tab"),
+        MethodSpec(
+            5.0,
+            "Current running tab",
+            mcp=McpMethodPolicy.internal(
+                "folded into gui_overview and tab listing surfaces"
+            ),
+        ),
     ),
     method_entry(
         "tab.save_data",
@@ -65,6 +77,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _comment(),
                 _expected_versions(),
             ),
+            mcp=McpMethodPolicy.override(
+                "gui_tab_save",
+                reason="manual MCP tool merges data/image save selectors",
+            ),
         ),
     ),
     method_entry(
@@ -77,6 +93,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _str("tab_id"),
                 _str_opt("image_path", "Override image path"),
                 _expected_versions(),
+            ),
+            mcp=McpMethodPolicy.override(
+                "gui_tab_save",
+                reason="manual MCP tool merges data/image save selectors",
             ),
         ),
     ),
@@ -93,6 +113,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _str_opt("image_path", "Override image path"),
                 _expected_versions(),
             ),
+            mcp=McpMethodPolicy.override(
+                "gui_tab_save",
+                reason="manual MCP tool merges data/image save selectors",
+            ),
         ),
     ),
     method_entry(
@@ -107,6 +131,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _str_opt("image_path", "Override image path"),
                 _comment(),
                 _expected_versions(),
+            ),
+            mcp=McpMethodPolicy.override(
+                "gui_tab_save",
+                reason="manual MCP tool merges data/image save selectors",
             ),
         ),
     ),

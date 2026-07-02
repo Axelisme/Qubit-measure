@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.remote.method_spec import MethodSpec
+from zcu_tools.gui.remote.method_spec import McpMethodPolicy, MethodSpec
 
 from ._params import (
     _bool_default,
@@ -13,22 +13,38 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "state.has_project",
         "state_project:_h_state_has_project",
-        MethodSpec(5.0, ""),
+        MethodSpec(
+            5.0,
+            "",
+            mcp=McpMethodPolicy.internal("folded into gui_overview readiness state"),
+        ),
     ),
     method_entry(
         "state.has_context",
         "state_project:_h_state_has_context",
-        MethodSpec(5.0, ""),
+        MethodSpec(
+            5.0,
+            "",
+            mcp=McpMethodPolicy.internal("folded into gui_overview readiness state"),
+        ),
     ),
     method_entry(
         "state.has_active_context",
         "state_project:_h_state_has_active_context",
-        MethodSpec(5.0, ""),
+        MethodSpec(
+            5.0,
+            "",
+            mcp=McpMethodPolicy.internal("folded into gui_overview readiness state"),
+        ),
     ),
     method_entry(
         "state.has_soc",
         "state_project:_h_state_has_soc",
-        MethodSpec(5.0, ""),
+        MethodSpec(
+            5.0,
+            "",
+            mcp=McpMethodPolicy.internal("folded into gui_overview readiness state"),
+        ),
     ),
     method_entry(
         "soc.info",
@@ -53,6 +69,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Read the applied project identity: chip_name / qub_name / res_name plus "
             "the resolved result_dir and database_path. Fast-fails with "
             "precondition_failed (no_project) when no project is applied yet.",
+            mcp=McpMethodPolicy.internal("folded into gui_overview project section"),
         ),
     ),
     method_entry(
@@ -71,6 +88,13 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "resources.versions",
         "state_project:_h_resources_versions",
-        MethodSpec(5.0, "Snapshot of all resource versions"),
+        MethodSpec(
+            5.0,
+            "Snapshot of all resource versions",
+            mcp=McpMethodPolicy.override(
+                "gui_debug_resource_versions",
+                reason="debug MCP tool exposes the hidden stale-guard version table",
+            ),
+        ),
     ),
 )

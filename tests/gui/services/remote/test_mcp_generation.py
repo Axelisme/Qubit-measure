@@ -7,10 +7,17 @@ that keep the agent-facing tool contract stable and drift-free.
 
 from __future__ import annotations
 
+import pytest
 from zcu_tools.gui.app.main.services.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.app.main.services.remote.method_specs import METHOD_SPECS
-from zcu_tools.mcp.core.bridge import generate_tools
+from zcu_tools.gui.remote.method_spec import (
+    McpExposure,
+    McpMethodPolicy,
+    MethodSpec,
+)
+from zcu_tools.mcp.core.bridge import McpServerConfig, generate_tools
 from zcu_tools.mcp.measure import server as m
+from zcu_tools.mcp.measure.exposure import build_mcp_exposure_plan
 
 
 def _tool_name_for(method: str, spec) -> str:
@@ -18,6 +25,26 @@ def _tool_name_for(method: str, spec) -> str:
     # app's tool_prefix + method-with-dots-as-underscores. Mirror that here so
     # the coverage assertion below stays pinned to the same naming rule.
     return spec.tool_name or m._CONFIG.tool_prefix + method.replace(".", "_")
+
+
+def _assert_generated(method: str) -> None:
+    assert METHOD_SPECS[method].mcp.exposure is McpExposure.GENERATED
+    assert method in m._MCP_EXPOSURE.generated_methods
+    assert method not in m._MCP_EXPOSURE.non_generated_methods
+
+
+def _assert_internal(method: str) -> None:
+    assert METHOD_SPECS[method].mcp.exposure is McpExposure.INTERNAL
+    assert method in m._MCP_EXPOSURE.non_generated_methods
+    assert method not in m._MCP_EXPOSURE.override_methods
+
+
+def _assert_override(method: str, *tool_names: str) -> None:
+    policy = METHOD_SPECS[method].mcp
+    assert policy.exposure is McpExposure.OVERRIDE
+    assert policy.override_tool_names == tool_names
+    assert m._MCP_EXPOSURE.override_methods[method] == tool_names
+    assert method in m._MCP_EXPOSURE.non_generated_methods
 
 
 def test_handlers_and_specs_match():
@@ -36,20 +63,102 @@ def test_every_tool_has_callable_handler_and_object_schema():
 
 def test_generated_and_override_sets_are_disjoint():
     generated = generate_tools(
-        m._CONFIG, METHOD_SPECS, m._NON_GENERATED_METHODS, m.send_gui_rpc
+        m._CONFIG,
+        METHOD_SPECS,
+        m._MCP_EXPOSURE.non_generated_methods,
+        m.send_gui_rpc,
     )
     overrides = {n for n in m._OVERRIDE_TOOLS if n in m._OVERRIDE_NAMES}
     assert set(generated).isdisjoint(overrides)
 
 
-def test_every_non_generated_method_is_covered_by_an_override():
-    # Each method excluded from generation must surface via an override tool,
-    # otherwise an RPC method would have no MCP entry point.
-    generated_methods = set(METHOD_SPECS) - m._NON_GENERATED_METHODS
-    generated_tool_names = {
-        _tool_name_for(meth, METHOD_SPECS[meth]) for meth in generated_methods
+def test_generated_methods_have_tools_and_suppressed_methods_have_policy():
+    suppressed_methods = {
+        method
+        for method, spec in METHOD_SPECS.items()
+        if spec.mcp.exposure is not McpExposure.GENERATED
     }
+    assert m._NON_GENERATED_METHODS == m._MCP_EXPOSURE.non_generated_methods
+    assert suppressed_methods == m._MCP_EXPOSURE.non_generated_methods
+    generated_tool_names = set(m._MCP_EXPOSURE.generated_tool_names.values())
     assert generated_tool_names.issubset(set(m.TOOLS))
+
+
+def test_mcp_exposure_policy_projection_matches_server_alias():
+    assert m._NON_GENERATED_METHODS == m._MCP_EXPOSURE.non_generated_methods
+    assert set(METHOD_SPECS) == (
+        m._MCP_EXPOSURE.generated_methods | m._MCP_EXPOSURE.non_generated_methods
+    )
+
+
+def test_mcp_method_policy_rejects_invalid_shapes():
+    with pytest.raises(ValueError, match="override tools"):
+        McpMethodPolicy(override_tool_names=("gui_bad",))
+    with pytest.raises(ValueError, match="override tools"):
+        McpMethodPolicy(
+            exposure=McpExposure.INTERNAL,
+            override_tool_names=("gui_bad",),
+            reason="wire-only",
+        )
+    with pytest.raises(ValueError, match="requires at least one tool name"):
+        McpMethodPolicy.override(reason="manual shape")
+    with pytest.raises(ValueError, match="requires a reason"):
+        McpMethodPolicy.internal("")
+
+
+def test_mcp_exposure_missing_override_tool_fails():
+    config = McpServerConfig("gui_", "test", "")
+    specs = {
+        "fake.method": MethodSpec(
+            1.0,
+            "",
+            mcp=McpMethodPolicy.override("missing_tool", reason="test override"),
+        )
+    }
+    with pytest.raises(RuntimeError, match="not registered"):
+        build_mcp_exposure_plan(config, specs, {})
+
+
+def test_mcp_exposure_generated_tool_collision_fails():
+    config = McpServerConfig("gui_", "test", "")
+    specs = {
+        "fake.one": MethodSpec(1.0, "", tool_name="gui_collision"),
+        "fake.two": MethodSpec(1.0, "", tool_name="gui_collision"),
+    }
+    with pytest.raises(RuntimeError, match="generated MCP tool name collision"):
+        build_mcp_exposure_plan(config, specs, {})
+
+
+def test_mcp_exposure_generated_manual_tool_collision_fails():
+    config = McpServerConfig("gui_", "test", "")
+    specs = {"fake.one": MethodSpec(1.0, "")}
+    with pytest.raises(RuntimeError, match="collide with manual tools"):
+        build_mcp_exposure_plan(config, specs, {"gui_fake_one": {}})
+
+
+def test_mcp_exposure_internal_and_override_reject_tool_name():
+    config = McpServerConfig("gui_", "test", "")
+    internal = {
+        "fake.internal": MethodSpec(
+            1.0,
+            "",
+            tool_name="gui_fake_internal",
+            mcp=McpMethodPolicy.internal("wire-only"),
+        )
+    }
+    with pytest.raises(RuntimeError, match="cannot use MethodSpec.tool_name"):
+        build_mcp_exposure_plan(config, internal, {})
+
+    override = {
+        "fake.override": MethodSpec(
+            1.0,
+            "",
+            tool_name="gui_fake_override",
+            mcp=McpMethodPolicy.override("gui_manual", reason="manual shape"),
+        )
+    }
+    with pytest.raises(RuntimeError, match="cannot use MethodSpec.tool_name"):
+        build_mcp_exposure_plan(config, override, {"gui_manual": {}})
 
 
 def test_generated_required_params_appear_in_schema():
@@ -135,7 +244,7 @@ def test_tab_new_is_a_pure_generated_forwarder():
     """gui_tab_new is the auto-generated tab.new forwarder (MCP 45): it returns
     just {tab_id}; the fan-out + guide fold moved to gui_tab_open. So tab.new
     must NOT be excluded from generation nor served by an override."""
-    assert "tab.new" not in m._NON_GENERATED_METHODS
+    _assert_generated("tab.new")
     assert "gui_tab_new" not in m._OVERRIDE_NAMES
     # The generated schema keeps the single required 'adapter_name' string param.
     schema = m.TOOLS["gui_tab_new"]["inputSchema"]
@@ -149,7 +258,7 @@ def test_writeback_apply_is_a_pure_generated_forwarder():
     save chaining still lives in gui_tab_commit. So tab.writeback_apply must
     NOT be excluded from generation nor served by an override, and the agent schema
     exposes only 'tab_id'."""
-    assert "tab.writeback_apply" not in m._NON_GENERATED_METHODS
+    _assert_generated("tab.writeback_apply")
     assert "gui_tab_writeback_apply" not in m._OVERRIDE_NAMES
     schema = m.TOOLS["gui_tab_writeback_apply"]["inputSchema"]
     # expected_versions is mcp_hidden; save_data is gone.
@@ -158,7 +267,7 @@ def test_writeback_apply_is_a_pure_generated_forwarder():
 
 def test_load_data_is_generated_with_hidden_expected_versions():
     assert "tab.load_data" in METHOD_SPECS
-    assert "tab.load_data" not in m._NON_GENERATED_METHODS
+    _assert_generated("tab.load_data")
     assert "gui_tab_load_data" in m.TOOLS
 
     schema = m.TOOLS["gui_tab_load_data"]["inputSchema"]
@@ -169,8 +278,8 @@ def test_load_data_is_generated_with_hidden_expected_versions():
 def test_value_source_tools_are_generated_read_only_forwards():
     assert "value.list" in METHOD_SPECS
     assert "value.read" in METHOD_SPECS
-    assert "value.list" not in m._NON_GENERATED_METHODS
-    assert "value.read" not in m._NON_GENERATED_METHODS
+    _assert_generated("value.list")
+    _assert_generated("value.read")
     assert "gui_value_list" in m.TOOLS
     assert "gui_value_read" in m.TOOLS
     assert "gui_value_list" not in m._OVERRIDE_NAMES
@@ -199,12 +308,11 @@ def test_view_screenshot_not_generated():
     """view.screenshot returns raw base64 PNG — it must NOT be auto-generated into
     a gui_view_screenshot agent tool. The only entry point is gui_screenshot
     (which decodes + writes a file). Mirrors the dialog.screenshot invariant."""
-    # Must be in the exclusion set so the generator skips it.
-    assert "view.screenshot" in m._NON_GENERATED_METHODS
+    _assert_override("view.screenshot", "gui_screenshot")
     # The leaked tool must not appear in the assembled tool table.
     assert "gui_view_screenshot" not in m.TOOLS
     # dialog.screenshot is the existing precedent — verify it is still excluded too.
-    assert "dialog.screenshot" in m._NON_GENERATED_METHODS
+    _assert_override("dialog.screenshot", "gui_screenshot")
     assert "gui_dialog_screenshot" not in m.TOOLS
 
 
@@ -238,12 +346,11 @@ def test_phase169_removed_tools_absent():
     }
     assert a_class.isdisjoint(set(METHOD_SPECS))
 
-    # B-class: the wire method + handler stay (the dispatch key-match needs the
-    # spec), but generation is suppressed via _NON_GENERATED_METHODS.
+    # B-class: the wire method + handler stay, but policy marks them internal.
     assert "app.shutdown" in METHOD_SPECS
     assert "view.snapshot" in METHOD_SPECS
-    assert "app.shutdown" in m._NON_GENERATED_METHODS
-    assert "view.snapshot" in m._NON_GENERATED_METHODS
+    _assert_internal("app.shutdown")
+    _assert_internal("view.snapshot")
 
 
 def test_phase170a_tab_cfg_io_tools():
@@ -261,7 +368,7 @@ def test_phase170a_tab_cfg_io_tools():
 
     # tab.get_cfg now exists and maps to the value-tree handler.
     assert "tab.get_cfg" in METHOD_SPECS
-    assert "tab.get_cfg" not in m._NON_GENERATED_METHODS
+    _assert_generated("tab.get_cfg")
     # Auto-generated tool is present.
     assert "gui_tab_get_cfg" in m.TOOLS
     assert "gui_tab_get_cfg" not in m._OVERRIDE_NAMES
@@ -272,7 +379,7 @@ def test_phase170a_tab_cfg_io_tools():
 
     # tab.set_cfg is a new wire method (non-generated: edits is array-of-objects).
     assert "tab.set_cfg" in METHOD_SPECS
-    assert "tab.set_cfg" in m._NON_GENERATED_METHODS
+    _assert_override("tab.set_cfg", "gui_tab_set_cfg")
     # Hand-written override is present.
     assert "gui_tab_set_cfg" in m.TOOLS
     assert "gui_tab_set_cfg" in m._OVERRIDE_NAMES
@@ -290,8 +397,8 @@ def test_phase170c_save_writeback_tools():
     """Save + writeback wire methods after P1.
 
     P1 folds the four save wire methods (tab.save_{data,image,post_image,result})
-    into the single gui_tab_save override (artifact + figure selectors), so they
-    move into _NON_GENERATED_METHODS and lose their per-method agent tool. The wire
+    into the single gui_tab_save override (artifact + figure selectors), so their
+    method policy is OVERRIDE and they lose their per-method agent tool. The wire
     methods themselves stay (gui_tab_save and the gui_tab_commit bundle call them directly).
     tab.save_set_paths is renamed to gui_tab_set_save_paths (tool_name override,
     still generated). The writeback methods are untouched in P1 (writeback is P3) —
@@ -315,9 +422,7 @@ def test_phase170c_save_writeback_tools():
     # The four save wire methods are now excluded from generation (folded into
     # gui_tab_save); the single merged save tool is present as an override.
     for method in save_wire_methods:
-        assert method in m._NON_GENERATED_METHODS, (
-            f"{method} must be excluded from generation (folded into gui_tab_save)"
-        )
+        _assert_override(method, "gui_tab_save")
     assert "gui_tab_save" in m.TOOLS
     assert "gui_tab_save" in m._OVERRIDE_NAMES
 
@@ -331,13 +436,13 @@ def test_phase170c_save_writeback_tools():
     assert merged_away_tools.isdisjoint(set(m.TOOLS))
 
     # tab.save_set_paths is renamed to gui_tab_set_save_paths (still generated).
-    assert "tab.save_set_paths" not in m._NON_GENERATED_METHODS
+    _assert_generated("tab.save_set_paths")
     assert "gui_tab_set_save_paths" in m.TOOLS
     assert "gui_tab_save_set_paths" not in m.TOOLS
 
     # Writeback tools after P3 (E6 editing-surface unification): preview->list,
     # set->set_item via tool_name overrides; wire methods unchanged, still
-    # auto-generated (not in _NON_GENERATED_METHODS).
+    # auto-generated.
     writeback_tools = {
         "gui_tab_writeback_list",
         "gui_tab_writeback_set_item",
@@ -349,7 +454,7 @@ def test_phase170c_save_writeback_tools():
         set(m.TOOLS)
     )
     for method in ("tab.writeback_preview", "tab.writeback_set", "tab.writeback_apply"):
-        assert method not in m._NON_GENERATED_METHODS
+        _assert_generated(method)
 
     # The pre-170c MCP tool names stay absent.
     old_tool_names = {
@@ -381,7 +486,7 @@ def test_phase170b_tab_run_analyze_tools():
     # NOT an _OVERRIDE_NAMES entry (the rename is via the spec's tool_name, the
     # shape change lives in the dispatch handler).
     assert "tab.list_all" in METHOD_SPECS
-    assert "tab.list_all" not in m._NON_GENERATED_METHODS
+    _assert_generated("tab.list_all")
     assert "gui_tab_list" in m.TOOLS
     assert "gui_tab_list" not in m._OVERRIDE_NAMES
 
@@ -392,18 +497,18 @@ def test_phase170b_tab_run_analyze_tools():
 
     # run.running_tab: internal-only — wire method + spec stay but no agent tool.
     assert "run.running_tab" in METHOD_SPECS
-    assert "run.running_tab" in m._NON_GENERATED_METHODS
+    _assert_internal("run.running_tab")
     assert "gui_run_running_tab" not in m.TOOLS
 
     # tab.run_start: non-generated hand-written override.
     assert "tab.run_start" in METHOD_SPECS
-    assert "tab.run_start" in m._NON_GENERATED_METHODS
+    _assert_override("tab.run_start", "gui_tab_run_start")
     assert "gui_tab_run_start" in m.TOOLS
     assert "gui_tab_run_start" in m._OVERRIDE_NAMES
 
     # tab.run_cancel: auto-generated (no override needed).
     assert "tab.run_cancel" in METHOD_SPECS
-    assert "tab.run_cancel" not in m._NON_GENERATED_METHODS
+    _assert_generated("tab.run_cancel")
     assert "gui_tab_run_cancel" in m.TOOLS
     assert "gui_tab_run_cancel" not in m._OVERRIDE_NAMES
 
@@ -411,12 +516,12 @@ def test_phase170b_tab_run_analyze_tools():
     # appends the _start suffix to the START tool names (the wait/poll halves are
     # retired in favour of the generic gui_op_wait / gui_op_poll, ADR-0026 §8).
     assert "tab.analyze" in METHOD_SPECS
-    assert "tab.analyze" in m._NON_GENERATED_METHODS
+    _assert_override("tab.analyze", "gui_tab_analyze_start")
     assert "gui_tab_analyze_start" in m.TOOLS
     assert "gui_tab_analyze_start" in m._OVERRIDE_NAMES
 
     assert "tab.post_analyze" in METHOD_SPECS
-    assert "tab.post_analyze" in m._NON_GENERATED_METHODS
+    _assert_override("tab.post_analyze", "gui_tab_post_analyze_start")
     assert "gui_tab_post_analyze_start" in m.TOOLS
     assert "gui_tab_post_analyze_start" in m._OVERRIDE_NAMES
 
@@ -479,8 +584,8 @@ def test_phase170d_context_md_ml_prefix_editor_rename():
 
     The context.md_*/ml_* and editor.* WIRE methods are unchanged by P1 (still the
     Phase 170d names), but the agent-facing MCP TOOL surface is reshaped:
-    - context.md_get / md_get_attr / md_set_attr / md_del_attr move into
-      _NON_GENERATED_METHODS — they feed the merged gui_context_md_read /
+    - context.md_get / md_get_attr / md_set_attr / md_del_attr use OVERRIDE
+      policy — they feed the merged gui_context_md_read /
       gui_context_md_write / gui_context_md_delete overrides, so the single-attr /
       list-keys per-method tools are retired.
     - context.ml_get -> gui_context_ml_list (tool_name); ml_del_module/_waveform ->
@@ -570,17 +675,11 @@ def test_phase170d_context_md_ml_prefix_editor_rename():
     }
     assert old_tool_names.isdisjoint(set(m.TOOLS))
 
-    # The md read/write/delete wire methods feed the merged overrides — excluded
-    # from generation.
-    for method in (
-        "context.md_get",
-        "context.md_get_attr",
-        "context.md_set_attr",
-        "context.md_del_attr",
-    ):
-        assert method in m._NON_GENERATED_METHODS, (
-            f"{method} must be excluded (feeds a merged md override)"
-        )
+    # The md read/write/delete wire methods feed the merged overrides.
+    _assert_override("context.md_get", "gui_context_md_read")
+    _assert_override("context.md_get_attr", "gui_context_md_read")
+    _assert_override("context.md_set_attr", "gui_context_md_write")
+    _assert_override("context.md_del_attr", "gui_context_md_delete")
     for tool_name in (
         "gui_context_md_read",
         "gui_context_md_write",
@@ -600,9 +699,7 @@ def test_phase170d_context_md_ml_prefix_editor_rename():
         "context.ml_list_roles",
         "context.ml_create_from_role",
     ):
-        assert method not in m._NON_GENERATED_METHODS, (
-            f"{method} must not be excluded from generation"
-        )
+        _assert_generated(method)
     for tool_name in (
         "gui_context_ml_list",
         "gui_context_ml_delete_module",
@@ -617,8 +714,8 @@ def test_phase170d_context_md_ml_prefix_editor_rename():
         )
 
     # editor.new is served by the gui_editor_open OVERRIDE (folds {tree}->{cfg}),
-    # so it IS excluded from generation and gui_editor_open is an override entry.
-    assert "editor.new" in m._NON_GENERATED_METHODS
+    # so it is excluded from generation and gui_editor_open is an override entry.
+    _assert_override("editor.new", "gui_editor_open")
     assert "gui_editor_open" in m._OVERRIDE_NAMES
     # editor.commit's tool_name is gui_editor_save (not an override either).
     assert "gui_editor_save" not in m._OVERRIDE_NAMES

@@ -61,14 +61,6 @@ def tool_gui_screenshot(arguments: dict[str, Any]) -> dict[str, Any]:
     return {"bytes": res.get("bytes", len(png)), "saved_to": out_path}
 
 
-NON_GENERATED_METHODS = frozenset(
-    {
-        "dialog.screenshot",
-        "view.screenshot",
-    }
-)
-
-
 OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
     "gui_screenshot": {
         "handler": tool_gui_screenshot,

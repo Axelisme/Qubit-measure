@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-02 (MCP tool domain split)
+**Last updated:** 2026-07-02 (MCP exposure policy projection)
 
 # `zcu_tools/mcp/measure/`
 
@@ -15,7 +15,11 @@ RemoteControlAdapter。此 package 是 app-local policy 層，不是共用 trans
   `server.send_gui_rpc`；generated tools 仍由 `generate_tools(..., send_gui_rpc)`
   維持 import-time capture。
 - `tools_*.py` 依 domain 共置 hand-written handler、override schema 與
-  non-generated method policy；`server.py` 只聚合這些 domain tables。
+  manual MCP tool schema；`server.py` 只聚合這些 manual tool tables。
+- `exposure.py` 從 GUI wire contract 的 `METHOD_SPECS[*].mcp` 推導 generated /
+  internal / override exposure plan，並在 assembly 時 fail-fast 檢查 generated
+  tool collision、manual/generated collision、override tool 缺漏，以及
+  internal/override method 誤用 `MethodSpec.tool_name`。
 - `session.py` 擁有 measure-only policy state：diagnostics piggyback queue、
   optimistic-concurrency baseline、guarded send flow、operation handle capture，以及
   `gui_debug_operations` 使用的 latest-handle projection。
@@ -47,6 +51,11 @@ RemoteControlAdapter。此 package 是 app-local policy 層，不是共用 trans
   重新連線。
 - `McpBridge` 只屬於 `zcu_tools.mcp.core` 的 transport adapter；measure-gui policy
   不下放到 bridge。
+- Wire method MCP exposure policy 由
+  `zcu_tools.gui.app.main.services.remote.method_entries` 的 method entry 宣告：
+  default `generated` 產生 1:1 RPC tool；`internal` 保留 wire method 供 bundle /
+  lifecycle 內部使用；`override` 指向一個或多個 hand-written MCP tools。
+  MCP-only lifecycle/bundle/debug tools 不硬塞進 method policy。
 
 ## 測試注意
 

@@ -480,20 +480,6 @@ def tool_gui_tab_get_current_figure(arguments: dict[str, Any]) -> dict[str, Any]
     )
 
 
-NON_GENERATED_METHODS = frozenset(
-    {
-        "tab.get_current_figure",
-        "tab.run_start",
-        "tab.analyze",
-        "tab.post_analyze",
-        "tab.save_data",
-        "tab.save_image",
-        "tab.save_post_image",
-        "tab.save_result",
-    }
-)
-
-
 OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
     "gui_tab_run_start": {
         "handler": tool_gui_tab_run_start,

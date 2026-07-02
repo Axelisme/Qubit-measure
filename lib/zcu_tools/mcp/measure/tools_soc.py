@@ -112,13 +112,6 @@ def tool_gui_soc_connect(arguments: dict[str, Any]) -> dict[str, Any]:
     return {"soc": result.get("soc")}
 
 
-NON_GENERATED_METHODS = frozenset(
-    {
-        "soc.connect",
-    }
-)
-
-
 OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
     "gui_soc_connect": {
         "handler": tool_gui_soc_connect,

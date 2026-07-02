@@ -55,14 +55,6 @@ def tool_gui_prompt_user(arguments: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-NON_GENERATED_METHODS = frozenset(
-    {
-        "notify.open",
-        "notify.await",
-    }
-)
-
-
 OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
     "gui_prompt_user": {
         "handler": tool_gui_prompt_user,
