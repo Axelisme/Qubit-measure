@@ -389,6 +389,9 @@ class TestResetFactory:
             def build(self, name):
                 raise NotImplementedError
 
+            def set_param(self, name, value):
+                raise NotImplementedError
+
         with pytest.raises(NotImplementedError):
             Reset("r", UnknownCfg())
 

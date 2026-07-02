@@ -24,14 +24,16 @@ if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
 
 
-class AbsWaveformCfg(ConfigBase):
+class AbsWaveformCfg(ConfigBase, ABC):
     style: str
 
+    @abstractmethod
     def build(self, name: str) -> AbsWaveform:
-        raise NotImplementedError(f"{type(self).__name__}.build is not implemented")
+        """Build the runtime waveform represented by this cfg."""
 
+    @abstractmethod
     def set_param(self, name: str, value: float | QickParam) -> None:
-        raise NotImplementedError(f"{type(self).__name__} does not support set_param")
+        """Update a sweep-tunable parameter by name."""
 
 
 class ConstWaveformCfg(AbsWaveformCfg):

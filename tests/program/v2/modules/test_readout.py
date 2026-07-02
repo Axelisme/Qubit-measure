@@ -227,6 +227,9 @@ class TestReadoutFactory:
             def build(self, name):
                 raise NotImplementedError
 
+            def set_param(self, name, value):
+                raise NotImplementedError
+
         with pytest.raises(NotImplementedError):
             Readout("ro", UnknownCfg())
 

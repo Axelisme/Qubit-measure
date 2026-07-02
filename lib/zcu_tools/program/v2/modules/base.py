@@ -21,15 +21,17 @@ def resolve_module_ref(value: Any, info: ValidationInfo) -> Any:
     return value
 
 
-class AbsModuleCfg(ConfigBase):
+class AbsModuleCfg(ConfigBase, ABC):
     type: str
     desc: str | None = None
 
+    @abstractmethod
     def build(self, name: str) -> Module:
-        raise NotImplementedError(f"{type(self).__name__}.build is not implemented")
+        """Build the runtime module represented by this cfg."""
 
+    @abstractmethod
     def set_param(self, name: str, value: float | QickParam) -> None:
-        raise NotImplementedError(f"{type(self).__name__} does not support set_param")
+        """Update a sweep-tunable parameter by name."""
 
 
 class Module(ABC):

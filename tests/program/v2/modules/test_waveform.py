@@ -36,14 +36,9 @@ def test_cosine_waveform_rejects_qickparam_length():
         cfg.set_param("length", QickParam(start=1.0, spans={"a": 0.1}))
 
 
-def test_abs_waveform_cfg_default_methods_raise():
-    cfg = AbsWaveformCfg(style="const")
-
-    with pytest.raises(NotImplementedError):
-        cfg.build("base")
-
-    with pytest.raises(NotImplementedError):
-        cfg.set_param("length", 2.0)
+def test_abs_waveform_cfg_is_abstract():
+    with pytest.raises(TypeError, match="abstract"):
+        AbsWaveformCfg(style="const")  # pyright: ignore[reportAbstractUsage]
 
 
 def test_const_waveform_rejects_unknown_param():

@@ -2,6 +2,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.program.v2.modules import ModuleCfgFactory, WaveformCfgFactory
+from zcu_tools.program.v2.modules.base import AbsModuleCfg
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import (
     DirectReadoutCfg,
@@ -22,6 +23,10 @@ from zcu_tools.program.v2.modules.waveform import (
 
 
 class TestModuleCfgFactoryFromRaw:
+    def test_abs_module_cfg_is_abstract(self):
+        with pytest.raises(TypeError, match="abstract"):
+            AbsModuleCfg(type="base")  # pyright: ignore[reportAbstractUsage]
+
     def test_dispatch_pulse(self):
         cfg = ModuleCfgFactory.from_raw(
             {
