@@ -14,7 +14,7 @@ from joblib import Parallel, delayed
 from numpy.typing import NDArray
 from tqdm.auto import tqdm
 
-from zcu_tools.notebook.persistance import load_result
+from zcu_tools.meta_tool import QubitParams
 from zcu_tools.simulate.fluxonium import calculate_chi_sweep
 from zcu_tools.simulate.fluxonium.branch.floquet import calc_ge_snr
 
@@ -425,24 +425,18 @@ def add_real_sample(
 ) -> None:
 
     result_path = os.path.join(result_dir, "params.json")
-    result_dict = load_result(result_path)
-
-    dispersive_dict = result_dict.get("dispersive")
-    assert dispersive_dict is not None
-
-    fluxdepfit_dict = result_dict.get("fluxdep_fit")
-    assert fluxdepfit_dict is not None
+    params_file = QubitParams(result_path, readonly=True)
+    project = params_file.require_project()
+    fit = params_file.require_fluxdep_fit()
+    dispersive = params_file.get_dispersive_fit()
+    assert dispersive is not None
 
     # unpack result
-    name = result_dict["name"]
-    params = (
-        fluxdepfit_dict["params"]["EJ"],
-        fluxdepfit_dict["params"]["EC"],
-        fluxdepfit_dict["params"]["EL"],
-    )
-    r_f = dispersive_dict["bare_rf"]
-    g = dispersive_dict["g"]
-    flux_half = fluxdepfit_dict["flux_half"]
+    name = project.name
+    params = fit.params
+    r_f = dispersive.bare_rf
+    g = dispersive.g
+    flux_half = fit.flux_half
 
     # load freq data
     sample_path = os.path.join(result_dir, "sample.csv")

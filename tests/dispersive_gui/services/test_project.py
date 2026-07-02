@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import json
-
 import pytest
 from zcu_tools.gui.app.dispersive.services.project import ProjectService
 from zcu_tools.gui.app.dispersive.state import DEFAULT_BARE_RF, DispersiveState
+from zcu_tools.meta_tool import DispersiveFit, FluxDepFit, ParamsProject, QubitParams
 
 
 def test_load_fit_inputs_reads_params_and_seeds_bare_rf(params_json):
@@ -24,21 +23,20 @@ def test_load_fit_inputs_reads_params_and_seeds_bare_rf(params_json):
 
 def test_bare_rf_priority_prefers_dispersive_section(tmp_path):
     path = str(tmp_path / "params.json")
-    with open(path, "w", encoding="utf8") as f:
-        json.dump(
-            {
-                "name": "Q1",
-                "fluxdep_fit": {
-                    "params": {"EJ": 4.0, "EC": 1.0, "EL": 0.5},
-                    "flux_half": 0.5,
-                    "flux_int": 1.0,
-                    "flux_period": 2.0,
-                    "plot_transitions": {"r_f": 5.3},
-                },
-                "dispersive": {"g": 0.06, "bare_rf": 5.9},
-            },
-            f,
+    params = QubitParams(path)
+    params.ensure_project(ParamsProject("Q1", "Q1"))
+    params.set_fluxdep_fit(
+        FluxDepFit(
+            EJ=4.0,
+            EC=1.0,
+            EL=0.5,
+            flux_half=0.5,
+            flux_int=1.0,
+            flux_period=2.0,
+            plot_transitions={"r_f": 5.3},
         )
+    )
+    params.set_dispersive_fit(DispersiveFit(g=0.06, bare_rf=5.9))
     st = DispersiveState()
     inputs = ProjectService(st).load_fit_inputs(path)
     assert inputs.bare_rf_seed == 5.9  # dispersive section wins over r_f
@@ -46,20 +44,19 @@ def test_bare_rf_priority_prefers_dispersive_section(tmp_path):
 
 def test_bare_rf_falls_back_to_default(tmp_path):
     path = str(tmp_path / "params.json")
-    with open(path, "w", encoding="utf8") as f:
-        json.dump(
-            {
-                "name": "Q1",
-                "fluxdep_fit": {
-                    "params": {"EJ": 4.0, "EC": 1.0, "EL": 0.5},
-                    "flux_half": 0.5,
-                    "flux_int": 1.0,
-                    "flux_period": 2.0,
-                    "plot_transitions": {},  # no r_f
-                },
-            },
-            f,
+    params = QubitParams(path)
+    params.ensure_project(ParamsProject("Q1", "Q1"))
+    params.set_fluxdep_fit(
+        FluxDepFit(
+            EJ=4.0,
+            EC=1.0,
+            EL=0.5,
+            flux_half=0.5,
+            flux_int=1.0,
+            flux_period=2.0,
+            plot_transitions={},  # no r_f
         )
+    )
     st = DispersiveState()
     inputs = ProjectService(st).load_fit_inputs(path)
     assert inputs.bare_rf_seed == DEFAULT_BARE_RF
@@ -73,8 +70,7 @@ def test_missing_file_fast_fails(tmp_path):
 
 def test_missing_fluxdep_fit_fast_fails(tmp_path):
     path = str(tmp_path / "params.json")
-    with open(path, "w", encoding="utf8") as f:
-        json.dump({"name": "Q1"}, f)
+    QubitParams(path).ensure_project(ParamsProject("Q1", "Q1"))
     st = DispersiveState()
     with pytest.raises(ValueError, match="no 'fluxdep_fit'"):
         ProjectService(st).load_fit_inputs(path)

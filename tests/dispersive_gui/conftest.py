@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import json
-
 import numpy as np
 import pytest
+from zcu_tools.meta_tool import FluxDepFit, ParamsProject, QubitParams
 from zcu_tools.utils.datasaver import save_labber_data
 
 
@@ -57,6 +56,17 @@ def params_json(tmp_path):
         "plot_transitions": {"r_f": 5.3, "transitions": [[0, 1]]},
     }
     path = str(tmp_path / "params.json")
-    with open(path, "w", encoding="utf8") as f:
-        json.dump({"name": "Q1", "fluxdep_fit": fluxdep_fit}, f)
+    params = QubitParams(path)
+    params.ensure_project(ParamsProject("Q1", "Q1"))
+    params.set_fluxdep_fit(
+        FluxDepFit(
+            EJ=4.0,
+            EC=1.0,
+            EL=0.5,
+            flux_half=0.5,
+            flux_int=1.0,
+            flux_period=2.0,
+            plot_transitions={"r_f": 5.3, "transitions": [[0, 1]]},
+        )
+    )
     return path, fluxdep_fit

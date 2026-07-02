@@ -24,8 +24,7 @@ from scqubits.core.fluxonium import Fluxonium
 from scqubits.core.hilbert_space import HilbertSpace
 
 %autoreload 2
-import zcu_tools.notebook.persistance as zp
-from zcu_tools.meta_tool import ExperimentManager
+from zcu_tools.meta_tool import ExperimentManager, QubitParams
 from zcu_tools.simulate import value2flux
 from zcu_tools.notebook.analysis.t1_curve import charge_spectral_density
 ```
@@ -42,18 +41,14 @@ image_dir.mkdir(exist_ok=True, parents=True)
 ```
 
 ```python
-result_dict = zp.load_result(f"{result_dir}/params.json")
-fluxdepfit_dict = result_dict.get("fluxdep_fit")
-assert fluxdepfit_dict is not None, "fluxdep_fit not found in result_dict"
+params_file = QubitParams(param_path, readonly=True)
+fit_inputs = params_file.require_dispersive_inputs(default_bare_rf=5.0)
+prior_dispersive = params_file.get_dispersive_fit()
 
-params = (
-    fluxdepfit_dict["params"]["EJ"],
-    fluxdepfit_dict["params"]["EC"],
-    fluxdepfit_dict["params"]["EL"],
-)
-flux_half = fluxdepfit_dict["flux_half"]
-flux_int = fluxdepfit_dict["flux_int"]
-flux_period = fluxdepfit_dict["flux_period"]
+params = fit_inputs.params
+flux_half = fit_inputs.flux_half
+flux_int = fit_inputs.flux_int
+flux_period = fit_inputs.flux_period
 
 print("params = ", params, " GHz")
 print("flux_half = ", flux_half)
@@ -64,13 +59,9 @@ sample_f = 9.58464
 fwhm = 5.247  # MHz
 
 g = 0.1  # GHz
-if dispersive_dict := result_dict.get("dispersive"):
-    bare_rf = dispersive_dict["bare_rf"]
-    g = dispersive_dict["g"]
-elif "r_f" in fluxdepfit_dict["plot_transitions"]:
-    bare_rf = fluxdepfit_dict["plot_transitions"]["r_f"]
-else:
-    bare_rf = 5.0  # GHz
+bare_rf = fit_inputs.bare_rf_seed
+if prior_dispersive is not None:
+    g = prior_dispersive.g
 print(f"bare rf = {bare_rf}", "GHz")
 print(f"g = {g}", "GHz")
 ```

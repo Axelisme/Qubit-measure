@@ -35,8 +35,8 @@ from tqdm.auto import tqdm
 from scipy.ndimage import gaussian_filter1d
 
 %autoreload 2
-import zcu_tools.notebook.persistance as zp
 import zcu_tools.notebook.analysis.dispersive as zd
+from zcu_tools.meta_tool import DispersiveFit, QubitParams
 from zcu_tools.simulate import value2flux
 from zcu_tools.simulate.fluxonium import calculate_dispersive_vs_flux
 from zcu_tools.notebook.analysis.plot import plot_dispersive_shift
@@ -62,31 +62,24 @@ web_dir.mkdir(exist_ok=True)
 ```
 
 ```python
-result_dict = zp.load_result(str(param_path))
-fluxdepfit_dict = result_dict.get("fluxdep_fit")
-assert fluxdepfit_dict is not None, "fluxdep_fit not found in result_dict"
+params_file = QubitParams(param_path, readonly=True)
+fit_inputs = params_file.require_dispersive_inputs(default_bare_rf=5.0)
+prior_dispersive = params_file.get_dispersive_fit()
 
-params = (
-    fluxdepfit_dict["params"]["EJ"],
-    fluxdepfit_dict["params"]["EC"],
-    fluxdepfit_dict["params"]["EL"],
-)
-flux_half = fluxdepfit_dict["flux_half"]
-flux_int = fluxdepfit_dict["flux_int"]
-flux_period = fluxdepfit_dict["flux_period"]
+params = fit_inputs.params
+flux_half = fit_inputs.flux_half
+flux_int = fit_inputs.flux_int
+flux_period = fit_inputs.flux_period
 
 print("params = ", params, " GHz")
 print("flux_half = ", flux_half)
 print("flux_int = ", flux_int)
 print("flux_period = ", flux_period)
 
-if dispersive_dict := result_dict.get("dispersive"):
-    bare_rf = dispersive_dict["bare_rf"]
-elif "r_f" in fluxdepfit_dict["plot_transitions"]:
-    bare_rf = fluxdepfit_dict["plot_transitions"]["r_f"]
-else:
-    bare_rf = 5.0  # GHz
+bare_rf = fit_inputs.bare_rf_seed
+g = prior_dispersive.g if prior_dispersive is not None else 0.05  # GHz
 print(f"bare rf = {bare_rf}", "GHz")
+print(f"g = {g}", "GHz")
 ```
 
 # Plot with Onetone
@@ -160,7 +153,7 @@ plt.close(fig)
 ```
 
 ```python
-best_g = 0.05  # GHz
+best_g = g
 ```
 
 ```python
@@ -231,5 +224,5 @@ fig.write_image(f"{image_dir}/{figname}.png", format="png", width=800, height=40
 # Write back g to result
 
 ```python
-zp.update_result(str(param_path), dict(dispersive=dict(g=best_g, bare_rf=bare_rf)))
+QubitParams(param_path).set_dispersive_fit(DispersiveFit(g=best_g, bare_rf=bare_rf))
 ```

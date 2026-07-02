@@ -1,6 +1,6 @@
 # `zcu_tools.meta_tool` — persistent experiment metadata
 
-**Last updated:** 2026-07-01
+**Last updated:** 2026-07-02 — QubitParams t1_curve_fit section
 
 這份筆記整理 `meta_tool/` 的設計，說明各類別的職責、同步機制與使用模式。
 
@@ -8,7 +8,7 @@
 
 ## 架構總覽（一句話版）
 
-`meta_tool/` 提供實驗的**持久化設定管理**：`SyncFile` 是自動讀寫同步的抽象基礎，`MetaDict` 以 JSON 儲存任意實驗參數、`ModuleLibrary` 以 YAML 管理波形與模組設定，`ExperimentManager` 把兩者綁定到以 flux 值命名的資料夾上下文，`SampleTable` 儲存樣品量測紀錄，`ArbWaveformDatabase` 管理 qubit-scoped arbitrary waveform `.npz` asset。
+`meta_tool/` 提供實驗的**持久化設定管理**：`SyncFile` 是自動讀寫同步的抽象基礎，`MetaDict` 以 JSON 儲存任意實驗參數、`ModuleLibrary` 以 YAML 管理波形與模組設定，`ExperimentManager` 把兩者綁定到以 flux 值命名的資料夾上下文，`QubitParams` 擁有每個 result scope 的 `params.json` typed handoff file，`SampleTable` 儲存樣品量測紀錄，`ArbWaveformDatabase` 管理 qubit-scoped arbitrary waveform `.npz` asset。
 
 ---
 
@@ -65,6 +65,29 @@ print(md.qubit_freq)      # 自動 sync + 讀取
 **受保護的屬性**（不進入 `_data`）：`_` 開頭的名稱，以及 `["dump", "load", "sync", "update_modify_time", "clone", "items", "keys", "get"]`。
 
 **`clone(dst_path, readonly)`**：複製整個 MetaDict 到新路徑（要求目標不存在）。
+
+---
+
+## `QubitParams`（`params.py`）
+
+`QubitParams` 是 `result/<chip>/<qub>/params.json` 的唯一 typed 讀寫 module。它不是任意 key/value store；caller 透過語意方法讀寫 project identity、`fluxdep_fit`、`dispersive`、`t1_curve_fit` 與 predictor 所需的 fluxonium model。
+
+**主要責任**：
+
+| 方法 | 說明 |
+|------|------|
+| `ensure_project(project)` | 建立或更新 canonical `project.{chip_name, qubit_name, resonator_name}`，並同步 legacy `name` |
+| `migrate_project_from_path(result_root=...)` | 將 v0 identity 原地升級；canonical `project` 優先，缺 project 時才由 `result/` 路徑推導 |
+| `set_fluxdep_fit(fit)` | 寫入 fluxdep fit；保留獨立的 `dispersive` section，並更新 `fluxdep_fit.timestamp` |
+| `require_dispersive_inputs(default_bare_rf=...)` | 讀出 dispersive GUI 的硬輸入，並集中 `bare_rf` seed 優先序 |
+| `set_dispersive_fit(fit)` | 寫入 dispersive fit；要求檔案已存在且已有 `fluxdep_fit`，並更新 `dispersive.timestamp` |
+| `set_t1_curve_fit(fit)` | 寫入 T1 curve noise fit handoff；要求檔案已存在且已有 `fluxdep_fit`，並更新 `t1_curve_fit.timestamp` |
+| `require_t1_curve_fit()` | 讀出 T1 curve fit 的 noise params、stderr 與 fit metadata |
+| `require_fluxonium_model(flux_bias=...)` | 讀出 `FluxoniumPredictor` / sim 需要的 `(EJ, EC, EL, flux_half, flux_period, flux_bias)` |
+
+**獨立 section 與 timestamp**：`fluxdep_fit`、`dispersive` 與 `t1_curve_fit` 是獨立 module section；寫入其中一個不會刪除另一個。每次 typed 寫入會更新該 section 的 `timestamp`，供 caller 判斷最後修改時間。`t1_curve_fit` 只保存後續模擬需要的 fit params 與 metadata；sample arrays 和 dense model curves 不放進 `params.json`。
+
+**未知 section preservation**：typed 寫入只更新自己的 section，其它未知 section 會保留。`to_raw()` / `replace_raw()` / `update_raw()` 只供 `notebook.persistance` 舊 helper 過渡使用；新 caller 應使用 typed 方法。
 
 ---
 
@@ -254,6 +277,21 @@ cfg = make_cfg(
     SomeExpCfgModel,  # SomeExpCfgModel = 你的 ExpCfgModel 子類
     ml=ml,
 )
+
+from zcu_tools.meta_tool import FluxDepFit, ParamsProject, QubitParams
+
+params = QubitParams.for_result_dir("result/chipA/qubitQ1")
+params.ensure_project(ParamsProject("chipA", "qubitQ1"))
+params.set_fluxdep_fit(
+    FluxDepFit(
+        EJ=4.0,
+        EC=1.0,
+        EL=0.5,
+        flux_half=0.5,
+        flux_int=1.0,
+        flux_period=2.0,
+    )
+)
 ```
 
 ---
@@ -271,6 +309,7 @@ Experiment cfg materialization
     ├── ModuleLibrary  (current ml；module lookup / lowering context)
     └── GlobalDeviceManager.get_all_info()  (thin wrapper 呼叫當下的 default snapshot provider)
 
+QubitParams          (params.json typed owner；fluxdep/dispersive/t1_curve/predictor caller 共用)
 ArbWaveformDatabase  (獨立，被 modules/waveform.py:ArbWaveform 使用)
 SampleTable          (獨立，供 notebook 記錄量測結果用)
 ```
@@ -283,3 +322,6 @@ SampleTable          (獨立，供 notebook 記錄量測結果用)
 - `MetaDict` 的 `_dirty` + `sync()` 表示每次 `__setattr__` 都會立即寫回磁碟（兩次 `sync()`：設定前確保最新，設定後立即寫回）。
 - `ModuleLibrary.get_waveform()` / `get_module()` 回傳 deepcopy，修改回傳值不影響 library 內部狀態（需透過 `register_*` / `update_*` 才能持久化）。
 - experiment cfg materialization 每次呼叫都使用 caller 傳入的 current `ml` 與 device snapshot；active context 切換不應被長壽 object 綁住。
+- `QubitParams.set_dispersive_fit()` 會要求 `params.json` 已有 `fluxdep_fit`；dispersive export 不能建立沒有 fluxdep handoff 的半成品檔案。
+- `QubitParams.set_t1_curve_fit()` 會要求 `params.json` 已有 `fluxdep_fit`；T1 curve fit section 是 downstream handoff，不建立沒有 fluxonium fit 的半成品。
+- `QubitParams.set_fluxdep_fit()` 不會刪除 `dispersive` 或 `t1_curve_fit`；這些 section 以各自的 `timestamp` 表示最後修改時間。

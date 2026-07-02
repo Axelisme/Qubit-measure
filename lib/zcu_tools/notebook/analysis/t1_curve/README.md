@@ -1,6 +1,6 @@
 # `t1_curve` 模塊重點文檔
 
-**Last updated:** 2026-07-02 — Qqp signed spectral density
+**Last updated:** 2026-07-02 — t1_curve_fit params handoff
 
 Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道的品質因子 (Q) / 準粒子密度 (x_qp)，並與理論 T1 曲線比對作圖。
 
@@ -30,6 +30,16 @@ Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道
 - `plot_sample_t1(...)`：T1 vs normalized flux `φ_ext/φ₀`，上軸同步顯示電流/電壓（透過 `value2flux`/`flux2value`）。實測 device-value array 進入 plotting 前會正規化成 `np.float64` ndarray，避免 scalar/array overload 影響後續 errorbar 與 limits 計算。
 - `plot_t1_with_sample(s_dev_values, s_T1s, s_T1errs, flux_half, flux_period, params, t_fluxs, *, name, noise_name, noise_values, Temp, **other_noise_options)`：疊加多條理論 T1(φ) 曲線；`name` ∈ {`Q_cap`, `x_qp`, `Q_ind`}；`noise_values` 中元素可為 float 或 callable `f(ω, T)`（可變 Q(ω) 模型）；底層呼叫 `simulate.fluxonium.calculate_eff_t1_vs_flux_fast`（**收 `params` tuple、自己 eigensolve，不再收 `Fluxonium`/`spectrum_data`**）。
 - `plot_eff_t1_with_sample(...)`：用法相同，但直接接受已算好的 `t1_effs`。
+
+### `t1_curve_fit.py` / `fit.py` — 四參數 T1 noise fit
+
+- `T1FitParams(Q_cap, x_qp, Q_ind, Temp)`：fit 初值與結果容器；`Temp` 單位 K，其餘沿用 scqubits noise option 語義。
+- `fit_t1_noise_params(fluxs, T1s, params, *, init, bounds=None, fixed=(), T1errs=None, residual_mode="log", progress=False, ...)`：用 `least_squares` 一次擬合 `Q_cap`、`x_qp`、`Q_ind`、`Temp`。`fluxs` 是 normalized flux；`T1s/T1errs` 是 ns；`params=(EJ,EC,EL)` 是 GHz。`progress=True` 時用 repo 的 progress-bar backend 顯示 residual evaluation 進度。
+- 擬合在 log-parameter 空間進行，所有參數必須為正；`bounds` 用參數名部分覆蓋預設範圍，`fixed` 用參數名固定任意多個參數，固定值取自 `init`。
+- 預設 residual 是 log T1；若提供 `T1errs`，finite positive error 會轉成權重，`NaN` 表示該點不加權。
+- `success=True` 只表示 SciPy optimizer 達到終止條件；是否可信要看 residual、`reduced_chi2`、stderr 與參數是否貼近 bounds。固定參數的 stderr 回報為 0，代表未估計而不是物理不確定度為 0。
+- `t1_curve_fit.py` 是明確的 public module name；`fit.py` 保留為既有 import path，兩者 export 同一組 API。
+- notebook 若要把 all-in-one fit 結果交給後續模擬，使用 `QubitParams.set_t1_curve_fit(T1CurveFit(...))` 寫入 `params.json` 的 `t1_curve_fit` section。這個 section 只放 noise params、stderr、fixed/free、bounds 與 fit metadata；sample arrays、residual arrays 與 dense model curve 留在 notebook 輸出或資料檔。
 
 ### `Qcap.py` — 介電耗散 (電容通道)
 

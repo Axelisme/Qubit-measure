@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-01
+**Last updated:** 2026-07-02 — QubitParams timestamp handoff
 
 # `zcu_tools.gui.app.dispersive` — dispersive-shift analysis GUI
 
@@ -10,7 +10,7 @@ state/services/UI 與 GUI-process remote adapter。Import path 固定為
 
 獨立的分析型 GUI，把 `notebook_md/analysis/dispersive.md` 的 fluxonium **色散位移（dispersive shift）** g / bare_rf 擬合流程移植成 Qt 桌面工具。是 fluxdep-gui 的 sibling：自己的 state / services / UI / RPC + MCP server / skill。
 
-**領域依賴 fluxdep**：兩 app 經 **同一個 `params.json` 的不同 section** 銜接 —— fluxdep-gui 寫 `fluxdep_fit`（EJ/EC/EL + flux 對齊），dispersive 讀它當輸入、寫 `dispersive`（g, bare_rf）。典型工作流：先跑 fluxdep-gui，再跑 dispersive-fit-gui。`update_result` 保留 fluxdep_fit（不用 dump_result，會覆蓋）。
+**領域依賴 fluxdep**：兩 app 經 **同一個 `params.json` 的不同 section** 銜接 —— fluxdep-gui 寫 `fluxdep_fit`（EJ/EC/EL + flux 對齊），dispersive 讀它當輸入、寫 `dispersive`（g, bare_rf）。典型工作流：先跑 fluxdep-gui，再跑 dispersive-fit-gui。`params.json` 讀寫經 `meta_tool.QubitParams`，dispersive 不直接操作 JSON section；兩個 section 保持獨立，分別用自己的 `timestamp` 記錄最後修改時間。
 
 流程是 **load inputs → load onetone → preprocess → tune g/r_f（手動 slider 或 Auto tune）→ export**。**fit 由手動 accept 定案**：user 調 g/r_f（拖 slider，或先按 Auto tune 讓 scipy 粗調，見下方 step4 段）後按「Use these g/r_f」即最終 fit（`set_manual_fit` 記 State）；Auto tune 只回填 slider、不自動 accept。GUI 不提供 chi 圖 / Result tab；tune 圖（g/r_f 線疊 norm-phase）即最終結果。`qub_dim`/`qub_cutoff` 寫死在 `PredictService` 的 `PredictionResolution`（`qub_dim=15`/`qub_cutoff=30`/`res_dim=4`），不曝露為控件。預測一律跑全 preprocessed flux 軸（preprocess 已降採樣、fast 路徑夠快），`DispFitState` 無 step、`fit.result` RPC 無 step。
 
@@ -65,5 +65,6 @@ agent 只觀測、user 在 GUI 驅動。method set 全純查詢（state.check / 
 - **OneTone 檔軸常反**：OneTone hdf5 常存成 `[Frequency, Flux]`，loader 假設 `[Flux, Flux→Freq]` → 載入後 freqs 變垃圾（如 ~1e-12），preprocess edelay 全錯。**不是 bug，是檔格式** —— user 在 load dialog 看 preview 勾「Transpose axes」修正（這正是 preview dialog 的用途）。同 fluxdep OneTone 軸反問題。
 - **preprocess smoothing signature**：preprocess 在 edelay/circle-fit 前與 phase-diff 前沿頻率軸做 smoothing，預設 method 是 `wavelet`；signature 包含 method、兩個 smoothing divisor 與 grid shape，因此 smoothing pipeline 變更會讓既有 fit 失效。小頻網格的 smoothing strength floor 至 1，GUI 不因粗網格崩潰。
 - **路徑**：`result_dir`=`result/<chip>/<qub>`（processed 輸出 / params.json）；`database_path`=`Database/<chip>/<qub>`（**raw onetone root**，對齊 notebook `Database/Q12_2D[5]/Q1/...`，**不是** result/ 下）。browse onetone 預設走 `database_path`。
-- **export 需既存 params.json**：`update_result` 先讀檔；export 前 gate on `has_result` + 檔存在，缺則 fast-fail 指向 fluxdep。
+- **export 需既存 params.json**：`QubitParams.set_dispersive_fit()` 要求檔案已存在且已有 `fluxdep_fit`；export 前 gate on `has_result`，缺 handoff 則 fast-fail 指向 fluxdep。
+- **section timestamp**：export 只更新 `dispersive` section 與 `dispersive.timestamp`，不改寫 `fluxdep_fit.timestamp`。
 - **bare_rf seed 不覆蓋**：`set_fit_inputs` 只在 disp_fit.bare_rf 無值時 seed（不蓋既有 tuning 值）。

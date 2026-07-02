@@ -33,7 +33,8 @@ import numpy as np
 %autoreload 2
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
 import zcu_tools.notebook.analysis.fluxdep as zf
-import zcu_tools.notebook.persistance as zp
+from zcu_tools.meta_tool import FluxDepFit, ParamsProject, QubitParams
+from zcu_tools.notebook.persistance import SpectrumResult
 from zcu_tools.notebook.utils import savefig
 from zcu_tools.simulate import value2flux, flux2value
 import zcu_tools.experiment.v2 as ze
@@ -46,7 +47,7 @@ qub_name = "Q1"
 flux_half = None
 flux_int = None
 flux_period = None
-spectrums = dict[str, zp.SpectrumResult]()
+spectrums = dict[str, SpectrumResult]()
 
 result_dir = f"../../result/{chip_name}/{qub_name}"
 image_dir = f"{result_dir}/image/fluxdep_fit"
@@ -57,14 +58,11 @@ os.makedirs(web_dir, exist_ok=True)
 
 ```python
 loadpath = f"{result_dir}/params.json"
-result = zp.load_result(loadpath)
-fluxdep_result = result.get("fluxdep_fit")
-if fluxdep_result is None:
-    raise ValueError(f"No fluxdep_fit result found in {loadpath}.")
+fluxdep_result = QubitParams(loadpath, readonly=True).require_fluxdep_fit()
 
-flux_half = fluxdep_result["flux_half"]
-flux_period = fluxdep_result["flux_period"]
-flux_period = fluxdep_result["flux_period"]
+flux_half = fluxdep_result.flux_half
+flux_int = fluxdep_result.flux_int
+flux_period = fluxdep_result.flux_period
 ```
 
 # Load Spectrum
@@ -325,23 +323,19 @@ fig.write_image(f"{image_dir}/spect_fit.png", format="png")
 # Save Parameters
 
 ```python
-# dump the data
 savepath = f"{result_dir}/params.json"
-
-zp.dump_result(
-    savepath,
-    f"{chip_name}/{qub_name}",
-    fluxdep_fit={
-        "params": {
-            "EJ": sp_params[0],
-            "EC": sp_params[1],
-            "EL": sp_params[2],
-        },
-        "flux_half": flux_half,
-        "flux_int": flux_int,
-        "flux_period": flux_period,
-        "plot_transitions": plot_transitions,
-    },
+params_file = QubitParams(savepath)
+params_file.ensure_project(ParamsProject(chip_name, qub_name))
+params_file.set_fluxdep_fit(
+    FluxDepFit(
+        EJ=sp_params[0],
+        EC=sp_params[1],
+        EL=sp_params[2],
+        flux_half=flux_half,
+        flux_int=flux_int,
+        flux_period=flux_period,
+        plot_transitions=plot_transitions,
+    )
 )
 ```
 

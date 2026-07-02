@@ -35,7 +35,7 @@ import plotly.graph_objects as go
 
 %autoreload 2
 import zcu_tools.experiment.v2 as ze
-from zcu_tools.notebook.persistance import load_result
+from zcu_tools.meta_tool import QubitParams
 from zcu_tools.simulate import mA2flx, flx2mA
 ```
 
@@ -48,7 +48,13 @@ image_dir.mkdir(parents=True, exist_ok=True)
 ```
 
 ```python
-_, params, mA_c, period, allows, _ = load_result(f"{result_dir}/params.json")
+params_file = QubitParams(result_dir / "params.json", readonly=True)
+fit = params_file.require_fluxdep_fit()
+
+params = fit.params
+mA_c = fit.flux_half
+period = fit.flux_period
+allows = fit.plot_transitions
 EJ, EC, EL = params
 
 print(allows)

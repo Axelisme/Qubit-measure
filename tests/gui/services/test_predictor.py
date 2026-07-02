@@ -308,18 +308,25 @@ def test_set_model_params_zero_period_raises():
 
 
 def _write_params_json(path, *, with_fluxdep: bool = True) -> None:
-    import json
-
-    payload: dict = {"name": "fake_qubit"}
     if with_fluxdep:
-        payload["fluxdep_fit"] = {
-            "params": {"EJ": 4.5, "EC": 1.2, "EL": 0.9},
-            "flux_half": 0.31,
-            "flux_int": 0.71,
-            "flux_period": 0.8,
-            "plot_transitions": {},
-        }
-    path.write_text(json.dumps(payload), encoding="utf-8")
+        from zcu_tools.meta_tool import FluxDepFit, ParamsProject, QubitParams
+
+        params = QubitParams(path)
+        params.ensure_project(ParamsProject("fake_qubit", "fake_qubit"))
+        params.set_fluxdep_fit(
+            FluxDepFit(
+                EJ=4.5,
+                EC=1.2,
+                EL=0.9,
+                flux_half=0.31,
+                flux_int=0.71,
+                flux_period=0.8,
+            )
+        )
+    else:
+        from zcu_tools.meta_tool import ParamsProject, QubitParams
+
+        QubitParams(path).ensure_project(ParamsProject("fake_qubit", "fake_qubit"))
 
 
 def test_read_fluxdep_fit_params_returns_request(tmp_path):

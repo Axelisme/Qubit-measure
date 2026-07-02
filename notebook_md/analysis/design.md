@@ -35,7 +35,7 @@ import pandas as pd
 import zcu_tools.notebook.analysis.design as zd
 import zcu_tools.notebook.analysis.plot as zp
 import zcu_tools.simulate.equation as zeq
-from zcu_tools.notebook.persistance import dump_result
+from zcu_tools.meta_tool import FluxDepFit, ParamsProject, QubitParams
 from zcu_tools.notebook.analysis.mist.branch import plot_chi_and_snr_over_photon
 ```
 
@@ -127,13 +127,18 @@ fig.write_html(
 )
 fig.write_image(f"../../result/{qub_name}/image/design/{save_name}.png", format="png")
 
-dump_result(
-    f"../../result/{qub_name}/params.json",
-    name=qub_name,
-    params=best_params,
-    cflx=0.5,
-    period=1.0,
-    allows=dict(),
+params_file = QubitParams(f"../../result/{qub_name}/params.json")
+params_file.ensure_project(ParamsProject(qub_name, qub_name))
+params_file.set_fluxdep_fit(
+    FluxDepFit(
+        EJ=best_params[0],
+        EC=best_params[1],
+        EL=best_params[2],
+        flux_half=0.5,
+        flux_int=0.0,
+        flux_period=1.0,
+        plot_transitions={},
+    )
 )
 ```
 

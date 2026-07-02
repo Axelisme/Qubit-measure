@@ -30,7 +30,7 @@ import numpy as np
 import plotly.graph_objects as go
 
 %autoreload 2
-from zcu_tools.notebook.persistance import load_result
+from zcu_tools.meta_tool import QubitParams
 from zcu_tools.simulate import mA2flx
 from zcu_tools.simulate.fluxonium import (
     calculate_system_n_oper_vs_flx,
@@ -49,10 +49,16 @@ qub_name = "Q12_2D[6]/Q1"
 
 ```python
 loadpath = f"../../result/{qub_name}/params.json"
-_, params, A_c, period, _, result = load_result(loadpath)
+params_file = QubitParams(loadpath, readonly=True)
+fit = params_file.require_fluxdep_fit()
+dispersive = params_file.get_dispersive_fit()
+assert dispersive is not None, "dispersive fit not found in params.json"
 
-r_f = result["dispersive"]["r_f"]
-g = result["dispersive"]["g"]
+params = fit.params
+A_c = fit.flux_half
+period = fit.flux_period
+r_f = dispersive.bare_rf
+g = dispersive.g
 ```
 
 # Matrix elements

@@ -203,14 +203,13 @@ def test_export_params_writes_json(tmp_path):
     path = svc.export_params(out)
     assert path == out
 
-    from zcu_tools.notebook.persistance import load_result
+    from zcu_tools.meta_tool import QubitParams
 
-    result = load_result(out)
-    fluxdep_fit = result.get("fluxdep_fit")
-    assert fluxdep_fit is not None
-    assert fluxdep_fit["params"] == {"EJ": 5.0, "EC": 1.2, "EL": 0.4}
-    assert fluxdep_fit["flux_half"] == 0.0
-    assert fluxdep_fit["flux_period"] == 1.0
+    fluxdep_fit = QubitParams(out, readonly=True).require_fluxdep_fit()
+    assert fluxdep_fit.params == (5.0, 1.2, 0.4)
+    assert fluxdep_fit.flux_half == 0.0
+    assert fluxdep_fit.flux_period == 1.0
+    assert fluxdep_fit.timestamp is not None
 
 
 def test_export_params_fast_fails_without_result():

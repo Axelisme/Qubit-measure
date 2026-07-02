@@ -7,8 +7,6 @@ fires and the predictor cache is bound to the right (params, flux-axis).
 
 from __future__ import annotations
 
-import json
-
 import numpy as np
 import zcu_tools.simulate.fluxonium.prediction as prediction_mod
 from zcu_tools.gui.app.dispersive.controller import Controller
@@ -21,6 +19,7 @@ from zcu_tools.gui.app.dispersive.event_bus import (
 )
 from zcu_tools.gui.app.dispersive.state import DispersiveState
 from zcu_tools.gui.project import ProjectInfo
+from zcu_tools.meta_tool import FluxDepFit, ParamsProject, QubitParams
 
 
 def _stub(params, fluxs, bare_rf, g, *, progress=False, res_dim=4, **kw):
@@ -31,20 +30,19 @@ def _stub(params, fluxs, bare_rf, g, *, progress=False, res_dim=4, **kw):
 
 def _params_json(tmp_path):
     path = str(tmp_path / "params.json")
-    with open(path, "w", encoding="utf8") as f:
-        json.dump(
-            {
-                "name": "Q1",
-                "fluxdep_fit": {
-                    "params": {"EJ": 4.0, "EC": 1.0, "EL": 0.5},
-                    "flux_half": 0.5,
-                    "flux_int": 1.0,
-                    "flux_period": 2.0,
-                    "plot_transitions": {"r_f": 5.3},
-                },
-            },
-            f,
+    params = QubitParams(path)
+    params.ensure_project(ParamsProject("Q1", "Q1"))
+    params.set_fluxdep_fit(
+        FluxDepFit(
+            EJ=4.0,
+            EC=1.0,
+            EL=0.5,
+            flux_half=0.5,
+            flux_int=1.0,
+            flux_period=2.0,
+            plot_transitions={"r_f": 5.3},
         )
+    )
     return path
 
 
@@ -93,11 +91,9 @@ def test_full_pipeline(monkeypatch, tmp_path, onetone_hdf5):
 
     # 6. export preserves fluxdep_fit
     ctrl.export_params(params_path)
-    from zcu_tools.notebook.persistance import load_result
-
-    saved = load_result(params_path)
-    assert saved.get("dispersive") is not None
-    assert saved.get("fluxdep_fit") is not None
+    saved = QubitParams(params_path, readonly=True)
+    assert saved.get_dispersive_fit() is not None
+    assert saved.require_fluxdep_fit().params == (4.0, 1.0, 0.5)
 
 
 def test_predictor_rebuilt_when_inputs_change(monkeypatch, tmp_path, onetone_hdf5):

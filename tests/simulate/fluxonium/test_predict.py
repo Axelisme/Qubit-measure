@@ -20,6 +20,7 @@ import numpy as np
 import pytest
 import scqubits.settings as scq_settings
 import zcu_tools.simulate.fluxonium.predict as predict_mod
+from zcu_tools.meta_tool import ParamsProject, QubitParams
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 scq_settings.PROGRESSBAR_DISABLED = True
@@ -271,10 +272,9 @@ def test_predictor_does_not_keep_shared_fluxonium_instance() -> None:
     assert not hasattr(p, "fluxonium")
 
 
-def test_from_file_requires_fluxdep_fit(monkeypatch: pytest.MonkeyPatch) -> None:
-    import zcu_tools.notebook.persistance as persistance
+def test_from_file_requires_fluxdep_fit(tmp_path) -> None:
+    path = tmp_path / "params.json"
+    QubitParams(path).ensure_project(ParamsProject("ChipA", "Q1"))
 
-    monkeypatch.setattr(persistance, "load_result", lambda result_path: {})
-
-    with pytest.raises(ValueError, match="fluxdep_fit result is required"):
-        FluxoniumPredictor.from_file("missing-fluxdep-fit.hdf5")
+    with pytest.raises(ValueError, match="fluxdep_fit"):
+        FluxoniumPredictor.from_file(str(path))

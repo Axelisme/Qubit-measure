@@ -17,6 +17,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.gui.session.events import PredictorChangedPayload
+from zcu_tools.meta_tool import QubitParams, QubitParamsError
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 from zcu_tools.simulate.fluxonium.prediction import FluxoniumPrediction
 
@@ -133,29 +134,19 @@ def read_fluxdep_fit_params(path: str) -> SetModelParamsRequest:
     the fit but deliberately omitted here: it is alignment-only, not part of the
     predictor's value<->flux affine.
 
-    Reuses load_result (the same loader FluxoniumPredictor.from_file uses).
     Raises PredictorLoadError on any IO / missing-key problem.
     """
-    from zcu_tools.notebook.persistance import load_result
-
     try:
-        result = load_result(path)
-    except (FileNotFoundError, OSError, ValueError) as exc:
+        model = QubitParams(path, readonly=True).require_fluxonium_model()
+    except (FileNotFoundError, OSError, QubitParamsError) as exc:
         raise PredictorLoadError(f"Failed to read params file: {exc}") from exc
-    fluxdep_fit = result.get("fluxdep_fit")
-    if fluxdep_fit is None:
-        raise PredictorLoadError("params file has no 'fluxdep_fit' section")
-    try:
-        params = fluxdep_fit["params"]
-        return SetModelParamsRequest(
-            EJ=params["EJ"],
-            EC=params["EC"],
-            EL=params["EL"],
-            flux_half=fluxdep_fit["flux_half"],
-            flux_period=fluxdep_fit["flux_period"],
-        )
-    except KeyError as exc:
-        raise PredictorLoadError(f"fluxdep_fit is missing key {exc}") from exc
+    return SetModelParamsRequest(
+        EJ=model.EJ,
+        EC=model.EC,
+        EL=model.EL,
+        flux_half=model.flux_half,
+        flux_period=model.flux_period,
+    )
 
 
 # ---------------------------------------------------------------------------

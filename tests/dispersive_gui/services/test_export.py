@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from zcu_tools.gui.app.dispersive.services.export import ExportService
 from zcu_tools.gui.app.dispersive.state import DispersiveState
-from zcu_tools.notebook.persistance import load_result
+from zcu_tools.meta_tool import QubitParams
 
 
 def test_export_writes_dispersive_and_preserves_fluxdep_fit(params_json):
@@ -16,13 +16,20 @@ def test_export_writes_dispersive_and_preserves_fluxdep_fit(params_json):
     written = ExportService(st).export_params(path)
 
     assert written == path
-    result = load_result(path)
-    assert result.get("dispersive") == {"g": 0.068, "bare_rf": 5.35}
+    result = QubitParams(path, readonly=True)
+    dispersive = result.get_dispersive_fit()
+    assert dispersive is not None
+    assert dispersive.g == 0.068
+    assert dispersive.bare_rf == 5.35
+    assert dispersive.timestamp is not None
     # fluxdep_fit section is preserved (not clobbered)
-    saved_fit = result.get("fluxdep_fit")
-    assert saved_fit is not None
-    assert saved_fit["params"] == fit["params"]
-    assert saved_fit["flux_period"] == fit["flux_period"]
+    saved_fit = result.require_fluxdep_fit()
+    assert saved_fit.params == (
+        fit["params"]["EJ"],
+        fit["params"]["EC"],
+        fit["params"]["EL"],
+    )
+    assert saved_fit.flux_period == fit["flux_period"]
 
 
 def test_export_without_result_fast_fails(params_json):

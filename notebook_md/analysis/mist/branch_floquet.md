@@ -25,8 +25,7 @@ import matplotlib.pyplot as plt
 from IPython.display import display
 
 %autoreload 2
-from zcu_tools.notebook.persistance import load_result
-from zcu_tools.meta_tool import MetaDict
+from zcu_tools.meta_tool import MetaDict, QubitParams
 from zcu_tools.simulate import mA2flx
 from zcu_tools.notebook.analysis.mist.branch import (
     plot_cn_over_flx,
@@ -54,13 +53,20 @@ os.makedirs(f"{result_dir}/data/branch_floquet", exist_ok=True)
 
 ```python
 loadpath = f"{result_dir}/params.json"
-_, params, mA_c, period, allows, data_dict = load_result(loadpath)
+params_file = QubitParams(loadpath, readonly=True)
+fit = params_file.require_fluxdep_fit()
+dispersive = params_file.get_dispersive_fit()
+
+params = fit.params
+mA_c = fit.flux_half
+period = fit.flux_period
+allows = fit.plot_transitions
 
 print(f"EJ: {params[0]:.3f} GHz, EC: {params[1]:.3f} GHz, EL: {params[2]:.3f} GHz")
 
-if dispersive_cfg := data_dict.get("dispersive"):
-    g = dispersive_cfg["g"]
-    r_f = dispersive_cfg["r_f"]
+if dispersive is not None:
+    g = dispersive.g
+    r_f = dispersive.bare_rf
     print(f"g: {g} GHz, r_f: {r_f} GHz")
 elif "r_f" in allows:
     r_f = allows["r_f"]

@@ -1,19 +1,27 @@
 from __future__ import annotations
 
+import logging
 import sys
-import traceback
 
 
-def print_traceback() -> None:
-    """
-    印出當前的異常追蹤訊息。如果異常包含 `_pyroTraceback`，則印出該追蹤訊息。
-    """
+def log_current_exception(
+    logger: logging.Logger,
+    message: str = "Unhandled exception",
+) -> None:
+    """Log the active exception, including Pyro's remote traceback when present."""
+
     err_msg = sys.exc_info()[1]
     if err_msg is None:
         return
-    if hasattr(err_msg, "_pyroTraceback"):
-        pyro_traceback = getattr(err_msg, "_pyroTraceback", None)
-        if isinstance(pyro_traceback, list):
-            print("".join(pyro_traceback))
-    else:
-        print(traceback.format_exc())
+
+    pyro_traceback = getattr(err_msg, "_pyroTraceback", None)
+    if isinstance(pyro_traceback, list):
+        logger.error(
+            "%s\n%s",
+            message,
+            "".join(str(line) for line in pyro_traceback),
+            exc_info=True,
+        )
+        return
+
+    logger.error(message, exc_info=True)

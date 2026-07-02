@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.19.4
   kernelspec:
-    display_name: .venv
+    display_name: zcu-tools
     language: python
     name: python3
   language_info:
@@ -21,32 +21,41 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.9.23
+    version: 3.13.11
 ---
+
+# Import
 
 ```python
 %load_ext autoreload
+import os
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from numpy.typing import NDArray
-import os
 
 %autoreload 2
-from zcu_tools.notebook.persistance import load_result
+from zcu_tools.meta_tool import (
+    QubitParams,
+    T1CurveFit,
+    T1CurveFitParams,
+    T1CurveFitUncertainty,
+)
 import zcu_tools.notebook.analysis.t1_curve as zt1
-from zcu_tools.simulate import value2flx
+from zcu_tools.simulate import value2flux
 import zcu_tools.simulate.fluxonium as zf
 ```
 
 ```python
-chip_name = "Si001"
-qub_name = ""
+chip_name = "Q12_2D[7]"
+qub_name = "Q4"
 
 result_dir = os.path.join("..", "..", "result", chip_name, qub_name)
-image_dir = os.path.join(result_dir, "image", "t1_curve")
-os.makedirs(image_dir, exist_ok=True)
+t1_curve_dir = os.path.join(result_dir, "t1_curve")
+image_dir = t1_curve_dir
 os.makedirs(result_dir, exist_ok=True)
+os.makedirs(image_dir, exist_ok=True)
 ```
 
 # Load data
@@ -54,18 +63,15 @@ os.makedirs(result_dir, exist_ok=True)
 ## Parameters
 
 ```python
-result_dict = load_result(os.path.join(result_dir, "params.json"))
-fluxdepfit_dict = result_dict.get("fluxdep_fit")
-assert fluxdepfit_dict is not None, "fluxdep_fit not found in result_dict"
+params_file = QubitParams(os.path.join(result_dir, "params.json"), readonly=True)
+fit_inputs = params_file.require_dispersive_inputs(default_bare_rf=5.0)
+prior_dispersive = params_file.get_dispersive_fit()
 
-EJ = fluxdepfit_dict["params"]["EJ"]
-EC = fluxdepfit_dict["params"]["EC"]
-EL = fluxdepfit_dict["params"]["EL"]
-
-params = (EJ, EC, EL)
-flx_half = fluxdepfit_dict["flx_half"]
-flx_int = fluxdepfit_dict["flx_int"]
-flx_period = fluxdepfit_dict["flx_period"]
+params = fit_inputs.params
+EJ, EC, EL = params
+flx_half = fit_inputs.flux_half
+flx_int = fit_inputs.flux_int
+flx_period = fit_inputs.flux_period
 
 print("params = ", params, " GHz")
 print("flx_half = ", flx_half)
@@ -76,13 +82,9 @@ sample_f = 9.58464
 
 g = 0.1  # GHz
 rf_w = 4.2e-3  # GHz
-if dispersive_dict := result_dict.get("dispersive"):
-    bare_rf = dispersive_dict["bare_rf"]
-    g = dispersive_dict["g"]
-elif "r_f" in fluxdepfit_dict["plot_transitions"]:
-    bare_rf = fluxdepfit_dict["plot_transitions"]["r_f"]
-else:
-    bare_rf = 5.0  # GHz
+bare_rf = fit_inputs.bare_rf_seed
+if prior_dispersive is not None:
+    g = prior_dispersive.g
 print(f"bare rf = {bare_rf}", "GHz")
 print(f"g = {g}", "GHz")
 ```
@@ -98,20 +100,26 @@ freqs_df = freqs_df[~np.isnan(freqs_df["T1 (us)"])]
 s_mAs: NDArray[np.float64] = freqs_df["calibrated mA"].values  # type: ignore
 s_fpts: NDArray[np.float64] = 1e-3 * freqs_df["Freq (MHz)"].values  # type: ignore
 s_T1s: NDArray[np.float64] = 1e3 * freqs_df["T1 (us)"].values  # type: ignore
-s_T1errs: NDArray[np.float64] = 1e3 * freqs_df["T1err (us)"].values  # type: ignore
+t1err_col = "T1err (us)"
+if t1err_col in freqs_df.columns:
+    s_T1errs: NDArray[np.float64] = 1e3 * freqs_df[t1err_col].values  # type: ignore
+else:
+    s_T1errs = np.full_like(s_T1s, np.nan, dtype=np.float64)
+    print(f"No '{t1err_col}' column found; T1 fitting will be unweighted.")
 
 # filter out bad points
-# valid = np.logical_or(s_T1errs < 0.25 * s_T1s, np.isnan(s_T1errs))
-# s_mAs = s_mAs[valid]
-# s_fpts = s_fpts[valid]
-# s_T1s = s_T1s[valid]
-# s_T1errs = s_T1errs[valid]
+finite_positive_err = np.isfinite(s_T1errs) & (s_T1errs > 0.0)
+valid = np.isnan(s_T1errs) | (finite_positive_err & (s_T1errs < 0.25 * s_T1s))
+s_mAs = s_mAs[valid]
+s_fpts = s_fpts[valid]
+s_T1s = s_T1s[valid]
+s_T1errs = s_T1errs[valid]
 
 # sort by flux
 s_mAs, s_fpts, s_T1s, s_T1errs = tuple(
     np.array(a) for a in zip(*sorted(zip(s_mAs, s_fpts, s_T1s, s_T1errs)))
 )
-s_flxs = value2flx(s_mAs, flx_half, flx_period)
+s_flxs = value2flux(s_mAs, flx_half, flx_period)
 s_omegas = zt1.freq2omega(s_fpts)
 
 freqs_df.head(10)
@@ -145,47 +153,49 @@ plot_args = (
     flx_half,
     flx_period,
     params,
-    t_flxs,
+    t_flxs
 )
 ```
 
 ## Q_cap
 
 ```python
-s_n_spectrum_data, s_n_elements = zf.calculate_n_oper_vs_flx(
+s_n_spectrum_data, s_n_elements = zf.calculate_n_oper_vs_flux(
     params, s_flxs, spectrum_data=s_n_spectrum_data
 )
+
+mask_range = (None, None)
+masks = np.ones_like(s_omegas, dtype=bool)
+if omega_lb := mask_range[0]:
+    masks = np.logical_and(masks, s_omegas >= omega_lb)
+if omega_ub := mask_range[1]:
+    masks = np.logical_and(masks, s_omegas <= omega_ub)
+
+mask_omegas = s_omegas[masks]
+mask_T1s = s_T1s[masks]
+mask_T1errs = s_T1errs[masks]
+mask_n_elements = s_n_elements[masks]
 
 Temp_Qcap = zt1.find_proper_Temp(
     Temp,
     lambda T: zt1.calc_Qcap_vs_omega(
-        params, s_omegas, s_T1s, s_n_elements, T1errs=s_T1errs, Temp=T
+        params, mask_omegas, mask_T1s, mask_n_elements, T1errs=mask_T1errs, Temp=T
     )[0],
 )
 print(f"Temp_Qcap = {Temp_Qcap * 1e3:.2f} mK")
 ```
 
 ```python
-# Temp_Qcap = Temp
+Temp_Qcap = Temp
 s_Qcaps, s_Qcaps_err = zt1.calc_Qcap_vs_omega(
     params, s_omegas, s_T1s, s_n_elements, T1errs=s_T1errs, Temp=Temp_Qcap
 )
 
 fig, ax = zt1.plot_Q_vs_omega(s_omegas, s_Qcaps, s_Qcaps_err, Qname=r"$Q_{cap}$")
 ax.set_title(f"Temp = {Temp_Qcap * 1e3:.2f} mK")
-# ax.set_ylim(1e3, 1e7)
+ax.set_ylim(1e4, 1e6)
 
-fit_Qcaps = []
-fit_Qcaps.append(zt1.add_Q_fit(ax, s_omegas, s_Qcaps, fit_constant=True))
-
-
-fit_Qcaps = list(map(np.array, fit_Qcaps))
-fit_Qcaps = np.concatenate(fit_Qcaps, axis=1)
-fit_Qcaps = fit_Qcaps[:, np.argsort(fit_Qcaps[0])]
-
-
-def fitted_Qcap(w: np.ndarray, T: float) -> np.ndarray:
-    return np.interp(w, fit_Qcaps[0], fit_Qcaps[1])
+_, fit_Qcaps = zt1.add_Q_fit(ax, s_omegas, s_Qcaps, omega_range=mask_range, fit_constant=True)
 
 
 plt.show()
@@ -194,15 +204,10 @@ plt.close(fig)
 ```
 
 ```python
-# Temp_Qcap = Temp
-cap_mask = np.logical_and(
-    s_omegas > np.min(fit_Qcaps[0]), s_omegas < np.max(fit_Qcaps[0])
-)
-
-s_cap_dipoles = zt1.calc_cap_dipole(params, s_n_elements, s_omegas, Temp_Qcap)
+mask_cap_dipoles = zt1.calc_cap_dipole(params, mask_n_elements, mask_omegas, Temp_Qcap)
 
 fig, ax = zt1.plot_t1_vs_elements(
-    s_cap_dipoles[cap_mask], s_T1s[cap_mask], s_T1errs[cap_mask], Q_name=r"$Q_{cap}$"
+    mask_cap_dipoles, mask_T1s, mask_T1errs, Q_name=r"$Q_{cap}$"
 )
 ax.set_title(f"Temp = {Temp_Qcap * 1e3:.2f} mK")
 # ax.set_ylim(5e3, 5e5)
@@ -213,24 +218,24 @@ plt.close(fig)
 ```
 
 ```python
-Q_cap_array = fitted_Qcap(s_omegas, Temp_Qcap)
-Q_cap = float(np.mean(Q_cap_array) + 2 * np.std(Q_cap_array))
+Q_cap = float(np.mean(fit_Qcaps))
 
 # Q_cap = 4e5
+log_product = np.log(mask_T1s * mask_cap_dipoles)
+up_Q = np.exp(np.mean(log_product) + 2.0 * np.std(log_product))
+down_Q = np.exp(np.mean(log_product) - 2.0 * np.std(log_product))
 
 fig, _ = zt1.plot_t1_with_sample(
     *plot_args,
     name="Q_cap",
     noise_name="t1_capacitive",
-    noise_values=[Q_cap / 2, Q_cap, Q_cap * 2],
-    # values=[Q_cap_min, fitted_Qcap, Q_cap_max],
+    noise_values=[down_Q, Q_cap, up_Q],
     Temp=Temp_Qcap,
 )
 
 plt.show()
 fig.savefig(os.path.join(image_dir, "T1s_fit_Qcap.png"))
 plt.close(fig)
-
 ```
 
 ## Q_qp
@@ -238,17 +243,29 @@ plt.close(fig)
 ```python
 s_sin2_elements = np.asarray([zt1.calc_qp_oper(params, flx) for flx in s_flxs])
 
+mask_range = (6, None)
+masks = np.ones_like(s_omegas, dtype=bool)
+if omega_lb := mask_range[0]:
+    masks = np.logical_and(masks, s_omegas >= omega_lb)
+if omega_ub := mask_range[1]:
+    masks = np.logical_and(masks, s_omegas <= omega_ub)
+
+mask_omegas = s_omegas[masks]
+mask_T1s = s_T1s[masks]
+mask_T1errs = s_T1errs[masks]
+mask_sin2_elements = s_sin2_elements[masks]
+
 Temp_Xqp = zt1.find_proper_Temp(
     Temp,
     lambda T: zt1.calc_Qqp_vs_omega(
-        params, s_omegas, s_T1s, s_sin2_elements, T1errs=s_T1errs, Temp=T
+        params, mask_omegas, mask_T1s, mask_sin2_elements, T1errs=mask_T1errs, Temp=T
     )[0],
 )
 print(f"Temp_Xqp = {Temp_Xqp * 1e3:.2f} mK")
 ```
 
 ```python
-# Temp_Xqp = Temp
+Temp_Xqp = Temp
 
 s_Qqps, s_Qqps_err = zt1.calc_Qqp_vs_omega(
     params, s_omegas, s_T1s, s_sin2_elements, T1errs=s_T1errs, Temp=Temp_Xqp
@@ -256,20 +273,9 @@ s_Qqps, s_Qqps_err = zt1.calc_Qqp_vs_omega(
 
 fig, ax = zt1.plot_Q_vs_omega(s_omegas, s_Qqps, s_Qqps_err, Qname=r"$Q_{qp}$")
 ax.set_title(f"Temp = {Temp_Xqp * 1e3:.2f} mK")
-# ax.set_ylim(1e3, 1e7)
+ax.set_ylim(1e2,1e6)
 
-fit_Qqps = []
-fit_Qqps.append(zt1.add_Q_fit(ax, s_omegas, s_Qqps, fit_constant=True))
-
-
-fit_Qqps = list(map(np.array, fit_Qqps))
-fit_Qqps = np.concatenate(fit_Qqps, axis=1)
-fit_Qqps = fit_Qqps[:, np.argsort(fit_Qqps[0])]
-
-
-def fitted_Qqp(w: np.ndarray, T: float) -> np.ndarray:
-    return np.interp(w, fit_Qqps[0], fit_Qqps[1])
-
+_, fit_Qqps = zt1.add_Q_fit(ax, s_omegas, s_Qqps, omega_range=(6, None), fit_constant=True)
 
 plt.show()
 fig.savefig(os.path.join(image_dir, "Qqp_vs_omega.png"))
@@ -277,16 +283,14 @@ plt.close(fig)
 ```
 
 ```python
-qp_mask = np.logical_and(s_omegas > np.min(fit_Qqps[0]), s_omegas < np.max(fit_Qqps[0]))
-
-s_qp_dipoles = zt1.calc_qp_dipole(params, s_sin2_elements, s_omegas, Temp_Xqp)
+mask_qp_dipoles = zt1.calc_qp_dipole(params, mask_sin2_elements, mask_omegas, Temp_Xqp)
 
 fig, ax = zt1.plot_t1_vs_elements(
-    s_qp_dipoles[qp_mask],
-    s_T1s[qp_mask],
-    s_T1errs[qp_mask],
+    mask_qp_dipoles,
+    mask_T1s,
+    mask_T1errs,
     Q_name=r"$x_{qp}$",
-    product2val=lambda x: 1 / x,
+    product2val=lambda x: 1 / x
 )
 ax.set_title(f"Temp = {Temp_Xqp * 1e3:.2f} mK")
 # ax.set_ylim(5e3, 5e5)
@@ -297,16 +301,18 @@ plt.close(fig)
 ```
 
 ```python
-Qqp_array = fitted_Qqp(s_omegas, Temp_Xqp)
-x_qp = 1 / float(np.mean(Qqp_array) + 2 * np.std(Qqp_array))
+x_qp = 1 / float(np.mean(fit_Qqps) + 20*np.std(fit_Qqps))
 
 # x_qp = 1.5e-4
+log_product = np.log(mask_T1s * mask_qp_dipoles)
+up_Q = np.exp(np.mean(log_product) + 2.0 * np.std(log_product))
+down_Q = np.exp(np.mean(log_product) - 2.0 * np.std(log_product))
 
 fig, _ = zt1.plot_t1_with_sample(
     *plot_args,
     name="x_qp",
     noise_name="t1_quasiparticle_tunneling",
-    noise_values=[x_qp / 2, x_qp, x_qp * 2],
+    noise_values=[1/down_Q, x_qp, 1/up_Q],
     Temp=Temp,
 )
 
@@ -318,21 +324,33 @@ plt.close(fig)
 ## Q_ind
 
 ```python
-s_phi_spectrum_data, s_phi_elements = zf.calculate_phi_oper_vs_flx(
+s_phi_spectrum_data, s_phi_elements = zf.calculate_phi_oper_vs_flux(
     params, s_flxs, spectrum_data=s_phi_spectrum_data
 )
+
+mask_range = (None, 4)
+masks = np.ones_like(s_omegas, dtype=bool)
+if omega_lb := mask_range[0]:
+    masks = np.logical_and(masks, s_omegas >= omega_lb)
+if omega_ub := mask_range[1]:
+    masks = np.logical_and(masks, s_omegas <= omega_ub)
+
+mask_omegas = s_omegas[masks]
+mask_T1s = s_T1s[masks]
+mask_T1errs = s_T1errs[masks]
+mask_phi_elements = s_phi_elements[masks]
 
 Temp_Qind = zt1.find_proper_Temp(
     Temp,
     lambda T: zt1.calc_Qind_vs_omega(
-        params, s_omegas, s_T1s, s_phi_elements, T1errs=s_T1errs, Temp=T
+        params, mask_omegas, mask_T1s, mask_phi_elements, T1errs=mask_T1errs, Temp=T
     )[0],
 )
 print(f"Temp_Qind = {Temp_Qind * 1e3:.2f} mK")
 ```
 
 ```python
-# Temp_Qind = Temp
+Temp_Qind = Temp
 Qind_array, Qind_array_err = zt1.calc_Qind_vs_omega(
     params, s_omegas, s_T1s, s_phi_elements, T1errs=s_T1errs, Temp=Temp_Qind
 )
@@ -340,17 +358,7 @@ Qind_array, Qind_array_err = zt1.calc_Qind_vs_omega(
 fig, ax = zt1.plot_Q_vs_omega(s_omegas, Qind_array, Qind_array_err, Qname=r"$Q_{ind}$")
 ax.set_title(f"Temp = {Temp_Qind * 1e3:.2f} mK")
 
-fit_Qinds = []
-fit_Qinds.append(zt1.add_Q_fit(ax, s_omegas, Qind_array, fit_constant=True))
-
-fit_Qinds = list(map(np.array, fit_Qinds))
-fit_Qinds = np.concatenate(fit_Qinds, axis=1)
-fit_Qinds = fit_Qinds[:, np.argsort(fit_Qinds[0])]
-
-
-def fitted_Qind(w: np.ndarray, T: float) -> np.ndarray:
-    return np.interp(w, fit_Qinds[0], fit_Qinds[1])
-
+_, fit_Qinds = zt1.add_Q_fit(ax, s_omegas, Qind_array, omega_range=mask_range, fit_constant=True)
 
 plt.show()
 fig.savefig(os.path.join(image_dir, "Qind_vs_omega.png"))
@@ -358,18 +366,13 @@ plt.close(fig)
 ```
 
 ```python
-ind_mask = np.logical_and(
-    s_omegas > np.min(fit_Qinds[0]), s_omegas < np.max(fit_Qinds[0])
-)
-
-s_ind_dipoles = zt1.calc_qp_dipole(params, s_phi_elements, s_omegas, Temp_Qind)
+mask_ind_dipoles = zt1.calc_ind_dipole(params, mask_phi_elements, mask_omegas, Temp_Qind)
 
 fig, ax = zt1.plot_t1_vs_elements(
-    s_ind_dipoles[ind_mask],
-    s_T1s[ind_mask],
-    s_T1errs[ind_mask],
-    Q_name=r"$Q_{ind}$",
-    product2val=lambda x: 1 / x,
+    mask_ind_dipoles,
+    mask_T1s,
+    mask_T1errs,
+    Q_name=r"$Q_{ind}$"
 )
 ax.set_title(f"Temp = {Temp_Qind * 1e3:.2f} mK")
 # ax.set_ylim(5e3, 5e5)
@@ -380,16 +383,18 @@ plt.close(fig)
 ```
 
 ```python
-Q_ind_array = fitted_Qind(s_omegas, Temp_Qind)
-Q_ind = float(np.mean(Q_ind_array) + 2 * np.std(Q_ind_array))
+Q_ind = float(np.mean(fit_Qinds))
 
 # Q_ind = 7e7
+log_product = np.log(mask_T1s * mask_ind_dipoles)
+up_Q = np.exp(np.mean(log_product) + 2.0 * np.std(log_product))
+down_Q = np.exp(np.mean(log_product) - 2.0 * np.std(log_product))
 
 fig, ax = zt1.plot_t1_with_sample(
     *plot_args,
     name="Q_ind",
     noise_name="t1_inductive",
-    noise_values=[Q_ind / 2, Q_ind, Q_ind * 2],
+    noise_values=[down_Q, Q_ind, up_Q],
     Temp=Temp_Qind,
 )
 # ax.set_xlim(-5, -4)
@@ -397,6 +402,142 @@ fig, ax = zt1.plot_t1_with_sample(
 plt.show()
 fig.savefig(os.path.join(image_dir, "T1s_fit_Q_ind.png"))
 plt.close(fig)
+```
+
+## All in once
+
+```python
+fit_init = zt1.T1FitParams(
+    Q_cap=Q_cap,
+    x_qp=x_qp,
+    Q_ind=Q_ind,
+    Temp=Temp,
+)
+
+fit_bounds = {
+    "Q_cap": (fit_init.Q_cap / 100, fit_init.Q_cap * 100),
+    "x_qp": (fit_init.x_qp / 100, fit_init.x_qp * 100),
+    "Q_ind": (fit_init.Q_ind / 100, fit_init.Q_ind * 100),
+    "Temp": (10e-3, 300e-3),
+}
+
+fit_result = zt1.fit_t1_noise_params(
+    s_flxs,
+    s_T1s,
+    params,
+    init=fit_init,
+    bounds=fit_bounds,
+    # fixed=("Temp", "Q_ind"),
+    T1errs=s_T1errs,
+    residual_mode="log",
+    loss="soft_l1",
+    max_nfev=200,
+    progress=True,
+)
+
+fit_Q_cap = fit_result.params.Q_cap
+fit_x_qp = fit_result.params.x_qp
+fit_Q_ind = fit_result.params.Q_ind
+fit_Temp = fit_result.params.Temp
+
+fit_noise = [
+    ("t1_capacitive", dict(Q_cap=fit_Q_cap)),
+    ("t1_quasiparticle_tunneling", dict(x_qp=fit_x_qp)),
+    ("t1_inductive", dict(Q_ind=fit_Q_ind)),
+]
+
+print("fit success =", fit_result.success)
+print("fit message =", fit_result.message)
+print(f"Q_cap = {fit_Q_cap:.3e} +/- {fit_result.stderr.Q_cap:.1e}")
+print(f"x_qp = {fit_x_qp:.3e} +/- {fit_result.stderr.x_qp:.1e}")
+print(f"Q_ind = {fit_Q_ind:.3e} +/- {fit_result.stderr.Q_ind:.1e}")
+print(f"Temp = {fit_Temp * 1e3:.2f} +/- {fit_result.stderr.Temp * 1e3:.2f} mK")
+print("fixed =", fit_result.fixed)
+print("free =", fit_result.free)
+print(f"reduced chi2 = {fit_result.reduced_chi2:.3g}")
+```
+
+```python
+fit_t1_effs = zf.calculate_eff_t1_vs_flux_fast(params, t_flxs, fit_noise, fit_Temp)
+fit_image_path = os.path.join(image_dir, "T1s_fit_all_in_once.png")
+
+QubitParams(os.path.join(result_dir, "params.json")).set_t1_curve_fit(
+    T1CurveFit(
+        params=T1CurveFitParams(
+            Q_cap=fit_Q_cap,
+            x_qp=fit_x_qp,
+            Q_ind=fit_Q_ind,
+            Temp=fit_Temp,
+        ),
+        stderr=T1CurveFitUncertainty(
+            Q_cap=fit_result.stderr.Q_cap,
+            x_qp=fit_result.stderr.x_qp,
+            Q_ind=fit_result.stderr.Q_ind,
+            Temp=fit_result.stderr.Temp,
+        ),
+        fixed=fit_result.fixed,
+        free=fit_result.free,
+        cost=fit_result.cost,
+        reduced_chi2=fit_result.reduced_chi2,
+        success=fit_result.success,
+        message=fit_result.message,
+        residual_mode="log",
+        loss="soft_l1",
+        max_nfev=200,
+        init=T1CurveFitParams(
+            Q_cap=fit_init.Q_cap,
+            x_qp=fit_init.x_qp,
+            Q_ind=fit_init.Q_ind,
+            Temp=fit_init.Temp,
+        ),
+        bounds=fit_bounds,
+    )
+)
+
+%matplotlib inline
+fig, ax = zt1.plot_eff_t1_with_sample(
+    s_mAs,
+    s_T1s,
+    s_T1errs,
+    fit_t1_effs,
+    flx_half,
+    flx_period,
+    t_flxs,
+    label="all-in-one fit",
+    title=f"Temperature = {fit_Temp * 1e3:.2f} mK",
+)
+
+fit_annotation = "\n".join(
+    [
+        f"Q_cap = {fit_Q_cap:.3e}",
+        f"x_qp = {fit_x_qp:.3e}",
+        f"Q_ind = {fit_Q_ind:.3e}",
+        f"Temp = {fit_Temp * 1e3:.2f} mK",
+        f"reduced chi2 = {fit_result.reduced_chi2:.3g}",
+    ]
+)
+ax.text(
+    1.02,
+    0.98,
+    fit_annotation,
+    transform=ax.transAxes,
+    va="top",
+    ha="left",
+    fontsize=10,
+    bbox=dict(
+        boxstyle="round,pad=0.35",
+        facecolor="white",
+        edgecolor="0.5",
+        alpha=0.85,
+    ),
+    clip_on=False,
+)
+
+plt.show()
+fig.savefig(fit_image_path, bbox_inches="tight")
+plt.close(fig)
+print("t1_curve_fit written to params.json")
+print(f"all-in-one fit image saved to {fit_image_path}")
 ```
 
 # Advance
@@ -409,8 +550,8 @@ Temp = Temp_Qcap
 # noise_channels = fit_noise
 noise_channels = [
     ("t1_capacitive", dict(Q_cap=Q_cap)),
-    # ("t1_quasiparticle_tunneling", dict(x_qp=x_qp)),
-    # ("t1_inductive", dict(Q_ind=Q_ind)),
+    ("t1_quasiparticle_tunneling", dict(x_qp=x_qp)),
+    ("t1_inductive", dict(Q_ind=Q_ind)),
 ]
 
 noise_label = "\n".join(
@@ -429,7 +570,7 @@ t1_effs = zf.calculate_eff_t1_vs_flux_fast(params, t_flxs, noise_channels, Temp)
 ## Percell Effect
 
 ```python
-percell_t1s = zf.calculate_percell_t1_vs_flx(
+percell_t1s = zf.calculate_percell_t1_vs_flux(
     t_flxs, bare_rf=bare_rf, kappa=rf_w, g=g, Temp=Temp, params=params
 )
 ```

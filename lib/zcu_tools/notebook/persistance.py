@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import json
 import os
-import re
 from typing import Any, NotRequired, cast
 
 import h5py as h5
 import numpy as np
 from numpy.typing import NDArray
 from typing_extensions import TypedDict  # extra_items (PEP 728) not in stdlib 3.13
+
+from zcu_tools.meta_tool import QubitParams
 
 
 def format_rawdata(
@@ -39,11 +39,13 @@ class FluxDepFitResult(TypedDict):
     flux_int: float
     flux_period: float
     plot_transitions: TransitionDict
+    timestamp: NotRequired[str]
 
 
 class DispersiveResult(TypedDict):
     bare_rf: float
     g: float
+    timestamp: NotRequired[str]
 
 
 class ProjectIdentity(TypedDict):
@@ -79,9 +81,7 @@ def dump_result(
     schema_version: int | None = None,
     project: ProjectIdentity | None = None,
 ) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-
-    result = ResultData(name=name)
+    result: dict[str, Any] = {"name": name}
     project_identity = project or _project_from_name(name)
     if project_identity is not None:
         result["schema_version"] = schema_version or 1
@@ -93,29 +93,17 @@ def dump_result(
     if dispersive is not None:
         result["dispersive"] = dispersive
 
-    with open(path, "w", encoding="utf8") as f:
-        output = json.dumps(result, ensure_ascii=False, indent=4)
-
-        def format_list(match):
-            return " ".join(match.group(0).split())
-
-        output = re.sub(r"(?<=\[)[^\[\]]+(?=\])", format_list, output)
-        f.write(output)
+    QubitParams(path).replace_raw(result)
 
 
 def load_result(path: str) -> ResultData:
     """Load the result from a json file"""
 
-    with open(path, "r") as f:
-        result_data = json.load(f)
-
-    return cast(ResultData, result_data)
+    return cast(ResultData, QubitParams(path, readonly=True).to_raw())
 
 
 def update_result(path: str, update_dict: dict[str, Any]) -> None:
-    result_data = load_result(path)
-    result_data.update(update_dict)  # type: ignore
-    dump_result(path, **result_data)
+    QubitParams(path).update_raw(update_dict)
 
 
 class SpectrumData(TypedDict):

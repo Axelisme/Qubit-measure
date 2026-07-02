@@ -16,19 +16,26 @@ jupyter:
 from scqubits.core.fluxonium import Fluxonium
 from scqubits.core.oscillator import Oscillator
 from scqubits.core.hilbert_space import HilbertSpace
-from zcu_tools.notebook.persistance import load_result
+from zcu_tools.meta_tool import QubitParams
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 
 qub_name = "Si001"
 
 loadpath = f"../../../result/{qub_name}/params.json"
-_, params, flx_half, period, allows, data_dict = load_result(loadpath)
+params_file = QubitParams(loadpath, readonly=True)
+fit = params_file.require_fluxdep_fit()
+dispersive = params_file.get_dispersive_fit()
+
+params = fit.params
+flx_half = fit.flux_half
+period = fit.flux_period
+allows = fit.plot_transitions
 
 print(f"EJ: {params[0]:.3f} GHz, EC: {params[1]:.3f} GHz, EL: {params[2]:.3f} GHz")
 
-if dispersive_cfg := data_dict.get("dispersive"):
-    g = dispersive_cfg["g"]
-    r_f = dispersive_cfg["r_f"]
+if dispersive is not None:
+    g = dispersive.g
+    r_f = dispersive.bare_rf
     print(f"g: {g} GHz, r_f: {r_f} GHz")
 elif "r_f" in allows:
     r_f = allows["r_f"]

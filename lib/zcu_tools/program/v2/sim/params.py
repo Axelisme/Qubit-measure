@@ -4,7 +4,7 @@ This module defines only the data container; no simulation logic lives here.
 SimEngine (P1-5) consumes SimParams to drive TLS density-matrix simulation in
 place of real hardware acquisition.
 
-Alignment with params.json (see zcu_tools.notebook.persistance):
+Alignment with params.json (see zcu_tools.meta_tool.QubitParams):
     fluxdep_fit.params["EJ"]  -> SimParams.EJ
     fluxdep_fit.params["EC"]  -> SimParams.EC
     fluxdep_fit.params["EL"]  -> SimParams.EL

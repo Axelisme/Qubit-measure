@@ -12,13 +12,12 @@ a Qt-signalling ``BaseProgressBar`` via ``use_pbar_factory``; without one,
 ``search_in_database`` falls back to its tqdm default.
 
 The numerical cores are reused verbatim from the notebook:
-``search_in_database`` (database search) and ``dump_result`` (params.json).
+``search_in_database`` (database search).
 """
 
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -27,12 +26,14 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, transitions_with_freqs
-from zcu_tools.notebook.analysis.fluxdep.fitting import search_in_database
-from zcu_tools.notebook.persistance import (
-    FluxDepFitResult,
-    TransitionDict,
-    dump_result,
+from zcu_tools.meta_tool import (
+    FluxDepFit,
+    ParamsProject,
+    QubitParams,
+    params_path_for_result_dir,
 )
+from zcu_tools.notebook.analysis.fluxdep.fitting import search_in_database
+from zcu_tools.notebook.persistance import TransitionDict
 from zcu_tools.progress_bar import BaseProgressBar, use_pbar_factory
 
 logger = logging.getLogger(__name__)
@@ -57,10 +58,9 @@ def default_params_path(result_dir: str) -> str:
     """The notebook-layout default params.json path (``<result_dir>/params.json``).
 
     ``result_dir`` is the project's result dir, which is always a concrete path
-    (``ProjectInfo`` derives it from chip/qubit eagerly), so the dirname is never
-    empty and ``dump_result``'s ``makedirs(dirname, exist_ok=True)`` always works.
+    (``ProjectInfo`` derives it from chip/qubit eagerly).
     """
-    return os.path.join(result_dir, "params.json")
+    return params_path_for_result_dir(result_dir)
 
 
 class FitService:
@@ -213,14 +213,20 @@ class FitService:
         )
 
         EJ, EC, EL = fit.params
-        result = FluxDepFitResult(
-            params={"EJ": EJ, "EC": EC, "EL": EL},
-            flux_half=aligned.flux_half,
-            flux_int=aligned.flux_int,
-            flux_period=aligned.flux_period,
-            plot_transitions=fit.transitions,
+        params_file = QubitParams(path)
+        params_file.ensure_project(
+            ParamsProject(chip_name=project.chip_name, qub_name=project.qub_name)
         )
-        name = f"{project.chip_name}/{project.qub_name}"
-        dump_result(path, name, fluxdep_fit=result)
+        params_file.set_fluxdep_fit(
+            FluxDepFit(
+                EJ=EJ,
+                EC=EC,
+                EL=EL,
+                flux_half=aligned.flux_half,
+                flux_int=aligned.flux_int,
+                flux_period=aligned.flux_period,
+                plot_transitions=fit.transitions,
+            )
+        )
         logger.debug("export_params: %r -> %r", fit.params, path)
         return path

@@ -33,7 +33,7 @@ import pandas as pd
 %autoreload 2
 import zcu_tools.notebook.analysis.plot as zp
 from zcu_tools.notebook.analysis.fluxdep.utils import FreqFluxDependVisualizer
-from zcu_tools.notebook.persistance import load_result
+from zcu_tools.meta_tool import QubitParams
 from zcu_tools.simulate import flx2mA, mA2flx
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flx
 ```
@@ -49,14 +49,21 @@ os.makedirs(f"../../result/{qub_name}/web/design", exist_ok=True)
 
 ```python
 loadpath = f"../../result/{qub_name}/params.json"
-_, params, mA_c, period, allows, data_dict = load_result(loadpath)
+params_file = QubitParams(loadpath, readonly=True)
+fit = params_file.require_fluxdep_fit()
+dispersive = params_file.get_dispersive_fit()
+
+params = fit.params
+mA_c = fit.flux_half
+period = fit.flux_period
+allows = fit.plot_transitions
 EJ, EC, EL = params
 
 print(allows)
 
-if dispersive_cfg := data_dict.get("dispersive"):
-    g = dispersive_cfg["g"]
-    r_f = dispersive_cfg["r_f"]
+if dispersive is not None:
+    g = dispersive.g
+    r_f = dispersive.bare_rf
     print(f"g: {g}, r_f: {r_f}")
 elif "r_f" in allows:
     r_f = allows["r_f"]

@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-02 — tests quality refactor
+**Last updated:** 2026-07-02 — QubitParams and T1 fit tests
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -116,10 +116,12 @@ tests/
 ├── experiment/v2/                  # Experiment runtime、persistence / analysis tests
 │   ├── autofluxdep/                # FluxDepInfoTracker typed context tests
 │   └── runner/                     # Schedule runtime、ResultTree 與 MultiMeasurementExecutor tests
+├── meta_tool/                      # SyncFile / QubitParams / arbitrary waveform persistence tests
 ├── analysis/
 │   └── fluxdep/                    # Flux-Dependence Analysis kernel tests
 ├── mcp/                            # MCP bridge、call-log、timeout policy、remote schema / ARRAY param regression tests
 ├── notebook/analysis/fluxdep/      # Fluxonium 光譜分析模型測試
+├── notebook/analysis/t1_curve/     # T1 curve Q-channel 與 t1_curve_fit tests
 └── utils/fitting/                  # 曲線擬合工具測試
 ```
 

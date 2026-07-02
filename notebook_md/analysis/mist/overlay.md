@@ -11,7 +11,7 @@ from typing import List, cast
 import zcu_tools.experiment.v2 as ze
 from zcu_tools.utils.datasaver import load_data
 from zcu_tools.simulate import mA2flx, flx2mA
-from zcu_tools.notebook.persistance import load_result
+from zcu_tools.meta_tool import QubitParams
 from zcu_tools.notebook.analysis.mist.branch.overlay import calc_overlay, plot_overlay
 ```
 
@@ -26,13 +26,18 @@ result_dir.joinpath("web").mkdir(exist_ok=True)
 ```
 
 ```python
-_, params, mA_c, period, allows, data_dict = load_result(
-    str(result_dir / "params.json")
-)
+params_file = QubitParams(result_dir / "params.json", readonly=True)
+fit = params_file.require_fluxdep_fit()
+dispersive = params_file.get_dispersive_fit()
 
-if dispersive_cfg := data_dict.get("dispersive"):
-    g: float = dispersive_cfg["g"]
-    r_f: float = dispersive_cfg["r_f"]
+params = fit.params
+mA_c = fit.flux_half
+period = fit.flux_period
+allows = fit.plot_transitions
+
+if dispersive is not None:
+    g: float = dispersive.g
+    r_f: float = dispersive.bare_rf
     print(f"g: {g}, r_f: {r_f}")
 elif "r_f" in allows:
     r_f = allows["r_f"]

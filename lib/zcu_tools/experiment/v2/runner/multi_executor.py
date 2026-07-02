@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import shutil
 from collections import OrderedDict, defaultdict
 from collections.abc import Callable, Mapping, Sequence
@@ -25,7 +26,7 @@ from zcu_tools.experiment.v2.runner.task import MeasurementBundle
 from zcu_tools.experiment.v2.utils import Result
 from zcu_tools.liveplot import AbsLivePlot, MultiLivePlot, make_plot_frame
 from zcu_tools.liveplot.backend.jupyter import grab_frame_with_instant_plot
-from zcu_tools.utils.debug import print_traceback
+from zcu_tools.utils.debug import log_current_exception
 
 T_Cfg = TypeVar("T_Cfg", bound=ExpCfgModel)
 T_Env = TypeVar("T_Env")
@@ -33,6 +34,8 @@ T_Axis = TypeVar("T_Axis", bound=Sequence[Any] | NDArray[Any])
 T_Measurement = TypeVar(
     "T_Measurement", bound=MeasurementBundle[Any, Any, Any, Any, Any]
 )
+
+logger = logging.getLogger(__name__)
 
 
 class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg, T_Env, T_Axis]):
@@ -199,7 +202,7 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg, T_Env, T_Axis]):
                     except KeyboardInterrupt:
                         sched.set_stop()
                     except Exception:
-                        print_traceback()
+                        log_current_exception(logger, "measurement executor failed")
                         raise
                     finally:
                         for measurement in self.measurements.values():

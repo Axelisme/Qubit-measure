@@ -37,23 +37,12 @@ class FluxoniumPredictor:
 
     @classmethod
     def from_file(cls, result_path: str, flux_bias: float = 0.0) -> FluxoniumPredictor:
-        from zcu_tools.notebook.persistance import load_result
+        from zcu_tools.meta_tool import QubitParams
 
-        result_dict = load_result(result_path)
-        fluxdepfit_dict = result_dict.get("fluxdep_fit")
-        if fluxdepfit_dict is None:
-            raise ValueError(
-                "fluxdep_fit result is required to create FluxoniumPredictor"
-            )
-        params = (
-            fluxdepfit_dict["params"]["EJ"],
-            fluxdepfit_dict["params"]["EC"],
-            fluxdepfit_dict["params"]["EL"],
+        model = QubitParams(result_path, readonly=True).require_fluxonium_model(
+            flux_bias=flux_bias
         )
-        flux_half = fluxdepfit_dict["flux_half"]
-        flux_period = fluxdepfit_dict["flux_period"]
-
-        return cls(params, flux_half, flux_period, flux_bias)
+        return cls(model.params, model.flux_half, model.flux_period, model.flux_bias)
 
     def clone(self) -> FluxoniumPredictor:
         return FluxoniumPredictor(

@@ -1,21 +1,12 @@
-"""ExportService — write the fitted g / bare_rf back to ``params.json``.
-
-Ports the notebook's final cell: ``update_result(path, dict(dispersive=...))``. It
-uses ``update_result`` (not ``dump_result``) so the existing ``fluxdep_fit`` section
-dispersive read its inputs from is preserved — the two sections coexist in one file.
-
-``update_result`` reads the file first, so it fast-fails if ``params.json`` does not
-exist (it always should, since the fit inputs were loaded from it).
-"""
+"""ExportService — write the fitted g / bare_rf back to ``params.json``."""
 
 from __future__ import annotations
 
 import logging
-import os
 
 from zcu_tools.gui.app.dispersive.services.project import default_params_path
 from zcu_tools.gui.app.dispersive.state import DispersiveState
-from zcu_tools.notebook.persistance import DispersiveResult, update_result
+from zcu_tools.meta_tool import DispersiveFit, QubitParams, QubitParamsError
 
 logger = logging.getLogger(__name__)
 
@@ -38,16 +29,19 @@ class ExportService:
             raise RuntimeError("no dispersive fit result to export (fit g first)")
 
         path = savepath or default_params_path(self._state.project.result_dir)
-        if not os.path.isfile(path):
+        assert fit.g is not None  # has_result guards this
+        try:
+            QubitParams(path).set_dispersive_fit(
+                DispersiveFit(g=fit.g, bare_rf=fit.bare_rf)
+            )
+        except FileNotFoundError as exc:
             raise FileNotFoundError(
                 f"params.json not found at {path!r} — it must already hold the "
                 "fluxdep_fit section (load the fit inputs from it first)"
-            )
-
-        assert fit.g is not None  # has_result guards this
-        update_result(
-            path,
-            dict(dispersive=DispersiveResult(g=fit.g, bare_rf=fit.bare_rf)),
-        )
+            ) from exc
+        except QubitParamsError as exc:
+            raise ValueError(
+                f"Failed to export dispersive fit to {path!r}: {exc}"
+            ) from exc
         logger.debug("export_params: wrote dispersive to %r", path)
         return path
