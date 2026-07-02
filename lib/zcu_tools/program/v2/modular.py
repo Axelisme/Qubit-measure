@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from abc import ABC, abstractmethod
 from collections.abc import Sequence
 
 import numpy as np
@@ -29,7 +30,7 @@ class ModularProgramV2(MyProgramV2):
     ) -> None:
         self.modules = modules
         self.sweep_dict = sweep
-        self._dmem_buffer = []
+        self._dmem_buffer: list[int] = []
 
         logger.debug(
             "ModularProgramV2.__init__: %d modules, reps=%s, relax_delay=%s",
@@ -53,7 +54,7 @@ class ModularProgramV2(MyProgramV2):
 
         logger.debug(
             "ModularProgramV2._initialize: registered %d unique pulses",
-            len(self.pulse_registry._pulses),
+            self.pulse_registry.count,
         )
 
     def _body(self, cfg: ProgramV2Cfg) -> None:
@@ -76,7 +77,7 @@ class ModularProgramV2(MyProgramV2):
         return np.array(self._dmem_buffer, dtype=np.int32)
 
 
-class BaseCustomProgramV2(ModularProgramV2):
+class BaseCustomProgramV2(ModularProgramV2, ABC):
     """
     A base class for custom programs to inherit.
     """
@@ -92,5 +93,5 @@ class BaseCustomProgramV2(ModularProgramV2):
             soccfg, cfg, modules=self.make_modules(cfg), sweep=sweep, **kwargs
         )
 
-    def make_modules(self, cfg: ProgramV2Cfg) -> Sequence[Module]:
-        return []
+    @abstractmethod
+    def make_modules(self, cfg: ProgramV2Cfg) -> Sequence[Module]: ...

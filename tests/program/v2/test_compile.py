@@ -12,7 +12,7 @@ from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.ir import base as ir_base
 from zcu_tools.program.v2.ir.pipeline import PipeLineConfig, PipeLineContext
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
-from zcu_tools.program.v2.modular import ModularProgramV2
+from zcu_tools.program.v2.modular import BaseCustomProgramV2, ModularProgramV2
 from zcu_tools.program.v2.modules import Delay, SoftDelay
 from zcu_tools.program.v2.sweep import SweepCfg
 
@@ -56,6 +56,14 @@ def _expected_line(prog: ModularProgramV2) -> int:
 def test_empty_program_compiles():
     prog = _make_prog()
     assert prog.binprog is not None
+
+
+def test_base_custom_program_requires_make_modules():
+    soccfg = make_mock_soccfg()
+    cfg = ProgramV2Cfg()
+
+    with pytest.raises(TypeError, match="abstract"):
+        BaseCustomProgramV2(soccfg, cfg)  # pyright: ignore[reportAbstractUsage]
 
 
 def test_binprog_has_pmem():

@@ -18,6 +18,7 @@ def _make_cfg(freq=5000.0, phase=0.0, gain=0.5, ch=0, length=0.1):
 def test_register_new_pulse_returns_true():
     reg = PulseRegistry()
     assert reg.register("p0", _make_cfg()) is True
+    assert reg.count == 1
 
 
 def test_register_duplicate_returns_false():
@@ -25,12 +26,14 @@ def test_register_duplicate_returns_false():
     cfg = _make_cfg()
     reg.register("p0", cfg)
     assert reg.register("p0_dup", _make_cfg()) is False
+    assert reg.count == 1
 
 
 def test_register_different_freq_is_new():
     reg = PulseRegistry()
     reg.register("p0", _make_cfg(freq=5000.0))
     assert reg.register("p1", _make_cfg(freq=5001.0)) is True
+    assert reg.count == 2
 
 
 def test_calc_name_stable_with_qickparam():

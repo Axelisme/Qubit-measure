@@ -37,6 +37,11 @@ class PulseRegistry:
     def __init__(self) -> None:
         self._pulses: dict[str, tuple[str, PulseCfg]] = {}
 
+    @property
+    def count(self) -> int:
+        """Number of unique pulse configurations registered."""
+        return len(self._pulses)
+
     def calc_name(self, cfg: PulseCfg) -> str:
         def sort_dict(d: dict) -> dict:
             sorted_dict = OrderedDict()
