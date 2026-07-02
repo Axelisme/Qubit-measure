@@ -327,7 +327,7 @@ class TestPeakNAvgMaxMode:
             peak_n_avg(np.array([1.0, 2.0]), n=-1)
 
     def test_invalid_mode_raises(self) -> None:
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError, match="Invalid mode"):
             peak_n_avg(np.array([1.0, 2.0]), n=1, mode="median")  # type: ignore[arg-type]
 
     def test_large_random_consistency(self) -> None:

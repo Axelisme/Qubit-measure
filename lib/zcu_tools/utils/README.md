@@ -1,6 +1,6 @@
 # zcu_tools.utils
 
-**Last updated:** 2026-07-01
+**Last updated:** 2026-07-02 — review_report9 cleanup
 
 `utils` 放可被 experiment / GUI 共用、且不反向依賴上層 domain 的 helper。
 實驗資料持久化的 public API 收斂在 `zcu_tools.utils.datasaver` package
@@ -28,8 +28,27 @@ import。
 - Path helpers（`format_ext`、`reserve_labber_filepath`、datafolder helpers）與
   HTTP transport helpers 由 facade re-export；`reserve_labber_filepath` 只供 caller
   / orchestration layer 預先決定 unique final path。
+- `format_ext` / `remove_ext` 只處理檔名 suffix，不改路徑中段的 `.h5` /
+  `.hdf5` 子串；`reserve_labber_filepath` 保留 Labber-style numeric sequence，
+  但孤立的數字尾碼可作為 caller 命名的一部分。
+- HTTP transport helper 失敗時 raise，不回傳 bool；caller 要在成功回傳後才移除
+  local file。
 
 `datasaver/` 內部 module 是責任拆分，不是額外 public import path。
+
+## fitting helpers
+
+`utils.fitting.base.fit_func` 保留既有 `curve_fit` 失敗時回退 `init_p` 的
+contract，但會發出 `RuntimeWarning`，讓 caller 不再把 fallback 靜默當成成功擬合。
+固定參數只在至少一個參數非 `None` 時啟用。
+
+## throttle / interpolation helpers
+
+`utils.func_tools.min_interval` 的參數是 duty-cycle ratio，不是秒數間隔；callback
+是否執行取決於上一輪執行耗時與兩次呼叫間隔的比例。`utils.math.IDWInterpolation`
+是 autofluxdep predictor residual correction 的純 Python helper，空資料回傳 0，
+一點資料回傳常數，兩點資料線性內插/外插，多點資料使用 nearest-k weighted
+linear regression。
 
 ## process helpers
 

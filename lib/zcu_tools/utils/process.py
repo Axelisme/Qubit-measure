@@ -47,6 +47,8 @@ def rotate2real(signals: NDArray[np.complex128]) -> NDArray[np.complex128]:
     try:
         angle = find_rotate_angle(signals)
     except ValueError:
+        # NaN-only, constant, or too-short buffers have no stable principal axis;
+        # keep the original signal rather than inventing a rotation.
         return signals
 
     return signals * np.exp(-1j * angle)
@@ -481,7 +483,8 @@ def peak_n_avg(
         The average of the first n max/min points.
     """
 
-    assert mode in ["max", "min"], f"Invalid mode: {mode}"
+    if mode not in ("max", "min"):
+        raise ValueError(f"Invalid mode: {mode}")
 
     if n <= 0:
         raise ValueError(f"n should be positive, but get {n}")

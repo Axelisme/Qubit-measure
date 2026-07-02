@@ -9,6 +9,11 @@ from tqdm.auto import tqdm
 
 from .base import batch_fit_func, fit_func
 
+RATE_UPPER_GUESS_MULTIPLIER = 5.0
+SINGLE_INITIAL_GROUND_BOUND = 0.01
+SINGLE_INITIAL_EXCITED_BOUND = 0.001
+DUAL_INITIAL_POPULATION_BOUND = 0.01
+
 
 def model_func(
     t: NDArray[np.float64],
@@ -115,19 +120,27 @@ def fit_transition_rates(
 
     R_ge, R_eg, R_eo, R_oe, R_go, R_og, p0_g, p0_e = p0_guess
 
-    max_R = 5 * float(np.max([R_ge, R_eg, R_eo, R_oe, R_go, R_og]))
+    max_R = RATE_UPPER_GUESS_MULTIPLIER * float(
+        np.max([R_ge, R_eg, R_eo, R_oe, R_go, R_og])
+    )
     pOpt, pCov = fit_func(
         pass_times,
         populations.flatten(),
         lambda *args: model_func(*args).flatten(),
         p0_guess,
         bounds=(
-            [0.0] * 6 + [max(0, p0_g - 0.01), max(0, p0_e - 0.001)],
-            [max_R] * 6 + [min(1, p0_g + 0.01), min(1, p0_e + 0.001)],
+            [0.0] * 6
+            + [
+                max(0, p0_g - SINGLE_INITIAL_GROUND_BOUND),
+                max(0, p0_e - SINGLE_INITIAL_EXCITED_BOUND),
+            ],
+            [max_R] * 6
+            + [
+                min(1, p0_g + SINGLE_INITIAL_GROUND_BOUND),
+                min(1, p0_e + SINGLE_INITIAL_EXCITED_BOUND),
+            ],
         ),
     )
-    # pOpt = list(p0_guess)
-    # pCov = np.eye(len(pOpt)) * 0.01
 
     fit_populations = model_func(pass_times, *pOpt)
 
@@ -236,7 +249,7 @@ def fit_dual_transition_rates(
     p0_init1 = tuple([*p0_guess[:6], p0_g1, p0_e1])
     p0_init2 = tuple([*p0_guess[:6], p0_g2, p0_e2])
 
-    max_R = 5 * float(np.max(p0_guess[:6]))
+    max_R = RATE_UPPER_GUESS_MULTIPLIER * float(np.max(p0_guess[:6]))
     (pOpt1, pOpt2), (pCov1, pCov2) = batch_fit_func(
         [pass_times, pass_times],
         [populations1.flatten(), populations2.flatten()],
@@ -245,19 +258,31 @@ def fit_dual_transition_rates(
         shared_idxs=[0, 1, 2, 3, 4, 5],
         list_bounds=[
             (
-                [0.0] * 6 + [max(0.0, p0_g1 - 0.01), max(0.0, p0_e1 - 0.01)],
-                [max_R] * 6 + [min(1.0, p0_g1 + 0.01), min(1.0, p0_e1 + 0.01)],
+                [0.0] * 6
+                + [
+                    max(0.0, p0_g1 - DUAL_INITIAL_POPULATION_BOUND),
+                    max(0.0, p0_e1 - DUAL_INITIAL_POPULATION_BOUND),
+                ],
+                [max_R] * 6
+                + [
+                    min(1.0, p0_g1 + DUAL_INITIAL_POPULATION_BOUND),
+                    min(1.0, p0_e1 + DUAL_INITIAL_POPULATION_BOUND),
+                ],
             ),
             (
-                [0.0] * 6 + [max(0.0, p0_g2 - 0.01), max(0.0, p0_e2 - 0.01)],
-                [max_R] * 6 + [min(1.0, p0_g2 + 0.01), min(1.0, p0_e2 + 0.01)],
+                [0.0] * 6
+                + [
+                    max(0.0, p0_g2 - DUAL_INITIAL_POPULATION_BOUND),
+                    max(0.0, p0_e2 - DUAL_INITIAL_POPULATION_BOUND),
+                ],
+                [max_R] * 6
+                + [
+                    min(1.0, p0_g2 + DUAL_INITIAL_POPULATION_BOUND),
+                    min(1.0, p0_e2 + DUAL_INITIAL_POPULATION_BOUND),
+                ],
             ),
         ],
     )
-    # pOpt1 = list(p0_init1)
-    # pOpt2 = list(p0_init2)
-    # pCov1 = np.eye(len(pOpt1)) * 0.01
-    # pCov2 = np.eye(len(pOpt2)) * 0.01
 
     fit_pops1 = model_func(pass_times, *pOpt1)
     fit_pops2 = model_func(pass_times, *pOpt2)

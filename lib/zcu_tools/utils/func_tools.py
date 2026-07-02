@@ -1,22 +1,21 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Generator
-from contextlib import contextmanager
-from typing import ClassVar, Generic, ParamSpec, overload
+from collections.abc import Callable
+from typing import Generic, ParamSpec, overload
 
 P = ParamSpec("P")
 
 
 class MinIntervalFunc(Generic[P]):
-    FORCE_EXECUTE: ClassVar[bool] = False
-
     def __init__(self, func: Callable[P, None], min_interval: float) -> None:
         self.func = func
-        self.min_interval = min_interval
+        self.duty_cycle_ratio = min_interval
 
-        if not 0.0 < self.min_interval <= 1.0:
-            raise ValueError("min_interval must be between 0.0 and 1.0")
+        if not 0.0 < self.duty_cycle_ratio <= 1.0:
+            raise ValueError(
+                "min_interval duty-cycle ratio must be between 0.0 and 1.0"
+            )
 
         self.last_call_time = 0.0
         self.last_exec_end = 0.0
@@ -26,21 +25,11 @@ class MinIntervalFunc(Generic[P]):
         last_exec_period = self.last_exec_end - self.last_call_time
         cur_call_period = cur_call_time - self.last_call_time
 
-        if (
-            self.FORCE_EXECUTE
-            or last_exec_period <= self.min_interval * cur_call_period
-        ):
+        if last_exec_period <= self.duty_cycle_ratio * cur_call_period:
             self.func(*args, **kwargs)
 
             self.last_call_time = cur_call_time
             self.last_exec_end = time.time()
-
-    @classmethod
-    @contextmanager
-    def force_execute(cls) -> Generator[None, None, None]:
-        cls.FORCE_EXECUTE = True
-        yield
-        cls.FORCE_EXECUTE = False
 
 
 @overload
@@ -56,7 +45,12 @@ def min_interval(
 def min_interval(
     func: Callable[P, None] | None, min_interval: float | None = None
 ) -> Callable[P, None] | None:
-    """ensures min_interval time ratio between function calls"""
+    """Throttle a callback by duty-cycle ratio.
+
+    ``min_interval`` is historical naming: the value is a ratio in ``(0, 1]``.
+    A callback is allowed when the previous execution duration is no greater
+    than ``min_interval * elapsed_since_previous_call``.
+    """
     if func is None or min_interval is None or min_interval == 1.0:
         return func
 

@@ -1,4 +1,6 @@
 import numpy as np
+import pytest
+import zcu_tools.utils.fitting.base.base as base_module
 from zcu_tools.utils.fitting.base import (
     asym_lorfunc,
     cosfunc,
@@ -17,6 +19,7 @@ from zcu_tools.utils.fitting.base import (
     lorfunc,
     sincfunc,
 )
+from zcu_tools.utils.fitting.base.base import fit_func
 
 
 def test_fitexp_recovers_parameters():
@@ -92,3 +95,50 @@ def test_fit_gauss_recovers_parameters():
     pOpt, _ = fit_gauss(x, y)
     assert abs(pOpt[2] - true[2]) < 1e-2
     assert abs(pOpt[3] - true[3]) < 1e-2
+
+
+def test_fit_func_warns_when_falling_back_to_init_p(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def fail_curve_fit(*args, **kwargs):
+        raise RuntimeError("no convergence")
+
+    monkeypatch.setattr(base_module.sp.optimize, "curve_fit", fail_curve_fit)
+
+    with pytest.warns(RuntimeWarning, match="returning init_p fallback"):
+        p_opt, p_cov = fit_func(
+            np.array([0.0, 1.0]),
+            np.array([0.0, 1.0]),
+            lambda x, a, b: a * x + b,
+            init_p=[1.0, None],
+        )
+
+    assert p_opt[0] == 1.0
+    assert np.isnan(p_opt[1])
+    assert np.all(np.isinf(p_cov))
+
+
+def test_fit_func_all_none_fixedparams_does_not_restore_fixed_params(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def fake_curve_fit(*args, **kwargs):
+        return np.array([1.0, 2.0]), np.eye(2)
+
+    def fail_add_fixed_params_back(*args, **kwargs):
+        pytest.fail("all-None fixedparams should not enter add_fixed_params_back")
+
+    monkeypatch.setattr(base_module.sp.optimize, "curve_fit", fake_curve_fit)
+    monkeypatch.setattr(
+        base_module, "add_fixed_params_back", fail_add_fixed_params_back
+    )
+
+    p_opt, p_cov = fit_func(
+        np.array([0.0, 1.0]),
+        np.array([0.0, 1.0]),
+        lambda x, a, b: a * x + b,
+        init_p=[1.0, 2.0],
+        fixedparams=[None, None],
+    )
+
+    np.testing.assert_allclose(p_opt, [1.0, 2.0])
+    np.testing.assert_allclose(p_cov, np.eye(2))

@@ -235,12 +235,12 @@ class PersistableExperiment(AbsExperiment[T_Result, T_Config]):
         ]
         z = (spec.z.label, spec.z.unit, np.asarray(getattr(result, spec.z.field_name)))
 
-        save_labber_data(
+        saved_path = save_labber_data(
             filepath, z=z, axes=axes, comment=comment, tags=tag or spec.tag
         )
         if server_ip is not None:
-            if upload_to_server(filepath, server_ip, port):
-                os.remove(filepath)
+            upload_to_server(saved_path, server_ip, port)
+            os.remove(saved_path)
 
     @record_result
     def load(

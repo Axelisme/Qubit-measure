@@ -51,6 +51,12 @@ def deepupdate(
 
 
 def format_obj(obj: Any) -> Any:
+    """Convert common model / array objects to plain Python values.
+
+    Conversion order is intentional for objects that provide multiple protocols:
+    explicit model exporters first, then array/list conversion, then scalar item
+    extraction.
+    """
     if hasattr(obj, "to_dict") and callable(obj.to_dict):
         obj = obj.to_dict()  # work for pydantic model
     if hasattr(obj, "model_dump") and callable(obj.model_dump):

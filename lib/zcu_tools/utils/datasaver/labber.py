@@ -1183,7 +1183,13 @@ def _read_trace_log(f, log, z_name):
 
 def _read_outer_step_axes(f, log):
     """Return outer step axes (name, unit, values) from Data/Data, skipping the
-    dummy 'Step index API' column.  Used for trace-mode logs."""
+    dummy 'Step index API' column.  Used for trace-mode logs.
+
+    Labber trace logs store one scalar step coordinate per entry. We reconstruct
+    axes by first appearance after rounding to 15 decimals, so intentional
+    repeated coordinates such as bidirectional sweeps cannot be represented as
+    distinct axis points in this compatibility layout.
+    """
     if "Data" not in log:
         return []
     D = log["Data"]["Data"][()]

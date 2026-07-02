@@ -41,7 +41,7 @@ def format_ext(filepath: str) -> str:
         str: The formatted file path with .hdf5 extension.
     """
     if filepath.endswith(".h5"):
-        return filepath.replace(".h5", ".hdf5")
+        return filepath[: -len(".h5")] + ".hdf5"
     if filepath.endswith(".hdf5"):
         return filepath
     return filepath + ".hdf5"
@@ -57,10 +57,10 @@ def remove_ext(filepath: str) -> str:
     Returns:
         str: The file path without the extension.
     """
-    if filepath.endswith(".h5"):
-        return filepath.replace(".h5", "")
     if filepath.endswith(".hdf5"):
-        return filepath.replace(".hdf5", "")
+        return filepath[: -len(".hdf5")]
+    if filepath.endswith(".h5"):
+        return filepath[: -len(".h5")]
     return filepath
 
 
@@ -78,20 +78,30 @@ def reserve_labber_filepath(filepath: str) -> str:
 
     filepath = format_ext(filepath)
 
-    def parse_filepath(filepath: str) -> tuple[str, int, str]:
+    def parse_filepath(filepath: str) -> tuple[str, int, str, bool]:
         filename, ext = os.path.splitext(filepath)
-        count = filename.split("_")[-1]
-        if count.isdigit():
-            filename = "_".join(filename.split("_")[:-1])  # remove number
-            return filename, int(count), ext
-        else:
-            return filename, 1, ext
+        prefix, separator, suffix = filename.rpartition("_")
+        if not separator or not suffix.isdigit():
+            return filename, 0, ext, False
 
-    filename, count, ext = parse_filepath(filepath)
+        sequence_has_root = os.path.exists(prefix + ext) or os.path.exists(
+            f"{prefix}_1{ext}"
+        )
+        if sequence_has_root:
+            return prefix, int(suffix), ext, True
+        return filename, 0, ext, True
 
-    filepath = filename + f"_{count}" + ext
+    filename, count, ext, has_numeric_suffix = parse_filepath(filepath)
+
+    if count > 0:
+        filepath = filename + f"_{count}" + ext
+    elif has_numeric_suffix:
+        filepath = filename + ext
+    else:
+        count = 1
+        filepath = filename + f"_{count}" + ext
     while os.path.exists(filepath):
-        count += 1
+        count = 1 if count == 0 else count + 1
         filepath = filename + f"_{count}" + ext
 
     return filepath

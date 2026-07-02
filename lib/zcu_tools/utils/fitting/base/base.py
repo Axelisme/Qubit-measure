@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from collections.abc import Callable, Sequence
 from functools import wraps
 from typing import TypeVar, cast
@@ -75,7 +76,11 @@ def fit_func(
     fixedparams: Sequence[float | None] | None = None,
     **kwargs,
 ) -> tuple[list[float], NDArray[np.float64]]:
-    if fixedparams is not None and any([p is not None for p in fixedparams]):
+    has_fixedparams = fixedparams is not None and any(
+        p is not None for p in fixedparams
+    )
+    if has_fixedparams:
+        assert fixedparams is not None
         if init_p is None:
             raise ValueError(
                 "Initial parameters must be provided when fixed parameters are specified."
@@ -92,13 +97,20 @@ def fit_func(
         pOpt, pCov = sp.optimize.curve_fit(
             fitfunc, xdata, ydata, p0=init_p, bounds=bounds, **kwargs
         )
-    except RuntimeError:
+    except RuntimeError as exc:
         if init_p is None:
             raise
+        warnings.warn(
+            "fit_func failed; returning init_p fallback with infinite covariance "
+            f"({exc})",
+            RuntimeWarning,
+            stacklevel=2,
+        )
         pOpt = [p if p is not None else np.nan for p in init_p]
         pCov = np.full(shape=(len(init_p), len(init_p)), fill_value=np.inf)
 
-    if fixedparams is not None and len(fixedparams) > 0:
+    if has_fixedparams:
+        assert fixedparams is not None
         pOpt, pCov = add_fixed_params_back(pOpt, pCov, fixedparams)
 
     return pOpt, pCov
