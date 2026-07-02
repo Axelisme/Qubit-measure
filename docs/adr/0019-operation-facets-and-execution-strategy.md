@@ -2,10 +2,10 @@
 status: accepted
 ---
 
-# Operation = token + opt-in facets + 可插 execution strategy（拆 Handle 出 gate、抽 BackgroundService）
+# Operation = token + opt-in facets + 可插 execution strategy（拆 Handle 出 gate、抽 BackgroundRunner）
 
-**狀態：** accepted（**已落地**：Phase A = BackgroundService（GUI 22）、Phase B = Handle 拆出 gate（GUI 23）皆完成；本檔現在式描述生效設計）。
-**關聯：** 重構 [[0002]]（gate = `_OperationExclusion` + `_OperationRegistry` facade、共用 token、analyze handle-only）——本檔把 registry 從 facade 拆成正交 sibling。**取代** [[0003]] §一「生命週期綁死、不拆可選疊加」的決定（其「無不互斥長任務場景」前提已失效）；cancel 三動詞承 [[0003]]。strategy 選擇留 domain service，依 [[0004]]/[[0005]]（orchestrator 組合 leaf）。OffMain 畫圖 marshal 依 [[0017]]；guard 用 Permit 依 [[0001]]。
+**狀態：** accepted（facet 拆分仍生效；OffMain 細節已演進為 `BackgroundRunner` + caller-owned ambient thunk，`OperationRunner` policy/spec 見 [[0026]]）。
+**關聯：** 重構 [[0002]]（gate = `_OperationExclusion` + `_OperationRegistry` facade、共用 token、analyze handle-only）——本檔把 registry 從 facade 拆成正交 sibling。**取代** [[0003]] §一「生命週期綁死、不拆可選疊加」的決定（其「無不互斥長任務場景」前提已失效）；cancel 三動詞承 [[0003]]。strategy 選擇留 domain service，依 [[0004]]/[[0005]]（orchestrator 組合 leaf）。OffMain 畫圖 marshal 依 [[0017]]；guard 用 Permit 依 [[0001]]；`BackgroundExecutor` scope wiring 依 [[0026]]。
 
 ## 脈絡
 
@@ -58,14 +58,14 @@ status: accepted
 - **analyze / interactive 改「只拿 Handle、不拿 lease」**;run / device 拿 Exclusion + Handle。消除「借 lease 當 handle」的假象。
 - 終端流程解耦:domain work（writeback / State）→ **settle Handle** → **release Exclusion**(若有)。今 `gate.release` 合一的兩步拆成兩個獨立呼叫。
 
-### 三、BackgroundService = OffMain strategy 的乾淨機制
+### 三、BackgroundRunner = OffMain strategy 的乾淨機制
 
-- 單一入口 `submit(work, scopes, *, run_in_pool, on_done, on_error)`。`run_in_pool` 直接講機制:True = 共享 QThreadPool（短 helper）、False = 專屬 QThread（長 operation）—— 避開 starvation（長 op 不搶 pool）。
-- **OffMainScopes** = 三個正交、可 None 的 ambient scope,worker thread 內才 enter:
-  - `figure_container` —— **routing ContextVar 與 QtLivePlotBackend 是同一 facet**:liveplot backend 的 `make_plot_frame` 就是 `plt.subplots()` 走同一 routing,且沒 active container 會 `require_current_container()` crash(co-dependent),故由同一參數一起驅動,不拆兩 scope。
-  - `pbar_factory` —— `use_pbar_factory`（Progress facet 的注入點,由 owner service bound to token 後傳入）。
-  - `stop_event` —— run policy closure 內轉成 `schedule_stop_scope(StopSignal(...))`（Cancel facet 的 off-main 實作）。
-- `RunWorker` / `AnalyzeWorker` / `SaveDataWorker` + 三 runner **收斂成一個 generic worker + bg**;scope 下沉成 service 建好的 thunk;**cancel 判讀上移 domain service**（持 stop_event 者在 `on_done`/`on_error` 自判 finished vs cancelled+partial,worker 只回 done/failed）。
+- 單一入口 `submit(work, *, run_in_pool, on_done, on_error)`。`run_in_pool` 直接講機制:True = 共享 QThreadPool（短 helper）、False = 專屬 QThread（長 operation）—— 避開 starvation（長 op 不搶 pool）。
+- Ambient scope 不再由 bg 物件辨識；caller 在 `work` thunk 內組合所需 scope（[[0026]]）：
+  - `figure_ambient` 住 app 層，封裝 routing ContextVar 與 QtLivePlotBackend。
+  - `progress_ambient` 住 session 層，只承載 pbar ContextVar。
+  - run policy closure 內把 `stop_event` 轉成 `schedule_stop_scope(StopSignal(...))`。
+- `RunWorker` / `AnalyzeWorker` / `SaveDataWorker` + 三 runner **收斂成一個 generic worker + bg**；scope 下沉成 service 建好的 thunk；**cancel 判讀上移 domain service**（持 stop_event 者在 terminal policy 自判 finished vs cancelled+partial，worker 只回 done/failed）。
 - interactive widget 經**窄 `InteractiveHostEnv` port**(目前只含 `run_background`,由 ctrl 實作)用 bg 的 pool strategy;**不持整個 ctrl**(command-surface 才持 ctrl,passive host 收窄注入,測試塞 fake port)。
 
 ### 四、刻意不做（防過度抽象）
@@ -90,7 +90,7 @@ status: accepted
 
 ## 落地（皆完成）
 
-- **Phase A（GUI 22 / Phase 146）** —— 抽 `BackgroundService`(OffMain strategy)+ `InteractiveHostEnv` port + `OffMainScopes`;三 worker/三 runner（`runner.py`）收斂成一個 generic worker;cancel 判讀上移 RunService。範圍 run / analyze / save / interactive。
+- **Phase A（GUI 22 / Phase 146）** —— 抽 OffMain strategy + `InteractiveHostEnv` port；後續由 [[0026]] 收斂為 `BackgroundRunner.submit(work, *, run_in_pool, on_done, on_error)`，ambient scope 由 caller thunk 擁有。三 worker/三 runner（`runner.py`）收斂成一個 generic worker；cancel 判讀上移 RunService。範圍 run / analyze / save / interactive。
 - **Phase B（GUI 23 / Phase 147）** —— `OperationGate` 瘦成純 Exclusion（`ensure_can_start`/`register`/`release`）;新 `operation_handles.OperationHandles`（`create` mint token、`settle`/`await_outcome`/`poll`/`cancel`/`cancel_all`/`live_count`）成 sibling;analyze/interactive 改**只拿 Handle 不拿 lease**;run/device/connect 組合兩 leaf;`ShutdownCoordinator`/`QtShutdownDriver`/`Controller.await_operation` 改吃 `OperationHandles`;`active_operation_count = handles.live_count`（現含 analyze/interactive）。
 - **device execution 統一（GUI 24 / Phase 148）** —— device 的 `_DeviceCommandWorker`/`_DeviceSetupWorker` 兩個 QThread 也收斂進 `bg.submit`（connect/disconnect 無 scope；setup 帶 progress scope，stop_event 由 work closure 捕捉、driver 直接 poll，**非** experiment schedule scope；cancel 判讀進 `DeviceService._on_setup_done`，「setup 可不可取消」改讀 `_active_kind`）。至此 run/analyze/save/interactive/device 全走同一個 OffMain strategy 機制。
 - 三階段 WIRE 皆不變、皆全綠驗證。

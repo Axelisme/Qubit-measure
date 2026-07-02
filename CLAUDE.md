@@ -72,7 +72,7 @@ ZCU-Tools 是控制與分析 ZCU216 FPGA 平台上超導量子位元（Fluxonium
 
 ## 架構（`lib/zcu_tools/`）
 
-- **`experiment/v2/`** — 高層實驗定義：`onetone/`、`twotone/`（spectroscopy）；`autofluxdep/`（`FluxDepExecutor` 自動多任務 flux 掃描）；`overnight/`（長時穩定度量測）；`runner/`（`Task`/`BatchTask`/`AbsTask` 執行框架）。
+- **`experiment/v2/`** — 高層實驗定義：`onetone/`、`twotone/`（spectroscopy）；`autofluxdep/`（`FluxDepExecutor` 自動多任務 flux 掃描）；`overnight/`（長時穩定度量測）；`runner/`（`Schedule` / `SignalBuffer` / `ProgramBuilder` acquisition runtime 與 `MultiMeasurementExecutor` executor scaffold）。
 - **`program/v2/`** — 低層 QICK ASM 編程：`base.py`（`MyProgramV2`）、`modular.py`（`ModularProgramV2` 組合 pulse blocks）、`modules/`（`Pulse`/`Readout`/`Reset`/`Delay`/`Waveform`/`dmem`/`registry`）。
 - **`meta_tool/`** — 設定與狀態管理：`MetaDict`（JSON 持久化 dict）、`ModuleLibrary`（YAML waveform/module store）、`ExperimentManager`（串接兩者的 context manager）。
 - **`device/`** — 硬體驅動（`YOKOGS200`、`RohdeSchwarzSGS100A` 等）與 `GlobalDeviceManager` singleton。

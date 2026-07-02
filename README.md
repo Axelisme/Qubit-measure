@@ -1,6 +1,6 @@
 # ZCU-Tools
 
-**Last updated:** 2026-07-01
+**Last updated:** 2026-07-02 — experiment runtime map
 
 ZCU-Tools 是 ZCU216/QICK 平台上的量子量測工具集。工作站端負責 GUI、
 Notebook、MCP automation、資料分析與模擬；ZCU 板端只跑 Pyro server，讓工作站
@@ -44,8 +44,8 @@ Notebook 仍可直接呼叫 `zcu_tools.experiment.v2` 與 `zcu_tools.notebook` h
 ## Package Map
 
 - `zcu_tools.program.v2`：QICK ASM / modular pulse / IR / mock SoC。
-- `zcu_tools.experiment.v2`：Notebook 與 GUI adapter 共用的實驗實作、task runner、
-  canonical persistence。
+- `zcu_tools.experiment.v2`：Notebook 與 GUI adapter 共用的實驗實作、
+  Schedule-based acquisition runtime、canonical persistence。
 - `zcu_tools.experiment.v2_gui`：把 experiment 包成 measure-gui adapter。
 - `zcu_tools.gui`：Qt GUI framework、shared session core、shared remote transport。
 - `zcu_tools.mcp`：GUI-facing MCP bridge 與 agent-memory server。

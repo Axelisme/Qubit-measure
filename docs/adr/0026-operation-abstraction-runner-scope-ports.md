@@ -34,22 +34,20 @@ OperationSpec(
     cancel_hook: CancelHook | None,       # 如何取消（handles.create 用；run/device = stop_event.set）
     work: Callable[[ProgressFactory | None], Any],  # off-main thunk；runner 注入 minted pbar factory
     run_in_pool: bool,
-    interpret: Callable[[BgOutcome], OperationOutcome],  # bg done/error → 終局語義（run 的 cancel-partial 在此）
-    on_begin: Callable[[int], None] | None,             # 樂觀寫 + 標 busy（token 傳入供記錄）
-    on_terminal: Callable[[OperationOutcome, Any], None],# 領域副作用（State 寫入、writeback、rollback）
+    on_terminal: Callable[[BgResult, SettleFn], None],  # 領域判讀 + State 寫入 + settle
 )
 ```
 
-`work` 只收 runner 唯一擁有、且必須在 token mint 之後才能 mint 的 **progress factory**；`figure_container` 與 `stop_event` 是 op policy 的 **closure 細節**（policy 建 work thunk 時就知道），**不**放進 spec——這讓 runner 真正 figure/stop-agnostic（不再像舊 `_entered` 那樣認得 figure facet）。`OffMainScopes` 隨之退場（三欄位分別化為 closure / 注入參數 / closure）。
+`work` 只收 runner 唯一擁有、且必須在 token mint 之後才能 mint 的 **progress factory**；`figure_container` 與 `stop_event` 是 op policy 的 **closure 細節**（policy 建 work thunk 時就知道），**不**放進 spec——這讓 runner 真正 figure/stop-agnostic（不再像舊 `_entered` 那樣認得 figure facet）。`on_terminal` 在主線程收到 `BgResult` 後執行領域判讀、State 寫入與 signal/event，再以 runner 注入的 `SettleFn` 恰好 settle 一次。`OffMainScopes` 隨之退場（三欄位分別化為 closure / 注入參數 / closure）。
 
 - runner 透過 **port** 使用協作者（`ExclusionGate` / `ProgressHub` / `BackgroundExecutor` / handle+channel），**只認契約不認行為**。
-- run / analyze / device / soc-connect 退化成**極薄的 policy 物件**：組 `OperationSpec`、填 `interpret` / `on_terminal`、宣告要哪些 facet。這就是「每個 service 封裝一種邏輯」——領域政策留在各 op，機制收斂到 runner 一處。
+- run / analyze / device / soc-connect 退化成**極薄的 policy 物件**：組 `OperationSpec`、在 `work` closure 與 `on_terminal` 內保留領域政策、宣告要哪些 facet。這就是「每個 service 封裝一種邏輯」——領域政策留在各 op，機制收斂到 runner 一處。
 - autofluxdep RUN 同樣是 `OperationRunner` client：flux-sweep domain loop 保留在 autofluxdep，但 QThread、running/stop flags、progress、cancel 與 terminal outcome 不另寫平行 lifecycle。RUN 使用 app-local operation kind（例如 autofluxdep run kind），透過同一 `ExclusionGate` / `ProgressHub` / handle channel interface 組合 facet；cancel 是協作停止，攜帶 `Stop(reason)` 意圖並保留已完成的 partial results，terminal outcome 可為 `cancelled` 而非 failure rollback。per-node fit/result summary 仍是 autofluxdep domain state/query，不塞進 generic progress。
-- **不可化約的領域邏輯**（run 的 cancel 帶 partial result 判讀、writeback compute、device rollback）以 `interpret` / `on_terminal` callback 留在各 op，**不**塞進 runner（避免 god-object）。
+- **不可化約的領域邏輯**（run 的 cancel 帶 partial result 判讀、writeback compute、device rollback）以 `work` closure / `on_terminal` callback 留在各 op，**不**塞進 runner（避免 god-object）。
 
-### 2. scope-as-adapter-input：`BackgroundService` 退化純執行器
+### 2. scope-as-adapter-input：`BackgroundRunner` 是純執行器
 
-`BackgroundService` 變回**純 off-main 執行器**——`submit(work, *, run_in_pool, on_done, on_error)` 只把 thunk 丟 worker thread / pool、把結果 marshal 回主線程，**移除 `_entered` 的 facet 知識**（連 `scopes` 參數一併拿掉）。scope 的 wiring 改由 **op policy 的 work thunk** 負責（experiment adapter 的 `run(request, schema)` 簽名不動——它是 domain code，不該為 GUI scope 改簽名）：
+`BackgroundRunner` 是**純 off-main 執行器**——`submit(work, *, run_in_pool, on_done, on_error)` 只把 thunk 丟 worker thread / pool、把結果 marshal 回主線程，**移除 `_entered` 的 facet 知識**（連 `scopes` 參數一併拿掉）。scope 的 wiring 改由 **op policy 的 work thunk** 負責（experiment adapter 的 `run(request, schema)` 簽名不動——它是 domain code，不該為 GUI scope 改簽名）：
 
 ```
 # run policy 建構的 work thunk（runner 注入 pbar_factory；figure/stop 由 closure 捕獲）

@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-02 — typed Schedule env tests
+**Last updated:** 2026-07-02 — Schedule result-buffer tests
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -114,7 +114,7 @@ tests/
 │           ├── test_registry.py
 │           └── test_util.py
 ├── experiment/v2/                  # Experiment runtime、persistence / analysis tests
-│   └── runner/                     # Schedule runtime 與 executor root-data tests
+│   └── runner/                     # Schedule runtime、BufferProtocol 與 executor result-buffer tests
 ├── analysis/
 │   └── fluxdep/                    # Flux-Dependence Analysis kernel tests
 ├── mcp/                            # MCP bridge、call-log、timeout policy、remote schema / ARRAY param regression tests

@@ -3,8 +3,8 @@
 A control-type GUI that runs an automated flux-dependence workflow: a sweep over
 flux × an ordered list of measurement Nodes, each Node declaring its
 dependencies and the information it produces. Replaces the notebook-style
-`experiment.v2.autofluxdep` cfg-maker lambdas + `ctx.env["info"]` chains with an
-explicit, declarative model.
+`experiment.v2.autofluxdep` cfg-maker lambdas + `FluxDepEnv.info` handoff chains
+with an explicit, declarative model.
 
 The mechanisms the lower-layer module gets right are kept (in-place
 accumulation, sweep-lived plotters fed one flux point at a time, result merging).
@@ -187,11 +187,11 @@ are already settled), then — only after acquire+fit complete — fills that ro
 fit fields (`fit_freq[idx]`, fit curve). The fit fields stay nan during acquire,
 so the Plotter must tolerate a mid-acquire row that has raw signals but no fit.
 
-On **stop**, the Result keeps its nans — it is not truncated (like the runner's
-nan-filled root_data). Rows after the stop stay nan (an honest "not measured");
-a row interrupted mid-acquire keeps its partial round-averaged raw (fit still
-nan). No special handling — the nan pre-allocation + the Plotter's nan
-tolerance already cover it.
+On **stop**, the Result keeps its nans — it is not truncated, matching the
+Schedule/executor convention of preserving preallocated nan-filled result data.
+Rows after the stop stay nan (an honest "not measured"); a row interrupted
+mid-acquire keeps its partial round-averaged raw (fit still nan). No special
+handling — the nan pre-allocation + the Plotter's nan tolerance already cover it.
 
 **Plotter**:
 A Node-type-defined, stateful object that draws that Node's figure. Its
@@ -234,7 +234,7 @@ UI-owned (only the UI redraws). The main thread builds the empty Result
 container at Run start (State stores the finished container); the worker then
 fills its rows in place. Filling pre-allocated numpy content is **not a State
 semantic write** — it does not add/remove keys or swap objects, does not bump a
-version or emit, exactly like the runner's root_data filled on its worker. So it
-does not violate the "State writes only on the main thread" invariant, which
-governs structural/semantic changes (add_node / set_flux), not row-fills of a
-container the main thread already placed.
+version or emit, exactly like Schedule/executor result buffers filled in place by
+their worker. So it does not violate the "State writes only on the main thread"
+invariant, which governs structural/semantic changes (add_node / set_flux), not
+row-fills of a container the main thread already placed.

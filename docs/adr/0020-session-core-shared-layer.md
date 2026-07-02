@@ -4,7 +4,7 @@ status: accepted
 
 # session-core 共用層：measure + autofluxdep 共享量測 session（gui/session/）
 
-**狀態：** accepted（**已落地**：S1–S5 抽取 + autofluxdep 完整複用 + Phase B cfg-driven 模擬；本檔現在式描述生效設計）。
+**狀態：** accepted（**已落地**：S1–S5 抽取 + autofluxdep 完整複用 + real-acquire RUN path；本檔現在式描述生效設計）。
 **關聯：** session service 角色/依賴依 [[0004]]/[[0005]]（App Service / Aggregate Root / 三問依賴）；resource versioning + async operation handle 依 [[0002]]；context 單一寫入 + CfgSchema lowering 依 [[0006]]；exclusion gate / handle / background 三 facet 依 [[0019]]（本檔把那套 leaf 提到共用層 + 定 app-local vs shared 邊界）；event_bus / shared transport 依 [[0014]]；autofluxdep orchestrator 設計依 [[0018]]；worker 不畫圖故 [[0017]] marshal 不適用。
 
 ## 脈絡
@@ -16,8 +16,8 @@ measure-gui 的「量測 session core」（context 系統 MetaDict/ModuleLibrary
 **抽 `gui/session/` 共用層**，對標 `gui/remote`/`gui/plotting`，圈出「量測 session core」：值型別（ExpContext/Soc*）、SessionState slice、session events、connection/context/device/startup 服務 + `build_session_services`、共用 dialog（setup/device/predictor/inspect_base）、`SessionControllerPort`。session 模組**永不**反向 import `gui.app.*`。
 
 **app-local vs shared 邊界**：
-- **app 自持**（policy / Qt facet 帶 app 味、各進程獨立無共享需求）：`OperationGate`（衝突 policy + app 自己的 RUN/sweep kind）、`BackgroundService`（measure 帶 QtLivePlot facet / autofluxdep 瘦版無 figure routing）。
-- **promote 成共用**（純機制 / app-agnostic）：`OperationHandles`、`ProgressService`、`IOManager`、`QtProgressTransport`、`BackgroundRunner`。
+- **app 自持**（policy / Qt facet 帶 app 味、各進程獨立無共享需求）：`OperationGate`（衝突 policy + app 自己的 RUN/sweep kind）與各 app 的 concrete `BackgroundRunner` instance（owner 直接呼 `quiesce()`）。
+- **promote 成共用**（純機制 / app-agnostic）：`OperationHandles`、`ProgressService`、`IOManager`、`QtProgressTransport`、`BackgroundRunner` class / `BackgroundExecutor` port。
 - session service 只依賴**窄 port**（`ExclusionGate`/`BackgroundExecutor`/`ProgressHub`/`ProjectIOPort`），app 經 `build_session_services` 注入具體。
 
 **SessionControllerPort = 共用 dialog 的 Controller 契約**：dialog 不碰 concrete `gui.app.*` Controller，只依這 Protocol；各 app 的 Controller **結構上**實作它（pyright 在各自 dialog call site 驗 conformance）。回傳宣告對 `BaseEventBus`，故 app 的 richer EventBus covariant 滿足。
@@ -26,7 +26,7 @@ measure-gui 的「量測 session core」（context 系統 MetaDict/ModuleLibrary
 
 **autofluxdep RUN lifecycle**：autofluxdep 的 flux-sweep RUN 使用共用 `OperationRunner` 生命週期機制，而不是 app-local `_RunWorker` / `_running` / `_stop` 平行實作。RUN 的 domain loop、workflow state 與 per-node result summary 仍屬 autofluxdep；operation facet（exclusion、handle、progress、cancel、terminal outcome）走 shared session operation interface。Stop 是帶 reason 的協作停止，保留已完成 partial results。
 
-**autofluxdep Phase B（run path，simulated）**：每 node 的 `Builder.make_cfg`（**在 `produce` 跑**，snapshot 在手——決策 A + D1）lower 當前 context 的 ml/md + drive 設定頭 params → 真 cfg（經 `ml.make_cfg`），再從 cfg 驅動**模擬** acquire（無硬體、無 mock 偵測）；空-ml/demo context fallback 純 snapshot 模擬。真 acquire（per-point `setup_devices` + program `acquire` + `cfg.dev` 寫入 + mock/real 分支）延未來獨立 phase——只換 `produce` 的合成那段。
+**autofluxdep RUN path（real acquire）**：每 node 的 `Builder.make_cfg`（**在 `produce` 跑**，snapshot 在手——決策 A + D1）lower 當前 context 的 ml/md + drive 設定頭 params → 真 cfg（經 `ml.make_cfg`），再把此 flux 點寫入 `cfg.dev[flux_device]`（by device name）→ `setup_devices` → program `.acquire`（round hook + cooperative stop + SNR early-stop）→ fit / Patch。offline 測試走 flux-aware MockSoc；無 synthetic fallback，未配置 context 由 `make_cfg` Fast Fail，orchestrator 轉成 `RunFailedPayload`。
 
 ## 理由 / 取捨
 

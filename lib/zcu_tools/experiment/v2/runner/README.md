@@ -1,13 +1,13 @@
 # `zcu_tools.experiment.v2.runner` — experiment runtime
 
-**Last updated:** 2026-07-02 — executor concrete lifecycle
+**Last updated:** 2026-07-02 — executor figure lifecycle
 
 `runner/` 提供 experiment/v2 的 Python-like acquisition runtime。一般實驗用
 `SignalBuffer` / `Schedule` / `ProgramBuilder` 編排 host-side loop 與 program
 acquire；executor 類流程用 executor-owned buffer 實作 `BufferProtocol` 來持有 root
 result tree，再交給同一個 `Schedule` 編排 outer loop，並用
 `MultiMeasurementExecutor` 共用 liveplot、recording 與 retry helper；measurement
-init/cleanup lifecycle 留在 concrete executor 的 `run()`。舊 Task tree
+init/cleanup 與 figure/writer cleanup lifecycle 留在 concrete executor 的 `run()`。舊 Task tree
 runtime 不再保留。
 
 ---
@@ -107,7 +107,8 @@ with Schedule(cfg, signals_buffer) as sched:
 它負責 combined liveplot layout、FFmpeg animation 與 per-measurement retry helper；
 root result tree 與 update callback 由 executor-owned buffer 持有，path、env、stop 與
 control flow 由 `Schedule` 持有；measurement init/cleanup lifecycle 留在 concrete
-executor 的 `run()`。
+executor 的 `run()`。`make_plotter()` 回傳的 figure 與 animation writer 也由 concrete
+executor 的 `run()` 以 `try/finally` 收尾，base scaffold 不擁有 pyplot lifecycle。
 
 典型 executor 格式：
 

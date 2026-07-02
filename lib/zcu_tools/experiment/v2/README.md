@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — experiment runtime
 
-**Last updated:** 2026-07-02 — executor concrete lifecycle
+**Last updated:** 2026-07-02 — executor figure lifecycle
 
 這份筆記整理 `experiment/v2/` 的整體設計，說明 Experiment 層與 runtime 層的分工、典型實驗的撰寫範本，以及各子模組的角色。`runner/` 的細節另見 `runner/README.md`。
 
@@ -16,7 +16,7 @@
   - `ExperimentProtocol`：結構性合約（runtime_checkable），描述所有實驗共有的 `last_result` / `run` / `analyze` / `save` / `load` 表面，刻意開放讓實驗自行擴充方法。
 - runtime 層（`runner/`）
   - 一般 Experiment：`SignalBuffer` / `Schedule` / `ProgramBuilder` 表達 Python-like acquire、host loop、batch/retry 與 stop。
-  - executor workflow：executor-owned buffer 實作 `BufferProtocol`，持有 outer loop result tree 與 update hook；`Schedule` 編排 outer loop；`MultiMeasurementExecutor` 提供 combined liveplot、recording 與 retry helper，measurement init/cleanup lifecycle 由 concrete executor 的 `run()` 擁有。
+  - executor workflow：executor-owned buffer 實作 `BufferProtocol`，持有 outer loop result tree 與 update hook；`Schedule` 編排 outer loop；`MultiMeasurementExecutor` 提供 combined liveplot、recording 與 retry helper，measurement init/cleanup 與 figure/writer cleanup lifecycle 由 concrete executor 的 `run()` 擁有。
 
 Experiment 是使用者（notebook）呼叫的入口；一般 `*Exp.run()` 以 `with Schedule(cfg, signals_buffer) as sched` 做單次 run orchestration，把 scan / buffer targeting 留在 Python control flow 中。`Schedule` 負責 cfg deepcopy、typed env 與 `StopSignal`；`SignalBuffer` 負責 update throttling 與 live update callback；`ProgramBuilder.build_and_acquire(...)` 直接建立 program、執行 acquire 並更新 buffer。
 
@@ -183,7 +183,7 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):          # 主要 Cfg = program cfg + 
 
 當要在外層再疊一層「sweep 多個子實驗」的場景（例如掃 flux × {freq, t1, t2echo, ...}），會用 Executor。
 
-兩個 Executor 共用同一個基底 `MultiMeasurementExecutor`（`runner/multi_executor.py`，見 `runner/README.md`），由它提供版面排版（`make_ax_layout` / `make_plotter`）、`record_animation` 的 FFMpeg facet、plot update 與 per-measurement retry helper；子類別各自實作 `run()` 的 cfg/env 前置、measurement init/cleanup lifecycle 與 `Schedule` outer loop。
+兩個 Executor 共用同一個基底 `MultiMeasurementExecutor`（`runner/multi_executor.py`，見 `runner/README.md`），由它提供版面排版（`make_ax_layout` / `make_plotter`）、`record_animation` 的 FFMpeg facet、plot update 與 per-measurement retry helper；子類別各自實作 `run()` 的 cfg/env 前置、measurement init/cleanup lifecycle、figure/writer `try/finally` cleanup 與 `Schedule` outer loop。
 
 - `FluxDepExecutor`（`autofluxdep/executor.py`）：註冊多個 `MeasurementTask`，caller 以 `FluxDepDeps` 提供 soc / soccfg / ModuleLibrary，executor 在 run 內組 `FluxDepEnv`，用 root `Schedule.scan("flux", ...)` 掃 flux，並與 `FluxoniumPredictor` 協作，於每個 flux step 依模型預測子實驗 cfg、設定 flux device，再交由 base executor 的 batch helper 執行 measurement。
 - `OvernightExecutor`（`overnight/executor.py`）：caller 以 `OvernightDeps` 提供 soc / soccfg，executor 在 run 內組 `OvernightEnv`，用 root `Schedule.repeat("Iter", ...)` 在時間軸上重複 measurement batch，並在每輪結束後強制刷新 liveplot。
