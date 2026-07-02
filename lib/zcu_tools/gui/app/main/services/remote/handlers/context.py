@@ -19,7 +19,6 @@ from zcu_tools.gui.session.value_lookup import (
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
-from ._common import Handler
 from ._wire_values import _json_safe
 
 logger = logging.getLogger(__name__)
@@ -310,24 +309,3 @@ def _h_context_ml_del_waveform(
             reason=getattr(exc, "reason_code", ""),
         ) from exc
     return {"deleted": name}
-
-
-HANDLERS: dict[str, Handler] = {
-    "context.use": _h_context_use,
-    "context.new": _h_context_new,
-    "context.labels": _h_context_labels,
-    "context.active": _h_context_active,
-    "context.md_get": _h_context_md_get,
-    "context.md_get_attr": _h_context_md_get_attr,
-    "value.list": _h_value_list,
-    "value.read": _h_value_read,
-    "context.ml_get": _h_context_ml_get,
-    "context.md_set_attr": _h_context_md_set_attr,
-    "context.md_del_attr": _h_context_md_del_attr,
-    "context.ml_del_module": _h_context_ml_del_module,
-    "context.ml_del_waveform": _h_context_ml_del_waveform,
-    "context.ml_rename_module": _h_context_ml_rename_module,
-    "context.ml_rename_waveform": _h_context_ml_rename_waveform,
-    "context.ml_list_roles": _h_context_ml_list_roles,
-    "context.ml_create_from_role": _h_context_ml_create_from_role,
-}

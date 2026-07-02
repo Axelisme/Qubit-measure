@@ -11,7 +11,6 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
-from ._common import Handler
 
 logger = logging.getLogger(__name__)
 
@@ -96,9 +95,3 @@ def _h_operation_progress(
     # their methods at this point. The mcp poll folds this into its reply.
     operation_id = int(params["operation_id"])  # type: ignore[arg-type]
     return _progress_bars_wire(adapter.ctrl.get_operation_progress(operation_id))
-
-
-HANDLERS: dict[str, Handler] = {
-    "operation.await": _h_operation_await,
-    "operation.progress": _h_operation_progress,
-}

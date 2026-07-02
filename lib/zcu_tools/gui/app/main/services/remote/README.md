@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-07-01 - remote dispatch/spec split
+**Last updated:** 2026-07-02 - remote method entry registry
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals GUI-owned work onto
@@ -15,12 +15,14 @@ not declare MCP tools and does not own stdio transport.
 - `service.py`：`RemoteControlAdapter`, a measure-gui subclass of shared
   `RemoteControlServiceBase`; owns client context, guard hooks, diagnostics, and
   editor cleanup.
-- `dispatch.py`：method registry composition root; keeps the public
+- `dispatch.py`：runtime method registry projection; keeps the public
   `METHOD_REGISTRY` import path stable.
 - `handlers/`：grouped wire method handlers bound to controller/render-view calls.
-- `method_specs.py`：Qt-free public aggregator for wire method schema, timeouts,
+- `method_specs.py`：Qt-free public projection for wire method schema, timeouts,
   and MCP generation metadata.
-- `method_spec_groups/`：grouped `MethodSpec` tables and `ParamSpec` shorthands.
+- `method_entries/`：single registration source for method name, handler ref,
+  `MethodSpec`, and `ParamSpec` shorthands. Handler refs are resolved only by
+  the dispatch projection.
 - `events.py`：domain payload type to wire event serializer mapping.
 - `dialogs.py`：wire-stable dialog names.
 - `path_resolver.py`：dotted-path mutation and settable-tree projection for
@@ -126,9 +128,10 @@ The wire surface is grouped by ownership:
 - `arb_waveform.*`：qubit-scoped arbitrary waveform asset operations.
 - `value.*`：read-only session value lookup.
 
-`method_specs.py` is the schema SSOT. Adding an agent-visible method requires the
-wire handler, method spec, MCP mapping or override, and tests for generation /
-guard policy.
+`method_entries/` is the registration SSOT. Adding an agent-visible method
+requires one entry containing the wire method name, handler ref, method spec, MCP
+mapping or override, and tests for generation / guard policy. `method_specs.py`
+remains the Qt-free public projection used by MCP generation.
 
 ## Cfg Editing
 

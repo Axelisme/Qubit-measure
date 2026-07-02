@@ -11,7 +11,6 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
-from ._common import Handler
 
 logger = logging.getLogger(__name__)
 
@@ -119,12 +118,3 @@ def _h_predictor_info(
     if info is None:
         return {"loaded": False}
     return {"loaded": True, **info}
-
-
-HANDLERS: dict[str, Handler] = {
-    "predictor.load": _h_predictor_load,
-    "predictor.set_model_params": _h_predictor_set_model_params,
-    "predictor.clear": _h_predictor_clear,
-    "predictor.predict": _h_predictor_predict,
-    "predictor.info": _h_predictor_info,
-}

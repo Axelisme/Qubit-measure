@@ -13,7 +13,6 @@ from zcu_tools.meta_tool import ArbWaveformError
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
-from ._common import Handler
 
 logger = logging.getLogger(__name__)
 
@@ -95,10 +94,3 @@ def _h_arb_waveform_set(
         ) from exc
     result["success"] = True
     return result
-
-
-HANDLERS: dict[str, Handler] = {
-    "arb_waveform.list": _h_arb_waveform_list,
-    "arb_waveform.preview": _h_arb_waveform_preview,
-    "arb_waveform.set": _h_arb_waveform_set,
-}

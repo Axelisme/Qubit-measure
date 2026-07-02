@@ -11,7 +11,6 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
-from ._common import Handler
 
 logger = logging.getLogger(__name__)
 
@@ -185,14 +184,3 @@ def _h_tab_post_analyze(
             reason=getattr(exc, "reason_code", ""),
         ) from exc
     return {"operation_id": operation_id}
-
-
-HANDLERS: dict[str, Handler] = {
-    "analyze.cancel": _h_analyze_cancel,
-    "tab.get_analyze_result": _h_tab_get_analyze_result,
-    "tab.get_analyze_params": _h_tab_get_analyze_params,
-    "tab.analyze": _h_tab_analyze,
-    "tab.get_post_analyze_result": _h_tab_get_post_analyze_result,
-    "tab.get_post_analyze_params": _h_tab_get_post_analyze_params,
-    "tab.post_analyze": _h_tab_post_analyze,
-}

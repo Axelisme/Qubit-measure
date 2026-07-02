@@ -11,7 +11,7 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
-from ._common import Handler, render_view
+from ._common import render_view
 
 logger = logging.getLogger(__name__)
 
@@ -130,14 +130,3 @@ def _h_tab_get_current_figure(
         Path(out_path).write_bytes(png)
         return {"bytes": len(png), "saved_to": out_path}
     return {"png_b64": base64.b64encode(bytes(png)).decode("ascii"), "bytes": len(png)}
-
-
-HANDLERS: dict[str, Handler] = {
-    "adapter.list": _h_adapter_list,
-    "adapter.guide": _h_adapter_guide,
-    "app.shutdown": _h_app_shutdown,
-    "dialog.screenshot": _h_dialog_screenshot,
-    "view.snapshot": _h_view_snapshot,
-    "view.screenshot": _h_view_screenshot,
-    "tab.get_current_figure": _h_tab_get_current_figure,
-}

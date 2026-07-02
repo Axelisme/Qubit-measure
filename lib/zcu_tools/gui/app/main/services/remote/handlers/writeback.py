@@ -16,7 +16,6 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
-from ._common import Handler
 from ._wire_values import _coerce_wire_value, _json_safe
 
 logger = logging.getLogger(__name__)
@@ -160,10 +159,3 @@ def _h_tab_writeback_apply(
         "written": result["written"],
         "context_version": context_version,
     }
-
-
-HANDLERS: dict[str, Handler] = {
-    "tab.writeback_preview": _h_tab_writeback_preview,
-    "tab.writeback_set": _h_tab_writeback_set,
-    "tab.writeback_apply": _h_tab_writeback_apply,
-}

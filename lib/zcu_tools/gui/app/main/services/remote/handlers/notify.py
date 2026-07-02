@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
-from ._common import Handler
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +34,3 @@ def _h_notify_await(
     if result.reply is not None:
         wire["reply"] = result.reply
     return wire
-
-
-HANDLERS: dict[str, Handler] = {
-    "notify.open": _h_notify_open,
-    "notify.await": _h_notify_await,
-}

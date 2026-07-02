@@ -12,7 +12,6 @@ from zcu_tools.gui.session.services.context import MlEntryValidationError
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
-from ._common import Handler
 
 logger = logging.getLogger(__name__)
 
@@ -127,12 +126,3 @@ def _h_editor_discard(
     except CfgEditorError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     return {}
-
-
-HANDLERS: dict[str, Handler] = {
-    "editor.new": _h_editor_new,
-    "editor.set_field": _h_editor_set_field,
-    "editor.get": _h_editor_get,
-    "editor.commit": _h_editor_commit,
-    "editor.discard": _h_editor_discard,
-}

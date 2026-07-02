@@ -22,7 +22,6 @@ from zcu_tools.gui.session.services.device import (
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
-from ._common import Handler
 
 logger = logging.getLogger(__name__)
 
@@ -355,19 +354,3 @@ def _h_device_snapshot(
             "info": snap.info.to_dict() if snap.info is not None else None,
         }
     }
-
-
-HANDLERS: dict[str, Handler] = {
-    "soc.connect": _h_soc_connect,
-    "startup.apply": _h_startup_apply,
-    "device.connect": _h_device_connect,
-    "device.disconnect": _h_device_disconnect,
-    "device.reconnect": _h_device_reconnect,
-    "device.forget": _h_device_forget,
-    "device.setup": _h_device_setup,
-    "device.setup_spec": _h_device_setup_spec,
-    "device.cancel_operation": _h_device_cancel_operation,
-    "device.active_operations": _h_device_active_operations,
-    "device.list": _h_device_list,
-    "device.snapshot": _h_device_snapshot,
-}

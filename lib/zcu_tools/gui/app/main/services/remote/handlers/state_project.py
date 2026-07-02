@@ -13,7 +13,6 @@ if TYPE_CHECKING:
 
     from ..service import RemoteControlAdapter
 
-from ._common import Handler
 
 logger = logging.getLogger(__name__)
 
@@ -108,15 +107,3 @@ def _h_resources_versions(
 ) -> Mapping[str, object]:
     del params
     return {"versions": adapter.ctrl.resources_versions()}
-
-
-HANDLERS: dict[str, Handler] = {
-    "state.has_project": _h_state_has_project,
-    "state.has_context": _h_state_has_context,
-    "state.has_active_context": _h_state_has_active_context,
-    "state.has_soc": _h_state_has_soc,
-    "soc.info": _h_soc_info,
-    "project.info": _h_project_info,
-    "result_scope.list": _h_result_scope_list,
-    "resources.versions": _h_resources_versions,
-}

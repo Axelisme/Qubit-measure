@@ -13,7 +13,6 @@ from ...load import LoadDataError
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
-from ._common import Handler
 
 logger = logging.getLogger(__name__)
 
@@ -188,16 +187,3 @@ def _h_tab_save_set_paths(
     image_path = str(params["image_path"])
     adapter.ctrl.update_tab_save_paths(tab_id, data_path, image_path)
     return {"data_path": data_path, "image_path": image_path}
-
-
-HANDLERS: dict[str, Handler] = {
-    "tab.run_start": _h_tab_run_start,
-    "tab.load_data": _h_tab_load_data,
-    "tab.run_cancel": _h_tab_run_cancel,
-    "run.running_tab": _h_run_running_tab,
-    "tab.save_data": _h_tab_save_data,
-    "tab.save_image": _h_tab_save_image,
-    "tab.save_post_image": _h_tab_save_post_image,
-    "tab.save_result": _h_tab_save_result,
-    "tab.save_set_paths": _h_tab_save_set_paths,
-}

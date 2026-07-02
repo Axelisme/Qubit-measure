@@ -11,7 +11,7 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
-from ._common import Handler, render_view
+from ._common import render_view
 
 logger = logging.getLogger(__name__)
 
@@ -206,14 +206,3 @@ def _h_tab_set_cfg(
         if isinstance(added, list):
             all_added.extend(str(p) for p in added)
     return {"valid": valid, "removed": all_removed, "added": all_added}
-
-
-HANDLERS: dict[str, Handler] = {
-    "tab.new": _h_tab_new,
-    "tab.close": _h_tab_close,
-    "tab.set_active": _h_tab_set_active,
-    "tab.list_all": _h_tab_list_all,
-    "tab.snapshot": _h_tab_snapshot,
-    "tab.get_cfg": _h_tab_get_cfg,
-    "tab.set_cfg": _h_tab_set_cfg,
-}
