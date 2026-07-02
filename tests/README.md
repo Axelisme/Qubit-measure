@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-02 — Schedule runtime tests
+**Last updated:** 2026-07-02 — typed Schedule env tests
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -181,7 +181,7 @@ result = _optimize_tree(root, [SomePass()], ctx)
 
 ### Experiment v2 Schedule runtime tests
 
-`tests/experiment/v2/runner/test_flow.py` 覆蓋 `SignalBuffer` / `Schedule` / `ProgramBuilder` 的 host scan、program-side sweep、buffer shape、stop checker、retry、batch 與 raw conversion contract。個別 experiment module 更接近資料編排，不新增 migration-specific tests；若要測 QICK compile 行為，放到 `tests/program/v2/` 或既有 sim integration 測試。
+`tests/experiment/v2/runner/test_flow.py` 覆蓋 `SignalBuffer` / `Schedule` / `ProgramBuilder` 的 typed env、host scan、program-side sweep、buffer shape、stop checker、retry、batch 與 raw conversion contract。個別 experiment module 更接近資料編排，不新增 migration-specific tests；若要測 QICK compile 行為，放到 `tests/program/v2/` 或既有 sim integration 測試。
 
 ### 補充 — `make_mock_soc()`（`lib/zcu_tools/program/v2/mocksoc.py`）
 

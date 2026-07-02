@@ -190,10 +190,10 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
                 cur_1d=make_plotter1d(axs[1][1]),
             ),
         ) as viewer:
-            env = {"idx": 0}
+            current_index = 0
 
             def plot_fn(data: NDArray[np.float64]) -> None:
-                i = int(env["idx"])
+                i = current_index
 
                 populations = calc_populations(data)
 
@@ -217,7 +217,7 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
                 dtype=np.float64,
                 on_update=plot_fn,
             )
-            with Schedule(cfg, buffer, env_dict=env) as sched:
+            with Schedule(cfg, buffer) as sched:
                 sched.cfg.modules.stark_pulse2.set_param(
                     "freq", sweep2param("freq", sched.cfg.sweep.freq)
                 )
@@ -226,7 +226,7 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
                 ):
                     modules = step.cfg.modules
                     modules.stark_pulse1.set_param("gain", gain)
-                    env["idx"] = gain_idx
+                    current_index = gain_idx
                     _ = (
                         step.prog_builder(soc, soccfg)
                         .add_reset("reset", modules.reset)

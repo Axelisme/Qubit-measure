@@ -261,6 +261,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         with LivePlot2DwithLine(
             "Number of Pi", "Time idxs", line_axis=1, num_lines=2
         ) as viewer:
+            current_length_idx = 0
             signals_buffer = SignalBuffer(
                 (len(times), len(length_idxs)),
                 on_update=lambda data: update_viewer(data),
@@ -268,16 +269,15 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
             with Schedule(cfg, signals_buffer) as sched:
 
                 def update_viewer(data: NDArray[np.complex128]) -> None:
-                    length_idx = int(sched.env["length_idx"])
                     viewer.update(
                         times.astype(np.float64),
-                        lengths[length_idx],
+                        lengths[current_length_idx],
                         cpmg_signal2real(data),
                         title=f"snr = {current_snr:.1f}" if current_snr else None,
                     )
 
                 for idx, (time_value, step) in enumerate(sched.scan("times", times)):
-                    sched.env.update(time=int(time_value), length_idx=idx)
+                    current_length_idx = idx
                     cfg = step.cfg
                     modules = cfg.modules
 

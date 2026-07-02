@@ -294,10 +294,10 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                 ),
             ),
         ) as viewer:
-            env: dict[str, Any] = {}
+            current_index = 0
 
             def plot_fn(data: NDArray[np.float64]) -> None:
-                idx = int(env["index"])
+                idx = current_index
                 snrs = np.abs(data)  # (num_points, )
 
                 cur_flux, cur_freq, cur_gain = params[idx, :]
@@ -327,9 +327,9 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                 dtype=np.float64,
                 on_update=plot_fn,
             )
-            with Schedule(cfg, signals_buffer, env_dict=env) as sched:
+            with Schedule(cfg, signals_buffer) as sched:
                 for idx, step in sched.scan("Iteration", range(num_points)):
-                    sched.env["index"] = idx
+                    current_index = idx
 
                     last_snr = None
                     if idx > 0:

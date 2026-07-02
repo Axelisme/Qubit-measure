@@ -38,6 +38,7 @@ from zcu_tools.utils.datasaver import (
 )
 from zcu_tools.utils.func_tools import MinIntervalFunc
 
+from ..env import OvernightEnv, iteration_index
 from ..executor import MeasurementTask, OvernightCfg, T_RootResult
 from .util import calc_populations
 
@@ -336,12 +337,12 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
 
     def run(
         self,
-        state: ScheduleStep[OvernightCfg, Any],
+        state: ScheduleStep[OvernightCfg, Any, OvernightEnv],
     ) -> None:
         self.gains = sweep2array(
             self.gains,
             "gain",
-            {"soccfg": state.env["soccfg"], "gen_ch": self.cfg.modules.probe_pulse.ch},
+            {"soccfg": state.env.soccfg, "gen_ch": self.cfg.modules.probe_pulse.ch},
         )
         populations_step = state.child("populations", cfg=self.cfg)
         _ = populations_step.buffer((len(self.gains), 2), dtype=np.float64)
@@ -352,7 +353,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
         modules.probe_pulse.set_param("gain", sweep2param("gain", gain_sweep))
 
         _ = (
-            populations_step.prog_builder(state.env["soc"], state.env["soccfg"])
+            populations_step.prog_builder(state.env.soc, state.env.soccfg)
             .add(
                 Reset("reset", modules.reset),
                 Pulse("init_pulse", cfg=modules.init_pulse),
@@ -434,11 +435,11 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
     def update_plotter(
         self,
         plotters,
-        ctx: ScheduleStep[Any, Any],
+        ctx: ScheduleStep[Any, Any, OvernightEnv],
         results: MistResult,
     ) -> None:
-        iters = ctx.env["iters"]
-        i = ctx.env["repeat_idx"]
+        iters = ctx.env.iters.astype(np.float64)
+        i = iteration_index(ctx)
 
         gains = results["gains"][0]
         populations = calc_populations(results["populations"])  # (iters, times, 3)

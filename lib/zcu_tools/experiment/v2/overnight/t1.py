@@ -38,6 +38,7 @@ from zcu_tools.utils.fitting import fit_decay
 from zcu_tools.utils.func_tools import MinIntervalFunc
 from zcu_tools.utils.process import rotate2real
 
+from .env import OvernightEnv
 from .executor import MeasurementTask, OvernightCfg, T_RootResult
 
 
@@ -91,8 +92,13 @@ class T1PlotAndSaveMixin(Generic[T_Cfg]):
             ),
         )
 
-    def update_plotter(self, plotters: T1PlotDict, ctx, results) -> None:
-        iters = ctx.env["iters"]
+    def update_plotter(
+        self,
+        plotters: T1PlotDict,
+        ctx: ScheduleStep[Any, Any, OvernightEnv],
+        results,
+    ) -> None:
+        iters = ctx.env.iters.astype(np.float64)
 
         lengths = results["lengths"][0]
         real_signals = t1_overnight_signal2real(results["signals"])
@@ -207,11 +213,9 @@ class T1Task(
 
     def run(
         self,
-        state: ScheduleStep[OvernightCfg, Any],
+        state: ScheduleStep[OvernightCfg, Any, OvernightEnv],
     ) -> None:
-        self.lengths = sweep2array(
-            self.lengths, "time", {"soccfg": state.env["soccfg"]}
-        )
+        self.lengths = sweep2array(self.lengths, "time", {"soccfg": state.env.soccfg})
         self.last_cfg = self.cfg
 
         signals_step = state.child("signals", cfg=self.cfg)
@@ -222,7 +226,7 @@ class T1Task(
         length_param = sweep2param("length", length_sweep)
 
         _ = (
-            signals_step.prog_builder(state.env["soc"], state.env["soccfg"])
+            signals_step.prog_builder(state.env.soc, state.env.soccfg)
             .add(
                 Reset("reset", modules.reset),
                 Pulse("pi_pulse", modules.pi_pulse),
@@ -285,13 +289,13 @@ class T1WithToneTask(
 
     def run(
         self,
-        state: ScheduleStep[OvernightCfg, Any],
+        state: ScheduleStep[OvernightCfg, Any, OvernightEnv],
     ) -> None:
         self.lengths = sweep2array(
             self.lengths,
             "time",
             {
-                "soccfg": state.env["soccfg"],
+                "soccfg": state.env.soccfg,
                 "gen_ch": self.cfg.modules.probe_pulse.ch,
             },
         )
@@ -306,7 +310,7 @@ class T1WithToneTask(
         modules.probe_pulse.set_param("length", length_param)
 
         _ = (
-            signals_step.prog_builder(state.env["soc"], state.env["soccfg"])
+            signals_step.prog_builder(state.env.soc, state.env.soccfg)
             .add(
                 Reset("reset", modules.reset),
                 Pulse("pi_pulse", modules.pi_pulse),

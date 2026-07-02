@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -18,6 +19,12 @@ from zcu_tools.program.v2 import Module, ProgramV2Cfg
 
 class FlowCfg(ProgramV2Cfg, ExpCfgModel):
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
+
+
+@dataclass
+class FlowEnv:
+    label: str
+    scale: float
 
 
 def _identity_array(raw: np.ndarray) -> np.ndarray:
@@ -47,12 +54,12 @@ class RecordingBuffer:
         self,
         data: Any,
         *,
-        on_update: Callable[[ScheduleStep[Any, Any]], None] | None = None,
+        on_update: Callable[[ScheduleStep[Any, Any, Any]], None] | None = None,
     ) -> None:
         self.data = data
         self._on_update = on_update
 
-    def trigger_update(self, step: ScheduleStep[Any, Any] | None = None) -> None:
+    def trigger_update(self, step: ScheduleStep[Any, Any, Any] | None = None) -> None:
         if step is not None and self._on_update is not None:
             self._on_update(step)
 
@@ -590,11 +597,13 @@ def test_schedule_requires_explicit_modules():
             raise AssertionError("ProgramBuilder.build should require modules")
 
 
-def test_schedule_scan_targets_buffer_step_with_getitem():
+def test_schedule_scan_targets_buffer_step_without_mutating_env():
     signals_buffer = SignalBuffer((3,), dtype=np.float64)
 
     with Schedule(_cfg(rounds=1), signals_buffer) as sched:
         for value, step in sched.scan("value", [10.0, 20.0, 30.0]):
+            assert step.value == value
+            assert isinstance(step.index, int)
             setattr(step.cfg, "value", value)
             step.prog_builder(
                 "soc",
@@ -604,13 +613,12 @@ def test_schedule_scan_targets_buffer_step_with_getitem():
                 raw2signal_fn=_identity_array,
             )
 
-        assert sched.env["value"] == 30.0
-        assert sched.env["value_idx"] == 2
+        assert sched.env == {}
 
     assert np.allclose(signals_buffer.array, [10.0, 20.0, 30.0])
 
 
-def test_schedule_repeat_sets_repeat_idx_and_targets_step_buffer():
+def test_schedule_repeat_targets_step_buffer_without_mutating_env():
     signals_buffer = SignalBuffer((3,), dtype=np.float64)
 
     with Schedule(_cfg(rounds=1), signals_buffer) as sched:
@@ -618,7 +626,6 @@ def test_schedule_repeat_sets_repeat_idx_and_targets_step_buffer():
             assert step.index == index
             assert step.value == index
             assert step.path == (index,)
-            assert step.env["repeat_idx"] == index
             setattr(step.cfg, "value", index)
             step.prog_builder(
                 "soc",
@@ -629,6 +636,16 @@ def test_schedule_repeat_sets_repeat_idx_and_targets_step_buffer():
             )
 
     assert np.allclose(signals_buffer.array, [0.0, 1.0, 2.0])
+
+
+def test_schedule_env_accepts_dataclass_context():
+    env = FlowEnv(label="typed", scale=2.0)
+
+    with Schedule(_cfg(), env=env) as sched:
+        assert sched.env.label == "typed"
+        for value, step in sched.scan("value", [3.0]):
+            assert step.env is env
+            assert step.env.scale * value == 6.0
 
 
 def test_schedule_nested_repeat_scan_targets_inner_step_buffer():

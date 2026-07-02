@@ -33,7 +33,8 @@ from zcu_tools.utils.fitting import fit_rabi
 from zcu_tools.utils.func_tools import MinIntervalFunc
 from zcu_tools.utils.process import rotate2real
 
-from .executor import FluxDepCfg, FluxDepInfoDict, MeasurementTask
+from .env import FluxDepEnv, FluxDepInfoDict
+from .executor import FluxDepCfg, MeasurementTask
 
 
 def lenrabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -122,7 +123,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
         self,
         num_expts: int,
         cfg_maker: Callable[
-            [ScheduleStep[FluxDepCfg, Any], ModuleLibrary],
+            [ScheduleStep[FluxDepCfg, Any, FluxDepEnv], ModuleLibrary],
             LenRabiCfgTemplate | None,
         ],
         earlystop_snr: float | None = None,
@@ -139,9 +140,9 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
 
     def run(
         self,
-        state: ScheduleStep[FluxDepCfg, Any],
+        state: ScheduleStep[FluxDepCfg, Any, FluxDepEnv],
     ) -> None:
-        cfg_temp = self.cfg_maker(state, state.env["ml"])
+        cfg_temp = self.cfg_maker(state, state.env.ml)
         if cfg_temp is None:
             return  # skip this task
 
@@ -168,7 +169,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
         modules.rabi_pulse.set_param("length", sweep2param("length", len_sweep))
 
         _ = (
-            raw_step.prog_builder(state.env["soc"], state.env["soccfg"])
+            raw_step.prog_builder(state.env.soc, state.env.soccfg)
             .add_reset("reset", modules.reset)
             .add_pulse("rabi_pulse", modules.rabi_pulse)
             .add_readout("readout", modules.readout)
@@ -188,7 +189,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
         real_signals = lenrabi_signal2real(raw_signals)
 
         self.lengths = sweep2array(
-            len_sweep, "time", {"soccfg": state.env["soccfg"], "gen_ch": rabi_pulse.ch}
+            len_sweep, "time", {"soccfg": state.env.soccfg, "gen_ch": rabi_pulse.ch}
         )
 
         (pi_len, _, pi2_len, _, rabi_freq, _, mean_err, fit_signals) = auto_fit_lenrabi(
@@ -205,7 +206,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
             success = False
 
         if success:
-            info: FluxDepInfoDict = state.env["info"]
+            info: FluxDepInfoDict = state.env.info
 
             cur_pi_product = pi_len * rabi_pulse.gain
             prev_pi_product = info.last.get("smooth_pi_product", cur_pi_product)
@@ -269,12 +270,12 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
     def update_plotter(
         self,
         plotters,
-        ctx: ScheduleStep[Any, Any],
+        ctx: ScheduleStep[Any, Any, FluxDepEnv],
         signals,
     ) -> None:
-        flux_values = ctx.env["flux_values"]
+        flux_values = ctx.env.flux_values
 
-        self.pi_line.set_xdata([ctx.env["info"].get("pi_length", np.nan)])
+        self.pi_line.set_xdata([ctx.env.info.get("pi_length", np.nan)])
         plotters["rabi_curve"].update(
             flux_values,
             self.lengths,

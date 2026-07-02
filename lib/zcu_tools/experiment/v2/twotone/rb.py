@@ -275,8 +275,9 @@ class RB_Exp(PersistableExperiment[RB_Result, RBCfg]):
 
         with LivePlot1D("Depth", "Signal") as viewer:
 
-            def update_seq_seed(step) -> None:
-                entropy = int(step.value)
+            def build_seq_seed(
+                entropy: int,
+            ) -> tuple[int, list[int], list[int], list[int]]:
                 child = np.random.SeedSequence(entropy)
                 rng = np.random.Generator(np.random.PCG64(child))
                 clifford_idxs = rng.integers(0, NUM_CLIFFORDS, size=max_depth)
@@ -289,15 +290,17 @@ class RB_Exp(PersistableExperiment[RB_Result, RBCfg]):
                         state = GATE_EFFECT_MAP[gate][state]
                     cum_states.append(state)
 
-                step.env["seed"] = entropy
                 rand_gate_seq, prefix_len_by_depth, recovery_gate_by_depth = (
                     build_seed_program_tables(
                         clifford_idxs.tolist(), cum_states, depths
                     )
                 )
-                step.env["rand_gate_seq"] = rand_gate_seq
-                step.env["prefix_len_by_depth"] = prefix_len_by_depth
-                step.env["recovery_gate_by_depth"] = recovery_gate_by_depth
+                return (
+                    entropy,
+                    rand_gate_seq,
+                    prefix_len_by_depth,
+                    recovery_gate_by_depth,
+                )
 
             signals_buffer = SignalBuffer(
                 (len(entropys), len(depths)),
@@ -308,17 +311,15 @@ class RB_Exp(PersistableExperiment[RB_Result, RBCfg]):
             )
             with Schedule(run_cfg, signals_buffer) as sched:
                 for _, step in sched.scan("seed", entropys.tolist()):
-                    update_seq_seed(step)
-
-                    seed: int = step.env["seed"]
+                    (
+                        seed,
+                        rand_gate_seq,
+                        prefix_len_by_depth,
+                        recovery_gate_by_depth,
+                    ) = build_seq_seed(int(step.value))
                     builder = step.prog_builder(soc, soccfg)
                     if seed not in prog_cache:
                         modules = step.cfg.modules
-                        rand_gate_seq: list[int] = step.env["rand_gate_seq"]
-                        prefix_len_by_depth: list[int] = step.env["prefix_len_by_depth"]
-                        recovery_gate_by_depth: list[int] = step.env[
-                            "recovery_gate_by_depth"
-                        ]
                         max_rand_len = max(prefix_len_by_depth, default=0)
 
                         Id_pulse = modules.I_pulse

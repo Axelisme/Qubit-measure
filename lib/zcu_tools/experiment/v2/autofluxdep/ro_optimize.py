@@ -37,7 +37,8 @@ from zcu_tools.utils import deepupdate
 from zcu_tools.utils.func_tools import MinIntervalFunc
 from zcu_tools.utils.process import smooth_signal_nd
 
-from .executor import FluxDepCfg, FluxDepInfoDict, MeasurementTask, T_RootResult
+from .env import FluxDepEnv, FluxDepInfoDict
+from .executor import FluxDepCfg, MeasurementTask, T_RootResult
 
 
 def ro_opt_signal2real(signals: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -90,7 +91,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
         freq_expts: int,
         gain_expts: int,
         cfg_maker: Callable[
-            [ScheduleStep[FluxDepCfg, Any], ModuleLibrary],
+            [ScheduleStep[FluxDepCfg, Any, FluxDepEnv], ModuleLibrary],
             RO_OptCfgTemplate | None,
         ],
     ) -> None:
@@ -108,11 +109,11 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
 
     def run(
         self,
-        state: ScheduleStep[FluxDepCfg, Any],
+        state: ScheduleStep[FluxDepCfg, Any, FluxDepEnv],
     ) -> None:
-        info: FluxDepInfoDict = state.env["info"]
+        info: FluxDepInfoDict = state.env.info
 
-        cfg_temp = self.cfg_maker(state, state.env["ml"])
+        cfg_temp = self.cfg_maker(state, state.env.ml)
         if cfg_temp is None:
             return  # skip this task
 
@@ -136,7 +137,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
             freq_sweep,
             "freq",
             {
-                "soccfg": state.env["soccfg"],
+                "soccfg": state.env.soccfg,
                 "gen_ch": modules.readout.pulse_cfg.ch,
                 "ro_ch": modules.readout.ro_cfg.ro_ch,
             },
@@ -145,7 +146,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
             gain_sweep,
             "gain",
             {
-                "soccfg": state.env["soccfg"],
+                "soccfg": state.env.soccfg,
                 "gen_ch": modules.readout.pulse_cfg.ch,
             },
         )
@@ -168,7 +169,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
             return snr_as_signal([tracker], ge_axis=0, skew_penalty=self.skew_penalty)
 
         _ = (
-            raw_step.prog_builder(state.env["soc"], state.env["soccfg"])
+            raw_step.prog_builder(state.env.soc, state.env.soccfg)
             .add(
                 Reset("reset", modules.reset),
                 Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
@@ -242,10 +243,10 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
     def update_plotter(
         self,
         plotters,
-        ctx: ScheduleStep[Any, Any],
+        ctx: ScheduleStep[Any, Any, FluxDepEnv],
         signals: RO_OptResult,
     ) -> None:
-        info: FluxDepInfoDict = ctx.env["info"]
+        info: FluxDepInfoDict = ctx.env.info
         i = info["flux_idx"]
 
         real_signals = ro_opt_signal2real(signals["raw_signals"][i])

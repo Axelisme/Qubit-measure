@@ -219,10 +219,10 @@ class T1WithToneSweepExp(
         fig, viewer = self._make_viewer_ctx(sweep_name)
 
         with viewer:
-            env = {"idx": 0}
+            current_index = 0
 
             def plot_fn(data: NDArray[np.float64]) -> None:
-                i = int(env["idx"])
+                i = current_index
                 populations = calc_populations(data)
 
                 viewer.get_plotter("gg_2d").update(
@@ -257,7 +257,7 @@ class T1WithToneSweepExp(
                 dtype=np.float64,
                 on_update=plot_fn,
             )
-            with Schedule(cfg, buffer, env_dict=env) as sched:
+            with Schedule(cfg, buffer) as sched:
                 for value_idx, (value, step) in enumerate(
                     sched.scan(sweep_name, xs.tolist())
                 ):
@@ -270,7 +270,7 @@ class T1WithToneSweepExp(
                     modules.probe_pulse.set_param(
                         "length", sweep2param("length", inner_length_sweep)
                     )
-                    env["idx"] = value_idx
+                    current_index = value_idx
                     _ = (
                         step.prog_builder(soc, soccfg)
                         .add(
@@ -339,10 +339,10 @@ class T1WithToneSweepExp(
         fig, viewer = self._make_viewer_ctx(sweep_name)
 
         with viewer:
-            env = {"idx": 0}
+            current_index = 0
 
             def plot_fn(data: NDArray[np.float64]) -> None:
-                i = int(env["idx"])
+                i = current_index
                 populations = calc_populations(data)
 
                 viewer.get_plotter("gg_2d").update(
@@ -381,12 +381,12 @@ class T1WithToneSweepExp(
                 on_update=lambda data: plot_fn(_average_non_uniform_rounds(data)),
             )
             programs: dict[tuple[float, float], ModularProgramV2] = {}
-            with Schedule(run_cfg, round_buffer, env_dict=env) as sched:
+            with Schedule(run_cfg, round_buffer) as sched:
                 for value_idx, (value, x_step) in enumerate(
                     sched.scan(sweep_name, xs.tolist())
                 ):
                     x_step.cfg.modules.probe_pulse.set_param(sweep_name, value)
-                    env["idx"] = value_idx
+                    current_index = value_idx
                     for _, rep in x_step.repeat("round", rounds):
                         for length, step in rep.scan("length", lengths.tolist()):
                             modules = step.cfg.modules

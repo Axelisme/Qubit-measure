@@ -20,6 +20,8 @@ from zcu_tools.experiment.v2.utils import Result, merge_result_list
 from zcu_tools.liveplot import AbsLivePlot
 from zcu_tools.utils.func_tools import MinIntervalFunc
 
+from .env import OvernightDeps, OvernightEnv
+
 T_PlotDict = TypeVar("T_PlotDict", bound=Mapping[str, AbsLivePlot])
 
 
@@ -38,7 +40,7 @@ class MeasurementTask(
     def init(self, dynamic_pbar: bool = False) -> None: ...
 
     @abstractmethod
-    def run(self, state: ScheduleStep[OvernightCfg, Any]) -> None: ...
+    def run(self, state: ScheduleStep[OvernightCfg, Any, OvernightEnv]) -> None: ...
 
     def cleanup(self) -> None: ...
 
@@ -55,7 +57,7 @@ class MeasurementTask(
     def update_plotter(
         self,
         plotters: T_PlotDict,
-        ctx: ScheduleStep[Any, Any],
+        ctx: ScheduleStep[Any, Any, OvernightEnv],
         results: T_Result,
     ) -> None: ...
 
@@ -72,7 +74,9 @@ class MeasurementTask(
 
 class OvernightExecutor(
     MultiMeasurementExecutor[
-        "MeasurementTask[Any, list[dict[str, Result]], Any]", OvernightCfg
+        "MeasurementTask[Any, list[dict[str, Result]], Any]",
+        OvernightCfg,
+        OvernightEnv,
     ]
 ):
     def __init__(self, num_times: int, interval: float) -> None:
@@ -89,22 +93,21 @@ class OvernightExecutor(
     @matplotlib.rc_context(
         {"font.size": 6, "xtick.major.size": 6, "ytick.major.size": 6}
     )
-    def run(
-        self, fail_retry: int = 3, env_dict: dict[str, Any] | None = None
-    ) -> Mapping[str, Result]:
+    def run(self, deps: OvernightDeps, fail_retry: int = 3) -> Mapping[str, Result]:
         if len(self.measurements) == 0:
             raise ValueError("No measurements added")
 
-        if env_dict is None:
-            env_dict = {}
-
-        env_dict.update(iters=np.arange(self.num_times))
+        env = OvernightEnv(
+            soc=deps.soc,
+            soccfg=deps.soccfg,
+            iters=np.arange(self.num_times),
+        )
 
         cfg = OvernightCfg()
 
         init_result = [self._default_batch_result() for _ in range(self.num_times)]
 
-        def run_loop(root_sched: Schedule[OvernightCfg]) -> None:
+        def run_loop(root_sched: Schedule[OvernightCfg, OvernightEnv]) -> None:
             for _, iter_step in root_sched.repeat(
                 "Iter", self.num_times, self.interval
             ):
@@ -112,7 +115,7 @@ class OvernightExecutor(
                 with MinIntervalFunc.force_execute():
                     iter_step.trigger_update()
 
-        results = self._run_with_plotting(init_result, cfg, env_dict, run_loop)
+        results = self._run_with_plotting(init_result, cfg, env, run_loop)
 
         signals_dict = merge_result_list(results)
 

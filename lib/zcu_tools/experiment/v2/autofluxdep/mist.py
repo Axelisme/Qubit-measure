@@ -29,6 +29,7 @@ from zcu_tools.utils import deepupdate
 from zcu_tools.utils.datasaver import save_labber_data
 from zcu_tools.utils.func_tools import MinIntervalFunc
 
+from .env import FluxDepEnv
 from .executor import FluxDepCfg, MeasurementTask, T_RootResult
 
 
@@ -86,7 +87,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
         self,
         gain_sweep: SweepCfg,
         cfg_maker: Callable[
-            [ScheduleStep[FluxDepCfg, Any], ModuleLibrary],
+            [ScheduleStep[FluxDepCfg, Any, FluxDepEnv], ModuleLibrary],
             MistCfgTemplate | None,
         ],
     ) -> None:
@@ -101,9 +102,9 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
 
     def run(
         self,
-        state: ScheduleStep[FluxDepCfg, Any],
+        state: ScheduleStep[FluxDepCfg, Any, FluxDepEnv],
     ) -> None:
-        cfg_temp = self.cfg_maker(state, state.env["ml"])
+        cfg_temp = self.cfg_maker(state, state.env.ml)
 
         if cfg_temp is None:
             return  # skip this task
@@ -121,7 +122,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
             cfg.sweep.gain,
             "gain",
             {
-                "soccfg": state.env["soccfg"],
+                "soccfg": state.env.soccfg,
                 "gen_ch": cfg.modules.mist_pulse.ch,
             },
         )
@@ -136,7 +137,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
         modules.mist_pulse.set_param("gain", sweep2param("gain", gain_sweep))
 
         _ = (
-            raw_step.prog_builder(state.env["soc"], state.env["soccfg"])
+            raw_step.prog_builder(state.env.soc, state.env.soccfg)
             .add_reset("reset", modules.reset)
             .add_pulse("pi_pulse", modules.pi_pulse)
             .add_pulse("mist_pulse", modules.mist_pulse)
@@ -181,10 +182,10 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
     def update_plotter(
         self,
         plotters,
-        ctx: ScheduleStep[Any, Any],
+        ctx: ScheduleStep[Any, Any, FluxDepEnv],
         signals: MistResult,
     ) -> None:
-        flux_values: NDArray[np.float64] = ctx.env["flux_values"]
+        flux_values = ctx.env.flux_values
 
         # shape: (flux, gains)
         mist_signals = mist_fluxdep_signal2real(signals["raw_signals"])

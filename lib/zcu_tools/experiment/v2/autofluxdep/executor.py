@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections import UserDict
 from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
@@ -29,6 +28,8 @@ from zcu_tools.liveplot import AbsLivePlot
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 from zcu_tools.utils.debug import print_traceback
 
+from .env import FluxDepDeps, FluxDepEnv, FluxDepInfoDict
+
 T_PlotDict = TypeVar("T_PlotDict", bound=Mapping[str, AbsLivePlot])
 
 
@@ -49,7 +50,7 @@ class MeasurementTask(
     def init(self, dynamic_pbar: bool = False) -> None: ...
 
     @abstractmethod
-    def run(self, state: ScheduleStep[FluxDepCfg, Any]) -> None: ...
+    def run(self, state: ScheduleStep[FluxDepCfg, Any, FluxDepEnv]) -> None: ...
 
     def cleanup(self) -> None: ...
 
@@ -66,7 +67,7 @@ class MeasurementTask(
     def update_plotter(
         self,
         plotters: T_PlotDict,
-        ctx: ScheduleStep[Any, Any],
+        ctx: ScheduleStep[Any, Any, FluxDepEnv],
         signals: T_Result,
     ) -> None: ...
 
@@ -81,27 +82,9 @@ class MeasurementTask(
     ) -> None: ...
 
 
-class FluxDepInfoDict(UserDict):
-    def __init__(self, initialdata: Mapping[str, Any] | None = None) -> None:
-        self.first_info: dict[str, Any] = {}
-        self.last_info: dict[str, Any] = {}
-        super().__init__(initialdata)
-
-    @property
-    def last(self) -> dict[str, Any]:
-        return self.last_info
-
-    @property
-    def first(self) -> dict[str, Any]:
-        return self.first_info
-
-    def __setitem__(self, key: str, item: Any) -> None:
-        super().__setitem__(key, item)
-        self.first_info.setdefault(key, deepcopy(item))
-        self.last_info[key] = deepcopy(item)
-
-
-class FluxDepExecutor(MultiMeasurementExecutor[MeasurementTask, FluxDepCfg]):
+class FluxDepExecutor(
+    MultiMeasurementExecutor[MeasurementTask, FluxDepCfg, FluxDepEnv]
+):
     def __init__(self, flux_values: NDArray[np.float64]) -> None:
         super().__init__()
 
@@ -114,18 +97,17 @@ class FluxDepExecutor(MultiMeasurementExecutor[MeasurementTask, FluxDepCfg]):
         self,
         dev_cfg: dict[str, DeviceInfo],
         predictor: FluxoniumPredictor,
-        env_dict: dict[str, Any] | None = None,
+        deps: FluxDepDeps,
         retry_time: int = 3,
     ) -> Mapping[str, Result]:
         if len(self.measurements) == 0:
             raise ValueError("No measurements added")
 
-        if env_dict is None:
-            env_dict = {}
-
         cfg = FluxDepCfg(dev=dev_cfg)
-
-        env_dict.update(
+        env = FluxDepEnv(
+            soc=deps.soc,
+            soccfg=deps.soccfg,
+            ml=deps.ml,
             flux_values=self.flux_values,
             predictor=predictor,
             info=FluxDepInfoDict(),
@@ -142,7 +124,7 @@ class FluxDepExecutor(MultiMeasurementExecutor[MeasurementTask, FluxDepCfg]):
         stop = current_stop_signal() or StopSignal()
         result_buffer = self._make_result_buffer(init_result, plot_fn)
 
-        with Schedule(cfg, result_buffer, env_dict=env_dict, stop=stop) as sched:
+        with Schedule(cfg, result_buffer, env=env, stop=stop) as sched:
             with plotter:
                 try:
                     for measurement in self.measurements.values():
@@ -151,8 +133,8 @@ class FluxDepExecutor(MultiMeasurementExecutor[MeasurementTask, FluxDepCfg]):
                     for i, (flux, flux_step) in enumerate(
                         sched.scan("flux", self.flux_values)
                     ):
-                        info: FluxDepInfoDict = flux_step.env["info"]
-                        predictor = flux_step.env["predictor"]
+                        info = flux_step.env.info
+                        predictor = flux_step.env.predictor
 
                         info.clear()  # clear current info dict
 

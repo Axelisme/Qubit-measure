@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runner` — experiment runtime
 
-**Last updated:** 2026-07-02 — unified Schedule executor runtime
+**Last updated:** 2026-07-02 — typed Schedule env
 
 `runner/` 提供 experiment/v2 的 Python-like acquisition runtime。一般實驗用
 `SignalBuffer` / `Schedule` / `ProgramBuilder` 編排 host-side loop 與 program
@@ -34,7 +34,7 @@ path，並觸發該 buffer 的 update hook。
 
 ### `Schedule`
 
-`Schedule` 是一次 run 的 scope：入口 deepcopy cfg、共享 env、持有 `StopSignal`，並
+`Schedule` 是一次 run 的 scope：入口 deepcopy cfg、typed env、持有 `StopSignal`，並
 建立 host-side control flow。
 
 ```python
@@ -58,11 +58,16 @@ with Schedule(cfg, signals_buffer) as sched:
 - `Schedule` 的 cfg 是泛型，可以是 experiment cfg；`ProgramBuilder` 只會把 builder
   cfg 投影成 `ProgramV2Cfg` 給 program。若 cfg 已是 `ProgramV2Cfg` instance/subclass
   則保留原型別；若 mapping/object 沒有任何 `ProgramV2Cfg` 欄位，builder 會 fast-fail。
+- `Schedule` 的 env 也是泛型，使用 `with Schedule(cfg, buffer, env=RunEnv(...))`
+  可讓 `sched.env.xxx` / `step.env.xxx` 取得 linter 型別支援。env 只放穩定 run
+  dependencies（例如 soc、soccfg、ModuleLibrary、predictor）；scan/repeat 的動態
+  value/index 不寫入 env，而是由 `ScheduleStep.value` / `ScheduleStep.index` /
+  `ScheduleStep.path` 表示。
 - `sched.scan(...)` / `step.scan(...)` 表示 host-side Python loop。
 - `sched.repeat(name, times, interval)` 表示 host-side repeat；等待期間會檢查
   `StopSignal`，需要刷新 liveplot 時由 caller 呼叫相關 buffer 的 `trigger_update()`。
 - `sched.batch({key: callable}, retry=N)` 執行 replayable child callable；retry 是
-  per-child，child 取得獨立 deepcopy cfg 與共享 env。
+  per-child，child 取得獨立 deepcopy cfg 與同一個 typed env。
 - `ScheduleStep.path` 會累積巢狀 host loop index，所以預設 single-buffer acquire 可
   依 owner path 自動寫入對應 slot，不需要 `into=` 參數。
 - `with Schedule(cfg, result_buffer) as sched` 可編排任何實作 `BufferProtocol` 的 result
@@ -105,7 +110,7 @@ buffer 持有，path、env、stop 與 control flow 由 `Schedule` 持有。
 典型 executor 格式：
 
 ```python
-def run_loop(root_sched: Schedule[FluxDepCfg]) -> None:
+def run_loop(root_sched: Schedule[FluxDepCfg, FluxDepEnv]) -> None:
     for i, (flux, flux_step) in enumerate(root_sched.scan("flux", flux_values)):
         update_flux_context(i, flux_step, flux)
         flux_step.batch(
@@ -121,7 +126,9 @@ def run_loop(root_sched: Schedule[FluxDepCfg]) -> None:
 leaf measurement 取得 `ScheduleStep` 後，通常用
 `raw_step = state.child("raw_signals", cfg=program_cfg)` 建立 program-owned cfg scope，再用
 `raw_step.buffer(shape, dtype=...)` 建立與 result tree 綁定的 acquire buffer；接著直接
-呼叫 `raw_step.prog_builder(...).build_and_acquire()`。
+呼叫 `raw_step.prog_builder(...).build_and_acquire()`。`autofluxdep` / `overnight`
+的 caller 入口各自用 deps dataclass 提供穩定依賴，executor 在 run 內組完整 typed
+env 給 root `Schedule`。
 
 ---
 
@@ -141,6 +148,6 @@ leaf measurement 取得 `ScheduleStep` 後，通常用
 
 ## 測試
 
-`tests/experiment/v2/runner/test_flow.py` 覆蓋 Schedule、SignalBuffer、ProgramBuilder、
-host scan/repeat/batch、retry、stop 與 decimated acquire。單一實驗模組只保留 runtime
-整合型檢查，不再為每個資料型 experiment 建獨立 runner 測試。
+`tests/experiment/v2/runner/test_flow.py` 覆蓋 Schedule、typed env、SignalBuffer、
+ProgramBuilder、host scan/repeat/batch、retry、stop 與 decimated acquire。單一實驗模組
+只保留 runtime 整合型檢查，不再為每個資料型 experiment 建獨立 runner 測試。

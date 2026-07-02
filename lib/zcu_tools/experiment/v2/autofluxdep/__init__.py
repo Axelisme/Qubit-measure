@@ -1,3 +1,4 @@
+from .env import FluxDepDeps, FluxDepEnv
 from .executor import FluxDepCfg, FluxDepExecutor, FluxDepInfoDict
 from .lenrabi import LenRabiCfg, LenRabiCfgTemplate, LenRabiTask
 from .mist import MistCfg, MistCfgTemplate, MistTask
@@ -11,6 +12,8 @@ __all__ = [
     # executor
     "FluxDepExecutor",
     "FluxDepInfoDict",
+    "FluxDepDeps",
+    "FluxDepEnv",
     "FluxDepCfg",
     # lenrabi
     "LenRabiTask",

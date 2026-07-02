@@ -18,10 +18,11 @@ from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass
 from numbers import Number
-from typing import Any, Generic, Literal, Protocol, Self, TypeAlias, TypeVar, overload
+from typing import Any, Generic, Literal, Protocol, Self, TypeAlias, cast, overload
 
 import numpy as np
 from numpy.typing import DTypeLike, NDArray
+from typing_extensions import TypeVar
 
 from zcu_tools.program.v2 import (
     ModularProgramV2,
@@ -40,6 +41,7 @@ from zcu_tools.utils.func_tools import min_interval
 
 T_Cfg = TypeVar("T_Cfg")
 T_ChildCfg = TypeVar("T_ChildCfg")
+T_Env = TypeVar("T_Env", default=dict[str, Any])
 
 T_Raw = TypeVar("T_Raw")
 T_Value = TypeVar("T_Value")
@@ -85,7 +87,9 @@ class BufferProtocol(Protocol):
     @property
     def data(self) -> Any: ...
 
-    def trigger_update(self, step: ScheduleStep[Any, Any] | None = None) -> None: ...
+    def trigger_update(
+        self, step: ScheduleStep[Any, Any, Any] | None = None
+    ) -> None: ...
 
 
 def default_raw2signal_fn(raw: Sequence[NDArray[np.float64]]) -> NDArray[np.complex128]:
@@ -168,7 +172,7 @@ class SignalBuffer:
         np.copyto(dst=self.array, src=value)
         self.trigger_update()
 
-    def trigger_update(self, step: ScheduleStep[Any, Any] | None = None) -> None:
+    def trigger_update(self, step: ScheduleStep[Any, Any, Any] | None = None) -> None:
         if self._throttled_update is not None:
             self._throttled_update(self.array)
 
@@ -187,18 +191,18 @@ class SignalSlot:
         self.buffer.trigger_update()
 
 
-class Schedule(Generic[T_Cfg]):
+class Schedule(Generic[T_Cfg, T_Env]):
     """Runtime scope for Python-like measurement orchestration."""
 
     def __init__(
         self,
         init_cfg: T_Cfg,
         *buffers: BufferProtocol,
-        env_dict: dict[str, Any] | None = None,
+        env: T_Env | None = None,
         stop: StopSignal | None = None,
     ) -> None:
         self.cfg = deepcopy(init_cfg)
-        self.env = env_dict if env_dict is not None else {}
+        self._env = cast(T_Env, {} if env is None else env)
         self._buffers = list(buffers)
         self._local_buffers: dict[tuple[Hashable, ...], SignalBuffer] = {}
         self._is_active = False
@@ -206,7 +210,7 @@ class Schedule(Generic[T_Cfg]):
         resolved_stop = stop if stop is not None else _current_stop_signal.get()
         self._stop = resolved_stop if resolved_stop is not None else StopSignal()
 
-    def __enter__(self) -> Schedule[T_Cfg]:
+    def __enter__(self) -> Schedule[T_Cfg, T_Env]:
         if self._is_closed:
             raise RuntimeError("Schedule cannot be reused after exiting its context")
         if self._is_active:
@@ -222,6 +226,10 @@ class Schedule(Generic[T_Cfg]):
     @property
     def data(self) -> Any:
         return self._get_data(self)
+
+    @property
+    def env(self) -> T_Env:
+        return self._env
 
     def register_buffer(self, *buffers: BufferProtocol) -> None:
         self._ensure_active()
@@ -254,20 +262,20 @@ class Schedule(Generic[T_Cfg]):
 
     def scan(
         self, name: str, values: Iterable[T_Value]
-    ) -> Iterator[tuple[T_Value, ScheduleStep[T_Cfg, T_Value]]]:
+    ) -> Iterator[tuple[T_Value, ScheduleStep[T_Cfg, T_Value, T_Env]]]:
         self._ensure_active()
         yield from self._scan(parent=self, name=name, values=values)
 
     def repeat(
         self, name: str, times: int, interval: float = 0.0
-    ) -> Iterator[tuple[int, ScheduleStep[T_Cfg, int]]]:
+    ) -> Iterator[tuple[int, ScheduleStep[T_Cfg, int, T_Env]]]:
         self._ensure_active()
         yield from self._repeat(parent=self, name=name, times=times, interval=interval)
 
     def batch(
         self,
         tasks: Mapping[
-            Hashable, Callable[[ScheduleStep[T_Cfg, Hashable]], T_BatchResult]
+            Hashable, Callable[[ScheduleStep[T_Cfg, Hashable, T_Env]], T_BatchResult]
         ],
         *,
         retry: int = 0,
@@ -334,10 +342,10 @@ class Schedule(Generic[T_Cfg]):
     def _scan(
         self,
         *,
-        parent: Schedule[T_Cfg] | ScheduleStep[T_Cfg, Any],
+        parent: Schedule[T_Cfg, T_Env] | ScheduleStep[T_Cfg, Any, T_Env],
         name: str,
         values: Iterable[T_Value],
-    ) -> Iterator[tuple[T_Value, ScheduleStep[T_Cfg, T_Value]]]:
+    ) -> Iterator[tuple[T_Value, ScheduleStep[T_Cfg, T_Value, T_Env]]]:
         if isinstance(values, Sized):
             sweep_values = values
             total = len(values)
@@ -354,8 +362,6 @@ class Schedule(Generic[T_Cfg]):
             for index, value in enumerate(sweep_values):
                 if self.is_stop():
                     break
-                self.env[name] = value
-                self.env[f"{name}_idx"] = index
                 step = ScheduleStep(
                     schedule=self,
                     name=name,
@@ -375,11 +381,11 @@ class Schedule(Generic[T_Cfg]):
     def _repeat(
         self,
         *,
-        parent: Schedule[T_Cfg] | ScheduleStep[T_Cfg, Any],
+        parent: Schedule[T_Cfg, T_Env] | ScheduleStep[T_Cfg, Any, T_Env],
         name: str,
         times: int,
         interval: float,
-    ) -> Iterator[tuple[int, ScheduleStep[T_Cfg, int]]]:
+    ) -> Iterator[tuple[int, ScheduleStep[T_Cfg, int, T_Env]]]:
         if times < 0:
             raise ValueError("times must be non-negative")
         if interval < 0.0:
@@ -413,7 +419,6 @@ class Schedule(Generic[T_Cfg]):
                 if self.is_stop():
                     break
 
-                self.env["repeat_idx"] = index
                 step = ScheduleStep(
                     schedule=self,
                     name=name,
@@ -435,9 +440,9 @@ class Schedule(Generic[T_Cfg]):
     def _batch(
         self,
         *,
-        parent: Schedule[T_Cfg] | ScheduleStep[T_Cfg, Any],
+        parent: Schedule[T_Cfg, T_Env] | ScheduleStep[T_Cfg, Any, T_Env],
         tasks: Mapping[
-            Hashable, Callable[[ScheduleStep[T_Cfg, Hashable]], T_BatchResult]
+            Hashable, Callable[[ScheduleStep[T_Cfg, Hashable, T_Env]], T_BatchResult]
         ],
         retry: int,
     ) -> dict[Hashable, T_BatchResult]:
@@ -459,7 +464,7 @@ class Schedule(Generic[T_Cfg]):
                 pbar.set_description(f"Batch [{str(key)}]")
                 completed = False
                 for attempt in range(retry + 1):
-                    step: ScheduleStep[T_Cfg, Hashable] = ScheduleStep(
+                    step: ScheduleStep[T_Cfg, Hashable, T_Env] = ScheduleStep(
                         schedule=self,
                         name=str(key),
                         index=key,
@@ -494,7 +499,7 @@ class Schedule(Generic[T_Cfg]):
 
         return results
 
-    def _get_data(self, owner: Schedule[Any] | ScheduleStep[Any, Any]) -> Any:
+    def _get_data(self, owner: Schedule[Any, Any] | ScheduleStep[Any, Any, Any]) -> Any:
         self._ensure_active()
         target = self._data_root()
         path = owner.path
@@ -519,7 +524,7 @@ class Schedule(Generic[T_Cfg]):
         return tuple(buffer.data for buffer in self._buffers)
 
     def _set_data(
-        self, owner: Schedule[Any] | ScheduleStep[Any, Any], value: Any
+        self, owner: Schedule[Any, Any] | ScheduleStep[Any, Any, Any], value: Any
     ) -> None:
         target = self._get_data(owner)
         if isinstance(target, MutableMapping):
@@ -543,7 +548,9 @@ class Schedule(Generic[T_Cfg]):
         self._trigger_update(owner)
 
     def _register_local_buffer(
-        self, owner: Schedule[Any] | ScheduleStep[Any, Any], buffer: SignalBuffer
+        self,
+        owner: Schedule[Any, Any] | ScheduleStep[Any, Any, Any],
+        buffer: SignalBuffer,
     ) -> None:
         self._ensure_active()
         target = self._get_data(owner)
@@ -559,7 +566,9 @@ class Schedule(Generic[T_Cfg]):
             )
         self._local_buffers[owner.path] = buffer
 
-    def _trigger_update(self, owner: Schedule[Any] | ScheduleStep[Any, Any]) -> None:
+    def _trigger_update(
+        self, owner: Schedule[Any, Any] | ScheduleStep[Any, Any, Any]
+    ) -> None:
         self._ensure_active()
         if not self._buffers:
             return
@@ -583,7 +592,7 @@ class Schedule(Generic[T_Cfg]):
                 self._local_buffers.pop(path, None)
 
     def _default_slot(
-        self, owner: Schedule[T_Cfg] | ScheduleStep[T_Cfg, Any]
+        self, owner: Schedule[T_Cfg, T_Env] | ScheduleStep[T_Cfg, Any, T_Env]
     ) -> SignalSlot:
         self._ensure_active()
         if owner.path in self._local_buffers:
@@ -601,8 +610,8 @@ class Schedule(Generic[T_Cfg]):
 
 
 @dataclass(frozen=True)
-class ScheduleStep(Generic[T_Cfg, T_Value]):
-    schedule: Schedule[T_Cfg]
+class ScheduleStep(Generic[T_Cfg, T_Value, T_Env]):
+    schedule: Schedule[T_Cfg, T_Env]
     name: str
     index: Hashable
     value: T_Value
@@ -610,7 +619,7 @@ class ScheduleStep(Generic[T_Cfg, T_Value]):
     path: tuple[Hashable, ...]
 
     @property
-    def env(self) -> dict[str, Any]:
+    def env(self) -> T_Env:
         return self.schedule.env
 
     @property
@@ -645,16 +654,16 @@ class ScheduleStep(Generic[T_Cfg, T_Value]):
     @overload
     def child(
         self, addr: Hashable, *, cfg: None = None
-    ) -> ScheduleStep[T_Cfg, Hashable]: ...
+    ) -> ScheduleStep[T_Cfg, Hashable, T_Env]: ...
 
     @overload
     def child(
         self, addr: Hashable, *, cfg: T_ChildCfg
-    ) -> ScheduleStep[T_ChildCfg, Hashable]: ...
+    ) -> ScheduleStep[T_ChildCfg, Hashable, T_Env]: ...
 
     def child(
         self, addr: Hashable, *, cfg: object | None = None
-    ) -> ScheduleStep[Any, Hashable]:
+    ) -> ScheduleStep[Any, Hashable, T_Env]:
         self.schedule._ensure_active()
         return ScheduleStep(
             schedule=self.schedule,
@@ -683,13 +692,13 @@ class ScheduleStep(Generic[T_Cfg, T_Value]):
 
     def scan(
         self, name: str, values: Iterable[T_NestedValue]
-    ) -> Iterator[tuple[T_NestedValue, ScheduleStep[T_Cfg, T_NestedValue]]]:
+    ) -> Iterator[tuple[T_NestedValue, ScheduleStep[T_Cfg, T_NestedValue, T_Env]]]:
         self.schedule._ensure_active()
         yield from self.schedule._scan(parent=self, name=name, values=values)
 
     def repeat(
         self, name: str, times: int, interval: float = 0.0
-    ) -> Iterator[tuple[int, ScheduleStep[T_Cfg, int]]]:
+    ) -> Iterator[tuple[int, ScheduleStep[T_Cfg, int, T_Env]]]:
         self.schedule._ensure_active()
         yield from self.schedule._repeat(
             parent=self, name=name, times=times, interval=interval
@@ -698,7 +707,7 @@ class ScheduleStep(Generic[T_Cfg, T_Value]):
     def batch(
         self,
         tasks: Mapping[
-            Hashable, Callable[[ScheduleStep[T_Cfg, Hashable]], T_BatchResult]
+            Hashable, Callable[[ScheduleStep[T_Cfg, Hashable, T_Env]], T_BatchResult]
         ],
         *,
         retry: int = 0,
@@ -777,7 +786,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
     def __init__(
         self,
         *,
-        owner: Schedule[Any] | ScheduleStep[Any, Any],
+        owner: Schedule[Any, Any] | ScheduleStep[Any, Any, Any],
         soc: object,
         soccfg: object,
         cfg: object,

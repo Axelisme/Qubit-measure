@@ -4,13 +4,14 @@ import shutil
 from collections import OrderedDict, defaultdict
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, Generic, Protocol, Self, TypeVar
+from typing import Any, Generic, Protocol, Self
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FFMpegWriter
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+from typing_extensions import TypeVar
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2.runner.schedule import (
@@ -26,6 +27,7 @@ from zcu_tools.utils.debug import print_traceback
 from zcu_tools.utils.func_tools import min_interval
 
 T_Cfg = TypeVar("T_Cfg", bound=ExpCfgModel)
+T_Env = TypeVar("T_Env", default=dict[str, Any])
 T_Result = TypeVar("T_Result", bound=Result)
 T_RootResult = TypeVar("T_RootResult", bound=Result)
 T_BufferData = TypeVar("T_BufferData")
@@ -38,13 +40,13 @@ class _ExecutorBuffer(Generic[T_BufferData]):
         self,
         data: T_BufferData,
         *,
-        on_update: Callable[[ScheduleStep[Any, Any]], None],
+        on_update: Callable[[ScheduleStep[Any, Any, Any]], None],
         update_interval: float | None = 0.1,
     ) -> None:
         self.data = data
         self._throttled_update = min_interval(on_update, update_interval)
 
-    def trigger_update(self, step: ScheduleStep[Any, Any] | None = None) -> None:
+    def trigger_update(self, step: ScheduleStep[Any, Any, Any] | None = None) -> None:
         if step is None or self._throttled_update is None:
             return
         self._throttled_update(step)
@@ -67,14 +69,14 @@ class PlottableMeasurement(Protocol):
     def update_plotter(
         self,
         plotters: Any,
-        ctx: ScheduleStep[Any, Any],
+        ctx: ScheduleStep[Any, Any, Any],
         results: Any,
         /,
     ) -> None: ...
 
     def init(self, dynamic_pbar: bool = False) -> None: ...
 
-    def run(self, state: ScheduleStep[Any, Any], /) -> None: ...
+    def run(self, state: ScheduleStep[Any, Any, Any], /) -> None: ...
 
     def cleanup(self) -> None: ...
 
@@ -84,7 +86,7 @@ class PlottableMeasurement(Protocol):
 T_Measurement = TypeVar("T_Measurement", bound=PlottableMeasurement)
 
 
-class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg]):
+class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg, T_Env]):
     """Shared base for executors that run several measurements with a combined
     live plot, optionally recording an FFmpeg animation of the figure.
 
@@ -152,7 +154,7 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg]):
     ) -> tuple[
         Figure,
         MultiLivePlot[tuple[str, str]],
-        Callable[[ScheduleStep[Any, Any]], None],
+        Callable[[ScheduleStep[Any, Any, Any]], None],
         FFMpegWriter | None,
     ]:
         fig, axs_map = self.make_ax_layout()
@@ -181,7 +183,7 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg]):
 
         plotter = MultiLivePlot(fig, flatten_dict(plotters_map))
 
-        def plot_fn(ctx: ScheduleStep[Any, Any]) -> None:
+        def plot_fn(ctx: ScheduleStep[Any, Any, Any]) -> None:
             if len(ctx.path) < 2:
                 cur_tasks = list(self.measurements.keys())
             else:
@@ -223,8 +225,8 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg]):
         self,
         init_result: T_RootResult,
         cfg: T_Cfg,
-        env_dict: dict[str, Any],
-        run_fn: Callable[[Schedule[T_Cfg]], None],
+        env: T_Env,
+        run_fn: Callable[[Schedule[T_Cfg, T_Env]], None],
     ) -> T_RootResult:
         fig, plotter, plot_fn, writer = self.make_plotter()
         stop = current_stop_signal() or StopSignal()
@@ -233,7 +235,7 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg]):
         with Schedule(
             cfg,
             result_buffer,
-            env_dict=env_dict,
+            env=env,
             stop=stop,
         ) as sched:
             with plotter:
@@ -262,13 +264,13 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg]):
     def _make_result_buffer(
         self,
         data: T_BufferData,
-        on_update: Callable[[ScheduleStep[Any, Any]], None],
+        on_update: Callable[[ScheduleStep[Any, Any, Any]], None],
     ) -> _ExecutorBuffer[T_BufferData]:
         return _ExecutorBuffer(data, on_update=on_update)
 
     def _run_measurement_batch(
         self,
-        step: ScheduleStep[Any, Any],
+        step: ScheduleStep[Any, Any, Any],
         retry_time: int,
     ) -> None:
         step.batch(
@@ -283,7 +285,7 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg]):
     def _run_measurement_with_retries(
         self,
         measurement: T_Measurement,
-        state: ScheduleStep[Any, Any],
+        state: ScheduleStep[Any, Any, Any],
         retry_time: int,
     ) -> None:
         if retry_time < 0:

@@ -41,6 +41,7 @@ from zcu_tools.utils.datasaver import (
 from zcu_tools.utils.fitting.multi_decay import fit_dual_transition_rates
 from zcu_tools.utils.func_tools import MinIntervalFunc
 
+from ..env import OvernightEnv, iteration_index
 from ..executor import MeasurementTask, OvernightCfg, T_RootResult
 from .util import calc_populations
 
@@ -103,9 +104,14 @@ class T1PlotAndSaveMixin(Generic[T_Cfg]):
             current_e=make_1d_plotter(axs["current_e"], f"{name} Init Excited"),
         )
 
-    def update_plotter(self, plotters, ctx, results) -> None:
-        iters = ctx.env["iters"]
-        i = ctx.env["repeat_idx"]
+    def update_plotter(
+        self,
+        plotters,
+        ctx: ScheduleStep[Any, Any, OvernightEnv],
+        results,
+    ) -> None:
+        iters = ctx.env.iters.astype(np.float64)
+        i = iteration_index(ctx)
 
         lengths = results["lengths"][0]
         populations = calc_populations(results["populations"])  # (iters, 2, times, 3)
@@ -266,10 +272,10 @@ class T1Task(
 
     def run(
         self,
-        state: ScheduleStep[OvernightCfg, Any],
+        state: ScheduleStep[OvernightCfg, Any, OvernightEnv],
     ) -> None:
         self.lengths = sweep2array(
-            self.cfg.sweep.length, "time", {"soccfg": state.env["soccfg"]}
+            self.cfg.sweep.length, "time", {"soccfg": state.env.soccfg}
         )
         populations_step = state.child("populations", cfg=self.cfg)
         _ = populations_step.buffer((2, len(self.lengths), 2), dtype=np.float64)
@@ -279,7 +285,7 @@ class T1Task(
         len_param = sweep2param("length", length_sweep)
 
         _ = (
-            populations_step.prog_builder(state.env["soc"], state.env["soccfg"])
+            populations_step.prog_builder(state.env.soc, state.env.soccfg)
             .add(
                 Reset("reset", modules.reset),
                 Branch(
@@ -356,10 +362,10 @@ class T1WithToneTask(
 
     def run(
         self,
-        state: ScheduleStep[OvernightCfg, Any],
+        state: ScheduleStep[OvernightCfg, Any, OvernightEnv],
     ) -> None:
         self.lengths = sweep2array(
-            self.cfg.sweep.length, "time", {"soccfg": state.env["soccfg"]}
+            self.cfg.sweep.length, "time", {"soccfg": state.env.soccfg}
         )
         populations_step = state.child("populations", cfg=self.cfg)
         _ = populations_step.buffer((2, len(self.lengths), 2), dtype=np.float64)
@@ -370,7 +376,7 @@ class T1WithToneTask(
         modules.probe_pulse.set_param("length", length_param)
 
         _ = (
-            populations_step.prog_builder(state.env["soc"], state.env["soccfg"])
+            populations_step.prog_builder(state.env.soc, state.env.soccfg)
             .add(
                 Reset("reset", modules.reset),
                 Branch(

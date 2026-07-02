@@ -312,10 +312,10 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
                 ),
             ),
         ) as viewer:
-            env: dict[str, Any] = {}
+            current_index = 0
 
             def plot_fn(data: NDArray[np.float64]) -> None:
-                idx = int(env["index"])
+                idx = current_index
                 snrs = np.abs(data)  # (num_points, )
 
                 cur_freq, cur_gain, cur_len = params[idx, :]
@@ -343,11 +343,11 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
                 dtype=np.float64,
                 on_update=plot_fn,
             )
-            with Schedule(run_cfg, signals_buffer, env_dict=env) as sched:
+            with Schedule(run_cfg, signals_buffer) as sched:
                 for idx, (_, step) in enumerate(
                     sched.scan("Iteration", range(num_points))
                 ):
-                    sched.env["index"] = idx
+                    current_index = idx
 
                     last_snr = None
                     if idx > 0:

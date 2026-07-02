@@ -40,7 +40,8 @@ from zcu_tools.utils.fitting import fit_decay
 from zcu_tools.utils.func_tools import MinIntervalFunc
 from zcu_tools.utils.process import rotate2real
 
-from .executor import FluxDepCfg, FluxDepInfoDict, MeasurementTask, T_RootResult
+from .env import FluxDepEnv, FluxDepInfoDict
+from .executor import FluxDepCfg, MeasurementTask, T_RootResult
 
 
 def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -99,7 +100,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
         self,
         num_expts: int,
         cfg_maker: Callable[
-            [ScheduleStep[FluxDepCfg, Any], ModuleLibrary],
+            [ScheduleStep[FluxDepCfg, Any, FluxDepEnv], ModuleLibrary],
             T1CfgTemplate | None,
         ],
         earlystop_snr: float | None = None,
@@ -116,17 +117,17 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
 
     def run(
         self,
-        state: ScheduleStep[FluxDepCfg, Any],
+        state: ScheduleStep[FluxDepCfg, Any, FluxDepEnv],
     ) -> None:
-        info: FluxDepInfoDict = state.env["info"]
+        info: FluxDepInfoDict = state.env.info
 
-        cfg_temp = self.cfg_maker(state, state.env["ml"])
+        cfg_temp = self.cfg_maker(state, state.env.ml)
 
         if cfg_temp is None:
             return  # skip this task
 
         len_sweep = make_sweep(*cfg_temp.sweep_range, self.num_expts)
-        self.lengths = sweep2array(len_sweep, "time", {"soccfg": state.env["soccfg"]})
+        self.lengths = sweep2array(len_sweep, "time", {"soccfg": state.env.soccfg})
 
         cfg = cfg_temp.to_dict()
         del cfg["sweep_range"]
@@ -149,7 +150,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
         length_param = sweep2param("length", length_sweep)
 
         _ = (
-            raw_step.prog_builder(state.env["soc"], state.env["soccfg"])
+            raw_step.prog_builder(state.env.soc, state.env.soccfg)
             .add(
                 Reset("reset", modules.reset),
                 Pulse("pi_pulse", modules.pi_pulse),
@@ -227,11 +228,11 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
     def update_plotter(
         self,
         plotters,
-        ctx: ScheduleStep[Any, Any],
+        ctx: ScheduleStep[Any, Any, FluxDepEnv],
         signals: T1Result,
     ) -> None:
-        flux_values = ctx.env["flux_values"]
-        info: FluxDepInfoDict = ctx.env["info"]
+        flux_values = ctx.env.flux_values
+        info: FluxDepInfoDict = ctx.env.info
 
         real_signals = t1_fluxdep_signal2real(signals["raw_signals"])
 
