@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Generic, TypeVar
 
 import matplotlib
+import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
@@ -18,12 +19,16 @@ from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, setup_devices
 from zcu_tools.experiment.v2.runner import (
     MultiMeasurementExecutor,
+    ResultBuffer,
     Schedule,
     ScheduleStep,
+    StopSignal,
+    current_stop_signal,
 )
 from zcu_tools.experiment.v2.utils import Result, merge_result_list
 from zcu_tools.liveplot import AbsLivePlot
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
+from zcu_tools.utils.debug import print_traceback
 
 T_PlotDict = TypeVar("T_PlotDict", bound=Mapping[str, AbsLivePlot])
 
@@ -127,24 +132,6 @@ class FluxDepExecutor(MultiMeasurementExecutor[MeasurementTask, FluxDepCfg]):
             info=FluxDepInfoDict(),
         )
 
-        def update_flux_context(
-            i: int,
-            ctx: ScheduleStep[FluxDepCfg, Any],
-            flux: float,
-        ) -> None:
-            info: FluxDepInfoDict = ctx.env["info"]
-            predictor: FluxoniumPredictor = ctx.env["predictor"]
-
-            info.clear()  # clear current info dict
-
-            info["flux_value"] = flux
-            info["flux_idx"] = i
-
-            info["cur_m"] = predictor.predict_matrix_element(flux)
-            info["m_ratio"] = info["cur_m"] / info.first["cur_m"]
-
-            set_flux_in_dev_cfg(ctx.cfg.dev, flux, label="flux_dev")
-
         set_flux_in_dev_cfg(cfg.dev, self.flux_values[0], label="flux_dev")
         setup_devices(cfg, progress=True)
 
@@ -152,14 +139,52 @@ class FluxDepExecutor(MultiMeasurementExecutor[MeasurementTask, FluxDepCfg]):
             self._default_batch_result() for _ in range(len(self.flux_values))
         ]
 
-        def run_loop(root_sched: Schedule[FluxDepCfg]) -> None:
-            for i, (flux, flux_step) in enumerate(
-                root_sched.scan("flux", self.flux_values)
-            ):
-                update_flux_context(i, flux_step, flux)
-                self._run_measurement_batch(flux_step, retry_time)
+        fig, plotter, plot_fn, writer = self.make_plotter()
+        stop = current_stop_signal() or StopSignal()
+        result_buffer = ResultBuffer(init_result, on_update=plot_fn)
 
-        results = self._run_with_plotting(init_result, cfg, env_dict, run_loop)
+        with Schedule(
+            cfg,
+            result_buffer,
+            env_dict=env_dict,
+            stop=stop,
+        ) as sched:
+            with plotter:
+                try:
+                    for measurement in self.measurements.values():
+                        measurement.init(dynamic_pbar=True)
+
+                    for i, (flux, flux_step) in enumerate(
+                        sched.scan("flux", self.flux_values)
+                    ):
+                        info: FluxDepInfoDict = flux_step.env["info"]
+                        predictor = flux_step.env["predictor"]
+
+                        info.clear()  # clear current info dict
+
+                        info["flux_value"] = flux
+                        info["flux_idx"] = i
+
+                        info["cur_m"] = predictor.predict_matrix_element(flux)
+                        info["m_ratio"] = info["cur_m"] / info.first["cur_m"]
+
+                        set_flux_in_dev_cfg(flux_step.cfg.dev, flux, label="flux_dev")
+
+                        self._run_measurement_batch(flux_step, retry_time)
+                except KeyboardInterrupt:
+                    sched.set_stop()
+                except Exception:
+                    print_traceback()
+                    raise
+                finally:
+                    for measurement in self.measurements.values():
+                        measurement.cleanup()
+                    if self.record_path is not None:
+                        assert writer is not None
+                        writer.finish()
+        plt.close(fig)
+
+        results = result_buffer.data
 
         signals_dict = merge_result_list(results)
 

@@ -16,11 +16,11 @@
   - `ExperimentProtocol`：結構性合約（runtime_checkable），描述所有實驗共有的 `last_result` / `run` / `analyze` / `save` / `load` 表面，刻意開放讓實驗自行擴充方法。
 - runtime 層（`runner/`）
   - 一般 Experiment：`SignalBuffer` / `Schedule` / `ProgramBuilder` 表達 Python-like acquire、host loop、batch/retry 與 stop。
-  - executor workflow：`Schedule(root_data=...)` 持有 outer loop result tree；`MultiMeasurementExecutor` 提供 combined liveplot、retry helper 與 measurement lifecycle。
+  - executor workflow：`ResultBuffer` 持有 outer loop result tree 與 update hook；`Schedule` 編排 outer loop；`MultiMeasurementExecutor` 提供 combined liveplot、retry helper 與 measurement lifecycle。
 
 Experiment 是使用者（notebook）呼叫的入口；一般 `*Exp.run()` 以 `with Schedule(cfg, signals_buffer) as sched` 做單次 run orchestration，把 scan / buffer targeting 留在 Python control flow 中。`Schedule` 負責 cfg deepcopy、shared env 與 `StopSignal`；`SignalBuffer` 負責 update throttling 與 live update callback；`ProgramBuilder.build_and_acquire(...)` 直接建立 program、執行 acquire 並更新 buffer。
 
-`SignalBuffer` + `Schedule` + `ProgramBuilder` 支援一般 program acquire、decimated trace、program-side sweep、host-side scan、repeat、replayable batch、per-child retry、caller-owned program reuse、SNR early stop 與 custom raw conversion。需要取得 raw shots 的 singleshot `GE` / `Check` path 使用同一個 `Schedule` scope 做 cfg/stop/buffer orchestration，但 leaf 端改由 `ProgramBuilder.build()` 取得 program 後直接呼叫 `program.acquire(...)`，再把 `program.get_raw()` 轉入 `SignalBuffer`。`autofluxdep` / `overnight` 這類 executor-owned 多任務流程也使用同一個 `Schedule` runtime：外層用 `scan` / `repeat` / `batch` 編排，leaf 用 `ScheduleStep.child(...).buffer(...)` 把 program acquire 寫回 result tree。
+`SignalBuffer` + `Schedule` + `ProgramBuilder` 支援一般 program acquire、decimated trace、program-side sweep、host-side scan、repeat、replayable batch、per-child retry、caller-owned program reuse、SNR early stop 與 custom raw conversion。需要取得 raw shots 的 singleshot `GE` / `Check` path 使用同一個 `Schedule` scope 做 cfg/stop/buffer orchestration，但 leaf 端改由 `ProgramBuilder.build()` 取得 program 後直接呼叫 `program.acquire(...)`，再把 `program.get_raw()` 轉入 `SignalBuffer`。`autofluxdep` / `overnight` 這類 executor-owned 多任務流程也使用同一個 `Schedule` runtime：外層用 `ResultBuffer` 保存 result tree，再用 `scan` / `repeat` / `batch` 編排，leaf 用 `ScheduleStep.child(...).buffer(...)` 把 program acquire 寫回 result tree。
 
 ---
 
@@ -245,4 +245,4 @@ executor leaf measurement 仍保留 app-local `MeasurementTask` ABC 作為 plott
 4. `ProgramBuilder.build_and_acquire()` / `run_program(...)` 自動注入 Schedule stop checker；若直接呼叫 `program.acquire(...)`，必須明確傳入 `stop_checkers=[sched.is_stop]` 或 `[step.is_stop]`（可加 SNR checker）。
 5. 持久化由 `AXES_SPEC` 宣告：每個 `Axis` 帶 `scale`（頻率 `MHZ_TO_HZ`、時間 `US_TO_S`）讓盤上是 SI 單位、記憶體內維持習慣單位，`AXES_SPEC.tag` 取有層次的 on-disk 名字（`"twotone/rabi/len"`），axes 以 inner-first 排列；繼承的 `save` / `load` 自動依 spec 做單位轉換與恒等逆 round-trip，無需自行寫 save/load。
 6. 如果有多個 sweep 軸，先區分 host loop 與 program loop：host loop 用 `sched.scan(...)` / `sched.repeat(...)` / `sched.batch(...)`，program loop 用 `ProgramBuilder.declare_sweep(...)`；batch child 必須是 replayable callable，buffer 寫入由 child 明確指定。host soft sweep 若需要重用每個點的 program，在 `run()` 裡維護 dict：cache miss 時 `builder.build()`，每次量測時 `builder.run_program(program)`。
-7. 如果要在 Experiment 外層疊 flux / time sweep，優先讓 Executor 持有 root `Schedule(root_data=...)`，外層用 `scan` / `repeat` / `batch`，leaf 用 `state.child(..., cfg=program_cfg).buffer(...)` 建立 result slot 與 program cfg scope。
+7. 如果要在 Experiment 外層疊 flux / time sweep，優先讓 Executor 建立 `ResultBuffer(init_result, on_update=plot_fn)` 並傳入 root `Schedule`，外層用 `scan` / `repeat` / `batch`，leaf 用 `state.child(..., cfg=program_cfg).buffer(...)` 建立 result slot 與 program cfg scope。

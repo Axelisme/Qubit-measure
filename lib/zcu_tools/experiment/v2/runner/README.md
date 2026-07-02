@@ -4,7 +4,8 @@
 
 `runner/` 提供 experiment/v2 的 Python-like acquisition runtime。一般實驗用
 `SignalBuffer` / `Schedule` / `ProgramBuilder` 編排 host-side loop 與 program
-acquire；executor 類流程也用同一個 `Schedule` 持有 root result tree，並用
+acquire；executor 類流程用 `ResultBuffer` 持有 root result tree，再交給同一個
+`Schedule` 編排 outer loop，並用
 `MultiMeasurementExecutor` 共用 liveplot、retry 與 measurement lifecycle。舊 Task tree
 runtime 不再保留。
 
@@ -22,6 +23,13 @@ runtime 不再保留。
   writable view。
 - `SignalBuffer.set(...)` / `SignalSlot.set(...)` 寫入後自動觸發 `on_update`。
 - `trigger_update()` 用於沒有新資料寫入、但 caller 想強制刷新 liveplot 的等待期。
+
+### `ResultBuffer`
+
+`ResultBuffer(data, on_update=...)` 是 structured result tree 的 storage 與 update
+owner，主要給 executor workflow 使用。`Schedule` 可以接收一個 `ResultBuffer`，但
+不直接宣告 `root_data` / `on_update`；child-local `SignalBuffer` 寫入時同步更新
+`ResultBuffer.data` 中對應 path，並觸發 `ResultBuffer` 的 update hook。
 
 ### `Schedule`
 
@@ -56,9 +64,9 @@ with Schedule(cfg, signals_buffer) as sched:
   per-child，child 取得獨立 deepcopy cfg 與共享 env。
 - `ScheduleStep.path` 會累積巢狀 host loop index，所以預設 single-buffer acquire 可
   依 owner path 自動寫入對應 slot，不需要 `into=` 參數。
-- `Schedule(root_data=..., on_update=...)` 可持有 executor result tree；
+- `with Schedule(cfg, result_buffer) as sched` 可編排 executor result tree；
   `step.child("field", cfg=program_cfg).buffer(shape)` 會建立 child-local default
-  `SignalBuffer`，buffer 寫入時同步回 `root_data` 並觸發 update。
+  `SignalBuffer`，buffer 寫入時同步回 `result_buffer.data` 並觸發 update。
 - `ScheduleStep.value` 是 scan/repeat/batch 的 control-flow coordinate；result tree 由
   `step.data` 讀取、`step.set_data(...)` 寫入，需要 ndarray slot 時用 `step.array_data`
   做型別邊界。
@@ -89,8 +97,8 @@ with Schedule(cfg, signals_buffer) as sched:
 
 `MultiMeasurementExecutor` 服務 `autofluxdep` / `overnight` 這類外層 workflow：
 它負責 combined liveplot layout、FFmpeg animation、measurement init/cleanup，以及
-per-measurement retry helper；root result tree、path、env、stop 與 update callback 則由
-`Schedule` 持有。
+per-measurement retry helper；root result tree 與 update callback 由 `ResultBuffer`
+持有，path、env、stop 與 control flow 由 `Schedule` 持有。
 
 典型 executor 格式：
 

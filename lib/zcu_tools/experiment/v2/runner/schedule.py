@@ -45,6 +45,7 @@ T_Raw = TypeVar("T_Raw")
 T_Value = TypeVar("T_Value")
 T_NestedValue = TypeVar("T_NestedValue")
 T_BatchResult = TypeVar("T_BatchResult")
+T_Data = TypeVar("T_Data")
 T_AcquireRaw_co = TypeVar("T_AcquireRaw_co", covariant=True)
 T_DecimatedRaw_co = TypeVar("T_DecimatedRaw_co", covariant=True)
 SignalArray: TypeAlias = NDArray[Any]
@@ -174,25 +175,46 @@ class SignalSlot:
         self.buffer.trigger_update()
 
 
+class ResultBuffer(Generic[T_Data]):
+    """Structured result tree with runner-aware update hooks."""
+
+    def __init__(
+        self,
+        data: T_Data,
+        *,
+        on_update: Callable[[ScheduleStep[Any, Any]], None] | None = None,
+        update_interval: float | None = 0.1,
+    ) -> None:
+        self.data = data
+        self._throttled_update = min_interval(on_update, update_interval)
+
+    def trigger_update(self, step: ScheduleStep[Any, Any]) -> None:
+        if self._throttled_update is not None:
+            self._throttled_update(step)
+
+
 class Schedule(Generic[T_Cfg]):
     """Runtime scope for Python-like measurement orchestration."""
 
     def __init__(
         self,
         init_cfg: T_Cfg,
-        *buffers: SignalBuffer,
+        *buffers: SignalBuffer | ResultBuffer[Any],
         env_dict: dict[str, Any] | None = None,
         stop: StopSignal | None = None,
-        root_data: Any | None = None,
-        on_update: Callable[[ScheduleStep[Any, Any]], None] | None = None,
-        update_interval: float | None = 0.1,
     ) -> None:
         self.cfg = deepcopy(init_cfg)
         self.env = env_dict if env_dict is not None else {}
-        self._buffers = list(buffers)
+        self._buffers: list[SignalBuffer] = []
+        self._result_buffer: ResultBuffer[Any] | None = None
+        for buffer in buffers:
+            if isinstance(buffer, ResultBuffer):
+                if self._result_buffer is not None:
+                    raise ValueError("Schedule accepts at most one ResultBuffer")
+                self._result_buffer = buffer
+            else:
+                self._buffers.append(buffer)
         self._local_buffers: dict[tuple[Hashable, ...], SignalBuffer] = {}
-        self._explicit_root_data = root_data
-        self._throttled_update = min_interval(on_update, update_interval)
         self._is_active = False
         self._is_closed = False
         resolved_stop = stop if stop is not None else _current_stop_signal.get()
@@ -213,8 +235,8 @@ class Schedule(Generic[T_Cfg]):
 
     @property
     def root_data(self) -> Any:
-        if self._explicit_root_data is not None:
-            return self._explicit_root_data
+        if self._result_buffer is not None:
+            return self._result_buffer.data
         if len(self._buffers) == 1:
             return self._buffers[0].array
         return tuple(buffer.array for buffer in self._buffers)
@@ -544,19 +566,20 @@ class Schedule(Generic[T_Cfg]):
         target = self._get_data(owner)
         if not isinstance(target, np.ndarray):
             raise ValueError(
-                "ScheduleStep.buffer target must point to an NDArray in root_data, "
+                "ScheduleStep.buffer target must point to an NDArray in result data, "
                 f"got {type(target)} at path {owner.path}"
             )
         if target.shape != buffer.array.shape:
             raise ValueError(
-                "ScheduleStep.buffer shape must match root_data target shape; "
+                "ScheduleStep.buffer shape must match result data target shape; "
                 f"target shape={target.shape}, buffer shape={buffer.array.shape}"
             )
         self._local_buffers[owner.path] = buffer
 
     def _trigger_update(self, owner: Schedule[Any] | ScheduleStep[Any, Any]) -> None:
         self._ensure_active()
-        if self._throttled_update is None:
+        result_buffer = self._result_buffer
+        if result_buffer is None:
             return
         if isinstance(owner, ScheduleStep):
             step = owner
@@ -569,7 +592,7 @@ class Schedule(Generic[T_Cfg]):
                 cfg=self.cfg,
                 path=(),
             )
-        self._throttled_update(step)
+        result_buffer.trigger_update(step)
 
     def _clear_local_buffers(self, prefix: tuple[Hashable, ...]) -> None:
         for path in list(self._local_buffers):

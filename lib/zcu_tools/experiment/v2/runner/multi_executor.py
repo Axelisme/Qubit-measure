@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import shutil
 from collections import OrderedDict, defaultdict
-from collections.abc import Callable, Hashable, Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Generic, Protocol, Self, TypeVar
 
@@ -14,6 +14,7 @@ from matplotlib.figure import Figure
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2.runner.schedule import (
+    ResultBuffer,
     Schedule,
     ScheduleStep,
     StopSignal,
@@ -207,13 +208,13 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg]):
     ) -> T_RootResult:
         fig, plotter, plot_fn, writer = self.make_plotter()
         stop = current_stop_signal() or StopSignal()
+        result_buffer = ResultBuffer(init_result, on_update=plot_fn)
 
         with Schedule(
             cfg,
+            result_buffer,
             env_dict=env_dict,
             stop=stop,
-            root_data=init_result,
-            on_update=plot_fn,
         ) as sched:
             with plotter:
                 try:
@@ -233,7 +234,7 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg]):
                         writer.finish()
         plt.close(fig)
 
-        return sched.root_data
+        return result_buffer.data
 
     def _default_batch_result(self) -> dict[str, Result]:
         return {name: ms.get_default_result() for name, ms in self.measurements.items()}
