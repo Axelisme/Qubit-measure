@@ -1,9 +1,9 @@
-"""DeviceControlFacet delegation and event-subscription contract."""
+"""DeviceControlFacet public contract tests."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any, cast
-from unittest.mock import MagicMock
 
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.gui.event_bus import BaseEventBus
@@ -13,85 +13,237 @@ from zcu_tools.gui.session.events import (
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
 )
+from zcu_tools.gui.session.pbar_host import ProgressBarModel
+from zcu_tools.gui.session.ports import OperationKind
 from zcu_tools.gui.session.services.device import (
+    ActiveDeviceOperation,
     ConnectDeviceRequest,
+    DeviceEntry,
+    DeviceSnapshot,
     DisconnectDeviceRequest,
     SetupDeviceRequest,
 )
+from zcu_tools.gui.session.state import DeviceStatus
+
+from tests.gui._control_fakes import CallLog, RecordedCall, call
 
 
-def _facet() -> tuple[DeviceControlFacet, MagicMock, MagicMock, BaseEventBus]:
+class RecordingDevice:
+    def __init__(self, log: CallLog) -> None:
+        self._log = log
+        self.info = FakeDeviceInfo(address="addr")
+        self.snapshot = DeviceSnapshot(
+            name="fd",
+            type_name="FakeDevice",
+            address="addr",
+            status=DeviceStatus.CONNECTED,
+            info=self.info,
+        )
+        self.active_operation = ActiveDeviceOperation(
+            device_name="fd",
+            kind=OperationKind.DEVICE_CONNECT,
+            snapshot=self.snapshot,
+            token=21,
+        )
+
+    def start_connect_device(self, req: ConnectDeviceRequest) -> int:
+        self._log.add("device", "start_connect_device", req)
+        return 11
+
+    def start_disconnect_device(self, req: DisconnectDeviceRequest) -> int:
+        self._log.add("device", "start_disconnect_device", req)
+        return 12
+
+    def start_reconnect_device(self, name: str) -> int:
+        self._log.add("device", "start_reconnect_device", name)
+        return 13
+
+    def start_setup_device(self, req: SetupDeviceRequest) -> int:
+        self._log.add("device", "start_setup_device", req)
+        return 14
+
+    def forget_device(self, name: str) -> None:
+        self._log.add("device", "forget_device", name)
+
+    def cancel_device_operation(self, name: str) -> None:
+        self._log.add("device", "cancel_device_operation", name)
+
+    def list_devices(self) -> list[DeviceEntry]:
+        self._log.add("device", "list_devices")
+        return [DeviceEntry(name="fd", type_name="FakeDevice", status="connected")]
+
+    def get_device_snapshot(self, name: str) -> DeviceSnapshot | None:
+        self._log.add("device", "get_device_snapshot", name)
+        return self.snapshot
+
+    def get_device_info(self, name: str) -> FakeDeviceInfo | None:
+        self._log.add("device", "get_device_info", name)
+        return self.info
+
+    def poll_device_info(self, name: str) -> None:
+        self._log.add("device", "poll_device_info", name)
+
+    def is_memory_device(self, name: str) -> bool:
+        self._log.add("device", "is_memory_device", name)
+        return True
+
+    def get_device_unit(self, name: str) -> str:
+        self._log.add("device", "get_device_unit", name)
+        return "A"
+
+    def get_active_device_operations(self) -> tuple[ActiveDeviceOperation, ...]:
+        self._log.add("device", "get_active_device_operations")
+        return (self.active_operation,)
+
+
+class RecordingProgress:
+    def __init__(self, log: CallLog) -> None:
+        self._log = log
+        self.dispose = _noop
+        self.bar = ProgressBarModel("setup", 10, 0.0)
+
+    def attach_by_owner(
+        self, owner_id: str, listener: Callable[[], None]
+    ) -> Callable[[], None]:
+        self._log.add("progress", "attach_by_owner", owner_id, listener)
+        return self.dispose
+
+    def bars_for_owner(self, owner_id: str) -> tuple[tuple[int, ProgressBarModel], ...]:
+        self._log.add("progress", "bars_for_owner", owner_id)
+        return ((1, self.bar),)
+
+
+def _noop() -> None:
+    pass
+
+
+def _facet() -> tuple[
+    DeviceControlFacet, CallLog, RecordingDevice, RecordingProgress, BaseEventBus
+]:
+    log = CallLog()
     bus = BaseEventBus()
-    device = MagicMock()
-    progress = MagicMock()
+    device = RecordingDevice(log)
+    progress = RecordingProgress(log)
     return (
         DeviceControlFacet(
             bus=bus,
             device=cast(Any, device),
             progress=cast(Any, progress),
         ),
+        log,
         device,
         progress,
         bus,
     )
 
 
-def test_device_control_facet_delegates_device_and_progress_calls() -> None:
-    facet, device, progress, _bus = _facet()
-
+def test_device_control_facet_forwards_deliberate_device_dialog_contract() -> None:
+    facet, log, device, progress, _bus = _facet()
     connect_req = ConnectDeviceRequest("FakeDevice", "fd", "addr")
     disconnect_req = DisconnectDeviceRequest("fd")
     setup_req = SetupDeviceRequest("fd", FakeDeviceInfo(address="addr"))
-    listener = MagicMock()
 
-    device.start_connect_device.return_value = 11
-    device.start_disconnect_device.return_value = 12
-    device.start_reconnect_device.return_value = 13
-    device.start_setup_device.return_value = 14
-    device.list_devices.return_value = ["entry"]
-    device.get_device_snapshot.return_value = "snapshot"
-    device.get_device_info.return_value = "info"
-    device.is_memory_device.return_value = True
-    device.get_device_unit.return_value = "A"
-    device.get_active_device_operations.return_value = ("op",)
-    progress.attach_by_owner.return_value = "dispose"
-    progress.bars_for_owner.return_value = ((1, "bar"),)
+    cases: tuple[tuple[str, Callable[[], object], object, RecordedCall], ...] = (
+        (
+            "start_connect_device",
+            lambda: facet.start_connect_device(connect_req),
+            11,
+            call("device", "start_connect_device", connect_req),
+        ),
+        (
+            "start_disconnect_device",
+            lambda: facet.start_disconnect_device(disconnect_req),
+            12,
+            call("device", "start_disconnect_device", disconnect_req),
+        ),
+        (
+            "start_reconnect_device",
+            lambda: facet.start_reconnect_device("fd"),
+            13,
+            call("device", "start_reconnect_device", "fd"),
+        ),
+        (
+            "start_setup_device",
+            lambda: facet.start_setup_device(setup_req),
+            14,
+            call("device", "start_setup_device", setup_req),
+        ),
+        (
+            "forget_device",
+            lambda: facet.forget_device("fd"),
+            None,
+            call("device", "forget_device", "fd"),
+        ),
+        (
+            "cancel_device_operation",
+            lambda: facet.cancel_device_operation("fd"),
+            None,
+            call("device", "cancel_device_operation", "fd"),
+        ),
+        (
+            "list_devices",
+            facet.list_devices,
+            [DeviceEntry(name="fd", type_name="FakeDevice", status="connected")],
+            call("device", "list_devices"),
+        ),
+        (
+            "get_device_snapshot",
+            lambda: facet.get_device_snapshot("fd"),
+            device.snapshot,
+            call("device", "get_device_snapshot", "fd"),
+        ),
+        (
+            "get_device_info",
+            lambda: facet.get_device_info("fd"),
+            device.info,
+            call("device", "get_device_info", "fd"),
+        ),
+        (
+            "poll_device_info",
+            lambda: facet.poll_device_info("fd"),
+            None,
+            call("device", "poll_device_info", "fd"),
+        ),
+        (
+            "is_memory_device",
+            lambda: facet.is_memory_device("fd"),
+            True,
+            call("device", "is_memory_device", "fd"),
+        ),
+        (
+            "get_device_unit",
+            lambda: facet.get_device_unit("fd"),
+            "A",
+            call("device", "get_device_unit", "fd"),
+        ),
+        (
+            "get_active_device_operations",
+            facet.get_active_device_operations,
+            (device.active_operation,),
+            call("device", "get_active_device_operations"),
+        ),
+        (
+            "attach_progress",
+            lambda: facet.attach_progress("fd", _noop),
+            progress.dispose,
+            call("progress", "attach_by_owner", "fd", _noop),
+        ),
+        (
+            "progress_bars",
+            lambda: facet.progress_bars("fd"),
+            ((1, progress.bar),),
+            call("progress", "bars_for_owner", "fd"),
+        ),
+    )
 
-    assert facet.start_connect_device(connect_req) == 11
-    assert facet.start_disconnect_device(disconnect_req) == 12
-    assert facet.start_reconnect_device("fd") == 13
-    assert facet.start_setup_device(setup_req) == 14
-    facet.forget_device("fd")
-    facet.cancel_device_operation("fd")
-    assert facet.list_devices() == ["entry"]
-    assert facet.get_device_snapshot("fd") == "snapshot"
-    assert facet.get_device_info("fd") == "info"
-    facet.poll_device_info("fd")
-    assert facet.is_memory_device("fd") is True
-    assert facet.get_device_unit("fd") == "A"
-    assert facet.get_active_device_operations() == ("op",)
-    assert facet.attach_progress("fd", listener) == "dispose"
-    assert facet.progress_bars("fd") == ((1, "bar"),)
+    for name, action, expected_result, _expected_call in cases:
+        assert action() == expected_result, name
 
-    device.start_connect_device.assert_called_once_with(connect_req)
-    device.start_disconnect_device.assert_called_once_with(disconnect_req)
-    device.start_reconnect_device.assert_called_once_with("fd")
-    device.start_setup_device.assert_called_once_with(setup_req)
-    device.forget_device.assert_called_once_with("fd")
-    device.cancel_device_operation.assert_called_once_with("fd")
-    device.list_devices.assert_called_once_with()
-    device.get_device_snapshot.assert_called_once_with("fd")
-    device.get_device_info.assert_called_once_with("fd")
-    device.poll_device_info.assert_called_once_with("fd")
-    device.is_memory_device.assert_called_once_with("fd")
-    device.get_device_unit.assert_called_once_with("fd")
-    device.get_active_device_operations.assert_called_once_with()
-    progress.attach_by_owner.assert_called_once_with("fd", listener)
-    progress.bars_for_owner.assert_called_once_with("fd")
+    assert log.calls == [expected_call for *_, expected_call in cases]
 
 
 def test_device_control_facet_event_disposer_unsubscribes() -> None:
-    facet, _device, _progress, bus = _facet()
+    facet, _log, _device, _progress, bus = _facet()
     changed: list[str | None] = []
     started: list[str] = []
     finished: list[str] = []

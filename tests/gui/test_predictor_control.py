@@ -1,9 +1,9 @@
-"""PredictorControlFacet delegation and event-subscription contract."""
+"""PredictorControlFacet public contract tests."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any, cast
-from unittest.mock import MagicMock
 
 import numpy as np
 from zcu_tools.gui.event_bus import BaseEventBus
@@ -17,20 +17,56 @@ from zcu_tools.gui.session.services.predictor import (
     SetModelParamsRequest,
 )
 
+from tests.gui._control_fakes import CallLog, RecordedCall, call, same
 
-def _facet() -> tuple[PredictorControlFacet, MagicMock, BaseEventBus]:
+
+class RecordingPredictor:
+    def __init__(self, log: CallLog) -> None:
+        self._log = log
+        self.freq_curve = object()
+        self.matrix_curve = object()
+        self.info: dict[str, bool] = {"loaded": True}
+
+    def load_predictor(self, req: LoadPredictorRequest) -> None:
+        self._log.add("predictor", "load_predictor", req)
+
+    def set_model_params(self, req: SetModelParamsRequest) -> None:
+        self._log.add("predictor", "set_model_params", req)
+
+    def clear_predictor(self) -> None:
+        self._log.add("predictor", "clear_predictor")
+
+    def predict_freq(self, req: PredictFreqRequest) -> float:
+        self._log.add("predictor", "predict_freq", req)
+        return 1234.5
+
+    def predict_freq_curve(self, req: PredictCurveRequest) -> object:
+        self._log.add("predictor", "predict_freq_curve", req)
+        return self.freq_curve
+
+    def predict_matrix_element_curve(self, req: PredictMatrixCurveRequest) -> object:
+        self._log.add("predictor", "predict_matrix_element_curve", req)
+        return self.matrix_curve
+
+    def get_predictor_info(self) -> dict[str, bool]:
+        self._log.add("predictor", "get_predictor_info")
+        return self.info
+
+
+def _facet() -> tuple[PredictorControlFacet, CallLog, RecordingPredictor, BaseEventBus]:
+    log = CallLog()
     bus = BaseEventBus()
-    predictor = MagicMock()
+    predictor = RecordingPredictor(log)
     return (
         PredictorControlFacet(bus=bus, predictor=cast(Any, predictor)),
+        log,
         predictor,
         bus,
     )
 
 
-def test_predictor_control_facet_delegates_predictor_calls() -> None:
-    facet, predictor, _bus = _facet()
-
+def test_predictor_control_facet_forwards_deliberate_predictor_contract() -> None:
+    facet, log, predictor, _bus = _facet()
     load_req = LoadPredictorRequest(path="/tmp/params.json", flux_bias=0.1)
     model_req = SetModelParamsRequest(
         EJ=4.0,
@@ -51,30 +87,59 @@ def test_predictor_control_facet_delegates_predictor_calls() -> None:
         operator="n",
     )
 
-    predictor.predict_freq.return_value = 1234.5
-    predictor.predict_freq_curve.return_value = "freq-curve"
-    predictor.predict_matrix_element_curve.return_value = "matrix-curve"
-    predictor.get_predictor_info.return_value = {"loaded": True}
+    cases: tuple[tuple[str, Callable[[], object], object, RecordedCall], ...] = (
+        (
+            "load_predictor",
+            lambda: facet.load_predictor(load_req),
+            None,
+            call("predictor", "load_predictor", same(load_req)),
+        ),
+        (
+            "set_predictor_model_params",
+            lambda: facet.set_predictor_model_params(model_req),
+            None,
+            call("predictor", "set_model_params", same(model_req)),
+        ),
+        (
+            "clear_predictor",
+            facet.clear_predictor,
+            None,
+            call("predictor", "clear_predictor"),
+        ),
+        (
+            "predict_freq",
+            lambda: facet.predict_freq(freq_req),
+            1234.5,
+            call("predictor", "predict_freq", same(freq_req)),
+        ),
+        (
+            "predict_freq_curve",
+            lambda: facet.predict_freq_curve(curve_req),
+            predictor.freq_curve,
+            call("predictor", "predict_freq_curve", same(curve_req)),
+        ),
+        (
+            "predict_matrix_element_curve",
+            lambda: facet.predict_matrix_element_curve(matrix_req),
+            predictor.matrix_curve,
+            call("predictor", "predict_matrix_element_curve", same(matrix_req)),
+        ),
+        (
+            "get_predictor_info",
+            facet.get_predictor_info,
+            {"loaded": True},
+            call("predictor", "get_predictor_info"),
+        ),
+    )
 
-    facet.load_predictor(load_req)
-    facet.set_predictor_model_params(model_req)
-    facet.clear_predictor()
-    assert facet.predict_freq(freq_req) == 1234.5
-    assert facet.predict_freq_curve(curve_req) == "freq-curve"
-    assert facet.predict_matrix_element_curve(matrix_req) == "matrix-curve"
-    assert facet.get_predictor_info() == {"loaded": True}
+    for name, action, expected_result, _expected_call in cases:
+        assert action() == expected_result, name
 
-    predictor.load_predictor.assert_called_once_with(load_req)
-    predictor.set_model_params.assert_called_once_with(model_req)
-    predictor.clear_predictor.assert_called_once_with()
-    predictor.predict_freq.assert_called_once_with(freq_req)
-    predictor.predict_freq_curve.assert_called_once_with(curve_req)
-    predictor.predict_matrix_element_curve.assert_called_once_with(matrix_req)
-    predictor.get_predictor_info.assert_called_once_with()
+    assert log.calls == [expected_call for *_, expected_call in cases]
 
 
 def test_predictor_control_facet_event_disposer_unsubscribes() -> None:
-    facet, _predictor, bus = _facet()
+    facet, _log, _predictor, bus = _facet()
     changed: list[str] = []
 
     unsubscribe = facet.on_predictor_changed(lambda _payload: changed.append("changed"))
