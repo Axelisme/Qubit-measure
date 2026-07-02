@@ -88,7 +88,7 @@ class BufferProtocol(Protocol):
     def data(self) -> Any: ...
 
     def trigger_update(
-        self, step: ScheduleStep[Any, Any, Any] | None = None
+        self, step: ScheduleStep[Any, Any, Any] | None = None, *, flush: bool = False
     ) -> None: ...
 
 
@@ -172,7 +172,9 @@ class SignalBuffer:
         np.copyto(dst=self.array, src=value)
         self.trigger_update()
 
-    def trigger_update(self, step: ScheduleStep[Any, Any, Any] | None = None) -> None:
+    def trigger_update(
+        self, step: ScheduleStep[Any, Any, Any] | None = None, *, flush: bool = False
+    ) -> None:
         if self._throttled_update is not None:
             self._throttled_update(self.array)
 
@@ -237,11 +239,11 @@ class Schedule(Generic[T_Cfg, T_Env]):
             raise ValueError("register_buffer requires at least one SignalBuffer")
         self._buffers.extend(buffers)
 
-    def trigger_update(self) -> None:
-        self._trigger_update(self)
+    def trigger_update(self, *, flush: bool = False) -> None:
+        self._trigger_update(self, flush=flush)
 
-    def set_data(self, value: Any) -> None:
-        self._set_data(self, value)
+    def set_data(self, value: Any, *, flush: bool = False) -> None:
+        self._set_data(self, value, flush=flush)
 
     @property
     def path(self) -> tuple[Hashable, ...]:
@@ -524,7 +526,11 @@ class Schedule(Generic[T_Cfg, T_Env]):
         return tuple(buffer.data for buffer in self._buffers)
 
     def _set_data(
-        self, owner: Schedule[Any, Any] | ScheduleStep[Any, Any, Any], value: Any
+        self,
+        owner: Schedule[Any, Any] | ScheduleStep[Any, Any, Any],
+        value: Any,
+        *,
+        flush: bool = False,
     ) -> None:
         target = self._get_data(owner)
         if isinstance(target, MutableMapping):
@@ -545,7 +551,7 @@ class Schedule(Generic[T_Cfg, T_Env]):
                 raise ValueError(f"Expected NDArray or number, got {type(value)}")
         else:
             raise ValueError(f"Expected Mapping, list, or NDArray, got {type(target)}")
-        self._trigger_update(owner)
+        self._trigger_update(owner, flush=flush)
 
     def _register_local_buffer(
         self,
@@ -567,7 +573,10 @@ class Schedule(Generic[T_Cfg, T_Env]):
         self._local_buffers[owner.path] = buffer
 
     def _trigger_update(
-        self, owner: Schedule[Any, Any] | ScheduleStep[Any, Any, Any]
+        self,
+        owner: Schedule[Any, Any] | ScheduleStep[Any, Any, Any],
+        *,
+        flush: bool = False,
     ) -> None:
         self._ensure_active()
         if not self._buffers:
@@ -584,7 +593,10 @@ class Schedule(Generic[T_Cfg, T_Env]):
                 path=(),
             )
         for buffer in self._buffers:
-            buffer.trigger_update(step)
+            if flush:
+                buffer.trigger_update(step, flush=True)
+            else:
+                buffer.trigger_update(step)
 
     def _clear_local_buffers(self, prefix: tuple[Hashable, ...]) -> None:
         for path in list(self._local_buffers):
@@ -645,11 +657,11 @@ class ScheduleStep(Generic[T_Cfg, T_Value, T_Env]):
     def set_stop(self) -> None:
         self.schedule.set_stop()
 
-    def set_data(self, value: Any) -> None:
-        self.schedule._set_data(self, value)
+    def set_data(self, value: Any, *, flush: bool = False) -> None:
+        self.schedule._set_data(self, value, flush=flush)
 
-    def trigger_update(self) -> None:
-        self.schedule._trigger_update(self)
+    def trigger_update(self, *, flush: bool = False) -> None:
+        self.schedule._trigger_update(self, flush=flush)
 
     @overload
     def child(

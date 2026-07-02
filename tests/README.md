@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-02 — Schedule result-buffer tests
+**Last updated:** 2026-07-02 — executor ResultTree tests
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -114,7 +114,8 @@ tests/
 │           ├── test_registry.py
 │           └── test_util.py
 ├── experiment/v2/                  # Experiment runtime、persistence / analysis tests
-│   └── runner/                     # Schedule runtime、BufferProtocol 與 executor result-buffer tests
+│   ├── autofluxdep/                # FluxDepInfoTracker typed context tests
+│   └── runner/                     # Schedule runtime、ResultTree 與 MultiMeasurementExecutor tests
 ├── analysis/
 │   └── fluxdep/                    # Flux-Dependence Analysis kernel tests
 ├── mcp/                            # MCP bridge、call-log、timeout policy、remote schema / ARRAY param regression tests
@@ -181,7 +182,11 @@ result = _optimize_tree(root, [SomePass()], ctx)
 
 ### Experiment v2 Schedule runtime tests
 
-`tests/experiment/v2/runner/test_flow.py` 覆蓋 `SignalBuffer` / `Schedule` / `ProgramBuilder` 的 typed env、host scan、program-side sweep、buffer shape、stop checker、retry、batch 與 raw conversion contract。個別 experiment module 更接近資料編排，不新增 migration-specific tests；若要測 QICK compile 行為，放到 `tests/program/v2/` 或既有 sim integration 測試。
+`tests/experiment/v2/runner/test_flow.py` 覆蓋 `SignalBuffer` / `Schedule` / `ProgramBuilder` 的 typed env、host scan、program-side sweep、buffer shape、stop checker、retry、batch 與 raw conversion contract。`test_result_tree.py` 覆蓋 executor-owned ResultTree 的 node set、child buffer、per-measurement subscription、flush 與 ordinary SignalBuffer regression；`test_multi_executor.py` 覆蓋 `MultiMeasurementExecutor` template lifecycle、retry、stop partial result、figure close 與 `ComposedMeasurementBundle` delegation。個別 experiment module 更接近資料編排，不新增 migration-specific tests；若要測 QICK compile 行為，放到 `tests/program/v2/` 或既有 sim integration 測試。
+
+### Autofluxdep typed context tests
+
+`tests/experiment/v2/autofluxdep/test_info_tracker.py` 覆蓋 `FluxDepInfoTracker` 的 `current` / `first` / `last` snapshot、mutable value deepcopy、missing required field fast-fail、unknown field fast-fail 與 smoothing helper behavior。這組是純 Python unit test，不觸發 predictor、SoC 或 device setup。
 
 ### 補充 — `make_mock_soc()`（`lib/zcu_tools/program/v2/mocksoc.py`）
 

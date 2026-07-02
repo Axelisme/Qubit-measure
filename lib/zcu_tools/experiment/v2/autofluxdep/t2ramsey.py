@@ -13,7 +13,11 @@ from typing_extensions import (
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
-from zcu_tools.experiment.v2.runner import ScheduleStep
+from zcu_tools.experiment.v2.runner import (
+    MeasurementTask,
+    ResultUpdateEvent,
+    ScheduleStep,
+)
 from zcu_tools.experiment.v2.utils import snr_checker, sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.meta_tool import ModuleLibrary
@@ -33,11 +37,10 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils import deepupdate
 from zcu_tools.utils.datasaver import load_labber_data, save_labber_data
 from zcu_tools.utils.fitting import fit_decay_fringe
-from zcu_tools.utils.func_tools import MinIntervalFunc
 from zcu_tools.utils.process import rotate2real
 
-from .env import FluxDepEnv, FluxDepInfoDict
-from .executor import FluxDepCfg, MeasurementTask, T_RootResult
+from .env import FluxDepEnv
+from .executor import FluxDepCfg
 
 
 def t2ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -96,7 +99,11 @@ class T2RamseyPlotDict(TypedDict, closed=True):
     t2r_curve: LivePlot1D
 
 
-class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotDict]):
+class T2RamseyTask(
+    MeasurementTask[
+        FluxDepCfg, FluxDepEnv, T2RamseyResult, T2RamseyPlotDict, NDArray[np.float64]
+    ]
+):
     def __init__(
         self,
         num_expts: int,
@@ -125,7 +132,7 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotDic
         self,
         state: ScheduleStep[FluxDepCfg, Any, FluxDepEnv],
     ) -> None:
-        info: FluxDepInfoDict = state.env.info
+        info = state.env.info
 
         cfg_temp = self.cfg_maker(state, state.env.ml)
 
@@ -201,22 +208,26 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotDic
             success = False
 
         if success:
-            info["t2r"] = t2r
-            info["t2r_detune"] = t2r_detune
-            info["smooth_t2r"] = 0.5 * (info.last.get("smooth_t2r", t2r) + t2r)
-
-        with MinIntervalFunc.force_execute():
-            state.set_data(
-                T2RamseyResult(
-                    raw_signals=raw_signals,
-                    length=self.lengths.copy(),
-                    t2r=np.array(t2r),
-                    t2r_err=np.array(t2r_err),
-                    t2r_detune=np.array(t2r_detune),
-                    t2r_detune_err=np.array(t2r_detune_err),
-                    success=np.array(success),
-                )
+            task_name = type(self).__name__
+            info.update(
+                t2r=t2r,
+                t2r_detune=t2r_detune,
+                smooth_t2r=0.5
+                * (info.last_or("smooth_t2r", t2r, task_name=task_name) + t2r),
             )
+
+        state.set_data(
+            T2RamseyResult(
+                raw_signals=raw_signals,
+                length=self.lengths.copy(),
+                t2r=np.array(t2r),
+                t2r_err=np.array(t2r_err),
+                t2r_detune=np.array(t2r_detune),
+                t2r_detune_err=np.array(t2r_detune_err),
+                success=np.array(success),
+            ),
+            flush=True,
+        )
 
     def get_default_result(self) -> T2RamseyResult:
         return T2RamseyResult(
@@ -256,17 +267,19 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotDic
     def update_plotter(
         self,
         plotters,
-        ctx: ScheduleStep[Any, Any, FluxDepEnv],
+        event: ResultUpdateEvent[FluxDepEnv, T2RamseyResult],
         signals: T2RamseyResult,
     ) -> None:
-        flux_values = ctx.env.flux_values
-        info: FluxDepInfoDict = ctx.env.info
+        flux_values = event.env.flux_values
+        flux_idx = event.outer_index
+        if flux_idx is None:
+            raise ValueError("T2 Ramsey plot update requires an outer flux index")
 
         real_signals = t2ramsey_fluxdep_signal2real(signals["raw_signals"])
 
         plotters["t2r"].update(flux_values, signals["t2r"], refresh=False)
         plotters["t2r_curve"].update(
-            self.lengths, real_signals[info["flux_idx"]], refresh=False
+            self.lengths, real_signals[flux_idx], refresh=False
         )
 
     def save(self, filepath, flux_values, result, comment, prefix_tag) -> None:

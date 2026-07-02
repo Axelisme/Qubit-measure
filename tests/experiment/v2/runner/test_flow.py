@@ -59,7 +59,12 @@ class RecordingBuffer:
         self.data = data
         self._on_update = on_update
 
-    def trigger_update(self, step: ScheduleStep[Any, Any, Any] | None = None) -> None:
+    def trigger_update(
+        self,
+        step: ScheduleStep[Any, Any, Any] | None = None,
+        *,
+        flush: bool = False,
+    ) -> None:
         if step is not None and self._on_update is not None:
             self._on_update(step)
 

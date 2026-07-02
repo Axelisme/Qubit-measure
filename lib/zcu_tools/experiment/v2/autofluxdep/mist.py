@@ -13,7 +13,11 @@ from typing_extensions import (
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, setup_devices
-from zcu_tools.experiment.v2.runner import ScheduleStep
+from zcu_tools.experiment.v2.runner import (
+    MeasurementTask,
+    ResultUpdateEvent,
+    ScheduleStep,
+)
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.meta_tool import ModuleLibrary
@@ -27,10 +31,9 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils import deepupdate
 from zcu_tools.utils.datasaver import save_labber_data
-from zcu_tools.utils.func_tools import MinIntervalFunc
 
 from .env import FluxDepEnv
-from .executor import FluxDepCfg, MeasurementTask, T_RootResult
+from .executor import FluxDepCfg
 
 
 def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -82,7 +85,11 @@ class MistPlotDict(TypedDict, closed=True):
     mist: LivePlot2DwithLine
 
 
-class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
+class MistTask(
+    MeasurementTask[
+        FluxDepCfg, FluxDepEnv, MistResult, MistPlotDict, NDArray[np.float64]
+    ]
+):
     def __init__(
         self,
         gain_sweep: SweepCfg,
@@ -148,13 +155,13 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
 
         raw_signals = raw_step.array_data
 
-        with MinIntervalFunc.force_execute():
-            state.set_data(
-                MistResult(
-                    raw_signals=raw_signals,
-                    success=np.array(True),
-                )
-            )
+        state.set_data(
+            MistResult(
+                raw_signals=raw_signals,
+                success=np.array(True),
+            ),
+            flush=True,
+        )
 
     def get_default_result(self) -> MistResult:
         return MistResult(
@@ -182,10 +189,10 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
     def update_plotter(
         self,
         plotters,
-        ctx: ScheduleStep[Any, Any, FluxDepEnv],
+        event: ResultUpdateEvent[FluxDepEnv, MistResult],
         signals: MistResult,
     ) -> None:
-        flux_values = ctx.env.flux_values
+        flux_values = event.env.flux_values
 
         # shape: (flux, gains)
         mist_signals = mist_fluxdep_signal2real(signals["raw_signals"])

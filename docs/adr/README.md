@@ -42,6 +42,10 @@
 - [0015 — PersistenceCaretaker](0015-persistence-caretaker-memento-single-file.md)：GUI app-state 用單一 memento file，由 caretaker 管理讀寫時機。
 - [0027 — Experiment data persistence](0027-experiment-data-persistence-native-labber-axes-list.md)：Experiment data file 使用 Labber axes-list、typed axes spec、grouped dataset roles。
 
+## Experiment Runtime
+
+- [0038 — Executor ResultTree](0038-executor-result-tree.md)：executor workflow 使用 ResultTree、per-measurement update event、template-method lifecycle 與 MeasurementBundle contract。
+
 ## Analysis / Simulation / Waveform
 
 - [0028 — Fluxdep analysis kernel](0028-fluxdep-analysis-kernel.md)：flux-dependence analysis kernel 位於 GUI / notebook adapter 之外。

@@ -1,5 +1,5 @@
 from . import singleshot
-from .env import OvernightDeps, OvernightEnv
+from .env import OvernightEnv
 from .executor import OvernightCfg, OvernightExecutor
 from .t1 import T1Cfg, T1Task, T1WithToneCfg, T1WithToneTask
 
@@ -9,7 +9,6 @@ __all__ = [
     # executor
     "OvernightExecutor",
     "OvernightCfg",
-    "OvernightDeps",
     "OvernightEnv",
     # t1
     "T1Task",

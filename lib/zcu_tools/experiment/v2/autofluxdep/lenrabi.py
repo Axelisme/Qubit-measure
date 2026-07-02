@@ -14,7 +14,11 @@ from typing_extensions import (
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
-from zcu_tools.experiment.v2.runner import ScheduleStep
+from zcu_tools.experiment.v2.runner import (
+    MeasurementTask,
+    ResultUpdateEvent,
+    ScheduleStep,
+)
 from zcu_tools.experiment.v2.utils import snr_checker, sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.meta_tool import ModuleLibrary
@@ -30,11 +34,10 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils import deepupdate
 from zcu_tools.utils.datasaver import load_labber_data, save_labber_data
 from zcu_tools.utils.fitting import fit_rabi
-from zcu_tools.utils.func_tools import MinIntervalFunc
 from zcu_tools.utils.process import rotate2real
 
-from .env import FluxDepEnv, FluxDepInfoDict
-from .executor import FluxDepCfg, MeasurementTask
+from .env import FluxDepEnv
+from .executor import FluxDepCfg
 
 
 def lenrabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -118,7 +121,11 @@ class LenRabiPlotDict(TypedDict, closed=True):
     rabi_curve: LivePlot2DwithLine
 
 
-class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
+class LenRabiTask(
+    MeasurementTask[
+        FluxDepCfg, FluxDepEnv, LenRabiResult, LenRabiPlotDict, NDArray[np.float64]
+    ]
+):
     def __init__(
         self,
         num_expts: int,
@@ -206,37 +213,47 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
             success = False
 
         if success:
-            info: FluxDepInfoDict = state.env.info
+            info = state.env.info
+            task_name = type(self).__name__
 
             cur_pi_product = pi_len * rabi_pulse.gain
-            prev_pi_product = info.last.get("smooth_pi_product", cur_pi_product)
+            flux_idx = int(info.require("flux_idx", task_name=task_name))
+            prev_pi_product = info.last_or(
+                "smooth_pi_product", cur_pi_product, task_name=task_name
+            )
             num_step = max(
-                1, info["flux_idx"] - info.last.get("lenrabi_success_idx", 0)
+                1,
+                flux_idx - info.last_or("lenrabi_success_idx", 0, task_name=task_name),
             )
             weight = 0.7**num_step
             smooth_pi_product = (1 - weight) * cur_pi_product + weight * prev_pi_product
 
-            info["pi_length"] = pi_len
-            info["pi2_length"] = pi2_len
-            info["pi_pulse"] = deepcopy(rabi_pulse)
-            info["pi_pulse"]["waveform"]["length"] = pi_len
+            pi_pulse = deepcopy(rabi_pulse)
+            pi_pulse.set_param("length", pi_len)
+            pi2_pulse = None
             if pi2_len > 0.03:  # skip if pi2_len is too short to be reliable
-                info["pi2_pulse"] = deepcopy(rabi_pulse)
-                info["pi2_pulse"]["waveform"]["length"] = pi2_len
-            info["smooth_pi_product"] = smooth_pi_product
-            info["lenrabi_success_idx"] = info["flux_idx"]
-
-        with MinIntervalFunc.force_execute():
-            state.set_data(
-                LenRabiResult(
-                    raw_signals=raw_signals,
-                    length=self.lengths.copy(),
-                    pi_length=np.array(pi_len),
-                    pi2_length=np.array(pi2_len),
-                    rabi_freq=np.array(rabi_freq),
-                    success=np.array(success),
-                )
+                pi2_pulse = deepcopy(rabi_pulse)
+                pi2_pulse.set_param("length", pi2_len)
+            info.update(
+                pi_length=pi_len,
+                pi2_length=pi2_len,
+                pi_pulse=pi_pulse,
+                pi2_pulse=pi2_pulse,
+                smooth_pi_product=smooth_pi_product,
+                lenrabi_success_idx=flux_idx,
             )
+
+        state.set_data(
+            LenRabiResult(
+                raw_signals=raw_signals,
+                length=self.lengths.copy(),
+                pi_length=np.array(pi_len),
+                pi2_length=np.array(pi2_len),
+                rabi_freq=np.array(rabi_freq),
+                success=np.array(success),
+            ),
+            flush=True,
+        )
 
     def get_default_result(self) -> LenRabiResult:
         return LenRabiResult(
@@ -270,12 +287,13 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
     def update_plotter(
         self,
         plotters,
-        ctx: ScheduleStep[Any, Any, FluxDepEnv],
-        signals,
+        event: ResultUpdateEvent[FluxDepEnv, LenRabiResult],
+        signals: LenRabiResult,
     ) -> None:
-        flux_values = ctx.env.flux_values
+        flux_values = event.env.flux_values
 
-        self.pi_line.set_xdata([ctx.env.info.get("pi_length", np.nan)])
+        pi_length = event.env.info.current.pi_length
+        self.pi_line.set_xdata([np.nan if pi_length is None else pi_length])
         plotters["rabi_curve"].update(
             flux_values,
             self.lengths,

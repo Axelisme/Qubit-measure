@@ -16,7 +16,11 @@ from typing_extensions import (
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
-from zcu_tools.experiment.v2.runner import ScheduleStep
+from zcu_tools.experiment.v2.runner import (
+    MeasurementTask,
+    ResultUpdateEvent,
+    ScheduleStep,
+)
 from zcu_tools.experiment.v2.singleshot.util import correct_populations
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, LivePlot2D
@@ -36,10 +40,9 @@ from zcu_tools.utils.datasaver import (
     reserve_labber_filepath,
     save_labber_data,
 )
-from zcu_tools.utils.func_tools import MinIntervalFunc
 
-from ..env import OvernightEnv, iteration_index
-from ..executor import MeasurementTask, OvernightCfg, T_RootResult
+from ..env import OvernightEnv
+from ..executor import OvernightCfg
 from .util import calc_populations
 
 
@@ -315,7 +318,11 @@ class MistOvernightAnalyzer:
         return self.result
 
 
-class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
+class MistTask(
+    MeasurementTask[
+        OvernightCfg, OvernightEnv, MistResult, MistPlotDict, NDArray[np.int64]
+    ]
+):
     def __init__(
         self, cfg: MistCfg, g_center: complex, e_center: complex, radius: float
     ) -> None:
@@ -367,13 +374,13 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
             )
         )
 
-        with MinIntervalFunc.force_execute():
-            state.set_data(
-                MistResult(
-                    gains=self.gains,
-                    populations=populations_step.array_data,
-                )
-            )
+        state.set_data(
+            MistResult(
+                gains=self.gains,
+                populations=populations_step.array_data,
+            ),
+            flush=True,
+        )
 
     def get_default_result(self) -> MistResult:
         return MistResult(
@@ -435,11 +442,15 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
     def update_plotter(
         self,
         plotters,
-        ctx: ScheduleStep[Any, Any, OvernightEnv],
+        event: ResultUpdateEvent[OvernightEnv, MistResult],
         results: MistResult,
     ) -> None:
-        iters = ctx.env.iters.astype(np.float64)
-        i = iteration_index(ctx)
+        iters = event.env.iters.astype(np.float64)
+        i = event.outer_index
+        if i is None:
+            raise ValueError(
+                "Singleshot MIST plot update requires an outer iteration index"
+            )
 
         gains = results["gains"][0]
         populations = calc_populations(results["populations"])  # (iters, times, 3)

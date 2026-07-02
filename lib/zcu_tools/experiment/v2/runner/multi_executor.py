@@ -2,87 +2,45 @@ from __future__ import annotations
 
 import shutil
 from collections import OrderedDict, defaultdict
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Generic, Protocol, Self
+from typing import Any, Generic, Self
 
 import numpy as np
 from matplotlib.animation import FFMpegWriter
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+from numpy.typing import NDArray
 from typing_extensions import TypeVar
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.v2.runner.schedule import ScheduleStep
-from zcu_tools.experiment.v2.utils import Result, merge_result_list
+from zcu_tools.experiment.v2.runner.result_tree import ResultTree, ResultUpdateEvent
+from zcu_tools.experiment.v2.runner.schedule import (
+    Schedule,
+    ScheduleStep,
+    StopSignal,
+    current_stop_signal,
+)
+from zcu_tools.experiment.v2.runner.task import MeasurementBundle
+from zcu_tools.experiment.v2.utils import Result
 from zcu_tools.liveplot import AbsLivePlot, MultiLivePlot, make_plot_frame
 from zcu_tools.liveplot.backend.jupyter import grab_frame_with_instant_plot
-from zcu_tools.utils.func_tools import min_interval
+from zcu_tools.utils.debug import print_traceback
 
 T_Cfg = TypeVar("T_Cfg", bound=ExpCfgModel)
-T_Env = TypeVar("T_Env", default=dict[str, Any])
-T_BufferData = TypeVar("T_BufferData")
+T_Env = TypeVar("T_Env")
+T_Axis = TypeVar("T_Axis", bound=Sequence[Any] | NDArray[Any])
+T_Measurement = TypeVar(
+    "T_Measurement", bound=MeasurementBundle[Any, Any, Any, Any, Any]
+)
 
 
-class _ExecutorBuffer(Generic[T_BufferData]):
-    """Executor-owned structured result tree buffer."""
-
-    def __init__(
-        self,
-        data: T_BufferData,
-        *,
-        on_update: Callable[[ScheduleStep[Any, Any, Any]], None],
-        update_interval: float | None = 0.1,
-    ) -> None:
-        self.data = data
-        self._throttled_update = min_interval(on_update, update_interval)
-
-    def trigger_update(self, step: ScheduleStep[Any, Any, Any] | None = None) -> None:
-        if step is None or self._throttled_update is None:
-            return
-        self._throttled_update(step)
-
-
-class PlottableMeasurement(Protocol):
-    """Structural interface the multi-measurement executor needs from a task.
-
-    Each app keeps its own concrete ``MeasurementTask`` ABC (they differ by cfg
-    generics); this Protocol only captures the plotting-related contract shared
-    by the base executor, so the base does not force-merge the two ABCs.
-    """
-
-    def num_axes(self) -> dict[str, int]: ...
-
-    def make_plotter(
-        self, name: str, axs: dict[str, list[Axes]], /
-    ) -> Mapping[str, AbsLivePlot]: ...
-
-    def update_plotter(
-        self,
-        plotters: Any,
-        ctx: ScheduleStep[Any, Any, Any],
-        results: Any,
-        /,
-    ) -> None: ...
-
-    def init(self, dynamic_pbar: bool = False) -> None: ...
-
-    def run(self, state: ScheduleStep[Any, Any, Any], /) -> None: ...
-
-    def cleanup(self) -> None: ...
-
-    def get_default_result(self) -> Result: ...
-
-
-T_Measurement = TypeVar("T_Measurement", bound=PlottableMeasurement)
-
-
-class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg, T_Env]):
+class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg, T_Env, T_Axis]):
     """Shared base for executors that run several measurements with a combined
     live plot, optionally recording an FFmpeg animation of the figure.
 
-    Subclasses own their ``run()`` and reuse the layout / plotter / recording
-    machinery here.
+    Subclasses build cfg/env and provide the outer-loop policy; this base owns
+    layout, plotter, recording, ``Schedule`` lifecycle, and final result folding.
     """
 
     def __init__(self) -> None:
@@ -144,7 +102,7 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg, T_Env]):
     ) -> tuple[
         Figure,
         MultiLivePlot[tuple[str, str]],
-        Callable[[ScheduleStep[Any, Any, Any]], None],
+        dict[str, Mapping[str, AbsLivePlot]],
         FFMpegWriter | None,
     ]:
         fig, axs_map = self.make_ax_layout()
@@ -172,54 +130,96 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg, T_Env]):
             return {(n1, n2): v for n1, d2 in d.items() for n2, v in d2.items()}
 
         plotter = MultiLivePlot(fig, flatten_dict(plotters_map))
-
-        def plot_fn(ctx: ScheduleStep[Any, Any, Any]) -> None:
-            if len(ctx.path) < 2:
-                cur_tasks = list(self.measurements.keys())
-            else:
-                cur_task = ctx.path[1]
-                if not isinstance(cur_task, str):
-                    raise TypeError(
-                        f"Expected measurement name at path[1], got {type(cur_task)}"
-                    )
-                cur_tasks = [cur_task]
-
-            result_data = ctx.schedule.data
-            if not isinstance(result_data, list):
-                raise TypeError(
-                    f"Expected executor result data to be list, got {type(result_data)}"
-                )
-            for cur_task in cur_tasks:
-                task_rows: list[Any] = []
-                for row in result_data:
-                    if not isinstance(row, Mapping):
-                        raise TypeError(
-                            "Expected executor result data rows to be mappings, "
-                            f"got {type(row)}"
-                        )
-                    task_rows.append(row[cur_task])
-                task_result = merge_result_list(task_rows)
-                self.measurements[cur_task].update_plotter(
-                    plotters_map[cur_task], ctx, task_result
-                )
-
-            if self.record_path is not None:
-                assert writer is not None
-                grab_frame_with_instant_plot(writer)
-
-            plotter.refresh()
-
-        return fig, plotter, plot_fn, writer
+        return fig, plotter, plotters_map, writer
 
     def _default_batch_result(self) -> dict[str, Result]:
         return {name: ms.get_default_result() for name, ms in self.measurements.items()}
 
-    def _make_result_buffer(
+    def _make_result_tree(
         self,
-        data: T_BufferData,
-        on_update: Callable[[ScheduleStep[Any, Any, Any]], None],
-    ) -> _ExecutorBuffer[T_BufferData]:
-        return _ExecutorBuffer(data, on_update=on_update)
+        data: list[dict[str, Result]],
+        *,
+        outer_values: T_Axis,
+        plotter: MultiLivePlot[tuple[str, str]],
+        plotters_map: Mapping[str, Mapping[str, AbsLivePlot]],
+        writer: FFMpegWriter | None,
+    ) -> ResultTree[T_Env]:
+        tree: ResultTree[T_Env] = ResultTree(data, outer_values=outer_values)
+
+        def make_callback(
+            name: str,
+            measurement: T_Measurement,
+        ) -> Callable[[ResultUpdateEvent[T_Env, Any]], None]:
+            def update(event: ResultUpdateEvent[T_Env, Any]) -> None:
+                measurement.update_plotter(plotters_map[name], event, event.result)
+                if self.record_path is not None:
+                    assert writer is not None
+                    grab_frame_with_instant_plot(writer)
+                plotter.refresh()
+
+            return update
+
+        for name, measurement in self.measurements.items():
+            tree.measurement_node(name).subscribe(make_callback(name, measurement))
+
+        return tree
+
+    def _run(
+        self,
+        *,
+        cfg: T_Cfg,
+        env: T_Env,
+        outer_values: T_Axis,
+        retry_time: int,
+        run_loop: Callable[[Schedule[T_Cfg, T_Env]], None],
+    ) -> Mapping[str, Result]:
+        if len(self.measurements) == 0:
+            raise ValueError("No measurements added")
+
+        init_result = [self._default_batch_result() for _ in range(len(outer_values))]
+
+        fig, plotter, plotters_map, writer = self.make_plotter()
+        stop = current_stop_signal() or StopSignal()
+        result_tree = self._make_result_tree(
+            init_result,
+            outer_values=outer_values,
+            plotter=plotter,
+            plotters_map=plotters_map,
+            writer=writer,
+        )
+
+        try:
+            with Schedule(cfg, result_tree, env=env, stop=stop) as sched:
+                with plotter:
+                    try:
+                        for measurement in self.measurements.values():
+                            measurement.init(dynamic_pbar=True)
+                        run_loop(sched)
+                    except KeyboardInterrupt:
+                        sched.set_stop()
+                    except Exception:
+                        print_traceback()
+                        raise
+                    finally:
+                        for measurement in self.measurements.values():
+                            measurement.cleanup()
+                        if self.record_path is not None:
+                            assert writer is not None
+                            writer.finish()
+        finally:
+            import matplotlib.pyplot as plt
+
+            plt.close(fig)
+
+        signals_dict = {
+            name: result_tree.measurement_result(name)
+            for name in self.measurements.keys()
+        }
+
+        self.last_cfg = cfg
+        self.last_result = signals_dict
+
+        return signals_dict
 
     def _run_measurement_batch(
         self,

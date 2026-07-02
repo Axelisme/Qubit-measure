@@ -13,7 +13,11 @@ from typing_extensions import (
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
-from zcu_tools.experiment.v2.runner import ScheduleStep
+from zcu_tools.experiment.v2.runner import (
+    MeasurementTask,
+    ResultUpdateEvent,
+    ScheduleStep,
+)
 from zcu_tools.experiment.v2.utils import snr_checker, sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.meta_tool import ModuleLibrary
@@ -37,11 +41,10 @@ from zcu_tools.utils.datasaver import (
     save_labber_data,
 )
 from zcu_tools.utils.fitting import fit_decay
-from zcu_tools.utils.func_tools import MinIntervalFunc
 from zcu_tools.utils.process import rotate2real
 
-from .env import FluxDepEnv, FluxDepInfoDict
-from .executor import FluxDepCfg, MeasurementTask, T_RootResult
+from .env import FluxDepEnv
+from .executor import FluxDepCfg
 
 
 def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -95,7 +98,9 @@ class T1PlotDict(TypedDict, closed=True):
     t1_curve: LivePlot1D
 
 
-class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
+class T1Task(
+    MeasurementTask[FluxDepCfg, FluxDepEnv, T1Result, T1PlotDict, NDArray[np.float64]]
+):
     def __init__(
         self,
         num_expts: int,
@@ -119,7 +124,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
         self,
         state: ScheduleStep[FluxDepCfg, Any, FluxDepEnv],
     ) -> None:
-        info: FluxDepInfoDict = state.env.info
+        info = state.env.info
 
         cfg_temp = self.cfg_maker(state, state.env.ml)
 
@@ -178,19 +183,23 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
             success = False
 
         if success:
-            info["t1"] = t1
-            info["smooth_t1"] = 0.5 * (info.last.get("smooth_t1", t1) + t1)
-
-        with MinIntervalFunc.force_execute():
-            state.set_data(
-                T1Result(
-                    raw_signals=raw_signals,
-                    length=self.lengths.copy(),
-                    t1=np.array(t1),
-                    t1_err=np.array(t1err),
-                    success=np.array(success),
-                )
+            task_name = type(self).__name__
+            info.update(
+                t1=t1,
+                smooth_t1=0.5
+                * (info.last_or("smooth_t1", t1, task_name=task_name) + t1),
             )
+
+        state.set_data(
+            T1Result(
+                raw_signals=raw_signals,
+                length=self.lengths.copy(),
+                t1=np.array(t1),
+                t1_err=np.array(t1err),
+                success=np.array(success),
+            ),
+            flush=True,
+        )
 
     def get_default_result(self) -> T1Result:
         return T1Result(
@@ -228,18 +237,18 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
     def update_plotter(
         self,
         plotters,
-        ctx: ScheduleStep[Any, Any, FluxDepEnv],
+        event: ResultUpdateEvent[FluxDepEnv, T1Result],
         signals: T1Result,
     ) -> None:
-        flux_values = ctx.env.flux_values
-        info: FluxDepInfoDict = ctx.env.info
+        flux_values = event.env.flux_values
+        flux_idx = event.outer_index
+        if flux_idx is None:
+            raise ValueError("T1 plot update requires an outer flux index")
 
         real_signals = t1_fluxdep_signal2real(signals["raw_signals"])
 
         plotters["t1"].update(flux_values, signals["t1"], refresh=False)
-        plotters["t1_curve"].update(
-            self.lengths, real_signals[info["flux_idx"]], refresh=False
-        )
+        plotters["t1_curve"].update(self.lengths, real_signals[flux_idx], refresh=False)
 
     def save(self, filepath, flux_values, result, comment, prefix_tag) -> None:
         filepath = Path(filepath)

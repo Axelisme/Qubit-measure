@@ -13,7 +13,11 @@ from typing_extensions import (
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
-from zcu_tools.experiment.v2.runner import ScheduleStep
+from zcu_tools.experiment.v2.runner import (
+    MeasurementTask,
+    ResultUpdateEvent,
+    ScheduleStep,
+)
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.program.v2 import (
@@ -35,11 +39,10 @@ from zcu_tools.utils.datasaver import (
     save_labber_data,
 )
 from zcu_tools.utils.fitting import fit_decay
-from zcu_tools.utils.func_tools import MinIntervalFunc
 from zcu_tools.utils.process import rotate2real
 
 from .env import OvernightEnv
-from .executor import MeasurementTask, OvernightCfg, T_RootResult
+from .executor import OvernightCfg
 
 
 def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -95,10 +98,10 @@ class T1PlotAndSaveMixin(Generic[T_Cfg]):
     def update_plotter(
         self,
         plotters: T1PlotDict,
-        ctx: ScheduleStep[Any, Any, OvernightEnv],
-        results,
+        event: ResultUpdateEvent[OvernightEnv, T1Result],
+        results: T1Result,
     ) -> None:
-        iters = ctx.env.iters.astype(np.float64)
+        iters = event.env.iters.astype(np.float64)
 
         lengths = results["lengths"][0]
         real_signals = t1_overnight_signal2real(results["signals"])
@@ -195,7 +198,10 @@ class T1Cfg(ProgramV2Cfg, ExpCfgModel):
 
 
 class T1Task(
-    T1PlotAndSaveMixin[T1Cfg], MeasurementTask[T1Result, T_RootResult, T1PlotDict]
+    T1PlotAndSaveMixin[T1Cfg],
+    MeasurementTask[
+        OvernightCfg, OvernightEnv, T1Result, T1PlotDict, NDArray[np.int64]
+    ],
 ):
     def __init__(
         self, cfg: T1Cfg, *, acquire_kwargs: dict[str, Any] | None = None
@@ -237,13 +243,13 @@ class T1Task(
             .build_and_acquire(**self.acquire_kwargs)
         )
 
-        with MinIntervalFunc.force_execute():
-            state.set_data(
-                T1Result(
-                    lengths=self.lengths,
-                    signals=signals_step.array_data,
-                )
-            )
+        state.set_data(
+            T1Result(
+                lengths=self.lengths,
+                signals=signals_step.array_data,
+            ),
+            flush=True,
+        )
 
     def get_default_result(self) -> T1Result:
         return T1Result(
@@ -273,7 +279,9 @@ class T1WithToneCfg(ProgramV2Cfg, ExpCfgModel):
 
 class T1WithToneTask(
     T1PlotAndSaveMixin[T1WithToneCfg],
-    MeasurementTask[T1Result, T_RootResult, T1PlotDict],
+    MeasurementTask[
+        OvernightCfg, OvernightEnv, T1Result, T1PlotDict, NDArray[np.int64]
+    ],
 ):
     def __init__(
         self, cfg: T1WithToneCfg, *, acquire_kwargs: dict[str, Any] | None = None
@@ -325,7 +333,8 @@ class T1WithToneTask(
             T1Result(
                 lengths=self.lengths,
                 signals=signals_step.array_data,
-            )
+            ),
+            flush=True,
         )
 
     def get_default_result(self) -> T1Result:

@@ -15,7 +15,11 @@ from typing_extensions import (
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
-from zcu_tools.experiment.v2.runner import ScheduleStep
+from zcu_tools.experiment.v2.runner import (
+    MeasurementTask,
+    ResultUpdateEvent,
+    ScheduleStep,
+)
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.liveplot import LivePlot2D
@@ -34,11 +38,10 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils import deepupdate
-from zcu_tools.utils.func_tools import MinIntervalFunc
 from zcu_tools.utils.process import smooth_signal_nd
 
-from .env import FluxDepEnv, FluxDepInfoDict
-from .executor import FluxDepCfg, MeasurementTask, T_RootResult
+from .env import FluxDepEnv
+from .executor import FluxDepCfg
 
 
 def ro_opt_signal2real(signals: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -85,7 +88,11 @@ class RO_OptPlotDict(TypedDict, closed=True):
     snr: LivePlot2D
 
 
-class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
+class RO_OptTask(
+    MeasurementTask[
+        FluxDepCfg, FluxDepEnv, RO_OptResult, RO_OptPlotDict, NDArray[np.float64]
+    ]
+):
     def __init__(
         self,
         freq_expts: int,
@@ -111,7 +118,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
         self,
         state: ScheduleStep[FluxDepCfg, Any, FluxDepEnv],
     ) -> None:
-        info: FluxDepInfoDict = state.env.info
+        info = state.env.info
 
         cfg_temp = self.cfg_maker(state, state.env.ml)
         if cfg_temp is None:
@@ -190,25 +197,26 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
         best_freq = self.freqs[max_freq_idx]
         best_gain = self.gains[max_gain_idx]
 
-        info["best_ro_freq"] = best_freq
-        info["best_ro_gain"] = best_gain
-
         readout_cfg = deepcopy(cfg.modules.readout)
         readout_cfg.set_param("freq", best_freq)
         readout_cfg.set_param("gain", best_gain)
 
-        info["opt_readout"] = readout_cfg
+        info.update(
+            best_ro_freq=best_freq,
+            best_ro_gain=best_gain,
+            opt_readout=readout_cfg,
+        )
 
-        with MinIntervalFunc.force_execute():
-            state.set_data(
-                RO_OptResult(
-                    raw_signals=raw_signals,
-                    freqs=self.freqs,
-                    gains=self.gains,
-                    best_freq=best_freq,
-                    best_gain=best_gain,
-                )
-            )
+        state.set_data(
+            RO_OptResult(
+                raw_signals=raw_signals,
+                freqs=self.freqs,
+                gains=self.gains,
+                best_freq=best_freq,
+                best_gain=best_gain,
+            ),
+            flush=True,
+        )
 
     def get_default_result(self) -> RO_OptResult:
         return RO_OptResult(
@@ -243,17 +251,19 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
     def update_plotter(
         self,
         plotters,
-        ctx: ScheduleStep[Any, Any, FluxDepEnv],
+        event: ResultUpdateEvent[FluxDepEnv, RO_OptResult],
         signals: RO_OptResult,
     ) -> None:
-        info: FluxDepInfoDict = ctx.env.info
-        i = info["flux_idx"]
+        info = event.env.info.current
+        i = event.outer_index
+        if i is None:
+            raise ValueError("RO optimize plot update requires an outer flux index")
 
         real_signals = ro_opt_signal2real(signals["raw_signals"][i])
 
-        self.best_point.set_offsets(
-            [info.get("best_ro_freq", np.nan), info.get("best_ro_gain", np.nan)]
-        )
+        best_ro_freq = np.nan if info.best_ro_freq is None else info.best_ro_freq
+        best_ro_gain = np.nan if info.best_ro_gain is None else info.best_ro_gain
+        self.best_point.set_offsets([best_ro_freq, best_ro_gain])
         plotters["snr"].update(self.freqs, self.gains, real_signals, refresh=False)
 
     def save(self, filepath, flux_values, result, comment, prefix_tag) -> None:

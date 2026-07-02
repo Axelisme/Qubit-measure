@@ -13,7 +13,11 @@ from typing_extensions import (
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
-from zcu_tools.experiment.v2.runner import ScheduleStep
+from zcu_tools.experiment.v2.runner import (
+    MeasurementTask,
+    ResultUpdateEvent,
+    ScheduleStep,
+)
 from zcu_tools.experiment.v2.utils import snr_checker, sweep2array
 from zcu_tools.liveplot import LivePlot1D, LivePlot2DwithLine
 from zcu_tools.meta_tool import ModuleLibrary
@@ -21,12 +25,11 @@ from zcu_tools.program.v2 import SweepCfg, TwoToneCfg, sweep2param
 from zcu_tools.utils import deepupdate
 from zcu_tools.utils.datasaver import load_labber_data, save_labber_data
 from zcu_tools.utils.fitting import fit_qubit_freq
-from zcu_tools.utils.func_tools import MinIntervalFunc
 from zcu_tools.utils.math import IDWInterpolation
 from zcu_tools.utils.process import rotate2real
 
-from .env import FluxDepEnv, FluxDepInfoDict
-from .executor import FluxDepCfg, MeasurementTask, T_RootResult
+from .env import FluxDepEnv
+from .executor import FluxDepCfg
 
 
 def qubitfreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -76,7 +79,11 @@ class FreqPlotDict(TypedDict, closed=True):
     detune: LivePlot2DwithLine
 
 
-class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]):
+class QubitFreqTask(
+    MeasurementTask[
+        FluxDepCfg, FluxDepEnv, QubitFreqResult, FreqPlotDict, NDArray[np.float64]
+    ]
+):
     def __init__(
         self,
         detune_sweep: SweepCfg,
@@ -107,9 +114,10 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
         predictor = state.env.predictor
         info = state.env.info
 
-        flux = info["flux_value"]
+        task_name = type(self).__name__
+        flux = float(info.require("flux_value", task_name=task_name))
         predict_freq = predictor.predict_freq(flux)
-        info["predict_freq"] = predict_freq + self.freq_err_pred.predict(flux)
+        info.update(predict_freq=predict_freq + self.freq_err_pred.predict(flux))
 
         cfg_temp = self.cfg_maker(state, state.env.ml)
         if cfg_temp is None:
@@ -199,9 +207,11 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
 
         if success:
             cur_factor = fwhm / float(cfg.modules.qub_pulse.gain)
-            prev_factor = info.last.get("qfw_factor", cur_factor)
+            flux_idx = int(info.require("flux_idx", task_name=task_name))
+            prev_factor = info.last_or("qfw_factor", cur_factor, task_name=task_name)
             num_step = max(
-                1, info["flux_idx"] - info.last.get("qubfreq_success_idx", 0)
+                1,
+                flux_idx - info.last_or("qubfreq_success_idx", 0, task_name=task_name),
             )
             weight = 0.7**num_step
             smooth_factor = (1 - weight) * cur_factor + weight * prev_factor
@@ -211,22 +221,22 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
                 fit_detune=detune,
                 fit_kappa=fwhm,
                 qfw_factor=smooth_factor,
-                qubfreq_success_idx=info["flux_idx"],
+                qubfreq_success_idx=flux_idx,
             )
 
-        with MinIntervalFunc.force_execute():
-            state.set_data(
-                QubitFreqResult(
-                    raw_signals=raw_signals,
-                    predict_freq=np.array(center_freq),
-                    fit_detune=np.array(detune),
-                    fit_freq=np.array(fit_freq),
-                    fit_freq_err=np.array(freq_err),
-                    fit_fwhm=np.array(fwhm),
-                    fit_fwhm_err=np.array(fwhm_err),
-                    success=np.array(success),
-                )
-            )
+        state.set_data(
+            QubitFreqResult(
+                raw_signals=raw_signals,
+                predict_freq=np.array(center_freq),
+                fit_detune=np.array(detune),
+                fit_freq=np.array(fit_freq),
+                fit_freq_err=np.array(freq_err),
+                fit_fwhm=np.array(fwhm),
+                fit_fwhm_err=np.array(fwhm_err),
+                success=np.array(success),
+            ),
+            flush=True,
+        )
 
     def get_default_result(self) -> QubitFreqResult:
         return QubitFreqResult(
@@ -270,12 +280,13 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
     def update_plotter(
         self,
         plotters,
-        ctx: ScheduleStep[Any, Any, FluxDepEnv],
+        event: ResultUpdateEvent[FluxDepEnv, QubitFreqResult],
         signals: QubitFreqResult,
     ) -> None:
-        flux_values = ctx.env.flux_values
+        flux_values = event.env.flux_values
 
-        self.freq_line.set_xdata([ctx.env.info.get("fit_detune", np.nan)])
+        fit_detune = event.env.info.current.fit_detune
+        self.freq_line.set_xdata([np.nan if fit_detune is None else fit_detune])
         plotters["fit_freq"].update(flux_values, signals["fit_freq"], refresh=False)
         plotters["detune"].update(
             flux_values,

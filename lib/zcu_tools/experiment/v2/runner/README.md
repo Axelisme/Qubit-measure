@@ -1,14 +1,13 @@
 # `zcu_tools.experiment.v2.runner` — experiment runtime
 
-**Last updated:** 2026-07-02 — executor figure lifecycle
+**Last updated:** 2026-07-02 — executor ResultTree lifecycle
 
 `runner/` 提供 experiment/v2 的 Python-like acquisition runtime。一般實驗用
 `SignalBuffer` / `Schedule` / `ProgramBuilder` 編排 host-side loop 與 program
-acquire；executor 類流程用 executor-owned buffer 實作 `BufferProtocol` 來持有 root
-result tree，再交給同一個 `Schedule` 編排 outer loop，並用
-`MultiMeasurementExecutor` 共用 liveplot、recording 與 retry helper；measurement
-init/cleanup 與 figure/writer cleanup lifecycle 留在 concrete executor 的 `run()`。舊 Task tree
-runtime 不再保留。
+acquire；executor 類流程用 `ResultTree` 實作 executor-owned `BufferProtocol`，再交給同一個
+`Schedule` 編排 outer loop，並用 `MultiMeasurementExecutor` 共用 result initialization、
+per-measurement liveplot subscription、recording、retry、cleanup 與 `last_cfg` /
+`last_result` lifecycle。舊 Task tree runtime 不再保留。
 
 ---
 
@@ -28,10 +27,27 @@ runtime 不再保留。
 ### `BufferProtocol`
 
 `BufferProtocol` 是 `Schedule` 對 buffer 的唯一要求：buffer 提供 `data` 以及
-`trigger_update(step)`。`SignalBuffer` 實作這個 protocol；executor workflow 也可在
-executor 層實作自己的 structured result buffer。`Schedule` 不直接宣告 result tree /
+`trigger_update(step, flush=False)`。`SignalBuffer` 實作這個 protocol；executor workflow
+使用 `ResultTree` 作為 structured result buffer。`Schedule` 不直接宣告 result tree /
 update callback；child-local `SignalBuffer` 寫入時同步更新 root buffer 的 `data` 中對應
 path，並觸發該 buffer 的 update hook。
+
+### `ResultTree`
+
+`ResultTree` 是 executor-owned buffer，root data 形狀為
+`list[dict[measurement_name, Result]]`。它提供：
+
+- `ResultNode` typed handle：`tree.at(i).child("task").child("field")` 可定位 result
+  subtree，`set(value, flush=True)` 可直接寫入並觸發 update。
+- child-local buffer：executor leaf 以 `state.child("raw_signals", cfg=cfg).buffer(...)`
+  建立 `SignalBuffer`，buffer 寫入時會回填 ResultTree leaf。
+- per-measurement subscription：executor plotter 訂閱 `tree.measurement_node(name)`，
+  callback 收 `ResultUpdateEvent`，包含 `measurement_name`、`outer_index`、
+  `outer_value`、`env`、`node`、stacked `result` 與 `flush`。
+- per-measurement cache：`measurement_result(name)` 只 merge 該 measurement；更新某個
+  measurement 時只 invalidates 該 measurement cache。
+
+一般 `SignalBuffer` experiment 不使用 ResultTree，public `on_update(data)` 行為不變。
 
 ### `Schedule`
 
@@ -76,8 +92,9 @@ with Schedule(cfg, signals_buffer) as sched:
   `step.child("field", cfg=program_cfg).buffer(shape)` 會建立 child-local default
   `SignalBuffer`，buffer 寫入時同步回 `result_buffer.data` 並觸發 update。
 - `ScheduleStep.value` 是 scan/repeat/batch 的 control-flow coordinate；result tree 由
-  `step.data` 讀取、`step.set_data(...)` 寫入，需要 ndarray slot 時用 `step.array_data`
-  做型別邊界。
+  `step.data` 讀取、`step.set_data(..., flush=True)` 寫入，需要 ndarray slot 時用
+  `step.array_data` 做型別邊界。`flush=True` 對 ResultTree 表示立即送出 node event；
+  對一般 `SignalBuffer` 不改變 `on_update(data)` public shape。
 
 ### `ProgramBuilder`
 
@@ -103,12 +120,11 @@ with Schedule(cfg, signals_buffer) as sched:
 
 ## Executor Scaffold
 
-`MultiMeasurementExecutor` 服務 `autofluxdep` / `overnight` 這類外層 workflow：
-它負責 combined liveplot layout、FFmpeg animation 與 per-measurement retry helper；
-root result tree 與 update callback 由 executor-owned buffer 持有，path、env、stop 與
-control flow 由 `Schedule` 持有；measurement init/cleanup lifecycle 留在 concrete
-executor 的 `run()`。`make_plotter()` 回傳的 figure 與 animation writer 也由 concrete
-executor 的 `run()` 以 `try/finally` 收尾，base scaffold 不擁有 pyplot lifecycle。
+`MultiMeasurementExecutor` 服務 `autofluxdep` / `overnight` 這類外層 workflow。
+base executor 擁有 common run lifecycle：建立 default outer result、combined liveplot
+layout、FFmpeg writer、`ResultTree` subscriptions、`Schedule` scope、measurement
+init/cleanup、per-measurement retry、stop handling、writer finish、figure close，以及
+`last_cfg` / `last_result`。concrete executor 只提供 cfg/env 建立與 outer-loop policy。
 
 典型 executor 格式：
 
@@ -116,22 +132,26 @@ executor 的 `run()` 以 `try/finally` 收尾，base scaffold 不擁有 pyplot l
 def run_loop(root_sched: Schedule[FluxDepCfg, FluxDepEnv]) -> None:
     for i, (flux, flux_step) in enumerate(root_sched.scan("flux", flux_values)):
         update_flux_context(i, flux_step, flux)
-        flux_step.batch(
-            {
-                name: lambda child, measurement=measurement: (
-                    self._run_measurement_with_retries(measurement, child, retry_time)
-                )
-                for name, measurement in self.measurements.items()
-            }
-        )
+        self._run_measurement_batch(flux_step, retry_time)
 ```
 
 leaf measurement 取得 `ScheduleStep` 後，通常用
 `raw_step = state.child("raw_signals", cfg=program_cfg)` 建立 program-owned cfg scope，再用
 `raw_step.buffer(shape, dtype=...)` 建立與 result tree 綁定的 acquire buffer；接著直接
 呼叫 `raw_step.prog_builder(...).build_and_acquire()`。`autofluxdep` / `overnight`
-的 caller 入口各自用 deps dataclass 提供穩定依賴，executor 在 run 內組完整 typed
+的 caller 入口以 explicit keyword deps 提供穩定依賴，executor 在 run 內組完整 typed
 env 給 root `Schedule`。
+
+executor leaf contract 由 `runner/task.py` 擁有：
+
+- `Acquirer[T_Cfg, T_Env, T_Result]`：`init` / `run` / `cleanup` /
+  `get_default_result`。
+- `TaskPlotter[T_Env, T_Result, T_PlotDict]`：axes、plotter 建立與
+  `ResultUpdateEvent` 更新。
+- `TaskPersister[T_Result, T_SaveAxis]`：save/load mechanics 的 save 端 contract。
+- `MeasurementBundle`：executor 接受的完整 leaf contract。
+- `ComposedMeasurementBundle`：把 acquire / plot / persistence 三段 component 組成 leaf。
+- `MeasurementTask`：單一 class 直接實作完整 bundle 的 convenience base。
 
 ---
 
@@ -152,5 +172,8 @@ env 給 root `Schedule`。
 ## 測試
 
 `tests/experiment/v2/runner/test_flow.py` 覆蓋 Schedule、typed env、SignalBuffer、
-ProgramBuilder、host scan/repeat/batch、retry、stop 與 decimated acquire。單一實驗模組
-只保留 runtime 整合型檢查，不再為每個資料型 experiment 建獨立 runner 測試。
+ProgramBuilder、host scan/repeat/batch、retry、stop 與 decimated acquire。
+`test_result_tree.py` 覆蓋 ResultTree node set、child buffer、subscription、flush 與
+ordinary SignalBuffer regression；`test_multi_executor.py` 覆蓋 executor template lifecycle、
+retry/stop partial result 與 composed bundle delegation。單一實驗模組只保留 runtime
+整合型檢查，不再為每個資料型 experiment 建獨立 runner 測試。

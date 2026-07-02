@@ -1,5 +1,5 @@
-from .env import FluxDepDeps, FluxDepEnv
-from .executor import FluxDepCfg, FluxDepExecutor, FluxDepInfoDict
+from .env import FluxDepEnv, FluxDepInfo, FluxDepInfoTracker
+from .executor import FluxDepCfg, FluxDepExecutor
 from .lenrabi import LenRabiCfg, LenRabiCfgTemplate, LenRabiTask
 from .mist import MistCfg, MistCfgTemplate, MistTask
 from .qubit_freq import QubitFreqCfg, QubitFreqCfgTemplate, QubitFreqTask
@@ -11,9 +11,9 @@ from .t2ramsey import T2RamseyCfg, T2RamseyCfgTemplate, T2RamseyTask
 __all__ = [
     # executor
     "FluxDepExecutor",
-    "FluxDepInfoDict",
-    "FluxDepDeps",
     "FluxDepEnv",
+    "FluxDepInfo",
+    "FluxDepInfoTracker",
     "FluxDepCfg",
     # lenrabi
     "LenRabiTask",

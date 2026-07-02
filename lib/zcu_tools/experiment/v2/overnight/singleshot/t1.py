@@ -14,7 +14,11 @@ from typing_extensions import (
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
-from zcu_tools.experiment.v2.runner import ScheduleStep
+from zcu_tools.experiment.v2.runner import (
+    MeasurementTask,
+    ResultUpdateEvent,
+    ScheduleStep,
+)
 from zcu_tools.experiment.v2.singleshot.util import correct_populations
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, LivePlot2D
@@ -39,10 +43,9 @@ from zcu_tools.utils.datasaver import (
     save_labber_data,
 )
 from zcu_tools.utils.fitting.multi_decay import fit_dual_transition_rates
-from zcu_tools.utils.func_tools import MinIntervalFunc
 
-from ..env import OvernightEnv, iteration_index
-from ..executor import MeasurementTask, OvernightCfg, T_RootResult
+from ..env import OvernightEnv
+from ..executor import OvernightCfg
 from .util import calc_populations
 
 
@@ -107,11 +110,15 @@ class T1PlotAndSaveMixin(Generic[T_Cfg]):
     def update_plotter(
         self,
         plotters,
-        ctx: ScheduleStep[Any, Any, OvernightEnv],
-        results,
+        event: ResultUpdateEvent[OvernightEnv, T1Result],
+        results: T1Result,
     ) -> None:
-        iters = ctx.env.iters.astype(np.float64)
-        i = iteration_index(ctx)
+        iters = event.env.iters.astype(np.float64)
+        i = event.outer_index
+        if i is None:
+            raise ValueError(
+                "Singleshot T1 plot update requires an outer iteration index"
+            )
 
         lengths = results["lengths"][0]
         populations = calc_populations(results["populations"])  # (iters, 2, times, 3)
@@ -250,7 +257,10 @@ class T1Cfg(ProgramV2Cfg, ExpCfgModel):
 
 
 class T1Task(
-    T1PlotAndSaveMixin[T1Cfg], MeasurementTask[T1Result, T_RootResult, T1PlotDict]
+    T1PlotAndSaveMixin[T1Cfg],
+    MeasurementTask[
+        OvernightCfg, OvernightEnv, T1Result, T1PlotDict, NDArray[np.int64]
+    ],
 ):
     def __init__(
         self, cfg: T1Cfg, g_center: complex, e_center: complex, radius: float
@@ -306,13 +316,13 @@ class T1Task(
             )
         )
 
-        with MinIntervalFunc.force_execute():
-            state.set_data(
-                T1Result(
-                    lengths=self.lengths,
-                    populations=populations_step.array_data,
-                )
-            )
+        state.set_data(
+            T1Result(
+                lengths=self.lengths,
+                populations=populations_step.array_data,
+            ),
+            flush=True,
+        )
 
     def get_default_result(self) -> T1Result:
         return T1Result(
@@ -342,7 +352,9 @@ class T1WithToneCfg(ProgramV2Cfg, ExpCfgModel):
 
 class T1WithToneTask(
     T1PlotAndSaveMixin[T1WithToneCfg],
-    MeasurementTask[T1Result, T_RootResult, T1PlotDict],
+    MeasurementTask[
+        OvernightCfg, OvernightEnv, T1Result, T1PlotDict, NDArray[np.int64]
+    ],
 ):
     def __init__(
         self, cfg: T1WithToneCfg, g_center: complex, e_center: complex, radius: float
@@ -397,13 +409,13 @@ class T1WithToneTask(
             )
         )
 
-        with MinIntervalFunc.force_execute():
-            state.set_data(
-                T1Result(
-                    lengths=self.lengths,
-                    populations=populations_step.array_data,
-                )
-            )
+        state.set_data(
+            T1Result(
+                lengths=self.lengths,
+                populations=populations_step.array_data,
+            ),
+            flush=True,
+        )
 
     def get_default_result(self) -> T1Result:
         return T1Result(
