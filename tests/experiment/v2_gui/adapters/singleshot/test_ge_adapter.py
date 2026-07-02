@@ -27,23 +27,9 @@ from zcu_tools.gui.app.main.adapter import (
     RunRequest,
     WritebackRequest,
 )
-from zcu_tools.meta_tool import MetaDict
 
-
-def _make_ml() -> MagicMock:
-    ml = MagicMock()
-    ml.modules = {}
-    ml.waveforms = {}
-    ml.make_cfg.return_value = MagicMock()
-    return ml
-
-
-def _make_ctx(ml: MagicMock | None = None) -> MagicMock:
-    ctx = MagicMock()
-    ctx.ml = ml or _make_ml()
-    ctx.md = MetaDict()
-    ctx.qub_name = "Q1"
-    return ctx
+from ._helpers import make_ctx as _make_ctx
+from ._helpers import make_ml as _make_ml
 
 
 def _make_req(ml: MagicMock | None = None) -> RunRequest:

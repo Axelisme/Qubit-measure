@@ -1,5 +1,4 @@
-"""Tests for the Phase 162C singleshot adapters: ac_stark, mist/power_freq,
-t1_tone_sweep_{gain,freq}.
+"""Tests for the ac_stark, mist/power_freq, and t1_tone_sweep adapters.
 
 Covers:
 - cfg_spec structure (2D = two sweep axes; t1_tone_sweep = length + one outer)
@@ -45,58 +44,27 @@ from zcu_tools.experiment.v2_gui.adapters.singleshot.t1_tone_sweep import (
     SsT1ToneSweepAnalyzeResult,
 )
 from zcu_tools.gui.app.main.adapter import (
-    AnalyzeRequest,
     MetaDictWriteback,
-    NoAnalyzeParams,
-    RunRequest,
     WritebackRequest,
 )
 from zcu_tools.meta_tool import MetaDict
 from zcu_tools.utils.datasaver import load_labber_data
 
-# ---------------------------------------------------------------------------
-# Fixtures / shared helpers (mirror test_phase162b_adapters)
-# ---------------------------------------------------------------------------
-
-
-def _make_ml() -> MagicMock:
-    ml = MagicMock()
-    ml.modules = {}
-    ml.waveforms = {}
-    ml.make_cfg.return_value = MagicMock()
-    return ml
-
-
-def _make_ctx(ml: MagicMock | None = None) -> MagicMock:
-    ctx = MagicMock()
-    ctx.ml = ml or _make_ml()
-    ctx.md = MetaDict()
-    ctx.qub_name = "Q1"
-    return ctx
-
-
-def _md_with_centers() -> MetaDict:
-    md = MetaDict()
-    md.g_center = -1.5 + 2.0j
-    md.e_center = 1.2 - 0.7j
-    md.ge_radius = 0.42
-    return md
-
-
-def _run_req(md: MetaDict, ml: MagicMock) -> RunRequest:
-    soc, soccfg = MagicMock(), MagicMock()
-    return RunRequest(md=md, ml=ml, soc=soc, soccfg=soccfg)
-
-
-def _analyze_req(run_result: Any, md: MetaDict) -> AnalyzeRequest[Any, NoAnalyzeParams]:
-    return AnalyzeRequest(
-        run_result=run_result,
-        analyze_params=NoAnalyzeParams(),
-        md=md,
-        ml=_make_ml(),
-        predictor=None,
-    )
-
+from ._helpers import (
+    analyze_req as _analyze_req,
+)
+from ._helpers import (
+    make_ctx as _make_ctx,
+)
+from ._helpers import (
+    make_ml as _make_ml,
+)
+from ._helpers import (
+    md_with_centers as _md_with_centers,
+)
+from ._helpers import (
+    run_req as _run_req,
+)
 
 # ---------------------------------------------------------------------------
 # cfg_spec structure (2D sweeps) + validate(ml) + filename stem

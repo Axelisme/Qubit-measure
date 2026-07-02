@@ -1,4 +1,4 @@
-"""Tests for the single-shot downstream adapters (Phase 162A).
+"""Tests for the single-shot downstream adapters.
 
 Covers the shared ``read_ge_centers`` helper (incl. the complex round-trip — the
 high-risk silent-break point), the mist run overrides that forward the GE
@@ -36,42 +36,23 @@ from zcu_tools.experiment.v2_gui.adapters.singleshot.mist.freq import (
 from zcu_tools.experiment.v2_gui.adapters.singleshot.mist.power import (
     MistPowerAnalyzeResult,
 )
-from zcu_tools.gui.app.main.adapter import (
-    AnalyzeRequest,
-    NoAnalyzeParams,
-    RunRequest,
-)
 from zcu_tools.meta_tool import MetaDict
 
-
-def _make_ml() -> MagicMock:
-    ml = MagicMock()
-    ml.modules = {}
-    ml.waveforms = {}
-    ml.make_cfg.return_value = MagicMock()
-    return ml
-
-
-def _make_ctx(ml: MagicMock | None = None) -> MagicMock:
-    ctx = MagicMock()
-    ctx.ml = ml or _make_ml()
-    ctx.md = MetaDict()
-    ctx.qub_name = "Q1"
-    return ctx
-
-
-def _md_with_centers() -> MetaDict:
-    md = MetaDict()
-    md.g_center = -1.5 + 2.0j
-    md.e_center = 1.2 - 0.7j
-    md.ge_radius = 0.42
-    return md
-
-
-def _run_req(md: MetaDict, ml: MagicMock) -> RunRequest:
-    soc, soccfg = MagicMock(), MagicMock()
-    return RunRequest(md=md, ml=ml, soc=soc, soccfg=soccfg)
-
+from ._helpers import (
+    analyze_req as _analyze_req,
+)
+from ._helpers import (
+    make_ctx as _make_ctx,
+)
+from ._helpers import (
+    make_ml as _make_ml,
+)
+from ._helpers import (
+    md_with_centers as _md_with_centers,
+)
+from ._helpers import (
+    run_req as _run_req,
+)
 
 # ---------------------------------------------------------------------------
 # read_ge_centers — the shared helper (complex round-trip is the key risk).
@@ -239,21 +220,6 @@ def test_check_run_uses_standard_path(monkeypatch: pytest.MonkeyPatch) -> None:
     schema = CheckAdapter().make_default_cfg(_make_ctx(ml))
     CheckAdapter().run(req, schema)
     assert captured["soc"] is req.soc
-
-
-# ---------------------------------------------------------------------------
-# analyze — figure-only results; md inputs (confusion / ac_coeff / centres).
-# ---------------------------------------------------------------------------
-
-
-def _analyze_req(run_result: Any, md: MetaDict) -> AnalyzeRequest[Any, NoAnalyzeParams]:
-    return AnalyzeRequest(
-        run_result=run_result,
-        analyze_params=NoAnalyzeParams(),
-        md=md,
-        ml=_make_ml(),
-        predictor=None,
-    )
 
 
 def test_mist_freq_analyze_reads_confusion(monkeypatch: pytest.MonkeyPatch) -> None:
