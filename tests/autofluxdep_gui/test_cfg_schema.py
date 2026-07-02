@@ -290,6 +290,18 @@ _DERIVED_FORBIDDEN = {
 }
 
 
+def test_expected_key_blocks_are_declared_user_knobs_only():
+    """The exact key goldens describe declared knobs, not derived cfg fields."""
+
+    builder_names = {builder.name for builder in _BUILDERS}
+    assert set(_EXPECTED_KEYS) == builder_names
+    assert set(_EXPECTED_PATHS) == builder_names
+    for builder in _BUILDERS:
+        keys = _EXPECTED_KEYS[builder.name]
+        assert keys == set(_EXPECTED_PATHS[builder.name])
+        assert keys.isdisjoint(_DERIVED_FORBIDDEN), builder.name
+
+
 @pytest.mark.parametrize("builder", _BUILDERS, ids=_BUILDER_IDS)
 def test_schema_keys_match_declared_knobs(builder: Builder):
     schema = builder.make_default_schema()

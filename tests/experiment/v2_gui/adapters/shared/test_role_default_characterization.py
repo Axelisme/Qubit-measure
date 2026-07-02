@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -70,19 +70,24 @@ def _serialize(node: object) -> Any:
     if node is None:
         return None
     if isinstance(node, DirectValue):
-        return {"D": node.value}
+        direct = cast(DirectValue, node)
+        return {"D": direct.value}
     if isinstance(node, EvalValue):
-        return {"E": node.expr, "r": node.resolved}
+        eval_value = cast(EvalValue, node)
+        return {"E": eval_value.expr, "r": eval_value.resolved}
     if isinstance(node, SweepValue):
-        return {"sweep": [node.start, node.stop, node.expts, round(node.step, 9)]}
+        sweep = cast(SweepValue, node)
+        return {"sweep": [sweep.start, sweep.stop, sweep.expts, round(sweep.step, 9)]}
     if isinstance(node, (ModuleRefValue, WaveformRefValue)):
+        ref = cast(ModuleRefValue | WaveformRefValue, node)
         return {
-            "ref": node.chosen_key,
-            "ov": node.is_overridden,
-            "v": _serialize(node.value),
+            "ref": ref.chosen_key,
+            "ov": ref.is_overridden,
+            "v": _serialize(ref.value),
         }
     if isinstance(node, CfgSectionValue):
-        return {k: _serialize(v) for k, v in node.fields.items()}
+        section = cast(CfgSectionValue, node)
+        return {k: _serialize(v) for k, v in section.fields.items()}
     return repr(node)
 
 
@@ -110,6 +115,23 @@ def test_golden_covers_exactly_the_registered_roles() -> None:
         "golden role set drifted from ROLE_FACTORIES; regenerate the golden for a "
         "reviewed role add/remove"
     )
+
+
+def test_readout_dpm_golden_keeps_optimized_readout_live_links() -> None:
+    """The golden pins readout_dpm to live ro_optimize outputs, not snapshots."""
+
+    payload = _load_golden()["readout_dpm"]["blank/pop"]["v"]
+    pulse_cfg = payload["pulse_cfg"]
+    ro_cfg = payload["ro_cfg"]
+
+    assert pulse_cfg["freq"] == {"E": "best_ro_freq", "r": None}
+    assert pulse_cfg["gain"] == {"E": "best_ro_gain", "r": None}
+    assert pulse_cfg["waveform"]["v"]["length"] == {
+        "E": "best_ro_length + 0.1",
+        "r": None,
+    }
+    assert ro_cfg["ro_freq"] == {"E": "best_ro_freq", "r": None}
+    assert ro_cfg["ro_length"] == {"E": "best_ro_length", "r": None}
 
 
 @pytest.mark.parametrize("role_id", sorted(ROLE_FACTORIES))

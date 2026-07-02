@@ -55,6 +55,12 @@ def test_role_table_reproduces_golden_payload(role_id: str) -> None:
     )
 
 
+def test_role_table_declares_exactly_the_golden_roles() -> None:
+    """The table owns every role that the golden characterizes."""
+
+    assert set(ROLE_TABLE) == set(_load_golden())
+
+
 def test_readout_dpm_freq_falls_back_to_live_r_f_when_best_ro_freq_absent() -> None:
     """Partial md (``r_f`` present, ``best_ro_freq`` absent): readout_dpm's pulse
     and ro freq fall back to a *live* ``EvalValue("r_f")`` — mirroring how the
