@@ -1,5 +1,4 @@
 from qick.qick_asm import AcquireMixin
-
 from zcu_tools.program.base.improve_acquire import (
     EarlyStopMixin,
     ImproveAcquireMixin,

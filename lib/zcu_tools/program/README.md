@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-07-01
+**Last updated:** 2026-07-02 — MRO regression tests
 
 這份筆記整理 `lib/zcu_tools/program` 對 QICK 的實際依賴，目的是讓後續開發能快速定位「應該看哪個 QICK 類別/方法」，而不用每次從頭追。
 
@@ -77,4 +77,4 @@
   - `acquire_params` 欄位名稱
   - `finish_round()` 回傳語意（是否仍為「還有下一 round」）
   - `_average_buf()` 的輸入 shape 假設
-- mixin 疊加順序有語意（`RoundHookMixin, TrackerMixin, SingleShotMixin, EarlyStopMixin`）；改順序前先檢查 MRO 對 `finish_round()` / `acquire()` 的影響。
+- mixin 疊加順序有語意（`RoundHookMixin, TrackerMixin, SingleShotMixin, EarlyStopMixin`）；`tests/program/test_acquire_mro.py` 鎖住 `ImproveAcquireMixin` 與 `MyProgramV2` 的關鍵 MRO / `finish_round()` 解析鏈，改順序前先更新測試與行為判斷。

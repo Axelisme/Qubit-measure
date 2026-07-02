@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-07-01
+**Last updated:** 2026-07-02 — cfg contract hardening
 
 ## Testing & Type Checking Conventions
 
@@ -11,6 +11,7 @@
 - **MagicMock Scope**: Keep `MagicMock` for non-program collaborators, child-module spy hooks, and deliberate error-injection tests. Do not use it as the default stand-in for a program object when the test is asserting emitted program behavior.
 - **MockSoc Role**: `MockSoc` remains the compile/acquire/sim adapter for integration-style tests. `ProgramTrace` is a unit-test recorder and does not replace hardware-aligned compile or acquisition coverage.
 - **QICK External Types**: `QickParam` runtime objects expose methods/attributes (`is_sweep`, `minval`, `maxval`, `start`, `spans`, `to_array`) that can be missing from third-party stubs. Program code narrows through `program.v2.utils.is_qick_param()` / `QickParamLike` instead of local `cast()` calls, so every use has a runtime guard.
+- **Cfg Contracts**: `AbsModuleCfg` and `AbsWaveformCfg` are abstract contracts. Concrete cfg classes implement both `build()` and `set_param()`; unknown parameter names raise `ValueError` rather than being ignored. `tests/program/v2/modules/test_set_param_contract.py` is the cross-family audit for this fail-fast rule.
 
 ## IR System & Hardware Alignment
 
