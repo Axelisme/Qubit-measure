@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runner` — experiment runtime
 
-**Last updated:** 2026-07-02 — executor ResultTree lifecycle
+**Last updated:** 2026-07-02 — stop preserves partial results
 
 `runner/` 提供 experiment/v2 的 Python-like acquisition runtime。一般實驗用
 `SignalBuffer` / `Schedule` / `ProgramBuilder` 編排 host-side loop 與 program
@@ -164,6 +164,9 @@ executor leaf contract 由 `runner/task.py` 擁有：
   讓 scope 內所有 `Schedule` 共用同一個 stop event。
 - `Schedule` 的 scan/repeat/batch 會在 host step 前檢查 stop；`ProgramBuilder` 會把
   `sched.is_stop` 注入 program acquire 的 `stop_checkers`，中斷粒度為 round-level。
+- stop 是 partial-result preserving：已寫入的 slot 保留，未完成的 slot 維持 NaN
+  初始化值；`ProgramBuilder` 捕捉 stop/`KeyboardInterrupt` 後設定 `StopSignal` 並回傳
+  當前 slot view，executor 回傳目前累積的 result，而不是丟棄整個 run。
 - `Schedule.batch(..., retry=N)` 支援一般 `ProgramV2Cfg` schedule 的 replayable child
   retry。
 - `autofluxdep` / `overnight` executor 的外層 retry 由

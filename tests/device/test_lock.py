@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 import threading
 
+import pytest
+import zcu_tools.device.fake as fake_module
 from _pytest.logging import LogCaptureFixture
 from zcu_tools.device import DeviceBusyError, FakeDevice, FakeDeviceInfo
 
@@ -21,8 +23,27 @@ def _make_slow_ramp_device() -> FakeDevice:
     dev = FakeDevice(fast_mode=False)
     # Small rampstep => many linspace steps => the ramp loop holds op_lock long
     # enough that get_info() should observe mid-ramp values through io_lock.
-    dev._rampstep = 1e-3
+    dev._rampstep = 1e-2
     return dev
+
+
+def test_fake_device_rampstep_is_actual_step(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """FakeDevice rampstep matches YOKO semantics: it is the actual ramp step."""
+    sleeps: list[float] = []
+    monkeypatch.setattr(
+        fake_module.time,
+        "sleep",
+        lambda seconds: sleeps.append(float(seconds)),
+    )
+    dev = FakeDevice(fast_mode=False)
+    cfg = FakeDeviceInfo(address="none", output="on", value=1.0, rampstep=0.25)
+
+    dev.setup(cfg, progress=False)
+
+    assert dev.get_value() == 1.0
+    assert len(sleeps) == 4
 
 
 def test_setup_ramp_allows_concurrent_get_info() -> None:

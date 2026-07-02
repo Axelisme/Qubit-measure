@@ -46,7 +46,7 @@ def _make_slow_ramp_device() -> FakeDevice:
     call manager APIs while the ramp holds the per-instance lock.
     """
     dev = FakeDevice(fast_mode=False)
-    dev._rampstep = 1e-3  # many steps => long ramp window
+    dev._rampstep = 1e-2  # many steps => long ramp window
     return dev
 
 

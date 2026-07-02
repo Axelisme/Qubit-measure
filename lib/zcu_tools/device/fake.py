@@ -10,7 +10,7 @@ from zcu_tools.progress_bar import make_pbar
 
 from .base import BaseDevice, BaseDeviceInfo, device_operation
 
-DEFAULT_RAMPSTEP = 0.001
+DEFAULT_RAMPSTEP = 0.01
 RAMP_INTERVAL = 0.01  # seconds between steps (skipped in fast_mode)
 
 
@@ -87,7 +87,7 @@ class FakeDevice(BaseDevice[FakeDeviceInfo]):
             return
 
         dist = abs(current_value - value)
-        step = 10 * self._rampstep
+        step = self._rampstep
         steps = max(1, round(dist / step))
         targets = np.linspace(current_value, value, num=steps + 1, endpoint=True)
 

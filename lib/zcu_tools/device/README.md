@@ -1,6 +1,6 @@
 # Device Note for `zcu_tools/device`
 
-**Last updated:** 2026-07-01
+**Last updated:** 2026-07-02 — FakeDevice rampstep semantics
 
 這份筆記整理 `lib/zcu_tools/device` 的設計：以 VISA（pyvisa）為底層，抽出 `BaseDevice` + `BaseDeviceInfo` 的通用契約，再由 `GlobalDeviceManager` 做 process-wide 單例管理。內建裝置包含 `YOKOGS200`（電流/電壓源）、`RohdeSchwarzSGS100A`（微波訊號源）與 `FakeDevice`（mock 測試）。
 
@@ -139,7 +139,7 @@ Process-wide registry（class-level `_devices` dict）：
 
 **安全上限（寫死）**：電壓 `|V| ≤ 20 V`（`_check_voltage`）、電流 `|I| ≤ 20 mA`（`_check_current`）。超過會 `RuntimeError`。
 
-**Smart ramp**：`set_voltage` / `set_current` 不直接跳值，而是以 `10 * _rampstep` 為步長在 `np.linspace` 上逐點下發，步間 sleep `_rampinterval = 0.01s`。`DEFAULT_RAMPSTEP = {voltage: 1e-4 V, current: 1e-7 A}`。`progress=True` 時跑 make_pbar。若 output 為 off 且目標值非零，setter 會 `RuntimeError`，不自動開輸出。兩者均接受 `stop_event: Optional[threading.Event]`，每步前 check `stop_event.is_set()` 協作中止。
+**Smart ramp**：`set_voltage` / `set_current` 不直接跳值，而是以 `_rampstep` 為實際步長在 `np.linspace` 上逐點下發，步間 sleep `_rampinterval = 0.01s`。`DEFAULT_RAMPSTEP = {voltage: 1e-3 V, current: 1e-6 A}`；這個預設值保留原本有效步長，舊的 `10 * _rampstep` 補償不再存在。`progress=True` 時跑 make_pbar。若 output 為 off 且目標值非零，setter 會 `RuntimeError`，不自動開輸出。兩者均接受 `stop_event: Optional[threading.Event]`，每步前 check `stop_event.is_set()` 協作中止。
 
 **模式切換**：`set_mode(mode, force=False, rampstep=None)` 若當前 level 非零會擋下來，需 `force=True`。切完自動換 `_rampstep` 為新模式的預設（或呼叫端給的）。
 
@@ -174,9 +174,9 @@ Process-wide registry（class-level `_devices` dict）：
 `FakeDevice` 用於本地流程測試，不需要真實儀器連線：
 
 - **`__init__(fast_mode=False)` 不接受 `rm` 參數**（直接 `self.address = "none"`，跳過 pyvisa session）。`fast_mode=True` 跳過 ramp 的 `time.sleep`（加速測試）。
-- `FakeDeviceInfo` 欄位：`type: Literal["FakeDevice"] = "FakeDevice"`、`output: Literal["on","off"] = "off"`、`value: float = 0.0`、`rampstep: float`。
+- `FakeDeviceInfo` 欄位：`type: Literal["FakeDevice"] = "FakeDevice"`、`output: Literal["on","off"] = "off"`、`value: float = 0.0`、`rampstep: float = 0.01`。
 - 提供 `get_output/set_output/output_on/output_off` 與 `get_value/set_value` 方法（記憶體狀態操作）。
-- `_set_value_smart(value, progress, stop_event=None)`：以 `np.linspace` 逐步 ramp + make_pbar，每步前 check `stop_event.is_set()`，協作中止。
+- `_set_value_smart(value, progress, stop_event=None)`：以 `_rampstep` 為實際步長在 `np.linspace` 上逐步 ramp + make_pbar，語義與 YOKOGS200 一致；每步前 check `stop_event.is_set()`，協作中止。
 - `_setup(cfg, *, progress, stop_event)` 呼叫 `set_output` + 更新 `_rampstep` + `_set_value_smart`（透傳 `stop_event`）。
 - `get_info()` 回傳當前記憶體狀態。
 
