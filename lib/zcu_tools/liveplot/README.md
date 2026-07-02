@@ -1,6 +1,6 @@
 # liveplot 模組重點筆記
 
-**Last updated:** 2026-07-02 - GUI driven backend path
+**Last updated:** 2026-07-02 - fast-fail cleanup
 
 Jupyter 中即時更新的 matplotlib 繪圖工具，在資料擷取過程中邊跑邊畫。
 
@@ -8,7 +8,6 @@ Jupyter 中即時更新的 matplotlib 繪圖工具，在資料擷取過程中邊
 
 1. `base.py` / `multi.py` — 介面與多圖組合
    - `AbsLivePlot`：所有 live plotter 的抽象基底（`clear / update / refresh` + context manager）。
-   - `DummyPlot`：no-op null object。
    - `MultiLivePlot[PlotKey_T]`：組合多個 plotter，用 key 分發 `update(plot_args={key: (args...)})`；`refresh()` 呼叫 `refresh_figure(self.fig)`，由 active backend 決定具體重繪行為（JupyterBackend 用 `canvas.draw()`，FallbackBackend 用 `draw_idle`）。
 
 2. `backend/` — backend 契約、註冊與內建 backend
@@ -53,7 +52,7 @@ Jupyter 中即時更新的 matplotlib 繪圖工具，在資料擷取過程中邊
 - 根模組 `liveplot/__init__.py` 匯出：
   - `backend`
   - `make_plot_frame`
-  - `AbsLivePlot`、`DummyPlot`
+  - `AbsLivePlot`
   - `MultiLivePlot`
   - `LivePlot1D`、`LivePlot2D`、`LivePlot2DwithLine`、`LivePlotScatter`
   - `instant_plot`（backend-dispatch；見上「對外統一入口」）。
@@ -80,7 +79,7 @@ with MultiLivePlot(fig, {
 
 ## 注意事項
 
-- `Plot1DSegment.update` 對 `signals` 做 `.astype(np.float64)`；複數輸入會丟虛部（依 numpy 轉型規則），呼叫端建議先取 `abs/real/imag`。
+- `Plot1DSegment.update` 只接受 real-valued `signals`；複數輸入會 fast-fail，呼叫端需先取 `abs/real/imag`。
 - `segments/` 內的 matplotlib artist 欄位在 `init_ax()` 前是 `None`。`update()` 先 fast-fail，再把 artist 存到 local 變數後使用；不要在 None check 後反覆透過 `self.im` 等 optional 屬性呼叫方法。
 - LivePlot 類若要保留圖（例如後續 `savefig`），請設定 `auto_close=False`。
 - 各個單一 segment 的 LivePlot 包裝層（`LivePlot1D`、`LivePlot2D`、`LivePlotScatter`）刻意保留樣板結構，不做公共基底抽象，理由是 `update()` 簽名各不相同，強行統一會犧牲型別提示。

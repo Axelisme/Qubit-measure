@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import Any
 
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
@@ -34,7 +35,6 @@ class QtLivePlotBackend(LivePlotBackend):
         del plot_instant  # figure is attached at creation; nothing to show
         kwargs.setdefault("squeeze", False)
         kwargs.setdefault("figsize", (6 * n_col, 4 * n_row))
-        import numpy as np
 
         fig, axs_nd = plt.subplots(n_row, n_col, **kwargs)
         # plt.subplots(squeeze=False) returns ndarray; convert to list[list[Axes]]

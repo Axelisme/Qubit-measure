@@ -74,6 +74,11 @@ class Plot1DSegment(AbsSegment):
     ) -> None:
         if self.lines is None:
             raise RuntimeError("Lines not initialized.")
+        if np.iscomplexobj(signals):
+            raise ValueError(
+                "Plot1DSegment.update requires real-valued signals; convert "
+                "complex data with abs, real, or imag before plotting."
+            )
 
         if signals.ndim == 1:
             signals = signals[None, :]

@@ -31,21 +31,3 @@ class AbsLivePlot(ABC):
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
         pass
-
-
-class DummyPlot(AbsLivePlot):
-    """
-    A plotter that does nothing.
-    """
-
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__()
-
-    def clear(self) -> None:
-        pass
-
-    def update(self, *args, refresh: bool = True, **kwargs) -> None:
-        pass
-
-    def refresh(self) -> None:
-        pass
