@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-02 — executor ResultTree tests
+**Last updated:** 2026-07-02 — tests quality refactor
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -192,6 +192,24 @@ result = _optimize_tree(root, [SomePass()], ctx)
 
 若要測 `acquire()` / `poll_data()` 路徑（不只 compile），可用 `make_mock_soc()` 建立 `MockQickSoc`。  
 它繼承 `QickConfig` 並提供 no-op 硬體控制方法，回傳 shape 正確的隨機資料，讓整段 acquire 流程可在無硬體下跑通。
+
+### Program v2 simulator tests
+
+`tests/program/v2/sim/test_engine.py` 放 public simulator behavior：physics shape、spectroscopy/Rabi/T1/T2、single-shot blob、readout scaling、decimated trace 與 branch smoke。若測試需要 spy private `SimEngine` helper、numba routing、cooperative cancel 或 optimization call count，放在 `test_engine_optimization_contract.py`，並在 test name / docstring 說清楚它是白箱 optimization contract。
+
+### Experiment v2 GUI adapter tests
+
+`tests/experiment/v2_gui/adapters/singleshot/_helpers.py` 集中 singleshot adapter 測試的 `ModuleLibrary` / context / request fixture。singleshot 測試檔名以 domain ownership 命名，例如 GE、downstream、LenRabi/T1、AC-Stark/MIST/T1-tone-sweep；不要再用歷史 Phase 編號命名。adapter 層 patch domain `run` / `analyze` 可作為 boundary isolation，但 assertion 應驗證 adapter 對 cfg、centers、summary、writeback 的語意。
+
+### GUI remote/control tests
+
+`tests/gui/services/remote/test_remote_mcp_toolchain.py` 保留 remote MCP startup/device/schema/wrapper 與 base async contract；bundle/stage tools 放在 `test_bundle_tools.py`，screenshot/debug/overview 放在 `test_screenshot_overview_tools.py`。新增 remote MCP 測試時優先放到對應 focused file；只有真正跨 toolchain 的行為才放回 `test_remote_mcp_toolchain.py`。
+
+`tests/gui/_control_fakes.py` 提供 control facet tests 的 typed recording fakes。新增 `test_*_control.py` contract 時，偏好 recording fake + 表驅動 public forwarding contract；只在需要 Qt signal / event bus behavior 時測 event disposer、signal rebind 或 state transition，不把 `MagicMock.assert_called_once_with` 當成主要測試內容。
+
+### Golden / characterization tests
+
+大型 golden/snapshot equality 可以保留作 characterization，但旁邊應有 focused semantic invariant 說明 load-bearing contract，例如 role set ownership、live `EvalValue` link、或 schema 宣告的是 user knobs 而非 derived cfg fields。變更 golden payload 時，先用 invariant 說明語意，再更新 payload。
 
 ---
 
