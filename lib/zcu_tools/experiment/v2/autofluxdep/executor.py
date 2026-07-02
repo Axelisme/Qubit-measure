@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
-from copy import deepcopy
 from pathlib import Path
 from typing import Any, Generic, TypeVar
 

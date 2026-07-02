@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Generic, TypeVar
 
 import matplotlib
+import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
@@ -15,9 +16,12 @@ from zcu_tools.experiment.v2.runner import (
     MultiMeasurementExecutor,
     Schedule,
     ScheduleStep,
+    StopSignal,
+    current_stop_signal,
 )
 from zcu_tools.experiment.v2.utils import Result, merge_result_list
 from zcu_tools.liveplot import AbsLivePlot
+from zcu_tools.utils.debug import print_traceback
 from zcu_tools.utils.func_tools import MinIntervalFunc
 
 from .env import OvernightDeps, OvernightEnv
@@ -107,15 +111,36 @@ class OvernightExecutor(
 
         init_result = [self._default_batch_result() for _ in range(self.num_times)]
 
-        def run_loop(root_sched: Schedule[OvernightCfg, OvernightEnv]) -> None:
-            for _, iter_step in root_sched.repeat(
-                "Iter", self.num_times, self.interval
-            ):
-                self._run_measurement_batch(iter_step, fail_retry)
-                with MinIntervalFunc.force_execute():
-                    iter_step.trigger_update()
+        fig, plotter, plot_fn, writer = self.make_plotter()
+        stop = current_stop_signal() or StopSignal()
+        result_buffer = self._make_result_buffer(init_result, plot_fn)
 
-        results = self._run_with_plotting(init_result, cfg, env, run_loop)
+        with Schedule(cfg, result_buffer, env=env, stop=stop) as sched:
+            with plotter:
+                try:
+                    for measurement in self.measurements.values():
+                        measurement.init(dynamic_pbar=True)
+
+                    for _, iter_step in sched.repeat(
+                        "Iter", self.num_times, self.interval
+                    ):
+                        self._run_measurement_batch(iter_step, fail_retry)
+                        with MinIntervalFunc.force_execute():
+                            iter_step.trigger_update()
+                except KeyboardInterrupt:
+                    sched.set_stop()
+                except Exception:
+                    print_traceback()
+                    raise
+                finally:
+                    for measurement in self.measurements.values():
+                        measurement.cleanup()
+                    if self.record_path is not None:
+                        assert writer is not None
+                        writer.finish()
+        plt.close(fig)
+
+        results = result_buffer.data
 
         signals_dict = merge_result_list(results)
 
