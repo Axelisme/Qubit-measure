@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-02 - context-control facet
+**Last updated:** 2026-07-02 - setup-control facet
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -39,7 +39,7 @@ Shared layers:
 `build_app_services()` constructs the app-local services and injects their driven
 ports. `Controller` is a facade over the service bundle; UI and remote code use
 the controller for app-specific workflow and the exposed session control facets
-for context/device/predictor/progress domains.
+for setup/context/device/predictor/progress domains.
 
 Key ownership rules:
 
@@ -156,6 +156,8 @@ shared dialog lifecycle helper for reference retention and `finished` /
 `InspectDialog` adapts the measure controller into the shared
 `InspectDialogBase` by passing `context_control`; the subclass keeps the concrete
 controller only for measure-only CfgEditor create/modify and role-catalog actions.
+`SetupDialog` receives `setup_control`, so project/context/SoC bootstrap UI no
+longer depends on the concrete controller façade.
 
 ## Adapter-Facing Rules
 

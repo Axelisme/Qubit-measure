@@ -3,9 +3,8 @@
 Both measurement-session app Controllers (measure: ``gui/app/main/controller``;
 autofluxdep: ``gui/app/autofluxdep/controller``) expose a wall of one-line
 forwards into the same four session services (soc_connection / context / device /
-startup). The setup subset structurally satisfies
-:class:`~zcu_tools.gui.session.controller_port.SessionControllerPort`; app-local
-and compatibility callers may still use the remaining forwards. The byte-identical
+startup). Shared dialogs now use explicit control facets; app-local and
+compatibility callers may still use these forwards. The byte-identical
 implementation lives here.
 
 Design (Candidate #14, Option B — abstract service accessors):
@@ -44,7 +43,7 @@ import Qt or ``gui.app.*`` (guarded by ``tests/gui/test_shared_layer.py``). Ever
 collaborator type — the session services and the request/result dataclasses — is
 referenced under ``TYPE_CHECKING`` only, so importing the mixin pulls in nothing
 heavy. pyright still enforces the accessor return types and the forward signatures
-against the port at each app's dialog call site.
+inside the concrete controllers.
 """
 
 from __future__ import annotations

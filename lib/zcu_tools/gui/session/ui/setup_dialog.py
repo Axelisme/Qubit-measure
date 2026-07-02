@@ -38,7 +38,7 @@ from zcu_tools.program import describe_soc
 
 if TYPE_CHECKING:
     from zcu_tools.gui.result_scope import ResultScope
-    from zcu_tools.gui.session.controller_port import SessionControllerPort
+    from zcu_tools.gui.session.setup_control import SetupControlPort
 
 
 @runtime_checkable
@@ -53,7 +53,7 @@ class SetupDialog(QDialog):
 
     def __init__(
         self,
-        controller: SessionControllerPort,
+        controller: SetupControlPort,
         parent: QWidget | None = None,
         startup_mode: bool = False,
     ) -> None:

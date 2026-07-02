@@ -35,9 +35,9 @@ _SHARED_MODULES = [
     "zcu_tools.gui.session.notify_handles",
     "zcu_tools.gui.session.ports",
     "zcu_tools.gui.session.state",
-    # The Controller port the shared dialogs depend on — pure Protocol, all
-    # collaborator types are TYPE_CHECKING-only.
-    "zcu_tools.gui.session.controller_port",
+    # SetupControlPort is the shared setup-dialog facade: collaborator types are
+    # TYPE_CHECKING-only, runtime imports stay Qt/app clean.
+    "zcu_tools.gui.session.setup_control",
     # DeviceControlPort is the shared device-domain facet: service types are
     # type-only, runtime imports stay Qt/app clean.
     "zcu_tools.gui.session.device_control",

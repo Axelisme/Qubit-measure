@@ -347,7 +347,7 @@ class MainWindow(QMainWindow):
         # Non-blocking open() keeps the Qt event loop (and the control socket)
         # alive while the dialog is visible. WA_DeleteOnClose + instance ref
         # prevent premature GC; finished clears the ref and refreshes state.
-        dlg = SetupDialog(self._ctrl, self, startup_mode=startup_mode)
+        dlg = SetupDialog(self._ctrl.setup_control, self, startup_mode=startup_mode)
 
         def _on_finished(_status: int) -> None:
             self._setup_dialog = None

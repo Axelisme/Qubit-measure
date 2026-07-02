@@ -44,7 +44,7 @@ class MainDialogRegistry:
         if name is DialogName.SETUP:
             from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 
-            return SetupDialog(self._ctrl, parent=self._parent)
+            return SetupDialog(self._ctrl.setup_control, parent=self._parent)
         if name is DialogName.DEVICE:
             from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 
@@ -77,7 +77,9 @@ class MainDialogRegistry:
             # fresh instance after the bootstrap dialog has closed.
             from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 
-            return SetupDialog(self._ctrl, parent=self._parent, startup_mode=True)
+            return SetupDialog(
+                self._ctrl.setup_control, parent=self._parent, startup_mode=True
+            )
         raise ValueError(f"Unknown DialogName: {name!r}")  # pragma: no cover
 
     def open(self, name: DialogName) -> None:

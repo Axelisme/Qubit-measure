@@ -29,6 +29,7 @@ from zcu_tools.gui.session.services.mock_flux import MockFluxProvisioner
 from zcu_tools.gui.session.services.predictor import PredictorService
 from zcu_tools.gui.session.services.startup import StartupService
 from zcu_tools.gui.session.services.value_sources import ValueSourceBinder
+from zcu_tools.gui.session.setup_control import SetupControlFacet
 from zcu_tools.gui.session.value_lookup import ValueLookup, ValueRegistry
 
 if TYPE_CHECKING:
@@ -47,6 +48,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.progress_control import ProgressControlPort
     from zcu_tools.gui.session.services.progress import ProgressService
+    from zcu_tools.gui.session.setup_control import SetupControlPort
     from zcu_tools.gui.session.state import SessionState
 
 
@@ -62,6 +64,7 @@ class SessionServices:
     context_control: ContextControlPort
     device: DeviceService
     device_control: DeviceControlPort
+    setup_control: SetupControlPort
     startup: StartupService
     values: ValueLookup
     value_sources: ValueSourceBinder
@@ -116,6 +119,13 @@ def build_session_services(
     # StartupService bridges the two session services it commands through their
     # ports (context bootstrap + remembered-device registration) + State prefs.
     startup = StartupService(context, device, state, ResultScopeManager(project_root))
+    setup_control = SetupControlFacet(
+        bus=bus,
+        startup=startup,
+        context=context_control,
+        connection=soc_connection,
+        device=device_control,
+    )
     # FLUX-AWARE-MOCK: self-subscribes to SOC_CHANGED + chains the one-shot ramp
     # off device.device_connected — both apps get mock flux provisioning for free.
     # Not exposed on the returned bundle: nothing reads it. Its lifetime is anchored
@@ -132,6 +142,7 @@ def build_session_services(
         context_control=context_control,
         device=device,
         device_control=device_control,
+        setup_control=setup_control,
         startup=startup,
         values=value_registry,
         value_sources=value_sources,

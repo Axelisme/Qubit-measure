@@ -100,6 +100,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.services.startup import (
         StartupProjectRequest,
     )
+    from zcu_tools.gui.session.setup_control import SetupControlPort
     from zcu_tools.meta_tool import ModuleLibrary
 
 logger = logging.getLogger(__name__)
@@ -245,6 +246,7 @@ class Controller(SessionControllerMixin):
         self._context_control = session.context_control
         self._dev_svc = session.device
         self._device_control = session.device_control
+        self._setup_control = session.setup_control
         self._startup_svc = session.startup
 
     # --- read-only accessors for the UI ---
@@ -274,6 +276,10 @@ class Controller(SessionControllerMixin):
         return self._context_control
 
     @property
+    def setup_control(self) -> SetupControlPort:
+        return self._setup_control
+
+    @property
     def is_running(self) -> bool:
         return self._active_run_token is not None
 
@@ -288,11 +294,10 @@ class Controller(SessionControllerMixin):
         return self._last_run_info
 
     # ------------------------------------------------------------------
-    # SessionControllerPort — the surface the shared setup dialog depends on
-    # (inspect/device/predictor dialogs use control facets). The identical
-    # forwards live in SessionControllerMixin (read through the _*_svc accessors,
-    # supplied below in __init__); only the methods whose body diverges are kept
-    # here. pyright verifies conformance at the dialog call sites.
+    # Shared setup/inspect/device/predictor dialogs use control facets. The
+    # remaining identical compatibility forwards live in SessionControllerMixin
+    # (read through the _*_svc accessors supplied above in __init__); only the
+    # methods whose body diverges are kept here.
     # ------------------------------------------------------------------
 
     def get_bus(self) -> EventBus:
