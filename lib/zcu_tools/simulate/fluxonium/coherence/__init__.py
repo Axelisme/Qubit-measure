@@ -10,7 +10,7 @@ from .coherence_fast import (
     calculate_eff_t1_fast,
     calculate_eff_t1_vs_flux_fast,
 )
-from .percell import calculate_percell_t1_vs_flux
+from .purcell import calculate_purcell_t1_vs_flux
 
 __all__ = [
     # coherence (scqubits)
@@ -23,6 +23,6 @@ __all__ = [
     "calculate_eff_t1_fast",
     "UnsupportedNoiseChannelError",
     "UnsupportedNoiseOptionError",
-    # percell
-    "calculate_percell_t1_vs_flux",
+    # purcell
+    "calculate_purcell_t1_vs_flux",
 ]

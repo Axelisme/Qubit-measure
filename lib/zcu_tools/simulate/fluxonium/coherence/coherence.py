@@ -7,6 +7,8 @@ import numpy as np
 from numpy.typing import NDArray
 from tqdm.auto import tqdm
 
+from zcu_tools.simulate.fluxonium.scq_settings import scq_t1_default_warning
+
 if TYPE_CHECKING:
     from scqubits.core.fluxonium import Fluxonium
     from scqubits.core.storage import SpectrumData
@@ -20,18 +22,13 @@ def calculate_eff_t1_with(
     esys: tuple[NDArray[np.float64], NDArray[np.complex128]] | None = None,
     **other_noise_options,
 ) -> float:
-    import scqubits.settings as scq_settings
-
-    old, scq_settings.T1_DEFAULT_WARNING = scq_settings.T1_DEFAULT_WARNING, False
-
     fluxonium.flux = flux
-    t1s = fluxonium.t1_effective(
-        noise_channels=noise_channels,
-        common_noise_options=dict(i=1, j=0, T=Temp, **other_noise_options),
-        esys=esys,  # type: ignore
-    )
-
-    scq_settings.T1_DEFAULT_WARNING = old
+    with scq_t1_default_warning(False):
+        t1s = fluxonium.t1_effective(
+            noise_channels=noise_channels,
+            common_noise_options=dict(i=1, j=0, T=Temp, **other_noise_options),
+            esys=esys,  # type: ignore
+        )
 
     # scqubits returns t1 in units of ns/rad, so we need to convert to ns
     return 2 * np.pi * t1s
@@ -63,36 +60,31 @@ def calculate_eff_t1_vs_flux_with(
     spectrum_data: SpectrumData | None = None,
     **other_noise_options,
 ) -> NDArray[np.float64]:
-    import scqubits.settings as scq_settings
-
-    old, scq_settings.T1_DEFAULT_WARNING = scq_settings.T1_DEFAULT_WARNING, False
-
     start_t = time.time()
     pbar = None
 
     eff_t1s = np.zeros_like(fluxs, dtype=np.float64)
-    for i, flux in enumerate(fluxs):
-        fluxonium.flux = flux
+    with scq_t1_default_warning(False):
+        for i, flux in enumerate(fluxs):
+            fluxonium.flux = flux
 
-        esys = None
-        if spectrum_data is not None:
-            esys = (spectrum_data.energy_table[i, :], spectrum_data.state_table[i])
+            esys = None
+            if spectrum_data is not None:
+                esys = (spectrum_data.energy_table[i, :], spectrum_data.state_table[i])
 
-        eff_t1s[i] = fluxonium.t1_effective(
-            noise_channels=noise_channels,
-            common_noise_options=dict(i=1, j=0, T=Temp, **other_noise_options),
-            esys=esys,
-        )
+            eff_t1s[i] = fluxonium.t1_effective(
+                noise_channels=noise_channels,
+                common_noise_options=dict(i=1, j=0, T=Temp, **other_noise_options),
+                esys=esys,
+            )
 
-        if time.time() - start_t > 1:
-            if pbar is None:
-                pbar = tqdm(total=len(fluxs), desc="Calculating t1", leave=False)
-                pbar.update(i)
-            pbar.update()
+            if time.time() - start_t > 1:
+                if pbar is None:
+                    pbar = tqdm(total=len(fluxs), desc="Calculating t1", leave=False)
+                    pbar.update(i)
+                pbar.update()
     if pbar is not None:
         pbar.close()
-
-    scq_settings.T1_DEFAULT_WARNING = old
 
     return 2 * np.pi * eff_t1s
 

@@ -7,8 +7,15 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from numpy.typing import NDArray
 
+from .dressed import DressedLabelingError, require_dressed_index
+from .scq_settings import scq_progress
+
 if TYPE_CHECKING:
     from scqubits.core.fluxonium import Fluxonium
+
+_SCALAR_RESONATOR_DIM = 10
+_SCALAR_QUB_CUTOFF = 30
+_SCALAR_EVALS_COUNT = 10
 
 
 @lru_cache(maxsize=32)
@@ -53,26 +60,36 @@ def calculate_dispersive(
     Calculate the dispersive shift of ground and excited state
     """
 
-    resonator_dim = 10
-    cutoff = 30
-    evals_count = 10
-
     from scqubits.core.fluxonium import Fluxonium
     from scqubits.core.hilbert_space import HilbertSpace
     from scqubits.core.oscillator import Oscillator
 
-    resonator = Oscillator(bare_rf, truncated_dim=resonator_dim)
-    fluxonium = Fluxonium(*params, flux=flux, cutoff=cutoff, truncated_dim=evals_count)
+    resonator = Oscillator(bare_rf, truncated_dim=_SCALAR_RESONATOR_DIM)
+    fluxonium = Fluxonium(
+        *params,
+        flux=flux,
+        cutoff=_SCALAR_QUB_CUTOFF,
+        truncated_dim=_SCALAR_EVALS_COUNT,
+    )
     hilbertspace = HilbertSpace([resonator, fluxonium])
     hilbertspace.add_interaction(
         g=g, op1=resonator.creation_operator, op2=fluxonium.n_operator, add_hc=True
     )
     hilbertspace.generate_lookup(ordering="LX")
 
-    idx_00 = hilbertspace.dressed_index((0, 0))
-    idx_10 = hilbertspace.dressed_index((1, 0))
-    idx_01 = hilbertspace.dressed_index((0, 1))
-    idx_11 = hilbertspace.dressed_index((1, 1))
+    context = f"calculate_dispersive flux={flux}"
+    idx_00 = require_dressed_index(
+        hilbertspace.dressed_index((0, 0)), (0, 0), context=context
+    )
+    idx_10 = require_dressed_index(
+        hilbertspace.dressed_index((1, 0)), (1, 0), context=context
+    )
+    idx_01 = require_dressed_index(
+        hilbertspace.dressed_index((0, 1)), (0, 1), context=context
+    )
+    idx_11 = require_dressed_index(
+        hilbertspace.dressed_index((1, 1)), (1, 1), context=context
+    )
     max_idx = max(idx_00, idx_10, idx_01, idx_11)
 
     evals = hilbertspace.eigenvals(evals_count=max_idx + 1)
@@ -97,7 +114,6 @@ def calculate_dispersive_sweep(
     Calculate the dispersive shift of ground and excited state vs. params of fluxonium
     """
 
-    import scqubits.settings as scq_settings
     from scqubits.core.fluxonium import Fluxonium
     from scqubits.core.hilbert_space import HilbertSpace
     from scqubits.core.oscillator import Oscillator
@@ -115,17 +131,15 @@ def calculate_dispersive_sweep(
     def update_hilbertspace(sweep_param: Any) -> None:
         update_fn(fluxonium, sweep_param)
 
-    old = scq_settings.PROGRESSBAR_DISABLED
-    scq_settings.PROGRESSBAR_DISABLED = not progress
-    sweep = ParameterSweep(
-        hilbertspace,
-        {"params": sweep_list},
-        update_hilbertspace=update_hilbertspace,
-        evals_count=res_dim * qub_dim,
-        subsys_update_info={"params": [fluxonium]},
-        labeling_scheme="LX",
-    )
-    scq_settings.PROGRESSBAR_DISABLED = old
+    with scq_progress(progress):
+        sweep = ParameterSweep(
+            hilbertspace,
+            {"params": sweep_list},
+            update_hilbertspace=update_hilbertspace,
+            evals_count=res_dim * qub_dim,
+            subsys_update_info={"params": [fluxonium]},
+            labeling_scheme="LX",
+        )
 
     evals = sweep["evals"].toarray()
 
@@ -186,7 +200,6 @@ def calculate_chi_sweep(
     Calculate the chi of ground and excited state vs. params of fluxonium
     """
 
-    import scqubits.settings as scq_settings
     from scqubits.core.fluxonium import Fluxonium
     from scqubits.core.hilbert_space import HilbertSpace
     from scqubits.core.oscillator import Oscillator
@@ -204,17 +217,15 @@ def calculate_chi_sweep(
     def update_hilbertspace(sweep_param: Any) -> None:
         update_fn(fluxonium, sweep_param)
 
-    old = scq_settings.PROGRESSBAR_DISABLED
-    scq_settings.PROGRESSBAR_DISABLED = not progress
-    sweep = ParameterSweep(
-        hilbertspace,
-        {"params": np.asarray(sweep_list)},
-        update_hilbertspace=update_hilbertspace,
-        evals_count=resonator_dim * evals_count,
-        subsys_update_info={"params": [fluxonium]},
-        labeling_scheme="LX",
-    )
-    scq_settings.PROGRESSBAR_DISABLED = old
+    with scq_progress(progress):
+        sweep = ParameterSweep(
+            hilbertspace,
+            {"params": np.asarray(sweep_list)},
+            update_hilbertspace=update_hilbertspace,
+            evals_count=resonator_dim * evals_count,
+            subsys_update_info={"params": [fluxonium]},
+            labeling_scheme="LX",
+        )
 
     return sweep["chi"]["subsys1":0, "subsys2":1]
 
@@ -251,17 +262,6 @@ def calculate_chi_vs_flux(
         qub_cutoff,
         qub_dim,
     )
-
-
-class DressedLabelingError(RuntimeError):
-    """Two bare product states mapped to the same dressed level (labeling ambiguous).
-
-    Raised by ``calculate_dispersive_vs_flux_fast`` when the simple overlap-argmax
-    dressed labeling is not a bijection at some flux — which happens when the
-    coupling is too strong / the levels too dense for the (0/1, i) states to track
-    cleanly. The caller should fall back to ``calculate_dispersive_vs_flux``
-    (scqubits, robust labeling) for those parameters.
-    """
 
 
 def calculate_dispersive_vs_flux_fast(

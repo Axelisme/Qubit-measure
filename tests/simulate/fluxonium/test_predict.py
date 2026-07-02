@@ -1,8 +1,8 @@
 """Behaviour-locking tests for FluxoniumPredictor.
 
-These pin the public semantics of FluxoniumPredictor *before* the array paths of
-``predict_freq`` / ``predict_matrix_element`` are batched. The contract that must
-survive the optimisation:
+These pin the public semantics of FluxoniumPredictor now that scalar and array
+``predict_freq`` / ``predict_matrix_element`` both delegate to the prediction
+engine. The contract that must survive that delegation:
 
   - scalar in -> scalar (Python float) out; array in -> ``NDArray`` out.
   - the array result is *exactly* the per-point scalar result, point by point
@@ -10,8 +10,7 @@ survive the optimisation:
   - the flux affine (``value_to_flux``) and the bias-correction in ``calculate_bias``
     / ``update_bias`` keep their current numerical behaviour.
 
-scqubits is the engine under both the scalar and (post-optimisation) array paths,
-so the cross-check is scalar-vs-array self-consistency at machine precision, plus a
+The cross-check is scalar-vs-array self-consistency at machine precision, plus a
 few absolute golden values so a wholesale regression in the physics is caught too.
 """
 
@@ -20,6 +19,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import scqubits.settings as scq_settings
+import zcu_tools.simulate.fluxonium.predict as predict_mod
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 scq_settings.PROGRESSBAR_DISABLED = True
@@ -113,6 +113,13 @@ def test_predict_freq_golden() -> None:
     assert p.predict_freq(0.1, (1, 2)) == pytest.approx(3416.7599127277226, abs=1e-7)
 
 
+def test_predict_freq_reverse_transition_keeps_signed_contract() -> None:
+    p = _make_predictor(PARAMS[0])
+    forward = p.predict_freq(0.13, (0, 1))
+    reverse = p.predict_freq(0.13, (1, 0))
+    assert reverse == pytest.approx(-forward, abs=1e-10)
+
+
 # --------------------------------------------------------------------------- #
 # predict_matrix_element: scalar/array type contract + self-consistency       #
 # --------------------------------------------------------------------------- #
@@ -160,6 +167,30 @@ def test_predict_matrix_element_golden() -> None:
     )
 
 
+def test_predict_matrix_element_invalid_operator_raises() -> None:
+    p = _make_predictor(PARAMS[0])
+
+    with pytest.raises(ValueError, match="unsupported matrix operator"):
+        p.predict_matrix_element(0.1, (0, 1), "bad")  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="unsupported matrix operator"):
+        p.predict_matrix_element(
+            np.array([0.1]),
+            (0, 1),
+            "bad",  # type: ignore[arg-type]
+        )
+
+
+def test_predict_matrix_element_rejects_levels_above_one() -> None:
+    p = _make_predictor(PARAMS[0])
+
+    with pytest.raises(ValueError, match="support only levels 0 and 1"):
+        p.predict_matrix_element(0.1, (1, 2), "n")
+
+    with pytest.raises(ValueError, match="support only levels 0 and 1"):
+        p.predict_matrix_element(np.array([0.1]), (1, 2), "n")
+
+
 # --------------------------------------------------------------------------- #
 # calculate_bias / update_bias                                                #
 # --------------------------------------------------------------------------- #
@@ -191,6 +222,23 @@ def test_calculate_bias_detects_offset() -> None:
     assert bias == pytest.approx(offset, abs=1e-3)
 
 
+def test_calculate_bias_warns_when_root_find_falls_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_root_scalar(*args, **kwargs):
+        raise RuntimeError("root failed")
+
+    monkeypatch.setattr(predict_mod, "root_scalar", fail_root_scalar)
+    p = FluxoniumPredictor(
+        (5.0, 1.0, 0.5), flux_half=0.0, flux_period=1.0, flux_bias=0.0
+    )
+
+    with pytest.warns(RuntimeWarning, match="Bias calibration failed"):
+        bias = p.calculate_bias(0.12, 0.0, (0, 1))
+
+    assert bias == pytest.approx(0.0, abs=1e-12)
+
+
 def test_update_bias_shifts_prediction() -> None:
     # update_bias changes value_to_flux and therefore predict_freq consistently.
     p = FluxoniumPredictor(
@@ -216,3 +264,17 @@ def test_clone_is_independent() -> None:
     assert p.predict_freq(0.1, (0, 1)) != pytest.approx(
         c.predict_freq(0.1, (0, 1)), abs=1.0
     )
+
+
+def test_predictor_does_not_keep_shared_fluxonium_instance() -> None:
+    p = _make_predictor(PARAMS[0])
+    assert not hasattr(p, "fluxonium")
+
+
+def test_from_file_requires_fluxdep_fit(monkeypatch: pytest.MonkeyPatch) -> None:
+    import zcu_tools.notebook.persistance as persistance
+
+    monkeypatch.setattr(persistance, "load_result", lambda result_path: {})
+
+    with pytest.raises(ValueError, match="fluxdep_fit result is required"):
+        FluxoniumPredictor.from_file("missing-fluxdep-fit.hdf5")

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import warnings
 from collections.abc import Iterable
-from typing import Literal, overload
+from typing import overload
 
 import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import root_scalar
 
-from zcu_tools.simulate.fluxonium.prediction import FluxAffineMap
+from zcu_tools.simulate.fluxonium.prediction import FluxoniumPrediction, MatrixOperator
 
 
 class FluxoniumPredictor:
@@ -22,16 +23,17 @@ class FluxoniumPredictor:
         flux_period: float,
         flux_bias: float,
     ) -> None:
-        self.params = params
-        self.flux_half = flux_half
-        self.flux_period = flux_period
-
-        self.flux_bias = flux_bias
-        self._affine = FluxAffineMap(flux_half, flux_period, flux_bias)
-
-        from scqubits.core.fluxonium import Fluxonium  # lazy import
-
-        self.fluxonium = Fluxonium(*self.params, flux=0.5, cutoff=40, truncated_dim=2)
+        self._engine = FluxoniumPrediction(
+            params,
+            flux_half=flux_half,
+            flux_period=flux_period,
+            flux_bias=flux_bias,
+        )
+        self.params = self._engine.params
+        self.flux_half = self._engine.affine.flux_half
+        self.flux_period = self._engine.affine.flux_period
+        self.flux_bias = self._engine.affine.flux_bias
+        self._affine = self._engine.affine
 
     @classmethod
     def from_file(cls, result_path: str, flux_bias: float = 0.0) -> FluxoniumPredictor:
@@ -39,9 +41,10 @@ class FluxoniumPredictor:
 
         result_dict = load_result(result_path)
         fluxdepfit_dict = result_dict.get("fluxdep_fit")
-        assert fluxdepfit_dict is not None, (
-            "fluxdep_fit result is required to create FluxoniumPredictor"
-        )
+        if fluxdepfit_dict is None:
+            raise ValueError(
+                "fluxdep_fit result is required to create FluxoniumPredictor"
+            )
         params = (
             fluxdepfit_dict["params"]["EJ"],
             fluxdepfit_dict["params"]["EC"],
@@ -58,15 +61,15 @@ class FluxoniumPredictor:
         )
 
     def value_to_flux(self, cur_value: float) -> float:
-        return self._affine.value_to_flux(cur_value)
+        return self._engine.value_to_flux(cur_value)
 
     def _value_to_flux_array(
         self, cur_values: NDArray[np.float64]
     ) -> NDArray[np.float64]:
-        return self._affine.values_to_flux(cur_values)
+        return self._engine.values_to_flux(cur_values)
 
     def flux_to_value(self, cur_flux: float) -> float:
-        return self._affine.flux_to_value(cur_flux)
+        return self._engine.flux_to_value(cur_flux)
 
     def calculate_bias(
         self, cur_value: float, cur_freq: float, transition: tuple[int, int] = (0, 1)
@@ -90,25 +93,36 @@ class FluxoniumPredictor:
             return self._predict_freq(value, transition) - cur_freq
 
         # Step 1: Use root_scalar to find one valid fit_A
+        bracket = [
+            cur_value - 0.25 * self.flux_period,
+            cur_value + 0.25 * self.flux_period,
+        ]
+        fit_value = cur_value
         try:
-            bracket = [
-                cur_value - 0.25 * self.flux_period,
-                cur_value + 0.25 * self.flux_period,
-            ]
             result = root_scalar(
                 freq_diff_func,
                 x0=cur_value,
                 x1=cur_value + 0.1 * self.flux_period,
                 method="secant",
-                bracket=bracket,
                 xtol=1e-5 * self.flux_period,
                 maxiter=100,
             )
-            fit_value = result.root
-            if not result.converged or fit_value > bracket[1] or fit_value < bracket[0]:
-                fit_value = cur_value
-        except Exception:
-            fit_value = cur_value
+            if result.converged and bracket[0] <= result.root <= bracket[1]:
+                fit_value = result.root
+            else:
+                warnings.warn(
+                    "Bias calibration did not converge inside the local search window; "
+                    "using the current value as the fallback.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+        except Exception as exc:
+            warnings.warn(
+                "Bias calibration failed; using the current value as the fallback: "
+                f"{exc}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
         # Step 2: Compute initial bias and corresponding flux
         bias0 = fit_value - cur_value + self.flux_bias
@@ -137,16 +151,19 @@ class FluxoniumPredictor:
         return best_bias
 
     def update_bias(self, flux_bias: float) -> None:
-        self.flux_bias = flux_bias
-        self._affine = FluxAffineMap(self.flux_half, self.flux_period, flux_bias)
+        self._engine = FluxoniumPrediction(
+            self.params,
+            flux_half=self.flux_half,
+            flux_period=self.flux_period,
+            flux_bias=flux_bias,
+        )
+        self.flux_bias = self._engine.affine.flux_bias
+        self._affine = self._engine.affine
 
     def _predict_freq(self, cur_value: float, transition: tuple[int, int]) -> float:
-        flux = self.value_to_flux(cur_value)
-
-        self.fluxonium.flux = flux
-        energies = self.fluxonium.eigenvals(evals_count=max(*transition) + 5)
-
-        return float(energies[transition[1]] - energies[transition[0]]) * 1e3  # MHz
+        values = np.array([cur_value], dtype=np.float64)
+        freq = self._predict_freq_array(values, transition)
+        return float(freq[0])
 
     @overload
     def predict_freq(
@@ -180,49 +197,32 @@ class FluxoniumPredictor:
         cur_values: NDArray[np.float64],
         transition: tuple[int, int],
     ) -> NDArray[np.float64]:
-        """Batched ``_predict_freq``: one vectorised flux sweep instead of N
-        scalar diagonalisations.
+        """Predict one transition over a value array through the shared engine."""
 
-        Reuses ``calculate_energy_vs_flux`` (precomputes the flux-independent
-        cos/sin(phi) operators once, then combines per flux), so this does not
-        touch ``self.fluxonium`` — the shared scqubits object whose ``.flux`` the
-        scalar path mutates. Building a fresh local engine inside the helper keeps
-        the batched path free of cross-call shared mutable state (thread-safe),
-        unlike the scalar path. ``evals_count`` mirrors the scalar path's
-        ``max(*transition) + 5`` so the two stay numerically aligned.
-        """
-        from zcu_tools.simulate.fluxonium.energies import calculate_energy_vs_flux
-
-        fluxs = self._value_to_flux_array(cur_values)
-        evals_count = max(*transition) + 5
-        _, energies = calculate_energy_vs_flux(
-            self.params, fluxs, cutoff=40, evals_count=evals_count
+        engine_transition, sign = _frequency_engine_transition(transition)
+        _, freqs_mhz = self._engine.predict_frequencies_mhz(
+            np.asarray(cur_values, dtype=np.float64),
+            (engine_transition,),
+            cutoff=40,
         )
-        diff = energies[:, transition[1]] - energies[:, transition[0]]
-        return np.asarray(diff * 1e3, dtype=np.float64)  # MHz
+        return np.asarray(sign * freqs_mhz[0], dtype=np.float64)
 
     def _predict_matrix_element(
         self,
         cur_value: float,
         transition: tuple[int, int],
-        operator: Literal["phi", "n"],
+        operator: MatrixOperator,
     ) -> float:
-        flux = self.value_to_flux(cur_value)
-
-        self.fluxonium.flux = flux
-        if operator == "n":
-            oper = self.fluxonium.n_operator(energy_esys=True)
-        elif operator == "phi":
-            oper = self.fluxonium.phi_operator(energy_esys=True)
-
-        return float(np.abs(oper[transition[0], transition[1]]))
+        values = np.array([cur_value], dtype=np.float64)
+        elems = self._predict_matrix_element_array(values, transition, operator)
+        return float(elems[0])
 
     @overload
     def predict_matrix_element(
         self,
         cur_value: float,
         transition: tuple[int, int] = (0, 1),
-        operator: Literal["phi", "n"] = "n",
+        operator: MatrixOperator = "n",
     ) -> float: ...
 
     @overload
@@ -230,14 +230,14 @@ class FluxoniumPredictor:
         self,
         cur_value: NDArray[np.float64],
         transition: tuple[int, int] = (0, 1),
-        operator: Literal["phi", "n"] = "n",
+        operator: MatrixOperator = "n",
     ) -> NDArray[np.float64]: ...
 
     def predict_matrix_element(
         self,
         cur_value: float | NDArray[np.float64],
         transition: tuple[int, int] = (0, 1),
-        operator: Literal["phi", "n"] = "n",
+        operator: MatrixOperator = "n",
     ) -> float | NDArray[np.float64]:
         """
         Predict the matrix element of operator between two levels of a fluxonium qubit.
@@ -258,30 +258,39 @@ class FluxoniumPredictor:
         self,
         cur_values: NDArray[np.float64],
         transition: tuple[int, int],
-        operator: Literal["phi", "n"],
+        operator: MatrixOperator,
     ) -> NDArray[np.float64]:
-        """Batched ``_predict_matrix_element``: one vectorised operator sweep.
+        """Predict one 0/1 matrix-element transition through the shared engine."""
 
-        Reuses ``calculate_{n,phi}_oper_vs_flux``, which build a local scqubits
-        engine and run ``get_matelements_vs_paramvals`` over the whole flux grid,
-        so this avoids mutating the shared ``self.fluxonium`` (thread-safe, unlike
-        the scalar path).
-
-        Like the scalar path (whose ``self.fluxonium`` has ``truncated_dim=2``)
-        this only takes the [0, 1] sub-block via ``return_dim=2``; a ``transition``
-        with a level >= 2 indexes past that block and raises, matching the scalar
-        path's behaviour. Supporting higher levels is a separate feature.
-        """
-        from zcu_tools.simulate.fluxonium.matrix_element import (
-            calculate_n_oper_vs_flux,
-            calculate_phi_oper_vs_flux,
+        engine_transition = _matrix_engine_transition(transition)
+        _, elems = self._engine.predict_matrix_elements(
+            np.asarray(cur_values, dtype=np.float64),
+            (engine_transition,),
+            operator,
         )
+        return np.asarray(elems[0], dtype=np.float64)
 
-        fluxs = self._value_to_flux_array(cur_values)
-        if operator == "n":
-            _, opers = calculate_n_oper_vs_flux(self.params, fluxs, return_dim=2)
-        else:
-            _, opers = calculate_phi_oper_vs_flux(self.params, fluxs, return_dim=2)
 
-        elems = opers[:, transition[0], transition[1]]
-        return np.abs(elems).astype(np.float64)
+def _frequency_engine_transition(
+    transition: tuple[int, int],
+) -> tuple[tuple[int, int], float]:
+    frm, to = transition
+    if frm < 0 or to < 0:
+        raise ValueError(f"Transition levels must be >= 0, got {transition}")
+    if to >= frm:
+        return transition, 1.0
+    return (to, frm), -1.0
+
+
+def _matrix_engine_transition(transition: tuple[int, int]) -> tuple[int, int]:
+    frm, to = transition
+    if frm < 0 or to < 0:
+        raise ValueError(f"Transition levels must be >= 0, got {transition}")
+    if frm > 1 or to > 1:
+        raise ValueError(
+            "FluxoniumPredictor matrix elements support only levels 0 and 1; "
+            f"got {transition}"
+        )
+    if to >= frm:
+        return transition
+    return (to, frm)

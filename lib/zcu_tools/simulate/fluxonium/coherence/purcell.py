@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 # -----------------------------
 
 
-def percell(
+def purcell(
     Egn: NDArray[np.float64],
     Vec_gn: NDArray[np.complex128],
     Een: NDArray[np.float64],
@@ -35,7 +35,7 @@ def percell(
     resonator: Oscillator,
 ) -> NDArray[np.float64]:
     """
-    Calculate the transition rate of 0-1 caused by percell effect.
+    Calculate the Purcell-limited T1 for the 0-1 transition.
 
     Egn, Een, bare_rf, kappa: GHz, Temp: K
     """
@@ -54,7 +54,7 @@ def percell(
 
     E_1n0m = Egn[:, None] - Een[None, :]  # (ns, ns), from |1, n> to |0, m>
 
-    # calculate the transition rate of 0-1 caused by up percell effect
+    # calculate the transition rate of 0-1 caused by up Purcell effect
 
     up_mask = E_1n0m > 0
     E_1n0m_up = E_1n0m.copy()
@@ -71,9 +71,9 @@ def percell(
             # Vec_gn entries are QuTiP Qobj (not plain ndarray); .dag() is valid
             # at runtime but scqubits/qutip lack typed stubs.
 
-    Percell_up = np.nansum(P_res_ns[None, :] * kappa * n_ths * np.abs(ad_1n0n) ** 2)
+    purcell_up = np.nansum(P_res_ns[None, :] * kappa * n_ths * np.abs(ad_1n0n) ** 2)
 
-    # calculate the transition rate of 0-1 caused by down percell effect
+    # calculate the transition rate of 0-1 caused by down Purcell effect
 
     down_mask = E_1n0m < 0
     E_1n0n_down = -E_1n0m.copy()
@@ -89,14 +89,14 @@ def percell(
             a_1n0n[ng, ne] = Vec_gn[ng].dag() * a_op * Vec_en[ne]  # type: ignore[attr-defined]
             # Vec_gn entries are QuTiP Qobj; .dag() is valid at runtime.
 
-    Percell_down = np.nansum(P_res_ns[None, :] * kappa * n_ths * np.abs(a_1n0n) ** 2)
+    purcell_down = np.nansum(P_res_ns[None, :] * kappa * n_ths * np.abs(a_1n0n) ** 2)
 
-    Percell_total = np.asarray(1 / (Percell_up + Percell_down), dtype=np.float64)
+    purcell_total = np.asarray(1 / (purcell_up + purcell_down), dtype=np.float64)
 
-    return Percell_total
+    return purcell_total
 
 
-def calculate_percell_t1_vs_flux(
+def calculate_purcell_t1_vs_flux(
     fluxs: NDArray[np.float64],
     bare_rf: float,
     kappa: float,
@@ -135,7 +135,7 @@ def calculate_percell_t1_vs_flux(
         subsys_update_info={"flux": [fluxonium]},
     )
 
-    def get_percell_t1(
+    def get_purcell_t1(
         paramsweep: ParameterSweep, paramindex_tuple: tuple, **kwargs
     ) -> NDArray[np.float64]:
         fluxonium = paramsweep.get_subsys(0)
@@ -162,11 +162,11 @@ def calculate_percell_t1_vs_flux(
 
             return En, Vec_n
 
-        # calculate the transition rate of 0-1 caused by percell effect
+        # calculate the transition rate of 0-1 caused by Purcell effect
         Egn, Vec_gn = get_esys(0)
         Een, Vec_en = get_esys(1)
 
-        return percell(
+        return purcell(
             Egn,
             Vec_gn,
             Een,
@@ -180,6 +180,6 @@ def calculate_percell_t1_vs_flux(
             resonator=resonator,
         )
 
-    sweep.add_sweep(get_percell_t1, sweep_name="percell_t1")
+    sweep.add_sweep(get_purcell_t1, sweep_name="purcell_t1")
 
-    return sweep["percell_t1"]
+    return sweep["purcell_t1"]

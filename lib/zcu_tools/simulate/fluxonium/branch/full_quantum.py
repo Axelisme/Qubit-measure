@@ -7,8 +7,15 @@ from joblib import Parallel, delayed
 from numpy.typing import NDArray
 from tqdm.auto import tqdm, trange
 
+from zcu_tools.simulate.fluxonium.dressed import require_dressed_index
+
 if TYPE_CHECKING:
     from scqubits.core.hilbert_space import HilbertSpace
+
+
+def _require_positive_upto(upto: int) -> None:
+    if upto <= 0:
+        raise ValueError(f"upto must be positive, got {upto}")
 
 
 def make_hilbertspace(
@@ -64,6 +71,7 @@ def calc_branch_population(
     """
     Calculate the average population of the states in branchs upto provided photon number
     """
+    _require_positive_upto(upto)
     fluxonium, resonator = hilbertspace.subsystem_list
     qub_dim = fluxonium.truncated_dim
     res_dim = resonator.truncated_dim
@@ -75,7 +83,13 @@ def calc_branch_population(
 
     _, evecs = hilbertspace.eigensys(evals_count=qub_dim * res_dim)
     dressed_indices = [
-        hilbertspace.dressed_index((b, n)) for b in branchs for n in range(upto)
+        require_dressed_index(
+            hilbertspace.dressed_index((b, n)),
+            (b, n),
+            context="calc_branch_population",
+        )
+        for b in branchs
+        for n in range(upto)
     ]
 
     def _calc_population(dressed_idx: int) -> float:
@@ -105,6 +119,7 @@ def calc_branch_population_over_flux(
     branchs: list[int] | None = None,
     batch_size: int = 10,
 ) -> NDArray[np.float64]:
+    _require_positive_upto(upto)
     from scqubits.core.param_sweep import ParameterSweep  # lazy import
 
     if branchs is None:
@@ -139,7 +154,11 @@ def calc_branch_population_over_flux(
             evecs = paramsweep["evecs"][paramindex_tuple]
 
             def _calc_population(b, n) -> float:
-                dressed_idx = paramsweep.dressed_index((b, n), paramindex_tuple)
+                dressed_idx = require_dressed_index(
+                    paramsweep.dressed_index((b, n), paramindex_tuple),
+                    (b, n),
+                    context=f"calc_branch_population_over_flux paramindex={paramindex_tuple}",
+                )
                 return calc_population(bra_array, evecs[dressed_idx].full())
 
             populations = np.array(

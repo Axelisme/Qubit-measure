@@ -8,10 +8,10 @@ import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.simulate.fluxonium.dispersive import (
-    DressedLabelingError,
     calculate_dispersive_vs_flux,
     calculate_dispersive_vs_flux_fast,
 )
+from zcu_tools.simulate.fluxonium.dressed import DressedLabelingError
 
 PredictionBackend = Literal["fast", "scqubits"]
 MatrixOperator = Literal["n", "phi"]

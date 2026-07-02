@@ -21,7 +21,11 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from zcu_tools.simulate.fluxonium.branch.floquet import calc_ge_snr
+from zcu_tools.simulate.fluxonium.branch.floquet import (
+    FloquetDualCouplingBranchAnalysis,
+    FloquetWithTLSBranchAnalysis,
+    calc_ge_snr,
+)
 
 # Shared grid for every case. max_photon=30 keeps each call well under 1s while
 # leaving the branch-tracking resolution intact for these parameter points.
@@ -72,3 +76,91 @@ def test_relaxed_tol_within_tol(
     # a tight relative tolerance of the strict golden. 2e-4 covers the ~6e-5
     # measured relative error with margin.
     assert _snr3(params) == pytest.approx(golden, rel=2e-4)
+
+
+def test_tls_branch_analysis_characterization() -> None:
+    photons = np.array([0.0, 0.2])
+    avg_times = np.array([0.0])
+    analysis = FloquetWithTLSBranchAnalysis(
+        (4.5, 1.0, 0.5),
+        r_f=5.0,
+        g=0.03,
+        E_tls=4.8,
+        g_tls=0.01,
+        qub_dim=4,
+        qub_cutoff=12,
+        solver_options=None,
+    )
+    fbasis_n = [
+        analysis.make_floquet_basis(float(photon), precompute=avg_times)
+        for photon in photons
+    ]
+
+    branch_infos = analysis.calc_branch_infos(fbasis_n, [0, 1], progress=False)
+    populations = analysis.calc_branch_populations(
+        fbasis_n, branch_infos, avg_times=avg_times, progress=False
+    )
+
+    assert branch_infos == {0: [0, 0], 1: [1, 1]}
+    np.testing.assert_allclose(
+        populations[0],
+        [6.681065569224993e-05, 0.0002795982255832228],
+        atol=1e-12,
+        rtol=0,
+    )
+    np.testing.assert_allclose(
+        populations[1],
+        [1.0000551277881877, 1.0001045753186426],
+        atol=1e-12,
+        rtol=0,
+    )
+
+
+def test_dual_coupling_branch_analysis_characterization() -> None:
+    photons = np.array([0.0, 0.2])
+    avg_times = np.array([0.0])
+    analysis = FloquetDualCouplingBranchAnalysis(
+        (4.5, 1.0, 0.5),
+        r_f=5.0,
+        g1=0.03,
+        g2=0.02,
+        qub_dim=4,
+        qub_cutoff=12,
+        solver_options=None,
+    )
+    fbasis_n = [
+        analysis.make_floquet_basis(float(photon), precompute=avg_times)
+        for photon in photons
+    ]
+
+    branch_infos = analysis.calc_branch_infos(fbasis_n, [0, 1], progress=False)
+    energies = analysis.calc_branch_energies(fbasis_n, branch_infos)
+    populations = analysis.calc_branch_populations(
+        fbasis_n, branch_infos, avg_times, progress=False
+    )
+
+    assert branch_infos == {0: [1, 1], 1: [2, 2]}
+    np.testing.assert_allclose(
+        energies[0],
+        [0.42538041856448916, 0.4252126135249715],
+        atol=1e-12,
+        rtol=0,
+    )
+    np.testing.assert_allclose(
+        energies[1],
+        [0.6011622294113531, 0.6014513084394016],
+        atol=1e-12,
+        rtol=0,
+    )
+    np.testing.assert_allclose(
+        populations[0],
+        [0.0, 0.0007636154963531296],
+        atol=1e-12,
+        rtol=0,
+    )
+    np.testing.assert_allclose(
+        populations[1],
+        [1.0, 1.0002483778485474],
+        atol=1e-12,
+        rtol=0,
+    )
