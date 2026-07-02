@@ -42,7 +42,8 @@ def qp_spectral_density(
     therm_ratio = calc_therm_ratio(omega, Temp)
     abs_therm = calc_therm_ratio(abs(omega), Temp)
 
-    omega_Hz = np.abs(1e9 * omega) / (2 * np.pi)
+    omega_Hz = 1e9 * omega / (2 * np.pi)
+    abs_omega_Hz = np.abs(omega_Hz)
     EJ_Hz = EJ * 1e9
     Delta_Hz = convert_eV_to_Hz(Delta_eV)
 
@@ -53,7 +54,7 @@ def qp_spectral_density(
         np.sqrt(2 / np.pi)
         * (8 / R_k)
         * (EJ_Hz / Delta_Hz)
-        * (2 * Delta_Hz / abs(omega_Hz)) ** (3 / 2)
+        * (2 * Delta_Hz / abs_omega_Hz) ** (3 / 2)
         * np.sqrt(1 / 2 * abs_therm)
         * sp_special.kv(0, 1 / 2 * abs(abs_therm))
         * np.sinh(1 / 2 * abs_therm)

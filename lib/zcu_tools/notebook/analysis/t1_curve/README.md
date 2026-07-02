@@ -1,6 +1,6 @@
 # `t1_curve` 模塊重點文檔
 
-**Last updated:** 2026-07-01
+**Last updated:** 2026-07-02 — Qqp signed spectral density
 
 Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道的品質因子 (Q) / 準粒子密度 (x_qp)，並與理論 T1 曲線比對作圖。
 
@@ -46,7 +46,7 @@ Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道
 ### `Qqp.py` — 準粒子穿隧 (quasiparticle)
 
 - `DELTA_ALUMINUM = 3.4e-4` eV：鋁超導能隙預設值。
-- `qp_spectral_density(ω, T, EJ, Delta_eV)`：依 Smith et al. (2020) Eq. S23/19 的 `Re Y_qp / x_qp` 公式（含 `sp_special.kv(0, ...)` 修飾 Bessel）。
+- `qp_spectral_density(ω, T, EJ, Delta_eV)`：依 Smith et al. (2020) Eq. S23/19 的 `Re Y_qp / x_qp` 公式（含 `sp_special.kv(0, ...)` 修飾 Bessel）；對齊 scqubits：`Re Y_qp` 只依 `|ω|`，但 spectral-density 前因子保留 signed `ω`，讓 `S(ω)+S(-ω)` 正確。
 - `calc_qp_oper(params, flux, return_dim=4, esys=None)`：回傳 `sin(φ/2)` 運算子矩陣；⚠ 假設 flux 併入 *cosine* 項（與某些文獻不同），故透過 `α=0.5, β=πflux` 做 `φ → φ + 2π·flux` 的平移。
 - `calc_qp_dipole(params, sin2_elements, ω, T, Delta_eV)`：`|⟨0|sin(φ/2)|1⟩|² · [S_qp(ω)+S_qp(-ω)]`。
 - `calc_Qqp_vs_omega(...)`：回傳的「Q_qp」實際上是 `1/x_qp`，代入 `plot_t1_with_sample(name="x_qp", ...)` 時要注意此反比關係。
