@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
 from pydantic import ConfigDict
 from zcu_tools.experiment import ExpCfgModel
 from zcu_tools.experiment.v2.runner import (
-    ResultBuffer,
     Schedule,
+    ScheduleStep,
     SignalBuffer,
     StopSignal,
     schedule_stop_scope,
@@ -39,6 +40,21 @@ class FakeModule(Module):
 
     def run(self, prog: Any, t: Any = 0.0) -> Any:
         return t
+
+
+class RecordingBuffer:
+    def __init__(
+        self,
+        data: Any,
+        *,
+        on_update: Callable[[ScheduleStep[Any, Any]], None] | None = None,
+    ) -> None:
+        self.data = data
+        self._on_update = on_update
+
+    def trigger_update(self, step: ScheduleStep[Any, Any] | None = None) -> None:
+        if step is not None and self._on_update is not None:
+            self._on_update(step)
 
 
 class FakeProgram:
@@ -230,12 +246,11 @@ def test_schedule_stop_scope_supplies_default_stop_signal() -> None:
 def test_schedule_child_buffer_syncs_result_buffer_without_throttling() -> None:
     root = {"task": {"signals": np.full((1,), np.nan)}}
     updates: list[tuple[tuple[Any, ...], np.ndarray]] = []
-    result_buffer = ResultBuffer(
+    result_buffer = RecordingBuffer(
         root,
         on_update=lambda step: updates.append(
             (step.path, root["task"]["signals"].copy())
         ),
-        update_interval=None,
     )
 
     def child(step):
@@ -542,7 +557,7 @@ def test_schedule_operations_require_context():
 def test_schedule_step_data_operations_require_context() -> None:
     root = {"child": {"signals": np.full((1,), np.nan)}}
 
-    with Schedule(_cfg(), ResultBuffer(root)) as sched:
+    with Schedule(_cfg(), RecordingBuffer(root)) as sched:
         step = next(iter(sched.batch({"child": lambda child: child}).values()))
         assert step.path == ("child",)
 
@@ -747,7 +762,7 @@ def test_schedule_batch_string_key_uses_child_local_default_buffer():
             raw2signal_fn=_identity_array,
         )
 
-    with Schedule(_cfg(rounds=1), ResultBuffer(root)) as sched:
+    with Schedule(_cfg(rounds=1), RecordingBuffer(root)) as sched:
         sched.batch({"child": child})
 
     assert np.allclose(root["child"]["signals"], [6.0])
@@ -778,14 +793,14 @@ def test_schedule_child_buffer_validates_target_before_acquire() -> None:
         else:
             raise AssertionError("buffer should reject non-array targets")
 
-    with Schedule(_cfg(), ResultBuffer(root)) as sched:
+    with Schedule(_cfg(), RecordingBuffer(root)) as sched:
         sched.batch({"child": child})
 
 
 def test_schedule_child_local_buffers_are_cleared_after_batch() -> None:
     root = {"child": {"signals": np.full((1,), np.nan)}}
 
-    with Schedule(_cfg(), ResultBuffer(root)) as sched:
+    with Schedule(_cfg(), RecordingBuffer(root)) as sched:
 
         def child(step):
             signals_step = step.child("signals")
@@ -813,7 +828,7 @@ def test_schedule_child_local_buffer_can_be_recreated_on_retry():
             raise RuntimeError("temporary failure after buffer creation")
         return attempts
 
-    with Schedule(_cfg(), ResultBuffer(root)) as sched:
+    with Schedule(_cfg(), RecordingBuffer(root)) as sched:
         results = sched.batch({"child": child}, retry=1)
 
     assert results == {"child": 2}

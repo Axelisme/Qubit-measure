@@ -14,7 +14,6 @@ from matplotlib.figure import Figure
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2.runner.schedule import (
-    ResultBuffer,
     Schedule,
     ScheduleStep,
     StopSignal,
@@ -24,10 +23,31 @@ from zcu_tools.experiment.v2.utils import Result, merge_result_list
 from zcu_tools.liveplot import AbsLivePlot, MultiLivePlot, make_plot_frame
 from zcu_tools.liveplot.backend.jupyter import grab_frame_with_instant_plot
 from zcu_tools.utils.debug import print_traceback
+from zcu_tools.utils.func_tools import min_interval
 
 T_Cfg = TypeVar("T_Cfg", bound=ExpCfgModel)
 T_Result = TypeVar("T_Result", bound=Result)
 T_RootResult = TypeVar("T_RootResult", bound=Result)
+T_BufferData = TypeVar("T_BufferData")
+
+
+class _ExecutorBuffer(Generic[T_BufferData]):
+    """Executor-owned structured result tree buffer."""
+
+    def __init__(
+        self,
+        data: T_BufferData,
+        *,
+        on_update: Callable[[ScheduleStep[Any, Any]], None],
+        update_interval: float | None = 0.1,
+    ) -> None:
+        self.data = data
+        self._throttled_update = min_interval(on_update, update_interval)
+
+    def trigger_update(self, step: ScheduleStep[Any, Any] | None = None) -> None:
+        if step is None or self._throttled_update is None:
+            return
+        self._throttled_update(step)
 
 
 class PlottableMeasurement(Protocol):
@@ -208,7 +228,7 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg]):
     ) -> T_RootResult:
         fig, plotter, plot_fn, writer = self.make_plotter()
         stop = current_stop_signal() or StopSignal()
-        result_buffer = ResultBuffer(init_result, on_update=plot_fn)
+        result_buffer = self._make_result_buffer(init_result, plot_fn)
 
         with Schedule(
             cfg,
@@ -238,6 +258,13 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg]):
 
     def _default_batch_result(self) -> dict[str, Result]:
         return {name: ms.get_default_result() for name, ms in self.measurements.items()}
+
+    def _make_result_buffer(
+        self,
+        data: T_BufferData,
+        on_update: Callable[[ScheduleStep[Any, Any]], None],
+    ) -> _ExecutorBuffer[T_BufferData]:
+        return _ExecutorBuffer(data, on_update=on_update)
 
     def _run_measurement_batch(
         self,

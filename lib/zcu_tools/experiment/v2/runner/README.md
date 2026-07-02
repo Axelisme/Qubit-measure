@@ -4,8 +4,8 @@
 
 `runner/` 提供 experiment/v2 的 Python-like acquisition runtime。一般實驗用
 `SignalBuffer` / `Schedule` / `ProgramBuilder` 編排 host-side loop 與 program
-acquire；executor 類流程用 `ResultBuffer` 持有 root result tree，再交給同一個
-`Schedule` 編排 outer loop，並用
+acquire；executor 類流程用 executor-owned buffer 實作 `BufferProtocol` 來持有 root
+result tree，再交給同一個 `Schedule` 編排 outer loop，並用
 `MultiMeasurementExecutor` 共用 liveplot、retry 與 measurement lifecycle。舊 Task tree
 runtime 不再保留。
 
@@ -24,12 +24,13 @@ runtime 不再保留。
 - `SignalBuffer.set(...)` / `SignalSlot.set(...)` 寫入後自動觸發 `on_update`。
 - `trigger_update()` 用於沒有新資料寫入、但 caller 想強制刷新 liveplot 的等待期。
 
-### `ResultBuffer`
+### `BufferProtocol`
 
-`ResultBuffer(data, on_update=...)` 是 structured result tree 的 storage 與 update
-owner，主要給 executor workflow 使用。`Schedule` 可以接收一個 `ResultBuffer`，但
-不直接宣告 result tree / update callback；child-local `SignalBuffer` 寫入時同步更新
-`ResultBuffer.data` 中對應 path，並觸發 `ResultBuffer` 的 update hook。
+`BufferProtocol` 是 `Schedule` 對 buffer 的唯一要求：buffer 提供 `data` 以及
+`trigger_update(step)`。`SignalBuffer` 實作這個 protocol；executor workflow 也可在
+executor 層實作自己的 structured result buffer。`Schedule` 不直接宣告 result tree /
+update callback；child-local `SignalBuffer` 寫入時同步更新 root buffer 的 `data` 中對應
+path，並觸發該 buffer 的 update hook。
 
 ### `Schedule`
 
@@ -64,7 +65,8 @@ with Schedule(cfg, signals_buffer) as sched:
   per-child，child 取得獨立 deepcopy cfg 與共享 env。
 - `ScheduleStep.path` 會累積巢狀 host loop index，所以預設 single-buffer acquire 可
   依 owner path 自動寫入對應 slot，不需要 `into=` 參數。
-- `with Schedule(cfg, result_buffer) as sched` 可編排 executor result tree；
+- `with Schedule(cfg, result_buffer) as sched` 可編排任何實作 `BufferProtocol` 的 result
+  tree；
   `step.child("field", cfg=program_cfg).buffer(shape)` 會建立 child-local default
   `SignalBuffer`，buffer 寫入時同步回 `result_buffer.data` 並觸發 update。
 - `ScheduleStep.value` 是 scan/repeat/batch 的 control-flow coordinate；result tree 由
@@ -97,8 +99,8 @@ with Schedule(cfg, signals_buffer) as sched:
 
 `MultiMeasurementExecutor` 服務 `autofluxdep` / `overnight` 這類外層 workflow：
 它負責 combined liveplot layout、FFmpeg animation、measurement init/cleanup，以及
-per-measurement retry helper；root result tree 與 update callback 由 `ResultBuffer`
-持有，path、env、stop 與 control flow 由 `Schedule` 持有。
+per-measurement retry helper；root result tree 與 update callback 由 executor-owned
+buffer 持有，path、env、stop 與 control flow 由 `Schedule` 持有。
 
 典型 executor 格式：
 

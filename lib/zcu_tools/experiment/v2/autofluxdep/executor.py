@@ -19,7 +19,6 @@ from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, setup_devices
 from zcu_tools.experiment.v2.runner import (
     MultiMeasurementExecutor,
-    ResultBuffer,
     Schedule,
     ScheduleStep,
     StopSignal,
@@ -141,14 +140,9 @@ class FluxDepExecutor(MultiMeasurementExecutor[MeasurementTask, FluxDepCfg]):
 
         fig, plotter, plot_fn, writer = self.make_plotter()
         stop = current_stop_signal() or StopSignal()
-        result_buffer = ResultBuffer(init_result, on_update=plot_fn)
+        result_buffer = self._make_result_buffer(init_result, plot_fn)
 
-        with Schedule(
-            cfg,
-            result_buffer,
-            env_dict=env_dict,
-            stop=stop,
-        ) as sched:
+        with Schedule(cfg, result_buffer, env_dict=env_dict, stop=stop) as sched:
             with plotter:
                 try:
                     for measurement in self.measurements.values():

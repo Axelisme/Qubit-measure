@@ -1,7 +1,7 @@
 from .multi_executor import MultiMeasurementExecutor
 from .schedule import (
+    BufferProtocol,
     ProgramBuilder,
-    ResultBuffer,
     Schedule,
     ScheduleStep,
     SignalBuffer,
@@ -13,9 +13,9 @@ from .schedule import (
 )
 
 __all__ = [
+    "BufferProtocol",
     "MultiMeasurementExecutor",
     "ProgramBuilder",
-    "ResultBuffer",
     "Schedule",
     "ScheduleStep",
     "SignalBuffer",

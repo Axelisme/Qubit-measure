@@ -45,7 +45,6 @@ T_Raw = TypeVar("T_Raw")
 T_Value = TypeVar("T_Value")
 T_NestedValue = TypeVar("T_NestedValue")
 T_BatchResult = TypeVar("T_BatchResult")
-T_Data = TypeVar("T_Data")
 T_AcquireRaw_co = TypeVar("T_AcquireRaw_co", covariant=True)
 T_DecimatedRaw_co = TypeVar("T_DecimatedRaw_co", covariant=True)
 SignalArray: TypeAlias = NDArray[Any]
@@ -78,6 +77,15 @@ class ProgramProtocol(Protocol[T_AcquireRaw_co, T_DecimatedRaw_co]):
 
 T_Program = TypeVar("T_Program", bound=ProgramProtocol[Any, Any])
 ProgramFactory: TypeAlias = Callable[..., T_Program]
+
+
+class BufferProtocol(Protocol):
+    """Minimal data/update surface consumed by Schedule."""
+
+    @property
+    def data(self) -> Any: ...
+
+    def trigger_update(self, step: ScheduleStep[Any, Any] | None = None) -> None: ...
 
 
 def default_raw2signal_fn(raw: Sequence[NDArray[np.float64]]) -> NDArray[np.complex128]:
@@ -142,6 +150,10 @@ class SignalBuffer:
         self.array = _make_nan_array(shape, dtype)
         self._throttled_update = min_interval(on_update, update_interval)
 
+    @property
+    def data(self) -> NDArray[Any]:
+        return self.array
+
     def at(self, *index_or_step: Any) -> SignalSlot:
         return SignalSlot(
             buffer=self, view=_writable_view(self.array, _resolve_index(index_or_step))
@@ -156,7 +168,7 @@ class SignalBuffer:
         np.copyto(dst=self.array, src=value)
         self.trigger_update()
 
-    def trigger_update(self) -> None:
+    def trigger_update(self, step: ScheduleStep[Any, Any] | None = None) -> None:
         if self._throttled_update is not None:
             self._throttled_update(self.array)
 
@@ -175,45 +187,19 @@ class SignalSlot:
         self.buffer.trigger_update()
 
 
-class ResultBuffer(Generic[T_Data]):
-    """Structured result tree with runner-aware update hooks."""
-
-    def __init__(
-        self,
-        data: T_Data,
-        *,
-        on_update: Callable[[ScheduleStep[Any, Any]], None] | None = None,
-        update_interval: float | None = 0.1,
-    ) -> None:
-        self.data = data
-        self._throttled_update = min_interval(on_update, update_interval)
-
-    def trigger_update(self, step: ScheduleStep[Any, Any]) -> None:
-        if self._throttled_update is not None:
-            self._throttled_update(step)
-
-
 class Schedule(Generic[T_Cfg]):
     """Runtime scope for Python-like measurement orchestration."""
 
     def __init__(
         self,
         init_cfg: T_Cfg,
-        *buffers: SignalBuffer | ResultBuffer[Any],
+        *buffers: BufferProtocol,
         env_dict: dict[str, Any] | None = None,
         stop: StopSignal | None = None,
     ) -> None:
         self.cfg = deepcopy(init_cfg)
         self.env = env_dict if env_dict is not None else {}
-        self._buffers: list[SignalBuffer] = []
-        self._result_buffer: ResultBuffer[Any] | None = None
-        for buffer in buffers:
-            if isinstance(buffer, ResultBuffer):
-                if self._result_buffer is not None:
-                    raise ValueError("Schedule accepts at most one ResultBuffer")
-                self._result_buffer = buffer
-            else:
-                self._buffers.append(buffer)
+        self._buffers = list(buffers)
         self._local_buffers: dict[tuple[Hashable, ...], SignalBuffer] = {}
         self._is_active = False
         self._is_closed = False
@@ -237,7 +223,7 @@ class Schedule(Generic[T_Cfg]):
     def data(self) -> Any:
         return self._get_data(self)
 
-    def register_buffer(self, *buffers: SignalBuffer) -> None:
+    def register_buffer(self, *buffers: BufferProtocol) -> None:
         self._ensure_active()
         if not buffers:
             raise ValueError("register_buffer requires at least one SignalBuffer")
@@ -528,11 +514,9 @@ class Schedule(Generic[T_Cfg]):
         return target
 
     def _data_root(self) -> Any:
-        if self._result_buffer is not None:
-            return self._result_buffer.data
         if len(self._buffers) == 1:
-            return self._buffers[0].array
-        return tuple(buffer.array for buffer in self._buffers)
+            return self._buffers[0].data
+        return tuple(buffer.data for buffer in self._buffers)
 
     def _set_data(
         self, owner: Schedule[Any] | ScheduleStep[Any, Any], value: Any
@@ -577,8 +561,7 @@ class Schedule(Generic[T_Cfg]):
 
     def _trigger_update(self, owner: Schedule[Any] | ScheduleStep[Any, Any]) -> None:
         self._ensure_active()
-        result_buffer = self._result_buffer
-        if result_buffer is None:
+        if not self._buffers:
             return
         if isinstance(owner, ScheduleStep):
             step = owner
@@ -591,7 +574,8 @@ class Schedule(Generic[T_Cfg]):
                 cfg=self.cfg,
                 path=(),
             )
-        result_buffer.trigger_update(step)
+        for buffer in self._buffers:
+            buffer.trigger_update(step)
 
     def _clear_local_buffers(self, prefix: tuple[Hashable, ...]) -> None:
         for path in list(self._local_buffers):
@@ -604,7 +588,7 @@ class Schedule(Generic[T_Cfg]):
         self._ensure_active()
         if owner.path in self._local_buffers:
             return self._local_buffers[owner.path].at()
-        if len(self._buffers) != 1:
+        if len(self._buffers) != 1 or not isinstance(self._buffers[0], SignalBuffer):
             raise ValueError(
                 "Schedule default acquire target requires exactly one SignalBuffer"
             )
