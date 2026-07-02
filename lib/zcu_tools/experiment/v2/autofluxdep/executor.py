@@ -123,41 +123,45 @@ class FluxDepExecutor(
         stop = current_stop_signal() or StopSignal()
         result_buffer = self._make_result_buffer(init_result, plot_fn)
 
-        with Schedule(cfg, result_buffer, env=env, stop=stop) as sched:
-            with plotter:
-                try:
-                    for measurement in self.measurements.values():
-                        measurement.init(dynamic_pbar=True)
+        try:
+            with Schedule(cfg, result_buffer, env=env, stop=stop) as sched:
+                with plotter:
+                    try:
+                        for measurement in self.measurements.values():
+                            measurement.init(dynamic_pbar=True)
 
-                    for i, (flux, flux_step) in enumerate(
-                        sched.scan("flux", self.flux_values)
-                    ):
-                        info = flux_step.env.info
-                        predictor = flux_step.env.predictor
+                        for i, (flux, flux_step) in enumerate(
+                            sched.scan("flux", self.flux_values)
+                        ):
+                            info = flux_step.env.info
+                            predictor = flux_step.env.predictor
 
-                        info.clear()  # clear current info dict
+                            info.clear()  # clear current info dict
 
-                        info["flux_value"] = flux
-                        info["flux_idx"] = i
+                            info["flux_value"] = flux
+                            info["flux_idx"] = i
 
-                        info["cur_m"] = predictor.predict_matrix_element(flux)
-                        info["m_ratio"] = info["cur_m"] / info.first["cur_m"]
+                            info["cur_m"] = predictor.predict_matrix_element(flux)
+                            info["m_ratio"] = info["cur_m"] / info.first["cur_m"]
 
-                        set_flux_in_dev_cfg(flux_step.cfg.dev, flux, label="flux_dev")
+                            set_flux_in_dev_cfg(
+                                flux_step.cfg.dev, flux, label="flux_dev"
+                            )
 
-                        self._run_measurement_batch(flux_step, retry_time)
-                except KeyboardInterrupt:
-                    sched.set_stop()
-                except Exception:
-                    print_traceback()
-                    raise
-                finally:
-                    for measurement in self.measurements.values():
-                        measurement.cleanup()
-                    if self.record_path is not None:
-                        assert writer is not None
-                        writer.finish()
-        plt.close(fig)
+                            self._run_measurement_batch(flux_step, retry_time)
+                    except KeyboardInterrupt:
+                        sched.set_stop()
+                    except Exception:
+                        print_traceback()
+                        raise
+                    finally:
+                        for measurement in self.measurements.values():
+                            measurement.cleanup()
+                        if self.record_path is not None:
+                            assert writer is not None
+                            writer.finish()
+        finally:
+            plt.close(fig)
 
         results = result_buffer.data
 

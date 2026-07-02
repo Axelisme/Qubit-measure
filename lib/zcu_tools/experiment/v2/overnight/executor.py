@@ -115,30 +115,32 @@ class OvernightExecutor(
         stop = current_stop_signal() or StopSignal()
         result_buffer = self._make_result_buffer(init_result, plot_fn)
 
-        with Schedule(cfg, result_buffer, env=env, stop=stop) as sched:
-            with plotter:
-                try:
-                    for measurement in self.measurements.values():
-                        measurement.init(dynamic_pbar=True)
+        try:
+            with Schedule(cfg, result_buffer, env=env, stop=stop) as sched:
+                with plotter:
+                    try:
+                        for measurement in self.measurements.values():
+                            measurement.init(dynamic_pbar=True)
 
-                    for _, iter_step in sched.repeat(
-                        "Iter", self.num_times, self.interval
-                    ):
-                        self._run_measurement_batch(iter_step, fail_retry)
-                        with MinIntervalFunc.force_execute():
-                            iter_step.trigger_update()
-                except KeyboardInterrupt:
-                    sched.set_stop()
-                except Exception:
-                    print_traceback()
-                    raise
-                finally:
-                    for measurement in self.measurements.values():
-                        measurement.cleanup()
-                    if self.record_path is not None:
-                        assert writer is not None
-                        writer.finish()
-        plt.close(fig)
+                        for _, iter_step in sched.repeat(
+                            "Iter", self.num_times, self.interval
+                        ):
+                            self._run_measurement_batch(iter_step, fail_retry)
+                            with MinIntervalFunc.force_execute():
+                                iter_step.trigger_update()
+                    except KeyboardInterrupt:
+                        sched.set_stop()
+                    except Exception:
+                        print_traceback()
+                        raise
+                    finally:
+                        for measurement in self.measurements.values():
+                            measurement.cleanup()
+                        if self.record_path is not None:
+                            assert writer is not None
+                            writer.finish()
+        finally:
+            plt.close(fig)
 
         results = result_buffer.data
 
