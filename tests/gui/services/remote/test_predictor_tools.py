@@ -8,13 +8,21 @@ the dual-end seam end to end (wire params -> service -> scqubits eigensolve).
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.gui.app.main.services.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.app.main.state import ExpContext, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
-from zcu_tools.gui.session.services.predictor import PredictorService
+from zcu_tools.gui.session.services.predictor import (
+    LoadPredictorRequest,
+    PredictFreqRequest,
+    PredictorService,
+    SetModelParamsRequest,
+)
 
 from ._helpers import dispatch_handler as _dispatch  # noqa: E402
 
@@ -30,6 +38,81 @@ def _ctrl_backed_by_real_service() -> MagicMock:
     ctrl.predict_freq.side_effect = svc.predict_freq
     ctrl.get_predictor_info.side_effect = svc.get_predictor_info
     return ctrl
+
+
+class _PoisonController:
+    def __getattr__(self, name: str) -> object:
+        raise AssertionError(f"broad controller used for {name}")
+
+
+def _dispatch_with_predictor_control(
+    method: str, params: dict[str, object], predictor_control: MagicMock
+) -> dict[str, object]:
+    adapter = SimpleNamespace(
+        ctrl=_PoisonController(),
+        predictor_control=predictor_control,
+    )
+    return dict(METHOD_REGISTRY[method].handler(cast(Any, adapter), params))
+
+
+def test_predictor_handlers_dispatch_only_through_predictor_control_facet():
+    pred = MagicMock()
+    pred.get_predictor_info.return_value = {
+        "path": None,
+        "flux_bias": 0.0,
+        "flux_half": 0.0,
+        "flux_period": 1.0,
+        "EJ": 4.0,
+        "EC": 1.0,
+        "EL": 1.0,
+    }
+    pred.predict_freq.return_value = 1234.5
+
+    assert (
+        _dispatch_with_predictor_control(
+            "predictor.load",
+            {"path": "/tmp/params.json", "flux_bias": 0.1},
+            pred,
+        )["loaded"]
+        is True
+    )
+    assert isinstance(pred.load_predictor.call_args.args[0], LoadPredictorRequest)
+
+    assert (
+        _dispatch_with_predictor_control(
+            "predictor.set_model_params",
+            {
+                "EJ": 4.0,
+                "EC": 1.0,
+                "EL": 1.0,
+                "flux_half": 0.0,
+                "flux_period": 1.0,
+                "flux_bias": 0.0,
+            },
+            pred,
+        )["loaded"]
+        is True
+    )
+    assert isinstance(
+        pred.set_predictor_model_params.call_args.args[0], SetModelParamsRequest
+    )
+
+    assert _dispatch_with_predictor_control(
+        "predictor.predict",
+        {"device_value": 0.5, "from_level": 0, "to_level": 1},
+        pred,
+    ) == {"freq_mhz": 1234.5}
+    assert isinstance(pred.predict_freq.call_args.args[0], PredictFreqRequest)
+
+    assert _dispatch_with_predictor_control("predictor.clear", {}, pred) == {
+        "loaded": False
+    }
+    pred.clear_predictor.assert_called_once_with()
+
+    pred.get_predictor_info.return_value = None
+    assert _dispatch_with_predictor_control("predictor.info", {}, pred) == {
+        "loaded": False
+    }
 
 
 def test_set_model_params_then_predict_returns_sane_freq():

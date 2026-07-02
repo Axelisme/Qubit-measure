@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-02 - device-control facet
+**Last updated:** 2026-07-02 - predictor-control facet
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -37,8 +37,9 @@ Shared layers:
 ## Composition Root
 
 `build_app_services()` constructs the app-local services and injects their driven
-ports. `Controller` is a facade over the service bundle; UI and remote code talk
-to the controller, not directly to service internals.
+ports. `Controller` is a facade over the service bundle; UI and remote code use
+the controller for app-specific workflow and the exposed session control facets
+for device/predictor domains.
 
 Key ownership rules:
 
@@ -126,8 +127,9 @@ logical sizes so saved images and agent screenshots do not depend on window size
 main-thread dispatch, resource-version guard, editor lifecycle, and diagnostics.
 It exposes the same behavior as the Qt UI. Device RPC handlers use the
 controller-exposed `DeviceControlPort` facet for device lifecycle/query/progress;
+predictor RPC handlers use `PredictorControlPort` for predictor load/query/compute.
 SoC/startup handlers remain on the app controller façade because they are not
-device-domain control.
+device-domain or predictor-domain control.
 
 `zcu_tools.mcp.measure` is the agent-facing bridge: tool declarations,
 short-wait wrappers, diagnostics piggyback, operation-handle bookkeeping, stale

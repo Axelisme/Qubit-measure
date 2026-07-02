@@ -3,14 +3,14 @@
 Both measurement-session app Controllers (measure: ``gui/app/main/controller``;
 autofluxdep: ``gui/app/autofluxdep/controller``) implement
 :class:`~zcu_tools.gui.session.controller_port.SessionControllerPort` as a wall of
-one-line forwards into the same five session services (soc_connection / predictor
-/ context / device / startup) plus app-local progress helpers. Those forwards
+one-line forwards into the same four session services (soc_connection / context /
+device / startup) plus app-local progress helpers. Those forwards
 were byte-identical across the two apps; this mixin holds the single copy.
 
 Design (Candidate #14, Option B — abstract service accessors):
 
 - The mixin declares a small set of **abstract accessors** for the services it
-  forwards into (``_soc_svc`` / ``_pred_svc`` / ``_ctx_svc`` / ``_dev_svc`` /
+  forwards into (``_soc_svc`` / ``_ctx_svc`` / ``_dev_svc`` /
   ``_startup_svc`` / ``_progress_svc``), as annotation-only attribute declarations
   with explicit service types. pyright treats each as an attribute the concrete
   Controller must supply, and enforces the declared service type at every forward.
@@ -25,8 +25,9 @@ Design (Candidate #14, Option B — abstract service accessors):
   no churn across the ~130 existing call sites.)
 - The mixin provides every **identical** forward reading those accessors.
 
-The device dialog lifecycle/query surface lives on ``DeviceControlPort``. This
-mixin still keeps ``attach_progress`` / ``progress_bars`` because non-device
+The device dialog lifecycle/query surface lives on ``DeviceControlPort``; the
+predictor dialog load/query/compute surface lives on ``PredictorControlPort``.
+This mixin still keeps ``attach_progress`` / ``progress_bars`` because non-device
 app-local callers (run tab and autofluxdep run progress) call those controller
 helpers directly.
 
@@ -63,16 +64,6 @@ if TYPE_CHECKING:
         DeviceEntry,
         DeviceService,
     )
-    from zcu_tools.gui.session.services.predictor import (
-        LoadPredictorRequest,
-        PredictCurveRequest,
-        PredictCurveResult,
-        PredictFreqRequest,
-        PredictMatrixCurveRequest,
-        PredictMatrixCurveResult,
-        PredictorService,
-        SetModelParamsRequest,
-    )
     from zcu_tools.gui.session.services.progress import ProgressService
     from zcu_tools.gui.session.services.startup import (
         PersistedStartup,
@@ -96,7 +87,6 @@ class SessionControllerMixin:
     # (both apps already assign these exact names). The explicit service types let
     # pyright enforce that each app feeds the forwards the right service type.
     _soc_svc: SoCConnectionService
-    _pred_svc: PredictorService
     _ctx_svc: ContextService
     _dev_svc: DeviceService
     _startup_svc: StartupService
@@ -184,30 +174,6 @@ class SessionControllerMixin:
 
     def get_device_unit(self, name: str) -> str:
         return self._dev_svc.get_device_unit(name)
-
-    # --- predictor dialog: load / clear / predict ------------------------
-    def load_predictor(self, req: LoadPredictorRequest) -> None:
-        self._pred_svc.load_predictor(req)
-
-    def set_predictor_model_params(self, req: SetModelParamsRequest) -> None:
-        self._pred_svc.set_model_params(req)
-
-    def clear_predictor(self) -> None:
-        self._pred_svc.clear_predictor()
-
-    def predict_freq(self, req: PredictFreqRequest) -> float:
-        return self._pred_svc.predict_freq(req)
-
-    def predict_freq_curve(self, req: PredictCurveRequest) -> PredictCurveResult:
-        return self._pred_svc.predict_freq_curve(req)
-
-    def predict_matrix_element_curve(
-        self, req: PredictMatrixCurveRequest
-    ) -> PredictMatrixCurveResult:
-        return self._pred_svc.predict_matrix_element_curve(req)
-
-    def get_predictor_info(self) -> dict | None:
-        return self._pred_svc.get_predictor_info()
 
     # --- setup dialog: device list/unit lookup ----------------------------
     def list_devices(self) -> list[DeviceEntry]:

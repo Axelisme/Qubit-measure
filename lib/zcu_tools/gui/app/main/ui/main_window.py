@@ -531,7 +531,7 @@ class MainWindow(QMainWindow):
             cast(Any, inspect).refresh()
 
     def refresh_predictor_panel(self) -> None:
-        info = self._ctrl.get_predictor_info()
+        info = self._ctrl.predictor_control.get_predictor_info()
         if info is None:
             self._predictor_label.setText("none")
             self._predictor_label.setStyleSheet("")

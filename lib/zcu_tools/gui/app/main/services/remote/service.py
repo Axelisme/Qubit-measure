@@ -19,7 +19,8 @@ layers measure-gui's own dispatch policy on top by overriding the base seams:
 
 Handlers receive *this adapter* (not the bare ctrl), so they reach app commands
 through ``adapter.ctrl.<façade>``, device commands through
-``adapter.device_control``, and View-side surfaces (render/snapshot) through
+``adapter.device_control``, predictor commands through
+``adapter.predictor_control``, and View-side surfaces (render/snapshot) through
 ``adapter.render_view``. Construct after ``Controller`` / ``MainWindow`` exist;
 inert until ``start()``.
 """
@@ -46,6 +47,7 @@ if TYPE_CHECKING:
     # checking handler/ctrl method names while the runtime import never happens.
     from zcu_tools.gui.app.main.controller import Controller, RenderView, Severity
     from zcu_tools.gui.session.device_control import DeviceControlPort
+    from zcu_tools.gui.session.predictor_control import PredictorControlPort
 
 from .dispatch import METHOD_REGISTRY
 from .events import EVENT_SERIALIZERS, wire_event_name
@@ -81,15 +83,17 @@ class RemoteControlAdapter(RemoteControlServiceBase):
     """Driving adapter: an NDJSON RPC face onto the measure-gui ``Controller``.
 
     Holds the concrete ``Controller`` (app command face), exposes the shared
-    device-control facet, and pulls EventBus from it via ``get_bus()``. Dispatch
-    handlers reach app commands through ``adapter.ctrl``, device commands through
-    ``adapter.device_control``, and the canvas-bearing View's pure-read surface
+    device/predictor-control facets, and pulls EventBus from it via ``get_bus()``.
+    Dispatch handlers reach app commands through ``adapter.ctrl``, device commands
+    through ``adapter.device_control``, predictor commands through
+    ``adapter.predictor_control``, and the canvas-bearing View's pure-read surface
     through ``adapter.render_view`` (screenshot / snapshot / dialog).
     ``render_view`` is None in a headless process; render handlers fail-fast then.
     """
 
     ctrl: Controller
     device_control: DeviceControlPort
+    predictor_control: PredictorControlPort
 
     def __init__(
         self,
@@ -109,6 +113,7 @@ class RemoteControlAdapter(RemoteControlServiceBase):
         )
         self.render_view = render_view
         self.device_control = controller.device_control
+        self.predictor_control = controller.predictor_control
 
     # ------------------------------------------------------------------
     # Base seams

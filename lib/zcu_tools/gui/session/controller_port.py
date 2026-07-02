@@ -6,7 +6,8 @@ app's Controller implements it structurally (measure: ``Controller``;
 autofluxdep: its own controller). This keeps the dialogs app-agnostic and
 prevents a back-edge from the session core to any app package.
 
-The port is the union of exactly the methods the two dialogs call:
+The port is the union of exactly the setup / inspect methods the shared dialogs
+call:
 
 - **setup dialog**: project/startup bootstrap (``apply_startup_project`` /
   ``get_persisted_startup`` / ``get_project_root``), context switching
@@ -14,17 +15,14 @@ The port is the union of exactly the methods the two dialogs call:
   ``get_active_context_label``), connection (``start_connect`` /
   ``bind_connection_outcome`` / ``remember_startup_connection`` /
   ``get_soccfg``), device list/unit lookup for flux binding.
-- **predictor dialog**: FluxoniumPredictor load / clear / frequency predict
-  (``load_predictor`` / ``set_predictor_model_params`` / ``clear_predictor`` /
-  ``predict_freq`` / ``get_predictor_info``). ``set_predictor_model_params``
-  builds+installs a predictor straight from typed EJ/EC/EL + flux params.
 - **inspect dialog base**: md read/edit (``get_current_md`` / ``coerce_md_value``
   / ``set_md_attr`` / ``del_md_attr``) + ml view/rename/delete
   (``get_current_ml`` / ``rename_ml_*`` / ``del_ml_*``). The ml create/modify
   path drags the CfgEditor and stays measure-only (the ``InspectDialog``
   subclass), so it is deliberately absent here.
 
-All three share ``get_bus`` (the event bus they subscribe to for live updates).
+Setup / inspect share ``get_bus`` (the event bus they subscribe to for live
+updates). The predictor and device dialogs use their own narrow facets.
 
 Return types are declared against the **shared base** (``BaseEventBus``) so an
 app's richer concrete type (measure's ``EventBus``) satisfies the port
@@ -45,15 +43,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.services.device import (
         DeviceEntry,
     )
-    from zcu_tools.gui.session.services.predictor import (
-        LoadPredictorRequest,
-        PredictCurveRequest,
-        PredictCurveResult,
-        PredictFreqRequest,
-        PredictMatrixCurveRequest,
-        PredictMatrixCurveResult,
-        SetModelParamsRequest,
-    )
     from zcu_tools.gui.session.services.startup import (
         PersistedStartup,
         StartupConnectionRequest,
@@ -65,7 +54,7 @@ if TYPE_CHECKING:
 
 
 class SessionControllerPort(Protocol):
-    """Narrow Controller surface the shared setup / device dialogs depend on."""
+    """Narrow Controller surface the shared setup / inspect dialogs depend on."""
 
     # --- shared ------------------------------------------------------------
     def get_bus(self) -> BaseEventBus: ...
@@ -104,17 +93,6 @@ class SessionControllerPort(Protocol):
     def get_soccfg(self) -> SocCfgHandle | None: ...
     def list_devices(self) -> list[DeviceEntry]: ...
     def get_device_unit(self, name: str) -> str: ...
-
-    # --- predictor dialog: load / clear / predict --------------------------
-    def load_predictor(self, req: LoadPredictorRequest) -> None: ...
-    def set_predictor_model_params(self, req: SetModelParamsRequest) -> None: ...
-    def clear_predictor(self) -> None: ...
-    def predict_freq(self, req: PredictFreqRequest) -> float: ...
-    def predict_freq_curve(self, req: PredictCurveRequest) -> PredictCurveResult: ...
-    def predict_matrix_element_curve(
-        self, req: PredictMatrixCurveRequest
-    ) -> PredictMatrixCurveResult: ...
-    def get_predictor_info(self) -> dict | None: ...
 
     # --- inspect dialog: md edit + ml view/rename/delete --------------------
     # (the ml create/modify path drags the CfgEditor and stays measure-only,

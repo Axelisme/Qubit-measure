@@ -53,7 +53,7 @@ from zcu_tools.gui.session.ui.predictor_canvas import PredictorCurveCanvas
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.session.controller_port import SessionControllerPort
+    from zcu_tools.gui.session.predictor_control import PredictorControlPort
 
 # Default display window in flux (Φ/Φ₀) units (plan spec).
 _DEFAULT_FLUX_WINDOW: tuple[float, float] = (0.4, 1.1)
@@ -87,22 +87,17 @@ _COL_MAG_PHI = 3
 
 
 class PredictorDialog(QDialog):
-    """Modal dialog for loading a FluxoniumPredictor and predicting frequencies.
-
-    Shared session dialog: depends only on ``SessionControllerPort`` (the
-    load/clear/predict + predictor-info + bus surface), so both measure and
-    autofluxdep open it with their own Controller.
-    """
+    """Modal dialog for loading a FluxoniumPredictor and predicting frequencies."""
 
     def __init__(
         self,
-        controller: SessionControllerPort,
+        predictor: PredictorControlPort,
         parent: QWidget | None = None,
         *,
         persistent_on_close: bool = False,
     ) -> None:
         super().__init__(parent)
-        self._ctrl = controller
+        self._pred = predictor
         self._persistent_on_close = persistent_on_close
         self.setWindowTitle("Predictor")
         self.setMinimumWidth(1000)
@@ -286,7 +281,7 @@ class PredictorDialog(QDialog):
         self._rebuild_table()
 
         # Pre-fill with current predictor state.
-        info = controller.get_predictor_info()
+        info = predictor.get_predictor_info()
         if info is not None:
             self._flux_bias_spin.setValue(info["flux_bias"])
             self._flux_half = info["flux_half"]
@@ -302,15 +297,12 @@ class PredictorDialog(QDialog):
             self._refresh_curves()
         self._update_active_label()
 
-        # EventBus subscription for live predictor state updates.
-        from zcu_tools.gui.session.events import PredictorChangedPayload
-
-        self._bus_subscribed = False
-        bus = controller.get_bus()
-        bus.subscribe(PredictorChangedPayload, self._on_predictor_changed)
-        self._bus_subscribed = True
-        self.finished.connect(self._cleanup_bus)
-        self.destroyed.connect(self._cleanup_bus)
+        # Facet subscription for live predictor state updates.
+        self._unsubscribe_predictor_changed: Callable[[], None] | None = (
+            predictor.on_predictor_changed(self._on_predictor_changed)
+        )
+        self.finished.connect(self._cleanup_subscription)
+        self.destroyed.connect(self._cleanup_subscription)
 
     def reject(self) -> None:
         if self._persistent_on_close:
@@ -372,7 +364,7 @@ class PredictorDialog(QDialog):
         """
         if self._flux_half is None or self._flux_period is None:
             return None, None
-        info = self._ctrl.get_predictor_info()
+        info = self._pred.get_predictor_info()
         if info is None:
             return None, None
         flux_bias = info["flux_bias"]
@@ -464,7 +456,7 @@ class PredictorDialog(QDialog):
         for row_idx, transition in enumerate(self._tracked):
             # Freq column: per-row scalar predict_freq (most accurate)
             try:
-                freq = self._ctrl.predict_freq(
+                freq = self._pred.predict_freq(
                     PredictFreqRequest(value=marker_value, transition=transition)
                 )
                 freq_text = f"{freq:.4f}"
@@ -495,7 +487,7 @@ class PredictorDialog(QDialog):
         )
 
         try:
-            mat_result = self._ctrl.predict_matrix_element_curve(
+            mat_result = self._pred.predict_matrix_element_curve(
                 PredictMatrixCurveRequest(
                     values=np.array([value], dtype=np.float64),
                     transitions=(transition,),
@@ -538,7 +530,7 @@ class PredictorDialog(QDialog):
 
         # ── Frequency curves ──────────────────────────────────────────────
         try:
-            freq_result = self._ctrl.predict_freq_curve(
+            freq_result = self._pred.predict_freq_curve(
                 PredictCurveRequest(values=grid, transitions=tuple(self._tracked))
             )
             self._last_freq_result = freq_result
@@ -603,7 +595,7 @@ class PredictorDialog(QDialog):
         )
 
         try:
-            mat_result = self._ctrl.predict_matrix_element_curve(
+            mat_result = self._pred.predict_matrix_element_curve(
                 PredictMatrixCurveRequest(
                     values=grid,
                     transitions=tuple(self._tracked),
@@ -795,7 +787,7 @@ class PredictorDialog(QDialog):
             flux_bias=self._flux_bias_spin.value(),
         )
         try:
-            self._ctrl.set_predictor_model_params(req)
+            self._pred.set_predictor_model_params(req)
         except PredictorLoadError as exc:
             self._set_status(str(exc), error=True)
             return False
@@ -808,19 +800,16 @@ class PredictorDialog(QDialog):
     # Bus subscription
     # ------------------------------------------------------------------
 
-    def _cleanup_bus(self, *_args: object) -> None:
-        if not self._bus_subscribed:
+    def _cleanup_subscription(self, *_args: object) -> None:
+        unsubscribe = self._unsubscribe_predictor_changed
+        if unsubscribe is None:
             return
-        from zcu_tools.gui.session.events import PredictorChangedPayload
-
-        self._ctrl.get_bus().unsubscribe(
-            PredictorChangedPayload, self._on_predictor_changed
-        )
-        self._bus_subscribed = False
+        self._unsubscribe_predictor_changed = None
+        unsubscribe()
 
     def _on_predictor_changed(self, payload: object) -> None:
         del payload
-        info = self._ctrl.get_predictor_info()
+        info = self._pred.get_predictor_info()
         if info is not None:
             self._flux_bias_spin.setValue(info["flux_bias"])
             self._flux_half = info["flux_half"]
@@ -862,7 +851,7 @@ class PredictorDialog(QDialog):
         Presence is derived from get_predictor_info (None ⇒ not installed). This
         is a plain indicator, NOT a per-param read-back.
         """
-        active = self._ctrl.get_predictor_info() is not None
+        active = self._pred.get_predictor_info() is not None
         if active:
             self._active_label.setText("Predictor: active")
             self._active_label.setStyleSheet("color: green;")

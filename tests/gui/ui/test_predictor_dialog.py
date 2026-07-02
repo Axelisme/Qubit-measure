@@ -69,7 +69,7 @@ def _make_ctrl(
     el: float = 1.0,
     path: str | None = None,
 ) -> MagicMock:
-    """Build a MagicMock controller pre-configured for dialog tests."""
+    """Build a MagicMock predictor-control port pre-configured for dialog tests."""
     ctrl = MagicMock()
     if has_predictor:
         ctrl.get_predictor_info.return_value = {
@@ -93,6 +93,7 @@ def _make_ctrl(
     ctrl.predict_freq_curve.side_effect = _freq_side
     ctrl.predict_matrix_element_curve.side_effect = _mat_side
     ctrl.predict_freq.return_value = 1234.5
+    ctrl.on_predictor_changed.return_value = MagicMock(name="unsubscribe_predictor")
     return ctrl
 
 
@@ -422,7 +423,7 @@ def test_predictor_dialog_active_label_updates_on_apply(qapp):
 
 
 def test_predictor_dialog_active_label_updates_on_clear_event(qapp):
-    """A cleared predictor bus event flips the active label back to 'not installed'."""
+    """A cleared predictor event flips the active label back to 'not installed'."""
     ctrl = _make_ctrl(has_predictor=True, path="/p.json")
     dialog = PredictorDialog(ctrl)
     assert "active" in dialog._active_label.text()
@@ -479,11 +480,11 @@ def test_predictor_dialog_init_no_predictor_no_curve_call(qapp):
 
 
 def test_predictor_dialog_persistent_reject_hides_without_finishing(qapp):
-    """Persistent host mode hides on close so cached curves and bus subscription remain."""
+    """Persistent host mode hides on close so cached curves and subscription remain."""
     from qtpy.QtWidgets import QApplication
 
     ctrl = _make_ctrl(has_predictor=False)
-    bus = ctrl.get_bus.return_value
+    unsubscribe = ctrl.on_predictor_changed.return_value
     dialog = PredictorDialog(ctrl, persistent_on_close=True)
     finished = MagicMock()
     dialog.finished.connect(finished)
@@ -495,7 +496,7 @@ def test_predictor_dialog_persistent_reject_hides_without_finishing(qapp):
 
     assert dialog.isVisible() is False
     finished.assert_not_called()
-    bus.unsubscribe.assert_not_called()
+    unsubscribe.assert_not_called()
 
 
 def test_predictor_dialog_init_with_predictor_all_canvases_have_axes(qapp):
@@ -824,12 +825,12 @@ def test_predictor_dialog_no_selection_calls_set_highlight_none_all(qapp):
 
 
 # ---------------------------------------------------------------------------
-# Bus events
+# Predictor events
 # ---------------------------------------------------------------------------
 
 
-def test_predictor_dialog_on_predictor_changed_bus_event_refreshes_curves(qapp):
-    """Bus PredictorChangedPayload with a loaded predictor must call predict_freq_curve."""
+def test_predictor_dialog_on_predictor_changed_event_refreshes_curves(qapp):
+    """PredictorChangedPayload with a loaded predictor must call predict_freq_curve."""
     ctrl = _make_ctrl(has_predictor=False)
     dialog = PredictorDialog(ctrl)
     assert ctrl.predict_freq_curve.call_count == 0
@@ -850,7 +851,7 @@ def test_predictor_dialog_on_predictor_changed_bus_event_refreshes_curves(qapp):
 
 
 def test_predictor_dialog_on_predictor_changed_cleared_clears_all_canvases(qapp):
-    """Bus event with no predictor must blank all canvases."""
+    """Predictor event with no predictor must blank all canvases."""
     ctrl = _make_ctrl(has_predictor=True, path="/p.json")
     dialog = PredictorDialog(ctrl)
 
@@ -863,7 +864,7 @@ def test_predictor_dialog_on_predictor_changed_cleared_clears_all_canvases(qapp)
 
 
 def test_predictor_dialog_on_predictor_changed_cleared_resets_all_columns(qapp):
-    """After a cleared bus event, all f / |n| / |phi| cells show '—'."""
+    """After a cleared predictor event, all f / |n| / |phi| cells show '—'."""
     ctrl = _make_ctrl(has_predictor=True, path="/p.json")
     dialog = PredictorDialog(ctrl)
 

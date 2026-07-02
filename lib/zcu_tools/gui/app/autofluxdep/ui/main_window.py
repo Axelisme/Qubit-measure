@@ -396,7 +396,7 @@ class MainWindow(QMainWindow):
 
         # The shared predictor dialog loads a FluxoniumPredictor into the active
         # context; the run reads exp_context.predictor.
-        dlg = PredictorDialog(self._ctrl, self)
+        dlg = PredictorDialog(self._ctrl.predictor_control, self)
         dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dlg.finished.connect(
             lambda _r: (

@@ -26,7 +26,7 @@ def _h_predictor_load(
     path = str(params["path"])
     flux_bias = float(params["flux_bias"])  # type: ignore[arg-type]
     try:
-        adapter.ctrl.load_predictor(
+        adapter.predictor_control.load_predictor(
             LoadPredictorRequest(path=path, flux_bias=flux_bias)
         )
     except PredictorLoadError as exc:
@@ -38,7 +38,7 @@ def _h_predictor_load(
     # Echo the installed model so the agent verifies the load without a follow-up
     # read; get_predictor_info() is non-None right after a successful install (a
     # None here is a broken invariant, so raise rather than echo a half-shape).
-    info = adapter.ctrl.get_predictor_info()
+    info = adapter.predictor_control.get_predictor_info()
     if info is None:
         raise RuntimeError("predictor missing immediately after a successful load")
     return {"loaded": True, **info}
@@ -61,7 +61,7 @@ def _h_predictor_set_model_params(
         flux_bias=float(params["flux_bias"]),  # type: ignore[arg-type]
     )
     try:
-        adapter.ctrl.set_predictor_model_params(req)
+        adapter.predictor_control.set_predictor_model_params(req)
     except PredictorLoadError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -70,7 +70,7 @@ def _h_predictor_set_model_params(
         ) from exc
     # Echo the installed model (path is null — in-memory install has no file); a
     # None right after a successful install is a broken invariant, so raise.
-    info = adapter.ctrl.get_predictor_info()
+    info = adapter.predictor_control.get_predictor_info()
     if info is None:
         raise RuntimeError("predictor missing immediately after a successful install")
     return {"loaded": True, **info}
@@ -80,7 +80,7 @@ def _h_predictor_clear(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    adapter.ctrl.clear_predictor()
+    adapter.predictor_control.clear_predictor()
     return {"loaded": False}
 
 
@@ -96,7 +96,7 @@ def _h_predictor_predict(
     from_level = int(params["from_level"])  # type: ignore[arg-type]
     to_level = int(params["to_level"])  # type: ignore[arg-type]
     try:
-        freq = adapter.ctrl.predict_freq(
+        freq = adapter.predictor_control.predict_freq(
             PredictFreqRequest(value=device_value, transition=(from_level, to_level))
         )
     except PredictorNotLoaded as exc:
@@ -114,7 +114,7 @@ def _h_predictor_info(
     del params
     # Flatten the model fields to the top level; the `loaded` flag replaces a null
     # payload so the agent never has to distinguish {info: null} from a real read.
-    info = adapter.ctrl.get_predictor_info()
+    info = adapter.predictor_control.get_predictor_info()
     if info is None:
         return {"loaded": False}
     return {"loaded": True, **info}

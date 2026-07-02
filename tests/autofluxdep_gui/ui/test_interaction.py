@@ -375,8 +375,8 @@ def test_predictor_button_opens_shared_predictor_dialog(app):
 
     ctrl, win = app
     assert hasattr(win, "_predictor_btn")
-    dlg = PredictorDialog(ctrl, win)  # must not raise
-    assert dlg._ctrl is ctrl
+    dlg = PredictorDialog(ctrl.predictor_control, win)  # must not raise
+    assert dlg._pred is ctrl.predictor_control
     dlg.deleteLater()
 
 

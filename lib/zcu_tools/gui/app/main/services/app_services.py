@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.ports import ProgressTransport
+    from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.services.io_manager import IOManager
 
     from .cfg_editor import CfgEditorHost
@@ -62,6 +63,7 @@ class AppServices:
     device_control: DeviceControlPort
     soc_connection: SoCConnectionService
     predictor: PredictorService
+    predictor_control: PredictorControlPort
     context: ContextService
     tab: TabService
     load: LoadService
@@ -140,6 +142,7 @@ def build_app_services(
         device_control=session.device_control,
         soc_connection=session.soc_connection,
         predictor=session.predictor,
+        predictor_control=session.predictor_control,
         context=context,
         tab=tab,
         load=LoadService(state, bus, writeback),

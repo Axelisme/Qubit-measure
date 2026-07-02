@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-07-02 - remote method entries and MCP exposure policy
+**Last updated:** 2026-07-02 - remote method entries, MCP exposure policy, predictor-control facet
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals GUI-owned work onto
@@ -17,7 +17,8 @@ not declare MCP tools and does not own stdio transport.
   editor cleanup.
 - `dispatch.py`：runtime method registry projection; keeps the public
   `METHOD_REGISTRY` import path stable.
-- `handlers/`：grouped wire method handlers bound to controller/render-view calls.
+- `handlers/`：grouped wire method handlers bound to controller, control-facet,
+  or render-view calls.
 - `method_specs.py`：Qt-free public projection for wire method schema, timeouts,
   and MCP generation metadata.
 - `method_entries/`：single registration source for method name, handler ref,
@@ -118,8 +119,9 @@ The wire surface is grouped by ownership:
 - `startup.*` / `result_scope.*`：project and result-scope setup.
 - `context.*`：MetaDict / ModuleLibrary / active context operations.
 - `soc.*`：mock or remote SoC connection.
-- `device.*`：device connect/disconnect/setup/snapshot.
-- `predictor.*`：Fluxonium predictor load, edit, clear, and predictions.
+- `device.*`：device connect/disconnect/setup/snapshot through `DeviceControlPort`.
+- `predictor.*`：Fluxonium predictor load, edit, clear, and predictions through
+  `PredictorControlPort`.
 - `tab.*`：tab lifecycle, cfg discovery/edit, run, load, save, figures.
 - `analyze.*` / `post_analyze.*`：primary and secondary analysis.
 - `writeback.*`：analysis result writeback preview and apply.

@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 from zcu_tools.gui.result_scope import ResultScopeManager
 from zcu_tools.gui.session.device_control import DeviceControlFacet
+from zcu_tools.gui.session.predictor_control import PredictorControlFacet
 from zcu_tools.gui.session.services.connection import SoCConnectionService
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.device import DeviceService
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
         ExclusionGate,
         ProjectIOPort,
     )
+    from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.services.progress import ProgressService
     from zcu_tools.gui.session.state import SessionState
 
@@ -50,6 +52,7 @@ class SessionServices:
 
     soc_connection: SoCConnectionService
     predictor: PredictorService
+    predictor_control: PredictorControlPort
     context: ContextService
     device: DeviceService
     device_control: DeviceControlPort
@@ -96,9 +99,10 @@ def build_session_services(
         driver_factory=driver_factory,
         device_registry=device_registry,
     )
-    device_control = DeviceControlFacet(bus=bus, device=device, progress=progress)
     soc_connection = SoCConnectionService(state, bus, gate, handles, runner)
     predictor = PredictorService(state, bus)
+    predictor_control = PredictorControlFacet(bus=bus, predictor=predictor)
+    device_control = DeviceControlFacet(bus=bus, device=device, progress=progress)
     context = ContextService(state, io_manager, bus, values=value_registry)
     value_sources = ValueSourceBinder(state=state, bus=bus, registry=value_registry)
     # StartupService bridges the two session services it commands through their
@@ -114,6 +118,7 @@ def build_session_services(
     return SessionServices(
         soc_connection=soc_connection,
         predictor=predictor,
+        predictor_control=predictor_control,
         context=context,
         device=device,
         device_control=device_control,
