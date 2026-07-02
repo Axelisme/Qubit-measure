@@ -1,32 +1,27 @@
 from __future__ import annotations
 
-import time
-
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
 from IPython.display import clear_output, display
-from matplotlib.animation import FuncAnimation
 from numpy.typing import NDArray
-from tqdm.auto import tqdm
 
-from ..processing import cast2real_and_norm, diff_mirror
+from zcu_tools.analysis.fluxdep import TwoLinePicker
 
 
-def _line_xdata0(line) -> float:
-    """Extract the first x-coordinate from a Line2D.
-
-    Line2D.get_xdata() returns ArrayLike in numpy-2 stubs, which does not
-    expose __getitem__.  Wrapping with np.asarray(...)[0] gives a concrete
-    ndarray that is safely indexable and then convertible to plain float.
-    """
-    return float(np.asarray(line.get_xdata())[0])
+def _canvas_widget(canvas) -> widgets.Widget:
+    if isinstance(canvas, widgets.Widget):
+        return canvas
+    output = widgets.Output()
+    with output:
+        display(canvas)
+    return output
 
 
 class InteractiveLines:
     TRACK_INFO = {
-        "half flux": "<span style='color:red'>正在移動half flux(紅線)</span>",
-        "integer flux": "<span style='color:blue'>正在移動integer flux(藍線)</span>",
+        "half": "<span style='color:red'>正在移動half flux(紅線)</span>",
+        "integer": "<span style='color:blue'>正在移動integer flux(藍線)</span>",
         "none": "<span style='color:gray'>未選擇</span>",
     }
 
@@ -38,58 +33,26 @@ class InteractiveLines:
         flux_half: float | None = None,
         flux_int: float | None = None,
     ) -> None:
-        plt.ioff()  # 避免立即顯示圖表
-        self.fig_main, self.ax_main = plt.subplots(figsize=(4, 3))
-        self.fig_loss, self.ax_loss = plt.subplots(figsize=(4, 3))
-        self.fig_main.tight_layout()
-        self.fig_loss.tight_layout()
+        self.is_finished = False
+
+        plt.ioff()  # to avoid showing the plot immediately
+        self.fig = plt.figure(figsize=(5, 5))
+        self.picker = TwoLinePicker(
+            self.fig,
+            np.asarray(signals, dtype=np.complex128),
+            dev_values,
+            freqs,
+            flux_half=flux_half,
+            flux_int=flux_int,
+        )
         plt.ion()
 
-        # 初始化線的位置
-        flux_center = (dev_values[0] + dev_values[-1]) / 2
-        self.flux_half = flux_center if flux_half is None else flux_half
-        self.flux_int = dev_values[-5] if flux_int is None else flux_int
-        if flux_half is not None and flux_int is not None:
-            fix_period = 2 * abs(self.flux_int - self.flux_half)
-
-            # fold the flux_half and flux_int to the closest point to the spect_center
-            self.flux_half = (
-                self.flux_half
-                - round((self.flux_half - flux_center) / fix_period, 0) * fix_period
-            )
-            self.flux_int = (
-                self.flux_int
-                - round((self.flux_int - flux_center) / fix_period, 0) * fix_period
-            )
-        self.flux_half = float(self.flux_half)
-        self.flux_int = float(self.flux_int)
-
-        self.dev_values = dev_values
-        self.freqs = freqs
-        self.signals = signals
-
-        # Display-mode flag; mirror-loss scoring still uses the selected signal view.
-        self.only_use_magnitude: bool = False
-
-        # Precompute the image shown in the main spectrum view.
-        self.real_signals = cast2real_and_norm(
-            signals, use_phase=not self.only_use_magnitude
-        )
-
-        self.mouse_x = None
-        self.mouse_y = None
-        self.prev_mouse_x = None
-        self.prev_mouse_y = None
-
-        # Throttle loss-view redraws to actual mouse movement.
-        self._mouse_moved = False
-
         self.create_widgets()
-        self.create_background(dev_values, freqs, self.real_signals)
-        self.create_lines(dev_values)
-        self.create_loss(dev_values, freqs, self.real_signals)
 
-        # 顯示 widget
+        self.fig.canvas.mpl_connect("button_press_event", self.onclick)
+        self.fig.canvas.mpl_connect("motion_notify_event", self.onmove)
+        self.fig.canvas.mpl_connect("button_release_event", self.onrelease)
+
         display(
             widgets.VBox(
                 [
@@ -110,13 +73,36 @@ class InteractiveLines:
                             self.only_use_magnitude_checkbox,
                         ]
                     ),
-                    widgets.HBox([self.fig_main.canvas, self.fig_loss.canvas]),
+                    _canvas_widget(self.fig.canvas),
                 ]
             )
         )
 
+    @property
+    def flux_half(self) -> float:
+        return self.picker.positions()[0]
+
+    @flux_half.setter
+    def flux_half(self, value: float) -> None:
+        _, flux_int = self.picker.positions()
+        self.picker.apply_positions(value, flux_int)
+        self._refresh_position()
+
+    @property
+    def flux_int(self) -> float:
+        return self.picker.positions()[1]
+
+    @flux_int.setter
+    def flux_int(self, value: float) -> None:
+        flux_half, _ = self.picker.positions()
+        self.picker.apply_positions(flux_half, value)
+        self._refresh_position()
+
+    @property
+    def only_use_magnitude(self) -> bool:
+        return self.picker.magnitude_only
+
     def create_widgets(self) -> None:
-        """創建 ipywidgets 控件"""
         self.flux_half_button = widgets.Button(
             description="選擇half flux(紅線)",
             button_style="danger",
@@ -135,10 +121,8 @@ class InteractiveLines:
         self.conjugate_checkbox = widgets.Checkbox(
             value=False, description="Conjugate Line"
         )
-
-        # Display the background with magnitude only when checked.
         self.only_use_magnitude_checkbox = widgets.Checkbox(
-            value=self.only_use_magnitude, description="Magnitude Only"
+            value=self.picker.magnitude_only, description="Magnitude Only"
         )
         self.swap_button = widgets.Button(
             description="交換線條",
@@ -151,404 +135,111 @@ class InteractiveLines:
             tooltip="自動找到mirror loss最小的位置並移動",
         )
         self.position_text = widgets.HTML(value=self.get_info())
-        self.status_text = widgets.HTML(value="<span style='color:gray'>未選擇</span>")
+        self.status_text = widgets.HTML(value=self.TRACK_INFO["none"])
 
-        # 綁定事件
         self.flux_half_button.on_click(self.set_picked_half_flux)
         self.flux_int_button.on_click(self.set_picked_int_flux)
         self.finish_button.on_click(self.on_finish)
         self.swap_button.on_click(self.swap_lines)
         self.auto_align_button.on_click(self.auto_align_lines)
-
-        # Bind the magnitude-only display toggle.
+        self.conjugate_checkbox.observe(self.on_toggle_conjugate, names="value")
         self.only_use_magnitude_checkbox.observe(
             self.on_toggle_magnitude, names="value"
         )
 
-    def create_background(self, dev_values, freqs, real_signals) -> None:
-        """創建背景圖片"""
-        # 儲存圖像控制柄以便之後更新資料
-        dx = (dev_values[-1] - dev_values[0]) / (len(dev_values) - 1)
-        dy = (freqs[-1] - freqs[0]) / (len(freqs) - 1)
-        self.main_im = self.ax_main.imshow(
-            real_signals.T,
-            aspect="auto",
-            origin="lower",
-            interpolation="none",
-            extent=(
-                dev_values[0] - dx / 2,
-                dev_values[-1] + dx / 2,
-                freqs[0] - dy / 2,
-                freqs[-1] + dy / 2,
-            ),
-        )
-
-        self.ax_main.set_xlim(dev_values[0], dev_values[-1])
-        self.ax_main.set_ylim(freqs[0], freqs[-1])
-
-    def create_lines(self, dev_values) -> None:
-        """創建兩條垂直線"""
-        # 創建兩條垂直線
-        self.half_line = self.ax_main.axvline(
-            x=self.flux_half, color="r", linestyle="--"
-        )
-        self.int_line = self.ax_main.axvline(x=self.flux_int, color="b", linestyle="--")
-
-        # 設置變數
-        self.picked = None
-        self.min_flux_dist = 0.01 * abs(dev_values[-1] - dev_values[0])
-        self.is_finished = False
-        self.active_line = None  # 用來跟踪目前正在移動的線
-
-        # 連接事件
-        self.fig_main.canvas.mpl_connect("button_press_event", self.onclick)
-        self.fig_main.canvas.mpl_connect("motion_notify_event", self.onmove)
-
-        # 創建動畫
-        self.anim_main = FuncAnimation(
-            self.fig_main,
-            self.update_main_view,
-            interval=33,  # 約30 FPS
-            blit=True,
-            cache_frame_data=False,
-        )
-
-    def create_loss(self, dev_values, freqs, real_signals) -> None:
-        """創建mirror loss視圖"""
-        self.ax_loss.set_title(f"mirror loss: {None}")
-
-        dx = (dev_values[-1] - dev_values[0]) / (len(dev_values) - 1)
-        dy = (freqs[-1] - freqs[0]) / (len(freqs) - 1)
-        self.loss_im = self.ax_loss.imshow(
-            real_signals.T,
-            aspect="auto",
-            origin="lower",
-            interpolation="none",
-            extent=(
-                dev_values[0] - dx / 2,
-                dev_values[-1] + dx / 2,
-                freqs[0] - dy / 2,
-                freqs[-1] + dy / 2,
-            ),
-        )
-        self.ax_loss.set_xticks([])
-        self.ax_loss.set_yticks([])
-
-        # show red spot at center
-        x = self.flux_half
-        y = 0.5 * (freqs[0] + freqs[-1])
-        self.loss_dot = self.ax_loss.plot([x], [y], "ro")[0]
-
-        self.anim_loss = FuncAnimation(
-            self.fig_loss,
-            self.update_loss_view,
-            interval=500,
-            blit=True,
-            cache_frame_data=False,
-        )
-
     def get_info(self) -> str:
-        return f"half flux: {self.flux_half:.2e}, integer flux: {self.flux_int:.2e}, flux period: {2 * abs(self.flux_int - self.flux_half):.2e}"
+        flux_half, flux_int = self.picker.positions()
+        period = 2 * abs(flux_int - flux_half)
+        return (
+            f"half flux: {flux_half:.2e}, "
+            f"integer flux: {flux_int:.2e}, "
+            f"flux period: {period:.2e}"
+        )
+
+    def _refresh_position(self) -> None:
+        self.position_text.value = self.get_info()
+        self.fig.canvas.draw_idle()
+
+    def _refresh_status(self) -> None:
+        role = self.picker.selected_role or "none"
+        self.status_text.value = self.TRACK_INFO[role]
 
     def set_picked_half_flux(self, _) -> None:
-        """選擇half flux(紅線)"""
         if self.is_finished:
             return
-
-        if self.active_line == self.half_line:
-            # 如果已經在移動紅線, 則停止移動
-            self.stop_tracking()
+        if self.picker.selected_role == "half":
+            self.picker.clear_selection()
         else:
-            # 開始移動紅線
-            self.active_line = self.half_line
-            self.picked = self.half_line
-            self.status_text.value = self.TRACK_INFO["half flux"]
+            self.picker.pick_half()
+        self._refresh_status()
 
     def set_picked_int_flux(self, _) -> None:
-        """選擇integer flux(藍線)"""
         if self.is_finished:
             return
-
-        if self.active_line == self.int_line:
-            # 如果已經在移動藍線, 則停止移動
-            self.stop_tracking()
+        if self.picker.selected_role == "integer":
+            self.picker.clear_selection()
         else:
-            # 開始移動藍線
-            self.active_line = self.int_line
-            self.picked = self.int_line
-            self.status_text.value = self.TRACK_INFO["integer flux"]
+            self.picker.pick_integer()
+        self._refresh_status()
 
     def stop_tracking(self) -> None:
-        """停止追蹤滑鼠"""
-        self.active_line = None
-        self.picked = None
-        self.status_text.value = self.TRACK_INFO["none"]
+        self.picker.clear_selection()
+        self._refresh_status()
 
     def swap_lines(self, _) -> None:
-        """交換half flux線與integer flux線的位置"""
         if self.is_finished:
             return
-
-        # 停止當前的追蹤
-        self.stop_tracking()
-
-        # 交換線條的位置
-        self.flux_half, self.flux_int = self.flux_int, self.flux_half
-
-        # 更新線條的視覺位置
-        self.half_line.set_xdata([self.flux_half])
-        self.int_line.set_xdata([self.flux_int])
-
-        # 更新位置文字
-        self.position_text.value = self.get_info()
-
-        # 重新繪製
-        self.fig_main.canvas.draw_idle()
+        self.picker.swap()
+        self._refresh_status()
+        self._refresh_position()
 
     def auto_align_lines(self, _) -> None:
-        """自動對齊線條到mirror loss最小的位置"""
         if self.is_finished:
             return
-
-        # 停止當前的追蹤
-        self.stop_tracking()
-
-        # 計算搜索範圍：總寬度的二十分之一
-        total_width = abs(self.dev_values[-1] - self.dev_values[0])
-        search_width = total_width / 20
-
-        # 為紅線和藍線分別找到最佳位置
-        best_flux_half = self._find_best_position(self.flux_half, search_width)
-        best_flux_int = self._find_best_position(self.flux_int, search_width)
-
-        # 更新線條位置
-        self.flux_half = best_flux_half
-        self.flux_int = best_flux_int
-
-        # 更新線條的視覺位置
-        self.half_line.set_xdata([self.flux_half])
-        self.int_line.set_xdata([self.flux_int])
-
-        # 更新位置文字
-        self.position_text.value = self.get_info()
-
-        # 重新繪製
-        self.fig_main.canvas.draw_idle()
-
-    def _find_best_position(self, current_pos: float, search_width: float) -> float:
-        """在給定範圍內找到mirror loss最小的位置"""
-        # 計算半格精度
-        precision = (
-            0.25
-            * (self.dev_values.max() - self.dev_values.min())
-            / len(self.dev_values)
-        )
-
-        # 定義搜索範圍
-        left_bound = max(self.dev_values.min(), current_pos - search_width / 2)
-        right_bound = min(self.dev_values.max(), current_pos + search_width / 2)
-
-        # 創建候選位置，只考慮半格的整數倍
-        # 將邊界轉換為相對於起始點的格數
-        left_steps = int(np.floor((left_bound - self.dev_values.min()) / precision))
-        right_steps = int(np.ceil((right_bound - self.dev_values.min()) / precision))
-
-        # 生成候選位置
-        candidates = [
-            self.dev_values.min() + i * precision
-            for i in range(left_steps, right_steps + 1)
-        ]
-
-        # 確保候選位置在有效範圍內
-        candidates = [
-            pos
-            for pos in candidates
-            if self.dev_values.min() <= pos <= self.dev_values.max()
-        ]
-
-        # 如果沒有有效的候選位置，返回當前位置
-        if not candidates:
-            return current_pos
-
-        best_pos = current_pos
-        min_loss = float("inf")
-
-        real_signals = cast2real_and_norm(
-            self.signals, use_phase=not self.only_use_magnitude
-        )
-
-        # 對每個候選位置計算mirror loss
-        pbar = None
-        start_t = time.time()
-        for i, candidate in enumerate(candidates):
-            # Score each candidate against the active signal view.
-            diff_amps = diff_mirror(self.dev_values, real_signals, candidate)
-            valid_amps = diff_amps[diff_amps != 0.0]
-
-            # 確保有有效的數據點
-            if len(valid_amps) > 0:
-                mirror_loss = np.mean(valid_amps)
-
-                # 如果這個位置的loss更小，更新最佳位置
-                if not np.isnan(mirror_loss) and mirror_loss < min_loss:
-                    min_loss = mirror_loss
-                    best_pos = candidate
-
-            if pbar is None:
-                if time.time() - start_t > 0.5:  # 如果計算超過0.5秒，才顯示進度條
-                    pbar = tqdm(
-                        candidates, desc="Auto-aligning", unit="pos", leave=False
-                    )
-                    pbar.update(i + 1)
-            else:
-                pbar.update(1)
-        if pbar is not None:
-            pbar.close()
-
-        return best_pos
+        self.picker.auto_align()
+        self._refresh_status()
+        self._refresh_position()
 
     def onclick(self, event) -> None:
-        """滑鼠點擊事件"""
-        if self.is_finished or event.inaxes != self.ax_main:
+        if self.is_finished or not self.picker.is_main_axes(event.inaxes):
             return
-
-        flux_half_dist = abs(event.xdata - _line_xdata0(self.half_line))
-        flux_int_dist = abs(event.xdata - _line_xdata0(self.int_line))
-
-        # 如果已經有活動的線條, 點擊任何位置都停止追蹤
-        if self.active_line is not None:
-            self.stop_tracking()
-            return
-
-        # 選擇最近的線
-        if flux_half_dist < flux_int_dist and flux_half_dist < 3 * self.min_flux_dist:
-            self.set_picked_half_flux(None)
-        elif flux_int_dist <= flux_half_dist and flux_int_dist < 3 * self.min_flux_dist:
-            self.set_picked_int_flux(None)
+        self.picker.on_press(event.xdata)
+        self._refresh_status()
 
     def onmove(self, event) -> None:
-        """滑鼠移動事件"""
-        if self.is_finished or event.inaxes != self.ax_main:
-            self.mouse_x = None
-            self.mouse_y = None
+        if self.is_finished or not self.picker.is_main_axes(event.inaxes):
             return
-        self.mouse_x = event.xdata
-        self.mouse_y = event.ydata
+        self.picker.on_move(event.xdata)
+        self._refresh_position()
 
-        # 標記滑鼠有移動，供 update_zoom_view 使用
-        self._mouse_moved = True
-
-        # 更新前一次位置紀錄
-        self.prev_mouse_x = self.mouse_x
-        self.prev_mouse_y = self.mouse_y
-
-    def update_main_view(self, _) -> list:
-        """更新動畫"""
-        x, y = self.mouse_x, self.mouse_y
-        if self.picked is None or x is None or y is None:
-            return []
-
-        other_line = self.int_line if self.picked is self.half_line else self.half_line
-        other_x = _line_xdata0(other_line)
-
-        # 確保線之間保持最小距離
-        if x > other_x and x - other_x < self.min_flux_dist:
-            x = other_x + self.min_flux_dist
-        elif x < other_x and other_x - x < self.min_flux_dist:
-            x = other_x - self.min_flux_dist
-
-        # 更新線的位置
-        if self.conjugate_checkbox.value:
-            # 同步移動
-            dx = x - _line_xdata0(self.picked)
-            # 更新兩條線的位置
-            self.half_line.set_xdata([_line_xdata0(self.half_line) + dx])
-            self.int_line.set_xdata([_line_xdata0(self.int_line) + dx])
-        else:
-            # 單獨移動
-            self.picked.set_xdata([x])
-
-        # 更新位置文字
-        self.flux_half = _line_xdata0(self.half_line)
-        self.flux_int = _line_xdata0(self.int_line)
-        self.position_text.value = self.get_info()
-
-        return [self.half_line, self.int_line]
-
-    def update_loss_view(self, _) -> list:
-        """更新放大視圖"""
-        x, y = self.mouse_x, self.mouse_y
-
-        # 條件不足或滑鼠未移動時不更新，減少 CPU loading
-        if x is None or y is None or self.active_line is None or not self._mouse_moved:
-            return []  # do nothing
-
-        # reset flag
-        self._mouse_moved = False
-
-        # The loss preview uses the raw complex spectrum independent of display mode.
-        mirror_loss = diff_mirror(self.dev_values, self.signals, x)
-        self.loss_im.set_data(mirror_loss.T)
-        self.loss_im.autoscale()
-
-        mirror_loss = np.mean(mirror_loss[mirror_loss != 0.0])
-
-        # set axis limits to simulate zoom
-        Dx = 0.3 * abs(self.dev_values[-1] - self.dev_values[0])
-        Dy = 0.3 * abs(self.freqs[-1] - self.freqs[0])
-        self.ax_loss.set_xlim(x - Dx, x + Dx)
-        self.ax_loss.set_ylim(y - Dy, y + Dy)
-        self.ax_loss.set_title(f"mirror loss: {mirror_loss:.4f}")
-
-        self.loss_dot.set_xdata([x])
-        self.loss_dot.set_ydata([y])
-        self.loss_dot.set_color("r" if self.active_line is self.half_line else "b")
-
-        return [self.loss_im, self.loss_dot]
+    def onrelease(self, event) -> None:
+        if self.is_finished or not self.picker.is_main_axes(event.inaxes):
+            return
+        self.picker.on_release(event.xdata, event.ydata)
 
     def on_finish(self, _) -> None:
-        """完成按鈕的回調函數"""
         self.finish_interactive()
-
-        # also clear the output
         clear_output(wait=False)
 
     def finish_interactive(self) -> None:
         self.is_finished = True
-        self.picked = None
-        self.active_line = None
-        # 停止動畫
-        if self.anim_main.event_source is not None:
-            self.anim_main.event_source.stop()
-        if self.anim_loss.event_source is not None:
-            self.anim_loss.event_source.stop()
-        plt.close(self.fig_main)
-        plt.close(self.fig_loss)
+        self.picker.clear_selection()
+        self._refresh_status()
+        plt.close(self.fig)
 
     def get_positions(self, finish: bool = True) -> tuple[float, float]:
-        """運行交互式選擇器並返回兩條線的位置"""
         if not self.is_finished and finish:
             self.finish_interactive()
-        return float(self.flux_half), float(self.flux_int)
+        return self.picker.positions()
 
-    def on_toggle_magnitude(self, change) -> None:
-        """切換是否僅使用振幅資料的顯示模式"""
+    def on_toggle_conjugate(self, change) -> None:
         if self.is_finished:
             return
+        self.picker.set_conjugate(bool(change["new"]))
 
-        # 停止當前的追蹤
-        self.stop_tracking()
-
-        # 更新屬性
-        self.only_use_magnitude = bool(change["new"])
-
-        # 重新計算要顯示的資料
-        self.real_signals = cast2real_and_norm(
-            self.signals, use_phase=not self.only_use_magnitude
-        )
-
-        self.main_im.set_data(self.real_signals.T)
-        self.main_im.autoscale()
-
-        # 更新背景影像
-        self.fig_main.canvas.draw_idle()
+    def on_toggle_magnitude(self, change) -> None:
+        if self.is_finished:
+            return
+        self.picker.set_magnitude_only(bool(change["new"]))
+        self._refresh_status()
+        self._refresh_position()

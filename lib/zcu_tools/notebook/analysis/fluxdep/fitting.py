@@ -7,6 +7,7 @@ including candidate breakpoint search, database search, and spectrum fitting.
 from __future__ import annotations
 
 import os
+import warnings
 from functools import lru_cache
 from typing import Literal, overload
 
@@ -219,6 +220,7 @@ def search_in_database(
     order = np.argsort(lbs)
     idx_bar = make_pbar(total=N, desc="Searching...")
     searched = 0
+    interrupted = False
     try:
         for oi in order:
             oi = int(oi)
@@ -248,13 +250,19 @@ def search_in_database(
                 best_params = f_params[oi] * a
         idx_bar.set_description("Done! ")
     except KeyboardInterrupt:
-        pass
+        interrupted = True
     finally:
         idx_bar.close()
 
     if not np.isfinite(best_dist):
         raise RuntimeError(
             "No valid candidate found in database (all parameter bounds infeasible)."
+        )
+    if interrupted:
+        warnings.warn(
+            "Database search was interrupted; returning the best-so-far partial result.",
+            RuntimeWarning,
+            stacklevel=2,
         )
 
     fig: Figure | None = None
@@ -359,9 +367,6 @@ def fit_spectrum(
         scq_settings.PROGRESSBAR_DISABLED = old
         pbar.close()
 
-    if isinstance(res, np.ndarray):  # alternate scipy/test double return shape
-        best_params = res
-    else:
-        best_params = res.x
+    best_params = res.x
 
     return (float(best_params[0]), float(best_params[1]), float(best_params[2]))

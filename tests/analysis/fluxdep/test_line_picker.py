@@ -66,3 +66,21 @@ def test_picker_magnitude_toggle() -> None:
     assert picker.magnitude_only is False
     picker.set_magnitude_only(True)
     assert picker.magnitude_only is True
+
+
+def test_picker_explicit_pick_hooks() -> None:
+    picker = _make_picker()
+    assert picker.selected_role is None
+    picker.pick_half()
+    assert picker.selected_role == "half"
+    picker.pick_integer()
+    assert picker.selected_role == "integer"
+    picker.clear_selection()
+    assert picker.selected_role is None
+
+
+def test_picker_identifies_main_axes() -> None:
+    picker = _make_picker()
+    assert picker.is_main_axes(picker._ax_main)
+    assert not picker.is_main_axes(picker._ax_loss)
+    assert not picker.is_main_axes(None)

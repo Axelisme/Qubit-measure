@@ -17,6 +17,15 @@ from zcu_tools.analysis.fluxdep import (
 from zcu_tools.notebook.persistance import SpectrumResult
 
 
+def _canvas_widget(canvas) -> widgets.Widget:
+    if isinstance(canvas, widgets.Widget):
+        return canvas
+    output = widgets.Output()
+    with output:
+        display(canvas)
+    return output
+
+
 class InteractiveSelector:
     def __init__(
         self,
@@ -36,9 +45,13 @@ class InteractiveSelector:
         self.selected = (
             selected if selected is not None else np.ones_like(self.s_fluxs, dtype=bool)
         )
-        self.filter_mask = np.ones_like(self.selected, dtype=bool)
+        if self.selected.shape != self.s_fluxs.shape:
+            raise ValueError("selected must have the same shape as the point cloud")
+        self.filter_mask = np.ones(int(np.count_nonzero(self.selected)), dtype=bool)
 
         self.is_finished = False
+        self.temp_circle = None
+        self.temp_circle_timer = None
 
         plt.ioff()  # to avoid showing the plot immediately
         self.fig, self.ax = plt.subplots()
@@ -55,7 +68,7 @@ class InteractiveSelector:
         display(
             widgets.HBox(
                 [
-                    self.fig.canvas,
+                    _canvas_widget(self.fig.canvas),
                     widgets.VBox(
                         [
                             self.width_slider,
@@ -68,10 +81,6 @@ class InteractiveSelector:
                 ]
             )
         )
-
-        # Transient brush-feedback marker and its cleanup timer.
-        self.temp_circle = None
-        self.temp_circle_timer = None
 
     def create_thresh_silders(self) -> None:
         self.thresh_slider = widgets.FloatSlider(

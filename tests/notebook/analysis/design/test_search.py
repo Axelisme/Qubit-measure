@@ -191,6 +191,47 @@ def test_calculate_t1_requires_esys(grid: pd.DataFrame) -> None:
         S.calculate_t1(grid, noise_channels=_NOISE_CHANNELS, Temp=0.05)
 
 
+def test_t1_default_warning_context_restores_on_exception(monkeypatch) -> None:
+    import scqubits.settings as scq
+
+    monkeypatch.setattr(scq, "T1_DEFAULT_WARNING", True)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        with S._t1_default_warning_disabled():
+            assert scq.T1_DEFAULT_WARNING is False
+            raise RuntimeError("boom")
+
+    assert scq.T1_DEFAULT_WARNING is True
+
+
+def test_calculate_t1_restores_warning_when_fluxonium_raises(monkeypatch) -> None:
+    import scqubits.core.fluxonium as fluxonium_mod
+    import scqubits.settings as scq
+
+    class FakeFluxonium:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def t1_effective(self, *_args, **_kwargs) -> float:
+            assert scq.T1_DEFAULT_WARNING is False
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(scq, "T1_DEFAULT_WARNING", True)
+    monkeypatch.setattr(fluxonium_mod, "Fluxonium", FakeFluxonium)
+    grid = S.generate_params_table(1.0, 1.0, 1.0)
+    grid["esys"] = [None]
+
+    with pytest.raises(RuntimeError, match="boom"):
+        S.calculate_t1(grid, noise_channels=_NOISE_CHANNELS, Temp=0.05)
+
+    assert scq.T1_DEFAULT_WARNING is True
+
+
+def test_calculate_dispersive_shift_is_correctly_spelled() -> None:
+    assert hasattr(S, "calculate_dispersive_shift")
+    assert not hasattr(S, "calculate_dipersive_shift")
+
+
 # --- avoid_collision --------------------------------------------------------
 
 

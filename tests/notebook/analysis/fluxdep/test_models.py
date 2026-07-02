@@ -6,6 +6,7 @@ from zcu_tools.notebook.analysis.fluxdep.models import (
     energy2linearform,
 )
 from zcu_tools.notebook.analysis.fluxdep.njit import energy2linearform_nb
+from zcu_tools.notebook.persistance import TransitionDict as PersistenceTransitionDict
 
 
 def _check_matches(transitions, energies):
@@ -95,3 +96,7 @@ def test_nb_empty_transitions_k_zero():
     B, C = energy2linearform_nb(energies, pairs, coeffs, offsets)
     assert B.shape == (5, 0)
     assert C.shape == (5, 0)
+
+
+def test_transition_dict_has_single_runtime_owner():
+    assert TransitionDict is PersistenceTransitionDict

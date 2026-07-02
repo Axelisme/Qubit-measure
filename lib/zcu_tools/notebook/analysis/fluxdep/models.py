@@ -8,16 +8,10 @@ flux-dependent spectroscopy, including energy calculations and transition models
 
 from __future__ import annotations
 
-from typing import NotRequired
-
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import TypedDict  # extra_items (PEP 728) not in stdlib 3.13
 
-
-class TransitionDict(TypedDict, extra_items=list[tuple[int, int]]):
-    r_f: NotRequired[float]
-    sample_f: NotRequired[float]
+from zcu_tools.notebook.persistance import TransitionDict
 
 
 def count_max_evals(transitions: TransitionDict) -> int:

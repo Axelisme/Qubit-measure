@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from matplotlib.figure import Figure
@@ -145,6 +145,17 @@ class TwoLinePicker:
     def magnitude_only(self) -> bool:
         return self._only_use_magnitude
 
+    @property
+    def selected_role(self) -> Literal["half", "integer"] | None:
+        if self._picked is self._half_line:
+            return "half"
+        if self._picked is self._int_line:
+            return "integer"
+        return None
+
+    def is_main_axes(self, axes: Any) -> bool:
+        return axes is self._ax_main
+
     def positions(self) -> tuple[float, float]:
         """Selected ``(flux_half, flux_int)``."""
 
@@ -267,16 +278,16 @@ class TwoLinePicker:
         if xdata is None:
             return
         if self._picked is not None:
-            self._picked = None
+            self.clear_selection()
             return
 
         half_dist = abs(xdata - self.flux_half)
         int_dist = abs(xdata - self.flux_int)
         thresh = 3 * self._min_flux_dist
         if half_dist < int_dist and half_dist < thresh:
-            self._picked = self._half_line
+            self.pick_half()
         elif int_dist <= half_dist and int_dist < thresh:
-            self._picked = self._int_line
+            self.pick_integer()
 
     def on_move(self, xdata: float | None) -> None:
         if self._picked is None or xdata is None:
@@ -312,8 +323,17 @@ class TwoLinePicker:
     def set_conjugate(self, on: bool) -> None:
         self._conjugate = bool(on)
 
-    def set_magnitude_only(self, on: bool) -> None:
+    def pick_half(self) -> None:
+        self._picked = self._half_line
+
+    def pick_integer(self) -> None:
+        self._picked = self._int_line
+
+    def clear_selection(self) -> None:
         self._picked = None
+
+    def set_magnitude_only(self, on: bool) -> None:
+        self.clear_selection()
         self._only_use_magnitude = bool(on)
         self._real_signals = cast2real_and_norm(
             self._signals, use_phase=not self._only_use_magnitude
@@ -322,7 +342,7 @@ class TwoLinePicker:
         self._main_im.autoscale()
 
     def swap(self) -> None:
-        self._picked = None
+        self.clear_selection()
         self.flux_half, self.flux_int = self.flux_int, self.flux_half
         self._apply_line_positions()
 
@@ -340,7 +360,7 @@ class TwoLinePicker:
         return half, intg
 
     def apply_positions(self, flux_half: float, flux_int: float) -> None:
-        self._picked = None
+        self.clear_selection()
         self.flux_half, self.flux_int = float(flux_half), float(flux_int)
         self._apply_line_positions()
         center_y = 0.5 * (self._freqs[0] + self._freqs[-1])

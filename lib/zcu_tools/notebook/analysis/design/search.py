@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from itertools import product
 from typing import Any
 
@@ -21,6 +23,18 @@ DESIGN_EVALS_COUNT = 15
 
 
 ParamGridInput = float | np.ndarray | tuple[float, float]
+
+
+@contextmanager
+def _t1_default_warning_disabled() -> Iterator[None]:
+    import scqubits.settings as scq
+
+    old = scq.T1_DEFAULT_WARNING
+    scq.T1_DEFAULT_WARNING = False
+    try:
+        yield
+    finally:
+        scq.T1_DEFAULT_WARNING = old
 
 
 def _param_grid_values(value: ParamGridInput, precision: float) -> NDArray[np.float64]:
@@ -154,7 +168,9 @@ def calculate_m01(params_table: pd.DataFrame) -> None:
     params_table["m01"] = m01
 
 
-def calculate_dipersive_shift(params_table: pd.DataFrame, g: float, r_f: float) -> None:
+def calculate_dispersive_shift(
+    params_table: pd.DataFrame, g: float, r_f: float
+) -> None:
     params_list = np.asarray(params_table.to_dict(orient="records"), dtype=object)
 
     from scqubits.core.fluxonium import Fluxonium  # lazy import
@@ -229,15 +245,11 @@ def calculate_t1(
     if "esys" not in params_table.columns:
         raise ValueError("This function requires esys to be calculated")
 
-    import scqubits.settings as scq
     from scqubits.core.fluxonium import Fluxonium  # lazy import
 
     fluxonium = Fluxonium(
         1.0, 1.0, 1.0, flux=0.5, cutoff=DESIGN_CUTOFF, truncated_dim=DESIGN_EVALS_COUNT
     )
-
-    # Suppress the warning when calculating t1
-    old, scq.T1_DEFAULT_WARNING = scq.T1_DEFAULT_WARNING, False
 
     fluxs = params_table["flux"].to_numpy()
     eJs = params_table["EJ"].to_numpy()
@@ -246,20 +258,19 @@ def calculate_t1(
     esys = params_table["esys"].to_numpy()
 
     t1 = np.empty(len(params_table), dtype=np.float64)
-    for i in range(len(params_table)):
-        fluxonium.flux = fluxs[i]
-        fluxonium.EJ = eJs[i]
-        fluxonium.EC = eCs[i]
-        fluxonium.EL = eLs[i]
-        t1[i] = fluxonium.t1_effective(
-            noise_channels=noise_channels,
-            common_noise_options=dict(i=1, j=0, T=Temp),
-            esys=esys[i],
-        )
+    with _t1_default_warning_disabled():
+        for i in range(len(params_table)):
+            fluxonium.flux = fluxs[i]
+            fluxonium.EJ = eJs[i]
+            fluxonium.EC = eCs[i]
+            fluxonium.EL = eLs[i]
+            t1[i] = fluxonium.t1_effective(
+                noise_channels=noise_channels,
+                common_noise_options=dict(i=1, j=0, T=Temp),
+                esys=esys[i],
+            )
 
     params_table["t1"] = t1
-
-    scq.T1_DEFAULT_WARNING = old
 
 
 def avoid_collision(
@@ -452,16 +463,15 @@ def add_real_sample(
     )
     snr = np.sort(snrs)[-3]
 
-    import scqubits.settings as scq
     from scqubits.core.fluxonium import Fluxonium  # lazy import
 
     # calculate t1
     fluxonium = Fluxonium(*params, flux=flux, cutoff=DESIGN_CUTOFF, truncated_dim=2)
-    scq.T1_DEFAULT_WARNING = False
-    predict_t1 = 1e-3 * fluxonium.t1_effective(
-        noise_channels=noise_channels,
-        common_noise_options=dict(i=1, j=0, T=Temp),
-    )
+    with _t1_default_warning_disabled():
+        predict_t1 = 1e-3 * fluxonium.t1_effective(
+            noise_channels=noise_channels,
+            common_noise_options=dict(i=1, j=0, T=Temp),
+        )
 
     # 添加從實際t1到預測t1的線段
     fig.add_shape(

@@ -1,6 +1,6 @@
 # fluxdep 模塊重點文檔
 
-**Last updated:** 2026-07-01
+**Last updated:** 2026-07-02 — InteractiveLines kernel adapter
 
 本模塊提供 Fluxonium 通量依賴光譜（flux-dependent spectrum）的擬合、資料處理、
 與互動式標註工具。搭配 `notebook_md/analysis/fluxdep_fit.md` 使用。
@@ -10,14 +10,14 @@
 ```
 fluxdep/
 ├── __init__.py        # 對外 API 匯出
-├── models.py          # 能量 → 躍遷頻率的線性形式轉換
+├── models.py          # TransitionDict re-export；能量 → 躍遷頻率的線性形式轉換
 ├── fitting.py         # 資料庫搜索 + least-squares 微調
 ├── njit.py            # numba JIT 核心：energy2linearform_nb、eval_dist_bounded、candidate_breakpoint_search、entry_lower_bound、_lower_bound_kernel、search_one_entry 等
 ├── processing.py      # re-export zcu_tools.analysis.fluxdep processing kernel
 ├── onetone.py         # InteractiveOneTone：onetone 峰值挑點 notebook adapter
 ├── utils.py           # 繪圖工具（plotly 可視化）
 └── interactive/       # matplotlib + ipywidgets 互動式工具
-    ├── find_line.py    # InteractiveLines：拖曳半通量/整通量定標
+    ├── find_line.py    # InteractiveLines：TwoLinePicker 的 ipywidgets thin adapter
     ├── find_point.py   # InteractiveFindPoints：筆刷式選取光譜點
     ├── point_select.py # InteractiveSelector：多光譜點選擇/過濾
     └── two_line_picker.py # re-export shared TwoLinePicker kernel
@@ -31,7 +31,7 @@ fluxdep/
 
 ### `TransitionDict`
 
-`TypedDict` 描述要擬合的躍遷類型，允許 key：
+`TransitionDict` 是 `notebook.persistance` 定義的共用資料契約，`models.py` re-export 供模型與 fitting code 使用。它描述要擬合的躍遷類型，允許 key：
 
 - `transitions`：`E_ji` 直接躍遷
 - `blue side` / `red side`：`E_ji ± r_f` 色散旁帶（需 `r_f`）
@@ -105,7 +105,7 @@ fluxdep/
 | 類別 | 用途 | 輸入 | 輸出 |
 |---|---|---|---|
 | `InteractiveOneTone` | onetone 資料找共振 dip vs flux | `signals, dev_values, freqs, threshold` | `(dev_values, freqs)` 於最大梯度頻率切面 |
-| `InteractiveLines` | 拖曳紅（half flux）/藍（integer flux）線做 mA→Φ 定標；支援 auto-align、swap、magnitude-only 切換 | `signals, dev_values, freqs, flux_half?, flux_int?` | `(flux_half, flux_int)` |
+| `InteractiveLines` | 拖曳紅（half flux）/藍（integer flux）線做 mA→Φ 定標；ipywidgets adapter 只處理 UI lifecycle，line folding、mirror-loss、auto-align、swap、magnitude-only 規則由 `TwoLinePicker` kernel 擁有 | `signals, dev_values, freqs, flux_half?, flux_int?` | `(flux_half, flux_int)` |
 | `InteractiveFindPoints` | 筆刷式遮罩 + 自動 `find_peaks` 從 2D 光譜擷取點 | `signals, dev_values, freqs, threshold, brush_width` | `(fluxs, freqs)` |
 | `InteractiveSelector` | 跨多個 `SpectrumResult` 用筆刷挑選/過濾點 | `spectrums: dict[str, SpectrumResult], selected?, brush_width` | `(fluxs, freqs, mask)` 3-tuple |
 

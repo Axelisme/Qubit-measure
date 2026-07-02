@@ -1,8 +1,11 @@
 import os
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from zcu_tools.notebook.analysis.fluxdep import fitting
 from zcu_tools.notebook.analysis.fluxdep.fitting import (
+    fit_spectrum,
     load_database,
     search_in_database,
 )
@@ -125,6 +128,78 @@ def test_load_database_is_cached_by_file():
     a = load_database(_DB)
     b = load_database(_DB)
     assert all(x is y for x, y in zip(a, b))
+
+
+def test_search_warns_when_interrupted_after_best_so_far(monkeypatch) -> None:
+    import zcu_tools.notebook.analysis.fluxdep.njit as njit
+
+    monkeypatch.setattr(
+        fitting,
+        "load_database",
+        lambda _path: (
+            np.array([0.0, 1.0], dtype=np.float64),
+            np.array([[1.0, 1.0, 1.0], [2.0, 2.0, 2.0]], dtype=np.float64),
+            np.zeros((2, 2, 1), dtype=np.float64),
+        ),
+    )
+    monkeypatch.setattr(
+        njit,
+        "_interp_weights",
+        lambda fluxs, _f_fluxs: (
+            np.zeros(len(fluxs), dtype=np.int64),
+            np.zeros(len(fluxs), dtype=np.float64),
+        ),
+    )
+    monkeypatch.setattr(njit, "_apply_interp", lambda energies, _idxs, _ws: energies)
+    monkeypatch.setattr(
+        njit,
+        "_lower_bound_kernel",
+        lambda *_args: np.array([0.0, 0.0], dtype=np.float64),
+    )
+
+    calls = 0
+
+    def fake_search_one_entry(*_args):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return 0.25, 1.0
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(njit, "search_one_entry", fake_search_one_entry)
+
+    with pytest.warns(RuntimeWarning, match="best-so-far"):
+        params, fig = search_in_database(
+            np.array([0.1], dtype=np.float64),
+            np.array([1.0], dtype=np.float64),
+            "unused.h5",
+            {},
+            (0.5, 3.0),
+            (0.5, 3.0),
+            (0.5, 3.0),
+            plot=False,
+        )
+
+    assert params == (1.0, 1.0, 1.0)
+    assert fig is None
+
+
+def test_fit_spectrum_reads_scipy_result_x(monkeypatch) -> None:
+    def fake_least_squares(*_args, **_kwargs):
+        return SimpleNamespace(x=np.array([1.1, 2.2, 3.3], dtype=np.float64))
+
+    monkeypatch.setattr(fitting, "least_squares", fake_least_squares)
+
+    params = fit_spectrum(
+        np.array([0.0], dtype=np.float64),
+        np.array([1.0], dtype=np.float64),
+        (1.0, 2.0, 3.0),
+        {},
+        ((0.5, 2.0), (1.0, 3.0), (2.0, 4.0)),
+        maxfun=1,
+    )
+
+    assert params == (1.1, 2.2, 3.3)
 
 
 # --- exact lower-bound prune (the default exact path) ----------------------

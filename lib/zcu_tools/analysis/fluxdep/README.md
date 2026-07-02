@@ -1,6 +1,6 @@
 # `zcu_tools.analysis.fluxdep` 模塊重點文檔
 
-**Last updated:** 2026-07-01
+**Last updated:** 2026-07-02 — line picker adapter hooks
 
 本模塊是 Flux-Dependence Analysis 的 notebook-neutral kernel，對應 ADR-0028。它承接 notebook
 與 Qt GUI 共用的互動選點、filtering、line selection、one-tone peak detection 規則；adapter
@@ -11,7 +11,7 @@
 - `processing.py`：頻譜轉實數/正規化、2D peak detection、point downsample、mirror difference。
 - `selection.py`：brush selection 的幾何規則，供 grid mask 與 joint point cloud 使用。
 - `onetone.py`：one-tone 最大色散頻率、切面平滑、peak detection 與點位輸出。
-- `line_picker.py`：半通量/整通量雙線互動狀態機與 mirror-loss 對齊輔助。
+- `line_picker.py`：半通量/整通量雙線互動狀態機、明確選線/清除選線 hook、與 mirror-loss 對齊輔助。
 
 ## 邊界
 
