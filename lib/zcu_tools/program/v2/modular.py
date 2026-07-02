@@ -70,7 +70,9 @@ class ModularProgramV2(MyProgramV2):
         self._dmem_buffer.extend(values)
         return offset
 
-    def compile_datamem(self) -> NDArray[np.int32] | None:  # type: ignore
+    def compile_datamem(  # type: ignore[reportIncompatibleMethodOverride]
+        self,
+    ) -> NDArray[np.int32] | None:
         if len(self._dmem_buffer) == 0:
             return None
 
