@@ -4,17 +4,17 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-STATE_SCRIPT = REPO_ROOT / ".agents" / "skills" / "orchestrate" / "scripts" / "state.py"
-QUEUE_SCRIPT = (
-    REPO_ROOT / ".agents" / "skills" / "orchestrate" / "scripts" / "merge_queue.py"
+WORKFLOW_SCRIPT = (
+    REPO_ROOT / ".agents" / "skills" / "orchestrate" / "scripts" / "workflow.py"
 )
-CODEX_STATE_SCRIPT = (
-    REPO_ROOT / ".codex" / "skills" / "orchestrate" / "scripts" / "state.py"
+CODEX_WORKFLOW_SCRIPT = (
+    REPO_ROOT / ".codex" / "skills" / "orchestrate" / "scripts" / "workflow.py"
 )
-CLAUDE_STATE_SCRIPT = (
-    REPO_ROOT / ".claude" / "skills" / "orchestrate" / "scripts" / "state.py"
+CLAUDE_WORKFLOW_SCRIPT = (
+    REPO_ROOT / ".claude" / "skills" / "orchestrate" / "scripts" / "workflow.py"
 )
 
 
@@ -38,26 +38,86 @@ def run_script(
     return result
 
 
-def create_task_and_lane(root: Path, task_id: str = "demo-task") -> None:
-    run_script(STATE_SCRIPT, "--root", str(root), "init")
+def run_git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise AssertionError(
+            f"git {' '.join(args)} failed with {result.returncode}\n"
+            f"stdout:\n{result.stdout}\n"
+            f"stderr:\n{result.stderr}",
+        )
+    return result
+
+
+def git_stdout(root: Path, *args: str) -> str:
+    return run_git(root, *args).stdout.strip()
+
+
+def git_returncode(root: Path, *args: str) -> int:
+    return subprocess.run(
+        ["git", *args],
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+    ).returncode
+
+
+def init_git_repo(root: Path) -> str:
+    run_git(root, "init")
+    run_git(root, "checkout", "-b", "main")
+    run_git(root, "config", "user.email", "agent@example.invalid")
+    run_git(root, "config", "user.name", "Agent Test")
+    (root / ".gitignore").write_text(".agent_state/\n", encoding="utf-8")
+    (root / "tracked.txt").write_text("base\n", encoding="utf-8")
+    run_git(root, "add", ".gitignore", "tracked.txt")
+    run_git(root, "commit", "-m", "base")
+    return git_stdout(root, "rev-parse", "HEAD")
+
+
+def create_integration_branch(root: Path, task_id: str = "demo-task") -> str:
+    run_git(root, "checkout", "-b", f"agent/{task_id}")
+    (root / "tracked.txt").write_text(f"{task_id}\n", encoding="utf-8")
+    run_git(root, "add", "tracked.txt")
+    run_git(root, "commit", "-m", task_id)
+    target = git_stdout(root, "rev-parse", "HEAD")
+    run_git(root, "checkout", "main")
+    return target
+
+
+def create_task_and_lane(
+    root: Path,
+    task_id: str = "demo-task",
+    *,
+    base_commit: str = "abc123",
+) -> None:
+    run_script(WORKFLOW_SCRIPT, "--root", str(root), "state", "init")
     run_script(
-        STATE_SCRIPT,
+        WORKFLOW_SCRIPT,
         "--root",
         str(root),
-        "task-create",
+        "task",
+        "create",
         task_id,
         "--base-branch",
         "main",
         "--base-commit",
-        "abc123",
+        base_commit,
         "--integration-branch",
         f"agent/{task_id}",
     )
     run_script(
-        STATE_SCRIPT,
+        WORKFLOW_SCRIPT,
         "--root",
         str(root),
-        "lane-create",
+        "lane",
+        "create",
         task_id,
         "main",
         "--role",
@@ -73,14 +133,62 @@ def create_task_and_lane(root: Path, task_id: str = "demo-task") -> None:
     )
 
 
-def test_state_script_manages_task_lane_and_report_path(tmp_path: Path) -> None:
+def queue_entry(
+    root: Path,
+    task_id: str,
+    *,
+    action: str,
+    base_commit: str,
+    status: str,
+    target_commit: str,
+) -> dict[str, Any]:
+    return {
+        "action": action,
+        "base_branch": "main",
+        "base_head": base_commit,
+        "branch": f"agent/{task_id}",
+        "enqueued_at": "2026-07-03T00:00:00Z",
+        "main_worktree": root.as_posix(),
+        "note": "",
+        "requested_by": "agent-a",
+        "started_at": None,
+        "status": status,
+        "target_commit": target_commit,
+        "task_id": task_id,
+        "token": None,
+    }
+
+
+def write_queue(root: Path, entries: list[dict[str, Any]]) -> None:
+    queue_file = root / ".agent_state" / "worktrees" / "merge_queue.json"
+    queue_file.write_text(
+        json.dumps({"version": 1, "queue": entries}, sort_keys=True),
+        encoding="utf-8",
+    )
+
+
+def read_task(root: Path, task_id: str = "demo-task") -> dict[str, Any]:
+    shown = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(root),
+        "task",
+        "show",
+        task_id,
+        "--json",
+    )
+    return json.loads(shown.stdout)["task"]
+
+
+def test_workflow_manages_task_lane_and_report_path(tmp_path: Path) -> None:
     create_task_and_lane(tmp_path)
 
     rerun = run_script(
-        STATE_SCRIPT,
+        WORKFLOW_SCRIPT,
         "--root",
         str(tmp_path),
-        "task-create",
+        "task",
+        "create",
         "demo-task",
         "--base-branch",
         "main",
@@ -92,10 +200,11 @@ def test_state_script_manages_task_lane_and_report_path(tmp_path: Path) -> None:
     assert rerun.returncode == 0
 
     report = run_script(
-        STATE_SCRIPT,
+        WORKFLOW_SCRIPT,
         "--root",
         str(tmp_path),
-        "report-path",
+        "report",
+        "path",
         "demo-task",
         "main",
         "planner",
@@ -114,118 +223,358 @@ def test_state_script_manages_task_lane_and_report_path(tmp_path: Path) -> None:
     )
     assert report_path.parent.is_dir()
 
-    shown = run_script(
-        STATE_SCRIPT,
-        "--root",
-        str(tmp_path),
-        "task-show",
-        "demo-task",
-        "--json",
-    )
-    task = json.loads(shown.stdout)["task"]
+    task = read_task(tmp_path)
     assert task["worktrees"]["main"]["worktree_path"] == (
         ".agent_state/worktrees/trees/demo-task"
     )
     assert task["worktrees"]["main"]["write_scope"] == ["lib/..."]
 
 
-def test_merge_queue_claim_release_and_task_status_sync(tmp_path: Path) -> None:
-    create_task_and_lane(tmp_path)
-    run_script(QUEUE_SCRIPT, "--root", str(tmp_path), "init")
-    run_script(
-        QUEUE_SCRIPT,
+def test_preview_start_and_abort_manage_queue_and_task_status(tmp_path: Path) -> None:
+    base_commit = init_git_repo(tmp_path)
+    target_commit = create_integration_branch(tmp_path)
+    create_task_and_lane(tmp_path, base_commit=base_commit)
+
+    started = run_script(
+        WORKFLOW_SCRIPT,
         "--root",
         str(tmp_path),
-        "enqueue",
-        "demo-task",
-        "--branch",
-        "agent/demo-task",
-        "--base-branch",
-        "main",
-        "--action",
         "preview",
+        "start",
+        "demo-task",
+        "--requested-by",
+        "agent-a",
+        "--json",
+    )
+    entry = json.loads(started.stdout)["entry"]
+    assert entry["action"] == "preview"
+    assert entry["status"] == "merging"
+    assert entry["target_commit"] == target_commit
+    assert (tmp_path / ".git" / "MERGE_HEAD").read_text(encoding="utf-8").strip() == (
+        target_commit
+    )
+    assert read_task(tmp_path)["status"] == "merge_preview"
+
+    run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "preview",
+        "abort",
+        "demo-task",
+    )
+    assert not (tmp_path / ".git" / "MERGE_HEAD").exists()
+    assert read_task(tmp_path)["status"] == "reviewing"
+
+    queue = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "queue",
+        "list",
+        "--json",
+    )
+    assert json.loads(queue.stdout)["queue"]["queue"] == []
+
+
+def test_preview_start_requires_base_branch(tmp_path: Path) -> None:
+    base_commit = init_git_repo(tmp_path)
+    create_integration_branch(tmp_path)
+    create_task_and_lane(tmp_path, base_commit=base_commit)
+    run_git(tmp_path, "checkout", "-b", "scratch")
+
+    result = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "preview",
+        "start",
+        "demo-task",
+        "--requested-by",
+        "agent-a",
+        check=False,
+    )
+
+    assert result.returncode == 40
+    assert "expected base branch main" in result.stderr
+    assert not (tmp_path / ".git" / "MERGE_HEAD").exists()
+    assert read_task(tmp_path)["status"] == "active"
+
+
+def test_preview_start_rejects_blocked_queue_entry(tmp_path: Path) -> None:
+    base_commit = init_git_repo(tmp_path)
+    target_commit = create_integration_branch(tmp_path)
+    create_task_and_lane(tmp_path, base_commit=base_commit)
+    write_queue(
+        tmp_path,
+        [
+            {
+                **queue_entry(
+                    tmp_path,
+                    "demo-task",
+                    action="preview",
+                    base_commit=base_commit,
+                    status="blocked",
+                    target_commit=target_commit,
+                ),
+                "note": "manual block",
+            }
+        ],
+    )
+
+    result = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "preview",
+        "start",
+        "demo-task",
+        "--requested-by",
+        "agent-a",
+        check=False,
+    )
+
+    assert result.returncode == 40
+    assert "queue entry is blocked" in result.stderr
+    queue = json.loads(
+        (tmp_path / ".agent_state" / "worktrees" / "merge_queue.json").read_text(
+            encoding="utf-8",
+        )
+    )["queue"]
+    assert queue[0]["status"] == "blocked"
+    assert queue[0]["note"] == "manual block"
+
+
+def test_final_fast_forward_aborts_preview_and_closes_task(tmp_path: Path) -> None:
+    base_commit = init_git_repo(tmp_path)
+    target_commit = create_integration_branch(tmp_path)
+    create_task_and_lane(tmp_path, base_commit=base_commit)
+    run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "preview",
+        "start",
+        "demo-task",
         "--requested-by",
         "agent-a",
     )
-    run_script(QUEUE_SCRIPT, "--root", str(tmp_path), "claim", "demo-task")
-    run_script(QUEUE_SCRIPT, "--root", str(tmp_path), "assert-held", "demo-task")
-
-    claimed = run_script(
-        STATE_SCRIPT,
-        "--root",
-        str(tmp_path),
-        "task-show",
-        "demo-task",
-        "--json",
-    )
-    assert json.loads(claimed.stdout)["task"]["status"] == "merge_preview"
 
     run_script(
-        QUEUE_SCRIPT,
+        WORKFLOW_SCRIPT,
         "--root",
         str(tmp_path),
-        "release",
+        "final",
+        "fast-forward",
         "demo-task",
-        "--result",
-        "preview-aborted",
+        "--requested-by",
+        "agent-a",
     )
-    released = run_script(
-        STATE_SCRIPT,
+
+    assert git_stdout(tmp_path, "rev-parse", "HEAD") == target_commit
+    missing = run_script(
+        WORKFLOW_SCRIPT,
         "--root",
         str(tmp_path),
-        "task-show",
+        "task",
+        "show",
         "demo-task",
-        "--json",
-    )
-    assert json.loads(released.stdout)["task"]["status"] == "reviewing"
-
-
-def test_merge_queue_enforces_head_claim(tmp_path: Path) -> None:
-    create_task_and_lane(tmp_path, "first-task")
-    create_task_and_lane(tmp_path, "second-task")
-    run_script(QUEUE_SCRIPT, "--root", str(tmp_path), "init")
-    for task_id in ("first-task", "second-task"):
-        run_script(
-            QUEUE_SCRIPT,
-            "--root",
-            str(tmp_path),
-            "enqueue",
-            task_id,
-            "--branch",
-            f"agent/{task_id}",
-            "--base-branch",
-            "main",
-            "--action",
-            "preview",
-            "--requested-by",
-            "agent-a",
-        )
-
-    result = run_script(
-        QUEUE_SCRIPT,
-        "--root",
-        str(tmp_path),
-        "claim",
-        "second-task",
         check=False,
     )
+    assert missing.returncode == 40
+    queue = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "queue",
+        "list",
+        "--json",
+    )
+    assert json.loads(queue.stdout)["queue"]["queue"] == []
+
+
+def test_final_fast_forward_waits_behind_queue_head(tmp_path: Path) -> None:
+    base_commit = init_git_repo(tmp_path)
+    first_target = create_integration_branch(tmp_path, "first-task")
+    second_target = create_integration_branch(tmp_path, "second-task")
+    create_task_and_lane(tmp_path, "first-task", base_commit=base_commit)
+    create_task_and_lane(tmp_path, "second-task", base_commit=base_commit)
+    queue_file = tmp_path / ".agent_state" / "worktrees" / "merge_queue.json"
+    write_queue(
+        tmp_path,
+        [
+            queue_entry(
+                tmp_path,
+                "first-task",
+                action="final",
+                base_commit=base_commit,
+                status="queued",
+                target_commit=first_target,
+            )
+        ],
+    )
+
+    result = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "final",
+        "fast-forward",
+        "second-task",
+        "--requested-by",
+        "agent-b",
+        check=False,
+    )
+
     assert result.returncode == 20
-    assert "not queue head" in result.stderr
+    assert "queued behind first-task" in result.stderr
+    queue = json.loads(queue_file.read_text(encoding="utf-8"))["queue"]
+    assert [entry["task_id"] for entry in queue] == ["first-task", "second-task"]
+    assert queue[1]["target_commit"] == second_target
 
 
-def test_codex_wrapper_invokes_primary_state_script(tmp_path: Path) -> None:
-    run_script(CODEX_STATE_SCRIPT, "--root", str(tmp_path), "init")
+def test_queue_validation_rejects_duplicate_task_ids(tmp_path: Path) -> None:
+    base_commit = init_git_repo(tmp_path)
+    target_commit = create_integration_branch(tmp_path)
+    create_task_and_lane(tmp_path, base_commit=base_commit)
+    write_queue(
+        tmp_path,
+        [
+            queue_entry(
+                tmp_path,
+                "demo-task",
+                action="preview",
+                base_commit=base_commit,
+                status="queued",
+                target_commit=target_commit,
+            ),
+            queue_entry(
+                tmp_path,
+                "demo-task",
+                action="final",
+                base_commit=base_commit,
+                status="queued",
+                target_commit=target_commit,
+            ),
+        ],
+    )
+
+    result = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "queue",
+        "list",
+        check=False,
+    )
+
+    assert result.returncode == 10
+    assert "duplicate task_id demo-task" in result.stderr
+
+
+def test_worktree_create_lane_records_generated_worktree(tmp_path: Path) -> None:
+    base_commit = init_git_repo(tmp_path)
+
+    created = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "worktree",
+        "create-lane",
+        "demo-task",
+        "main",
+        "--base-branch",
+        "main",
+        "--write-scope",
+        "lib/...",
+        "--json",
+    )
+
+    result = json.loads(created.stdout)
+    worktree_path = Path(result["worktree_path"])
+    assert worktree_path.is_dir()
+    assert (worktree_path / ".git").exists()
+    assert result["branch"] == "agent/demo-task"
+    task = read_task(tmp_path)
+    assert task["base_commit"] == base_commit
+    assert task["worktrees"]["main"]["worktree_path"] == (
+        ".agent_state/worktrees/trees/demo-task"
+    )
+
+
+def test_worktree_create_lane_preflights_state_conflict(tmp_path: Path) -> None:
+    init_git_repo(tmp_path)
+    run_script(WORKFLOW_SCRIPT, "--root", str(tmp_path), "state", "init")
+    run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "task",
+        "create",
+        "conflict-task",
+        "--base-branch",
+        "main",
+        "--base-commit",
+        "different-base",
+        "--integration-branch",
+        "agent/conflict-task",
+    )
+
+    result = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "worktree",
+        "create-lane",
+        "conflict-task",
+        "main",
+        "--base-branch",
+        "main",
+        "--write-scope",
+        "lib/...",
+        check=False,
+    )
+
+    assert result.returncode == 40
+    assert "different identity" in result.stderr
+    assert (
+        git_returncode(
+            tmp_path,
+            "show-ref",
+            "--verify",
+            "--quiet",
+            "refs/heads/agent/conflict-task",
+        )
+        == 1
+    )
+    assert not (
+        tmp_path / ".agent_state" / "worktrees" / "trees" / "conflict-task"
+    ).exists()
+
+
+def test_codex_workflow_script_is_self_contained(tmp_path: Path) -> None:
+    run_script(CODEX_WORKFLOW_SCRIPT, "--root", str(tmp_path), "state", "init")
     state_file = tmp_path / ".agent_state" / "worktrees" / "state.json"
+    queue_file = tmp_path / ".agent_state" / "worktrees" / "merge_queue.json"
     assert json.loads(state_file.read_text(encoding="utf-8")) == {
         "version": 2,
         "tasks": {},
     }
+    assert json.loads(queue_file.read_text(encoding="utf-8")) == {
+        "version": 1,
+        "queue": [],
+    }
 
 
-def test_claude_state_script_is_self_contained(tmp_path: Path) -> None:
-    run_script(CLAUDE_STATE_SCRIPT, "--root", str(tmp_path), "init")
+def test_claude_workflow_script_is_self_contained(tmp_path: Path) -> None:
+    run_script(CLAUDE_WORKFLOW_SCRIPT, "--root", str(tmp_path), "state", "init")
     state_file = tmp_path / ".agent_state" / "worktrees" / "state.json"
+    queue_file = tmp_path / ".agent_state" / "worktrees" / "merge_queue.json"
     assert json.loads(state_file.read_text(encoding="utf-8")) == {
         "version": 2,
         "tasks": {},
+    }
+    assert json.loads(queue_file.read_text(encoding="utf-8")) == {
+        "version": 1,
+        "queue": [],
     }
