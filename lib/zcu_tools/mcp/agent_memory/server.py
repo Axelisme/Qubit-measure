@@ -12,27 +12,22 @@ writes figures to local temp files on the same host as this server).
 
 from __future__ import annotations
 
-import importlib.util
 import os
-import sys
+import runpy
 from pathlib import Path
 from typing import Any, Callable, Dict
 
-# Launched standalone (``python .../server.py``), so add the repo ``lib`` dir to
-# sys.path for the absolute imports below.
-# lib/zcu_tools/mcp/agent_memory/server.py -> lib
-_LIB_DIR = Path(__file__).resolve().parents[3]
-if str(_LIB_DIR) not in sys.path:
-    sys.path.insert(0, str(_LIB_DIR))
-
-# Fast-fail preflight: the store needs PyYAML. Surface an actionable instruction on
-# stderr (stdout is the JSON-RPC channel and must stay clean).
-if importlib.util.find_spec("yaml") is None:
-    sys.stderr.write(
-        "agent-memory MCP server requires PyYAML. Rebuild the environment with:\n"
-        "    uv sync --extra client\n"
-    )
-    raise SystemExit(1)
+_BOOTSTRAP = runpy.run_path(str(Path(__file__).resolve().parents[1] / "_standalone.py"))
+_BOOTSTRAP["bootstrap_standalone_server"](
+    __file__,
+    required_modules=(
+        (
+            "yaml",
+            "agent-memory MCP server requires PyYAML. Rebuild the environment with:\n"
+            "    uv sync --extra client\n",
+        ),
+    ),
+)
 
 # The shared MCP stdio plumbing lives in zcu_tools.mcp.core.bridge. It consumes the
 # wire-spec primitives from zcu_tools.gui.remote — mcp is a consumer of that shared

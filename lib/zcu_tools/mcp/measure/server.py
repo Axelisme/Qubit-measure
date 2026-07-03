@@ -21,10 +21,9 @@ Threading:
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import logging
-import sys
+import runpy
 from collections.abc import Mapping, MutableMapping
 from pathlib import Path
 from tempfile import gettempdir
@@ -32,30 +31,26 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# This bridge is launched standalone (``python .../mcp_server.py``), so the repo
-# ``lib`` dir is not on sys.path by default. Add it so the wire-contract modules
-# import cleanly. Importing under ``zcu_tools.gui.app.main`` runs that package's
-# ``__init__`` which eagerly loads Qt; the bridge tolerates this (it never builds
-# a QApplication), trading a heavier import for a single MethodSpec source of
-# truth shared with the dispatcher.
-# lib/zcu_tools/mcp/measure -> lib
-_LIB_DIR = Path(__file__).resolve().parents[3]
-if str(_LIB_DIR) not in sys.path:
-    sys.path.insert(0, str(_LIB_DIR))
-
-# Fast-fail preflight: importing ``zcu_tools.gui.app.main`` below eagerly loads Qt. If the
-# 'gui' extra was not installed (e.g. a fresh checkout on another machine), the
-# import chain would otherwise die with a bare ``ModuleNotFoundError`` deep
-# inside the package. Surface an actionable instruction on stderr instead
-# (stdout is the JSON-RPC channel and must stay clean).
-for _gui_dep in ("qtpy", "PyQt6"):
-    if importlib.util.find_spec(_gui_dep) is None:
-        sys.stderr.write(
+# Standalone bootstrap: insert repo ``lib`` into sys.path and fast-fail if GUI
+# extras are missing before importing the heavy GUI method-spec modules.
+_BOOTSTRAP = runpy.run_path(str(Path(__file__).resolve().parents[1] / "_standalone.py"))
+_BOOTSTRAP["bootstrap_standalone_server"](
+    __file__,
+    required_modules=(
+        (
+            "qtpy",
             "measure-gui MCP server requires the 'gui' extra (qtpy + PyQt6); "
-            f"'{_gui_dep}' is missing. Rebuild the environment with:\n"
-            "    uv sync --extra gui\n"
-        )
-        raise SystemExit(1)
+            "'{module}' is missing. Rebuild the environment with:\n"
+            "    uv sync --extra gui\n",
+        ),
+        (
+            "PyQt6",
+            "measure-gui MCP server requires the 'gui' extra (qtpy + PyQt6); "
+            "'{module}' is missing. Rebuild the environment with:\n"
+            "    uv sync --extra gui\n",
+        ),
+    ),
+)
 
 # NOTE: absolute imports (NOT relative) — this module is launched as a script
 # (``python .../mcp_server.py`` per .mcp.json), so it has no parent package and a

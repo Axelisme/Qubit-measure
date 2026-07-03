@@ -20,28 +20,22 @@ Threading: see :mod:`zcu_tools.mcp.core.bridge`.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import runpy
 from pathlib import Path
 from tempfile import gettempdir
 
-# This bridge is launched standalone (``python .../server.py``), so the repo
-# ``lib`` dir is not on sys.path by default. Add it so the wire-contract modules
-# import cleanly.
-# lib/zcu_tools/mcp/autofluxdep -> lib
-_LIB_DIR = Path(__file__).resolve().parents[3]
-if str(_LIB_DIR) not in sys.path:
-    sys.path.insert(0, str(_LIB_DIR))
-
-# Fast-fail preflight: the GUI fork needs the 'gui' extra (qtpy).
-for _gui_dep in ("qtpy",):
-    if importlib.util.find_spec(_gui_dep) is None:
-        sys.stderr.write(
+_BOOTSTRAP = runpy.run_path(str(Path(__file__).resolve().parents[1] / "_standalone.py"))
+_BOOTSTRAP["bootstrap_standalone_server"](
+    __file__,
+    required_modules=(
+        (
+            "qtpy",
             "autofluxdep-gui MCP server requires the 'gui' extra (qtpy); "
-            f"'{_gui_dep}' is missing. Rebuild the environment with:\n"
-            "    uv sync --extra gui\n"
-        )
-        raise SystemExit(1)
+            "'{module}' is missing. Rebuild the environment with:\n"
+            "    uv sync --extra gui\n",
+        ),
+    ),
+)
 
 # NOTE: absolute imports (NOT relative) — this module is launched as a script
 # (``python .../server.py`` per .mcp.json), so it has no parent package.

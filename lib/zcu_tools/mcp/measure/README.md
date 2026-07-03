@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-02 (MCP exposure policy projection)
+**Last updated:** 2026-07-03 (shared standalone bootstrap)
 
 # `zcu_tools/mcp/measure/`
 
@@ -10,6 +10,10 @@ RemoteControlAdapter。此 package 是 app-local policy 層，不是共用 trans
 - `server.py` 是 MCP bootstrap / aggregation facade：保留 standalone preflight、
   server instructions/config、session/bridge setup、guarded `send_gui_rpc`、
   compatibility exports、domain tool table aggregation、stdio loop hooks。
+- `zcu_tools.mcp._standalone.bootstrap_standalone_server()` 是所有 standalone
+  MCP entry server 共用的最小啟動 helper：在 entry import `zcu_tools.*` 前把
+  repo `lib` 加進 `sys.path`，並用一致的 stderr + `SystemExit(1)` 做 dependency
+  preflight。各 app server 只保留自己的 required modules 與錯誤訊息。
 - `tool_context.py` 提供 override handlers 的 late-bound runtime context 與共用 helper。
   hand-written override handlers 透過 context provider 解析目前的
   `server.send_gui_rpc`；generated tools 仍由 `generate_tools(..., send_gui_rpc)`
