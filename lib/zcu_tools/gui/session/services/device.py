@@ -14,7 +14,7 @@ from typing import (
 
 from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
-from zcu_tools.device.base import BaseDeviceInfo
+from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
 from zcu_tools.gui.session.events import (
     DeviceChangedPayload,
     DeviceSetupFinishedPayload,
@@ -227,7 +227,7 @@ class GlobalDeviceRegistryAdapter:
     def register_device(self, name: str, device: object) -> None:
         from zcu_tools.device import GlobalDeviceManager
 
-        GlobalDeviceManager.register_device(name, device)
+        GlobalDeviceManager.register_device(name, cast(BaseDevice[Any], device))
 
     def drop_device(self, name: str, ignore_error: bool = False) -> None:
         from zcu_tools.device import GlobalDeviceManager

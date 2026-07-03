@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Literal
+from typing import Any, Literal, cast
 
 import pytest
 from _pytest.capture import CaptureFixture
@@ -157,7 +157,7 @@ def test_connect_and_close_log_without_printing(
     rm = DummyResourceManager(session)
 
     with caplog.at_level(logging.INFO, logger=DummyDevice.__module__):
-        dev = DummyDevice("DUMMY::INSTR", rm)
+        dev = DummyDevice("DUMMY::INSTR", cast(Any, rm))
         dev.close()
 
     captured = capsys.readouterr()
