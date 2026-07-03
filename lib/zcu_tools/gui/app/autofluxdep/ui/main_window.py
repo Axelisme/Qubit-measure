@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from qtpy.QtCore import QObject, Qt, QTimer, Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
@@ -66,6 +66,9 @@ from zcu_tools.gui.widgets import DialogRefStore
 
 from .node_detail import NodeDetailPane
 from .node_list import NodeListPane
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
 
 logger = logging.getLogger(__name__)
 _ProgressSnapshot = tuple[int, str, int]
@@ -178,6 +181,7 @@ class MainWindow(QMainWindow):
         self._build_plot_perf = PerfStats("main.build_plots", logger, slow_ms=100.0)
         self._run_active = False
         self._active_run_node_name: str | None = None
+        self._live_predictor_flux_idx: int | None = None
         self._auto_follow_navigation = False
         self._flux_progress_snapshot: _ProgressSnapshot | None = None
         # The single live (non-modal) context inspector, or None when closed. The
@@ -186,7 +190,7 @@ class MainWindow(QMainWindow):
         self._inspect_dialog: QDialog | None = None
         self._setup_dialog: QDialog | None = None
         self._devices_dialog: QDialog | None = None
-        self._predictor_dialog: QDialog | None = None
+        self._predictor_dialog: PredictorDialog | None = None
         self.setWindowTitle("autofluxdep-gui")
         self.resize(1100, 800)
 
@@ -396,13 +400,18 @@ class MainWindow(QMainWindow):
 
         existing = self._predictor_dialog
         if existing is not None:
+            self._sync_predictor_dialog_live_state()
             existing.raise_()
             existing.activateWindow()
             return
 
         # The shared predictor dialog loads a FluxoniumPredictor into the active
         # context; the run reads exp_context.predictor.
-        dlg = PredictorDialog(self._ctrl.predictor_control, self)
+        dlg = PredictorDialog(
+            self._ctrl.predictor_control,
+            self,
+            device=self._ctrl.device_control,
+        )
         dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dlg.finished.connect(
             lambda _r: (
@@ -411,6 +420,7 @@ class MainWindow(QMainWindow):
             )
         )
         self._predictor_dialog = dlg
+        self._sync_predictor_dialog_live_state()
         dlg.open()
 
     def _on_inspect(self) -> None:
@@ -502,10 +512,12 @@ class MainWindow(QMainWindow):
     def _on_run_started(self) -> None:
         self._run_active = True
         self._active_run_node_name = None
+        self._live_predictor_flux_idx = 0 if self._ctrl.state.flux_values else None
         self._list.set_running(True)
         auto_follow = self._ctrl.get_auto_follow_tabs()
         self._detail.set_running(True, switch_tab=auto_follow)
         self._refresh_toolbar_buttons()
+        self._sync_predictor_dialog_live_state()
 
     def _on_node_entered(self, name: str, idx: int) -> None:
         """Auto-follow: a provider started → select it + show its run tab/plot.
@@ -514,7 +526,8 @@ class MainWindow(QMainWindow):
         the list are skipped — there is nothing to navigate to. If the running
         provider is already selected, keep the user's current edit/run sub-tab.
         """
-        del idx
+        self._live_predictor_flux_idx = idx
+        self._sync_predictor_dialog_live_value()
         self._active_run_node_name = name
         if not self._ctrl.get_auto_follow_tabs():
             return
@@ -584,6 +597,8 @@ class MainWindow(QMainWindow):
             self._bridge.row_rendered(name, idx)
 
     def _on_point_done(self, idx: int) -> None:
+        self._live_predictor_flux_idx = idx
+        self._sync_predictor_dialog_live_value()
         self._apply_flux_progress_snapshot(
             (
                 self._progress.maximum(),
@@ -656,9 +671,11 @@ class MainWindow(QMainWindow):
     def _on_run_done(self) -> None:
         self._run_active = False
         self._active_run_node_name = None
+        self._live_predictor_flux_idx = None
         self._list.set_running(False)
         self._detail.set_running(False, switch_tab=self._ctrl.get_auto_follow_tabs())
         self._refresh_toolbar_buttons()
+        self._sync_predictor_dialog_live_state()
 
     def _on_run_failed(self, message: str) -> None:
         """A Node's produce raised mid-sweep → unlock the UI + surface the error.
@@ -684,6 +701,33 @@ class MainWindow(QMainWindow):
 
     def _on_predictor_changed(self, _payload: PredictorChangedPayload) -> None:
         self._refresh_session_status()
+        self._sync_predictor_dialog_live_value()
+
+    def _current_live_predictor_value(self) -> float | None:
+        idx = self._live_predictor_flux_idx
+        values = self._ctrl.state.flux_values
+        if idx is None or idx < 0 or idx >= len(values):
+            return None
+        return float(values[idx])
+
+    def _sync_predictor_dialog_live_state(self) -> None:
+        dlg = self._predictor_dialog
+        if dlg is None:
+            return
+        if self._run_active:
+            dlg.set_live_mode(True)
+            self._sync_predictor_dialog_live_value()
+        else:
+            dlg.set_live_mode(False)
+
+    def _sync_predictor_dialog_live_value(self) -> None:
+        dlg = self._predictor_dialog
+        if dlg is None or not self._run_active:
+            return
+        value = self._current_live_predictor_value()
+        if value is None:
+            return
+        dlg.set_live_device_value(value)
 
     def _on_context_switched(self, _payload: ContextSwitchedPayload) -> None:
         self._refresh_session_status()
@@ -702,7 +746,7 @@ class MainWindow(QMainWindow):
         editing = not self._ctrl.is_running
         self._setup_btn.setEnabled(editing)
         self._devices_btn.setEnabled(editing)
-        self._predictor_btn.setEnabled(editing)
+        self._predictor_btn.setEnabled(True)
         # Inspect stays enabled during a run: the inspector reflects the live
         # context and is non-modal, so it never blocks the event loop.
         self._inspect_btn.setEnabled(True)

@@ -28,6 +28,7 @@ from zcu_tools.gui.app.autofluxdep.services.run_store import (
 from zcu_tools.gui.app.autofluxdep.state import ProjectInfo
 
 from ._helpers import (
+    connect_mock,
     make_builder,
     make_measurement_builder,
     run_controller_to_completion,
@@ -237,6 +238,7 @@ def test_run_event_emitter_uses_direct_path_on_owner_thread(qapp):
         NodeEnteredPayload,
         PointDonePayload,
     )
+    from zcu_tools.gui.session.events import PredictorChangedPayload
 
     main_thread = threading.get_ident()
     ctrl = build_core()
@@ -249,13 +251,75 @@ def test_run_event_emitter_uses_direct_path_on_owner_thread(qapp):
         NodeEnteredPayload,
         lambda p: seen.append(("node", p.name, threading.get_ident())),
     )
+    ctrl.bus.subscribe(
+        PredictorChangedPayload,
+        lambda _p: seen.append(("predictor", 0, threading.get_ident())),
+    )
 
     emitter = _RunEventEmitter(ctrl)
     emitter.emit_point_done(3)
     emitter.emit_node_entered("consumer", 3)
+    emitter.emit_predictor_changed()
 
-    assert seen == [("point", 3, main_thread), ("node", "consumer", main_thread)]
+    assert seen == [
+        ("point", 3, main_thread),
+        ("node", "consumer", main_thread),
+        ("predictor", 0, main_thread),
+    ]
     assert ctrl._cur_idx == 3
+
+
+def test_qubit_freq_row_emits_predictor_changed_for_live_dialog(qapp):
+    from zcu_tools.gui.session.events import PredictorChangedPayload
+
+    def produce_fit(env, snapshot):
+        del snapshot
+        patch = Patch()
+        patch.set("qubit_freq", 5000.0 + env.flux)
+        return patch
+
+    main_thread = threading.get_ident()
+    ctrl = build_core()
+    ctrl.add_node(
+        make_builder(
+            "qubit_freq",
+            provides=("qubit_freq",),
+            produce_fn=produce_fit,
+        )
+    )
+    ctrl.rename_node(0, "renamed_qubit_freq")
+    ctrl.set_flux_values([0.0, 1.0])
+    connect_mock(ctrl)
+    seen: list[int] = []
+    ctrl.bus.subscribe(
+        PredictorChangedPayload,
+        lambda _payload: seen.append(threading.get_ident()),
+    )
+
+    run_controller_to_completion(ctrl)
+
+    assert seen == [main_thread, main_thread]
+
+
+def test_empty_qubit_freq_patch_does_not_emit_predictor_changed(qapp):
+    from zcu_tools.gui.session.events import PredictorChangedPayload
+
+    ctrl = build_core()
+    ctrl.add_node(
+        make_builder(
+            "qubit_freq",
+            provides=("qubit_freq",),
+            produce_fn=lambda _env, _snapshot: Patch(),
+        )
+    )
+    ctrl.set_flux_values([0.0, 1.0])
+    connect_mock(ctrl)
+    seen: list[object] = []
+    ctrl.bus.subscribe(PredictorChangedPayload, seen.append)
+
+    run_controller_to_completion(ctrl)
+
+    assert seen == []
 
 
 def test_run_threads_flux_into_env():

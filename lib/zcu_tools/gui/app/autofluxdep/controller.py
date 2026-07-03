@@ -82,6 +82,7 @@ from zcu_tools.gui.background import BackgroundRunner
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
 from zcu_tools.gui.session.controller_mixin import SessionControllerMixin
+from zcu_tools.gui.session.events import PredictorChangedPayload
 from zcu_tools.gui.session.operation_handles import (
     AwaitResult,
     OperationHandles,
@@ -174,6 +175,7 @@ class _RunEventEmitter(QObject):
 
     point_done = Signal(int)
     node_entered = Signal(str, int)
+    predictor_changed = Signal()
 
     def __init__(self, owner: Controller) -> None:
         super().__init__()
@@ -181,6 +183,10 @@ class _RunEventEmitter(QObject):
         blocking = Qt.ConnectionType.BlockingQueuedConnection
         self.point_done.connect(owner._emit_point_done_on_main, type=blocking)  # type: ignore[call-arg]
         self.node_entered.connect(owner._emit_node_entered_on_main, type=blocking)  # type: ignore[call-arg]
+        self.predictor_changed.connect(  # type: ignore[call-arg]
+            owner._emit_predictor_changed_on_main,
+            type=blocking,
+        )
 
     def emit_point_done(self, idx: int) -> None:
         if QThread.currentThread() == self.thread():
@@ -193,6 +199,12 @@ class _RunEventEmitter(QObject):
             self._owner._emit_node_entered_on_main(name, idx)
             return
         self.node_entered.emit(name, idx)
+
+    def emit_predictor_changed(self) -> None:
+        if QThread.currentThread() == self.thread():
+            self._owner._emit_predictor_changed_on_main()
+            return
+        self.predictor_changed.emit()
 
 
 class Controller(SessionControllerMixin):
@@ -752,6 +764,9 @@ class Controller(SessionControllerMixin):
     def _emit_node_entered_on_main(self, name: str, idx: int) -> None:
         self._bus.emit(NodeEnteredPayload(name=name, idx=idx))
 
+    def _emit_predictor_changed_on_main(self) -> None:
+        self._bus.emit(PredictorChangedPayload())
+
     def _allocate_results(self, flux: Any) -> dict[str, Any]:
         """Pre-allocate each user provider's sweep Result on the main thread.
 
@@ -831,6 +846,7 @@ class Controller(SessionControllerMixin):
             self._run_events.emit_point_done(idx)
 
         user_node_names = {n.name for n in enabled_nodes}
+        user_node_types = {n.name: n.type_name for n in enabled_nodes}
 
         def on_node(name: str, idx: int) -> None:
             # a provider is about to run → let the UI auto-follow to its run tab.
@@ -849,6 +865,12 @@ class Controller(SessionControllerMixin):
         ) -> None:
             if name in user_node_names:
                 store.write_node_row(name, idx, patch, info)
+                if (
+                    user_node_types.get(name) == "qubit_freq"
+                    and "qubit_freq" in patch.values()
+                    and self._state.exp_context.predictor is not None
+                ):
+                    self._run_events.emit_predictor_changed()
 
         def on_skip(name: str, idx: int, reason: Any) -> None:
             if name in user_node_names:

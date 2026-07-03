@@ -706,9 +706,32 @@ def test_run_switches_detail_to_run_tab(app):
     assert captured.get("btn") == "■ Stop"
     assert captured.get("setup_enabled") is False
     assert captured.get("devices_enabled") is False
-    assert captured.get("predictor_enabled") is False
+    assert captured.get("predictor_enabled") is True
     assert captured.get("inspect_enabled") is True
     assert win._setup_btn.isEnabled()
+
+
+def test_predictor_dialog_can_open_as_live_view_during_run(app):
+    ctrl, win = app
+    ctrl.set_flux_values([0.1, 0.2])
+    win._on_run_started()
+
+    win._on_predictor_clicked()
+
+    dlg = win._predictor_dialog
+    assert dlg is not None
+    assert dlg._live_mode
+    assert not dlg._apply_btn.isEnabled()
+    assert dlg._predict_value_spin.value() == pytest.approx(0.1)
+
+    win._on_node_entered("qubit_freq", 1)
+
+    assert dlg._predict_value_spin.value() == pytest.approx(0.2)
+
+    win._on_run_done()
+
+    assert not dlg._live_mode
+    assert dlg._apply_btn.isEnabled()
 
 
 def test_auto_follow_checkbox_disables_tab_switch_and_navigation(app):

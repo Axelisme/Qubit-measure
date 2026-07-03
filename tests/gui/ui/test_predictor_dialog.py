@@ -141,6 +141,66 @@ def test_predictor_dialog_default_field_values_no_predictor(qapp):
     assert dialog._flux_bias_spin.value() == pytest.approx(_DEFAULT_FLUX_BIAS)  # 0.0
 
 
+def test_live_mode_locks_model_marker_and_transition_controls(qapp):
+    ctrl = _make_ctrl(has_predictor=True, flux_bias=0.12)
+    device = _make_device_ctrl()
+    dialog = PredictorDialog(ctrl, device=device)
+
+    dialog.set_live_mode(True)
+
+    for widget in (
+        dialog._params_path_edit,
+        dialog._load_btn,
+        dialog._browse_btn,
+        dialog._ej_spin,
+        dialog._ec_spin,
+        dialog._el_spin,
+        dialog._flux_half_spin,
+        dialog._flux_period_spin,
+        dialog._flux_bias_spin,
+        dialog._apply_btn,
+        dialog._predict_value_spin,
+        dialog._add_from_spin,
+        dialog._add_to_spin,
+        dialog._add_btn,
+        dialog._remove_btn,
+        dialog._device_combo,
+        dialog._device_refresh_btn,
+        dialog._device_read_btn,
+    ):
+        assert widget is not None
+        assert not widget.isEnabled()
+    assert all(not canvas._interaction_enabled for canvas in dialog._all_canvases)
+
+    dialog._on_apply_model_params()
+    ctrl.set_predictor_model_params.assert_not_called()
+
+    dialog.set_live_mode(False)
+
+    assert dialog._apply_btn.isEnabled()
+    assert dialog._predict_value_spin.isEnabled()
+    assert dialog._device_read_btn is not None
+    assert not dialog._device_read_btn.isEnabled()
+    assert all(canvas._interaction_enabled for canvas in dialog._all_canvases)
+
+
+def test_live_device_value_updates_marker_without_enabling_manual_drag(qapp):
+    ctrl = _make_ctrl(has_predictor=True)
+    dialog = PredictorDialog(ctrl)
+    dialog.set_live_mode(True)
+
+    dialog.set_live_device_value(0.25)
+
+    assert dialog._predict_value_spin.value() == pytest.approx(0.25)
+    assert all(
+        canvas._marker_value == pytest.approx(0.25) for canvas in dialog._all_canvases
+    )
+
+    dialog._on_canvas_follow(0.5)
+
+    assert dialog._predict_value_spin.value() == pytest.approx(0.25)
+
+
 def test_predictor_dialog_param_spinboxes_do_not_pad_trailing_zeros(qapp):
     ctrl = _make_ctrl(has_predictor=False)
     dialog = PredictorDialog(ctrl)

@@ -91,6 +91,7 @@ class PredictorCurveCanvas(QWidget):
 
         # Follow-state field: True between the engaging click and the locking click.
         self._following: bool = False
+        self._interaction_enabled: bool = True
 
         # Injected follow callbacks; set to no-ops so we never check for None.
         self._on_follow: Callable[[float], None] = lambda _v: None
@@ -123,6 +124,12 @@ class PredictorCurveCanvas(QWidget):
         """Inject the dialog's follow/lock handlers."""
         self._on_follow = on_follow
         self._on_lock = on_lock
+
+    def set_interaction_enabled(self, enabled: bool) -> None:
+        """Enable or disable user marker interaction."""
+        self._interaction_enabled = bool(enabled)
+        if not self._interaction_enabled:
+            self._following = False
 
     # ------------------------------------------------------------------
     # Public rendering API
@@ -312,6 +319,8 @@ class PredictorCurveCanvas(QWidget):
         the axes disengages and locks the marker at its current position, firing
         on_lock so the dialog can do a final immediate recompute.
         """
+        if not self._interaction_enabled:
+            return
         x = self._event_xdata(event)
         if x is None:
             return
@@ -323,6 +332,8 @@ class PredictorCurveCanvas(QWidget):
             self._following = True
 
     def _on_move(self, event: Event) -> None:
+        if not self._interaction_enabled:
+            return
         if not self._following:
             return
         x = self._event_xdata(event)

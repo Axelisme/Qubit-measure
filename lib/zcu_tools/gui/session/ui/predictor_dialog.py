@@ -107,6 +107,7 @@ class PredictorDialog(QDialog):
         self._pred = predictor
         self._dev = device
         self._persistent_on_close = persistent_on_close
+        self._live_mode = False
         self.setWindowTitle("Predictor")
         self.setMinimumWidth(1000)
         self.setMinimumHeight(480)
@@ -139,12 +140,12 @@ class PredictorDialog(QDialog):
         self._params_path_edit.setPlaceholderText("params.json containing fluxdep_fit")
         params_path_row = QHBoxLayout()
         params_path_row.addWidget(self._params_path_edit, stretch=1)
-        load_btn = QPushButton("Load")
-        load_btn.clicked.connect(self._on_load_path_clicked)
-        params_path_row.addWidget(load_btn)
-        browse_btn = QPushButton("Browse")
-        browse_btn.clicked.connect(self._on_browse_file)
-        params_path_row.addWidget(browse_btn)
+        self._load_btn = QPushButton("Load")
+        self._load_btn.clicked.connect(self._on_load_path_clicked)
+        params_path_row.addWidget(self._load_btn)
+        self._browse_btn = QPushButton("Browse")
+        self._browse_btn.clicked.connect(self._on_browse_file)
+        params_path_row.addWidget(self._browse_btn)
         params_path_holder = QWidget()
         params_path_holder.setLayout(params_path_row)
         model_form.addRow("params.json:", params_path_holder)
@@ -167,9 +168,9 @@ class PredictorDialog(QDialog):
         model_form.addRow("flux_bias:", self._flux_bias_spin)
 
         model_btn_row = QHBoxLayout()
-        apply_btn = QPushButton("Apply")
-        apply_btn.clicked.connect(self._on_apply_model_params)
-        model_btn_row.addWidget(apply_btn)
+        self._apply_btn = QPushButton("Apply")
+        self._apply_btn.clicked.connect(self._on_apply_model_params)
+        model_btn_row.addWidget(self._apply_btn)
         model_form.addRow("", model_btn_row)
 
         left_layout.addWidget(model_group)
@@ -239,9 +240,9 @@ class PredictorDialog(QDialog):
         self._add_to_spin.setRange(0, 20)
         self._add_to_spin.setValue(1)
         self._transition_controls_row.addWidget(self._add_to_spin)
-        add_btn = QPushButton("Add")
-        add_btn.clicked.connect(self._on_add_clicked)
-        self._transition_controls_row.addWidget(add_btn)
+        self._add_btn = QPushButton("Add")
+        self._add_btn.clicked.connect(self._on_add_clicked)
+        self._transition_controls_row.addWidget(self._add_btn)
 
         self._transition_controls_row.addStretch()
         transitions_layout.addLayout(self._transition_controls_row)
@@ -332,6 +333,7 @@ class PredictorDialog(QDialog):
 
         # Pre-fill with current predictor state.
         self._sync_predictor_from_control(refresh_curves=True)
+        self._sync_live_mode_controls()
 
         # Facet subscription for live predictor state updates.
         self._unsubscribe_predictor_changed: Callable[[], None] | None = (
@@ -366,6 +368,12 @@ class PredictorDialog(QDialog):
                 return
 
         self._sync_predictor_from_control(refresh_curves=False)
+        if self._live_mode:
+            self._set_predict_value(
+                self._predict_value_spin.value(), update_status=False
+            )
+            self._set_status("Live predictor view", error=False)
+            return
         self._refresh_device_selector()
         selected = self._selected_device_name()
         if selected is not None:
@@ -376,6 +384,58 @@ class PredictorDialog(QDialog):
 
     def _on_close_requested(self) -> None:
         self.reject()
+
+    def set_live_mode(self, enabled: bool, *, status: str | None = None) -> None:
+        """Toggle app-driven live display mode.
+
+        Live mode is read-only: the active predictor model and marker are driven by
+        the host app, while the user can still inspect the plot/table selection.
+        """
+        self._live_mode = bool(enabled)
+        self._sync_live_mode_controls()
+        if self._live_mode:
+            self._debounce_timer.stop()
+            self._sync_predictor_from_control(refresh_curves=True)
+            self._set_status(status or "Live predictor view", error=False)
+        else:
+            self._set_status(status or "Manual predictor control", error=False)
+
+    def set_live_device_value(self, value: float, *, status: str | None = None) -> None:
+        """Set the live marker to a host-provided device value."""
+        self._set_predict_value(float(value), update_status=False)
+        if self._live_mode:
+            self._set_status(
+                status or f"Live device value: {float(value):.6g}",
+                error=False,
+            )
+
+    def _sync_live_mode_controls(self) -> None:
+        enabled = not self._live_mode
+        for widget in (
+            self._params_path_edit,
+            self._load_btn,
+            self._browse_btn,
+            self._ej_spin,
+            self._ec_spin,
+            self._el_spin,
+            self._flux_half_spin,
+            self._flux_period_spin,
+            self._flux_bias_spin,
+            self._apply_btn,
+            self._predict_value_spin,
+            self._add_from_spin,
+            self._add_to_spin,
+            self._add_btn,
+            self._remove_btn,
+        ):
+            widget.setEnabled(enabled)
+        if self._device_combo is not None:
+            self._device_combo.setEnabled(enabled)
+        if self._device_refresh_btn is not None:
+            self._device_refresh_btn.setEnabled(enabled)
+        self._update_device_buttons()
+        for canvas in self._all_canvases:
+            canvas.set_interaction_enabled(enabled)
 
     # ------------------------------------------------------------------
     # Model-param widgets / helpers
@@ -492,7 +552,7 @@ class PredictorDialog(QDialog):
         return data if isinstance(data, str) and data else None
 
     def _update_device_buttons(self) -> None:
-        selected = self._selected_device_name() is not None
+        selected = (not self._live_mode) and self._selected_device_name() is not None
         if self._device_read_btn is not None:
             self._device_read_btn.setEnabled(selected)
 
@@ -557,6 +617,9 @@ class PredictorDialog(QDialog):
             self._set_status(f"Failed to refresh {name!r}: {exc}", error=True)
 
     def _on_refresh_devices_clicked(self) -> None:
+        if self._live_mode:
+            self._set_status("Live mode controls the device value.", error=False)
+            return
         self._refresh_device_selector()
         selected = self._selected_device_name()
         if selected is None:
@@ -568,6 +631,9 @@ class PredictorDialog(QDialog):
         self._request_live_device_refresh(selected)
 
     def _on_read_device_clicked(self) -> None:
+        if self._live_mode:
+            self._set_status("Live mode controls the device value.", error=False)
+            return
         if self._dev is None:
             return
         selected = self._selected_device_name()
@@ -588,6 +654,8 @@ class PredictorDialog(QDialog):
 
     def _on_device_selection_changed(self, _index: int) -> None:
         self._update_device_buttons()
+        if self._live_mode:
+            return
         selected = self._selected_device_name()
         if selected is None:
             self._set_predict_value(
@@ -875,6 +943,11 @@ class PredictorDialog(QDialog):
 
     def _on_add_clicked(self) -> None:
         """Validate and add the transition from the add-row spinboxes."""
+        if self._live_mode:
+            self._set_status(
+                "Live mode keeps tracked transitions read-only.", error=False
+            )
+            return
         frm = self._add_from_spin.value()
         to = self._add_to_spin.value()
         if self._add_transition(frm, to):
@@ -883,6 +956,11 @@ class PredictorDialog(QDialog):
 
     def _on_remove_selected(self) -> None:
         """Remove ALL currently selected transitions and refresh."""
+        if self._live_mode:
+            self._set_status(
+                "Live mode keeps tracked transitions read-only.", error=False
+            )
+            return
         to_remove = self._selected_transitions()
         if not to_remove:
             return
@@ -903,6 +981,8 @@ class PredictorDialog(QDialog):
 
     def _on_spinbox_changed(self, value: float) -> None:
         """Spinbox changed → move all canvas markers; schedule debounced column update."""
+        if self._live_mode:
+            return
         self._sync_markers(value)
         self._debounce_timer.start()
 
@@ -915,6 +995,8 @@ class PredictorDialog(QDialog):
         recompute (table f/|n|/|phi|) is debounced so motion does not recompute
         on every pixel.
         """
+        if self._live_mode:
+            return
         self._predict_value_spin.blockSignals(True)
         self._predict_value_spin.setValue(value)
         self._predict_value_spin.blockSignals(False)
@@ -923,6 +1005,8 @@ class PredictorDialog(QDialog):
 
     def _on_canvas_lock(self, value: float) -> None:
         """Marker locked (second click) → final immediate recompute of the columns."""
+        if self._live_mode:
+            return
         self._predict_value_spin.blockSignals(True)
         self._predict_value_spin.setValue(value)
         self._predict_value_spin.blockSignals(False)
@@ -943,6 +1027,9 @@ class PredictorDialog(QDialog):
 
     def _on_load_path_clicked(self) -> None:
         """Load the typed params.json path, populate fields, and auto-apply."""
+        if self._live_mode:
+            self._set_status("Live mode keeps model params read-only.", error=False)
+            return
         path = self._params_path_edit.text().strip()
         if not path:
             self._set_status("Enter a params.json path.", error=True)
@@ -957,6 +1044,9 @@ class PredictorDialog(QDialog):
         flux_period == 0 or a service error), the fields stay populated and the
         error is shown in the status.
         """
+        if self._live_mode:
+            self._set_status("Live mode keeps model params read-only.", error=False)
+            return
         path, _ = QFileDialog.getOpenFileName(
             self, "Select params.json", "", "JSON files (*.json);;All files (*)"
         )
@@ -986,6 +1076,9 @@ class PredictorDialog(QDialog):
 
     def _on_apply_model_params(self) -> None:
         """Build+install a predictor from the current editable fields."""
+        if self._live_mode:
+            self._set_status("Live mode keeps model params read-only.", error=False)
+            return
         self._install_from_fields()
 
     def _install_from_fields(self) -> bool:
@@ -1046,6 +1139,8 @@ class PredictorDialog(QDialog):
 
     def _on_device_changed(self, payload: DeviceChangedPayload) -> None:
         if not self.isVisible():
+            return
+        if self._live_mode:
             return
         before = self._selected_device_name()
         self._refresh_device_selector()
