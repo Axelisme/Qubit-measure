@@ -25,6 +25,7 @@ the fields it does not use).
 
 from __future__ import annotations
 
+import inspect
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
 from dataclasses import InitVar, dataclass, field
@@ -137,12 +138,15 @@ class Builder(ABC):
 
     # --- typed param schema (the node-knob SSOT; ADR-0011 spec/value) ---
 
-    def make_default_schema(self) -> NodeCfgSchema:
+    def make_default_schema(self, ctx: Any | None = None) -> NodeCfgSchema:
         """The node's typed knob schema (defaults + types) — the param SSOT.
 
         Measurement Builders override this to declare their typed knobs. A Service
         (the predictor) has no user knobs, so the base returns an empty schema.
+        ``ctx`` is the active experiment context used only to seed fresh placement
+        defaults; the resulting schema remains the per-placement SSOT.
         """
+        del ctx
         return sectioned_node_schema(())
 
     # --- sweep-lived factories (Run start; no-op for pure-compute Services) ---
@@ -210,12 +214,21 @@ class PlacedNode:
     # Seed for the per-placement schema. Consumed once in ``__post_init__`` to
     # build ``schema``; not retained (the schema is the SSOT thereafter).
     overrides: InitVar[Mapping[str, Any] | None] = None
+    # Active ExpContext used only while building fresh defaults. It is not retained,
+    # and persisted workflow restore still overwrites from the saved raw value tree.
+    default_context: InitVar[Any | None] = None
     schema: NodeCfgSchema = field(init=False)
 
-    def __post_init__(self, overrides: Mapping[str, Any] | None) -> None:
+    def __post_init__(
+        self, overrides: Mapping[str, Any] | None, default_context: Any | None
+    ) -> None:
         if not self.name:
             self.name = self.builder.name
-        self.schema = self.builder.make_default_schema()
+        make_default_schema = self.builder.make_default_schema
+        if inspect.signature(make_default_schema).parameters:
+            self.schema = make_default_schema(default_context)
+        else:
+            self.schema = make_default_schema()
         if overrides:
             self.schema.with_overrides(overrides)
 

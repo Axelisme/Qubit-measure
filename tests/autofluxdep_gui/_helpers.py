@@ -187,7 +187,8 @@ def make_builder(
     """
 
     class _AdHocBuilder(Builder):
-        def make_default_schema(self) -> NodeCfgSchema:
+        def make_default_schema(self, ctx: Any | None = None) -> NodeCfgSchema:
+            del ctx
             return NodeCfgSchema(flat_node_schema(schema_fields))
 
         def build_node(self, env: RunEnv) -> Node:

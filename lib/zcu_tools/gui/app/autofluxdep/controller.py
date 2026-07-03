@@ -487,7 +487,12 @@ class Controller(SessionControllerMixin):
 
     def add_node(self, builder: Builder, **params: Any) -> PlacedNode:
         name = self._unique_name(builder.name)
-        node = PlacedNode(builder=builder, name=name, overrides=params)
+        node = PlacedNode(
+            builder=builder,
+            name=name,
+            overrides=params,
+            default_context=self._state.exp_context,
+        )
         self._state.nodes.append(node)
         self._state.version.bump(WORKFLOW_VERSION_KEY)
         logger.debug("add_node: %r (type=%r) params=%s", name, builder.name, params)
@@ -503,7 +508,7 @@ class Controller(SessionControllerMixin):
         averages a sensible number of passes (the user can tune it) — written
         through the placement's schema (the SSOT) rather than a params dict.
         """
-        node = create_placement(type_name)
+        node = create_placement(type_name, ctx=self._state.exp_context)
         node.name = self._unique_name(node.name)
         if "rounds" in node.schema.keys:
             node.schema.set_field("rounds", DEFAULT_ROUNDS)

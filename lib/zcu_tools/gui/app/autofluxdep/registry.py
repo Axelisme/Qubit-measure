@@ -17,6 +17,8 @@ that flux point.
 
 from __future__ import annotations
 
+from typing import Any
+
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, PlacedNode
 from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import LenRabiBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.mist import MistBuilder
@@ -44,9 +46,9 @@ def available_node_types() -> list[str]:
     return list(NODE_BUILDERS)
 
 
-def create_placement(type_name: str) -> PlacedNode:
+def create_placement(type_name: str, ctx: Any | None = None) -> PlacedNode:
     """A fresh ``PlacedNode`` of ``type_name`` with empty (default) params.
 
     Raises ``KeyError`` if the type is not registered (fast-fail).
     """
-    return PlacedNode(builder=NODE_BUILDERS[type_name])
+    return PlacedNode(builder=NODE_BUILDERS[type_name], default_context=ctx)

@@ -63,6 +63,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     set_flux_by_name,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
+from zcu_tools.gui.app.autofluxdep.nodes.defaults import md_scalar_first, pulse_seed
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import READOUT_LIBRARY_ALIASES
 from zcu_tools.gui.app.autofluxdep.nodes.plotters import title_with_snr
@@ -366,7 +367,7 @@ class QubitFreqBuilder(Builder):
         ModuleDep("readout", default=_default_readout, aliases=READOUT_LIBRARY_ALIASES),
     )
 
-    def make_default_schema(self) -> NodeCfgSchema:
+    def make_default_schema(self, ctx: Any | None = None) -> NodeCfgSchema:
         """The typed node-knob schema (defaults + types) — the param SSOT.
 
         ``detune_sweep`` is a ``SweepSpec`` (expts-defined, aligning with the cfg
@@ -377,37 +378,48 @@ class QubitFreqBuilder(Builder):
         waveform, ``make_cfg`` uses an inline const waveform of that length so
         mock-created contexts remain runnable.
         """
+        qub_seed = pulse_seed(
+            ctx,
+            module_aliases=("qub_probe",),
+            waveform_aliases=("qub_flat", "qub_cos"),
+            fallback_waveform=_DEFAULT_QUB_WAVEFORM,
+            fallback_ch=md_scalar_first(ctx, ("qub_4_5_ch", "qub_ch"), _DEFAULT_QUB_CH),
+            fallback_nqz=2,
+            fallback_freq=0.0,
+            fallback_gain=_DEFAULT_QUB_GAIN,
+            fallback_length=0.1,
+        )
         return path_node_schema(
             (
                 node_path(
                     "qub_waveform",
                     "modules.qub_pulse.waveform",
                     str_scalar_spec("waveform", optional=True),
-                    _DEFAULT_QUB_WAVEFORM,
+                    qub_seed.waveform,
                 ),
                 node_path(
                     "qub_ch",
                     "modules.qub_pulse.ch",
                     IntSpec(label="ch"),
-                    _DEFAULT_QUB_CH,
+                    qub_seed.ch,
                 ),
                 node_path(
                     "qub_nqz",
                     "modules.qub_pulse.nqz",
                     IntSpec(label="nqz", choices=[1, 2]),
-                    2,
+                    qub_seed.nqz,
                 ),
                 node_path(
                     "qub_gain",
                     "modules.qub_pulse.gain",
                     FloatSpec(label="gain"),
-                    _DEFAULT_QUB_GAIN,
+                    qub_seed.gain,
                 ),
                 node_path(
                     "qub_length",
                     "modules.qub_pulse.length",
                     FloatSpec(label="waveform length (us)"),
-                    0.1,
+                    qub_seed.length,
                 ),
                 node_path(
                     "relax_delay",

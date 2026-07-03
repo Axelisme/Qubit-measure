@@ -73,6 +73,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     signal2real_flip,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
+from zcu_tools.gui.app.autofluxdep.nodes.defaults import md_scaled, md_scaled_sweep_stop
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import (
     PI2_PULSE_LIBRARY_ALIASES,
@@ -297,7 +298,7 @@ class T2RamseyBuilder(Builder):
         ),
     )
 
-    def make_default_schema(self) -> NodeCfgSchema:
+    def make_default_schema(self, ctx: Any | None = None) -> NodeCfgSchema:
         """The typed node-knob schema (defaults + types) — the param SSOT.
 
         ``sweep_range`` (a ``SweepSpec``, expts-defined) seeds the initial Result
@@ -306,13 +307,15 @@ class T2RamseyBuilder(Builder):
         need a one-fringe synthetic trace override it explicitly. The dead
         ``num_expts`` knob (never read) is dropped.
         """
+        relax_delay = md_scaled(ctx, "t1", 3.0, _DEFAULT_T1, minimum=1.0)
+        sweep_stop = md_scaled_sweep_stop(ctx, "t2r", _SWEEP_T2R_FACTOR, 10.0)
         return path_node_schema(
             (
                 node_path(
                     "relax_delay",
                     "relax_delay",
                     FloatSpec(label="relax_delay (us)"),
-                    max(1.0, 3.0 * _DEFAULT_T1),
+                    relax_delay,
                 ),
                 node_path(
                     "reps",
@@ -330,7 +333,7 @@ class T2RamseyBuilder(Builder):
                     "sweep_range",
                     "sweep_range",
                     SweepSpec(label="sweep_range (us)"),
-                    SweepValue(start=0.0, stop=25.0, expts=121),
+                    SweepValue(start=0.0, stop=sweep_stop, expts=121),
                 ),
                 node_path(
                     "detune_ratio",

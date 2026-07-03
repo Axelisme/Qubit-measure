@@ -63,6 +63,13 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     set_flux_by_name,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
+from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
+    md_float,
+    md_scaled,
+    readout_seed,
+    ro_freq_range,
+    ro_gain_range,
+)
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import (
     PI_PULSE_LIBRARY_ALIASES,
@@ -198,13 +205,18 @@ def _resolve_range(
     previous: float,
     fixed: Any,
     label: str,
+    default_previous: float | None = None,
 ) -> tuple[float, float]:
     fixed_start = float(fixed.start)
     fixed_stop = float(fixed.stop)
     if mode == _RANGE_MODE_PREVIOUS_BEST:
         half_width = abs(fixed_stop - fixed_start) / 2.0
-        start = float(previous) - half_width
-        stop = float(previous) + half_width
+        center = float(previous)
+        fixed_center = (fixed_start + fixed_stop) / 2.0
+        if default_previous is not None and np.isclose(center, default_previous):
+            center = fixed_center
+        start = center - half_width
+        stop = center + half_width
     elif mode == _RANGE_MODE_FIXED:
         start = fixed_start
         stop = fixed_stop
@@ -400,7 +412,7 @@ class RoOptimizeBuilder(Builder):
         ModuleDep("readout", default=_default_readout, aliases=READOUT_LIBRARY_ALIASES),
     )
 
-    def make_default_schema(self) -> NodeCfgSchema:
+    def make_default_schema(self, ctx: Any | None = None) -> NodeCfgSchema:
         """The typed node-knob schema (defaults + types) — the param SSOT.
 
         The visible "Default cfg" block mirrors the notebook ``ml.make_cfg`` dict:
@@ -408,13 +420,31 @@ class RoOptimizeBuilder(Builder):
         endpoints can either be used directly or re-centered around the previous
         best point by the generation override modes.
         """
+        readout = readout_seed(
+            ctx,
+            READOUT_LIBRARY_ALIASES,
+            fallback_freq=md_float(ctx, "r_f", _DEFAULT_CENTER_FREQ),
+            fallback_gain=md_float(ctx, "best_ro_gain", _DEFAULT_CENTER_GAIN),
+        )
+        freq_range = ro_freq_range(
+            ctx,
+            center=readout.freq,
+            fallback_half_width=(_DEFAULT_FREQ_RANGE[1] - _DEFAULT_FREQ_RANGE[0]) / 2.0,
+            expts=_DEFAULT_FREQ_RANGE[2],
+        )
+        gain_range = ro_gain_range(
+            ctx,
+            center=readout.gain,
+            half_width=(_DEFAULT_GAIN_RANGE[1] - _DEFAULT_GAIN_RANGE[0]) / 2.0,
+            expts=_DEFAULT_GAIN_RANGE[2],
+        )
         return path_node_schema(
             (
                 node_path(
                     "relax_delay",
                     "relax_delay",
                     FloatSpec(label="relax_delay (us)"),
-                    3.0 * _DEFAULT_T1,
+                    md_scaled(ctx, "t1", 3.0, _DEFAULT_T1),
                 ),
                 node_path(
                     "reps",
@@ -438,21 +468,13 @@ class RoOptimizeBuilder(Builder):
                     "freq_range",
                     "freq_range",
                     SweepSpec(label="freq_range (MHz)"),
-                    SweepValue(
-                        start=_DEFAULT_FREQ_RANGE[0],
-                        stop=_DEFAULT_FREQ_RANGE[1],
-                        expts=_DEFAULT_FREQ_RANGE[2],
-                    ),
+                    freq_range,
                 ),
                 node_path(
                     "gain_range",
                     "gain_range",
                     SweepSpec(label="gain_range"),
-                    SweepValue(
-                        start=_DEFAULT_GAIN_RANGE[0],
-                        stop=_DEFAULT_GAIN_RANGE[1],
-                        expts=_DEFAULT_GAIN_RANGE[2],
-                    ),
+                    gain_range,
                 ),
                 node_path(
                     "freq_range_mode",
@@ -503,12 +525,14 @@ class RoOptimizeBuilder(Builder):
             previous=_DEFAULT_CENTER_FREQ,
             fixed=freq_range_knob,
             label="freq",
+            default_previous=_DEFAULT_CENTER_FREQ,
         )
         gain_range = _resolve_range(
             str(knobs["gain_range_mode"]),
             previous=_DEFAULT_CENTER_GAIN,
             fixed=gain_range_knob,
             label="gain",
+            default_previous=_DEFAULT_CENTER_GAIN,
         )
         freqs = np.linspace(freq_range[0], freq_range[1], freq_expts)
         gains = np.linspace(gain_range[0], gain_range[1], gain_expts)
@@ -554,12 +578,14 @@ class RoOptimizeBuilder(Builder):
             previous=float(snapshot["best_ro_freq"]),
             fixed=freq_range_knob,
             label="freq",
+            default_previous=_DEFAULT_CENTER_FREQ,
         )
         gain_range = _resolve_range(
             str(knobs["gain_range_mode"]),
             previous=float(snapshot["best_ro_gain"]),
             fixed=gain_range_knob,
             label="gain",
+            default_previous=_DEFAULT_CENTER_GAIN,
         )
         t1 = float(snapshot["t1"])
         relax_delay = _resolve_relax_delay(

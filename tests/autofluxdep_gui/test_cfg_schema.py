@@ -49,6 +49,8 @@ from zcu_tools.gui.app.autofluxdep.nodes.ro_optimize import RoOptimizeBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.t1 import T1Builder
 from zcu_tools.gui.app.autofluxdep.nodes.t2echo import T2EchoBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.t2ramsey import T2RamseyBuilder
+from zcu_tools.gui.app.autofluxdep.registry import create_placement
+from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 _READOUT = {
@@ -83,6 +85,15 @@ def _ml() -> ModuleLibrary:
         }
     )
     return ml
+
+
+def _ctx(md: MetaDict | None = None, ml: ModuleLibrary | None = None) -> ExpContext:
+    return ExpContext(
+        md=md if md is not None else MetaDict(),
+        ml=ml if ml is not None else ModuleLibrary(),
+        soc=None,
+        soccfg=None,
+    )
 
 
 _BUILDERS: tuple[Builder, ...] = (
@@ -473,6 +484,29 @@ def test_path_schema_renders_raw_cfg_tree_while_lowering_logical_keys():
     }
 
 
+def test_path_schema_scalar_default_preserves_eval_value():
+    md = MetaDict()
+    md.gain = 0.25
+    schema = path_node_schema(
+        (
+            node_path(
+                "qub_gain",
+                "modules.qub_pulse.gain",
+                FloatSpec("gain"),
+                EvalValue("gain"),
+            ),
+        ),
+        section_labels={"modules": "modules", "modules.qub_pulse": "qub_pulse"},
+    )
+
+    assert schema.read_knobs()["qub_gain"] == {"__kind": "eval", "expr": "gain"}
+    assert schema.read_value_tree()["modules"]["qub_pulse"]["gain"] == {
+        "__kind": "eval",
+        "expr": "gain",
+    }
+    assert schema.lower(None, md=md)["qub_gain"] == 0.25
+
+
 def test_sectioned_schema_read_knobs_is_flat_json_friendly():
     schema = _sectioned_test_schema()
     schema.set_field("qub_gain", EvalValue("gain"))
@@ -738,6 +772,124 @@ def test_t2_default_knobs():
             25.0,
             121,
         ), builder.name
+
+
+def test_fresh_node_defaults_seed_from_md_values():
+    md = MetaDict()
+    md.qub_4_5_ch = 7
+    md.t1 = 12.0
+    md.pi_len = 0.2
+    md.r_f = 6200.0
+    md.rf_w = 10.0
+    md.t2r = 8.0
+    md.t2e = 9.0
+    md.mist_f = 6100.0
+    ctx = _ctx(md=md)
+
+    qubit = create_placement("qubit_freq", ctx=ctx).schema.lower(None, md=md)
+    assert qubit["qub_ch"] == 7
+
+    lenrabi = LenRabiBuilder().make_default_schema(ctx).lower(None, md=md)
+    assert lenrabi["qub_ch"] == 7
+    assert lenrabi["relax_delay"] == 36.0
+    assert np.allclose(
+        [float(lenrabi["sweep_range"].start), float(lenrabi["sweep_range"].stop)],
+        [0.05, 1.0],
+    )
+
+    ro = RoOptimizeBuilder().make_default_schema(ctx).lower(None, md=md)
+    assert ro["relax_delay"] == 36.0
+    assert (
+        float(ro["freq_range"].start),
+        float(ro["freq_range"].stop),
+        int(ro["freq_range"].expts),
+    ) == (6198.0, 6202.0, 21)
+
+    t1 = T1Builder().make_default_schema(ctx).lower(None, md=md)
+    assert t1["relax_delay"] == 36.0
+    assert (float(t1["sweep_range"].start), float(t1["sweep_range"].stop)) == (
+        0.5,
+        60.0,
+    )
+
+    ramsey = T2RamseyBuilder().make_default_schema(ctx).lower(None, md=md)
+    echo = T2EchoBuilder().make_default_schema(ctx).lower(None, md=md)
+    assert ramsey["relax_delay"] == 36.0
+    assert (float(ramsey["sweep_range"].start), float(ramsey["sweep_range"].stop)) == (
+        0.0,
+        20.0,
+    )
+    assert echo["relax_delay"] == 36.0
+    assert (float(echo["sweep_range"].start), float(echo["sweep_range"].stop)) == (
+        0.0,
+        22.5,
+    )
+
+    mist = MistBuilder().make_default_schema(ctx).lower(None, md=md)
+    assert mist["mist_ch"] == 7
+    assert mist["mist_freq"] == 6100.0
+    assert mist["relax_delay"] == 60.0
+
+
+def test_fresh_node_defaults_seed_from_ml_modules():
+    ml = ModuleLibrary()
+    ml.register_waveform(
+        qub_flat={
+            "style": "flat_top",
+            "length": 2.0,
+            "raise_waveform": {"style": "cosine", "length": 0.02},
+        }
+    )
+    ml.register_module(
+        pi_amp={
+            "type": "pulse",
+            "ch": 5,
+            "nqz": 1,
+            "freq": 5100.0,
+            "gain": 0.6,
+            "waveform": {"style": "const", "length": 0.24},
+        },
+        readout_dpm={
+            "type": "readout/pulse",
+            "pulse_cfg": {
+                "type": "pulse",
+                "ch": 2,
+                "nqz": 2,
+                "freq": 6201.0,
+                "gain": 0.42,
+                "waveform": {"style": "const", "length": 1.0},
+            },
+            "ro_cfg": {
+                "type": "readout/direct",
+                "ro_ch": 0,
+                "ro_length": 0.9,
+                "ro_freq": 6201.0,
+                "trig_offset": 0.6,
+            },
+        },
+    )
+    ctx = _ctx(ml=ml)
+
+    lenrabi = LenRabiBuilder().make_default_schema(ctx).lower(ml, md=ctx.md)
+    assert lenrabi["qub_waveform"] == "qub_flat"
+    assert lenrabi["qub_ch"] == 5
+    assert lenrabi["qub_nqz"] == 1
+    assert lenrabi["qub_gain"] == 0.4
+    assert lenrabi["qub_length"] == 0.24
+    assert np.allclose(
+        [float(lenrabi["sweep_range"].start), float(lenrabi["sweep_range"].stop)],
+        [0.05, 1.2],
+    )
+
+    ro = RoOptimizeBuilder().make_default_schema(ctx).lower(ml, md=ctx.md)
+    assert np.allclose(
+        [float(ro["freq_range"].start), float(ro["freq_range"].stop)],
+        [6200.0, 6202.0],
+    )
+    assert np.allclose(
+        [float(ro["gain_range"].start), float(ro["gain_range"].stop)],
+        [0.37, 0.47],
+    )
 
 
 # --- 2b. equivalence: default-knob make_cfg == the prototype's hardcoded cfg ----

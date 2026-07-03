@@ -20,7 +20,7 @@ No qtbot: the repo drives widgets directly under the autouse ``qapp`` fixture
 
 from __future__ import annotations
 
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from zcu_tools.gui.app.autofluxdep.app import build_core
@@ -29,6 +29,7 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     FloatSpec,
     IntSpec,
     NodeCfgSchema,
+    ScalarSpec,
     SweepValue,
     node_field,
     node_section,
@@ -58,7 +59,8 @@ class _NoopNode(Node):
 class _SectionedBuilder(Builder):
     name = "sectioned"
 
-    def make_default_schema(self) -> NodeCfgSchema:
+    def make_default_schema(self, ctx: Any | None = None) -> NodeCfgSchema:
+        del ctx
         return sectioned_node_schema(
             (
                 node_section(
@@ -139,8 +141,12 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
             "gain",
             "length",
         }
-        assert qub_pulse.fields["ch"].spec.optional is False
-        assert qub_pulse.fields["nqz"].spec.choices == [1, 2]
+        ch_spec = qub_pulse.fields["ch"].spec
+        nqz_spec = qub_pulse.fields["nqz"].spec
+        assert isinstance(ch_spec, ScalarSpec)
+        assert isinstance(nqz_spec, ScalarSpec)
+        assert ch_spec.optional is False
+        assert nqz_spec.choices == [1, 2]
         assert "qub_gain" not in form._default_model.fields
         assert set(_generation(form).fields.keys()) == {"drive_gain_mode"}
         assert set(node.schema.keys) == {

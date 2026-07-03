@@ -56,8 +56,17 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     signal2real_flip,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
+from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
+    md_scalar_first,
+    md_scaled,
+    md_scaled_sweep_stop,
+    pulse_seed,
+)
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
-from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import READOUT_LIBRARY_ALIASES
+from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import (
+    PI_PULSE_LIBRARY_ALIASES,
+    READOUT_LIBRARY_ALIASES,
+)
 from zcu_tools.gui.app.autofluxdep.nodes.plotters import ColormapLinePlotter
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
@@ -238,7 +247,7 @@ class LenRabiBuilder(Builder):
         ),
     )
 
-    def make_default_schema(self) -> NodeCfgSchema:
+    def make_default_schema(self, ctx: Any | None = None) -> NodeCfgSchema:
         """The typed node-knob schema (defaults + types) — the param SSOT.
 
         ``sweep_range`` is the pulse-length axis as a ``SweepSpec`` (expts-defined,
@@ -249,43 +258,63 @@ class LenRabiBuilder(Builder):
         pulse with ``qub_length``. The prototype's dead ``num_expts`` knob (never
         read — the point count came from the axis itself) is dropped.
         """
+        pi_seed = pulse_seed(
+            ctx,
+            module_aliases=PI_PULSE_LIBRARY_ALIASES,
+            waveform_aliases=("qub_flat", "qub_cos"),
+            fallback_waveform=_DEFAULT_QUB_WAVEFORM,
+            fallback_ch=md_scalar_first(ctx, ("qub_4_5_ch", "qub_ch"), _DEFAULT_QUB_CH),
+            fallback_nqz=2,
+            fallback_freq=0.0,
+            fallback_gain=0.05,
+            fallback_length=0.1,
+        )
+        drive_gain = (
+            round(min(1.0, pi_seed.gain / 1.5), 12)
+            if pi_seed.from_module
+            else pi_seed.gain
+        )
+        relax_delay = md_scaled(ctx, "t1", 3.0, _DEFAULT_RELAX_DELAY / 3.0)
+        sweep_stop = md_scaled_sweep_stop(
+            ctx, "pi_len", 5.0, pi_seed.length, minimum=0.5
+        )
         return path_node_schema(
             (
                 node_path(
                     "qub_waveform",
                     "modules.rabi_pulse.waveform",
                     str_scalar_spec("waveform", optional=True),
-                    _DEFAULT_QUB_WAVEFORM,
+                    pi_seed.waveform,
                 ),
                 node_path(
                     "qub_ch",
                     "modules.rabi_pulse.ch",
                     IntSpec(label="ch"),
-                    _DEFAULT_QUB_CH,
+                    pi_seed.ch,
                 ),
                 node_path(
                     "qub_nqz",
                     "modules.rabi_pulse.nqz",
                     IntSpec(label="nqz", choices=[1, 2]),
-                    2,
+                    pi_seed.nqz,
                 ),
                 node_path(
                     "qub_gain",
                     "modules.rabi_pulse.gain",
                     FloatSpec(label="gain"),
-                    0.05,
+                    drive_gain,
                 ),
                 node_path(
                     "qub_length",
                     "modules.rabi_pulse.length",
                     FloatSpec(label="waveform length (us)"),
-                    0.1,
+                    pi_seed.length,
                 ),
                 node_path(
                     "relax_delay",
                     "relax_delay",
                     FloatSpec(label="relax_delay (us)"),
-                    _DEFAULT_RELAX_DELAY,
+                    relax_delay,
                 ),
                 node_path(
                     "reps",
@@ -303,7 +332,7 @@ class LenRabiBuilder(Builder):
                     "sweep_range",
                     "sweep_range",
                     SweepSpec(label="sweep_range (us)"),
-                    SweepValue(start=0.05, stop=0.5, expts=101),
+                    SweepValue(start=0.05, stop=sweep_stop, expts=101),
                 ),
                 node_path(
                     "earlystop_snr",

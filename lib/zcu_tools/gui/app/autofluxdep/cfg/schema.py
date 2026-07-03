@@ -203,6 +203,8 @@ def _default_value_for(spec: CfgNodeSpec, default: Any) -> Any:
             )
         return default
     if isinstance(spec, ScalarSpec):
+        if isinstance(default, (DirectValue, EvalValue)):
+            return default
         return DirectValue(default)
     raise TypeError(f"Unsupported node field spec: {type(spec).__name__}")
 

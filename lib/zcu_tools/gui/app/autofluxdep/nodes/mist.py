@@ -59,6 +59,13 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     set_flux_by_name,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
+from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
+    md_float,
+    md_scalar,
+    md_scalar_first,
+    md_scaled,
+    pulse_seed,
+)
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import (
     PI_PULSE_LIBRARY_ALIASES,
@@ -258,7 +265,7 @@ class MistBuilder(Builder):
         ),
     )
 
-    def make_default_schema(self) -> NodeCfgSchema:
+    def make_default_schema(self, ctx: Any | None = None) -> NodeCfgSchema:
         """The typed node-knob schema (defaults + types) — the param SSOT.
 
         ``gain_sweep`` is the disturbance-gain axis as a ``SweepSpec`` (expts-
@@ -268,49 +275,67 @@ class MistBuilder(Builder):
         project does not define that named waveform, ``make_cfg`` uses an inline
         const waveform with ``mist_length`` so mock-created contexts remain runnable.
         """
+        mist_seed = pulse_seed(
+            ctx,
+            module_aliases=("mist_pulse", "mist", "mist_drive"),
+            waveform_aliases=("mist_waveform", "mist_flat", "qub_flat", "res_flat"),
+            fallback_waveform=_DEFAULT_MIST_WAVEFORM,
+            fallback_ch=md_scalar_first(
+                ctx,
+                ("mist_ch", "res_ch", "qub_4_5_ch", "qub_ch"),
+                _DEFAULT_MIST_CH,
+            ),
+            fallback_nqz=2,
+            fallback_freq=md_scalar(
+                ctx, "mist_f", md_scalar(ctx, "r_f", _DEFAULT_MIST_FREQ)
+            ),
+            fallback_gain=0.5,
+            fallback_length=0.1,
+        )
+        relax_delay = md_scaled(ctx, "t1", 5.0, _DEFAULT_RELAX_DELAY / 5.0)
         return path_node_schema(
             (
                 node_path(
                     "mist_waveform",
                     "modules.mist_pulse.waveform",
                     str_scalar_spec("waveform", optional=True),
-                    _DEFAULT_MIST_WAVEFORM,
+                    mist_seed.waveform,
                 ),
                 node_path(
                     "mist_ch",
                     "modules.mist_pulse.ch",
                     IntSpec(label="ch"),
-                    _DEFAULT_MIST_CH,
+                    mist_seed.ch,
                 ),
                 node_path(
                     "mist_nqz",
                     "modules.mist_pulse.nqz",
                     IntSpec(label="nqz", choices=[1, 2]),
-                    2,
+                    mist_seed.nqz,
                 ),
                 node_path(
                     "mist_freq",
                     "modules.mist_pulse.freq",
                     FloatSpec(label="freq (MHz)"),
-                    _DEFAULT_MIST_FREQ,
+                    mist_seed.freq,
                 ),
                 node_path(
                     "mist_gain",
                     "modules.mist_pulse.gain",
                     FloatSpec(label="gain"),
-                    0.5,
+                    mist_seed.gain,
                 ),
                 node_path(
                     "mist_length",
                     "modules.mist_pulse.length",
                     FloatSpec(label="waveform length (us)"),
-                    0.1,
+                    mist_seed.length,
                 ),
                 node_path(
                     "relax_delay",
                     "relax_delay",
                     FloatSpec(label="relax_delay (us)"),
-                    _DEFAULT_RELAX_DELAY,
+                    relax_delay,
                 ),
                 node_path(
                     "reps",
