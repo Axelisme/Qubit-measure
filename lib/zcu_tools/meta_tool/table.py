@@ -8,7 +8,7 @@ from .syncfile import SyncFile, auto_sync
 
 
 class SampleTable(SyncFile):
-    def __init__(self, csv_path: str | None = None) -> None:
+    def __init__(self, csv_path: str | Path | None = None) -> None:
         self.samples = pd.DataFrame()
         super().__init__(csv_path)
 

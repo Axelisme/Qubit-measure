@@ -104,7 +104,7 @@ class ModuleLibrary(SyncFile):
         self.waveforms = {}
         for name, wav_cfg in cfg["waveforms"].items():
             try:
-                wav_cfg = WaveformCfgFactory.from_raw(wav_cfg)
+                wav_cfg = WaveformCfgFactory.from_raw(wav_cfg, ml=self)
             except Exception as e:
                 raise ValueError(
                     f"Error parsing waveform {name} in module library: \n{e}"
@@ -114,7 +114,7 @@ class ModuleLibrary(SyncFile):
         self.modules = {}
         for name, mod_cfg in cfg["modules"].items():
             try:
-                mod_cfg = ModuleCfgFactory.from_raw(mod_cfg)
+                mod_cfg = ModuleCfgFactory.from_raw(mod_cfg, ml=self)
             except Exception as e:
                 raise ValueError(
                     f"Error parsing module {name} in module library: \n{e}"

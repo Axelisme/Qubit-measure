@@ -7,6 +7,30 @@ from typing import Literal
 from .library import ModuleLibrary
 from .metadict import MetaDict
 
+_UNIT_RANGES: dict[str, tuple[tuple[str, float, float], ...]] = {
+    "A": (
+        ("mA", 100e-3, 1e3),  # 100 mA
+        ("A", float("inf"), 1),
+    ),
+    "V": (
+        ("mV", 100e-3, 1e3),  # 100 mV
+        ("V", float("inf"), 1),
+    ),
+    "K": (
+        ("mK", 1000e-3, 1e3),  # 1000 mK
+        ("K", float("inf"), 1),
+    ),
+    "none": (
+        ("u", 1e-3, 1e6),
+        ("m", 1e-1, 1e3),
+        ("", 1e3, 1),
+        ("k", 1e6, 1e-3),
+        ("M", 1e9, 1e-6),
+        ("G", 1e12, 1e-9),
+        ("T", float("inf"), 1e-12),
+    ),
+}
+
 
 class ExperimentManager:
     def __init__(self, exp_dir: str | Path) -> None:
@@ -99,34 +123,9 @@ class ExperimentManager:
         value: float | None = None,
         unit: Literal["A", "V", "K", "none"] = "none",
     ) -> str:
-
-        UNIT_RANGES = {
-            "A": [
-                ("mA", 100e-3, 1e3),  # 100 mA
-                ("A", float("inf"), 1),
-            ],
-            "V": [
-                ("mV", 100e-3, 1e3),  # 100 mV
-                ("V", float("inf"), 1),
-            ],
-            "K": [
-                ("mK", 1000e-3, 1e3),  # 1000 mK
-                ("K", float("inf"), 1),
-            ],
-            "none": [
-                ("u", 1e-3, 1e6),
-                ("m", 1e-1, 1e3),
-                ("", 1e3, 1),
-                ("k", 1e6, 1e-3),
-                ("M", 1e9, 1e-6),
-                ("G", 1e12, 1e-9),
-                ("T", float("inf"), 1e-12),
-            ],
-        }
-
         united_value = None
         if value is not None:
-            for unit_suffix, max_value, scale in UNIT_RANGES[unit]:
+            for unit_suffix, max_value, scale in _UNIT_RANGES[unit]:
                 if abs(value) <= max_value:
                     united_value = f"{value * scale:.3f}{unit_suffix}"
                     break
@@ -144,7 +143,10 @@ class ExperimentManager:
         return f"{base_name}_{idx}"
 
     def __str__(self) -> str:
-        return f"{self.__class__.__name__}(exp_dir={self.exp_dir}, active={None if self.label is None else self.label})"
+        return (
+            f"{self.__class__.__name__}("
+            f"exp_dir={self.exp_dir}, active={self.current_label})"
+        )
 
     def __repr__(self) -> str:
         return self.__str__()

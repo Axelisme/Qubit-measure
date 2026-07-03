@@ -19,7 +19,7 @@ def auto_sync(
         def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
             sync_file = args[0]
             if not isinstance(sync_file, SyncFile):
-                warnings.warn(
+                raise TypeError(
                     f"Expected first argument to be SyncFile, got {args} and {kwargs}"
                 )
             sync_file = cast(SyncFile, sync_file)

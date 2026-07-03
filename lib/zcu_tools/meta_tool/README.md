@@ -1,6 +1,6 @@
 # `zcu_tools.meta_tool` — persistent experiment metadata
 
-**Last updated:** 2026-07-02 — QubitParams t1_curve_fit white-list channels
+**Last updated:** 2026-07-03 — MetaDict structural sync cleanup
 
 這份筆記整理 `meta_tool/` 的設計，說明各類別的職責、同步機制與使用模式。
 
@@ -45,6 +45,8 @@ else:
 @auto_sync("write")  # 進入前 sync()，退出後再 sync()（確保寫回）
 ```
 
+裝飾器只接受 `SyncFile` instance method；若第一個參數不是 `SyncFile`，會直接 `TypeError`，避免錯誤 receiver 被 warning 後繼續執行到不明確的 attribute failure。
+
 ---
 
 ## `MetaDict`（`metadict.py`）
@@ -59,10 +61,13 @@ print(md.qubit_freq)      # 自動 sync + 讀取
 
 **型別特殊處理**：
 
-- 寫入時呼叫 `format_obj()`（utils），將 complex 等非 JSON 原生型別轉成字串。
-- 載入時呼叫 `_restore_complex()`，將字串還原為 `complex`（如 `"(1+2j)"` → `1+2j`）。
+- 寫入時先呼叫 `format_obj()`（utils）把 model / array / scalar 轉成 JSON-friendly Python value，再把 `complex` 寫成標記物件 `{"__complex__": [real, imag]}`。
+- 載入時只把標記物件還原為 `complex`；舊檔案中無標記且形如 complex 的字串會以 deprecation warning 還原，供舊 `meta_info.json` 過渡。
+- 使用者字串維持字串語意；若字串本身形如舊 complex literal，dump 時會加上 `{"__metadict_string__": value}` escape marker，避免下一次載入被 legacy parser 誤判。
 
-**受保護的屬性**（不進入 `_data`）：`_` 開頭的名稱，以及 `["dump", "load", "sync", "update_modify_time", "clone", "items", "keys", "get"]`。
+**受保護的屬性**（不進入 `_data`）：`_` 開頭的名稱，以及 `MetaDict` / `SyncFile` class 或 MRO 上已存在的名稱，例如 `dump`、`load`、`sync`、`has_persistence`、`clone`、`items`、`keys`、`get`、`update`。對 protected name 寫入或載入 protected key 會 fail-fast，避免 `_data` 內存在被 class attribute 遮蔽、永遠讀不到的 shadow key。
+
+**批次寫入**：`update(values, **kwargs)` 在一次 auto-sync write transaction 中更新多個 key；單一屬性賦值仍會立即同步，批次修改應優先使用 `update()`。
 
 **`clone(dst_path, readonly)`**：複製整個 MetaDict 到新路徑（要求目標不存在）。
 
@@ -135,7 +140,7 @@ modules:
 **Cfg 解析 API**（統一走 Factory wrapper）：
 
 ```python
-# library.py 內 store 解析點（_load / register_*）統一使用：
+# library.py 內 store 解析點（_load / register_* / update_*）統一使用：
 WaveformCfgFactory.from_raw(raw, ml=self)
 ModuleCfgFactory.from_raw(raw, ml=self)
 ```
@@ -197,7 +202,7 @@ exp_dir/
 以 CSV 儲存量測樣品紀錄（pandas DataFrame 包裝）。
 
 ```python
-st = SampleTable("samples.csv")
+st = SampleTable("samples.csv")  # 也接受 pathlib.Path
 st.add_sample(qubit="Q1", flux=1.23e-3, T1=50e-6)
 df = st.get_samples()
 ```
@@ -319,7 +324,7 @@ SampleTable          (獨立，供 notebook 記錄量測結果用)
 ## 注意事項
 
 - `SyncFile.sync()` 採 mtime 比較，且目前沒有 file lock。若兩個 process 同時寫同一個檔案，會 warning 衝突並以本地 dirty 內容覆蓋磁碟版本。
-- `MetaDict` 的 `_dirty` + `sync()` 表示每次 `__setattr__` 都會立即寫回磁碟（兩次 `sync()`：設定前確保最新，設定後立即寫回）。
+- `MetaDict` 的 `_dirty` + `sync()` 表示每次單一 `__setattr__` 都會立即寫回磁碟；多 key 寫入用 `update()` 共用同一次 write transaction。
 - `ModuleLibrary.get_waveform()` / `get_module()` 回傳 deepcopy，修改回傳值不影響 library 內部狀態（需透過 `register_*` / `update_*` 才能持久化）。
 - experiment cfg materialization 每次呼叫都使用 caller 傳入的 current `ml` 與 device snapshot；active context 切換不應被長壽 object 綁住。
 - `QubitParams.set_dispersive_fit()` 會要求 `params.json` 已有 `fluxdep_fit`；dispersive export 不能建立沒有 fluxdep handoff 的半成品檔案。
