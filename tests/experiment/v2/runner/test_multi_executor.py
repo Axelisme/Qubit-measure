@@ -57,10 +57,12 @@ class FakeTask(MeasurementTask[ExecCfg, ExecEnv, FakeResult, Any, NDArray[np.flo
         *,
         offset: float = 0.0,
         fail_once_at: int | None = None,
+        fail_always_at: int | None = None,
         stop_at: int | None = None,
     ) -> None:
         self.offset = offset
         self.fail_once_at = fail_once_at
+        self.fail_always_at = fail_always_at
         self.stop_at = stop_at
         self.init_count = 0
         self.cleanup_count = 0
@@ -76,6 +78,8 @@ class FakeTask(MeasurementTask[ExecCfg, ExecEnv, FakeResult, Any, NDArray[np.flo
         self.run_indices.append(index)
         if self.stop_at == index:
             raise KeyboardInterrupt
+        if self.fail_always_at == index:
+            raise RuntimeError("permanent failure")
         if self.fail_once_at == index and index not in self._failed_indices:
             self._failed_indices.add(index)
             raise RuntimeError("temporary failure")
@@ -250,6 +254,8 @@ def test_multi_executor_retries_measurement_and_reinitializes_task() -> None:
     assert task.init_count == 2
     assert task.cleanup_count == 2
     assert len(task.plot_events) == 1
+    assert executor.last_run_outcome is not None
+    assert executor.last_run_outcome.status == "completed"
 
 
 def test_multi_executor_stop_keeps_partial_result_and_cleans_up() -> None:
@@ -268,6 +274,30 @@ def test_multi_executor_stop_keeps_partial_result_and_cleans_up() -> None:
     assert task.run_indices == [0, 1]
     assert task.cleanup_count == 1
     assert [event[1] for event in task.plot_events] == [0]
+    assert executor.last_run_outcome is not None
+    assert executor.last_run_outcome.status == "interrupted"
+
+
+def test_multi_executor_retry_exhaustion_keeps_partial_result_and_cleans_up() -> None:
+    task = FakeTask(fail_always_at=1)
+    executor = FakeExecutor(
+        np.array([0.0, 1.0, 2.0], dtype=np.float64)
+    ).add_measurements({"task": task})
+
+    result = executor.run(retry_time=1)
+
+    np.testing.assert_allclose(
+        result["task"]["value"],
+        np.array([0.0, np.nan, np.nan]),
+        equal_nan=True,
+    )
+    assert task.run_indices == [0, 1, 1]
+    assert task.init_count == 2
+    assert task.cleanup_count == 2
+    assert [event[1] for event in task.plot_events] == [0]
+    assert executor.last_run_outcome is not None
+    assert executor.last_run_outcome.status == "failed"
+    assert isinstance(executor.last_run_outcome.exception, RuntimeError)
 
 
 def test_composed_measurement_bundle_delegates_components() -> None:

@@ -50,6 +50,7 @@ T_BatchResult = TypeVar("T_BatchResult")
 T_AcquireRaw_co = TypeVar("T_AcquireRaw_co", covariant=True)
 T_DecimatedRaw_co = TypeVar("T_DecimatedRaw_co", covariant=True)
 SignalArray: TypeAlias = NDArray[Any]
+RunStatus: TypeAlias = Literal["completed", "stopped", "interrupted", "failed"]
 
 
 class ProgramProtocol(Protocol[T_AcquireRaw_co, T_DecimatedRaw_co]):
@@ -120,6 +121,19 @@ class StopSignal:
     @property
     def event(self) -> threading.Event:
         return self._event
+
+
+@dataclass(frozen=True)
+class ScheduleOutcome:
+    """Completion state for a Schedule run."""
+
+    status: RunStatus = "completed"
+    reason: str | None = None
+    exception: BaseException | None = None
+
+    @property
+    def is_partial(self) -> bool:
+        return self.status != "completed"
 
 
 _current_stop_signal: ContextVar[StopSignal | None] = ContextVar(
@@ -203,10 +217,12 @@ class Schedule(Generic[T_Cfg, T_Env]):
         env: T_Env | None = None,
         stop: StopSignal | None = None,
     ) -> None:
+        self._ensure_single_root_buffer_count(len(buffers))
         self.cfg = deepcopy(init_cfg)
         self._env = cast(T_Env, {} if env is None else env)
         self._buffers = list(buffers)
         self._local_buffers: dict[tuple[Hashable, ...], SignalBuffer] = {}
+        self._outcome = ScheduleOutcome()
         self._is_active = False
         self._is_closed = False
         resolved_stop = stop if stop is not None else _current_stop_signal.get()
@@ -237,6 +253,7 @@ class Schedule(Generic[T_Cfg, T_Env]):
         self._ensure_active()
         if not buffers:
             raise ValueError("register_buffer requires at least one SignalBuffer")
+        self._ensure_single_root_buffer_count(len(self._buffers) + len(buffers))
         self._buffers.extend(buffers)
 
     def trigger_update(self, *, flush: bool = False) -> None:
@@ -253,11 +270,15 @@ class Schedule(Generic[T_Cfg, T_Env]):
     def stop(self) -> StopSignal:
         return self._stop
 
+    @property
+    def outcome(self) -> ScheduleOutcome:
+        return self._outcome
+
     def is_stop(self) -> bool:
         return self._stop.is_stop()
 
     def set_stop(self) -> None:
-        self._stop.set_stop()
+        self._mark_stopped("stop requested")
 
     def clear_stop(self) -> None:
         self._stop.clear_stop()
@@ -279,11 +300,9 @@ class Schedule(Generic[T_Cfg, T_Env]):
         tasks: Mapping[
             Hashable, Callable[[ScheduleStep[T_Cfg, Hashable, T_Env]], T_BatchResult]
         ],
-        *,
-        retry: int = 0,
     ) -> dict[Hashable, T_BatchResult]:
         self._ensure_active()
-        return self._batch(parent=self, tasks=tasks, retry=retry)
+        return self._batch(parent=self, tasks=tasks)
 
     @overload
     def prog_builder(
@@ -341,6 +360,51 @@ class Schedule(Generic[T_Cfg, T_Env]):
                 "Schedule operations must run inside 'with Schedule(...)'"
             )
 
+    def _mark_stopped(self, reason: str) -> None:
+        self._stop.set_stop()
+        self._set_outcome("stopped", reason=reason)
+
+    def _mark_interrupted(self, exc: BaseException) -> None:
+        self._stop.set_stop()
+        self._set_outcome("interrupted", reason=_exception_reason(exc), exception=exc)
+
+    def _mark_failed(self, exc: BaseException) -> None:
+        self._stop.set_stop()
+        self._set_outcome("failed", reason=_exception_reason(exc), exception=exc)
+
+    def _set_outcome(
+        self,
+        status: RunStatus,
+        *,
+        reason: str | None = None,
+        exception: BaseException | None = None,
+    ) -> None:
+        if self._outcome.status == "completed":
+            self._outcome = ScheduleOutcome(
+                status=status, reason=reason, exception=exception
+            )
+
+    def _reset_outcome_for_retry(self) -> None:
+        self._outcome = ScheduleOutcome()
+        self._stop.clear_stop()
+
+    def _check_stop_requested(self) -> bool:
+        if self.is_stop():
+            self._mark_stopped("stop requested")
+            return True
+        return False
+
+    def _should_retry_after_failed_attempt(self, attempt: int, retry: int) -> bool:
+        if self._outcome.status != "failed" or attempt >= retry:
+            return False
+        self._reset_outcome_for_retry()
+        return True
+
+    @staticmethod
+    def _ensure_single_root_buffer_count(buffer_count: int) -> None:
+        if buffer_count > 1:
+            raise ValueError("Schedule supports at most one root result buffer")
+
     def _scan(
         self,
         *,
@@ -362,7 +426,7 @@ class Schedule(Generic[T_Cfg, T_Env]):
         )
         try:
             for index, value in enumerate(sweep_values):
-                if self.is_stop():
+                if self._check_stop_requested():
                     break
                 step = ScheduleStep(
                     schedule=self,
@@ -407,18 +471,18 @@ class Schedule(Generic[T_Cfg, T_Env]):
         start_t = time.time() - 2 * interval
         try:
             for index in range(times):
-                if self.is_stop():
+                if self._check_stop_requested():
                     break
 
                 while time.time() - start_t < interval:
-                    if self.is_stop():
+                    if self._check_stop_requested():
                         break
                     passed_time = round(time.time() - start_t, 1)
                     time_pbar.set_progress(passed_time)
                     time.sleep(0.1)
                 time_pbar.reset()
 
-                if self.is_stop():
+                if self._check_stop_requested():
                     break
 
                 step = ScheduleStep(
@@ -446,11 +510,7 @@ class Schedule(Generic[T_Cfg, T_Env]):
         tasks: Mapping[
             Hashable, Callable[[ScheduleStep[T_Cfg, Hashable, T_Env]], T_BatchResult]
         ],
-        retry: int,
     ) -> dict[Hashable, T_BatchResult]:
-        if retry < 0:
-            raise ValueError("retry must be non-negative")
-
         results: dict[Hashable, T_BatchResult] = {}
         task_items = list(tasks.items())
         pbar = make_pbar(
@@ -460,41 +520,34 @@ class Schedule(Generic[T_Cfg, T_Env]):
         )
         try:
             for key, child_fn in task_items:
-                if self.is_stop():
+                if self._check_stop_requested():
                     break
 
                 pbar.set_description(f"Batch [{str(key)}]")
-                completed = False
-                for attempt in range(retry + 1):
-                    step: ScheduleStep[T_Cfg, Hashable, T_Env] = ScheduleStep(
-                        schedule=self,
-                        name=str(key),
-                        index=key,
-                        value=key,
-                        cfg=deepcopy(parent.cfg),
-                        path=parent.path + (key,),
-                    )
+                step: ScheduleStep[T_Cfg, Hashable, T_Env] = ScheduleStep(
+                    schedule=self,
+                    name=str(key),
+                    index=key,
+                    value=key,
+                    cfg=deepcopy(parent.cfg),
+                    path=parent.path + (key,),
+                )
+                self._clear_local_buffers(step.path)
+                try:
+                    result = child_fn(step)
+                except KeyboardInterrupt as exc:
                     self._clear_local_buffers(step.path)
-                    try:
-                        result = child_fn(step)
-                    except KeyboardInterrupt:
-                        self._clear_local_buffers(step.path)
-                        self.set_stop()
-                        break
-                    except Exception:
-                        self._clear_local_buffers(step.path)
-                        if attempt == retry:
-                            raise
-                        continue
-
+                    self._mark_interrupted(exc)
+                    break
+                except Exception as exc:
                     self._clear_local_buffers(step.path)
-                    results[key] = result
-                    completed = True
+                    self._mark_failed(exc)
                     break
 
-                if completed:
-                    pbar.update()
-                if self.is_stop():
+                self._clear_local_buffers(step.path)
+                results[key] = result
+                pbar.update()
+                if self._check_stop_requested():
                     break
         finally:
             pbar.close()
@@ -508,7 +561,9 @@ class Schedule(Generic[T_Cfg, T_Env]):
     def _data_root(self) -> Any:
         if len(self._buffers) == 1:
             return self._buffers[0].data
-        return tuple(buffer.data for buffer in self._buffers)
+        if not self._buffers:
+            return ()
+        raise ValueError("Schedule supports at most one root result buffer")
 
     def _set_data(
         self,
@@ -552,14 +607,7 @@ class Schedule(Generic[T_Cfg, T_Env]):
         if isinstance(owner, ScheduleStep):
             step = owner
         else:
-            step = ScheduleStep(
-                schedule=self,
-                name="root",
-                index=(),
-                value=None,
-                cfg=self.cfg,
-                path=(),
-            )
+            step = None
         for buffer in self._buffers:
             if flush:
                 buffer.trigger_update(step, flush=True)
@@ -689,11 +737,9 @@ class ScheduleStep(Generic[T_Cfg, T_Value, T_Env]):
         tasks: Mapping[
             Hashable, Callable[[ScheduleStep[T_Cfg, Hashable, T_Env]], T_BatchResult]
         ],
-        *,
-        retry: int = 0,
     ) -> dict[Hashable, T_BatchResult]:
         self.schedule._ensure_active()
-        return self.schedule._batch(parent=self, tasks=tasks, retry=retry)
+        return self.schedule._batch(parent=self, tasks=tasks)
 
     @overload
     def prog_builder(
@@ -900,21 +946,30 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         if retry < 0:
             raise ValueError("retry must be non-negative")
 
+        slot = self._default_slot()
         for attempt in range(retry + 1):
-            program = self._build_program(self._isolated_cfg())
             try:
-                return runner(
-                    program,
-                    raw2signal_fn=raw2signal_fn,
-                    retry=0,
-                    progress=progress,
-                    stop_checkers=stop_checkers,
-                    **acquire_kwargs,
-                )
-            except Exception:
+                program = self._build_program(self._isolated_cfg())
+            except KeyboardInterrupt as exc:
+                self._schedule._mark_interrupted(exc)
+                return slot.view
+            except Exception as exc:
                 if attempt == retry:
-                    raise
+                    self._schedule._mark_failed(exc)
+                    return slot.view
                 continue
+
+            result = runner(
+                program,
+                raw2signal_fn=raw2signal_fn,
+                retry=0,
+                progress=progress,
+                stop_checkers=stop_checkers,
+                **acquire_kwargs,
+            )
+            if self._schedule._should_retry_after_failed_attempt(attempt, retry):
+                continue
+            return result
 
         return self._default_slot().view
 
@@ -957,19 +1012,28 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
                         slot=slot,
                         pbar=pbar,
                     )
-                except KeyboardInterrupt:
-                    self._schedule.set_stop()
+                except KeyboardInterrupt as exc:
+                    self._schedule._mark_interrupted(exc)
                     break
-                except Exception:
+                except Exception as exc:
                     if attempt == retry:
-                        raise
+                        self._schedule._mark_failed(exc)
+                        break
                     continue
 
-                pbar.set_progress(rounds)
-                slot.set(signal_fn(raw))
+                if self._schedule._check_stop_requested():
+                    break
+
+                try:
+                    pbar.set_progress(rounds)
+                    slot.set(signal_fn(raw))
+                except KeyboardInterrupt as exc:
+                    self._schedule._mark_interrupted(exc)
+                except Exception as exc:
+                    self._schedule._mark_failed(exc)
                 break
-        except KeyboardInterrupt:
-            self._schedule.set_stop()
+        except KeyboardInterrupt as exc:
+            self._schedule._mark_interrupted(exc)
         finally:
             pbar.close()
 
@@ -1050,6 +1114,13 @@ def _program_cfg_from(cfg: object) -> ProgramV2Cfg:
             "settings"
         )
     return ProgramV2Cfg.model_validate(data)
+
+
+def _exception_reason(exc: BaseException) -> str:
+    message = str(exc)
+    if message:
+        return f"{type(exc).__name__}: {message}"
+    return type(exc).__name__
 
 
 def _make_nan_array(shape: int | Sequence[int], dtype: DTypeLike) -> NDArray[Any]:

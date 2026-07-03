@@ -1,13 +1,13 @@
 # `zcu_tools.experiment.v2.runner` — experiment runtime
 
-**Last updated:** 2026-07-02 — stop preserves partial results
+**Last updated:** 2026-07-03 — retry and stop scope
 
 `runner/` 提供 experiment/v2 的 Python-like acquisition runtime。一般實驗用
 `SignalBuffer` / `Schedule` / `ProgramBuilder` 編排 host-side loop 與 program
 acquire；executor 類流程用 `ResultTree` 實作 executor-owned `BufferProtocol`，再交給同一個
 `Schedule` 編排 outer loop，並用 `MultiMeasurementExecutor` 共用 result initialization、
-per-measurement liveplot subscription、recording、retry、cleanup 與 `last_cfg` /
-`last_result` lifecycle。舊 Task tree runtime 不再保留。
+per-measurement liveplot subscription、recording、retry、cleanup、partial-result outcome
+與 `last_cfg` / `last_result` lifecycle。舊 Task tree runtime 不再保留。
 
 ---
 
@@ -86,18 +86,22 @@ with Schedule(cfg, signals_buffer) as sched:
 - `sched.scan(...)` / `step.scan(...)` 表示 host-side Python loop。
 - `sched.repeat(name, times, interval)` 表示 host-side repeat；等待期間會檢查
   `StopSignal`，需要刷新 liveplot 時由 caller 呼叫相關 buffer 的 `trigger_update()`。
-- `sched.batch({key: callable}, retry=N)` 執行 replayable child callable；retry 是
-  per-child，child 取得獨立 deepcopy cfg 與同一個 typed env。
+- `sched.batch({key: callable})` 執行 replayable child callable；child 取得獨立
+  deepcopy cfg 與同一個 typed env。batch child 出現一般例外或 `KeyboardInterrupt`
+  時會標記 `Schedule.outcome`、停止後續 child，並回傳已完成 child 的 partial
+  result；batch 本身不做 per-child retry。
 - `ScheduleStep.path` 會累積巢狀 host loop index，所以預設 single-buffer acquire 可
   依 owner path 自動寫入對應 slot，不需要 `into=` 參數。
 - `with Schedule(cfg, result_buffer) as sched` 可編排任何實作 `BufferProtocol` 的 result
-  tree；
+  tree；root result buffer 目前最多一個，多 root buffer 會 fast-fail。
   `step.child("field", cfg=program_cfg).buffer(shape)` 會建立 child-local default
   `SignalBuffer`，buffer 寫入時同步回 `result_buffer.data` 並觸發 update。
 - `ScheduleStep.value` 是 scan/repeat/batch 的 control-flow coordinate；result tree 由
   `step.data` 讀取、`step.set_data(..., flush=True)` 寫入，需要 ndarray slot 時用
   `step.array_data` 做型別邊界。`flush=True` 對 ResultTree 表示立即送出 node event；
   對一般 `SignalBuffer` 不改變 `on_update(data)` public shape。
+- `sched.trigger_update(flush=True)` 是 root-level update，會對 root buffer 傳
+  `step=None`；step-level update 才帶 `ScheduleStep`。
 
 ### `ProgramBuilder`
 
@@ -126,8 +130,9 @@ with Schedule(cfg, signals_buffer) as sched:
 `MultiMeasurementExecutor` 服務 `autofluxdep` / `overnight` 這類外層 workflow。
 base executor 擁有 common run lifecycle：建立 default outer result、combined liveplot
 layout、FFmpeg writer、`ResultTree` subscriptions、`Schedule` scope、measurement
-init/cleanup、per-measurement retry、stop handling、writer finish、figure close，以及
-`last_cfg` / `last_result`。concrete executor 只提供 cfg/env 建立與 outer-loop policy。
+init/cleanup、per-measurement retry、stop/error partial handling、writer finish、
+figure close，以及 `last_cfg` / `last_result` / `last_run_outcome`。concrete executor
+只提供 cfg/env 建立與 outer-loop policy。
 
 典型 executor 格式：
 
@@ -164,21 +169,25 @@ executor leaf contract 由 `runner/task.py` 擁有：
   讓 scope 內所有 `Schedule` 共用同一個 stop event。
 - `Schedule` 的 scan/repeat/batch 會在 host step 前檢查 stop；`ProgramBuilder` 會把
   `sched.is_stop` 注入 program acquire 的 `stop_checkers`，中斷粒度為 round-level。
-- stop 是 partial-result preserving：已寫入的 slot 保留，未完成的 slot 維持 NaN
-  初始化值；`ProgramBuilder` 捕捉 stop/`KeyboardInterrupt` 後設定 `StopSignal` 並回傳
-  當前 slot view，executor 回傳目前累積的 result，而不是丟棄整個 run。
-- `Schedule.batch(..., retry=N)` 支援一般 `ProgramV2Cfg` schedule 的 replayable child
-  retry。
+- `Schedule.outcome` 記錄 run 結果：`completed`、`stopped`、`interrupted` 或
+  `failed`。stop / `KeyboardInterrupt` / program build、acquire 或分析例外都會設定 `StopSignal`
+  並保留目前已寫入 buffer / result tree 的 partial result；已寫入的 slot 保留，
+  未完成的 slot 維持 NaN 初始化值。
+- `ProgramBuilder.build_and_acquire(..., retry=N)` /
+  `run_program(..., retry=N)` 是單次 program acquire retry；`Schedule.batch(...)` 不提供
+  per-child retry。
 - `autofluxdep` / `overnight` executor 的外層 retry 由
   `MultiMeasurementExecutor._run_measurement_with_retries(...)` 提供；retry 預算是
-  per-measurement、per-flux/time-step。
+  per-measurement、per-flux/time-step；retry 耗盡後 executor 回傳 partial result 並
+  把狀態寫入 `last_run_outcome`。
 
 ---
 
 ## 測試
 
 `tests/experiment/v2/runner/test_flow.py` 覆蓋 Schedule、typed env、SignalBuffer、
-ProgramBuilder、host scan/repeat/batch、retry、stop 與 decimated acquire。
+ProgramBuilder、host scan/repeat/batch、ProgramBuilder retry、`ScheduleOutcome` 與
+decimated acquire。
 `test_result_tree.py` 覆蓋 ResultTree node set、child buffer、subscription、flush 與
 ordinary SignalBuffer regression；`test_multi_executor.py` 覆蓋 executor template lifecycle、
 retry/stop partial result 與 composed bundle delegation。單一實驗模組只保留 runtime

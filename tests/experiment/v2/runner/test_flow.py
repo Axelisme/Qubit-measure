@@ -69,6 +69,20 @@ class RecordingBuffer:
             self._on_update(step)
 
 
+class RootUpdateRecordingBuffer:
+    def __init__(self, data: Any) -> None:
+        self.data = data
+        self.calls: list[tuple[ScheduleStep[Any, Any, Any] | None, bool]] = []
+
+    def trigger_update(
+        self,
+        step: ScheduleStep[Any, Any, Any] | None = None,
+        *,
+        flush: bool = False,
+    ) -> None:
+        self.calls.append((step, flush))
+
+
 class FakeProgram:
     instances: list[FakeProgram] = []
 
@@ -238,6 +252,83 @@ class FlakyBuildProgram:
         raw = np.array([4.0])
         round_hook(1, np.array([3.0]))
         return raw
+
+    def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
+        raise NotImplementedError
+
+
+class AlwaysFailingProgram:
+    instances: list[AlwaysFailingProgram] = []
+
+    def __init__(
+        self,
+        soccfg: Any,
+        cfg: FlowCfg,
+        *,
+        modules: list[Module],
+        sweep: list[tuple[str, Any]] | None,
+    ) -> None:
+        self.cfg_model = cfg
+        self.modules = modules
+        self.sweep = sweep
+        self.acquire_count = 0
+        AlwaysFailingProgram.instances.append(self)
+
+    def acquire(self, *_args: Any, round_hook, **_kwargs: Any) -> np.ndarray:
+        self.acquire_count += 1
+        raw = np.array([float(len(AlwaysFailingProgram.instances))])
+        round_hook(1, raw)
+        raise RuntimeError("permanent failure")
+
+    def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
+        raise NotImplementedError
+
+
+class ConstructorFailingProgram:
+    def __init__(
+        self,
+        soccfg: Any,
+        cfg: FlowCfg,
+        *,
+        modules: list[Module],
+        sweep: list[tuple[str, Any]] | None,
+    ) -> None:
+        if getattr(cfg, "value") == 1.0:
+            raise RuntimeError("build failure")
+        self.cfg_model = cfg
+        self.modules = modules
+        self.sweep = sweep
+
+    def acquire(self, *_args: Any, round_hook, **_kwargs: Any) -> np.ndarray:
+        raw = np.array([float(getattr(self.cfg_model, "value"))])
+        round_hook(1, raw)
+        return raw
+
+    def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
+        raise NotImplementedError
+
+
+class InterruptingProgram:
+    instances: list[InterruptingProgram] = []
+
+    def __init__(
+        self,
+        soccfg: Any,
+        cfg: FlowCfg,
+        *,
+        modules: list[Module],
+        sweep: list[tuple[str, Any]] | None,
+    ) -> None:
+        self.soccfg = soccfg
+        self.cfg_model = cfg
+        self.modules = modules
+        self.sweep = sweep
+        self.acquire_count = 0
+        InterruptingProgram.instances.append(self)
+
+    def acquire(self, *_args: Any, **_kwargs: Any) -> np.ndarray:
+        self.acquire_count += 1
+        raise KeyboardInterrupt
 
     def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
         raise NotImplementedError
@@ -427,12 +518,79 @@ def test_build_and_acquire_rebuilds_program_on_retry():
             .add(FakeModule("readout"))
             .build_and_acquire(raw2signal_fn=_identity_array, retry=1)
         )
+        assert sched.outcome.status == "completed"
 
     assert np.allclose(result, [4.0])
     assert np.allclose(signals_buffer.array, [4.0])
     assert len(FlakyBuildProgram.instances) == 2
     assert FlakyBuildProgram.instances[0].acquire_count == 1
     assert FlakyBuildProgram.instances[1].acquire_count == 1
+
+
+def test_build_and_acquire_returns_partial_on_keyboard_interrupt_without_retrying():
+    InterruptingProgram.instances.clear()
+    signals_buffer = SignalBuffer((1,), dtype=np.float64)
+
+    with Schedule(_cfg(rounds=1), signals_buffer) as sched:
+        result = (
+            sched.prog_builder("soc", "soccfg", program_cls=InterruptingProgram)
+            .add(FakeModule("readout"))
+            .build_and_acquire(raw2signal_fn=_identity_array, retry=3)
+        )
+        assert sched.is_stop() is True
+        assert sched.outcome.status == "interrupted"
+        assert isinstance(sched.outcome.exception, KeyboardInterrupt)
+        np.testing.assert_allclose(result, np.array([np.nan]), equal_nan=True)
+
+    assert len(InterruptingProgram.instances) == 1
+    assert InterruptingProgram.instances[0].acquire_count == 1
+    np.testing.assert_allclose(signals_buffer.array, np.array([np.nan]), equal_nan=True)
+
+
+def test_build_and_acquire_returns_last_partial_after_retry_exhaustion():
+    AlwaysFailingProgram.instances.clear()
+    signals_buffer = SignalBuffer((1,), dtype=np.float64)
+
+    with Schedule(_cfg(rounds=1), signals_buffer) as sched:
+        result = (
+            sched.prog_builder("soc", "soccfg", program_cls=AlwaysFailingProgram)
+            .add(FakeModule("readout"))
+            .build_and_acquire(raw2signal_fn=_identity_array, retry=1)
+        )
+        assert sched.is_stop() is True
+        assert sched.outcome.status == "failed"
+        assert isinstance(sched.outcome.exception, RuntimeError)
+        assert sched.outcome.reason == "RuntimeError: permanent failure"
+
+    np.testing.assert_allclose(result, np.array([2.0]))
+    np.testing.assert_allclose(signals_buffer.array, np.array([2.0]))
+    assert len(AlwaysFailingProgram.instances) == 2
+    assert AlwaysFailingProgram.instances[0].acquire_count == 1
+    assert AlwaysFailingProgram.instances[1].acquire_count == 1
+
+
+def test_scan_returns_partial_when_program_build_fails():
+    signals_buffer = SignalBuffer((3,), dtype=np.float64)
+
+    with Schedule(_cfg(rounds=1), signals_buffer) as sched:
+        for value, step in sched.scan("value", [0.0, 1.0, 2.0]):
+            setattr(step.cfg, "value", value)
+            step.prog_builder(
+                "soc",
+                "soccfg",
+                program_cls=ConstructorFailingProgram,
+            ).add(FakeModule("readout")).build_and_acquire(
+                raw2signal_fn=_identity_array,
+            )
+        assert sched.outcome.status == "failed"
+        assert isinstance(sched.outcome.exception, RuntimeError)
+        assert sched.outcome.reason == "RuntimeError: build failure"
+
+    np.testing.assert_allclose(
+        signals_buffer.array,
+        np.array([0.0, np.nan, np.nan]),
+        equal_nan=True,
+    )
 
 
 def test_run_program_reuses_caller_owned_program_cache():
@@ -519,6 +677,43 @@ def test_schedule_registers_program_derived_buffer_before_decimated_run():
     assert np.allclose(signals_buffer.array, [2.0 + 0.0j, 0.0 + 2.0j])
     assert np.allclose(buffer_updates[-1], [2.0 + 0.0j, 0.0 + 2.0j])
     assert len(FakeDecimatedProgram.instances) == 1
+
+
+def test_schedule_rejects_multiple_root_buffers_at_construction() -> None:
+    with np.testing.assert_raises_regex(ValueError, "at most one root result buffer"):
+        Schedule(
+            _cfg(),
+            RecordingBuffer(np.zeros((1,))),
+            RecordingBuffer(np.zeros((1,))),
+        )
+
+
+def test_schedule_rejects_registering_multiple_root_buffers() -> None:
+    first = RecordingBuffer(np.zeros((1,)))
+    second = RecordingBuffer(np.zeros((1,)))
+
+    with Schedule(_cfg(), first) as sched:
+        with np.testing.assert_raises_regex(
+            ValueError, "at most one root result buffer"
+        ):
+            sched.register_buffer(second)
+
+
+def test_schedule_allows_registering_one_root_buffer_later() -> None:
+    buffer = RecordingBuffer(np.zeros((1,)))
+
+    with Schedule(_cfg()) as sched:
+        sched.register_buffer(buffer)
+        assert sched.data is buffer.data
+
+
+def test_schedule_root_trigger_update_passes_none_step() -> None:
+    buffer = RootUpdateRecordingBuffer(np.zeros((1,)))
+
+    with Schedule(_cfg(), buffer) as sched:
+        sched.trigger_update(flush=True)
+
+    assert buffer.calls == [(None, True)]
 
 
 def test_signal_buffer_write_triggers_update_and_manual_trigger():
@@ -699,6 +894,7 @@ def test_schedule_repeat_obeys_stop_signal():
         for index, _step in sched.repeat("round", 3):
             seen.append(index)
             sched.set_stop()
+        assert sched.outcome.status == "stopped"
 
     assert seen == [0]
 
@@ -727,26 +923,37 @@ def test_schedule_batch_runs_children_with_isolated_cfgs():
     assert getattr(init_cfg, "marker") == "base"
 
 
-def test_schedule_batch_retries_each_child():
-    signals_buffer = SignalBuffer((2,), dtype=np.float64)
-    attempts = {0: 0, 1: 0}
+def test_schedule_batch_returns_partial_on_child_exception_without_retry():
+    root = {"child": {"signals": np.full((1,), np.nan)}}
+    attempts = 0
+    later_called = False
 
-    def flaky(step):
-        attempts[step.index] += 1
-        if step.index == 0 and attempts[step.index] == 1:
-            raise RuntimeError("temporary failure")
-        signals_buffer[step].set(np.array(float(step.index) + 10.0))
-        return attempts[step.index]
+    def failing(step):
+        nonlocal attempts
+        attempts += 1
+        signals_step = step.child("signals")
+        buffer = signals_step.buffer((1,), dtype=np.float64)
+        buffer.set(np.array([1.0]))
+        raise RuntimeError("temporary failure")
 
-    with Schedule(_cfg(), signals_buffer) as sched:
-        results = sched.batch({0: flaky, 1: flaky}, retry=1)
+    def later(_step):
+        nonlocal later_called
+        later_called = True
+        return "later"
 
-    assert results == {0: 2, 1: 1}
-    assert attempts == {0: 2, 1: 1}
-    assert np.allclose(signals_buffer.array, [10.0, 11.0])
+    with Schedule(_cfg(), RecordingBuffer(root)) as sched:
+        results = sched.batch({"child": failing, "later": later})
+        assert results == {}
+        assert sched.outcome.status == "failed"
+        assert isinstance(sched.outcome.exception, RuntimeError)
+        assert sched._local_buffers == {}
+
+    assert attempts == 1
+    assert later_called is False
+    np.testing.assert_allclose(root["child"]["signals"], np.array([1.0]))
 
 
-def test_schedule_batch_string_key_default_program_target_has_clear_error():
+def test_schedule_batch_string_key_default_program_target_marks_failed_outcome():
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
     def child(step):
@@ -760,13 +967,12 @@ def test_schedule_batch_string_key_default_program_target_has_clear_error():
         )
 
     with Schedule(_cfg(rounds=1), signals_buffer) as sched:
-        try:
-            sched.batch({"child": child})
-        except ValueError as exc:
-            assert "integer-indexed path" in str(exc)
-            assert "SignalBuffer slot" in str(exc)
-        else:
-            raise AssertionError("batch string key default target should fail clearly")
+        results = sched.batch({"child": child})
+        assert results == {}
+        assert sched.outcome.status == "failed"
+        assert sched.outcome.reason is not None
+        assert "integer-indexed path" in sched.outcome.reason
+        assert "SignalBuffer slot" in sched.outcome.reason
 
 
 def test_schedule_batch_string_key_uses_child_local_default_buffer():
@@ -836,27 +1042,6 @@ def test_schedule_child_local_buffers_are_cleared_after_batch() -> None:
     np.testing.assert_allclose(root["child"]["signals"], np.array([3.0]))
 
 
-def test_schedule_child_local_buffer_can_be_recreated_on_retry():
-    root = {"child": {"signals": np.full((1,), np.nan)}}
-    attempts = 0
-
-    def child(step):
-        nonlocal attempts
-        attempts += 1
-        signals_step = step.child("signals")
-        buffer = signals_step.buffer((1,), dtype=np.float64)
-        buffer.set(np.array([float(attempts)]))
-        if attempts == 1:
-            raise RuntimeError("temporary failure after buffer creation")
-        return attempts
-
-    with Schedule(_cfg(), RecordingBuffer(root)) as sched:
-        results = sched.batch({"child": child}, retry=1)
-
-    assert results == {"child": 2}
-    assert np.allclose(root["child"]["signals"], [2.0])
-
-
 def test_schedule_batch_does_not_retry_keyboard_interrupt():
     attempts = 0
     later_called = False
@@ -872,19 +1057,10 @@ def test_schedule_batch_does_not_retry_keyboard_interrupt():
         return "later"
 
     with Schedule(_cfg()) as sched:
-        results = sched.batch({"a": interrupted, "b": later}, retry=3)
+        results = sched.batch({"a": interrupted, "b": later})
         assert sched.is_stop() is True
+        assert sched.outcome.status == "interrupted"
 
     assert results == {}
     assert attempts == 1
     assert later_called is False
-
-
-def test_schedule_batch_validates_retry():
-    with Schedule(_cfg()) as sched:
-        try:
-            sched.batch({"a": lambda _step: None}, retry=-1)
-        except ValueError as exc:
-            assert "retry" in str(exc)
-        else:
-            raise AssertionError("batch should reject negative retry")

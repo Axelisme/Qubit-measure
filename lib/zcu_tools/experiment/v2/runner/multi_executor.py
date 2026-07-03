@@ -18,6 +18,7 @@ from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2.runner.result_tree import ResultTree, ResultUpdateEvent
 from zcu_tools.experiment.v2.runner.schedule import (
     Schedule,
+    ScheduleOutcome,
     ScheduleStep,
     StopSignal,
     current_stop_signal,
@@ -49,6 +50,7 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg, T_Env, T_Axis]):
     def __init__(self) -> None:
         self.record_path: Path | None = None
         self.measurements: OrderedDict[str, T_Measurement] = OrderedDict()
+        self.last_run_outcome: ScheduleOutcome | None = None
 
     def add_measurements(self, measurements: Mapping[str, T_Measurement]) -> Self:
         for name, measurement in measurements.items():
@@ -199,8 +201,8 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg, T_Env, T_Axis]):
                         for measurement in self.measurements.values():
                             measurement.init(dynamic_pbar=True)
                         run_loop(sched)
-                    except KeyboardInterrupt:
-                        sched.set_stop()
+                    except KeyboardInterrupt as exc:
+                        sched._mark_interrupted(exc)
                     except Exception:
                         log_current_exception(logger, "measurement executor failed")
                         raise
@@ -222,6 +224,7 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg, T_Env, T_Axis]):
 
         self.last_cfg = cfg
         self.last_result = signals_dict
+        self.last_run_outcome = sched.outcome
 
         return signals_dict
 
@@ -250,12 +253,13 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg, T_Env, T_Axis]):
         for attempt in range(retry_time + 1):
             try:
                 measurement.run(state)
-            except KeyboardInterrupt:
-                state.set_stop()
+            except KeyboardInterrupt as exc:
+                state.schedule._mark_interrupted(exc)
                 break
-            except Exception:
+            except Exception as exc:
                 if attempt == retry_time:
-                    raise
+                    state.schedule._mark_failed(exc)
+                    break
                 measurement.cleanup()
                 measurement.init(dynamic_pbar=True)
                 continue
