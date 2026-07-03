@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.services.device import DeviceEntry
     from zcu_tools.gui.session.services.startup import (
         PersistedStartup,
+        ResolvedStartupProject,
         StartupConnectionRequest,
         StartupProjectRequest,
         StartupService,
@@ -65,12 +66,14 @@ class SetupControlFacet:
         context: ContextControlPort,
         connection: SoCConnectionService,
         device: DeviceControlPort,
+        on_project_applied: Callable[[ResolvedStartupProject], None] | None = None,
     ) -> None:
         self._bus = bus
         self._startup = startup
         self._context = context
         self._connection = connection
         self._device = device
+        self._on_project_applied = on_project_applied
 
     def get_bus(self) -> BaseEventBus:
         return self._bus
@@ -82,7 +85,9 @@ class SetupControlFacet:
         return self._startup.list_result_scopes()
 
     def apply_startup_project(self, req: StartupProjectRequest) -> bool:
-        self._startup.apply_project(req)
+        resolved = self._startup.apply_project(req)
+        if self._on_project_applied is not None:
+            self._on_project_applied(resolved)
         return True
 
     def use_context(self, label: str) -> None:

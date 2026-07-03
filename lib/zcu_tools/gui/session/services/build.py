@@ -14,6 +14,7 @@ The app injects concrete infrastructure through the session *ports*
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -48,6 +49,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.progress_control import ProgressControlPort
     from zcu_tools.gui.session.services.progress import ProgressService
+    from zcu_tools.gui.session.services.startup import ResolvedStartupProject
     from zcu_tools.gui.session.setup_control import SetupControlPort
     from zcu_tools.gui.session.state import SessionState
 
@@ -83,6 +85,7 @@ def build_session_services(
     project_root: str = "",
     driver_factory: DriverFactoryPort | None = None,
     device_registry: DeviceRegistryPort | None = None,
+    on_project_applied: Callable[[ResolvedStartupProject], None] | None = None,
 ) -> SessionServices:
     """Construct the session services from the app-provided infrastructure.
 
@@ -125,6 +128,7 @@ def build_session_services(
         context=context_control,
         connection=soc_connection,
         device=device_control,
+        on_project_applied=on_project_applied,
     )
     # FLUX-AWARE-MOCK: self-subscribes to SOC_CHANGED + chains the one-shot ramp
     # off device.device_connected — both apps get mock flux provisioning for free.

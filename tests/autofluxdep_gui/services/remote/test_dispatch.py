@@ -14,6 +14,8 @@ QApplication the Controller's session services need at construction.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 from zcu_tools.gui.app.autofluxdep.app import build_core
@@ -26,6 +28,8 @@ from zcu_tools.gui.app.autofluxdep.services.remote.method_specs import METHOD_SP
 from zcu_tools.gui.app.autofluxdep.state import ProjectInfo
 from zcu_tools.gui.remote.errors import RemoteError
 from zcu_tools.gui.remote.param_spec import validate_params
+from zcu_tools.gui.session.services.startup import StartupProjectRequest
+from zcu_tools.meta_tool import FluxDepFit, ParamsProject, QubitParams
 
 
 class _StubAdapter:
@@ -44,6 +48,23 @@ def _call(adapter: _StubAdapter, method: str, raw_params: dict) -> dict:
     spec = METHOD_REGISTRY[method]
     params = validate_params(spec.params, raw_params) if spec.params else raw_params
     return dict(spec.handler(adapter, params))  # type: ignore[arg-type]
+
+
+def _write_fluxdep_params(root: Path) -> str:
+    params_path = root / "result" / "ChipA" / "Q1" / "params.json"
+    params = QubitParams(params_path)
+    params.ensure_project(ParamsProject("ChipA", "Q1", "R1"))
+    params.set_fluxdep_fit(
+        FluxDepFit(
+            EJ=4.0,
+            EC=1.0,
+            EL=0.5,
+            flux_half=0.25,
+            flux_int=0.75,
+            flux_period=0.8,
+        )
+    )
+    return str(params_path)
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +156,24 @@ def test_state_check_reflects_workflow_and_project():
     assert check["has_flux_device"] is True
     assert check["is_running"] is False
     assert check["has_results"] is False
+
+
+def test_setup_control_apply_updates_project_info_and_loads_predictor(tmp_path):
+    params_path = _write_fluxdep_params(tmp_path)
+    adapter = _StubAdapter(build_core(project_root=str(tmp_path)))
+
+    assert adapter.ctrl.setup_control.apply_startup_project(
+        StartupProjectRequest("ChipA", "Q1", "R1")
+    )
+
+    info = _call(adapter, "project.info", {})
+    assert info["chip_name"] == "ChipA"
+    assert info["qub_name"] == "Q1"
+    assert info["result_dir"] == str(tmp_path / "result" / "ChipA" / "Q1")
+    assert info["params_path"] == params_path
+    check = _call(adapter, "state.check", {})
+    assert check["has_project"] is True
+    assert check["has_loaded_predictor"] is True
 
 
 # ---------------------------------------------------------------------------

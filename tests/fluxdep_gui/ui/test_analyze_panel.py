@@ -8,7 +8,7 @@ spin boxes, and Search being blocked when the database path is empty / missing.
 from __future__ import annotations
 
 import pytest
-from qtpy.QtWidgets import QTabWidget  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QSizePolicy, QTabWidget  # type: ignore[attr-defined]
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.app.fluxdep.ui.analyze_panel import (
@@ -63,6 +63,11 @@ def test_search_blocked_on_missing_database_file(panel):
     w._db_edit.setText("/nonexistent/path/to/db.h5")
     w._on_search()
     assert "not found" in w._status.text().lower()
+
+
+def test_search_status_ignored_in_horizontal_minimum_width(panel):
+    w, _ = panel
+    assert w._status.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Ignored
 
 
 def test_show_tab_has_display_tools(panel):

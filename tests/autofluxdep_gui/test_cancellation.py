@@ -10,6 +10,7 @@ independent of experiment physics, so a fake measurement Node (a deterministic
 from __future__ import annotations
 
 import time
+from unittest.mock import MagicMock
 
 import numpy as np
 from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
@@ -39,8 +40,10 @@ def _build_ready_controller():
     return ctrl
 
 
-def test_stop_run_mid_sweep_emits_run_stopped_not_finished():
+def test_stop_run_mid_sweep_emits_run_stopped_not_finished(monkeypatch):
     ctrl = _build_ready_controller()
+    persist_all = MagicMock()
+    monkeypatch.setattr(ctrl, "persist_all", persist_all)
 
     events: list[RunEvent] = []
     ctrl.bus.subscribe(RunStoppedPayload, lambda p: events.append(p.EVENT))
@@ -76,11 +79,14 @@ def test_stop_run_mid_sweep_emits_run_stopped_not_finished():
     assert not np.isnan(sweep_result.signal[0]).any()
     assert not np.isnan(sweep_result.signal[1]).any()
     assert np.isnan(sweep_result.signal[2]).all()
+    persist_all.assert_called_once_with()
 
 
-def test_full_run_without_stop_emits_run_finished():
+def test_full_run_without_stop_emits_run_finished(monkeypatch):
     # control case: an un-cancelled run ends on RUN_FINISHED over every point.
     ctrl = _build_ready_controller()
+    persist_all = MagicMock()
+    monkeypatch.setattr(ctrl, "persist_all", persist_all)
 
     events: list[RunEvent] = []
     ctrl.bus.subscribe(RunStoppedPayload, lambda p: events.append(p.EVENT))
@@ -94,6 +100,7 @@ def test_full_run_without_stop_emits_run_finished():
     assert events == [RunEvent.RUN_FINISHED]
     assert points == [0, 1, 2, 3, 4]
     assert info.point["flux_idx"] == 4
+    persist_all.assert_called_once_with()
 
 
 def test_run_operation_progress_is_live_until_terminal():

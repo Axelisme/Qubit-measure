@@ -424,7 +424,10 @@ class MainWindow(QMainWindow):
         from zcu_tools.gui.widgets.project_dialog import ProjectDialog
 
         dialog = ProjectDialog(
-            self._ctrl.state.project, parent=self, db_label="Database path"
+            self._ctrl.state.project,
+            parent=self,
+            db_label="Database path",
+            project_root=self._ctrl.get_project_root(),
         )
         # Non-blocking open() keeps the Qt event loop (and the read-only control
         # socket) responsive; the post-accept logic moves onto the accepted signal.

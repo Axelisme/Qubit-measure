@@ -16,7 +16,11 @@ dir" (its raw one-tone root). The app passes its label; everything else is share
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable
+
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -32,6 +36,9 @@ from zcu_tools.gui.project import (
     default_database_root,
     default_result_dir,
 )
+from zcu_tools.gui.result_scope import ResultScope, ResultScopeManager
+
+logger = logging.getLogger(__name__)
 
 # fluxdep's label; the database field's default form-row label. dispersive passes
 # its own ("One-tone dir") explicitly.
@@ -47,17 +54,20 @@ class ProjectDialog(QDialog):
         parent: QWidget | None = None,
         *,
         db_label: str = DEFAULT_DB_LABEL,
+        project_root: str | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Project")
         self.resize(560, 220)
 
         self._db_label = db_label
+        self._result_scopes: tuple[ResultScope, ...] = ()
+        self._syncing_scope_selection = False
 
         # Anchor derived defaults at the same repo root the project was built
         # with, so the auto-derivation matches the project's actual paths (else a
         # root-anchored project.result_dir would be mis-detected as overridden).
-        self._root = project.root_dir
+        self._root = project_root if project_root is not None else project.root_dir
 
         # Each path field tracks chip/qubit until the user edits / browses it.
         # It counts as "overridden" if it already differs from what the names
@@ -76,6 +86,19 @@ class ProjectDialog(QDialog):
         )
 
         form = QFormLayout(self)
+
+        scope_row = QHBoxLayout()
+        self._scope_combo = QComboBox()
+        self._scope_combo.setMinimumWidth(260)
+        self._scope_combo.currentIndexChanged.connect(self._on_scope_selected)
+        scope_row.addWidget(self._scope_combo, stretch=1)
+        refresh_scopes_btn = QPushButton("↻")
+        refresh_scopes_btn.setFixedWidth(28)
+        refresh_scopes_btn.setToolTip("Refresh result scopes")
+        refresh_scopes_btn.clicked.connect(self._refresh_result_scopes)
+        scope_row.addWidget(refresh_scopes_btn)
+        form.addRow("Result scope", scope_row)
+
         self._chip_edit = QLineEdit(project.chip_name)
         self._qub_edit = QLineEdit(project.qub_name)
         self._chip_edit.textChanged.connect(self._on_names_changed)
@@ -100,7 +123,10 @@ class ProjectDialog(QDialog):
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
 
-    def _dir_row(self, edit: QLineEdit, on_browse) -> QWidget:
+        self._refresh_result_scopes(silent=True)
+        self._on_names_changed("")
+
+    def _dir_row(self, edit: QLineEdit, on_browse: Callable[[], None]) -> QWidget:
         row = QHBoxLayout()
         row.addWidget(edit, stretch=1)
         browse = QPushButton("Browse…")
@@ -113,12 +139,108 @@ class ProjectDialog(QDialog):
     # --- auto-derivation -------------------------------------------------
 
     def _on_names_changed(self, _text: str) -> None:
+        if self._syncing_scope_selection:
+            return
         chip = self._chip_edit.text().strip()
         qub = self._qub_edit.text().strip()
         if not self._result_overridden:
             self._result_edit.setText(default_result_dir(chip, qub, self._root))
         if not self._database_overridden:
             self._database_edit.setText(default_database_root(chip, qub, self._root))
+        self._update_scope_options(chip, qub)
+
+    def _refresh_result_scopes(
+        self, _checked: bool = False, *, silent: bool = False
+    ) -> None:
+        try:
+            self._result_scopes = ResultScopeManager(self._root or ".").list_scopes()
+        except Exception as exc:  # noqa: BLE001 - scope discovery is best-effort UI.
+            logger.warning("ProjectDialog: failed to list result scopes: %s", exc)
+            self._result_scopes = ()
+            if not silent:
+                self._scope_combo.setToolTip(f"Failed to refresh result scopes: {exc}")
+        else:
+            self._scope_combo.setToolTip("")
+        self._update_scope_options(
+            self._chip_edit.text().strip(), self._qub_edit.text().strip()
+        )
+
+    def _update_scope_options(self, chip: str, qub: str) -> None:
+        self._scope_combo.blockSignals(True)
+        prev_scope_id = self._scope_combo.currentData()
+        current_result = self._result_edit.text().strip()
+        self._scope_combo.clear()
+
+        generated_index = -1
+        has_names = bool(chip and qub)
+        if has_names:
+            self._scope_combo.addItem("(new generated scope)", userData=None)
+            generated_index = 0
+
+        for scope in self._result_scopes:
+            self._scope_combo.addItem(
+                f"{scope.chip_name}/{scope.qub_name}",
+                userData=scope.scope_id,
+            )
+
+        idx = -1
+        if prev_scope_id:
+            idx = self._scope_combo.findData(prev_scope_id)
+        if idx < 0 and current_result:
+            for scope in self._result_scopes:
+                if (
+                    scope.result_dir == current_result
+                    or scope.scope_id == current_result
+                ):
+                    idx = self._scope_combo.findData(scope.scope_id)
+                    break
+        if idx < 0 and has_names:
+            for scope in self._result_scopes:
+                if (scope.chip_name, scope.qub_name) == (chip, qub):
+                    idx = self._scope_combo.findData(scope.scope_id)
+                    break
+
+        if idx >= 0:
+            self._scope_combo.setCurrentIndex(idx)
+        elif has_names:
+            self._scope_combo.setCurrentIndex(generated_index)
+        elif self._result_scopes:
+            self._scope_combo.setCurrentIndex(0)
+        else:
+            self._scope_combo.addItem("(no result scopes found)", userData=None)
+
+        self._scope_combo.blockSignals(False)
+
+    def _current_scope(self) -> ResultScope | None:
+        scope_id = self._scope_combo.currentData()
+        if not scope_id:
+            return None
+        for scope in self._result_scopes:
+            if scope.scope_id == scope_id:
+                return scope
+        return None
+
+    def _on_scope_selected(self, _index: int) -> None:
+        scope = self._current_scope()
+        if scope is None:
+            return
+
+        self._syncing_scope_selection = True
+        try:
+            self._chip_edit.setText(scope.chip_name)
+            self._qub_edit.setText(scope.qub_name)
+            self._result_edit.setText(scope.result_dir)
+            if not self._database_overridden:
+                self._database_edit.setText(
+                    default_database_root(scope.chip_name, scope.qub_name, self._root)
+                )
+        finally:
+            self._syncing_scope_selection = False
+
+        self._result_overridden = scope.result_dir != default_result_dir(
+            scope.chip_name, scope.qub_name, self._root
+        )
+        self._update_scope_options(scope.chip_name, scope.qub_name)
 
     def _on_result_edited(self, _text: str) -> None:
         # a manual edit detaches the result dir from the chip/qubit derivation

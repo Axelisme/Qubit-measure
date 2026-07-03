@@ -338,7 +338,12 @@ class PipelinePanelWidget(QWidget):
         # the ``accepted`` signal (it only fires on Accept; Reject runs nothing).
         from qtpy.QtCore import Qt  # type: ignore[attr-defined]
 
-        dialog = ProjectDialog(self._ctrl.state.project, self, db_label="One-tone dir")
+        dialog = ProjectDialog(
+            self._ctrl.state.project,
+            self,
+            db_label="One-tone dir",
+            project_root=self._ctrl.get_project_root(),
+        )
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
         def _on_accepted() -> None:

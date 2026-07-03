@@ -18,6 +18,7 @@ import logging
 import threading
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from qtpy.QtCore import QObject, Qt, QThread, Signal  # type: ignore[attr-defined]
@@ -61,6 +62,7 @@ from zcu_tools.gui.app.autofluxdep.state import (
     FLUX_VERSION_KEY,
     WORKFLOW_VERSION_KEY,
     AutoFluxDepState,
+    ProjectInfo,
 )
 from zcu_tools.gui.app.autofluxdep.tools import (
     FluxoniumPredictorAdapter,
@@ -85,7 +87,12 @@ from zcu_tools.gui.session.operation_runner import (
 from zcu_tools.gui.session.scopes import progress_ambient
 from zcu_tools.gui.session.services.build import build_session_services
 from zcu_tools.gui.session.services.io_manager import IOManager
+from zcu_tools.gui.session.services.predictor import (
+    PredictorLoadError,
+    SetModelParamsRequest,
+)
 from zcu_tools.gui.session.services.progress import ProgressService
+from zcu_tools.meta_tool import QubitParams, QubitParamsError
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.autofluxdep.services.caretaker import (
@@ -98,6 +105,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.progress_control import ProgressControlPort
     from zcu_tools.gui.session.services.startup import (
+        ResolvedStartupProject,
         StartupProjectRequest,
     )
     from zcu_tools.gui.session.setup_control import SetupControlPort
@@ -236,6 +244,7 @@ class Controller(SessionControllerMixin):
             io_manager=self._io_manager,
             runner=self._runner,
             project_root=self._project_root,
+            on_project_applied=self._on_startup_project_applied,
         )
         self._session = session
         self._soc_svc = session.soc_connection
@@ -396,8 +405,54 @@ class Controller(SessionControllerMixin):
     # get_project_root also stay per-app (app EventBus subtype / app state). Every
     # other setup-controller forward lives in SessionControllerMixin.
     def apply_startup_project(self, req: StartupProjectRequest) -> bool:
-        self._startup_svc.apply_project(req)
+        resolved = self._startup_svc.apply_project(req)
+        self._on_startup_project_applied(resolved)
         return True
+
+    def _on_startup_project_applied(self, project: "ResolvedStartupProject") -> None:
+        self._state.project = ProjectInfo(
+            chip_name=project.chip_name,
+            qub_name=project.qub_name,
+            result_dir=project.result_dir,
+            params_path=project.params_path,
+        )
+        self._try_auto_load_predictor_from_params(project)
+
+    def _try_auto_load_predictor_from_params(
+        self, project: "ResolvedStartupProject"
+    ) -> None:
+        params_path = Path(project.params_path)
+        if not params_path.is_file():
+            logger.debug(
+                "autofluxdep predictor auto-load skipped: %s is not a file",
+                params_path,
+            )
+            return
+        try:
+            fit = QubitParams(params_path, readonly=True).get_fluxdep_fit()
+            if fit is None:
+                logger.debug(
+                    "autofluxdep predictor auto-load skipped: no fluxdep_fit in %s",
+                    params_path,
+                )
+                return
+            self._pred_svc.set_model_params(
+                SetModelParamsRequest(
+                    EJ=fit.EJ,
+                    EC=fit.EC,
+                    EL=fit.EL,
+                    flux_half=fit.flux_half,
+                    flux_period=fit.flux_period,
+                )
+            )
+        except (OSError, QubitParamsError, PredictorLoadError, ValueError) as exc:
+            logger.warning(
+                "autofluxdep predictor auto-load failed for %s: %s",
+                params_path,
+                exc,
+            )
+            return
+        logger.info("autofluxdep predictor auto-loaded from %s", params_path)
 
     def get_project_root(self) -> str:
         return self._project_root
@@ -777,12 +832,14 @@ class Controller(SessionControllerMixin):
         def _on_run_finished(settle: SettleFn) -> None:
             logger.info("run finished: %d flux point(s)", len(flux_values))
             _clear_active_run()
+            self.persist_all()
             settle(OperationOutcome("finished"))
             self._bus.emit(RunFinishedPayload())
 
         def _on_run_stopped(settle: SettleFn) -> None:
             logger.info("run stopped at flux idx %d", self._cur_idx)
             _clear_active_run()
+            self.persist_all()
             settle(OperationOutcome("cancelled"))
             self._bus.emit(RunStoppedPayload())
 

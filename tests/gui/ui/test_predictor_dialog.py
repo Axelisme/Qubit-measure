@@ -150,6 +150,7 @@ def test_predictor_dialog_init_populates_fields_from_info(qapp):
     assert dialog._flux_half_spin.value() == pytest.approx(0.3)
     assert dialog._flux_period_spin.value() == pytest.approx(0.8)
     assert dialog._flux_bias_spin.value() == pytest.approx(0.05)
+    assert dialog._params_path_edit.text() == "/p.json"
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +178,7 @@ def test_predictor_dialog_browse_populates_six_fields(qapp):
     ):
         dialog._on_browse_file()
 
+    assert dialog._params_path_edit.text() == "/chosen/params.json"
     assert dialog._ej_spin.value() == pytest.approx(5.5)
     assert dialog._ec_spin.value() == pytest.approx(1.3)
     assert dialog._el_spin.value() == pytest.approx(0.6)
@@ -272,6 +274,39 @@ def test_predictor_dialog_browse_error_shown_in_status(qapp):
 
     assert "no fluxdep_fit" in dialog._status_label.text()
     # Read failure means no install attempt.
+    ctrl.set_predictor_model_params.assert_not_called()
+
+
+def test_predictor_dialog_typed_path_load_populates_and_applies(qapp):
+    """Typing a params.json path exercises the same load+auto-apply path as Browse."""
+    ctrl = _make_ctrl(has_predictor=False)
+    dialog = PredictorDialog(ctrl)
+    dialog._params_path_edit.setText("/typed/params.json")
+
+    fake_params = SetModelParamsRequest(
+        EJ=6.0, EC=1.4, EL=0.8, flux_half=0.2, flux_period=0.9
+    )
+    with patch(
+        "zcu_tools.gui.session.services.predictor.read_fluxdep_fit_params",
+        return_value=fake_params,
+    ) as read_params:
+        dialog._on_load_path_clicked()
+
+    read_params.assert_called_once_with("/typed/params.json")
+    assert dialog._ej_spin.value() == pytest.approx(6.0)
+    ctrl.set_predictor_model_params.assert_called_once()
+    (req,) = ctrl.set_predictor_model_params.call_args.args
+    assert req.EJ == pytest.approx(6.0)
+    assert req.flux_period == pytest.approx(0.9)
+
+
+def test_predictor_dialog_typed_path_load_requires_path(qapp):
+    ctrl = _make_ctrl(has_predictor=False)
+    dialog = PredictorDialog(ctrl)
+
+    dialog._on_load_path_clicked()
+
+    assert "params.json path" in dialog._status_label.text()
     ctrl.set_predictor_model_params.assert_not_called()
 
 

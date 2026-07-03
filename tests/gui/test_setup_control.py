@@ -11,6 +11,7 @@ from zcu_tools.gui.session.services.connection import ConnectMockRequest
 from zcu_tools.gui.session.services.device import DeviceEntry
 from zcu_tools.gui.session.services.startup import (
     PersistedStartup,
+    ResolvedStartupProject,
     StartupConnectionRequest,
     StartupProjectRequest,
 )
@@ -33,6 +34,15 @@ class RecordingStartup:
             params_path="/tmp/result/chip/qub/params.json",
             source="discovered",
         )
+        self.resolved = ResolvedStartupProject(
+            chip_name="chip",
+            qub_name="qub",
+            res_name="res",
+            result_dir="/tmp/result/chip/qub",
+            database_path="/tmp/Database/chip/qub",
+            params_path="/tmp/result/chip/qub/params.json",
+            scope_id="/tmp/result/chip/qub",
+        )
 
     def get_persisted(self) -> PersistedStartup:
         self._log.add("startup", "get_persisted")
@@ -42,9 +52,9 @@ class RecordingStartup:
         self._log.add("startup", "list_result_scopes")
         return (self.scope,)
 
-    def apply_project(self, req: StartupProjectRequest) -> object:
+    def apply_project(self, req: StartupProjectRequest) -> ResolvedStartupProject:
         self._log.add("startup", "apply_project", req)
-        return object()
+        return self.resolved
 
     def remember_connection(self, req: StartupConnectionRequest) -> None:
         self._log.add("startup", "remember_connection", req)
@@ -111,7 +121,10 @@ class RecordingDevice:
         return "V"
 
 
-def _facet() -> tuple[SetupControlFacet, CallLog, BaseEventBus, RecordingConnection]:
+def _facet(
+    *,
+    on_project_applied: Callable[[ResolvedStartupProject], None] | None = None,
+) -> tuple[SetupControlFacet, CallLog, BaseEventBus, RecordingConnection]:
     log = CallLog()
     bus = BaseEventBus()
     startup = RecordingStartup(log)
@@ -125,6 +138,7 @@ def _facet() -> tuple[SetupControlFacet, CallLog, BaseEventBus, RecordingConnect
             context=cast(Any, context),
             connection=cast(Any, connection),
             device=cast(Any, device),
+            on_project_applied=on_project_applied,
         ),
         log,
         bus,
@@ -227,6 +241,18 @@ def test_setup_control_facet_forwards_deliberate_setup_dialog_contract() -> None
         assert action() == expected_result, name
 
     assert log.calls == [expected_call for *_, expected_call in cases]
+
+
+def test_setup_control_project_applied_hook_receives_resolved_project() -> None:
+    seen: list[ResolvedStartupProject] = []
+    facet, log, _bus, _connection = _facet(on_project_applied=seen.append)
+    req = StartupProjectRequest("chip", "qub", "res")
+
+    assert facet.apply_startup_project(req) is True
+
+    assert log.calls == [call("startup", "apply_project", req)]
+    assert len(seen) == 1
+    assert seen[0].params_path == "/tmp/result/chip/qub/params.json"
 
 
 def test_setup_control_rebinds_connection_outcome_signals() -> None:

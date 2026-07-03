@@ -1,10 +1,18 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-07-01 (lifecycle helpers)
+**Last updated:** 2026-07-03 (project scope picker)
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
 `plotting`, `remote`, `session`, `widgets`) are shared by every app.
+
+## Project / Result Scope
+
+`ResultScopeManager` scans `result/**/params.json` under the project root and
+treats each hit as a selectable result scope. Measurement-session setup dialogs
+(measure/autofluxdep) use that scope to apply startup context; analysis dialogs
+(fluxdep/dispersive) use the same discovery in `widgets.ProjectDialog` as a
+dropdown picker only, leaving typed paths and Browse flows available.
 
 ## Dialogs — always non-blocking
 

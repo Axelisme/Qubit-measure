@@ -42,6 +42,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QLineEdit,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QStackedWidget,
     QTabWidget,
     QVBoxLayout,
@@ -271,6 +272,10 @@ class AnalyzePanelWidget(QWidget):
         form.addRow(self._export_btn)
 
         self._status = QLabel("")
+        self._status.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
+        self._status.setWordWrap(True)
         form.addRow(self._status)
 
         # Right: the search's native diagnostic figure (routed via the backend).
@@ -531,9 +536,11 @@ class AnalyzePanelWidget(QWidget):
             path = self._ctrl.export_params()
         except Exception as exc:  # noqa: BLE001 — surface to the panel
             self._status.setText("Export failed.")
+            self._status.setToolTip("")
             self._show_message("Export failed", friendly_fit_message("Export", exc))
             return
         self._status.setText(f"Exported → {path}")
+        self._status.setToolTip(path)
 
     def _show_message(self, title: str, message: str) -> None:
         from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]

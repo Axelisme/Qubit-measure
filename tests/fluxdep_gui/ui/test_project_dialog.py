@@ -96,3 +96,44 @@ def test_browse_buttons_exist(dialog):
     labels = [b.text() for b in dialog.findChildren(QPushButton)]
     # a Browse… for result dir and one for database path
     assert labels.count("Browse…") == 2
+
+
+def test_result_scope_dropdown_lists_discovered_params(qapp, tmp_path):
+    from zcu_tools.meta_tool import ParamsProject, QubitParams
+
+    params_path = tmp_path / "result" / "ChipA" / "Q1" / "params.json"
+    QubitParams(params_path).ensure_project(ParamsProject("ChipA", "Q1"))
+
+    d = ProjectDialog(ProjectInfo(root_dir=str(tmp_path)), project_root=str(tmp_path))
+    try:
+        assert d._scope_combo.findData(str(params_path.parent.resolve())) >= 0
+    finally:
+        d.deleteLater()
+
+
+def test_selecting_result_scope_updates_names_and_paths(qapp, tmp_path):
+    import os
+
+    from zcu_tools.meta_tool import ParamsProject, QubitParams
+
+    params_path = tmp_path / "result" / "ChipA" / "Q1" / "params.json"
+    QubitParams(params_path).ensure_project(ParamsProject("ChipA", "Q1"))
+
+    d = ProjectDialog(
+        ProjectInfo(chip_name="Other", qub_name="Q2", root_dir=str(tmp_path)),
+        project_root=str(tmp_path),
+    )
+    try:
+        idx = d._scope_combo.findData(str(params_path.parent.resolve()))
+        assert idx >= 0
+
+        d._scope_combo.setCurrentIndex(idx)
+
+        assert d._chip_edit.text() == "ChipA"
+        assert d._qub_edit.text() == "Q1"
+        assert d._result_edit.text() == str(params_path.parent.resolve())
+        assert d._database_edit.text() == os.path.join(
+            str(tmp_path), "Database", "ChipA", "Q1"
+        )
+    finally:
+        d.deleteLater()

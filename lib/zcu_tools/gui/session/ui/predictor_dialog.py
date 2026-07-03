@@ -1,9 +1,9 @@
 """PredictorDialog — load/define a FluxoniumPredictor and predict frequencies.
 
 Two ways to supply model parameters:
-  1. Browse a params.json → populates the six editable spinboxes AND auto-applies
-     (installs the predictor); on install failure the fields are still populated and
-     the error is shown in the status.
+  1. Type or Browse a params.json, then Load → populates the editable spinboxes
+     AND auto-applies (installs the predictor); on install failure the fields are
+     still populated and the error is shown in the status.
   2. Type or tweak the spinboxes directly, then Apply → builds+installs in-memory
      via set_predictor_model_params.
 
@@ -40,6 +40,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QSpinBox,
     QTableWidget,
@@ -122,10 +123,24 @@ class PredictorDialog(QDialog):
         left_layout.setContentsMargins(0, 0, 0, 0)
 
         # ── Model params (editable EJ/EC/EL/flux anchors/flux_bias) ───────
-        # Browse opens a file dialog and populates the six spinboxes (no install).
-        # Apply builds+installs via set_predictor_model_params.
+        # Load reads a typed/browsed params.json and auto-installs; Apply
+        # builds+installs directly via set_predictor_model_params.
         model_group = QGroupBox("Model params")
         model_form = QFormLayout(model_group)
+
+        self._params_path_edit = QLineEdit()
+        self._params_path_edit.setPlaceholderText("params.json containing fluxdep_fit")
+        params_path_row = QHBoxLayout()
+        params_path_row.addWidget(self._params_path_edit, stretch=1)
+        load_btn = QPushButton("Load")
+        load_btn.clicked.connect(self._on_load_path_clicked)
+        params_path_row.addWidget(load_btn)
+        browse_btn = QPushButton("Browse")
+        browse_btn.clicked.connect(self._on_browse_file)
+        params_path_row.addWidget(browse_btn)
+        params_path_holder = QWidget()
+        params_path_holder.setLayout(params_path_row)
+        model_form.addRow("params.json:", params_path_holder)
 
         # Energies in GHz; flux anchors and bias in device-value units. Wide
         # ranges + many decimals so exploratory inputs are accepted; the only hard
@@ -145,9 +160,6 @@ class PredictorDialog(QDialog):
         model_form.addRow("flux_bias:", self._flux_bias_spin)
 
         model_btn_row = QHBoxLayout()
-        browse_btn = QPushButton("Browse")
-        browse_btn.clicked.connect(self._on_browse_file)
-        model_btn_row.addWidget(browse_btn)
         apply_btn = QPushButton("Apply")
         apply_btn.clicked.connect(self._on_apply_model_params)
         model_btn_row.addWidget(apply_btn)
@@ -283,6 +295,9 @@ class PredictorDialog(QDialog):
         # Pre-fill with current predictor state.
         info = predictor.get_predictor_info()
         if info is not None:
+            path = info.get("path")
+            if path:
+                self._params_path_edit.setText(str(path))
             self._flux_bias_spin.setValue(info["flux_bias"])
             self._flux_half = info["flux_half"]
             self._flux_period = info["flux_period"]
@@ -723,36 +738,48 @@ class PredictorDialog(QDialog):
     # Browse / Apply handlers
     # ------------------------------------------------------------------
 
-    def _on_browse_file(self) -> None:
-        """Open a file dialog to pick a params.json, populate the fields, auto-apply.
+    def _on_load_path_clicked(self) -> None:
+        """Load the typed params.json path, populate fields, and auto-apply."""
+        path = self._params_path_edit.text().strip()
+        if not path:
+            self._set_status("Enter a params.json path.", error=True)
+            return
+        self._load_params_file(path)
 
-        Browse first fills the six spinboxes from the file, then installs the
+    def _on_browse_file(self) -> None:
+        """Pick a params.json, populate the typed path, then load it.
+
+        Loading first fills the model spinboxes from the file, then installs the
         predictor via the same path as Apply.  If the install fails (e.g.
         flux_period == 0 or a service error), the fields stay populated and the
-        error is shown in the status — Browse never crashes on a bad install.
+        error is shown in the status.
         """
-        from zcu_tools.gui.session.services.predictor import (
-            PredictorLoadError,
-            read_fluxdep_fit_params,
-        )
-
         path, _ = QFileDialog.getOpenFileName(
             self, "Select params.json", "", "JSON files (*.json);;All files (*)"
         )
         if not path:
             return
+        self._params_path_edit.setText(path)
+        self._load_params_file(path)
+
+    def _load_params_file(self, path: str) -> bool:
+        from zcu_tools.gui.session.services.predictor import (
+            PredictorLoadError,
+            read_fluxdep_fit_params,
+        )
+
         try:
             params = read_fluxdep_fit_params(path)
         except PredictorLoadError as exc:
             self._set_status(str(exc), error=True)
-            return
+            return False
         self._populate_model_fields(
             params.EJ, params.EC, params.EL, params.flux_half, params.flux_period
         )
         logger.info("PredictorDialog: loaded params into fields from %r", path)
         # Auto-apply: install immediately. Failure leaves fields populated and
         # surfaces the error in the status (install path sets its own status).
-        self._install_from_fields()
+        return self._install_from_fields()
 
     def _on_apply_model_params(self) -> None:
         """Build+install a predictor from the current editable fields."""
@@ -811,6 +838,9 @@ class PredictorDialog(QDialog):
         del payload
         info = self._pred.get_predictor_info()
         if info is not None:
+            path = info.get("path")
+            if path:
+                self._params_path_edit.setText(str(path))
             self._flux_bias_spin.setValue(info["flux_bias"])
             self._flux_half = info["flux_half"]
             self._flux_period = info["flux_period"]

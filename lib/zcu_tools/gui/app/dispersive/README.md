@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-02 — QubitParams timestamp handoff
+**Last updated:** 2026-07-03 — project scope picker
 
 # `zcu_tools.gui.app.dispersive` — dispersive-shift analysis GUI
 
@@ -32,7 +32,7 @@ state/services/UI 與 GUI-process remote adapter。Import path 固定為
 ### 領域各 app 自有（共用機制之上）
 - `event_bus.py`：dispersive 的 payload 型別 + `EventBus`（建在共用 `BaseEventBus` 上）。
 - `services/remote/service.py`（RemoteControlAdapter）：**subclass 共用 `RemoteControlServiceBase`**（`gui/remote/control_service`），router scaffolding（route / events.* / `_dispatch_on_main` bare marshal / EventBus subscribe/serialize/broadcast，底層委 `NdjsonRpcEndpoint`）全在 base。dispersive read-only → **零 policy 覆寫**（`_get_bus` 用 base 預設 `ctrl.bus`、serializers 以 payload `type` 為 key），本檔只剩 domain 注入（method registry / serializers / 版本 / `server_name="DispersiveRemoteServer"`）。
-- `ui/error_messages.py`：用共用 `gui/error_messages` framework（`normalize_raw`/`details_tail`/`friendly_from_rules`/`fit_io_redirect`），domain rule（`friendly_io_message` + `_FIT_RULES`）各 app。其餘領域自有。`ProjectDialog` 來自共用 `gui/widgets/project_dialog.py`（`db_label="One-tone dir"`）；`ProjectInfo`/`default_*`/`nearest_existing` 在共用 `gui/project.py`（Qt-free）。本目錄不含 app-local project dialog。
+- `ui/error_messages.py`：用共用 `gui/error_messages` framework（`normalize_raw`/`details_tail`/`friendly_from_rules`/`fit_io_redirect`），domain rule（`friendly_io_message` + `_FIT_RULES`）各 app。其餘領域自有。`ProjectDialog` 來自共用 `gui/widgets/project_dialog.py`（`db_label="One-tone dir"`），可用 project root 掃描到的 `result/**/params.json` result scope 選既有 chip/qubit；`ProjectInfo`/`default_*`/`nearest_existing` 在共用 `gui/project.py`（Qt-free）。本目錄不含 app-local project dialog。
 
 ## 計算全走 worker（避免 GUI 卡頓）
 **重計算都經共用 `gui/background.py` `BackgroundRunner.submit`（per-panel，`enter=None`——無 routing/pbar scope）** off-main：preprocess（joblib edelay）、predict（tune 圖，scqubits）、auto_tune。模式統一：提交的 `work` 純呼 `compute_*`/`predict_*`（讀 State 不寫）並回**純資料 dataclass**（`_TuneData`/PreprocessResult）；`on_done`（主執行緒）唯一 `record_*`（State 寫）+ **畫圖**（worker 從不碰 Qt widget / pyplot，守 ADR-0017 + main-thread State 不變式）。一次只跑一個用按鈕 disable guard（不需 generation 戳記）。
@@ -64,7 +64,7 @@ agent 只觀測、user 在 GUI 驅動。method set 全純查詢（state.check / 
   - **平行化教訓（benchmark 實測）**：per-row Python loop + threads **比 serial 慢 3.5x**（`np.linalg.solve`/scipy LAPACK 不放 GIL，線程互搶）；向量化（消內層 grid loop）後 threads/loky 才好（0.4-0.5s）；numba prange 最贏（放 GIL 的真平行 + 無 fork 開銷）。
 - **OneTone 檔軸常反**：OneTone hdf5 常存成 `[Frequency, Flux]`，loader 假設 `[Flux, Flux→Freq]` → 載入後 freqs 變垃圾（如 ~1e-12），preprocess edelay 全錯。**不是 bug，是檔格式** —— user 在 load dialog 看 preview 勾「Transpose axes」修正（這正是 preview dialog 的用途）。同 fluxdep OneTone 軸反問題。
 - **preprocess smoothing signature**：preprocess 在 edelay/circle-fit 前與 phase-diff 前沿頻率軸做 smoothing，預設 method 是 `wavelet`；signature 包含 method、兩個 smoothing divisor 與 grid shape，因此 smoothing pipeline 變更會讓既有 fit 失效。小頻網格的 smoothing strength floor 至 1，GUI 不因粗網格崩潰。
-- **路徑**：`result_dir`=`result/<chip>/<qub>`（processed 輸出 / params.json）；`database_path`=`Database/<chip>/<qub>`（**raw onetone root**，對齊 notebook `Database/Q12_2D[5]/Q1/...`，**不是** result/ 下）。browse onetone 預設走 `database_path`。
+- **路徑**：`result_dir`=`result/<chip>/<qub>`（processed 輸出 / params.json，可由 result scope picker 帶入既有 scope）；`database_path`=`Database/<chip>/<qub>`（**raw onetone root**，對齊 notebook `Database/Q12_2D[5]/Q1/...`，**不是** result/ 下）。browse onetone 預設走 `database_path`。
 - **export 需既存 params.json**：`QubitParams.set_dispersive_fit()` 要求檔案已存在且已有 `fluxdep_fit`；export 前 gate on `has_result`，缺 handoff 則 fast-fail 指向 fluxdep。
 - **section timestamp**：export 只更新 `dispersive` section 與 `dispersive.timestamp`，不改寫 `fluxdep_fit.timestamp`。
 - **bare_rf seed 不覆蓋**：`set_fit_inputs` 只在 disp_fit.bare_rf 無值時 seed（不蓋既有 tuning 值）。
