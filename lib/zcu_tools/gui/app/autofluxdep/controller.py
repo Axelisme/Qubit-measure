@@ -23,12 +23,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from qtpy.QtCore import (  # type: ignore[attr-defined]
+from qtpy.QtCore import (
     QObject,
     Qt,
     QThread,
     QTimer,
-    Signal,
+    Signal,  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.app.autofluxdep.cfg import CfgSectionValue
@@ -185,7 +185,7 @@ class _RunEventEmitter(QObject):
         self.node_entered.connect(owner._emit_node_entered_on_main, type=blocking)  # type: ignore[call-arg]
         self.predictor_changed.connect(  # type: ignore[call-arg]
             owner._emit_predictor_changed_on_main,
-            type=blocking,
+            type=blocking,  # type: ignore[call-arg]
         )
 
     def emit_point_done(self, idx: int) -> None:

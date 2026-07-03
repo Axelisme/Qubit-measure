@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from zcu_tools.gui.app.autofluxdep.app import build_core
@@ -232,7 +233,7 @@ def test_window_restore_workflow_view_updates_list_and_flux_fields(qapp):  # noq
         assert item is not None
         row = win._list._list.itemWidget(item)
         assert row is not None
-        assert not row._checkbox.isChecked()
+        assert not cast(Any, row)._checkbox.isChecked()
     finally:
         ctrl._background_svc.quiesce()
         win.close()

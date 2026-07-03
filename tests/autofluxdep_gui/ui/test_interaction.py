@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -74,7 +74,7 @@ def _node_checkbox(win: MainWindow, row: int):
     assert item is not None
     widget = win._list._list.itemWidget(item)
     assert widget is not None
-    return widget._checkbox
+    return cast(Any, widget)._checkbox
 
 
 class _RowReceiver(QObject):
