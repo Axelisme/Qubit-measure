@@ -143,6 +143,65 @@ def test_setup_dialog_scope_combo_lists_all_scopes_and_selection_prefills_names(
     assert dialog._qub_edit.text() == "Q1"
 
 
+def test_setup_dialog_prefills_persisted_scope_id_without_side_effects(qapp):
+    scope = ResultScope(
+        scope_id="/tmp/result/Q4_2D/Q2",
+        chip_name="Q4_2D",
+        qub_name="Q2",
+        result_dir="/tmp/result/Q4_2D/Q2",
+        params_path="/tmp/result/Q4_2D/Q2/params.json",
+        source="discovered",
+    )
+    prefs = PersistedStartup(
+        chip_name="Q4_2D",
+        qub_name="Q2",
+        res_name="R2",
+        scope_id=scope.scope_id,
+        ip="10.0.0.2",
+        port=7777,
+    )
+    ctrl = _make_ctrl(get_persisted_startup=prefs, list_result_scopes=(scope,))
+
+    dialog = SetupDialog(ctrl)
+
+    assert dialog._scope_combo.currentData() == scope.scope_id
+    assert dialog._chip_edit.text() == "Q4_2D"
+    assert dialog._qub_edit.text() == "Q2"
+    assert dialog._res_edit.text() == "R2"
+    assert dialog._ip_edit.text() == "10.0.0.2"
+    assert dialog._port_spin.value() == 7777
+    ctrl.apply_startup_project.assert_not_called()
+    ctrl.remember_startup_connection.assert_not_called()
+    ctrl.start_connect.assert_not_called()
+
+
+def test_setup_dialog_missing_persisted_scope_falls_back_without_side_effects(qapp):
+    scope = ResultScope(
+        scope_id="/tmp/result/Q5_2D/Q1",
+        chip_name="Q5_2D",
+        qub_name="Q1",
+        result_dir="/tmp/result/Q5_2D/Q1",
+        params_path="/tmp/result/Q5_2D/Q1/params.json",
+        source="discovered",
+    )
+    prefs = PersistedStartup(
+        chip_name="Q5_2D",
+        qub_name="Q1",
+        res_name="R1",
+        scope_id="/tmp/result/missing/scope",
+    )
+    ctrl = _make_ctrl(get_persisted_startup=prefs, list_result_scopes=(scope,))
+
+    dialog = SetupDialog(ctrl)
+
+    assert dialog._scope_combo.currentData() == scope.scope_id
+    assert dialog._chip_edit.text() == "Q5_2D"
+    assert dialog._qub_edit.text() == "Q1"
+    ctrl.apply_startup_project.assert_not_called()
+    ctrl.remember_startup_connection.assert_not_called()
+    ctrl.start_connect.assert_not_called()
+
+
 def test_setup_dialog_does_not_render_success_when_project_apply_fails(qapp):
     ctrl = _make_ctrl()
     ctrl.apply_startup_project.return_value = False

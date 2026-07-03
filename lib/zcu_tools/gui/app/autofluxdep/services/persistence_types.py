@@ -7,6 +7,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from zcu_tools.gui.session.services.startup import PersistedStartup
+
 APP_STATE_VERSION = 1
 
 
@@ -49,6 +51,7 @@ class AppPersistedState(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     version: int = APP_STATE_VERSION
+    startup: PersistedStartup = Field(default_factory=PersistedStartup)
     workflow: PersistedWorkflow = Field(default_factory=PersistedWorkflow)
     flux: PersistedFluxSweep = Field(default_factory=PersistedFluxSweep)
     ui: PersistedUiPrefs = Field(default_factory=PersistedUiPrefs)
@@ -75,6 +78,7 @@ __all__ = [
     "AppPersistedState",
     "PersistedFluxSweep",
     "PersistedNode",
+    "PersistedStartup",
     "PersistedUiPrefs",
     "PersistedWorkflow",
     "PersistenceError",

@@ -12,12 +12,17 @@ from zcu_tools.gui.app.autofluxdep.services import (
     AppPersistedState,
     PersistedFluxSweep,
     PersistedNode,
+    PersistedStartup,
     PersistedUiPrefs,
     PersistedWorkflow,
     PersistenceCaretaker,
     RestoreReport,
 )
 from zcu_tools.gui.app.autofluxdep.ui.main_window import MainWindow
+from zcu_tools.gui.session.services.startup import (
+    StartupConnectionRequest,
+    StartupProjectRequest,
+)
 
 
 def _list_labels(win: MainWindow) -> list[str]:
@@ -59,6 +64,29 @@ def test_workflow_persistence_roundtrip(tmp_path: Path):
     assert restored.get_auto_follow_tabs() is False
 
 
+def test_startup_memento_persistence_roundtrip(tmp_path: Path):
+    ctrl = build_core(project_root=str(tmp_path))
+    ctrl.apply_startup_project(StartupProjectRequest("chip", "qub", "res"))
+    ctrl.remember_startup_connection(StartupConnectionRequest(ip="10.0.0.2", port=7000))
+    scope_id = ctrl.get_persisted_startup().scope_id
+    ctrl.attach_caretaker(PersistenceCaretaker(ctrl, cache_dir=tmp_path))
+    ctrl.persist_all()
+
+    restored = build_core(project_root=str(tmp_path))
+    restored.attach_caretaker(PersistenceCaretaker(restored, cache_dir=tmp_path))
+    outcome = restored.restore_all()
+
+    assert outcome is not None
+    assert outcome.load_error is None
+    startup = restored.get_persisted_startup()
+    assert startup.scope_id == scope_id
+    assert startup.ip == "10.0.0.2"
+    assert startup.port == 7000
+    assert restored.state.project is None
+    assert restored.state.exp_context.soc is None
+    assert restored.state.exp_context.soccfg is None
+
+
 def test_restore_old_memento_without_ui_defaults_auto_follow_true(tmp_path: Path):
     ctrl = build_core()
     ctrl.set_auto_follow_tabs(False)
@@ -86,6 +114,7 @@ def test_restore_old_memento_without_ui_defaults_auto_follow_true(tmp_path: Path
     assert outcome is not None
     assert outcome.load_error is None
     assert ctrl.get_auto_follow_tabs() is True
+    assert ctrl.get_persisted_startup() == PersistedStartup()
     assert ctrl.state.flux_values == pytest.approx([0.0, 0.5, 1.0])
 
 

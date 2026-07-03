@@ -314,10 +314,19 @@ class SetupDialog(QDialog):
         if data.res_name:
             self._res_edit.setText(data.res_name)
         self._on_names_changed()
+        self._select_persisted_scope(data.scope_id)
         if data.ip:
             self._ip_edit.setText(data.ip)
         if data.port:
             self._port_spin.setValue(data.port)
+
+    def _select_persisted_scope(self, scope_id: str) -> None:
+        if not scope_id:
+            return
+        idx = self._scope_combo.findData(scope_id)
+        if idx < 0:
+            return
+        self._scope_combo.setCurrentIndex(idx)
 
     def _on_names_changed(self) -> None:
         if self._syncing_scope_selection:

@@ -93,6 +93,7 @@ from zcu_tools.gui.session.services.predictor import (
     SetModelParamsRequest,
 )
 from zcu_tools.gui.session.services.progress import ProgressService
+from zcu_tools.gui.session.state import DEFAULT_LEFT_PANEL_WIDTH
 from zcu_tools.meta_tool import QubitParams, QubitParamsError
 
 if TYPE_CHECKING:
@@ -330,6 +331,9 @@ class Controller(SessionControllerMixin):
             for node in self._state.nodes
         )
         return AppPersistedState(
+            startup=self._startup_svc.capture_startup(
+                left_panel_width=DEFAULT_LEFT_PANEL_WIDTH
+            ),
             workflow=PersistedWorkflow(nodes=nodes),
             flux=PersistedFluxSweep(
                 start_expr=self._state.flux_start_expr,
@@ -343,6 +347,7 @@ class Controller(SessionControllerMixin):
     def restore_persisted_state(self, state: AppPersistedState) -> RestoreReport:
         """Apply a persisted workflow snapshot, rejecting only invalid nodes."""
         rejected: list[RestoreIssue] = []
+        self._startup_svc.restore_startup(state.startup)
         self._state.nodes = []
 
         for index, persisted in enumerate(state.workflow.nodes):

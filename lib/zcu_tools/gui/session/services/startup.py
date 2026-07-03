@@ -53,6 +53,7 @@ class PersistedStartup(BaseModel):
     chip_name: str = ""
     qub_name: str = ""
     res_name: str = ""
+    scope_id: str = ""
     result_dir: str = ""
     database_path: str = ""
     ip: str = "192.168.10.1"
@@ -195,6 +196,7 @@ class StartupService:
         prefs.chip_name = resolved.chip_name
         prefs.qub_name = resolved.qub_name
         prefs.res_name = resolved.res_name
+        prefs.scope_id = resolved.scope_id
         prefs.result_dir = resolved.result_dir
         prefs.database_path = resolved.database_path
         return resolved
@@ -220,6 +222,7 @@ class StartupService:
             chip_name=prefs.chip_name,
             qub_name=prefs.qub_name,
             res_name=prefs.res_name,
+            scope_id=prefs.scope_id,
             result_dir=prefs.result_dir,
             database_path=prefs.database_path,
             ip=prefs.ip,
@@ -236,6 +239,7 @@ class StartupService:
             chip_name=data.chip_name,
             qub_name=data.qub_name,
             res_name=data.res_name,
+            scope_id=data.scope_id,
             result_dir=data.result_dir,
             database_path=data.database_path,
             ip=data.ip,
@@ -259,6 +263,7 @@ class StartupService:
             chip_name=prefs.chip_name,
             qub_name=prefs.qub_name,
             res_name=prefs.res_name,
+            scope_id=prefs.scope_id,
             result_dir=prefs.result_dir,
             database_path=prefs.database_path,
             ip=prefs.ip,

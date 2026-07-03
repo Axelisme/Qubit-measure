@@ -44,6 +44,7 @@ def test_apply_project_resolves_generated_scope_and_records_prefs(tmp_path) -> N
     prefs = state.startup_prefs
     assert prefs.chip_name == "chip"
     assert prefs.qub_name == "qubit"
+    assert prefs.scope_id == resolved.scope_id
     assert prefs.result_dir == expected_result
     assert prefs.database_path.startswith(str(tmp_path / "Database" / "chip" / "qubit"))
 
@@ -65,6 +66,35 @@ def test_remember_connection_records_prefs() -> None:
     svc.remember_connection(StartupConnectionRequest(ip="10.0.0.2", port=1234))
     assert state.startup_prefs.ip == "10.0.0.2"
     assert state.startup_prefs.port == 1234
+
+
+def test_scope_id_capture_restore_roundtrips_with_connection(tmp_path) -> None:
+    manager = ResultScopeManager(tmp_path)
+    scope = manager.ensure_scope(chip_name="chip", qub_name="qubit")
+    svc, _, _, state = _make_service(tmp_path)
+
+    svc.apply_project(
+        StartupProjectRequest(
+            "chip",
+            "qubit",
+            "res",
+            scope_id=scope.scope_id,
+        )
+    )
+    svc.remember_connection(StartupConnectionRequest(ip="10.0.0.2", port=1234))
+
+    memento = svc.capture_startup(left_panel_width=321)
+
+    assert memento.scope_id == scope.scope_id
+    assert memento.ip == "10.0.0.2"
+    assert memento.port == 1234
+
+    restored_svc, _, _, restored_state = _make_service(tmp_path)
+    restored_svc.restore_startup(memento)
+
+    assert restored_state.startup_prefs.scope_id == scope.scope_id
+    assert restored_state.startup_prefs.ip == "10.0.0.2"
+    assert restored_state.startup_prefs.port == 1234
 
 
 def test_derive_project_paths_scopes_under_chip_qubit() -> None:
@@ -107,11 +137,12 @@ def test_capture_startup_projects_remembered_devices_and_prefs() -> None:
 
 
 def test_restore_startup_seeds_prefs_and_registers_devices() -> None:
-    svc, _, devices, state = _make_service("/tmp")
+    svc, context, devices, state = _make_service("/tmp")
     data = PersistedStartup(
         chip_name="chip",
         qub_name="qub",
         res_name="res",
+        scope_id="/tmp/result/chip/qub",
         ip="host",
         port=9999,
         devices=(
@@ -124,10 +155,13 @@ def test_restore_startup_seeds_prefs_and_registers_devices() -> None:
 
     # Prefs seeded (so the setup dialog prefills) — project NOT auto-applied.
     assert state.startup_prefs.chip_name == "chip"
+    assert state.startup_prefs.scope_id == "/tmp/result/chip/qub"
     assert state.startup_prefs.port == 9999
     assert state.startup_prefs.left_panel_width == 222
     (entries,) = devices.register_remembered_devices.call_args.args
     assert entries[0].name == "flux"
+    context.set_startup_context.assert_not_called()
+    context.setup_project.assert_not_called()
 
 
 def test_connection_request_validates_port() -> None:

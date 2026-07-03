@@ -29,7 +29,11 @@ from zcu_tools.gui.app.main.events.tab import (
     TabInteractionChangedPayload,
 )
 from zcu_tools.gui.app.main.registry import Registry
-from zcu_tools.gui.app.main.services import PersistenceCaretaker, StartupProjectRequest
+from zcu_tools.gui.app.main.services import (
+    PersistenceCaretaker,
+    StartupConnectionRequest,
+    StartupProjectRequest,
+)
 from zcu_tools.gui.app.main.services.ports import RestoreIssue, RestoreReport
 from zcu_tools.gui.app.main.state import DeviceStatus, State
 from zcu_tools.gui.plotting import FigureContainer
@@ -781,7 +785,12 @@ def test_persist_then_restore_app_state(tmp_path):
     schema = _default_fake_schema(cf.state.exp_context)
     cf.ctrl.update_tab_cfg(tab_id, schema)
     cf.ctrl.update_tab_save_paths(tab_id, "/tmp/a.h5", "/tmp/b.png")
-    cf.ctrl.apply_startup_project(StartupProjectRequest("chip", "qub", "res"))
+    resolved = cf.ctrl.apply_startup_project(
+        StartupProjectRequest("chip", "qub", "res")
+    )
+    cf.ctrl.remember_startup_connection(
+        StartupConnectionRequest(ip="10.0.0.2", port=7000)
+    )
     cf.ctrl.persist_all()
 
     cf_restored = ControllerFixture(cache_dir=tmp_path)
@@ -797,7 +806,12 @@ def test_persist_then_restore_app_state(tmp_path):
     assert save_paths.data_path == "/tmp/a.h5"
     assert save_paths.image_path == "/tmp/b.png"
     # startup prefs round-tripped (prefill values; project not auto-applied).
-    assert cf_restored.ctrl.get_persisted_startup().chip_name == "chip"
+    startup = cf_restored.ctrl.get_persisted_startup()
+    assert startup.chip_name == "chip"
+    assert startup.scope_id == resolved["scope_id"]
+    assert startup.ip == "10.0.0.2"
+    assert startup.port == 7000
+    assert cf_restored.state.exp_context.result_dir == "/tmp/zcu_result"
 
 
 def test_restore_corrupt_file_is_visible_to_user(cf, tmp_path):

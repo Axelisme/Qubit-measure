@@ -112,6 +112,7 @@ class StartupPrefs:
     chip_name: str = ""
     qub_name: str = ""
     res_name: str = ""
+    scope_id: str = ""
     result_dir: str = ""
     database_path: str = ""
     ip: str = "192.168.10.1"
