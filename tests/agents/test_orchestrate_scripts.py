@@ -74,7 +74,7 @@ def init_git_repo(root: Path) -> str:
     run_git(root, "checkout", "-b", "main")
     run_git(root, "config", "user.email", "agent@example.invalid")
     run_git(root, "config", "user.name", "Agent Test")
-    (root / ".gitignore").write_text(".agent_state/\n", encoding="utf-8")
+    (root / ".gitignore").write_text(".agent_state/\nscratch/\n", encoding="utf-8")
     (root / "tracked.txt").write_text("base\n", encoding="utf-8")
     run_git(root, "add", ".gitignore", "tracked.txt")
     run_git(root, "commit", "-m", "base")
@@ -277,6 +277,129 @@ def test_preview_start_and_abort_manage_queue_and_task_status(tmp_path: Path) ->
     assert json.loads(queue.stdout)["queue"]["queue"] == []
 
 
+def test_preview_allows_nonoverlapping_untracked_file(tmp_path: Path) -> None:
+    base_commit = init_git_repo(tmp_path)
+    create_integration_branch(tmp_path)
+    create_task_and_lane(tmp_path, base_commit=base_commit)
+    (tmp_path / "report.md").write_text("local report\n", encoding="utf-8")
+
+    run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "preview",
+        "start",
+        "demo-task",
+        "--requested-by",
+        "agent-a",
+    )
+    run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "preview",
+        "abort",
+        "demo-task",
+    )
+
+    assert (tmp_path / "report.md").read_text(encoding="utf-8") == "local report\n"
+    assert read_task(tmp_path)["status"] == "reviewing"
+
+
+def test_preview_rejects_untracked_file_collision(tmp_path: Path) -> None:
+    base_commit = init_git_repo(tmp_path)
+    run_git(tmp_path, "checkout", "-b", "agent/demo-task")
+    (tmp_path / "report.md").write_text("branch report\n", encoding="utf-8")
+    run_git(tmp_path, "add", "report.md")
+    run_git(tmp_path, "commit", "-m", "add report")
+    run_git(tmp_path, "checkout", "main")
+    (tmp_path / "report.md").write_text("local report\n", encoding="utf-8")
+    create_task_and_lane(tmp_path, base_commit=base_commit)
+
+    result = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "preview",
+        "start",
+        "demo-task",
+        "--requested-by",
+        "agent-a",
+        check=False,
+    )
+
+    assert result.returncode == 40
+    assert "untracked files overlap the merge target" in result.stderr
+    assert "report.md" in result.stderr
+    assert not (tmp_path / ".git" / "MERGE_HEAD").exists()
+    assert read_task(tmp_path)["status"] == "active"
+
+
+def test_preview_rejects_ignored_untracked_file_collision(tmp_path: Path) -> None:
+    base_commit = init_git_repo(tmp_path)
+    run_git(tmp_path, "checkout", "-b", "agent/demo-task")
+    (tmp_path / "scratch").mkdir()
+    (tmp_path / "scratch" / "note.md").write_text("branch note\n", encoding="utf-8")
+    run_git(tmp_path, "add", "-f", "scratch/note.md")
+    run_git(tmp_path, "commit", "-m", "add ignored-path note")
+    run_git(tmp_path, "checkout", "main")
+    (tmp_path / "scratch").mkdir()
+    (tmp_path / "scratch" / "note.md").write_text("local note\n", encoding="utf-8")
+    create_task_and_lane(tmp_path, base_commit=base_commit)
+
+    result = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "preview",
+        "start",
+        "demo-task",
+        "--requested-by",
+        "agent-a",
+        check=False,
+    )
+
+    assert result.returncode == 40
+    assert "untracked files overlap the merge target" in result.stderr
+    assert "scratch/note.md" in result.stderr
+    assert (tmp_path / "scratch" / "note.md").read_text(encoding="utf-8") == (
+        "local note\n"
+    )
+    assert not (tmp_path / ".git" / "MERGE_HEAD").exists()
+
+
+def test_preview_rejects_untracked_prefix_collision(tmp_path: Path) -> None:
+    base_commit = init_git_repo(tmp_path)
+    run_git(tmp_path, "checkout", "-b", "agent/demo-task")
+    (tmp_path / "scratch").mkdir()
+    (tmp_path / "scratch" / "note.md").write_text("branch note\n", encoding="utf-8")
+    run_git(tmp_path, "add", "-f", "scratch/note.md")
+    run_git(tmp_path, "commit", "-m", "add nested note")
+    run_git(tmp_path, "checkout", "main")
+    (tmp_path / "scratch").write_text("local file blocks directory\n", encoding="utf-8")
+    create_task_and_lane(tmp_path, base_commit=base_commit)
+
+    result = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "preview",
+        "start",
+        "demo-task",
+        "--requested-by",
+        "agent-a",
+        check=False,
+    )
+
+    assert result.returncode == 40
+    assert "untracked files overlap the merge target" in result.stderr
+    assert "scratch" in result.stderr
+    assert (tmp_path / "scratch").read_text(encoding="utf-8") == (
+        "local file blocks directory\n"
+    )
+    assert not (tmp_path / ".git" / "MERGE_HEAD").exists()
+
+
 def test_preview_start_requires_base_branch(tmp_path: Path) -> None:
     base_commit = init_git_repo(tmp_path)
     create_integration_branch(tmp_path)
@@ -391,6 +514,29 @@ def test_final_fast_forward_aborts_preview_and_closes_task(tmp_path: Path) -> No
         "--json",
     )
     assert json.loads(queue.stdout)["queue"]["queue"] == []
+
+
+def test_final_fast_forward_allows_nonoverlapping_untracked_file(
+    tmp_path: Path,
+) -> None:
+    base_commit = init_git_repo(tmp_path)
+    target_commit = create_integration_branch(tmp_path)
+    create_task_and_lane(tmp_path, base_commit=base_commit)
+    (tmp_path / "report.md").write_text("local report\n", encoding="utf-8")
+
+    run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "final",
+        "fast-forward",
+        "demo-task",
+        "--requested-by",
+        "agent-a",
+    )
+
+    assert git_stdout(tmp_path, "rev-parse", "HEAD") == target_commit
+    assert (tmp_path / "report.md").read_text(encoding="utf-8") == "local report\n"
 
 
 def test_final_fast_forward_waits_behind_queue_head(tmp_path: Path) -> None:

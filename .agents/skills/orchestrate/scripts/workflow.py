@@ -421,10 +421,58 @@ def ensure_no_merge_in_progress(root: Path) -> None:
         )
 
 
-def ensure_clean_worktree(root: Path) -> None:
-    status = run_git(root, "status", "--porcelain").stdout.strip()
+def ensure_tracked_clean_worktree(root: Path) -> None:
+    status = run_git(
+        root, "status", "--porcelain", "--untracked-files=no"
+    ).stdout.strip()
     if status:
-        raise OrchestrateError(f"main checkout is not clean:\n{status}", 40)
+        raise OrchestrateError(f"main checkout has tracked changes:\n{status}", 40)
+
+
+def git_null_list(root: Path, *git_args: str) -> list[str]:
+    output = run_git(root, *git_args).stdout
+    return [item for item in output.split("\0") if item]
+
+
+def paths_overlap(left: str, right: str) -> bool:
+    left_parts = Path(left).parts
+    right_parts = Path(right).parts
+    common = min(len(left_parts), len(right_parts))
+    return left_parts[:common] == right_parts[:common]
+
+
+def ensure_untracked_files_do_not_overlap_merge_target(
+    root: Path,
+    target_commit: str,
+) -> None:
+    untracked_paths = git_null_list(
+        root,
+        "ls-files",
+        "--others",
+        "-z",
+    )
+    if not untracked_paths:
+        return
+    target_paths = git_null_list(
+        root,
+        "diff",
+        "--name-only",
+        "-z",
+        "HEAD",
+        target_commit,
+    )
+    collisions = sorted(
+        untracked_path
+        for untracked_path in untracked_paths
+        if any(
+            paths_overlap(untracked_path, target_path) for target_path in target_paths
+        )
+    )
+    if collisions:
+        raise OrchestrateError(
+            "untracked files overlap the merge target:\n" + "\n".join(collisions),
+            40,
+        )
 
 
 def require_task(state: dict[str, Any], task_id: str) -> dict[str, Any]:
@@ -530,7 +578,7 @@ def abort_preview_merge(root: Path, entry: dict[str, Any]) -> None:
     expected_target = entry.get("target_commit")
     current_target = git_merge_head(root)
     if current_target is None:
-        ensure_clean_worktree(root)
+        ensure_tracked_clean_worktree(root)
     elif expected_target and current_target != expected_target:
         raise OrchestrateError(
             f"merge preview target is {current_target}, expected {expected_target}",
@@ -544,7 +592,7 @@ def abort_preview_merge(root: Path, entry: dict[str, Any]) -> None:
                 50,
             )
     ensure_no_merge_in_progress(root)
-    ensure_clean_worktree(root)
+    ensure_tracked_clean_worktree(root)
     expected_base = entry.get("base_head")
     if expected_base:
         current_head = git_commit(root, "HEAD")
@@ -835,7 +883,8 @@ def command_preview_start(args: argparse.Namespace) -> None:
         target_commit = git_commit(root, task["integration_branch"])
         base_head = git_commit(root, "HEAD")
         ensure_no_merge_in_progress(root)
-        ensure_clean_worktree(root)
+        ensure_tracked_clean_worktree(root)
+        ensure_untracked_files_do_not_overlap_merge_target(root, target_commit)
 
         index, current = find_queue_entry(queue, args.task_id)
         if current is not None and current["status"] == "merging":
@@ -877,7 +926,13 @@ def command_preview_start(args: argparse.Namespace) -> None:
         save_workflow(root, state, queue)
 
         result = run_git(
-            root, "merge", "--no-commit", "--no-ff", target_commit, check=False
+            root,
+            "merge",
+            "--no-overwrite-ignore",
+            "--no-commit",
+            "--no-ff",
+            target_commit,
+            check=False,
         )
         if result.returncode != 0:
             note = f"preview merge failed: {format_git_output(result)}"
@@ -1001,7 +1056,8 @@ def command_final_fast_forward(args: argparse.Namespace) -> None:
             )
 
         ensure_no_merge_in_progress(root)
-        ensure_clean_worktree(root)
+        ensure_tracked_clean_worktree(root)
+        ensure_untracked_files_do_not_overlap_merge_target(root, target_commit)
         base_head = git_commit(root, "HEAD")
         claim_entry(
             entry,
@@ -1015,7 +1071,14 @@ def command_final_fast_forward(args: argparse.Namespace) -> None:
         task["status"] = "merge_preview"
         save_workflow(root, state, queue)
 
-        result = run_git(root, "merge", "--ff-only", target_commit, check=False)
+        result = run_git(
+            root,
+            "merge",
+            "--no-overwrite-ignore",
+            "--ff-only",
+            target_commit,
+            check=False,
+        )
         if result.returncode != 0:
             note = f"final fast-forward failed: {format_git_output(result)}"
             block_entry(entry, note)
