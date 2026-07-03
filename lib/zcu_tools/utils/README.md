@@ -1,6 +1,6 @@
 # zcu_tools.utils
 
-**Last updated:** 2026-07-04 — streaming Labber writer
+**Last updated:** 2026-07-04 — streaming Labber writer validation
 
 `utils` 放可被 experiment / GUI 共用、且不反向依賴上層 domain 的 helper。
 實驗資料持久化的 public API 收斂在 `zcu_tools.utils.datasaver` package
@@ -25,6 +25,8 @@ import。
   role schema，writer 預建 nan-filled datasets，之後以 outer row slice 寫入並
   flush。它是長掃 workflow 的 streaming primitive，不改變 one-shot save helper
   的 complete-file 語意。
+- Streaming writer 對自己建立的 Labber `Data` layout 採 hard invariant：若
+  內部 HDF5 group / dataset 結構不符合預期，立即 raise，不做靜默 fallback。
 - Experiment semantic schema 住在 `zcu_tools.experiment.axes_spec`：
   `GroupedAxesSpec` / `RoleSpec` 把 Result/Cfg 映射到這裡的 generic grouped
   payload；`utils.datasaver` 不反向依賴 experiment Result 或 cfg。

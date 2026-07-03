@@ -157,11 +157,12 @@ class StreamingGroupedLabberWriter:
                 target.attrs[DATASET_ROLE_ATTR] = str(spec.role)
                 for key, value in spec.attrs.items():
                     target.attrs[str(key)] = _attr_value(value)
+                data_group = _require_group(target, "Data")
                 self._handles[spec.role] = _RoleHandle(
                     spec=spec,
                     target=target,
-                    data=target["Data"]["Data"],
-                    timestamps=target["Data"]["Time stamp"],
+                    data=_require_dataset(data_group, "Data"),
+                    timestamps=_require_dataset(data_group, "Time stamp"),
                 )
 
             self._file.attrs[GROUPED_VERSION_ATTR] = GROUPED_DATASET_VERSION
@@ -224,8 +225,8 @@ class StreamingGroupedLabberWriter:
         start = idx * block_entries
         stop = start + block_entries
         zf = arr.reshape(block_entries, n_x)
-        handle.data[:, -2, start:stop] = zf.real.T
-        handle.data[:, -1, start:stop] = zf.imag.T
+        handle.data[:, -2, start:stop] = np.real(zf).T
+        handle.data[:, -1, start:stop] = np.imag(zf).T
         if timestamp is not None:
             handle.timestamps[start:stop] = float(timestamp) - self._creation_time(
                 handle
@@ -267,6 +268,20 @@ def open_streaming_grouped_labber_data(
 
 def _entry_count(shape: tuple[int, ...]) -> int:
     return int(np.prod(shape[:-1])) if len(shape) > 1 else 1
+
+
+def _require_group(parent: h5py.File | h5py.Group, name: str) -> h5py.Group:
+    child = parent[name]
+    if not isinstance(child, h5py.Group):
+        raise TypeError(f"expected HDF5 group at {child.name!r}")
+    return child
+
+
+def _require_dataset(parent: h5py.Group, name: str) -> h5py.Dataset:
+    child = parent[name]
+    if not isinstance(child, h5py.Dataset):
+        raise TypeError(f"expected HDF5 dataset at {child.name!r}")
+    return child
 
 
 def _attr_value(value: Any) -> Any:
