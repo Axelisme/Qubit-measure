@@ -230,6 +230,191 @@ def test_workflow_manages_task_lane_and_report_path(tmp_path: Path) -> None:
     assert task["worktrees"]["main"]["write_scope"] == ["lib/..."]
 
 
+def test_lane_scope_show_outputs_current_scope(tmp_path: Path) -> None:
+    create_task_and_lane(tmp_path)
+
+    shown = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "lane",
+        "scope",
+        "show",
+        "demo-task",
+        "main",
+        "--json",
+    )
+
+    data = json.loads(shown.stdout)
+    assert data["write_scope"] == ["lib/..."]
+
+
+def test_lane_scope_update_adds_and_removes_scope(tmp_path: Path) -> None:
+    create_task_and_lane(tmp_path)
+
+    updated = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "lane",
+        "scope",
+        "update",
+        "demo-task",
+        "main",
+        "--expect-current",
+        "lib/...",
+        "--remove",
+        "lib/...",
+        "--add",
+        "tests/agents",
+        "--add",
+        "./.agents/skills/orchestrate",
+        "--add",
+        "tests/agents",
+        "--reason",
+        "narrow scope after planning",
+        "--json",
+    )
+
+    data = json.loads(updated.stdout)
+    assert data["old_write_scope"] == ["lib/..."]
+    assert data["write_scope"] == ["tests/agents", ".agents/skills/orchestrate"]
+    assert data["changed"] is True
+    assert read_task(tmp_path)["worktrees"]["main"]["write_scope"] == [
+        "tests/agents",
+        ".agents/skills/orchestrate",
+    ]
+
+    rerun = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "lane",
+        "scope",
+        "update",
+        "demo-task",
+        "main",
+        "--set",
+        "tests/agents",
+        "--set",
+        ".agents/skills/orchestrate",
+        "--reason",
+        "idempotent retry",
+        "--json",
+    )
+    assert json.loads(rerun.stdout)["changed"] is False
+
+
+def test_lane_scope_update_rejects_stale_expect_current(tmp_path: Path) -> None:
+    create_task_and_lane(tmp_path)
+
+    result = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "lane",
+        "scope",
+        "update",
+        "demo-task",
+        "main",
+        "--expect-current",
+        "tests/agents",
+        "--add",
+        ".agents/skills/orchestrate",
+        "--reason",
+        "stale update attempt",
+        check=False,
+    )
+
+    assert result.returncode == 40
+    assert "write_scope changed" in result.stderr
+    assert read_task(tmp_path)["worktrees"]["main"]["write_scope"] == ["lib/..."]
+
+
+def test_lane_scope_update_rejects_empty_scope_without_confirmation(
+    tmp_path: Path,
+) -> None:
+    create_task_and_lane(tmp_path)
+
+    result = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "lane",
+        "scope",
+        "update",
+        "demo-task",
+        "main",
+        "--remove",
+        "lib/...",
+        "--reason",
+        "empty scope mistake",
+        check=False,
+    )
+
+    assert result.returncode == 40
+    assert "write_scope would be empty" in result.stderr
+    assert read_task(tmp_path)["worktrees"]["main"]["write_scope"] == ["lib/..."]
+
+
+def test_lane_scope_update_allows_confirmed_empty_scope(tmp_path: Path) -> None:
+    create_task_and_lane(tmp_path)
+
+    updated = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "lane",
+        "scope",
+        "update",
+        "demo-task",
+        "main",
+        "--remove",
+        "lib/...",
+        "--allow-empty",
+        "--reason",
+        "scope is intentionally delegated elsewhere",
+        "--json",
+    )
+
+    assert json.loads(updated.stdout)["write_scope"] == []
+    assert read_task(tmp_path)["worktrees"]["main"]["write_scope"] == []
+
+
+def test_lane_scope_update_rejects_merge_preview_task(tmp_path: Path) -> None:
+    create_task_and_lane(tmp_path)
+    run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "task",
+        "status",
+        "demo-task",
+        "--status",
+        "merge_preview",
+    )
+
+    result = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "lane",
+        "scope",
+        "update",
+        "demo-task",
+        "main",
+        "--add",
+        ".agents/skills/orchestrate",
+        "--reason",
+        "late scope change",
+        check=False,
+    )
+
+    assert result.returncode == 40
+    assert "abort preview before updating lane scope" in result.stderr
+    assert read_task(tmp_path)["worktrees"]["main"]["write_scope"] == ["lib/..."]
+
+
 def test_preview_start_and_abort_manage_queue_and_task_status(tmp_path: Path) -> None:
     base_commit = init_git_repo(tmp_path)
     target_commit = create_integration_branch(tmp_path)

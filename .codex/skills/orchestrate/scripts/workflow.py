@@ -101,7 +101,21 @@ def normalize_repo_path(root: Path, raw_path: str) -> str:
 
 
 def normalize_scope(raw_scope: str) -> str:
-    return raw_scope.replace("\\", "/").removeprefix("./")
+    scope = raw_scope.replace("\\", "/").removeprefix("./")
+    if not scope:
+        raise OrchestrateError("write scope must not be empty", 40)
+    return scope
+
+
+def normalize_scope_list(raw_scopes: list[str]) -> list[str]:
+    scopes: list[str] = []
+    seen: set[str] = set()
+    for raw_scope in raw_scopes:
+        scope = normalize_scope(raw_scope)
+        if scope not in seen:
+            scopes.append(scope)
+            seen.add(scope)
+    return scopes
 
 
 def parse_ignored_input(raw: str) -> dict[str, str]:
@@ -242,6 +256,13 @@ def validate_state(data: dict[str, Any]) -> None:
                     f"task {task_id} lane {lane_id}.write_scope must be a list",
                     10,
                 )
+            for index, scope in enumerate(lane["write_scope"]):
+                if not isinstance(scope, str) or not scope:
+                    raise OrchestrateError(
+                        f"task {task_id} lane {lane_id}.write_scope[{index}] "
+                        "must be a non-empty string",
+                        10,
+                    )
             if not isinstance(lane.get("ignored_inputs"), list):
                 raise OrchestrateError(
                     f"task {task_id} lane {lane_id}.ignored_inputs must be a list",
@@ -750,7 +771,7 @@ def command_lane_create(args: argparse.Namespace) -> None:
         "branch": args.branch,
         "worktree_path": normalize_repo_path(root, args.worktree_path),
         "reports_dir": normalize_repo_path(root, args.reports_dir),
-        "write_scope": [normalize_scope(scope) for scope in args.write_scope],
+        "write_scope": normalize_scope_list(args.write_scope),
         "ignored_inputs": [parse_ignored_input(raw) for raw in args.ignored_input],
     }
     with locked_state(root, args.lock_timeout) as data:
@@ -790,6 +811,110 @@ def command_lane_status(args: argparse.Namespace) -> None:
         args,
         {"task_id": args.task_id, "lane_id": args.lane_id, "status": args.status},
         f"lane {args.task_id}/{args.lane_id} -> {args.status}",
+    )
+
+
+def command_lane_scope_show(args: argparse.Namespace) -> None:
+    validate_id(args.task_id, "task-id")
+    validate_id(args.lane_id, "lane-id")
+    root = normalize_root(args.root)
+    data = load_state(root)
+    lane = data["tasks"].get(args.task_id, {}).get("worktrees", {}).get(args.lane_id)
+    if lane is None:
+        raise OrchestrateError(f"lane {args.task_id}/{args.lane_id} does not exist", 40)
+    write_scope = list(lane["write_scope"])
+    print_result(
+        args,
+        {
+            "task_id": args.task_id,
+            "lane_id": args.lane_id,
+            "write_scope": write_scope,
+        },
+        "\n".join(write_scope)
+        if write_scope
+        else f"lane {args.task_id}/{args.lane_id} has empty write scope",
+    )
+
+
+def command_lane_scope_update(args: argparse.Namespace) -> None:
+    validate_id(args.task_id, "task-id")
+    validate_id(args.lane_id, "lane-id")
+    set_scope = normalize_scope_list(args.set_scope)
+    add_scope = normalize_scope_list(args.add_scope)
+    remove_scope = normalize_scope_list(args.remove_scope)
+    expect_current = (
+        normalize_scope_list(args.expect_current)
+        if args.expect_current is not None
+        else None
+    )
+
+    if set_scope and (add_scope or remove_scope):
+        raise OrchestrateError("--set cannot be combined with --add or --remove", 40)
+    if not set_scope and not add_scope and not remove_scope:
+        raise OrchestrateError("provide --set, --add, or --remove", 40)
+    scope_overlap = sorted(set(add_scope) & set(remove_scope))
+    if scope_overlap:
+        raise OrchestrateError(
+            "--add and --remove cannot contain the same scope: "
+            + ", ".join(scope_overlap),
+            40,
+        )
+
+    root = normalize_root(args.root)
+    with locked_state(root, args.lock_timeout) as data:
+        task = data["tasks"].get(args.task_id)
+        if task is None:
+            raise OrchestrateError(f"task {args.task_id} does not exist", 40)
+        if task["status"] == "merge_preview":
+            raise OrchestrateError(
+                f"task {args.task_id} is in merge_preview; abort preview before "
+                "updating lane scope",
+                40,
+            )
+        lane = task["worktrees"].get(args.lane_id)
+        if lane is None:
+            raise OrchestrateError(
+                f"lane {args.task_id}/{args.lane_id} does not exist", 40
+            )
+
+        old_scope = list(lane["write_scope"])
+        if expect_current is not None and old_scope != expect_current:
+            raise OrchestrateError(
+                f"lane {args.task_id}/{args.lane_id} write_scope changed; "
+                f"expected {expect_current}, found {old_scope}",
+                40,
+            )
+
+        if set_scope:
+            new_scope = set_scope
+        else:
+            removed = set(remove_scope)
+            new_scope = [scope for scope in old_scope if scope not in removed]
+            for scope in add_scope:
+                if scope not in new_scope:
+                    new_scope.append(scope)
+
+        if not new_scope and not args.allow_empty:
+            raise OrchestrateError(
+                "lane write_scope would be empty; pass --allow-empty to confirm",
+                40,
+            )
+
+        lane["write_scope"] = new_scope
+        changed = new_scope != old_scope
+
+    print_result(
+        args,
+        {
+            "task_id": args.task_id,
+            "lane_id": args.lane_id,
+            "old_write_scope": old_scope,
+            "write_scope": new_scope,
+            "changed": changed,
+            "reason": args.reason,
+        },
+        f"lane {args.task_id}/{args.lane_id} write_scope "
+        + ("updated" if changed else "unchanged"),
     )
 
 
@@ -1144,7 +1269,7 @@ def command_worktree_create_lane(args: argparse.Namespace) -> None:
         "branch": branch,
         "worktree_path": normalize_repo_path(root, worktree_path.as_posix()),
         "reports_dir": normalize_repo_path(root, reports_dir.as_posix()),
-        "write_scope": [normalize_scope(scope) for scope in args.write_scope],
+        "write_scope": normalize_scope_list(args.write_scope),
         "ignored_inputs": [parse_ignored_input(raw) for raw in args.ignored_input],
     }
 
@@ -1304,6 +1429,43 @@ def build_parser() -> argparse.ArgumentParser:
     lane_status.add_argument("--status", required=True)
     add_common_args(lane_status)
     lane_status.set_defaults(func=command_lane_status)
+
+    lane_scope = lane_subparsers.add_parser("scope")
+    lane_scope_subparsers = lane_scope.add_subparsers(
+        dest="lane_scope_command",
+        required=True,
+    )
+
+    lane_scope_show = lane_scope_subparsers.add_parser("show")
+    lane_scope_show.add_argument("task_id")
+    lane_scope_show.add_argument("lane_id")
+    add_common_args(lane_scope_show)
+    lane_scope_show.set_defaults(func=command_lane_scope_show)
+
+    lane_scope_update = lane_scope_subparsers.add_parser("update")
+    lane_scope_update.add_argument("task_id")
+    lane_scope_update.add_argument("lane_id")
+    lane_scope_update.add_argument(
+        "--set", action="append", default=[], dest="set_scope"
+    )
+    lane_scope_update.add_argument(
+        "--add", action="append", default=[], dest="add_scope"
+    )
+    lane_scope_update.add_argument(
+        "--remove",
+        action="append",
+        default=[],
+        dest="remove_scope",
+    )
+    lane_scope_update.add_argument(
+        "--expect-current",
+        action="append",
+        dest="expect_current",
+    )
+    lane_scope_update.add_argument("--allow-empty", action="store_true")
+    lane_scope_update.add_argument("--reason", required=True)
+    add_common_args(lane_scope_update)
+    lane_scope_update.set_defaults(func=command_lane_scope_update)
 
     lane_remove = lane_subparsers.add_parser("remove")
     lane_remove.add_argument("task_id")
