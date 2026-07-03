@@ -132,6 +132,46 @@ def test_disabled_node_is_omitted_from_run_results_and_artifact(tmp_path):
     assert event_nodes == {"enabled_probe"}
 
 
+def test_enabled_consumer_skips_when_required_provider_is_disabled(tmp_path):
+    called: list[str] = []
+
+    def produce_source(env, snapshot):
+        del env, snapshot
+        called.append("source")
+        patch = Patch()
+        patch.set("x", 1.0)
+        return patch
+
+    def produce_consumer(env, snapshot):
+        del env, snapshot
+        called.append("consumer")
+        return Patch()
+
+    ctrl = build_core(project=_project(tmp_path))
+    ctrl.add_node(make_builder("source", provides=("x",), produce_fn=produce_source))
+    ctrl.add_node(
+        make_builder(
+            "consumer",
+            requires=(Dependency("x"),),
+            produce_fn=produce_consumer,
+        )
+    )
+    ctrl.set_node_enabled(0, False)
+    ctrl.set_flux_values([0.0])
+
+    run_controller_to_completion(ctrl)
+
+    assert called == []
+    run_dir = _latest_run_dir(tmp_path)
+    events = load_journal_events(run_dir / "journal.jsonl")
+    assert any(
+        event["type"] == "node_skipped"
+        and event["node"] == "consumer"
+        and event["reason"]["missing_info_keys"] == ["x"]
+        for event in events
+    )
+
+
 def test_dry_run_omits_disabled_nodes():
     called: list[str] = []
 

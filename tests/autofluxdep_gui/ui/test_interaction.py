@@ -15,6 +15,7 @@ from __future__ import annotations
 import threading
 import time
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtCore import QObject  # type: ignore[attr-defined]
@@ -365,6 +366,16 @@ def test_node_list_teardown_is_idempotent_and_called_by_close_event(app):
     win.closeEvent(QCloseEvent())
 
     assert win._list._torn_down is True
+
+
+def test_main_window_close_flushes_persistence(app):
+    ctrl, win = app
+    persist_all = MagicMock()
+    ctrl.persist_all = persist_all  # type: ignore[method-assign]
+
+    win.closeEvent(QCloseEvent())
+
+    persist_all.assert_called_once_with()
 
 
 def test_main_window_close_removes_event_bus_subscriptions(app):

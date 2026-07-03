@@ -237,6 +237,20 @@ def test_workflow_list_has_result_flips_after_allocation():
     assert listed[0]["has_result"] is True
 
 
+def test_disabling_node_clears_remote_result_views():
+    adapter = _adapter()
+    adapter.ctrl.add_node_by_type("qubit_freq")
+    adapter.ctrl.set_flux_values([0.0, 0.1])
+    adapter.ctrl.prepare_run_results()
+
+    adapter.ctrl.set_node_enabled(0, False)
+
+    listed = _call(adapter, "workflow.list", {})["nodes"]
+    assert listed[0]["enabled"] is False
+    assert listed[0]["has_result"] is False
+    assert _call(adapter, "result.summary", {}) == {"results": []}
+
+
 # ---------------------------------------------------------------------------
 # node.cfg
 # ---------------------------------------------------------------------------
