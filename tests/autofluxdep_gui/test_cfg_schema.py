@@ -287,6 +287,7 @@ _DERIVED_FORBIDDEN = {
     "t2r",
     "t2e",
     "fit_kappa",
+    "qfw_factor",
 }
 
 
@@ -634,7 +635,7 @@ def test_qubit_freq_make_cfg_uses_schema_defaults():
         ml=ml,
     )
     snap = Snapshot(
-        {"predict_freq": 5135.0, "fit_kappa": 0.05}, modules={"readout": _READOUT}
+        {"predict_freq": 5135.0, "qfw_factor": None}, modules={"readout": _READOUT}
     )
     cfg = builder.make_cfg(env, snap)
     # the hardcoded prototype defaults, now sourced from the schema
@@ -647,6 +648,33 @@ def test_qubit_freq_make_cfg_uses_schema_defaults():
     assert float(cfg.modules.qub_pulse.freq) == 5135.0  # the injected predict_freq
 
 
+def test_qubit_freq_make_cfg_uses_smoothed_qfw_factor_for_drive_gain():
+    ml = _ml()
+    builder = QubitFreqBuilder()
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=1,
+        schema=builder.make_default_schema(),
+        ml=ml,
+    )
+
+    cfg = builder.make_cfg(
+        env,
+        Snapshot(
+            {"predict_freq": 5135.0, "qfw_factor": 65.0}, modules={"readout": _READOUT}
+        ),
+    )
+    assert float(cfg.modules.qub_pulse.gain) == 0.1
+
+    clamped = builder.make_cfg(
+        env,
+        Snapshot(
+            {"predict_freq": 5135.0, "qfw_factor": 3.0}, modules={"readout": _READOUT}
+        ),
+    )
+    assert float(clamped.modules.qub_pulse.gain) == 1.0
+
+
 def test_qubit_freq_make_cfg_uses_const_waveform_when_named_waveform_missing():
     builder = QubitFreqBuilder()
     env = RunEnv(
@@ -656,7 +684,7 @@ def test_qubit_freq_make_cfg_uses_const_waveform_when_named_waveform_missing():
         ml=ModuleLibrary(),
     )
     snap = Snapshot(
-        {"predict_freq": 5135.0, "fit_kappa": 0.05}, modules={"readout": _READOUT}
+        {"predict_freq": 5135.0, "qfw_factor": None}, modules={"readout": _READOUT}
     )
 
     cfg = builder.make_cfg(env, snap)

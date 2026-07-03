@@ -46,13 +46,16 @@ def _builders():
         p.set("qubit_freq", 5001.0)
         p.set("fit_detune", 1.0)
         p.set("fit_kappa", 0.05)
+        p.set("qfw_factor", 1.0)
         return p
 
     qubit_freq = make_builder(
         "qubit_freq",
-        provides=("qubit_freq", "fit_detune", "fit_kappa"),
+        provides=("qubit_freq", "fit_detune", "fit_kappa", "qfw_factor"),
         requires=(Dependency("predict_freq"),),
-        optional=(Dependency("fit_kappa", smooth="ewma", default=lambda: 0.05),),
+        optional=(
+            Dependency("qfw_factor", smooth="step_weighted", default=lambda: None),
+        ),
         optional_modules=(ModuleDep("readout", default=lambda: None),),
         produce_fn=qf_produce,
         result_factory=_filling_result,
@@ -219,7 +222,7 @@ def test_full_workflow_flows_modules():
 def test_full_workflow_projects_smoothed_values():
     _ctrl, info = _run_all([0.0, 0.5, 1.0])
     # consumer-declared smoothing fired for the keys downstream reads smoothed
-    for key in ("t1", "t2r", "t2e", "fit_kappa"):
+    for key in ("t1", "t2r", "t2e", "qfw_factor"):
         assert key in info.point_smoothed
 
 

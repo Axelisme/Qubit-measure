@@ -12,7 +12,7 @@ translates the notebook's ``cfg_maker`` lambda + ``ctx.env`` walrus chain into:
   the predicted qubit freq, runs a real ``TwoToneProgram.acquire`` (against the
   flux-aware MockSoc offline or real hardware), fits it with ``fit_qubit_freq``,
   fills the Result's flux-idx row in place, notifies via the round_hook, and
-  returns the raw qubit_freq / fit_detune / fit_kappa Patch.
+  returns the raw qubit_freq / fit_detune / fit_kappa / qfw_factor Patch.
 
 Mirrors the lower-layer ground truth ``experiment/v2/autofluxdep/qubit_freq.py``:
 predict-centred drive freq, detune
@@ -22,9 +22,10 @@ predictor calibration closed loop.
 
 - ``predict_freq`` — required; provided by the predictor Service (a Builder
   whose Node computes it), resolved latest-available like any dependency.
-- ``fit_kappa`` — declared ``smooth="ewma"``: ``produce`` reads the *smoothed*
-  estimate under the same key (the old ``qfw_factor``) and reports raw fit_kappa
-  back; the orchestrator's SmoothingService projects the smoothed value in.
+- ``fit_kappa`` — raw fit FWHM reported for diagnostics / downstream consumers.
+- ``qfw_factor`` — adaptive drive feedback, reported as ``fit_kappa / gain`` and
+  read back smoothed with the notebook's step-weighted rule to choose the next
+  drive gain.
 - ``readout`` — optional module, Node-produced (ro_optimize) → ml preset →
   default.
 """
@@ -76,7 +77,9 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_QUB_WAVEFORM = "qub_flat"
 _DEFAULT_QUB_CH = 0
+_DEFAULT_QUB_GAIN = 0.05
 _DEFAULT_EARLYSTOP_SNR = 50.0
+_QFW_TARGET_KAPPA = 6.5
 
 
 class QubitFreqCfgTemplate(TwoToneCfg, ExpCfgModel):
@@ -91,10 +94,22 @@ class QubitFreqCfgTemplate(TwoToneCfg, ExpCfgModel):
 
 
 # --- default external bindings (project metadata can override) ---
-def _default_kappa() -> float:
-    # notebook: md.qf_w — the smoothed kappa estimate's fallback; lazy so the
-    # real md is bound at build time. (Drives the drive-gain guess.)
-    return 0.05
+def _default_qfw_factor() -> None:
+    # First point has no previous linewidth/gain feedback; use the operator's
+    # schema drive gain. Later points read the smoothed qfw_factor from the
+    # orchestrator, mirroring notebook ``info.last.get("qfw_factor", ...)``.
+    return None
+
+
+def _drive_gain_from_qfw_factor(qfw_factor: Any | None, initial_gain: float) -> float:
+    if qfw_factor is None:
+        return float(initial_gain)
+    factor = float(qfw_factor)
+    if factor <= 0.0:
+        raise RuntimeError(
+            "qubit_freq.make_cfg needs positive qfw_factor to derive drive gain"
+        )
+    return min(1.0, _QFW_TARGET_KAPPA / factor)
 
 
 def _default_readout() -> Any | None:
@@ -146,7 +161,6 @@ class QubitFreqNode(Node):
     def produce(self, snapshot: Snapshot) -> Patch:
         env = self._env
         pred_qf = float(snapshot["predict_freq"])
-        _ = snapshot["fit_kappa"]  # smoothed kappa (drives the real drive-gain)
 
         result: QubitFreqResult = env.result
         idx = env.flux_idx
@@ -250,6 +264,12 @@ class QubitFreqNode(Node):
         patch.set("qubit_freq", float(freq))
         patch.set("fit_detune", float(freq) - pred_qf)
         patch.set("fit_kappa", float(fwhm))
+        drive_gain = float(cfg.modules.qub_pulse.gain)
+        if drive_gain <= 0.0:
+            raise RuntimeError(
+                "qubit_freq produced fit_kappa with non-positive drive gain"
+            )
+        patch.set("qfw_factor", float(fwhm) / drive_gain)
         return patch
 
 
@@ -313,21 +333,21 @@ class QubitFreqPlotter:
 class QubitFreqBuilder(Builder):
     """The qubit_freq provider — stateless; builds Result / Plotter / Nodes.
 
-    Reports RAW fit results only (qubit_freq, fit_detune, fit_kappa) and reads
-    the readout MODULE. A consumer wanting smoothed kappa adds ``smooth="ewma"``
-    to its fit_kappa dependency; this provider never smooths its output.
+    Reports RAW fit results (qubit_freq, fit_detune, fit_kappa) plus qfw_factor
+    feedback, and reads the readout MODULE. The provider never smooths its own
+    output; the orchestrator projects the smoothed qfw_factor into the next point.
     """
 
     name = "qubit_freq"
-    provides = ("qubit_freq", "fit_detune", "fit_kappa")
+    provides = ("qubit_freq", "fit_detune", "fit_kappa", "qfw_factor")
     # predict_freq is required, supplied by the predictor Service (a Builder
     # whose Node computes it). With latest-available resolution a consumer
     # ordered before the predictor just reads the previous point's value.
     requires = (Dependency("predict_freq"),)
     optional = (
-        # consumer-declared smoothing: read fit_kappa *smoothed* (same key). The
+        # consumer-declared smoothing: read qfw_factor *smoothed* (same key). The
         # orchestrator builds the SmoothingService from this declaration alone.
-        Dependency("fit_kappa", smooth="ewma", default=_default_kappa),
+        Dependency("qfw_factor", smooth="step_weighted", default=_default_qfw_factor),
     )
     # the readout module: Node-produced → calibrated ml preset → default.
     optional_modules = (
@@ -410,7 +430,7 @@ class QubitFreqBuilder(Builder):
                         "qub_gain",
                         "gain",
                         FloatSpec(label="Drive gain"),
-                        0.05,
+                        _DEFAULT_QUB_GAIN,
                     ),
                     node_field(
                         "qub_length",
@@ -466,6 +486,9 @@ class QubitFreqBuilder(Builder):
         if ch is None:
             raise RuntimeError("qubit_freq.make_cfg needs qub_ch param set")
         predict_freq = float(snapshot["predict_freq"])
+        drive_gain = _drive_gain_from_qfw_factor(
+            snapshot["qfw_factor"], float(knobs["qub_gain"])
+        )
         return ml.make_cfg(
             {
                 "modules": {
@@ -476,7 +499,7 @@ class QubitFreqBuilder(Builder):
                         ),
                         "ch": ch,
                         "nqz": knobs["qub_nqz"],
-                        "gain": knobs["qub_gain"],
+                        "gain": drive_gain,
                         "freq": predict_freq,
                     },
                     "readout": readout,

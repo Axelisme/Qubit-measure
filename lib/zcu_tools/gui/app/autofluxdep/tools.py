@@ -140,9 +140,9 @@ class Smoother:
     - ``ewma``:        ``0.5*(prev + cur)`` — t1 / t2r / t2e.
     - ``step_weighted``: ``w = decay**num_step; (1-w)*cur + w*prev`` where
       ``num_step`` is how many flux points since this quantity last updated —
-      so a long gap (failed points) trusts the new value more. A mode the
-      notebook uses for gap-aware tuning; no current Node declares it
-      (the smoothed kappa in qubit_freq uses ``ewma``).
+      so a long gap (failed points) trusts the new value more. This mirrors the
+      notebook's gap-aware tuning and is used by qubit_freq's ``qfw_factor``
+      feedback.
 
     ``update(name, idx, cur, mode=...)`` folds ``cur`` into the running estimate
     and returns the smoothed value.

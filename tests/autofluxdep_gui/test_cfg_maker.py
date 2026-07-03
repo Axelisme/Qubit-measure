@@ -74,14 +74,25 @@ def _env(ml: ModuleLibrary) -> RunEnv:
 
 def test_qubit_freq_make_cfg_lowers_context():
     snap = Snapshot(
-        {"predict_freq": 5135.0, "fit_kappa": 0.05}, modules={"readout": _READOUT}
+        {"predict_freq": 5135.0, "qfw_factor": None}, modules={"readout": _READOUT}
     )
     cfg = QubitFreqBuilder().make_cfg(_env(_ml()), snap)
     assert isinstance(cfg, QubitFreqCfgTemplate)
     # the drive pulse frequency is the predicted qubit freq (from the snapshot)
     assert float(cfg.modules.qub_pulse.freq) == 5135.0
+    assert float(cfg.modules.qub_pulse.gain) == 0.05
     assert int(cfg.modules.qub_pulse.ch) == 3
     assert cfg.reps == 100 and cfg.rounds == 2
+
+
+def test_qubit_freq_make_cfg_uses_qfw_factor_feedback():
+    snap = Snapshot(
+        {"predict_freq": 5135.0, "qfw_factor": 32.5}, modules={"readout": _READOUT}
+    )
+
+    cfg = QubitFreqBuilder().make_cfg(_env(_ml()), snap)
+
+    assert float(cfg.modules.qub_pulse.gain) == 0.2
 
 
 def test_qubit_freq_produce_fast_fails_when_context_unconfigured():
@@ -106,7 +117,7 @@ def test_qubit_freq_produce_fast_fails_when_context_unconfigured():
         result=result,
     )
     snap = Snapshot(
-        {"predict_freq": 5135.0, "fit_kappa": 0.05}, modules={"readout": _READOUT}
+        {"predict_freq": 5135.0, "qfw_factor": None}, modules={"readout": _READOUT}
     )
     with pytest.raises(RuntimeError, match="ModuleLibrary"):
         builder.build_node(env).produce(snap)

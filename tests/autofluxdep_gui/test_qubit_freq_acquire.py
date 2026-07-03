@@ -137,7 +137,7 @@ def test_plotter_update_runs_after_a_real_produce():
     )
     builder.build_node(env).produce(
         Snapshot(
-            {"predict_freq": 600.0, "fit_kappa": 0.05}, modules={"readout": _READOUT}
+            {"predict_freq": 600.0, "qfw_factor": None}, modules={"readout": _READOUT}
         )
     )
     plotter.update(result, 0)  # must not raise
@@ -186,10 +186,13 @@ def test_good_fit_calibrates_the_predictor():
     )
     patch = builder.build_node(env).produce(
         Snapshot(
-            {"predict_freq": 600.0, "fit_kappa": 0.05}, modules={"readout": _READOUT}
+            {"predict_freq": 600.0, "qfw_factor": None}, modules={"readout": _READOUT}
         )
     )
-    assert "qubit_freq" in patch.values()  # a good fit
+    values = patch.values()
+    assert "qubit_freq" in values  # a good fit
+    assert "qfw_factor" in values
+    assert abs(values["qfw_factor"] - values["fit_kappa"] / 0.3) < 1e-9
     # the predictor was calibrated at flux 0 toward the measured frequency
     assert predictor.predict_freq(0.0) != before
-    assert abs(predictor.predict_freq(0.0) - patch.values()["qubit_freq"]) < 1e-6
+    assert abs(predictor.predict_freq(0.0) - values["qubit_freq"]) < 1e-6

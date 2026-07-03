@@ -14,7 +14,8 @@ There are two parallel spaces, with distinct access methods because they hold
 different kinds of thing:
 
 - **info values** — plain quantities that flow between Nodes (``qubit_freq``,
-  ``fit_kappa`` …). Read ``snapshot[key]``; produce ``patch.set(key, value)``;
+  ``fit_kappa``, ``qfw_factor`` …). Read ``snapshot[key]``; produce
+  ``patch.set(key, value)``;
   declared via ``requires`` / ``optional`` / ``provides``.
 - **modules** — cfg components (a ``PulseReadoutCfg`` …). A Node can read a named
   module (from the ml library OR produced by another Node, e.g. ro_optimize's
