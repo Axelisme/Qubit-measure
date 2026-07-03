@@ -22,7 +22,14 @@ from zcu_tools.experiment.v2_gui.adapters.twotone import (
     T2EchoAdapter,
     T2RamseyAdapter,
 )
-from zcu_tools.gui.app.main.adapter import CfgSchema, DirectValue, RunRequest
+from zcu_tools.gui.app.main.adapter import (
+    CfgSchema,
+    CfgSectionValue,
+    DirectValue,
+    EvalValue,
+    RunRequest,
+    SweepValue,
+)
 from zcu_tools.gui.session.value_lookup import EmptyValueLookup, ValueKey, ValueRegistry
 from zcu_tools.meta_tool import MetaDict
 from zcu_tools.program.v2 import ModuleCfgFactory, SweepCfg
@@ -189,6 +196,43 @@ def test_flux_dep_build_exp_cfg_delegates_to_make_cfg() -> None:
 
     adapter.build_exp_cfg(raw, _make_req(ml))
     assert ml.make_cfg.call_args.args[1] is FreqFluxCfg
+
+
+def test_flux_dep_default_reps_and_rounds_are_notebook_seed() -> None:
+    raw = _lower(FluxDepAdapter().make_default_cfg(_make_ctx()), _make_req())
+
+    assert raw["reps"] == 1000
+    assert raw["rounds"] == 100
+
+
+@pytest.mark.parametrize(
+    ("adapter_cls", "md_key", "fallback"),
+    [
+        (T2RamseyAdapter, "t2r", 0.4),
+        (T2EchoAdapter, "t2e", 20.0),
+    ],
+)
+def test_t2_delay_sweep_stop_uses_one_point_five_md_link(
+    adapter_cls: type, md_key: str, fallback: float
+) -> None:
+    ctx = _make_ctx(_make_ml())
+    setattr(ctx.md, md_key, 12.0)
+
+    schema = adapter_cls().make_default_cfg(ctx)
+    sweep = schema.value.fields["sweep"]
+    assert isinstance(sweep, CfgSectionValue)
+    delay = sweep.fields["length"]
+    assert isinstance(delay, SweepValue)
+    assert isinstance(delay.stop, EvalValue)
+    assert delay.stop.expr == f"1.5 * {md_key}"
+
+    fallback_schema = adapter_cls().make_default_cfg(_make_ctx(_make_ml()))
+    fallback_sweep = fallback_schema.value.fields["sweep"]
+    assert isinstance(fallback_sweep, CfgSectionValue)
+    fallback_delay = fallback_sweep.fields["length"]
+    assert isinstance(fallback_delay, SweepValue)
+    assert isinstance(fallback_delay.stop, float)
+    assert fallback_delay.stop == pytest.approx(fallback)
 
 
 @pytest.mark.parametrize(

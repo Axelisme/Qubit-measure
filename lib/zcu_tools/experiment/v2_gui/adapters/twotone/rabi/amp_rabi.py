@@ -20,7 +20,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_module_spec,
     make_readout_module_spec,
     make_reset_module_spec,
-    md_eval_scaled,
+    md_eval_scaled_or_value,
     proper_relax,
 )
 from zcu_tools.gui.app.main.adapter import (
@@ -84,7 +84,8 @@ class AmpRabiAdapter(
             "Reads from the MetaDict (all optional, seeding defaults): 'q_f' — "
             "qubit frequency feeding the drive pulse (~2000–6000 MHz); "
             "'qub_ch' — qubit-drive channel; 'pi_gain' — prior pi-pulse gain, "
-            "the gain sweep spans up to 2*pi_gain (fallback ~0.5). Readout "
+            "the gain sweep spans up to 1.2*pi_gain (fallback 0.6). 'pi_len' "
+            "seeds the qubit pulse length as 1.01*pi_len when present. Readout "
             "defaults pull 'r_f' (~4000–8000 MHz), 'res_ch' / 'ro_ch', and "
             "'timeFly' for the readout trigger offset (~0–1 us)."
         ),
@@ -139,13 +140,18 @@ class AmpRabiAdapter(
             # optional → None (disabled) when no library reset (ADR-0010)
             .role("modules.reset", "reset", Init.DISABLED)
             .role("modules.qub_pulse", "qub_probe", Init.INLINE)
-            .set("modules.qub_pulse.waveform.length", 1.1)
+            .set(
+                "modules.qub_pulse.waveform.length",
+                md_eval_scaled_or_value(ctx, "pi_len", factor=1.01, fallback=1.1),
+            )
             .role("modules.readout", "readout")
             .set_sweep(
                 "sweep.gain",
                 SweepValue(
                     start=-0.3,
-                    stop=md_eval_scaled(ctx, "pi_gain", factor=1.2, fallback=1.0),
+                    stop=md_eval_scaled_or_value(
+                        ctx, "pi_gain", factor=1.2, fallback=0.6
+                    ),
                     expts=51,
                 ),
             )

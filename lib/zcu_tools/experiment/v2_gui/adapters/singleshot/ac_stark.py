@@ -16,6 +16,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_module_spec,
     make_readout_module_spec,
     make_reset_module_spec,
+    md_has_key,
     proper_relax,
 )
 from zcu_tools.gui.app.main.adapter import (
@@ -25,6 +26,7 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
+    EvalValue,
     ExpContext,
     MetaDictWriteback,
     NoAnalyzeParams,
@@ -120,6 +122,15 @@ class SsAcStarkAdapter(
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+        freq_sweep = (
+            SweepValue(
+                start=EvalValue(expr="q_f - 700.0"),
+                stop=EvalValue(expr="q_f + 100.0"),
+                expts=101,
+            )
+            if md_has_key(ctx, "q_f")
+            else SweepValue(start=3300.0, stop=4100.0, expts=101)
+        )
         return (
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(reps=1000, rounds=2)
@@ -131,7 +142,7 @@ class SsAcStarkAdapter(
             .role("modules.reset", "reset", Init.DISABLED)
             .role("modules.init_pulse", "pi_pulse", Init.DISABLED)
             .set_sweep("sweep.gain", SweepValue(start=0.0, stop=0.22, expts=301))
-            .set_sweep("sweep.freq", SweepValue(start=-700.0, stop=100.0, expts=101))
+            .set_sweep("sweep.freq", freq_sweep)
             .build()
         )
 

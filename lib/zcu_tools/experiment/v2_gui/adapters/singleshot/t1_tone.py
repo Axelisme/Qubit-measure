@@ -43,7 +43,7 @@ from zcu_tools.gui.app.main.adapter import (
     require_soc_handles,
 )
 
-from ._shared import read_ge_centers
+from ._shared import read_ge_centers, readout_probe_freq
 
 # Domain T1WithToneExp.analyze returns (t1, t1_b, fig). The T1 with tone value
 # (``t1_with_tone``) is written back to the MetaDict (key ``t1_with_tone``,
@@ -87,7 +87,8 @@ class SsT1ToneAdapter(
             "Optionally reads 'confusion_matrix' to readout-correct populations "
             "at analyze time; 't1_with_tone' or 't1' to seed the sweep stop "
             "(default 5*t1, fallback 100 us); 'q_f' / 'qub_ch' for the pi "
-            "pulse; 'r_f' / 'res_ch' / 'ro_ch' / 'timeFly' for readout."
+            "pulse; 'readout_f' or 'r_f' plus 'res_ch' seed the probe tone; "
+            "'r_f' / 'res_ch' / 'ro_ch' / 'timeFly' for readout."
         ),
         expects_ml=(
             "Needs a qubit pi-pulse module, a probe-tone pulse module, and a "
@@ -138,7 +139,8 @@ class SsT1ToneAdapter(
                 uniform=False,  # domain default: log-spaced
             )
             .role("modules.pi_pulse", "pi_pulse")
-            .role("modules.probe_pulse", "qub_probe", Init.INLINE)
+            .role("modules.probe_pulse", "res_probe", Init.INLINE)
+            .set("modules.probe_pulse.freq", readout_probe_freq(ctx))
             .role("modules.readout", "readout")
             .role("modules.reset", "reset", Init.DISABLED)
             .role("modules.init_pulse", "pi_pulse", Init.DISABLED)

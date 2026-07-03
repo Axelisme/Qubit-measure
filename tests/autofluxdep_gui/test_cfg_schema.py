@@ -826,7 +826,7 @@ def test_lenrabi_default_knobs():
     assert knobs["max_drive_gain"] == 1.0
     assert knobs["qub_ch"] == 0
     assert knobs["qub_nqz"] == 2
-    assert knobs["qub_gain"] == 1.0
+    assert knobs["qub_gain"] == 0.3
     sweep = knobs["sweep_range"]
     assert np.allclose([float(sweep.start), float(sweep.stop)], [0.05, 5.0])
     assert int(sweep.expts) == 101
@@ -839,9 +839,9 @@ def test_mist_default_knobs():
     assert knobs["relax_delay"] == 30.5
     assert knobs["mist_ch"] == 0
     assert knobs["mist_nqz"] == 2
-    assert knobs["mist_freq"] == 4000.0
-    assert knobs["mist_gain"] == 0.1
-    assert knobs["mist_length"] == 5.1
+    assert knobs["mist_freq"] == 6000.0
+    assert knobs["mist_gain"] == 0.05
+    assert knobs["mist_length"] == 1.0
     gain = knobs["gain_sweep"]
     assert (float(gain.start), float(gain.stop), int(gain.expts)) == (0.0, 1.0, 151)
 
@@ -996,8 +996,8 @@ def test_fresh_node_defaults_seed_from_md_values():
     )
 
     mist = MistBuilder().make_default_schema(ctx).lower(None, md=md)
-    assert mist["mist_ch"] == 7
-    assert mist["mist_freq"] == 5100.0
+    assert mist["mist_ch"] == 0
+    assert mist["mist_freq"] == 6200.0
     assert mist["relax_delay"] == 60.0
 
 
@@ -1043,7 +1043,7 @@ def test_fresh_node_defaults_seed_from_ml_modules():
     lenrabi = LenRabiBuilder().make_default_schema(ctx).lower(ml, md=ctx.md)
     assert lenrabi["qub_ch"] == 0
     assert lenrabi["qub_nqz"] == 2
-    assert lenrabi["qub_gain"] == 1.0
+    assert lenrabi["qub_gain"] == 0.3
     assert lenrabi["expected_pi_length"] == 0.24
     assert lenrabi["pi_product_seed"] == pytest.approx(0.144)
     assert np.allclose(
@@ -1170,8 +1170,8 @@ def test_mist_make_cfg_uses_schema_defaults():
     assert cfg.rounds == 100
     assert cfg.relax_delay == 30.5
     assert int(cfg.modules.mist_pulse.ch) == 0
-    assert float(cfg.modules.mist_pulse.gain) == 0.1
-    assert float(cfg.modules.mist_pulse.freq) == 4000.0
+    assert float(cfg.modules.mist_pulse.gain) == 0.05
+    assert float(cfg.modules.mist_pulse.freq) == 6000.0
     assert int(cfg.modules.mist_pulse.nqz) == 2
 
 
@@ -1190,7 +1190,7 @@ def test_mist_make_cfg_uses_const_waveform_when_named_waveform_missing():
     cfg = builder.make_cfg(env, snap)
 
     assert cfg.modules.mist_pulse.waveform.style == "const"
-    assert float(cfg.modules.mist_pulse.waveform.length) == 5.1
+    assert float(cfg.modules.mist_pulse.waveform.length) == 1.0
 
 
 # --- 2c. set_field type coercion + unknown-key fast-fail (the 160a bridge) ------

@@ -16,7 +16,16 @@ from zcu_tools.experiment.v2_gui.adapters.twotone.ro_optimize import (
     RoOptLengthAdapter,
     RoOptPowerAdapter,
 )
-from zcu_tools.gui.app.main.adapter import CfgSchema, RunRequest
+from zcu_tools.gui.app.main.adapter import (
+    CfgSchema,
+    CfgSectionValue,
+    DirectValue,
+    EvalValue,
+    RunRequest,
+)
+from zcu_tools.gui.app.main.adapter import (
+    SweepValue as GuiSweepValue,
+)
 from zcu_tools.meta_tool import MetaDict
 from zcu_tools.program.v2 import SweepCfg
 
@@ -114,6 +123,75 @@ def test_ro_opt_auto_num_points_validation() -> None:
     with pytest.raises(ValueError):
         adapter._num_points({"num_points": "x"})  # not an int
     assert adapter._num_points({"num_points": 500}) == 500
+
+
+def test_ro_opt_freq_gain_defaults_center_on_best_ro_freq_and_gain_notebook_range() -> (
+    None
+):
+    ctx = _make_ctx(_make_ml())
+    ctx.md.best_ro_freq = 6100.0
+    ctx.md.r_f = 6000.0
+    ctx.md.rf_w = 20.0
+
+    schema = RoOptFreqGainAdapter().make_default_cfg(ctx)
+    sweep = schema.value.fields["sweep"]
+    assert isinstance(sweep, CfgSectionValue)
+    freq = sweep.fields["freq"]
+    gain = sweep.fields["gain"]
+    assert isinstance(freq, GuiSweepValue)
+    assert isinstance(freq.start, EvalValue)
+    assert isinstance(freq.stop, EvalValue)
+    assert freq.start.expr == "best_ro_freq - 0.5 * rf_w"
+    assert freq.stop.expr == "best_ro_freq + 0.5 * rf_w"
+    assert freq.expts == 31
+    assert isinstance(gain, GuiSweepValue)
+    assert gain.start == 0.0
+    assert gain.stop == 0.2
+    assert gain.expts == 31
+
+
+def test_ro_opt_freq_gain_defaults_fall_back_to_r_f_center() -> None:
+    ctx = _make_ctx(_make_ml())
+    ctx.md.r_f = 6000.0
+    ctx.md.rf_w = 20.0
+
+    schema = RoOptFreqGainAdapter().make_default_cfg(ctx)
+    sweep = schema.value.fields["sweep"]
+    assert isinstance(sweep, CfgSectionValue)
+    freq = sweep.fields["freq"]
+    assert isinstance(freq, GuiSweepValue)
+    assert isinstance(freq.start, EvalValue)
+    assert isinstance(freq.stop, EvalValue)
+    assert freq.start.expr == "r_f - 0.5 * rf_w"
+    assert freq.stop.expr == "r_f + 0.5 * rf_w"
+
+
+def test_ro_opt_length_relax_defaults_to_proper_relax() -> None:
+    ctx = _make_ctx(_make_ml())
+    ctx.md.t1 = 12.0
+
+    schema = RoOptLengthAdapter().make_default_cfg(ctx)
+    relax = schema.value.fields["relax_delay"]
+    assert isinstance(relax, EvalValue)
+    assert relax.expr == "5.0 * t1"
+
+
+def test_ro_opt_auto_defaults_relax_num_points_and_gain_bounds() -> None:
+    ctx = _make_ctx(_make_ml())
+    ctx.md.t1 = 12.0
+
+    schema = RoOptAutoAdapter().make_default_cfg(ctx)
+    assert schema.value.fields["num_points"] == DirectValue(1001)
+    relax = schema.value.fields["relax_delay"]
+    assert isinstance(relax, EvalValue)
+    assert relax.expr == "3.0 * t1"
+    sweep = schema.value.fields["sweep"]
+    assert isinstance(sweep, CfgSectionValue)
+    gain = sweep.fields["gain"]
+    assert isinstance(gain, GuiSweepValue)
+    assert gain.start == 0.1
+    assert gain.stop == 0.25
+    assert gain.expts == 51
 
 
 @pytest.mark.parametrize(

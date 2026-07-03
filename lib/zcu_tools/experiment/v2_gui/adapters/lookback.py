@@ -122,7 +122,7 @@ class LookbackAdapter(
             .scalars(rounds=500, relax_delay=0.0)
             .role("modules.readout", "readout", Init.INLINE)
             .set("modules.readout.pulse_cfg.gain", 1.0)
-            .set("modules.readout.ro_cfg.ro_length", 1.4)
+            .set("modules.readout.ro_cfg.ro_length", 1.5)
             .set(
                 "modules.readout.ro_cfg.trig_offset",
                 make_trig_offset(ctx, trig_expr="timeFly - 0.1", trig_fallback=0.4),

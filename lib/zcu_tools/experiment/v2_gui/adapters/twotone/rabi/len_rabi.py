@@ -21,7 +21,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_module_spec,
     make_readout_module_spec,
     make_reset_module_spec,
-    md_eval_scaled,
+    md_eval_scaled_or_value,
     proper_relax,
 )
 from zcu_tools.gui.app.main.adapter import (
@@ -87,7 +87,7 @@ class LenRabiAdapter(
             "Reads from the MetaDict (all optional, seeding defaults): 'q_f' — "
             "qubit frequency feeding the drive pulse (~2000–6000 MHz); "
             "'qub_ch' — qubit-drive channel; 'pi_len' — prior pi-pulse length, "
-            "the length sweep spans up to 4*pi_len (fallback ~0.1 us). Readout "
+            "the length sweep spans up to 4*pi_len (fallback 0.3 us). Readout "
             "defaults pull 'r_f' (~4000–8000 MHz), 'res_ch' / 'ro_ch', and "
             "'timeFly' for the readout trigger offset (~0–1 us)."
         ),
@@ -114,7 +114,7 @@ class LenRabiAdapter(
             "Analysis defaults to fitting a decay envelope on the oscillation; "
             "keep it on when the Rabi oscillation visibly damps over the "
             "sweep, turn it off for a pure undamped cosine fit. A length sweep "
-            "spanning a few pi lengths (up to 4*pi_len) captures a full "
+            "spanning a few pi lengths (up to 4*pi_len when calibrated) captures a full "
             "oscillation; widen it if no full period is visible."
         ),
     )
@@ -141,13 +141,15 @@ class LenRabiAdapter(
             # optional → None (disabled) when no library reset (ADR-0010)
             .role("modules.reset", "reset", Init.DISABLED)
             .role("modules.qub_pulse", "qub_probe", Init.INLINE)
-            .set("modules.qub_pulse.gain", 1.0)
+            .set("modules.qub_pulse.gain", 0.3)
             .role("modules.readout", "readout")
             .set_sweep(
                 "sweep.length",
                 SweepValue(
-                    start=0.05,
-                    stop=md_eval_scaled(ctx, "pi_len", factor=4.0, fallback=1.0),
+                    start=0.03,
+                    stop=md_eval_scaled_or_value(
+                        ctx, "pi_len", factor=4.0, fallback=0.3
+                    ),
                     expts=101,
                 ),
             )

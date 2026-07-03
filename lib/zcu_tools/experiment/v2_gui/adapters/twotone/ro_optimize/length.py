@@ -20,6 +20,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_module_spec,
     make_pulse_readout_module_spec,
     make_reset_module_spec,
+    proper_relax,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -127,7 +128,12 @@ class RoOptLengthAdapter(
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         return (
             CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=10000, rounds=1, relax_delay=1.0, skew_penalty=0.0)
+            .scalars(
+                reps=10000,
+                rounds=1,
+                relax_delay=proper_relax(ctx),
+                skew_penalty=0.0,
+            )
             .role("modules.reset", "reset", Init.DISABLED)
             .role("modules.qub_pulse", "pi_pulse")
             .role("modules.readout", "readout")

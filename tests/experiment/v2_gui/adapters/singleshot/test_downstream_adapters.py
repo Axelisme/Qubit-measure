@@ -36,6 +36,12 @@ from zcu_tools.experiment.v2_gui.adapters.singleshot.mist.freq import (
 from zcu_tools.experiment.v2_gui.adapters.singleshot.mist.power import (
     MistPowerAnalyzeResult,
 )
+from zcu_tools.gui.app.main.adapter import (
+    CfgSectionValue,
+    EvalValue,
+    ModuleRefValue,
+    SweepValue,
+)
 from zcu_tools.meta_tool import MetaDict
 
 from ._helpers import (
@@ -122,6 +128,53 @@ def test_mist_cfg_validates_and_delegates(
 
     cfg = adapter.build_exp_cfg(raw, _run_req(MetaDict(), ml))
     assert isinstance(cfg, cfg_model)
+
+
+def test_mist_freq_probe_defaults_to_readout_frequency_sweep_and_channel() -> None:
+    ctx = _make_ctx(_make_ml())
+    ctx.md.readout_f = 6123.0
+    ctx.md.r_f = 6000.0
+    ctx.md.rf_w = 20.0
+    ctx.md.res_ch = 2
+
+    schema = MistFreqAdapter().make_default_cfg(ctx)
+    modules = schema.value.fields["modules"]
+    assert isinstance(modules, CfgSectionValue)
+    probe = modules.fields["probe_pulse"]
+    assert isinstance(probe, ModuleRefValue)
+    freq = probe.value.fields["freq"]
+    ch = probe.value.fields["ch"]
+    assert isinstance(freq, EvalValue)
+    assert freq.expr == "readout_f"
+    assert isinstance(ch, EvalValue)
+    assert ch.expr == "res_ch"
+    sweep = schema.value.fields["sweep"]
+    assert isinstance(sweep, CfgSectionValue)
+    freq_sweep = sweep.fields["freq"]
+    assert isinstance(freq_sweep, SweepValue)
+    assert isinstance(freq_sweep.start, EvalValue)
+    assert isinstance(freq_sweep.stop, EvalValue)
+    assert freq_sweep.start.expr == "readout_f - 1.5 * rf_w"
+    assert freq_sweep.stop.expr == "readout_f + 1.5 * rf_w"
+
+
+def test_mist_power_probe_defaults_to_readout_frequency_and_channel() -> None:
+    ctx = _make_ctx(_make_ml())
+    ctx.md.readout_f = 6123.0
+    ctx.md.r_f = 6000.0
+    ctx.md.res_ch = 2
+
+    schema = MistPowerAdapter().make_default_cfg(ctx)
+    modules = schema.value.fields["modules"]
+    assert isinstance(modules, CfgSectionValue)
+    probe = modules.fields["probe_pulse"]
+    assert isinstance(probe, ModuleRefValue)
+    freq = probe.value.fields["freq"]
+    ch = probe.value.fields["ch"]
+    assert isinstance(freq, EvalValue)
+    assert freq.expr == "readout_f"
+    assert isinstance(ch, EvalValue)
+    assert ch.expr == "res_ch"
 
 
 def test_check_cfg_validates_and_has_shots() -> None:

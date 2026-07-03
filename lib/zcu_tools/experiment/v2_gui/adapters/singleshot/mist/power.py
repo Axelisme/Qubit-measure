@@ -30,7 +30,7 @@ from zcu_tools.gui.app.main.adapter import (
     require_soc_handles,
 )
 
-from .._shared import read_ge_centers
+from .._shared import read_ge_centers, readout_probe_freq
 
 MistPowerRunResult: TypeAlias = PowerResult
 
@@ -65,8 +65,8 @@ class MistPowerAdapter(
             "classifies each shot against them and fast-fails if any is "
             "missing. Optionally reads 'confusion_matrix' (readout correction) "
             "and 'ac_stark_coeff' (rescales the x-axis to photon number) at "
-            "analyze time, and 't1' to set the relax delay; 'q_f' / 'qub_ch' "
-            "seed the probe drive."
+            "analyze time, and 't1' to set the relax delay; 'readout_f' or "
+            "'r_f' plus 'res_ch' seed the probe drive."
         ),
         expects_ml=(
             "Needs a probe pulse and a readout module. Optionally references a "
@@ -106,7 +106,8 @@ class MistPowerAdapter(
             # optional → None (disabled) when no library entry (ADR-0010)
             .role("modules.reset", "reset", Init.DISABLED)
             .role("modules.init_pulse", "pi_pulse", Init.DISABLED)
-            .role("modules.probe_pulse", "qub_probe", Init.INLINE)
+            .role("modules.probe_pulse", "res_probe", Init.INLINE)
+            .set("modules.probe_pulse.freq", readout_probe_freq(ctx))
             .role("modules.readout", "readout")
             .set_sweep("sweep.gain", SweepValue(start=0.0, stop=1.0, expts=151))
             .build()

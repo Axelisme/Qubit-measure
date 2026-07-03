@@ -44,7 +44,11 @@ from zcu_tools.experiment.v2_gui.adapters.singleshot.t1_tone_sweep import (
     SsT1ToneSweepAnalyzeResult,
 )
 from zcu_tools.gui.app.main.adapter import (
+    CfgSectionValue,
+    EvalValue,
     MetaDictWriteback,
+    ModuleRefValue,
+    SweepValue,
     WritebackRequest,
 )
 from zcu_tools.meta_tool import MetaDict
@@ -85,6 +89,31 @@ def test_ac_stark_cfg_validates_2d_sweep() -> None:
     assert set(sweep) == {"gain", "freq"}  # 2D
 
 
+def test_ac_stark_freq_sweep_is_q_f_centered_eval_expression() -> None:
+    ctx = _make_ctx(_make_ml())
+    ctx.md.q_f = 4000.0
+
+    schema = SsAcStarkAdapter().make_default_cfg(ctx)
+    sweep = schema.value.fields["sweep"]
+    assert isinstance(sweep, CfgSectionValue)
+    freq = sweep.fields["freq"]
+    assert isinstance(freq, SweepValue)
+    assert isinstance(freq.start, EvalValue)
+    assert isinstance(freq.stop, EvalValue)
+    assert freq.start.expr == "q_f - 700.0"
+    assert freq.stop.expr == "q_f + 100.0"
+
+
+def test_ac_stark_freq_sweep_fallback_uses_notebook_q_f_seed() -> None:
+    schema = SsAcStarkAdapter().make_default_cfg(_make_ctx(_make_ml()))
+    sweep = schema.value.fields["sweep"]
+    assert isinstance(sweep, CfgSectionValue)
+    freq = sweep.fields["freq"]
+    assert isinstance(freq, SweepValue)
+    assert freq.start == 3300.0
+    assert freq.stop == 4100.0
+
+
 def test_mist_power_freq_cfg_validates_2d_sweep() -> None:
     ml = _make_ml()
     adapter = MistPowerFreqAdapter()
@@ -96,6 +125,37 @@ def test_mist_power_freq_cfg_validates_2d_sweep() -> None:
     assert "readout" in modules
     sweep = cast(dict[str, Any], raw["sweep"])
     assert set(sweep) == {"freq", "gain"}  # 2D
+
+
+def test_mist_power_freq_probe_defaults_to_readout_frequency_sweep_and_channel() -> (
+    None
+):
+    ctx = _make_ctx(_make_ml())
+    ctx.md.readout_f = 6123.0
+    ctx.md.r_f = 6000.0
+    ctx.md.rf_w = 20.0
+    ctx.md.res_ch = 2
+
+    schema = MistPowerFreqAdapter().make_default_cfg(ctx)
+    modules = schema.value.fields["modules"]
+    assert isinstance(modules, CfgSectionValue)
+    probe = modules.fields["probe_pulse"]
+    assert isinstance(probe, ModuleRefValue)
+    freq = probe.value.fields["freq"]
+    ch = probe.value.fields["ch"]
+    assert isinstance(freq, EvalValue)
+    assert freq.expr == "readout_f"
+    assert isinstance(ch, EvalValue)
+    assert ch.expr == "res_ch"
+
+    sweep = schema.value.fields["sweep"]
+    assert isinstance(sweep, CfgSectionValue)
+    freq_sweep = sweep.fields["freq"]
+    assert isinstance(freq_sweep, SweepValue)
+    assert isinstance(freq_sweep.start, EvalValue)
+    assert isinstance(freq_sweep.stop, EvalValue)
+    assert freq_sweep.start.expr == "readout_f - 1.5 * rf_w"
+    assert freq_sweep.stop.expr == "readout_f + 1.5 * rf_w"
 
 
 @pytest.mark.parametrize(
@@ -119,6 +179,47 @@ def test_t1_tone_sweep_cfg_has_one_outer_sweep(
     assert set(sweep) == {"length", outer_key}
     # uniform extra present, default True (domain default).
     assert raw["uniform"] is True
+
+
+@pytest.mark.parametrize(
+    "adapter_cls", [SsT1ToneSweepGainAdapter, SsT1ToneSweepFreqAdapter]
+)
+def test_t1_tone_sweep_probe_defaults_to_readout_frequency_and_channel(
+    adapter_cls: Any,
+) -> None:
+    ctx = _make_ctx(_make_ml())
+    ctx.md.readout_f = 6123.0
+    ctx.md.r_f = 6000.0
+    ctx.md.rf_w = 20.0
+    ctx.md.res_ch = 2
+
+    schema = adapter_cls().make_default_cfg(ctx)
+    modules = schema.value.fields["modules"]
+    assert isinstance(modules, CfgSectionValue)
+    probe = modules.fields["probe_pulse"]
+    assert isinstance(probe, ModuleRefValue)
+    freq = probe.value.fields["freq"]
+    ch = probe.value.fields["ch"]
+    assert isinstance(freq, EvalValue)
+    assert freq.expr == "readout_f"
+    assert isinstance(ch, EvalValue)
+    assert ch.expr == "res_ch"
+
+
+def test_t1_tone_sweep_freq_axis_defaults_to_readout_frequency_range() -> None:
+    ctx = _make_ctx(_make_ml())
+    ctx.md.readout_f = 6123.0
+    ctx.md.rf_w = 20.0
+
+    schema = SsT1ToneSweepFreqAdapter().make_default_cfg(ctx)
+    sweep = schema.value.fields["sweep"]
+    assert isinstance(sweep, CfgSectionValue)
+    freq_sweep = sweep.fields["freq"]
+    assert isinstance(freq_sweep, SweepValue)
+    assert isinstance(freq_sweep.start, EvalValue)
+    assert isinstance(freq_sweep.stop, EvalValue)
+    assert freq_sweep.start.expr == "readout_f - 1.5 * rf_w"
+    assert freq_sweep.stop.expr == "readout_f + 1.5 * rf_w"
 
 
 @pytest.mark.parametrize(

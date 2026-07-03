@@ -29,11 +29,14 @@ from zcu_tools.experiment.v2_gui.adapters.twotone.rabi.len_rabi import (
     LenRabiAnalyzeResult,
 )
 from zcu_tools.gui.app.main.adapter import (
+    CfgSectionValue,
     DirectValue,
     EvalValue,
     MetaDictWriteback,
+    ModuleRefValue,
     ModuleWriteback,
     SweepValue,
+    WaveformRefValue,
     WritebackRequest,
 )
 from zcu_tools.meta_tool import MetaDict
@@ -358,14 +361,25 @@ def _gain_sweep_stop(ctx: MagicMock) -> float | EvalValue:
     """Extract the gain sweep stop edge from AmpRabiAdapter.make_default_value."""
     val = AmpRabiAdapter().make_default_value(ctx)
     sweep_section = val.fields["sweep"]
-    assert isinstance(sweep_section, type(val)), (
-        f"Expected CfgSectionValue, got {type(sweep_section)}"
-    )
+    assert isinstance(sweep_section, CfgSectionValue)
     gain_sweep = sweep_section.fields["gain"]
     assert isinstance(gain_sweep, SweepValue), (
         f"Expected SweepValue, got {type(gain_sweep)}"
     )
     return gain_sweep.stop
+
+
+def _amp_qub_waveform_length(ctx: MagicMock) -> DirectValue | EvalValue:
+    val = AmpRabiAdapter().make_default_value(ctx)
+    modules = val.fields["modules"]
+    assert isinstance(modules, CfgSectionValue)
+    qub_pulse = modules.fields["qub_pulse"]
+    assert isinstance(qub_pulse, ModuleRefValue)
+    waveform = qub_pulse.value.fields["waveform"]
+    assert isinstance(waveform, WaveformRefValue)
+    length = waveform.value.fields["length"]
+    assert isinstance(length, DirectValue | EvalValue)
+    return length
 
 
 class TestAmpRabiDefaultValueGainSeed:
@@ -378,11 +392,11 @@ class TestAmpRabiDefaultValueGainSeed:
         assert stop.expr == "1.2 * pi_gain"
 
     def test_pi_gain_absent_yields_fallback_float(self) -> None:
-        # When md has no pi_gain, fall back to 1.2 * 1.0 = 1.2.
+        # When md has no pi_gain, fall back to the notebook gain edge 0.6.
         ctx = _make_ctx_with_md()
         stop = _gain_sweep_stop(ctx)
         assert isinstance(stop, float)
-        assert stop == pytest.approx(1.2)
+        assert stop == pytest.approx(0.6)
 
     def test_pi_amp_does_not_seed_gain_sweep(self) -> None:
         # Old md key 'pi_amp' is now reserved for pulse MODULE names; it must
@@ -394,6 +408,17 @@ class TestAmpRabiDefaultValueGainSeed:
             "pi_amp must not seed the gain sweep; expected plain fallback float"
         )
 
+    def test_pi_len_present_yields_waveform_length_eval_expr(self) -> None:
+        ctx = _make_ctx_with_md(pi_len=0.08)
+        length = _amp_qub_waveform_length(ctx)
+        assert isinstance(length, EvalValue)
+        assert length.expr == "1.01 * pi_len"
+
+    def test_pi_len_absent_yields_waveform_length_fallback(self) -> None:
+        ctx = _make_ctx_with_md()
+        length = _amp_qub_waveform_length(ctx)
+        assert length == DirectValue(1.1)
+
 
 # ---------------------------------------------------------------------------
 # LenRabiAdapter — make_default_value length-sweep seed
@@ -404,14 +429,32 @@ def _length_sweep_stop(ctx: MagicMock) -> float | EvalValue:
     """Extract the length sweep stop edge from LenRabiAdapter.make_default_value."""
     val = LenRabiAdapter().make_default_value(ctx)
     sweep_section = val.fields["sweep"]
-    assert isinstance(sweep_section, type(val)), (
-        f"Expected CfgSectionValue, got {type(sweep_section)}"
-    )
+    assert isinstance(sweep_section, CfgSectionValue)
     length_sweep = sweep_section.fields["length"]
     assert isinstance(length_sweep, SweepValue), (
         f"Expected SweepValue, got {type(length_sweep)}"
     )
     return length_sweep.stop
+
+
+def _length_sweep(ctx: MagicMock) -> SweepValue:
+    val = LenRabiAdapter().make_default_value(ctx)
+    sweep_section = val.fields["sweep"]
+    assert isinstance(sweep_section, CfgSectionValue)
+    length_sweep = sweep_section.fields["length"]
+    assert isinstance(length_sweep, SweepValue)
+    return length_sweep
+
+
+def _len_qub_gain(ctx: MagicMock) -> DirectValue:
+    val = LenRabiAdapter().make_default_value(ctx)
+    modules = val.fields["modules"]
+    assert isinstance(modules, CfgSectionValue)
+    qub_pulse = modules.fields["qub_pulse"]
+    assert isinstance(qub_pulse, ModuleRefValue)
+    gain = qub_pulse.value.fields["gain"]
+    assert isinstance(gain, DirectValue)
+    return gain
 
 
 class TestLenRabiDefaultValueLengthSeed:
@@ -424,9 +467,15 @@ class TestLenRabiDefaultValueLengthSeed:
         assert stop.expr == "4.0 * pi_len"
 
     def test_pi_len_absent_yields_fallback_float(self) -> None:
-        # When md has no pi_len, md_eval_scaled returns 4.0 * 1.0 = 4.0
-        # (factor * fallback, where fallback=1.0 from the adapter).
+        # When md has no pi_len, fall back to the notebook length edge 0.3 us.
         ctx = _make_ctx_with_md()
         stop = _length_sweep_stop(ctx)
         assert isinstance(stop, float)
-        assert stop == pytest.approx(4.0)
+        assert stop == pytest.approx(0.3)
+
+    def test_length_sweep_starts_at_notebook_seed(self) -> None:
+        sweep = _length_sweep(_make_ctx_with_md())
+        assert sweep.start == pytest.approx(0.03)
+
+    def test_default_qubit_gain_matches_notebook_seed(self) -> None:
+        assert _len_qub_gain(_make_ctx_with_md()) == DirectValue(0.3)

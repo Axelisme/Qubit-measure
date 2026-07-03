@@ -20,6 +20,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_module_spec,
     make_readout_module_spec,
     make_reset_module_spec,
+    proper_relax,
     proper_res_freq_range,
 )
 from zcu_tools.gui.app.main.adapter import (
@@ -141,15 +142,15 @@ class RoOptAutoAdapter(
             .scalars(
                 reps=1000,
                 rounds=10,
-                relax_delay=1.0,
-                num_points=1000,
+                relax_delay=proper_relax(ctx, factor=3.0, fallback=30.5),
+                num_points=1001,
                 skew_penalty=0.0,
             )
             .role("modules.reset", "reset", Init.DISABLED)
             .role("modules.qub_pulse", "pi_pulse")
             .role("modules.readout", "readout")
             .set_sweep("sweep.freq", proper_res_freq_range(ctx, 51, span_factor=0.2))
-            .sweep("sweep.gain", 0.01, 0.25, 51)
+            .sweep("sweep.gain", 0.1, 0.25, 51)
             .sweep("sweep.length", 5.0, 10.0, 51)
             .build()
         )

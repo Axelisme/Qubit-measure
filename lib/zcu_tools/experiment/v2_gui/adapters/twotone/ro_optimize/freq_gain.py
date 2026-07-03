@@ -20,8 +20,8 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_module_spec,
     make_pulse_readout_module_spec,
     make_reset_module_spec,
+    proper_best_ro_freq_range,
     proper_relax,
-    proper_res_freq_range,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -137,8 +137,10 @@ class RoOptFreqGainAdapter(
             .role("modules.reset", "reset", Init.DISABLED)
             .role("modules.qub_pulse", "pi_pulse")
             .role("modules.readout", "readout")
-            .set_sweep("sweep.freq", proper_res_freq_range(ctx, 31, span_factor=0.5))
-            .sweep("sweep.gain", 0.01, 0.5, 31)
+            .set_sweep(
+                "sweep.freq", proper_best_ro_freq_range(ctx, 31, span_factor=0.5)
+            )
+            .sweep("sweep.gain", 0.0, 0.2, 31)
             .build()
         )
 

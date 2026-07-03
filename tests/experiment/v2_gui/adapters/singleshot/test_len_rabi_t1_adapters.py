@@ -38,7 +38,12 @@ from zcu_tools.experiment.v2_gui.adapters.singleshot.t1_tone import (
     SsT1ToneRunResult,
 )
 from zcu_tools.gui.app.main.adapter import (
+    CfgSectionValue,
+    DirectValue,
+    EvalValue,
     MetaDictWriteback,
+    ModuleRefValue,
+    SweepValue,
     WritebackRequest,
 )
 from zcu_tools.meta_tool import MetaDict
@@ -75,6 +80,42 @@ def test_ss_len_rabi_cfg_validates() -> None:
     assert "readout" in modules
     sweep = cast(dict[str, Any], raw["sweep"])
     assert "length" in sweep
+
+
+def test_ss_len_rabi_default_seed_matches_notebook_values() -> None:
+    ml = _make_ml()
+    schema = SsLenRabiAdapter().make_default_cfg(_make_ctx(ml))
+
+    assert schema.value.fields["reps"] == DirectValue(1000)
+    assert schema.value.fields["rounds"] == DirectValue(100)
+    assert schema.value.fields["relax_delay"] == DirectValue(50.5)
+
+    modules = schema.value.fields["modules"]
+    assert isinstance(modules, CfgSectionValue)
+    qub_pulse = modules.fields["qub_pulse"]
+    assert isinstance(qub_pulse, ModuleRefValue)
+    assert qub_pulse.value.fields["gain"] == DirectValue(1.0)
+
+    sweep = schema.value.fields["sweep"]
+    assert isinstance(sweep, CfgSectionValue)
+    length = sweep.fields["length"]
+    assert isinstance(length, SweepValue)
+    assert length.start == 0.03
+    assert length.stop == 0.2
+    assert length.expts == 51
+
+
+def test_ss_len_rabi_default_stop_keeps_pi_len_md_link() -> None:
+    ctx = _make_ctx(_make_ml())
+    ctx.md.pi_len = 0.06
+
+    schema = SsLenRabiAdapter().make_default_cfg(ctx)
+    sweep = schema.value.fields["sweep"]
+    assert isinstance(sweep, CfgSectionValue)
+    length = sweep.fields["length"]
+    assert isinstance(length, SweepValue)
+    assert isinstance(length.stop, EvalValue)
+    assert length.stop.expr == "4.0 * pi_len"
 
 
 def test_ss_len_rabi_build_exp_cfg_passes_correct_model() -> None:
@@ -131,6 +172,26 @@ def test_ss_t1_tone_cfg_validates() -> None:
     assert "length" in sweep
     assert "uniform" in raw
     assert raw["uniform"] is False
+
+
+def test_ss_t1_tone_probe_defaults_to_readout_frequency_and_channel() -> None:
+    ctx = _make_ctx(_make_ml())
+    ctx.md.readout_f = 6123.0
+    ctx.md.r_f = 6000.0
+    ctx.md.res_ch = 2
+
+    schema = SsT1ToneAdapter().make_default_cfg(ctx)
+    modules = schema.value.fields["modules"]
+    assert isinstance(modules, CfgSectionValue)
+    probe = modules.fields["probe_pulse"]
+    assert isinstance(probe, ModuleRefValue)
+    assert probe.chosen_key == "<Custom:Pulse>"
+    freq = probe.value.fields["freq"]
+    ch = probe.value.fields["ch"]
+    assert isinstance(freq, EvalValue)
+    assert freq.expr == "readout_f"
+    assert isinstance(ch, EvalValue)
+    assert ch.expr == "res_ch"
 
 
 def test_ss_t1_tone_build_exp_cfg_pops_uniform() -> None:

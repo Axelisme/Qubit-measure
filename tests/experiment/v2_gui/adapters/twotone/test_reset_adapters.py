@@ -219,6 +219,58 @@ def test_reset_freq_locks_tested_reset_freq() -> None:
     assert pulse_cfg.fields["freq"] == DirectValue(0.0)
 
 
+def test_reset_freq_default_seed_matches_notebook_values() -> None:
+    from zcu_tools.gui.app.main.adapter import (
+        CfgSectionValue,
+        DirectValue,
+        EvalValue,
+        ModuleRefValue,
+        WaveformRefValue,
+    )
+
+    ctx = _make_ctx(_make_ml())
+    ctx.md.rf_w = 1.25
+    ctx.md.t1 = 30.5
+    schema = SingleToneFreqAdapter().make_default_cfg(ctx)
+
+    assert schema.value.fields["reps"] == DirectValue(1000)
+    assert schema.value.fields["rounds"] == DirectValue(100)
+    relax = schema.value.fields["relax_delay"]
+    assert isinstance(relax, EvalValue)
+    assert relax.expr == "1.0 * t1"
+
+    modules = schema.value.fields["modules"]
+    assert isinstance(modules, CfgSectionValue)
+    tested_reset = modules.fields["tested_reset"]
+    assert isinstance(tested_reset, ModuleRefValue)
+    pulse_cfg = tested_reset.value.fields["pulse_cfg"]
+    assert isinstance(pulse_cfg, CfgSectionValue)
+    assert pulse_cfg.fields["gain"] == DirectValue(0.3)
+    post_delay = pulse_cfg.fields["post_delay"]
+    assert isinstance(post_delay, EvalValue)
+    assert post_delay.expr == "5.0 / (2 * 3.141592653589793 * rf_w)"
+    waveform = pulse_cfg.fields["waveform"]
+    assert isinstance(waveform, WaveformRefValue)
+    assert waveform.value.fields["length"] == DirectValue(5.0)
+
+
+def test_reset_freq_post_delay_has_direct_fallback_without_rf_w() -> None:
+    from zcu_tools.gui.app.main.adapter import (
+        CfgSectionValue,
+        DirectValue,
+        ModuleRefValue,
+    )
+
+    schema = SingleToneFreqAdapter().make_default_cfg(_make_ctx(_make_ml()))
+    modules = schema.value.fields["modules"]
+    assert isinstance(modules, CfgSectionValue)
+    tested_reset = modules.fields["tested_reset"]
+    assert isinstance(tested_reset, ModuleRefValue)
+    pulse_cfg = tested_reset.value.fields["pulse_cfg"]
+    assert isinstance(pulse_cfg, CfgSectionValue)
+    assert pulse_cfg.fields["post_delay"] == DirectValue(0.8)
+
+
 def _single_freq_items(*, reset_f: float | None, with_snapshot: bool) -> list[Any]:
     import numpy as np
     from matplotlib.figure import Figure

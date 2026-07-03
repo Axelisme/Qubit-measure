@@ -71,6 +71,19 @@ def md_eval_scaled(
     return factor * fallback
 
 
+def md_eval_scaled_or_value(
+    ctx: ExpContext, key: str, factor: float, fallback: float
+) -> float | EvalValue:
+    """A ``factor * <key>`` edge with a fixed fallback value.
+
+    Use this when the notebook default has a live calibrated expression if md is
+    present, but a separate fixed fallback when md is absent.
+    """
+    if md_has_key(ctx, key):
+        return EvalValue(expr=f"{factor} * {key}")
+    return fallback
+
+
 def proper_relax(
     ctx: ExpContext, factor: float = 5.0, fallback: float = 100.0
 ) -> ScalarValue:
@@ -122,6 +135,17 @@ def proper_res_freq_range(
 ) -> SweepValue:
     """Resonator frequency sweep range: ``r_f ± span_factor*rf_w``."""
     return _freq_range(ctx, "r_f", "rf_w", expts, span_factor, 6500.0, 500.0)
+
+
+def proper_best_ro_freq_range(
+    ctx: ExpContext, expts: int, *, span_factor: float = 1.5
+) -> SweepValue:
+    """Readout sweep range centered on ``best_ro_freq``, falling back to ``r_f``."""
+    if md_has_key(ctx, "best_ro_freq"):
+        return _freq_range(
+            ctx, "best_ro_freq", "rf_w", expts, span_factor, 6500.0, 500.0
+        )
+    return proper_res_freq_range(ctx, expts, span_factor=span_factor)
 
 
 def proper_qub_freq_range(

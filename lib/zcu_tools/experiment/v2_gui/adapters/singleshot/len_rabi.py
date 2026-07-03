@@ -18,7 +18,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_module_spec,
     make_readout_module_spec,
     make_reset_module_spec,
-    md_eval_scaled,
+    md_eval_scaled_or_value,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -71,8 +71,8 @@ class SsLenRabiAdapter(
             "fast-fails if any is missing. "
             "Optionally reads 'confusion_matrix' to readout-correct the "
             "populations at analyze time; 'pi_len' to seed the sweep stop "
-            "(default sweep: 0.03 – 4*pi_len us); 'q_f' / 'qub_ch' to seed "
-            "the qubit-drive defaults."
+            "(4*pi_len when calibrated; fallback sweep 0.03–0.2 us); "
+            "'q_f' / 'qub_ch' to seed the qubit-drive defaults."
         ),
         expects_ml=(
             "Needs a qubit drive-pulse module (qub_pulse) and a readout module. "
@@ -101,15 +101,16 @@ class SsLenRabiAdapter(
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        sweep_stop = md_eval_scaled(ctx, "pi_len", factor=4.0, fallback=0.1)
+        sweep_stop = md_eval_scaled_or_value(ctx, "pi_len", factor=4.0, fallback=0.2)
         return (
             CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=10000, rounds=1, relax_delay=10.5)
+            .scalars(reps=1000, rounds=100, relax_delay=50.5)
             .role("modules.qub_pulse", "qub_probe", Init.INLINE)
+            .set("modules.qub_pulse.gain", 1.0)
             .role("modules.readout", "readout")
             .role("modules.reset", "reset", Init.DISABLED)
             .set_sweep(
-                "sweep.length", SweepValue(start=0.03, stop=sweep_stop, expts=101)
+                "sweep.length", SweepValue(start=0.03, stop=sweep_stop, expts=51)
             )
             .build()
         )

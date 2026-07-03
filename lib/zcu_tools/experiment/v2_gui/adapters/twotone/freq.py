@@ -74,10 +74,11 @@ class FreqAdapter(
             "setting the half-span as 1.5*qf_w (~1–50 MHz); 'qub_ch' — "
             "qubit-drive channel; 'r_f' — resonator frequency for the readout "
             "tone (~4000–8000 MHz); 'res_ch' / 'ro_ch' — readout drive / ADC "
-            "channels; 'timeFly' — readout trigger-offset cable delay (~0–1 "
-            "us). Absent 'q_f'/'qf_w' → a fixed ±30 MHz span around 4000 MHz; "
-            "for a first qubit search this default is only a placeholder, so "
-            "override it with a broad, hardware-safe survey window."
+            "channels; 'timeFly' — readout trigger-offset cable delay (~0–1 us). "
+            "Absent 'q_f'/'qf_w' → a broad survey fallback around 5000 MHz "
+            "with ~GHz-scale span from the shared qubit-frequency helper; for "
+            "a first qubit search, still review the hardware-safe passband and "
+            "override the sweep if the line is expected elsewhere."
         ),
         expects_ml=(
             "Needs a qubit-probe pulse module and a pulse-readout module; "

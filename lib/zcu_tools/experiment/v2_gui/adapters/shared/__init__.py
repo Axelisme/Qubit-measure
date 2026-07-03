@@ -2,11 +2,13 @@ from .analyze_results import FigureOnlyAnalyzeResult, run_figure_only_analyze
 from .cfg_builder import CfgBuilder, Init
 from .ctx_helpers import (
     md_eval_scaled,
+    md_eval_scaled_or_value,
     md_get_float,
     md_get_int,
     md_has_key,
     md_scalar_float,
     md_scalar_int,
+    proper_best_ro_freq_range,
     proper_flux_range,
     proper_qub_freq_range,
     proper_relax,
@@ -62,7 +64,9 @@ __all__ = [
     "md_scalar_float",
     "md_scalar_int",
     "md_eval_scaled",
+    "md_eval_scaled_or_value",
     "proper_relax",
+    "proper_best_ro_freq_range",
     "proper_res_freq_range",
     "proper_qub_freq_range",
     "proper_reset_freq_range",

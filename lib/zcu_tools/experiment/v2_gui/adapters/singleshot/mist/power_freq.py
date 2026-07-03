@@ -19,7 +19,6 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_readout_module_spec,
     make_reset_module_spec,
     proper_relax,
-    proper_res_freq_range,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -34,7 +33,7 @@ from zcu_tools.gui.app.main.adapter import (
     require_soc_handles,
 )
 
-from .._shared import read_ge_centers
+from .._shared import read_ge_centers, readout_probe_freq, readout_probe_freq_range
 
 MistPowerFreqRunResult: TypeAlias = FreqPowerResult
 
@@ -74,7 +73,8 @@ class MistPowerFreqAdapter(
             "classifies each shot against them and fast-fails if any is "
             "missing. Optionally reads 'confusion_matrix' (readout correction), "
             "'ac_stark_coeff' and 'log_scale' at analyze time; 't1' to set the "
-            "relax delay; 'q_f' / 'qub_ch' seed the probe drive."
+            "relax delay; 'readout_f' or 'r_f' plus 'rf_w' / 'res_ch' seed the "
+            "probe drive and frequency sweep."
         ),
         expects_ml=(
             "Needs a probe pulse and a readout module. Optionally references a "
@@ -118,9 +118,10 @@ class MistPowerFreqAdapter(
             # optional → None (disabled) when no library entry (ADR-0010)
             .role("modules.reset", "reset", Init.DISABLED)
             .role("modules.init_pulse", "pi_pulse", Init.DISABLED)
-            .role("modules.probe_pulse", "qub_probe", Init.INLINE)
+            .role("modules.probe_pulse", "res_probe", Init.INLINE)
+            .set("modules.probe_pulse.freq", readout_probe_freq(ctx))
             .role("modules.readout", "readout")
-            .set_sweep("sweep.freq", proper_res_freq_range(ctx, 51))
+            .set_sweep("sweep.freq", readout_probe_freq_range(ctx, 51))
             .sweep("sweep.gain", 0.0, 1.0, 51)
             .build()
         )

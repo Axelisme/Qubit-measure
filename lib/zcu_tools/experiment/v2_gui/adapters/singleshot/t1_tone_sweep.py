@@ -56,7 +56,7 @@ from zcu_tools.gui.app.main.adapter import (
     require_soc_handles,
 )
 
-from ._shared import read_ge_centers
+from ._shared import read_ge_centers, readout_probe_freq, readout_probe_freq_range
 
 SsT1ToneSweepRunResult: TypeAlias = Any  # T1WithToneSweepResult (frozen domain)
 
@@ -114,6 +114,11 @@ class _SsT1ToneSweepBase(
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         sweep_stop = md_eval_scaled(ctx, "t1", factor=5.0, fallback=100.0)
+        outer_sweep = (
+            readout_probe_freq_range(ctx, self.outer_default.expts)
+            if self.outer_key == "freq"
+            else self.outer_default
+        )
         relax_delay = proper_relax(ctx)
         return (
             CfgBuilder(ctx, self.cfg_spec())
@@ -125,11 +130,12 @@ class _SsT1ToneSweepBase(
                 uniform=True,
             )
             .role("modules.pi_pulse", "pi_pulse")
-            .role("modules.probe_pulse", "qub_probe", Init.INLINE)
+            .role("modules.probe_pulse", "res_probe", Init.INLINE)
+            .set("modules.probe_pulse.freq", readout_probe_freq(ctx))
             .role("modules.readout", "readout")
             .role("modules.reset", "reset", Init.DISABLED)
             .set_sweep("sweep.length", SweepValue(start=0.0, stop=sweep_stop, expts=51))
-            .set_sweep(f"sweep.{self.outer_key}", self.outer_default)
+            .set_sweep(f"sweep.{self.outer_key}", outer_sweep)
             .build()
         )
 
@@ -200,7 +206,8 @@ class SsT1ToneSweepGainAdapter(_SsT1ToneSweepBase):
             "'g_center' / 'e_center' / 'ge_radius' are present; run fast-fails "
             "if any is missing. Optionally reads 'confusion_matrix' (readout "
             "correction) and 'ac_stark_coeff' (rescales the gain axis to photon "
-            "number) at analyze time; 't1' to seed the length sweep stop."
+            "number) at analyze time; 't1' to seed the length sweep stop; "
+            "'readout_f' or 'r_f' plus 'res_ch' seed the probe tone."
         ),
         expects_ml=(
             "Needs a qubit pi-pulse module, a probe-tone pulse module, and a "
@@ -222,7 +229,9 @@ class SsT1ToneSweepGainAdapter(_SsT1ToneSweepBase):
 class SsT1ToneSweepFreqAdapter(_SsT1ToneSweepBase):
     outer_key: ClassVar[str] = "freq"
     outer_label: ClassVar[str] = "Probe frequency (MHz)"
-    outer_default: ClassVar[SweepValue] = SweepValue(start=-100.0, stop=100.0, expts=21)
+    outer_default: ClassVar[SweepValue] = SweepValue(
+        start=5250.0, stop=6750.0, expts=21
+    )
     filename_token: ClassVar[str] = "freq"
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
@@ -239,7 +248,9 @@ class SsT1ToneSweepFreqAdapter(_SsT1ToneSweepBase):
             "MetaDict — run 'singleshot/ge' first and apply its writeback so "
             "'g_center' / 'e_center' / 'ge_radius' are present; run fast-fails "
             "if any is missing. Optionally reads 'confusion_matrix' (readout "
-            "correction) at analyze time; 't1' to seed the length sweep stop. "
+            "correction) at analyze time; 't1' to seed the length sweep stop; "
+            "'readout_f' or 'r_f' plus 'rf_w' / 'res_ch' seed the probe drive "
+            "and frequency sweep. "
             "('ac_stark_coeff' applies only to a gain sweep, not this one.)"
         ),
         expects_ml=(

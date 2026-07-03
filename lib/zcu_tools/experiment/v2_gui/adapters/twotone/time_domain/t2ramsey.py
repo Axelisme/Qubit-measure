@@ -21,7 +21,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_module_spec,
     make_readout_module_spec,
     make_reset_module_spec,
-    md_eval_scaled,
+    md_eval_scaled_or_value,
     proper_relax,
 )
 from zcu_tools.experiment.v2_gui.adapters.twotone.time_domain._detune_shared import (
@@ -92,8 +92,8 @@ class T2RamseyAdapter(
         ),
         expects_md=(
             "Reads from the MetaDict (all optional, seeding defaults): 't2r' — "
-            "prior T2-Ramsey estimate (us); the delay sweep spans up to 4*t2r "
-            "(fallback ~20 us). 't1' seeds relax_delay (5*t1, fallback ~100 "
+            "prior T2-Ramsey estimate (us); the delay sweep spans up to "
+            "1.5*t2r (fallback ~0.4 us). 't1' seeds relax_delay (5*t1, fallback ~100 "
             "us). The pi/2 pulse pulls 'q_f' (~2000–6000 MHz) and 'qub_ch'. "
             "Readout pulls 'r_f' (~4000–8000 MHz), 'res_ch' / 'ro_ch', and "
             "'timeFly' for the readout trigger offset (~0–1 us)."
@@ -164,7 +164,7 @@ class T2RamseyAdapter(
                 "sweep.length",
                 SweepValue(
                     start=0.0,
-                    stop=md_eval_scaled(ctx, "t2r", factor=4.0, fallback=20.0),
+                    stop=md_eval_scaled_or_value(ctx, "t2r", factor=1.5, fallback=0.4),
                     expts=101,
                 ),
             )

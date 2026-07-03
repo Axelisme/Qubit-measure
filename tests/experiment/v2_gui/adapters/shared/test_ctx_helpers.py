@@ -6,6 +6,8 @@ from unittest.mock import MagicMock
 
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     md_eval_scaled,
+    md_eval_scaled_or_value,
+    proper_best_ro_freq_range,
     proper_flux_range,
     proper_qub_freq_range,
     proper_relax,
@@ -80,6 +82,20 @@ def test_md_eval_scaled_falls_back_to_scaled_float_without_md():
     assert not isinstance(edge, EvalValue)
 
 
+def test_md_eval_scaled_or_value_falls_back_to_fixed_float_without_md():
+    ctx = _ctx_with_md({})
+    edge = md_eval_scaled_or_value(ctx, "pi_len", factor=4.0, fallback=0.3)
+    assert edge == 0.3
+    assert not isinstance(edge, EvalValue)
+
+
+def test_md_eval_scaled_or_value_uses_eval_when_md_present():
+    ctx = _ctx_with_md({"pi_len": 0.05})
+    edge = md_eval_scaled_or_value(ctx, "pi_len", factor=4.0, fallback=0.3)
+    assert isinstance(edge, EvalValue)
+    assert edge.expr == "4.0 * pi_len"
+
+
 # --- proper_*_freq_range ----------------------------------------------------
 
 
@@ -118,6 +134,23 @@ def test_qub_freq_range_uses_qubit_md_keys():
     assert sv.start.expr == "q_f - 2.0 * qf_w"
     assert sv.start.resolved is None
     assert sv.expts == 201
+
+
+def test_best_ro_freq_range_prefers_best_ro_freq():
+    ctx = _ctx_with_md({"best_ro_freq": 6123.0, "r_f": 6000.0, "rf_w": 20.0})
+    sv = proper_best_ro_freq_range(ctx, 31, span_factor=0.5)
+    assert isinstance(sv.start, EvalValue)
+    assert sv.start.expr == "best_ro_freq - 0.5 * rf_w"
+    assert isinstance(sv.stop, EvalValue)
+    assert sv.stop.expr == "best_ro_freq + 0.5 * rf_w"
+    assert sv.expts == 31
+
+
+def test_best_ro_freq_range_falls_back_to_r_f():
+    ctx = _ctx_with_md({"r_f": 6000.0, "rf_w": 20.0})
+    sv = proper_best_ro_freq_range(ctx, 31, span_factor=0.5)
+    assert isinstance(sv.start, EvalValue)
+    assert sv.start.expr == "r_f - 0.5 * rf_w"
 
 
 # --- proper_flux_range ------------------------------------------------------
