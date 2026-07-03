@@ -2,7 +2,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from zcu_tools.program.v2.ir.instructions import NopInst, RegWriteInst
+import pytest
+from zcu_tools.program.v2.ir.factory import IRLexer, IRParser
+from zcu_tools.program.v2.ir.instructions import (
+    JumpInst,
+    LabelInst,
+    NopInst,
+    RegWriteInst,
+    TestInst,
+)
+from zcu_tools.program.v2.ir.labels import Label
 from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, IRLoop
 from zcu_tools.program.v2.ir.operands import (
     AluExpr,
@@ -13,8 +22,56 @@ from zcu_tools.program.v2.ir.operands import (
 )
 
 
+@pytest.mark.parametrize("pmem_size", [512, 4096])
+def test_register_driven_loop_prologue_splits_test_from_conditional_jump(
+    pmem_size: int,
+):
+    loop = IRLoop(
+        name="loop",
+        counter_reg=Register("r0"),
+        n=Register("r1"),
+        body=BlockNode(insts=[BasicBlockNode(insts=[NopInst()])]),
+    )
+    insts = IRLexer().flatten(IRParser(pmem_size=pmem_size).unparse(BlockNode([loop])))
+
+    bad_jumps = [
+        inst
+        for inst in insts
+        if isinstance(inst, JumpInst)
+        and inst.if_cond is not None
+        and inst.op is not None
+        and inst.uf
+    ]
+    assert not bad_jumps
+    assert any(isinstance(inst, TestInst) and inst.uf for inst in insts)
+
+
+def test_unparse_suffixes_loop_start_when_existing_label_uses_base_name():
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(labels=[LabelInst(name=Label("loop_start"))]),
+            IRLoop(
+                name="loop",
+                counter_reg=Register("r0"),
+                n=1,
+                body=BlockNode(insts=[BasicBlockNode(insts=[NopInst()])]),
+            ),
+        ]
+    )
+
+    chunks = IRParser(pmem_size=512).unparse(root)
+    labels = [
+        str(label.name)
+        for chunk in chunks
+        if isinstance(chunk, BasicBlockNode)
+        for label in chunk.labels
+    ]
+
+    assert labels.count("loop_start") == 1
+    assert "loop_start_0" in labels
+
+
 def test_structural_loop_roundtrip():
-    from zcu_tools.program.v2.ir.factory import IRLexer, IRParser
     from zcu_tools.program.v2.ir.linker import IRLinker
 
     # This test verifies that we can build a structural IR from instructions,

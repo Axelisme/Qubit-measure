@@ -35,9 +35,9 @@ QICK Hardware Notes
 - The ``r_wave`` bundle reference: because ``WmemWriteInst.reg_read`` includes
   the full wave-register bundle, a shadow entry for ``r_wave`` acts as a
   DCE-level sentinel that flushes when *any* ``wN`` alias appears in a read or write.
-- JumpInst and other non-data instructions with control-flow semantics are
-  treated as barriers (``_is_write_tracking_barrier``): all pending entries
-  are conservatively flushed.
+- JumpInst, CALL/RET, and other non-data instructions with control-flow
+  semantics are treated as barriers (``_is_write_tracking_barrier``): all
+  pending entries are conservatively flushed.
 
 Decision Notes
 --------------
@@ -109,12 +109,16 @@ class DeadWriteEliminationPass(BlockChunkPass):
                         for r in inst_pending_regs.pop(prev_idx):
                             reg_to_inst.pop(r, None)
 
-            # 2. Process Side-effects: instructions with hardware side effects
-            # (volatile regs, -uf, or wmem read) are never candidates for removal.
-            can_be_dead = not (
-                getattr(inst, "uf", False)
-                or is_wmem_read
-                or any(Register(w).is_volatile_reg() for w in writes)
+            # 2. Process Side-effects: only plain REG_WR instructions are DCE
+            # candidates. Memory/port/timing/control instructions may expose
+            # side effects even when their register writes are shadowed later.
+            can_be_dead = (
+                isinstance(inst, RegWriteInst)
+                and not getattr(inst, "uf", False)
+                and not is_wmem_read
+                and inst.ww is None
+                and inst.wp is None
+                and not any(Register(w).is_volatile_reg() for w in writes)
             )
 
             # 3. Process Writes: shadowing previous writes.

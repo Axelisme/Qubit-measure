@@ -34,7 +34,10 @@ class IRLinker:
                 continue
             line += 1
             if isinstance(inst, LabelInst):
-                labels[inst.name.name] = f"&{p_addr}"
+                name = inst.name.name
+                if name in labels:
+                    raise ValueError(f"IRLinker.link: duplicate label {name!r}")
+                labels[name] = f"&{p_addr}"
                 d = inst.to_dict()
                 d["p_addr"] = p_addr
                 meta_infos.append(d)

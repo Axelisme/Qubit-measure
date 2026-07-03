@@ -5,7 +5,6 @@ from abc import ABC, abstractmethod
 from ..instructions import (
     ArithInst,
     BaseInst,
-    CallInst,
     ClearInst,
     ComInst,
     CustomPeripheralInst,
@@ -18,7 +17,6 @@ from ..instructions import (
     NopInst,
     PortWriteInst,
     RegWriteInst,
-    RetInst,
     TimeInst,
     TrigInst,
     WaitInst,
@@ -31,9 +29,10 @@ from ..pipeline import AbsChunkPass, ChunkList, PipeLineContext
 # Shared dataflow transparency list (R1)
 # ---------------------------------------------------------------------------
 
-# Instructions that are transparent to dataflow tracking: passes can freely
-# sink/hoist/reorder across these without flushing pending state.
-# Excluded (barrier by omission): JumpInst, TestInst, LabelInst, DportWriteInst.
+# Instructions that are transparent to dataflow tracking: passes can move
+# pending state across these without flushing it.
+# Excluded (barrier by omission): CallInst, JumpInst, RetInst, TestInst,
+# LabelInst, DportWriteInst.
 DATAFLOW_TRANSPARENT_INSTS: tuple[type[BaseInst], ...] = (
     TimeInst,
     WaitInst,
@@ -44,7 +43,6 @@ DATAFLOW_TRANSPARENT_INSTS: tuple[type[BaseInst], ...] = (
     WmemWriteInst,
     NopInst,
     ArithInst,
-    CallInst,
     ClearInst,
     ComInst,
     CustomPeripheralInst,
@@ -52,7 +50,6 @@ DATAFLOW_TRANSPARENT_INSTS: tuple[type[BaseInst], ...] = (
     DportReadInst,
     FlagInst,
     NetInst,
-    RetInst,
     TrigInst,
 )
 

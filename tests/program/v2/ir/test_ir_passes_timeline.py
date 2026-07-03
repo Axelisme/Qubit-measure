@@ -18,10 +18,13 @@ from zcu_tools.program.v2.ir.node import (
     IRNode,
 )
 from zcu_tools.program.v2.ir.operands import (
+    AluExpr,
+    AluOp,
     Immediate,
     ImmValue,
     MemAddr,
     Register,
+    SideWrite,
     SrcKeyword,
     TimeOffset,
 )
@@ -315,6 +318,119 @@ def test_lit_time_sinks_past_reg_write():
     assert isinstance(bb.insts[0], RegWriteInst)
     assert isinstance(bb.insts[1], TimeInst)
     assert str(bb.insts[1].lit) == "#10"
+
+
+def test_lit_time_flushes_before_wmem_read_reg_write():
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    TimeInst(c_op="inc_ref", lit=Immediate(5)),
+                    RegWriteInst(dst=Register("r_wave"), src=SrcKeyword.WMEM),
+                ]
+            )
+        ]
+    )
+
+    out = _run_merge(root)
+    bb = out.insts[0]
+
+    assert isinstance(bb, BasicBlockNode)
+    assert len(bb.insts) == 2
+    assert isinstance(bb.insts[0], TimeInst)
+    assert bb.insts[0].lit == Immediate(5)
+    assert isinstance(bb.insts[1], RegWriteInst)
+    assert bb.insts[1].src == SrcKeyword.WMEM
+
+
+def test_lit_time_flushes_before_side_write_to_s14():
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    TimeInst(c_op="inc_ref", lit=Immediate(5)),
+                    RegWriteInst(
+                        dst=Register("r0"),
+                        src=SrcKeyword.IMM,
+                        lit=Immediate(1),
+                        wr=SideWrite(Register("s14"), "op"),
+                    ),
+                ]
+            )
+        ]
+    )
+
+    out = _run_merge(root)
+    bb = out.insts[0]
+
+    assert isinstance(bb, BasicBlockNode)
+    assert len(bb.insts) == 2
+    assert isinstance(bb.insts[0], TimeInst)
+    assert bb.insts[0].lit == Immediate(5)
+    assert isinstance(bb.insts[1], RegWriteInst)
+    assert bb.insts[1].wr == SideWrite(Register("s14"), "op")
+
+
+def test_lit_time_flushes_before_timeoffset_side_write_to_s14():
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    TimeInst(c_op="inc_ref", lit=Immediate(5)),
+                    PortWriteInst(
+                        dst=ImmValue(2),
+                        src=SrcKeyword.WMEM,
+                        addr=MemAddr(12),
+                        time=TimeOffset(7),
+                        wr=SideWrite(Register("s14"), "op"),
+                    ),
+                ]
+            )
+        ]
+    )
+
+    out = _run_merge(root)
+    bb = out.insts[0]
+
+    assert isinstance(bb, BasicBlockNode)
+    assert len(bb.insts) == 2
+    assert isinstance(bb.insts[0], TimeInst)
+    assert bb.insts[0].lit == Immediate(5)
+    assert isinstance(bb.insts[1], PortWriteInst)
+    assert bb.insts[1].time == TimeOffset(7)
+    assert bb.insts[1].wr == SideWrite(Register("s14"), "op")
+
+
+def test_lit_time_flushes_before_timeoffset_explicit_s14_read():
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    TimeInst(c_op="inc_ref", lit=Immediate(5)),
+                    PortWriteInst(
+                        dst=ImmValue(2),
+                        src=SrcKeyword.WMEM,
+                        addr=MemAddr(12),
+                        time=TimeOffset(7),
+                        op=AluExpr(Register("s14"), AluOp.ADD, Immediate(1)),
+                        wr=SideWrite(Register("r1"), "op"),
+                    ),
+                ]
+            )
+        ]
+    )
+
+    out = _run_merge(root)
+    bb = out.insts[0]
+
+    assert isinstance(bb, BasicBlockNode)
+    assert len(bb.insts) == 2
+    assert isinstance(bb.insts[0], TimeInst)
+    assert bb.insts[0].lit == Immediate(5)
+    assert isinstance(bb.insts[1], PortWriteInst)
+    assert bb.insts[1].time == TimeOffset(7)
+    assert bb.insts[1].op == AluExpr(Register("s14"), AluOp.ADD, Immediate(1))
+    assert bb.insts[1].wr == SideWrite(Register("r1"), "op")
 
 
 def test_lit_time_sinks_past_multiple_non_timed():

@@ -17,7 +17,15 @@ from .instructions import (
     TestInst,
 )
 from .labels import Label, LabelRef, make_label
-from .node import BasicBlockNode, BlockNode, IRBranch, IRDispatch, IRLoop, IRNode
+from .node import (
+    BasicBlockNode,
+    BlockNode,
+    IRBranch,
+    IRDispatch,
+    IRLoop,
+    IRNode,
+    _collect_subtree_names,
+)
 from .operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
 
 
@@ -380,6 +388,8 @@ class IRParser:
         round-trips for ``IRLoop`` / ``IRBranch`` structures (``IRDispatch``
         is a leaf emitted only by passes, never re-parsed).
         """
+        label_names, struct_names = _collect_subtree_names(root)
+        self.allocated.update(label_names | struct_names)
         return self._unparse_block_node(root)
 
     def _unparse_node(self, node: IRNode) -> list[BasicBlockNode | MetaInst]:
@@ -520,22 +530,14 @@ class IRParser:
                     RegWriteInst(
                         dst=Register("s15"), src=SrcKeyword.LABEL, label=LabelRef(end)
                     ),
-                    JumpInst(
-                        addr=Register("s15"),
-                        if_cond="Z",
-                        op=AluExpr(node.n, AluOp.SUB, Immediate(0)),
-                        uf=True,
-                    ),
+                    TestInst(op=AluExpr(node.n, AluOp.SUB, Immediate(0)), uf=True),
+                    JumpInst(addr=Register("s15"), if_cond="Z"),
                 ]
             else:
-                pre.append(
-                    JumpInst(
-                        label=LabelRef(end),
-                        if_cond="Z",
-                        op=AluExpr(node.n, AluOp.SUB, Immediate(0)),
-                        uf=True,
-                    )
-                )
+                pre += [
+                    TestInst(op=AluExpr(node.n, AluOp.SUB, Immediate(0)), uf=True),
+                    JumpInst(label=LabelRef(end), if_cond="Z"),
+                ]
         elif isinstance(node.n, int) and node.n <= 0:
             if needs_big_jump(self.pmem_size):
                 pre += [

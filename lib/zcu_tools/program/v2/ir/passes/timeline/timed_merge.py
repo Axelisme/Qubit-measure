@@ -43,10 +43,12 @@ QICK Hardware Notes
 
   - With ``@T``: the ``TimeOffset`` absorbs ``pending_lit`` (``@T += delta``);
     pending is *not* cleared so the hardware clock still advances at block end.
-  - Without ``@T``, reading ``TIMED_BASE_REG``: pending is flushed first
-    because the instruction would observe a stale reference value.
-  - Without ``@T``, not reading ``TIMED_BASE_REG``: truly transparent; pending
-    is unchanged.
+    This compensation applies only when the instruction does not also write the
+    time-base register through ``-wr``.
+  - Without ``@T``, reading or writing ``TIMED_BASE_REG``: pending is flushed
+    first because the instruction would observe or mutate the reference value.
+  - Without ``@T``, not touching ``TIMED_BASE_REG``: truly transparent;
+    pending is unchanged.
 
   Any other instruction flushes pending before it.
 
@@ -76,7 +78,7 @@ from ...instructions import (
     WmemWriteInst,
 )
 from ...node import BasicBlockNode
-from ...operands import Immediate, TimeOffset
+from ...operands import Immediate, Operand, TimeOffset
 from ..base import BlockChunkPass
 
 # conservative safe limit for TIME inc_ref and @T fields
@@ -100,6 +102,19 @@ def _flush(result: list[BaseInst], pending_lit: int) -> int:
     if pending_lit > 0:
         result.append(TimeInst(c_op="inc_ref", lit=Immediate(pending_lit)))
     return 0
+
+
+def _has_uncompensated_timed_base_access(inst: BaseInst) -> bool:
+    """Return true when an anchored timed instruction touches s14 beyond scheduling."""
+    if TIMED_BASE_REG in inst.reg_write:
+        return True
+    for field in dataclasses.fields(inst):
+        if field.name == "time":
+            continue
+        value = getattr(inst, field.name)
+        if isinstance(value, Operand) and TIMED_BASE_REG in value.regs():
+            return True
+    return False
 
 
 class TimedMergePass(BlockChunkPass):
@@ -135,6 +150,11 @@ class TimedMergePass(BlockChunkPass):
                 # comparison value (TEST s11 - #(T-10)), not an offset from the
                 # s14 reference, so absorbing a TIME inc_ref delta would change
                 # the wait target. WaitInst falls through to the else-flush.
+                if _has_uncompensated_timed_base_access(inst):
+                    pending_lit = _flush(result, pending_lit)
+                    result.append(inst)
+                    continue
+
                 time = getattr(inst, "time")
                 assert isinstance(time, TimeOffset)
                 if pending_lit > 0:
@@ -166,6 +186,11 @@ class TimedMergePass(BlockChunkPass):
                 # accumulated pending delta is invalidated.
                 pending_lit = _flush(result, pending_lit)
                 result.append(inst)
+            elif not isinstance(inst, TimeInst) and (
+                TIMED_BASE_REG in inst.reg_read or TIMED_BASE_REG in inst.reg_write
+            ):
+                pending_lit = _flush(result, pending_lit)
+                result.append(inst)
             elif isinstance(
                 inst,
                 (
@@ -176,8 +201,6 @@ class TimedMergePass(BlockChunkPass):
                     WmemWriteInst,
                 ),
             ):
-                if TIMED_BASE_REG in inst.reg_read or TIMED_BASE_REG in inst.reg_write:
-                    pending_lit = _flush(result, pending_lit)
                 result.append(inst)
             elif isinstance(inst, RegWriteInst) and not inst.dst.is_volatile_reg():
                 result.append(inst)

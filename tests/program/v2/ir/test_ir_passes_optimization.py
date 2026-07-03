@@ -4,6 +4,8 @@ from collections.abc import Iterator
 
 from zcu_tools.program.v2.ir.factory import IRParser
 from zcu_tools.program.v2.ir.instructions import (
+    CallInst,
+    DmemWriteInst,
     Instruction,
     JumpInst,
     LabelInst,
@@ -24,7 +26,9 @@ from zcu_tools.program.v2.ir.operands import (
     AluExpr,
     AluOp,
     Immediate,
+    MemAddr,
     Register,
+    SideWrite,
     SrcKeyword,
 )
 from zcu_tools.program.v2.ir.passes.dataflow import (
@@ -193,6 +197,86 @@ def test_dead_write_elimination_removes_overwritten_write_in_basic_block():
     assert str(inst.lit) == "#2"
 
 
+def test_dead_write_elimination_keeps_reg_write_when_side_write_is_read():
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    RegWriteInst(
+                        dst=Register("r2"),
+                        src=SrcKeyword.IMM,
+                        lit=Immediate(0),
+                        wr=SideWrite(Register("r1"), "op"),
+                    ),
+                    RegWriteInst(
+                        dst=Register("r2"), src=SrcKeyword.IMM, lit=Immediate(1)
+                    ),
+                    TestInst(op=AluExpr(Register("r1"), AluOp.SUB, Immediate(0))),
+                ]
+            )
+        ]
+    )
+
+    out = _run_chunk_passes_on_root(root, [DeadWriteEliminationPass()])
+    bb = out.insts[0]
+
+    assert isinstance(bb, BasicBlockNode)
+    assert len(bb.insts) == 3
+    first = bb.insts[0]
+    assert isinstance(first, RegWriteInst)
+    assert first.wr == SideWrite(Register("r1"), "op")
+
+
+def test_dead_write_elimination_never_deletes_dmem_write_with_side_write():
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    DmemWriteInst(
+                        dst=MemAddr(0),
+                        wr=SideWrite(Register("r1"), "op"),
+                    ),
+                    RegWriteInst(
+                        dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(1)
+                    ),
+                ]
+            )
+        ]
+    )
+
+    out = _run_chunk_passes_on_root(root, [DeadWriteEliminationPass()])
+    bb = out.insts[0]
+
+    assert isinstance(bb, BasicBlockNode)
+    assert len(bb.insts) == 2
+    assert isinstance(bb.insts[0], DmemWriteInst)
+
+
+def test_dead_write_elimination_does_not_cross_call_boundary():
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    RegWriteInst(
+                        dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(1)
+                    ),
+                    CallInst(label=LabelRef(Label("sub"))),
+                    RegWriteInst(
+                        dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(2)
+                    ),
+                ]
+            )
+        ]
+    )
+
+    out = _run_chunk_passes_on_root(root, [DeadWriteEliminationPass()])
+    bb = out.insts[0]
+
+    assert isinstance(bb, BasicBlockNode)
+    writes = [inst for inst in bb.insts if isinstance(inst, RegWriteInst)]
+    assert [inst.lit for inst in writes] == [Immediate(1), Immediate(2)]
+
+
 # ---------------------------------------------------------------------------
 # DeadTestEliminationPass
 # ---------------------------------------------------------------------------
@@ -297,6 +381,79 @@ def test_dead_test_elimination_keeps_test_when_uf_instruction_follows_consumptio
     assert len(bb.insts) == 2
     assert isinstance(bb.insts[0], RegWriteInst)
     assert isinstance(bb.insts[1], TestInst)
+
+
+def test_dead_test_elimination_reg_write_if_cond_consumes_flag():
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    TestInst(op=AluExpr(Register("r1"), AluOp.SUB, Immediate(0))),
+                    RegWriteInst(
+                        dst=Register("r2"),
+                        src=SrcKeyword.IMM,
+                        lit=Immediate(1),
+                        if_cond="Z",
+                    ),
+                ]
+            )
+        ]
+    )
+
+    root = _run_chunk_passes_on_root(root, [DeadTestEliminationPass()])
+    bb = root.insts[0]
+
+    assert isinstance(bb, BasicBlockNode)
+    assert isinstance(bb.insts[0], TestInst)
+    assert isinstance(bb.insts[1], RegWriteInst)
+
+
+def test_dead_test_elimination_if_cond_uf_consumes_old_flag_before_overwrite():
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    TestInst(op=AluExpr(Register("r1"), AluOp.SUB, Immediate(0))),
+                    RegWriteInst(
+                        dst=Register("r2"),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r2"), AluOp.ADD, Immediate(1)),
+                        if_cond="Z",
+                        uf=True,
+                    ),
+                ]
+            )
+        ]
+    )
+
+    root = _run_chunk_passes_on_root(root, [DeadTestEliminationPass()])
+    bb = root.insts[0]
+
+    assert isinstance(bb, BasicBlockNode)
+    assert isinstance(bb.insts[0], TestInst)
+    assert isinstance(bb.insts[1], RegWriteInst)
+    assert bb.insts[1].if_cond == "Z"
+    assert bb.insts[1].uf is True
+
+
+def test_dead_test_elimination_does_not_delete_test_before_call_boundary():
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    TestInst(op=AluExpr(Register("r1"), AluOp.SUB, Immediate(0))),
+                    CallInst(label=LabelRef(Label("sub"))),
+                ]
+            )
+        ]
+    )
+
+    root = _run_chunk_passes_on_root(root, [DeadTestEliminationPass()])
+    bb = root.insts[0]
+
+    assert isinstance(bb, BasicBlockNode)
+    assert isinstance(bb.insts[0], TestInst)
+    assert isinstance(bb.insts[1], CallInst)
 
 
 # ---------------------------------------------------------------------------
@@ -821,6 +978,21 @@ def _collect_reg_write_s15(root: BlockNode) -> list:
             if isinstance(inst, RegWriteInst) and inst.dst == Register("s15"):
                 result.append(inst)
     return result
+
+
+def test_partial_unroll_suffixes_start_label_when_name_is_already_allocated():
+    loop = _nop_loop("loop", n=100)
+    root = BlockNode(insts=[loop])
+    ctx = _ctx_partial(pmem_capacity=512, pmem_budget=10)
+    ctx.allocated_names.add("loop_unrolled_start")
+
+    out, _ = _apply_tree_pass_to_root(root, UnrollLoopPass(), ctx)
+    label_names = [
+        str(label.name) for bb in _walk_basic_blocks(out) for label in bb.labels
+    ]
+
+    assert "loop_unrolled_start_0" in label_names
+    assert "loop_unrolled_start" not in label_names
 
 
 def test_partial_unroll_small_pmem_no_remainder_label_jump():

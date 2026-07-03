@@ -512,7 +512,10 @@ class RegWriteInst(BaseInst):
 
     @property
     def reg_write(self) -> frozenset[str]:
-        return self.dst.regs() if self.dst else frozenset()
+        writes = self.dst.regs() if self.dst else frozenset()
+        if self.wr is not None:
+            writes = writes | self.wr.regs()
+        return writes
 
     @property
     def need_label(self) -> Label | None:
@@ -603,7 +606,7 @@ class PortWriteInst(BaseInst):
 
     @property
     def reg_write(self) -> frozenset[str]:
-        return frozenset()
+        return self.wr.regs() if self.wr else frozenset()
 
     def to_dict(self) -> dict[str, Any]:
         src_val = (
@@ -679,7 +682,10 @@ class DmemReadInst(BaseInst):
 
     @property
     def reg_write(self) -> frozenset[str]:
-        return self.dst.regs() if self.dst else frozenset()
+        writes = self.dst.regs() if self.dst else frozenset()
+        if self.wr is not None:
+            writes = writes | self.wr.regs()
+        return writes
 
     @property
     def need_label(self) -> Label | None:
@@ -754,6 +760,10 @@ class DmemWriteInst(BaseInst):
             reads = reads | self.op.regs()
         return reads
 
+    @property
+    def reg_write(self) -> frozenset[str]:
+        return self.wr.regs() if self.wr else frozenset()
+
     def to_dict(self) -> dict[str, Any]:
         dst_str = str(self.dst)
         if isinstance(self.dst, MemAddr):
@@ -805,6 +815,10 @@ class WmemWriteInst(BaseInst):
         if self.op:
             reads = reads | self.op.regs()
         return reads
+
+    @property
+    def reg_write(self) -> frozenset[str]:
+        return self.wr.regs() if self.wr else frozenset()
 
     def to_dict(self) -> dict[str, Any]:
         d = {
@@ -863,7 +877,7 @@ class DportWriteInst(BaseInst):
 
     @property
     def reg_write(self) -> frozenset[str]:
-        return frozenset()
+        return self.wr.regs() if self.wr else frozenset()
 
     def to_dict(self) -> dict[str, Any]:
         src_val = (

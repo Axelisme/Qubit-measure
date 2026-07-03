@@ -1,11 +1,13 @@
 from zcu_tools.program.v2.ir.factory import IRParser
 from zcu_tools.program.v2.ir.instructions import (
+    CallInst,
     NopInst,
     PortWriteInst,
     RegWriteInst,
     TimeInst,
     WmemWriteInst,
 )
+from zcu_tools.program.v2.ir.labels import Label, LabelRef
 from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode
 from zcu_tools.program.v2.ir.operands import (
     AluExpr,
@@ -112,6 +114,40 @@ def test_inc_reg_merge_free_flush_on_read():
     assert isinstance(insts[1], TimeInst)
     assert isinstance(insts[2], RegWriteInst) and insts[2].op is not None
     assert str(insts[2].op.rhs) == "#3"
+
+
+def test_inc_reg_merge_does_not_cross_call_boundary():
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    RegWriteInst(
+                        dst=Register("r1"),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r1"), AluOp.ADD, Immediate(1)),
+                    ),
+                    CallInst(label=LabelRef(Label("sub"))),
+                    RegWriteInst(
+                        dst=Register("r1"),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r1"), AluOp.ADD, Immediate(2)),
+                    ),
+                ]
+            )
+        ]
+    )
+
+    root = _run_chunk_pass(root)
+    block = root.insts[0]
+
+    assert isinstance(block, BasicBlockNode)
+    insts = block.insts
+    assert len(insts) == 3
+    assert isinstance(insts[0], RegWriteInst)
+    assert insts[0].op is not None and insts[0].op.rhs == Immediate(1)
+    assert isinstance(insts[1], CallInst)
+    assert isinstance(insts[2], RegWriteInst)
+    assert insts[2].op is not None and insts[2].op.rhs == Immediate(2)
 
 
 def test_inc_reg_merge_free_can_cross_port_write():

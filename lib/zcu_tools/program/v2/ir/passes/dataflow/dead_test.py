@@ -3,30 +3,34 @@
 Purpose
 -------
 A ``TEST`` instruction evaluates an ALU expression and sets the condition
-flags, but has no other side effects.  If no conditional jump reads those
-flags before the next ``TEST`` or before the block exits, the instruction is
-dead and can be removed.
+flags, but has no other side effects.  If no conditional instruction reads
+those flags before the next flag overwrite or before the block exits, the
+instruction is dead and can be removed.
 
 Example
 -------
 Before::
 
     TEST op(r0 - #5)      ; dead: flag never consumed
-    TEST op(r1 - #3)      ; flag consumed by JUMP below
-    JUMP loop -if(NZ)
+    TEST op(r1 - #3)      ; flag consumed by conditional write below
+    REG_WR r2 imm #1 -if(NZ)
 
 After::
 
     TEST op(r1 - #3)
-    JUMP loop -if(NZ)
+    REG_WR r2 imm #1 -if(NZ)
 
 QICK Hardware Notes
 -------------------
 - ``TestInst`` has no hardware side effects beyond setting the condition flags.
   It is therefore safe to remove any TEST whose flags are never read.
-- Only a ``JumpInst`` with ``if_cond is not None`` consumes the flags.  A
-  ``RegWriteInst`` with ``-uf`` *also* updates flags but it does so as a
-  *write*, not a read — so it does NOT consume a preceding TEST's flag.
+- Any instruction with ``if_cond is not None`` consumes the current flags.
+  If the same instruction also carries ``-uf``, the condition reads the old
+  flag first and the ALU update overwrites flags for later instructions.
+- A ``-uf`` instruction without ``if_cond`` overwrites the ALU flags without
+  consuming them, so a preceding pending TEST becomes dead.
+- Opaque control boundaries such as CALL/RET clear local pending state without
+  marking the TEST dead because the callee/return boundary may observe flags.
 - The scan is conservative in one direction: if a block exits (via its branch
   field or by falling off the end) without a conditional jump, the pending
   TEST is marked dead.
@@ -43,7 +47,7 @@ from __future__ import annotations
 
 from ...instructions import BaseInst, JumpInst, TestInst
 from ...node import BasicBlockNode
-from ..base import BlockChunkPass
+from ..base import DATAFLOW_TRANSPARENT_INSTS, BlockChunkPass
 
 
 class DeadTestEliminationPass(BlockChunkPass):
@@ -69,6 +73,8 @@ class DeadTestEliminationPass(BlockChunkPass):
                 if pending is not None:
                     dead.add(pending)  # previous TEST was never consumed
                 pending = idx
+            elif getattr(inst, "if_cond", None) is not None:
+                pending = None  # flag consumed by any conditional instruction
             elif getattr(inst, "uf", False):
                 # A -uf instruction (e.g. REG_WR -uf) overwrites the ALU flags
                 # as a side effect. Any pending TEST is now dead — its flags can
@@ -77,8 +83,8 @@ class DeadTestEliminationPass(BlockChunkPass):
                 if pending is not None:
                     dead.add(pending)
                 pending = None
-            elif isinstance(inst, JumpInst) and inst.if_cond is not None:
-                pending = None  # flag consumed by conditional jump
+            elif not isinstance(inst, DATAFLOW_TRANSPARENT_INSTS):
+                pending = None  # opaque boundary may observe flags outside this block
 
         # After all insts, check the block's branch.
         if pending is not None:

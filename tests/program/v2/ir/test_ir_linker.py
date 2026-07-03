@@ -47,6 +47,18 @@ def test_linker_link_tracks_meta_and_label_without_advancing_address():
     assert cursor.final_line == 3
 
 
+def test_linker_link_rejects_duplicate_label_names():
+    linker = IRLinker()
+    insts = [
+        LabelInst(name=Label("dup")),
+        NopInst(),
+        LabelInst(name=Label("dup")),
+    ]
+
+    with pytest.raises(ValueError, match="duplicate label 'dup'"):
+        linker.link(insts)
+
+
 @pytest.mark.parametrize(
     ("labels", "meta_infos", "expected"),
     [
