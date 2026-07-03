@@ -48,6 +48,7 @@ class RunStore:
         self,
         *,
         run_dir: Path,
+        data_dir: Path,
         run_id: str,
         project: ProjectInfo,
         flux_values: Sequence[float],
@@ -55,7 +56,10 @@ class RunStore:
         nodes: Sequence[PlacedNode],
         results: Mapping[str, object],
     ) -> None:
+        # ``run_dir`` is the lightweight metadata root under result_dir.
         self.run_dir = run_dir
+        # ``data_dir`` is the heavy Labber HDF5 root under database_path.
+        self.data_dir = data_dir
         self.run_id = run_id
         self._project = project
         self._flux_values = [float(value) for value in flux_values]
@@ -93,11 +97,14 @@ class RunStore:
         run_suffix = run_id.rsplit("-", maxsplit=1)[-1]
         slug = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}_flux-sweep-{run_suffix}"
         run_dir = Path(project.result_dir) / "autofluxdep_runs" / slug
+        data_dir = Path(project.database_path) / "autofluxdep_runs" / slug
         run_dir.mkdir(parents=True, exist_ok=False)
-        (run_dir / "nodes").mkdir()
-        (run_dir / "exports" / "fluxdep").mkdir(parents=True)
+        data_dir.mkdir(parents=True, exist_ok=False)
+        (data_dir / "nodes").mkdir()
+        (data_dir / "exports" / "fluxdep").mkdir(parents=True)
         store = cls(
             run_dir=run_dir,
+            data_dir=data_dir,
             run_id=run_id,
             project=project,
             flux_values=flux_values,
@@ -339,7 +346,7 @@ class RunStore:
             relpath = f"nodes/{filename}"
             specs = result_role_specs(node.name, node.type_name, result)
             writer = open_streaming_grouped_labber_data(
-                str(self.run_dir / relpath),
+                str(self.data_dir / relpath),
                 specs,
                 metadata=LabberMetadata(
                     comment=f"autofluxdep run {self.run_id} node {node.name}",
@@ -383,7 +390,13 @@ class RunStore:
                 "chip_name": self._project.chip_name,
                 "qub_name": self._project.qub_name,
                 "result_dir": self._project.result_dir,
+                "database_path": self._project.database_path,
                 "params_path": self._project.params_path,
+            },
+            "paths": {
+                "metadata_root": str(self.run_dir),
+                "data_root": str(self.data_dir),
+                "journal": "journal.jsonl",
             },
             "workflow": {
                 "workflow_hash": f"sha256:{workflow_hash}",
@@ -440,10 +453,10 @@ class RunStore:
             relpath = "exports/fluxdep/qubit_freq.hdf5"
             written = export_qubit_freq_fluxdep_spectrum(
                 result,
-                self.run_dir / relpath,
+                self.data_dir / relpath,
                 committed_mask=committed_mask,
             )
-            self._exports["fluxdep_spectrum"] = _relative(self.run_dir, Path(written))
+            self._exports["fluxdep_spectrum"] = _relative(self.data_dir, Path(written))
             break
 
     def _generate_report(self) -> None:

@@ -387,6 +387,7 @@ class T2EchoBuilder(Builder):
                     "earlystop_snr",
                     FloatSpec(label="earlystop_snr", optional=True),
                     _DEFAULT_EARLYSTOP_SNR,
+                    group="safety",
                 ),
                 generation_field(
                     "sweep_range_mode",
@@ -396,6 +397,7 @@ class T2EchoBuilder(Builder):
                         (_SWEEP_RANGE_MODE_AUTO_T2E, _SWEEP_RANGE_MODE_FIXED),
                     ),
                     _SWEEP_RANGE_MODE_AUTO_T2E,
+                    group="sweep",
                 ),
                 generation_field(
                     "relax_delay_mode",
@@ -405,42 +407,49 @@ class T2EchoBuilder(Builder):
                         (_RELAX_DELAY_MODE_AUTO_T1, _RELAX_DELAY_MODE_FIXED),
                     ),
                     _RELAX_DELAY_MODE_AUTO_T1,
+                    group="timing",
                 ),
                 generation_field(
                     "t1_seed_us",
                     "t1_seed_us",
                     FloatSpec(label="t1_seed_us"),
                     t1_seed,
+                    group="timing",
                 ),
                 generation_field(
                     "t2e_seed_us",
                     "t2e_seed_us",
                     FloatSpec(label="t2e_seed_us"),
                     t2e_seed,
+                    group="timing",
                 ),
                 generation_field(
                     "relax_factor",
                     "relax_factor",
                     FloatSpec(label="relax_factor"),
                     _DEFAULT_RELAX_FACTOR,
+                    group="timing",
                 ),
                 generation_field(
                     "relax_min_us",
                     "relax_min_us",
                     FloatSpec(label="relax_min_us"),
                     _DEFAULT_RELAX_MIN,
+                    group="timing",
                 ),
                 generation_field(
                     "sweep_start_us",
                     "sweep_start_us",
                     FloatSpec(label="sweep_start_us"),
                     _DEFAULT_SWEEP_START,
+                    group="sweep",
                 ),
                 generation_field(
                     "sweep_stop_factor",
                     "sweep_stop_factor",
                     FloatSpec(label="sweep_stop_factor"),
                     _T2E_WINDOW_FACTOR,
+                    group="sweep",
                 ),
                 generation_field(
                     "fit_method",
@@ -450,6 +459,7 @@ class T2EchoBuilder(Builder):
                         (_FIT_METHOD_AUTO, _FIT_METHOD_FRINGE, _FIT_METHOD_DECAY),
                     ),
                     _FIT_METHOD_AUTO,
+                    group="fit",
                 ),
             ),
             default_overrides={

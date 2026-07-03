@@ -421,6 +421,7 @@ class Controller(SessionControllerMixin):
             chip_name=project.chip_name,
             qub_name=project.qub_name,
             result_dir=project.result_dir,
+            database_path=project.database_path,
             params_path=project.params_path,
         )
         self._try_auto_load_predictor_from_params(project)

@@ -28,15 +28,17 @@ FLUX_VERSION_KEY = "flux"
 
 @dataclass(frozen=True)
 class ProjectInfo:
-    """Project handle — chip/qubit identity + where params.json lives.
+    """Project handle — chip/qubit identity + result/database roots.
 
     ``params_path`` is where a real FluxoniumPredictor would be loaded from when
     predictor loading is wired (the run uses a SimplePredictor stand-in).
+    ``database_path`` is the heavy raw-data root for Labber HDF5 artifacts.
     """
 
     chip_name: str
     qub_name: str
     result_dir: str
+    database_path: str
     params_path: str
 
 

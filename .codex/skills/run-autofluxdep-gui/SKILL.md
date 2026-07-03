@@ -57,7 +57,7 @@ autofluxdep_launch             # opens the GUI for the user, connects (control p
                                # or autofluxdep_connect to attach to a GUI the user already started
 autofluxdep_state_check        # {has_project, has_soc, node_count, flux_count,
                                #  has_flux_device, is_running, has_results, ...predictor flags}
-autofluxdep_project_info       # {chip_name, qub_name, result_dir, params_path}
+autofluxdep_project_info       # {chip_name, qub_name, result_dir, database_path, params_path}
 autofluxdep_workflow_list      # each node's {name, type, provides, requires, has_result}
 autofluxdep_node_cfg name=...  # one placed node's {name, type, knobs:{...}}
 autofluxdep_result_summary     # per node-with-result {name, kind, n_flux, n_measured, fit_summary}

@@ -10,6 +10,10 @@ def test_run_report_contains_terminal_status_paths_and_counts():
         "run_id": "run-1",
         "created_at": "2026-07-04T00:00:00Z",
         "project": {"chip_name": "chip", "qub_name": "q1"},
+        "paths": {
+            "metadata_root": "result/chip/q1/autofluxdep_runs/run-1",
+            "data_root": "Database/chip/q1/autofluxdep_runs/run-1",
+        },
         "workflow": {
             "workflow_hash": "sha256:abc",
             "nodes": [{"name": "qubit_freq"}, {"name": "t1"}],
@@ -39,6 +43,8 @@ def test_run_report_contains_terminal_status_paths_and_counts():
 
     assert "# Autofluxdep Run run-1" in report
     assert "- Status: failed" in report
+    assert "- Metadata root: result/chip/q1/autofluxdep_runs/run-1" in report
+    assert "- Data root: Database/chip/q1/autofluxdep_runs/run-1" in report
     assert "- Journal: journal.jsonl" in report
     assert "- Export fluxdep_spectrum: exports/fluxdep/qubit_freq.hdf5" in report
     assert "| qubit_freq | 1 | 0 | 0 |" in report

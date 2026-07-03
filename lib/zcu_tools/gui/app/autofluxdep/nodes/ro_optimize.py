@@ -474,6 +474,7 @@ class RoOptimizeBuilder(Builder):
                         (_RANGE_MODE_PREVIOUS_BEST, _RANGE_MODE_FIXED),
                     ),
                     _RANGE_MODE_PREVIOUS_BEST,
+                    group="sweep",
                 ),
                 generation_field(
                     "gain_range_mode",
@@ -483,6 +484,7 @@ class RoOptimizeBuilder(Builder):
                         (_RANGE_MODE_PREVIOUS_BEST, _RANGE_MODE_FIXED),
                     ),
                     _RANGE_MODE_PREVIOUS_BEST,
+                    group="sweep",
                 ),
                 generation_field(
                     "relax_delay_mode",
@@ -492,18 +494,21 @@ class RoOptimizeBuilder(Builder):
                         (_RELAX_DELAY_MODE_AUTO_T1, _RELAX_DELAY_MODE_FIXED),
                     ),
                     _RELAX_DELAY_MODE_AUTO_T1,
+                    group="timing",
                 ),
                 generation_field(
                     "t1_seed_us",
                     "t1_seed_us",
                     FloatSpec(label="t1_seed_us"),
                     t1_seed,
+                    group="timing",
                 ),
                 generation_field(
                     "relax_factor",
                     "relax_factor",
                     FloatSpec(label="relax_factor"),
                     _DEFAULT_RELAX_FACTOR,
+                    group="timing",
                 ),
                 generation_field(
                     "freq_window_mode",
@@ -513,12 +518,14 @@ class RoOptimizeBuilder(Builder):
                         (_WINDOW_MODE_FIXED_HALF_WIDTH, _WINDOW_MODE_DEFAULT_SWEEP),
                     ),
                     _WINDOW_MODE_FIXED_HALF_WIDTH,
+                    group="feedback",
                 ),
                 generation_field(
                     "freq_half_width_mhz",
                     "freq_half_width_mhz",
                     FloatSpec(label="freq_half_width_mhz"),
                     _DEFAULT_FREQ_HALF_WIDTH,
+                    group="feedback",
                 ),
                 generation_field(
                     "gain_window_mode",
@@ -528,12 +535,14 @@ class RoOptimizeBuilder(Builder):
                         (_WINDOW_MODE_FIXED_HALF_WIDTH, _WINDOW_MODE_DEFAULT_SWEEP),
                     ),
                     _WINDOW_MODE_FIXED_HALF_WIDTH,
+                    group="feedback",
                 ),
                 generation_field(
                     "gain_half_width",
                     "gain_half_width",
                     FloatSpec(label="gain_half_width"),
                     _DEFAULT_GAIN_HALF_WIDTH,
+                    group="feedback",
                 ),
             ),
             default_overrides={

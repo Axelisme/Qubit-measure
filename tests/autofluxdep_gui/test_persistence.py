@@ -34,13 +34,31 @@ def test_workflow_persistence_roundtrip(tmp_path: Path):
     ctrl = build_core()
     ctrl.add_node_by_type("qubit_freq")
     ctrl.rename_node(0, "freq_scan")
-    ctrl.set_node_params(0, {"qub_gain": "0.2"})
+    ctrl.set_node_params(
+        0,
+        {
+            "qub_gain": "0.2",
+            "drive_gain_mode": "fixed",
+            "earlystop_snr": "12.5",
+        },
+    )
     ctrl.add_node_by_type("lenrabi")
     ctrl.set_flux_sweep_expressions("span / 2", "-span / 2", "2 * count + 1")
     ctrl.set_flux_values([0.002, 0.001, 0.0, -0.001, -0.002])
     ctrl.set_auto_follow_tabs(False)
-    ctrl.attach_caretaker(PersistenceCaretaker(ctrl, cache_dir=tmp_path))
+    caretaker = PersistenceCaretaker(ctrl, cache_dir=tmp_path)
+    ctrl.attach_caretaker(caretaker)
     ctrl.persist_all()
+
+    payload = json.loads(caretaker.state_path.read_text(encoding="utf-8"))
+    generation_raw = payload["workflow"]["nodes"][0]["cfg_raw"]["generation"]
+    assert generation_raw["drive_gain_mode"] == {
+        "__kind": "direct",
+        "value": "fixed",
+    }
+    assert generation_raw["earlystop_snr"] == {"__kind": "direct", "value": 12.5}
+    assert "feedback" not in generation_raw
+    assert "safety" not in generation_raw
 
     restored = build_core()
     restored.attach_caretaker(PersistenceCaretaker(restored, cache_dir=tmp_path))
@@ -52,7 +70,10 @@ def test_workflow_persistence_roundtrip(tmp_path: Path):
     assert outcome.report.rejected_nodes == ()
     assert restored.state.node_names() == ["freq_scan", "lenrabi"]
     assert restored.state.nodes[0].type_name == "qubit_freq"
-    assert restored.state.nodes[0].schema.read_knobs()["qub_gain"] == pytest.approx(0.2)
+    knobs = restored.state.nodes[0].schema.read_knobs()
+    assert knobs["qub_gain"] == pytest.approx(0.2)
+    assert knobs["drive_gain_mode"] == "fixed"
+    assert knobs["earlystop_snr"] == pytest.approx(12.5)
     assert restored.get_flux_sweep_expressions() == (
         "span / 2",
         "-span / 2",

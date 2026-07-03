@@ -26,6 +26,14 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
 from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
+GENERATION_GROUP_LABELS: dict[str, str] = {
+    "sweep": "Sweep generation",
+    "timing": "Timing / relax",
+    "feedback": "Feedback / adaptive",
+    "fit": "Fit behavior",
+    "safety": "Safety gates",
+}
+
 
 @dataclass(frozen=True)
 class GenerationField:
@@ -33,13 +41,28 @@ class GenerationField:
     field_key: str
     spec: ScalarSpec | SweepSpec
     default: Any
+    group_key: str
+    group_label: str
 
 
 def generation_field(
-    logical_key: str, field_key: str, spec: ScalarSpec | SweepSpec, default: Any
+    logical_key: str,
+    field_key: str,
+    spec: ScalarSpec | SweepSpec,
+    default: Any,
+    *,
+    group: str,
+    group_label: str | None = None,
 ) -> GenerationField:
+    if not group:
+        raise ValueError("generation field group must be non-empty")
     return GenerationField(
-        logical_key=logical_key, field_key=field_key, spec=spec, default=default
+        logical_key=logical_key,
+        field_key=field_key,
+        spec=spec,
+        default=default,
+        group_key=group,
+        group_label=group_label or GENERATION_GROUP_LABELS.get(group, group),
     )
 
 
@@ -58,19 +81,33 @@ def adapter_node_schema(
     projection = dict(logical_paths)
 
     if generation_fields:
+        generation_spec_fields: dict[str, Any] = {}
+        generation_value_fields: dict[str, Any] = {}
+        for field in generation_fields:
+            group_spec = generation_spec_fields.setdefault(
+                field.group_key,
+                CfgSectionSpec(label=field.group_label, fields={}),
+            )
+            group_value = generation_value_fields.setdefault(
+                field.group_key,
+                CfgSectionValue(fields={}),
+            )
+            if field.field_key in group_spec.fields:
+                raise ValueError(
+                    f"duplicate generation field {field.group_key}.{field.field_key}"
+                )
+            group_spec.fields[field.field_key] = field.spec
+            group_value.fields[field.field_key] = _default_value(
+                field.spec, field.default
+            )
         spec_fields["generation"] = CfgSectionSpec(
             label="Generation overrides",
-            fields={field.field_key: field.spec for field in generation_fields},
+            fields=generation_spec_fields,
         )
-        value_fields["generation"] = CfgSectionValue(
-            fields={
-                field.field_key: _default_value(field.spec, field.default)
-                for field in generation_fields
-            }
-        )
+        value_fields["generation"] = CfgSectionValue(fields=generation_value_fields)
         projection.update(
             {
-                field.logical_key: f"generation.{field.field_key}"
+                field.logical_key: f"generation.{field.group_key}.{field.field_key}"
                 for field in generation_fields
             }
         )

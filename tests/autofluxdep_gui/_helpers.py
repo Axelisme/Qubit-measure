@@ -43,6 +43,7 @@ def ensure_test_project(ctrl: Controller) -> ProjectInfo:
         chip_name="test_chip",
         qub_name="test_qub",
         result_dir=str(result_dir),
+        database_path=str(result_dir / "Database" / "test_chip" / "test_qub"),
         params_path=str(result_dir / "params.json"),
     )
     ctrl.state.project = project

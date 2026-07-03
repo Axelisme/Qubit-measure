@@ -40,6 +40,7 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     sectioned_node_schema,
     str_choice_spec,
 )
+from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgPersistenceError
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import LenRabiBuilder
@@ -311,7 +312,7 @@ _EXPECTED_PATHS = {
         "reps": "reps",
         "rounds": "rounds",
         "relax_delay": "relax_delay",
-        "earlystop_snr": "generation.earlystop_snr",
+        "earlystop_snr": "generation.safety.earlystop_snr",
         "reset": "modules.reset",
         "qub_pulse": "modules.qub_pulse",
         "readout": "modules.readout",
@@ -319,37 +320,37 @@ _EXPECTED_PATHS = {
         "qub_nqz": "modules.qub_pulse.nqz",
         "qub_gain": "modules.qub_pulse.gain",
         "qub_length": "modules.qub_pulse.waveform.length",
-        "drive_gain_mode": "generation.drive_gain_mode",
-        "target_kappa": "generation.target_kappa",
-        "max_drive_gain": "generation.max_drive_gain",
-        "qf_width_seed": "generation.qf_width_seed",
-        "qfw_seed_gain": "generation.qfw_seed_gain",
+        "drive_gain_mode": "generation.feedback.drive_gain_mode",
+        "target_kappa": "generation.feedback.target_kappa",
+        "max_drive_gain": "generation.feedback.max_drive_gain",
+        "qf_width_seed": "generation.feedback.qf_width_seed",
+        "qfw_seed_gain": "generation.feedback.qfw_seed_gain",
     },
     "lenrabi": {
         "sweep_range": "sweep.length",
         "reps": "reps",
         "rounds": "rounds",
         "relax_delay": "relax_delay",
-        "earlystop_snr": "generation.earlystop_snr",
+        "earlystop_snr": "generation.safety.earlystop_snr",
         "reset": "modules.reset",
         "rabi_pulse": "modules.qub_pulse",
         "readout": "modules.readout",
         "qub_ch": "modules.qub_pulse.ch",
         "qub_nqz": "modules.qub_pulse.nqz",
         "qub_gain": "modules.qub_pulse.gain",
-        "relax_delay_mode": "generation.relax_delay_mode",
-        "t1_seed_us": "generation.t1_seed_us",
-        "relax_factor": "generation.relax_factor",
-        "relax_min_us": "generation.relax_min_us",
-        "sweep_range_mode": "generation.sweep_range_mode",
-        "expected_pi_length": "generation.expected_pi_length",
-        "sweep_start_us": "generation.sweep_start_us",
-        "sweep_stop_factor": "generation.sweep_stop_factor",
-        "sweep_stop_min_us": "generation.sweep_stop_min_us",
-        "drive_gain_mode": "generation.drive_gain_mode",
-        "pi_product_seed": "generation.pi_product_seed",
-        "pi_product_factor": "generation.pi_product_factor",
-        "max_drive_gain": "generation.max_drive_gain",
+        "relax_delay_mode": "generation.timing.relax_delay_mode",
+        "t1_seed_us": "generation.timing.t1_seed_us",
+        "relax_factor": "generation.timing.relax_factor",
+        "relax_min_us": "generation.timing.relax_min_us",
+        "sweep_range_mode": "generation.sweep.sweep_range_mode",
+        "expected_pi_length": "generation.sweep.expected_pi_length",
+        "sweep_start_us": "generation.sweep.sweep_start_us",
+        "sweep_stop_factor": "generation.sweep.sweep_stop_factor",
+        "sweep_stop_min_us": "generation.sweep.sweep_stop_min_us",
+        "drive_gain_mode": "generation.feedback.drive_gain_mode",
+        "pi_product_seed": "generation.feedback.pi_product_seed",
+        "pi_product_factor": "generation.feedback.pi_product_factor",
+        "max_drive_gain": "generation.feedback.max_drive_gain",
     },
     "ro_optimize": {
         "freq_range": "sweep.freq",
@@ -360,16 +361,16 @@ _EXPECTED_PATHS = {
         "reps": "reps",
         "rounds": "rounds",
         "relax_delay": "relax_delay",
-        "freq_range_mode": "generation.freq_range_mode",
-        "gain_range_mode": "generation.gain_range_mode",
-        "relax_delay_mode": "generation.relax_delay_mode",
+        "freq_range_mode": "generation.sweep.freq_range_mode",
+        "gain_range_mode": "generation.sweep.gain_range_mode",
+        "relax_delay_mode": "generation.timing.relax_delay_mode",
         "skew_penalty": "skew_penalty",
-        "t1_seed_us": "generation.t1_seed_us",
-        "relax_factor": "generation.relax_factor",
-        "freq_window_mode": "generation.freq_window_mode",
-        "freq_half_width_mhz": "generation.freq_half_width_mhz",
-        "gain_window_mode": "generation.gain_window_mode",
-        "gain_half_width": "generation.gain_half_width",
+        "t1_seed_us": "generation.timing.t1_seed_us",
+        "relax_factor": "generation.timing.relax_factor",
+        "freq_window_mode": "generation.feedback.freq_window_mode",
+        "freq_half_width_mhz": "generation.feedback.freq_half_width_mhz",
+        "gain_window_mode": "generation.feedback.gain_window_mode",
+        "gain_half_width": "generation.feedback.gain_half_width",
     },
     "t1": {
         "sweep_range": "sweep.length",
@@ -378,16 +379,16 @@ _EXPECTED_PATHS = {
         "readout": "modules.readout",
         "reps": "reps",
         "rounds": "rounds",
-        "earlystop_snr": "generation.earlystop_snr",
-        "sweep_range_mode": "generation.sweep_range_mode",
-        "relax_delay_mode": "generation.relax_delay_mode",
+        "earlystop_snr": "generation.safety.earlystop_snr",
+        "sweep_range_mode": "generation.sweep.sweep_range_mode",
+        "relax_delay_mode": "generation.timing.relax_delay_mode",
         "relax_delay": "relax_delay",
-        "t1_seed_us": "generation.t1_seed_us",
-        "relax_factor": "generation.relax_factor",
-        "relax_min_us": "generation.relax_min_us",
-        "sweep_start_us": "generation.sweep_start_us",
-        "sweep_stop_factor": "generation.sweep_stop_factor",
-        "sweep_stop_min_us": "generation.sweep_stop_min_us",
+        "t1_seed_us": "generation.timing.t1_seed_us",
+        "relax_factor": "generation.timing.relax_factor",
+        "relax_min_us": "generation.timing.relax_min_us",
+        "sweep_start_us": "generation.sweep.sweep_start_us",
+        "sweep_stop_factor": "generation.sweep.sweep_stop_factor",
+        "sweep_stop_min_us": "generation.sweep.sweep_stop_min_us",
     },
     "t2ramsey": {
         "sweep_range": "sweep.length",
@@ -397,16 +398,16 @@ _EXPECTED_PATHS = {
         "readout": "modules.readout",
         "reps": "reps",
         "rounds": "rounds",
-        "earlystop_snr": "generation.earlystop_snr",
-        "sweep_range_mode": "generation.sweep_range_mode",
-        "relax_delay_mode": "generation.relax_delay_mode",
+        "earlystop_snr": "generation.safety.earlystop_snr",
+        "sweep_range_mode": "generation.sweep.sweep_range_mode",
+        "relax_delay_mode": "generation.timing.relax_delay_mode",
         "relax_delay": "relax_delay",
-        "t1_seed_us": "generation.t1_seed_us",
-        "t2r_seed_us": "generation.t2r_seed_us",
-        "relax_factor": "generation.relax_factor",
-        "relax_min_us": "generation.relax_min_us",
-        "sweep_start_us": "generation.sweep_start_us",
-        "sweep_stop_factor": "generation.sweep_stop_factor",
+        "t1_seed_us": "generation.timing.t1_seed_us",
+        "t2r_seed_us": "generation.timing.t2r_seed_us",
+        "relax_factor": "generation.timing.relax_factor",
+        "relax_min_us": "generation.timing.relax_min_us",
+        "sweep_start_us": "generation.sweep.sweep_start_us",
+        "sweep_stop_factor": "generation.sweep.sweep_stop_factor",
     },
     "t2echo": {
         "sweep_range": "sweep.length",
@@ -417,17 +418,17 @@ _EXPECTED_PATHS = {
         "readout": "modules.readout",
         "reps": "reps",
         "rounds": "rounds",
-        "earlystop_snr": "generation.earlystop_snr",
-        "sweep_range_mode": "generation.sweep_range_mode",
-        "relax_delay_mode": "generation.relax_delay_mode",
+        "earlystop_snr": "generation.safety.earlystop_snr",
+        "sweep_range_mode": "generation.sweep.sweep_range_mode",
+        "relax_delay_mode": "generation.timing.relax_delay_mode",
         "relax_delay": "relax_delay",
-        "t1_seed_us": "generation.t1_seed_us",
-        "t2e_seed_us": "generation.t2e_seed_us",
-        "relax_factor": "generation.relax_factor",
-        "relax_min_us": "generation.relax_min_us",
-        "sweep_start_us": "generation.sweep_start_us",
-        "sweep_stop_factor": "generation.sweep_stop_factor",
-        "fit_method": "generation.fit_method",
+        "t1_seed_us": "generation.timing.t1_seed_us",
+        "t2e_seed_us": "generation.timing.t2e_seed_us",
+        "relax_factor": "generation.timing.relax_factor",
+        "relax_min_us": "generation.timing.relax_min_us",
+        "sweep_start_us": "generation.sweep.sweep_start_us",
+        "sweep_stop_factor": "generation.sweep.sweep_stop_factor",
+        "fit_method": "generation.fit.fit_method",
     },
     "mist": {
         "gain_sweep": "sweep.gain",
@@ -602,6 +603,91 @@ def test_path_schema_renders_raw_cfg_tree_while_lowering_logical_keys():
         "reps": 1000,
         "drive_gain_mode": "adaptive",
     }
+
+
+def test_generation_groups_keep_logical_knobs_flat():
+    schema = QubitFreqBuilder().make_default_schema()
+
+    generation_spec = schema.schema.spec.fields["generation"]
+    generation_value = schema.schema.value.fields["generation"]
+    assert isinstance(generation_spec, CfgSectionSpec)
+    assert isinstance(generation_value, CfgSectionValue)
+    assert set(generation_spec.fields) == {"feedback", "safety"}
+    assert set(generation_value.fields) == {"feedback", "safety"}
+    feedback_spec = generation_spec.fields["feedback"]
+    feedback_value = generation_value.fields["feedback"]
+    assert isinstance(feedback_spec, CfgSectionSpec)
+    assert isinstance(feedback_value, CfgSectionValue)
+    assert "drive_gain_mode" in feedback_spec.fields
+    assert "drive_gain_mode" in feedback_value.fields
+    assert schema.path_for("drive_gain_mode") == "generation.feedback.drive_gain_mode"
+
+    knobs = schema.read_knobs()
+
+    assert "drive_gain_mode" in knobs
+    assert "feedback" not in knobs
+    assert "safety" not in knobs
+    assert schema.read_value_tree()["generation"]["feedback"]["drive_gain_mode"] == (
+        "adaptive"
+    )
+
+
+def test_generation_persistence_uses_flat_logical_keys():
+    schema = QubitFreqBuilder().make_default_schema()
+    schema.set_field("drive_gain_mode", "fixed")
+    schema.set_field("earlystop_snr", 12.5)
+
+    raw = schema.to_persisted_raw()
+
+    generation = raw["generation"]
+    assert isinstance(generation, dict)
+    assert "feedback" not in generation
+    assert "safety" not in generation
+    assert generation["drive_gain_mode"] == {"__kind": "direct", "value": "fixed"}
+    assert generation["earlystop_snr"] == {"__kind": "direct", "value": 12.5}
+
+    restored = QubitFreqBuilder().make_default_schema()
+    restored.restore_persisted_raw(raw)
+
+    knobs = restored.read_knobs()
+    assert knobs["drive_gain_mode"] == "fixed"
+    assert knobs["earlystop_snr"] == pytest.approx(12.5)
+    assert restored.read_value_tree()["generation"]["feedback"]["drive_gain_mode"] == (
+        "fixed"
+    )
+
+
+def test_generation_restore_rejects_unknown_flat_persisted_key():
+    schema = QubitFreqBuilder().make_default_schema()
+    raw = schema.to_persisted_raw()
+    generation = raw["generation"]
+    assert isinstance(generation, dict)
+    generation["not_a_generation_knob"] = {"__kind": "direct", "value": 1}
+
+    with pytest.raises(NodeCfgPersistenceError, match="Unknown persisted generation"):
+        QubitFreqBuilder().make_default_schema().restore_persisted_raw(raw)
+
+
+def test_grouped_generation_section_is_removed_from_lower_raw():
+    schema = path_node_schema(
+        (
+            node_path(
+                "drive_gain_mode",
+                "generation.feedback.drive_gain_mode",
+                str_choice_spec("drive_gain_mode", ("adaptive", "fixed")),
+                "adaptive",
+            ),
+            node_path("reps", "reps", IntSpec("reps"), 1000),
+        ),
+        section_labels={
+            "generation": "Generation overrides",
+            "generation.feedback": "Feedback / adaptive",
+        },
+    )
+
+    raw = schema.lower_raw(None)
+
+    assert raw == {"reps": 1000}
 
 
 def test_path_schema_scalar_default_preserves_eval_value():

@@ -33,7 +33,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "project.info": MethodSpec(
         5.0,
         "Read the current project info (chip_name, qub_name, result_dir, "
-        "params_path); fields are null when no real project is set.",
+        "database_path, params_path); fields are null when no real project is set.",
     ),
     # Workflow definition (the ordered node placements)
     "workflow.list": MethodSpec(

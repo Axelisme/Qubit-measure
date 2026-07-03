@@ -32,9 +32,9 @@ from zcu_tools.gui.app.autofluxdep.services.remote.wire_version import (
 )
 
 
-def test_versions_start_at_one():
-    assert WIRE_VERSION == 1
-    assert GUI_VERSION == 1
+def test_versions_track_project_info_database_path_contract():
+    assert WIRE_VERSION == 2
+    assert GUI_VERSION == 2
 
 
 def test_every_payload_type_has_a_serializer():

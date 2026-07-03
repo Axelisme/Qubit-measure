@@ -28,6 +28,7 @@ def _project(tmp_path: Path) -> ProjectInfo:
         chip_name="chip",
         qub_name="q1",
         result_dir=str(tmp_path),
+        database_path=str(tmp_path / "Database" / "chip" / "q1"),
         params_path=str(tmp_path / "params.json"),
     )
 
@@ -65,11 +66,18 @@ def test_run_store_writes_manifest_node_row_journal_and_finalize(tmp_path):
     assert manifest["format_version"] == 1
     assert manifest["artifact_kind"] == "zcu_tools.autofluxdep.run"
     assert manifest["terminal"]["status"] == "finished"
+    assert manifest["project"]["result_dir"] == str(tmp_path)
+    assert manifest["project"]["database_path"] == str(
+        tmp_path / "Database" / "chip" / "q1"
+    )
+    assert manifest["paths"]["metadata_root"] == str(store.run_dir)
+    assert manifest["paths"]["data_root"] == str(store.data_dir)
     assert manifest["files"]["nodes"][0]["path"].startswith("nodes/000-probe")
     assert manifest["reports"]["markdown"] == "report.md"
     report = (store.run_dir / "report.md").read_text(encoding="utf-8")
     assert "- Run finalized events: 1" in report
     assert "- Report markdown: report.md" in report
+    assert f"- Data root: {store.data_dir}" in report
 
     events = load_journal_events(store.run_dir / "journal.jsonl")
     assert [event["type"] for event in events] == [
@@ -80,8 +88,10 @@ def test_run_store_writes_manifest_node_row_journal_and_finalize(tmp_path):
     assert events[0]["patch"] == {"fit": 3.0}
     assert events[-1]["terminal_status"] == "finished"
 
+    assert not (store.run_dir / manifest["files"]["nodes"][0]["path"]).exists()
+    assert (store.data_dir / manifest["files"]["nodes"][0]["path"]).is_file()
     loaded = load_node_result(
-        store.run_dir / manifest["files"]["nodes"][0]["path"], "probe"
+        store.data_dir / manifest["files"]["nodes"][0]["path"], "probe"
     )
     assert isinstance(loaded, Sweep1DResult)
     np.testing.assert_allclose(loaded.signal[0], [1.0, 2.0])
@@ -137,7 +147,7 @@ def test_run_store_rejects_non_json_safe_module_snapshot(tmp_path):
     store.close_writers(finalize=True)
     manifest = load_manifest(store.manifest_path)
     loaded = load_node_result(
-        store.run_dir / manifest["files"]["nodes"][0]["path"], "probe"
+        store.data_dir / manifest["files"]["nodes"][0]["path"], "probe"
     )
     assert isinstance(loaded, Sweep1DResult)
     assert np.isnan(loaded.signal[0]).all()
@@ -161,7 +171,7 @@ def test_run_store_rejects_nonfinite_patch_value_before_hdf5_write(tmp_path):
     store.close_writers(finalize=True)
     manifest = load_manifest(store.manifest_path)
     loaded = load_node_result(
-        store.run_dir / manifest["files"]["nodes"][0]["path"], "probe"
+        store.data_dir / manifest["files"]["nodes"][0]["path"], "probe"
     )
     assert isinstance(loaded, Sweep1DResult)
     assert np.isnan(loaded.signal[0]).all()
@@ -189,7 +199,7 @@ def test_qubit_freq_export_excludes_memory_rows_without_journal_commit(tmp_path)
     store.finalize("finished")
 
     manifest = load_manifest(store.manifest_path)
-    export_path = store.run_dir / manifest["exports"]["fluxdep_spectrum"]
+    export_path = store.data_dir / manifest["exports"]["fluxdep_spectrum"]
     state = FluxDepState()
     name = LoadService(state).load_spectrum(str(export_path), spec_type="TwoTone")
     raw = state.spectrums[name].raw

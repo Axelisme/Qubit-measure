@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -58,6 +59,7 @@ def _project(tmp_path):
         chip_name="chip",
         qub_name="q1",
         result_dir=str(tmp_path),
+        database_path=str(tmp_path / "Database" / "chip" / "q1"),
         params_path=str(tmp_path / "params.json"),
     )
 
@@ -93,6 +95,9 @@ def test_controller_run_writes_artifact_manifest_journal_and_node_hdf5(tmp_path)
     manifest = load_manifest(run_dir / "manifest.json")
     assert manifest["terminal"]["status"] == "finished"
     assert manifest["files"]["nodes"][0]["name"] == "probe"
+    assert manifest["paths"]["metadata_root"] == str(run_dir)
+    data_root = Path(manifest["paths"]["data_root"])
+    assert str(data_root).endswith("Database/chip/q1/autofluxdep_runs/" + run_dir.name)
     events = load_journal_events(run_dir / "journal.jsonl")
     assert [event["type"] for event in events] == [
         "node_row_written",
@@ -102,7 +107,7 @@ def test_controller_run_writes_artifact_manifest_journal_and_node_hdf5(tmp_path)
         "run_finalized",
     ]
     node_result = load_node_result(
-        run_dir / manifest["files"]["nodes"][0]["path"], "probe"
+        data_root / manifest["files"]["nodes"][0]["path"], "probe"
     )
     assert not np.isnan(node_result.signal[0]).any()
 

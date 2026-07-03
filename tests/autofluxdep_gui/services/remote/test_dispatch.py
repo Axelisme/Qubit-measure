@@ -30,6 +30,7 @@ from zcu_tools.gui.remote.errors import RemoteError
 from zcu_tools.gui.remote.param_spec import validate_params
 from zcu_tools.gui.session.services.startup import StartupProjectRequest
 from zcu_tools.meta_tool import FluxDepFit, ParamsProject, QubitParams
+from zcu_tools.utils.datasaver import get_datafolder_path
 
 
 class _StubAdapter:
@@ -101,6 +102,7 @@ def test_project_info_null_when_no_project():
         "chip_name": None,
         "qub_name": None,
         "result_dir": None,
+        "database_path": None,
         "params_path": None,
     }
 
@@ -110,12 +112,14 @@ def test_project_info_reports_set_project():
         chip_name="Q5_2D",
         qub_name="Q1",
         result_dir="result/Q5_2D/Q1",
+        database_path="Database/Q5_2D/Q1",
         params_path="result/Q5_2D/Q1/params.json",
     )
     info = _call(_adapter(project), "project.info", {})
     assert info["chip_name"] == "Q5_2D"
     assert info["qub_name"] == "Q1"
     assert info["result_dir"] == "result/Q5_2D/Q1"
+    assert info["database_path"] == "Database/Q5_2D/Q1"
     assert info["params_path"] == "result/Q5_2D/Q1/params.json"
 
 
@@ -141,7 +145,11 @@ def test_state_check_empty():
 
 def test_state_check_reflects_workflow_and_project():
     project = ProjectInfo(
-        chip_name="Q5_2D", qub_name="Q1", result_dir="r", params_path="p"
+        chip_name="Q5_2D",
+        qub_name="Q1",
+        result_dir="r",
+        database_path="d",
+        params_path="p",
     )
     adapter = _adapter(project)
     adapter.ctrl.add_node_by_type("qubit_freq")
@@ -170,6 +178,9 @@ def test_setup_control_apply_updates_project_info_and_loads_predictor(tmp_path):
     assert info["chip_name"] == "ChipA"
     assert info["qub_name"] == "Q1"
     assert info["result_dir"] == str(tmp_path / "result" / "ChipA" / "Q1")
+    assert info["database_path"] == get_datafolder_path(
+        str(tmp_path / "Database"), str(Path("ChipA") / "Q1")
+    )
     assert info["params_path"] == params_path
     check = _call(adapter, "state.check", {})
     assert check["has_project"] is True

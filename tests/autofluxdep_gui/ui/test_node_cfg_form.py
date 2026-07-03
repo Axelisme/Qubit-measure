@@ -128,6 +128,17 @@ def _generation(form: NodeCfgForm) -> SectionLiveField:
     return field
 
 
+def _generation_group(form: NodeCfgForm, key: str) -> SectionLiveField:
+    return _subsection(_generation(form), key)
+
+
+def _generation_leaf(form: NodeCfgForm, key: str) -> Any:
+    for group in _generation(form).fields.values():
+        if isinstance(group, SectionLiveField) and key in group.fields:
+            return group.fields[key]
+    raise AssertionError(f"generation leaf {key!r} not found")
+
+
 def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
     ctrl, node, index = ctrl_node
     form = NodeCfgForm(ctrl, node, index)
@@ -150,8 +161,11 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
         assert ch_spec.optional is False
         assert nqz_spec.choices == [1, 2]
         assert "qub_gain" not in form._default_model.fields
-        assert set(_generation(form).fields.keys()) == {
+        assert set(_generation(form).fields.keys()) == {"feedback", "safety"}
+        assert set(_generation_group(form, "safety").fields.keys()) == {
             "earlystop_snr",
+        }
+        assert set(_generation_group(form, "feedback").fields.keys()) == {
             "drive_gain_mode",
             "target_kappa",
             "max_drive_gain",
@@ -256,9 +270,7 @@ def test_edit_scalar_writes_back_to_schema(ctrl_node, qapp):
         form._default_model.fields["reps"].set_value(DirectValue(value=321))
         qub_pulse = _ref_subsection(_section(form, "modules"), "qub_pulse")
         qub_pulse.fields["gain"].set_value(DirectValue(value=0.42))
-        _generation(form).fields["drive_gain_mode"].set_value(
-            DirectValue(value="fixed")
-        )
+        _generation_leaf(form, "drive_gain_mode").set_value(DirectValue(value="fixed"))
         knobs = node.schema.lower(None)
         assert knobs["reps"] == 321 and isinstance(knobs["reps"], int)
         assert knobs["qub_gain"] == 0.42
@@ -312,7 +324,7 @@ def test_optional_scalar_blank_lowers_to_none(ctrl_node, qapp):
     try:
         # earlystop_snr is an optional FloatSpec: set then clear it; an unset
         # optional scalar lowers to an omitted key (None — no early-stop)
-        earlystop_snr = _generation(form).fields["earlystop_snr"]
+        earlystop_snr = _generation_leaf(form, "earlystop_snr")
         earlystop_snr.set_value(DirectValue(value=50.0))
         assert node.schema.lower(None)["earlystop_snr"] == 50.0
         earlystop_snr.set_value(DirectValue(value=None))

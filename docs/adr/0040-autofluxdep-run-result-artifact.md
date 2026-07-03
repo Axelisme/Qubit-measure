@@ -21,15 +21,15 @@ status: accepted
 
 1. **Run Result Artifact 是 canonical source of truth。** `autofluxdep` 的 canonical persisted output 是一個 run-scoped artifact；fluxdep-compatible spectrum、dispersive input 與 markdown report 都是由它派生的 exchange export / report sidecar，不是 canonical source。
 
-2. **artifact 以 run directory 表達。** 每次 run 有一個 run directory，包含 manifest、append-only journal、每個 placed node 的 result file，以及可選 exports / report sidecars。manifest 擁有 run identity、workflow hash、node file list、terminal status 與 export/report path；journal 擁有 row-level audit events。
+2. **artifact 以 run-scoped metadata/data root 表達。** 每次 run 有一個 sortable slug，對應兩個同 slug root：metadata root 包含 manifest、append-only journal 與 report sidecar；data root 包含每個 placed node 的 result file 與 heavy exports。manifest 擁有 run identity、workflow hash、project result/database roots、metadata/data roots、node file list、terminal status 與 export/report path；journal 擁有 row-level audit events。
 
-3. **run directory 位於 project result scope 下。** artifact 放在 project `result_dir/autofluxdep_runs/<run_id>/`，不放 active context 的 `exps/` 目錄。autofluxdep 是 workflow-level sweep，不是 measure-gui tab experiment；其 output 要被 fluxdep / dispersive / report tooling 找到，應掛在 qubit scope 的 project result directory。
+3. **result_dir 只放輕量 metadata，heavy HDF5 放 project database_path。** metadata root 位於 project `result_dir/autofluxdep_runs/<run_slug>/`，不放 active context 的 `exps/` 目錄；data root 位於 project `database_path/autofluxdep_runs/<run_slug>/`。`database_path` 使用 shared startup resolved value，通常是 dated raw folder `Database/<chip>/<qub>/YYYY/MM/Data_MMDD`。autofluxdep 是 workflow-level sweep，不是 measure-gui tab experiment；其 metadata/report 要被 result tooling 找到，應掛在 qubit scope 的 project result directory；Labber-readable heavy data 則留在 Database tree。
 
 4. **run directory name 以 timestamp 為主，語意 slug 為輔。** 目錄名使用 sortable wall-clock timestamp 加可讀 slug，例如 `20260704-153012_flux-sweep`；真正 identity 是 manifest 內的 `run_id`，包含 timestamp 與短 random suffix，避免同秒 collision。slug 只供人閱讀，不作 stable identity。
 
-5. **manifest / journal 是正式版本化格式。** manifest 包含 `format_version: 1`；journal 每個 event 包含 `event_version: 1`。result browser、resume、agent report 與 migration tooling 都只能依賴版本化 shape；未知 major version 必須 fast-fail，不以 best-effort parse 假裝可讀。
+5. **manifest / journal 是正式版本化格式。** manifest 包含 `format_version: 1`；journal 每個 event 包含 `event_version: 1`。manifest 的 workflow snapshot 使用 node `to_persisted_raw()`；UI 可用 nested generation groups，但 snapshot 內的 `generation` 仍以 flat logical-key raw map 表達，避免 presentation grouping 改變 artifact contract。result browser、resume、agent report 與 migration tooling 都只能依賴版本化 shape；未知 major version 必須 fast-fail，不以 best-effort parse 假裝可讀。
 
-6. **每個 placed node 一個 streaming HDF5 result file。** canonical node data 不拆成每個 flux 一個檔案。node file 在 run start 預先建立 full-shape nan-filled datasets；每個 node row 完成後寫入同一個 node file 並 flush。這讓 `qubit_freq` 保持自然的 flux x detune map，也避免大量小檔讓 manifest/journal 變成主要資料庫。
+6. **每個 placed node 一個 streaming HDF5 result file。** canonical node data 不拆成每個 flux 一個檔案，且 node HDF5 寫在 data root 的 `nodes/` 下，不寫在 result_dir metadata root。node file 在 run start 預先建立 full-shape nan-filled datasets；每個 node row 完成後寫入同一個 node file 並 flush。這讓 `qubit_freq` 保持自然的 flux x detune map，也避免大量小檔讓 manifest/journal 變成主要資料庫。
 
 7. **node HDF5 盡量保持 Labber-readable。** 同一 node file 內的各 Result 欄位以多個 Labber log group / dataset role 表達，而不是只把 primary signal 做成 Labber dataset、把其他欄位藏進私有 HDF5 dataset。journal/manifest 才放 Labber 不自然表達的 workflow metadata。
 
@@ -51,7 +51,7 @@ status: accepted
 
 13. **fit / provide failure 仍可 committed。** 如果 acquire 完成、Result row 有 raw signal，但 fit gate 失敗導致 Patch 為空，node row 仍算 committed measurement attempt。journal 以 structured status 區分 `measurement_status` 與 `provide_status`；Patch `{}` 是可稽核狀態，不等於未測。
 
-14. **Patch 與 provided modules 進 journal，不進 Labber data channel。** Patch 是 downstream dependency state，不是 node self result channel。`node_row_written` event 記錄 `flux_idx`、node、Patch、provided modules、result file reference 與 provide status。
+14. **Patch 與 provided modules 進 journal，不進 Labber data channel。** Patch 是 downstream dependency state，不是 node self result channel。`node_row_written` event 記錄 `flux_idx`、node、Patch、provided modules、result file reference 與 provide status；result file reference 是相對 data root 的 path。
 
 15. **resolver skip 是 journal event，不是 HDF5 row。** 被 dependency resolver skip 的 node 不寫 HDF5 row，但 append `node_skipped` event。skip reason 是 structured data，至少包含 missing info keys / missing modules；保留 payload 擴充點。這需要把 resolver 的 implicit `None` skip 語意提升為 typed resolution result 或等價 side-channel。
 
@@ -61,7 +61,7 @@ status: accepted
 
 18. **persistence failure policy 採 fast-fail / fail-run / preserve-flushed-data。** run start 前建立 run directory、manifest、journal 或 node writers 任一步失敗，run 不開始；run 中 HDF5 row write、flush 或 journal append 失敗，視為 infrastructure failure 並 fail 整個 run；terminal report / export 失敗記入 manifest 並 surfaced，但不把已 committed measurement row 改成 measurement failure。manifest update 失敗必須 surfaced，但不得刪除或覆蓋已 flush 的 node HDF5 / journal。
 
-19. **markdown report 在 terminal finalize 時產生，不做 live report rewrite。** live safety 由 node HDF5 row flush、journal append 與 manifest update 提供；report 是 terminal summary。第一版 report 只包含 metadata、terminal status、node row/skip/failure summary、artifact paths、fluxdep export path 與 fit/provide summary，不輸出 PNG / MP4，也不要求 headless 重畫 figure。
+19. **markdown report 在 terminal finalize 時產生，不做 live report rewrite。** live safety 由 node HDF5 row flush、journal append 與 manifest update 提供；report 是 terminal summary。第一版 report 只包含 metadata、terminal status、node row/skip/failure summary、metadata/data root paths、fluxdep export path 與 fit/provide summary，不輸出 PNG / MP4，也不要求 headless 重畫 figure。
 
 20. **stop / cancel 必須 finalize artifact。** cooperative stop 不是 failure；terminal path 必須關閉 streaming writers、flush manifest/journal、寫 `status=stopped`，保留已 committed row。若 terminal finalize 本身失敗，錯誤要 surfaced，但不得破壞已 flush 的 node files / journal events。
 
@@ -71,9 +71,10 @@ status: accepted
 
 - `autofluxdep` persistence 不是 memento。Memento 只保存 workflow definition / UI preference；Run Result Artifact 保存 run output 與 audit trail。
 - `autofluxdep` run lifecycle 需要一個 store layer，負責 create / write node row / commit flux / finalize / load。它是 infrastructure boundary，不屬於 Node produce domain logic。
+- `result_dir` 保持輕量，適合 result browser、report 與 agent reference；Labber HDF5 path 必須透過 manifest 的 `paths.data_root` 加 node/export 相對 path 解析。
 - `project_snapshot()` / resolver skip path 需要提供 machine-readable skip reason，否則 artifact 無法完整稽核 skipped node。這是 resolver boundary 的顯式化，不改變 orchestrator 的「requirement resolver」角色。
 - `save_labber_data` 不承擔 long-lived partial write；新增 streaming primitive 時需保持與 ADR-0027 one-shot Experiment Data File 語意分離。
-- `fluxdep` handoff 第一版可由 `qubit_freq` node result 產生 Labber-compatible spectrum export，但 canonical evidence 仍是 run directory 內的 node file + journal。
+- `fluxdep` handoff 第一版可由 `qubit_freq` node result 產生 Labber-compatible spectrum export，但 canonical evidence 是 data root 內的 node/export file 加 metadata root 內的 journal/manifest。
 
 ## 拒絕的替代方案
 

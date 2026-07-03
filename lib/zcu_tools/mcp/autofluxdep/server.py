@@ -75,7 +75,8 @@ Read tools (all pure queries):
   - autofluxdep_state_check → {has_project, has_soc, node_count, flux_count,
     has_flux_device, is_running, has_results, has_loaded_predictor,
     has_run_predictor}.
-  - autofluxdep_project_info → {chip_name, qub_name, result_dir, params_path}.
+  - autofluxdep_project_info → {chip_name, qub_name, result_dir,
+    database_path, params_path}.
   - autofluxdep_workflow_list → each placed node's {name, type, provides,
     provides_modules, requires, has_result}.
   - autofluxdep_node_cfg(name) → {name, type, knobs:{...}} for one placed node.

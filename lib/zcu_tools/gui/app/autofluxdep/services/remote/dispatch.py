@@ -53,8 +53,8 @@ Handler = Callable[["RemoteControlAdapter", Mapping[str, object]], Mapping[str, 
 
 # ---------------------------------------------------------------------------
 # Project — note autofluxdep's ProjectInfo differs from gui.project.ProjectInfo
-# (it carries ``params_path``, not ``database_path``, and may be None), so the
-# shared project_info_payload / is_real_project helpers do NOT apply; only the
+# (it also carries ``params_path`` and may be None), so the shared
+# project_info_payload / is_real_project helpers do NOT apply; only the
 # DEFAULT_CHIP / DEFAULT_QUBIT placeholder constants are reused.
 # ---------------------------------------------------------------------------
 
@@ -80,12 +80,14 @@ def _h_project_info(
             "chip_name": None,
             "qub_name": None,
             "result_dir": None,
+            "database_path": None,
             "params_path": None,
         }
     return {
         "chip_name": project.chip_name,
         "qub_name": project.qub_name,
         "result_dir": project.result_dir,
+        "database_path": project.database_path,
         "params_path": project.params_path,
     }
 

@@ -44,6 +44,7 @@ def render_markdown_report(
     )
     terminal = dict(manifest.get("terminal", {}))
     files = dict(manifest.get("files", {}))
+    paths = dict(manifest.get("paths", {}))
     workflow = dict(manifest.get("workflow", {}))
     flux = dict(workflow.get("flux", {}))
     lines = [
@@ -58,6 +59,8 @@ def render_markdown_report(
         "",
         "## Artifact Paths",
         "",
+        f"- Metadata root: {paths.get('metadata_root', '')}",
+        f"- Data root: {paths.get('data_root', '')}",
         f"- Manifest: manifest.json",
         f"- Journal: {files.get('journal', 'journal.jsonl')}",
     ]

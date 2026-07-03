@@ -16,6 +16,7 @@ the measure-gui adapter's native value tree plus ``logical_paths`` directly into
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Final, cast
 
@@ -536,14 +537,26 @@ class NodeCfgSchema:
         return _jsonify_value_tree(self.schema.value)
 
     def to_persisted_raw(self) -> dict[str, object]:
-        """Encode the value tree using the shared cfg persistence codec."""
-        return schema_to_raw(self.schema)
+        """Encode the value tree using stable logical generation keys.
+
+        The visible UI value tree may group ``generation`` fields, but the workflow
+        memento and run manifest keep generation overrides flat by logical key so
+        grouping stays a presentation detail.
+        """
+        return _flatten_generation_persistence_raw(
+            schema_to_raw(self.schema),
+            self.logical_paths,
+        )
 
     def restore_persisted_raw(self, raw: Mapping[str, object]) -> None:
         """Restore the value tree from the shared cfg persistence raw shape."""
         try:
-            self.schema = raw_to_schema(self.schema, dict(raw))
-        except SessionCodecError as exc:
+            normalized_raw = _expand_generation_persistence_raw(
+                dict(raw),
+                self.logical_paths,
+            )
+            self.schema = raw_to_schema(self.schema, normalized_raw)
+        except (SessionCodecError, TypeError, ValueError, RuntimeError) as exc:
             raise NodeCfgPersistenceError(str(exc)) from exc
 
     def replace_value_tree(self, value: CfgSectionValue) -> None:
@@ -668,6 +681,113 @@ def _assign_value_at_path(value: CfgSectionValue, path: str, leaf: Any) -> None:
 
 
 _MISSING: Final = object()
+
+
+def _generation_logical_paths(
+    logical_paths: Mapping[str, str],
+) -> dict[str, tuple[str, ...]]:
+    paths: dict[str, tuple[str, ...]] = {}
+    for logical_key, path in logical_paths.items():
+        parts = _split_path(path)
+        if parts[0] == "generation":
+            paths[logical_key] = parts
+    return paths
+
+
+def _flatten_generation_persistence_raw(
+    raw: dict[str, object],
+    logical_paths: Mapping[str, str],
+) -> dict[str, object]:
+    generation_paths = _generation_logical_paths(logical_paths)
+    if not generation_paths:
+        return raw
+
+    generation: dict[str, object] = {}
+    for logical_key, parts in generation_paths.items():
+        generation[logical_key] = _raw_value_at_path(raw, parts)
+    raw["generation"] = generation
+    return raw
+
+
+def _expand_generation_persistence_raw(
+    raw: dict[str, object],
+    logical_paths: Mapping[str, str],
+) -> dict[str, object]:
+    generation_paths = _generation_logical_paths(logical_paths)
+    if not generation_paths:
+        return dict(raw)
+
+    expanded = deepcopy(raw)
+    raw_generation = expanded.get("generation")
+    if raw_generation is None:
+        return expanded
+    if not isinstance(raw_generation, dict):
+        return expanded
+
+    generation = cast(dict[str, object], raw_generation)
+    group_keys = {parts[1] for parts in generation_paths.values() if len(parts) > 2}
+    flat_keys = set(generation_paths)
+    unknown = set(generation) - group_keys - flat_keys
+    if unknown:
+        raise RuntimeError(
+            "Unknown persisted generation key(s): " + ", ".join(sorted(unknown))
+        )
+
+    for logical_key, parts in generation_paths.items():
+        if len(parts) <= 2 or logical_key not in generation:
+            continue
+        flat_value = generation.pop(logical_key)
+        _assign_raw_path_if_absent_or_same(
+            generation,
+            parts[1:],
+            flat_value,
+            subject=logical_key,
+        )
+    return expanded
+
+
+def _raw_value_at_path(raw: Mapping[str, object], parts: tuple[str, ...]) -> object:
+    cur: object = raw
+    for part in parts:
+        if not isinstance(cur, Mapping):
+            raise RuntimeError(
+                f"Persisted node cfg path {'.'.join(parts)!r} cannot descend "
+                f"through {type(cur).__name__}"
+            )
+        cur_map = cast(Mapping[str, object], cur)
+        if part not in cur_map:
+            raise RuntimeError(
+                f"Persisted node cfg path {'.'.join(parts)!r} is missing"
+            )
+        cur = cur_map[part]
+    return cur
+
+
+def _assign_raw_path_if_absent_or_same(
+    root: dict[str, object],
+    parts: tuple[str, ...],
+    value: object,
+    *,
+    subject: str,
+) -> None:
+    cur = root
+    for part in parts[:-1]:
+        child = cur.get(part)
+        if child is None:
+            child = {}
+            cur[part] = child
+        if not isinstance(child, dict):
+            raise RuntimeError(
+                f"Persisted generation key {subject!r} cannot descend through "
+                f"{part!r}: found {type(child).__name__}"
+            )
+        cur = cast(dict[str, object], child)
+
+    leaf = parts[-1]
+    existing = cur.get(leaf, _MISSING)
+    if existing is not _MISSING and existing != value:
+        raise RuntimeError(f"Conflicting persisted generation values for {subject!r}")
+    cur[leaf] = value
 
 
 def _lower_value_at_path(
