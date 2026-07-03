@@ -31,9 +31,10 @@ QICK Hardware Notes
   consuming them, so a preceding pending TEST becomes dead.
 - Opaque control boundaries such as CALL/RET clear local pending state without
   marking the TEST dead because the callee/return boundary may observe flags.
-- The scan is conservative in one direction: if a block exits (via its branch
-  field or by falling off the end) without a conditional jump, the pending
-  TEST is marked dead.
+- The scan is conservative at fall-through boundaries: if a block has no
+  terminal branch, the next block may consume the flags, so a pending TEST is
+  kept. A pending TEST is only marked dead at block exit when an explicit
+  unconditional branch proves there is no fall-through consumer.
 
 Decision Notes
 --------------
@@ -88,7 +89,7 @@ class DeadTestEliminationPass(BlockChunkPass):
 
         # After all insts, check the block's branch.
         if pending is not None:
-            if branch is None or branch.if_cond is None:
+            if branch is not None and branch.if_cond is None:
                 dead.add(pending)  # flag never consumed before block exit
 
         return dead

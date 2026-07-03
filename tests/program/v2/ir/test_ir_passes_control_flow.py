@@ -31,6 +31,7 @@ from zcu_tools.program.v2.ir.passes.control_flow import (
     BlockMergePass,
     BranchEliminationPass,
     DeadLabelEliminationPass,
+    UnreachableEliminationPass,
 )
 from zcu_tools.program.v2.ir.passes.dataflow import DeadWriteEliminationPass
 from zcu_tools.program.v2.ir.pipeline import (
@@ -190,6 +191,34 @@ def test_branch_elim_keeps_non_adjacent_branch():
     a = out.insts[0]
     assert isinstance(a, BasicBlockNode)
     assert a.branch is not None
+
+
+# ---------------------------------------------------------------------------
+# UnreachableEliminationPass
+# ---------------------------------------------------------------------------
+
+
+def test_unreachable_elim_keeps_fixed_block_but_removes_following_dead_block():
+    exit_label = _label("exit")
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(branch=JumpInst(label=LabelRef(exit_label))),
+            BasicBlockNode(insts=[NopInst()], disable_opt=True),
+            BasicBlockNode(insts=[NopInst()]),
+            BasicBlockNode(labels=[LabelInst(name=exit_label)], insts=[NopInst()]),
+        ]
+    )
+
+    out = _run_chunk_passes_on_root(root, [UnreachableEliminationPass()])
+
+    assert len(out.insts) == 3
+    fixed = out.insts[1]
+    assert isinstance(fixed, BasicBlockNode)
+    assert fixed.disable_opt is True
+    assert len(fixed.insts) == 1
+    exit_block = out.insts[2]
+    assert isinstance(exit_block, BasicBlockNode)
+    assert [label.name for label in exit_block.labels] == [exit_label]
 
 
 # ---------------------------------------------------------------------------

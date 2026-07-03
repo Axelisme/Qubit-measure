@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
+import pytest
 from zcu_tools.program.v2.ir.factory import IRParser
 from zcu_tools.program.v2.ir.instructions import (
     CallInst,
@@ -283,13 +284,15 @@ def test_dead_write_elimination_does_not_cross_call_boundary():
 
 
 def test_dead_test_elimination_removes_unused_test():
+    exit_label = Label("exit")
     root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
                     TestInst(op=AluExpr(Register("r1"), AluOp.SUB, Immediate(10))),
                     NopInst(),
-                ]
+                ],
+                branch=JumpInst(label=LabelRef(exit_label)),
             ),
         ]
     )
@@ -300,6 +303,36 @@ def test_dead_test_elimination_removes_unused_test():
     assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 1
     assert isinstance(bb.insts[0], NopInst)
+
+
+def test_dead_test_elimination_keeps_pending_test_before_fallthrough_exit():
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    TestInst(op=AluExpr(Register("r1"), AluOp.SUB, Immediate(10))),
+                    NopInst(),
+                ]
+            ),
+            BasicBlockNode(
+                insts=[
+                    RegWriteInst(
+                        dst=Register("r2"),
+                        src=SrcKeyword.IMM,
+                        lit=Immediate(1),
+                        if_cond="NZ",
+                    )
+                ]
+            ),
+        ]
+    )
+
+    root = _run_chunk_passes_on_root(root, [DeadTestEliminationPass()])
+
+    bb = root.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    assert isinstance(bb.insts[0], TestInst)
+    assert isinstance(bb.insts[1], NopInst)
 
 
 def test_dead_test_elimination_keeps_used_test():
@@ -875,13 +908,14 @@ def test_dead_test_conditional_jump_in_insts_consumes_flag():
             if_cond="Z",
             op=AluExpr(Register("r0"), AluOp.SUB, Immediate(0)),
         ),
-        _test_inst(),  # dead: no branch at end, no further consumer
+        _test_inst(),  # kept: branch=None is a possible fall-through boundary
     ]
     dead = pass_._find_dead_indices(insts, branch=None)  # type: ignore[attr-defined]
     # The first TEST (index 0) should NOT be dead (consumed by cond jump at index 1)
-    # The second TEST (index 2) should be dead (no consumer after it)
+    # The second TEST (index 2) is also kept conservatively because branch=None
+    # means a following block may consume the flags.
     assert 0 not in dead
-    assert 2 in dead
+    assert 2 not in dead
 
 
 # ---------------------------------------------------------------------------
@@ -915,6 +949,39 @@ def test_pipeline_non_convergence_emits_warning(caplog):
     assert any("OscillatingPass" in r.message for r in caplog.records)
 
 
+def test_pipeline_non_convergence_diagnostic_does_not_mutate_live_chunks(caplog):
+    import logging
+
+    from zcu_tools.program.v2.ir.pipeline import (
+        AbsChunkListPass,
+        ChunkList,
+        _run_chunklist_opt,
+    )
+
+    class DiagnosticMutatingPass(AbsChunkListPass):
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def process(self, chunks: ChunkList, ctx: PipeLineContext):
+            self.calls += 1
+            if self.calls > ctx.config.max_opt_iterations:
+                block = chunks[0]
+                assert isinstance(block, BasicBlockNode)
+                block.insts.append(NopInst())
+            return chunks, True
+
+    ctx = PipeLineContext(config=PipeLineConfig(max_opt_iterations=2), pmem_budget=1024)
+    block = BasicBlockNode(insts=[NopInst()])
+    chunks: ChunkList = [block]
+
+    with caplog.at_level(logging.WARNING, logger="zcu_tools.program.v2.ir.pipeline"):
+        out = _run_chunklist_opt([], [DiagnosticMutatingPass()], chunks, ctx)
+
+    assert out is chunks
+    assert block.insts == [NopInst()]
+    assert any("DiagnosticMutatingPass" in r.message for r in caplog.records)
+
+
 def test_pipeline_disable_opt_violation_raises():
     """A ChunkPass that changes word count of a disable_opt block must raise ValueError."""
     from zcu_tools.program.v2.ir.pipeline import (
@@ -942,6 +1009,67 @@ def test_pipeline_disable_opt_violation_raises():
 
     with pytest.raises(ValueError, match="disable_opt"):
         _run_passes([WordCountChangingPass()], chunks, ctx)
+
+
+def test_pipeline_disable_opt_deletion_raises():
+    from zcu_tools.program.v2.ir.pipeline import (
+        AbsChunkPass,
+        ChunkList,
+        _run_passes,
+    )
+
+    class DeletingPass(AbsChunkPass):
+        def process(self, chunks: ChunkList, ctx: PipeLineContext):
+            return [
+                chunk
+                for chunk in chunks
+                if not (isinstance(chunk, BasicBlockNode) and chunk.disable_opt)
+            ], True
+
+    ctx = PipeLineContext(config=PipeLineConfig(), pmem_budget=1024)
+    fixed_bb = BasicBlockNode(insts=[NopInst()], disable_opt=True)
+
+    with pytest.raises(ValueError, match="disable_opt"):
+        _run_passes([DeletingPass()], [fixed_bb], ctx)
+
+
+def test_pipeline_disable_opt_replacement_raises():
+    from zcu_tools.program.v2.ir.pipeline import (
+        AbsChunkPass,
+        ChunkList,
+        _run_passes,
+    )
+
+    class ReplacingPass(AbsChunkPass):
+        def process(self, chunks: ChunkList, ctx: PipeLineContext):
+            return [
+                BasicBlockNode(insts=list(chunk.insts), disable_opt=True)
+                if isinstance(chunk, BasicBlockNode) and chunk.disable_opt
+                else chunk
+                for chunk in chunks
+            ], True
+
+    ctx = PipeLineContext(config=PipeLineConfig(), pmem_budget=1024)
+    fixed_bb = BasicBlockNode(insts=[NopInst()], disable_opt=True)
+
+    with pytest.raises(ValueError, match="disable_opt"):
+        _run_passes([ReplacingPass()], [fixed_bb], ctx)
+
+
+def test_pipeline_tree_pass_missing_disable_opt_block_raises():
+    from zcu_tools.program.v2.ir.pipeline import _optimize_tree
+
+    class DroppingTreePass(AbsIRTreePass):
+        def transform(self, node: IRNode, ctx: PipeLineContext):
+            if isinstance(node, BlockNode):
+                return BlockNode()
+            return None
+
+    ctx = PipeLineContext(config=PipeLineConfig(), pmem_budget=1024)
+    root = BlockNode(insts=[BasicBlockNode(insts=[NopInst()], disable_opt=True)])
+
+    with pytest.raises(ValueError, match="disable_opt"):
+        _optimize_tree(root, [DroppingTreePass()], ctx)
 
 
 # ---------------------------------------------------------------------------

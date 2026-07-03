@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 # Pattern to extract registers, literals and operators
 _OP_TOKEN_RE = re.compile(
-    r"([a-zA-Z_]\w*|#u?\-?[0-9A-Fa-f]+|&[a-zA-Z0-9_]+|@[0-9\-]+|<<|>>|AND|OR|XOR|ASR|SR|SL|ABS|MSH|LSH|SWP|CAT|::|NOT|!|PAR|[\+\-\*&\|\^=<>]+)"
+    r"([a-zA-Z_]\w*|#(?:u|b|h)?\-?[0-9A-Fa-f_xX]+|&[a-zA-Z0-9_]+|@[0-9\-_]+|<<|>>|AND|OR|XOR|ASR|SR|SL|ABS|MSH|LSH|SWP|CAT|::|NOT|!|PAR|[\+\-\*&\|\^=<>]+)"
 )
 
 
@@ -113,6 +113,27 @@ _REG_ALIAS: dict[str, str] = {
 def canonical_reg(name: str) -> str:
     """Resolve a register alias (e.g. 'w_freq' -> 'w0') to its canonical name."""
     return _REG_ALIAS.get(name, name)
+
+
+def _parse_prefixed_int(raw: str) -> int:
+    if raw.startswith("#b"):
+        return int(raw[2:], 2)
+    if raw.startswith("#h"):
+        return int(raw[2:], 16)
+    if raw.startswith("#u"):
+        return _parse_int_literal(raw[2:])
+    if raw.startswith("#"):
+        return _parse_int_literal(raw[1:])
+    return _parse_int_literal(raw)
+
+
+def _parse_int_literal(raw: str) -> int:
+    try:
+        return int(raw, 0)
+    except ValueError:
+        if re.fullmatch(r"[+-]?[0-9][0-9_]*", raw):
+            return int(raw, 10)
+        raise
 
 
 @dataclass
@@ -316,14 +337,10 @@ def parse_immediate(val: Immediate | str | int | None) -> Immediate | None:
     if not isinstance(val, str):
         return None
     val = val.strip()
-    if val.startswith("#u"):
-        num_str = val[2:]
-    elif val.startswith("#"):
-        num_str = val[1:]
-    else:
+    if not val.startswith("#"):
         return None
     try:
-        return Immediate(value=int(num_str, 0))
+        return Immediate(value=_parse_prefixed_int(val))
     except ValueError:
         return None
 
@@ -372,12 +389,7 @@ def parse_imm_value(val: ImmValue | str | int | None) -> ImmValue | None:
         return None
     val = val.strip()
     try:
-        if (
-            val.isdigit()
-            or (val.startswith("-") and val[1:].isdigit())
-            or val.startswith("0x")
-        ):
-            return ImmValue(value=int(val, 0))
+        return ImmValue(value=_parse_int_literal(val))
     except ValueError:
         pass
     return None

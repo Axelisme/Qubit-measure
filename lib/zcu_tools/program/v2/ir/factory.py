@@ -116,60 +116,99 @@ class IRParser:
         return root
 
     def _check_sese(self, items: list[BasicBlockNode | MetaInst]) -> None:
-        control_labels: set[str] = set()
-        skip_indices: set[int] = set()
+        start_to_end = {
+            "LOOP_START": "LOOP_END",
+            "BRANCH_START": "BRANCH_END",
+            "DISPATCH_START": "DISPATCH_END",
+        }
+        end_to_start = {end: start for start, end in start_to_end.items()}
+        regions: list[tuple[str, str, set[int], set[str]]] = []
+        region_stack: list[tuple[str, str, set[int], set[str]]] = []
 
-        depth = 0
-        skip_active = False
-
-        i = 0
-        while i < len(items):
-            item = items[i]
+        for i, item in enumerate(items):
             if isinstance(item, MetaInst):
                 mt = item.type
-                if mt in ("LOOP_START", "BRANCH_START"):
-                    depth += 1
-                    skip_active = True
-                elif mt in ("LOOP_BODY_START", "BRANCH_CASE_START"):
-                    skip_active = False
-                elif mt == "LOOP_BODY_END":
-                    skip_active = True
-                elif mt == "BRANCH_CASE_END":
-                    if depth > 0:
-                        skip_active = True
-                elif mt in ("LOOP_END", "BRANCH_END"):
-                    depth -= 1
-                    if depth < 0:
+                if mt in start_to_end:
+                    block_indices: set[int] = set()
+                    label_names: set[str] = set()
+                    region = (mt, item.name, block_indices, label_names)
+                    region_stack.append(region)
+                    regions.append(region)
+                    continue
+                if mt in end_to_start:
+                    expected_start = end_to_start[mt]
+                    if not region_stack or region_stack[-1][0] != expected_start:
                         raise ValueError(
                             f"IRParser: unexpected META {mt!r} without matching start"
                         )
-                    skip_active = depth > 0
-            else:
-                assert isinstance(item, BasicBlockNode)
-                if skip_active and depth > 0:
-                    skip_indices.add(i)
-                    for lbl in item.labels:
-                        control_labels.add(str(lbl.name))
-            i += 1
+                    start_type, start_name, _block_indices, _label_names = (
+                        region_stack.pop()
+                    )
+                    if item.name != start_name:
+                        raise ValueError(
+                            f"IRParser: META {mt!r} name {item.name!r} does not "
+                            f"match {start_type!r} name {start_name!r}"
+                        )
+                    continue
 
-        if depth != 0:
+            if isinstance(item, BasicBlockNode) and region_stack:
+                label_names = {str(lbl.name) for lbl in item.labels}
+                for _mt, _name, block_indices, region_labels in region_stack:
+                    block_indices.add(i)
+                    region_labels.update(label_names)
+
+        if region_stack:
             raise ValueError("IRParser: unbalanced structural META markers")
 
-        if not control_labels:
+        if not any(label_names for _mt, _name, _indices, label_names in regions):
             return
 
+        refs_by_idx = {
+            idx: self._block_needed_label_names(item)
+            for idx, item in enumerate(items)
+            if isinstance(item, BasicBlockNode)
+        }
+
+        for _mt, _name, block_indices, label_names in regions:
+            if not label_names:
+                continue
+            for idx, refs in refs_by_idx.items():
+                if idx in block_indices:
+                    continue
+                hit = refs & label_names
+                if hit:
+                    raise ValueError(
+                        f"IRParser: jump to control label {sorted(hit)[0]!r} from "
+                        f"outside its structural region violates SESE assumption. "
+                        f"Block index {idx}."
+                    )
+
+    @staticmethod
+    def _block_needed_label_names(item: BasicBlockNode) -> set[str]:
+        refs: set[str] = set()
+        for inst in item.insts:
+            refs.update(str(label) for label in inst.need_labels)
+        if item.branch is not None:
+            refs.update(str(label) for label in item.branch.need_labels)
+        return refs
+
         for idx, item in enumerate(items):
-            if idx in skip_indices:
+            if idx in inside_indices:
                 continue
             if not isinstance(item, BasicBlockNode):
                 continue
-            for jump in [item.branch] if item.branch else []:
-                if jump.label is not None and str(jump.label) in control_labels:
-                    raise ValueError(
-                        f"IRParser: jump to control label {str(jump.label)!r} from "
-                        f"outside its structural region violates SESE assumption. "
-                        f"Block index {idx}: {item}"
-                    )
+            refs: set[str] = set()
+            for inst in item.insts:
+                refs.update(str(label) for label in inst.need_labels)
+            if item.branch is not None:
+                refs.update(str(label) for label in item.branch.need_labels)
+            hit = refs & control_labels
+            if hit:
+                raise ValueError(
+                    f"IRParser: jump to control label {sorted(hit)[0]!r} from "
+                    f"outside its structural region violates SESE assumption. "
+                    f"Block index {idx}."
+                )
 
     def _parse_block(
         self,
@@ -291,7 +330,7 @@ class IRParser:
                 f"IRParser: mismatched BRANCH_END for {branch.name!r}, got {end_meta.name!r}"
             )
 
-        end_label = self._consume_branch_end_label(items, pos)
+        end_label = self._consume_branch_end_label(items, pos, branch.name)
         branch.cases = [
             self._strip_synthetic_branch_jump(case, end_label)
             for _, case in parsed_cases
@@ -323,6 +362,7 @@ class IRParser:
         self,
         items: list[BasicBlockNode | MetaInst],
         pos: list[int],
+        branch_name: str,
     ) -> Label | None:
         if pos[0] >= len(items):
             return None
@@ -334,8 +374,15 @@ class IRParser:
             or len(item.labels) != 1
         ):
             return None
+        label_inst = item.labels[0]
+        label_name = str(label_inst.name)
+        expected = f"{branch_name}_end"
+        if not label_inst.can_remove or (
+            label_name != expected and not label_name.startswith(f"{expected}_")
+        ):
+            return None
         pos[0] += 1
-        return item.labels[0].name
+        return label_inst.name
 
     def _strip_synthetic_branch_jump(
         self,
@@ -456,12 +503,22 @@ class IRParser:
                 first_block_attached = False
                 for item in case_items:
                     if not first_block_attached and isinstance(item, BasicBlockNode):
-                        item.labels.insert(
-                            0,
-                            LabelInst(name=case_entry_labels[idx], can_remove=True),
+                        result_branch.append(
+                            BasicBlockNode(
+                                labels=[
+                                    LabelInst(
+                                        name=case_entry_labels[idx], can_remove=True
+                                    ),
+                                    *item.labels,
+                                ],
+                                insts=list(item.insts),
+                                branch=item.branch,
+                                disable_opt=item.disable_opt,
+                            )
                         )
                         first_block_attached = True
-                    result_branch.append(item)
+                    else:
+                        result_branch.append(item)
                 if not first_block_attached:
                     result_branch.append(
                         BasicBlockNode(

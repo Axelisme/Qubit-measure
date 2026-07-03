@@ -97,6 +97,9 @@ def test_parse_immediate_paths():
     assert parse_immediate(5) == Immediate(5)
     assert parse_immediate("#7") == Immediate(7)
     assert parse_immediate("#u0x10") == Immediate(16)
+    assert parse_immediate("#b1010_0101") == Immediate(0b1010_0101)
+    assert parse_immediate("#hff_00") == Immediate(0xFF00)
+    assert parse_immediate("#1_000") == Immediate(1000)
     assert parse_immediate(None) is None
     assert parse_immediate("7") is None
     assert parse_immediate("#bogus") is None
@@ -127,6 +130,8 @@ def test_parse_mem_addr_and_imm_value_paths():
     assert parse_imm_value("12") == ImmValue(12)
     assert parse_imm_value("-7") == ImmValue(-7)
     assert parse_imm_value("0x20") == ImmValue(32)
+    assert parse_imm_value("1_024") == ImmValue(1024)
+    assert parse_imm_value("0b1010_0101") == ImmValue(0b1010_0101)
     assert parse_imm_value(None) is None
     assert parse_imm_value("1.2") is None
     assert parse_imm_value("0xGG") is None
@@ -145,6 +150,12 @@ def test_parse_label_paths():
 def test_parse_alu_expr_success_paths():
     expr = parse_alu_expr("r1 + #3")
     assert expr == AluExpr(Register("r1"), AluOp.ADD, Immediate(3))
+
+    prefixed = parse_alu_expr("r1 + #h7F_0000")
+    assert prefixed == AluExpr(Register("r1"), AluOp.ADD, Immediate(0x7F_0000))
+
+    unsigned_hex = parse_alu_expr("r1 + #u0x10")
+    assert unsigned_hex == AluExpr(Register("r1"), AluOp.ADD, Immediate(16))
 
     reg_rhs = parse_alu_expr("r1 AND s2")
     assert reg_rhs == AluExpr(Register("r1"), AluOp.AND, Register("s2"))

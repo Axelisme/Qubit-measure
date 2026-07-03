@@ -254,6 +254,25 @@ def test_branch_requires_at_least_two_branches():
         Branch("sel", [_FixedDurationModule("b0", 0.1)])
 
 
+def test_branch_rejects_s15_default_compare_register():
+    with pytest.raises(ValueError, match="s15"):
+        Branch(
+            "s15",
+            [_FixedDurationModule("b0", 0.1)],
+            [_FixedDurationModule("b1", 0.2)],
+        )
+
+
+def test_branch_rejects_s15_compare_by_alias():
+    with pytest.raises(ValueError, match="s15"):
+        Branch(
+            "sel",
+            [_FixedDurationModule("b0", 0.1)],
+            [_FixedDurationModule("b1", 0.2)],
+            compare_by="s_addr",
+        )
+
+
 # ---------------------------------------------------------------------------
 # Branch — init delegates to sub-module init
 # ---------------------------------------------------------------------------

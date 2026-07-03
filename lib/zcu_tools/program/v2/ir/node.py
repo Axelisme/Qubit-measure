@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
+from .hw_semantics import ADDR_REG
 from .instructions import BaseInst, JumpInst, LabelInst, MetaInst
 from .labels import Label
 from .operands import Register
@@ -168,6 +169,12 @@ class IRBranch(IRNode):
     compare_reg: Register
     cases: list[IRNode]
 
+    def __post_init__(self) -> None:
+        if self.compare_reg.canonical_name == ADDR_REG:
+            raise ValueError(
+                f"IRBranch.compare_reg must not be reserved address register {ADDR_REG}"
+            )
+
     def children(self) -> list[IRNode]:
         return list(self.cases)
 
@@ -206,6 +213,12 @@ class IRDispatch(IRNode):
     name: str
     value_reg: Register
     target_labels: list[Label]
+
+    def __post_init__(self) -> None:
+        if self.value_reg.canonical_name == ADDR_REG:
+            raise ValueError(
+                f"IRDispatch.value_reg must not be reserved address register {ADDR_REG}"
+            )
 
     def children(self) -> list[IRNode]:
         return []

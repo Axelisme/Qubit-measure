@@ -34,7 +34,14 @@ from zcu_tools.program.v2.ir.node import (
     IRLoop,
     IRNode,
 )
-from zcu_tools.program.v2.ir.operands import Immediate, Register, SrcKeyword
+from zcu_tools.program.v2.ir.operands import (
+    AluExpr,
+    AluOp,
+    DmemAddr,
+    Immediate,
+    Register,
+    SrcKeyword,
+)
 from zcu_tools.program.v2.ir.passes import BranchEliminationPass
 from zcu_tools.program.v2.ir.passes.control_flow import SimplifyDispatchPass
 from zcu_tools.program.v2.ir.pipeline import (
@@ -121,6 +128,162 @@ def _run_full_pipeline_capture_ctx(
     insts = lexer.flatten(parser.unparse(root))
     out_insts, ctx = pipeline(insts)
     return parser.parse(lexer.lex(out_insts)), ctx
+
+
+# ---------------------------------------------------------------------------
+# Structural parser invariants
+# ---------------------------------------------------------------------------
+
+
+def test_sese_rejects_external_jump_into_loop_body_label():
+    body_label = Label("loop_body_user")
+    items = [
+        BasicBlockNode(branch=JumpInst(label=LabelRef(body_label))),
+        MetaInst(
+            type="LOOP_START",
+            name="lp",
+            info={"counter_reg": "r0", "n": 1},
+        ),
+        MetaInst(type="LOOP_BODY_START", name="lp"),
+        BasicBlockNode(labels=[LabelInst(name=body_label)], insts=[NopInst()]),
+        MetaInst(type="LOOP_BODY_END", name="lp"),
+        MetaInst(type="LOOP_END", name="lp"),
+    ]
+
+    with pytest.raises(ValueError, match="violates SESE assumption"):
+        IRParser().parse(items)
+
+
+def test_sese_rejects_external_jump_into_branch_case_label():
+    case_label = Label("branch_case_user")
+    items = [
+        BasicBlockNode(branch=JumpInst(label=LabelRef(case_label))),
+        MetaInst(type="BRANCH_START", name="br", info={"compare_reg": "r0"}),
+        MetaInst(type="BRANCH_CASE_START", name="0"),
+        BasicBlockNode(labels=[LabelInst(name=case_label)], insts=[NopInst()]),
+        MetaInst(type="BRANCH_CASE_END", name="0"),
+        MetaInst(type="BRANCH_END", name="br"),
+    ]
+
+    with pytest.raises(ValueError, match="violates SESE assumption"):
+        IRParser().parse(items)
+
+
+def test_sese_rejects_parent_region_jump_into_nested_loop_body_label():
+    body_label = Label("nested_loop_body")
+    items = [
+        MetaInst(type="BRANCH_START", name="br", info={"compare_reg": "r0"}),
+        MetaInst(type="BRANCH_CASE_START", name="0"),
+        BasicBlockNode(branch=JumpInst(label=LabelRef(body_label))),
+        MetaInst(
+            type="LOOP_START",
+            name="inner",
+            info={"counter_reg": "r1", "n": 1},
+        ),
+        MetaInst(type="LOOP_BODY_START", name="inner"),
+        BasicBlockNode(labels=[LabelInst(name=body_label)], insts=[NopInst()]),
+        MetaInst(type="LOOP_BODY_END", name="inner"),
+        MetaInst(type="LOOP_END", name="inner"),
+        MetaInst(type="BRANCH_CASE_END", name="0"),
+        MetaInst(type="BRANCH_END", name="br"),
+    ]
+
+    with pytest.raises(ValueError, match="violates SESE assumption"):
+        IRParser().parse(items)
+
+
+def test_sese_rejects_external_instruction_need_labels_into_loop_body():
+    body_label = Label("loop_dmem_entry")
+    items = [
+        BasicBlockNode(
+            insts=[
+                RegWriteInst(
+                    dst=Register("r2"),
+                    src=SrcKeyword.OP,
+                    op=AluExpr(Register("r1"), AluOp.ADD, DmemAddr((body_label,))),
+                )
+            ]
+        ),
+        MetaInst(
+            type="LOOP_START",
+            name="lp",
+            info={"counter_reg": "r0", "n": 1},
+        ),
+        MetaInst(type="LOOP_BODY_START", name="lp"),
+        BasicBlockNode(labels=[LabelInst(name=body_label)], insts=[NopInst()]),
+        MetaInst(type="LOOP_BODY_END", name="lp"),
+        MetaInst(type="LOOP_END", name="lp"),
+    ]
+
+    with pytest.raises(ValueError, match="violates SESE assumption"):
+        IRParser().parse(items)
+
+
+def test_sese_rejects_external_jump_into_dispatch_internal_label():
+    table_label = Label("dispatch_entry")
+    items = [
+        BasicBlockNode(branch=JumpInst(label=LabelRef(table_label))),
+        MetaInst(type="DISPATCH_START", name="d"),
+        BasicBlockNode(
+            labels=[LabelInst(name=table_label)],
+            branch=JumpInst(label=LabelRef(Label("target"))),
+        ),
+        MetaInst(type="DISPATCH_END", name="d"),
+    ]
+
+    with pytest.raises(ValueError, match="violates SESE assumption"):
+        IRParser().parse(items)
+
+
+def test_parse_branch_end_keeps_user_label_after_branch():
+    after = Label("user_after_branch")
+    items = [
+        MetaInst(type="BRANCH_START", name="br", info={"compare_reg": "r0"}),
+        MetaInst(type="BRANCH_CASE_START", name="0"),
+        BasicBlockNode(insts=[NopInst()]),
+        MetaInst(type="BRANCH_CASE_END", name="0"),
+        MetaInst(type="BRANCH_END", name="br"),
+        BasicBlockNode(labels=[LabelInst(name=after, can_remove=False)]),
+    ]
+
+    root = IRParser().parse(items)
+
+    assert len(root.insts) == 2
+    assert isinstance(root.insts[0], IRBranch)
+    after_block = root.insts[1]
+    assert isinstance(after_block, BasicBlockNode)
+    assert [label.name for label in after_block.labels] == [after]
+
+
+def test_unparse_branch_fallback_does_not_mutate_case_labels():
+    user_label = Label("case_user")
+    case_block = BasicBlockNode(labels=[LabelInst(name=user_label)], insts=[NopInst()])
+    root = BlockNode(
+        insts=[
+            IRBranch(
+                name="br",
+                compare_reg=Register("r0"),
+                cases=[
+                    BlockNode(insts=[case_block]),
+                    BlockNode(insts=[BasicBlockNode(insts=[NopInst()])]),
+                ],
+            )
+        ]
+    )
+
+    IRParser(pmem_size=512).unparse(root)
+
+    assert [label.name for label in case_block.labels] == [user_label]
+
+
+def test_ir_branch_and_dispatch_reject_s15_selector():
+    with pytest.raises(ValueError, match="s15"):
+        IRBranch(name="br", compare_reg=Register("s15"), cases=[])
+
+    with pytest.raises(ValueError, match="s15"):
+        IRDispatch(
+            name="disp", value_reg=Register("s_addr"), target_labels=[Label("t")]
+        )
 
 
 # ---------------------------------------------------------------------------

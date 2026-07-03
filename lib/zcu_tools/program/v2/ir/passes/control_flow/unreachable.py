@@ -36,6 +36,8 @@ QICK Hardware Notes
   bookkeeping.
 - A block with labels is always potentially reachable (some dynamic branch may
   target it), so dead-mode ends as soon as a labelled block is encountered.
+- A block with ``disable_opt=True`` is a physical-layout barrier. It is kept
+  even in dead-mode; removing it would violate fixed program-memory offsets.
 
 Decision Notes
 --------------
@@ -71,6 +73,8 @@ class UnreachableEliminationPass(AbsChunkListPass):
         for chunk in chunks:
             if dead_mode:
                 if isinstance(chunk, MetaInst):
+                    result.append(chunk)
+                elif isinstance(chunk, BasicBlockNode) and chunk.disable_opt:
                     result.append(chunk)
                 elif isinstance(chunk, BasicBlockNode) and chunk.labels:
                     dead_mode = False

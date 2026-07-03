@@ -137,14 +137,59 @@ class AbsIRTreePass(ABC):
 
 
 def _validate_fixed_block_words(
-    block: BasicBlockNode, *, before_addr_size: int | None
+    block: BasicBlockNode, *, before_addr_size: int
 ) -> None:
     block.__post_init__()
-    if before_addr_size is not None and block.addr_size != before_addr_size:
+    if not block.disable_opt:
         raise ValueError(
-            "AbsChunkPass violated disable_opt invariant: "
+            "Pass violated disable_opt invariant: fixed block lost disable_opt=True."
+        )
+    if block.addr_size != before_addr_size:
+        raise ValueError(
+            "Pass violated disable_opt invariant: "
             "block program-memory word count changed."
         )
+
+
+def _collect_fixed_blocks(node: IRNode) -> dict[int, tuple[BasicBlockNode, int]]:
+    from .node import BlockNode, IRBranch, IRLoop
+
+    if isinstance(node, BasicBlockNode):
+        return {id(node): (node, node.addr_size)} if node.disable_opt else {}
+    result: dict[int, tuple[BasicBlockNode, int]] = {}
+    if isinstance(node, BlockNode):
+        for child in node.insts:
+            result.update(_collect_fixed_blocks(child))
+    elif isinstance(node, IRLoop):
+        result.update(_collect_fixed_blocks(node.body))
+    elif isinstance(node, IRBranch):
+        for case in node.cases:
+            result.update(_collect_fixed_blocks(case))
+    return result
+
+
+def _validate_fixed_blocks_preserved(
+    before: dict[int, tuple[BasicBlockNode, int]],
+    node_or_chunks: IRNode | ChunkList,
+) -> None:
+    if not before:
+        return
+    if isinstance(node_or_chunks, list):
+        after: dict[int, tuple[BasicBlockNode, int]] = {
+            id(chunk): (chunk, chunk.addr_size)
+            for chunk in node_or_chunks
+            if isinstance(chunk, BasicBlockNode)
+        }
+    else:
+        after = _collect_fixed_blocks(node_or_chunks)
+    missing = set(before) - set(after)
+    if missing:
+        raise ValueError(
+            "Pass violated disable_opt invariant: fixed block was removed or replaced."
+        )
+    for block_id, (_, before_addr_size) in before.items():
+        block = after[block_id][0]
+        _validate_fixed_block_words(block, before_addr_size=before_addr_size)
 
 
 def _run_passes(
@@ -156,18 +201,12 @@ def _run_passes(
     changed = False
     for chunk_pass in passes:
         fixed_before = {
-            id(chunk): chunk.addr_size
+            id(chunk): (chunk, chunk.addr_size)
             for chunk in chunks
             if isinstance(chunk, BasicBlockNode) and chunk.disable_opt
         }
         chunks, pass_changed = chunk_pass.process(chunks, ctx)
-        for chunk in chunks:
-            if not isinstance(chunk, BasicBlockNode):
-                continue
-            _validate_fixed_block_words(
-                chunk,
-                before_addr_size=fixed_before.get(id(chunk)),
-            )
+        _validate_fixed_blocks_preserved(fixed_before, chunks)
         changed |= pass_changed
     return chunks, changed
 
@@ -196,7 +235,7 @@ def _run_chunklist_opt(
     # Did not converge — identify the still-changing passes for debugging.
     stuck: list[str] = []
     for p in (*passes, *chunk_list_passes):
-        _, changed = p.process(chunks, ctx)
+        _, changed = p.process(deepcopy(chunks), deepcopy(ctx))
         if changed:
             stuck.append(type(p).__name__)
     logger.warning(
@@ -230,6 +269,8 @@ def _optimize_tree(
     if isinstance(node, BasicBlockNode):
         return node
 
+    fixed_before = _collect_fixed_blocks(node)
+
     # ── Recurse into children first (post-order) ──────────────────────────────
     if isinstance(node, BlockNode):
         node.insts = [_optimize_tree(child, tree_passes, ctx) for child in node.insts]
@@ -245,7 +286,9 @@ def _optimize_tree(
     for tree_pass in tree_passes:
         replacement = tree_pass.transform(node, ctx)
         if replacement is not None:
+            _validate_fixed_blocks_preserved(fixed_before, replacement)
             return _optimize_tree(replacement, tree_passes, ctx)
+    _validate_fixed_blocks_preserved(fixed_before, node)
     return node
 
 

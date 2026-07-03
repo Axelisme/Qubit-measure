@@ -322,6 +322,43 @@ class TestRegWriteInstruction:
         recovered = inst.to_dict()
         assert recovered == original
 
+    def test_roundtrip_regwr_wmem_preserves_wp_and_port(self):
+        original = {
+            "CMD": "REG_WR",
+            "DST": "r_wave",
+            "SRC": "wmem",
+            "ADDR": "&7",
+            "WP": "r_wave",
+            "PORT": "3",
+        }
+        inst = BaseInst.from_dict(original)
+        assert isinstance(inst, RegWriteInst)
+        assert inst.wp == "r_wave"
+        assert inst.port == "3"
+        assert inst.to_dict() == original
+
+    def test_regwr_rejects_packed_wp_port_shape(self):
+        with pytest.raises(ValueError, match="REG_WR.WP"):
+            BaseInst.from_dict(
+                {
+                    "CMD": "REG_WR",
+                    "DST": "r_wave",
+                    "SRC": "wmem",
+                    "ADDR": "&7",
+                    "WP": "r_wave p3",
+                }
+            )
+
+    def test_regwr_rejects_invalid_src_token(self):
+        with pytest.raises(ValueError, match="REG_WR.SRC"):
+            BaseInst.from_dict({"CMD": "REG_WR", "DST": "r0", "SRC": "garbage"})
+
+    def test_regwr_rejects_invalid_immediate_field(self):
+        with pytest.raises(ValueError, match="REG_WR.LIT"):
+            BaseInst.from_dict(
+                {"CMD": "REG_WR", "DST": "r0", "SRC": "imm", "LIT": "#bad"}
+            )
+
     def test_regwr_immutable(self):
         inst = RegWriteInst(dst=Register("s1"), src=SrcKeyword.IMM)
         with pytest.raises(Exception):
@@ -419,7 +456,7 @@ class TestUnknownOpcode:
 
     def test_dispatch_dport_wr_to_specific(self):
         """DPORT_WR is specially handled; should be DportWriteInst."""
-        d = {"CMD": "DPORT_WR", "DST": "0", "DATA": "1"}
+        d = {"CMD": "DPORT_WR", "DST": "0", "SRC": "imm", "DATA": "1"}
         inst = BaseInst.from_dict(d)
         assert isinstance(inst, DportWriteInst)
         assert str(inst.dst) == "0"
@@ -465,12 +502,13 @@ class TestWmemWriteInstruction:
     """Tests for WMEM_WR."""
 
     def test_dispatch_wmem_wr(self):
-        d = {"CMD": "WMEM_WR", "DST": "&5", "TIME": "@10", "WP": "r_wave p0"}
+        d = {"CMD": "WMEM_WR", "DST": "&5", "TIME": "@10", "WP": "r_wave", "PORT": "0"}
         inst = BaseInst.from_dict(d)
         assert isinstance(inst, WmemWriteInst)
         assert str(inst.addr) == "&5"
         assert str(inst.time) == "@10"
-        assert inst.wp == "r_wave p0"
+        assert inst.wp == "r_wave"
+        assert inst.port == "0"
 
     def test_roundtrip_wmem_wr(self):
         original = {
@@ -492,7 +530,8 @@ class TestWmemWriteInstruction:
             wr=SideWrite(Register("r3"), "op"),
             uf=True,
             if_cond="NZ",
-            wp="r_wave p0",
+            wp="r_wave",
+            port="0",
         )
         reads = inst.reg_read
         assert "s14" in reads
@@ -507,11 +546,24 @@ class TestWmemWriteInstruction:
             "OP": "r3 + #1",
             "UF": "1",
             "IF": "NZ",
-            "WP": "r_wave p0",
+            "WP": "r_wave",
+            "PORT": "0",
         }
         inst = BaseInst.from_dict(original)
         assert isinstance(inst, WmemWriteInst)
         assert inst.to_dict() == original
+
+    def test_wmem_wr_rejects_packed_wp_port_shape(self):
+        with pytest.raises(ValueError, match="WMEM_WR.WP"):
+            BaseInst.from_dict({"CMD": "WMEM_WR", "DST": "&5", "WP": "r_wave p0"})
+
+    def test_wmem_wr_rejects_wp_without_port(self):
+        with pytest.raises(ValueError, match="WMEM_WR.PORT"):
+            BaseInst.from_dict({"CMD": "WMEM_WR", "DST": "&5", "WP": "r_wave"})
+
+    def test_wmem_wr_rejects_invalid_time_field(self):
+        with pytest.raises(ValueError, match="WMEM_WR.TIME"):
+            BaseInst.from_dict({"CMD": "WMEM_WR", "DST": "&5", "TIME": "@bad"})
 
 
 class TestDportReadInstruction:
@@ -914,15 +966,66 @@ class TestStrictParsing:
         assert inst.addr == Register("s15")
 
     def test_dport_write_data_rejects_garbage_string(self):
-        with pytest.raises(ValueError, match="DPORT_WR data value"):
-            BaseInst.from_dict({"CMD": "DPORT_WR", "DST": "0", "DATA": "garbage"})
+        with pytest.raises(ValueError, match="DPORT_WR.DATA"):
+            BaseInst.from_dict(
+                {"CMD": "DPORT_WR", "DST": "0", "SRC": "imm", "DATA": "garbage"}
+            )
 
     def test_dport_write_data_rejects_unknown_register_name(self):
-        with pytest.raises(ValueError, match="DPORT_WR data value"):
-            BaseInst.from_dict({"CMD": "DPORT_WR", "DST": "0", "DATA": "w_bogus"})
+        with pytest.raises(ValueError, match="DPORT_WR.DATA"):
+            BaseInst.from_dict(
+                {"CMD": "DPORT_WR", "DST": "0", "SRC": "reg", "DATA": "w_bogus"}
+            )
 
-    @pytest.mark.parametrize("data", ["0", "#1", "r0", "w0"])
-    def test_dport_write_data_accepts_valid_value_types(self, data: str):
-        inst = BaseInst.from_dict({"CMD": "DPORT_WR", "DST": "0", "DATA": data})
+    def test_dport_write_requires_src(self):
+        with pytest.raises(ValueError, match="DPORT_WR.SRC"):
+            BaseInst.from_dict({"CMD": "DPORT_WR", "DST": "0", "DATA": "0"})
+
+    def test_dport_write_rejects_invalid_src_keyword(self):
+        with pytest.raises(ValueError, match="DPORT_WR.SRC"):
+            BaseInst.from_dict(
+                {"CMD": "DPORT_WR", "DST": "0", "SRC": "wmem", "DATA": "0"}
+            )
+
+    def test_dport_write_rejects_register_src_token(self):
+        with pytest.raises(ValueError, match="DPORT_WR.SRC"):
+            BaseInst.from_dict(
+                {"CMD": "DPORT_WR", "DST": "0", "SRC": "r0", "DATA": "0"}
+            )
+
+    @pytest.mark.parametrize(("src", "data"), [("imm", "0"), ("reg", "r0")])
+    def test_dport_write_accepts_valid_src_keywords(self, src: str, data: str):
+        inst = BaseInst.from_dict(
+            {"CMD": "DPORT_WR", "DST": "0", "SRC": src, "DATA": data}
+        )
+        assert isinstance(inst, DportWriteInst)
+        assert inst.to_dict()["SRC"] == src
+        assert inst.to_dict()["DATA"] == data
+
+    @pytest.mark.parametrize("data", ["0", "0x10"])
+    def test_dport_write_imm_data_accepts_bare_ints(self, data: str):
+        inst = BaseInst.from_dict(
+            {"CMD": "DPORT_WR", "DST": "0", "SRC": "imm", "DATA": data}
+        )
+        assert isinstance(inst, DportWriteInst)
+        assert isinstance(inst.data, ImmValue)
+
+    @pytest.mark.parametrize("data", ["r0", "w0"])
+    def test_dport_write_reg_data_accepts_registers(self, data: str):
+        inst = BaseInst.from_dict(
+            {"CMD": "DPORT_WR", "DST": "0", "SRC": "reg", "DATA": data}
+        )
         assert isinstance(inst, DportWriteInst)
         assert inst.to_dict()["DATA"] == data
+
+    def test_dport_write_imm_data_rejects_prefixed_immediate(self):
+        with pytest.raises(ValueError, match="DPORT_WR.DATA"):
+            BaseInst.from_dict(
+                {"CMD": "DPORT_WR", "DST": "0", "SRC": "imm", "DATA": "#1"}
+            )
+
+    def test_dport_write_reg_data_rejects_bare_int(self):
+        with pytest.raises(ValueError, match="DPORT_WR.DATA"):
+            BaseInst.from_dict(
+                {"CMD": "DPORT_WR", "DST": "0", "SRC": "reg", "DATA": "1"}
+            )

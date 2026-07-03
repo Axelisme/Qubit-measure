@@ -7,7 +7,8 @@ from qick.asm_v2 import AsmInst, QickParam, WriteLabel
 
 from zcu_tools.program.v2.modular import ModularProgramV2
 
-from ..ir.hw_semantics import needs_big_jump
+from ..ir.hw_semantics import ADDR_REG, needs_big_jump
+from ..ir.operands import parse_register
 from .base import Module
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,12 @@ def _emit_jump_s15(prog) -> None:
 
 def _emit_write_label(prog, label: str) -> None:
     prog.append_macro(WriteLabel(label=label))
+
+
+def _reject_addr_reg_selector(reg_name: str, *, field: str) -> None:
+    reg = parse_register(reg_name)
+    if reg is not None and reg.canonical_name == ADDR_REG:
+        raise ValueError(f"{field} must not use reserved address register {ADDR_REG}")
 
 
 class Repeat(Module):
@@ -134,6 +141,7 @@ class Branch(Module):
     ) -> None:
         self.name = name
         self.compare_reg = compare_by if compare_by is not None else name
+        _reject_addr_reg_selector(self.compare_reg, field="Branch.compare_by")
 
         if len(branches) < 2:
             raise ValueError("Branch requires at least 2 branches")
