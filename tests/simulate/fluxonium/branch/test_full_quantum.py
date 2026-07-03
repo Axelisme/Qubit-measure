@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from typing import Any, cast
 
 import numpy as np
@@ -8,6 +9,17 @@ from zcu_tools.simulate.fluxonium.branch.full_quantum import (
     calc_branch_population,
     calc_branch_population_over_flux,
 )
+
+
+def test_full_quantum_upto_is_required() -> None:
+    assert (
+        inspect.signature(calc_branch_population).parameters["upto"].default
+        is inspect.Parameter.empty
+    )
+    assert (
+        inspect.signature(calc_branch_population_over_flux).parameters["upto"].default
+        is inspect.Parameter.empty
+    )
 
 
 def test_calc_branch_population_rejects_non_positive_upto() -> None:

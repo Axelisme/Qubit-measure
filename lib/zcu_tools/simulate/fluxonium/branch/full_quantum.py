@@ -66,7 +66,7 @@ def calc_population(
 
 
 def calc_branch_population(
-    hilbertspace: HilbertSpace, branchs: list[int], upto: int = -1
+    hilbertspace: HilbertSpace, branchs: list[int], upto: int
 ) -> dict[int, NDArray[np.float64]]:
     """
     Calculate the average population of the states in branchs upto provided photon number
@@ -115,7 +115,7 @@ def calc_branch_population_over_flux(
     qub_cutoff: int,
     res_dim: int,
     g: float,
-    upto: int = -1,
+    upto: int,
     branchs: list[int] | None = None,
     batch_size: int = 10,
 ) -> NDArray[np.float64]:
