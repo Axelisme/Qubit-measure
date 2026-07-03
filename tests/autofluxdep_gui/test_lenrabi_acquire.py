@@ -28,7 +28,6 @@ from ._helpers import (
 )
 
 _PARAMS = {
-    "qub_waveform": "rabi_drive",
     "qub_ch": 1,
     "qub_nqz": 1,
     "qub_gain": 0.5,

@@ -22,7 +22,6 @@ from ._helpers import ACQUIRE_READOUT, connect_mock, make_acquire_env, node_sche
 
 _PARAMS = {
     "gain_sweep": SweepValue(start=0.0, stop=1.0, expts=21),
-    "mist_waveform": "mist_drive",
     "mist_ch": 1,
     "mist_nqz": 1,
     "mist_freq": 0.0,

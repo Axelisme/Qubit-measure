@@ -6,15 +6,15 @@ measure-app cfg form machinery via the ``cfg/form`` seam. The placement's schema
 value tree is split into a main "Default cfg" form and, when present, a
 "Generation overrides" form, each backed by its own ``SectionLiveField`` and
 rendered by ``CfgFormWidget``. This gives int/float spin widgets, a 3-field sweep
-editor, optional-blank → None, and string scalars (the by-name waveform) for free,
+editor, optional-blank → None, and adapter-native module/waveform refs for free,
 all WYSIWYG.
 
 Edits flow back to the SSOT: ``CfgFormWidget.schema_changed`` fires a fresh draft
-snapshot, and this widget writes each leaf into the placement schema through the
-controller's typed ``set_node_params`` entry (a main-thread State write that bumps
-the workflow version + emits ``WorkflowChangedPayload``). The LiveModel is a local
-draft (like measure's inspect / writeback dialogs), not auto-committed by the
-framework — this widget owns the commit.
+snapshot, and this widget writes the complete value tree into the placement schema
+through the controller (a main-thread State write that bumps the workflow version
++ emits ``WorkflowChangedPayload``). The LiveModel is a local draft (like measure's
+inspect / writeback dialogs), not auto-committed by the framework — this widget
+owns the commit.
 
 ``set_read_only`` disables the whole form during a run (values stay visible —
 "what this run used"), preserving the prototype's lock-on-run intent. A read-only
@@ -56,7 +56,7 @@ class NodeCfgForm(QWidget):
 
     Owns split ``SectionLiveField`` drafts over the placement's schema and
     ``CfgFormWidget`` renderers for them; on edit it commits the merged leaves back
-    to the placement's schema SSOT via ``controller.set_node_params``.
+    to the placement's schema SSOT via ``controller.set_node_cfg_value``.
     """
 
     def __init__(
@@ -130,8 +130,7 @@ class NodeCfgForm(QWidget):
         typed entry, which coerces + fast-fails and bumps the workflow version.
         """
         del schema
-        params = self._node.schema.logical_updates_from(self._combined_value())
-        self._ctrl.set_node_params(self._index, params)
+        self._ctrl.set_node_cfg_value(self._index, self._combined_value())
 
     def _combined_value(self) -> CfgSectionValue:
         """Merge the split UI drafts back into the schema's full root value tree."""

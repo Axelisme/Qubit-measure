@@ -33,15 +33,8 @@ import numpy as np
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.gui.app.autofluxdep.cfg import (
-    FloatSpec,
-    IntSpec,
-    SweepSpec,
-    SweepValue,
-    node_path,
-    path_node_schema,
-    str_scalar_spec,
-)
+from zcu_tools.experiment.v2_gui.adapters.twotone.rabi.len_rabi import LenRabiAdapter
+from zcu_tools.gui.app.autofluxdep.cfg import FloatSpec
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     SnrProbe,
@@ -57,20 +50,15 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
-    md_scalar_first,
-    md_scaled,
-    md_scaled_sweep_stop,
-    pulse_seed,
+    adapter_node_schema,
+    generation_field,
+    move_module,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
-from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import (
-    PI_PULSE_LIBRARY_ALIASES,
-    READOUT_LIBRARY_ALIASES,
-)
+from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import READOUT_LIBRARY_ALIASES
 from zcu_tools.gui.app.autofluxdep.nodes.plotters import ColormapLinePlotter
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
-from zcu_tools.gui.app.autofluxdep.nodes.waveform_defaults import waveform_or_const
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     ProgramV2Cfg,
@@ -86,9 +74,6 @@ from zcu_tools.utils.fitting import fit_rabi
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_QUB_WAVEFORM = "qub_flat"
-_DEFAULT_QUB_CH = 0
-_DEFAULT_RELAX_DELAY = 30.0
 _DEFAULT_EARLYSTOP_SNR = 30.0
 
 
@@ -248,104 +233,31 @@ class LenRabiBuilder(Builder):
     )
 
     def make_default_schema(self, ctx: Any | None = None) -> NodeCfgSchema:
-        """The typed node-knob schema (defaults + types) — the param SSOT.
-
-        ``sweep_range`` is the pulse-length axis as a ``SweepSpec`` (expts-defined,
-        like qubit_freq's detune). Its default starts away from zero and spans the
-        notebook's conservative initial ``5 * pi_len`` window for a 0.1 us pi
-        guess. Drive defaults follow the measure-gui qubit-pulse convention:
-        ``qub_flat`` on channel 0; missing named waveforms lower to an inline const
-        pulse with ``qub_length``. The prototype's dead ``num_expts`` knob (never
-        read — the point count came from the axis itself) is dropped.
-        """
-        pi_seed = pulse_seed(
+        """Adapter-backed default cfg plus autofluxdep generation controls."""
+        return adapter_node_schema(
+            LenRabiAdapter,
             ctx,
-            module_aliases=PI_PULSE_LIBRARY_ALIASES,
-            waveform_aliases=("qub_flat", "qub_cos"),
-            fallback_waveform=_DEFAULT_QUB_WAVEFORM,
-            fallback_ch=md_scalar_first(ctx, ("qub_4_5_ch", "qub_ch"), _DEFAULT_QUB_CH),
-            fallback_nqz=2,
-            fallback_freq=0.0,
-            fallback_gain=0.05,
-            fallback_length=0.1,
-        )
-        drive_gain = (
-            round(min(1.0, pi_seed.gain / 1.5), 12)
-            if pi_seed.from_module
-            else pi_seed.gain
-        )
-        relax_delay = md_scaled(ctx, "t1", 3.0, _DEFAULT_RELAX_DELAY / 3.0)
-        sweep_stop = md_scaled_sweep_stop(
-            ctx, "pi_len", 5.0, pi_seed.length, minimum=0.5
-        )
-        return path_node_schema(
-            (
-                node_path(
-                    "qub_waveform",
-                    "modules.rabi_pulse.waveform",
-                    str_scalar_spec("waveform", optional=True),
-                    pi_seed.waveform,
-                ),
-                node_path(
-                    "qub_ch",
-                    "modules.rabi_pulse.ch",
-                    IntSpec(label="ch"),
-                    pi_seed.ch,
-                ),
-                node_path(
-                    "qub_nqz",
-                    "modules.rabi_pulse.nqz",
-                    IntSpec(label="nqz", choices=[1, 2]),
-                    pi_seed.nqz,
-                ),
-                node_path(
-                    "qub_gain",
-                    "modules.rabi_pulse.gain",
-                    FloatSpec(label="gain"),
-                    drive_gain,
-                ),
-                node_path(
-                    "qub_length",
-                    "modules.rabi_pulse.length",
-                    FloatSpec(label="waveform length (us)"),
-                    pi_seed.length,
-                ),
-                node_path(
-                    "relax_delay",
-                    "relax_delay",
-                    FloatSpec(label="relax_delay (us)"),
-                    relax_delay,
-                ),
-                node_path(
-                    "reps",
-                    "reps",
-                    IntSpec(label="reps"),
-                    1000,
-                ),
-                node_path(
-                    "rounds",
-                    "rounds",
-                    IntSpec(label="rounds"),
-                    10,
-                ),
-                node_path(
-                    "sweep_range",
-                    "sweep_range",
-                    SweepSpec(label="sweep_range (us)"),
-                    SweepValue(start=0.05, stop=sweep_stop, expts=101),
-                ),
-                node_path(
+            logical_paths={
+                "reset": "modules.reset",
+                "rabi_pulse": "modules.qub_pulse",
+                "qub_ch": "modules.qub_pulse.ch",
+                "qub_nqz": "modules.qub_pulse.nqz",
+                "qub_gain": "modules.qub_pulse.gain",
+                "qub_length": "modules.qub_pulse.waveform.length",
+                "readout": "modules.readout",
+                "relax_delay": "relax_delay",
+                "reps": "reps",
+                "rounds": "rounds",
+                "sweep_range": "sweep.length",
+            },
+            generation_fields=(
+                generation_field(
                     "earlystop_snr",
-                    "task.earlystop_snr",
+                    "earlystop_snr",
                     FloatSpec(label="earlystop_snr", optional=True),
                     _DEFAULT_EARLYSTOP_SNR,
                 ),
             ),
-            section_labels={
-                "modules": "modules",
-                "modules.rabi_pulse": "rabi_pulse",
-                "task": "task",
-            },
         )
 
     def make_init_result(
@@ -393,11 +305,8 @@ class LenRabiBuilder(Builder):
             raise RuntimeError(
                 "lenrabi.make_cfg needs a readout module (none produced or preset)"
             )
+        raw_cfg = env.schema.lower_raw(ml, md=env.md)
         knobs = env.schema.lower(ml, md=env.md)
-        waveform_name = knobs.get("qub_waveform")
-        ch = knobs.get("qub_ch")
-        if ch is None:
-            raise RuntimeError("lenrabi.make_cfg needs qub_ch param set")
         qubit_freq = float(snapshot["qubit_freq"])
 
         # the pulse-length extent (start, stop): the Result's trailing axis when a
@@ -409,25 +318,9 @@ class LenRabiBuilder(Builder):
             xs = sweepcfg_to_axis(knobs["sweep_range"])
         sweep_range = (float(xs[0]), float(xs[-1]))
 
-        return ml.make_cfg(
-            {
-                "modules": {
-                    "rabi_pulse": {
-                        "type": "pulse",
-                        "waveform": waveform_or_const(
-                            ml, waveform_name, length=knobs["qub_length"]
-                        ),
-                        "ch": ch,
-                        "nqz": knobs["qub_nqz"],
-                        "gain": knobs["qub_gain"],
-                        "freq": qubit_freq,
-                    },
-                    "readout": readout,
-                },
-                "relax_delay": knobs["relax_delay"],
-                "reps": knobs["reps"],
-                "rounds": knobs["rounds"],
-                "sweep_range": sweep_range,
-            },
-            LenRabiCfgTemplate,
-        )
+        move_module(raw_cfg, "qub_pulse", "rabi_pulse")
+        raw_cfg["modules"]["rabi_pulse"]["freq"] = qubit_freq
+        raw_cfg["modules"]["readout"] = readout
+        raw_cfg.pop("sweep", None)
+        raw_cfg["sweep_range"] = sweep_range
+        return ml.make_cfg(raw_cfg, LenRabiCfgTemplate)

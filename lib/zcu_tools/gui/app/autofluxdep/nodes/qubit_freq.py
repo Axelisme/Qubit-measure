@@ -41,16 +41,8 @@ from numpy.typing import NDArray
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.gui.app.autofluxdep.cfg import (
-    FloatSpec,
-    IntSpec,
-    SweepSpec,
-    SweepValue,
-    node_path,
-    path_node_schema,
-    str_choice_spec,
-    str_scalar_spec,
-)
+from zcu_tools.experiment.v2_gui.adapters.twotone.freq import FreqAdapter
+from zcu_tools.gui.app.autofluxdep.cfg import FloatSpec, str_choice_spec
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     SnrProbe,
@@ -63,22 +55,22 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     set_flux_by_name,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
-from zcu_tools.gui.app.autofluxdep.nodes.defaults import md_scalar_first, pulse_seed
+from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
+    adapter_node_schema,
+    generation_field,
+    module_dict,
+)
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import READOUT_LIBRARY_ALIASES
 from zcu_tools.gui.app.autofluxdep.nodes.plotters import title_with_snr
 from zcu_tools.gui.app.autofluxdep.nodes.result import QubitFreqResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
-from zcu_tools.gui.app.autofluxdep.nodes.waveform_defaults import waveform_or_const
 from zcu_tools.program.v2 import SweepCfg, TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import rotate2real
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_QUB_WAVEFORM = "qub_flat"
-_DEFAULT_QUB_CH = 0
-_DEFAULT_QUB_GAIN = 0.05
 _DEFAULT_EARLYSTOP_SNR = 50.0
 _QFW_TARGET_KAPPA = 6.5
 _DRIVE_GAIN_MODE_ADAPTIVE = "adaptive"
@@ -368,92 +360,33 @@ class QubitFreqBuilder(Builder):
     )
 
     def make_default_schema(self, ctx: Any | None = None) -> NodeCfgSchema:
-        """The typed node-knob schema (defaults + types) — the param SSOT.
-
-        ``detune_sweep`` is a ``SweepSpec`` (expts-defined, aligning with the cfg
-        editor): its default ``(-20, 50, expts=141)`` gives a 0.5 MHz step. The
-        drive defaults follow the
-        measure-gui qubit-pulse convention: ``qub_flat`` on channel 0, with
-        ``qub_length`` at 0.1 us. If a project does not define that named
-        waveform, ``make_cfg`` uses an inline const waveform of that length so
-        mock-created contexts remain runnable.
-        """
-        qub_seed = pulse_seed(
+        """Adapter-backed default cfg plus autofluxdep generation controls."""
+        return adapter_node_schema(
+            FreqAdapter,
             ctx,
-            module_aliases=("qub_probe",),
-            waveform_aliases=("qub_flat", "qub_cos"),
-            fallback_waveform=_DEFAULT_QUB_WAVEFORM,
-            fallback_ch=md_scalar_first(ctx, ("qub_4_5_ch", "qub_ch"), _DEFAULT_QUB_CH),
-            fallback_nqz=2,
-            fallback_freq=0.0,
-            fallback_gain=_DEFAULT_QUB_GAIN,
-            fallback_length=0.1,
-        )
-        return path_node_schema(
-            (
-                node_path(
-                    "qub_waveform",
-                    "modules.qub_pulse.waveform",
-                    str_scalar_spec("waveform", optional=True),
-                    qub_seed.waveform,
-                ),
-                node_path(
-                    "qub_ch",
-                    "modules.qub_pulse.ch",
-                    IntSpec(label="ch"),
-                    qub_seed.ch,
-                ),
-                node_path(
-                    "qub_nqz",
-                    "modules.qub_pulse.nqz",
-                    IntSpec(label="nqz", choices=[1, 2]),
-                    qub_seed.nqz,
-                ),
-                node_path(
-                    "qub_gain",
-                    "modules.qub_pulse.gain",
-                    FloatSpec(label="gain"),
-                    qub_seed.gain,
-                ),
-                node_path(
-                    "qub_length",
-                    "modules.qub_pulse.length",
-                    FloatSpec(label="waveform length (us)"),
-                    qub_seed.length,
-                ),
-                node_path(
-                    "relax_delay",
-                    "relax_delay",
-                    FloatSpec(label="relax_delay (us)"),
-                    0.5,
-                ),
-                node_path(
-                    "reps",
-                    "reps",
-                    IntSpec(label="reps"),
-                    1000,
-                ),
-                node_path(
-                    "rounds",
-                    "rounds",
-                    IntSpec(label="rounds"),
-                    100,
-                ),
-                node_path(
-                    "detune_sweep",
-                    "detune_sweep",
-                    SweepSpec(label="detune_sweep (MHz)"),
-                    SweepValue(start=-20.0, stop=50.0, expts=141),
-                ),
-                node_path(
+            logical_paths={
+                "reset": "modules.reset",
+                "qub_pulse": "modules.qub_pulse",
+                "qub_ch": "modules.qub_pulse.ch",
+                "qub_nqz": "modules.qub_pulse.nqz",
+                "qub_gain": "modules.qub_pulse.gain",
+                "qub_length": "modules.qub_pulse.waveform.length",
+                "readout": "modules.readout",
+                "relax_delay": "relax_delay",
+                "reps": "reps",
+                "rounds": "rounds",
+                "detune_sweep": "sweep.freq",
+            },
+            generation_fields=(
+                generation_field(
                     "earlystop_snr",
-                    "task.earlystop_snr",
+                    "earlystop_snr",
                     FloatSpec(label="earlystop_snr", optional=True),
                     _DEFAULT_EARLYSTOP_SNR,
                 ),
-                node_path(
+                generation_field(
                     "drive_gain_mode",
-                    "generation.drive_gain_mode",
+                    "drive_gain_mode",
                     str_choice_spec(
                         "drive_gain_mode",
                         (
@@ -464,12 +397,6 @@ class QubitFreqBuilder(Builder):
                     _DRIVE_GAIN_MODE_ADAPTIVE,
                 ),
             ),
-            section_labels={
-                "modules": "modules",
-                "modules.qub_pulse": "qub_pulse",
-                "task": "task",
-                "generation": "Generation overrides",
-            },
         )
 
     def make_init_result(
@@ -507,38 +434,18 @@ class QubitFreqBuilder(Builder):
             raise RuntimeError(
                 "qubit_freq.make_cfg needs a readout module (none produced or preset)"
             )
-        # the typed knobs (defaults + types owned by the placement's schema);
-        # reps/rounds/relax come pre-typed, the optional drive waveform/ch are
-        # omitted when unset.
+        raw_cfg = env.schema.lower_raw(ml, md=env.md)
         knobs = env.schema.lower(ml, md=env.md)
-        waveform_name = knobs.get("qub_waveform")
-        ch = knobs.get("qub_ch")
-        if ch is None:
-            raise RuntimeError("qubit_freq.make_cfg needs qub_ch param set")
         predict_freq = float(snapshot["predict_freq"])
+        qub_pulse = module_dict(raw_cfg, "qub_pulse")
         drive_gain = _resolve_drive_gain(
             str(knobs["drive_gain_mode"]),
             snapshot["qfw_factor"],
-            float(knobs["qub_gain"]),
+            float(qub_pulse["gain"]),
         )
-        return ml.make_cfg(
-            {
-                "modules": {
-                    "qub_pulse": {
-                        "type": "pulse",
-                        "waveform": waveform_or_const(
-                            ml, waveform_name, length=knobs["qub_length"]
-                        ),
-                        "ch": ch,
-                        "nqz": knobs["qub_nqz"],
-                        "gain": drive_gain,
-                        "freq": predict_freq,
-                    },
-                    "readout": readout,
-                },
-                "relax_delay": knobs["relax_delay"],
-                "reps": knobs["reps"],
-                "rounds": knobs["rounds"],
-            },
-            QubitFreqCfgTemplate,
-        )
+        qub_pulse["freq"] = predict_freq
+        qub_pulse["gain"] = drive_gain
+        raw_cfg["modules"]["qub_pulse"] = qub_pulse
+        raw_cfg["modules"]["readout"] = readout
+        raw_cfg.pop("sweep", None)
+        return ml.make_cfg(raw_cfg, QubitFreqCfgTemplate)

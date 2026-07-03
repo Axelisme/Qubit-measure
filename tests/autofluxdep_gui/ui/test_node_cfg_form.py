@@ -113,6 +113,13 @@ def _subsection(section: SectionLiveField, key: str) -> SectionLiveField:
     return cast(SectionLiveField, field)
 
 
+def _ref_subsection(section: SectionLiveField, key: str) -> SectionLiveField:
+    field = section.fields[key]
+    sub_field = getattr(field, "sub_field", None)
+    assert isinstance(sub_field, SectionLiveField)
+    return sub_field
+
+
 def _generation(form: NodeCfgForm) -> SectionLiveField:
     field = form._generation_model
     assert isinstance(field, SectionLiveField)
@@ -130,17 +137,10 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
             "relax_delay",
             "reps",
             "rounds",
-            "detune_sweep",
-            "task",
+            "sweep",
         }
-        qub_pulse = _subsection(_section(form, "modules"), "qub_pulse")
-        assert set(qub_pulse.fields.keys()) == {
-            "waveform",
-            "ch",
-            "nqz",
-            "gain",
-            "length",
-        }
+        qub_pulse = _ref_subsection(_section(form, "modules"), "qub_pulse")
+        assert {"waveform", "ch", "nqz", "gain"}.issubset(qub_pulse.fields)
         ch_spec = qub_pulse.fields["ch"].spec
         nqz_spec = qub_pulse.fields["nqz"].spec
         assert isinstance(ch_spec, ScalarSpec)
@@ -148,14 +148,19 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
         assert ch_spec.optional is False
         assert nqz_spec.choices == [1, 2]
         assert "qub_gain" not in form._default_model.fields
-        assert set(_generation(form).fields.keys()) == {"drive_gain_mode"}
+        assert set(_generation(form).fields.keys()) == {
+            "earlystop_snr",
+            "drive_gain_mode",
+        }
         assert set(node.schema.keys) == {
             "detune_sweep",
             "reps",
             "rounds",
             "relax_delay",
             "earlystop_snr",
-            "qub_waveform",
+            "reset",
+            "qub_pulse",
+            "readout",
             "qub_ch",
             "qub_nqz",
             "qub_gain",
@@ -187,7 +192,7 @@ def test_edit_scalar_writes_back_to_schema(ctrl_node, qapp):
         # drive the int knob the way a spin-box edit would (model.set_value →
         # schema_changed → controller.set_node_params → schema SSOT)
         form._default_model.fields["reps"].set_value(DirectValue(value=321))
-        qub_pulse = _subsection(_section(form, "modules"), "qub_pulse")
+        qub_pulse = _ref_subsection(_section(form, "modules"), "qub_pulse")
         qub_pulse.fields["gain"].set_value(DirectValue(value=0.42))
         _generation(form).fields["drive_gain_mode"].set_value(
             DirectValue(value="fixed")
@@ -204,7 +209,7 @@ def test_edit_sweep_writes_back_to_schema(ctrl_node, qapp):
     ctrl, node, index = ctrl_node
     form = NodeCfgForm(ctrl, node, index)
     try:
-        form._default_model.fields["detune_sweep"].set_value(
+        _section(form, "sweep").fields["freq"].set_value(
             SweepValue(start=-15.0, stop=25.0, expts=41)
         )
         detune = node.schema.lower(None)["detune_sweep"]
@@ -245,7 +250,7 @@ def test_optional_scalar_blank_lowers_to_none(ctrl_node, qapp):
     try:
         # earlystop_snr is an optional FloatSpec: set then clear it; an unset
         # optional scalar lowers to an omitted key (None — no early-stop)
-        earlystop_snr = _section(form, "task").fields["earlystop_snr"]
+        earlystop_snr = _generation(form).fields["earlystop_snr"]
         earlystop_snr.set_value(DirectValue(value=50.0))
         assert node.schema.lower(None)["earlystop_snr"] == 50.0
         earlystop_snr.set_value(DirectValue(value=None))
@@ -262,7 +267,7 @@ def test_invalid_required_scalar_is_rejected(ctrl_node, qapp):
         # marks the field invalid (the form surfaces it red) and the value tree now
         # carries an unset required leaf, so lowering Fast-Fails rather than
         # fabricating a default — no malformed-but-silent run cfg.
-        nqz = _subsection(_section(form, "modules"), "qub_pulse").fields["nqz"]
+        nqz = _ref_subsection(_section(form, "modules"), "qub_pulse").fields["nqz"]
         nqz.set_value(DirectValue(value=None))
         assert not nqz.is_valid()
         assert not form._default_form.is_valid()  # the whole default block is invalid

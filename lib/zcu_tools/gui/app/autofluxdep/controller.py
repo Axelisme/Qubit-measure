@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from qtpy.QtCore import QObject, Qt, QThread, Signal  # type: ignore[attr-defined]
 
+from zcu_tools.gui.app.autofluxdep.cfg import CfgSectionValue
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgPersistenceError
 from zcu_tools.gui.app.autofluxdep.derivation import DerivationService
 from zcu_tools.gui.app.autofluxdep.events.run import (
@@ -579,6 +580,14 @@ class Controller(SessionControllerMixin):
         logger.debug(
             "set_node_params[%d] (%r): keys=%s", index, node.name, list(params)
         )
+        self._bus.emit(WorkflowChangedPayload(name=None))
+
+    def set_node_cfg_value(self, index: int, value: CfgSectionValue) -> None:
+        """Replace one Node's complete cfg value tree from the typed form draft."""
+        node = self._state.nodes[index]
+        node.schema.replace_value_tree(value)
+        self._state.version.bump(WORKFLOW_VERSION_KEY)
+        logger.debug("set_node_cfg_value[%d] (%r)", index, node.name)
         self._bus.emit(WorkflowChangedPayload(name=None))
 
     def set_flux_values(self, values: list[float]) -> None:

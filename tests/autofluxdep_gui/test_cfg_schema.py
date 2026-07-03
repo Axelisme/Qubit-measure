@@ -171,7 +171,9 @@ _EXPECTED_KEYS = {
         "rounds",
         "relax_delay",
         "earlystop_snr",
-        "qub_waveform",
+        "reset",
+        "qub_pulse",
+        "readout",
         "qub_ch",
         "qub_nqz",
         "qub_gain",
@@ -184,7 +186,9 @@ _EXPECTED_KEYS = {
         "rounds",
         "relax_delay",
         "earlystop_snr",
-        "qub_waveform",
+        "reset",
+        "rabi_pulse",
+        "readout",
         "qub_ch",
         "qub_nqz",
         "qub_gain",
@@ -193,6 +197,9 @@ _EXPECTED_KEYS = {
     "ro_optimize": {
         "freq_range",
         "gain_range",
+        "reset",
+        "pi_pulse",
+        "readout",
         "reps",
         "rounds",
         "freq_range_mode",
@@ -203,6 +210,9 @@ _EXPECTED_KEYS = {
     },
     "t1": {
         "sweep_range",
+        "reset",
+        "pi_pulse",
+        "readout",
         "reps",
         "rounds",
         "earlystop_snr",
@@ -213,6 +223,9 @@ _EXPECTED_KEYS = {
     "t2ramsey": {
         "sweep_range",
         "detune_ratio",
+        "reset",
+        "pi2_pulse",
+        "readout",
         "reps",
         "rounds",
         "earlystop_snr",
@@ -223,6 +236,10 @@ _EXPECTED_KEYS = {
     "t2echo": {
         "sweep_range",
         "detune_ratio",
+        "reset",
+        "pi_pulse",
+        "pi2_pulse",
+        "readout",
         "reps",
         "rounds",
         "earlystop_snr",
@@ -232,10 +249,13 @@ _EXPECTED_KEYS = {
     },
     "mist": {
         "gain_sweep",
+        "reset",
+        "pi_pulse",
+        "mist_pulse",
+        "readout",
         "reps",
         "rounds",
         "relax_delay",
-        "mist_waveform",
         "mist_ch",
         "mist_nqz",
         "mist_freq",
@@ -246,33 +266,40 @@ _EXPECTED_KEYS = {
 
 _EXPECTED_PATHS = {
     "qubit_freq": {
-        "detune_sweep": "detune_sweep",
+        "detune_sweep": "sweep.freq",
         "reps": "reps",
         "rounds": "rounds",
         "relax_delay": "relax_delay",
-        "earlystop_snr": "task.earlystop_snr",
-        "qub_waveform": "modules.qub_pulse.waveform",
+        "earlystop_snr": "generation.earlystop_snr",
+        "reset": "modules.reset",
+        "qub_pulse": "modules.qub_pulse",
+        "readout": "modules.readout",
         "qub_ch": "modules.qub_pulse.ch",
         "qub_nqz": "modules.qub_pulse.nqz",
         "qub_gain": "modules.qub_pulse.gain",
-        "qub_length": "modules.qub_pulse.length",
+        "qub_length": "modules.qub_pulse.waveform.length",
         "drive_gain_mode": "generation.drive_gain_mode",
     },
     "lenrabi": {
-        "sweep_range": "sweep_range",
+        "sweep_range": "sweep.length",
         "reps": "reps",
         "rounds": "rounds",
         "relax_delay": "relax_delay",
-        "earlystop_snr": "task.earlystop_snr",
-        "qub_waveform": "modules.rabi_pulse.waveform",
-        "qub_ch": "modules.rabi_pulse.ch",
-        "qub_nqz": "modules.rabi_pulse.nqz",
-        "qub_gain": "modules.rabi_pulse.gain",
-        "qub_length": "modules.rabi_pulse.length",
+        "earlystop_snr": "generation.earlystop_snr",
+        "reset": "modules.reset",
+        "rabi_pulse": "modules.qub_pulse",
+        "readout": "modules.readout",
+        "qub_ch": "modules.qub_pulse.ch",
+        "qub_nqz": "modules.qub_pulse.nqz",
+        "qub_gain": "modules.qub_pulse.gain",
+        "qub_length": "modules.qub_pulse.waveform.length",
     },
     "ro_optimize": {
-        "freq_range": "freq_range",
-        "gain_range": "gain_range",
+        "freq_range": "sweep.freq",
+        "gain_range": "sweep.gain",
+        "reset": "modules.reset",
+        "pi_pulse": "modules.qub_pulse",
+        "readout": "modules.readout",
         "reps": "reps",
         "rounds": "rounds",
         "relax_delay": "relax_delay",
@@ -282,45 +309,58 @@ _EXPECTED_PATHS = {
         "skew_penalty": "skew_penalty",
     },
     "t1": {
-        "sweep_range": "sweep_range",
+        "sweep_range": "sweep.length",
+        "reset": "modules.reset",
+        "pi_pulse": "modules.pi_pulse",
+        "readout": "modules.readout",
         "reps": "reps",
         "rounds": "rounds",
-        "earlystop_snr": "task.earlystop_snr",
+        "earlystop_snr": "generation.earlystop_snr",
         "sweep_range_mode": "generation.sweep_range_mode",
         "relax_delay_mode": "generation.relax_delay_mode",
         "relax_delay": "relax_delay",
     },
     "t2ramsey": {
-        "sweep_range": "sweep_range",
-        "detune_ratio": "task.detune_ratio",
+        "sweep_range": "sweep.length",
+        "detune_ratio": "detune_ratio",
+        "reset": "modules.reset",
+        "pi2_pulse": "modules.pi2_pulse",
+        "readout": "modules.readout",
         "reps": "reps",
         "rounds": "rounds",
-        "earlystop_snr": "task.earlystop_snr",
+        "earlystop_snr": "generation.earlystop_snr",
         "sweep_range_mode": "generation.sweep_range_mode",
         "relax_delay_mode": "generation.relax_delay_mode",
         "relax_delay": "relax_delay",
     },
     "t2echo": {
-        "sweep_range": "sweep_range",
-        "detune_ratio": "task.detune_ratio",
+        "sweep_range": "sweep.length",
+        "detune_ratio": "detune_ratio",
+        "reset": "modules.reset",
+        "pi_pulse": "modules.pi_pulse",
+        "pi2_pulse": "modules.pi2_pulse",
+        "readout": "modules.readout",
         "reps": "reps",
         "rounds": "rounds",
-        "earlystop_snr": "task.earlystop_snr",
+        "earlystop_snr": "generation.earlystop_snr",
         "sweep_range_mode": "generation.sweep_range_mode",
         "relax_delay_mode": "generation.relax_delay_mode",
         "relax_delay": "relax_delay",
     },
     "mist": {
-        "gain_sweep": "gain_sweep",
+        "gain_sweep": "sweep.gain",
+        "reset": "modules.reset",
+        "pi_pulse": "modules.init_pulse",
+        "mist_pulse": "modules.probe_pulse",
+        "readout": "modules.readout",
         "reps": "reps",
         "rounds": "rounds",
         "relax_delay": "relax_delay",
-        "mist_waveform": "modules.mist_pulse.waveform",
-        "mist_ch": "modules.mist_pulse.ch",
-        "mist_nqz": "modules.mist_pulse.nqz",
-        "mist_freq": "modules.mist_pulse.freq",
-        "mist_gain": "modules.mist_pulse.gain",
-        "mist_length": "modules.mist_pulse.length",
+        "mist_ch": "modules.probe_pulse.ch",
+        "mist_nqz": "modules.probe_pulse.nqz",
+        "mist_freq": "modules.probe_pulse.freq",
+        "mist_gain": "modules.probe_pulse.gain",
+        "mist_length": "modules.probe_pulse.waveform.length",
     },
 }
 
@@ -330,9 +370,6 @@ _DERIVED_FORBIDDEN = {
     "predict_freq",
     "qubit_freq",
     "freq",
-    "pi_pulse",
-    "pi2_pulse",
-    "readout",
     "opt_readout",
     "best_ro_freq",
     "best_ro_gain",
@@ -652,21 +689,18 @@ def test_qubit_freq_default_knobs():
     knobs = QubitFreqBuilder().make_default_schema().lower(None)
     assert knobs["reps"] == 1000
     assert knobs["rounds"] == 100
-    assert knobs["relax_delay"] == 0.5
+    assert knobs["relax_delay"] == 1.0
     assert knobs["earlystop_snr"] == 50.0
-    assert knobs["qub_waveform"] == "qub_flat"
     assert knobs["qub_ch"] == 0
     assert knobs["qub_nqz"] == 2
-    assert knobs["qub_gain"] == 0.05
-    assert knobs["qub_length"] == 0.1
+    assert knobs["qub_gain"] == 0.1
+    assert knobs["qub_length"] == 5.0
     assert knobs["drive_gain_mode"] == "adaptive"
     # clearing optional defaults still omits them; channel/nqz remain required raw
     # cfg fields because PulseCfg cannot run without concrete hardware routing.
     schema = QubitFreqBuilder().make_default_schema()
-    schema.set_field("qub_waveform", None)
     schema.set_field("earlystop_snr", None)
     cleared = schema.lower(None)
-    assert "qub_waveform" not in cleared
     assert "earlystop_snr" not in cleared
     schema.set_field("qub_ch", None)
     with pytest.raises(RuntimeError, match="modules\\.qub_pulse\\.ch"):
@@ -675,23 +709,27 @@ def test_qubit_freq_default_knobs():
     schema.set_field("qub_nqz", 0)
     with pytest.raises(RuntimeError, match="modules\\.qub_pulse\\.nqz.*choices"):
         schema.lower(None)
-    # the detune sweep lowers to the prototype's (-20, 50, step 0.5) axis exactly
+    # the sweep comes directly from the twotone/freq adapter default.
     detune = knobs["detune_sweep"]
-    axis = np.linspace(float(detune.start), float(detune.stop), int(detune.expts))
-    old = np.linspace(-20.0, 50.0, int(round((50 - (-20)) / 0.5)) + 1)
-    assert np.allclose(axis, old)
+    assert (float(detune.start), float(detune.stop), int(detune.expts)) == (
+        3500.0,
+        6500.0,
+        301,
+    )
 
 
 def test_lenrabi_default_knobs():
     knobs = LenRabiBuilder().make_default_schema().lower(None)
     assert knobs["reps"] == 1000
-    assert knobs["rounds"] == 10
-    assert knobs["relax_delay"] == 30.0
+    assert knobs["rounds"] == 100
+    assert knobs["relax_delay"] == 30.5
     assert knobs["earlystop_snr"] == 30.0
-    assert knobs["qub_waveform"] == "qub_flat"
     assert knobs["qub_ch"] == 0
+    assert knobs["qub_nqz"] == 2
+    assert knobs["qub_gain"] == 1.0
+    assert knobs["qub_length"] == 1.0
     sweep = knobs["sweep_range"]
-    assert np.allclose([float(sweep.start), float(sweep.stop)], [0.05, 0.5])
+    assert np.allclose([float(sweep.start), float(sweep.stop)], [0.05, 4.0])
     assert int(sweep.expts) == 101
 
 
@@ -699,19 +737,18 @@ def test_mist_default_knobs():
     knobs = MistBuilder().make_default_schema().lower(None)
     assert knobs["reps"] == 1000
     assert knobs["rounds"] == 100
-    assert knobs["relax_delay"] == 20.5
-    assert knobs["mist_waveform"] == "mist_waveform"
+    assert knobs["relax_delay"] == 30.5
     assert knobs["mist_ch"] == 0
     assert knobs["mist_nqz"] == 2
-    assert knobs["mist_freq"] == 6000.0
-    assert knobs["mist_gain"] == 0.5
-    assert knobs["mist_length"] == 0.1
+    assert knobs["mist_freq"] == 4000.0
+    assert knobs["mist_gain"] == 0.1
+    assert knobs["mist_length"] == 5.1
     gain = knobs["gain_sweep"]
-    assert (float(gain.start), float(gain.stop), int(gain.expts)) == (0.0, 1.0, 51)
+    assert (float(gain.start), float(gain.stop), int(gain.expts)) == (0.0, 1.0, 151)
 
     schema = MistBuilder().make_default_schema()
     schema.set_field("mist_nqz", 0)
-    with pytest.raises(RuntimeError, match="modules\\.mist_pulse\\.nqz.*choices"):
+    with pytest.raises(RuntimeError, match="modules\\.probe_pulse\\.nqz.*choices"):
         schema.lower(None)
 
 
@@ -720,70 +757,77 @@ def test_ro_optimize_default_knobs():
     freq_range = knobs["freq_range"]
     gain_range = knobs["gain_range"]
     assert knobs["reps"] == 1000
-    assert knobs["rounds"] == 10
+    assert knobs["rounds"] == 1000
     assert (
         float(freq_range.start),
         float(freq_range.stop),
         int(freq_range.expts),
-    ) == (5999.0, 6001.0, 21)
+    ) == (6250.0, 6750.0, 31)
     assert (
         float(gain_range.start),
         float(gain_range.stop),
         int(gain_range.expts),
-    ) == (0.45, 0.55, 21)
+    ) == (0.01, 0.5, 31)
     assert knobs["freq_range_mode"] == "previous_best"
     assert knobs["gain_range_mode"] == "previous_best"
     assert knobs["relax_delay_mode"] == "auto_t1"
-    assert knobs["relax_delay"] == 30.0
+    assert knobs["relax_delay"] == 100.0
     assert knobs["skew_penalty"] == 0.0
     # The sweep range widgets carry the user-facing start/stop/expts raw-cfg shape.
     spec = RoOptimizeBuilder().make_default_schema().schema.spec
-    assert isinstance(spec.fields["freq_range"], SweepSpec)
-    assert isinstance(spec.fields["gain_range"], SweepSpec)
+    sweep = spec.fields["sweep"]
+    assert isinstance(sweep, CfgSectionSpec)
+    assert isinstance(sweep.fields["freq"], SweepSpec)
+    assert isinstance(sweep.fields["gain"], SweepSpec)
 
 
 def test_t1_default_knobs():
     knobs = T1Builder().make_default_schema().lower(None)
     assert knobs["reps"] == 1000
-    assert knobs["rounds"] == 10
+    assert knobs["rounds"] == 100
     assert knobs["earlystop_snr"] == 20.0
     assert knobs["sweep_range_mode"] == "auto_t1"
     assert knobs["relax_delay_mode"] == "auto_t1"
-    assert knobs["relax_delay"] == 30.0
+    assert knobs["relax_delay"] == 100.0
     sweep = knobs["sweep_range"]
-    assert (float(sweep.start), float(sweep.stop), int(sweep.expts)) == (0.5, 60.0, 101)
+    assert (float(sweep.start), float(sweep.stop), int(sweep.expts)) == (
+        0.0,
+        500.0,
+        101,
+    )
 
 
 def test_t2_default_knobs():
     for builder in (T2RamseyBuilder(), T2EchoBuilder()):
         knobs = builder.make_default_schema().lower(None)
         assert knobs["reps"] == 1000
-        assert knobs["rounds"] == 10
-        assert knobs["detune_ratio"] == 0.05
+        assert knobs["rounds"] == 100
+        assert knobs["detune_ratio"] == (0.05 if builder.name == "t2ramsey" else 0.1)
         assert knobs["earlystop_snr"] == 20.0
         assert knobs["relax_delay_mode"] == "auto_t1"
-        assert knobs["relax_delay"] == 30.0
+        assert knobs["relax_delay"] == 100.0
         assert knobs["sweep_range_mode"] == (
             "auto_t2r" if builder.name == "t2ramsey" else "auto_t2e"
         )
         sweep = knobs["sweep_range"]
         assert (float(sweep.start), float(sweep.stop), int(sweep.expts)) == (
             0.0,
-            25.0,
-            121,
+            80.0,
+            101,
         ), builder.name
 
 
 def test_fresh_node_defaults_seed_from_md_values():
     md = MetaDict()
-    md.qub_4_5_ch = 7
+    md.qub_ch = 7
     md.t1 = 12.0
     md.pi_len = 0.2
     md.r_f = 6200.0
     md.rf_w = 10.0
+    md.q_f = 5100.0
+    md.qf_w = 20.0
     md.t2r = 8.0
     md.t2e = 9.0
-    md.mist_f = 6100.0
     ctx = _ctx(md=md)
 
     qubit = create_placement("qubit_freq", ctx=ctx).schema.lower(None, md=md)
@@ -791,43 +835,43 @@ def test_fresh_node_defaults_seed_from_md_values():
 
     lenrabi = LenRabiBuilder().make_default_schema(ctx).lower(None, md=md)
     assert lenrabi["qub_ch"] == 7
-    assert lenrabi["relax_delay"] == 36.0
+    assert lenrabi["relax_delay"] == 60.0
     assert np.allclose(
         [float(lenrabi["sweep_range"].start), float(lenrabi["sweep_range"].stop)],
-        [0.05, 1.0],
+        [0.05, 0.8],
     )
 
     ro = RoOptimizeBuilder().make_default_schema(ctx).lower(None, md=md)
-    assert ro["relax_delay"] == 36.0
+    assert ro["relax_delay"] == 60.0
     assert (
         float(ro["freq_range"].start),
         float(ro["freq_range"].stop),
         int(ro["freq_range"].expts),
-    ) == (6198.0, 6202.0, 21)
+    ) == (6195.0, 6205.0, 31)
 
     t1 = T1Builder().make_default_schema(ctx).lower(None, md=md)
-    assert t1["relax_delay"] == 36.0
+    assert t1["relax_delay"] == 60.0
     assert (float(t1["sweep_range"].start), float(t1["sweep_range"].stop)) == (
-        0.5,
+        0.0,
         60.0,
     )
 
     ramsey = T2RamseyBuilder().make_default_schema(ctx).lower(None, md=md)
     echo = T2EchoBuilder().make_default_schema(ctx).lower(None, md=md)
-    assert ramsey["relax_delay"] == 36.0
+    assert ramsey["relax_delay"] == 60.0
     assert (float(ramsey["sweep_range"].start), float(ramsey["sweep_range"].stop)) == (
         0.0,
-        20.0,
+        32.0,
     )
-    assert echo["relax_delay"] == 36.0
+    assert echo["relax_delay"] == 60.0
     assert (float(echo["sweep_range"].start), float(echo["sweep_range"].stop)) == (
         0.0,
-        22.5,
+        36.0,
     )
 
     mist = MistBuilder().make_default_schema(ctx).lower(None, md=md)
     assert mist["mist_ch"] == 7
-    assert mist["mist_freq"] == 6100.0
+    assert mist["mist_freq"] == 5100.0
     assert mist["relax_delay"] == 60.0
 
 
@@ -871,24 +915,23 @@ def test_fresh_node_defaults_seed_from_ml_modules():
     ctx = _ctx(ml=ml)
 
     lenrabi = LenRabiBuilder().make_default_schema(ctx).lower(ml, md=ctx.md)
-    assert lenrabi["qub_waveform"] == "qub_flat"
-    assert lenrabi["qub_ch"] == 5
-    assert lenrabi["qub_nqz"] == 1
-    assert lenrabi["qub_gain"] == 0.4
-    assert lenrabi["qub_length"] == 0.24
+    assert lenrabi["qub_ch"] == 0
+    assert lenrabi["qub_nqz"] == 2
+    assert lenrabi["qub_gain"] == 1.0
+    assert lenrabi["qub_length"] == 1.0
     assert np.allclose(
         [float(lenrabi["sweep_range"].start), float(lenrabi["sweep_range"].stop)],
-        [0.05, 1.2],
+        [0.05, 4.0],
     )
 
     ro = RoOptimizeBuilder().make_default_schema(ctx).lower(ml, md=ctx.md)
     assert np.allclose(
         [float(ro["freq_range"].start), float(ro["freq_range"].stop)],
-        [6200.0, 6202.0],
+        [6250.0, 6750.0],
     )
     assert np.allclose(
         [float(ro["gain_range"].start), float(ro["gain_range"].stop)],
-        [0.37, 0.47],
+        [0.01, 0.5],
     )
 
 
@@ -915,10 +958,10 @@ def test_qubit_freq_make_cfg_uses_schema_defaults():
     # the hardcoded prototype defaults, now sourced from the schema
     assert cfg.reps == 1000
     assert cfg.rounds == 100
-    assert cfg.relax_delay == 0.5
+    assert cfg.relax_delay == 1.0
     assert int(cfg.modules.qub_pulse.ch) == 0
     assert int(cfg.modules.qub_pulse.nqz) == 2
-    assert float(cfg.modules.qub_pulse.gain) == 0.05
+    assert float(cfg.modules.qub_pulse.gain) == 0.1
     assert float(cfg.modules.qub_pulse.freq) == 5135.0  # the injected predict_freq
 
 
@@ -964,7 +1007,7 @@ def test_qubit_freq_make_cfg_uses_const_waveform_when_named_waveform_missing():
     cfg = builder.make_cfg(env, snap)
 
     assert cfg.modules.qub_pulse.waveform.style == "const"
-    assert float(cfg.modules.qub_pulse.waveform.length) == 0.1
+    assert float(cfg.modules.qub_pulse.waveform.length) == 5.0
 
 
 def test_lenrabi_make_cfg_uses_const_waveform_when_named_waveform_missing():
@@ -980,18 +1023,11 @@ def test_lenrabi_make_cfg_uses_const_waveform_when_named_waveform_missing():
     cfg = builder.make_cfg(env, snap)
 
     assert cfg.modules.rabi_pulse.waveform.style == "const"
-    assert float(cfg.modules.rabi_pulse.waveform.length) == 0.1
+    assert float(cfg.modules.rabi_pulse.waveform.length) == 1.0
 
 
 def test_mist_make_cfg_uses_schema_defaults():
     ml = ModuleLibrary()
-    ml.register_waveform(
-        mist_waveform={
-            "style": "flat_top",
-            "length": 2.0,
-            "raise_waveform": {"style": "cosine", "length": 0.02},
-        }
-    )
     builder = MistBuilder()
     env = RunEnv(
         flux=0.0,
@@ -1005,10 +1041,10 @@ def test_mist_make_cfg_uses_schema_defaults():
     cfg = builder.make_cfg(env, snap)
     assert cfg.reps == 1000
     assert cfg.rounds == 100
-    assert cfg.relax_delay == 20.5
+    assert cfg.relax_delay == 30.5
     assert int(cfg.modules.mist_pulse.ch) == 0
-    assert float(cfg.modules.mist_pulse.gain) == 0.5
-    assert float(cfg.modules.mist_pulse.freq) == 6000.0
+    assert float(cfg.modules.mist_pulse.gain) == 0.1
+    assert float(cfg.modules.mist_pulse.freq) == 4000.0
     assert int(cfg.modules.mist_pulse.nqz) == 2
 
 
@@ -1027,7 +1063,7 @@ def test_mist_make_cfg_uses_const_waveform_when_named_waveform_missing():
     cfg = builder.make_cfg(env, snap)
 
     assert cfg.modules.mist_pulse.waveform.style == "const"
-    assert float(cfg.modules.mist_pulse.waveform.length) == 0.1
+    assert float(cfg.modules.mist_pulse.waveform.length) == 5.1
 
 
 # --- 2c. set_field type coercion + unknown-key fast-fail (the 160a bridge) ------
@@ -1055,7 +1091,7 @@ def test_scalar_eval_value_lowers_against_md():
         "__kind": "eval",
         "expr": "gain",
     }
-    assert schema.read_value_tree()["modules"]["qub_pulse"]["gain"] == {
+    assert schema.read_value_tree()["modules"]["qub_pulse"]["value"]["gain"] == {
         "__kind": "eval",
         "expr": "gain",
     }
@@ -1085,7 +1121,7 @@ def test_sweep_eval_edges_lower_against_md():
         "__kind": "eval",
         "expr": "center - 2",
     }
-    assert schema.read_value_tree()["detune_sweep"]["start"] == {
+    assert schema.read_value_tree()["sweep"]["freq"]["start"] == {
         "__kind": "eval",
         "expr": "center - 2",
     }

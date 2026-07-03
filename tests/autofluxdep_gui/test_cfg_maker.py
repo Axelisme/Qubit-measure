@@ -61,7 +61,6 @@ def _env(ml: ModuleLibrary) -> RunEnv:
         schema=_schema(
             QubitFreqBuilder(),
             {
-                "qub_waveform": "qub_flat",
                 "qub_ch": 3,
                 "qub_nqz": 2,
                 "qub_gain": 0.05,
@@ -106,7 +105,6 @@ def test_qubit_freq_make_cfg_can_fix_drive_gain():
         schema=_schema(
             QubitFreqBuilder(),
             {
-                "qub_waveform": "qub_flat",
                 "qub_ch": 3,
                 "qub_nqz": 2,
                 "qub_gain": 0.05,
@@ -140,7 +138,7 @@ def test_qubit_freq_produce_fast_fails_when_context_unconfigured():
     env = RunEnv(
         flux=0.0,
         flux_idx=0,
-        schema=_schema(builder, {"qub_waveform": "qub_flat", "qub_ch": 3}),
+        schema=_schema(builder, {"qub_ch": 3}),
         ml=None,
         result=result,
     )
@@ -159,7 +157,6 @@ def test_lenrabi_make_cfg_lowers_context():
 
     ml = _ml()
     params = {
-        "qub_waveform": "qub_flat",
         "qub_ch": 4,
         "qub_nqz": 2,
         "qub_gain": 0.3,
@@ -190,7 +187,6 @@ def test_lenrabi_produce_fast_fails_when_context_unconfigured():
 
     builder = LenRabiBuilder()
     params = {
-        "qub_waveform": "qub_flat",
         "qub_ch": 4,
         "sweep_range": SweepValue(start=0.05, stop=2.5, expts=61),
     }
@@ -765,7 +761,6 @@ def _mist_env(ml: ModuleLibrary, **result_tools) -> RunEnv:
         schema=_schema(
             MistBuilder(),
             {
-                "mist_waveform": "mist_flat",
                 "mist_ch": 4,
                 "mist_nqz": 2,
                 "mist_freq": 5135.0,

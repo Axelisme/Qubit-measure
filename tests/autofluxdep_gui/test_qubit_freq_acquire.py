@@ -60,7 +60,6 @@ def test_qubit_freq_acquire_fit_varies_with_flux():
     node = ctrl.add_node_by_type("qubit_freq")
     node.schema.with_overrides(
         {
-            "qub_waveform": "qub_drive",
             "qub_ch": 1,
             "qub_nqz": 1,
             "qub_gain": 0.3,
@@ -110,7 +109,6 @@ def test_plotter_update_runs_after_a_real_produce():
     builder = QubitFreqBuilder()
     flux = np.linspace(0.0, 0.1, 3)
     params = {
-        "qub_waveform": "qub_drive",
         "qub_ch": 1,
         "qub_nqz": 1,
         "qub_gain": 0.3,
@@ -158,7 +156,6 @@ def test_good_fit_calibrates_the_predictor():
 
     builder = QubitFreqBuilder()
     params = {
-        "qub_waveform": "qub_drive",
         "qub_ch": 1,
         "qub_nqz": 1,
         "qub_gain": 0.3,

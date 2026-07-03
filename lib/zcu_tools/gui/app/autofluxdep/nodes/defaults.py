@@ -1,283 +1,136 @@
-"""Context-aware default seeds for autofluxdep node cfg schemas.
+"""Adapter-backed default cfg schemas for autofluxdep nodes.
 
-The helpers mirror measure-gui's md/ml seeding pattern without importing the
-measure app directly: fresh autofluxdep placements can adopt calibrated modules
-and live md expressions, while persisted schemas remain the stored value tree.
+Fresh autofluxdep placements reuse the corresponding measure-gui adapter's
+``make_default_cfg(ctx)`` result as the visible Default cfg. Autofluxdep only adds
+its run-time ``generation`` section and a logical projection for the node builder.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass
-from numbers import Real
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from zcu_tools.gui.app.autofluxdep.cfg import EvalValue, SweepValue
-from zcu_tools.program.v2.modules import DirectReadoutCfg, PulseCfg, PulseReadoutCfg
-
-if TYPE_CHECKING:
-    from zcu_tools.gui.session.types import ExpContext
-    from zcu_tools.meta_tool import ModuleLibrary
-
-
-@dataclass(frozen=True)
-class PulseSeed:
-    waveform: str | None
-    ch: Any
-    nqz: int
-    freq: Any
-    gain: float
-    length: float
-    from_module: bool
+from zcu_tools.gui.app.autofluxdep.cfg import (
+    CfgSchema,
+    CfgSectionSpec,
+    CfgSectionValue,
+    DirectValue,
+    NodeCfgSchema,
+    ScalarSpec,
+    SweepSpec,
+    SweepValue,
+)
+from zcu_tools.gui.session.types import ExpContext
+from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 
 @dataclass(frozen=True)
-class ReadoutSeed:
-    freq: float
-    gain: float
-    from_module: bool
+class GenerationField:
+    logical_key: str
+    field_key: str
+    spec: ScalarSpec | SweepSpec
+    default: Any
 
 
-def md_has(ctx: ExpContext | Any | None, key: str) -> bool:
-    md = getattr(ctx, "md", None)
-    if md is None:
-        return False
-    sentinel = object()
-    try:
-        value = md.get(key, sentinel)
-    except Exception:
-        return False
-    return value is not sentinel and value is not None
-
-
-def md_scalar(ctx: ExpContext | Any | None, key: str, fallback: Any) -> Any:
-    """Return a live md expression when the key exists, else a plain fallback."""
-    if md_has(ctx, key):
-        return EvalValue(key)
-    return fallback
-
-
-def md_scalar_first(
-    ctx: ExpContext | Any | None, keys: tuple[str, ...], fallback: Any
-) -> Any:
-    for key in keys:
-        if md_has(ctx, key):
-            return EvalValue(key)
-    return fallback
-
-
-def md_float(ctx: ExpContext | Any | None, key: str, fallback: float) -> float:
-    value = _md_number(ctx, key)
-    return value if value is not None else fallback
-
-
-def md_scaled(
-    ctx: ExpContext | Any | None,
-    key: str,
-    factor: float,
-    fallback: float,
-    *,
-    minimum: float | None = None,
-) -> float | EvalValue:
-    """Default for ``factor * md.<key>``.
-
-    Numeric md values are materialized immediately so floor constraints can be
-    honoured. Non-numeric-but-present md keys keep a live expression; the shared
-    evaluator will fast-fail on lower if the md value is not numeric.
-    """
-    value = _md_number(ctx, key)
-    if value is not None:
-        scaled = factor * value
-        return max(minimum, scaled) if minimum is not None else scaled
-    if md_has(ctx, key):
-        return EvalValue(f"{factor} * {key}")
-    scaled = factor * fallback
-    return max(minimum, scaled) if minimum is not None else scaled
-
-
-def md_scaled_sweep_stop(
-    ctx: ExpContext | Any | None,
-    key: str,
-    factor: float,
-    fallback: float,
-    *,
-    minimum: float | None = None,
-) -> float | EvalValue:
-    return md_scaled(ctx, key, factor, fallback, minimum=minimum)
-
-
-def preferred_waveform(
-    ctx: ExpContext | Any | None, names: tuple[str, ...], fallback: str | None
-) -> str | None:
-    ml = _context_ml(ctx)
-    if ml is not None:
-        waveforms = getattr(ml, "waveforms", {})
-        for name in names:
-            if name in waveforms:
-                return name
-    return fallback
-
-
-def pulse_seed(
-    ctx: ExpContext | Any | None,
-    *,
-    module_aliases: tuple[str, ...],
-    waveform_aliases: tuple[str, ...],
-    fallback_waveform: str | None,
-    fallback_ch: Any,
-    fallback_nqz: int,
-    fallback_freq: Any,
-    fallback_gain: float,
-    fallback_length: float,
-) -> PulseSeed:
-    waveform = preferred_waveform(ctx, waveform_aliases, fallback_waveform)
-    module = _first_module(ctx, module_aliases, PulseCfg)
-    if module is None:
-        return PulseSeed(
-            waveform=waveform,
-            ch=fallback_ch,
-            nqz=_valid_nqz(fallback_nqz, 2),
-            freq=fallback_freq,
-            gain=fallback_gain,
-            length=fallback_length,
-            from_module=False,
-        )
-    length = _number(getattr(module.waveform, "length", None))
-    freq = _number(module.freq)
-    gain = _number(module.gain)
-    return PulseSeed(
-        waveform=waveform,
-        ch=int(module.ch),
-        nqz=_valid_nqz(module.nqz, fallback_nqz),
-        freq=freq if freq is not None else fallback_freq,
-        gain=gain if gain is not None else fallback_gain,
-        length=length if length is not None else fallback_length,
-        from_module=True,
+def generation_field(
+    logical_key: str, field_key: str, spec: ScalarSpec | SweepSpec, default: Any
+) -> GenerationField:
+    return GenerationField(
+        logical_key=logical_key, field_key=field_key, spec=spec, default=default
     )
 
 
-def readout_seed(
-    ctx: ExpContext | Any | None,
-    aliases: tuple[str, ...],
+def adapter_node_schema(
+    adapter_cls: type[Any],
+    ctx: Any | None,
     *,
-    fallback_freq: float,
-    fallback_gain: float,
-) -> ReadoutSeed:
-    module = _first_readout(ctx, aliases)
-    if isinstance(module, PulseReadoutCfg):
-        freq = _number(module.pulse_cfg.freq)
-        if freq is None:
-            freq = _number(module.ro_cfg.ro_freq)
-        gain = _number(module.pulse_cfg.gain)
-        return ReadoutSeed(
-            freq=freq if freq is not None else fallback_freq,
-            gain=gain if gain is not None else fallback_gain,
-            from_module=True,
+    logical_paths: Mapping[str, str],
+    generation_fields: tuple[GenerationField, ...] = (),
+) -> NodeCfgSchema:
+    """Build a ``NodeCfgSchema`` from a measure-gui adapter default cfg."""
+    schema = adapter_cls().make_default_cfg(_ensure_context(ctx))
+    spec_fields = dict(schema.spec.fields)
+    value_fields = dict(schema.value.fields)
+    projection = dict(logical_paths)
+
+    if generation_fields:
+        spec_fields["generation"] = CfgSectionSpec(
+            label="Generation overrides",
+            fields={field.field_key: field.spec for field in generation_fields},
         )
-    if isinstance(module, DirectReadoutCfg):
-        freq = _number(module.ro_freq)
-        return ReadoutSeed(
-            freq=freq if freq is not None else fallback_freq,
-            gain=fallback_gain,
-            from_module=True,
+        value_fields["generation"] = CfgSectionValue(
+            fields={
+                field.field_key: _default_value(field.spec, field.default)
+                for field in generation_fields
+            }
         )
-    return ReadoutSeed(freq=fallback_freq, gain=fallback_gain, from_module=False)
-
-
-def ro_freq_range(
-    ctx: ExpContext | Any | None,
-    *,
-    center: float,
-    fallback_half_width: float,
-    expts: int,
-) -> SweepValue:
-    if md_has(ctx, "r_f") and md_has(ctx, "rf_w"):
-        return SweepValue(
-            start=EvalValue("r_f - 0.2 * rf_w"),
-            stop=EvalValue("r_f + 0.2 * rf_w"),
-            expts=expts,
+        projection.update(
+            {
+                field.logical_key: f"generation.{field.field_key}"
+                for field in generation_fields
+            }
         )
-    width = md_float(ctx, "rf_w", fallback_half_width / 0.2)
-    half_width = 0.2 * width if width > 0.0 else fallback_half_width
-    return SweepValue(start=center - half_width, stop=center + half_width, expts=expts)
 
-
-def ro_gain_range(
-    ctx: ExpContext | Any | None,
-    *,
-    center: float,
-    half_width: float,
-    expts: int,
-) -> SweepValue:
-    value = _md_number(ctx, "best_ro_gain")
-    if value is not None:
-        return _clipped_gain_range(value, half_width=half_width, expts=expts)
-    if md_has(ctx, "best_ro_gain"):
-        return SweepValue(
-            start=EvalValue(f"best_ro_gain - {half_width}"),
-            stop=EvalValue(f"best_ro_gain + {half_width}"),
-            expts=expts,
-        )
-    return _clipped_gain_range(center, half_width=half_width, expts=expts)
-
-
-def _clipped_gain_range(center: float, *, half_width: float, expts: int) -> SweepValue:
-    return SweepValue(
-        start=round(max(0.0, center - half_width), 12),
-        stop=round(min(1.0, center + half_width), 12),
-        expts=expts,
+    return NodeCfgSchema(
+        CfgSchema(
+            spec=CfgSectionSpec(
+                fields=spec_fields,
+                label=schema.spec.label,
+                inherit_hook=schema.spec.inherit_hook,
+            ),
+            value=CfgSectionValue(fields=value_fields),
+        ),
+        logical_paths=projection,
     )
 
 
-def _context_ml(ctx: ExpContext | Any | None) -> ModuleLibrary | None:
-    return getattr(ctx, "ml", None)
+def module_dict(raw_cfg: dict[str, Any], key: str) -> dict[str, Any]:
+    modules = raw_cfg.get("modules")
+    if not isinstance(modules, dict):
+        raise RuntimeError("adapter raw cfg has no modules section")
+    module = modules.get(key)
+    if not isinstance(module, dict):
+        raise RuntimeError(f"adapter raw cfg module {key!r} is missing")
+    return deepcopy(module)
 
 
-def _first_module[T](
-    ctx: ExpContext | Any | None, aliases: tuple[str, ...], module_type: type[T]
-) -> T | None:
-    ml = _context_ml(ctx)
-    if ml is None:
-        return None
-    modules = getattr(ml, "modules", {})
-    for name in aliases:
-        module = modules.get(name)
-        if isinstance(module, module_type):
-            return module
-    return None
+def move_module(raw_cfg: dict[str, Any], old: str, new: str) -> None:
+    modules = raw_cfg.get("modules")
+    if not isinstance(modules, dict):
+        raise RuntimeError("adapter raw cfg has no modules section")
+    if old not in modules:
+        raise RuntimeError(f"adapter raw cfg module {old!r} is missing")
+    modules[new] = modules.pop(old)
 
 
-def _first_readout(
-    ctx: ExpContext | Any | None, aliases: tuple[str, ...]
-) -> PulseReadoutCfg | DirectReadoutCfg | None:
-    ml = _context_ml(ctx)
-    if ml is None:
-        return None
-    modules = getattr(ml, "modules", {})
-    for name in aliases:
-        module = modules.get(name)
-        if isinstance(module, (PulseReadoutCfg, DirectReadoutCfg)):
-            return module
-    return None
+def sweep_range(raw_cfg: dict[str, Any], key: str) -> tuple[float, float]:
+    sweep = raw_cfg.get("sweep")
+    if not isinstance(sweep, dict):
+        raise RuntimeError("adapter raw cfg has no sweep section")
+    axis = sweep.get(key)
+    start = getattr(axis, "start", None)
+    stop = getattr(axis, "stop", None)
+    if start is None or stop is None:
+        raise RuntimeError(f"adapter raw cfg sweep {key!r} is missing start/stop")
+    return (float(start), float(stop))
 
 
-def _md_number(ctx: ExpContext | Any | None, key: str) -> float | None:
-    md = getattr(ctx, "md", None)
-    if md is None:
-        return None
-    try:
-        value = md.get(key)
-    except Exception:
-        return None
-    return _number(value)
+def _ensure_context(ctx: Any | None) -> ExpContext:
+    if isinstance(ctx, ExpContext):
+        return ctx
+    return ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
 
 
-def _number(value: object, fallback: float | None = None) -> float | None:
-    if isinstance(value, bool) or not isinstance(value, Real):
-        return fallback
-    return float(value)
-
-
-def _valid_nqz(value: object, fallback: int) -> int:
-    if value in (1, 2):
-        return int(value)
-    return fallback if fallback in (1, 2) else 2
+def _default_value(spec: ScalarSpec | SweepSpec, default: Any) -> Any:
+    if isinstance(spec, SweepSpec):
+        if not isinstance(default, SweepValue):
+            raise TypeError(
+                f"SweepSpec generation default must be SweepValue, "
+                f"got {type(default).__name__}"
+            )
+        return default
+    if isinstance(default, DirectValue):
+        return default
+    return DirectValue(default)

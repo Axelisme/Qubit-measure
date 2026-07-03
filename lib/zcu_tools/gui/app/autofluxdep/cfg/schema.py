@@ -8,9 +8,9 @@ while the write/lower contract stays keyed by stable logical names (``reps``,
 without forcing every Builder to read nested dicts.
 
 ``flat_node_schema`` keeps the legacy flat Builder contract. Older grouped
-schemas can use ``sectioned_node_schema``; real autofluxdep nodes should prefer
-``path_node_schema`` so the UI tree is explicitly tied to the raw cfg path each
-logical knob controls.
+schemas can use ``sectioned_node_schema``; adapter-backed autofluxdep nodes pass
+the measure-gui adapter's native value tree plus ``logical_paths`` directly into
+``NodeCfgSchema`` so the UI stays cfg-shaped while builder code keeps stable keys.
 """
 
 from __future__ import annotations
@@ -29,9 +29,13 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionValue,
     DirectValue,
     EvalValue,
+    ModuleRefSpec,
+    ModuleRefValue,
     ScalarSpec,
     SweepSpec,
     SweepValue,
+    WaveformRefSpec,
+    WaveformRefValue,
 )
 
 if TYPE_CHECKING:
@@ -99,8 +103,8 @@ def str_choice_spec(label: str, choices: tuple[str, ...]) -> ScalarSpec:
     return ScalarSpec(label=label, type=str, choices=list(choices))
 
 
-# One field declaration: its spec + its default value. The default is the
-# hardcoded value the old ``make_cfg`` carried (now the single source of truth).
+# One field declaration: its spec + its default value. Kept for flat/sectioned
+# helper tests and tiny synthetic builders; real nodes use adapter-backed schemas.
 NodeField = tuple[str, CfgNodeSpec, Any]
 
 
@@ -424,6 +428,8 @@ class NodeCfgSchema:
         a real typo (only declared knobs are writable), so it fast-fails.
 
         - A ``SweepSpec`` knob accepts a ``SweepValue`` (stored verbatim).
+        - A module/waveform ref knob accepts the corresponding ref value (or None
+          for optional refs), preserving adapter-native selections.
         - A ``ScalarSpec`` knob accepts either a ``DirectValue`` / ``EvalValue``
           (stored verbatim — the form produced it) or a raw value (coerced to
           the field's declared type; a blank/None leaves the leaf unset so the
@@ -435,6 +441,28 @@ class NodeCfgSchema:
             if not isinstance(value, SweepValue):
                 raise TypeError(
                     f"Param {key!r} is a sweep; expected a SweepValue, "
+                    f"got {type(value).__name__}"
+                )
+            _assign_value_at_path(self.schema.value, path, value)
+            return
+        if isinstance(spec, ModuleRefSpec):
+            if value is None and spec.optional:
+                _assign_value_at_path(self.schema.value, path, None)
+                return
+            if not isinstance(value, ModuleRefValue):
+                raise TypeError(
+                    f"Param {key!r} is a module ref; expected a ModuleRefValue, "
+                    f"got {type(value).__name__}"
+                )
+            _assign_value_at_path(self.schema.value, path, value)
+            return
+        if isinstance(spec, WaveformRefSpec):
+            if value is None and spec.optional:
+                _assign_value_at_path(self.schema.value, path, None)
+                return
+            if not isinstance(value, WaveformRefValue):
+                raise TypeError(
+                    f"Param {key!r} is a waveform ref; expected a WaveformRefValue, "
                     f"got {type(value).__name__}"
                 )
             _assign_value_at_path(self.schema.value, path, value)
@@ -471,16 +499,28 @@ class NodeCfgSchema:
 
         Scalars lower to their value; a ``SweepSpec`` lowers to a ``SweepCfg``.
         Numeric scalar and sweep-edge ``EvalValue`` leaves resolve against
-        ``md`` through the shared cfg lowering path.
+        ``md`` through the shared cfg lowering path. Each logical path lowers
+        independently so preview/init code can read sweep/scalar generation knobs
+        without resolving unrelated adapter module refs.
         """
-        raw = self.schema.to_raw_dict(md=md, ml=ml)
         knobs: dict[str, Any] = {}
         for logical_key, path in self.logical_paths.items():
-            value = _get_raw_at_path(raw, path)
+            spec = _resolve_spec_at_path(self.schema.spec, path)
+            if ml is None and isinstance(spec, (ModuleRefSpec, WaveformRefSpec)):
+                continue
+            value = _lower_value_at_path(self.schema.value, spec, path, ml, md)
             if value is _MISSING:
                 continue
             knobs[logical_key] = value
         return knobs
+
+    def lower_raw(
+        self, ml: ModuleLibrary | None, md: MetaDict | None = None
+    ) -> dict[str, Any]:
+        """Lower the full adapter-shaped cfg tree, omitting autofluxdep-only knobs."""
+        raw = self.schema.to_raw_dict(md=md, ml=ml)
+        raw.pop("generation", None)
+        return raw
 
     def read_knobs(self) -> dict[str, Any]:
         """The current *un-lowered* user knob values, as a JSON-friendly dict.
@@ -522,6 +562,10 @@ class NodeCfgSchema:
         except SessionCodecError as exc:
             raise NodeCfgPersistenceError(str(exc)) from exc
 
+    def replace_value_tree(self, value: CfgSectionValue) -> None:
+        """Replace the complete value tree while keeping this node's spec/projection."""
+        self.schema = CfgSchema(spec=self.schema.spec, value=value)
+
     def logical_updates_from(self, value: CfgSectionValue) -> dict[str, Any]:
         """Project a full UI draft value tree back into logical-key updates."""
         updates: dict[str, Any] = {}
@@ -543,11 +587,13 @@ def _validate_logical_paths(spec: CfgSectionSpec, paths: Mapping[str, str]) -> N
     for logical_key, path in paths.items():
         _validate_path_part("logical key", logical_key)
         leaf_spec = _resolve_spec_at_path(spec, path)
-        if not isinstance(leaf_spec, (ScalarSpec, SweepSpec)):
+        if not isinstance(
+            leaf_spec, (ScalarSpec, SweepSpec, ModuleRefSpec, WaveformRefSpec)
+        ):
             raise TypeError(
                 f"Logical node param {logical_key!r} maps to unsupported spec "
-                f"{type(leaf_spec).__name__}; only ScalarSpec and SweepSpec "
-                "are supported"
+                f"{type(leaf_spec).__name__}; only ScalarSpec, SweepSpec, "
+                "ModuleRefSpec, and WaveformRefSpec are supported"
             )
 
 
@@ -560,19 +606,50 @@ def _split_path(path: str) -> tuple[str, ...]:
 
 def _resolve_spec_at_path(spec: CfgSectionSpec, path: str) -> CfgNodeSpec:
     node_spec: CfgNodeSpec = spec
-    for part in _split_path(path):
-        if not isinstance(node_spec, CfgSectionSpec):
+    parts = _split_path(path)
+    for idx, part in enumerate(parts):
+        if isinstance(node_spec, CfgSectionSpec):
+            if part not in node_spec.fields:
+                raise KeyError(
+                    f"Node field path {path!r} segment {part!r} not found; "
+                    f"available: {', '.join(node_spec.fields)}"
+                )
+            node_spec = node_spec.fields[part]
+            continue
+        if isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec)):
+            remaining = ".".join(parts[idx:])
+            node_spec = _resolve_ref_spec_at_path(node_spec, remaining)
+            break
+        else:
             raise RuntimeError(
                 f"Node field path {path!r} cannot descend into "
                 f"{type(node_spec).__name__} at {part!r}"
             )
-        if part not in node_spec.fields:
-            raise KeyError(
-                f"Node field path {path!r} segment {part!r} not found; "
-                f"available: {', '.join(node_spec.fields)}"
-            )
-        node_spec = node_spec.fields[part]
     return node_spec
+
+
+def _resolve_ref_spec_at_path(
+    spec: ModuleRefSpec | WaveformRefSpec, path: str
+) -> CfgNodeSpec:
+    matches: list[CfgNodeSpec] = []
+    for allowed in spec.allowed:
+        try:
+            matches.append(_resolve_spec_at_path(allowed, path))
+        except (KeyError, RuntimeError):
+            continue
+    if not matches:
+        allowed = ", ".join(shape.label for shape in spec.allowed)
+        raise KeyError(
+            f"Node ref path segment {path!r} not found in any allowed shape "
+            f"(allowed: {allowed})"
+        )
+    first = matches[0]
+    if not all(type(match) is type(first) for match in matches):
+        raise TypeError(
+            f"Node ref path {path!r} resolves to inconsistent spec types: "
+            + ", ".join(type(match).__name__ for match in matches)
+        )
+    return first
 
 
 def _get_value_at_path(value: CfgSectionValue, path: str) -> Any:
@@ -580,12 +657,15 @@ def _get_value_at_path(value: CfgSectionValue, path: str) -> Any:
     parts = _split_path(path)
     for part in parts[:-1]:
         child = section.fields.get(part)
-        if not isinstance(child, CfgSectionValue):
+        if isinstance(child, (ModuleRefValue, WaveformRefValue)):
+            section = child.value
+        elif isinstance(child, CfgSectionValue):
+            section = child
+        else:
             raise RuntimeError(
                 f"Node field path {path!r} cannot descend into "
                 f"{type(child).__name__} at {part!r}"
             )
-        section = child
     if parts[-1] not in section.fields:
         raise KeyError(f"Node field path {path!r} leaf {parts[-1]!r} not found")
     return section.fields[parts[-1]]
@@ -596,18 +676,36 @@ def _assign_value_at_path(value: CfgSectionValue, path: str, leaf: Any) -> None:
     parts = _split_path(path)
     for part in parts[:-1]:
         child = section.fields.get(part)
-        if not isinstance(child, CfgSectionValue):
+        if isinstance(child, (ModuleRefValue, WaveformRefValue)):
+            section = child.value
+        elif isinstance(child, CfgSectionValue):
+            section = child
+        else:
             raise RuntimeError(
                 f"Node field path {path!r} cannot descend into "
                 f"{type(child).__name__} at {part!r}"
             )
-        section = child
     if parts[-1] not in section.fields:
         raise KeyError(f"Node field path {path!r} leaf {parts[-1]!r} not found")
     section.fields[parts[-1]] = leaf
 
 
 _MISSING: Final = object()
+
+
+def _lower_value_at_path(
+    value_tree: CfgSectionValue,
+    spec: CfgNodeSpec,
+    path: str,
+    ml: ModuleLibrary | None,
+    md: MetaDict | None,
+) -> Any:
+    value = _get_value_at_path(value_tree, path)
+    raw = CfgSchema(
+        spec=CfgSectionSpec(fields={"value": spec}),
+        value=CfgSectionValue(fields={"value": value}),
+    ).to_raw_dict(md=md, ml=ml)
+    return raw.get("value", _MISSING)
 
 
 def _get_raw_at_path(raw: Mapping[str, Any], path: str) -> Any:
@@ -625,8 +723,24 @@ def _get_raw_at_path(raw: Mapping[str, Any], path: str) -> Any:
 
 
 def _jsonify_value_node(value: Any) -> Any:
+    if value is None:
+        return None
     if isinstance(value, CfgSectionValue):
         return _jsonify_value_tree(value)
+    if isinstance(value, ModuleRefValue):
+        return {
+            "__kind": "module_ref",
+            "chosen_key": value.chosen_key,
+            "is_overridden": bool(value.is_overridden),
+            "value": _jsonify_value_tree(value.value),
+        }
+    if isinstance(value, WaveformRefValue):
+        return {
+            "__kind": "waveform_ref",
+            "chosen_key": value.chosen_key,
+            "is_overridden": bool(value.is_overridden),
+            "value": _jsonify_value_tree(value.value),
+        }
     if isinstance(value, SweepValue):
         return {
             "start": _knob_scalar_value(value.start),

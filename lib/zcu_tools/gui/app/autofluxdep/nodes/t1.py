@@ -58,15 +58,8 @@ import numpy as np
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.gui.app.autofluxdep.cfg import (
-    FloatSpec,
-    IntSpec,
-    SweepSpec,
-    SweepValue,
-    node_path,
-    path_node_schema,
-    str_choice_spec,
-)
+from zcu_tools.experiment.v2_gui.adapters.twotone.time_domain.t1 import T1Adapter
+from zcu_tools.gui.app.autofluxdep.cfg import FloatSpec, str_choice_spec
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     SnrProbe,
@@ -81,7 +74,10 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     signal2real_flip,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
-from zcu_tools.gui.app.autofluxdep.nodes.defaults import md_scaled, md_scaled_sweep_stop
+from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
+    adapter_node_schema,
+    generation_field,
+)
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import (
     PI_PULSE_LIBRARY_ALIASES,
@@ -299,60 +295,38 @@ class T1Builder(Builder):
     )
 
     def make_default_schema(self, ctx: Any | None = None) -> NodeCfgSchema:
-        """The typed node-knob schema (defaults + types) — the param SSOT.
-
-        ``sweep_range`` (a ``SweepSpec``, expts-defined) seeds the initial Result
-        relax-time axis; the *cfg's* sweep_range is derived from the smoothed t1 in
-        ``make_cfg`` (``_resolve_sweep_range``), not from this knob. Its default
-        ``(0.5, 60, expts=101)`` reproduces the prototype axis; the dead
-        ``num_expts`` knob (never read) is dropped.
-        """
-        relax_delay = md_scaled(ctx, "t1", 3.0, _DEFAULT_T1, minimum=1.0)
-        sweep_stop = md_scaled_sweep_stop(ctx, "t1", 5.0, 12.0, minimum=1.0)
-        return path_node_schema(
-            (
-                node_path(
-                    "relax_delay",
-                    "relax_delay",
-                    FloatSpec(label="relax_delay (us)"),
-                    relax_delay,
-                ),
-                node_path(
-                    "reps",
-                    "reps",
-                    IntSpec(label="reps"),
-                    1000,
-                ),
-                node_path(
-                    "rounds",
-                    "rounds",
-                    IntSpec(label="rounds"),
-                    10,
-                ),
-                node_path(
-                    "sweep_range",
-                    "sweep_range",
-                    SweepSpec(label="sweep_range (us)"),
-                    SweepValue(start=0.5, stop=sweep_stop, expts=101),
-                ),
-                node_path(
+        """Adapter-backed default cfg plus autofluxdep generation controls."""
+        return adapter_node_schema(
+            T1Adapter,
+            ctx,
+            logical_paths={
+                "reset": "modules.reset",
+                "pi_pulse": "modules.pi_pulse",
+                "readout": "modules.readout",
+                "relax_delay": "relax_delay",
+                "reps": "reps",
+                "rounds": "rounds",
+                "sweep_range": "sweep.length",
+            },
+            generation_fields=(
+                generation_field(
                     "earlystop_snr",
-                    "task.earlystop_snr",
+                    "earlystop_snr",
                     FloatSpec(label="earlystop_snr", optional=True),
                     _DEFAULT_EARLYSTOP_SNR,
                 ),
-                node_path(
+                generation_field(
                     "sweep_range_mode",
-                    "generation.sweep_range_mode",
+                    "sweep_range_mode",
                     str_choice_spec(
                         "sweep_range_mode",
                         (_SWEEP_RANGE_MODE_AUTO_T1, _SWEEP_RANGE_MODE_FIXED),
                     ),
                     _SWEEP_RANGE_MODE_AUTO_T1,
                 ),
-                node_path(
+                generation_field(
                     "relax_delay_mode",
-                    "generation.relax_delay_mode",
+                    "relax_delay_mode",
                     str_choice_spec(
                         "relax_delay_mode",
                         (_RELAX_DELAY_MODE_AUTO_T1, _RELAX_DELAY_MODE_FIXED),
@@ -360,10 +334,6 @@ class T1Builder(Builder):
                     _RELAX_DELAY_MODE_AUTO_T1,
                 ),
             ),
-            section_labels={
-                "task": "task",
-                "generation": "Generation overrides",
-            },
         )
 
     def make_init_result(
@@ -406,6 +376,7 @@ class T1Builder(Builder):
             raise RuntimeError(
                 "t1.make_cfg needs a readout module (none produced or preset)"
             )
+        raw_cfg = env.schema.lower_raw(ml, md=env.md)
         knobs = env.schema.lower(ml, md=env.md)
         smoothed_t1 = float(snapshot["t1"])
         relax_delay = _resolve_cfg_relax_delay(
@@ -418,16 +389,9 @@ class T1Builder(Builder):
             smoothed_t1=smoothed_t1,
             fixed=knobs["sweep_range"],
         )
-        return ml.make_cfg(
-            {
-                "modules": {
-                    "pi_pulse": pi_pulse,
-                    "readout": readout,
-                },
-                "relax_delay": relax_delay,
-                "reps": knobs["reps"],
-                "rounds": knobs["rounds"],
-                "sweep_range": sweep_range,
-            },
-            T1CfgTemplate,
-        )
+        raw_cfg["modules"]["pi_pulse"] = pi_pulse
+        raw_cfg["modules"]["readout"] = readout
+        raw_cfg.pop("sweep", None)
+        raw_cfg["relax_delay"] = relax_delay
+        raw_cfg["sweep_range"] = sweep_range
+        return ml.make_cfg(raw_cfg, T1CfgTemplate)

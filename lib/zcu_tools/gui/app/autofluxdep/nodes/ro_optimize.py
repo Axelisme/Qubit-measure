@@ -46,15 +46,10 @@ from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
-from zcu_tools.gui.app.autofluxdep.cfg import (
-    FloatSpec,
-    IntSpec,
-    SweepSpec,
-    SweepValue,
-    node_path,
-    path_node_schema,
-    str_choice_spec,
+from zcu_tools.experiment.v2_gui.adapters.twotone.ro_optimize.freq_gain import (
+    RoOptFreqGainAdapter,
 )
+from zcu_tools.gui.app.autofluxdep.cfg import str_choice_spec
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     axis_to_sweep,
@@ -64,11 +59,9 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
-    md_float,
-    md_scaled,
-    readout_seed,
-    ro_freq_range,
-    ro_gain_range,
+    adapter_node_schema,
+    generation_field,
+    move_module,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import (
@@ -413,90 +406,43 @@ class RoOptimizeBuilder(Builder):
     )
 
     def make_default_schema(self, ctx: Any | None = None) -> NodeCfgSchema:
-        """The typed node-knob schema (defaults + types) — the param SSOT.
-
-        The visible "Default cfg" block mirrors the notebook ``ml.make_cfg`` dict:
-        ``freq_range`` and ``gain_range`` are explicit SweepSpec ranges whose
-        endpoints can either be used directly or re-centered around the previous
-        best point by the generation override modes.
-        """
-        readout = readout_seed(
+        """Adapter-backed default cfg plus autofluxdep generation controls."""
+        return adapter_node_schema(
+            RoOptFreqGainAdapter,
             ctx,
-            READOUT_LIBRARY_ALIASES,
-            fallback_freq=md_float(ctx, "r_f", _DEFAULT_CENTER_FREQ),
-            fallback_gain=md_float(ctx, "best_ro_gain", _DEFAULT_CENTER_GAIN),
-        )
-        freq_range = ro_freq_range(
-            ctx,
-            center=readout.freq,
-            fallback_half_width=(_DEFAULT_FREQ_RANGE[1] - _DEFAULT_FREQ_RANGE[0]) / 2.0,
-            expts=_DEFAULT_FREQ_RANGE[2],
-        )
-        gain_range = ro_gain_range(
-            ctx,
-            center=readout.gain,
-            half_width=(_DEFAULT_GAIN_RANGE[1] - _DEFAULT_GAIN_RANGE[0]) / 2.0,
-            expts=_DEFAULT_GAIN_RANGE[2],
-        )
-        return path_node_schema(
-            (
-                node_path(
-                    "relax_delay",
-                    "relax_delay",
-                    FloatSpec(label="relax_delay (us)"),
-                    md_scaled(ctx, "t1", 3.0, _DEFAULT_T1),
-                ),
-                node_path(
-                    "reps",
-                    "reps",
-                    IntSpec(label="reps"),
-                    1000,
-                ),
-                node_path(
-                    "rounds",
-                    "rounds",
-                    IntSpec(label="rounds"),
-                    10,
-                ),
-                node_path(
-                    "skew_penalty",
-                    "skew_penalty",
-                    FloatSpec(label="skew_penalty", decimals=3),
-                    0.0,
-                ),
-                node_path(
-                    "freq_range",
-                    "freq_range",
-                    SweepSpec(label="freq_range (MHz)"),
-                    freq_range,
-                ),
-                node_path(
-                    "gain_range",
-                    "gain_range",
-                    SweepSpec(label="gain_range"),
-                    gain_range,
-                ),
-                node_path(
+            logical_paths={
+                "reset": "modules.reset",
+                "pi_pulse": "modules.qub_pulse",
+                "readout": "modules.readout",
+                "relax_delay": "relax_delay",
+                "skew_penalty": "skew_penalty",
+                "reps": "reps",
+                "rounds": "rounds",
+                "freq_range": "sweep.freq",
+                "gain_range": "sweep.gain",
+            },
+            generation_fields=(
+                generation_field(
                     "freq_range_mode",
-                    "generation.freq_range_mode",
+                    "freq_range_mode",
                     str_choice_spec(
                         "freq_range_mode",
                         (_RANGE_MODE_PREVIOUS_BEST, _RANGE_MODE_FIXED),
                     ),
                     _RANGE_MODE_PREVIOUS_BEST,
                 ),
-                node_path(
+                generation_field(
                     "gain_range_mode",
-                    "generation.gain_range_mode",
+                    "gain_range_mode",
                     str_choice_spec(
                         "gain_range_mode",
                         (_RANGE_MODE_PREVIOUS_BEST, _RANGE_MODE_FIXED),
                     ),
                     _RANGE_MODE_PREVIOUS_BEST,
                 ),
-                node_path(
+                generation_field(
                     "relax_delay_mode",
-                    "generation.relax_delay_mode",
+                    "relax_delay_mode",
                     str_choice_spec(
                         "relax_delay_mode",
                         (_RELAX_DELAY_MODE_AUTO_T1, _RELAX_DELAY_MODE_FIXED),
@@ -504,7 +450,6 @@ class RoOptimizeBuilder(Builder):
                     _RELAX_DELAY_MODE_AUTO_T1,
                 ),
             ),
-            section_labels={"generation": "Generation overrides"},
         )
 
     def make_init_result(
@@ -570,6 +515,7 @@ class RoOptimizeBuilder(Builder):
                 "ro_optimize.make_cfg needs the pi_pulse + readout modules "
                 "(none produced or preset)"
             )
+        raw_cfg = env.schema.lower_raw(ml, md=env.md)
         knobs = env.schema.lower(ml, md=env.md)
         freq_range_knob = knobs["freq_range"]
         gain_range_knob = knobs["gain_range"]
@@ -593,18 +539,11 @@ class RoOptimizeBuilder(Builder):
             t1=t1,
             fixed=float(knobs["relax_delay"]),
         )
-        return ml.make_cfg(
-            {
-                "modules": {
-                    "pi_pulse": pi_pulse,
-                    "readout": readout,
-                },
-                "relax_delay": relax_delay,
-                "reps": knobs["reps"],
-                "rounds": knobs["rounds"],
-                "skew_penalty": knobs["skew_penalty"],
-                "freq_range": freq_range,
-                "gain_range": gain_range,
-            },
-            RoOptimizeCfgTemplate,
-        )
+        move_module(raw_cfg, "qub_pulse", "pi_pulse")
+        raw_cfg["modules"]["pi_pulse"] = pi_pulse
+        raw_cfg["modules"]["readout"] = readout
+        raw_cfg.pop("sweep", None)
+        raw_cfg["relax_delay"] = relax_delay
+        raw_cfg["freq_range"] = freq_range
+        raw_cfg["gain_range"] = gain_range
+        return ml.make_cfg(raw_cfg, RoOptimizeCfgTemplate)
