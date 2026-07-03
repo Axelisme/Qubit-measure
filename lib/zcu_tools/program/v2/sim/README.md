@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-07-03 — LoadWord fast-fail boundary
+**Last updated:** 2026-07-03 — LoadWord readout frequency support
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -146,10 +146,11 @@ every coupling point.
 - `lowering.py` — module tree -> Bloch timeline + readout plan for one sweep
   point. Owns the single-rotating-frame detuning (plus the engine's per-node
   `detune_offset` frame shift), shaped-pulse discretisation, deterministic Branch
-  selection, and the scalar `LoadValue` dmem indirection used by non-uniform T1.
-  Raw `LoadWord` tables fast-fail because the simulator has no physics contract for
-  arbitrary hardware register words. Does NOT compute f_qubit, acc_buf, noise, S21,
-  or the detune ensemble (the engine owns that).
+  selection, scalar `LoadValue` dmem indirection used by non-uniform T1, and
+  `LoadWord` readout frequency decoding when consumed by `PulseReadout.freq_val`
+  or `PulseReadout.ro_freq_val`. Arbitrary raw hardware words still fast-fail
+  without an explicit consuming module contract. Does NOT compute f_qubit, acc_buf,
+  noise, S21, or the detune ensemble (the engine owns that).
 - `waveforms.py` — shared peak-normalized envelope sampling for both lowering and
   decimated readout. `ArbWaveform` uses the asset's stored reference time axis and
   asset duration (`time[-1]`) as its playback length; config no longer supplies a
@@ -239,11 +240,12 @@ every coupling point.
   detuning recurses into the selected branch. Measurement-conditional branches,
   nested branches, and a readout inside a branch fast-fail (control flow that
   needs shot-level feedback is out of scope).
-- **Register dmem support is scalar-only.** The simulator can recover
+- **Register dmem support is consumer-specific.** The simulator can recover
   uncompressed `LoadValue` tables when a semantic consumer such as `DelayAuto`
-  interprets the register as a scalar. `LoadWord` carries raw hardware words and
-  therefore fast-fails until a specific consuming module defines simulator
-  semantics for those words.
+  interprets the register as a scalar. `LoadWord` carries raw hardware words and is
+  supported only where a consumer defines semantics; currently `PulseReadout`
+  decodes frequency words through the active `soccfg`. Raw gain words and arbitrary
+  raw-word consumers still fast-fail.
 - **Q3 — `DressedLabelingError` fallback.** Where the fast dispersive labeling is
   ambiguous, `resonator_freqs` degrades deterministically to "no dispersive
   shift" (`rf_g = rf_e = bare_rf`) and warns, rather than crashing — a real

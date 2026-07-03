@@ -25,6 +25,7 @@ from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
+    LoadWord,
     ProgramV2Cfg,
     PulseReadout,
     PulseReadoutCfg,
@@ -136,6 +137,24 @@ def homophasal_sweep2array(
     return rounded
 
 
+def readout_freq_words_from_freqs(
+    freqs: NDArray[np.float64],
+    cfg: FreqCfg,
+    soccfg,
+) -> tuple[list[int], list[int]]:
+    readout = cfg.modules.readout
+    gen_ch = readout.pulse_cfg.ch
+    ro_ch = readout.ro_cfg.ro_ch
+    gen_words = [
+        int(soccfg.freq2reg(float(freq), gen_ch=gen_ch, ro_ch=ro_ch)) for freq in freqs
+    ]
+    ro_words = [
+        int(soccfg.freq2reg_adc(float(freq), ro_ch=ro_ch, gen_ch=gen_ch))
+        for freq in freqs
+    ]
+    return gen_words, ro_words
+
+
 class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
     # freq stores Hz on disk -> scale=MHZ_TO_HZ (disk = memory * 1e6)
     AXES_SPEC = AxesSpec(
@@ -221,19 +240,41 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             )
 
             with Schedule(cfg, signals_buffer) as sched:
-                for freq, step in sched.scan("freq", freqs.tolist()):
-                    cfg = step.cfg
-                    modules = cfg.modules
-                    modules.readout.set_param("freq", float(freq))
+                cfg = sched.cfg
+                modules = cfg.modules
+                modules.readout.set_param("freq", float(freqs[0]))
+                freq_words, ro_freq_words = readout_freq_words_from_freqs(
+                    freqs, cfg, soccfg
+                )
 
-                    _ = (
-                        step.prog_builder(soc, soccfg)
-                        .add_reset("reset", modules.reset)
-                        .add(PulseReadout("readout", modules.readout))
-                        .build_and_acquire(
-                            **(acquire_kwargs or {}),
-                        )
+                _ = (
+                    sched.prog_builder(soc, soccfg)
+                    .add_reset("reset", modules.reset)
+                    .add(
+                        LoadWord(
+                            "load_readout_freq",
+                            values=freq_words,
+                            idx_reg="freq",
+                            val_reg="readout_freq_word",
+                        ),
+                        LoadWord(
+                            "load_readout_ro_freq",
+                            values=ro_freq_words,
+                            idx_reg="freq",
+                            val_reg="readout_ro_freq_word",
+                        ),
+                        PulseReadout(
+                            "readout",
+                            modules.readout,
+                            freq_val="readout_freq_word",
+                            ro_freq_val="readout_ro_freq_word",
+                        ),
                     )
+                    .declare_sweep("freq", len(freqs))
+                    .build_and_acquire(
+                        **(acquire_kwargs or {}),
+                    )
+                )
 
             return FreqResult(
                 freqs=freqs, signals=signals_buffer.array, cfg_snapshot=orig_cfg

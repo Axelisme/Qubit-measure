@@ -10,7 +10,8 @@ Covers:
 - End-to-end pi / pi-half rotation through bloch.evolve (the load-bearing
   correctness check that the whole gain -> Omega -> rotation chain is right).
 - T1 dmem path: each sweep point's free-segment duration equals the LoadValue
-  cycle recovered via cycles2us; raw LoadWord tables fast-fail explicitly.
+  cycle recovered via cycles2us; raw LoadWord tables fast-fail on unsupported
+  consumers and decode through PulseReadout runtime frequency registers.
 - Sweep resolution: amp_rabi (gain), len_rabi (length), t2ramsey (delay).
 - detune_offset: a static global frame shift added to every segment's delta
   (drive + idle); detune_offset=0 reproduces the unshifted timeline.
@@ -31,6 +32,7 @@ import math
 import numpy as np
 import pytest
 from qick.asm_v2 import QickParam
+from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.control import Branch
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, SoftDelay
@@ -38,6 +40,7 @@ from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import (
     DirectReadoutCfg,
+    PulseReadout,
     PulseReadoutCfg,
 )
 from zcu_tools.program.v2.modules.reset import (
@@ -535,6 +538,134 @@ class TestReadoutPlan:
         assert lp.readout.readout_gain == pytest.approx(0.2)
         assert lp.readout.pulse_length_us == pytest.approx(0.5)
         assert lp.readout.ro_length_us == pytest.approx(1.2)
+
+    def test_pulse_readout_freq_val_decodes_load_word(self) -> None:
+        soccfg = make_mock_soccfg(n_gens=1, n_readouts=1)
+        freqs_mhz = [5990.0, 6000.0, 6010.0]
+        freq_words = [
+            int(soccfg.freq2reg(freq, gen_ch=0, ro_ch=0)) for freq in freqs_mhz
+        ]
+        pulse_cfg = PulseCfg(
+            waveform=ConstWaveformCfg(length=1.0),
+            ch=0,
+            nqz=1,
+            freq=freqs_mhz[0],
+            gain=0.25,
+        )
+        ro_cfg = DirectReadoutCfg(
+            ro_ch=0, ro_length=1.5, ro_freq=freqs_mhz[0], trig_offset=0.35
+        )
+        ro = PulseReadout(
+            "ro",
+            PulseReadoutCfg(pulse_cfg=pulse_cfg, ro_cfg=ro_cfg),
+            freq_val="freq_word",
+        )
+        modules = [
+            LoadWord(
+                "load_freq",
+                values=freq_words,
+                idx_reg="freq",
+                val_reg="freq_word",
+            ),
+            ro,
+        ]
+
+        lp = lower_point(
+            modules,
+            [("freq", len(freq_words))],
+            _SIM,
+            _F_QUBIT_GHZ,
+            {"freq": 2},
+            _identity_cycles2us,
+            soccfg=soccfg,
+        )
+
+        assert lp.readout.f_ro_ghz == pytest.approx(
+            soccfg.reg2freq(freq_words[2], gen_ch=0) / 1e3
+        )
+
+    def test_pulse_readout_prefers_freq_val_over_ro_freq_val_for_probe_freq(
+        self,
+    ) -> None:
+        soccfg = make_mock_soccfg(n_gens=1, n_readouts=1)
+        freq_words = [
+            int(soccfg.freq2reg(freq, gen_ch=0, ro_ch=0)) for freq in (5990.0, 6000.0)
+        ]
+        ro_freq_words = [
+            int(soccfg.freq2reg_adc(freq, ro_ch=0, gen_ch=0)) for freq in (100.0, 200.0)
+        ]
+        pulse_cfg = PulseCfg(
+            waveform=ConstWaveformCfg(length=1.0),
+            ch=0,
+            nqz=1,
+            freq=5990.0,
+            gain=0.25,
+        )
+        ro_cfg = DirectReadoutCfg(ro_ch=0, ro_length=1.5, ro_freq=5990.0)
+        ro = PulseReadout(
+            "ro",
+            PulseReadoutCfg(pulse_cfg=pulse_cfg, ro_cfg=ro_cfg),
+            freq_val="freq_word",
+            ro_freq_val="ro_freq_word",
+        )
+        modules = [
+            LoadWord("load_freq", freq_words, idx_reg="freq", val_reg="freq_word"),
+            LoadWord(
+                "load_ro_freq",
+                ro_freq_words,
+                idx_reg="freq",
+                val_reg="ro_freq_word",
+            ),
+            ro,
+        ]
+
+        lp = lower_point(
+            modules,
+            [("freq", len(freq_words))],
+            _SIM,
+            _F_QUBIT_GHZ,
+            {"freq": 1},
+            _identity_cycles2us,
+            soccfg=soccfg,
+        )
+
+        assert lp.readout.f_ro_ghz == pytest.approx(
+            soccfg.reg2freq(freq_words[1], gen_ch=0) / 1e3
+        )
+
+    def test_pulse_readout_gain_val_load_word_fast_fails(self) -> None:
+        pulse_cfg = PulseCfg(
+            waveform=ConstWaveformCfg(length=1.0),
+            ch=0,
+            nqz=1,
+            freq=6000.0,
+            gain=0.25,
+        )
+        ro_cfg = DirectReadoutCfg(ro_ch=0, ro_length=1.5, ro_freq=6000.0)
+        ro = PulseReadout(
+            "ro",
+            PulseReadoutCfg(pulse_cfg=pulse_cfg, ro_cfg=ro_cfg),
+            gain_val="gain_word",
+        )
+
+        with pytest.raises(UnsupportedModuleError, match="gain_val"):
+            lower_point(
+                [
+                    LoadWord(
+                        "load_gain",
+                        values=[1234],
+                        idx_reg="gain",
+                        val_reg="gain_word",
+                    ),
+                    ro,
+                ],
+                [("gain", 1)],
+                _SIM,
+                _F_QUBIT_GHZ,
+                {"gain": 0},
+                _identity_cycles2us,
+                soccfg=make_mock_soccfg(n_gens=1, n_readouts=1),
+            )
 
 
 class TestEndToEndRotation:

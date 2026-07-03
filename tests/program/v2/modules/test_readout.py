@@ -302,6 +302,75 @@ class TestPulseReadoutRuntime:
         assert mock_prog.count("trigger") == 1
         assert mock_prog.count("pulse") == 1
 
+    def test_runtime_regs_init_scratch_entries(self, mock_prog):
+        ro = PulseReadout(
+            "ro",
+            _make_pulse_ro_cfg(ch=3),
+            gain_val="gain_word",
+            freq_val="freq_word",
+            ro_freq_val="ro_freq_word",
+        )
+
+        ro.init(mock_prog)
+
+        assert mock_prog.count("declare_readout") == 1
+        assert mock_prog.count("declare_gen") == 2
+        add_pulses = mock_prog.events_of("add_pulse")
+        assert [event.kwargs["name"] for event in add_pulses] == [
+            "pulse_0",
+            "ro_runtime_pulse",
+        ]
+        add_readouts = mock_prog.events_of("add_readout_config")
+        assert [event.kwargs["name"] for event in add_readouts] == [
+            "ro_adc",
+            "ro_adc_runtime",
+        ]
+
+    def test_runtime_regs_patch_scratch_entries_before_playback(self, mock_prog):
+        ro = PulseReadout(
+            "ro",
+            _make_pulse_ro_cfg(ch=3),
+            gain_val="gain_word",
+            freq_val="freq_word",
+            ro_freq_val="ro_freq_word",
+        )
+        ro.init(mock_prog)
+
+        ro.run(mock_prog, t=0.25)
+
+        patch_events = mock_prog.events_of("patch_wmem")
+        assert [event.kwargs for event in patch_events] == [
+            {
+                "name": "ro_adc_runtime",
+                "freq_reg": "ro_freq_word",
+                "gain_reg": None,
+            },
+            {
+                "name": "ro_runtime_pulse",
+                "freq_reg": "freq_word",
+                "gain_reg": "gain_word",
+            },
+        ]
+        assert mock_prog.only("send_readout_config").kwargs["name"] == "ro_adc_runtime"
+        assert mock_prog.only("pulse").kwargs["name"] == "ro_runtime_pulse"
+
+    def test_runtime_ro_freq_only_leaves_pulse_on_normal_entry(self, mock_prog):
+        ro = PulseReadout(
+            "ro",
+            _make_pulse_ro_cfg(ch=3),
+            ro_freq_val="ro_freq_word",
+        )
+        ro.init(mock_prog)
+
+        ro.run(mock_prog)
+
+        assert mock_prog.only("patch_wmem").kwargs == {
+            "name": "ro_adc_runtime",
+            "freq_reg": "ro_freq_word",
+            "gain_reg": None,
+        }
+        assert mock_prog.only("pulse").kwargs["name"] == "pulse_0"
+
     def test_allow_rerun(self):
         assert PulseReadout("ro", _make_pulse_ro_cfg()).allow_rerun() is True
 

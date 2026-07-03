@@ -26,6 +26,7 @@ TraceKind = Literal[
     "nop",
     "open_loop",
     "pulse",
+    "patch_wmem",
     "read_dmem",
     "reg_write",
     "send_readout_config",
@@ -173,6 +174,15 @@ class ProgramTrace:
         tag: str | None = None,
     ) -> None:
         self._record("pulse", ch=ch, name=name, t=t, tag=tag)
+
+    def patch_wmem_from_regs(
+        self,
+        name: str,
+        *,
+        freq_reg: str | None = None,
+        gain_reg: str | None = None,
+    ) -> None:
+        self._record("patch_wmem", name=name, freq_reg=freq_reg, gain_reg=gain_reg)
 
     def delay(self, t: Any, tag: str | None = None) -> None:
         self._record("delay", t=t, tag=tag)

@@ -134,9 +134,20 @@ class DirectReadout(AbsReadout):
 
 
 class PulseReadout(AbsReadout):
-    def __init__(self, name: str, cfg: PulseReadoutCfg) -> None:
+    def __init__(
+        self,
+        name: str,
+        cfg: PulseReadoutCfg,
+        *,
+        gain_val: str | None = None,
+        freq_val: str | None = None,
+        ro_freq_val: str | None = None,
+    ) -> None:
         self.name = name
         self.cfg = deepcopy(cfg)
+        self.gain_val = gain_val
+        self.freq_val = freq_val
+        self.ro_freq_val = ro_freq_val
         ro_ch = self.cfg.pulse_cfg.ro_ch
         if ro_ch is None:
             ro_ch = self.cfg.ro_cfg.ro_ch
@@ -147,19 +158,67 @@ class PulseReadout(AbsReadout):
             )
         self.pulse = Pulse(name=f"{name}_pulse", cfg=self.cfg.pulse_cfg)
         self.ro_window = DirectReadout(name=f"{name}_adc", cfg=self.cfg.ro_cfg)
+        self._runtime_pulse: Pulse | None = None
+        self._runtime_ro_name: str | None = None
 
     def init(self, prog: ModularProgramV2) -> None:
         self.pulse.init(prog)
         self.ro_window.init(prog)
+        if self._uses_runtime_pulse:
+            self._runtime_pulse = Pulse(
+                name=f"{self.name}_runtime_pulse",
+                cfg=self.cfg.pulse_cfg,
+                pulse_id=f"{self.name}_runtime_pulse",
+            )
+            self._runtime_pulse.init(prog)
+        if self.ro_freq_val is not None:
+            self._runtime_ro_name = f"{self.name}_adc_runtime"
+            readout_kwargs: dict[str, int] = {}
+            if self.cfg.ro_cfg.gen_ch is not None:
+                readout_kwargs["gen_ch"] = self.cfg.ro_cfg.gen_ch
+            prog.add_readoutconfig(
+                ch=self.cfg.ro_cfg.ro_ch,
+                name=self._runtime_ro_name,
+                freq=self.cfg.ro_cfg.ro_freq,
+                **readout_kwargs,
+            )
 
     def total_length(self, prog: ModularProgramV2) -> float | QickParam:
         return calc_max_length(
             self.ro_window.total_length(prog), self.pulse.total_length(prog)
         )
 
+    @property
+    def _uses_runtime_pulse(self) -> bool:
+        return self.gain_val is not None or self.freq_val is not None
+
     def run(
         self, prog: ModularProgramV2, t: float | QickParam = 0.0
     ) -> float | QickParam:
-        self.ro_window.run(prog, t)
-        self.pulse.run(prog, t)
+        if self.ro_freq_val is None:
+            self.ro_window.run(prog, t)
+        else:
+            runtime_ro_name = self._runtime_ro_name
+            assert runtime_ro_name is not None
+            prog.patch_wmem_from_regs(runtime_ro_name, freq_reg=self.ro_freq_val)
+            self._run_readout_config(prog, runtime_ro_name, t)
+
+        if not self._uses_runtime_pulse:
+            self.pulse.run(prog, t)
+        else:
+            runtime_pulse = self._runtime_pulse
+            assert runtime_pulse is not None
+            pulse_id = runtime_pulse.pulse_id
+            assert pulse_id is not None
+            prog.patch_wmem_from_regs(
+                pulse_id, freq_reg=self.freq_val, gain_reg=self.gain_val
+            )
+            runtime_pulse.run(prog, t)
         return t + self.total_length(prog)
+
+    def _run_readout_config(
+        self, prog: ModularProgramV2, name: str, t: float | QickParam
+    ) -> None:
+        ro_ch = self.cfg.ro_cfg.ro_ch
+        prog.send_readoutconfig(ro_ch, name, t=t)  # type: ignore
+        prog.trigger([ro_ch], t=t + self.cfg.ro_cfg.trig_offset)

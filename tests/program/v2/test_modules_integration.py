@@ -236,6 +236,42 @@ class TestReadoutIntegration:
         prog = _make_prog(modules=[PulseReadout("ro", cfg)])
         assert prog.binprog is not None
 
+    def test_pulse_readout_runtime_freq_words_compile(self):
+        cfg = PulseReadoutCfg(
+            pulse_cfg=_pulse_cfg(ch=GEN_CH, freq=GEN_FREQ),
+            ro_cfg=DirectReadoutCfg(
+                ro_ch=RO_CH,
+                ro_length=RO_LENGTH,
+                ro_freq=RO_FREQ,
+                gen_ch=GEN_CH,
+            ),
+        )
+        modules = [
+            LoadWord(
+                "load_freq",
+                values=[1, 2],
+                idx_reg="freq",
+                val_reg="freq_word",
+            ),
+            LoadWord(
+                "load_ro_freq",
+                values=[3, 4],
+                idx_reg="freq",
+                val_reg="ro_freq_word",
+            ),
+            PulseReadout(
+                "ro",
+                cfg,
+                freq_val="freq_word",
+                ro_freq_val="ro_freq_word",
+            ),
+        ]
+
+        prog = _make_prog(modules=modules, sweep=[("freq", 2)])
+
+        assert prog.binprog is not None
+        assert any(inst.get("CMD") == "WMEM_WR" for inst in prog.prog_list)
+
     def test_readout_factory_direct_compiles(self):
         prog = _make_prog(modules=[Readout("ro", _direct_ro_cfg())])
         assert prog.binprog is not None

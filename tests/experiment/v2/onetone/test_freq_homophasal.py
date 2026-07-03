@@ -3,10 +3,16 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from zcu_tools.experiment.v2.onetone.freq import (
+    FreqCfg,
+    FreqModuleCfg,
+    FreqSweepCfg,
     HomophasalSamplingCfg,
     homophasal_freqs_from_sweep,
+    readout_freq_words_from_freqs,
 )
-from zcu_tools.program.v2 import SweepCfg
+from zcu_tools.program.v2 import DirectReadoutCfg, PulseCfg, PulseReadoutCfg, SweepCfg
+from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 
 def _theta_from_freq(freqs: np.ndarray, params: HomophasalSamplingCfg) -> np.ndarray:
@@ -42,3 +48,39 @@ def test_homophasal_sampling_params_require_positive_fit_scale() -> None:
 
     with pytest.raises(ValueError, match="rf_w must be positive"):
         HomophasalSamplingCfg(r_f=6000.0, rf_w=0.0, theta0=0.0)
+
+
+def test_readout_freq_words_from_freqs_uses_gen_and_readout_formats() -> None:
+    soccfg = make_mock_soccfg(n_gens=2, n_readouts=1)
+    cfg = FreqCfg(
+        modules=FreqModuleCfg(
+            readout=PulseReadoutCfg(
+                pulse_cfg=PulseCfg(
+                    waveform=ConstWaveformCfg(length=1.0),
+                    ch=1,
+                    nqz=1,
+                    freq=6000.0,
+                    gain=0.5,
+                ),
+                ro_cfg=DirectReadoutCfg(
+                    ro_ch=0,
+                    ro_length=1.0,
+                    ro_freq=6000.0,
+                    gen_ch=1,
+                ),
+            )
+        ),
+        sweep=FreqSweepCfg(
+            freq=SweepCfg(start=5990.0, stop=6010.0, expts=3, step=10.0)
+        ),
+    )
+    freqs = np.asarray([5990.0, 6000.0, 6010.0], dtype=np.float64)
+
+    gen_words, ro_words = readout_freq_words_from_freqs(freqs, cfg, soccfg)
+
+    assert gen_words == [
+        int(soccfg.freq2reg(float(freq), gen_ch=1, ro_ch=0)) for freq in freqs
+    ]
+    assert ro_words == [
+        int(soccfg.freq2reg_adc(float(freq), ro_ch=0, gen_ch=1)) for freq in freqs
+    ]

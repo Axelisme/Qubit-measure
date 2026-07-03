@@ -518,7 +518,7 @@ def _delay_segment(
     idle_detuning: float,
     loop_counts: dict[str, int],
     point: dict[str, int],
-    dmem_values: dict[str, list[int]],
+    dmem_tables: dict[str, _DmemTable],
     cycles2us: object,
 ) -> Segment:
     """Lower a delay module to one free-evolution segment.
@@ -526,14 +526,14 @@ def _delay_segment(
     A ``DelayAuto`` whose ``t`` is a register name is the non-uniform T1 path:
     the per-point delay lives in a dmem table loaded by a ``LoadValue`` earlier
     in the module list, indexed by the ``*_idx`` sweep axis.  The cycle count is
-    recovered from ``dmem_values`` and converted to µs via ``cycles2us``.
+    recovered from ``dmem_tables`` and converted to µs via ``cycles2us``.
     ``idle_detuning`` is the single-frame idle precession rate (already including
     the global ``detune_offset``) applied to the emitted free segment.
     """
 
     if isinstance(module, DelayAuto) and isinstance(module.t, str):
         return _dmem_delay_segment(
-            module, sim, idle_detuning, point, dmem_values, cycles2us
+            module, sim, idle_detuning, point, dmem_tables, cycles2us
         )
 
     # DelayAuto stores its (non-register) duration in `.t`; Delay and SoftDelay
@@ -554,7 +554,7 @@ def _dmem_delay_segment(
     sim: SimParams,
     idle_detuning: float,
     point: dict[str, int],
-    dmem_values: dict[str, list[int]],
+    dmem_tables: dict[str, _DmemTable],
     cycles2us: object,
 ) -> Segment:
     """Recover a register-driven DelayAuto's per-point delay from the dmem table.
@@ -572,79 +572,109 @@ def _dmem_delay_segment(
 
     val_reg = module.t
     assert isinstance(val_reg, str)
-    if val_reg not in dmem_values:
+    if val_reg not in dmem_tables:
         raise UnsupportedModuleError(
             f"DelayAuto reads register {val_reg!r} but no LoadValue populates it; "
             f"cannot recover the delay value"
         )
 
-    values = dmem_values[val_reg]
-
-    # The sweep axis that indexes this table is the LoadValue's idx_reg.  We
-    # recorded it alongside the values; find the matching axis index in `point`.
-    idx_axis = _DMEM_IDX_AXES.get(val_reg)
-    if idx_axis is None or idx_axis not in point:
+    table = dmem_tables[val_reg]
+    if table.raw_word:
         raise UnsupportedModuleError(
-            f"cannot determine which sweep axis indexes dmem register {val_reg!r}"
+            f"DelayAuto reads register {val_reg!r} from LoadWord {table.source_name!r}; "
+            "raw hardware register words cannot be interpreted as delay cycles"
         )
 
-    idx = point[idx_axis]
-    if not 0 <= idx < len(values):
-        raise UnsupportedModuleError(
-            f"dmem index {idx} out of range for register {val_reg!r} "
-            f"(table size {len(values)})"
-        )
-
-    cycles = values[idx]
+    cycles = _dmem_table_value(val_reg, table, point)
     t_us = float(cycles2us(int(cycles)))  # type: ignore[operator]
     return _idle_segment(sim, t_us, idle_detuning)
 
 
-# Module-list-local mapping from a LoadValue val_reg to the sweep axis (idx_reg)
-# that indexes it.  Populated per-lowering by _collect_dmem_values; module-global
-# because lowering is single-threaded and re-populates it on every call.
-_DMEM_IDX_AXES: dict[str, str] = {}
-
-
-def _load_word_unsupported(module: LoadWord) -> UnsupportedModuleError:
-    return UnsupportedModuleError(
-        f"LoadWord {module.name!r} contains raw hardware register words; "
-        "the Bloch lowering only supports scalar LoadValue dmem tables"
-    )
+@dataclass(frozen=True)
+class _DmemTable:
+    values: list[int]
+    idx_reg: str
+    raw_word: bool
+    source_name: str
 
 
 def _collect_dmem_values(
     modules: Sequence[Module],
-) -> dict[str, list[int]]:
-    """Scan the module list for LoadValue tables, keyed by their ``val_reg``.
+) -> dict[str, _DmemTable]:
+    """Scan the module list for dmem tables, keyed by their ``val_reg``.
 
-    Also records the LoadValue's ``idx_reg`` (the sweep axis name) so a later
+    Also records the table's ``idx_reg`` (the sweep axis name) so a later
     register-driven DelayAuto can map its register back to the correct sweep
     axis.  ``auto_compress`` tables would change the stored layout; the T1 path
     uses ``auto_compress=False`` so values are stored verbatim, which is the only
-    layout this lowering supports — anything compressed fast-fails.
+    scalar layout this lowering supports — anything compressed fast-fails.
     """
 
-    _DMEM_IDX_AXES.clear()
-    tables: dict[str, list[int]] = {}
+    tables: dict[str, _DmemTable] = {}
     for module in modules:
-        if isinstance(module, LoadWord):
-            raise _load_word_unsupported(module)
         if isinstance(module, LoadValue):
             if module._is_compressed:
                 raise UnsupportedModuleError(
                     f"LoadValue {module.name!r} is compressed; the Bloch lowering "
                     f"only supports verbatim (auto_compress=False) dmem tables"
                 )
-            tables[module.val_reg] = list(module.values)
-            _DMEM_IDX_AXES[module.val_reg] = module.idx_reg
+            _add_dmem_table(
+                tables,
+                module.val_reg,
+                _DmemTable(
+                    values=list(module.values),
+                    idx_reg=module.idx_reg,
+                    raw_word=False,
+                    source_name=module.name,
+                ),
+            )
+        elif isinstance(module, LoadWord):
+            _add_dmem_table(
+                tables,
+                module.val_reg,
+                _DmemTable(
+                    values=list(module.values),
+                    idx_reg=module.idx_reg,
+                    raw_word=True,
+                    source_name=module.name,
+                ),
+            )
     return tables
+
+
+def _add_dmem_table(
+    tables: dict[str, _DmemTable], val_reg: str, table: _DmemTable
+) -> None:
+    if val_reg in tables:
+        raise UnsupportedModuleError(
+            f"dmem register {val_reg!r} is populated by multiple LoadValue/LoadWord "
+            "modules; SimEngine requires one producer per register"
+        )
+    tables[val_reg] = table
+
+
+def _dmem_table_value(val_reg: str, table: _DmemTable, point: dict[str, int]) -> int:
+    if table.idx_reg not in point:
+        raise UnsupportedModuleError(
+            f"cannot determine which sweep axis indexes dmem register {val_reg!r}"
+        )
+
+    idx = point[table.idx_reg]
+    if not 0 <= idx < len(table.values):
+        raise UnsupportedModuleError(
+            f"dmem index {idx} out of range for register {val_reg!r} "
+            f"(table size {len(table.values)})"
+        )
+
+    return table.values[idx]
 
 
 def _readout_plan(
     module: AbsReadout,
     loop_counts: dict[str, int],
     point: dict[str, int],
+    dmem_tables: dict[str, _DmemTable],
+    soccfg: object | None,
 ) -> ReadoutPlan:
     """Build the ReadoutPlan from a readout module at one sweep point."""
 
@@ -672,6 +702,27 @@ def _readout_plan(
             module.cfg.pulse_cfg.pre_delay, loop_counts, point
         )
         f_ro_mhz = _resolve_scalar(ro_freq, loop_counts, point)
+        if module.gain_val is not None:
+            raise UnsupportedModuleError(
+                f"PulseReadout {module.name!r} uses gain_val={module.gain_val!r}; "
+                "SimEngine cannot decode raw gain LoadWord values"
+            )
+        if module.freq_val is not None:
+            f_ro_mhz = _load_word_gen_freq_mhz(
+                module.freq_val,
+                dmem_tables,
+                point,
+                soccfg,
+                gen_ch=module.cfg.pulse_cfg.ch,
+            )
+        elif module.ro_freq_val is not None:
+            f_ro_mhz = _load_word_ro_freq_mhz(
+                module.ro_freq_val,
+                dmem_tables,
+                point,
+                soccfg,
+                ro_ch=module.cfg.ro_cfg.ro_ch,
+            )
         ro_length_us = _resolve_scalar(ro_length, loop_counts, point)
         trig_offset_us = _resolve_scalar(trig_offset, loop_counts, point)
         return ReadoutPlan(
@@ -687,6 +738,64 @@ def _readout_plan(
         raise UnsupportedModuleError(
             f"unsupported readout module {type(module).__name__} for lowering"
         )
+
+
+def _load_word_gen_freq_mhz(
+    val_reg: str,
+    dmem_tables: dict[str, _DmemTable],
+    point: dict[str, int],
+    soccfg: object | None,
+    *,
+    gen_ch: int,
+) -> float:
+    raw = _load_word_value(
+        val_reg, dmem_tables, point, consumer="PulseReadout.freq_val"
+    )
+    if soccfg is None or not hasattr(soccfg, "reg2freq"):
+        raise UnsupportedModuleError(
+            "PulseReadout.freq_val requires soccfg.reg2freq to decode LoadWord "
+            "frequency words"
+        )
+    return float(soccfg.reg2freq(raw, gen_ch=gen_ch))  # type: ignore[attr-defined]
+
+
+def _load_word_ro_freq_mhz(
+    val_reg: str,
+    dmem_tables: dict[str, _DmemTable],
+    point: dict[str, int],
+    soccfg: object | None,
+    *,
+    ro_ch: int,
+) -> float:
+    raw = _load_word_value(
+        val_reg, dmem_tables, point, consumer="PulseReadout.ro_freq_val"
+    )
+    if soccfg is None or not hasattr(soccfg, "reg2freq_adc"):
+        raise UnsupportedModuleError(
+            "PulseReadout.ro_freq_val requires soccfg.reg2freq_adc to decode "
+            "LoadWord readout frequency words"
+        )
+    return float(soccfg.reg2freq_adc(raw, ro_ch=ro_ch))  # type: ignore[attr-defined]
+
+
+def _load_word_value(
+    val_reg: str,
+    dmem_tables: dict[str, _DmemTable],
+    point: dict[str, int],
+    *,
+    consumer: str,
+) -> int:
+    if val_reg not in dmem_tables:
+        raise UnsupportedModuleError(
+            f"{consumer} reads register {val_reg!r} but no LoadWord populates it"
+        )
+    table = dmem_tables[val_reg]
+    if not table.raw_word:
+        raise UnsupportedModuleError(
+            f"{consumer} reads register {val_reg!r} from LoadValue {table.source_name!r}; "
+            "raw hardware register words require LoadWord"
+        )
+    return _dmem_table_value(val_reg, table, point)
 
 
 def _select_branch(branch: Branch, point: dict[str, int]) -> list[Module]:
@@ -788,6 +897,7 @@ def lower_point(
     f_qubit_ghz: float,
     point: dict[str, int],
     cycles2us: object,
+    soccfg: object | None = None,
     detune_offset: float = 0.0,
 ) -> LoweredPoint:
     """Lower the module tree to a Bloch timeline + readout plan at one sweep point.
@@ -812,6 +922,9 @@ def lower_point(
     cycles2us
         ``soccfg.cycles2us`` callable, used only to convert dmem cycle counts
         (non-uniform T1 path) into µs delays.
+    soccfg
+        Optional QICK config object used to decode raw LoadWord frequency words
+        consumed by PulseReadout runtime registers.
     detune_offset
         A static, global rotating-frame shift in rad/µs (same unit as
         ``Segment.delta``), added to every segment's detuning — both drives and
@@ -831,7 +944,7 @@ def lower_point(
     loop_counts = _loop_counts(sweep)
     f_qubit_mhz = f_qubit_ghz * _GHZ_TO_MHZ
 
-    dmem_values = _collect_dmem_values(modules)
+    dmem_tables = _collect_dmem_values(modules)
     frame_detuning = _frame_detuning(modules, f_qubit_mhz, loop_counts, point)
     idle_detuning = frame_detuning + detune_offset
 
@@ -844,7 +957,7 @@ def lower_point(
                 raise UnsupportedModuleError(
                     "more than one readout module in the timeline is not supported"
                 )
-            readout = _readout_plan(module, loop_counts, point)
+            readout = _readout_plan(module, loop_counts, point, dmem_tables, soccfg)
             continue
         if isinstance(module, Branch):
             # Deterministic branch: descend into the selected sub-sequence only.
@@ -865,7 +978,7 @@ def lower_point(
                     idle_detuning,
                     loop_counts,
                     point,
-                    dmem_values,
+                    dmem_tables,
                     cycles2us,
                     segments,
                 )
@@ -879,7 +992,7 @@ def lower_point(
             idle_detuning,
             loop_counts,
             point,
-            dmem_values,
+            dmem_tables,
             cycles2us,
             segments,
         )
@@ -929,7 +1042,7 @@ def _lower_module(
     idle_detuning: float,
     loop_counts: dict[str, int],
     point: dict[str, int],
-    dmem_values: dict[str, list[int]],
+    dmem_tables: dict[str, _DmemTable],
     cycles2us: object,
     segments: list[Segment],
 ) -> None:
@@ -944,9 +1057,7 @@ def _lower_module(
     omits.
     """
 
-    if isinstance(module, LoadWord):
-        raise _load_word_unsupported(module)
-    if isinstance(module, LoadValue):
+    if isinstance(module, (LoadValue, LoadWord)):
         return  # dmem setup, already collected; emits no evolution
     if isinstance(module, (NoneReset, PulseReset, TwoPulseReset, BathReset)):
         segments.extend(
@@ -984,7 +1095,7 @@ def _lower_module(
                 idle_detuning,
                 loop_counts,
                 point,
-                dmem_values,
+                dmem_tables,
                 cycles2us,
             )
         )

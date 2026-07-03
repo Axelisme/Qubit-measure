@@ -11,6 +11,7 @@ from .delay import DelayRegAuto
 from .loop import CloseInnerLoop, OpenInnerLoop
 from .meta import MetaMacro
 from .pluse_reg import PulseByReg
+from .wmem import PatchWmemFromRegs
 from .write_reg import WriteRegOp
 
 
@@ -120,6 +121,17 @@ class AdditionalMacroMixin(AsmV2):
                 )
         else:
             self.append_macro(PulseByReg(ch=ch, t=t, addr_regs=[addr_reg]))
+
+    def patch_wmem_from_regs(
+        self,
+        name: str,
+        *,
+        freq_reg: str | None = None,
+        gain_reg: str | None = None,
+    ) -> None:
+        self.append_macro(
+            PatchWmemFromRegs(name=name, freq_reg=freq_reg, gain_reg=gain_reg)
+        )
 
     def debug_macro(self, name: str, t: float | QickParam, prefix: str = "") -> None:
         """Insert a debug macro that prints the current time (cycle count) with a name."""

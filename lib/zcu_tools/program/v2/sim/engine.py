@@ -881,6 +881,7 @@ class SimEngine:
             f_qubit_ghz,
             point,
             self.program.soccfg.cycles2us,
+            soccfg=self.program.soccfg,
             detune_offset=detune_offset,
         )
 

@@ -134,8 +134,10 @@ def run(self, soc, soccfg, cfg: FreqCfg) -> FreqResult:
 
 `onetone/freq` 的 frequency sampling 有兩種 mode：`linear` 沿用 program-side
 `SweepCfg` sweep；`homophasal` 保留同一個 `sweep.freq` 使用者介面，但由已擬合的 resonator
-circle 參數產生非等距 frequency array，再用 host-side `Schedule.scan(...)` 逐點量測。這類非等距
-模式仍先把點 round 到硬體格點，並在相鄰點 collapse 時 fast-fail。
+circle 參數產生非等距 frequency array，再把 gen/readout raw frequency words 放進
+`LoadWord` tables，由單一 program-side sweep 透過 `PulseReadout.freq_val` /
+`ro_freq_val` 逐點更新 wmem。這類非等距模式仍先把點 round 到硬體格點，並在相鄰點
+collapse 時 fast-fail。
 
 ### sweep 參數 mutation 的歸屬：搬進 runner-owned cfg
 
