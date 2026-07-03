@@ -33,35 +33,8 @@ if TYPE_CHECKING:
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.utils.process import rotate2real
 
-# How many running-average rounds a freshly GUI-placed Node acquires by default.
-# A real acquire averages many shots; ``rounds`` is the round count the cfg passes
-# to ``.acquire`` (the running average settles round by round). The controller
-# seeds this onto a GUI-placed Node; a directly-constructed Node (tests) overrides
-# it via params. Kept here (the real-acquire home) rather than scattered in cfg.
-DEFAULT_ROUNDS = 10
 logger = logging.getLogger(__name__)
 _ROUND_HOOK_PERF = PerfStats("worker.round_hook", logger, slow_ms=20.0)
-
-
-def parse_linear_axis(
-    spec: Any, default: tuple[float, float, int]
-) -> NDArray[np.float64]:
-    """Parse a free-text "start,stop,npts" sweep axis (or a 3-tuple) to a linspace.
-
-    Some sweep knobs accept free text; a malformed value degrades to ``default``
-    rather than failing the sweep (shared by t1 / lenrabi / t2ramsey / t2echo /
-    mist, whose trailing axis is a simple linspace)."""
-    try:
-        if isinstance(spec, str) and spec.strip():
-            start, stop, npts = spec.split(",")
-            lo, hi, n = float(start), float(stop), int(npts)
-        elif isinstance(spec, (tuple, list)) and len(spec) == 3:
-            lo, hi, n = float(spec[0]), float(spec[1]), int(spec[2])
-        else:
-            lo, hi, n = default
-    except (ValueError, TypeError):
-        lo, hi, n = default
-    return np.linspace(lo, hi, max(2, n))
 
 
 def is_good_fit(

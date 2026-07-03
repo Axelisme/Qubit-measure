@@ -43,7 +43,6 @@ from .schema import (
     path_node_schema,
     sectioned_node_schema,
     str_choice_spec,
-    str_scalar_spec,
 )
 
 __all__ = [
@@ -69,5 +68,4 @@ __all__ = [
     "path_node_schema",
     "sectioned_node_schema",
     "str_choice_spec",
-    "str_scalar_spec",
 ]

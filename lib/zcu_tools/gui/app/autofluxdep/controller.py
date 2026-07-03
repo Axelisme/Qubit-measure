@@ -15,12 +15,14 @@ dependency model.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 from qtpy.QtCore import QObject, Qt, QThread, Signal  # type: ignore[attr-defined]
 
 from zcu_tools.gui.app.autofluxdep.cfg import CfgSectionValue
@@ -38,7 +40,6 @@ from zcu_tools.gui.app.autofluxdep.events.workflow import (
     FluxChangedPayload,
     WorkflowChangedPayload,
 )
-from zcu_tools.gui.app.autofluxdep.nodes.acquire import DEFAULT_ROUNDS
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, PlacedNode
 from zcu_tools.gui.app.autofluxdep.nodes.predictor import PredictorBuilder
 from zcu_tools.gui.app.autofluxdep.operation_gate import OperationGate, OperationKind
@@ -72,6 +73,7 @@ from zcu_tools.gui.app.autofluxdep.tools import (
 )
 from zcu_tools.gui.background import BackgroundRunner
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
 from zcu_tools.gui.session.controller_mixin import SessionControllerMixin
 from zcu_tools.gui.session.operation_handles import (
     AwaitResult,
@@ -95,6 +97,7 @@ from zcu_tools.gui.session.services.predictor import (
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.state import DEFAULT_LEFT_PANEL_WIDTH
 from zcu_tools.meta_tool import QubitParams, QubitParamsError
+from zcu_tools.progress_bar import make_pbar
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.autofluxdep.services.caretaker import (
@@ -203,8 +206,6 @@ class Controller(SessionControllerMixin):
         # Base directory default result/database paths are anchored under (the
         # entry script injects the repo root). None falls back to cwd — fine for
         # tests / a `python -m` run from the repo root.
-        import os
-
         self._project_root = project_root if project_root is not None else os.getcwd()
 
         # --- session-core infrastructure (this app owns its gate + executor) ---
@@ -221,10 +222,6 @@ class Controller(SessionControllerMixin):
         if progress_transport is not None:
             transport = progress_transport
         else:
-            from zcu_tools.gui.session.adapters.qt_progress_transport import (
-                QtProgressTransport,
-            )
-
             transport = QtProgressTransport()
         self._operation_gate = OperationGate()
         self._operation_handles = OperationHandles()
@@ -510,14 +507,9 @@ class Controller(SessionControllerMixin):
 
         The instance name defaults to the type name, de-duped within the
         workflow (a second ``mist`` becomes ``mist_2``); the user can rename it.
-        A Node is seeded with the GUI's default acquire ``rounds`` so the run
-        averages a sensible number of passes (the user can tune it) — written
-        through the placement's schema (the SSOT) rather than a params dict.
         """
         node = create_placement(type_name, ctx=self._state.exp_context)
         node.name = self._unique_name(node.name)
-        if "rounds" in node.schema.keys:
-            node.schema.set_field("rounds", DEFAULT_ROUNDS)
         self._state.nodes.append(node)
         self._state.version.bump(WORKFLOW_VERSION_KEY)
         logger.debug("add_node_by_type: %r -> %r", type_name, node.name)
@@ -773,8 +765,6 @@ class Controller(SessionControllerMixin):
         self._run_stop_event = stop_event
 
         def work(factory: Any) -> _RunOutcome:
-            from zcu_tools.progress_bar import make_pbar
-
             with progress_ambient(factory):
                 pbar = make_pbar(
                     total=len(flux_values),
@@ -908,8 +898,6 @@ class Controller(SessionControllerMixin):
         The UI calls this before starting the worker so the Plotters bind to the
         same Result objects the worker fills. Returns the name→Result map.
         """
-        import numpy as np
-
         flux = np.asarray(self._state.flux_values or [0.0], dtype=np.float64)
         self._state.run_results = self._allocate_results(flux)
         return self._state.run_results

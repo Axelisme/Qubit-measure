@@ -25,7 +25,6 @@ the fields it does not use).
 
 from __future__ import annotations
 
-import inspect
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
 from dataclasses import InitVar, dataclass, field
@@ -224,11 +223,7 @@ class PlacedNode:
     ) -> None:
         if not self.name:
             self.name = self.builder.name
-        make_default_schema = self.builder.make_default_schema
-        if inspect.signature(make_default_schema).parameters:
-            self.schema = make_default_schema(default_context)
-        else:
-            self.schema = make_default_schema()
+        self.schema = self.builder.make_default_schema(default_context)
         if overrides:
             self.schema.with_overrides(overrides)
 

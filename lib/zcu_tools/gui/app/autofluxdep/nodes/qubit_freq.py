@@ -455,7 +455,7 @@ class QubitFreqBuilder(Builder):
                     _DEFAULT_QFW_SEED_GAIN,
                 ),
             ),
-            default_overrides={"detune_sweep": _DEFAULT_DETUNE_SWEEP},
+            default_overrides={"detune_sweep": _DEFAULT_DETUNE_SWEEP, "rounds": 10},
         )
 
     def make_init_result(

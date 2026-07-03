@@ -771,7 +771,7 @@ def test_sectioned_node_schema_duplicate_logical_key_fast_fails():
 def test_qubit_freq_default_knobs():
     knobs = QubitFreqBuilder().make_default_schema().lower(None)
     assert knobs["reps"] == 1000
-    assert knobs["rounds"] == 100
+    assert knobs["rounds"] == 10
     assert knobs["relax_delay"] == 1.0
     assert knobs["earlystop_snr"] == 50.0
     assert knobs["qub_ch"] == 0
@@ -835,7 +835,7 @@ def test_lenrabi_default_knobs():
 def test_mist_default_knobs():
     knobs = MistBuilder().make_default_schema().lower(None)
     assert knobs["reps"] == 1000
-    assert knobs["rounds"] == 100
+    assert knobs["rounds"] == 10
     assert knobs["relax_delay"] == 30.5
     assert knobs["mist_ch"] == 0
     assert knobs["mist_nqz"] == 2
@@ -1082,9 +1082,9 @@ def test_qubit_freq_make_cfg_uses_schema_defaults():
         {"predict_freq": 5135.0, "qfw_factor": None}, modules={"readout": _READOUT}
     )
     cfg = builder.make_cfg(env, snap)
-    # the hardcoded prototype defaults, now sourced from the schema
+    # the builder defaults, now sourced from the schema
     assert cfg.reps == 1000
-    assert cfg.rounds == 100
+    assert cfg.rounds == 10
     assert cfg.relax_delay == 1.0
     assert int(cfg.modules.qub_pulse.ch) == 0
     assert int(cfg.modules.qub_pulse.nqz) == 2
@@ -1167,7 +1167,7 @@ def test_mist_make_cfg_uses_schema_defaults():
     )
     cfg = builder.make_cfg(env, snap)
     assert cfg.reps == 1000
-    assert cfg.rounds == 100
+    assert cfg.rounds == 10
     assert cfg.relax_delay == 30.5
     assert int(cfg.modules.mist_pulse.ch) == 0
     assert float(cfg.modules.mist_pulse.gain) == 0.05

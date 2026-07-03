@@ -541,11 +541,10 @@ def test_t1_produce_fast_fails_when_context_unconfigured():
     # is None — make_cfg cannot lower the pi_pulse + readout.
     import numpy as np
     import pytest
-    from zcu_tools.gui.app.autofluxdep.nodes.acquire import parse_linear_axis
     from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
     from zcu_tools.gui.app.autofluxdep.nodes.t1 import T1Builder
 
-    times = parse_linear_axis("0.5,60,101", (0.5, 60.0, 101))
+    times = np.linspace(0.5, 60.0, 101)
     result = Sweep1DResult.allocate(np.array([0.5]), times, x_label="relax time (us)")
     env = RunEnv(
         flux=0.5,
@@ -657,12 +656,11 @@ def test_t2ramsey_produce_fast_fails_when_context_unconfigured():
     # is None — make_cfg cannot lower the pi/2 pulse + readout.
     import numpy as np
     import pytest
-    from zcu_tools.gui.app.autofluxdep.nodes.acquire import parse_linear_axis
     from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
     from zcu_tools.gui.app.autofluxdep.nodes.t2ramsey import T2RamseyBuilder
 
     flux = np.linspace(0.0, 1.0, 11)
-    times = parse_linear_axis("0,25,61", (0.0, 25.0, 61))
+    times = np.linspace(0.0, 25.0, 61)
     result = Sweep1DResult.allocate(flux, times, x_label="delay time (us)")
     env = RunEnv(
         flux=float(flux[1]),
@@ -891,11 +889,10 @@ def test_mist_produce_fast_fails_when_context_unconfigured():
 
     import numpy as np
     import pytest
-    from zcu_tools.gui.app.autofluxdep.nodes.acquire import parse_linear_axis
     from zcu_tools.gui.app.autofluxdep.nodes.mist import MistBuilder
     from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
 
-    gains = parse_linear_axis("0,1,21", (0.0, 1.0, 21))
+    gains = np.linspace(0.0, 1.0, 21)
     result = Sweep1DResult.allocate(np.array([0.0]), gains, x_label="gain")
     # the mist env fixture always binds an ml; replace it with None for this test.
     env = dataclasses.replace(_mist_env(_mist_ml(), result=result), ml=None)

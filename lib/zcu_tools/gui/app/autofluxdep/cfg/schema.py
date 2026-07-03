@@ -37,6 +37,11 @@ from zcu_tools.gui.app.main.adapter import (
     WaveformRefSpec,
     WaveformRefValue,
 )
+from zcu_tools.gui.app.main.services.session_codec import (
+    SessionCodecError,
+    raw_to_schema,
+    schema_to_raw,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary
@@ -80,20 +85,6 @@ def _coerce_scalar(value: Any, type_: type) -> Any:
     if type_ is bool:
         return bool(value)
     return type_(value)
-
-
-def str_scalar_spec(
-    label: str, *, required: bool = False, optional: bool = False
-) -> ScalarSpec:
-    """A string scalar field (e.g. a by-name waveform reference).
-
-    The framework's ``IntSpec`` / ``FloatSpec`` sugar covers numerics; a string
-    knob (the waveform name a node lowers via ``ml.get_waveform``) needs the bare
-    ``ScalarSpec(type=str)``, so this is its explicit counterpart. ``optional``
-    lets the knob lower to an omitted key when unset (a node then Fast-Fails on
-    the missing waveform name with its own message).
-    """
-    return ScalarSpec(label=label, type=str, required=required, optional=optional)
 
 
 def str_choice_spec(label: str, choices: tuple[str, ...]) -> ScalarSpec:
@@ -546,17 +537,10 @@ class NodeCfgSchema:
 
     def to_persisted_raw(self) -> dict[str, object]:
         """Encode the value tree using the shared cfg persistence codec."""
-        from zcu_tools.gui.app.main.services.session_codec import schema_to_raw
-
         return schema_to_raw(self.schema)
 
     def restore_persisted_raw(self, raw: Mapping[str, object]) -> None:
         """Restore the value tree from the shared cfg persistence raw shape."""
-        from zcu_tools.gui.app.main.services.session_codec import (
-            SessionCodecError,
-            raw_to_schema,
-        )
-
         try:
             self.schema = raw_to_schema(self.schema, dict(raw))
         except SessionCodecError as exc:
@@ -565,13 +549,6 @@ class NodeCfgSchema:
     def replace_value_tree(self, value: CfgSectionValue) -> None:
         """Replace the complete value tree while keeping this node's spec/projection."""
         self.schema = CfgSchema(spec=self.schema.spec, value=value)
-
-    def logical_updates_from(self, value: CfgSectionValue) -> dict[str, Any]:
-        """Project a full UI draft value tree back into logical-key updates."""
-        updates: dict[str, Any] = {}
-        for logical_key, path in self.logical_paths.items():
-            updates[logical_key] = _get_value_at_path(value, path)
-        return updates
 
     def _require_logical_path(self, logical_key: str) -> str:
         try:
@@ -714,20 +691,6 @@ def _lower_value_at_path(
 def _rewrite_single_value_lower_error(message: str, path: str) -> str:
     """Preserve the node cfg path when lowering an isolated logical leaf."""
     return message.replace("Config field 'value'", f"Config field '{path}'")
-
-
-def _get_raw_at_path(raw: Mapping[str, Any], path: str) -> Any:
-    node: Any = raw
-    for part in _split_path(path):
-        if not isinstance(node, Mapping):
-            raise RuntimeError(
-                f"Lowered node field path {path!r} cannot descend into "
-                f"{type(node).__name__} at {part!r}"
-            )
-        if part not in node:
-            return _MISSING
-        node = node[part]
-    return node
 
 
 def _jsonify_value_node(value: Any) -> Any:

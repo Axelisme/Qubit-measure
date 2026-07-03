@@ -273,6 +273,7 @@ class MistBuilder(Builder):
                 "rounds": "rounds",
                 "gain_sweep": "sweep.gain",
             },
+            default_overrides={"rounds": 10},
         )
 
     def make_init_result(
