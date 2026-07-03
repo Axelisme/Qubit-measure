@@ -105,6 +105,12 @@ def _section(form: NodeCfgForm, key: str) -> SectionLiveField:
     return cast(SectionLiveField, field)
 
 
+def _subsection(section: SectionLiveField, key: str) -> SectionLiveField:
+    field = section.fields[key]
+    assert isinstance(field, SectionLiveField)
+    return cast(SectionLiveField, field)
+
+
 def _generation(form: NodeCfgForm) -> SectionLiveField:
     field = form._generation_model
     assert isinstance(field, SectionLiveField)
@@ -118,10 +124,22 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
         # Default cfg and generation behavior render as separate editor blocks; the
         # schema keeps logical keys.
         assert set(form._default_model.fields.keys()) == {
-            "sweep",
-            "acquire",
-            "drive",
+            "modules",
+            "relax_delay",
+            "reps",
+            "rounds",
+            "detune_sweep",
+            "task",
         }
+        qub_pulse = _subsection(_section(form, "modules"), "qub_pulse")
+        assert set(qub_pulse.fields.keys()) == {
+            "waveform",
+            "ch",
+            "nqz",
+            "gain",
+            "length",
+        }
+        assert "qub_gain" not in form._default_model.fields
         assert set(_generation(form).fields.keys()) == {"drive_gain_mode"}
         assert set(node.schema.keys) == {
             "detune_sweep",
@@ -149,7 +167,7 @@ def test_field_labels_use_autofluxdep_width(ctrl_node, qapp):
         assert all(
             label.maximumWidth() == NODE_FIELD_LABEL_MAX_WIDTH for label in labels
         )
-        assert any(label.toolTip() == "Early-stop SNR:" for label in labels)
+        assert any(label.toolTip() == "earlystop_snr:" for label in labels)
     finally:
         form.teardown()
 
@@ -160,8 +178,9 @@ def test_edit_scalar_writes_back_to_schema(ctrl_node, qapp):
     try:
         # drive the int knob the way a spin-box edit would (model.set_value →
         # schema_changed → controller.set_node_params → schema SSOT)
-        _section(form, "acquire").fields["reps"].set_value(DirectValue(value=321))
-        _section(form, "drive").fields["gain"].set_value(DirectValue(value=0.42))
+        form._default_model.fields["reps"].set_value(DirectValue(value=321))
+        qub_pulse = _subsection(_section(form, "modules"), "qub_pulse")
+        qub_pulse.fields["gain"].set_value(DirectValue(value=0.42))
         _generation(form).fields["drive_gain_mode"].set_value(
             DirectValue(value="fixed")
         )
@@ -177,7 +196,7 @@ def test_edit_sweep_writes_back_to_schema(ctrl_node, qapp):
     ctrl, node, index = ctrl_node
     form = NodeCfgForm(ctrl, node, index)
     try:
-        _section(form, "sweep").fields["detune"].set_value(
+        form._default_model.fields["detune_sweep"].set_value(
             SweepValue(start=-15.0, stop=25.0, expts=41)
         )
         detune = node.schema.lower(None)["detune_sweep"]
@@ -218,7 +237,7 @@ def test_optional_scalar_blank_lowers_to_none(ctrl_node, qapp):
     try:
         # earlystop_snr is an optional FloatSpec: set then clear it; an unset
         # optional scalar lowers to an omitted key (None — no early-stop)
-        earlystop_snr = _section(form, "acquire").fields["earlystop_snr"]
+        earlystop_snr = _section(form, "task").fields["earlystop_snr"]
         earlystop_snr.set_value(DirectValue(value=50.0))
         assert node.schema.lower(None)["earlystop_snr"] == 50.0
         earlystop_snr.set_value(DirectValue(value=None))
@@ -235,11 +254,11 @@ def test_invalid_required_scalar_is_rejected(ctrl_node, qapp):
         # marks the field invalid (the form surfaces it red) and the value tree now
         # carries an unset required leaf, so lowering Fast-Fails rather than
         # fabricating a default — no malformed-but-silent run cfg.
-        nqz = _section(form, "drive").fields["nqz"]
+        nqz = _subsection(_section(form, "modules"), "qub_pulse").fields["nqz"]
         nqz.set_value(DirectValue(value=None))
         assert not nqz.is_valid()
         assert not form._default_form.is_valid()  # the whole default block is invalid
-        with pytest.raises(RuntimeError, match="drive\\.nqz"):
+        with pytest.raises(RuntimeError, match="modules\\.qub_pulse\\.nqz"):
             node.schema.lower(None)
     finally:
         form.teardown()
@@ -255,7 +274,7 @@ def test_read_only_lock_keeps_values_visible(ctrl_node, qapp):
             form._generation_form is not None and not form._generation_form.isEnabled()
         )
         # the model (values) is untouched — "what this run used" stays visible
-        reps_value = _section(form, "acquire").fields["reps"].get_value()
+        reps_value = form._default_model.fields["reps"].get_value()
         assert isinstance(reps_value, DirectValue) and reps_value.value == 1000
         form.set_read_only(False)
         assert form._default_form.isEnabled()

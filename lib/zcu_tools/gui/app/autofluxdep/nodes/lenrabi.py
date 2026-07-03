@@ -38,9 +38,8 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     IntSpec,
     SweepSpec,
     SweepValue,
-    node_field,
-    node_section,
-    sectioned_node_schema,
+    node_path,
+    path_node_schema,
     str_scalar_spec,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
@@ -250,81 +249,74 @@ class LenRabiBuilder(Builder):
         pulse with ``qub_length``. The prototype's dead ``num_expts`` knob (never
         read — the point count came from the axis itself) is dropped.
         """
-        return sectioned_node_schema(
+        return path_node_schema(
             (
-                node_section(
-                    "sweep",
-                    "Sweep",
-                    node_field(
-                        "sweep_range",
-                        "length",
-                        SweepSpec(label="Pulse length sweep (us)"),
-                        SweepValue(start=0.05, stop=0.5, expts=101),
-                    ),
+                node_path(
+                    "qub_waveform",
+                    "modules.rabi_pulse.waveform",
+                    str_scalar_spec("waveform", optional=True),
+                    _DEFAULT_QUB_WAVEFORM,
                 ),
-                node_section(
-                    "acquire",
-                    "Acquisition",
-                    node_field(
-                        "reps",
-                        "reps",
-                        IntSpec(label="Reps"),
-                        1000,
-                    ),
-                    node_field(
-                        "rounds",
-                        "rounds",
-                        IntSpec(label="Rounds"),
-                        10,
-                    ),
-                    node_field(
-                        "relax_delay",
-                        "relax_delay",
-                        FloatSpec(label="Relax delay (us)"),
-                        _DEFAULT_RELAX_DELAY,
-                    ),
-                    node_field(
-                        "earlystop_snr",
-                        "earlystop_snr",
-                        FloatSpec(label="Early-stop SNR", optional=True),
-                        _DEFAULT_EARLYSTOP_SNR,
-                    ),
+                node_path(
+                    "qub_ch",
+                    "modules.rabi_pulse.ch",
+                    IntSpec(label="ch", optional=True),
+                    _DEFAULT_QUB_CH,
                 ),
-                node_section(
-                    "drive",
-                    "Drive pulse",
-                    node_field(
-                        "qub_waveform",
-                        "waveform",
-                        str_scalar_spec("Drive waveform", optional=True),
-                        _DEFAULT_QUB_WAVEFORM,
-                    ),
-                    node_field(
-                        "qub_ch",
-                        "ch",
-                        IntSpec(label="Drive ch", optional=True),
-                        _DEFAULT_QUB_CH,
-                    ),
-                    node_field(
-                        "qub_nqz",
-                        "nqz",
-                        IntSpec(label="Drive nqz"),
-                        2,
-                    ),
-                    node_field(
-                        "qub_gain",
-                        "gain",
-                        FloatSpec(label="Drive gain"),
-                        0.05,
-                    ),
-                    node_field(
-                        "qub_length",
-                        "length",
-                        FloatSpec(label="Drive length (us)"),
-                        0.1,
-                    ),
+                node_path(
+                    "qub_nqz",
+                    "modules.rabi_pulse.nqz",
+                    IntSpec(label="nqz"),
+                    2,
                 ),
-            )
+                node_path(
+                    "qub_gain",
+                    "modules.rabi_pulse.gain",
+                    FloatSpec(label="gain"),
+                    0.05,
+                ),
+                node_path(
+                    "qub_length",
+                    "modules.rabi_pulse.length",
+                    FloatSpec(label="waveform length (us)"),
+                    0.1,
+                ),
+                node_path(
+                    "relax_delay",
+                    "relax_delay",
+                    FloatSpec(label="relax_delay (us)"),
+                    _DEFAULT_RELAX_DELAY,
+                ),
+                node_path(
+                    "reps",
+                    "reps",
+                    IntSpec(label="reps"),
+                    1000,
+                ),
+                node_path(
+                    "rounds",
+                    "rounds",
+                    IntSpec(label="rounds"),
+                    10,
+                ),
+                node_path(
+                    "sweep_range",
+                    "sweep_range",
+                    SweepSpec(label="sweep_range (us)"),
+                    SweepValue(start=0.05, stop=0.5, expts=101),
+                ),
+                node_path(
+                    "earlystop_snr",
+                    "task.earlystop_snr",
+                    FloatSpec(label="earlystop_snr", optional=True),
+                    _DEFAULT_EARLYSTOP_SNR,
+                ),
+            ),
+            section_labels={
+                "modules": "modules",
+                "modules.rabi_pulse": "rabi_pulse",
+                "task": "task",
+            },
         )
 
     def make_init_result(

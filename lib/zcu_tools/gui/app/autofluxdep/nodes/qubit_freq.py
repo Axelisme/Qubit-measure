@@ -46,9 +46,8 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     IntSpec,
     SweepSpec,
     SweepValue,
-    node_field,
-    node_section,
-    sectioned_node_schema,
+    node_path,
+    path_node_schema,
     str_choice_spec,
     str_scalar_spec,
 )
@@ -378,97 +377,87 @@ class QubitFreqBuilder(Builder):
         waveform, ``make_cfg`` uses an inline const waveform of that length so
         mock-created contexts remain runnable.
         """
-        return sectioned_node_schema(
+        return path_node_schema(
             (
-                node_section(
-                    "sweep",
-                    "Sweep",
-                    node_field(
-                        "detune_sweep",
-                        "detune",
-                        SweepSpec(label="Detune sweep (MHz)"),
-                        SweepValue(start=-20.0, stop=50.0, expts=141),
-                    ),
+                node_path(
+                    "qub_waveform",
+                    "modules.qub_pulse.waveform",
+                    str_scalar_spec("waveform", optional=True),
+                    _DEFAULT_QUB_WAVEFORM,
                 ),
-                node_section(
-                    "acquire",
-                    "Acquisition",
-                    node_field(
-                        "reps",
-                        "reps",
-                        IntSpec(label="Reps"),
-                        1000,
-                    ),
-                    node_field(
-                        "rounds",
-                        "rounds",
-                        IntSpec(label="Rounds"),
-                        100,
-                    ),
-                    node_field(
-                        "relax_delay",
-                        "relax_delay",
-                        FloatSpec(label="Relax delay (us)"),
-                        0.5,
-                    ),
-                    node_field(
-                        "earlystop_snr",
-                        "earlystop_snr",
-                        FloatSpec(label="Early-stop SNR", optional=True),
-                        _DEFAULT_EARLYSTOP_SNR,
-                    ),
+                node_path(
+                    "qub_ch",
+                    "modules.qub_pulse.ch",
+                    IntSpec(label="ch", optional=True),
+                    _DEFAULT_QUB_CH,
                 ),
-                node_section(
-                    "drive",
-                    "Drive pulse",
-                    node_field(
-                        "qub_waveform",
-                        "waveform",
-                        str_scalar_spec("Drive waveform", optional=True),
-                        _DEFAULT_QUB_WAVEFORM,
-                    ),
-                    node_field(
-                        "qub_ch",
-                        "ch",
-                        IntSpec(label="Drive ch", optional=True),
-                        _DEFAULT_QUB_CH,
-                    ),
-                    node_field(
-                        "qub_nqz",
-                        "nqz",
-                        IntSpec(label="Drive nqz"),
-                        2,
-                    ),
-                    node_field(
-                        "qub_gain",
-                        "gain",
-                        FloatSpec(label="Drive gain"),
-                        _DEFAULT_QUB_GAIN,
-                    ),
-                    node_field(
-                        "qub_length",
-                        "length",
-                        FloatSpec(label="Drive length (us)"),
-                        0.1,
-                    ),
+                node_path(
+                    "qub_nqz",
+                    "modules.qub_pulse.nqz",
+                    IntSpec(label="nqz"),
+                    2,
                 ),
-                node_section(
-                    "generation",
-                    "Generation overrides",
-                    node_field(
+                node_path(
+                    "qub_gain",
+                    "modules.qub_pulse.gain",
+                    FloatSpec(label="gain"),
+                    _DEFAULT_QUB_GAIN,
+                ),
+                node_path(
+                    "qub_length",
+                    "modules.qub_pulse.length",
+                    FloatSpec(label="waveform length (us)"),
+                    0.1,
+                ),
+                node_path(
+                    "relax_delay",
+                    "relax_delay",
+                    FloatSpec(label="relax_delay (us)"),
+                    0.5,
+                ),
+                node_path(
+                    "reps",
+                    "reps",
+                    IntSpec(label="reps"),
+                    1000,
+                ),
+                node_path(
+                    "rounds",
+                    "rounds",
+                    IntSpec(label="rounds"),
+                    100,
+                ),
+                node_path(
+                    "detune_sweep",
+                    "detune_sweep",
+                    SweepSpec(label="detune_sweep (MHz)"),
+                    SweepValue(start=-20.0, stop=50.0, expts=141),
+                ),
+                node_path(
+                    "earlystop_snr",
+                    "task.earlystop_snr",
+                    FloatSpec(label="earlystop_snr", optional=True),
+                    _DEFAULT_EARLYSTOP_SNR,
+                ),
+                node_path(
+                    "drive_gain_mode",
+                    "generation.drive_gain_mode",
+                    str_choice_spec(
                         "drive_gain_mode",
-                        "drive_gain_mode",
-                        str_choice_spec(
-                            "Drive gain mode",
-                            (
-                                _DRIVE_GAIN_MODE_ADAPTIVE,
-                                _DRIVE_GAIN_MODE_FIXED,
-                            ),
+                        (
+                            _DRIVE_GAIN_MODE_ADAPTIVE,
+                            _DRIVE_GAIN_MODE_FIXED,
                         ),
-                        _DRIVE_GAIN_MODE_ADAPTIVE,
                     ),
+                    _DRIVE_GAIN_MODE_ADAPTIVE,
                 ),
-            )
+            ),
+            section_labels={
+                "modules": "modules",
+                "modules.qub_pulse": "qub_pulse",
+                "task": "task",
+                "generation": "Generation overrides",
+            },
         )
 
     def make_init_result(

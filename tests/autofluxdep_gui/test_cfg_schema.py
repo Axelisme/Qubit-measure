@@ -34,8 +34,11 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     SweepSpec,
     SweepValue,
     node_field,
+    node_path,
     node_section,
+    path_node_schema,
     sectioned_node_schema,
+    str_choice_spec,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
@@ -177,16 +180,12 @@ _EXPECTED_KEYS = {
         "qub_length",
     },
     "ro_optimize": {
-        "freq_expts",
-        "gain_expts",
+        "freq_range",
+        "gain_range",
         "reps",
         "rounds",
-        "freq_window",
-        "gain_window",
-        "center_freq_mode",
-        "center_freq",
-        "center_gain_mode",
-        "center_gain",
+        "freq_range_mode",
+        "gain_range_mode",
         "relax_delay_mode",
         "relax_delay",
         "skew_penalty",
@@ -236,85 +235,81 @@ _EXPECTED_KEYS = {
 
 _EXPECTED_PATHS = {
     "qubit_freq": {
-        "detune_sweep": "sweep.detune",
-        "reps": "acquire.reps",
-        "rounds": "acquire.rounds",
-        "relax_delay": "acquire.relax_delay",
-        "earlystop_snr": "acquire.earlystop_snr",
-        "qub_waveform": "drive.waveform",
-        "qub_ch": "drive.ch",
-        "qub_nqz": "drive.nqz",
-        "qub_gain": "drive.gain",
-        "qub_length": "drive.length",
+        "detune_sweep": "detune_sweep",
+        "reps": "reps",
+        "rounds": "rounds",
+        "relax_delay": "relax_delay",
+        "earlystop_snr": "task.earlystop_snr",
+        "qub_waveform": "modules.qub_pulse.waveform",
+        "qub_ch": "modules.qub_pulse.ch",
+        "qub_nqz": "modules.qub_pulse.nqz",
+        "qub_gain": "modules.qub_pulse.gain",
+        "qub_length": "modules.qub_pulse.length",
         "drive_gain_mode": "generation.drive_gain_mode",
     },
     "lenrabi": {
-        "sweep_range": "sweep.length",
-        "reps": "acquire.reps",
-        "rounds": "acquire.rounds",
-        "relax_delay": "acquire.relax_delay",
-        "earlystop_snr": "acquire.earlystop_snr",
-        "qub_waveform": "drive.waveform",
-        "qub_ch": "drive.ch",
-        "qub_nqz": "drive.nqz",
-        "qub_gain": "drive.gain",
-        "qub_length": "drive.length",
+        "sweep_range": "sweep_range",
+        "reps": "reps",
+        "rounds": "rounds",
+        "relax_delay": "relax_delay",
+        "earlystop_snr": "task.earlystop_snr",
+        "qub_waveform": "modules.rabi_pulse.waveform",
+        "qub_ch": "modules.rabi_pulse.ch",
+        "qub_nqz": "modules.rabi_pulse.nqz",
+        "qub_gain": "modules.rabi_pulse.gain",
+        "qub_length": "modules.rabi_pulse.length",
     },
     "ro_optimize": {
-        "freq_expts": "grid.freq_points",
-        "gain_expts": "grid.gain_points",
-        "reps": "acquire.reps",
-        "rounds": "acquire.rounds",
-        "freq_window": "window.freq_half_width",
-        "gain_window": "window.gain_half_width",
-        "center_freq_mode": "generation.center_freq_mode",
-        "center_freq": "generation.center_freq",
-        "center_gain_mode": "generation.center_gain_mode",
-        "center_gain": "generation.center_gain",
+        "freq_range": "freq_range",
+        "gain_range": "gain_range",
+        "reps": "reps",
+        "rounds": "rounds",
+        "relax_delay": "relax_delay",
+        "freq_range_mode": "generation.freq_range_mode",
+        "gain_range_mode": "generation.gain_range_mode",
         "relax_delay_mode": "generation.relax_delay_mode",
-        "relax_delay": "generation.relax_delay",
-        "skew_penalty": "acquire.skew_penalty",
+        "skew_penalty": "skew_penalty",
     },
     "t1": {
-        "sweep_range": "sweep.delay",
-        "reps": "acquire.reps",
-        "rounds": "acquire.rounds",
-        "earlystop_snr": "acquire.earlystop_snr",
+        "sweep_range": "sweep_range",
+        "reps": "reps",
+        "rounds": "rounds",
+        "earlystop_snr": "task.earlystop_snr",
         "sweep_range_mode": "generation.sweep_range_mode",
         "relax_delay_mode": "generation.relax_delay_mode",
-        "relax_delay": "generation.relax_delay",
+        "relax_delay": "relax_delay",
     },
     "t2ramsey": {
-        "sweep_range": "sweep.delay",
-        "detune_ratio": "ramsey.detune_ratio",
-        "reps": "acquire.reps",
-        "rounds": "acquire.rounds",
-        "earlystop_snr": "acquire.earlystop_snr",
+        "sweep_range": "sweep_range",
+        "detune_ratio": "task.detune_ratio",
+        "reps": "reps",
+        "rounds": "rounds",
+        "earlystop_snr": "task.earlystop_snr",
         "sweep_range_mode": "generation.sweep_range_mode",
         "relax_delay_mode": "generation.relax_delay_mode",
-        "relax_delay": "generation.relax_delay",
+        "relax_delay": "relax_delay",
     },
     "t2echo": {
-        "sweep_range": "sweep.delay",
-        "detune_ratio": "echo.detune_ratio",
-        "reps": "acquire.reps",
-        "rounds": "acquire.rounds",
-        "earlystop_snr": "acquire.earlystop_snr",
+        "sweep_range": "sweep_range",
+        "detune_ratio": "task.detune_ratio",
+        "reps": "reps",
+        "rounds": "rounds",
+        "earlystop_snr": "task.earlystop_snr",
         "sweep_range_mode": "generation.sweep_range_mode",
         "relax_delay_mode": "generation.relax_delay_mode",
-        "relax_delay": "generation.relax_delay",
+        "relax_delay": "relax_delay",
     },
     "mist": {
-        "gain_sweep": "sweep.gain",
-        "reps": "acquire.reps",
-        "rounds": "acquire.rounds",
-        "relax_delay": "acquire.relax_delay",
-        "mist_waveform": "disturbance.waveform",
-        "mist_ch": "disturbance.ch",
-        "mist_nqz": "disturbance.nqz",
-        "mist_freq": "disturbance.freq",
-        "mist_gain": "disturbance.gain",
-        "mist_length": "disturbance.length",
+        "gain_sweep": "gain_sweep",
+        "reps": "reps",
+        "rounds": "rounds",
+        "relax_delay": "relax_delay",
+        "mist_waveform": "modules.mist_pulse.waveform",
+        "mist_ch": "modules.mist_pulse.ch",
+        "mist_nqz": "modules.mist_pulse.nqz",
+        "mist_freq": "modules.mist_pulse.freq",
+        "mist_gain": "modules.mist_pulse.gain",
+        "mist_length": "modules.mist_pulse.length",
     },
 }
 
@@ -324,8 +319,6 @@ _DERIVED_FORBIDDEN = {
     "predict_freq",
     "qubit_freq",
     "freq",
-    "freq_range",
-    "gain_range",
     "pi_pulse",
     "pi2_pulse",
     "readout",
@@ -428,6 +421,56 @@ def test_sectioned_schema_set_field_and_with_overrides_write_nested_leaf():
         11,
     )
     assert knobs["qub_gain"] == 0.2
+
+
+def test_path_schema_renders_raw_cfg_tree_while_lowering_logical_keys():
+    schema = path_node_schema(
+        (
+            node_path(
+                "qub_gain",
+                "modules.qub_pulse.gain",
+                FloatSpec("gain"),
+                0.05,
+            ),
+            node_path(
+                "reps",
+                "reps",
+                IntSpec("reps"),
+                1000,
+            ),
+            node_path(
+                "drive_gain_mode",
+                "generation.drive_gain_mode",
+                str_choice_spec("drive_gain_mode", ("adaptive", "fixed")),
+                "adaptive",
+            ),
+        ),
+        section_labels={
+            "modules": "modules",
+            "modules.qub_pulse": "qub_pulse",
+            "generation": "Generation overrides",
+        },
+    )
+
+    value_tree = schema.read_value_tree()
+
+    assert value_tree == {
+        "modules": {
+            "qub_pulse": {
+                "gain": 0.05,
+            },
+        },
+        "reps": 1000,
+        "generation": {
+            "drive_gain_mode": "adaptive",
+        },
+    }
+    assert schema.path_for("qub_gain") == "modules.qub_pulse.gain"
+    assert schema.lower(None) == {
+        "qub_gain": 0.05,
+        "reps": 1000,
+        "drive_gain_mode": "adaptive",
+    }
 
 
 def test_sectioned_schema_read_knobs_is_flat_json_friendly():
@@ -629,25 +672,29 @@ def test_mist_default_knobs():
 
 def test_ro_optimize_default_knobs():
     knobs = RoOptimizeBuilder().make_default_schema().lower(None)
-    assert knobs["freq_expts"] == 21
-    assert knobs["gain_expts"] == 21
+    freq_range = knobs["freq_range"]
+    gain_range = knobs["gain_range"]
     assert knobs["reps"] == 1000
     assert knobs["rounds"] == 10
-    assert knobs["freq_window"] == 1.0
-    assert knobs["gain_window"] == 0.05
-    assert knobs["center_freq_mode"] == "previous_best"
-    assert knobs["center_freq"] == 6000.0
-    assert knobs["center_gain_mode"] == "previous_best"
-    assert knobs["center_gain"] == 0.5
+    assert (
+        float(freq_range.start),
+        float(freq_range.stop),
+        int(freq_range.expts),
+    ) == (5999.0, 6001.0, 21)
+    assert (
+        float(gain_range.start),
+        float(gain_range.stop),
+        int(gain_range.expts),
+    ) == (0.45, 0.55, 21)
+    assert knobs["freq_range_mode"] == "previous_best"
+    assert knobs["gain_range_mode"] == "previous_best"
     assert knobs["relax_delay_mode"] == "auto_t1"
     assert knobs["relax_delay"] == 30.0
     assert knobs["skew_penalty"] == 0.0
-    # the window half-widths are flat scalars, NOT a SweepSpec (decision)
+    # The sweep range widgets carry the user-facing start/stop/expts raw-cfg shape.
     spec = RoOptimizeBuilder().make_default_schema().schema.spec
-    window = spec.fields["window"]
-    assert isinstance(window, CfgSectionSpec)
-    assert not isinstance(window.fields["freq_half_width"], SweepSpec)
-    assert not isinstance(window.fields["gain_half_width"], SweepSpec)
+    assert isinstance(spec.fields["freq_range"], SweepSpec)
+    assert isinstance(spec.fields["gain_range"], SweepSpec)
 
 
 def test_t1_default_knobs():
@@ -845,7 +892,7 @@ def test_scalar_eval_value_lowers_against_md():
         "__kind": "eval",
         "expr": "gain",
     }
-    assert schema.read_value_tree()["drive"]["gain"] == {
+    assert schema.read_value_tree()["modules"]["qub_pulse"]["gain"] == {
         "__kind": "eval",
         "expr": "gain",
     }
@@ -875,7 +922,7 @@ def test_sweep_eval_edges_lower_against_md():
         "__kind": "eval",
         "expr": "center - 2",
     }
-    assert schema.read_value_tree()["sweep"]["detune"]["start"] == {
+    assert schema.read_value_tree()["detune_sweep"]["start"] == {
         "__kind": "eval",
         "expr": "center - 2",
     }

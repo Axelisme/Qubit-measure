@@ -55,9 +55,8 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     IntSpec,
     SweepSpec,
     SweepValue,
-    node_field,
-    node_section,
-    sectioned_node_schema,
+    node_path,
+    path_node_schema,
     str_choice_spec,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
@@ -307,79 +306,67 @@ class T2RamseyBuilder(Builder):
         need a one-fringe synthetic trace override it explicitly. The dead
         ``num_expts`` knob (never read) is dropped.
         """
-        return sectioned_node_schema(
+        return path_node_schema(
             (
-                node_section(
-                    "sweep",
-                    "Sweep",
-                    node_field(
-                        "sweep_range",
-                        "delay",
-                        SweepSpec(label="Result axis seed (us)"),
-                        SweepValue(start=0.0, stop=25.0, expts=121),
-                    ),
+                node_path(
+                    "relax_delay",
+                    "relax_delay",
+                    FloatSpec(label="relax_delay (us)"),
+                    max(1.0, 3.0 * _DEFAULT_T1),
                 ),
-                node_section(
-                    "ramsey",
-                    "Ramsey",
-                    node_field(
-                        "detune_ratio",
-                        "detune_ratio",
-                        FloatSpec(label="Detune ratio"),
-                        _DEFAULT_DETUNE_RATIO,
-                    ),
+                node_path(
+                    "reps",
+                    "reps",
+                    IntSpec(label="reps"),
+                    1000,
                 ),
-                node_section(
-                    "acquire",
-                    "Acquisition",
-                    node_field(
-                        "reps",
-                        "reps",
-                        IntSpec(label="Reps"),
-                        1000,
-                    ),
-                    node_field(
-                        "rounds",
-                        "rounds",
-                        IntSpec(label="Rounds"),
-                        10,
-                    ),
-                    node_field(
-                        "earlystop_snr",
-                        "earlystop_snr",
-                        FloatSpec(label="Early-stop SNR", optional=True),
-                        _DEFAULT_EARLYSTOP_SNR,
-                    ),
+                node_path(
+                    "rounds",
+                    "rounds",
+                    IntSpec(label="rounds"),
+                    10,
                 ),
-                node_section(
-                    "generation",
-                    "Generation overrides",
-                    node_field(
+                node_path(
+                    "sweep_range",
+                    "sweep_range",
+                    SweepSpec(label="sweep_range (us)"),
+                    SweepValue(start=0.0, stop=25.0, expts=121),
+                ),
+                node_path(
+                    "detune_ratio",
+                    "task.detune_ratio",
+                    FloatSpec(label="detune_ratio"),
+                    _DEFAULT_DETUNE_RATIO,
+                ),
+                node_path(
+                    "earlystop_snr",
+                    "task.earlystop_snr",
+                    FloatSpec(label="earlystop_snr", optional=True),
+                    _DEFAULT_EARLYSTOP_SNR,
+                ),
+                node_path(
+                    "sweep_range_mode",
+                    "generation.sweep_range_mode",
+                    str_choice_spec(
                         "sweep_range_mode",
-                        "sweep_range_mode",
-                        str_choice_spec(
-                            "Sweep range mode",
-                            (_SWEEP_RANGE_MODE_AUTO_T2R, _SWEEP_RANGE_MODE_FIXED),
-                        ),
-                        _SWEEP_RANGE_MODE_AUTO_T2R,
+                        (_SWEEP_RANGE_MODE_AUTO_T2R, _SWEEP_RANGE_MODE_FIXED),
                     ),
-                    node_field(
-                        "relax_delay_mode",
-                        "relax_delay_mode",
-                        str_choice_spec(
-                            "Relax delay mode",
-                            (_RELAX_DELAY_MODE_AUTO_T1, _RELAX_DELAY_MODE_FIXED),
-                        ),
-                        _RELAX_DELAY_MODE_AUTO_T1,
-                    ),
-                    node_field(
-                        "relax_delay",
-                        "relax_delay",
-                        FloatSpec(label="Fixed relax delay (us)"),
-                        max(1.0, 3.0 * _DEFAULT_T1),
-                    ),
+                    _SWEEP_RANGE_MODE_AUTO_T2R,
                 ),
-            )
+                node_path(
+                    "relax_delay_mode",
+                    "generation.relax_delay_mode",
+                    str_choice_spec(
+                        "relax_delay_mode",
+                        (_RELAX_DELAY_MODE_AUTO_T1, _RELAX_DELAY_MODE_FIXED),
+                    ),
+                    _RELAX_DELAY_MODE_AUTO_T1,
+                ),
+            ),
+            section_labels={
+                "task": "task",
+                "generation": "Generation overrides",
+            },
         )
 
     def detune_ratio(self, schema: NodeCfgSchema, md: Any = None) -> float:

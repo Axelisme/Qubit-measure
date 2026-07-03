@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 from zcu_tools.gui.app.autofluxdep.app import build_core
+from zcu_tools.gui.app.autofluxdep.cfg import SweepValue
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.ro_optimize import RoOptimizeBuilder
 
@@ -30,12 +31,10 @@ _READOUT = {
 }
 
 _PARAMS = {
-    "freq_expts": 11,
-    "gain_expts": 11,
     "reps": 100,
     "rounds": 1,
-    "freq_window": 5.0,
-    "gain_window": 0.3,
+    "freq_range": SweepValue(start=5995.0, stop=6005.0, expts=11),
+    "gain_range": SweepValue(start=0.2, stop=0.8, expts=11),
     "skew_penalty": 0.0,
 }
 

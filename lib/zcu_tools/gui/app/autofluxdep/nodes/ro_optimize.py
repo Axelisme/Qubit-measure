@@ -49,9 +49,10 @@ from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.gui.app.autofluxdep.cfg import (
     FloatSpec,
     IntSpec,
-    node_field,
-    node_section,
-    sectioned_node_schema,
+    SweepSpec,
+    SweepValue,
+    node_path,
+    path_node_schema,
     str_choice_spec,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema
@@ -124,23 +125,17 @@ def _ro_landscape(
 
 
 # Default axis specs: (start, stop, npts). The readout-frequency fallback follows
-# measure-gui's resonator role fallback around 6000 MHz; a calibrated readout or
-# previous ro_optimize result recenters the real run.
-_DEFAULT_FREQ: tuple[float, float, int] = (5998.0, 6002.0, 21)
-_DEFAULT_GAIN: tuple[float, float, int] = (0.3, 0.7, 21)
+# the notebook raw cfg shape: previous-best center ± a small range. A calibrated
+# readout or previous ro_optimize result recenters the real run.
+_DEFAULT_FREQ_RANGE: tuple[float, float, int] = (5999.0, 6001.0, 21)
+_DEFAULT_GAIN_RANGE: tuple[float, float, int] = (0.45, 0.55, 21)
 
 _DEFAULT_CENTER_FREQ = 6000.0  # MHz — baseline readout resonance fallback
 _DEFAULT_CENTER_GAIN = 0.5
 
-# the cfg sweep-window half-widths (the "設定頭"): the notebook centres the
-# freq_range on the previous best ± ``0.2 * md.rf_w`` and the gain_range on the
-# previous best ± ``0.05``. The GUI exposes those half-widths as params; these are
-# their defaults when unset.
-_DEFAULT_FREQ_WINDOW = 1.0  # MHz half-width of the readout-freq sweep window
-_DEFAULT_GAIN_WINDOW = 0.05  # half-width of the readout-gain sweep window
 _DEFAULT_T1 = 10.0  # us — fallback T1 for the relax_delay (3·T1)
-_CENTER_MODE_PREVIOUS_BEST = "previous_best"
-_CENTER_MODE_FIXED = "fixed"
+_RANGE_MODE_PREVIOUS_BEST = "previous_best"
+_RANGE_MODE_FIXED = "fixed"
 _RELAX_DELAY_MODE_AUTO_T1 = "auto_t1"
 _RELAX_DELAY_MODE_FIXED = "fixed"
 
@@ -197,18 +192,27 @@ def _default_readout() -> Any | None:
     return None
 
 
-def _resolve_center(
+def _resolve_range(
     mode: str,
     *,
     previous: float,
-    fixed: float,
+    fixed: Any,
     label: str,
-) -> float:
-    if mode == _CENTER_MODE_PREVIOUS_BEST:
-        return float(previous)
-    if mode == _CENTER_MODE_FIXED:
-        return float(fixed)
-    raise RuntimeError(f"unsupported ro_optimize {label} center mode: {mode!r}")
+) -> tuple[float, float]:
+    fixed_start = float(fixed.start)
+    fixed_stop = float(fixed.stop)
+    if mode == _RANGE_MODE_PREVIOUS_BEST:
+        half_width = abs(fixed_stop - fixed_start) / 2.0
+        start = float(previous) - half_width
+        stop = float(previous) + half_width
+    elif mode == _RANGE_MODE_FIXED:
+        start = fixed_start
+        stop = fixed_stop
+    else:
+        raise RuntimeError(f"unsupported ro_optimize {label} range mode: {mode!r}")
+    if label == "gain":
+        return (max(0.0, start), min(1.0, stop))
+    return (start, stop)
 
 
 def _resolve_relax_delay(mode: str, *, t1: float, fixed: float) -> float:
@@ -399,155 +403,115 @@ class RoOptimizeBuilder(Builder):
     def make_default_schema(self) -> NodeCfgSchema:
         """The typed node-knob schema (defaults + types) — the param SSOT.
 
-        ro_optimize sweeps a 2D freq × gain grid: ``freq_expts`` / ``gain_expts``
-        are the grid point counts (IntSpec), and ``freq_window`` / ``gain_window``
-        are the cfg sweep-window half-widths (FloatSpec) centred on the previous
-        best — per the decision these stay flat scalar knobs, NOT SweepSpec (the
-        sweep grid is 2D and the centres are derived per flux point, not user-set).
-        Defaults are the prototype's hardcoded values.
+        The visible "Default cfg" block mirrors the notebook ``ml.make_cfg`` dict:
+        ``freq_range`` and ``gain_range`` are explicit SweepSpec ranges whose
+        endpoints can either be used directly or re-centered around the previous
+        best point by the generation override modes.
         """
-        return sectioned_node_schema(
+        return path_node_schema(
             (
-                node_section(
-                    "grid",
-                    "Search grid",
-                    node_field(
-                        "freq_expts",
-                        "freq_points",
-                        IntSpec(label="Freq points"),
-                        _DEFAULT_FREQ[2],
-                    ),
-                    node_field(
-                        "gain_expts",
-                        "gain_points",
-                        IntSpec(label="Gain points"),
-                        _DEFAULT_GAIN[2],
+                node_path(
+                    "relax_delay",
+                    "relax_delay",
+                    FloatSpec(label="relax_delay (us)"),
+                    3.0 * _DEFAULT_T1,
+                ),
+                node_path(
+                    "reps",
+                    "reps",
+                    IntSpec(label="reps"),
+                    1000,
+                ),
+                node_path(
+                    "rounds",
+                    "rounds",
+                    IntSpec(label="rounds"),
+                    10,
+                ),
+                node_path(
+                    "skew_penalty",
+                    "skew_penalty",
+                    FloatSpec(label="skew_penalty", decimals=3),
+                    0.0,
+                ),
+                node_path(
+                    "freq_range",
+                    "freq_range",
+                    SweepSpec(label="freq_range (MHz)"),
+                    SweepValue(
+                        start=_DEFAULT_FREQ_RANGE[0],
+                        stop=_DEFAULT_FREQ_RANGE[1],
+                        expts=_DEFAULT_FREQ_RANGE[2],
                     ),
                 ),
-                node_section(
-                    "window",
-                    "Search window",
-                    node_field(
-                        "freq_window",
-                        "freq_half_width",
-                        FloatSpec(label="Freq window half-width (MHz)"),
-                        _DEFAULT_FREQ_WINDOW,
-                    ),
-                    node_field(
-                        "gain_window",
-                        "gain_half_width",
-                        FloatSpec(label="Gain window half-width"),
-                        _DEFAULT_GAIN_WINDOW,
+                node_path(
+                    "gain_range",
+                    "gain_range",
+                    SweepSpec(label="gain_range"),
+                    SweepValue(
+                        start=_DEFAULT_GAIN_RANGE[0],
+                        stop=_DEFAULT_GAIN_RANGE[1],
+                        expts=_DEFAULT_GAIN_RANGE[2],
                     ),
                 ),
-                node_section(
-                    "generation",
-                    "Generation overrides",
-                    node_field(
-                        "center_freq_mode",
-                        "center_freq_mode",
-                        str_choice_spec(
-                            "Freq center mode",
-                            (_CENTER_MODE_PREVIOUS_BEST, _CENTER_MODE_FIXED),
-                        ),
-                        _CENTER_MODE_PREVIOUS_BEST,
+                node_path(
+                    "freq_range_mode",
+                    "generation.freq_range_mode",
+                    str_choice_spec(
+                        "freq_range_mode",
+                        (_RANGE_MODE_PREVIOUS_BEST, _RANGE_MODE_FIXED),
                     ),
-                    node_field(
-                        "center_freq",
-                        "center_freq",
-                        FloatSpec(label="Fixed center freq (MHz)"),
-                        _DEFAULT_CENTER_FREQ,
+                    _RANGE_MODE_PREVIOUS_BEST,
+                ),
+                node_path(
+                    "gain_range_mode",
+                    "generation.gain_range_mode",
+                    str_choice_spec(
+                        "gain_range_mode",
+                        (_RANGE_MODE_PREVIOUS_BEST, _RANGE_MODE_FIXED),
                     ),
-                    node_field(
-                        "center_gain_mode",
-                        "center_gain_mode",
-                        str_choice_spec(
-                            "Gain center mode",
-                            (_CENTER_MODE_PREVIOUS_BEST, _CENTER_MODE_FIXED),
-                        ),
-                        _CENTER_MODE_PREVIOUS_BEST,
-                    ),
-                    node_field(
-                        "center_gain",
-                        "center_gain",
-                        FloatSpec(label="Fixed center gain"),
-                        _DEFAULT_CENTER_GAIN,
-                    ),
-                    node_field(
+                    _RANGE_MODE_PREVIOUS_BEST,
+                ),
+                node_path(
+                    "relax_delay_mode",
+                    "generation.relax_delay_mode",
+                    str_choice_spec(
                         "relax_delay_mode",
-                        "relax_delay_mode",
-                        str_choice_spec(
-                            "Relax delay mode",
-                            (_RELAX_DELAY_MODE_AUTO_T1, _RELAX_DELAY_MODE_FIXED),
-                        ),
-                        _RELAX_DELAY_MODE_AUTO_T1,
+                        (_RELAX_DELAY_MODE_AUTO_T1, _RELAX_DELAY_MODE_FIXED),
                     ),
-                    node_field(
-                        "relax_delay",
-                        "relax_delay",
-                        FloatSpec(label="Fixed relax delay (us)"),
-                        3.0 * _DEFAULT_T1,
-                    ),
+                    _RELAX_DELAY_MODE_AUTO_T1,
                 ),
-                node_section(
-                    "acquire",
-                    "Acquisition",
-                    node_field(
-                        "reps",
-                        "reps",
-                        IntSpec(label="Reps"),
-                        1000,
-                    ),
-                    node_field(
-                        "rounds",
-                        "rounds",
-                        IntSpec(label="Rounds"),
-                        10,
-                    ),
-                    node_field(
-                        "skew_penalty",
-                        "skew_penalty",
-                        FloatSpec(label="Skew penalty", decimals=3),
-                        0.0,
-                    ),
-                ),
-            )
+            ),
+            section_labels={"generation": "Generation overrides"},
         )
 
     def make_init_result(
         self, schema: NodeCfgSchema, flux: Any, md: Any = None
     ) -> Sweep2DResult:
         knobs = schema.lower(None, md=md)
-        freq_expts = int(knobs["freq_expts"])
-        gain_expts = int(knobs["gain_expts"])
+        freq_range_knob = knobs["freq_range"]
+        gain_range_knob = knobs["gain_range"]
+        freq_expts = int(freq_range_knob.expts)
+        gain_expts = int(gain_range_knob.expts)
 
-        # The first allocation has no per-flux snapshot yet, so auto modes use the
-        # default centres; fixed modes use the operator's explicit centres. ``produce``
-        # rebuilds these axes from the lowered per-point cfg before acquiring.
-        freq_window = abs(float(knobs["freq_window"]))
-        gain_window = abs(float(knobs["gain_window"]))
-        center_freq = _resolve_center(
-            str(knobs["center_freq_mode"]),
+        # The first allocation has no per-flux snapshot yet, so previous-best modes
+        # use the default centres; fixed modes use the operator's explicit ranges.
+        # ``produce`` rebuilds these axes from the lowered per-point cfg before
+        # acquiring.
+        freq_range = _resolve_range(
+            str(knobs["freq_range_mode"]),
             previous=_DEFAULT_CENTER_FREQ,
-            fixed=float(knobs["center_freq"]),
+            fixed=freq_range_knob,
             label="freq",
         )
-        center_gain = _resolve_center(
-            str(knobs["center_gain_mode"]),
+        gain_range = _resolve_range(
+            str(knobs["gain_range_mode"]),
             previous=_DEFAULT_CENTER_GAIN,
-            fixed=float(knobs["center_gain"]),
+            fixed=gain_range_knob,
             label="gain",
         )
-        freqs = np.linspace(
-            center_freq - freq_window,
-            center_freq + freq_window,
-            freq_expts,
-        )
-        gains = np.linspace(
-            max(0.0, center_gain - gain_window),
-            min(1.0, center_gain + gain_window),
-            gain_expts,
-        )
+        freqs = np.linspace(freq_range[0], freq_range[1], freq_expts)
+        gains = np.linspace(gain_range[0], gain_range[1], gain_expts)
         return Sweep2DResult.allocate(flux, freqs, gains)
 
     def make_plotter(self, figure: Any) -> Landscape2DPlotter:
@@ -562,11 +526,11 @@ class RoOptimizeBuilder(Builder):
         Mirrors the notebook's ro_optimize ``cfg_maker`` (runs in ``produce``,
         where the snapshot is available): the ``pi_pulse`` and ``readout`` modules
         come whole from the snapshot (lenrabi produces the pi-pulse; the readout is
-        the base template), the relax_delay is ``3·T1`` (the smoothed prev-point
-        T1), and the ``freq_range`` / ``gain_range`` are the previous best ± the
-        window half-widths (the "設定頭"). The flux ``dev`` entry and the concrete
-        ``freq`` / ``gain`` sweeps are NOT here — the lower-layer ``run`` merges
-        them.
+        the base template), the relax_delay can be auto-derived from ``3·T1``, and
+        the ``freq_range`` / ``gain_range`` can be either fixed ranges from the
+        Default cfg or those same range widths re-centered around the previous best.
+        The flux ``dev`` entry and the concrete ``freq`` / ``gain`` sweeps are NOT
+        here — the lower-layer ``run`` merges them.
 
         Raises if the ml is unavailable or the pi_pulse / readout modules are
         unset — a real run needs both concrete modules (Fast Fail), unlike the
@@ -583,16 +547,18 @@ class RoOptimizeBuilder(Builder):
                 "(none produced or preset)"
             )
         knobs = env.schema.lower(ml, md=env.md)
-        center_freq = _resolve_center(
-            str(knobs["center_freq_mode"]),
+        freq_range_knob = knobs["freq_range"]
+        gain_range_knob = knobs["gain_range"]
+        freq_range = _resolve_range(
+            str(knobs["freq_range_mode"]),
             previous=float(snapshot["best_ro_freq"]),
-            fixed=float(knobs["center_freq"]),
+            fixed=freq_range_knob,
             label="freq",
         )
-        center_gain = _resolve_center(
-            str(knobs["center_gain_mode"]),
+        gain_range = _resolve_range(
+            str(knobs["gain_range_mode"]),
             previous=float(snapshot["best_ro_gain"]),
-            fixed=float(knobs["center_gain"]),
+            fixed=gain_range_knob,
             label="gain",
         )
         t1 = float(snapshot["t1"])
@@ -601,8 +567,6 @@ class RoOptimizeBuilder(Builder):
             t1=t1,
             fixed=float(knobs["relax_delay"]),
         )
-        freq_window = abs(float(knobs["freq_window"]))
-        gain_window = abs(float(knobs["gain_window"]))
         return ml.make_cfg(
             {
                 "modules": {
@@ -613,14 +577,8 @@ class RoOptimizeBuilder(Builder):
                 "reps": knobs["reps"],
                 "rounds": knobs["rounds"],
                 "skew_penalty": knobs["skew_penalty"],
-                "freq_range": (
-                    center_freq - freq_window,
-                    center_freq + freq_window,
-                ),
-                "gain_range": (
-                    max(0.0, center_gain - gain_window),
-                    min(1.0, center_gain + gain_window),
-                ),
+                "freq_range": freq_range,
+                "gain_range": gain_range,
             },
             RoOptimizeCfgTemplate,
         )

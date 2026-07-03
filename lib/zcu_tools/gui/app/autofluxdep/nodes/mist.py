@@ -45,9 +45,8 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     IntSpec,
     SweepSpec,
     SweepValue,
-    node_field,
-    node_section,
-    sectioned_node_schema,
+    node_path,
+    path_node_schema,
     str_scalar_spec,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
@@ -269,81 +268,73 @@ class MistBuilder(Builder):
         project does not define that named waveform, ``make_cfg`` uses an inline
         const waveform with ``mist_length`` so mock-created contexts remain runnable.
         """
-        return sectioned_node_schema(
+        return path_node_schema(
             (
-                node_section(
-                    "sweep",
-                    "Sweep",
-                    node_field(
-                        "gain_sweep",
-                        "gain",
-                        SweepSpec(label="Gain sweep"),
-                        SweepValue(start=0.0, stop=1.0, expts=51),
-                    ),
+                node_path(
+                    "mist_waveform",
+                    "modules.mist_pulse.waveform",
+                    str_scalar_spec("waveform", optional=True),
+                    _DEFAULT_MIST_WAVEFORM,
                 ),
-                node_section(
-                    "acquire",
-                    "Acquisition",
-                    node_field(
-                        "reps",
-                        "reps",
-                        IntSpec(label="Reps"),
-                        1000,
-                    ),
-                    node_field(
-                        "rounds",
-                        "rounds",
-                        IntSpec(label="Rounds"),
-                        100,
-                    ),
-                    node_field(
-                        "relax_delay",
-                        "relax_delay",
-                        FloatSpec(label="Relax delay (us)"),
-                        _DEFAULT_RELAX_DELAY,
-                    ),
+                node_path(
+                    "mist_ch",
+                    "modules.mist_pulse.ch",
+                    IntSpec(label="ch", optional=True),
+                    _DEFAULT_MIST_CH,
                 ),
-                node_section(
-                    "disturbance",
-                    "Disturbance pulse",
-                    node_field(
-                        "mist_waveform",
-                        "waveform",
-                        str_scalar_spec("Disturbance waveform", optional=True),
-                        _DEFAULT_MIST_WAVEFORM,
-                    ),
-                    node_field(
-                        "mist_ch",
-                        "ch",
-                        IntSpec(label="Disturbance ch", optional=True),
-                        _DEFAULT_MIST_CH,
-                    ),
-                    node_field(
-                        "mist_nqz",
-                        "nqz",
-                        IntSpec(label="Disturbance nqz"),
-                        2,
-                    ),
-                    node_field(
-                        "mist_freq",
-                        "freq",
-                        FloatSpec(label="Disturbance freq (MHz)"),
-                        _DEFAULT_MIST_FREQ,
-                    ),
-                    node_field(
-                        "mist_gain",
-                        "gain",
-                        FloatSpec(label="Disturbance gain"),
-                        0.5,
-                    ),
-                    node_field(
-                        "mist_length",
-                        "length",
-                        FloatSpec(label="Disturbance length (us)"),
-                        0.1,
-                    ),
+                node_path(
+                    "mist_nqz",
+                    "modules.mist_pulse.nqz",
+                    IntSpec(label="nqz"),
+                    2,
                 ),
-            )
+                node_path(
+                    "mist_freq",
+                    "modules.mist_pulse.freq",
+                    FloatSpec(label="freq (MHz)"),
+                    _DEFAULT_MIST_FREQ,
+                ),
+                node_path(
+                    "mist_gain",
+                    "modules.mist_pulse.gain",
+                    FloatSpec(label="gain"),
+                    0.5,
+                ),
+                node_path(
+                    "mist_length",
+                    "modules.mist_pulse.length",
+                    FloatSpec(label="waveform length (us)"),
+                    0.1,
+                ),
+                node_path(
+                    "relax_delay",
+                    "relax_delay",
+                    FloatSpec(label="relax_delay (us)"),
+                    _DEFAULT_RELAX_DELAY,
+                ),
+                node_path(
+                    "reps",
+                    "reps",
+                    IntSpec(label="reps"),
+                    1000,
+                ),
+                node_path(
+                    "rounds",
+                    "rounds",
+                    IntSpec(label="rounds"),
+                    100,
+                ),
+                node_path(
+                    "gain_sweep",
+                    "gain_sweep",
+                    SweepSpec(label="gain_sweep"),
+                    SweepValue(start=0.0, stop=1.0, expts=51),
+                ),
+            ),
+            section_labels={
+                "modules": "modules",
+                "modules.mist_pulse": "mist_pulse",
+            },
         )
 
     def make_init_result(

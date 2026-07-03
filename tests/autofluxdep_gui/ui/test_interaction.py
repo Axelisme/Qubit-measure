@@ -486,11 +486,16 @@ def _zero_delays(ctrl):
 
 
 def _pump_until_done(ctrl, win):
-    for _ in range(20000):
+    del win
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
         QApplication.processEvents()
         if not ctrl.is_running:
             break
+        time.sleep(0.001)
+    QApplication.processEvents()
     ctrl._background_svc.quiesce()
+    assert not ctrl.is_running
 
 
 def _run_to_completion(ctrl, win):
@@ -506,6 +511,16 @@ def _current_form_node_name(win: MainWindow) -> str:
     form = win._detail.current_form
     assert form is not None
     return form._node.name
+
+
+def _current_form_editors_enabled(win: MainWindow) -> bool:
+    form = win._detail.current_form
+    assert form is not None
+    default_enabled = form._default_form.isEnabled()
+    generation_enabled = (
+        True if form._generation_form is None else form._generation_form.isEnabled()
+    )
+    return default_enabled and generation_enabled
 
 
 def test_run_locks_then_unlocks(app):
@@ -666,7 +681,7 @@ def test_deferred_edit_form_materializes_when_user_opens_edit_tab_during_run(app
 
     assert _current_form_node_name(win) == "probe"
     assert win._detail.current_form is not None
-    assert not win._detail.current_form._form.isEnabled()
+    assert not _current_form_editors_enabled(win)
     assert ctrl.get_auto_follow_tabs() is False
     assert not win._list._auto_follow_tabs.isChecked()
     win._on_run_done()
@@ -684,7 +699,7 @@ def test_run_done_materializes_pending_edit_form_after_auto_follow(app):
     assert win._detail.current_tab == 0
     assert _current_form_node_name(win) == "probe"
     assert win._detail.current_form is not None
-    assert win._detail.current_form._form.isEnabled()
+    assert _current_form_editors_enabled(win)
 
 
 def test_auto_follow_checkbox_can_turn_on_during_run(app):
@@ -720,7 +735,7 @@ def test_manual_node_switch_during_run_disables_auto_follow(app):
     assert not win._list._auto_follow_tabs.isChecked()
     assert _current_form_node_name(win) == "probe"
     assert win._detail.current_form is not None
-    assert not win._detail.current_form._form.isEnabled()
+    assert not _current_form_editors_enabled(win)
     win._on_node_entered("qubit_freq", 0)
     assert win._list.selected_index == 1
     win._on_run_done()
