@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import QEventLoop
+from qtpy.QtCore import QCoreApplication, QEventLoop
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.gui.app.main.adapter import DeviceRefSpec, DirectValue
@@ -24,6 +26,8 @@ from zcu_tools.gui.session.services.device import (
     DisconnectDeviceRequest,
 )
 from zcu_tools.gui.session.services.progress import ProgressService
+
+from tests.gui.services._device_fakes import FakeDeviceRegistry
 
 # See tests/gui/services/test_device.py for why test-created BackgroundRunners must
 # be quiesced before GC: a queued main-thread delivery to a GC'd runner segfaults.
@@ -68,6 +72,20 @@ def _make_field(
     return DeviceRefLiveField(spec, env, initial)
 
 
+def _drain_until(
+    condition: Callable[[], bool], *, timeout: float = 3.0, label: str = "condition"
+) -> None:
+    app = QCoreApplication.instance()
+    assert app is not None
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        app.processEvents()
+        if condition():
+            return
+        time.sleep(0.01)
+    raise AssertionError(f"timed out waiting for {label}")
+
+
 def _make_service(device: MagicMock) -> tuple[DeviceService, EventBus]:
     bus = EventBus()
     gate = OperationGate()
@@ -84,6 +102,7 @@ def _make_service(device: MagicMock) -> tuple[DeviceService, EventBus]:
             runner,
             handles,
             driver_factory=lambda _type, _address: device,  # type: ignore[arg-type]
+            device_registry=FakeDeviceRegistry(),
         ),
         bus,
     )
@@ -143,13 +162,16 @@ def test_device_service_emits_pending_and_connected_events(qapp):
     svc, bus = _make_service(device)
     received: list[DeviceChangedPayload] = []
     bus.subscribe(DeviceChangedPayload, received.append)
-    loop = QEventLoop()
-    svc.device_connected.connect(lambda _request: loop.quit())
+    connected: list[object] = []
+    errors: list[str] = []
+    svc.device_connected.connect(connected.append)
+    svc.operation_failed.connect(lambda _name, error: errors.append(error))
 
     svc.start_connect_device(
         ConnectDeviceRequest(type_name="FakeDevice", name="dev1", address="")
     )
-    loop.exec()
+    _drain_until(lambda: bool(connected or errors), label="connect dev1")
+    assert not errors
 
     assert [payload.name for payload in received] == ["dev1", "dev1"]
 
@@ -158,12 +180,15 @@ def test_device_service_emits_pending_and_disconnected_events(qapp):
     device = MagicMock()
     device.get_info.return_value = FakeDeviceInfo(address="")
     svc, bus = _make_service(device)
-    connect_loop = QEventLoop()
-    svc.device_connected.connect(lambda _request: connect_loop.quit())
+    connected: list[object] = []
+    errors: list[str] = []
+    svc.device_connected.connect(connected.append)
+    svc.operation_failed.connect(lambda _name, error: errors.append(error))
     svc.start_connect_device(
         ConnectDeviceRequest(type_name="FakeDevice", name="dev1", address="")
     )
-    connect_loop.exec()
+    _drain_until(lambda: bool(connected or errors), label="connect dev1")
+    assert not errors
     received: list[DeviceChangedPayload] = []
     bus.subscribe(DeviceChangedPayload, received.append)
     loop = QEventLoop()

@@ -13,7 +13,7 @@ import pytest
 from qtpy.QtCore import QCoreApplication, QEventLoop
 from qtpy.QtWidgets import QLabel, QStackedWidget
 from zcu_tools.device import GlobalDeviceManager
-from zcu_tools.device.fake import FakeDeviceInfo
+from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.registry import register_all
 from zcu_tools.gui.app.main.adapter import (
@@ -605,17 +605,19 @@ def test_device_connect_handler_is_ui_only_no_persistence_coordination(cf):
     """Persistence is now a State projection (StartupService subscribes to
     DEVICE_CHANGED). The Controller's connect handler must not itself coordinate
     persistence — it only presents UI feedback."""
-    driver = MagicMock()
-    driver.get_info.return_value = FakeDeviceInfo(address="addr")
+    driver = FakeDevice()
     cf.ctrl._dev_svc._driver_factory = lambda _type, _address: driver
     cf.ctrl._startup_svc = MagicMock()
-    loop = QEventLoop()
-    cf.ctrl._dev_svc.device_connected.connect(lambda _request: loop.quit())
+    connected: list[object] = []
+    errors: list[str] = []
+    cf.ctrl._dev_svc.device_connected.connect(connected.append)
+    cf.ctrl._dev_svc.operation_failed.connect(lambda _name, error: errors.append(error))
 
     cf.ctrl.device_control.start_connect_device(
         ConnectDeviceRequest(type_name="FakeDevice", name="flux", address="addr")
     )
-    loop.exec()
+    assert _wait_for(lambda: bool(connected or errors))
+    assert not errors
 
     # Controller no longer reaches into StartupService for device persistence.
     assert not cf.ctrl._startup_svc.method_calls

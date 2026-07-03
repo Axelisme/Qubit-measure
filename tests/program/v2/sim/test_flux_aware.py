@@ -22,9 +22,12 @@ its registry around every test (mirrors tests/device/test_manager_lock.py).
 
 from __future__ import annotations
 
+import threading
+
 import numpy as np
 import pytest
 from zcu_tools.device import FakeDevice, GlobalDeviceManager
+from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
 from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.program.v2.modular import ModularProgramV2
@@ -215,11 +218,31 @@ def test_engine_unregistered_device_raises():
 def test_engine_non_fake_device_raises():
     """A non-FakeDevice flux source fails fast (only FakeDevice is supported)."""
 
-    class _NotFake:
-        def get_value(self) -> float:
-            return 0.0
+    class _NotFakeInfo(BaseDeviceInfo):
+        type: str = "NotFakeDevice"
 
-    GlobalDeviceManager.register_device("flux", _NotFake())  # type: ignore[arg-type]
+    class _NotFakeDevice(BaseDevice[_NotFakeInfo]):
+        info_model = _NotFakeInfo
+
+        def __init__(self) -> None:
+            super().__init__("not-fake", None)
+
+        def _open_session(self, rm):
+            return None
+
+        def _setup(
+            self,
+            cfg: _NotFakeInfo,
+            *,
+            progress: bool = True,
+            stop_event: threading.Event | None = None,
+        ) -> None:
+            return None
+
+        def get_info(self) -> _NotFakeInfo:
+            return _NotFakeInfo(address=self.address)
+
+    GlobalDeviceManager.register_device("flux", _NotFakeDevice())
 
     soc, soccfg = make_mock_soc(sim=_SIM)
     soc.set_flux_device("flux")

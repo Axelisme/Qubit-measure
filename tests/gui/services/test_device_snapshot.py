@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import QEventLoop
+from qtpy.QtCore import QCoreApplication
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.fake import FakeDevice
 from zcu_tools.device.yoko import YOKOGS200Info
@@ -18,6 +20,8 @@ from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.device import ConnectDeviceRequest, DeviceService
 from zcu_tools.gui.session.services.progress import ProgressService
+
+from tests.gui.services._device_fakes import FakeDeviceRegistry
 
 # See tests/gui/services/test_device.py for why test-created BackgroundRunners must
 # be quiesced before GC: a queued main-thread delivery to a GC'd runner segfaults.
@@ -47,6 +51,20 @@ def _clean_devices():
         GlobalDeviceManager.drop_device(name)
 
 
+def _drain_until(
+    condition: Callable[[], bool], *, timeout: float = 3.0, label: str = "condition"
+) -> None:
+    app = QCoreApplication.instance()
+    assert app is not None
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        app.processEvents()
+        if condition():
+            return
+        time.sleep(0.01)
+    raise AssertionError(f"timed out waiting for {label}")
+
+
 def _make_svc(driver: object | None = None) -> DeviceService:
     fake = driver if driver is not None else FakeDevice()
     gate = OperationGate()
@@ -62,18 +80,22 @@ def _make_svc(driver: object | None = None) -> DeviceService:
         runner,
         handles,
         driver_factory=lambda _type, _address: fake,  # type: ignore[arg-type]
+        device_registry=FakeDeviceRegistry(),
     )
 
 
 def _connect(
     svc: DeviceService, name: str = "flux", type_name: str = "FakeDevice"
 ) -> None:
-    loop = QEventLoop()
-    svc.device_connected.connect(lambda _request: loop.quit())
+    connected: list[object] = []
+    errors: list[str] = []
+    svc.device_connected.connect(connected.append)
+    svc.operation_failed.connect(lambda _name, error: errors.append(error))
     svc.start_connect_device(
         ConnectDeviceRequest(type_name=type_name, name=name, address="")
     )
-    loop.exec()
+    _drain_until(lambda: bool(connected or errors), label=f"connect {name}")
+    assert not errors
 
 
 def test_list_device_names_uses_connected_snapshot(qapp):

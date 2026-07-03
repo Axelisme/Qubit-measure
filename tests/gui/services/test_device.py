@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import threading
+import time
+from collections.abc import Callable
 from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import QEventLoop
+from qtpy.QtCore import QCoreApplication, QEventLoop
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.gui.app.main.services.operation_gate import OperationGate
@@ -25,6 +27,8 @@ from zcu_tools.gui.session.services.device import (
     SetupDeviceRequest,
 )
 from zcu_tools.gui.session.services.progress import ProgressService
+
+from tests.gui.services._device_fakes import FakeDeviceRegistry
 
 # Every BackgroundRunner created in a test is registered here so the autouse
 # teardown can quiesce it: a DeviceService runs its commands on a dedicated worker
@@ -58,6 +62,20 @@ def _clean_devices():
         GlobalDeviceManager.drop_device(name)
 
 
+def _drain_until(
+    condition: Callable[[], bool], *, timeout: float = 3.0, label: str = "condition"
+) -> None:
+    app = QCoreApplication.instance()
+    assert app is not None
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        app.processEvents()
+        if condition():
+            return
+        time.sleep(0.01)
+    raise AssertionError(f"timed out waiting for {label}")
+
+
 def _make_svc(
     driver: MagicMock | None = None, gate: OperationGate | None = None
 ) -> tuple[DeviceService, MagicMock]:
@@ -80,6 +98,7 @@ def _make_svc(
             runner,
             handles,
             driver_factory=lambda _type, _address: device,  # type: ignore[arg-type]
+            device_registry=FakeDeviceRegistry(),
         ),
         device,
     )
@@ -90,19 +109,24 @@ def _req(name: str = "dev1") -> ConnectDeviceRequest:
 
 
 def _connect(svc: DeviceService, req: ConnectDeviceRequest) -> None:
-    loop = QEventLoop()
-    svc.device_connected.connect(lambda _request: loop.quit())
-    svc.operation_failed.connect(lambda _name, _error: loop.quit())
+    connected: list[object] = []
+    errors: list[str] = []
+    svc.device_connected.connect(connected.append)
+    svc.operation_failed.connect(lambda _name, error: errors.append(error))
     svc.start_connect_device(req)
-    loop.exec()
+    _drain_until(lambda: bool(connected or errors), label=f"connect {req.name}")
+    assert not errors
 
 
 def test_device_connect_returns_operation_handle(qapp):
     svc, _device = _make_svc()
-    loop = QEventLoop()
-    svc.device_connected.connect(lambda _request: loop.quit())
+    connected: list[object] = []
+    errors: list[str] = []
+    svc.device_connected.connect(connected.append)
+    svc.operation_failed.connect(lambda _name, error: errors.append(error))
     token = svc.start_connect_device(_req())
-    loop.exec()
+    _drain_until(lambda: bool(connected or errors), label="device connect")
+    assert not errors
     # connect now returns an operation token (parity with setup) for awaiting.
     assert isinstance(token, int)
     assert svc.get_device_snapshot("dev1").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
@@ -165,7 +189,7 @@ def test_device_connect_failure_is_reported_without_live_registration(qapp):
 
     assert errors
     assert "cannot query" in errors[0]
-    assert "dev1" not in GlobalDeviceManager.get_all_devices()
+    assert "dev1" not in svc._registry.get_all_devices()
     device.close.assert_called_once_with()
     assert svc.get_device_snapshot("dev1") is None
 
@@ -213,6 +237,7 @@ def test_active_device_setups_enumerates_concurrent_setups(qapp):
     handles = OperationHandles()
     progress = ProgressService(QtProgressTransport())
     runner = OperationRunner(resolved_gate, handles, progress, bg_svc)
+    registry = FakeDeviceRegistry()
     svc = DeviceService(
         EventBus(),
         State(MagicMock()),
@@ -221,6 +246,7 @@ def test_active_device_setups_enumerates_concurrent_setups(qapp):
         runner,
         handles,
         driver_factory=factory,  # type: ignore[arg-type]
+        device_registry=registry,
     )
 
     for name in ("alpha", "beta"):
@@ -228,7 +254,7 @@ def test_active_device_setups_enumerates_concurrent_setups(qapp):
         svc.device_connected.connect(lambda _r: loop.quit())
         svc.start_connect_device(_req(name))
         loop.exec()
-        drivers[name] = cast(MagicMock, GlobalDeviceManager.get_device(name))
+        drivers[name] = cast(MagicMock, registry.get_device(name))
 
     # Both setups block on the same gate event so they stay in-flight together.
     release = threading.Event()
@@ -377,7 +403,7 @@ def test_disconnect_close_failure_retains_connected_device_and_releases_gate(qap
     loop.exec()
 
     assert "close failed" in errors[0]
-    assert "dev1" in GlobalDeviceManager.get_all_devices()
+    assert "dev1" in svc._registry.get_all_devices()
     assert svc.get_device_snapshot("dev1").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
     device.close.side_effect = None
     retry_loop = QEventLoop()
@@ -404,6 +430,7 @@ def test_failing_device_changed_subscriber_does_not_abort_connect(qapp):
         runner,
         handles,
         driver_factory=lambda _type, _address: MagicMock(),  # type: ignore[arg-type]
+        device_registry=FakeDeviceRegistry(),
     )
     # A DEVICE_CHANGED subscriber raising (e.g. a View redraw bug) is swallowed +
     # logged by the EventBus; it must NOT abort the connect or roll back the
@@ -614,6 +641,7 @@ def _make_multi_svc(
     handles = OperationHandles()
     progress = ProgressService(QtProgressTransport())
     runner = OperationRunner(resolved_gate, handles, progress, bg)
+    registry = FakeDeviceRegistry()
     svc = DeviceService(
         EventBus(),
         State(MagicMock()),
@@ -622,19 +650,22 @@ def _make_multi_svc(
         runner,
         handles,
         driver_factory=factory,  # type: ignore[arg-type]
+        device_registry=registry,
     )
     return svc, drivers
 
 
 def _connect_named(svc: DeviceService, name: str) -> None:
-    loop = QEventLoop()
-    svc.device_connected.connect(lambda _r: loop.quit())
-    svc.operation_failed.connect(lambda _n, _e: loop.quit())
+    connected: list[object] = []
+    errors: list[str] = []
+    svc.device_connected.connect(connected.append)
+    svc.operation_failed.connect(lambda _n, error: errors.append(error))
     # address == name so _make_multi_svc keys the driver by name.
     svc.start_connect_device(
         ConnectDeviceRequest(type_name="FakeDevice", name=name, address=name)
     )
-    loop.exec()
+    _drain_until(lambda: bool(connected or errors), label=f"connect {name}")
+    assert not errors
 
 
 def test_gate_allows_concurrent_setup_of_different_devices(qapp):
@@ -772,43 +803,10 @@ def test_concurrent_setups_cancel_independently(qapp):
 # ---------------------------------------------------------------------------
 
 
-class _FakeRegistry:
-    """In-memory ``DeviceRegistryPort`` implementation for unit tests.
-
-    Mirrors the ``GlobalDeviceManager`` semantics (ValueError on unknown name,
-    warn-overwrite on re-register) but is entirely in-memory and instance-scoped
-    so test cases are isolated from each other and from the real singleton.
-    """
-
-    def __init__(self) -> None:
-        self._devices: dict[str, Any] = {}
-
-    def register_device(self, name: str, device: Any) -> None:
-        self._devices[name] = device
-
-    def drop_device(self, name: str, ignore_error: bool = False) -> None:
-        if name not in self._devices:
-            if ignore_error:
-                return
-            raise ValueError(f"Device {name} not found")
-        del self._devices[name]
-
-    def get_device(self, name: str) -> Any:
-        if name not in self._devices:
-            raise ValueError(f"Device {name} not found")
-        return self._devices[name]
-
-    def get_all_devices(self) -> dict[str, Any]:
-        return dict(self._devices)
-
-    def get_info(self, name: str) -> Any:
-        return self.get_device(name).get_info()
-
-
 def _make_svc_with_fake_registry(
     driver: MagicMock | None = None,
     gate: OperationGate | None = None,
-) -> tuple[DeviceService, MagicMock, _FakeRegistry]:
+) -> tuple[DeviceService, MagicMock, FakeDeviceRegistry]:
     """Like ``_make_svc`` but injects a ``_FakeRegistry`` instead of the real singleton."""
     from zcu_tools.gui.session.operation_handles import OperationHandles
     from zcu_tools.gui.session.operation_runner import OperationRunner
@@ -820,7 +818,7 @@ def _make_svc_with_fake_registry(
     handles = OperationHandles()
     progress = ProgressService(QtProgressTransport())
     runner = OperationRunner(resolved_gate, handles, progress, bg)
-    registry = _FakeRegistry()
+    registry = FakeDeviceRegistry()
     svc = DeviceService(
         EventBus(),
         State(MagicMock()),
