@@ -160,7 +160,6 @@ def test_lenrabi_make_cfg_lowers_context():
         "qub_ch": 4,
         "qub_nqz": 2,
         "qub_gain": 0.3,
-        "qub_length": 0.5,
         "sweep_range": SweepValue(start=0.05, stop=2.5, expts=61),
         "reps": 1000,
         "rounds": 10,

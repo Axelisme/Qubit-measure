@@ -243,7 +243,6 @@ class LenRabiBuilder(Builder):
                 "qub_ch": "modules.qub_pulse.ch",
                 "qub_nqz": "modules.qub_pulse.nqz",
                 "qub_gain": "modules.qub_pulse.gain",
-                "qub_length": "modules.qub_pulse.waveform.length",
                 "readout": "modules.readout",
                 "relax_delay": "relax_delay",
                 "reps": "reps",

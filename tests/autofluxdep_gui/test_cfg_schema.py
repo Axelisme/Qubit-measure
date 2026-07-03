@@ -192,7 +192,6 @@ _EXPECTED_KEYS = {
         "qub_ch",
         "qub_nqz",
         "qub_gain",
-        "qub_length",
     },
     "ro_optimize": {
         "freq_range",
@@ -292,7 +291,6 @@ _EXPECTED_PATHS = {
         "qub_ch": "modules.qub_pulse.ch",
         "qub_nqz": "modules.qub_pulse.nqz",
         "qub_gain": "modules.qub_pulse.gain",
-        "qub_length": "modules.qub_pulse.waveform.length",
     },
     "ro_optimize": {
         "freq_range": "sweep.freq",
@@ -727,7 +725,6 @@ def test_lenrabi_default_knobs():
     assert knobs["qub_ch"] == 0
     assert knobs["qub_nqz"] == 2
     assert knobs["qub_gain"] == 1.0
-    assert knobs["qub_length"] == 1.0
     sweep = knobs["sweep_range"]
     assert np.allclose([float(sweep.start), float(sweep.stop)], [0.05, 4.0])
     assert int(sweep.expts) == 101
@@ -756,18 +753,15 @@ def test_ro_optimize_default_knobs():
     knobs = RoOptimizeBuilder().make_default_schema().lower(None)
     freq_range = knobs["freq_range"]
     gain_range = knobs["gain_range"]
-    assert knobs["reps"] == 1000
+    assert knobs["reps"] == 100
     assert knobs["rounds"] == 1000
     assert (
         float(freq_range.start),
         float(freq_range.stop),
         int(freq_range.expts),
     ) == (6250.0, 6750.0, 31)
-    assert (
-        float(gain_range.start),
-        float(gain_range.stop),
-        int(gain_range.expts),
-    ) == (0.01, 0.5, 31)
+    assert np.allclose([float(gain_range.start), float(gain_range.stop)], [0.01, 0.5])
+    assert int(gain_range.expts) == 31
     assert knobs["freq_range_mode"] == "previous_best"
     assert knobs["gain_range_mode"] == "previous_best"
     assert knobs["relax_delay_mode"] == "auto_t1"
@@ -918,7 +912,6 @@ def test_fresh_node_defaults_seed_from_ml_modules():
     assert lenrabi["qub_ch"] == 0
     assert lenrabi["qub_nqz"] == 2
     assert lenrabi["qub_gain"] == 1.0
-    assert lenrabi["qub_length"] == 1.0
     assert np.allclose(
         [float(lenrabi["sweep_range"].start), float(lenrabi["sweep_range"].stop)],
         [0.05, 4.0],

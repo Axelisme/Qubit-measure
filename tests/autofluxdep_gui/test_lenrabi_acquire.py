@@ -31,7 +31,6 @@ _PARAMS = {
     "qub_ch": 1,
     "qub_nqz": 1,
     "qub_gain": 0.5,
-    "qub_length": 1.0,
     # start above zero: a const waveform length-sweep needs >= a few FPGA cycles
     "sweep_range": SweepValue(start=0.05, stop=2.0, expts=41),
     "reps": 100,

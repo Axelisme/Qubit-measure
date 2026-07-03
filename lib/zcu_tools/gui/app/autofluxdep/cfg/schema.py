@@ -701,11 +701,19 @@ def _lower_value_at_path(
     md: MetaDict | None,
 ) -> Any:
     value = _get_value_at_path(value_tree, path)
-    raw = CfgSchema(
-        spec=CfgSectionSpec(fields={"value": spec}),
-        value=CfgSectionValue(fields={"value": value}),
-    ).to_raw_dict(md=md, ml=ml)
+    try:
+        raw = CfgSchema(
+            spec=CfgSectionSpec(fields={"value": spec}),
+            value=CfgSectionValue(fields={"value": value}),
+        ).to_raw_dict(md=md, ml=ml)
+    except RuntimeError as exc:
+        raise RuntimeError(_rewrite_single_value_lower_error(str(exc), path)) from exc
     return raw.get("value", _MISSING)
+
+
+def _rewrite_single_value_lower_error(message: str, path: str) -> str:
+    """Preserve the node cfg path when lowering an isolated logical leaf."""
+    return message.replace("Config field 'value'", f"Config field '{path}'")
 
 
 def _get_raw_at_path(raw: Mapping[str, Any], path: str) -> Any:

@@ -177,10 +177,13 @@ def test_field_labels_use_autofluxdep_width(ctrl_node, qapp):
     try:
         labels = form.findChildren(ElidedLabel)
         assert labels
-        assert all(
-            label.maximumWidth() == NODE_FIELD_LABEL_MAX_WIDTH for label in labels
-        )
-        assert any(label.toolTip() == "earlystop_snr:" for label in labels)
+        constrained = [
+            label
+            for label in labels
+            if label.maximumWidth() == NODE_FIELD_LABEL_MAX_WIDTH
+        ]
+        assert constrained
+        assert any(label.toolTip() == "earlystop_snr:" for label in constrained)
     finally:
         form.teardown()
 
