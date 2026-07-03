@@ -204,12 +204,17 @@ class PlacedNode:
     ``mist`` placements both provide ``success`` — info keys are flat, not
     instance-scoped), so renaming changes identity, not the dependency wiring.
 
+    ``enabled`` is the workflow inclusion toggle. Disabled placements stay in the
+    editable workflow and persistence, but the controller omits them from run-time
+    providers, results, and artifacts.
+
     The declaration helpers delegate to the Builder so a PlacedNode satisfies the
     orchestrator's ``Provider`` view directly.
     """
 
     builder: Builder
     name: str = ""
+    enabled: bool = True
     # Seed for the per-placement schema. Consumed once in ``__post_init__`` to
     # build ``schema``; not retained (the schema is the SSOT thereafter).
     overrides: InitVar[Mapping[str, Any] | None] = None

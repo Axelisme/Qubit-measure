@@ -108,6 +108,7 @@ def _h_workflow_list(
             {
                 "name": node.name,
                 "type": node.type_name,
+                "enabled": node.enabled,
                 "provides": list(node.provides),
                 "provides_modules": list(node.provides_modules),
                 "requires": [dep.key for dep in node.all_dependencies()],

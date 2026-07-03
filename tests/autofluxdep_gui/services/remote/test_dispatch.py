@@ -201,10 +201,22 @@ def test_workflow_list_reports_placed_nodes():
     assert [n["name"] for n in listed] == ["qubit_freq", "lenrabi"]
     qf = listed[0]
     assert qf["type"] == "qubit_freq"
+    assert qf["enabled"] is True
     assert "qubit_freq" in qf["provides"]
     assert qf["has_result"] is False
     # lenrabi declares a dependency on qubit_freq's info key
     assert "qubit_freq" in listed[1]["requires"]
+
+
+def test_workflow_list_reports_enabled_state():
+    adapter = _adapter()
+    adapter.ctrl.add_node_by_type("qubit_freq")
+    adapter.ctrl.add_node_by_type("lenrabi")
+    adapter.ctrl.set_node_enabled(1, False)
+
+    listed = _call(adapter, "workflow.list", {})["nodes"]
+
+    assert [node["enabled"] for node in listed] == [True, False]
 
 
 def test_workflow_list_excludes_predictor_service():

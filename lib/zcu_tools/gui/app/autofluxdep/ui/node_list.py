@@ -20,6 +20,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QInputDialog,
     QLabel,
     QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPushButton,
     QVBoxLayout,
@@ -274,8 +275,17 @@ class NodeListPane(QWidget):
         prev = self._list.currentRow()
         self._list.blockSignals(True)
         self._list.clear()
-        for n in self._ctrl.state.nodes:
-            self._list.addItem(n.name)
+        for index, node in enumerate(self._ctrl.state.nodes):
+            item = QListWidgetItem(node.name)
+            widget = _NodeRowWidget(
+                index=index,
+                name=node.name,
+                enabled=node.enabled,
+                on_toggled=self._on_node_enabled_toggled,
+            )
+            item.setSizeHint(widget.sizeHint())
+            self._list.addItem(item)
+            self._list.setItemWidget(item, widget)
         if 0 <= prev < self._list.count():
             self._list.setCurrentRow(prev)
         elif self._list.count() > 0:
@@ -294,6 +304,10 @@ class NodeListPane(QWidget):
 
     def _on_row_changed(self, row: int) -> None:
         self.selection_changed.emit(row)
+
+    def _on_node_enabled_toggled(self, index: int, enabled: bool) -> None:
+        self._ctrl.set_node_enabled(index, enabled)
+        self._refresh_buttons()
 
     def refresh_flux_fields(self) -> None:
         start_expr, stop_expr, npts_expr = self._ctrl.get_flux_sweep_expressions()
@@ -430,6 +444,13 @@ class NodeListPane(QWidget):
             self._flux_source,
         ):
             b.setEnabled(editing)
+        for row in range(self._list.count()):
+            item = self._list.item(row)
+            if item is None:
+                continue
+            widget = self._list.itemWidget(item)
+            if isinstance(widget, _NodeRowWidget):
+                widget.set_editing(editing)
         reason = self._run_disabled_reason()
         # Run needs a complete setup; Stop always remains enabled while running.
         self._run_btn.setEnabled(self._running or reason is None)
@@ -440,9 +461,50 @@ class NodeListPane(QWidget):
             return "Setup required"
         if not self._ctrl.state.nodes:
             return "Add at least one node"
+        if not any(node.enabled for node in self._ctrl.state.nodes):
+            return "Enable at least one node"
         if self._ctrl.get_flux_device() is None:
             return "Select a flux source"
         return None
+
+
+class _NodeRowWidget(QWidget):
+    """A compact node-list row with an enable checkbox and stable label."""
+
+    def __init__(
+        self,
+        *,
+        index: int,
+        name: str,
+        enabled: bool,
+        on_toggled,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._checkbox = QCheckBox()
+        self._checkbox.setToolTip("Include this node in future runs")
+        self._label = QLabel(name)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(2, 0, 2, 0)
+        layout.setSpacing(6)
+        layout.addWidget(self._checkbox)
+        layout.addWidget(self._label, 1)
+
+        self._checkbox.blockSignals(True)
+        self._checkbox.setChecked(enabled)
+        self._checkbox.blockSignals(False)
+        self._label.setEnabled(enabled)
+        self._checkbox.toggled.connect(
+            lambda checked, row=index: self._handle_toggled(row, checked, on_toggled)
+        )
+
+    def set_editing(self, editing: bool) -> None:
+        self._checkbox.setEnabled(editing)
+
+    def _handle_toggled(self, index: int, checked: bool, on_toggled) -> None:
+        self._label.setEnabled(checked)
+        on_toggled(index, checked)
 
 
 def _btn(text: str, slot) -> QPushButton:

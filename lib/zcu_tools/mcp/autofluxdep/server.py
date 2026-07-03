@@ -77,8 +77,8 @@ Read tools (all pure queries):
     has_run_predictor}.
   - autofluxdep_project_info → {chip_name, qub_name, result_dir,
     database_path, params_path}.
-  - autofluxdep_workflow_list → each placed node's {name, type, provides,
-    provides_modules, requires, has_result}.
+  - autofluxdep_workflow_list → each placed node's {name, type, enabled,
+    provides, provides_modules, requires, has_result}.
   - autofluxdep_node_cfg(name) → {name, type, knobs:{...}} for one placed node.
   - autofluxdep_result_summary → per node-with-result {name, kind, n_flux,
     n_measured, fit_summary} — how far the sweep has progressed, not the raw 2D data.

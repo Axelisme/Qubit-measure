@@ -38,9 +38,11 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     # Workflow definition (the ordered node placements)
     "workflow.list": MethodSpec(
         5.0,
-        "List the placed workflow nodes in order: each {name, type, provides, "
-        "provides_modules, requires, has_result}. Excludes the predictor service "
-        "(prepended only while a run is in progress, never a list row).",
+        "List the placed workflow nodes in order: each {name, type, enabled, "
+        "provides, provides_modules, requires, has_result}. Excludes the "
+        "predictor service (prepended only while a run is in progress, never a "
+        "list row). Disabled nodes remain listed but are omitted from future "
+        "runs until re-enabled.",
     ),
     # One placed node's user knobs
     "node.cfg": MethodSpec(

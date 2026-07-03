@@ -21,6 +21,7 @@ class PersistedNode(BaseModel):
 
     type_name: str
     name: str
+    enabled: bool = True
     cfg_raw: dict[str, Any] = Field(default_factory=dict)
 
 

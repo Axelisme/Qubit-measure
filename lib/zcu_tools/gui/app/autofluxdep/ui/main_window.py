@@ -477,6 +477,8 @@ class MainWindow(QMainWindow):
 
         results = self._ctrl.prepare_run_results()
         for node in self._ctrl.state.nodes:
+            if not node.enabled:
+                continue
             result = results.get(node.name)
             if result is None:
                 continue  # a provider without a Result (none in the prototype)

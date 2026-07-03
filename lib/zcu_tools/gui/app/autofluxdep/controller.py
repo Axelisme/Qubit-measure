@@ -23,7 +23,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from qtpy.QtCore import QObject, Qt, QThread, Signal  # type: ignore[attr-defined]
+from qtpy.QtCore import (  # type: ignore[attr-defined]
+    QObject,
+    Qt,
+    QThread,
+    QTimer,
+    Signal,
+)
 
 from zcu_tools.gui.app.autofluxdep.cfg import CfgSectionValue
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgPersistenceError
@@ -121,6 +127,7 @@ logger = logging.getLogger(__name__)
 
 RUN_PROGRESS_OWNER_ID = "autofluxdep-run"
 _RUN_OWNER_ID = RUN_PROGRESS_OWNER_ID
+_PERSIST_DEBOUNCE_MS = 500
 
 
 @dataclass(frozen=True)
@@ -206,6 +213,9 @@ class Controller(SessionControllerMixin):
         self._run_stop_event: threading.Event | None = None
         self._last_run_info: InfoStore | None = None
         self._caretaker: PersistenceCaretaker | None = None
+        self._persist_timer = QTimer()
+        self._persist_timer.setSingleShot(True)
+        self._persist_timer.timeout.connect(self.persist_all)
 
         # Base directory default result/database paths are anchored under (the
         # entry script injects the repo root). None falls back to cwd — fine for
@@ -327,6 +337,7 @@ class Controller(SessionControllerMixin):
             PersistedNode(
                 type_name=node.type_name,
                 name=node.name,
+                enabled=node.enabled,
                 cfg_raw=node.schema.to_persisted_raw(),
             )
             for node in self._state.nodes
@@ -356,6 +367,7 @@ class Controller(SessionControllerMixin):
             try:
                 node = create_placement(persisted.type_name)
                 node.name = self._unique_name(persisted.name or node.name)
+                node.enabled = persisted.enabled
                 node.schema.restore_persisted_raw(persisted.cfg_raw)
             except (
                 KeyError,
@@ -399,12 +411,22 @@ class Controller(SessionControllerMixin):
         return outcome
 
     def persist_all(self) -> None:
+        self._persist_timer.stop()
         if self._caretaker is None:
             return
         try:
             self._caretaker.flush()
         except PersistenceError:
             logger.exception("autofluxdep settings save failed")
+
+    def _schedule_persist_all(self) -> None:
+        if self._caretaker is None:
+            return
+        self._persist_timer.start(_PERSIST_DEBOUNCE_MS)
+
+    def _clear_run_products(self) -> None:
+        self._state.run_results = {}
+        self._state.run_predictor = None
 
     # -- setup dialog: project / startup --
     # apply_startup_project diverges (autofluxdep returns bool; measure returns the
@@ -502,9 +524,11 @@ class Controller(SessionControllerMixin):
             default_context=self._state.exp_context,
         )
         self._state.nodes.append(node)
+        self._clear_run_products()
         self._state.version.bump(WORKFLOW_VERSION_KEY)
         logger.debug("add_node: %r (type=%r) params=%s", name, builder.name, params)
         self._bus.emit(WorkflowChangedPayload(name=node.name))
+        self._schedule_persist_all()
         return node
 
     def add_node_by_type(self, type_name: str) -> PlacedNode:
@@ -516,9 +540,11 @@ class Controller(SessionControllerMixin):
         node = create_placement(type_name, ctx=self._state.exp_context)
         node.name = self._unique_name(node.name)
         self._state.nodes.append(node)
+        self._clear_run_products()
         self._state.version.bump(WORKFLOW_VERSION_KEY)
         logger.debug("add_node_by_type: %r -> %r", type_name, node.name)
         self._bus.emit(WorkflowChangedPayload(name=node.name))
+        self._schedule_persist_all()
         return node
 
     def rename_node(self, index: int, new_name: str) -> str:
@@ -538,17 +564,25 @@ class Controller(SessionControllerMixin):
             return node.name  # blank → no-op, keep current name
         old = node.name
         node.name = self._unique_name(cleaned, exclude=node)
+        if node.name == old:
+            return node.name
+        self._clear_run_products()
         self._state.version.bump(WORKFLOW_VERSION_KEY)
         logger.debug("rename_node[%d]: %r -> %r", index, old, node.name)
         self._bus.emit(WorkflowChangedPayload(name=node.name))
+        self._schedule_persist_all()
         return node.name
 
     def remove_node(self, name: str) -> None:
         before = len(self._state.nodes)
         self._state.nodes = [n for n in self._state.nodes if n.name != name]
+        if len(self._state.nodes) == before:
+            return
+        self._clear_run_products()
         self._state.version.bump(WORKFLOW_VERSION_KEY)
         logger.debug("remove_node: %r (%d -> %d)", name, before, len(self._state.nodes))
         self._bus.emit(WorkflowChangedPayload(name=name))
+        self._schedule_persist_all()
 
     def reorder(self, index: int, delta: int) -> int:
         """Move the Node at ``index`` by ``delta`` (±1). Returns the new index."""
@@ -557,10 +591,25 @@ class Controller(SessionControllerMixin):
         if not (0 <= index < len(nodes) and 0 <= new_index < len(nodes)):
             return index  # out of range → no-op
         nodes[index], nodes[new_index] = nodes[new_index], nodes[index]
+        self._clear_run_products()
         self._state.version.bump(WORKFLOW_VERSION_KEY)
         logger.debug("reorder: %d <-> %d", index, new_index)
         self._bus.emit(WorkflowChangedPayload(name=None))
+        self._schedule_persist_all()
         return new_index
+
+    def set_node_enabled(self, index: int, enabled: bool) -> None:
+        """Toggle whether a placed node participates in future runs."""
+        node = self._state.nodes[index]
+        enabled = bool(enabled)
+        if node.enabled == enabled:
+            return
+        node.enabled = enabled
+        self._clear_run_products()
+        self._state.version.bump(WORKFLOW_VERSION_KEY)
+        logger.debug("set_node_enabled[%d] (%r): %s", index, node.name, enabled)
+        self._bus.emit(WorkflowChangedPayload(name=node.name))
+        self._schedule_persist_all()
 
     def set_node_params(self, index: int, params: Mapping[str, Any]) -> None:
         """Write one-or-more knob leaves of the Node at ``index`` into its schema SSOT.
@@ -578,22 +627,27 @@ class Controller(SessionControllerMixin):
         node = self._state.nodes[index]
         for key, value in params.items():
             node.schema.set_field(key, value)  # fast-fails unknown key / wrong type
+        self._clear_run_products()
         self._state.version.bump(WORKFLOW_VERSION_KEY)
         logger.debug(
             "set_node_params[%d] (%r): keys=%s", index, node.name, list(params)
         )
         self._bus.emit(WorkflowChangedPayload(name=None))
+        self._schedule_persist_all()
 
     def set_node_cfg_value(self, index: int, value: CfgSectionValue) -> None:
         """Replace one Node's complete cfg value tree from the typed form draft."""
         node = self._state.nodes[index]
         node.schema.replace_value_tree(value)
+        self._clear_run_products()
         self._state.version.bump(WORKFLOW_VERSION_KEY)
         logger.debug("set_node_cfg_value[%d] (%r)", index, node.name)
         self._bus.emit(WorkflowChangedPayload(name=None))
+        self._schedule_persist_all()
 
     def set_flux_values(self, values: list[float]) -> None:
         self._state.flux_values = list(values)
+        self._clear_run_products()
         self._state.version.bump(FLUX_VERSION_KEY)
         if values:
             logger.debug(
@@ -605,6 +659,7 @@ class Controller(SessionControllerMixin):
         else:
             logger.debug("set_flux_values: cleared")
         self._bus.emit(FluxChangedPayload(count=len(values)))
+        self._schedule_persist_all()
 
     def set_flux_sweep_expressions(
         self, start_expr: str, stop_expr: str, npts_expr: str
@@ -613,7 +668,9 @@ class Controller(SessionControllerMixin):
         self._state.flux_start_expr = start_expr
         self._state.flux_stop_expr = stop_expr
         self._state.flux_npts_expr = npts_expr
+        self._clear_run_products()
         self._state.version.bump(FLUX_VERSION_KEY)
+        self._schedule_persist_all()
 
     def get_flux_sweep_expressions(self) -> tuple[str, str, str]:
         return (
@@ -624,7 +681,11 @@ class Controller(SessionControllerMixin):
 
     def set_auto_follow_tabs(self, enabled: bool) -> None:
         """Persist the UI preference for run-time selection/tab auto-follow."""
-        self._state.auto_follow_tabs = bool(enabled)
+        enabled = bool(enabled)
+        if self._state.auto_follow_tabs == enabled:
+            return
+        self._state.auto_follow_tabs = enabled
+        self._schedule_persist_all()
 
     def get_auto_follow_tabs(self) -> bool:
         return self._state.auto_follow_tabs
@@ -656,13 +717,16 @@ class Controller(SessionControllerMixin):
         self._operation_handles.stop(token, reason=reason)
         return True
 
+    def _enabled_nodes(self) -> list[PlacedNode]:
+        return [node for node in self._state.nodes if node.enabled]
+
     def _build_providers(self) -> list[PlacedNode]:
         """The execution sequence: the predictor Service prepended to the user's
         providers. The Service is loaded because qubit_freq requires
         ``predict_freq`` — it is not in the user's list, but it runs first each
         point so its ``predict_freq`` is this-point-available downstream."""
         service = PlacedNode(builder=PredictorBuilder())
-        return [service, *self._state.nodes]
+        return [service, *self._enabled_nodes()]
 
     def _build_tools(self) -> Tools:
         """Build the sweep's adaptive predictor from the active context.
@@ -698,7 +762,7 @@ class Controller(SessionControllerMixin):
         """
         results: dict[str, Any] = {}
         md = self._state.exp_context.md
-        for node in self._state.nodes:
+        for node in self._enabled_nodes():
             result = node.builder.make_init_result(node.schema, flux, md=md)
             if result is not None:
                 results[node.name] = result
@@ -723,10 +787,13 @@ class Controller(SessionControllerMixin):
 
         self._cur_idx = 0
         self._last_run_info = None
+        enabled_nodes = self._enabled_nodes()
+        if not enabled_nodes:
+            raise RuntimeError("autofluxdep run requires at least one enabled node")
         logger.info(
-            "run start: %d user Node(s) %s over %d flux point(s)",
-            len(self._state.nodes),
-            self._state.node_names(),
+            "run start: %d enabled user Node(s) %s over %d flux point(s)",
+            len(enabled_nodes),
+            [node.name for node in enabled_nodes],
             len(self._state.flux_values),
         )
 
@@ -739,7 +806,10 @@ class Controller(SessionControllerMixin):
         # The UI pre-allocates Results (+ binds Plotters) before starting the
         # worker; a headless caller has not, so allocate here. Either way the
         # worker fills these exact containers in place.
-        if not self._state.run_results:
+        enabled_names = {node.name for node in enabled_nodes}
+        if not self._state.run_results or not set(self._state.run_results).issubset(
+            enabled_names
+        ):
             self.prepare_run_results()
         results = self._state.run_results
         flux_values = list(self._state.flux_values)
@@ -752,7 +822,7 @@ class Controller(SessionControllerMixin):
             project=project,
             flux_values=flux_values,
             flux_device_name=flux_device,
-            nodes=self._state.nodes,
+            nodes=enabled_nodes,
             results=results,
         )
 
@@ -760,7 +830,7 @@ class Controller(SessionControllerMixin):
             del flux, info  # POINT_DONE carries only the index
             self._run_events.emit_point_done(idx)
 
-        user_node_names = {n.name for n in self._state.nodes}
+        user_node_names = {n.name for n in enabled_nodes}
 
         def on_node(name: str, idx: int) -> None:
             # a provider is about to run → let the UI auto-follow to its run tab.
@@ -925,6 +995,7 @@ class Controller(SessionControllerMixin):
         ) -> None:
             logger.error("run failed at flux idx %d: %s", self._cur_idx, error)
             _clear_active_run()
+            self.persist_all()
             try:
                 store.record_run_failed(
                     error,

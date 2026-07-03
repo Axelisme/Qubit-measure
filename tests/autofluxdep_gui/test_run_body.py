@@ -13,6 +13,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -112,6 +113,43 @@ def test_controller_run_writes_artifact_manifest_journal_and_node_hdf5(tmp_path)
     assert not np.isnan(node_result.signal[0]).any()
 
 
+def test_disabled_node_is_omitted_from_run_results_and_artifact(tmp_path):
+    ctrl = build_core(project=_project(tmp_path))
+    ctrl.add_node(make_measurement_builder("enabled_probe"))
+    ctrl.add_node(make_measurement_builder("disabled_probe"))
+    ctrl.set_node_enabled(1, False)
+    ctrl.set_flux_values([0.0, 1.0])
+
+    run_controller_to_completion(ctrl)
+
+    assert set(ctrl.state.run_results) == {"enabled_probe"}
+    run_dir = _latest_run_dir(tmp_path)
+    manifest = load_manifest(run_dir / "manifest.json")
+    assert [node["name"] for node in manifest["workflow"]["nodes"]] == ["enabled_probe"]
+    assert [node["name"] for node in manifest["files"]["nodes"]] == ["enabled_probe"]
+    events = load_journal_events(run_dir / "journal.jsonl")
+    event_nodes = {event.get("node") for event in events if "node" in event}
+    assert event_nodes == {"enabled_probe"}
+
+
+def test_dry_run_omits_disabled_nodes():
+    called: list[str] = []
+
+    def record(env, snapshot):
+        del env, snapshot
+        called.append("disabled")
+        return Patch()
+
+    ctrl = build_core()
+    ctrl.add_node(make_builder("disabled", produce_fn=record))
+    ctrl.set_node_enabled(0, False)
+    ctrl.set_flux_values([0.0])
+
+    ctrl.dry_run()
+
+    assert called == []
+
+
 def test_run_event_bus_payloads_emit_on_main_thread(qapp):
     from zcu_tools.gui.app.autofluxdep.events.run import (
         NodeEnteredPayload,
@@ -201,7 +239,7 @@ def test_run_threads_flux_into_env():
     assert seen == [0.0, 0.5, 1.0]
 
 
-def test_produce_exception_fails_run_gracefully():
+def test_produce_exception_fails_run_gracefully(monkeypatch):
     # a Node whose produce raises (e.g. an unconfigured real acquire Fast-Failing)
     # must NOT propagate out of the run: the orchestrator catches it, the run ends
     # on RUN_FAILED (not RUN_FINISHED), the controller unlocks, and the error is
@@ -220,6 +258,8 @@ def test_produce_exception_fails_run_gracefully():
         make_builder("broken", requires=(Dependency("predict_freq"),), produce_fn=boom)
     )
     ctrl.set_flux_values([0.0, 1.0])
+    persist_all = MagicMock()
+    monkeypatch.setattr(ctrl, "persist_all", persist_all)
 
     events: list[str] = []
     ctrl.bus.subscribe(RunFailedPayload, lambda p: events.append(f"failed:{p.message}"))
@@ -230,6 +270,7 @@ def test_produce_exception_fails_run_gracefully():
     assert len(events) == 1 and events[0].startswith("failed:")
     assert "node not configured" in events[0]
     assert not ctrl.is_running  # the controller unlocked
+    persist_all.assert_called_once_with()
 
 
 def test_controller_failed_run_finalizes_artifact(tmp_path):

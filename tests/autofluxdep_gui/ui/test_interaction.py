@@ -68,6 +68,14 @@ def _list_labels(win: MainWindow) -> list[str]:
     return [it.text() for it in items if it is not None]
 
 
+def _node_checkbox(win: MainWindow, row: int):
+    item = win._list._list.item(row)
+    assert item is not None
+    widget = win._list._list.itemWidget(item)
+    assert widget is not None
+    return widget._checkbox
+
+
 class _RowReceiver(QObject):
     def __init__(self, bridge: _RunBridge) -> None:
         super().__init__()
@@ -137,6 +145,34 @@ def test_run_bridge_teardown_removes_event_bus_subscriptions(qapp):
 def test_list_reflects_nodes(app):
     _ctrl, win = app
     assert _list_labels(win) == ["qubit_freq", "probe"]
+    assert _node_checkbox(win, 0).isChecked()
+    assert _node_checkbox(win, 1).isChecked()
+
+
+def test_node_enable_checkbox_toggles_controller_state(app):
+    ctrl, win = app
+    checkbox = _node_checkbox(win, 1)
+
+    checkbox.setChecked(False)
+
+    assert ctrl.state.nodes[1].enabled is False
+    assert not checkbox.isChecked()
+
+    checkbox.setChecked(True)
+
+    assert ctrl.state.nodes[1].enabled is True
+    assert checkbox.isChecked()
+
+
+def test_node_enable_checkbox_locks_while_running(app):
+    _ctrl, win = app
+    checkbox = _node_checkbox(win, 0)
+
+    assert checkbox.isEnabled()
+    win._list.set_running(True)
+    assert not checkbox.isEnabled()
+    win._list.set_running(False)
+    assert checkbox.isEnabled()
 
 
 def test_reorder_swaps_and_keeps_selection(app):
@@ -502,6 +538,23 @@ def test_run_disabled_without_nodes(qapp):
     ctrl._background_svc.quiesce()
     win.close()
     win.deleteLater()
+
+
+def test_run_disabled_when_all_nodes_disabled(app):
+    from zcu_tools.gui.session.services.mock_flux import FAKE_FLUX_DEVICE_NAME
+
+    ctrl, win = app
+    ctrl.set_node_enabled(0, False)
+    ctrl.set_node_enabled(1, False)
+    win._list.refresh_list()
+    connect_mock(ctrl)
+    win._list.refresh_flux_sources()
+    idx = win._list._flux_source.findData(FAKE_FLUX_DEVICE_NAME)
+    assert idx >= 0
+    win._list._flux_source.setCurrentIndex(idx)
+
+    assert not win._list._run_btn.isEnabled()
+    assert win._list._run_btn.toolTip() == "Enable at least one node"
 
 
 # --- run lifecycle: edit↔run lock, liveplot canvas, progress ---
