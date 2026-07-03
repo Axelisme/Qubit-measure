@@ -1,7 +1,7 @@
 """NodeDetailPane — the right side: the selected Node's edit / run sub-tabs.
 
 Shows ONE Node at a time (whichever the left list selects). Inner QTabWidget:
-- "編輯" (Edit): the typed ``NodeCfgForm`` (settings + dep summary). Locked
+- "編輯" (Edit): the typed ``NodeCfgForm``. Locked
   read-only during a run so the user can still see "what this run used".
 - "執行" (Run): the Node's liveplot — a bare matplotlib ``FigureCanvasQTAgg``
   embedded directly (NOT via gui/plotting's backend; the worker never draws, so
@@ -219,6 +219,18 @@ class NodeDetailPane(QWidget):
         canvas between the run tab and the park (never leaves one parentless).
         """
         self._canvas_park = park
+
+    def refresh_cfg_editor(self, event: object) -> None:
+        """Refresh every materialized cfg form against a session-context event."""
+        seen: set[int] = set()
+        for form in (self._form, *self._form_cache.values()):
+            if form is None:
+                continue
+            marker = id(form)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            form.refresh_external(event)
 
     def show_run_canvas(self, canvas: QWidget | None) -> None:
         """Swap the run tab's content to ``canvas`` (or the placeholder if None).

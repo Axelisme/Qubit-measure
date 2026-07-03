@@ -36,7 +36,10 @@ from zcu_tools.gui.app.autofluxdep.ui.main_window import MainWindow, _RunBridge
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
     DeviceChangedPayload,
+    MdChangedPayload,
+    MlChangedPayload,
     PredictorChangedPayload,
+    SessionEvent,
     SocChangedPayload,
 )
 
@@ -342,6 +345,8 @@ def test_main_window_close_removes_event_bus_subscriptions(app):
         DeviceChangedPayload,
         PredictorChangedPayload,
         ContextSwitchedPayload,
+        MdChangedPayload,
+        MlChangedPayload,
     ):
         assert has_owner(payload_type, win)
 
@@ -362,6 +367,8 @@ def test_main_window_close_removes_event_bus_subscriptions(app):
         DeviceChangedPayload,
         PredictorChangedPayload,
         ContextSwitchedPayload,
+        MdChangedPayload,
+        MlChangedPayload,
     ):
         assert not has_owner(payload_type, win)
 
@@ -434,6 +441,28 @@ def test_selection_shows_node_form(app):
     assert win._detail.current_form is not None
     win._list.select_index(1)
     assert win._detail._title.text() == "probe"
+
+
+def test_session_events_refresh_current_cfg_editor(app, monkeypatch):
+    ctrl, win = app
+    form = win._detail.current_form
+    assert form is not None
+    seen: list[object] = []
+    monkeypatch.setattr(form, "refresh_external", seen.append)
+
+    md = ctrl.get_current_md()
+    ml = ctrl.get_current_ml()
+    ctrl.bus.emit(MdChangedPayload(md=md))
+    ctrl.bus.emit(MlChangedPayload(ml=ml))
+    ctrl.bus.emit(ContextSwitchedPayload(md=md, ml=ml))
+    ctrl.bus.emit(DeviceChangedPayload(name="flux_dev"))
+
+    assert seen == [
+        SessionEvent.MD_CHANGED,
+        SessionEvent.ML_CHANGED,
+        SessionEvent.CONTEXT_SWITCHED,
+        SessionEvent.DEVICE_CHANGED,
+    ]
 
 
 # --- Setup → Run enable ---

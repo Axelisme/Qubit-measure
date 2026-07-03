@@ -54,7 +54,10 @@ from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
     DeviceChangedPayload,
+    MdChangedPayload,
+    MlChangedPayload,
     PredictorChangedPayload,
+    SessionPayload,
     SocChangedPayload,
 )
 from zcu_tools.gui.session.ui.progress_bar import LightweightProgressBar
@@ -275,8 +278,8 @@ class MainWindow(QMainWindow):
         self._bridge.run_stopped.connect(self._on_run_done)
         self._bridge.run_failed.connect(self._on_run_failed)
 
-        # Shared session changes refresh the top status row and the flux source
-        # picker (mock setup can auto-provision fake_flux).
+        # Shared session changes refresh the top status row, flux source picker, and
+        # any materialized cfg editor LiveModels.
         self._bus_subs.subscribe(ctrl.bus, SocChangedPayload, self._on_soc_changed)
         self._bus_subs.subscribe(
             ctrl.bus, DeviceChangedPayload, self._on_device_changed
@@ -287,6 +290,8 @@ class MainWindow(QMainWindow):
         self._bus_subs.subscribe(
             ctrl.bus, ContextSwitchedPayload, self._on_context_switched
         )
+        self._bus_subs.subscribe(ctrl.bus, MdChangedPayload, self._on_md_changed)
+        self._bus_subs.subscribe(ctrl.bus, MlChangedPayload, self._on_ml_changed)
         self.destroyed.connect(self._cleanup_bus_subscriptions)
 
         self._refresh_toolbar_buttons()
@@ -673,12 +678,23 @@ class MainWindow(QMainWindow):
 
     def _on_device_changed(self, _payload: DeviceChangedPayload) -> None:
         self._list.refresh_flux_sources()
+        self._refresh_cfg_editor_from_session(_payload)
 
     def _on_predictor_changed(self, _payload: PredictorChangedPayload) -> None:
         self._refresh_session_status()
 
     def _on_context_switched(self, _payload: ContextSwitchedPayload) -> None:
         self._refresh_session_status()
+        self._refresh_cfg_editor_from_session(_payload)
+
+    def _on_md_changed(self, _payload: MdChangedPayload) -> None:
+        self._refresh_cfg_editor_from_session(_payload)
+
+    def _on_ml_changed(self, _payload: MlChangedPayload) -> None:
+        self._refresh_cfg_editor_from_session(_payload)
+
+    def _refresh_cfg_editor_from_session(self, payload: SessionPayload) -> None:
+        self._detail.refresh_cfg_editor(payload.EVENT)
 
     def _refresh_toolbar_buttons(self) -> None:
         editing = not self._ctrl.is_running

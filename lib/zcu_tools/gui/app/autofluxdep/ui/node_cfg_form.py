@@ -17,8 +17,7 @@ inspect / writeback dialogs), not auto-committed by the framework — this widge
 owns the commit.
 
 ``set_read_only`` disables the whole form during a run (values stay visible —
-"what this run used"), preserving the prototype's lock-on-run intent. A read-only
-dependency / provides summary footer is kept for at-a-glance context.
+"what this run used"), preserving the prototype's lock-on-run intent.
 """
 
 from __future__ import annotations
@@ -26,9 +25,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
-    QFrame,
     QGroupBox,
-    QLabel,
     QVBoxLayout,
     QWidget,
 )
@@ -46,13 +43,10 @@ if TYPE_CHECKING:
 
 
 NODE_FIELD_LABEL_MAX_WIDTH = 180
-DEFAULT_CFG_BLOCK_MAX_HEIGHT = 520
-GENERATION_BLOCK_MIN_HEIGHT = 180
-GENERATION_BLOCK_MAX_HEIGHT = 340
 
 
 class NodeCfgForm(QWidget):
-    """Typed cfg form for one PlacedNode, plus a read-only dep/provides summary.
+    """Typed cfg form for one PlacedNode.
 
     Owns split ``SectionLiveField`` drafts over the placement's schema and
     ``CfgFormWidget`` renderers for them; on edit it commits the merged leaves back
@@ -92,7 +86,6 @@ class NodeCfgForm(QWidget):
         )
 
         self._default_group = QGroupBox("Default cfg")
-        self._default_group.setMaximumHeight(DEFAULT_CFG_BLOCK_MAX_HEIGHT)
         default_layout = QVBoxLayout(self._default_group)
         self._default_form = CfgFormWidget(
             field_label_max_width=NODE_FIELD_LABEL_MAX_WIDTH
@@ -100,14 +93,12 @@ class NodeCfgForm(QWidget):
         self._default_form.attach(self._default_model)
         self._default_form.schema_changed.connect(self._on_schema_changed)
         default_layout.addWidget(self._default_form)
-        root.addWidget(self._default_group, 3)
+        root.addWidget(self._default_group, 1)
 
         self._generation_group: QGroupBox | None = None
         self._generation_form: CfgFormWidget | None = None
         if self._generation_model is not None:
             generation_group = QGroupBox("Generation overrides")
-            generation_group.setMinimumHeight(GENERATION_BLOCK_MIN_HEIGHT)
-            generation_group.setMaximumHeight(GENERATION_BLOCK_MAX_HEIGHT)
             generation_layout = QVBoxLayout(generation_group)
             self._generation_form = CfgFormWidget(
                 field_label_max_width=NODE_FIELD_LABEL_MAX_WIDTH
@@ -117,10 +108,6 @@ class NodeCfgForm(QWidget):
             generation_layout.addWidget(self._generation_form)
             self._generation_group = generation_group
             root.addWidget(generation_group, 1)
-
-        root.addWidget(_hline())
-        root.addWidget(QLabel(self._summary_text()))
-        root.addStretch(0)
 
     def _on_schema_changed(self, schema: object) -> None:
         """Commit the form draft into the placement schema SSOT.
@@ -139,32 +126,17 @@ class NodeCfgForm(QWidget):
             fields["generation"] = self._generation_model.get_value()
         return CfgSectionValue(fields=fields)
 
-    def _summary_text(self) -> str:
-        s = self._node.builder
-        req = ", ".join(d.key for d in s.requires) or "—"
-        opt = (
-            ", ".join(
-                d.key + (f" (smooth={d.smooth})" if d.smooth else "")
-                for d in s.optional
-            )
-            or "—"
-        )
-        mods = ", ".join(m.name for m in s.all_module_deps()) or "—"
-        prov = ", ".join(s.provides) or "—"
-        prov_m = ", ".join(s.provides_modules) or "—"
-        return (
-            f"requires:  {req}\n"
-            f"optional:  {opt}\n"
-            f"modules:   {mods}\n"
-            f"provides:  {prov}\n"
-            f"prov.mod:  {prov_m}"
-        )
-
     def set_read_only(self, read_only: bool) -> None:
         """Lock the form during a run (values stay visible, editing disabled)."""
         self._default_form.setEnabled(not read_only)
         if self._generation_form is not None:
             self._generation_form.setEnabled(not read_only)
+
+    def refresh_external(self, event: object) -> None:
+        """Refresh expression/ref snapshots after context, md, ml, or device changes."""
+        self._default_model.refresh_external(event)
+        if self._generation_model is not None:
+            self._generation_model.refresh_external(event)
 
     def teardown(self) -> None:
         """Detach the CfgFormWidget + drop the LiveModel draft."""
@@ -176,13 +148,6 @@ class NodeCfgForm(QWidget):
             self._generation_form.detach()
         if self._generation_model is not None:
             self._generation_model.teardown()
-
-
-def _hline() -> QFrame:
-    line = QFrame()
-    line.setFrameShape(QFrame.Shape.HLine)
-    line.setFrameShadow(QFrame.Shadow.Sunken)
-    return line
 
 
 def _split_generation_section(

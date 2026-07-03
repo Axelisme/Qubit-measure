@@ -23,6 +23,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 import pytest
+from qtpy.QtWidgets import QGroupBox, QVBoxLayout  # type: ignore[attr-defined]
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.cfg import (
     DirectValue,
@@ -48,6 +49,7 @@ from zcu_tools.gui.app.autofluxdep.ui.node_cfg_form import (
     NodeCfgForm,
 )
 from zcu_tools.gui.app.main.ui.fields.common import ElidedLabel
+from zcu_tools.gui.session.events import SessionEvent
 
 
 class _NoopNode(Node):
@@ -192,6 +194,55 @@ def test_field_labels_use_autofluxdep_width(ctrl_node, qapp):
         ]
         assert constrained
         assert any(label.toolTip() == "earlystop_snr:" for label in constrained)
+    finally:
+        form.teardown()
+
+
+def test_default_and_generation_blocks_share_vertical_space(ctrl_node, qapp):
+    ctrl, node, index = ctrl_node
+    form = NodeCfgForm(ctrl, node, index)
+    try:
+        layout = cast(QVBoxLayout, form.layout())
+        assert layout is not None
+        assert layout.count() == 2
+        assert layout.stretch(0) == 1
+        assert layout.stretch(1) == 1
+
+        groups = form.findChildren(QGroupBox)
+        assert {group.title() for group in groups} == {
+            "Default cfg",
+            "Generation overrides",
+        }
+        assert all(group.maximumHeight() > 10_000 for group in groups)
+        assert all(group.minimumHeight() == 0 for group in groups)
+    finally:
+        form.teardown()
+
+
+def test_session_refresh_updates_split_live_models(ctrl_node, qapp, monkeypatch):
+    ctrl, node, index = ctrl_node
+    form = NodeCfgForm(ctrl, node, index)
+    seen: list[tuple[str, object]] = []
+    try:
+        generation = form._generation_model
+        assert generation is not None
+        monkeypatch.setattr(
+            form._default_model,
+            "refresh_external",
+            lambda event: seen.append(("default", event)),
+        )
+        monkeypatch.setattr(
+            generation,
+            "refresh_external",
+            lambda event: seen.append(("generation", event)),
+        )
+
+        form.refresh_external(SessionEvent.CONTEXT_SWITCHED)
+
+        assert seen == [
+            ("default", SessionEvent.CONTEXT_SWITCHED),
+            ("generation", SessionEvent.CONTEXT_SWITCHED),
+        ]
     finally:
         form.teardown()
 
