@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
+from numbers import Real
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
 from matplotlib.figure import Figure
@@ -28,12 +29,18 @@ from zcu_tools.gui.app.main.adapter import (
     ExpContext,
     MetaDictWriteback,
     ParamMeta,
+    RunRequest,
+    ScalarSpec,
     SweepSpec,
     WritebackItem,
     WritebackRequest,
 )
 
 OneToneFreqRunResult: TypeAlias = FreqResult
+SamplingMode: TypeAlias = Literal["linear", "homophasal"]
+
+_SAMPLING_MODE_CHOICES: list[SamplingMode] = ["linear", "homophasal"]
+_HOMOPHASAL_MD_KEYS = ("r_f", "rf_w", "theta0")
 
 
 @dataclass
@@ -72,27 +79,30 @@ class OneToneFreqAdapter(
             "resonator search has placed you near the right frequency."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'r_f' — resonator "
-            "frequency (~4000–8000 MHz); 'res_probe_len' — probe-pulse length, "
-            "from which the readout window is derived (~0.5–5 us); 'res_ch' / "
-            "'ro_ch' — drive / readout channel indices; 'timeFly' — cable "
-            "time-of-flight feeding the trigger offset (~0–1 us)."
+            "Reads from the MetaDict: 'r_f' seeds the default sweep centre; "
+            "'rf_w' seeds the default span; 'res_probe_len' seeds the readout "
+            "window; 'res_ch' / 'ro_ch' seed drive / readout channels; "
+            "'timeFly' seeds the trigger offset. Homophasal sampling also "
+            "requires fitted 'r_f', 'rf_w', and 'theta0'."
         ),
         expects_ml=(
             "Needs a pulse-readout module, and references a ModuleLibrary "
             "waveform named 'ro_waveform' when one exists (optional)."
         ),
         typical_writeback=(
-            "Proposes the fitted resonator frequency and linewidth into "
-            "MetaDict 'r_f' / 'rf_w'. The readout module / waveform are left "
-            "to the user — a frequency fit alone does not justify rewriting "
-            "the whole readout config."
+            "Proposes the fitted resonator frequency, linewidth, and phase "
+            "offset into MetaDict 'r_f' / 'rf_w' / 'theta0'. The readout "
+            "module / waveform are left to the user — a frequency fit alone "
+            "does not justify rewriting the whole readout config."
         ),
         recommended=(
             "Analysis defaults to the hanger-model fit ('hm') with "
             "background-slope fitting on. A sweep spanning a few linewidths "
             "around the known resonator frequency usually captures the dip "
-            "cleanly; widen it if the resonator has drifted."
+            "cleanly; widen it if the resonator has drifted. Use "
+            "homophasal sampling after a fit has written 'theta0' when you "
+            "want equal resonator-circle phase spacing instead of a linear "
+            "frequency grid."
         ),
     )
 
@@ -107,6 +117,13 @@ class OneToneFreqAdapter(
                 .lock_literal("ro_cfg.ro_freq", 0.0),
             },
             sweep={"freq": SweepSpec(label="Freq (MHz)")},
+            extra={
+                "sampling_mode": ScalarSpec(
+                    label="Sampling mode",
+                    type=str,
+                    choices=list(_SAMPLING_MODE_CHOICES),
+                )
+            },
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
@@ -119,6 +136,7 @@ class OneToneFreqAdapter(
         return (
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(reps=100, rounds=100, relax_delay=1.0)
+            .scalars(sampling_mode="linear")
             # cfg_spec() locks pulse_cfg.freq / ro_cfg.ro_freq to 0.0 (the sweep
             # axis owns frequency); build() fills those locked literals from the
             # spec, so they are not set here.
@@ -128,6 +146,60 @@ class OneToneFreqAdapter(
             .set_sweep("sweep.freq", proper_res_freq_range(ctx, 301))
             .build()
         )
+
+    def _sampling_mode(self, raw_cfg: dict[str, object]) -> SamplingMode:
+        value = raw_cfg.get("sampling_mode", "linear")
+        if value == "linear":
+            return "linear"
+        if value == "homophasal":
+            return "homophasal"
+        raise ValueError(
+            "'sampling_mode' must be one of "
+            f"{', '.join(_SAMPLING_MODE_CHOICES)}, got {value!r}"
+        )
+
+    def _homophasal_params_from_md(self, md: object) -> dict[str, float]:
+        values: dict[str, float] = {}
+        missing: list[str] = []
+        invalid: list[str] = []
+        get = getattr(md, "get")
+        for key in _HOMOPHASAL_MD_KEYS:
+            value = get(key)
+            if value is None:
+                missing.append(key)
+                continue
+            if isinstance(value, bool) or not isinstance(value, Real):
+                invalid.append(f"{key}={value!r}")
+                continue
+            values[key] = float(value)
+
+        problems: list[str] = []
+        if missing:
+            problems.append(f"missing: {', '.join(missing)}")
+        if invalid:
+            problems.append(f"non-numeric: {', '.join(invalid)}")
+        if problems:
+            raise ValueError(
+                "homophasal sampling requires numeric MetaDict keys "
+                f"{', '.join(_HOMOPHASAL_MD_KEYS)} ({'; '.join(problems)})"
+            )
+        if values["r_f"] <= 0.0:
+            raise ValueError(f"MetaDict r_f must be positive, got {values['r_f']}")
+        if values["rf_w"] <= 0.0:
+            raise ValueError(f"MetaDict rf_w must be positive, got {values['rf_w']}")
+        return values
+
+    def validate_run_request(self, req: RunRequest, raw_cfg: dict[str, object]) -> None:
+        if self._sampling_mode(raw_cfg) == "homophasal":
+            self._homophasal_params_from_md(req.md)
+
+    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FreqCfg:
+        cfg_raw = dict(raw_cfg)
+        if self._sampling_mode(cfg_raw) == "homophasal":
+            cfg_raw["homophasal"] = self._homophasal_params_from_md(req.md)
+        else:
+            cfg_raw.pop("homophasal", None)
+        return super().build_exp_cfg(cfg_raw, req)
 
     def analyze(
         self, req: AnalyzeRequest[OneToneFreqRunResult, OneToneFreqAnalyzeParams]
@@ -149,6 +221,12 @@ class OneToneFreqAdapter(
         self, req: WritebackRequest[OneToneFreqRunResult, OneToneFreqAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
+        theta0 = result.params.get("theta0")
+        if isinstance(theta0, bool) or not isinstance(theta0, Real):
+            raise ValueError(
+                "OneToneFreqAnalyzeResult.params must contain numeric 'theta0' "
+                "for writeback"
+            )
         return [
             MetaDictWriteback(
                 target_name="r_f",
@@ -159,6 +237,11 @@ class OneToneFreqAdapter(
                 target_name="rf_w",
                 description="Resonator linewidth FWHM (MHz)",
                 proposed_value=result.fwhm,
+            ),
+            MetaDictWriteback(
+                target_name="theta0",
+                description="Resonator circle phase offset (rad)",
+                proposed_value=float(theta0),
             ),
         ]
 

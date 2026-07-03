@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-07-01
+**Last updated:** 2026-07-03 — onetone homophasal freq sampling
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -39,6 +39,12 @@ ModuleLibrary / WaveformLibrary 的 calibrated entry，缺項時退回 inline bl
 明確要求 inline blank，不 adopt library；`.role(..., Init.DISABLED)` 只用於 optional ref，library miss
 時產生 `None`（disabled）。spec 的 `optional=True` 是結構能力，`Init.DISABLED` 是 adapter default
 初始化選擇，兩者需同時成立。
+
+`build_exp_spec(extra=...)` 表示 adapter-defined top-level knobs，放在 `sweep` 與 `reps`
+之間；它們可以是正式 ExpCfg 欄位，也可以是 run-only adapter 欄位。正式欄位正常 lower 到
+ExpCfg；run-only 欄位由 adapter 在 `build_exp_cfg()` 或 custom `run()` 內讀取後 pop 掉。
+`onetone/freq` 的 `sampling_mode` 是正式 `FreqCfg` 欄位，GUI 維持既有 `sweep.freq`
+結構，選 `homophasal` 時 adapter 從 md 的 `r_f` / `rf_w` / `theta0` 注入 fit params。
 
 跨 session 狀態的少數 default 走 `CfgBuilder.value_ref(path, key, type_name?, default?)`，透過
 `ctx.values` 立即讀取 registered value source，成功後寫入普通 direct value，不把 lazy ref 放進
@@ -90,6 +96,10 @@ predictor 輸出取代掃描與看圖判讀。
 `flx_int` / period（視 2D map 判讀）→ 將 flux device 移到 `flx_int` →
 在該 flux 重跑 `onetone/freq` → `twotone/freq` 寬掃 → `twotone/freq` 窄掃 →
 agent / user 審核 figure 與 writeback preview → 後續 Rabi / T1 / T2。
+
+`onetone/freq` 第一次通常用 `linear` sampling 建立 `r_f` / `rf_w` / `theta0`；這些 writeback
+齊全後，可切到 `homophasal` sampling，讓同一個 start/stop/expts 掃描在 resonator circle
+phase 上等距。
 
 `twotone/flux_dep` 是 readout 與 `q_f` 可信後的後續 qubit model mapping，不是早期找
 flux 的工具；readout/qubit 參數還沒處理好時通常看不到可用 arc。Writeback 責任留給

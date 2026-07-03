@@ -3,18 +3,22 @@ from __future__ import annotations
 from typing import Any, cast
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 from zcu_tools.experiment.v2.onetone.flux_dep import FluxDepCfg
-from zcu_tools.experiment.v2.onetone.freq import FreqCfg
+from zcu_tools.experiment.v2.onetone.freq import FreqCfg, FreqResult
 from zcu_tools.experiment.v2.onetone.power_dep import PowerDepCfg
 from zcu_tools.experiment.v2_gui.adapters.onetone.flux_dep import (
     OneToneFluxDepAdapter,
 )
-from zcu_tools.experiment.v2_gui.adapters.onetone.freq import OneToneFreqAdapter
+from zcu_tools.experiment.v2_gui.adapters.onetone.freq import (
+    OneToneFreqAdapter,
+    OneToneFreqAnalyzeResult,
+)
 from zcu_tools.experiment.v2_gui.adapters.onetone.power_dep import (
     OneTonePowerDepAdapter,
 )
-from zcu_tools.gui.app.main.adapter import CfgSchema, RunRequest
+from zcu_tools.gui.app.main.adapter import CfgSchema, RunRequest, WritebackRequest
 from zcu_tools.gui.session.value_lookup import EmptyValueLookup, ValueKey, ValueRegistry
 from zcu_tools.meta_tool import MetaDict
 from zcu_tools.program.v2 import ModuleCfgFactory, SweepCfg
@@ -37,9 +41,14 @@ def _make_ctx(ml: MagicMock | None = None) -> MagicMock:
     return ctx
 
 
-def _make_req(ml: MagicMock | None = None, *, with_soc: bool = False) -> RunRequest:
+def _make_req(
+    ml: MagicMock | None = None,
+    *,
+    with_soc: bool = False,
+    md: Any | None = None,
+) -> RunRequest:
     return RunRequest(
-        md=MagicMock(),
+        md=md if md is not None else MagicMock(),
         ml=ml or _make_ml(),
         soc=MagicMock() if with_soc else None,
         soccfg=MagicMock() if with_soc else None,
@@ -55,7 +64,15 @@ def test_onetone_freq_build_exp_cfg_uses_cfg_assembler() -> None:
     adapter = OneToneFreqAdapter()
     raw = _lower(adapter.make_default_cfg(_make_ctx(ml)), _make_req(ml))
 
-    assert set(raw) == {"modules", "reps", "rounds", "relax_delay", "sweep"}
+    assert set(raw) == {
+        "modules",
+        "reps",
+        "rounds",
+        "relax_delay",
+        "sampling_mode",
+        "sweep",
+    }
+    assert raw["sampling_mode"] == "linear"
     sweep = cast(dict[str, Any], raw["sweep"])
     modules = cast(dict[str, Any], raw["modules"])
     assert isinstance(sweep["freq"], SweepCfg)
@@ -67,6 +84,65 @@ def test_onetone_freq_build_exp_cfg_uses_cfg_assembler() -> None:
 
     cfg = adapter.build_exp_cfg(raw, _make_req(ml))
     assert isinstance(cfg, FreqCfg)
+    assert cfg.sampling_mode == "linear"
+    assert cfg.homophasal is None
+
+
+def test_onetone_freq_homophasal_build_exp_cfg_injects_md_fit_params() -> None:
+    ml = _make_ml()
+    md = MetaDict()
+    md.r_f = 6000.0
+    md.rf_w = 20.0
+    md.theta0 = 0.35
+    adapter = OneToneFreqAdapter()
+    schema = adapter.make_default_cfg(_make_ctx(ml))
+    schema.value.with_field("sampling_mode", "homophasal")
+    raw = _lower(schema, _make_req(ml, md=md))
+
+    cfg = adapter.build_exp_cfg(raw, _make_req(ml, md=md))
+
+    assert isinstance(cfg, FreqCfg)
+    assert cfg.sampling_mode == "homophasal"
+    assert cfg.homophasal is not None
+    assert cfg.homophasal.r_f == pytest.approx(6000.0)
+    assert cfg.homophasal.rf_w == pytest.approx(20.0)
+    assert cfg.homophasal.theta0 == pytest.approx(0.35)
+
+
+def test_onetone_freq_homophasal_preflight_requires_fit_params() -> None:
+    ml = _make_ml()
+    adapter = OneToneFreqAdapter()
+    schema = adapter.make_default_cfg(_make_ctx(ml))
+    schema.value.with_field("sampling_mode", "homophasal")
+    raw = _lower(schema, _make_req(ml, md=MetaDict()))
+
+    with pytest.raises(
+        ValueError,
+        match="homophasal sampling requires numeric MetaDict keys",
+    ):
+        adapter.validate_run_request(_make_req(ml, md=MetaDict()), raw)
+
+
+def test_onetone_freq_writeback_includes_theta0() -> None:
+    adapter = OneToneFreqAdapter()
+    analyze_result = OneToneFreqAnalyzeResult(
+        freq=6000.0,
+        fwhm=20.0,
+        params={"theta0": 0.35},
+        figure=MagicMock(),
+    )
+    req = WritebackRequest(
+        run_result=FreqResult(
+            freqs=np.asarray([], dtype=np.float64),
+            signals=np.asarray([], dtype=np.complex128),
+        ),
+        analyze_result=analyze_result,
+        ctx=_make_ctx(_make_ml()),
+    )
+
+    items = adapter.get_writeback_items(req)
+
+    assert [item.target_name for item in items] == ["r_f", "rf_w", "theta0"]
 
 
 @pytest.mark.parametrize(

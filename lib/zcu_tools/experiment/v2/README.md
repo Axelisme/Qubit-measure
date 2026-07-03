@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — experiment runtime
 
-**Last updated:** 2026-07-03 — runner retry and stop scope
+**Last updated:** 2026-07-03 — onetone homophasal freq sampling
 
 這份筆記整理 `experiment/v2/` 的整體設計，說明 Experiment 層與 runtime 層的分工、典型實驗的撰寫範本，以及各子模組的角色。`runner/` 的細節另見 `runner/README.md`。
 
@@ -131,6 +131,11 @@ def run(self, soc, soccfg, cfg: FreqCfg) -> FreqResult:
 5. **回傳 Result**：`run()` 直接 `return XxxResult(...)`，由 `@record_result` decorator 寫入 `last_result`（給 `analyze` / `save` 使用），Result 內部攜帶 `cfg_snapshot`。
 
 目前所有 Experiment 均走新 runtime 或直接 `SignalBuffer` path，包含 `lookback.py`、`fake.py`、`onetone/*`、`twotone/*`、`singleshot/*`、`jpa/*`、`fastflux/*`、`mist/*`、`autofluxdep/*` 與 `overnight/*`。
+
+`onetone/freq` 的 frequency sampling 有兩種 mode：`linear` 沿用 program-side
+`SweepCfg` sweep；`homophasal` 保留同一個 `sweep.freq` 使用者介面，但由已擬合的 resonator
+circle 參數產生非等距 frequency array，再用 host-side `Schedule.scan(...)` 逐點量測。這類非等距
+模式仍先把點 round 到硬體格點，並在相鄰點 collapse 時 fast-fail。
 
 ### sweep 參數 mutation 的歸屬：搬進 runner-owned cfg
 

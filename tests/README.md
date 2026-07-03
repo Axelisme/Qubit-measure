@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-03 — runner retry and stop scope
+**Last updated:** 2026-07-03 — onetone homophasal freq sampling
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -186,6 +186,9 @@ result = _optimize_tree(root, [SomePass()], ctx)
 
 `tests/experiment/v2/runner/test_flow.py` 覆蓋 `SignalBuffer` / `Schedule` / `ProgramBuilder` 的 typed env、host scan、program-side sweep、buffer shape、stop checker、ProgramBuilder retry、`ScheduleOutcome`、batch 與 raw conversion contract。`test_result_tree.py` 覆蓋 executor-owned ResultTree 的 node set、direct node env event / missing-env fast-fail、child buffer、per-measurement subscription、root broadcast、flush 與 ordinary SignalBuffer regression；`test_multi_executor.py` 覆蓋 `MultiMeasurementExecutor` template lifecycle、retry、error/stop partial result、figure close 與 `ComposedMeasurementBundle` delegation。個別 experiment module 更接近資料編排，不新增 migration-specific tests；若要測 QICK compile 行為，放到 `tests/program/v2/` 或既有 sim integration 測試。
 
+`tests/experiment/v2/onetone/` 放 onetone domain-level pure behavior tests；例如 `freq`
+的 homophasal helper 測端點保留與 resonator-circle phase 等距，不碰 GUI 或硬體。
+
 ### Autofluxdep typed context tests
 
 `tests/experiment/v2/autofluxdep/test_info_tracker.py` 覆蓋 `FluxDepInfoTracker` 的 `current` / `first` / `last` snapshot、mutable value deepcopy、missing required field fast-fail、unknown field fast-fail 與 smoothing helper behavior。這組是純 Python unit test，不觸發 predictor、SoC 或 device setup。
@@ -202,6 +205,10 @@ result = _optimize_tree(root, [SomePass()], ctx)
 ### Experiment v2 GUI adapter tests
 
 `tests/experiment/v2_gui/adapters/singleshot/_helpers.py` 集中 singleshot adapter 測試的 `ModuleLibrary` / context / request fixture。singleshot 測試檔名以 domain ownership 命名，例如 GE、downstream、LenRabi/T1、AC-Stark/MIST/T1-tone-sweep；不要再用歷史 Phase 編號命名。adapter 層 patch domain `run` / `analyze` 可作為 boundary isolation，但 assertion 應驗證 adapter 對 cfg、centers、summary、writeback 的語意。
+
+onetone adapter tests 覆蓋 real-hardware adapter 的 cfg lowering、md preflight 與 writeback
+contract；`onetone/freq` 的 homophasal selector 只在 adapter 邊界注入 md fit params，runtime
+取樣公式由 domain-level tests 擁有。
 
 ### GUI remote/control tests
 

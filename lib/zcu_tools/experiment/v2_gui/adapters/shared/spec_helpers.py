@@ -170,8 +170,9 @@ def build_exp_spec(
     - ``sweep`` / ``sweep_label``: sweep-axis fields → a section (omit the whole
       section when None, e.g. lookback). ``sweep_label`` overrides the "Sweep"
       header (e.g. an optimizer's "Search bounds (min–max)").
-    - ``extra``: run-only scalar knobs not part of the lowered ExpCfg (e.g.
-      ``earlystop_snr`` / ``num_points``); placed between sweep and reps.
+    - ``extra``: adapter-defined top-level knobs placed between sweep and reps.
+      These can be real ExpCfg fields that lower normally or run-only knobs the
+      adapter pops before lowering (e.g. ``earlystop_snr`` / ``num_points``).
     - ``reps`` / ``rounds``: default to the standard int scalars; pass a
       ``LiteralSpec`` to lock one (lookback locks reps to 1).
     """
