@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import threading
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from .base import BaseDevice, BaseDeviceInfo, device_operation
+
+if TYPE_CHECKING:
+    from pyvisa import ResourceManager
 
 STATUS_MAP = {"on": "1", "off": "0"}
 
@@ -30,6 +33,9 @@ class RohdeSchwarzSGS100AInfo(BaseDeviceInfo):
 
 class RohdeSchwarzSGS100A(BaseDevice[RohdeSchwarzSGS100AInfo]):
     info_model = RohdeSchwarzSGS100AInfo
+
+    def __init__(self, address: str, rm: ResourceManager) -> None:
+        super().__init__(address, rm)
 
     def get_output(self) -> Literal["on", "off"]:
         return STATUS_MAP_INV[self.query(":OUTPut?")]  # type: ignore
@@ -97,7 +103,7 @@ class RohdeSchwarzSGS100A(BaseDevice[RohdeSchwarzSGS100AInfo]):
 
     def _setup(
         self,
-        cfg,
+        cfg: RohdeSchwarzSGS100AInfo,
         *,
         progress: bool = True,
         stop_event: threading.Event | None = None,

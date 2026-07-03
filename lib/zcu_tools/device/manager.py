@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 import warnings
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from .base import BaseDevice
 
@@ -16,7 +16,13 @@ class GlobalDeviceManager:
     _lock: ClassVar[threading.RLock] = threading.RLock()
 
     @classmethod
-    def register_device(cls, name: str, device: Any) -> None:
+    def register_device(cls, name: str, device: BaseDevice) -> None:
+        if not isinstance(device, BaseDevice):
+            raise TypeError(
+                f"register_device expected BaseDevice for {name!r}, "
+                f"got {type(device).__name__}"
+            )
+
         with cls._lock:
             if name in cls._devices:
                 warnings.warn(f"Device {name} already registered, overwriting")

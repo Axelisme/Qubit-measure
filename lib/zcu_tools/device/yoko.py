@@ -3,13 +3,13 @@ from __future__ import annotations
 import threading
 import time
 import warnings
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-import numpy as np
-
-from zcu_tools.progress_bar import make_pbar
-
+from ._ramp import ramp_linear
 from .base import BaseDevice, BaseDeviceInfo, device_operation
+
+if TYPE_CHECKING:
+    from pyvisa import ResourceManager
 
 STATUS_MAP = {"on": "1", "off": "0"}
 MODE_MAPS = {"voltage": "VOLT", "current": "CURR"}
@@ -39,7 +39,7 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
 
     # Initializes session for device.
     # address: address of device, rm: VISA resource manager
-    def __init__(self, address: str, rm) -> None:
+    def __init__(self, address: str, rm: ResourceManager) -> None:
         super().__init__(address, rm)
 
         mode = self.get_mode()
@@ -86,34 +86,21 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
         progress: bool = False,
         stop_event: threading.Event | None = None,
     ) -> None:
-        # sweep to the target value step by step
-        current_voltage = self.get_voltage()
-        if current_voltage == voltage:
-            return
-
         self._check_voltage(voltage)
+        current_voltage = self.get_voltage()
 
-        dist = abs(current_voltage - voltage)
-        pbar = make_pbar(
-            total=round(dist, 2),
+        ramp_linear(
+            start=current_voltage,
+            target=voltage,
+            step=self._rampstep,
+            apply_value=self._set_voltage_direct,
+            progress=progress,
             desc="Ramp voltage",
             unit="V",
-            leave=False,
-            disable=not progress,
+            progress_decimals=2,
+            stop_event=stop_event,
+            include_start=True,
         )
-
-        step = self._rampstep
-        steps = max(1, round(abs(voltage - current_voltage) / step))
-        voltages = np.linspace(current_voltage, voltage, num=steps + 1, endpoint=True)
-        for tempvolt in voltages:
-            if stop_event is not None and stop_event.is_set():
-                break
-            self._set_voltage_direct(tempvolt)
-
-            cur_dist = abs(tempvolt - voltage)
-            pbar.set_progress(round(dist - cur_dist, 2))
-
-        pbar.close()
 
     @device_operation
     def set_voltage(
@@ -154,34 +141,22 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
         progress: bool = False,
         stop_event: threading.Event | None = None,
     ) -> None:
-        # sweep to the target value step by step
-        current_current = self.get_current()
-        if current_current == current:
-            return
-
         self._check_current(current)
+        current_current = self.get_current()
 
-        dist = 1e3 * abs(current_current - current)
-        pbar = make_pbar(
-            total=round(dist, 2),
+        ramp_linear(
+            start=current_current,
+            target=current,
+            step=self._rampstep,
+            apply_value=self._set_current_direct,
+            progress=progress,
             desc="Ramp current",
             unit="mA",
-            leave=False,
-            disable=not progress,
+            progress_scale=1e3,
+            progress_decimals=2,
+            stop_event=stop_event,
+            include_start=True,
         )
-
-        step = self._rampstep
-        steps = max(1, round(abs(current - current_current) / step))
-        currents = np.linspace(current_current, current, num=steps + 1, endpoint=True)
-        for tempcurrent in currents:
-            if stop_event is not None and stop_event.is_set():
-                break
-            self._set_current_direct(tempcurrent)
-
-            cur_dist = 1e3 * abs(tempcurrent - current)
-            pbar.set_progress(round(dist - cur_dist, 2))
-
-        pbar.close()
 
     # Ramp up the current (amps) in increments of _rampstep, waiting _rampinterval
     # between each increment.
@@ -266,7 +241,7 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
 
     def _setup(
         self,
-        cfg,
+        cfg: YOKOGS200Info,
         *,
         progress: bool = True,
         stop_event: threading.Event | None = None,

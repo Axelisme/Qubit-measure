@@ -13,6 +13,7 @@ regardless of scheduler timing.
 from __future__ import annotations
 
 import threading
+from typing import Any, cast
 
 import pytest
 from zcu_tools.device import FakeDevice, FakeDeviceInfo, GlobalDeviceManager
@@ -143,6 +144,23 @@ def test_get_info_not_blocked_by_concurrent_setup_on_other_device() -> None:
         "get_info('B') returned only after device A's ramp finished; "
         "expected it to return before writer_done was set (lock-free path)."
     )
+
+
+def test_register_device_rejects_non_base_device_without_mutating_registry() -> None:
+    bad_device = cast(Any, object())
+
+    with pytest.raises(TypeError, match="register_device expected BaseDevice"):
+        GlobalDeviceManager.register_device("bad", bad_device)
+
+    assert "bad" not in GlobalDeviceManager.get_all_devices()
+
+
+def test_register_device_accepts_base_device() -> None:
+    dev = _make_fast_device()
+
+    GlobalDeviceManager.register_device("ok", dev)
+
+    assert GlobalDeviceManager.get_device("ok") is dev
 
 
 def test_get_all_info_returns_correct_snapshot() -> None:

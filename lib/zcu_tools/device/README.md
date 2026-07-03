@@ -1,6 +1,6 @@
 # Device Note for `zcu_tools/device`
 
-**Last updated:** 2026-07-02 — FakeDevice rampstep semantics
+**Last updated:** 2026-07-03 — BaseDevice session hook and shared ramp helper
 
 這份筆記整理 `lib/zcu_tools/device` 的設計：以 VISA（pyvisa）為底層，抽出 `BaseDevice` + `BaseDeviceInfo` 的通用契約，再由 `GlobalDeviceManager` 做 process-wide 單例管理。內建裝置包含 `YOKOGS200`（電流/電壓源）、`RohdeSchwarzSGS100A`（微波訊號源）與 `FakeDevice`（mock 測試）。
 
@@ -49,9 +49,10 @@ Pydantic model，繼承 `ConfigBase`，所有子類型共用的基底欄位：
 
 職責：
 
-- `info_model: type[BaseDeviceInfo] = BaseDeviceInfo`：class-level 屬性，子類覆寫為對應 Info 型別（用於 `setup()` 的 model_validate）。
-- `__init__(address, rm)`：建立 per-instance `_op_lock`（`threading.RLock`）/ `_io_lock`（`threading.Lock`，見「並發與鎖」）；用 pyvisa `ResourceManager` 開 session；強制 `read/write_termination = "\n"`；立即呼叫 `connect_message()`（發 `*IDN?` 並印出）。連線失敗 `pyvisa.Error` 直接 re-raise。
-- Helper：`write(cmd)`、`query(cmd)`（已 `strip()`，只持 `_io_lock`）、`close()`、`connect_message()`。
+- `info_model: ClassVar[type[BaseDeviceInfo]]`：子類必須在 class body 宣告具體 Info 型別；漏宣告、宣告 `BaseDeviceInfo` 本身、或宣告非 `BaseDeviceInfo` subclass 會在 class definition 時 `TypeError`。
+- `__init__(address, rm)`：建立 per-instance `_op_lock`（`threading.RLock`）/ `_io_lock`（`threading.Lock`，見「並發與鎖」）與 logger；透過 protected `_open_session(rm)` 建立 session。預設 `_open_session` 要求非 `None` pyvisa `ResourceManager`；`FakeDevice` override 回傳 `None`，因此不開真 session 但仍取得 base invariants。
+- 若 `_open_session()` 回傳 session，base 會強制 `read/write_termination = "\n"` 並呼叫 `connect_message()`（發 `*IDN?` 並寫 logger）。連線失敗 `pyvisa.Error` 以 logger 記錄後 re-raise。
+- Helper：`write(cmd)`、`query(cmd)`（已 `strip()`，只持 `_io_lock`）、`close()`、`connect_message()`；無 session 時 `write/query/connect_message/close` fail-fast，除非子類像 `FakeDevice.close()` 明確 override 成安全 no-op。
 - Abstract：`_setup(cfg: BaseDeviceInfo, *, progress, stop_event)`、`get_info() -> BaseDeviceInfo`。
 - `setup(cfg: BaseDeviceInfo, *, progress, stop_event)`：非抽象 wrapper，fail-fast 流程：
   1. `@device_operation` 以 non-blocking acquire 取得 `_op_lock`；若另一執行緒正在執行 mutating operation → 立即 `raise DeviceBusyError`（含 class 名與 address）。
@@ -62,13 +63,13 @@ Pydantic model，繼承 `ConfigBase`，所有子類型共用的基底欄位：
 
 **協作式取消（stop_event）**：`setup()` 接受 `Optional[threading.Event]`，透傳給 `_setup`。子類 ramp loop 每步前 check `stop_event.is_set()`，若已設置則 `break`（設備停在中途值，這是預期行為）。SGS100A 無 ramp，簽名對齊但不使用。
 
-**契約重點**：`setup()` 的地址/型別檢查由 base 保證（address 先、`isinstance` 後）；子類 `_setup` 收到的 `cfg` 已是 `self.info_model` 的實例，不需再做 `typeguard.check_type`。
+**契約重點**：`setup()` 的地址/型別檢查由 base 保證（address 先、`isinstance` 後）；子類 `_setup` 收到的 `cfg` 已是 `self.info_model` 的實例，不需再做 `typeguard.check_type`。`info_model` 的存在與有效性在 subclass 定義時先被檢查，runtime `setup()` 仍保留 cfg sanity check。
 
 ---
 
 ## 並發與鎖（per-instance `op_lock` / `io_lock`）
 
-每個 device 實例持有兩把鎖（`BaseDevice.__init__` 建立；`FakeDevice` 因覆寫 `__init__` 不走 `super().__init__()`，改呼叫 `_init_locks()` 建立同一組鎖）。
+每個 device 實例持有兩把鎖（`BaseDevice.__init__` 建立；`FakeDevice` 透過 `_open_session()` hook 跳過真 session，但仍走同一個 base init 流程）。
 
 - `_op_lock`：保護 public mutating operation（`setup`、`close`、`set_*`、`output_*`、`IQ_*`）。入口一律用 `@device_operation`，non-blocking acquire，忙碌時 fail-fast。
 - `_io_lock`：普通 `threading.Lock`，只保護 base `write` / `query` / `close` 這類單次 session transaction。driver getter / `get_info()` 不手動取得 `_io_lock`；它們只透過每一次 `query()` 間接取得短 mutex。
@@ -103,7 +104,7 @@ Process-wide registry（class-level `_devices` dict）：
 
 | API | 用途 |
 | --- | ---- |
-| `register_device(name, device)` | 註冊；重名會 warn 並覆蓋 |
+| `register_device(name, device)` | 註冊 `BaseDevice` 實例；非 `BaseDevice` 入口 `TypeError`，重名會 warn 並覆蓋 |
 | `drop_device(name, ignore_error=False)` | 移除 |
 | `get_device(name)` | 取得；找不到 `ValueError` |
 | `get_all_devices()` | 回傳整個 dict |
@@ -111,7 +112,7 @@ Process-wide registry（class-level `_devices` dict）：
 | `get_info(name)` | 取得單一 device 的 `get_info()` 結果；找不到 `ValueError` |
 | `get_all_info()` | 把每個 device 的 `get_info()` 收成 dict，方便存檔 |
 
-**使用慣例**：在 notebook / 實驗腳本啟動時一次 `register_device`，之後以名稱（如 `"flux"`, `"qubit_lo"`）在任何地方取用。`setup_devices` 通常接受從 YAML / JSON 讀出的 config block。
+**使用慣例**：在 notebook / 實驗腳本啟動時一次 `register_device`，之後以名稱（如 `"flux"`, `"qubit_lo"`）在任何地方取用。`register_device` 只接受 `BaseDevice` instance，duck object 或裸 mock 會在入口 fail-fast。`setup_devices` 通常接受從 YAML / JSON 讀出的 config block。
 
 **Thread safety（鎖分層）**：class 內含 `_lock: threading.RLock`，職責是保護 **registry dict**（`_devices`）的讀寫——僅此而已。`device.setup()` / `device.get_info()` 全部在 manager 鎖**外**執行。各 device 自己用 `_op_lock` 管 mutating operation、`_io_lock` 管單次 session transaction；A 裝置正在跑長時間 ramp 時，對 B 裝置的 `get_info()` 不會被 A 阻塞，對 A 自己的 `get_info()` 也只等待短 I/O 而不等待整段 ramp。
 
@@ -139,7 +140,7 @@ Process-wide registry（class-level `_devices` dict）：
 
 **安全上限（寫死）**：電壓 `|V| ≤ 20 V`（`_check_voltage`）、電流 `|I| ≤ 20 mA`（`_check_current`）。超過會 `RuntimeError`。
 
-**Smart ramp**：`set_voltage` / `set_current` 不直接跳值，而是以 `_rampstep` 為實際步長在 `np.linspace` 上逐點下發，步間 sleep `_rampinterval = 0.01s`。`DEFAULT_RAMPSTEP = {voltage: 1e-3 V, current: 1e-6 A}`；這個預設值保留原本有效步長，舊的 `10 * _rampstep` 補償不再存在。`progress=True` 時跑 make_pbar。若 output 為 off 且目標值非零，setter 會 `RuntimeError`，不自動開輸出。兩者均接受 `stop_event: Optional[threading.Event]`，每步前 check `stop_event.is_set()` 協作中止。
+**Smart ramp**：`set_voltage` / `set_current` 不直接跳值，而是以 `_rampstep` 為實際步長在 `np.linspace` 上逐點下發，步間 sleep `_rampinterval = 0.01s`。`DEFAULT_RAMPSTEP = {voltage: 1e-3 V, current: 1e-6 A}`；這個預設值保留原本有效步長，舊的 `10 * _rampstep` 補償不再存在。線性 stepping、progress 與 `stop_event` check 由 module-private shared ramp helper 處理；mode/output/safety guard 保留在 YOKO public setter 與 direct setter。YOKO ramp 保留起始點也下發一次的硬體 I/O/timing 行為。`progress=True` 時跑 make_pbar。若 output 為 off 且目標值非零，setter 會 `RuntimeError`，不自動開輸出。兩者均接受 `stop_event: Optional[threading.Event]`，每步前 check `stop_event.is_set()` 協作中止。
 
 **模式切換**：`set_mode(mode, force=False, rampstep=None)` 若當前 level 非零會擋下來，需 `force=True`。切完自動換 `_rampstep` 為新模式的預設（或呼叫端給的）。
 
@@ -173,10 +174,10 @@ Process-wide registry（class-level `_devices` dict）：
 
 `FakeDevice` 用於本地流程測試，不需要真實儀器連線：
 
-- **`__init__(fast_mode=False)` 不接受 `rm` 參數**（直接 `self.address = "none"`，跳過 pyvisa session）。`fast_mode=True` 跳過 ramp 的 `time.sleep`（加速測試）。
+- **`__init__(fast_mode=False)` 不接受 `rm` 參數**；它呼叫 `BaseDevice.__init__("none", rm=None)`，並由 `_open_session()` override 回傳 `None`。因此 Fake 不開 pyvisa session、不呼叫 `connect_message()`，但仍取得 base locks/logger/session invariant。`fast_mode=True` 跳過 ramp 的 `time.sleep`（加速測試）。
 - `FakeDeviceInfo` 欄位：`type: Literal["FakeDevice"] = "FakeDevice"`、`output: Literal["on","off"] = "off"`、`value: float = 0.0`、`rampstep: float = 0.01`。
 - 提供 `get_output/set_output/output_on/output_off` 與 `get_value/set_value` 方法（記憶體狀態操作）。
-- `_set_value_smart(value, progress, stop_event=None)`：以 `_rampstep` 為實際步長在 `np.linspace` 上逐步 ramp + make_pbar，語義與 YOKOGS200 一致；每步前 check `stop_event.is_set()`，協作中止。
+- `_set_value_smart(value, progress, stop_event=None)`：以 `_rampstep` 為實際步長，透過同一個 private ramp helper 做 `np.linspace` stepping + make_pbar；Fake 保留跳過起始點的 mock 行為，每步前 check `stop_event.is_set()`，協作中止。
 - `_setup(cfg, *, progress, stop_event)` 呼叫 `set_output` + 更新 `_rampstep` + `_set_value_smart`（透傳 `stop_event`）。
 - `get_info()` 回傳當前記憶體狀態。
 
@@ -233,14 +234,14 @@ snapshot = GlobalDeviceManager.get_all_info()
 1. 在 `device/` 下新增 `xxx.py`。
 2. 定義 `XxxInfo(BaseDeviceInfo)`，欄位全列、`type: Literal["Xxx"] = "Xxx"`。
 3. 繼承 `BaseDevice`：
-   - 設 `info_model = XxxInfo`。
+   - 設 `info_model = XxxInfo`；漏宣告或宣告錯誤會在 class definition 時 fail-fast。
    - SCPI getter/setter（`write` / `query`）。
    - Public mutating method 加 `@device_operation`；getter 不加 decorator，也不手動包 `_io_lock`，只依靠 `write` / `query` 的短 mutex。
-   - 必要時加範圍檢查、smart ramp、安全限制。
+   - 必要時加範圍檢查、smart ramp、安全限制；smart ramp 可重用 module-private helper，但 device-specific mode/output/safety guard 仍留在 driver shell。
    - 實作 `_setup(cfg: XxxInfo, *, progress: bool = True, stop_event: Optional[threading.Event] = None)` 與 `get_info() -> XxxInfo`。
    - 若有 ramp loop：每步前 check `stop_event and stop_event.is_set()`，中止時 `break`。
    - **不需要** `typeguard.check_type`；base `setup()` 已完成型別/地址檢查。
-4. `info_model = XxxInfo` 必須設定正確（`BaseDevice.setup` 用 `isinstance(cfg, self.info_model)` 做型別 sanity check）；`XxxInfo.type` literal 供序列化辨別用。
+4. `info_model = XxxInfo` 必須設定正確（class definition guard 先檢查，`BaseDevice.setup` 再用 `isinstance(cfg, self.info_model)` 做 runtime sanity check）；`XxxInfo.type` literal 供序列化辨別用。
 5. 在 `__init__.py` 的 `DeviceInfo` Union 加入 `XxxInfo`，並加進 `__all__`。
 6. 在使用端 `GlobalDeviceManager.register_device(name, instance)`。
 
@@ -248,7 +249,7 @@ snapshot = GlobalDeviceManager.get_all_info()
 
 ## 已知侷限 / 維護提醒
 
-- `BaseDevice.__init__` 直接 import `pyvisa`（lazy import）；執行環境需先裝 `pyvisa` 與對應 VISA backend（NI-VISA / pyvisa-py）。`FakeDevice` 例外，不需要 pyvisa。
+- 預設 `BaseDevice._open_session()` 直接 import `pyvisa`（lazy import）；執行環境需先裝 `pyvisa` 與對應 VISA backend（NI-VISA / pyvisa-py）。`FakeDevice` override `_open_session()`，不需要 pyvisa。
 - `GlobalDeviceManager._devices` 是 class-level state，測試或多實驗混用時要注意汙染；必要時手動 `drop_device`。
 - `YOKOGS200.set_voltage/set_current` 在 output off 且目標值非零時會拒絕執行；呼叫端要先明確開啟 output。
 - 安全上限是**硬編碼**在程式內，若更換樣品 / 線路需直接改 `_check_voltage` / `_check_current`。

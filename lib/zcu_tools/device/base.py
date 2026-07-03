@@ -2,12 +2,21 @@ from __future__ import annotations
 
 import functools
 import logging
-import sys
 import threading
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Generic, Literal, Self, TypeVar, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Generic,
+    Literal,
+    Protocol,
+    Self,
+    TypeVar,
+    cast,
+)
 
 from zcu_tools.cfg_model import ConfigBase
 
@@ -73,6 +82,18 @@ T_DeviceInfo = TypeVar("T_DeviceInfo", bound=BaseDeviceInfo)
 T_Return = TypeVar("T_Return")
 
 
+class _DeviceSession(Protocol):
+    resource_name: str
+    read_termination: str
+    write_termination: str
+
+    def write(self, cmd: str) -> object: ...
+
+    def query(self, cmd: str) -> str: ...
+
+    def close(self) -> None: ...
+
+
 def device_operation(method: Callable[..., T_Return]) -> Callable[..., T_Return]:
     """Guard a public mutating device operation with op_lock and logging."""
 
@@ -127,24 +148,38 @@ class BaseDevice(ABC, Generic[T_DeviceInfo]):
     Base class for all devices.
     """
 
-    info_model: type[BaseDeviceInfo] = BaseDeviceInfo
+    info_model: ClassVar[type[BaseDeviceInfo]]
 
-    def __init__(self, address: str, rm: ResourceManager) -> None:
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+
+        if "info_model" not in cls.__dict__:
+            raise TypeError(
+                f"{cls.__name__} must declare a concrete info_model class attribute"
+            )
+
+        info_model = cls.__dict__["info_model"]
+        if not isinstance(info_model, type) or not issubclass(
+            info_model, BaseDeviceInfo
+        ):
+            raise TypeError(
+                f"{cls.__name__}.info_model must be a BaseDeviceInfo subclass"
+            )
+
+        if info_model is BaseDeviceInfo:
+            raise TypeError(
+                f"{cls.__name__}.info_model must be a concrete BaseDeviceInfo subclass"
+            )
+
+    def __init__(self, address: str, rm: ResourceManager | None) -> None:
         self.address = address
         self._init_locks()
 
-        import pyvisa as visa
-
-        try:
-            self.session = rm.open_resource(address)
-            self.session.read_termination = "\n"  # type: ignore
-            self.session.write_termination = "\n"  # type: ignore
-        except visa.Error:
-            sys.stderr.write(f"Couldn't connect to {address}")
-            raise
-
-        # Print IDN message on connection
-        self.connect_message()
+        self.session: _DeviceSession | None = self._open_session(rm)
+        if self.session is not None:
+            self.session.read_termination = "\n"
+            self.session.write_termination = "\n"
+            self.connect_message()
 
     # ----- helper methods -----
 
@@ -156,29 +191,54 @@ class BaseDevice(ABC, Generic[T_DeviceInfo]):
         self._op_depth = 0
         self._logger = logging.getLogger(type(self).__module__)
 
-    def connect_message(self) -> None:
-        """Queries and prints the IDN to confirm connection."""
-        import pyvisa
+    def _open_session(self, rm: ResourceManager | None) -> _DeviceSession | None:
+        if rm is None:
+            raise TypeError(
+                f"{self.__class__.__name__} requires a VISA ResourceManager"
+            )
+
+        import pyvisa as visa
 
         try:
+            return cast(_DeviceSession, rm.open_resource(self.address))
+        except visa.Error:
+            self._logger.exception("could not connect to %s", self.address)
+            raise
+
+    def _require_session(self) -> _DeviceSession:
+        if self.session is None:
+            raise RuntimeError(
+                f"{self.__class__.__name__} at {self.address!r} has no VISA session"
+            )
+        return self.session
+
+    def connect_message(self) -> None:
+        """Queries and logs the IDN to confirm connection."""
+        import pyvisa
+
+        self._require_session()
+        try:
             idn = self.query("*IDN?")
-            print(f"Connected to: {idn}")
-        except pyvisa.Error as e:
-            print(f"Could not query IDN. Error: {e}")
+            self._logger.info("connected to device: %s", idn)
+        except pyvisa.Error:
+            self._logger.warning("could not query IDN", exc_info=True)
 
     @device_operation
     def close(self) -> None:
+        session = self._require_session()
         with self._io_lock:
-            print(f"Disconnecting from {self.session.resource_name}")
-            self.session.close()
+            self._logger.info("disconnecting from %s", session.resource_name)
+            session.close()
 
     def write(self, cmd: str) -> None:
+        session = self._require_session()
         with self._io_lock:
-            self.session.write(cmd)  # type: ignore
+            session.write(cmd)
 
     def query(self, cmd: str) -> str:
+        session = self._require_session()
         with self._io_lock:
-            return self.session.query(cmd).strip()  # type: ignore
+            return session.query(cmd).strip()
 
     # ----- abstract methods -----
 
