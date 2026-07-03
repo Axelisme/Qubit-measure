@@ -20,11 +20,11 @@ from zcu_tools.program.v2.ir.operands import (
 
 def test_time_inst_analysis():
     inst = TimeInst(c_op="inc_ref", lit=Immediate(100))
-    assert set(inst.reg_read) == set()
+    assert set(inst.reg_read) == {"s14"}
     assert set(inst.reg_write) == {"s14"}
 
     inst = TimeInst(c_op="inc_ref", r1=Register("s1"))
-    assert set(inst.reg_read) == {"s1"}
+    assert set(inst.reg_read) == {"s1", "s14"}
     assert set(inst.reg_write) == {"s14"}
 
 

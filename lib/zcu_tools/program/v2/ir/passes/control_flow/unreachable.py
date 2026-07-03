@@ -35,7 +35,10 @@ QICK Hardware Notes
   region because the pipeline infrastructure relies on them for structural
   bookkeeping.
 - A block with labels is always potentially reachable (some dynamic branch may
-  target it), so dead-mode ends as soon as a labelled block is encountered.
+  target it), so the block is kept.  After that, dead-mode is recomputed from
+  the labelled block's own terminal branch: a labelled unconditional jump
+  re-enters dead-mode for following unlabeled blocks, while labelled
+  fall-through clears it.
 - A block with ``disable_opt=True`` is a physical-layout barrier. It is kept
   even in dead-mode; removing it would violate fixed program-memory offsets.
 
@@ -74,10 +77,12 @@ class UnreachableEliminationPass(AbsChunkListPass):
             if dead_mode:
                 if isinstance(chunk, MetaInst):
                     result.append(chunk)
-                elif isinstance(chunk, BasicBlockNode) and chunk.disable_opt:
-                    result.append(chunk)
                 elif isinstance(chunk, BasicBlockNode) and chunk.labels:
-                    dead_mode = False
+                    result.append(chunk)
+                    dead_mode = (
+                        chunk.branch is not None and chunk.branch.if_cond is None
+                    )
+                elif isinstance(chunk, BasicBlockNode) and chunk.disable_opt:
                     result.append(chunk)
                 else:
                     changed = True

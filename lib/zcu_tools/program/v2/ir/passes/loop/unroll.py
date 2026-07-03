@@ -74,14 +74,13 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass
-from typing import cast
 
 from ...analysis import (
     estimate_body_cost,
     estimate_body_scheduled_ticks,
     estimate_flat_size,
 )
-from ...hw_semantics import needs_big_jump
+from ...hw_semantics import GENERAL_REGS, needs_big_jump
 from ...instructions import BaseInst, JumpInst, LabelInst, RegWriteInst, TestInst
 from ...labels import Label, LabelRef, make_label
 from ...node import (
@@ -146,9 +145,9 @@ def _prepend_label_to_body(body: list[IRNode], label: Label) -> None:
     """Insert a LabelInst for `label` at the front of the first BasicBlockNode.
     If body is empty or the first item is not a BasicBlockNode, prepend a new one."""
     if body and isinstance(body[0], BasicBlockNode):
-        body[0].labels.insert(0, LabelInst(name=label))
+        body[0].labels.insert(0, LabelInst(name=label, can_remove=True))
     else:
-        body.insert(0, BasicBlockNode(labels=[LabelInst(name=label)]))
+        body.insert(0, BasicBlockNode(labels=[LabelInst(name=label, can_remove=True)]))
 
 
 def _floor_pow2(x: int) -> int:
@@ -228,7 +227,7 @@ class UnrollLoopPass(AbsIRTreePass):
         if not counter.is_general_reg():
             raise ValueError(
                 f"UnrollLoopPass: loop {node.name!r} counter_reg {str(counter)!r} "
-                f"is not a general-purpose register (r0-r14)."
+                f"is not a general-purpose register (expected one of {sorted(GENERAL_REGS)})."
             )
 
         if isinstance(node.n, Register):
@@ -276,7 +275,7 @@ class UnrollLoopPass(AbsIRTreePass):
         ctx: PipeLineContext,
     ) -> IRNode | None:
         """Handle loops with a known (compile-time or exact-hint) iteration count."""
-        analysis = _analyze_unroll(cast(BlockNode, node.body).insts, loop_overhead, ctx)
+        analysis = _analyze_unroll(node.body.insts, loop_overhead, ctx)
         logger.debug(
             "UnrollLoopPass: analyze constant/exact loop name=%s n=%s exact=%s "
             "scheduled_ticks=%s body_cost=%s slack=%s body_size=%s "
@@ -319,7 +318,7 @@ class UnrollLoopPass(AbsIRTreePass):
     def _unroll_full(self, node: IRLoop, n: int, ctx: PipeLineContext) -> BlockNode:
         """Full expansion: emit n body copies, drop the loop entirely (n <= k)."""
         logger.debug("UnrollLoopPass: fully expand loop name=%s n=%s", node.name, n)
-        body_insts = cast(BlockNode, node.body).insts
+        body_insts = node.body.insts
         init_bb = BasicBlockNode(
             insts=[
                 RegWriteInst(dst=node.counter_reg, src=SrcKeyword.IMM, lit=Immediate(0))
@@ -346,7 +345,7 @@ class UnrollLoopPass(AbsIRTreePass):
             remainder,
         )
         pmem_size = ctx.config.pmem_capacity
-        body_insts = cast(BlockNode, node.body).insts
+        body_insts = node.body.insts
         result: list[IRNode] = []
 
         local_allocated = ctx.allocated_names
@@ -358,7 +357,11 @@ class UnrollLoopPass(AbsIRTreePass):
             part2 = _clone_body_copies(body_insts, remainder, local_allocated)
 
             if not part2:
-                part2 = [BasicBlockNode(labels=[LabelInst(name=entry_label)])]
+                part2 = [
+                    BasicBlockNode(
+                        labels=[LabelInst(name=entry_label, can_remove=True)]
+                    )
+                ]
             else:
                 _prepend_label_to_body(part2, entry_label)
             unrolled_body = part1 + part2
@@ -426,7 +429,7 @@ class UnrollLoopPass(AbsIRTreePass):
                 branch=JumpInst(label=LabelRef(start), if_cond="S"),
             )
         result.append(back_bb)
-        result.append(BasicBlockNode(labels=[LabelInst(name=end)]))
+        result.append(BasicBlockNode(labels=[LabelInst(name=end, can_remove=True)]))
 
         return BlockNode(insts=result)
 
@@ -442,7 +445,7 @@ class UnrollLoopPass(AbsIRTreePass):
         Returns None when any precondition fails (k <= 1, body_words == 0, etc.)
         so the caller falls back to no-unroll.
         """
-        body_insts = cast(BlockNode, node.body).insts
+        body_insts = node.body.insts
         analysis = _analyze_unroll(body_insts, loop_overhead, ctx)
         body_size = analysis.body_size
         logger.debug(

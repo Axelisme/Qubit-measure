@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from .hw_semantics import STATUS_REG, TIMED_BASE_REG, USR_TIME_REG
+from .hw_semantics import ADDR_REG, STATUS_REG, TIMED_BASE_REG, USR_TIME_REG
 from .labels import Label, LabelRef
 from .operands import (
     AddrType,
@@ -456,6 +456,8 @@ class TimeInst(BaseInst):
     @property
     def reg_read(self) -> frozenset[str]:
         reads = self.r1.regs() if self.r1 else frozenset()
+        if self.c_op == "inc_ref":
+            reads = reads | {TIMED_BASE_REG}
         if self.c_op == "updt":
             reads = reads | {USR_TIME_REG}
         return reads
@@ -525,8 +527,10 @@ class JumpInst(BaseInst):
         )
 
     def __post_init__(self) -> None:
-        if self.addr is not None and self.addr != Register("s15"):
-            raise ValueError(f"JumpInst.addr must be 's15', got {self.addr!r}.")
+        if isinstance(self.addr, Register) and self.addr.canonical_name != ADDR_REG:
+            raise ValueError(f"JumpInst.addr must be {ADDR_REG!r}, got {self.addr!r}.")
+        if self.addr is not None and not isinstance(self.addr, Register):
+            raise ValueError(f"JumpInst.addr must be {ADDR_REG!r}, got {self.addr!r}.")
 
     @property
     def reg_read(self) -> frozenset[str]:
@@ -1080,8 +1084,10 @@ class CallInst(BaseInst):
         )
 
     def __post_init__(self) -> None:
-        if self.addr is not None and self.addr != Register("s15"):
-            raise ValueError(f"CallInst.addr must be 's15', got {self.addr!r}.")
+        if isinstance(self.addr, Register) and self.addr.canonical_name != ADDR_REG:
+            raise ValueError(f"CallInst.addr must be {ADDR_REG!r}, got {self.addr!r}.")
+        if self.addr is not None and not isinstance(self.addr, Register):
+            raise ValueError(f"CallInst.addr must be {ADDR_REG!r}, got {self.addr!r}.")
 
     @property
     def reg_read(self) -> frozenset[str]:
@@ -1156,10 +1162,10 @@ class ArithInst(BaseInst):
     def from_dict(cls, d: dict[str, Any]) -> ArithInst:
         return cls(
             c_op=_require_literal(str(d["C_OP"]), "ARITH.C_OP", _VALID_ARITH_COPS),  # type: ignore[arg-type]
-            r1=parse_register(d["R1"]) if "R1" in d else None,
-            r2=parse_register(d["R2"]) if "R2" in d else None,
-            r3=parse_register(d["R3"]) if "R3" in d else None,
-            r4=parse_register(d["R4"]) if "R4" in d else None,
+            r1=_parse_optional_register(d, "R1", "ARITH.R1"),
+            r2=_parse_optional_register(d, "R2", "ARITH.R2"),
+            r3=_parse_optional_register(d, "R3", "ARITH.R3"),
+            r4=_parse_optional_register(d, "R4", "ARITH.R4"),
         )
 
     @property
@@ -1241,9 +1247,9 @@ class NetInst(BaseInst):
     def from_dict(cls, d: dict[str, Any]) -> NetInst:
         return cls(
             c_op=_require_literal(str(d["C_OP"]), "NET.C_OP", _VALID_NET_COPS),  # type: ignore[arg-type]
-            r1=parse_register(d["R1"]) if "R1" in d else None,
-            r2=parse_register(d["R2"]) if "R2" in d else None,
-            r3=parse_register(d["R3"]) if "R3" in d else None,
+            r1=_parse_optional_register(d, "R1", "NET.R1"),
+            r2=_parse_optional_register(d, "R2", "NET.R2"),
+            r3=_parse_optional_register(d, "R3", "NET.R3"),
         )
 
     @property
@@ -1277,18 +1283,18 @@ class ComInst(BaseInst):
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> ComInst:
-        r1_raw = d.get("R1")
         flag_val: ComFlagVal | None = None
         r1 = None
-        if r1_raw is not None and isinstance(r1_raw, str):
-            if r1_raw in _VALID_COM_FLAG_VALS:
-                # COM set_flag encodes flag value as bare '0'/'1' in R1 field;
-                # preserve it so to_dict can emit R1 exactly as assembler expects.
+        if "R1" in d:
+            r1_raw = d["R1"]
+            if isinstance(r1_raw, str) and r1_raw in _VALID_COM_FLAG_VALS:
                 flag_val = r1_raw  # type: ignore[assignment]
             else:
                 r1 = parse_register(r1_raw)
-        else:
-            r1 = parse_register(r1_raw)
+                if r1 is None:
+                    raise ValueError(
+                        f"COM.R1: {r1_raw!r} is not a valid register name or flag value"
+                    )
 
         return cls(
             c_op=_require_literal(str(d["C_OP"]), "COM.C_OP", _VALID_COM_COPS),  # type: ignore[arg-type]
@@ -1336,10 +1342,10 @@ class CustomPeripheralInst(BaseInst):
         return cls(
             cmd=_require_literal(str(d["CMD"]), "PA/PB.CMD", _VALID_PA_CMDS),  # type: ignore[arg-type]
             c_op=int(d["C_OP"]),
-            r1=parse_register(d["R1"]) if "R1" in d else None,
-            r2=parse_register(d["R2"]) if "R2" in d else None,
-            r3=parse_register(d["R3"]) if "R3" in d else None,
-            r4=parse_register(d["R4"]) if "R4" in d else None,
+            r1=_parse_optional_register(d, "R1", f"{d['CMD']}.R1"),
+            r2=_parse_optional_register(d, "R2", f"{d['CMD']}.R2"),
+            r3=_parse_optional_register(d, "R3", f"{d['CMD']}.R3"),
+            r4=_parse_optional_register(d, "R4", f"{d['CMD']}.R4"),
         )
 
     @property
@@ -1407,8 +1413,10 @@ class WaitInst(BaseInst):
         )
 
     def __post_init__(self) -> None:
-        if self.addr is not None and self.addr != Register("s15"):
-            raise ValueError(f"WaitInst.addr must be 's15', got {self.addr!r}.")
+        if isinstance(self.addr, Register) and self.addr.canonical_name != ADDR_REG:
+            raise ValueError(f"WaitInst.addr must be {ADDR_REG!r}, got {self.addr!r}.")
+        if self.addr is not None and not isinstance(self.addr, Register):
+            raise ValueError(f"WaitInst.addr must be {ADDR_REG!r}, got {self.addr!r}.")
 
     @property
     def reg_read(self) -> frozenset[str]:

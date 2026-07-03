@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-03 — strict IR correctness checks
+**Last updated:** 2026-07-03 — review remediation contract checks
 
 # IR Architecture Guide
 
@@ -34,7 +34,7 @@ clone 安全；`__str__` raise（resolve 前不可序列化）。詳見 ARCH-6 /
 - `parse_alu_expr`、`parse_side_write`、`parse_label`
 - 複合分派：`parse_value`、`parse_addr`、`parse_time`、`parse_src`
 
-**`parse_register` 的 `&` 剝除**：`asm_v2.py` 在 dmem 位址為暫存器時會產生 `'&r1'` 格式（`ReadDmem.expand()` L633：`addr = '&%s' % (prog._get_reg(...))`）。`parse_register` 必須剝除前綴 `&` 才能識別，並回傳裸名的 `Register`（`name='r1'`）。
+**`parse_register` 的 `&` 剝除**：`asm_v2.py` 在 dmem 位址為暫存器時會產生 `'&r1'` 格式（`ReadDmem.expand()` L633：`addr = '&%s' % (prog._get_reg(...))`）。`parse_register` 必須剝除前綴 `&` 才能識別，並回傳裸名的 `Register`（`name='r1'`）。對 string input，合法 register 僅限已知 alias、`r_wave`、`r0..r31`、`s0..s15`、`w0..w5`；超出硬體範圍的 `r32`/`s16`/`w6` 會在 parse 邊界回傳 `None`，由 instruction `from_dict` helper 轉成 `ValueError`。已建好的 `Register` instance 視為 typed operand，不在 `parse_register()` 重做名稱驗證。
 
 **Immediate literal grammar**：`parse_immediate` 接受 QICK 的 `#N` / `#uN` / `#b...` / `#h...` 以及 underscore 分隔（例如 `#h7F_0000`），IR 內部統一正規化成 `Immediate(int)`；`to_dict()` 仍以十進位 `#N` 輸出。
 
@@ -101,10 +101,10 @@ clone 安全；`__str__` raise（resolve 前不可序列化）。詳見 ARCH-6 /
    - **SideWrite (`-wr`) dataflow**: 支援 `wr: SideWrite | None` 的 instruction 必須把 `wr.regs()` 納入 `reg_write`。`DeadWriteEliminationPass` 仍只把純 register-like `RegWriteInst` 當刪除候選；memory/port/timing/control instruction 即使 side-write register 之後被 shadow，也不可因此被刪除。
    - **Flag 更新 (`-uf`)**: 帶有 `uf` 標記的指令具備隱性副作用（更新 ALU Flag），不可被 DCE 刪除。
    - **系統寄存器屏障**: `IncRegMergePass`應禁止合併或挪動任何 canonical 名以 `s` 開頭的寄存器增量（包含別名解析後落在 `s` 的）；這保證 I/O 操 作（如 Shot counter）的物理位置穩定性。
-   - **wmem 讀作為 read barrier**: `REG_WR <dst> wmem` 從 wave memory 讀取（具有非寄存器副作用）並寫入整組 wave register。DCE 必須把它視為 opaque read barrier：清空 pending 並不把 writes 加進 pending，避免後續 `wN`  寫被當成 shadow 而誤刪這條 wmem 讀。
+   - **wmem 讀作為不可刪副作用**: `REG_WR <dst> wmem` 從 wave memory 讀取（具有非寄存器副作用）並寫入整組 wave register。DCE 必須保留這條讀取本身（`can_be_dead=False`），但它的 wave-register writes 仍參與精確 shadow tracking，讓後續 `wN` 寫可以安全 shadow 先前 pending write。
 
-4. **DCE 對 alias 寫的保守策略**:
-   - `RegWriteInst.reg_write` 對 `dst=r_wave`/`wN` 會展開出多個 reg name（`len(writes) > 1`）。為避免複雜的 group shadow 分析，DCE 把這類寫的舊 shadow 加進 dead 集合後，**不**把這次寫放進 pending（即連續多個 wave reg 寫不會互相 shadow）。這是已知的保守，安全但 sub-optimal；若未來要強化，需要設計 group-aware shadow tracking。
+4. **DCE 對 alias 寫的 group-aware tracking**:
+   - `RegWriteInst.reg_write` 對 `dst=r_wave`/`wN` 會展開出多個 reg name。DCE 以 group-aware pending tracking 精確處理 alias shadow：只有當一筆 pending write 的全部目的 register 都被後續 writes shadow 時才標 dead；任一目的 register 被讀取時，該 pending write 會被視為 live。這讓連續 wave-register writes 可被安全消除，同時避免刪掉仍有部分 alias 被觀察的寫入。
 
 ## Core Layers
 
@@ -146,7 +146,7 @@ clone 安全；`__str__` raise（resolve 前不可序列化）。詳見 ARCH-6 /
   - `branch` 只放 terminal `JumpInst`
   - `insts` 中禁止 `MetaInst`、`LabelInst`、`JumpInst`
 - `BlockNode` 是結構容器，子節點可以是任何 `IRNode`（`BasicBlockNode`、`IRLoop`、`IRBranch`、`IRDispatch`、`BlockNode`）。`parse()` 回傳 `BlockNode` 作為 AST 根節點（無 `RootNode`）。
-- `IRLoop.body: IRNode`（不限定 `BlockNode`），代表完整的一次 iteration，包含 loop-carried counter update。
+- `IRLoop.body: BlockNode`，代表完整的一次 iteration，包含 loop-carried counter update；constructor 與 `replace_child()` 會 fast-fail 拒絕非 `BlockNode` body，避免 analysis/unroll 對 loop body 形狀做隱性猜測。
 - `IRBranch.cases: list[IRNode]`（不限定 `BlockNode`），只承載各 case 的實際執行內容，不包含 dispatch tree。
 - `IRDispatch` 是葉節點，持有 `value_reg: Register` 和 `target_labels: list[Label]`。`target_labels[-1]` 永遠是 out-of-range guard 的跳轉目標。Case bodies 不放在 `IRDispatch` 內，由呼叫端負責在 chunk stream 中跟在 dispatch 結構後面。
 - `IRBranch.compare_reg` 與 `IRDispatch.value_reg` 不可是 `ADDR_REG/s15`，因為 lowering 需要 `s15` 保存 indirect jump address。
@@ -217,6 +217,7 @@ clone 安全；`__str__` raise（resolve 前不可序列化）。詳見 ARCH-6 /
 - `MetaInst` 只能存在於 flat / chunked structural layer，不能進入 `BasicBlockNode.insts`。
 - `disable_opt=True` 的兩個來源：（1）dispatch-table stub blocks——pmem word 數與 object identity 不可改變；（2）包含 QICK pseudo-label（`HERE`/`NEXT`/`SKIP`）的 macro 展開——pseudo-label 在 assembler 階段才解析為 `P_ADDR ± offset`，IR pass 若插入、移除或替換 block 會讓 offset 計算錯位。
 - `IRLoop.body` 必須視為完整 iteration 的語義單位，不能假設 counter update 一定位於最後一條指令。
+- `IRBranch.cases` 保持泛化 `IRNode` contract；analysis helper 必須能估算 direct `BasicBlockNode`、`BlockNode` 與 nested structure case，不能 cast 成 `BlockNode`。
 - `IRParser._check_sese()` 會禁止從任一結構 region 外部跳入或透過 label-address instruction 引用該 region 的 internal label，包含 parent region 內部跳入 nested child region 的情況。
 
 ## Pipeline

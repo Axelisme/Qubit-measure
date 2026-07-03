@@ -161,6 +161,10 @@ class TestJumpInstruction:
         assert isinstance(inst.addr, Register)
         assert inst.addr.name == "s15"
 
+    def test_construction_with_addr_alias(self):
+        inst = JumpInst(addr=Register("s_addr"))
+        assert inst.addr == Register("s_addr")
+
     def test_dispatch_jump_unconditional(self):
         Label("loop")
         d = {"CMD": "JUMP", "LABEL": "loop"}
@@ -184,6 +188,12 @@ class TestJumpInstruction:
         assert isinstance(inst.addr, Register)
         assert inst.addr.name == "s15"
         assert inst.if_cond == "Z"
+
+    def test_dispatch_jump_with_addr_alias(self):
+        d = {"CMD": "JUMP", "ADDR": "s_addr"}
+        inst = BaseInst.from_dict(d)
+        assert isinstance(inst, JumpInst)
+        assert inst.addr == Register("s_addr")
 
     def test_roundtrip_jump_unconditional(self):
         Label("loop")
@@ -369,23 +379,23 @@ class TestPortWriteInstruction:
     """Tests for PortWriteInst (WPORT_WR opcode)."""
 
     def test_construction_with_specific_fields(self):
-        inst = PortWriteInst(dst=ImmValue(0), time=Register("t0"), ww="1")
+        inst = PortWriteInst(dst=ImmValue(0), time=Register("r0"), ww="1")
         assert str(inst.dst) == "0"
         assert isinstance(inst.time, Register)
-        assert inst.time.name == "t0"
+        assert inst.time.name == "r0"
         assert inst.ww == "1"
 
     def test_dispatch_wport_wr(self):
-        d = {"CMD": "WPORT_WR", "DST": "1", "TIME": "t1", "WW": "1"}
+        d = {"CMD": "WPORT_WR", "DST": "1", "TIME": "r1", "WW": "1"}
         inst = BaseInst.from_dict(d)
         assert isinstance(inst, PortWriteInst)
         assert str(inst.dst) == "1"
         assert isinstance(inst.time, Register)
-        assert inst.time.name == "t1"
+        assert inst.time.name == "r1"
         assert inst.ww == "1"
 
     def test_roundtrip_wport_wr(self):
-        original = {"CMD": "WPORT_WR", "DST": "0", "TIME": "t0", "WW": "1"}
+        original = {"CMD": "WPORT_WR", "DST": "0", "TIME": "r0", "WW": "1"}
         inst = BaseInst.from_dict(original)
         recovered = inst.to_dict()
         assert recovered == original
@@ -410,7 +420,7 @@ class TestPortWriteInstruction:
         original = {
             "CMD": "WPORT_WR",
             "DST": "2",
-            "TIME": "t2",
+            "TIME": "r2",
             "WW": "1",
         }
         inst = BaseInst.from_dict(original)
@@ -620,6 +630,11 @@ class TestWaitInstruction:
         inst = WaitInst(c_op="div_rdy", time=Register("r0"), addr=Register("s15"))
         assert inst.reg_read == frozenset({"s10", "r0", "s15"})
 
+    def test_wait_accepts_addr_alias(self):
+        inst = BaseInst.from_dict({"CMD": "WAIT", "C_OP": "time", "ADDR": "s_addr"})
+        assert isinstance(inst, WaitInst)
+        assert inst.addr == Register("s_addr")
+
     def test_wait_rejects_invalid_cop(self):
         with pytest.raises(ValueError, match="WAIT.C_OP"):
             BaseInst.from_dict({"CMD": "WAIT", "C_OP": "bad"})
@@ -760,6 +775,13 @@ class TestCallRetInstruction:
         assert inst.reg_read == frozenset({"s15"})
         assert inst.to_dict() == original
 
+    def test_call_roundtrip_addr_alias(self):
+        original = {"CMD": "CALL", "ADDR": "s_addr"}
+        inst = BaseInst.from_dict(original)
+        assert isinstance(inst, CallInst)
+        assert inst.reg_read == frozenset({"s15"})
+        assert inst.to_dict() == original
+
     def test_call_rejects_non_s15_addr(self):
         with pytest.raises(ValueError, match="CallInst.addr"):
             BaseInst.from_dict({"CMD": "CALL", "ADDR": "r0"})
@@ -798,6 +820,22 @@ class TestPeripheralInstructions:
     def test_arith_rejects_invalid_cop(self):
         with pytest.raises(ValueError, match="ARITH.C_OP"):
             BaseInst.from_dict({"CMD": "ARITH", "C_OP": "bad"})
+
+    @pytest.mark.parametrize(
+        ("payload", "message"),
+        [
+            ({"CMD": "ARITH", "C_OP": "T", "R1": "garbage_reg"}, "ARITH.R1"),
+            ({"CMD": "NET", "C_OP": "sync_net", "R2": "w6"}, "NET.R2"),
+            ({"CMD": "COM", "C_OP": "sync", "R1": "not_a_reg"}, "COM.R1"),
+            ({"CMD": "PA", "C_OP": "7", "R3": "r32"}, "PA.R3"),
+            ({"CMD": "PB", "C_OP": "7", "R4": None}, "PB.R4"),
+        ],
+    )
+    def test_optional_register_fields_reject_invalid_values(
+        self, payload: dict[str, object], message: str
+    ):
+        with pytest.raises(ValueError, match=message):
+            BaseInst.from_dict(payload)
 
     def test_net_roundtrip_reg_read_and_invalid_cop(self):
         original = {
@@ -964,6 +1002,13 @@ class TestStrictParsing:
     def test_wait_inst_accepts_s15_addr(self):
         inst = WaitInst(c_op="time", addr=Register("s15"))
         assert inst.addr == Register("s15")
+
+    def test_time_inc_ref_reg_read_includes_s14(self):
+        assert TimeInst(c_op="inc_ref").reg_read == frozenset({"s14"})
+
+    def test_from_dict_rejects_unknown_time_string(self):
+        with pytest.raises(ValueError, match="WAIT.TIME"):
+            BaseInst.from_dict({"CMD": "WAIT", "C_OP": "time", "TIME": "garbage"})
 
     def test_dport_write_data_rejects_garbage_string(self):
         with pytest.raises(ValueError, match="DPORT_WR.DATA"):

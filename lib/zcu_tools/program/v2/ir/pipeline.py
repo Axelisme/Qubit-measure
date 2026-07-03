@@ -275,7 +275,13 @@ def _optimize_tree(
     if isinstance(node, BlockNode):
         node.insts = [_optimize_tree(child, tree_passes, ctx) for child in node.insts]
     elif isinstance(node, IRLoop):
-        node.body = _optimize_tree(node.body, tree_passes, ctx)
+        optimized_body = _optimize_tree(node.body, tree_passes, ctx)
+        if not isinstance(optimized_body, BlockNode):
+            raise TypeError(
+                "IRLoop.body optimization must preserve BlockNode, "
+                f"got {type(optimized_body).__name__}"
+            )
+        node.body = optimized_body
     elif isinstance(node, IRBranch):
         node.cases = [_optimize_tree(case, tree_passes, ctx) for case in node.cases]
     # IRDispatch is a leaf (case bodies are not stored inside it).

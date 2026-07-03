@@ -87,8 +87,15 @@ def test_parse_register_paths():
     assert parse_register("w_freq") == Register("w_freq")
     assert parse_register("&s14") == Register("s14")
     assert parse_register("w3") == Register("w3")
+    assert parse_register("r31") == Register("r31")
+    assert parse_register("s15") == Register("s15")
+    assert parse_register("w5") == Register("w5")
     assert parse_register(invalid) is None
     assert parse_register("s_typo") is None
+    assert parse_register("r32") is None
+    assert parse_register("s16") is None
+    assert parse_register("w6") is None
+    assert parse_register("&r32") is None
 
 
 def test_parse_immediate_paths():
@@ -227,7 +234,7 @@ def test_parse_addr_paths():
     assert parse_addr("label_name") is None
 
 
-def test_parse_time_paths_and_fallback():
+def test_parse_time_paths_reject_unknown_strings():
     reg = Register("s14")
     offset = TimeOffset(12)
     assert parse_time(None) is None
@@ -236,7 +243,7 @@ def test_parse_time_paths_and_fallback():
     assert parse_time(5) == TimeOffset(5)
     assert parse_time("@7") == TimeOffset(7)
     assert parse_time("r1") == Register("r1")
-    assert parse_time("custom_time_reg") == Register("custom_time_reg")
+    assert parse_time("custom_time_reg") is None
     assert parse_time("") is None
 
 

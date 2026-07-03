@@ -92,6 +92,53 @@ def test_unreachable_labelled_block_after_jump_survives():
     assert any(bb.labels[0].name == exit_lbl for bb in labelled)
 
 
+def test_unreachable_labelled_disable_opt_fallthrough_clears_dead_mode():
+    entry_lbl = _label("entry")
+    exit_lbl = _label("exit")
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(branch=_unconditional_jump("exit")),
+            BasicBlockNode(
+                labels=[LabelInst(name=entry_lbl)],
+                insts=[NopInst()],
+                disable_opt=True,
+            ),
+            _nop_block(),
+            BasicBlockNode(labels=[LabelInst(name=exit_lbl)]),
+        ]
+    )
+    out, changed = _run(root)
+
+    assert changed is False
+    blocks = [n for n in out.insts if isinstance(n, BasicBlockNode)]
+    assert len(blocks) == 4
+    assert blocks[1].disable_opt is True
+    assert blocks[1].labels[0].name == entry_lbl
+
+
+def test_unreachable_labelled_block_with_unconditional_branch_reenters_dead_mode():
+    entry_lbl = _label("entry")
+    exit_lbl = _label("exit")
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(branch=_unconditional_jump("entry")),
+            BasicBlockNode(
+                labels=[LabelInst(name=entry_lbl)],
+                branch=_unconditional_jump("exit"),
+            ),
+            _nop_block(),
+            BasicBlockNode(labels=[LabelInst(name=exit_lbl)]),
+        ]
+    )
+    out, changed = _run(root)
+
+    assert changed is True
+    blocks = [n for n in out.insts if isinstance(n, BasicBlockNode)]
+    assert len(blocks) == 3
+    assert blocks[1].labels[0].name == entry_lbl
+    assert all(not (bb.insts == [NopInst()] and not bb.labels) for bb in blocks)
+
+
 # ---------------------------------------------------------------------------
 # MetaInst preserved in dead region
 # ---------------------------------------------------------------------------

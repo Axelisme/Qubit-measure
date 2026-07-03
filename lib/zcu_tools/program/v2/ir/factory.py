@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import cast
-
 from .dispatch import (
     build_dispatch_table_island,
     emit_dispatch_address_setup,
@@ -192,24 +190,6 @@ class IRParser:
             refs.update(str(label) for label in item.branch.need_labels)
         return refs
 
-        for idx, item in enumerate(items):
-            if idx in inside_indices:
-                continue
-            if not isinstance(item, BasicBlockNode):
-                continue
-            refs: set[str] = set()
-            for inst in item.insts:
-                refs.update(str(label) for label in inst.need_labels)
-            if item.branch is not None:
-                refs.update(str(label) for label in item.branch.need_labels)
-            hit = refs & control_labels
-            if hit:
-                raise ValueError(
-                    f"IRParser: jump to control label {sorted(hit)[0]!r} from "
-                    f"outside its structural region violates SESE assumption. "
-                    f"Block index {idx}."
-                )
-
     def _parse_block(
         self,
         items: list[BasicBlockNode | MetaInst],
@@ -276,7 +256,7 @@ class IRParser:
         self._parse_block(
             items,
             pos,
-            cast(BlockNode, loop.body),
+            loop.body,
             end_markers=frozenset({"LOOP_BODY_END"}),
         )
         self._consume_meta(items, pos, "LOOP_BODY_END")
@@ -469,7 +449,7 @@ class IRParser:
                 ),
                 *self._loop_prologue(node, start, end),
                 MetaInst(type="LOOP_BODY_START", name=node.name),
-                *self._unparse_node(cast(BlockNode, node.body)),
+                *self._unparse_node(node.body),
                 MetaInst(type="LOOP_BODY_END", name=node.name),
                 *self._loop_epilogue(node, start, end),
                 MetaInst(type="LOOP_END", name=node.name),

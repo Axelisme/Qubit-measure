@@ -316,14 +316,14 @@ def parse_register(val: Register | str | None) -> Register | None:
         return None
     # asm_v2.py encodes dmem register addresses as '&rN'; strip the leading '&'
     core = val[1:] if val.startswith("&") else val
-    # Accept only: the r_wave bundle, a known QICK alias (s_*/w_* descriptive
-    # names live in _REG_ALIAS), or a bare sN/rN/wN address. A descriptive name
-    # not in the alias table (e.g. 's_typo') is rejected here so the bad name
-    # surfaces at IR parse time instead of deep inside the QICK assembler.
+    # Accept only hardware-backed registers and known QICK aliases. This keeps
+    # malformed names out of the IR instead of deferring the failure to assembler.
     if (
         core == "r_wave"
         or core in _REG_ALIAS
-        or (bool(core) and core[0] in "rsw" and core[1:].isdigit())
+        or core in GENERAL_REGS
+        or core in VOLATILE_REGS
+        or core in WAVE_REGS
     ):
         return Register(name=core)
     return None
@@ -542,9 +542,6 @@ def parse_time(val: Register | TimeOffset | str | int | None) -> TimeType | None
     reg = parse_register(val_s)
     if reg is not None:
         return reg
-    # Fallback: treat any non-empty string as a register name
-    if val_s:
-        return Register(name=val_s)
     return None
 
 

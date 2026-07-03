@@ -1072,6 +1072,32 @@ def test_pipeline_tree_pass_missing_disable_opt_block_raises():
         _optimize_tree(root, [DroppingTreePass()], ctx)
 
 
+def test_pipeline_rejects_non_block_loop_body_replacement():
+    from zcu_tools.program.v2.ir.pipeline import _optimize_tree
+
+    class ReplacingLoopBodyPass(AbsIRTreePass):
+        def transform(self, node: IRNode, ctx: PipeLineContext):
+            if (
+                isinstance(node, BlockNode)
+                and len(node.insts) == 1
+                and isinstance(node.insts[0], BasicBlockNode)
+            ):
+                return BasicBlockNode(insts=[NopInst()])
+            return None
+
+    loop = IRLoop(
+        name="lp",
+        counter_reg=Register("r0"),
+        n=3,
+        body=BlockNode(insts=[BasicBlockNode(insts=[NopInst()])]),
+    )
+    root = BlockNode(insts=[loop])
+    ctx = PipeLineContext(config=PipeLineConfig(), pmem_budget=1024)
+
+    with pytest.raises(TypeError, match="IRLoop.body optimization"):
+        _optimize_tree(root, [ReplacingLoopBodyPass()], ctx)
+
+
 # ---------------------------------------------------------------------------
 # UnrollLoopPass — _unroll_partial big-jump paths (8.2)
 # ---------------------------------------------------------------------------
@@ -1084,6 +1110,15 @@ def _nop_loop(name: str, n: int, counter: str = "r0") -> IRLoop:
         counter_reg=Register(counter),
         n=n,
         body=BlockNode(insts=[BasicBlockNode(insts=[NopInst()])]),
+    )
+
+
+def _empty_const_loop(name: str, n: int) -> IRLoop:
+    return IRLoop(
+        name=name,
+        counter_reg=Register("r0"),
+        n=n,
+        body=BlockNode(insts=[]),
     )
 
 
@@ -1167,6 +1202,42 @@ def test_partial_unroll_with_remainder_small_pmem():
 
     s15_writes = _collect_reg_write_s15(out)
     assert len(s15_writes) == 0  # no s15 in small-pmem mode
+
+
+def test_partial_unroll_synthetic_labels_are_removable():
+    loop = _nop_loop("lp", n=103)
+    root = BlockNode(insts=[loop])
+    ctx = _ctx_partial(pmem_capacity=512, pmem_budget=10)
+    out, _ = _apply_tree_pass_to_root(root, UnrollLoopPass(), ctx)
+
+    synthetic_labels = [
+        label
+        for bb in _walk_basic_blocks(out)
+        for label in bb.labels
+        if str(label.name).startswith(
+            ("lp_remainder_entry", "lp_unrolled_start", "lp_unrolled_end")
+        )
+    ]
+
+    assert synthetic_labels
+    assert all(label.can_remove for label in synthetic_labels)
+
+
+def test_partial_unroll_empty_body_remainder_label_is_removable():
+    loop = _empty_const_loop("lp", n=103)
+    root = BlockNode(insts=[loop])
+    ctx = _ctx_partial(pmem_capacity=512, pmem_budget=10)
+    out, _ = _apply_tree_pass_to_root(root, UnrollLoopPass(), ctx)
+
+    remainder_labels = [
+        label
+        for bb in _walk_basic_blocks(out)
+        for label in bb.labels
+        if str(label.name).startswith("lp_remainder_entry")
+    ]
+
+    assert remainder_labels
+    assert all(label.can_remove for label in remainder_labels)
 
 
 def test_partial_unroll_with_remainder_big_pmem():

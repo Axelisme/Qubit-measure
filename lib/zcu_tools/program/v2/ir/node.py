@@ -139,14 +139,24 @@ class IRLoop(IRNode):
     name: str
     counter_reg: Register
     n: int | Register
-    body: IRNode
+    body: BlockNode
     range_hint: tuple[int, int] | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.body, BlockNode):
+            raise TypeError(
+                f"IRLoop.body must be BlockNode, got {type(self.body).__name__}"
+            )
 
     def children(self) -> list[IRNode]:
         return [self.body]
 
     def replace_child(self, old: IRNode, new: IRNode) -> None:
         if self.body is old:
+            if not isinstance(new, BlockNode):
+                raise TypeError(
+                    f"IRLoop.body must be replaced with BlockNode, got {type(new).__name__}"
+                )
             self.body = new
         else:
             raise ValueError(
@@ -295,11 +305,16 @@ def _clone_node(
             insts=[_clone_node(c, label_remap, name_remap) for c in node.insts]
         )
     if isinstance(node, IRLoop):
+        cloned_body = _clone_node(node.body, label_remap, name_remap)
+        if not isinstance(cloned_body, BlockNode):
+            raise TypeError(
+                f"_clone_node: cloned IRLoop.body must be BlockNode, got {type(cloned_body).__name__}"
+            )
         return IRLoop(
             name=name_remap.get(node.name, node.name),
             counter_reg=node.counter_reg,
             n=node.n,
-            body=_clone_node(node.body, label_remap, name_remap),
+            body=cloned_body,
             range_hint=node.range_hint,
         )
     if isinstance(node, IRBranch):

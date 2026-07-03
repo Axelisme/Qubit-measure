@@ -128,6 +128,28 @@ def test_scheduled_ticks_irbranch_pessimistic_min():
     assert estimate_body_scheduled_ticks([branch]) == 50
 
 
+def test_scheduled_ticks_irbranch_accepts_basic_block_cases():
+    fast = BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit=Immediate(50))])
+    slow = BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit=Immediate(200))])
+    branch = IRBranch(
+        name="br",
+        compare_reg=Register("r_sel"),
+        cases=[fast, slow],
+    )
+    assert estimate_body_scheduled_ticks([branch]) == 50
+
+
+def test_scheduled_ticks_irbranch_accepts_nested_loop_case():
+    case = IRLoop(
+        name="case_loop",
+        counter_reg=Register("r0"),
+        n=2,
+        body=BlockNode(insts=[_time_bb(30)]),
+    )
+    branch = IRBranch(name="br", compare_reg=Register("r_sel"), cases=[case])
+    assert estimate_body_scheduled_ticks([branch]) == 60
+
+
 def test_scheduled_ticks_irbranch_no_cases_contributes_zero():
     branch = IRBranch(name="br", compare_reg=Register("r0"), cases=[])
     assert estimate_body_scheduled_ticks([branch]) == 0
@@ -188,7 +210,7 @@ def test_flat_size_irloop_unknown_uses_n1():
         body=BlockNode(insts=[inner]),
     )
     size = estimate_flat_size([loop])
-    # 2 + 1*1 = 3 (underestimate for budget safety)
+    # Unknown dynamic loops stay rolled: 2 loop overhead words + one body copy.
     assert size == 3
 
 
@@ -199,6 +221,17 @@ def test_flat_size_irbranch_accounts_all_terms():
     size = estimate_flat_size([branch])
     # setup=4, table=2*2=4, cases=1+2=3 → 11
     assert size == 11
+
+
+def test_flat_size_irbranch_accepts_basic_block_cases():
+    case0 = BasicBlockNode(insts=[NopInst()])
+    case1 = BasicBlockNode(insts=[NopInst(), NopInst()])
+    branch = IRBranch(
+        name="br",
+        compare_reg=Register("r_sel"),
+        cases=[case0, case1],
+    )
+    assert estimate_flat_size([branch]) == 11
 
 
 def test_flat_size_nested_block_node():
@@ -298,6 +331,19 @@ def test_body_cost_irbranch_dispatch_overhead_plus_max_case():
     dispatch_overhead = 4 * 1 + 2 * (1 + 2)
     max_case = 2
     assert estimate_body_cost([branch], cfg) == dispatch_overhead + max_case
+
+
+def test_body_cost_irbranch_accepts_basic_block_cases():
+    fast = BasicBlockNode(insts=[NopInst()])
+    slow = BasicBlockNode(insts=[NopInst(), NopInst()])
+    branch = IRBranch(
+        name="br",
+        compare_reg=Register("r_sel"),
+        cases=[fast, slow],
+    )
+    cfg = _cfg(cost_default=1, cost_jump_flush=2)
+    dispatch_overhead = 4 * 1 + 2 * (1 + 2)
+    assert estimate_body_cost([branch], cfg) == dispatch_overhead + 2
 
 
 def test_body_cost_irbranch_no_cases_only_dispatch_overhead():

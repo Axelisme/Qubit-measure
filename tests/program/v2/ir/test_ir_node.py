@@ -98,6 +98,19 @@ def test_irloop_tree_api_and_string():
     with pytest.raises(ValueError, match="not a child"):
         loop.replace_child(body, new_body)
 
+    with pytest.raises(TypeError, match="IRLoop.body"):
+        loop.replace_child(new_body, BasicBlockNode(insts=[NopInst()]))
+
+
+def test_irloop_body_rejects_non_block_node():
+    with pytest.raises(TypeError, match="IRLoop.body must be BlockNode"):
+        IRLoop(
+            name="loop",
+            counter_reg=Register("r0"),
+            n=3,
+            body=BasicBlockNode(insts=[NopInst()]),  # type: ignore[arg-type]
+        )
+
 
 def test_irbranch_and_irdispatch_tree_api_and_string():
     case0 = BlockNode(insts=[BasicBlockNode(insts=[NopInst()])])
