@@ -24,6 +24,7 @@ from zcu_tools.gui.app.autofluxdep.events.run import (
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 
 from ._helpers import (
+    ensure_test_project,
     make_builder,
     make_measurement_builder,
     pump_controller_until_idle,
@@ -35,6 +36,7 @@ _FLUX = [0.0, 0.25, 0.5, 0.75, 1.0]
 
 def _build_ready_controller():
     ctrl = build_core()
+    ensure_test_project(ctrl)
     ctrl.add_node(make_measurement_builder("probe"))
     ctrl.set_flux_values(_FLUX)
     return ctrl
@@ -105,6 +107,7 @@ def test_full_run_without_stop_emits_run_finished(monkeypatch):
 
 def test_run_operation_progress_is_live_until_terminal():
     ctrl = build_core()
+    ensure_test_project(ctrl)
 
     def wait_for_cancel(env, snapshot):
         del snapshot

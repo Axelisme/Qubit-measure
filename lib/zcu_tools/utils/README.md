@@ -1,6 +1,6 @@
 # zcu_tools.utils
 
-**Last updated:** 2026-07-02 — debug logging helper
+**Last updated:** 2026-07-04 — streaming Labber writer
 
 `utils` 放可被 experiment / GUI 共用、且不反向依賴上層 domain 的 helper。
 實驗資料持久化的 public API 收斂在 `zcu_tools.utils.datasaver` package
@@ -20,6 +20,11 @@ import。
 - `save_grouped_labber_data` / `load_grouped_labber_data` 處理 grouped file；
   experiment loader 傳 required roles，省略 required roles 只用於 diagnostic
   與 migration tooling。
+- `StreamingLabberRoleSpec` / `open_streaming_grouped_labber_data` 處理
+  grouped Labber file 的 partial-write use case：caller 先宣告 full-shape
+  role schema，writer 預建 nan-filled datasets，之後以 outer row slice 寫入並
+  flush。它是長掃 workflow 的 streaming primitive，不改變 one-shot save helper
+  的 complete-file 語意。
 - Experiment semantic schema 住在 `zcu_tools.experiment.axes_spec`：
   `GroupedAxesSpec` / `RoleSpec` 把 Result/Cfg 映射到這裡的 generic grouped
   payload；`utils.datasaver` 不反向依賴 experiment Result 或 cfg。

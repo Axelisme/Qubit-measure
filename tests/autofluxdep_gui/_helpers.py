@@ -9,8 +9,10 @@ params. Together they replace the old ``NodeSpec`` + injected ``run_node``.
 
 from __future__ import annotations
 
+import tempfile
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from zcu_tools.gui.app.autofluxdep.cfg import NodeCfgSchema, flat_node_schema
@@ -23,12 +25,28 @@ from zcu_tools.gui.app.autofluxdep.nodes.builder import (
 )
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
+from zcu_tools.gui.app.autofluxdep.state import ProjectInfo
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.autofluxdep.controller import Controller
     from zcu_tools.gui.app.autofluxdep.orchestrator import InfoStore, Notify
 
 ProduceFn = Callable[[RunEnv, Snapshot], Patch]
+
+
+def ensure_test_project(ctrl: Controller) -> ProjectInfo:
+    """Seed a temporary project so production start_run can create artifacts."""
+    if ctrl.state.project is not None:
+        return ctrl.state.project
+    result_dir = Path(tempfile.mkdtemp(prefix="autofluxdep-test-result-"))
+    project = ProjectInfo(
+        chip_name="test_chip",
+        qub_name="test_qub",
+        result_dir=str(result_dir),
+        params_path=str(result_dir / "params.json"),
+    )
+    ctrl.state.project = project
+    return project
 
 
 def high_snr_simparams(snr: float = 5000.0) -> Any:
@@ -76,8 +94,6 @@ def connect_mock(ctrl: Controller, *, sim_params: Any = None) -> None:
     (an unquiesced worker QThread segfaults the process). Best-effort with a
     timeout — a test that does not exercise flux still returns promptly.
     """
-    import time
-
     from qtpy.QtCore import QCoreApplication, QEventLoop
     from zcu_tools.gui.session.services.connection import ConnectMockRequest
     from zcu_tools.gui.session.services.mock_flux import (
@@ -86,6 +102,7 @@ def connect_mock(ctrl: Controller, *, sim_params: Any = None) -> None:
     )
     from zcu_tools.gui.session.state import DeviceStatus
 
+    ensure_test_project(ctrl)
     loop = QEventLoop()
     ctrl.bind_connection_outcome(
         on_finished=loop.quit, on_failed=lambda _msg: loop.quit()
@@ -138,6 +155,7 @@ def run_controller_to_completion(
     timeout: float = 5.0,
 ) -> InfoStore:
     """Start an async controller RUN and return its terminal InfoStore."""
+    ensure_test_project(ctrl)
     ctrl.start_run(notify=notify)
     pump_controller_until_idle(ctrl, timeout=timeout)
     info = ctrl.last_run_info

@@ -13,11 +13,23 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 
+import numpy as np
+import pytest
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency
+from zcu_tools.gui.app.autofluxdep.services.result_io import load_node_result
+from zcu_tools.gui.app.autofluxdep.services.run_store import (
+    load_journal_events,
+    load_manifest,
+)
+from zcu_tools.gui.app.autofluxdep.state import ProjectInfo
 
-from ._helpers import make_builder, run_controller_to_completion
+from ._helpers import (
+    make_builder,
+    make_measurement_builder,
+    run_controller_to_completion,
+)
 
 
 def _consume_predict(env, snapshot):
@@ -41,6 +53,21 @@ def _fake_consumer():
     )
 
 
+def _project(tmp_path):
+    return ProjectInfo(
+        chip_name="chip",
+        qub_name="q1",
+        result_dir=str(tmp_path),
+        params_path=str(tmp_path / "params.json"),
+    )
+
+
+def _latest_run_dir(tmp_path):
+    runs = sorted((tmp_path / "autofluxdep_runs").glob("*"))
+    assert runs
+    return runs[-1]
+
+
 def test_controller_run_drives_predictor_service_then_consumer():
     # the controller prepends the predictor Service and runs the user node after it;
     # the consumer reads the Service's predict_freq and the final InfoStore carries
@@ -53,6 +80,31 @@ def test_controller_run_drives_predictor_service_then_consumer():
     # consumer produced its derived key off it
     assert "predict_freq" in info.point
     assert info.point["measured"] == info.point["predict_freq"] + 0.5
+
+
+def test_controller_run_writes_artifact_manifest_journal_and_node_hdf5(tmp_path):
+    ctrl = build_core(project=_project(tmp_path))
+    ctrl.add_node(make_measurement_builder("probe"))
+    ctrl.set_flux_values([0.0, 1.0])
+
+    run_controller_to_completion(ctrl)
+
+    run_dir = _latest_run_dir(tmp_path)
+    manifest = load_manifest(run_dir / "manifest.json")
+    assert manifest["terminal"]["status"] == "finished"
+    assert manifest["files"]["nodes"][0]["name"] == "probe"
+    events = load_journal_events(run_dir / "journal.jsonl")
+    assert [event["type"] for event in events] == [
+        "node_row_written",
+        "flux_committed",
+        "node_row_written",
+        "flux_committed",
+        "run_finalized",
+    ]
+    node_result = load_node_result(
+        run_dir / manifest["files"]["nodes"][0]["path"], "probe"
+    )
+    assert not np.isnan(node_result.signal[0]).any()
 
 
 def test_run_event_bus_payloads_emit_on_main_thread(qapp):
@@ -173,6 +225,50 @@ def test_produce_exception_fails_run_gracefully():
     assert len(events) == 1 and events[0].startswith("failed:")
     assert "node not configured" in events[0]
     assert not ctrl.is_running  # the controller unlocked
+
+
+def test_controller_failed_run_finalizes_artifact(tmp_path):
+    def boom(env, snapshot):
+        del env, snapshot
+        raise RuntimeError("node not configured")
+
+    ctrl = build_core(project=_project(tmp_path))
+    ctrl.add_node(
+        make_builder("broken", requires=(Dependency("predict_freq"),), produce_fn=boom)
+    )
+    ctrl.set_flux_values([0.0])
+
+    run_controller_to_completion(ctrl)
+
+    run_dir = _latest_run_dir(tmp_path)
+    assert load_manifest(run_dir / "manifest.json")["terminal"]["status"] == "failed"
+    events = load_journal_events(run_dir / "journal.jsonl")
+    assert [event["type"] for event in events] == [
+        "node_failed",
+        "run_failed",
+        "run_finalized",
+    ]
+
+
+def test_operation_begin_failure_finalizes_created_artifact(tmp_path, monkeypatch):
+    ctrl = build_core(project=_project(tmp_path))
+    ctrl.add_node(make_measurement_builder("probe"))
+    ctrl.set_flux_values([0.0])
+
+    def fail_begin(_spec):
+        raise RuntimeError("operation gate closed")
+
+    monkeypatch.setattr(ctrl._runner, "begin", fail_begin)
+
+    with pytest.raises(RuntimeError, match="operation gate closed"):
+        ctrl.start_run()
+
+    run_dir = _latest_run_dir(tmp_path)
+    manifest = load_manifest(run_dir / "manifest.json")
+    assert manifest["terminal"]["status"] == "failed"
+    assert not ctrl.is_running
+    events = load_journal_events(run_dir / "journal.jsonl")
+    assert [event["type"] for event in events] == ["run_failed", "run_finalized"]
 
 
 def test_ml_module_source_returns_none_on_absent():

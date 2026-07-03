@@ -23,6 +23,11 @@ from .paths import (
     remove_ext,
     reserve_labber_filepath,
 )
+from .streaming import (
+    StreamingGroupedLabberWriter,
+    StreamingLabberRoleSpec,
+    open_streaming_grouped_labber_data,
+)
 from .transport import download_from_server, upload_to_server
 
 __all__ = [
@@ -36,6 +41,9 @@ __all__ = [
     "load_labber_data",
     "save_grouped_labber_data",
     "load_grouped_labber_data",
+    "StreamingLabberRoleSpec",
+    "StreamingGroupedLabberWriter",
+    "open_streaming_grouped_labber_data",
     "save_labber_trace_data",
     "format_ext",
     "remove_ext",

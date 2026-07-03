@@ -60,6 +60,7 @@ from zcu_tools.gui.app.autofluxdep.services.persistence_types import (
     RestoreIssue,
     RestoreReport,
 )
+from zcu_tools.gui.app.autofluxdep.services.run_store import RunStore
 from zcu_tools.gui.app.autofluxdep.state import (
     FLUX_VERSION_KEY,
     WORKFLOW_VERSION_KEY,
@@ -128,6 +129,9 @@ class _RunOutcome:
 
     info: InfoStore
     run_error: Exception | None
+    run_error_node: str | None
+    run_error_flux_idx: int | None
+    run_error_stage: str | None
     stopped: bool
 
 
@@ -740,6 +744,16 @@ class Controller(SessionControllerMixin):
         flux_values = list(self._state.flux_values)
         providers = self._build_providers()
         flux_device = self._state.flux_device_name
+        project = self._state.project
+        if project is None:
+            raise RuntimeError("autofluxdep run requires a configured project")
+        store = RunStore.create(
+            project=project,
+            flux_values=flux_values,
+            flux_device_name=flux_device,
+            nodes=self._state.nodes,
+            results=results,
+        )
 
         def on_point(idx: int, flux: float, info: InfoStore) -> None:
             del flux, info  # POINT_DONE carries only the index
@@ -755,6 +769,26 @@ class Controller(SessionControllerMixin):
             # navigate to.
             if name in user_node_names:
                 self._run_events.emit_node_entered(name, idx)
+
+        def on_node_row(
+            name: str,
+            idx: int,
+            patch: Any,
+            info: InfoStore,
+        ) -> None:
+            if name in user_node_names:
+                store.write_node_row(name, idx, patch, info)
+
+        def on_skip(name: str, idx: int, reason: Any) -> None:
+            if name in user_node_names:
+                store.record_node_skipped(name, idx, reason)
+
+        def on_node_failed(name: str, idx: int, exc: Exception, stage: str) -> None:
+            if name in user_node_names:
+                store.record_node_failed(name, idx, exc, stage)
+
+        def on_flux_committed(idx: int, flux: float, info: InfoStore) -> None:
+            store.commit_flux(idx, flux, info)
 
         # Build the sweep's adaptive predictor once and stash it as run-lived
         # state (like run_results) so an Info dialog / a test can inspect the
@@ -797,15 +831,23 @@ class Controller(SessionControllerMixin):
                         flux_values,
                         on_point=on_point_with_progress,
                         on_node=on_node,
+                        on_skip=on_skip,
+                        on_node_row=on_node_row,
+                        on_node_failed=on_node_failed,
+                        on_flux_committed=on_flux_committed,
                         should_stop=stop_event.is_set,
                     )
                     pbar.refresh()
                     return _RunOutcome(
                         info=info,
                         run_error=orch.run_error,
+                        run_error_node=orch.run_error_node,
+                        run_error_flux_idx=orch.run_error_flux_idx,
+                        run_error_stage=orch.run_error_stage,
                         stopped=stop_event.is_set(),
                     )
                 finally:
+                    store.close_writers(finalize=True)
                     pbar.close()
 
         def on_terminal(bg: BgResult, settle: SettleFn) -> None:
@@ -821,7 +863,13 @@ class Controller(SessionControllerMixin):
                     return
                 self._last_run_info = outcome.info
                 if outcome.run_error is not None:
-                    _on_run_failed(outcome.run_error, settle)
+                    _on_run_failed(
+                        outcome.run_error,
+                        settle,
+                        node=outcome.run_error_node,
+                        flux_idx=outcome.run_error_flux_idx,
+                        stage=outcome.run_error_stage,
+                    )
                 elif outcome.stopped:
                     _on_run_stopped(settle)
                 else:
@@ -842,6 +890,13 @@ class Controller(SessionControllerMixin):
             logger.info("run finished: %d flux point(s)", len(flux_values))
             _clear_active_run()
             self.persist_all()
+            try:
+                store.finalize("finished")
+            except Exception as exc:
+                logger.exception("autofluxdep artifact finalize failed")
+                settle(OperationOutcome("failed", str(exc)))
+                self._bus.emit(RunFailedPayload(message=str(exc)))
+                return
             settle(OperationOutcome("finished"))
             self._bus.emit(RunFinishedPayload())
 
@@ -849,12 +904,37 @@ class Controller(SessionControllerMixin):
             logger.info("run stopped at flux idx %d", self._cur_idx)
             _clear_active_run()
             self.persist_all()
+            try:
+                store.finalize("stopped")
+            except Exception as exc:
+                logger.exception("autofluxdep stopped artifact finalize failed")
+                settle(OperationOutcome("failed", str(exc)))
+                self._bus.emit(RunFailedPayload(message=str(exc)))
+                return
             settle(OperationOutcome("cancelled"))
             self._bus.emit(RunStoppedPayload())
 
-        def _on_run_failed(error: Exception, settle: SettleFn) -> None:
+        def _on_run_failed(
+            error: Exception,
+            settle: SettleFn,
+            *,
+            node: str | None = None,
+            flux_idx: int | None = None,
+            stage: str | None = None,
+        ) -> None:
             logger.error("run failed at flux idx %d: %s", self._cur_idx, error)
             _clear_active_run()
+            try:
+                store.record_run_failed(
+                    error,
+                    flux_idx=flux_idx,
+                    node=node,
+                    stage=stage,
+                )
+                store.finalize("failed", error=error)
+            except Exception as exc:
+                logger.exception("autofluxdep failed artifact finalize failed")
+                error = RuntimeError(f"{error}; artifact finalize failed: {exc}")
             settle(OperationOutcome("failed", str(error)))
             self._bus.emit(RunFailedPayload(message=str(error)))
 
@@ -873,8 +953,18 @@ class Controller(SessionControllerMixin):
 
         try:
             token = self._runner.begin(spec)
-        except Exception:
+        except Exception as exc:
             self._run_stop_event = None
+            try:
+                store.record_run_failed(exc, stage="operation_begin")
+                store.finalize("failed", error=exc)
+            except Exception as finalize_exc:
+                logger.exception(
+                    "autofluxdep artifact finalize failed before RUN begin"
+                )
+                raise RuntimeError(
+                    f"{exc}; artifact finalize failed: {finalize_exc}"
+                ) from exc
             raise
         self._active_run_token = token
         self._bus.emit(RunStartedPayload())

@@ -114,6 +114,35 @@ One full Run: the orchestrator iterates flux points, and at each flux point runs
 every Node in list order. The unit of "the whole run", as opposed to a single
 flux point or a single Node execution.
 
+**Run Result Artifact**:
+The canonical persisted evidence for one autofluxdep Sweep. It is run-scoped,
+not node-scoped: it ties the workflow definition, per-Node committed result
+rows, dependency Patch events, skips, failures, and terminal status to one run
+identity. Fluxdep / dispersive handoff files and reports are exports from this
+artifact, not separate sources of truth.
+_Avoid_: export file, report bundle, memento.
+
+**Committed Node Row**:
+The durable statement that one Node completed its measurement attempt for one
+flux point and its Result row is safe to read back. A committed row may still
+have an empty Patch when fitting or providing failed; that means "measured but
+did not provide", not "unmeasured".
+_Avoid_: successful fit, completed flux point.
+
+**Flux Point Commit**:
+The durable statement that the workflow finished processing a flux point at the
+provider-loop level. It is distinct from individual Node row commits: a flux
+point can have some committed node rows and still fail or stop before the full
+point commits.
+_Avoid_: row commit, node completion.
+
+**Run Journal Event**:
+A machine-readable audit event in the Run Result Artifact, such as node row
+written, node skipped, node failed, flux point committed, or run finalized.
+Patch and skip/failure state live here because they describe workflow dependency
+state, not a Node's measurement data channel.
+_Avoid_: log line, Labber channel, debug message.
+
 **Tools**:
 The container of **general, sweep-lived, stateful services** curried into Nodes
 by their Builder (predictor, an IDW error-corrector, ...). Services

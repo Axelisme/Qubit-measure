@@ -88,6 +88,26 @@ OnPoint = Callable[[int, float, "InfoStore"], None]
 # it resolved — a skipped provider does not fire). The UI uses it to auto-follow
 # (select the running Node + show its run tab). Pure data, like Notify.
 OnNode = Callable[[str, int], None]
+OnSkip = Callable[[str, int, "SkipReason"], None]
+OnNodeRow = Callable[[str, int, Any, "InfoStore"], None]
+OnNodeFailed = Callable[[str, int, Exception, str], None]
+OnFluxCommitted = Callable[[int, float, "InfoStore"], None]
+
+
+@dataclass(frozen=True)
+class SkipReason:
+    """Structured resolver skip reason for run artifact journal events."""
+
+    missing_info_keys: tuple[str, ...] = ()
+    missing_modules: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class SnapshotResolution:
+    """Resolver output: either a Snapshot or a machine-readable skip reason."""
+
+    snapshot: Snapshot | None
+    skip_reason: SkipReason | None = None
 
 
 @dataclass
@@ -182,9 +202,17 @@ def project_snapshot(
     that resolves to nothing anywhere (and has no default) → None (skip the
     provider this point).
     """
+    return resolve_provider_snapshot(provider, info, ml).snapshot
+
+
+def resolve_provider_snapshot(
+    provider: DepDeclaring, info: InfoStore, ml: ModuleSource | None = None
+) -> SnapshotResolution:
+    """Project a provider Snapshot, preserving structured skip reasons."""
     name = getattr(provider, "name", "?")
     deps = provider.all_dependencies()
     resolved: dict[str, Any] = {}
+    missing_info_keys: list[str] = []
     for d in deps:
         value = info.latest(d.key, smoothed=d.smooth is not None)
         if value is _MISSING:
@@ -194,11 +222,12 @@ def project_snapshot(
                 logger.debug(
                     "skip %r: required info %r unavailable everywhere", name, d.key
                 )
-                return None  # required, no value anywhere, no default → skip
+                missing_info_keys.append(str(d.key))
         else:
             resolved[d.key] = value
 
     modules: dict[str, Any] = {}
+    missing_modules: list[str] = []
     for m in provider.all_module_deps():
         mod = _resolve_module(m.name, m.aliases, info, ml)
         if mod is _MISSING:
@@ -208,11 +237,20 @@ def project_snapshot(
                 logger.debug(
                     "skip %r: required module %r unavailable everywhere", name, m.name
                 )
-                return None  # required module unavailable everywhere → skip
+                missing_modules.append(str(m.name))
         else:
             modules[m.name] = mod
 
-    return Snapshot(resolved, modules)
+    if missing_info_keys or missing_modules:
+        return SnapshotResolution(
+            snapshot=None,
+            skip_reason=SkipReason(
+                missing_info_keys=tuple(missing_info_keys),
+                missing_modules=tuple(missing_modules),
+            ),
+        )
+
+    return SnapshotResolution(Snapshot(resolved, modules))
 
 
 @dataclass
@@ -270,6 +308,9 @@ class Orchestrator:
         # the sweep, and exposes it here so the caller turns it into a terminal
         # RUN_FAILED instead of letting it abort the run worker's QThread.
         self.run_error: Exception | None = None
+        self.run_error_node: str | None = None
+        self.run_error_flux_idx: int | None = None
+        self.run_error_stage: str | None = None
 
     def _make_env(self, provider: PlacedNode, idx: int, flux: float) -> RunEnv:
         """Curry this point's execution environment for ``provider`` into a RunEnv.
@@ -309,6 +350,10 @@ class Orchestrator:
         flux_values: list[float],
         on_point: OnPoint | None = None,
         on_node: OnNode | None = None,
+        on_skip: OnSkip | None = None,
+        on_node_row: OnNodeRow | None = None,
+        on_node_failed: OnNodeFailed | None = None,
+        on_flux_committed: OnFluxCommitted | None = None,
         should_stop: Callable[[], bool] | None = None,
     ) -> InfoStore:
         """Sweep flux × providers in order.
@@ -334,6 +379,9 @@ class Orchestrator:
         # it into ``stop_checkers``).
         self._should_stop = should_stop
         self.run_error = None
+        self.run_error_node = None
+        self.run_error_flux_idx = None
+        self.run_error_stage = None
         info = InfoStore()
         for idx, flux in enumerate(flux_values):
             if should_stop is not None and should_stop():
@@ -343,13 +391,18 @@ class Orchestrator:
             info.point["flux_value"] = flux
             info.point["flux_idx"] = idx
             logger.debug("flux point %d: value=%g", idx, flux)
+            provider_loop_completed = True
             for provider in self.providers:
                 if should_stop is not None and should_stop():
                     logger.info("sweep stopped within flux idx %d", idx)
+                    provider_loop_completed = False
                     break
-                snapshot = project_snapshot(provider, info, self.ml)
-                if snapshot is None:
+                resolution = resolve_provider_snapshot(provider, info, self.ml)
+                if resolution.snapshot is None:
+                    if on_skip is not None and resolution.skip_reason is not None:
+                        on_skip(provider.name, idx, resolution.skip_reason)
                     continue  # skipped this point (a required dep/module missing)
+                snapshot = resolution.snapshot
                 if on_node is not None:
                     on_node(provider.name, idx)
                 node = provider.builder.build_node(self._make_env(provider, idx, flux))
@@ -367,15 +420,44 @@ class Orchestrator:
                         elapsed_ms(profile_start),
                         detail=f"node={provider.name} idx={idx} failed=1",
                     )
-                    self.run_error = exc
+                    self._record_run_error(provider.name, idx, "produce", exc)
+                    if on_node_failed is not None:
+                        on_node_failed(provider.name, idx, exc, "produce")
                     return info
                 _PRODUCE_PERF.record(
                     elapsed_ms(profile_start),
                     detail=f"node={provider.name} idx={idx}",
                 )
-                validate_patch(
-                    patch, provider.provides, provider.provides_modules
-                )  # provides / provides_modules = the output contract
+                if should_stop is not None and should_stop():
+                    logger.info(
+                        "sweep stopped after %r produced at flux idx %d; "
+                        "row not committed",
+                        provider.name,
+                        idx,
+                    )
+                    provider_loop_completed = False
+                    break
+                try:
+                    validate_patch(
+                        patch, provider.provides, provider.provides_modules
+                    )  # provides / provides_modules = the output contract
+                except Exception as exc:
+                    self._record_run_error(provider.name, idx, "validate_patch", exc)
+                    if on_node_failed is not None:
+                        on_node_failed(provider.name, idx, exc, "validate_patch")
+                    else:
+                        raise
+                    return info
+                try:
+                    if on_node_row is not None:
+                        on_node_row(provider.name, idx, patch, info)
+                except Exception as exc:
+                    self._record_run_error(provider.name, idx, "row_write", exc)
+                    if on_node_failed is not None:
+                        on_node_failed(provider.name, idx, exc, "row_write")
+                    else:
+                        raise
+                    return info
                 info.point.update(patch.values())
                 info.module_point.update(patch.modules())
                 logger.debug(
@@ -391,6 +473,16 @@ class Orchestrator:
                     logger.debug("  smoothed: %s", smoothed)
             for svc in self.derivations:
                 info.point.update(svc.derive(info.point))
+            if provider_loop_completed and on_flux_committed is not None:
+                on_flux_committed(idx, flux, info)
             if on_point is not None:
                 on_point(idx, flux, info)
         return info
+
+    def _record_run_error(
+        self, provider_name: str, flux_idx: int, stage: str, exc: Exception
+    ) -> None:
+        self.run_error = exc
+        self.run_error_node = provider_name
+        self.run_error_flux_idx = flux_idx
+        self.run_error_stage = stage
