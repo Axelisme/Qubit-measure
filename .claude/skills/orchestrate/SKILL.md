@@ -1,7 +1,7 @@
 ---
 name: orchestrate
 description: Act as the repo-wide orchestrator / tech lead — hold the architecture mental model, own the roadmap and progress, coordinate task plans, worktree lanes, integration branches, and sub-agent reports, and independently sanity-check delegated plans/reviews when risk warrants it. Use when asked to plan and push the whole repo forward, coordinate a multi-step / cross-module effort, manage a phase roadmap, or steer work across several sub-agents rather than do one concrete edit yourself.
-skill_version: 5
+skill_version: 6
 ---
 
 # orchestrate
@@ -50,7 +50,7 @@ self-planner 產出要 source-grounded：引用讀過的高層文件或關鍵檔
 
 ## `.agent_state/` 目錄
 
-`.agent_state/` 是 gitignored agent 工作區，不進 commit。它取代舊 `task_plans/`。
+`.agent_state/` 是 gitignored agent 工作區，不進 commit；協作狀態由本 skill 的 scripts 維護，agent 不直接編輯 `state.json` 或 `merge_queue.json`。
 
 ```text
 .agent_state/
@@ -77,14 +77,45 @@ self-planner 產出要 source-grounded：引用讀過的高層文件或關鍵檔
 - `.agent_state/plans/<task-id>/findings.md`：委派過程中的非顯而易見發現、決策、踩過的坑。
 - `.agent_state/plans/<task-id>/progress.md`：各 Phase / 工作項的狀態與時間軸。
 - `.agent_state/plans/archives/<task-id>/`：已結束 task 的完整 plan 目錄；task fast-forward 或明確 abandoned 收尾、且 `state.json` / worktree / branch 都清理完成後，將 `.agent_state/plans/<task-id>/` 整包移到這裡，讓 `.agent_state/plans/` 只保留仍 active / reviewing / merge_preview / blocked 的計劃。這個 `archives/` 是完成 task 的收納區；task 內的 `archive.md` 仍只用於 Phase 壓縮。
-- `.agent_state/worktrees/state.json`：仍需操作的 task / lane checkpoint；已 merge / abandoned 並清理完的 task 不留在這裡。
-- `.agent_state/worktrees/merge_queue.json`：序列化主 checkout 的 merge preview / final fast-forward；每次只能有一個 task 進入主 checkout merge critical section。
+- `.agent_state/worktrees/state.json`：仍需操作的 task / lane checkpoint；寫入一律透過 `scripts/state.py`。
+- `.agent_state/worktrees/merge_queue.json`：序列化主 checkout 的 merge preview / final fast-forward；寫入一律透過 `scripts/merge_queue.py`。
 - `.agent_state/worktrees/reports/<task-id>/<lane-id>/`：sub-agent 長報告。報告寫在**主 checkout 的絕對路徑**，不要寫進 task worktree，因為 untracked 檔不會跨 worktree 同步。
 - `.agent_state/worktrees/trees/<worktree-id>/`：實際 git worktree checkout；單 lane 預設 `worktree-id = <task-id>`，多 lane 使用 `worktree-id = <task-id>--<lane-id>`。
 
+## Scripts
+
+本 skill 提供兩個跨平台 Python scripts：
+
+- `scripts/state.py`：管理 `.agent_state/worktrees/state.json`、建立 reports 目錄、查詢 report path。
+- `scripts/merge_queue.py`：管理 `.agent_state/worktrees/merge_queue.json`，並在 queue 狀態切換時同步 task status。
+
+script 只使用 Python stdlib，寫入 JSON 時使用 UTF-8、穩定排序、結尾 newline、lock file 與 atomic replace。路徑參數可用 OS-native 寫法；寫入 JSON 的 worktree/report 路徑一律正規化為 repo-relative POSIX path。重跑同一個 mutating command 時要是 no-op；同名但內容不同時 fail fast。
+
+文件中的 `<repo-python>` 代表 repo Python，例如 Linux/macOS 的 `.venv/bin/python` 或 Windows 的 `.venv\Scripts\python.exe`。`<skill-dir>` 代表此 `SKILL.md` 所在目錄。所有命令都指定 `--root <main-checkout>`，因為協作狀態屬於主 checkout。
+
+常用命令：
+
+```text
+<repo-python> <skill-dir>/scripts/state.py --root <main-checkout> init
+<repo-python> <skill-dir>/scripts/state.py --root <main-checkout> task-create <task-id> --base-branch main --base-commit <sha> --integration-branch agent/<task-id>
+<repo-python> <skill-dir>/scripts/state.py --root <main-checkout> lane-create <task-id> <lane-id> --role lane --branch agent/<worktree-id> --worktree-path .agent_state/worktrees/trees/<worktree-id> --reports-dir .agent_state/worktrees/reports/<task-id>/<lane-id> --write-scope lib/...
+<repo-python> <skill-dir>/scripts/state.py --root <main-checkout> report-path <task-id> <lane-id> <agent-id> --mkdir
+<repo-python> <skill-dir>/scripts/state.py --root <main-checkout> task-status <task-id> --status active|reviewing|merge_preview|blocked
+<repo-python> <skill-dir>/scripts/state.py --root <main-checkout> task-close <task-id> --expect-status merge_preview
+
+<repo-python> <skill-dir>/scripts/merge_queue.py --root <main-checkout> init
+<repo-python> <skill-dir>/scripts/merge_queue.py --root <main-checkout> enqueue <task-id> --branch agent/<task-id> --base-branch main --action preview|final --requested-by <agent-id>
+<repo-python> <skill-dir>/scripts/merge_queue.py --root <main-checkout> claim <task-id>
+<repo-python> <skill-dir>/scripts/merge_queue.py --root <main-checkout> assert-held <task-id>
+<repo-python> <skill-dir>/scripts/merge_queue.py --root <main-checkout> release <task-id> --result preview-aborted|final-complete|abandoned
+<repo-python> <skill-dir>/scripts/merge_queue.py --root <main-checkout> block <task-id> --note <text>
+```
+
+固定 exit code：`0` 成功、`10` schema invalid、`20` queue not head、`30` lock timeout、`40` invalid transition / conflicting input。加 `--json` 可輸出 machine-readable result。
+
 ## Worktree Protocol
 
-本 repo 不使用 taskboard MCP、path lock 或 `agent-taskboard` skill。一般單 agent 工作直接在目前 checkout 完成；需要多 agent、長線 orchestration、或想隔離未提交 diff 時，使用以下 protocol。
+一般單 agent 工作直接在目前 checkout 完成；需要多 agent、長線 orchestration、或想隔離未提交 diff 時，使用以下 protocol。
 
 ### Identity Model
 
@@ -96,7 +127,7 @@ self-planner 產出要 source-grounded：引用讀過的高層文件或關鍵檔
 
 ### State JSON Contract
 
-`.agent_state/worktrees/state.json` 使用這個形狀：
+`.agent_state/worktrees/state.json` 使用這個形狀；寫入一律透過 `scripts/state.py`：
 
 ```json
 {
@@ -123,13 +154,13 @@ self-planner 產出要 source-grounded：引用讀過的高層文件或關鍵檔
 }
 ```
 
-`status` 可用：`active`、`reviewing`、`merge_preview`、`blocked`。task-level `status` 是整體狀態；每個 lane 也有自己的 `status`。`role` 可用 `lane` 或 `integration`；單 lane task 通常只有一個 `main` lane，且該 lane branch 同時就是 `integration_branch`。merged / abandoned 的 task 在更新 `progress.md` 並清理 worktree / branch 後直接從 `state.json` 移除。
+`status` 可用：`active`、`reviewing`、`merge_preview`、`blocked`。task-level `status` 是整體狀態；每個 lane 也有自己的 `status`。`role` 可用 `lane` 或 `integration`；單 lane task 通常只有一個 `main` lane，且該 lane branch 同時就是 `integration_branch`。merged / abandoned 的 task 在更新 `progress.md` 並清理 worktree / branch 後，透過 `state.py task-close` 從 `state.json` 移除。
 
-不要在 `state.json` 增加 repo-wide `active_task` 欄位。`tasks` map 本身就是多 task source of truth；若需要列出當前焦點，在回報或 task plan 中用明確 `task-id` 表達，不要建立會和其他 session 互相覆蓋的全域指標。
+`tasks` map 是多 task source of truth；當前焦點在回報或 task plan 中用明確 `task-id` 表達。
 
 ### Merge Queue Contract
 
-`.agent_state/worktrees/merge_queue.json` 序列化主 checkout 的 merge preview / final fast-forward。它只保護主 checkout merge critical section；不取代 write-scope 拆分、lane 整理、測試或人工判斷，也不保證不同 task 沒有語義衝突。
+`.agent_state/worktrees/merge_queue.json` 序列化主 checkout 的 merge preview / final fast-forward；寫入一律透過 `scripts/merge_queue.py`。它只保護主 checkout merge critical section；write-scope 拆分、lane 整理、測試與語義衝突判斷仍由 orchestrator 負責。
 
 ```json
 {
@@ -152,9 +183,9 @@ self-planner 產出要 source-grounded：引用讀過的高層文件或關鍵檔
 
 `action` 可用 `preview` 或 `final`；`status` 可用 `queued`、`merging`、`blocked`。使用規則：
 
-- 在主 checkout 執行 `git merge --no-commit --no-ff agent/<task-id>` 或 `git merge --ff-only agent/<task-id>` 前，先讀取或建立 `merge_queue.json`，把自己的 `task-id`、branch、base branch、action 登記進 queue。已存在同一 `task-id` entry 時更新 action / note，不新增重複 entry。
-- 只有 queue 第一個 entry 可以進入 merge critical section。開始前把該 entry `status` 設成 `merging`、寫入 `started_at`，立刻重讀檔案確認自己仍是第一個且狀態仍是 `merging`；若不是，停止 merge 並回報 queue 狀態。
-- preview 開著時該 entry 仍持有 queue。只有在 preview abort 後、final fast-forward 完成後、或 task 明確 blocked / abandoned 並清掉主 checkout merge 狀態後，才移除 queue entry 或把它標成可由用戶處理的 `blocked`。
+- 在主 checkout 執行 `git merge --no-commit --no-ff agent/<task-id>` 或 `git merge --ff-only agent/<task-id>` 前，先用 `merge_queue.py enqueue` 登記 `task-id`、branch、base branch、action。已存在同一 `task-id` entry 時，script 更新 action / note。
+- 只有 queue 第一個 entry 可以進入 merge critical section。開始前用 `merge_queue.py claim <task-id>` 把 entry 轉成 `merging` 並寫入 `started_at`，接著用 `merge_queue.py assert-held <task-id>` 確認自己仍持有 queue。
+- preview 開著時該 entry 仍持有 queue。preview abort 後用 `merge_queue.py release <task-id> --result preview-aborted` 釋放；final fast-forward 完成後用 `merge_queue.py release <task-id> --result final-complete` 釋放；task blocked 時用 `merge_queue.py block <task-id> --note <text>` 標記。
 - queue 第一個 entry 若是 `blocked`，後面的 task 不可跳過。先解決或 abort 這個 task 的主 checkout merge 狀態，再處理下一個 entry。
 - 不要自動偷走看似 stale 的 `merging` entry。先檢查主 checkout `git status`、相關 branch / worktree / report；只有用戶確認，或有明確證據顯示該 merge 已不存在且主 checkout 乾淨時，才可清理 stale entry，並在 `note` 或 `progress.md` 記錄原因。
 
@@ -168,18 +199,18 @@ self-planner 產出要 source-grounded：引用讀過的高層文件或關鍵檔
 git worktree add .agent_state/worktrees/trees/<worktree-id> -b agent/<worktree-id> <base-branch>
 ```
 
-4. 多 lane task 額外建立 parent integration branch `agent/<task-id>`。需要在獨立 checkout 做整合時，建立 integration worktree，並在 `state.json` 以 `role: "integration"` 記錄；不需要平行整合 checkout 時，至少在 task entry 的 `integration_branch` 記錄它。
+4. 多 lane task 額外建立 parent integration branch `agent/<task-id>`。需要在獨立 checkout 做整合時，建立 integration worktree，並用 `state.py lane-create --role integration` 記錄；task entry 的 `integration_branch` 始終指向 parent integration branch。
 
 ```bash
 git worktree add .agent_state/worktrees/trees/<task-id>--integration -b agent/<task-id> <base-branch>
 ```
 
-5. 建立 `.agent_state/worktrees/reports/<task-id>/<lane-id>/`；若這個 task 需要長線計劃檔，建立 `.agent_state/plans/<task-id>/`；並用 `task-id` + `lane-id` + `worktree-id` 更新 `state.json`。
+5. 若這個 task 需要長線計劃檔，建立 `.agent_state/plans/<task-id>/`；接著用 `state.py task-create` 與 `state.py lane-create` 記錄 `task-id`、`lane-id`、`worktree-id`、branch、worktree path、reports dir 與 write scope。reports 目錄由 `state.py report-path <task-id> <lane-id> <agent-id> --mkdir` 建立。
 6. 盤點這個 task / lane 需要的額外 gitignored inputs，例如本地設定、scratch fixtures、未追蹤資料檔。worktree 只共享 Git-tracked content；ignored/untracked files 不會自動出現在新 worktree。
-7. 對每個額外 gitignored input 選一種處理方式，寫進委派 prompt、report 或 `state.json.worktrees[<lane-id>].ignored_inputs`：
+7. 對每個額外 gitignored input 選一種處理方式，寫進委派 prompt、report，並在 `state.py lane-create --ignored-input <mode>:<path-or-label>` 記錄：
    - **copy**：複製到 task worktree 內的明確路徑，讓 sub-agent 用 worktree-local copy。
    - **reference**：給 sub-agent 主 checkout 的絕對路徑，只讀使用；report 一律用這種方式寫到主 checkout。
-   - **omit**：若不需要，明確說不提供，避免 sub-agent 猜測舊 `task_plans/` 或其他本地檔存在。
+   - **omit**：若不需要，明確說不提供，避免 sub-agent 猜測未提供的本地檔存在。
 8. 委派 sub-agent 時明確給：
    - `task-id`、`lane-id`、`worktree-id`
    - lane worktree 的 `workdir`
@@ -209,14 +240,16 @@ git worktree add .agent_state/worktrees/trees/<task-id>--integration -b agent/<t
 3. lane 完成後，在 lane worktree 中把 `agent/<worktree-id>` rebase 到目前的 parent integration branch（單 lane 時就是 `base_branch` / `agent/<task-id>`），並把內部修補 commit 整理成語意清楚的 lane commit。預設用 `git reset --soft <integration-branch>` 後重新 `git commit`；若保留多個 commit 對審查更清楚，需在 report 說明。
 4. 單 lane task：`agent/<task-id>` 同時是 lane branch 與 integration branch，整理後可直接進入主線 preview。
 5. 多 lane task：由 orchestrator 決定整合順序。每個 lane branch 依序 rebase 到目前的 `agent/<task-id>`，然後在 integration checkout 中用 `git merge --ff-only agent/<worktree-id>` 推進 parent integration branch。遇到衝突時先判斷是否為規格/架構分歧；若是，停下向用戶確認，不要自行猜測。所有 lane 都進入 `agent/<task-id>` 後，這個 parent branch 才是主線驗收預覽與最終 fast-forward 的來源。
-6. 回到主 checkout 的 `base_branch` 前，先依 Merge Queue Contract 把 `task-id` 登記到 `.agent_state/worktrees/merge_queue.json`；只有 queue 第一個 entry 可建立主 checkout preview。
-7. 取得 queue 後，由 orchestrator 用 `git merge --no-commit --no-ff agent/<task-id>` 建立未提交的驗收預覽，讓用戶在主線脈絡下檢查整體 diff、測試狀態與行為。這個 merge 只作 preview；不要 commit，也不要在主 checkout 的 merge preview 上直接改碼。
-8. 若用戶提出改動意見，先在主 checkout 執行 `git merge --abort` 取消 preview，清理或更新自己的 merge queue entry，再委派 sub-agent 回到相關 lane worktree 或 integration worktree 修改、測試、更新 report；完成後重新整理 lane / integration branch，必要時 rebase，再重新排隊走 preview。
-9. 若用戶沒有改動意見並授權收尾，確認自己仍持有 queue 第一個 entry；先取消仍開著的 preview，再用 fast-forward 把 `agent/<task-id>` 接到主線，保持 `base_branch` 線性歷史；成功後移除自己的 merge queue entry，然後從 `state.json` 刪除 task entry，結束 Phase，移除 task 的所有 lane / integration worktree 並刪除對應 branch：
+6. 回到主 checkout 的 `base_branch` 前，先用 `merge_queue.py enqueue <task-id> --action preview` 登記 queue；只有 queue 第一個 entry 可建立主 checkout preview。
+7. 取得 queue 時執行 `merge_queue.py claim <task-id>` 與 `merge_queue.py assert-held <task-id>`，再由 orchestrator 用 `git merge --no-commit --no-ff agent/<task-id>` 建立未提交的驗收預覽，讓用戶在主線脈絡下檢查整體 diff、測試狀態與行為。這個 merge 只作 preview；不要 commit，也不要在主 checkout 的 merge preview 上直接改碼。
+8. 若用戶提出改動意見，先在主 checkout 執行 `git merge --abort` 取消 preview，再用 `merge_queue.py release <task-id> --result preview-aborted` 釋放 queue，委派 sub-agent 回到相關 lane worktree 或 integration worktree 修改、測試、更新 report；完成後重新整理 lane / integration branch，必要時 rebase，再重新排隊走 preview。
+9. 若用戶沒有改動意見並授權收尾，執行 `merge_queue.py assert-held <task-id>` 確認自己仍持有 queue 第一個 entry；先取消仍開著的 preview，再用 fast-forward 把 `agent/<task-id>` 接到主線，保持 `base_branch` 線性歷史；成功後用 `merge_queue.py release <task-id> --result final-complete` 釋放 queue，接著用 `state.py task-close <task-id>` 移除 task entry，結束 Phase，移除 task 的所有 lane / integration worktree 並刪除對應 branch：
 
-```bash
+```text
 git merge --abort
 git merge --ff-only agent/<task-id>
+<repo-python> <skill-dir>/scripts/merge_queue.py --root <main-checkout> release <task-id> --result final-complete
+<repo-python> <skill-dir>/scripts/state.py --root <main-checkout> task-close <task-id>
 git worktree remove .agent_state/worktrees/trees/<worktree-id>
 git worktree prune
 git branch -d agent/<worktree-id>
@@ -227,10 +260,10 @@ git branch -d agent/<task-id>
 
 若 `.agent_state/plans/<task-id>/` 存在，最後建立 `.agent_state/plans/archives/` 並將整個 plan 目錄移到 `.agent_state/plans/archives/<task-id>/`；不要只複製單一檔案，也不要把已結束 task 留在 active plans 列表旁。
 
-10. 若尚未建立 preview，就仍須先取得 merge queue 第一個 entry，再用 `git merge --ff-only agent/<task-id>` 收尾；不要為了收尾建立 merge commit。
+10. 若尚未建立 preview，就仍須先用 `merge_queue.py enqueue <task-id> --action final`、`merge_queue.py claim <task-id>` 與 `merge_queue.py assert-held <task-id>` 取得 queue，再用 `git merge --ff-only agent/<task-id>` 收尾；不要為了收尾建立 merge commit。
 11. 若未授權進入主線 preview，停在可檢查的 integration branch / lane branch diff，回報 task-id、lane-id、worktree path、測試狀態與下一步；不要佔用 merge queue。
 12. 每個 task item 或 Phase 告一段落時，必須完成整合決策：fast-forward、abandon 或 blocked。已結束 task 要同步完成 plan 歸檔；不要把 worktree 或 active plan 當長期常駐狀態留著，長期殘留會讓 branch、ignored inputs、reports 與 base branch 漸漸失同步。
-13. 當 task 告一段落且沒有剩餘 backlog 時，可以主動詢問用戶是否關閉這個 task。用戶同意後，依上方收尾規則清理目前 task 的 worktree / branch / `state.json` entry，並將 `.agent_state/plans/<task-id>/` 整包移到 `.agent_state/plans/archives/<task-id>/`。
+13. 當 task 告一段落且沒有剩餘 backlog 時，可以主動詢問用戶是否關閉這個 task。用戶同意後，依上方收尾規則清理目前 task 的 worktree / branch，執行 `state.py task-close <task-id>`，並將 `.agent_state/plans/<task-id>/` 整包移到 `.agent_state/plans/archives/<task-id>/`。
 14. `git merge --squash` 不是預設收尾方式；它會斷開 branch ancestry，讓 `git branch -d` 無法確認 task / lane branch 已整合。除非用戶明確要求 squash merge，否則使用 rebase / soft reset 整理 lane branch，再以 `ff-only` 推進 integration branch 與主線。
 
 ### Phase 推薦流水線
@@ -241,7 +274,7 @@ git branch -d agent/<task-id>
 2. `plan-item-implementer`：在該 Phase 的 lane worktree 中照 planner 報告逐項實作；遇到架構不明或規格分叉時停下回報，不自行猜測。
 3. `python-module-reviewer`：針對 implementer 的變更做 correctness / simplicity / anti-pattern review；review finding 回到同一個 lane worktree 修正，必要時再跑一輪 reviewer。
 4. orchestrator：收齊三階段 reports，對 planner / reviewer 的關鍵結論做二次驗證，檢查 diff，更新 `.agent_state/plans/<task-id>/progress.md` / `findings.md`，依 `CLAUDE.md` 收尾驗證。
-5. linear preview / 收尾：建立 worktree 時把當前目標 branch 記成 `base_branch`；Phase 變更完成後，先整理各 lane branch，再依序 fast-forward 到 parent integration branch `agent/<task-id>`。回主 checkout 建立驗收 preview 或 final fast-forward 前，先在 `.agent_state/worktrees/merge_queue.json` 登記 `task-id`，且只有 queue 第一個 entry 可 merge。用戶有改動意見時 abort preview、釋放或更新 queue entry，並委派 sub-agent 回相關 lane / integration worktree 修改；用戶無意見並授權收尾時確認仍持有 queue，再 abort preview，改用 `git merge --ff-only agent/<task-id>` 進主線，結束 Phase，移除所有 lane / integration worktree 並刪除 branch。未授權進入 preview 時停在可檢查 diff / branch commit，回報 task-id、lane-id、worktree path 與下一步。
+5. linear preview / 收尾：建立 worktree 時用 `state.py task-create` 記錄當前目標 branch / commit；Phase 變更完成後，先整理各 lane branch，再依序 fast-forward 到 parent integration branch `agent/<task-id>`。回主 checkout 建立驗收 preview 或 final fast-forward 前，用 `merge_queue.py enqueue` / `claim` / `assert-held` 取得 queue。用戶有改動意見時 abort preview，並用 `merge_queue.py release --result preview-aborted` 釋放 queue，再委派 sub-agent 回相關 lane / integration worktree 修改；用戶無意見並授權收尾時確認仍持有 queue，再 abort preview，改用 `git merge --ff-only agent/<task-id>` 進主線，執行 `merge_queue.py release --result final-complete` 與 `state.py task-close`，結束 Phase，移除所有 lane / integration worktree 並刪除 branch。未授權進入 preview 時停在可檢查 diff / branch commit，回報 task-id、lane-id、worktree path 與下一步。
 
 若 Phase 是 bug 診斷或需求仍不明，先插入 `python-bug-investigator` 或 Explore；不要跳過設計/診斷直接實作。
 
@@ -261,19 +294,19 @@ git branch -d agent/<task-id>
 
 ## 進度追蹤模型
 
-`.agent_state/worktrees/state.json` 可以同時追蹤多個 active / reviewing / merge_preview / blocked task。`task-id` 是 plan / roadmap / findings / parent integration branch 的 identity；`lane-id` 是同一 task 內可平行工作線的 identity；`worktree-id` 是實際 checkout / branch identity。orchestrator 每次更新 roadmap、進度、findings、report 或 branch 時都要明確指定 `task-id`，不要依賴全域 `active_task`。共用資源只有 `docs/adr/` 與 `.agent_state/worktrees/merge_queue.json`：跨模組 / 跨 task 的設計決策寫在 ADR，以現在式描述目前生效的設計，`[[NNNN]]` 互鏈；主 checkout merge 由 merge queue 序列化。
+`.agent_state/worktrees/state.json` 可以同時追蹤多個 active / reviewing / merge_preview / blocked task。`task-id` 是 plan / roadmap / findings / parent integration branch 的 identity；`lane-id` 是同一 task 內可平行工作線的 identity；`worktree-id` 是實際 checkout / branch identity。orchestrator 每次更新 roadmap、進度、findings、report 或 branch 時都要明確指定 `task-id`，共享狀態由 `state.py` 與 `merge_queue.py` 維護。共用資源只有 `docs/adr/` 與 `.agent_state/worktrees/merge_queue.json`：跨模組 / 跨 task 的設計決策寫在 ADR，以現在式描述目前生效的設計，`[[NNNN]]` 互鏈；主 checkout merge 由 merge queue 序列化。
 
 跨模組設計決策寫進 `docs/adr/`，模組局部知識寫進該模組 `README.md`（lib/tests 子目錄）。
 
 ## 工作迴圈
 
-1. **釐清目標、定 task-id**。對應到既有 `.agent_state/plans/<task-id>/` 或開新的。目標含糊時用開放式問題向用戶澄清；不要建立或依賴 repo-wide `active_task`。
+1. **釐清目標、定 task-id**。對應到既有 `.agent_state/plans/<task-id>/` 或開新的。目標含糊時用開放式問題向用戶澄清；共享狀態的焦點一律以明確 `task-id` 表達。
 2. **建立 context**。讀該 task-id 的三件套 + 相關模組 `README.md`（lib/tests 子目錄）/ ADR。缺對程式碼現狀的理解就委派 Explore。
-3. **拆解成 task item / lane**，需要隔離或多 agent 時為每個可獨立整合的 lane 建立 worktree/state entry，並在委派 prompt 中說明額外 gitignored inputs 的 copy/reference policy。
+3. **拆解成 task item / lane**，需要隔離或多 agent 時為每個可獨立整合的 lane 建立 worktree，並用 `state.py task-create` / `lane-create` 建立 state entry；委派 prompt 說明額外 gitignored inputs 的 copy/reference policy。
 4. **委派 / self-plan / self-review**：每個 Phase 預設走 `impl-detail-planner` → `plan-item-implementer` → `python-module-reviewer`。給每個 agent 清楚 task-id、lane-id、workdir、write scope、report path；planner 產出是 implementer 的輸入，reviewer finding 回到同一 lane worktree 修正。若工作小而局部，可以由 orchestrator 自己完成 planner 或 reviewer 角色，但要明確記錄讀了哪些 source/diff、採納了哪些結論、以及哪些風險仍需委派或用戶決策。
 5. **收報告 → 二次驗證 → 整合**：讀 final message 與 report 檔，抽查關鍵 source / diff / test evidence，回寫 `progress.md` / `findings.md`，判斷完成度。報告矛盾、不足或和抽查結果不一致時補一輪委派、要求修正 report，或自己做更小範圍 review，不要含糊整合。
 6. **驗證與回報**：一個 Phase 收尾時，按 `CLAUDE.md` 依序跑（或指示/委派）`pyright` → `pytest` → `ruff`，再更新對應模組 `README.md`（lib/tests 子目錄，現在式、刷新頂部 Last updated，不寫 commit hash）。
-7. **關閉 task / lane worktree**：Phase / task item 收尾時，先在各 lane branch rebase / 整理 commit，必要時整合到 parent branch `agent/<task-id>`，再登記 merge queue；只有 queue 第一個 entry 可用 `git merge --no-commit --no-ff` 在主 checkout 建立驗收預覽。用戶有改動意見就 abort preview、釋放或更新 queue entry，並讓 sub-agent 回相關 lane / integration worktree 修；無意見且授權收尾就確認仍持有 queue，abort preview 後用 `git merge --ff-only agent/<task-id>` 進主線，移除 queue entry，從 `state.json` 刪除 task entry、移除所有 lane / integration worktree 並刪除 branch。若 task 已告一段落且沒有剩餘 backlog，可以先詢問用戶是否關閉；用戶同意後就按同一套清理流程移除當前 worktree 並歸檔 plan。若不整合，清理後同樣刪除 entry；只有仍在 active/reviewing/merge_preview/blocked 的 task 才保留 entry。task 結束後，將 `.agent_state/plans/<task-id>/` 整包移到 `.agent_state/plans/archives/<task-id>/`，讓 plans 根目錄維持乾淨。
+7. **關閉 task / lane worktree**：Phase / task item 收尾時，先在各 lane branch rebase / 整理 commit，必要時整合到 parent branch `agent/<task-id>`，再用 `merge_queue.py enqueue` / `claim` / `assert-held` 取得 queue；只有 queue 第一個 entry 可用 `git merge --no-commit --no-ff` 在主 checkout 建立驗收預覽。用戶有改動意見就 abort preview，執行 `merge_queue.py release --result preview-aborted`，並讓 sub-agent 回相關 lane / integration worktree 修；無意見且授權收尾就確認仍持有 queue，abort preview 後用 `git merge --ff-only agent/<task-id>` 進主線，執行 `merge_queue.py release --result final-complete` 與 `state.py task-close`，移除所有 lane / integration worktree 並刪除 branch。若 task 已告一段落且沒有剩餘 backlog，可以先詢問用戶是否關閉；用戶同意後就按同一套清理流程移除當前 worktree 並歸檔 plan。若不整合，清理後同樣用 `state.py task-close` 移除 entry；只有仍在 active/reviewing/merge_preview/blocked 的 task 才保留 entry。task 結束後，將 `.agent_state/plans/<task-id>/` 整包移到 `.agent_state/plans/archives/<task-id>/`，讓 plans 根目錄維持乾淨。
 
 ## 邊界
 
