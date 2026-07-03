@@ -54,6 +54,21 @@ def test_iomanager_setup_creates_exp_dir(tmp_path):
     assert io.list_contexts() == []
 
 
+def test_iomanager_contexts_live_under_result_exps(tmp_path):
+    io = IOManager()
+    result_dir = tmp_path / "result" / "ChipA" / "Q1"
+    io.setup(str(result_dir))
+
+    io.new_context(_make_base_ctx())
+    label = io.get_active_label()
+    assert label is not None
+
+    assert (result_dir / "exps" / label / "meta_info.json").exists()
+    assert (result_dir / "exps" / label / "module_cfg.yaml").exists()
+    assert not (result_dir / label / "meta_info.json").exists()
+    assert io.list_contexts() == [label]
+
+
 # ---------------------------------------------------------------------------
 # use_context
 # ---------------------------------------------------------------------------

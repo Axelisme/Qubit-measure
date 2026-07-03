@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
@@ -22,7 +23,7 @@ class IOManager:
         from zcu_tools.meta_tool import ExperimentManager
 
         logger.info("setup: result_dir=%r", result_dir)
-        self._em = ExperimentManager(result_dir)
+        self._em = ExperimentManager(Path(result_dir) / "exps")
 
     def list_contexts(self) -> list[str]:
         if self._em is None:
