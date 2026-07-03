@@ -58,6 +58,7 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     node_field,
     node_section,
     sectioned_node_schema,
+    str_choice_spec,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
@@ -99,6 +100,10 @@ _DEFAULT_T2R = 5.0  # us — smoothed t2r fallback
 _SWEEP_T2R_FACTOR = 2.5  # notebook: sweep_range = (0, 2.5 * prev_t2r)
 _DEFAULT_DETUNE_RATIO = 0.05  # notebook default activate-detune fraction
 _DEFAULT_EARLYSTOP_SNR = 20.0
+_SWEEP_RANGE_MODE_AUTO_T2R = "auto_t2r"
+_SWEEP_RANGE_MODE_FIXED = "fixed"
+_RELAX_DELAY_MODE_AUTO_T1 = "auto_t1"
+_RELAX_DELAY_MODE_FIXED = "fixed"
 
 
 class T2RamseyCfgTemplate(ProgramV2Cfg, ExpCfgModel):
@@ -132,6 +137,28 @@ def _placeholder_pi2_pulse() -> Any:
 
 def _default_readout() -> Any | None:
     return None
+
+
+def _fixed_sweep_range(sweep: Any) -> tuple[float, float]:
+    return (float(sweep.start), float(sweep.stop))
+
+
+def _resolve_cfg_sweep_range(
+    mode: str, *, t2r: float, fixed: Any
+) -> tuple[float, float]:
+    if mode == _SWEEP_RANGE_MODE_AUTO_T2R:
+        return (0.0, _SWEEP_T2R_FACTOR * float(t2r))
+    if mode == _SWEEP_RANGE_MODE_FIXED:
+        return _fixed_sweep_range(fixed)
+    raise RuntimeError(f"unsupported t2ramsey sweep_range_mode: {mode!r}")
+
+
+def _resolve_cfg_relax_delay(mode: str, *, t1: float, fixed: float) -> float:
+    if mode == _RELAX_DELAY_MODE_AUTO_T1:
+        return max(1.0, 3.0 * float(t1))
+    if mode == _RELAX_DELAY_MODE_FIXED:
+        return float(fixed)
+    raise RuntimeError(f"unsupported t2ramsey relax_delay_mode: {mode!r}")
 
 
 class T2RamseyNode(Node):
@@ -324,6 +351,34 @@ class T2RamseyBuilder(Builder):
                         _DEFAULT_EARLYSTOP_SNR,
                     ),
                 ),
+                node_section(
+                    "generation",
+                    "Generation overrides",
+                    node_field(
+                        "sweep_range_mode",
+                        "sweep_range_mode",
+                        str_choice_spec(
+                            "Sweep range mode",
+                            (_SWEEP_RANGE_MODE_AUTO_T2R, _SWEEP_RANGE_MODE_FIXED),
+                        ),
+                        _SWEEP_RANGE_MODE_AUTO_T2R,
+                    ),
+                    node_field(
+                        "relax_delay_mode",
+                        "relax_delay_mode",
+                        str_choice_spec(
+                            "Relax delay mode",
+                            (_RELAX_DELAY_MODE_AUTO_T1, _RELAX_DELAY_MODE_FIXED),
+                        ),
+                        _RELAX_DELAY_MODE_AUTO_T1,
+                    ),
+                    node_field(
+                        "relax_delay",
+                        "relax_delay",
+                        FloatSpec(label="Fixed relax delay (us)"),
+                        max(1.0, 3.0 * _DEFAULT_T1),
+                    ),
+                ),
             )
         )
 
@@ -377,16 +432,26 @@ class T2RamseyBuilder(Builder):
         knobs = env.schema.lower(ml, md=env.md)
         t1 = float(snapshot["t1"])
         t2r = float(snapshot["t2r"])
+        relax_delay = _resolve_cfg_relax_delay(
+            str(knobs["relax_delay_mode"]),
+            t1=t1,
+            fixed=float(knobs["relax_delay"]),
+        )
+        sweep_range = _resolve_cfg_sweep_range(
+            str(knobs["sweep_range_mode"]),
+            t2r=t2r,
+            fixed=knobs["sweep_range"],
+        )
         return ml.make_cfg(
             {
                 "modules": {
                     "pi2_pulse": pi2_pulse,
                     "readout": readout,
                 },
-                "relax_delay": max(1.0, 3.0 * t1),
+                "relax_delay": relax_delay,
                 "reps": knobs["reps"],
                 "rounds": knobs["rounds"],
-                "sweep_range": (0.0, _SWEEP_T2R_FACTOR * t2r),
+                "sweep_range": sweep_range,
             },
             T2RamseyCfgTemplate,
         )

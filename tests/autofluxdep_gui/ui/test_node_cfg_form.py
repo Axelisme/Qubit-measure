@@ -110,7 +110,12 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
     form = NodeCfgForm(ctrl, node, index)
     try:
         # The LiveModel renders the sectioned root; the schema keeps logical keys.
-        assert set(form._model.fields.keys()) == {"sweep", "acquire", "drive"}
+        assert set(form._model.fields.keys()) == {
+            "sweep",
+            "acquire",
+            "drive",
+            "generation",
+        }
         assert set(node.schema.keys) == {
             "detune_sweep",
             "reps",
@@ -122,6 +127,7 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
             "qub_nqz",
             "qub_gain",
             "qub_length",
+            "drive_gain_mode",
         }
     finally:
         form.teardown()
@@ -149,9 +155,13 @@ def test_edit_scalar_writes_back_to_schema(ctrl_node, qapp):
         # schema_changed → controller.set_node_params → schema SSOT)
         _section(form, "acquire").fields["reps"].set_value(DirectValue(value=321))
         _section(form, "drive").fields["gain"].set_value(DirectValue(value=0.42))
+        _section(form, "generation").fields["drive_gain_mode"].set_value(
+            DirectValue(value="fixed")
+        )
         knobs = node.schema.lower(None)
         assert knobs["reps"] == 321 and isinstance(knobs["reps"], int)
         assert knobs["qub_gain"] == 0.42
+        assert knobs["drive_gain_mode"] == "fixed"
     finally:
         form.teardown()
 

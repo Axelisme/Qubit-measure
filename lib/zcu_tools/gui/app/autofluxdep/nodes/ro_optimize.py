@@ -52,6 +52,7 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     node_field,
     node_section,
     sectioned_node_schema,
+    str_choice_spec,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
@@ -138,6 +139,10 @@ _DEFAULT_CENTER_GAIN = 0.5
 _DEFAULT_FREQ_WINDOW = 1.0  # MHz half-width of the readout-freq sweep window
 _DEFAULT_GAIN_WINDOW = 0.05  # half-width of the readout-gain sweep window
 _DEFAULT_T1 = 10.0  # us — fallback T1 for the relax_delay (3·T1)
+_CENTER_MODE_PREVIOUS_BEST = "previous_best"
+_CENTER_MODE_FIXED = "fixed"
+_RELAX_DELAY_MODE_AUTO_T1 = "auto_t1"
+_RELAX_DELAY_MODE_FIXED = "fixed"
 
 
 class RoOptimizeModuleCfg(ConfigBase):
@@ -190,6 +195,28 @@ def _placeholder_pi_pulse() -> Any:
 
 def _default_readout() -> Any | None:
     return None
+
+
+def _resolve_center(
+    mode: str,
+    *,
+    previous: float,
+    fixed: float,
+    label: str,
+) -> float:
+    if mode == _CENTER_MODE_PREVIOUS_BEST:
+        return float(previous)
+    if mode == _CENTER_MODE_FIXED:
+        return float(fixed)
+    raise RuntimeError(f"unsupported ro_optimize {label} center mode: {mode!r}")
+
+
+def _resolve_relax_delay(mode: str, *, t1: float, fixed: float) -> float:
+    if mode == _RELAX_DELAY_MODE_AUTO_T1:
+        return 3.0 * float(t1)
+    if mode == _RELAX_DELAY_MODE_FIXED:
+        return float(fixed)
+    raise RuntimeError(f"unsupported ro_optimize relax_delay_mode: {mode!r}")
 
 
 class RoOptimizeNode(Node):
@@ -414,6 +441,55 @@ class RoOptimizeBuilder(Builder):
                     ),
                 ),
                 node_section(
+                    "generation",
+                    "Generation overrides",
+                    node_field(
+                        "center_freq_mode",
+                        "center_freq_mode",
+                        str_choice_spec(
+                            "Freq center mode",
+                            (_CENTER_MODE_PREVIOUS_BEST, _CENTER_MODE_FIXED),
+                        ),
+                        _CENTER_MODE_PREVIOUS_BEST,
+                    ),
+                    node_field(
+                        "center_freq",
+                        "center_freq",
+                        FloatSpec(label="Fixed center freq (MHz)"),
+                        _DEFAULT_CENTER_FREQ,
+                    ),
+                    node_field(
+                        "center_gain_mode",
+                        "center_gain_mode",
+                        str_choice_spec(
+                            "Gain center mode",
+                            (_CENTER_MODE_PREVIOUS_BEST, _CENTER_MODE_FIXED),
+                        ),
+                        _CENTER_MODE_PREVIOUS_BEST,
+                    ),
+                    node_field(
+                        "center_gain",
+                        "center_gain",
+                        FloatSpec(label="Fixed center gain"),
+                        _DEFAULT_CENTER_GAIN,
+                    ),
+                    node_field(
+                        "relax_delay_mode",
+                        "relax_delay_mode",
+                        str_choice_spec(
+                            "Relax delay mode",
+                            (_RELAX_DELAY_MODE_AUTO_T1, _RELAX_DELAY_MODE_FIXED),
+                        ),
+                        _RELAX_DELAY_MODE_AUTO_T1,
+                    ),
+                    node_field(
+                        "relax_delay",
+                        "relax_delay",
+                        FloatSpec(label="Fixed relax delay (us)"),
+                        3.0 * _DEFAULT_T1,
+                    ),
+                ),
+                node_section(
                     "acquire",
                     "Acquisition",
                     node_field(
@@ -445,19 +521,31 @@ class RoOptimizeBuilder(Builder):
         freq_expts = int(knobs["freq_expts"])
         gain_expts = int(knobs["gain_expts"])
 
-        # The first allocation has no per-flux snapshot yet, so use the same window
-        # widths around the default centres. ``produce`` rebuilds these axes from the
-        # lowered per-point cfg before acquiring and plotting each row.
+        # The first allocation has no per-flux snapshot yet, so auto modes use the
+        # default centres; fixed modes use the operator's explicit centres. ``produce``
+        # rebuilds these axes from the lowered per-point cfg before acquiring.
         freq_window = abs(float(knobs["freq_window"]))
         gain_window = abs(float(knobs["gain_window"]))
+        center_freq = _resolve_center(
+            str(knobs["center_freq_mode"]),
+            previous=_DEFAULT_CENTER_FREQ,
+            fixed=float(knobs["center_freq"]),
+            label="freq",
+        )
+        center_gain = _resolve_center(
+            str(knobs["center_gain_mode"]),
+            previous=_DEFAULT_CENTER_GAIN,
+            fixed=float(knobs["center_gain"]),
+            label="gain",
+        )
         freqs = np.linspace(
-            _DEFAULT_CENTER_FREQ - freq_window,
-            _DEFAULT_CENTER_FREQ + freq_window,
+            center_freq - freq_window,
+            center_freq + freq_window,
             freq_expts,
         )
         gains = np.linspace(
-            max(0.0, _DEFAULT_CENTER_GAIN - gain_window),
-            min(1.0, _DEFAULT_CENTER_GAIN + gain_window),
+            max(0.0, center_gain - gain_window),
+            min(1.0, center_gain + gain_window),
             gain_expts,
         )
         return Sweep2DResult.allocate(flux, freqs, gains)
@@ -495,9 +583,24 @@ class RoOptimizeBuilder(Builder):
                 "(none produced or preset)"
             )
         knobs = env.schema.lower(ml, md=env.md)
-        prev_best_freq = float(snapshot["best_ro_freq"])
-        prev_best_gain = float(snapshot["best_ro_gain"])
+        center_freq = _resolve_center(
+            str(knobs["center_freq_mode"]),
+            previous=float(snapshot["best_ro_freq"]),
+            fixed=float(knobs["center_freq"]),
+            label="freq",
+        )
+        center_gain = _resolve_center(
+            str(knobs["center_gain_mode"]),
+            previous=float(snapshot["best_ro_gain"]),
+            fixed=float(knobs["center_gain"]),
+            label="gain",
+        )
         t1 = float(snapshot["t1"])
+        relax_delay = _resolve_relax_delay(
+            str(knobs["relax_delay_mode"]),
+            t1=t1,
+            fixed=float(knobs["relax_delay"]),
+        )
         freq_window = abs(float(knobs["freq_window"]))
         gain_window = abs(float(knobs["gain_window"]))
         return ml.make_cfg(
@@ -506,17 +609,17 @@ class RoOptimizeBuilder(Builder):
                     "pi_pulse": pi_pulse,
                     "readout": readout,
                 },
-                "relax_delay": 3.0 * t1,
+                "relax_delay": relax_delay,
                 "reps": knobs["reps"],
                 "rounds": knobs["rounds"],
                 "skew_penalty": knobs["skew_penalty"],
                 "freq_range": (
-                    prev_best_freq - freq_window,
-                    prev_best_freq + freq_window,
+                    center_freq - freq_window,
+                    center_freq + freq_window,
                 ),
                 "gain_range": (
-                    max(0.0, prev_best_gain - gain_window),
-                    min(1.0, prev_best_gain + gain_window),
+                    max(0.0, center_gain - gain_window),
+                    min(1.0, center_gain + gain_window),
                 ),
             },
             RoOptimizeCfgTemplate,

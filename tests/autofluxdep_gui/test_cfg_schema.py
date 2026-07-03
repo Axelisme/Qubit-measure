@@ -162,6 +162,7 @@ _EXPECTED_KEYS = {
         "qub_nqz",
         "qub_gain",
         "qub_length",
+        "drive_gain_mode",
     },
     "lenrabi": {
         "sweep_range",
@@ -182,11 +183,43 @@ _EXPECTED_KEYS = {
         "rounds",
         "freq_window",
         "gain_window",
+        "center_freq_mode",
+        "center_freq",
+        "center_gain_mode",
+        "center_gain",
+        "relax_delay_mode",
+        "relax_delay",
         "skew_penalty",
     },
-    "t1": {"sweep_range", "reps", "rounds", "earlystop_snr"},
-    "t2ramsey": {"sweep_range", "detune_ratio", "reps", "rounds", "earlystop_snr"},
-    "t2echo": {"sweep_range", "detune_ratio", "reps", "rounds", "earlystop_snr"},
+    "t1": {
+        "sweep_range",
+        "reps",
+        "rounds",
+        "earlystop_snr",
+        "sweep_range_mode",
+        "relax_delay_mode",
+        "relax_delay",
+    },
+    "t2ramsey": {
+        "sweep_range",
+        "detune_ratio",
+        "reps",
+        "rounds",
+        "earlystop_snr",
+        "sweep_range_mode",
+        "relax_delay_mode",
+        "relax_delay",
+    },
+    "t2echo": {
+        "sweep_range",
+        "detune_ratio",
+        "reps",
+        "rounds",
+        "earlystop_snr",
+        "sweep_range_mode",
+        "relax_delay_mode",
+        "relax_delay",
+    },
     "mist": {
         "gain_sweep",
         "reps",
@@ -213,6 +246,7 @@ _EXPECTED_PATHS = {
         "qub_nqz": "drive.nqz",
         "qub_gain": "drive.gain",
         "qub_length": "drive.length",
+        "drive_gain_mode": "generation.drive_gain_mode",
     },
     "lenrabi": {
         "sweep_range": "sweep.length",
@@ -233,6 +267,12 @@ _EXPECTED_PATHS = {
         "rounds": "acquire.rounds",
         "freq_window": "window.freq_half_width",
         "gain_window": "window.gain_half_width",
+        "center_freq_mode": "generation.center_freq_mode",
+        "center_freq": "generation.center_freq",
+        "center_gain_mode": "generation.center_gain_mode",
+        "center_gain": "generation.center_gain",
+        "relax_delay_mode": "generation.relax_delay_mode",
+        "relax_delay": "generation.relax_delay",
         "skew_penalty": "acquire.skew_penalty",
     },
     "t1": {
@@ -240,6 +280,9 @@ _EXPECTED_PATHS = {
         "reps": "acquire.reps",
         "rounds": "acquire.rounds",
         "earlystop_snr": "acquire.earlystop_snr",
+        "sweep_range_mode": "generation.sweep_range_mode",
+        "relax_delay_mode": "generation.relax_delay_mode",
+        "relax_delay": "generation.relax_delay",
     },
     "t2ramsey": {
         "sweep_range": "sweep.delay",
@@ -247,6 +290,9 @@ _EXPECTED_PATHS = {
         "reps": "acquire.reps",
         "rounds": "acquire.rounds",
         "earlystop_snr": "acquire.earlystop_snr",
+        "sweep_range_mode": "generation.sweep_range_mode",
+        "relax_delay_mode": "generation.relax_delay_mode",
+        "relax_delay": "generation.relax_delay",
     },
     "t2echo": {
         "sweep_range": "sweep.delay",
@@ -254,6 +300,9 @@ _EXPECTED_PATHS = {
         "reps": "acquire.reps",
         "rounds": "acquire.rounds",
         "earlystop_snr": "acquire.earlystop_snr",
+        "sweep_range_mode": "generation.sweep_range_mode",
+        "relax_delay_mode": "generation.relax_delay_mode",
+        "relax_delay": "generation.relax_delay",
     },
     "mist": {
         "gain_sweep": "sweep.gain",
@@ -533,6 +582,7 @@ def test_qubit_freq_default_knobs():
     assert knobs["qub_nqz"] == 2
     assert knobs["qub_gain"] == 0.05
     assert knobs["qub_length"] == 0.1
+    assert knobs["drive_gain_mode"] == "adaptive"
     # clearing an optional default still omits it (preserving the Fast-Fail guard)
     schema = QubitFreqBuilder().make_default_schema()
     schema.set_field("qub_waveform", None)
@@ -585,6 +635,12 @@ def test_ro_optimize_default_knobs():
     assert knobs["rounds"] == 10
     assert knobs["freq_window"] == 1.0
     assert knobs["gain_window"] == 0.05
+    assert knobs["center_freq_mode"] == "previous_best"
+    assert knobs["center_freq"] == 6000.0
+    assert knobs["center_gain_mode"] == "previous_best"
+    assert knobs["center_gain"] == 0.5
+    assert knobs["relax_delay_mode"] == "auto_t1"
+    assert knobs["relax_delay"] == 30.0
     assert knobs["skew_penalty"] == 0.0
     # the window half-widths are flat scalars, NOT a SweepSpec (decision)
     spec = RoOptimizeBuilder().make_default_schema().schema.spec
@@ -599,6 +655,9 @@ def test_t1_default_knobs():
     assert knobs["reps"] == 1000
     assert knobs["rounds"] == 10
     assert knobs["earlystop_snr"] == 20.0
+    assert knobs["sweep_range_mode"] == "auto_t1"
+    assert knobs["relax_delay_mode"] == "auto_t1"
+    assert knobs["relax_delay"] == 30.0
     sweep = knobs["sweep_range"]
     assert (float(sweep.start), float(sweep.stop), int(sweep.expts)) == (0.5, 60.0, 101)
 
@@ -610,6 +669,11 @@ def test_t2_default_knobs():
         assert knobs["rounds"] == 10
         assert knobs["detune_ratio"] == 0.05
         assert knobs["earlystop_snr"] == 20.0
+        assert knobs["relax_delay_mode"] == "auto_t1"
+        assert knobs["relax_delay"] == 30.0
+        assert knobs["sweep_range_mode"] == (
+            "auto_t2r" if builder.name == "t2ramsey" else "auto_t2e"
+        )
         sweep = knobs["sweep_range"]
         assert (float(sweep.start), float(sweep.stop), int(sweep.expts)) == (
             0.0,

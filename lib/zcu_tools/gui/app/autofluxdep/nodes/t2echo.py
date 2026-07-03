@@ -49,6 +49,7 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     node_field,
     node_section,
     sectioned_node_schema,
+    str_choice_spec,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
@@ -92,6 +93,10 @@ _DEFAULT_T2E = 5.0  # us — smoothed t2e fallback
 _T2E_WINDOW_FACTOR = 2.5  # notebook: sweep_range = (0, 2.5 * prev_t2e)
 _DEFAULT_DETUNE_RATIO = 0.05  # notebook default activate-detune fraction
 _DEFAULT_EARLYSTOP_SNR = 20.0
+_SWEEP_RANGE_MODE_AUTO_T2E = "auto_t2e"
+_SWEEP_RANGE_MODE_FIXED = "fixed"
+_RELAX_DELAY_MODE_AUTO_T1 = "auto_t1"
+_RELAX_DELAY_MODE_FIXED = "fixed"
 
 
 def _default_t1() -> float:
@@ -114,6 +119,28 @@ def _placeholder_pi2_pulse() -> Any:
 
 def _default_readout() -> Any | None:
     return None
+
+
+def _fixed_sweep_range(sweep: Any) -> tuple[float, float]:
+    return (float(sweep.start), float(sweep.stop))
+
+
+def _resolve_cfg_sweep_range(
+    mode: str, *, t2e: float, fixed: Any
+) -> tuple[float, float]:
+    if mode == _SWEEP_RANGE_MODE_AUTO_T2E:
+        return (0.0, _T2E_WINDOW_FACTOR * float(t2e))
+    if mode == _SWEEP_RANGE_MODE_FIXED:
+        return _fixed_sweep_range(fixed)
+    raise RuntimeError(f"unsupported t2echo sweep_range_mode: {mode!r}")
+
+
+def _resolve_cfg_relax_delay(mode: str, *, t1: float, fixed: float) -> float:
+    if mode == _RELAX_DELAY_MODE_AUTO_T1:
+        return max(1.0, 3.0 * float(t1))
+    if mode == _RELAX_DELAY_MODE_FIXED:
+        return float(fixed)
+    raise RuntimeError(f"unsupported t2echo relax_delay_mode: {mode!r}")
 
 
 def _is_lowerable_pulse(module: Any) -> bool:
@@ -349,6 +376,34 @@ class T2EchoBuilder(Builder):
                         _DEFAULT_EARLYSTOP_SNR,
                     ),
                 ),
+                node_section(
+                    "generation",
+                    "Generation overrides",
+                    node_field(
+                        "sweep_range_mode",
+                        "sweep_range_mode",
+                        str_choice_spec(
+                            "Sweep range mode",
+                            (_SWEEP_RANGE_MODE_AUTO_T2E, _SWEEP_RANGE_MODE_FIXED),
+                        ),
+                        _SWEEP_RANGE_MODE_AUTO_T2E,
+                    ),
+                    node_field(
+                        "relax_delay_mode",
+                        "relax_delay_mode",
+                        str_choice_spec(
+                            "Relax delay mode",
+                            (_RELAX_DELAY_MODE_AUTO_T1, _RELAX_DELAY_MODE_FIXED),
+                        ),
+                        _RELAX_DELAY_MODE_AUTO_T1,
+                    ),
+                    node_field(
+                        "relax_delay",
+                        "relax_delay",
+                        FloatSpec(label="Fixed relax delay (us)"),
+                        max(1.0, 3.0 * _DEFAULT_T1),
+                    ),
+                ),
             )
         )
 
@@ -403,6 +458,16 @@ class T2EchoBuilder(Builder):
         knobs = env.schema.lower(ml, md=env.md)
         cur_t1 = float(snapshot["t1"])  # smoothed t1
         prev_t2e = float(snapshot["t2e"])  # smoothed t2e
+        relax_delay = _resolve_cfg_relax_delay(
+            str(knobs["relax_delay_mode"]),
+            t1=cur_t1,
+            fixed=float(knobs["relax_delay"]),
+        )
+        sweep_range = _resolve_cfg_sweep_range(
+            str(knobs["sweep_range_mode"]),
+            t2e=prev_t2e,
+            fixed=knobs["sweep_range"],
+        )
         return ml.make_cfg(
             {
                 "modules": {
@@ -410,10 +475,10 @@ class T2EchoBuilder(Builder):
                     "pi2_pulse": pi2_pulse,
                     "readout": readout,
                 },
-                "relax_delay": max(1.0, 3.0 * cur_t1),
+                "relax_delay": relax_delay,
                 "reps": knobs["reps"],
                 "rounds": knobs["rounds"],
-                "sweep_range": (0.0, _T2E_WINDOW_FACTOR * prev_t2e),
+                "sweep_range": sweep_range,
             },
             T2EchoCfgTemplate,
         )

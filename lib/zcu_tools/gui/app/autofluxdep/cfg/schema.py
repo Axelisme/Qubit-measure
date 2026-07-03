@@ -90,6 +90,13 @@ def str_scalar_spec(
     return ScalarSpec(label=label, type=str, required=required, optional=optional)
 
 
+def str_choice_spec(label: str, choices: tuple[str, ...]) -> ScalarSpec:
+    """A required string choice field rendered as the cfg editor's combo box."""
+    if not choices:
+        raise ValueError("str_choice_spec needs at least one choice")
+    return ScalarSpec(label=label, type=str, choices=list(choices))
+
+
 # One field declaration: its spec + its default value. The default is the
 # hardcoded value the old ``make_cfg`` carried (now the single source of truth).
 NodeField = tuple[str, CfgNodeSpec, Any]

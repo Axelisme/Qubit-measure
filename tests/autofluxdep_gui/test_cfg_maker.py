@@ -95,6 +95,33 @@ def test_qubit_freq_make_cfg_uses_qfw_factor_feedback():
     assert float(cfg.modules.qub_pulse.gain) == 0.2
 
 
+def test_qubit_freq_make_cfg_can_fix_drive_gain():
+    snap = Snapshot(
+        {"predict_freq": 5135.0, "qfw_factor": 32.5}, modules={"readout": _READOUT}
+    )
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=_schema(
+            QubitFreqBuilder(),
+            {
+                "qub_waveform": "qub_flat",
+                "qub_ch": 3,
+                "qub_nqz": 2,
+                "qub_gain": 0.05,
+                "drive_gain_mode": "fixed",
+                "reps": 100,
+                "rounds": 2,
+            },
+        ),
+        ml=_ml(),
+    )
+
+    cfg = QubitFreqBuilder().make_cfg(env, snap)
+
+    assert float(cfg.modules.qub_pulse.gain) == 0.05
+
+
 def test_qubit_freq_produce_fast_fails_when_context_unconfigured():
     # the real-acquire contract: produce Fast Fails (no synthetic fallback) when the
     # context is unconfigured — here ml is None, so make_cfg cannot lower a drive
@@ -233,6 +260,49 @@ def test_ro_optimize_make_cfg_lowers_context():
     assert cfg.relax_delay == 30.0
 
 
+def test_ro_optimize_make_cfg_can_fix_center_and_relax_delay():
+    import pytest
+    from zcu_tools.gui.app.autofluxdep.nodes.ro_optimize import RoOptimizeBuilder
+
+    ml = _ml()
+    pi_pulse = {
+        "type": "pulse",
+        "waveform": ml.get_waveform("qub_flat", {"length": 0.1}),
+        "ch": 3,
+        "nqz": 2,
+        "gain": 0.3,
+        "freq": 5135.0,
+    }
+    snap = Snapshot(
+        {"best_ro_freq": 7444.6, "best_ro_gain": 0.5, "t1": 10.0},
+        modules={"pi_pulse": pi_pulse, "readout": _READOUT},
+    )
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=_schema(
+            RoOptimizeBuilder(),
+            {
+                "freq_window": 0.25,
+                "gain_window": 0.1,
+                "center_freq_mode": "fixed",
+                "center_freq": 7001.0,
+                "center_gain_mode": "fixed",
+                "center_gain": 0.8,
+                "relax_delay_mode": "fixed",
+                "relax_delay": 7.5,
+            },
+        ),
+        ml=ml,
+    )
+
+    cfg = RoOptimizeBuilder().make_cfg(env, snap)
+
+    assert cfg.freq_range == pytest.approx((7000.75, 7001.25))
+    assert cfg.gain_range == pytest.approx((0.7, 0.9))
+    assert cfg.relax_delay == 7.5
+
+
 def test_ro_optimize_init_result_uses_window_params():
     import numpy as np
     from zcu_tools.gui.app.autofluxdep.nodes.ro_optimize import RoOptimizeBuilder
@@ -255,6 +325,34 @@ def test_ro_optimize_init_result_uses_window_params():
     assert result.n_gain == 31
     assert result.gain[0] == 0.0
     assert result.gain[-1] == 1.0
+
+
+def test_ro_optimize_init_result_uses_fixed_center_params():
+    import numpy as np
+    import pytest
+    from zcu_tools.gui.app.autofluxdep.nodes.ro_optimize import RoOptimizeBuilder
+
+    builder = RoOptimizeBuilder()
+    schema = _schema(
+        builder,
+        {
+            "freq_expts": 11,
+            "gain_expts": 11,
+            "freq_window": 0.25,
+            "gain_window": 0.1,
+            "center_freq_mode": "fixed",
+            "center_freq": 7001.0,
+            "center_gain_mode": "fixed",
+            "center_gain": 0.8,
+        },
+    )
+
+    result = builder.make_init_result(schema, np.linspace(0.0, 1.0, 3))
+
+    assert result.freq[0] == pytest.approx(7000.75)
+    assert result.freq[-1] == pytest.approx(7001.25)
+    assert result.gain[0] == pytest.approx(0.7)
+    assert result.gain[-1] == pytest.approx(0.9)
 
 
 def test_ro_optimize_produce_fast_fails_when_context_unconfigured():
@@ -330,6 +428,34 @@ def test_t1_make_cfg_lowers_context():
     assert cfg.sweep_range == (0.5, 60.0)  # (0.5, max(1.0, 5 * 12))
     # reps / rounds come from the node params
     assert cfg.reps == 100 and cfg.rounds == 2
+
+
+def test_t1_make_cfg_can_fix_sweep_range_and_relax_delay():
+    from zcu_tools.gui.app.autofluxdep.nodes.t1 import T1Builder
+    from zcu_tools.meta_tool import ModuleLibrary
+
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=_schema(
+            T1Builder(),
+            {
+                "sweep_range": SweepValue(start=2.0, stop=4.0, expts=21),
+                "sweep_range_mode": "fixed",
+                "relax_delay_mode": "fixed",
+                "relax_delay": 9.0,
+            },
+        ),
+        ml=ModuleLibrary(),
+    )
+    snap = Snapshot(
+        {"t1": 12.0}, modules={"pi_pulse": _T1_PI_PULSE, "opt_readout": _READOUT}
+    )
+
+    cfg = T1Builder().make_cfg(env, snap)
+
+    assert cfg.sweep_range == (2.0, 4.0)
+    assert cfg.relax_delay == 9.0
 
 
 def test_t1_produce_fast_fails_when_context_unconfigured():
@@ -417,6 +543,35 @@ def test_t2ramsey_make_cfg_lowers_context():
     assert cfg.reps == 1000 and cfg.rounds == 10
     # the readout module (snapshot's opt_readout) lowered into the cfg's readout
     assert cfg.modules.readout.type == "readout/pulse"
+
+
+def test_t2ramsey_make_cfg_can_fix_sweep_range_and_relax_delay():
+    from zcu_tools.gui.app.autofluxdep.nodes.t2ramsey import T2RamseyBuilder
+
+    ml = _t2ramsey_ml()
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=_schema(
+            T2RamseyBuilder(),
+            {
+                "sweep_range": SweepValue(start=1.0, stop=9.0, expts=41),
+                "sweep_range_mode": "fixed",
+                "relax_delay_mode": "fixed",
+                "relax_delay": 11.0,
+            },
+        ),
+        ml=ml,
+    )
+    snap = Snapshot(
+        {"t1": 12.0, "t2r": 8.0},
+        modules={"pi2_pulse": _t2ramsey_pi2_pulse(ml), "opt_readout": _READOUT},
+    )
+
+    cfg = T2RamseyBuilder().make_cfg(env, snap)
+
+    assert cfg.sweep_range == (1.0, 9.0)
+    assert cfg.relax_delay == 11.0
 
 
 def test_t2ramsey_produce_fast_fails_when_context_unconfigured():
@@ -517,6 +672,40 @@ def test_t2echo_make_cfg_lowers_context():
     assert float(cfg.modules.pi2_pulse.gain) == 0.25
     assert cfg.modules.readout.type == "readout/pulse"
     assert cfg.reps == 1000 and cfg.rounds == 10
+
+
+def test_t2echo_make_cfg_can_fix_sweep_range_and_relax_delay():
+    from zcu_tools.gui.app.autofluxdep.nodes.t2echo import T2EchoBuilder
+
+    ml = _ml()
+    pi_pulse, pi2_pulse = _t2echo_pulses(ml)
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=_schema(
+            T2EchoBuilder(),
+            {
+                "sweep_range": SweepValue(start=1.0, stop=7.0, expts=41),
+                "sweep_range_mode": "fixed",
+                "relax_delay_mode": "fixed",
+                "relax_delay": 13.0,
+            },
+        ),
+        ml=ml,
+    )
+    snap = Snapshot(
+        {"t1": 12.0, "t2e": 8.0},
+        modules={
+            "pi_pulse": pi_pulse,
+            "pi2_pulse": pi2_pulse,
+            "opt_readout": _READOUT,
+        },
+    )
+
+    cfg = T2EchoBuilder().make_cfg(env, snap)
+
+    assert cfg.sweep_range == (1.0, 7.0)
+    assert cfg.relax_delay == 13.0
 
 
 def test_t2echo_produce_fast_fails_when_context_unconfigured():

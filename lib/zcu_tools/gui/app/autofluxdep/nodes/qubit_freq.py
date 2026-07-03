@@ -49,6 +49,7 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     node_field,
     node_section,
     sectioned_node_schema,
+    str_choice_spec,
     str_scalar_spec,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
@@ -80,6 +81,8 @@ _DEFAULT_QUB_CH = 0
 _DEFAULT_QUB_GAIN = 0.05
 _DEFAULT_EARLYSTOP_SNR = 50.0
 _QFW_TARGET_KAPPA = 6.5
+_DRIVE_GAIN_MODE_ADAPTIVE = "adaptive"
+_DRIVE_GAIN_MODE_FIXED = "fixed"
 
 
 class QubitFreqCfgTemplate(TwoToneCfg, ExpCfgModel):
@@ -110,6 +113,16 @@ def _drive_gain_from_qfw_factor(qfw_factor: Any | None, initial_gain: float) -> 
             "qubit_freq.make_cfg needs positive qfw_factor to derive drive gain"
         )
     return min(1.0, _QFW_TARGET_KAPPA / factor)
+
+
+def _resolve_drive_gain(
+    mode: str, qfw_factor: Any | None, initial_gain: float
+) -> float:
+    if mode == _DRIVE_GAIN_MODE_ADAPTIVE:
+        return _drive_gain_from_qfw_factor(qfw_factor, initial_gain)
+    if mode == _DRIVE_GAIN_MODE_FIXED:
+        return float(initial_gain)
+    raise RuntimeError(f"unsupported qubit_freq drive_gain_mode: {mode!r}")
 
 
 def _default_readout() -> Any | None:
@@ -439,6 +452,22 @@ class QubitFreqBuilder(Builder):
                         0.1,
                     ),
                 ),
+                node_section(
+                    "generation",
+                    "Generation overrides",
+                    node_field(
+                        "drive_gain_mode",
+                        "drive_gain_mode",
+                        str_choice_spec(
+                            "Drive gain mode",
+                            (
+                                _DRIVE_GAIN_MODE_ADAPTIVE,
+                                _DRIVE_GAIN_MODE_FIXED,
+                            ),
+                        ),
+                        _DRIVE_GAIN_MODE_ADAPTIVE,
+                    ),
+                ),
             )
         )
 
@@ -486,8 +515,10 @@ class QubitFreqBuilder(Builder):
         if ch is None:
             raise RuntimeError("qubit_freq.make_cfg needs qub_ch param set")
         predict_freq = float(snapshot["predict_freq"])
-        drive_gain = _drive_gain_from_qfw_factor(
-            snapshot["qfw_factor"], float(knobs["qub_gain"])
+        drive_gain = _resolve_drive_gain(
+            str(knobs["drive_gain_mode"]),
+            snapshot["qfw_factor"],
+            float(knobs["qub_gain"]),
         )
         return ml.make_cfg(
             {
