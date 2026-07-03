@@ -626,15 +626,21 @@ def test_qubit_freq_default_knobs():
     assert knobs["qub_gain"] == 0.05
     assert knobs["qub_length"] == 0.1
     assert knobs["drive_gain_mode"] == "adaptive"
-    # clearing an optional default still omits it (preserving the Fast-Fail guard)
+    # clearing optional defaults still omits them; channel/nqz remain required raw
+    # cfg fields because PulseCfg cannot run without concrete hardware routing.
     schema = QubitFreqBuilder().make_default_schema()
     schema.set_field("qub_waveform", None)
-    schema.set_field("qub_ch", None)
     schema.set_field("earlystop_snr", None)
     cleared = schema.lower(None)
     assert "qub_waveform" not in cleared
-    assert "qub_ch" not in cleared
     assert "earlystop_snr" not in cleared
+    schema.set_field("qub_ch", None)
+    with pytest.raises(RuntimeError, match="modules\\.qub_pulse\\.ch"):
+        schema.lower(None)
+    schema = QubitFreqBuilder().make_default_schema()
+    schema.set_field("qub_nqz", 0)
+    with pytest.raises(RuntimeError, match="modules\\.qub_pulse\\.nqz.*choices"):
+        schema.lower(None)
     # the detune sweep lowers to the prototype's (-20, 50, step 0.5) axis exactly
     detune = knobs["detune_sweep"]
     axis = np.linspace(float(detune.start), float(detune.stop), int(detune.expts))
@@ -668,6 +674,11 @@ def test_mist_default_knobs():
     assert knobs["mist_length"] == 0.1
     gain = knobs["gain_sweep"]
     assert (float(gain.start), float(gain.stop), int(gain.expts)) == (0.0, 1.0, 51)
+
+    schema = MistBuilder().make_default_schema()
+    schema.set_field("mist_nqz", 0)
+    with pytest.raises(RuntimeError, match="modules\\.mist_pulse\\.nqz.*choices"):
+        schema.lower(None)
 
 
 def test_ro_optimize_default_knobs():

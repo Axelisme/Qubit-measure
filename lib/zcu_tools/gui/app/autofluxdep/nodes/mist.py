@@ -279,13 +279,13 @@ class MistBuilder(Builder):
                 node_path(
                     "mist_ch",
                     "modules.mist_pulse.ch",
-                    IntSpec(label="ch", optional=True),
+                    IntSpec(label="ch"),
                     _DEFAULT_MIST_CH,
                 ),
                 node_path(
                     "mist_nqz",
                     "modules.mist_pulse.nqz",
-                    IntSpec(label="nqz"),
+                    IntSpec(label="nqz", choices=[1, 2]),
                     2,
                 ),
                 node_path(

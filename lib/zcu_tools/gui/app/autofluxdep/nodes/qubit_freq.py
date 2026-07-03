@@ -388,13 +388,13 @@ class QubitFreqBuilder(Builder):
                 node_path(
                     "qub_ch",
                     "modules.qub_pulse.ch",
-                    IntSpec(label="ch", optional=True),
+                    IntSpec(label="ch"),
                     _DEFAULT_QUB_CH,
                 ),
                 node_path(
                     "qub_nqz",
                     "modules.qub_pulse.nqz",
-                    IntSpec(label="nqz"),
+                    IntSpec(label="nqz", choices=[1, 2]),
                     2,
                 ),
                 node_path(

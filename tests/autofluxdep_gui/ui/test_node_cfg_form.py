@@ -139,6 +139,8 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
             "gain",
             "length",
         }
+        assert qub_pulse.fields["ch"].spec.optional is False
+        assert qub_pulse.fields["nqz"].spec.choices == [1, 2]
         assert "qub_gain" not in form._default_model.fields
         assert set(_generation(form).fields.keys()) == {"drive_gain_mode"}
         assert set(node.schema.keys) == {
