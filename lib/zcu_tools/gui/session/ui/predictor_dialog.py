@@ -31,9 +31,10 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
-from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
+from qtpy.QtGui import QCloseEvent, QShowEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QAbstractItemView,
+    QComboBox,
     QDialog,
     QFileDialog,
     QFormLayout,
@@ -50,10 +51,14 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.gui.session.state import DeviceStatus
 from zcu_tools.gui.session.ui.predictor_canvas import PredictorCurveCanvas
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 
 if TYPE_CHECKING:
+    from zcu_tools.device.base import BaseDeviceInfo
+    from zcu_tools.gui.session.device_control import DeviceControlPort
+    from zcu_tools.gui.session.events import DeviceChangedPayload
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
 
 # Default display window in flux (Φ/Φ₀) units (plan spec).
@@ -95,10 +100,12 @@ class PredictorDialog(QDialog):
         predictor: PredictorControlPort,
         parent: QWidget | None = None,
         *,
+        device: DeviceControlPort | None = None,
         persistent_on_close: bool = False,
     ) -> None:
         super().__init__(parent)
         self._pred = predictor
+        self._dev = device
         self._persistent_on_close = persistent_on_close
         self.setWindowTitle("Predictor")
         self.setMinimumWidth(1000)
@@ -190,6 +197,29 @@ class PredictorDialog(QDialog):
         self._predict_value_spin.setValue(0.0)
         self._predict_value_spin.valueChanged.connect(self._on_spinbox_changed)
         controls_row.addWidget(self._predict_value_spin)
+
+        self._device_combo: QComboBox | None = None
+        self._device_refresh_btn: QPushButton | None = None
+        self._device_read_btn: QPushButton | None = None
+        if self._dev is not None:
+            device_combo = QComboBox()
+            device_combo.setMinimumWidth(180)
+            device_combo.currentIndexChanged.connect(self._on_device_selection_changed)
+            controls_row.addWidget(device_combo)
+            self._device_combo = device_combo
+
+            device_refresh_btn = QPushButton("↻")
+            device_refresh_btn.setFixedWidth(28)
+            device_refresh_btn.setToolTip("Refresh device list and cached value")
+            device_refresh_btn.clicked.connect(self._on_refresh_devices_clicked)
+            controls_row.addWidget(device_refresh_btn)
+            self._device_refresh_btn = device_refresh_btn
+
+            device_read_btn = QPushButton("Use")
+            device_read_btn.setToolTip("Read selected device value")
+            device_read_btn.clicked.connect(self._on_read_device_clicked)
+            controls_row.addWidget(device_read_btn)
+            self._device_read_btn = device_read_btn
 
         controls_row.addSpacing(12)
         controls_row.addWidget(QLabel("from"))
@@ -291,33 +321,22 @@ class PredictorDialog(QDialog):
 
         # Populate table from default transitions before loading predictor.
         self._rebuild_table()
+        self._refresh_device_selector()
 
         # Pre-fill with current predictor state.
-        info = predictor.get_predictor_info()
-        if info is not None:
-            path = info.get("path")
-            if path:
-                self._params_path_edit.setText(str(path))
-            self._flux_bias_spin.setValue(info["flux_bias"])
-            self._flux_half = info["flux_half"]
-            self._flux_period = info["flux_period"]
-            self._populate_model_fields(
-                info["EJ"],
-                info["EC"],
-                info["EL"],
-                info["flux_half"],
-                info["flux_period"],
-            )
-            self._set_status("Currently loaded", error=False)
-            self._refresh_curves()
-        self._update_active_label()
+        self._sync_predictor_from_control(refresh_curves=True)
 
         # Facet subscription for live predictor state updates.
         self._unsubscribe_predictor_changed: Callable[[], None] | None = (
             predictor.on_predictor_changed(self._on_predictor_changed)
         )
-        self.finished.connect(self._cleanup_subscription)
-        self.destroyed.connect(self._cleanup_subscription)
+        self._unsubscribe_device_changed: Callable[[], None] | None = (
+            device.on_device_changed(self._on_device_changed)
+            if device is not None
+            else None
+        )
+        self.finished.connect(self._cleanup_subscriptions)
+        self.destroyed.connect(self._cleanup_subscriptions)
 
     def reject(self) -> None:
         if self._persistent_on_close:
@@ -332,6 +351,21 @@ class PredictorDialog(QDialog):
             self.hide()
             return
         super().closeEvent(a0)
+
+    def showEvent(self, a0: QShowEvent | None) -> None:  # noqa: N802
+        if a0 is not None:
+            super().showEvent(a0)
+            if a0.spontaneous():
+                return
+
+        self._sync_predictor_from_control(refresh_curves=False)
+        self._refresh_device_selector()
+        selected = self._selected_device_name()
+        if selected is not None:
+            self._apply_cached_device_value(selected)
+            self._request_live_device_refresh(selected)
+            return
+        self._set_predict_value(self._predict_value_spin.value(), update_status=False)
 
     def _on_close_requested(self) -> None:
         self.reject()
@@ -364,6 +398,42 @@ class PredictorDialog(QDialog):
         self._flux_half_spin.setValue(flux_half)
         self._flux_period_spin.setValue(flux_period)
 
+    def _sync_predictor_from_control(self, *, refresh_curves: bool) -> None:
+        """Read the active predictor model into the fields and optional curves."""
+        info = self._pred.get_predictor_info()
+        if info is not None:
+            path = info.get("path")
+            if path:
+                self._params_path_edit.setText(str(path))
+            self._flux_bias_spin.setValue(info["flux_bias"])
+            self._flux_half = info["flux_half"]
+            self._flux_period = info["flux_period"]
+            self._populate_model_fields(
+                info["EJ"],
+                info["EC"],
+                info["EL"],
+                info["flux_half"],
+                info["flux_period"],
+            )
+            self._set_status("Currently loaded", error=False)
+            if refresh_curves:
+                self._refresh_curves()
+        else:
+            self._flux_half = None
+            self._flux_period = None
+            self._set_status("Not loaded", error=False)
+            self._clear_predictor_display()
+        self._update_active_label()
+
+    def _clear_predictor_display(self) -> None:
+        for canvas in self._all_canvases:
+            canvas.clear()
+        for row_idx in range(self._table.rowCount()):
+            for col in (_COL_FREQ, _COL_MAG_N, _COL_MAG_PHI):
+                item = self._table.item(row_idx, col)
+                if item is not None:
+                    item.setText("—")
+
     # ------------------------------------------------------------------
     # Affine helpers (value ↔ flux)
     # ------------------------------------------------------------------
@@ -393,6 +463,132 @@ class PredictorDialog(QDialog):
             return (f - 0.5) * flux_period + flux_half - flux_bias
 
         return value_to_flux, flux_to_value
+
+    # ------------------------------------------------------------------
+    # Device-value selector helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _extract_numeric_info_value(info: BaseDeviceInfo | None) -> float | None:
+        if info is None:
+            return None
+        raw = getattr(info, "value", None)
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+            return None
+        return float(raw)
+
+    def _selected_device_name(self) -> str | None:
+        combo = self._device_combo
+        if combo is None:
+            return None
+        data = combo.currentData()
+        return data if isinstance(data, str) and data else None
+
+    def _update_device_buttons(self) -> None:
+        selected = self._selected_device_name() is not None
+        if self._device_read_btn is not None:
+            self._device_read_btn.setEnabled(selected)
+
+    def _refresh_device_selector(self) -> None:
+        if self._dev is None or self._device_combo is None:
+            return
+
+        combo = self._device_combo
+        current_name = self._selected_device_name()
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("(none)", userData=None)
+        try:
+            entries = self._dev.list_devices()
+            for entry in entries:
+                if entry.status != DeviceStatus.CONNECTED.value:
+                    continue
+                value = self._dev.get_cached_device_value(entry.name)
+                if value is None:
+                    continue
+                unit = self._dev.get_device_unit(entry.name)
+                unit_suffix = f" ({unit})" if unit and unit != "none" else ""
+                combo.addItem(
+                    f"{entry.name}  [{entry.type_name}]{unit_suffix}",
+                    userData=entry.name,
+                )
+        except Exception as exc:
+            self._set_status(f"Failed to refresh device list: {exc}", error=True)
+        finally:
+            idx = combo.findData(current_name) if current_name is not None else 0
+            combo.setCurrentIndex(idx if idx >= 0 else 0)
+            combo.blockSignals(False)
+            self._update_device_buttons()
+
+    def _set_predict_value(self, value: float, *, update_status: bool = True) -> None:
+        self._predict_value_spin.blockSignals(True)
+        self._predict_value_spin.setValue(value)
+        self._predict_value_spin.blockSignals(False)
+        self._sync_markers(self._predict_value_spin.value())
+        self._debounce_timer.stop()
+        self._update_value_columns()
+        if update_status:
+            self._set_status(f"Device value: {self._predict_value_spin.value():.6g}")
+
+    def _apply_cached_device_value(self, name: str) -> bool:
+        if self._dev is None:
+            return False
+        value = self._dev.get_cached_device_value(name)
+        if value is None:
+            self._set_status(f"No cached device value for {name!r}.", error=True)
+            return False
+        self._set_predict_value(value, update_status=False)
+        self._set_status(f"Cached device value from {name}: {value:.6g}", error=False)
+        return True
+
+    def _request_live_device_refresh(self, name: str) -> None:
+        if self._dev is None:
+            return
+        try:
+            self._dev.poll_device_info(name)
+        except Exception as exc:
+            self._set_status(f"Failed to refresh {name!r}: {exc}", error=True)
+
+    def _on_refresh_devices_clicked(self) -> None:
+        self._refresh_device_selector()
+        selected = self._selected_device_name()
+        if selected is None:
+            self._set_predict_value(
+                self._predict_value_spin.value(), update_status=False
+            )
+            return
+        self._apply_cached_device_value(selected)
+        self._request_live_device_refresh(selected)
+
+    def _on_read_device_clicked(self) -> None:
+        if self._dev is None:
+            return
+        selected = self._selected_device_name()
+        if selected is None:
+            self._set_status("Select a device first.", error=True)
+            return
+        try:
+            info = self._dev.get_device_info(selected)
+        except Exception as exc:
+            self._set_status(f"Failed to read {selected!r}: {exc}", error=True)
+            return
+        value = self._extract_numeric_info_value(info)
+        if value is None:
+            self._set_status(f"Device {selected!r} has no numeric value.", error=True)
+            return
+        self._set_predict_value(value, update_status=False)
+        self._set_status(f"Read device value from {selected}: {value:.6g}", error=False)
+
+    def _on_device_selection_changed(self, _index: int) -> None:
+        self._update_device_buttons()
+        selected = self._selected_device_name()
+        if selected is None:
+            self._set_predict_value(
+                self._predict_value_spin.value(), update_status=False
+            )
+            return
+        self._apply_cached_device_value(selected)
+        self._request_live_device_refresh(selected)
 
     # ------------------------------------------------------------------
     # Table helpers
@@ -827,44 +1023,30 @@ class PredictorDialog(QDialog):
     # Bus subscription
     # ------------------------------------------------------------------
 
-    def _cleanup_subscription(self, *_args: object) -> None:
-        unsubscribe = self._unsubscribe_predictor_changed
-        if unsubscribe is None:
-            return
-        self._unsubscribe_predictor_changed = None
-        unsubscribe()
+    def _cleanup_subscriptions(self, *_args: object) -> None:
+        unsubscribe_predictor = self._unsubscribe_predictor_changed
+        if unsubscribe_predictor is not None:
+            self._unsubscribe_predictor_changed = None
+            unsubscribe_predictor()
+        unsubscribe_device = self._unsubscribe_device_changed
+        if unsubscribe_device is not None:
+            self._unsubscribe_device_changed = None
+            unsubscribe_device()
 
     def _on_predictor_changed(self, payload: object) -> None:
         del payload
-        info = self._pred.get_predictor_info()
-        if info is not None:
-            path = info.get("path")
-            if path:
-                self._params_path_edit.setText(str(path))
-            self._flux_bias_spin.setValue(info["flux_bias"])
-            self._flux_half = info["flux_half"]
-            self._flux_period = info["flux_period"]
-            self._populate_model_fields(
-                info["EJ"],
-                info["EC"],
-                info["EL"],
-                info["flux_half"],
-                info["flux_period"],
-            )
-            self._set_status("Currently loaded", error=False)
-            self._refresh_curves()
-        else:
-            self._flux_half = None
-            self._flux_period = None
-            self._set_status("Not loaded", error=False)
-            for canvas in self._all_canvases:
-                canvas.clear()
-            for row_idx in range(self._table.rowCount()):
-                for col in (_COL_FREQ, _COL_MAG_N, _COL_MAG_PHI):
-                    item = self._table.item(row_idx, col)
-                    if item is not None:
-                        item.setText("—")
-        self._update_active_label()
+        self._sync_predictor_from_control(refresh_curves=True)
+
+    def _on_device_changed(self, payload: DeviceChangedPayload) -> None:
+        if not self.isVisible():
+            return
+        before = self._selected_device_name()
+        self._refresh_device_selector()
+        selected = self._selected_device_name()
+        if selected is None:
+            return
+        if payload.name is None or payload.name == selected or before != selected:
+            self._apply_cached_device_value(selected)
 
     # ------------------------------------------------------------------
     # Status helper

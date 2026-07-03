@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-02 - setup-control facet
+**Last updated:** 2026-07-03 - predictor device facet
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -157,7 +157,10 @@ shared dialog lifecycle helper for reference retention and `finished` /
 `InspectDialogBase` by passing `context_control`; the subclass keeps the concrete
 controller only for measure-only CfgEditor create/modify and role-catalog actions.
 `SetupDialog` receives `setup_control`, so project/context/SoC bootstrap UI no
-longer depends on the concrete controller façade.
+longer depends on the concrete controller façade. The persistent measure
+`PredictorDialog` receives both `predictor_control` and `device_control`, so the
+shared dialog can refresh cached device values on every reopen without depending
+on the concrete controller.
 
 ## Adapter-Facing Rules
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from typing import cast
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from qtpy.QtWidgets import QDialog, QWidget
@@ -112,6 +112,27 @@ def test_open_rebuilds_stale_destroyed_dialog(qapp) -> None:
 
     assert registry.dialog(DialogName.SETUP) is created[0]
     assert created[0].isVisible() is True
+
+
+def test_predictor_dialog_factory_injects_predictor_and_device_facets(qapp) -> None:
+    parent = QWidget()
+    ctrl = MagicMock()
+    registry = MainDialogRegistry(ctrl, parent=parent)
+    dialog = QDialog(parent)
+
+    with patch(
+        "zcu_tools.gui.session.ui.predictor_dialog.PredictorDialog",
+        return_value=dialog,
+    ) as predictor_dialog:
+        built = registry._build_dialog(DialogName.PREDICTOR)
+
+    assert built is dialog
+    predictor_dialog.assert_called_once_with(
+        ctrl.predictor_control,
+        parent=parent,
+        device=ctrl.device_control,
+        persistent_on_close=True,
+    )
 
 
 def test_take_screenshot_requires_visible_dialog(qapp) -> None:

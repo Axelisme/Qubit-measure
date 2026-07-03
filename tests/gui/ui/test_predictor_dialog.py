@@ -6,6 +6,9 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
+from zcu_tools.device.fake import FakeDeviceInfo
+from zcu_tools.gui.session.events import DeviceChangedPayload
+from zcu_tools.gui.session.services.device import DeviceEntry
 from zcu_tools.gui.session.services.predictor import (
     PredictCurveResult,
     PredictMatrixCurveResult,
@@ -13,6 +16,7 @@ from zcu_tools.gui.session.services.predictor import (
     PredictorNotLoaded,
     SetModelParamsRequest,
 )
+from zcu_tools.gui.session.state import DeviceStatus
 from zcu_tools.gui.session.ui.predictor_dialog import (
     _COL_FREQ,
     _COL_MAG_N,
@@ -94,6 +98,26 @@ def _make_ctrl(
     ctrl.predict_matrix_element_curve.side_effect = _mat_side
     ctrl.predict_freq.return_value = 1234.5
     ctrl.on_predictor_changed.return_value = MagicMock(name="unsubscribe_predictor")
+    return ctrl
+
+
+def _make_device_ctrl(
+    *,
+    entries: list[DeviceEntry] | None = None,
+    cached: dict[str, float | None] | None = None,
+    units: dict[str, str] | None = None,
+    live: dict[str, FakeDeviceInfo | None] | None = None,
+) -> MagicMock:
+    ctrl = MagicMock()
+    value_cache = cached if cached is not None else {}
+    unit_map = units if units is not None else {}
+    live_map = live if live is not None else {}
+    ctrl.list_devices.return_value = list(entries or [])
+    ctrl.get_cached_device_value.side_effect = lambda name: value_cache.get(name)
+    ctrl.get_device_unit.side_effect = lambda name: unit_map.get(name, "none")
+    ctrl.get_device_info.side_effect = lambda name: live_map.get(name)
+    ctrl.poll_device_info.return_value = None
+    ctrl.on_device_changed.return_value = MagicMock(name="unsubscribe_device")
     return ctrl
 
 
@@ -414,6 +438,112 @@ def test_predictor_dialog_device_value_label_no_unit(qapp):
     # No Ampere / "(A)" unit on any label.
     assert not any("(A)" in t for t in labels)
     assert not any("Flux value" in t for t in labels)
+
+
+def test_predictor_dialog_optional_device_facet_no_controls(qapp):
+    ctrl = _make_ctrl(has_predictor=False)
+    dialog = PredictorDialog(ctrl)
+
+    assert dialog._dev is None
+    assert dialog._device_combo is None
+
+
+def test_predictor_dialog_device_selector_lists_connected_cached_values(qapp):
+    ctrl = _make_ctrl(has_predictor=False)
+    entries = [
+        DeviceEntry("flux", "YOKOGS200", DeviceStatus.CONNECTED.value),
+        DeviceEntry("fake", "FakeDevice", DeviceStatus.CONNECTED.value),
+        DeviceEntry("lo", "RohdeSchwarzSGS100A", DeviceStatus.CONNECTED.value),
+        DeviceEntry("memory", "FakeDevice", DeviceStatus.MEMORY_ONLY.value),
+        DeviceEntry("busy", "FakeDevice", DeviceStatus.SETTING_UP.value),
+    ]
+    device = _make_device_ctrl(
+        entries=entries,
+        cached={"flux": 0.1, "fake": 0.2, "lo": None, "memory": 0.3, "busy": 0.4},
+        units={"flux": "A"},
+    )
+
+    dialog = PredictorDialog(ctrl, device=device)
+
+    combo = dialog._device_combo
+    assert combo is not None
+    assert [combo.itemData(i) for i in range(combo.count())] == [
+        None,
+        "flux",
+        "fake",
+    ]
+    assert "YOKOGS200" in combo.itemText(1)
+    assert "(A)" in combo.itemText(1)
+
+
+def test_predictor_dialog_read_selected_device_updates_value_immediately(qapp):
+    ctrl = _make_ctrl(has_predictor=True, path="/p.json")
+    device = _make_device_ctrl(
+        entries=[DeviceEntry("flux", "FakeDevice", DeviceStatus.CONNECTED.value)],
+        cached={"flux": 0.1},
+        live={"flux": FakeDeviceInfo(address="none", value=0.456)},
+    )
+    dialog = PredictorDialog(ctrl, device=device)
+    combo = dialog._device_combo
+    assert combo is not None
+    combo.setCurrentIndex(combo.findData("flux"))
+
+    with patch.object(dialog, "_update_value_columns") as update_columns:
+        dialog._on_read_device_clicked()
+
+    assert dialog._predict_value_spin.value() == pytest.approx(0.456)
+    update_columns.assert_called_once_with()
+    device.get_device_info.assert_called_with("flux")
+
+
+def test_predictor_dialog_show_refreshes_selected_cached_value_and_columns(qapp):
+    ctrl = _make_ctrl(has_predictor=True, path="/p.json")
+    cached: dict[str, float | None] = {"flux": 0.1}
+    device = _make_device_ctrl(
+        entries=[DeviceEntry("flux", "FakeDevice", DeviceStatus.CONNECTED.value)],
+        cached=cached,
+    )
+    dialog = PredictorDialog(ctrl, device=device)
+    combo = dialog._device_combo
+    assert combo is not None
+    combo.setCurrentIndex(combo.findData("flux"))
+    ctrl.predict_freq.reset_mock()
+    ctrl.predict_freq_curve.reset_mock()
+    device.poll_device_info.reset_mock()
+    cached["flux"] = 0.3
+
+    dialog.showEvent(None)
+
+    assert dialog._predict_value_spin.value() == pytest.approx(0.3)
+    device.poll_device_info.assert_called_with("flux")
+    ctrl.predict_freq.assert_called()
+    ctrl.predict_freq_curve.assert_not_called()
+
+
+def test_predictor_dialog_selected_device_changed_applies_cached_value(qapp):
+    ctrl = _make_ctrl(has_predictor=True, path="/p.json")
+    cached: dict[str, float | None] = {"flux": 0.1, "other": 0.2}
+    device = _make_device_ctrl(
+        entries=[
+            DeviceEntry("flux", "FakeDevice", DeviceStatus.CONNECTED.value),
+            DeviceEntry("other", "FakeDevice", DeviceStatus.CONNECTED.value),
+        ],
+        cached=cached,
+    )
+    dialog = PredictorDialog(ctrl, device=device)
+    combo = dialog._device_combo
+    assert combo is not None
+    combo.setCurrentIndex(combo.findData("flux"))
+    dialog.show()
+    qapp.processEvents()
+
+    cached["other"] = 0.9
+    dialog._on_device_changed(DeviceChangedPayload(name="other"))
+    assert dialog._predict_value_spin.value() == pytest.approx(0.1)
+
+    cached["flux"] = 0.7
+    dialog._on_device_changed(DeviceChangedPayload(name="flux"))
+    assert dialog._predict_value_spin.value() == pytest.approx(0.7)
 
 
 # ---------------------------------------------------------------------------

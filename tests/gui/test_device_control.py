@@ -80,6 +80,10 @@ class RecordingDevice:
         self._log.add("device", "get_device_info", name)
         return self.info
 
+    def get_cached_device_value(self, name: str) -> float | None:
+        self._log.add("device", "get_cached_device_value", name)
+        return 0.125
+
     def poll_device_info(self, name: str) -> None:
         self._log.add("device", "poll_device_info", name)
 
@@ -197,6 +201,12 @@ def test_device_control_facet_forwards_deliberate_device_dialog_contract() -> No
             lambda: facet.get_device_info("fd"),
             device.info,
             call("device", "get_device_info", "fd"),
+        ),
+        (
+            "get_cached_device_value",
+            lambda: facet.get_cached_device_value("fd"),
+            0.125,
+            call("device", "get_cached_device_value", "fd"),
         ),
         (
             "poll_device_info",

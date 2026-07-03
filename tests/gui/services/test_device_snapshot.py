@@ -9,10 +9,11 @@ from unittest.mock import MagicMock
 import pytest
 from qtpy.QtCore import QCoreApplication
 from zcu_tools.device import GlobalDeviceManager
-from zcu_tools.device.fake import FakeDevice
+from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
+from zcu_tools.device.sgs100a import RohdeSchwarzSGS100AInfo
 from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.gui.app.main.services.operation_gate import OperationGate
-from zcu_tools.gui.app.main.state import State
+from zcu_tools.gui.app.main.state import DeviceState, DeviceStatus, State
 from zcu_tools.gui.background import BackgroundRunner
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
@@ -115,6 +116,75 @@ def test_get_device_unit_for_cached_yoko_info(qapp):
 
     assert svc.get_device_unit("flux") == "V"
     assert svc.get_device_value_for_new_context("flux") == 0.003
+
+
+def test_get_cached_device_value_uses_state_without_reading_hardware(qapp):
+    yoko_info = YOKOGS200Info(address="GPIB::1", mode="voltage", value=0.003)
+    fake_yoko = MagicMock()
+    fake_yoko.get_info.return_value = yoko_info
+    svc = _make_svc(driver=fake_yoko)
+    _connect(svc, type_name="YOKOGS200")
+    fake_yoko.get_info.reset_mock()
+
+    assert svc.get_cached_device_value("flux") == pytest.approx(0.003)
+    fake_yoko.get_info.assert_not_called()
+
+
+def test_get_cached_device_value_accepts_fake_device_info(qapp):
+    svc = _make_svc()
+    _connect(svc, "fake_flux", type_name="FakeDevice")
+
+    assert svc.get_cached_device_value("fake_flux") == pytest.approx(0.0)
+
+
+def test_get_cached_device_value_rejects_unsupported_device_type(qapp):
+    fake_source = MagicMock()
+    fake_source.get_info.return_value = RohdeSchwarzSGS100AInfo(
+        address="TCPIP::1", freq_Hz=5e9, power_dBm=-20.0
+    )
+    svc = _make_svc(driver=fake_source)
+    _connect(svc, "lo", type_name="RohdeSchwarzSGS100A")
+
+    assert svc.get_cached_device_value("lo") is None
+
+
+def test_get_cached_device_value_rejects_non_connected_or_missing_info(qapp):
+    svc = _make_svc()
+    state = svc._state
+    state.put_device(
+        DeviceState(
+            name="memory",
+            type_name="FakeDevice",
+            address="none",
+            status=DeviceStatus.MEMORY_ONLY,
+            remember=True,
+            info=FakeDeviceInfo(address="none", value=1.0),
+        )
+    )
+    state.put_device(
+        DeviceState(
+            name="setting",
+            type_name="FakeDevice",
+            address="none",
+            status=DeviceStatus.SETTING_UP,
+            remember=True,
+            info=FakeDeviceInfo(address="none", value=2.0),
+        )
+    )
+    state.put_device(
+        DeviceState(
+            name="missing",
+            type_name="FakeDevice",
+            address="none",
+            status=DeviceStatus.CONNECTED,
+            remember=True,
+            info=None,
+        )
+    )
+
+    assert svc.get_cached_device_value("memory") is None
+    assert svc.get_cached_device_value("setting") is None
+    assert svc.get_cached_device_value("missing") is None
 
 
 def test_get_device_unit_yoko_current_mode_returns_a(qapp):

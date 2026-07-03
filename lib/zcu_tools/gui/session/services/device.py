@@ -211,6 +211,16 @@ def _mode_dependent_unit(dev: DeviceState) -> str | None:
     return None
 
 
+def _extract_numeric_device_value(info: BaseDeviceInfo | None) -> float | None:
+    """Return a strict numeric ``value`` field from cached/live device info."""
+    if info is None:
+        return None
+    raw = getattr(info, "value", None)
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return None
+    return float(raw)
+
+
 def list_supported_device_types() -> list[str]:
     return list(_DEVICE_TYPE_REGISTRY.keys())
 
@@ -762,6 +772,21 @@ class DeviceService(QObject):
             return mode_unit
         return _DEVICE_DEFAULT_UNITS[dev.type_name]
 
+    def get_cached_device_value(self, name: str) -> float | None:
+        """Return the cached numeric predictor/flux value for a live device.
+
+        This is a cheap State-only query: it does not touch hardware, refresh the
+        cache, bump versions, or emit events. The type whitelist intentionally
+        matches the existing flux-device unit whitelist so RF sources are not
+        treated as predictor device-value providers by accident.
+        """
+        dev = self._state.get_device(name)
+        if dev is None or dev.status is not DeviceStatus.CONNECTED:
+            return None
+        if dev.type_name not in _DEVICE_DEFAULT_UNITS:
+            return None
+        return _extract_numeric_device_value(dev.info)
+
     def get_device_info(self, name: str) -> BaseDeviceInfo | None:
         self._reject_mutating_read(name)
         dev = self._state.get_device(name)
@@ -845,10 +870,7 @@ class DeviceService(QObject):
 
     def get_device_value_for_new_context(self, name: str) -> float | None:
         info = self.get_device_info(name)
-        if info is None:
-            return None
-        raw = getattr(info, "value", None)
-        return None if raw is None else float(raw)
+        return _extract_numeric_device_value(info)
 
     def _connect(self, req: ConnectDeviceRequest) -> BaseDeviceInfo:
         if req.name in self._registry.get_all_devices():

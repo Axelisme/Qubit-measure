@@ -59,6 +59,7 @@ class MainDialogRegistry:
             return PredictorDialog(
                 self._ctrl.predictor_control,
                 parent=self._parent,
+                device=self._ctrl.device_control,
                 persistent_on_close=True,
             )
         if name is DialogName.INSPECT:

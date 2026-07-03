@@ -1,6 +1,6 @@
 # Device Note for `zcu_tools/device`
 
-**Last updated:** 2026-07-03 — BaseDevice session hook and shared ramp helper
+**Last updated:** 2026-07-03 — strict device value validation
 
 這份筆記整理 `lib/zcu_tools/device` 的設計：以 VISA（pyvisa）為底層，抽出 `BaseDevice` + `BaseDeviceInfo` 的通用契約，再由 `GlobalDeviceManager` 做 process-wide 單例管理。內建裝置包含 `YOKOGS200`（電流/電壓源）、`RohdeSchwarzSGS100A`（微波訊號源）與 `FakeDevice`（mock 測試）。
 
@@ -38,6 +38,11 @@ Pydantic model，繼承 `ConfigBase`，所有子類型共用的基底欄位：
 | `label` | ✘ | 選填顯示名（`Optional[str] = None`） |
 
 子類透過 `class XxxInfo(BaseDeviceInfo)` 繼承，`type: Literal["Xxx"] = "Xxx"` 鎖死型別。
+
+Value-capable info models（目前 `FakeDeviceInfo` / `YOKOGS200Info`）把 `value`
+視為 strict real numeric scalar：只接受 `int | float`，不接受 `bool` 或 string
+coercion。這個限制在 Pydantic model boundary 先 fail-fast，避免 device cache /
+predictor device-value flow 把非 numeric input 當作有效硬體值。
 
 `with_updates(**kwargs)`：拒絕修改 `type` / `address`（protected fields），確保 immutable identity；其他欄位透過 Pydantic `model_validate` 更新。
 

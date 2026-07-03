@@ -5,6 +5,8 @@ import time
 import warnings
 from typing import TYPE_CHECKING, Literal
 
+from pydantic import field_validator
+
 from ._ramp import ramp_linear
 from .base import BaseDevice, BaseDeviceInfo, device_operation
 
@@ -29,6 +31,16 @@ class YOKOGS200Info(BaseDeviceInfo):
     mode: Literal["voltage", "current"] = "voltage"
     value: float = 0.0
     rampstep: float = DEFAULT_RAMPSTEP["voltage"]
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def _validate_value(cls, value: object) -> object:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(
+                "value must be a real numeric scalar (int or float); "
+                "bool and strings are not accepted"
+            )
+        return value
 
     def set_flux(self, value: float) -> None:
         self.value = value
