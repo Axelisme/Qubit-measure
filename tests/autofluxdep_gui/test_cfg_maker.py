@@ -159,6 +159,8 @@ def test_lenrabi_make_cfg_lowers_context():
         "qub_ch": 4,
         "qub_nqz": 2,
         "qub_gain": 0.3,
+        "expected_pi_length": 0.25,
+        "max_drive_gain": 2.0,
         "sweep_range": SweepValue(start=0.05, stop=2.5, expts=61),
         "reps": 1000,
         "rounds": 10,
@@ -166,7 +168,7 @@ def test_lenrabi_make_cfg_lowers_context():
     }
     env = RunEnv(flux=0.0, flux_idx=0, schema=_schema(LenRabiBuilder(), params), ml=ml)
     snap = Snapshot(
-        {"qubit_freq": 5135.0, "t1": 10.0, "pi_length": 0.5, "pi_product": 0.45},
+        {"qubit_freq": 5135.0, "t1": 10.0, "pi_length": 0.5, "pi_product": 0.3},
         modules={"opt_readout": _READOUT},
     )
     cfg = LenRabiBuilder().make_cfg(env, snap)
@@ -174,9 +176,11 @@ def test_lenrabi_make_cfg_lowers_context():
     # the rabi drive pulse is on resonance: its freq is the required qubit_freq
     assert float(cfg.modules.rabi_pulse.freq) == 5135.0
     assert int(cfg.modules.rabi_pulse.ch) == 4
-    assert float(cfg.modules.rabi_pulse.gain) == pytest.approx(0.6)
+    # drive gain uses expected_pi_length as the control setpoint, not the
+    # previous measured pi_length.
+    assert float(cfg.modules.rabi_pulse.gain) == pytest.approx(0.8)
     assert cfg.reps == 1000 and cfg.rounds == 10
-    # sweep_range tracks the latest pi_length by default.
+    # sweep_range still tracks the latest measured pi_length by default.
     assert cfg.sweep_range == (0.05, 2.5)
     assert cfg.relax_delay == 30.0
 
@@ -209,6 +213,34 @@ def test_lenrabi_make_cfg_uses_matching_pi_seed_for_first_pass_gain():
 
     assert float(cfg.modules.rabi_pulse.gain) == pytest.approx(0.4)
     assert cfg.sweep_range == (0.05, 1.2)
+
+
+def test_lenrabi_make_cfg_uses_seed_and_expected_setpoint_without_feedback():
+    from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import LenRabiBuilder
+
+    ml = _ml()
+    builder = LenRabiBuilder()
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=_schema(
+            builder,
+            {
+                "qub_ch": 4,
+                "qub_nqz": 2,
+                "expected_pi_length": 0.3,
+                "pi_product_seed": 0.36,
+                "max_drive_gain": 2.0,
+            },
+        ),
+        ml=ml,
+    )
+    snap = Snapshot({"qubit_freq": 5135.0}, modules={"opt_readout": _READOUT})
+
+    cfg = builder.make_cfg(env, snap)
+
+    assert float(cfg.modules.rabi_pulse.gain) == pytest.approx(0.8)
+    assert cfg.sweep_range == (0.05, 1.5)
 
 
 def test_lenrabi_produce_fast_fails_when_context_unconfigured():

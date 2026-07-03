@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-03 — device setup poll
+**Last updated:** 2026-07-04 — autofluxdep lenrabi feedback
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -215,6 +215,10 @@ contract；`onetone/freq` 的 homophasal selector 只在 adapter 邊界注入 md
 `tests/gui/services/remote/test_remote_mcp_toolchain.py` 保留 remote MCP startup/device/schema/wrapper 與 base async contract；bundle/stage tools 放在 `test_bundle_tools.py`，screenshot/debug/overview 放在 `test_screenshot_overview_tools.py`。新增 remote MCP 測試時優先放到對應 focused file；只有真正跨 toolchain 的行為才放回 `test_remote_mcp_toolchain.py`。
 
 `tests/gui/_control_fakes.py` 提供 control facet tests 的 typed recording fakes。新增 `test_*_control.py` contract 時，偏好 recording fake + 表驅動 public forwarding contract；只在需要 Qt signal / event bus behavior 時測 event disposer、signal rebind 或 state transition，不把 `MagicMock.assert_called_once_with` 當成主要測試內容。
+
+### Autofluxdep GUI tests
+
+`tests/autofluxdep_gui/test_cfg_maker.py` 覆蓋 node builder 的 cfg lowering 與 generation overrides；lenrabi 測試同時鎖定 drive-gain feedback 使用 `expected_pi_length` setpoint、auto sweep range 使用上一點 measured `pi_length`、first-pass fallback 使用 `pi_product_seed`。`test_lenrabi_acquire.py` 覆蓋 lenrabi real-acquire smoke path 與 node-local fit gate helper：decay/non-decay fit 競賽、預期 candidate fit failure isolation、非預期 fit exception Fast Fail、不可信 fit 不送 feedback Patch、pi2 不可信時不產生成對 drive modules。
 
 ### GUI device service tests
 

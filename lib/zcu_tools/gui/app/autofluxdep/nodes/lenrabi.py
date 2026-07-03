@@ -10,8 +10,8 @@ and pi2 lengths plus the Rabi frequency.
   drives the qubit on resonance, so no qubit frequency → no sensible cfg.
 - the ``opt_readout`` module is optional (ro_optimize produces it → ml preset →
   default).
-- provides the ``pi_pulse`` and ``pi2_pulse`` modules built from the fitted pi /
-  pi2 lengths.
+- provides the ``pi_pulse`` module built from the fitted pi length, and provides
+  ``pi2_pulse`` when the fitted pi2 length is finite and trusted.
 
 ``produce`` lowers the active context (a populated ml + an ``opt_readout`` module
 + the drive "設定頭" params) into a real ``LenRabiCfgTemplate`` via
@@ -25,10 +25,12 @@ Fast Fails when the context is unconfigured. Compare ``notebook_md/autofluxdep.m
 from __future__ import annotations
 
 import logging
-from collections.abc import MutableMapping
+from collections.abc import Callable, MutableMapping
+from dataclasses import dataclass
 from typing import Any, cast
 
 import numpy as np
+from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -41,7 +43,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     acquire_to_complex,
     axis_to_sweep,
     build_stop_checkers,
-    fill_decay_fit_or_skip,
+    is_good_fit,
     make_on_round,
     require_flux_device,
     round_progress,
@@ -88,6 +90,9 @@ _DEFAULT_RELAX_FACTOR = 3.0
 _DEFAULT_RELAX_MIN = 0.0
 _DEFAULT_PI_PRODUCT_FACTOR = 1.5
 _DEFAULT_MAX_DRIVE_GAIN = 1.0
+_MIN_TRUSTED_PI_LENGTH = 0.03
+_MAX_PI_SWEEP_FRACTION = 0.9
+_MAX_FIT_RESIDUAL_RATIO = 0.1
 _SWEEP_RANGE_MODE_AUTO_PI_LENGTH = "auto_pi_length"
 _SWEEP_RANGE_MODE_FIXED = "fixed"
 _RELAX_DELAY_MODE_AUTO_T1 = "auto_t1"
@@ -140,6 +145,19 @@ def _float_or_none(value: Any) -> float | None:
     if value is None:
         return None
     return float(value)
+
+
+def _require_positive_finite(name: str, value: Any) -> float:
+    out = float(value)
+    if not np.isfinite(out) or out <= 0.0:
+        raise RuntimeError(f"lenrabi {name} must be positive and finite")
+    return out
+
+
+def _optional_positive_finite(name: str, value: Any) -> float | None:
+    if value is None:
+        return None
+    return _require_positive_finite(name, value)
 
 
 def _seed_t1(ctx: Any | None) -> float:
@@ -203,31 +221,27 @@ def _resolve_cfg_relax_delay(
 
 
 def _drive_gain_from_pi_product(
-    pi_product: float, pi_length: float, *, factor: float, max_drive_gain: float
+    pi_product: float, target_pi_length: float, *, factor: float, max_drive_gain: float
 ) -> float:
-    if pi_product <= 0.0:
-        raise RuntimeError("lenrabi auto drive gain needs positive pi_product")
-    if pi_length <= 0.0:
-        raise RuntimeError("lenrabi auto drive gain needs positive pi_length")
-    if factor <= 0.0:
-        raise RuntimeError("lenrabi pi_product_factor must be positive")
-    if max_drive_gain <= 0.0:
-        raise RuntimeError("lenrabi max_drive_gain must be positive")
-    return min(float(max_drive_gain), float(pi_product) / (factor * pi_length))
+    product = _require_positive_finite("pi_product", pi_product)
+    target = _require_positive_finite("target_pi_length", target_pi_length)
+    gain_factor = _require_positive_finite("pi_product_factor", factor)
+    gain_cap = _require_positive_finite("max_drive_gain", max_drive_gain)
+    return min(gain_cap, product / (gain_factor * target))
 
 
 def _resolve_drive_gain(
     mode: str,
     *,
     pi_product: float,
-    pi_length: float,
+    target_pi_length: float,
     fixed: float,
     knobs: dict[str, Any],
 ) -> float:
     if mode == _DRIVE_GAIN_MODE_AUTO_PI_PRODUCT:
         return _drive_gain_from_pi_product(
             pi_product,
-            pi_length,
+            target_pi_length,
             factor=float(knobs["pi_product_factor"]),
             max_drive_gain=float(knobs["max_drive_gain"]),
         )
@@ -240,6 +254,142 @@ def _drive_pulse_with_length(base: PulseCfg, length: float) -> dict[str, Any]:
     pulse = base.model_copy(deep=True)
     pulse.set_param("length", float(length))
     return pulse.to_dict()
+
+
+@dataclass(frozen=True)
+class _LenRabiFeedbackInputs:
+    target_pi_length: float
+    range_pi_length: float
+    feedback_pi_product: float
+
+
+def _resolve_feedback_inputs(
+    snapshot: Snapshot, knobs: dict[str, Any]
+) -> _LenRabiFeedbackInputs:
+    target_pi_length = _require_positive_finite(
+        "expected_pi_length", knobs["expected_pi_length"]
+    )
+    range_pi_length = (
+        _optional_positive_finite("previous pi_length", snapshot.get("pi_length"))
+        or target_pi_length
+    )
+    feedback_pi_product = _optional_positive_finite(
+        "previous pi_product", snapshot.get("pi_product")
+    ) or _require_positive_finite("pi_product_seed", knobs["pi_product_seed"])
+    return _LenRabiFeedbackInputs(
+        target_pi_length=target_pi_length,
+        range_pi_length=range_pi_length,
+        feedback_pi_product=feedback_pi_product,
+    )
+
+
+@dataclass(frozen=True)
+class _LenRabiFit:
+    pi_length: float
+    pi2_length: float
+    rabi_freq: float
+    residual: float
+    fit_curve: NDArray[np.float64]
+
+
+def _fit_residual_sort_key(fit: _LenRabiFit) -> tuple[int, float]:
+    if not np.isfinite(fit.residual):
+        return (1, np.inf)
+    return (0, fit.residual)
+
+
+def _fit_lenrabi(
+    lengths: NDArray[np.float64], real: NDArray[np.float64]
+) -> _LenRabiFit:
+    fits: list[_LenRabiFit] = []
+    fit_errors: list[RuntimeError] = []
+    for decay in (True, False):
+        try:
+            pi_x, _, pi2_x, _, freq, _, fit_curve, _ = fit_rabi(
+                lengths, real, decay=decay
+            )
+        except RuntimeError as exc:
+            fit_errors.append(exc)
+            logger.debug(
+                "lenrabi %s fit candidate failed: %s",
+                "decay" if decay else "non-decay",
+                exc,
+            )
+            continue
+        curve = np.asarray(fit_curve, dtype=np.float64)
+        residual = float(np.mean(np.abs(np.asarray(real, dtype=np.float64) - curve)))
+        fits.append(
+            _LenRabiFit(
+                pi_length=float(pi_x),
+                pi2_length=float(pi2_x),
+                rabi_freq=float(freq),
+                residual=residual,
+                fit_curve=curve,
+            )
+        )
+    if not fits:
+        raise RuntimeError(
+            "lenrabi fit failed for decay and non-decay candidates"
+        ) from (fit_errors[-1] if fit_errors else None)
+    return min(fits, key=_fit_residual_sort_key)
+
+
+def _is_trusted_lenrabi_fit(
+    fit: _LenRabiFit, lengths: NDArray[np.float64], real: NDArray[np.float64]
+) -> bool:
+    if not (
+        np.isfinite(fit.pi_length)
+        and np.isfinite(fit.rabi_freq)
+        and np.isfinite(fit.residual)
+    ):
+        return False
+    if fit.pi_length < _MIN_TRUSTED_PI_LENGTH:
+        return False
+    max_length = float(np.max(np.asarray(lengths, dtype=np.float64)))
+    if (
+        not np.isfinite(max_length)
+        or fit.pi_length > _MAX_PI_SWEEP_FRACTION * max_length
+    ):
+        return False
+    return is_good_fit(real, fit.fit_curve, threshold=_MAX_FIT_RESIDUAL_RATIO)
+
+
+def _fill_lenrabi_fit_or_skip(
+    result: Any,
+    idx: int,
+    lengths: NDArray[np.float64],
+    real: NDArray[np.float64],
+    fit: _LenRabiFit,
+    round_hook: Callable[[int], None] | None,
+) -> bool:
+    if not _is_trusted_lenrabi_fit(fit, lengths, real):
+        logger.debug("lenrabi fit @flux%d: untrusted fit discarded", idx)
+        if round_hook is not None:
+            round_hook(idx)
+        return False
+    result.fit_value[idx] = fit.pi_length
+    np.copyto(result.fit_curve[idx], fit.fit_curve)
+    if round_hook is not None:
+        round_hook(idx)
+    return True
+
+
+def _patch_from_lenrabi_fit(fit: _LenRabiFit, base_drive_pulse: PulseCfg) -> Patch:
+    patch = Patch()
+    patch.set("pi_length", fit.pi_length)
+    patch.set("rabi_freq", fit.rabi_freq)
+    patch.set("pi_product", fit.pi_length * float(base_drive_pulse.gain))
+    pi2_length = float(fit.pi2_length)
+    if not (np.isfinite(pi2_length) and pi2_length >= _MIN_TRUSTED_PI_LENGTH):
+        return patch
+    patch.set("pi2_length", pi2_length)
+    patch.set_module(
+        "pi_pulse", _drive_pulse_with_length(base_drive_pulse, fit.pi_length)
+    )
+    patch.set_module(
+        "pi2_pulse", _drive_pulse_with_length(base_drive_pulse, pi2_length)
+    )
+    return patch
 
 
 class LenRabiNode(Node):
@@ -314,38 +464,31 @@ class LenRabiNode(Node):
             )
         real = signal2real_flip(acquire_to_complex(raw))
 
-        pi_x, _, pi2_x, _, freq, _, fit_curve, _ = fit_rabi(lengths, real)
+        fit = _fit_lenrabi(lengths, real)
 
         # The fitted single scalar (the Result's fit_value) is the pi length; the
         # extra Patch keys/modules below are lenrabi-specific and stay in the node.
-        if not fill_decay_fit_or_skip(
-            result, idx, real, float(pi_x), fit_curve, env.round_hook, logger, "lenrabi"
+        if not _fill_lenrabi_fit_or_skip(
+            result, idx, lengths, real, fit, env.round_hook
         ):
-            # partial: omit pi_length/pi2_length/rabi_freq + modules → downstream fallback
+            # partial: omit feedback values/modules so downstream keeps fallback
             return Patch()
 
         logger.debug(
             "lenrabi fit @flux%d: rabi_freq=%.4f pi_len=%.3f pi2_len=%.3f",
             idx,
-            float(freq),
-            float(pi_x),
-            float(pi2_x),
+            fit.rabi_freq,
+            fit.pi_length,
+            fit.pi2_length,
         )
 
-        patch = Patch()
-        patch.set("pi_length", float(pi_x))
-        patch.set("pi2_length", float(pi2_x))
-        patch.set("rabi_freq", float(freq))
-        patch.set("pi_product", float(pi_x) * float(base_drive_pulse.gain))
-        patch.set_module("pi_pulse", _drive_pulse_with_length(base_drive_pulse, pi_x))
-        patch.set_module("pi2_pulse", _drive_pulse_with_length(base_drive_pulse, pi2_x))
-        return patch
+        return _patch_from_lenrabi_fit(fit, base_drive_pulse)
 
 
 class LenRabiBuilder(Builder):
     """The lenrabi provider — acquire Rabi oscillation, real fit_rabi, accumulating
-    colormap.  Produces pi_pulse and pi2_pulse modules in addition to the scalar
-    pi_length / pi2_length / rabi_freq info values.
+    colormap. Produces scalar pi_length / pi2_length / rabi_freq info values, and
+    only produces the pi_pulse / pi2_pulse pair when the fitted pi2 length is trusted.
     """
 
     name = "lenrabi"
@@ -557,18 +700,13 @@ class LenRabiBuilder(Builder):
         knobs = env.schema.lower(ml, md=env.md)
         qubit_freq = float(snapshot["qubit_freq"])
         t1 = _float_or_none(snapshot.get("t1")) or float(knobs["t1_seed_us"])
-        prev_pi_length = _float_or_none(snapshot.get("pi_length")) or float(
-            knobs["expected_pi_length"]
-        )
-        prev_pi_product = _float_or_none(snapshot.get("pi_product")) or float(
-            knobs["pi_product_seed"]
-        )
+        feedback = _resolve_feedback_inputs(snapshot, knobs)
 
         move_module(raw_cfg, "qub_pulse", "rabi_pulse")
         raw_cfg["modules"]["rabi_pulse"]["gain"] = _resolve_drive_gain(
             str(knobs["drive_gain_mode"]),
-            pi_product=prev_pi_product,
-            pi_length=prev_pi_length,
+            pi_product=feedback.feedback_pi_product,
+            target_pi_length=feedback.target_pi_length,
             fixed=float(raw_cfg["modules"]["rabi_pulse"]["gain"]),
             knobs=knobs,
         )
@@ -583,7 +721,7 @@ class LenRabiBuilder(Builder):
         )
         raw_cfg["sweep_range"] = _resolve_cfg_sweep_range(
             str(knobs["sweep_range_mode"]),
-            pi_length=prev_pi_length,
+            pi_length=feedback.range_pi_length,
             fixed=knobs["sweep_range"],
             knobs=knobs,
         )
