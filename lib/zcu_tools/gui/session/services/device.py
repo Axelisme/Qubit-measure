@@ -61,10 +61,10 @@ class DeviceProtocol(Protocol):
       "cancelled" only if it returns with the event set. A ``setup`` that ignores
       ``stop_event`` makes cancel a no-op (the worker blocks until natural
       completion). ``progress`` may drive a pbar via the ambient pbar factory.
-    - ``get_info`` returns a fresh value snapshot. It is called both on the
-      worker (right after ``setup``) and on the main thread (idle live-read,
-      guarded by OperationGate against a concurrent mutation). It must not mutate
-      device state.
+    - ``get_info`` returns a fresh value snapshot. It is called on the worker
+      right after ``setup``, by the synchronous idle read path, and by the
+      off-main poll path that may refresh current values during setup/ramp. It
+      must not mutate device state.
     - ``close`` releases the underlying resource and SHOULD be idempotent: it is
       called on disconnect, and on any rollback where a driver was constructed
       but never became the live registry entry.
@@ -787,17 +787,15 @@ class DeviceService(QObject):
         ``on_done`` does the cache compare + bump + DEVICE_CHANGED emit, so the
         State main-thread invariant holds (the worker never touches State).
 
-        Skip without raising when the device is not a live read target — not
-        connected / memory-only, or being mutated (connect/disconnect/setup,
-        i.e. SETTING_UP ramp): a poll must never compete with a mutation. A
-        single read that fails (timeout / no response / driver gone) is logged
-        and swallowed so the next tick still runs — this is the best-effort
-        core, not a Fast-Fail path.
+        Skip without raising when the device is not a live read target —
+        missing / memory-only, connecting, disconnecting, or under an unknown
+        mutation. ``DEVICE_SETUP`` is the one mutation whose driver read is
+        allowed: setup/ramp code owns the write lock, while ``get_info`` is a
+        best-effort current-value read. A single read that fails (timeout / no
+        response / driver gone) is logged and swallowed so the next tick still
+        runs — this is the best-effort core, not a Fast-Fail path.
         """
-        dev = self._state.get_device(name)
-        if dev is None or dev.is_memory_only():
-            return
-        if self._gate.is_device_mutating(name):
+        if not self._can_poll_device_info(name):
             return
 
         def read_work() -> BaseDeviceInfo:
@@ -805,13 +803,10 @@ class DeviceService(QObject):
             return cast(BaseDeviceInfo, self._registry.get_info(name))
 
         def on_read(info: object) -> None:
-            # Main thread: the device may have gone away or started mutating
-            # between submit and delivery; re-check before the cache refresh so
-            # a late poll result never bumps a now-mutating / removed device.
-            current = self._state.get_device(name)
-            if current is None or current.is_memory_only():
-                return
-            if self._gate.is_device_mutating(name):
+            # Main thread: the device may have gone away or started a non-setup
+            # mutation between submit and delivery; re-check before the cache
+            # refresh so a late poll result never bumps that State.
+            if not self._can_poll_device_info(name):
                 return
             if self._state.refresh_device_info_cache(name, cast(BaseDeviceInfo, info)):
                 self._emit_device_changed(name)
@@ -827,6 +822,26 @@ class DeviceService(QObject):
             on_done=on_read,
             on_error=on_read_failed,
         )
+
+    def _can_poll_device_info(self, name: str) -> bool:
+        """Return whether ``poll_device_info`` may live-read this device now.
+
+        The concrete gate only exposes the coarse "device is mutating" question.
+        DeviceService owns the finer in-flight metadata, so setup can be the
+        only admitted mutation without expanding the gate contract.
+        """
+        dev = self._state.get_device(name)
+        if dev is None or dev.is_memory_only():
+            return False
+        op = self._inflight.get(name)
+        if op is not None:
+            return (
+                op.kind is OperationKind.DEVICE_SETUP
+                and dev.status is DeviceStatus.SETTING_UP
+            )
+        if dev.status is not DeviceStatus.CONNECTED:
+            return False
+        return not self._gate.is_device_mutating(name)
 
     def get_device_value_for_new_context(self, name: str) -> float | None:
         info = self.get_device_info(name)

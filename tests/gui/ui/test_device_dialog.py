@@ -335,6 +335,35 @@ def test_poll_tick_polls_selected_device(qapp):
         dialog.close()
 
 
+def test_poll_tick_polls_selected_setting_up_device(qapp):
+    """Auto poll still asks for a best-effort refresh while the selected device
+    is setting up; the synchronous Refresh button can remain disabled."""
+    from zcu_tools.device.fake import FakeDeviceInfo
+
+    ctrl = _make_ctrl()
+    ctrl.list_devices.return_value = [
+        DeviceEntry(
+            name="fd",
+            type_name="FakeDevice",
+            status=DeviceStatus.SETTING_UP.value,
+        )
+    ]
+    ctrl.get_device_snapshot.side_effect = lambda n: _setting_up_snapshot(
+        n, FakeDeviceInfo(address="none")
+    )
+
+    dialog = _make_dialog(ctrl)
+    try:
+        dialog._list.setCurrentRow(0)
+        assert dialog._refresh_btn.isEnabled() is False
+
+        dialog._on_poll_tick()
+
+        ctrl.poll_device_info.assert_called_once_with("fd")
+    finally:
+        dialog.close()
+
+
 def test_poll_tick_with_no_selection_stops_timer(qapp):
     """A tick that finds nothing selected stops the timer instead of polling
     None (guards a race where the selection vanished between decisions)."""

@@ -515,6 +515,38 @@ def _drain_poll(qapp) -> None:
     qapp.processEvents()
 
 
+class _DeferredPollBackground:
+    """BackgroundExecutor fake that captures poll delivery for late-result tests."""
+
+    def __init__(self) -> None:
+        self.submitted = False
+        self._delivery: Callable[[], None] | None = None
+
+    def submit(
+        self,
+        work: Callable[[], Any],
+        *,
+        run_in_pool: bool,
+        on_done: Callable[[Any], None],
+        on_error: Callable[[Exception], None],
+    ) -> None:
+        assert run_in_pool is True
+        self.submitted = True
+        try:
+            result = work()
+        except Exception as exc:
+            self._delivery = lambda exc=exc: on_error(exc)
+        else:
+            self._delivery = lambda result=result: on_done(result)
+
+    def deliver(self) -> None:
+        if self._delivery is None:
+            raise AssertionError("no deferred poll delivery")
+        delivery = self._delivery
+        self._delivery = None
+        delivery()
+
+
 def test_poll_device_info_changed_value_bumps_and_emits_on_main(qapp):
     """The off-main poll reads the driver on a worker; the main-thread on_done
     does the cache compare + bump + DEVICE_CHANGED. A value that drifted under
@@ -577,20 +609,104 @@ def test_poll_device_info_skips_memory_only_device(qapp):
     device.get_info.assert_not_called()
 
 
-def test_poll_device_info_skips_mutating_device(qapp):
-    """A device being mutated (setup/connect/disconnect lease held) must not be
-    polled — a poll must never compete with a mutation read-lock."""
+def test_poll_device_info_polls_setting_up_device(qapp):
+    """Setup/ramp is the safe mutation: poll may read current driver values and
+    refresh cache/UI while setup remains in flight."""
+    svc, device = _make_svc()
+    state = svc._state
+    _connect(svc, _req())
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    def blocking_setup(_info, stop_event=None):
+        entered.set()
+        release.wait()
+
+    device.setup.side_effect = blocking_setup
+    device.get_info.return_value = FakeDeviceInfo(address="addr", value=4.0)
+
+    svc.start_setup_device(
+        SetupDeviceRequest(name="dev1", info=FakeDeviceInfo(address="addr", value=4.0))
+    )
+    try:
+        _drain_until(entered.is_set, label="setup worker entered")
+        assert svc.get_device_snapshot("dev1").status is DeviceStatus.SETTING_UP  # type: ignore[union-attr]
+
+        device.get_info.reset_mock()
+        before = state.version.get("device:dev1")
+        events: list[object] = []
+        svc._bus.subscribe(DeviceChangedPayload, lambda p: events.append(p.name))
+
+        svc.poll_device_info("dev1")
+        _drain_until(
+            lambda: state.version.get("device:dev1") == before + 1,
+            label="setup poll delivery",
+        )
+
+        device.get_info.assert_called_once_with()
+        assert state.version.get("device:dev1") == before + 1
+        assert events == ["dev1"]
+        cached = state.get_device("dev1")
+        assert cached is not None
+        assert cached.status is DeviceStatus.SETTING_UP
+        assert getattr(cached.info, "value", None) == 4.0
+    finally:
+        release.set()
+        _drain_until(
+            lambda: svc.get_device_snapshot("dev1").status is DeviceStatus.CONNECTED,  # type: ignore[union-attr]
+            label="setup finished",
+        )
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [OperationKind.DEVICE_CONNECT, OperationKind.DEVICE_DISCONNECT],
+)
+def test_poll_device_info_skips_non_setup_device_mutation(qapp, kind: OperationKind):
+    """Connect/disconnect leases are not safe live-read windows, so poll skips
+    them without submitting a worker."""
     gate = OperationGate()
     svc, device = _make_svc(gate=gate)
     _connect(svc, _req())
     device.get_info.reset_mock()
-    gate.register(99, OperationKind.DEVICE_SETUP, owner_id="held", resource_id="dev1")
+    gate.register(99, kind, owner_id="held", resource_id="dev1")
 
-    svc.poll_device_info("dev1")  # skipped without raising (unlike get_device_info)
-    _drain_poll(qapp)
+    try:
+        svc.poll_device_info("dev1")  # skipped without raising
+        _drain_poll(qapp)
 
-    device.get_info.assert_not_called()
-    gate.release(99)
+        device.get_info.assert_not_called()
+    finally:
+        gate.release(99)
+
+
+def test_poll_device_info_late_result_skips_after_non_setup_mutation(qapp):
+    """A delayed poll delivery must not bump State after the device enters a
+    non-setup mutation."""
+    svc, device = _make_svc()
+    state = svc._state
+    _connect(svc, _req())
+    before = state.version.get("device:dev1")
+    events: list[object] = []
+    svc._bus.subscribe(DeviceChangedPayload, lambda p: events.append(p.name))
+
+    device.get_info.return_value = FakeDeviceInfo(address="addr", value=8.0)
+    deferred_bg = _DeferredPollBackground()
+    svc._bg = deferred_bg  # white-box: only poll_device_info reads this field.
+
+    svc.poll_device_info("dev1")
+    assert deferred_bg.submitted is True
+    assert state.version.get("device:dev1") == before
+
+    state.set_device_status("dev1", DeviceStatus.DISCONNECTING)
+    after_status_change = state.version.get("device:dev1")
+    deferred_bg.deliver()
+
+    assert state.version.get("device:dev1") == after_status_change
+    assert events == []
+    cached = state.get_device("dev1")
+    assert cached is not None and getattr(cached.info, "value", None) == 0.0
 
 
 def test_poll_device_info_swallows_read_failure(qapp):

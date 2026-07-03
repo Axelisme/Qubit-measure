@@ -365,12 +365,13 @@ class DeviceDialog(QDialog):
         self.destroyed.connect(self._cleanup_event_subscriptions)
 
         # Dialog-scoped + selection-scoped live poller (Phase 2): while the
-        # dialog is visible AND a connected device is selected, tick once a
-        # second and best-effort off-main read the selected device's real driver
-        # values. The result flows back through DEVICE_CHANGED (only when it
-        # actually moved), which the Phase 1 repaint+preserve-selection path
-        # absorbs. Built stopped; _update_poll_timer (re)decides on every
-        # selection change and on show/hide.
+        # dialog is visible AND a device is selected, tick once a second and
+        # best-effort off-main read the selected device's real driver values,
+        # including setup/ramp current-value refreshes. The result flows
+        # back through DEVICE_CHANGED (only when it actually moved), which the
+        # Phase 1 repaint+preserve-selection path absorbs. Built stopped;
+        # _update_poll_timer (re)decides on every selection change and on
+        # show/hide.
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(1000)
         self._poll_timer.timeout.connect(self._on_poll_tick)
@@ -410,12 +411,11 @@ class DeviceDialog(QDialog):
         """(Re)decide whether the live poller should be running.
 
         Dialog-scoped + selection-scoped: poll only while the dialog is visible
-        AND a device is selected. A memory-only / busy selection still keeps the
-        timer running — the per-tick poll itself skips those cheaply
-        (DeviceService.poll_device_info) and the selection may flip to
-        connected without another timer decision. The timer stops when the
-        dialog hides or nothing is selected, so there is no always-on / all-
-        device polling and no leak after close.
+        AND a device is selected. A memory-only / transient selection still
+        keeps the timer running: DeviceService cheaply skips non-live and
+        non-setup mutation states, while setup/ramp can still refresh current
+        values. The timer stops when the dialog hides or nothing is selected,
+        so there is no always-on / all-device polling and no leak after close.
         """
         should_run = self.isVisible() and self._selected_device_name() is not None
         if should_run:

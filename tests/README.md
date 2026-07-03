@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-03 — device test registry isolation
+**Last updated:** 2026-07-03 — device setup poll
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -221,6 +221,10 @@ contract；`onetone/freq` 的 homophasal selector 只在 adapter 邊界注入 md
 `GlobalDeviceManager` 是 production singleton，入口只接受 `BaseDevice` instance。GUI service unit tests 若用
 `MagicMock` driver 來驗證 call interaction，應注入 `tests/gui/services/_device_fakes.py::FakeDeviceRegistry`，
 不要把 mock driver 註冊進 global singleton。需要測 singleton CRUD 時改用真 `FakeDevice`。
+
+`DeviceService.poll_device_info(name)` 測試應視為 best-effort off-main live-read contract：memory-only、
+connect/disconnect 等非 setup mutation 會 skip；`SETTING_UP` 的 selected device 可 poll current driver
+info 來刷新 cache/UI，但 late delivery 若已進入非 setup mutation 不可 bump/emit。
 
 等待 async device connect 時避免裸 `QEventLoop.exec()` 只聽 success signal；測試 helper 應同時觀察
 `operation_failed`，並用 bounded `processEvents()` loop，讓 connect failure 變成 assertion failure 而非 pytest hang。
