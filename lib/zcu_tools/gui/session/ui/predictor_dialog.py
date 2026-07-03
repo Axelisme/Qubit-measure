@@ -184,60 +184,67 @@ class PredictorDialog(QDialog):
         transitions_group = QGroupBox("Tracked transitions")
         transitions_layout = QVBoxLayout(transitions_group)
 
-        # Controls row above the table: device-value spinbox + add-transition
-        # controls.  All in a single horizontal bar so the table can take the
-        # remaining vertical space.  No operator selector — both matrix operators
-        # are shown as table columns.
-        controls_row = QHBoxLayout()
+        # Controls above the table.  Keep device value/device selector and
+        # transition-add controls on separate rows so long device names do not
+        # force the whole left column wider than the plot area needs.
+        self._value_controls_row = QHBoxLayout()
 
-        controls_row.addWidget(QLabel("Device value:"))
+        self._value_controls_row.addWidget(QLabel("Device value:"))
         self._predict_value_spin = TrimDoubleSpinBox()
         self._predict_value_spin.setRange(-1e6, 1e6)
         self._predict_value_spin.setDecimals(6)
         self._predict_value_spin.setValue(0.0)
         self._predict_value_spin.valueChanged.connect(self._on_spinbox_changed)
-        controls_row.addWidget(self._predict_value_spin)
+        self._value_controls_row.addWidget(self._predict_value_spin)
 
         self._device_combo: QComboBox | None = None
         self._device_refresh_btn: QPushButton | None = None
         self._device_read_btn: QPushButton | None = None
         if self._dev is not None:
             device_combo = QComboBox()
-            device_combo.setMinimumWidth(180)
+            device_combo.setMinimumWidth(160)
+            device_combo.setMinimumContentsLength(16)
+            device_combo.setSizeAdjustPolicy(
+                QComboBox.AdjustToMinimumContentsLengthWithIcon  # type: ignore[attr-defined]
+            )
             device_combo.currentIndexChanged.connect(self._on_device_selection_changed)
-            controls_row.addWidget(device_combo)
+            self._value_controls_row.addWidget(device_combo)
             self._device_combo = device_combo
 
             device_refresh_btn = QPushButton("↻")
             device_refresh_btn.setFixedWidth(28)
             device_refresh_btn.setToolTip("Refresh device list and cached value")
             device_refresh_btn.clicked.connect(self._on_refresh_devices_clicked)
-            controls_row.addWidget(device_refresh_btn)
+            self._value_controls_row.addWidget(device_refresh_btn)
             self._device_refresh_btn = device_refresh_btn
 
             device_read_btn = QPushButton("Use")
             device_read_btn.setToolTip("Read selected device value")
             device_read_btn.clicked.connect(self._on_read_device_clicked)
-            controls_row.addWidget(device_read_btn)
+            self._value_controls_row.addWidget(device_read_btn)
             self._device_read_btn = device_read_btn
 
-        controls_row.addSpacing(12)
-        controls_row.addWidget(QLabel("from"))
+        self._value_controls_row.addStretch()
+        transitions_layout.addLayout(self._value_controls_row)
+
+        self._transition_controls_row = QHBoxLayout()
+        self._transition_controls_row.addWidget(QLabel("Transition:"))
+        self._transition_controls_row.addWidget(QLabel("from"))
         self._add_from_spin = QSpinBox()
         self._add_from_spin.setRange(0, 20)
         self._add_from_spin.setValue(0)
-        controls_row.addWidget(self._add_from_spin)
-        controls_row.addWidget(QLabel("to"))
+        self._transition_controls_row.addWidget(self._add_from_spin)
+        self._transition_controls_row.addWidget(QLabel("to"))
         self._add_to_spin = QSpinBox()
         self._add_to_spin.setRange(0, 20)
         self._add_to_spin.setValue(1)
-        controls_row.addWidget(self._add_to_spin)
+        self._transition_controls_row.addWidget(self._add_to_spin)
         add_btn = QPushButton("Add")
         add_btn.clicked.connect(self._on_add_clicked)
-        controls_row.addWidget(add_btn)
+        self._transition_controls_row.addWidget(add_btn)
 
-        controls_row.addStretch()
-        transitions_layout.addLayout(controls_row)
+        self._transition_controls_row.addStretch()
+        transitions_layout.addLayout(self._transition_controls_row)
 
         # 4-column table: Transition | f (MHz) | |n| | |phi|
         # Multi-row selection enabled; individual delete buttons are gone.

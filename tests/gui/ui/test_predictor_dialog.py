@@ -448,6 +448,24 @@ def test_predictor_dialog_optional_device_facet_no_controls(qapp):
     assert dialog._device_combo is None
 
 
+def test_predictor_dialog_device_and_transition_controls_are_separate_rows(qapp):
+    ctrl = _make_ctrl(has_predictor=False)
+    device = _make_device_ctrl(
+        entries=[DeviceEntry("flux", "YOKOGS200", DeviceStatus.CONNECTED.value)],
+        cached={"flux": 0.1},
+    )
+
+    dialog = PredictorDialog(ctrl, device=device)
+
+    assert dialog._device_combo is not None
+    assert dialog._value_controls_row.indexOf(dialog._predict_value_spin) >= 0
+    assert dialog._value_controls_row.indexOf(dialog._device_combo) >= 0
+    assert dialog._value_controls_row.indexOf(dialog._add_from_spin) == -1
+    assert dialog._transition_controls_row.indexOf(dialog._add_from_spin) >= 0
+    assert dialog._transition_controls_row.indexOf(dialog._add_to_spin) >= 0
+    assert dialog._transition_controls_row.indexOf(dialog._device_combo) == -1
+
+
 def test_predictor_dialog_device_selector_lists_connected_cached_values(qapp):
     ctrl = _make_ctrl(has_predictor=False)
     entries = [
