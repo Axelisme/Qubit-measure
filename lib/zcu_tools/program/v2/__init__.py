@@ -16,6 +16,7 @@ from .modules import (
     DirectReadoutCfg,
     Join,
     LoadValue,
+    LoadWord,
     Module,
     ModuleCfg,
     ModuleCfgFactory,

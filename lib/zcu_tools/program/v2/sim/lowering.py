@@ -78,7 +78,7 @@ from qick.asm_v2 import QickParam
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.control import Branch
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, SoftDelay
-from zcu_tools.program.v2.modules.dmem import LoadValue
+from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.readout import (
     AbsReadout,
@@ -606,6 +606,13 @@ def _dmem_delay_segment(
 _DMEM_IDX_AXES: dict[str, str] = {}
 
 
+def _load_word_unsupported(module: LoadWord) -> UnsupportedModuleError:
+    return UnsupportedModuleError(
+        f"LoadWord {module.name!r} contains raw hardware register words; "
+        "the Bloch lowering only supports scalar LoadValue dmem tables"
+    )
+
+
 def _collect_dmem_values(
     modules: Sequence[Module],
 ) -> dict[str, list[int]]:
@@ -621,6 +628,8 @@ def _collect_dmem_values(
     _DMEM_IDX_AXES.clear()
     tables: dict[str, list[int]] = {}
     for module in modules:
+        if isinstance(module, LoadWord):
+            raise _load_word_unsupported(module)
         if isinstance(module, LoadValue):
             if module._is_compressed:
                 raise UnsupportedModuleError(
@@ -935,6 +944,8 @@ def _lower_module(
     omits.
     """
 
+    if isinstance(module, LoadWord):
+        raise _load_word_unsupported(module)
     if isinstance(module, LoadValue):
         return  # dmem setup, already collected; emits no evolution
     if isinstance(module, (NoneReset, PulseReset, TwoPulseReset, BathReset)):

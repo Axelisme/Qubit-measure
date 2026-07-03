@@ -12,7 +12,7 @@ from .base import AbsModuleCfg, Module, resolve_module_ref
 from .computed_pulse import ComputedPulse
 from .control import Branch, Repeat
 from .delay import Delay, DelayAuto, Join, SoftDelay
-from .dmem import LoadValue, ScanWith
+from .dmem import LoadValue, LoadWord, ScanWith
 from .pulse import Pulse, PulseCfg
 from .readout import (
     AbsReadout,

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Literal
 
+import numpy as np
 import pytest
 from qick.asm_v2 import Label, WriteReg
 from zcu_tools.program.v2.base import ProgramV2Cfg
@@ -17,7 +18,7 @@ from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.control import Repeat
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, Join, SoftDelay
-from zcu_tools.program.v2.modules.dmem import LoadValue, ScanWith
+from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord, ScanWith
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.readout import (
     DirectReadout,
@@ -391,6 +392,19 @@ class TestDmemIntegration:
         r.add_content(lv)
         prog = _make_prog(modules=[r])
         assert prog.compile_datamem() is not None
+
+    def test_load_word_compiles_uint32_words_as_int32_datamem(self):
+        vals = [0, 2**31, 2**32 - 1]
+        lw = LoadWord("lw", vals, idx_reg="myloop", val_reg="myword")
+        r = Repeat("myloop", len(vals))
+        r.add_content(lw)
+        prog = _make_prog(modules=[r])
+
+        dmem = prog.compile_datamem()
+
+        assert dmem is not None
+        assert dmem.dtype == np.int32
+        assert dmem.tolist() == [0, -(2**31), -1]
 
     def test_scan_with_compiles(self):
         vals = list(range(10))

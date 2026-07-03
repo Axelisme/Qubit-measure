@@ -26,8 +26,17 @@ _COMPRESS_MIN_VALUES = 30
 # compression path may legitimately set bit 31; the SR + AND extraction in run()
 # recovers the correct value in either arithmetic or logical shift mode.
 _INT32_MAX = (1 << 31) - 1
+_UINT32_MAX = (1 << 32) - 1
 
 SubModule: TypeAlias = Module | list[Module]
+
+
+def _encode_uint32_as_int32(value: int) -> int:
+    if value < 0 or value > _UINT32_MAX:
+        raise ValueError(f"raw uint32 word must be in [0, {_UINT32_MAX}]")
+    if value > _INT32_MAX:
+        return value - (1 << 32)
+    return value
 
 
 class LoadValue(Module):
@@ -156,9 +165,7 @@ class LoadValue(Module):
             # the signed int32 two's-complement representation so that the value
             # fits in np.int32 without overflow; the hardware bit pattern is
             # identical and the SR + AND extraction in run() remains correct.
-            if word > _INT32_MAX:
-                word -= 1 << 32
-            packed.append(word)
+            packed.append(_encode_uint32_as_int32(word))
         return packed
 
     def _plan_compression(self) -> None:
@@ -188,6 +195,63 @@ class LoadValue(Module):
         self._word_shift = int(math.log2(values_per_word))
         self._bits_shift = int(math.log2(bits))
         self._packed_values = self._pack_values(bits, value_mask)
+
+
+class LoadWord(Module):
+    def __init__(
+        self,
+        name: str,
+        values: Sequence[int],
+        idx_reg: str,
+        val_reg: str,
+        use_existed: bool = False,
+    ) -> None:
+        self.name = name
+        self.values = [int(v) for v in values]
+        self._encoded_values = [_encode_uint32_as_int32(v) for v in self.values]
+        self.use_existed = use_existed
+        self._is_empty = len(self.values) == 0
+
+        self.idx_reg = idx_reg
+        self.val_reg = val_reg
+        self.offset = 0
+
+    def init(self, prog: ModularProgramV2) -> None:
+        if self._is_empty:
+            logger.debug(
+                "LoadWord.init: short-circuit empty values name='%s' (no dmem allocated)",
+                self.name,
+            )
+            return
+
+        self.offset = prog.add_dmem(self._encoded_values)
+
+        if not self.use_existed:
+            prog.add_reg(self.val_reg)
+
+        logger.debug(
+            "LoadWord.init: name='%s', values=%d",
+            self.name,
+            len(self.values),
+        )
+
+    def run(
+        self, prog: ModularProgramV2, t: float | QickParam = 0.0
+    ) -> float | QickParam:
+        if self._is_empty:
+            return t
+
+        with prog.acquire_temp_reg(1) as (addr_reg,):
+            if self.offset == 0:
+                prog.write_reg(addr_reg, self.idx_reg)
+            else:
+                prog.write_reg_op(addr_reg, self.idx_reg, "+", self.offset)
+            prog.read_dmem(dst=self.val_reg, addr=addr_reg)
+
+        return t
+
+    def allow_rerun(self) -> bool:
+        return True
 
 
 class ScanWith(Module):

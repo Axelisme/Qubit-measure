@@ -2,7 +2,12 @@ from contextlib import contextmanager
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.program.v2.modules.dmem import _COMPRESS_MIN_VALUES, LoadValue, ScanWith
+from zcu_tools.program.v2.modules.dmem import (
+    _COMPRESS_MIN_VALUES,
+    LoadValue,
+    LoadWord,
+    ScanWith,
+)
 
 
 def _make_dmem_prog(temp_regs=("r10", "r11")):
@@ -226,3 +231,69 @@ def test_packed_words_fit_in_int32():
 def test_bits_needed_rejects_negative():
     with pytest.raises(ValueError, match="non-negative"):
         LoadValue._bits_needed(-1)
+
+
+# ---------------------------------------------------------------------------
+# LoadWord
+# ---------------------------------------------------------------------------
+
+
+def test_load_word_accepts_uint32_boundaries():
+    values = [0, 2**31 - 1, 2**31, 2**32 - 1]
+    lw = LoadWord("w", values, idx_reg="i", val_reg="v")
+
+    assert lw.values == values
+    assert lw._encoded_values == [0, 2**31 - 1, -(2**31), -1]
+    assert lw.allow_rerun() is True
+
+
+@pytest.mark.parametrize("value", [-1, 2**32])
+def test_load_word_rejects_values_outside_uint32_range(value):
+    with pytest.raises(ValueError, match="raw uint32"):
+        LoadWord("w", [value], idx_reg="i", val_reg="v")
+
+
+def test_load_word_empty_values_short_circuit():
+    lw = LoadWord("w", [], idx_reg="i", val_reg="v")
+    prog = _make_dmem_prog()
+
+    lw.init(prog)
+    out = lw.run(prog, t=2.5)
+
+    assert out == 2.5
+    prog.add_dmem.assert_not_called()
+    prog.read_dmem.assert_not_called()
+    prog.write_reg.assert_not_called()
+    prog.write_reg_op.assert_not_called()
+
+
+def test_load_word_init_stores_signed_int32_bit_patterns():
+    lw = LoadWord("w", [1, 2**31, 2**32 - 1], idx_reg="i", val_reg="v")
+    prog = _make_dmem_prog()
+
+    lw.init(prog)
+
+    prog.add_dmem.assert_called_once_with([1, -(2**31), -1])
+    prog.add_reg.assert_called_once_with("v")
+
+
+def test_load_word_run_zero_offset_uses_write_reg():
+    lw = LoadWord("w", [10, 20, 30], idx_reg="i", val_reg="v")
+    prog = _make_dmem_prog()
+    lw.init(prog)
+    lw.offset = 0
+    lw.run(prog)
+
+    prog.write_reg.assert_called_once_with("r10", "i")
+    prog.read_dmem.assert_called_once_with(dst="v", addr="r10")
+
+
+def test_load_word_run_nonzero_offset_uses_write_reg_op():
+    lw = LoadWord("w", [10, 20, 30], idx_reg="i", val_reg="v")
+    prog = _make_dmem_prog()
+    lw.init(prog)
+    lw.offset = 7
+    lw.run(prog)
+
+    prog.write_reg_op.assert_any_call("r10", "i", "+", 7)
+    prog.read_dmem.assert_called_once_with(dst="v", addr="r10")

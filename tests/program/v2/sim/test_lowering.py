@@ -10,7 +10,7 @@ Covers:
 - End-to-end pi / pi-half rotation through bloch.evolve (the load-bearing
   correctness check that the whole gain -> Omega -> rotation chain is right).
 - T1 dmem path: each sweep point's free-segment duration equals the LoadValue
-  cycle recovered via cycles2us.
+  cycle recovered via cycles2us; raw LoadWord tables fast-fail explicitly.
 - Sweep resolution: amp_rabi (gain), len_rabi (length), t2ramsey (delay).
 - detune_offset: a static global frame shift added to every segment's delta
   (drive + idle); detune_offset=0 reproduces the unshifted timeline.
@@ -34,7 +34,7 @@ from qick.asm_v2 import QickParam
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.control import Branch
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, SoftDelay
-from zcu_tools.program.v2.modules.dmem import LoadValue
+from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import (
     DirectReadoutCfg,
@@ -611,6 +611,27 @@ class TestT1DmemPath:
                 _SIM,
                 _F_QUBIT_GHZ,
                 {"length_idx": 0},
+                _identity_cycles2us,
+            )
+
+    def test_load_word_table_fast_fails(self) -> None:
+        modules = [
+            LoadWord(
+                "load_raw_freq",
+                values=[0, 2**31, 2**32 - 1],
+                idx_reg="freq_idx",
+                val_reg="freq_word",
+            ),
+            DelayAuto("uses_word", t="freq_word"),
+            _readout(),
+        ]
+        with pytest.raises(UnsupportedModuleError, match="LoadWord"):
+            lower_point(
+                modules,
+                [("freq_idx", 3)],
+                _SIM,
+                _F_QUBIT_GHZ,
+                {"freq_idx": 0},
                 _identity_cycles2us,
             )
 
