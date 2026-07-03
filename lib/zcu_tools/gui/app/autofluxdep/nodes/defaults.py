@@ -1,8 +1,9 @@
-"""Adapter-backed default cfg schemas for autofluxdep nodes.
+"""Adapter-shaped default cfg schemas for autofluxdep nodes.
 
-Fresh autofluxdep placements reuse the corresponding measure-gui adapter's
-``make_default_cfg(ctx)`` result as the visible Default cfg. Autofluxdep only adds
-its run-time ``generation`` section and a logical projection for the node builder.
+Fresh autofluxdep placements reuse the corresponding measure-gui adapter's spec
+and copy its default value tree, then apply node-local runtime defaults before the
+UI sees it. Autofluxdep adds its run-time ``generation`` section and a logical
+projection for the node builder.
 """
 
 from __future__ import annotations
@@ -48,11 +49,12 @@ def adapter_node_schema(
     *,
     logical_paths: Mapping[str, str],
     generation_fields: tuple[GenerationField, ...] = (),
+    default_overrides: Mapping[str, Any] | None = None,
 ) -> NodeCfgSchema:
-    """Build a ``NodeCfgSchema`` from a measure-gui adapter default cfg."""
+    """Build a ``NodeCfgSchema`` from a copied measure-gui adapter cfg shape."""
     schema = adapter_cls().make_default_cfg(_ensure_context(ctx))
     spec_fields = dict(schema.spec.fields)
-    value_fields = dict(schema.value.fields)
+    value_fields = deepcopy(schema.value.fields)
     projection = dict(logical_paths)
 
     if generation_fields:
@@ -73,7 +75,7 @@ def adapter_node_schema(
             }
         )
 
-    return NodeCfgSchema(
+    node_schema = NodeCfgSchema(
         CfgSchema(
             spec=CfgSectionSpec(
                 fields=spec_fields,
@@ -84,6 +86,82 @@ def adapter_node_schema(
         ),
         logical_paths=projection,
     )
+    if default_overrides:
+        node_schema.with_overrides(default_overrides)
+    return node_schema
+
+
+def ctx_md_float(ctx: Any | None, key: str) -> float | None:
+    """Return a numeric MetaDict value from ``ctx`` when present."""
+    if not isinstance(ctx, ExpContext):
+        return None
+    value = ctx.md.get(key)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return None
+
+
+def ctx_module(ctx: Any | None, *names: str) -> Any | None:
+    """Return the first ModuleLibrary module found in ``ctx`` under ``names``."""
+    if not isinstance(ctx, ExpContext):
+        return None
+    for name in names:
+        try:
+            module = ctx.ml.get_module(name)
+        except (KeyError, ValueError):
+            module = None
+        if module is not None:
+            return module
+    return None
+
+
+def nested_get(value: Any, *path: str) -> Any | None:
+    """Read a nested attr/dict path from raw dicts or cfg objects."""
+    cur = value
+    for part in path:
+        if isinstance(cur, Mapping):
+            cur = cur.get(part)
+        else:
+            cur = getattr(cur, part, None)
+        if cur is None:
+            return None
+    return cur
+
+
+def pulse_gain(module: Any) -> float | None:
+    value = nested_get(module, "gain")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return None
+
+
+def pulse_length(module: Any) -> float | None:
+    value = nested_get(module, "waveform", "length")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return None
+
+
+def pulse_product(module: Any) -> float | None:
+    length = pulse_length(module)
+    gain = pulse_gain(module)
+    if length is None or gain is None:
+        return None
+    return length * gain
+
+
+def readout_pulse_freq(module: Any) -> float | None:
+    value = nested_get(module, "pulse_cfg", "freq")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return None
+
+
+def readout_pulse_gain(module: Any) -> float | None:
+    value = nested_get(module, "pulse_cfg", "gain")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return None
 
 
 def module_dict(raw_cfg: dict[str, Any], key: str) -> dict[str, Any]:

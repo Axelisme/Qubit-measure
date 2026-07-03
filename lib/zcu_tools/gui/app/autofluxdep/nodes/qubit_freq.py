@@ -42,7 +42,7 @@ from numpy.typing import NDArray
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2_gui.adapters.twotone.freq import FreqAdapter
-from zcu_tools.gui.app.autofluxdep.cfg import FloatSpec, str_choice_spec
+from zcu_tools.gui.app.autofluxdep.cfg import FloatSpec, SweepValue, str_choice_spec
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     SnrProbe,
@@ -57,6 +57,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
     adapter_node_schema,
+    ctx_md_float,
     generation_field,
     module_dict,
 )
@@ -72,7 +73,10 @@ from zcu_tools.utils.process import rotate2real
 logger = logging.getLogger(__name__)
 
 _DEFAULT_EARLYSTOP_SNR = 50.0
+_DEFAULT_DETUNE_SWEEP = SweepValue(start=-20.0, stop=50.0, expts=141)
 _QFW_TARGET_KAPPA = 6.5
+_DEFAULT_QFW_SEED_GAIN = 0.05
+_DEFAULT_MAX_DRIVE_GAIN = 1.0
 _DRIVE_GAIN_MODE_ADAPTIVE = "adaptive"
 _DRIVE_GAIN_MODE_FIXED = "fixed"
 
@@ -96,7 +100,13 @@ def _default_qfw_factor() -> None:
     return None
 
 
-def _drive_gain_from_qfw_factor(qfw_factor: Any | None, initial_gain: float) -> float:
+def _drive_gain_from_qfw_factor(
+    qfw_factor: Any | None,
+    initial_gain: float,
+    *,
+    target_kappa: float,
+    max_drive_gain: float,
+) -> float:
     if qfw_factor is None:
         return float(initial_gain)
     factor = float(qfw_factor)
@@ -104,17 +114,41 @@ def _drive_gain_from_qfw_factor(qfw_factor: Any | None, initial_gain: float) -> 
         raise RuntimeError(
             "qubit_freq.make_cfg needs positive qfw_factor to derive drive gain"
         )
-    return min(1.0, _QFW_TARGET_KAPPA / factor)
+    return min(float(max_drive_gain), float(target_kappa) / factor)
 
 
 def _resolve_drive_gain(
-    mode: str, qfw_factor: Any | None, initial_gain: float
+    mode: str,
+    qfw_factor: Any | None,
+    initial_gain: float,
+    *,
+    target_kappa: float,
+    max_drive_gain: float,
 ) -> float:
     if mode == _DRIVE_GAIN_MODE_ADAPTIVE:
-        return _drive_gain_from_qfw_factor(qfw_factor, initial_gain)
+        return _drive_gain_from_qfw_factor(
+            qfw_factor,
+            initial_gain,
+            target_kappa=target_kappa,
+            max_drive_gain=max_drive_gain,
+        )
     if mode == _DRIVE_GAIN_MODE_FIXED:
         return float(initial_gain)
     raise RuntimeError(f"unsupported qubit_freq drive_gain_mode: {mode!r}")
+
+
+def _qf_width_seed(ctx: Any | None) -> float | None:
+    return ctx_md_float(ctx, "qf_w")
+
+
+def _qfw_factor_seed(knobs: dict[str, Any]) -> float | None:
+    width = knobs.get("qf_width_seed")
+    if width is None:
+        return None
+    seed_gain = float(knobs["qfw_seed_gain"])
+    if seed_gain <= 0.0:
+        raise RuntimeError("qubit_freq qfw_seed_gain must be positive")
+    return float(width) / seed_gain
 
 
 def _default_readout() -> Any | None:
@@ -396,7 +430,32 @@ class QubitFreqBuilder(Builder):
                     ),
                     _DRIVE_GAIN_MODE_ADAPTIVE,
                 ),
+                generation_field(
+                    "target_kappa",
+                    "target_kappa",
+                    FloatSpec(label="target_kappa"),
+                    _QFW_TARGET_KAPPA,
+                ),
+                generation_field(
+                    "max_drive_gain",
+                    "max_drive_gain",
+                    FloatSpec(label="max_drive_gain"),
+                    _DEFAULT_MAX_DRIVE_GAIN,
+                ),
+                generation_field(
+                    "qf_width_seed",
+                    "qf_width_seed",
+                    FloatSpec(label="qf_width_seed", optional=True),
+                    _qf_width_seed(ctx),
+                ),
+                generation_field(
+                    "qfw_seed_gain",
+                    "qfw_seed_gain",
+                    FloatSpec(label="qfw_seed_gain"),
+                    _DEFAULT_QFW_SEED_GAIN,
+                ),
             ),
+            default_overrides={"detune_sweep": _DEFAULT_DETUNE_SWEEP},
         )
 
     def make_init_result(
@@ -438,10 +497,15 @@ class QubitFreqBuilder(Builder):
         knobs = env.schema.lower(ml, md=env.md)
         predict_freq = float(snapshot["predict_freq"])
         qub_pulse = module_dict(raw_cfg, "qub_pulse")
+        qfw_factor = snapshot.get("qfw_factor")
+        if qfw_factor is None:
+            qfw_factor = _qfw_factor_seed(knobs)
         drive_gain = _resolve_drive_gain(
             str(knobs["drive_gain_mode"]),
-            snapshot["qfw_factor"],
+            qfw_factor,
             float(qub_pulse["gain"]),
+            target_kappa=float(knobs["target_kappa"]),
+            max_drive_gain=float(knobs["max_drive_gain"]),
         )
         qub_pulse["freq"] = predict_freq
         qub_pulse["gain"] = drive_gain

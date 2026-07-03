@@ -151,6 +151,10 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
         assert set(_generation(form).fields.keys()) == {
             "earlystop_snr",
             "drive_gain_mode",
+            "target_kappa",
+            "max_drive_gain",
+            "qf_width_seed",
+            "qfw_seed_gain",
         }
         assert set(node.schema.keys) == {
             "detune_sweep",
@@ -166,6 +170,10 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
             "qub_gain",
             "qub_length",
             "drive_gain_mode",
+            "target_kappa",
+            "max_drive_gain",
+            "qf_width_seed",
+            "qfw_seed_gain",
         }
     finally:
         form.teardown()

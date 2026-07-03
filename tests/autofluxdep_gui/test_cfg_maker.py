@@ -18,7 +18,8 @@ from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import (
     QubitFreqBuilder,
     QubitFreqCfgTemplate,
 )
-from zcu_tools.meta_tool import ModuleLibrary
+from zcu_tools.gui.session.types import ExpContext
+from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 _READOUT = {
     "type": "readout/pulse",
@@ -73,9 +74,7 @@ def _env(ml: ModuleLibrary) -> RunEnv:
 
 
 def test_qubit_freq_make_cfg_lowers_context():
-    snap = Snapshot(
-        {"predict_freq": 5135.0, "qfw_factor": None}, modules={"readout": _READOUT}
-    )
+    snap = Snapshot({"predict_freq": 5135.0}, modules={"readout": _READOUT})
     cfg = QubitFreqBuilder().make_cfg(_env(_ml()), snap)
     assert isinstance(cfg, QubitFreqCfgTemplate)
     # the drive pulse frequency is the predicted qubit freq (from the snapshot)
@@ -166,15 +165,50 @@ def test_lenrabi_make_cfg_lowers_context():
         "relax_delay": 1.0,
     }
     env = RunEnv(flux=0.0, flux_idx=0, schema=_schema(LenRabiBuilder(), params), ml=ml)
-    snap = Snapshot({"qubit_freq": 5135.0}, modules={"opt_readout": _READOUT})
+    snap = Snapshot(
+        {"qubit_freq": 5135.0, "t1": 10.0, "pi_length": 0.5, "pi_product": 0.45},
+        modules={"opt_readout": _READOUT},
+    )
     cfg = LenRabiBuilder().make_cfg(env, snap)
     assert isinstance(cfg, LenRabiCfgTemplate)
     # the rabi drive pulse is on resonance: its freq is the required qubit_freq
     assert float(cfg.modules.rabi_pulse.freq) == 5135.0
     assert int(cfg.modules.rabi_pulse.ch) == 4
+    assert float(cfg.modules.rabi_pulse.gain) == pytest.approx(0.6)
     assert cfg.reps == 1000 and cfg.rounds == 10
-    # sweep_range is the (start, stop) extent parsed from the param axis
+    # sweep_range tracks the latest pi_length by default.
     assert cfg.sweep_range == (0.05, 2.5)
+    assert cfg.relax_delay == 30.0
+
+
+def test_lenrabi_make_cfg_uses_matching_pi_seed_for_first_pass_gain():
+    from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import LenRabiBuilder
+
+    ml = _ml()
+    ml.register_module(
+        pi_amp={
+            "type": "pulse",
+            "ch": 5,
+            "nqz": 1,
+            "freq": 5100.0,
+            "gain": 0.6,
+            "waveform": {"style": "const", "length": 0.24},
+        }
+    )
+    ctx = ExpContext(md=MetaDict(), ml=ml, soc=None, soccfg=None)
+    builder = LenRabiBuilder()
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=builder.make_default_schema(ctx),
+        ml=ml,
+    )
+    snap = Snapshot({"qubit_freq": 5135.0}, modules={"opt_readout": _READOUT})
+
+    cfg = builder.make_cfg(env, snap)
+
+    assert float(cfg.modules.rabi_pulse.gain) == pytest.approx(0.4)
+    assert cfg.sweep_range == (0.05, 1.2)
 
 
 def test_lenrabi_produce_fast_fails_when_context_unconfigured():
@@ -195,6 +229,39 @@ def test_lenrabi_produce_fast_fails_when_context_unconfigured():
     snap = Snapshot({"qubit_freq": 5135.0}, modules={"opt_readout": _READOUT})
     with pytest.raises(RuntimeError, match="ModuleLibrary"):
         builder.build_node(env).produce(snap)
+
+
+def test_t2echo_auto_fit_method_dispatches_by_detune(monkeypatch):
+    import numpy as np
+    from zcu_tools.gui.app.autofluxdep.nodes import t2echo as t2echo_mod
+
+    calls: list[str] = []
+    times = np.asarray([0.0, 1.0, 2.0])
+    real = np.asarray([1.0, 0.5, 0.25])
+
+    def fake_decay(_times, _real):
+        calls.append("decay")
+        return 12.0, None, np.zeros_like(_times), None
+
+    def fake_fringe(_times, _real):
+        calls.append("fringe")
+        return 8.0, None, None, None, np.ones_like(_times), None
+
+    monkeypatch.setattr(t2echo_mod, "fit_decay", fake_decay)
+    monkeypatch.setattr(t2echo_mod, "fit_decay_fringe", fake_fringe)
+
+    t2e, fit_curve = t2echo_mod._fit_t2echo(
+        "auto_by_detune", detune_ratio=0.0, times=times, real=real
+    )
+    assert t2e == 12.0
+    np.testing.assert_allclose(fit_curve, np.zeros_like(times))
+
+    t2e, fit_curve = t2echo_mod._fit_t2echo(
+        "auto_by_detune", detune_ratio=0.05, times=times, real=real
+    )
+    assert t2e == 8.0
+    np.testing.assert_allclose(fit_curve, np.ones_like(times))
+    assert calls == ["decay", "fringe"]
 
 
 def test_ro_optimize_make_cfg_lowers_context():
@@ -309,6 +376,31 @@ def test_ro_optimize_init_result_uses_window_params():
             "gain_range": SweepValue(start=-0.5, stop=1.5, expts=31),
         },
     )
+    result = builder.make_init_result(schema, np.linspace(0.0, 1.0, 3))
+
+    assert result.n_freq == 31
+    assert result.freq[0] == 5999.0
+    assert result.freq[-1] == 6001.0
+    assert result.n_gain == 31
+    assert result.gain[0] == 0.45
+    assert result.gain[-1] == 0.55
+
+
+def test_ro_optimize_init_result_can_use_default_sweep_width():
+    import numpy as np
+    from zcu_tools.gui.app.autofluxdep.nodes.ro_optimize import RoOptimizeBuilder
+
+    builder = RoOptimizeBuilder()
+    schema = _schema(
+        builder,
+        {
+            "freq_range": SweepValue(start=5950.0, stop=6050.0, expts=31),
+            "gain_range": SweepValue(start=-0.5, stop=1.5, expts=31),
+            "freq_window_mode": "from_default_sweep",
+            "gain_window_mode": "from_default_sweep",
+        },
+    )
+
     result = builder.make_init_result(schema, np.linspace(0.0, 1.0, 3))
 
     assert result.n_freq == 31

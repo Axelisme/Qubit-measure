@@ -53,7 +53,7 @@ from zcu_tools.experiment.v2.autofluxdep.t2ramsey import T2RamseyModuleCfg
 from zcu_tools.experiment.v2_gui.adapters.twotone.time_domain.t2ramsey import (
     T2RamseyAdapter,
 )
-from zcu_tools.gui.app.autofluxdep.cfg import FloatSpec, str_choice_spec
+from zcu_tools.gui.app.autofluxdep.cfg import FloatSpec, SweepValue, str_choice_spec
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     SnrProbe,
@@ -70,6 +70,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
     adapter_node_schema,
+    ctx_md_float,
     generation_field,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
@@ -98,6 +99,9 @@ _DEFAULT_T2R = 5.0  # us — smoothed t2r fallback
 _SWEEP_T2R_FACTOR = 2.5  # notebook: sweep_range = (0, 2.5 * prev_t2r)
 _DEFAULT_DETUNE_RATIO = 0.05  # notebook default activate-detune fraction
 _DEFAULT_EARLYSTOP_SNR = 20.0
+_DEFAULT_RELAX_FACTOR = 3.0
+_DEFAULT_RELAX_MIN = 1.0
+_DEFAULT_SWEEP_START = 0.0
 _SWEEP_RANGE_MODE_AUTO_T2R = "auto_t2r"
 _SWEEP_RANGE_MODE_FIXED = "fixed"
 _RELAX_DELAY_MODE_AUTO_T1 = "auto_t1"
@@ -120,12 +124,27 @@ class T2RamseyCfgTemplate(ProgramV2Cfg, ExpCfgModel):
     sweep_range: tuple[float, float]
 
 
-def _default_t1() -> float:
-    return _DEFAULT_T1
+def _default_t1() -> None:
+    return None
 
 
-def _default_t2r() -> float:
-    return _DEFAULT_T2R
+def _default_t2r() -> None:
+    return None
+
+
+def _seed_t1(ctx: Any | None) -> float:
+    return ctx_md_float(ctx, "t1") or _DEFAULT_T1
+
+
+def _seed_t2r(ctx: Any | None) -> float:
+    return ctx_md_float(ctx, "t2r") or _DEFAULT_T2R
+
+
+def _snapshot_float(snapshot: Snapshot, key: str, fallback: float) -> float:
+    value = snapshot.get(key)
+    if value is None:
+        return fallback
+    return float(value)
 
 
 def _placeholder_pi2_pulse() -> Any:
@@ -142,18 +161,23 @@ def _fixed_sweep_range(sweep: Any) -> tuple[float, float]:
 
 
 def _resolve_cfg_sweep_range(
-    mode: str, *, t2r: float, fixed: Any
+    mode: str, *, t2r: float, fixed: Any, knobs: dict[str, Any]
 ) -> tuple[float, float]:
     if mode == _SWEEP_RANGE_MODE_AUTO_T2R:
-        return (0.0, _SWEEP_T2R_FACTOR * float(t2r))
+        return (
+            float(knobs["sweep_start_us"]),
+            float(knobs["sweep_stop_factor"]) * float(t2r),
+        )
     if mode == _SWEEP_RANGE_MODE_FIXED:
         return _fixed_sweep_range(fixed)
     raise RuntimeError(f"unsupported t2ramsey sweep_range_mode: {mode!r}")
 
 
-def _resolve_cfg_relax_delay(mode: str, *, t1: float, fixed: float) -> float:
+def _resolve_cfg_relax_delay(
+    mode: str, *, t1: float, fixed: float, knobs: dict[str, Any]
+) -> float:
     if mode == _RELAX_DELAY_MODE_AUTO_T1:
-        return max(1.0, 3.0 * float(t1))
+        return max(float(knobs["relax_min_us"]), float(knobs["relax_factor"]) * t1)
     if mode == _RELAX_DELAY_MODE_FIXED:
         return float(fixed)
     raise RuntimeError(f"unsupported t2ramsey relax_delay_mode: {mode!r}")
@@ -175,8 +199,6 @@ class T2RamseyNode(Node):
 
     def produce(self, snapshot: Snapshot) -> Patch:
         env = self._env
-        _ = snapshot["t1"]  # optional smoothed t1 — relax_delay in make_cfg
-        _ = snapshot["t2r"]  # smoothed (declared smooth="ewma") — sweep_range
         _ = snapshot.module("pi2_pulse")  # required module — lowered into the cfg
         _ = snapshot.module("opt_readout")  # required — lowered into the cfg
 
@@ -298,6 +320,8 @@ class T2RamseyBuilder(Builder):
 
     def make_default_schema(self, ctx: Any | None = None) -> NodeCfgSchema:
         """Adapter-backed default cfg plus autofluxdep generation controls."""
+        t1_seed = _seed_t1(ctx)
+        t2r_seed = _seed_t2r(ctx)
         return adapter_node_schema(
             T2RamseyAdapter,
             ctx,
@@ -336,7 +360,52 @@ class T2RamseyBuilder(Builder):
                     ),
                     _RELAX_DELAY_MODE_AUTO_T1,
                 ),
+                generation_field(
+                    "t1_seed_us",
+                    "t1_seed_us",
+                    FloatSpec(label="t1_seed_us"),
+                    t1_seed,
+                ),
+                generation_field(
+                    "t2r_seed_us",
+                    "t2r_seed_us",
+                    FloatSpec(label="t2r_seed_us"),
+                    t2r_seed,
+                ),
+                generation_field(
+                    "relax_factor",
+                    "relax_factor",
+                    FloatSpec(label="relax_factor"),
+                    _DEFAULT_RELAX_FACTOR,
+                ),
+                generation_field(
+                    "relax_min_us",
+                    "relax_min_us",
+                    FloatSpec(label="relax_min_us"),
+                    _DEFAULT_RELAX_MIN,
+                ),
+                generation_field(
+                    "sweep_start_us",
+                    "sweep_start_us",
+                    FloatSpec(label="sweep_start_us"),
+                    _DEFAULT_SWEEP_START,
+                ),
+                generation_field(
+                    "sweep_stop_factor",
+                    "sweep_stop_factor",
+                    FloatSpec(label="sweep_stop_factor"),
+                    _SWEEP_T2R_FACTOR,
+                ),
             ),
+            default_overrides={
+                "rounds": 10,
+                "relax_delay": max(_DEFAULT_RELAX_MIN, _DEFAULT_RELAX_FACTOR * t1_seed),
+                "sweep_range": SweepValue(
+                    _DEFAULT_SWEEP_START,
+                    _SWEEP_T2R_FACTOR * t2r_seed,
+                    expts=101,
+                ),
+            },
         )
 
     def detune_ratio(self, schema: NodeCfgSchema, md: Any = None) -> float:
@@ -388,17 +457,19 @@ class T2RamseyBuilder(Builder):
             )
         raw_cfg = env.schema.lower_raw(ml, md=env.md)
         knobs = env.schema.lower(ml, md=env.md)
-        t1 = float(snapshot["t1"])
-        t2r = float(snapshot["t2r"])
+        t1 = _snapshot_float(snapshot, "t1", float(knobs["t1_seed_us"]))
+        t2r = _snapshot_float(snapshot, "t2r", float(knobs["t2r_seed_us"]))
         relax_delay = _resolve_cfg_relax_delay(
             str(knobs["relax_delay_mode"]),
             t1=t1,
             fixed=float(knobs["relax_delay"]),
+            knobs=knobs,
         )
         sweep_range = _resolve_cfg_sweep_range(
             str(knobs["sweep_range_mode"]),
             t2r=t2r,
             fixed=knobs["sweep_range"],
+            knobs=knobs,
         )
         raw_cfg["modules"]["pi2_pulse"] = pi2_pulse
         raw_cfg["modules"]["readout"] = readout

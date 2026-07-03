@@ -179,6 +179,10 @@ _EXPECTED_KEYS = {
         "qub_gain",
         "qub_length",
         "drive_gain_mode",
+        "target_kappa",
+        "max_drive_gain",
+        "qf_width_seed",
+        "qfw_seed_gain",
     },
     "lenrabi": {
         "sweep_range",
@@ -192,6 +196,19 @@ _EXPECTED_KEYS = {
         "qub_ch",
         "qub_nqz",
         "qub_gain",
+        "relax_delay_mode",
+        "t1_seed_us",
+        "relax_factor",
+        "relax_min_us",
+        "sweep_range_mode",
+        "expected_pi_length",
+        "sweep_start_us",
+        "sweep_stop_factor",
+        "sweep_stop_min_us",
+        "drive_gain_mode",
+        "pi_product_seed",
+        "pi_product_factor",
+        "max_drive_gain",
     },
     "ro_optimize": {
         "freq_range",
@@ -206,6 +223,12 @@ _EXPECTED_KEYS = {
         "relax_delay_mode",
         "relax_delay",
         "skew_penalty",
+        "t1_seed_us",
+        "relax_factor",
+        "freq_window_mode",
+        "freq_half_width_mhz",
+        "gain_window_mode",
+        "gain_half_width",
     },
     "t1": {
         "sweep_range",
@@ -218,6 +241,12 @@ _EXPECTED_KEYS = {
         "sweep_range_mode",
         "relax_delay_mode",
         "relax_delay",
+        "t1_seed_us",
+        "relax_factor",
+        "relax_min_us",
+        "sweep_start_us",
+        "sweep_stop_factor",
+        "sweep_stop_min_us",
     },
     "t2ramsey": {
         "sweep_range",
@@ -231,6 +260,12 @@ _EXPECTED_KEYS = {
         "sweep_range_mode",
         "relax_delay_mode",
         "relax_delay",
+        "t1_seed_us",
+        "t2r_seed_us",
+        "relax_factor",
+        "relax_min_us",
+        "sweep_start_us",
+        "sweep_stop_factor",
     },
     "t2echo": {
         "sweep_range",
@@ -245,6 +280,13 @@ _EXPECTED_KEYS = {
         "sweep_range_mode",
         "relax_delay_mode",
         "relax_delay",
+        "t1_seed_us",
+        "t2e_seed_us",
+        "relax_factor",
+        "relax_min_us",
+        "sweep_start_us",
+        "sweep_stop_factor",
+        "fit_method",
     },
     "mist": {
         "gain_sweep",
@@ -278,6 +320,10 @@ _EXPECTED_PATHS = {
         "qub_gain": "modules.qub_pulse.gain",
         "qub_length": "modules.qub_pulse.waveform.length",
         "drive_gain_mode": "generation.drive_gain_mode",
+        "target_kappa": "generation.target_kappa",
+        "max_drive_gain": "generation.max_drive_gain",
+        "qf_width_seed": "generation.qf_width_seed",
+        "qfw_seed_gain": "generation.qfw_seed_gain",
     },
     "lenrabi": {
         "sweep_range": "sweep.length",
@@ -291,6 +337,19 @@ _EXPECTED_PATHS = {
         "qub_ch": "modules.qub_pulse.ch",
         "qub_nqz": "modules.qub_pulse.nqz",
         "qub_gain": "modules.qub_pulse.gain",
+        "relax_delay_mode": "generation.relax_delay_mode",
+        "t1_seed_us": "generation.t1_seed_us",
+        "relax_factor": "generation.relax_factor",
+        "relax_min_us": "generation.relax_min_us",
+        "sweep_range_mode": "generation.sweep_range_mode",
+        "expected_pi_length": "generation.expected_pi_length",
+        "sweep_start_us": "generation.sweep_start_us",
+        "sweep_stop_factor": "generation.sweep_stop_factor",
+        "sweep_stop_min_us": "generation.sweep_stop_min_us",
+        "drive_gain_mode": "generation.drive_gain_mode",
+        "pi_product_seed": "generation.pi_product_seed",
+        "pi_product_factor": "generation.pi_product_factor",
+        "max_drive_gain": "generation.max_drive_gain",
     },
     "ro_optimize": {
         "freq_range": "sweep.freq",
@@ -305,6 +364,12 @@ _EXPECTED_PATHS = {
         "gain_range_mode": "generation.gain_range_mode",
         "relax_delay_mode": "generation.relax_delay_mode",
         "skew_penalty": "skew_penalty",
+        "t1_seed_us": "generation.t1_seed_us",
+        "relax_factor": "generation.relax_factor",
+        "freq_window_mode": "generation.freq_window_mode",
+        "freq_half_width_mhz": "generation.freq_half_width_mhz",
+        "gain_window_mode": "generation.gain_window_mode",
+        "gain_half_width": "generation.gain_half_width",
     },
     "t1": {
         "sweep_range": "sweep.length",
@@ -317,6 +382,12 @@ _EXPECTED_PATHS = {
         "sweep_range_mode": "generation.sweep_range_mode",
         "relax_delay_mode": "generation.relax_delay_mode",
         "relax_delay": "relax_delay",
+        "t1_seed_us": "generation.t1_seed_us",
+        "relax_factor": "generation.relax_factor",
+        "relax_min_us": "generation.relax_min_us",
+        "sweep_start_us": "generation.sweep_start_us",
+        "sweep_stop_factor": "generation.sweep_stop_factor",
+        "sweep_stop_min_us": "generation.sweep_stop_min_us",
     },
     "t2ramsey": {
         "sweep_range": "sweep.length",
@@ -330,6 +401,12 @@ _EXPECTED_PATHS = {
         "sweep_range_mode": "generation.sweep_range_mode",
         "relax_delay_mode": "generation.relax_delay_mode",
         "relax_delay": "relax_delay",
+        "t1_seed_us": "generation.t1_seed_us",
+        "t2r_seed_us": "generation.t2r_seed_us",
+        "relax_factor": "generation.relax_factor",
+        "relax_min_us": "generation.relax_min_us",
+        "sweep_start_us": "generation.sweep_start_us",
+        "sweep_stop_factor": "generation.sweep_stop_factor",
     },
     "t2echo": {
         "sweep_range": "sweep.length",
@@ -344,6 +421,13 @@ _EXPECTED_PATHS = {
         "sweep_range_mode": "generation.sweep_range_mode",
         "relax_delay_mode": "generation.relax_delay_mode",
         "relax_delay": "relax_delay",
+        "t1_seed_us": "generation.t1_seed_us",
+        "t2e_seed_us": "generation.t2e_seed_us",
+        "relax_factor": "generation.relax_factor",
+        "relax_min_us": "generation.relax_min_us",
+        "sweep_start_us": "generation.sweep_start_us",
+        "sweep_stop_factor": "generation.sweep_stop_factor",
+        "fit_method": "generation.fit_method",
     },
     "mist": {
         "gain_sweep": "sweep.gain",
@@ -376,6 +460,7 @@ _DERIVED_FORBIDDEN = {
     "t2e",
     "fit_kappa",
     "qfw_factor",
+    "pi_product",
 }
 
 
@@ -694,6 +779,9 @@ def test_qubit_freq_default_knobs():
     assert knobs["qub_gain"] == 0.1
     assert knobs["qub_length"] == 5.0
     assert knobs["drive_gain_mode"] == "adaptive"
+    assert knobs["target_kappa"] == 6.5
+    assert knobs["max_drive_gain"] == 1.0
+    assert knobs["qfw_seed_gain"] == 0.05
     # clearing optional defaults still omits them; channel/nqz remain required raw
     # cfg fields because PulseCfg cannot run without concrete hardware routing.
     schema = QubitFreqBuilder().make_default_schema()
@@ -707,26 +795,40 @@ def test_qubit_freq_default_knobs():
     schema.set_field("qub_nqz", 0)
     with pytest.raises(RuntimeError, match="modules\\.qub_pulse\\.nqz.*choices"):
         schema.lower(None)
-    # the sweep comes directly from the twotone/freq adapter default.
+    # autofluxdep copies the adapter-shaped cfg, then replaces the absolute
+    # twotone/freq sweep with md-style relative detune.
     detune = knobs["detune_sweep"]
     assert (float(detune.start), float(detune.stop), int(detune.expts)) == (
-        3500.0,
-        6500.0,
-        301,
+        -20.0,
+        50.0,
+        141,
     )
 
 
 def test_lenrabi_default_knobs():
     knobs = LenRabiBuilder().make_default_schema().lower(None)
     assert knobs["reps"] == 1000
-    assert knobs["rounds"] == 100
-    assert knobs["relax_delay"] == 30.5
+    assert knobs["rounds"] == 10
+    assert knobs["relax_delay"] == 30.0
     assert knobs["earlystop_snr"] == 30.0
+    assert knobs["relax_delay_mode"] == "auto_t1"
+    assert knobs["t1_seed_us"] == 10.0
+    assert knobs["relax_factor"] == 3.0
+    assert knobs["relax_min_us"] == 0.0
+    assert knobs["sweep_range_mode"] == "auto_pi_length"
+    assert knobs["expected_pi_length"] == 1.0
+    assert knobs["sweep_start_us"] == 0.05
+    assert knobs["sweep_stop_factor"] == 5.0
+    assert knobs["sweep_stop_min_us"] == 0.5
+    assert knobs["drive_gain_mode"] == "auto_pi_product"
+    assert knobs["pi_product_seed"] == 1.0
+    assert knobs["pi_product_factor"] == 1.5
+    assert knobs["max_drive_gain"] == 1.0
     assert knobs["qub_ch"] == 0
     assert knobs["qub_nqz"] == 2
     assert knobs["qub_gain"] == 1.0
     sweep = knobs["sweep_range"]
-    assert np.allclose([float(sweep.start), float(sweep.stop)], [0.05, 4.0])
+    assert np.allclose([float(sweep.start), float(sweep.stop)], [0.05, 5.0])
     assert int(sweep.expts) == 101
 
 
@@ -753,19 +855,25 @@ def test_ro_optimize_default_knobs():
     knobs = RoOptimizeBuilder().make_default_schema().lower(None)
     freq_range = knobs["freq_range"]
     gain_range = knobs["gain_range"]
-    assert knobs["reps"] == 100
-    assert knobs["rounds"] == 1000
+    assert knobs["reps"] == 1000
+    assert knobs["rounds"] == 10
     assert (
         float(freq_range.start),
         float(freq_range.stop),
         int(freq_range.expts),
-    ) == (6250.0, 6750.0, 31)
-    assert np.allclose([float(gain_range.start), float(gain_range.stop)], [0.01, 0.5])
+    ) == (5999.0, 6001.0, 31)
+    assert np.allclose([float(gain_range.start), float(gain_range.stop)], [0.45, 0.55])
     assert int(gain_range.expts) == 31
     assert knobs["freq_range_mode"] == "previous_best"
     assert knobs["gain_range_mode"] == "previous_best"
     assert knobs["relax_delay_mode"] == "auto_t1"
-    assert knobs["relax_delay"] == 100.0
+    assert knobs["relax_delay"] == 30.0
+    assert knobs["t1_seed_us"] == 10.0
+    assert knobs["relax_factor"] == 3.0
+    assert knobs["freq_window_mode"] == "fixed_half_width"
+    assert knobs["freq_half_width_mhz"] == 1.0
+    assert knobs["gain_window_mode"] == "fixed_half_width"
+    assert knobs["gain_half_width"] == 0.05
     assert knobs["skew_penalty"] == 0.0
     # The sweep range widgets carry the user-facing start/stop/expts raw-cfg shape.
     spec = RoOptimizeBuilder().make_default_schema().schema.spec
@@ -778,15 +886,21 @@ def test_ro_optimize_default_knobs():
 def test_t1_default_knobs():
     knobs = T1Builder().make_default_schema().lower(None)
     assert knobs["reps"] == 1000
-    assert knobs["rounds"] == 100
+    assert knobs["rounds"] == 10
     assert knobs["earlystop_snr"] == 20.0
     assert knobs["sweep_range_mode"] == "auto_t1"
     assert knobs["relax_delay_mode"] == "auto_t1"
-    assert knobs["relax_delay"] == 100.0
+    assert knobs["relax_delay"] == 30.0
+    assert knobs["t1_seed_us"] == 10.0
+    assert knobs["relax_factor"] == 3.0
+    assert knobs["relax_min_us"] == 1.0
+    assert knobs["sweep_start_us"] == 0.5
+    assert knobs["sweep_stop_factor"] == 5.0
+    assert knobs["sweep_stop_min_us"] == 1.0
     sweep = knobs["sweep_range"]
     assert (float(sweep.start), float(sweep.stop), int(sweep.expts)) == (
-        0.0,
-        500.0,
+        0.5,
+        50.0,
         101,
     )
 
@@ -795,18 +909,28 @@ def test_t2_default_knobs():
     for builder in (T2RamseyBuilder(), T2EchoBuilder()):
         knobs = builder.make_default_schema().lower(None)
         assert knobs["reps"] == 1000
-        assert knobs["rounds"] == 100
-        assert knobs["detune_ratio"] == (0.05 if builder.name == "t2ramsey" else 0.1)
+        assert knobs["rounds"] == 10
+        assert knobs["detune_ratio"] == 0.05
         assert knobs["earlystop_snr"] == 20.0
         assert knobs["relax_delay_mode"] == "auto_t1"
-        assert knobs["relax_delay"] == 100.0
+        assert knobs["relax_delay"] == 30.0
+        assert knobs["t1_seed_us"] == 10.0
+        assert knobs["relax_factor"] == 3.0
+        assert knobs["relax_min_us"] == 1.0
+        assert knobs["sweep_start_us"] == 0.0
+        assert knobs["sweep_stop_factor"] == 2.5
         assert knobs["sweep_range_mode"] == (
             "auto_t2r" if builder.name == "t2ramsey" else "auto_t2e"
         )
+        if builder.name == "t2ramsey":
+            assert knobs["t2r_seed_us"] == 5.0
+        else:
+            assert knobs["t2e_seed_us"] == 5.0
+            assert knobs["fit_method"] == "auto_by_detune"
         sweep = knobs["sweep_range"]
         assert (float(sweep.start), float(sweep.stop), int(sweep.expts)) == (
             0.0,
-            80.0,
+            12.5,
             101,
         ), builder.name
 
@@ -829,38 +953,46 @@ def test_fresh_node_defaults_seed_from_md_values():
 
     lenrabi = LenRabiBuilder().make_default_schema(ctx).lower(None, md=md)
     assert lenrabi["qub_ch"] == 7
-    assert lenrabi["relax_delay"] == 60.0
+    assert lenrabi["t1_seed_us"] == 12.0
+    assert lenrabi["expected_pi_length"] == 0.2
+    assert lenrabi["relax_delay"] == 36.0
     assert np.allclose(
         [float(lenrabi["sweep_range"].start), float(lenrabi["sweep_range"].stop)],
-        [0.05, 0.8],
+        [0.05, 1.0],
     )
 
     ro = RoOptimizeBuilder().make_default_schema(ctx).lower(None, md=md)
-    assert ro["relax_delay"] == 60.0
+    assert ro["t1_seed_us"] == 12.0
+    assert ro["relax_delay"] == 36.0
     assert (
         float(ro["freq_range"].start),
         float(ro["freq_range"].stop),
         int(ro["freq_range"].expts),
-    ) == (6195.0, 6205.0, 31)
+    ) == (6199.0, 6201.0, 31)
 
     t1 = T1Builder().make_default_schema(ctx).lower(None, md=md)
-    assert t1["relax_delay"] == 60.0
+    assert t1["t1_seed_us"] == 12.0
+    assert t1["relax_delay"] == 36.0
     assert (float(t1["sweep_range"].start), float(t1["sweep_range"].stop)) == (
-        0.0,
+        0.5,
         60.0,
     )
 
     ramsey = T2RamseyBuilder().make_default_schema(ctx).lower(None, md=md)
     echo = T2EchoBuilder().make_default_schema(ctx).lower(None, md=md)
-    assert ramsey["relax_delay"] == 60.0
+    assert ramsey["t1_seed_us"] == 12.0
+    assert ramsey["t2r_seed_us"] == 8.0
+    assert ramsey["relax_delay"] == 36.0
     assert (float(ramsey["sweep_range"].start), float(ramsey["sweep_range"].stop)) == (
         0.0,
-        32.0,
+        20.0,
     )
-    assert echo["relax_delay"] == 60.0
+    assert echo["t1_seed_us"] == 12.0
+    assert echo["t2e_seed_us"] == 9.0
+    assert echo["relax_delay"] == 36.0
     assert (float(echo["sweep_range"].start), float(echo["sweep_range"].stop)) == (
         0.0,
-        36.0,
+        22.5,
     )
 
     mist = MistBuilder().make_default_schema(ctx).lower(None, md=md)
@@ -912,19 +1044,21 @@ def test_fresh_node_defaults_seed_from_ml_modules():
     assert lenrabi["qub_ch"] == 0
     assert lenrabi["qub_nqz"] == 2
     assert lenrabi["qub_gain"] == 1.0
+    assert lenrabi["expected_pi_length"] == 0.24
+    assert lenrabi["pi_product_seed"] == pytest.approx(0.144)
     assert np.allclose(
         [float(lenrabi["sweep_range"].start), float(lenrabi["sweep_range"].stop)],
-        [0.05, 4.0],
+        [0.05, 1.2],
     )
 
     ro = RoOptimizeBuilder().make_default_schema(ctx).lower(ml, md=ctx.md)
     assert np.allclose(
         [float(ro["freq_range"].start), float(ro["freq_range"].stop)],
-        [6250.0, 6750.0],
+        [6200.0, 6202.0],
     )
     assert np.allclose(
         [float(ro["gain_range"].start), float(ro["gain_range"].stop)],
-        [0.01, 0.5],
+        [0.37, 0.47],
     )
 
 

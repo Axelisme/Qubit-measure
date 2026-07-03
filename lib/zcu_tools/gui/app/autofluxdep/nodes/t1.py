@@ -59,7 +59,7 @@ from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2_gui.adapters.twotone.time_domain.t1 import T1Adapter
-from zcu_tools.gui.app.autofluxdep.cfg import FloatSpec, str_choice_spec
+from zcu_tools.gui.app.autofluxdep.cfg import FloatSpec, SweepValue, str_choice_spec
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     SnrProbe,
@@ -76,6 +76,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
     adapter_node_schema,
+    ctx_md_float,
     generation_field,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
@@ -104,6 +105,11 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_T1 = 10.0  # us — md.t1 stand-in (the smoothed-t1 fallback)
 _DEFAULT_EARLYSTOP_SNR = 20.0
+_DEFAULT_RELAX_FACTOR = 3.0
+_DEFAULT_RELAX_MIN = 1.0
+_DEFAULT_SWEEP_START = 0.5
+_DEFAULT_SWEEP_STOP_FACTOR = 5.0
+_DEFAULT_SWEEP_STOP_MIN = 1.0
 _SWEEP_RANGE_MODE_AUTO_T1 = "auto_t1"
 _SWEEP_RANGE_MODE_FIXED = "fixed"
 _RELAX_DELAY_MODE_AUTO_T1 = "auto_t1"
@@ -138,8 +144,19 @@ class T1CfgTemplate(ProgramV2Cfg, ExpCfgModel):
     sweep_range: tuple[float, float]
 
 
-def _default_t1() -> float:
-    return _DEFAULT_T1
+def _default_t1() -> None:
+    return None
+
+
+def _seed_t1(ctx: Any | None) -> float:
+    return ctx_md_float(ctx, "t1") or _DEFAULT_T1
+
+
+def _snapshot_t1(snapshot: Snapshot, knobs: dict[str, Any]) -> float:
+    value = snapshot.get("t1")
+    if value is None:
+        return float(knobs["t1_seed_us"])
+    return float(value)
 
 
 def _placeholder_pi_pulse() -> Any:
@@ -151,23 +168,25 @@ def _default_readout() -> Any | None:
     return None
 
 
-def _resolve_sweep_range(smoothed_t1: float) -> tuple[float, float]:
+def _resolve_sweep_range(
+    smoothed_t1: float, *, start: float, stop_factor: float, stop_min: float
+) -> tuple[float, float]:
     """The relax-time axis span from the smoothed t1 (the notebook's formula).
 
     ``(0.5, max(1.0, 5 * smooth_t1))`` — the sweep runs from just above zero to a
     few times the expected T1 so the decay is well resolved. Shared by ``make_cfg``
     (the cfg's ``sweep_range``) and the cfg-driven axis in ``produce``.
     """
-    return (0.5, max(1.0, 5.0 * smoothed_t1))
+    return (float(start), max(float(stop_min), float(stop_factor) * smoothed_t1))
 
 
-def _resolve_relax_delay(smoothed_t1: float) -> float:
+def _resolve_relax_delay(smoothed_t1: float, *, factor: float, minimum: float) -> float:
     """The relax delay between shots from the smoothed t1 (the notebook's formula).
 
     ``max(1.0, 3 * smooth_t1)`` — wait a few T1 so the qubit fully decays before
     the next shot.
     """
-    return max(1.0, 3.0 * smoothed_t1)
+    return max(float(minimum), float(factor) * smoothed_t1)
 
 
 def _fixed_sweep_range(sweep: Any) -> tuple[float, float]:
@@ -175,18 +194,29 @@ def _fixed_sweep_range(sweep: Any) -> tuple[float, float]:
 
 
 def _resolve_cfg_sweep_range(
-    mode: str, *, smoothed_t1: float, fixed: Any
+    mode: str, *, smoothed_t1: float, fixed: Any, knobs: dict[str, Any]
 ) -> tuple[float, float]:
     if mode == _SWEEP_RANGE_MODE_AUTO_T1:
-        return _resolve_sweep_range(smoothed_t1)
+        return _resolve_sweep_range(
+            smoothed_t1,
+            start=float(knobs["sweep_start_us"]),
+            stop_factor=float(knobs["sweep_stop_factor"]),
+            stop_min=float(knobs["sweep_stop_min_us"]),
+        )
     if mode == _SWEEP_RANGE_MODE_FIXED:
         return _fixed_sweep_range(fixed)
     raise RuntimeError(f"unsupported t1 sweep_range_mode: {mode!r}")
 
 
-def _resolve_cfg_relax_delay(mode: str, *, smoothed_t1: float, fixed: float) -> float:
+def _resolve_cfg_relax_delay(
+    mode: str, *, smoothed_t1: float, fixed: float, knobs: dict[str, Any]
+) -> float:
     if mode == _RELAX_DELAY_MODE_AUTO_T1:
-        return _resolve_relax_delay(smoothed_t1)
+        return _resolve_relax_delay(
+            smoothed_t1,
+            factor=float(knobs["relax_factor"]),
+            minimum=float(knobs["relax_min_us"]),
+        )
     if mode == _RELAX_DELAY_MODE_FIXED:
         return float(fixed)
     raise RuntimeError(f"unsupported t1 relax_delay_mode: {mode!r}")
@@ -207,7 +237,6 @@ class T1Node(Node):
 
     def produce(self, snapshot: Snapshot) -> Patch:
         env = self._env
-        _ = snapshot["t1"]  # smoothed (declared smooth="ewma") — dependency contract
 
         result: Sweep1DResult = env.result
         idx = env.flux_idx
@@ -296,6 +325,7 @@ class T1Builder(Builder):
 
     def make_default_schema(self, ctx: Any | None = None) -> NodeCfgSchema:
         """Adapter-backed default cfg plus autofluxdep generation controls."""
+        t1_seed = _seed_t1(ctx)
         return adapter_node_schema(
             T1Adapter,
             ctx,
@@ -333,7 +363,60 @@ class T1Builder(Builder):
                     ),
                     _RELAX_DELAY_MODE_AUTO_T1,
                 ),
+                generation_field(
+                    "t1_seed_us",
+                    "t1_seed_us",
+                    FloatSpec(label="t1_seed_us"),
+                    t1_seed,
+                ),
+                generation_field(
+                    "relax_factor",
+                    "relax_factor",
+                    FloatSpec(label="relax_factor"),
+                    _DEFAULT_RELAX_FACTOR,
+                ),
+                generation_field(
+                    "relax_min_us",
+                    "relax_min_us",
+                    FloatSpec(label="relax_min_us"),
+                    _DEFAULT_RELAX_MIN,
+                ),
+                generation_field(
+                    "sweep_start_us",
+                    "sweep_start_us",
+                    FloatSpec(label="sweep_start_us"),
+                    _DEFAULT_SWEEP_START,
+                ),
+                generation_field(
+                    "sweep_stop_factor",
+                    "sweep_stop_factor",
+                    FloatSpec(label="sweep_stop_factor"),
+                    _DEFAULT_SWEEP_STOP_FACTOR,
+                ),
+                generation_field(
+                    "sweep_stop_min_us",
+                    "sweep_stop_min_us",
+                    FloatSpec(label="sweep_stop_min_us"),
+                    _DEFAULT_SWEEP_STOP_MIN,
+                ),
             ),
+            default_overrides={
+                "rounds": 10,
+                "relax_delay": _resolve_relax_delay(
+                    t1_seed,
+                    factor=_DEFAULT_RELAX_FACTOR,
+                    minimum=_DEFAULT_RELAX_MIN,
+                ),
+                "sweep_range": SweepValue(
+                    *_resolve_sweep_range(
+                        t1_seed,
+                        start=_DEFAULT_SWEEP_START,
+                        stop_factor=_DEFAULT_SWEEP_STOP_FACTOR,
+                        stop_min=_DEFAULT_SWEEP_STOP_MIN,
+                    ),
+                    expts=101,
+                ),
+            },
         )
 
     def make_init_result(
@@ -378,16 +461,18 @@ class T1Builder(Builder):
             )
         raw_cfg = env.schema.lower_raw(ml, md=env.md)
         knobs = env.schema.lower(ml, md=env.md)
-        smoothed_t1 = float(snapshot["t1"])
+        smoothed_t1 = _snapshot_t1(snapshot, knobs)
         relax_delay = _resolve_cfg_relax_delay(
             str(knobs["relax_delay_mode"]),
             smoothed_t1=smoothed_t1,
             fixed=float(knobs["relax_delay"]),
+            knobs=knobs,
         )
         sweep_range = _resolve_cfg_sweep_range(
             str(knobs["sweep_range_mode"]),
             smoothed_t1=smoothed_t1,
             fixed=knobs["sweep_range"],
+            knobs=knobs,
         )
         raw_cfg["modules"]["pi_pulse"] = pi_pulse
         raw_cfg["modules"]["readout"] = readout

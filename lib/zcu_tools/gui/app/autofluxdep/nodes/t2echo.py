@@ -1,15 +1,15 @@
-"""t2echo — Hahn-echo Builder: acquire decay cosine → fit_decay_fringe → t2e.
+"""t2echo — Hahn-echo Builder: acquire decay/fringe trace → fit → t2e.
 
 Translates the notebook's T2EchoTask cfg_maker. Sets this flux point's value on
 the picked flux device, sets up devices, acquires a decaying cosine fringe vs
-delay time with ``ModularProgramV2`` (a Hahn-echo sequence), fits it with the
-real ``fit_decay_fringe``, fills its sweep Result row in place, and returns the
-raw t2e.
+delay time with ``ModularProgramV2`` (a Hahn-echo sequence), fits it with either
+``fit_decay_fringe`` or ``fit_decay`` according to the generation fit method, fills
+its sweep Result row in place, and returns the raw t2e.
 
 Unlike t2ramsey, the echo sequence refocuses static dephasing and typically
 yields a longer coherence time; the difference is purely in the pulse sequence.
-The same decay-cosine / fringe fit path applies regardless of the ``detune_ratio``
-param (no branch).
+The default ``auto_by_detune`` fit method uses a pure decay fit when
+``detune_ratio == 0`` and a fringe fit otherwise.
 
 - needs the ``pi_pulse`` and ``pi2_pulse`` modules (lenrabi produces both) — the
   Hahn echo needs both a pi refocusing pulse and two pi/2 pulses. Both carry
@@ -44,7 +44,7 @@ from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2_gui.adapters.twotone.time_domain.t2echo import (
     T2EchoAdapter,
 )
-from zcu_tools.gui.app.autofluxdep.cfg import FloatSpec, str_choice_spec
+from zcu_tools.gui.app.autofluxdep.cfg import FloatSpec, SweepValue, str_choice_spec
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     SnrProbe,
@@ -61,6 +61,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
     adapter_node_schema,
+    ctx_md_float,
     generation_field,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
@@ -82,7 +83,7 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.program.v2.modules import PulseCfg, ReadoutCfg, ResetCfg
-from zcu_tools.utils.fitting import fit_decay_fringe
+from zcu_tools.utils.fitting import fit_decay, fit_decay_fringe
 
 logger = logging.getLogger(__name__)
 
@@ -91,18 +92,39 @@ _DEFAULT_T2E = 5.0  # us — smoothed t2e fallback
 _T2E_WINDOW_FACTOR = 2.5  # notebook: sweep_range = (0, 2.5 * prev_t2e)
 _DEFAULT_DETUNE_RATIO = 0.05  # notebook default activate-detune fraction
 _DEFAULT_EARLYSTOP_SNR = 20.0
+_DEFAULT_RELAX_FACTOR = 3.0
+_DEFAULT_RELAX_MIN = 1.0
+_DEFAULT_SWEEP_START = 0.0
 _SWEEP_RANGE_MODE_AUTO_T2E = "auto_t2e"
 _SWEEP_RANGE_MODE_FIXED = "fixed"
 _RELAX_DELAY_MODE_AUTO_T1 = "auto_t1"
 _RELAX_DELAY_MODE_FIXED = "fixed"
+_FIT_METHOD_AUTO = "auto_by_detune"
+_FIT_METHOD_FRINGE = "fringe"
+_FIT_METHOD_DECAY = "decay"
 
 
-def _default_t1() -> float:
-    return _DEFAULT_T1
+def _default_t1() -> None:
+    return None
 
 
-def _default_t2e() -> float:
-    return _DEFAULT_T2E
+def _default_t2e() -> None:
+    return None
+
+
+def _seed_t1(ctx: Any | None) -> float:
+    return ctx_md_float(ctx, "t1") or _DEFAULT_T1
+
+
+def _seed_t2e(ctx: Any | None) -> float:
+    return ctx_md_float(ctx, "t2e") or _DEFAULT_T2E
+
+
+def _snapshot_float(snapshot: Snapshot, key: str, fallback: float) -> float:
+    value = snapshot.get(key)
+    if value is None:
+        return fallback
+    return float(value)
 
 
 def _placeholder_pi_pulse() -> Any:
@@ -124,18 +146,23 @@ def _fixed_sweep_range(sweep: Any) -> tuple[float, float]:
 
 
 def _resolve_cfg_sweep_range(
-    mode: str, *, t2e: float, fixed: Any
+    mode: str, *, t2e: float, fixed: Any, knobs: dict[str, Any]
 ) -> tuple[float, float]:
     if mode == _SWEEP_RANGE_MODE_AUTO_T2E:
-        return (0.0, _T2E_WINDOW_FACTOR * float(t2e))
+        return (
+            float(knobs["sweep_start_us"]),
+            float(knobs["sweep_stop_factor"]) * float(t2e),
+        )
     if mode == _SWEEP_RANGE_MODE_FIXED:
         return _fixed_sweep_range(fixed)
     raise RuntimeError(f"unsupported t2echo sweep_range_mode: {mode!r}")
 
 
-def _resolve_cfg_relax_delay(mode: str, *, t1: float, fixed: float) -> float:
+def _resolve_cfg_relax_delay(
+    mode: str, *, t1: float, fixed: float, knobs: dict[str, Any]
+) -> float:
     if mode == _RELAX_DELAY_MODE_AUTO_T1:
-        return max(1.0, 3.0 * float(t1))
+        return max(float(knobs["relax_min_us"]), float(knobs["relax_factor"]) * t1)
     if mode == _RELAX_DELAY_MODE_FIXED:
         return float(fixed)
     raise RuntimeError(f"unsupported t2echo relax_delay_mode: {mode!r}")
@@ -156,6 +183,20 @@ def _is_lowerable_pulse(module: Any) -> bool:
     if isinstance(module, dict):
         return module.get("type") == "pulse"
     return False
+
+
+def _fit_t2echo(
+    method: str, *, detune_ratio: float, times: np.ndarray, real: np.ndarray
+) -> tuple[float, Any]:
+    if method == _FIT_METHOD_AUTO:
+        method = _FIT_METHOD_DECAY if detune_ratio == 0.0 else _FIT_METHOD_FRINGE
+    if method == _FIT_METHOD_DECAY:
+        t2f, _, fit_curve, _ = fit_decay(times, real)
+        return float(t2f), fit_curve
+    if method == _FIT_METHOD_FRINGE:
+        t2f, _, _, _, fit_curve, _ = fit_decay_fringe(times, real)
+        return float(t2f), fit_curve
+    raise RuntimeError(f"unsupported t2echo fit_method: {method!r}")
 
 
 class T2EchoModuleCfg(ConfigBase):
@@ -189,12 +230,11 @@ class T2EchoCfgTemplate(ProgramV2Cfg, ExpCfgModel):
 
 
 class T2EchoNode(Node):
-    """One flux point's t2echo: set flux → real acquire → fit_decay_fringe → Patch.
+    """One flux point's t2echo: set flux → real acquire → configured fit → Patch.
 
     Mirrors the lower-layer T2Echo Schedule acquire + ``run``: a
-    Hahn-echo sequence (pi/2 → τ/2 → pi → τ/2 → detuned pi/2) sweeps the total delay
-    τ, the second pi/2 carries the activate-detune phase ramp, and
-    ``fit_decay_fringe`` recovers T2Echo.
+    Hahn-echo sequence (pi/2 → τ/2 → pi → τ/2 → optional detuned pi/2) sweeps the
+    total delay τ, and the configured fit method recovers T2Echo.
     """
 
     def __init__(self, env: RunEnv, builder: T2EchoBuilder) -> None:
@@ -203,8 +243,6 @@ class T2EchoNode(Node):
 
     def produce(self, snapshot: Snapshot) -> Patch:
         env = self._env
-        _ = snapshot["t1"]  # optional smoothed t1 — relax_delay in make_cfg
-        _ = snapshot["t2e"]  # smoothed (declared smooth="ewma") — sweep_range
         _ = snapshot.module("pi_pulse")  # required — refocusing pulse
         _ = snapshot.module("pi2_pulse")  # required — the two pi/2 pulses
         _ = snapshot.module("opt_readout")  # required — readout
@@ -274,7 +312,10 @@ class T2EchoNode(Node):
             )
         real = signal2real_flip(acquire_to_complex(raw))
 
-        t2f, _, _, _, fit_curve, _ = fit_decay_fringe(times, real)
+        fit_method = self._builder.fit_method(env.schema, md=env.md)
+        t2f, fit_curve = _fit_t2echo(
+            fit_method, detune_ratio=detune_ratio, times=times, real=real
+        )
 
         if not is_good_fit(real, fit_curve):
             logger.debug("t2echo fit @flux%d: poor fit (SNR-trough?) — discarded", idx)
@@ -295,8 +336,9 @@ class T2EchoNode(Node):
 
 
 class T2EchoBuilder(Builder):
-    """The t2echo provider — acquire decay cosine, real fit_decay_fringe, accumulating
-    colormap.  Reports only the raw echo t2e (detune is refocused and not reported).
+    """The t2echo provider — acquire echo decay/fringe traces and fit T2Echo.
+
+    Reports only the raw echo t2e (detune is refocused and not reported).
     """
 
     name = "t2echo"
@@ -323,6 +365,8 @@ class T2EchoBuilder(Builder):
 
     def make_default_schema(self, ctx: Any | None = None) -> NodeCfgSchema:
         """Adapter-backed default cfg plus autofluxdep generation controls."""
+        t1_seed = _seed_t1(ctx)
+        t2e_seed = _seed_t2e(ctx)
         return adapter_node_schema(
             T2EchoAdapter,
             ctx,
@@ -362,12 +406,70 @@ class T2EchoBuilder(Builder):
                     ),
                     _RELAX_DELAY_MODE_AUTO_T1,
                 ),
+                generation_field(
+                    "t1_seed_us",
+                    "t1_seed_us",
+                    FloatSpec(label="t1_seed_us"),
+                    t1_seed,
+                ),
+                generation_field(
+                    "t2e_seed_us",
+                    "t2e_seed_us",
+                    FloatSpec(label="t2e_seed_us"),
+                    t2e_seed,
+                ),
+                generation_field(
+                    "relax_factor",
+                    "relax_factor",
+                    FloatSpec(label="relax_factor"),
+                    _DEFAULT_RELAX_FACTOR,
+                ),
+                generation_field(
+                    "relax_min_us",
+                    "relax_min_us",
+                    FloatSpec(label="relax_min_us"),
+                    _DEFAULT_RELAX_MIN,
+                ),
+                generation_field(
+                    "sweep_start_us",
+                    "sweep_start_us",
+                    FloatSpec(label="sweep_start_us"),
+                    _DEFAULT_SWEEP_START,
+                ),
+                generation_field(
+                    "sweep_stop_factor",
+                    "sweep_stop_factor",
+                    FloatSpec(label="sweep_stop_factor"),
+                    _T2E_WINDOW_FACTOR,
+                ),
+                generation_field(
+                    "fit_method",
+                    "fit_method",
+                    str_choice_spec(
+                        "fit_method",
+                        (_FIT_METHOD_AUTO, _FIT_METHOD_FRINGE, _FIT_METHOD_DECAY),
+                    ),
+                    _FIT_METHOD_AUTO,
+                ),
             ),
+            default_overrides={
+                "detune_ratio": _DEFAULT_DETUNE_RATIO,
+                "rounds": 10,
+                "relax_delay": max(_DEFAULT_RELAX_MIN, _DEFAULT_RELAX_FACTOR * t1_seed),
+                "sweep_range": SweepValue(
+                    _DEFAULT_SWEEP_START,
+                    _T2E_WINDOW_FACTOR * t2e_seed,
+                    expts=101,
+                ),
+            },
         )
 
     def detune_ratio(self, schema: NodeCfgSchema, md: Any = None) -> float:
         """The activate-detune ratio for this placement (typed knob, default 0.05)."""
         return float(schema.lower(None, md=md)["detune_ratio"])
+
+    def fit_method(self, schema: NodeCfgSchema, md: Any = None) -> str:
+        return str(schema.lower(None, md=md)["fit_method"])
 
     def make_init_result(
         self, schema: NodeCfgSchema, flux: Any, md: Any = None
@@ -415,17 +517,19 @@ class T2EchoBuilder(Builder):
             )
         raw_cfg = env.schema.lower_raw(ml, md=env.md)
         knobs = env.schema.lower(ml, md=env.md)
-        cur_t1 = float(snapshot["t1"])  # smoothed t1
-        prev_t2e = float(snapshot["t2e"])  # smoothed t2e
+        cur_t1 = _snapshot_float(snapshot, "t1", float(knobs["t1_seed_us"]))
+        prev_t2e = _snapshot_float(snapshot, "t2e", float(knobs["t2e_seed_us"]))
         relax_delay = _resolve_cfg_relax_delay(
             str(knobs["relax_delay_mode"]),
             t1=cur_t1,
             fixed=float(knobs["relax_delay"]),
+            knobs=knobs,
         )
         sweep_range = _resolve_cfg_sweep_range(
             str(knobs["sweep_range_mode"]),
             t2e=prev_t2e,
             fixed=knobs["sweep_range"],
+            knobs=knobs,
         )
         raw_cfg["modules"]["pi_pulse"] = pi_pulse
         raw_cfg["modules"]["pi2_pulse"] = pi2_pulse

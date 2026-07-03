@@ -49,7 +49,7 @@ from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.experiment.v2_gui.adapters.twotone.ro_optimize.freq_gain import (
     RoOptFreqGainAdapter,
 )
-from zcu_tools.gui.app.autofluxdep.cfg import str_choice_spec
+from zcu_tools.gui.app.autofluxdep.cfg import FloatSpec, SweepValue, str_choice_spec
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     axis_to_sweep,
@@ -60,8 +60,12 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
     adapter_node_schema,
+    ctx_md_float,
+    ctx_module,
     generation_field,
     move_module,
+    readout_pulse_freq,
+    readout_pulse_gain,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import (
@@ -134,8 +138,13 @@ _DEFAULT_CENTER_FREQ = 6000.0  # MHz — baseline readout resonance fallback
 _DEFAULT_CENTER_GAIN = 0.5
 
 _DEFAULT_T1 = 10.0  # us — fallback T1 for the relax_delay (3·T1)
+_DEFAULT_RELAX_FACTOR = 3.0
+_DEFAULT_FREQ_HALF_WIDTH = 1.0
+_DEFAULT_GAIN_HALF_WIDTH = 0.05
 _RANGE_MODE_PREVIOUS_BEST = "previous_best"
 _RANGE_MODE_FIXED = "fixed"
+_WINDOW_MODE_DEFAULT_SWEEP = "from_default_sweep"
+_WINDOW_MODE_FIXED_HALF_WIDTH = "fixed_half_width"
 _RELAX_DELAY_MODE_AUTO_T1 = "auto_t1"
 _RELAX_DELAY_MODE_FIXED = "fixed"
 
@@ -171,16 +180,44 @@ class RoOptimizeCfgTemplate(ProgramV2Cfg, ExpCfgModel):
     skew_penalty: float = Field(default=0.0, ge=0.0)
 
 
-def _default_t1() -> float:
-    return _DEFAULT_T1
+def _default_t1() -> None:
+    return None
 
 
-def _default_best_freq() -> float:
-    return _DEFAULT_CENTER_FREQ
+def _default_best_freq() -> None:
+    return None
 
 
-def _default_best_gain() -> float:
-    return _DEFAULT_CENTER_GAIN
+def _default_best_gain() -> None:
+    return None
+
+
+def _seed_t1(ctx: Any | None) -> float:
+    return ctx_md_float(ctx, "t1") or _DEFAULT_T1
+
+
+def _seed_readout_freq(ctx: Any | None) -> float:
+    md_value = ctx_md_float(ctx, "r_f")
+    if md_value is not None:
+        return md_value
+    module = ctx_module(ctx, "readout_dpm", "readout_rf", "readout", "res_readout")
+    return readout_pulse_freq(module) or _DEFAULT_CENTER_FREQ
+
+
+def _seed_readout_gain(ctx: Any | None) -> float:
+    module = ctx_module(ctx, "readout_dpm", "readout_rf", "readout", "res_readout")
+    return readout_pulse_gain(module) or _DEFAULT_CENTER_GAIN
+
+
+def _snapshot_float(snapshot: Snapshot, key: str, fallback: float) -> float:
+    value = snapshot.get(key)
+    if value is None:
+        return fallback
+    return float(value)
+
+
+def _center_of(sweep: Any) -> float:
+    return 0.5 * (float(sweep.start) + float(sweep.stop))
 
 
 def _placeholder_pi_pulse() -> Any:
@@ -198,18 +235,23 @@ def _resolve_range(
     previous: float,
     fixed: Any,
     label: str,
-    default_previous: float | None = None,
+    window_mode: str,
+    half_width: float,
 ) -> tuple[float, float]:
     fixed_start = float(fixed.start)
     fixed_stop = float(fixed.stop)
     if mode == _RANGE_MODE_PREVIOUS_BEST:
-        half_width = abs(fixed_stop - fixed_start) / 2.0
+        if window_mode == _WINDOW_MODE_DEFAULT_SWEEP:
+            width = abs(fixed_stop - fixed_start) / 2.0
+        elif window_mode == _WINDOW_MODE_FIXED_HALF_WIDTH:
+            width = float(half_width)
+        else:
+            raise RuntimeError(
+                f"unsupported ro_optimize {label} window mode: {window_mode!r}"
+            )
         center = float(previous)
-        fixed_center = (fixed_start + fixed_stop) / 2.0
-        if default_previous is not None and np.isclose(center, default_previous):
-            center = fixed_center
-        start = center - half_width
-        stop = center + half_width
+        start = center - width
+        stop = center + width
     elif mode == _RANGE_MODE_FIXED:
         start = fixed_start
         stop = fixed_stop
@@ -220,9 +262,11 @@ def _resolve_range(
     return (start, stop)
 
 
-def _resolve_relax_delay(mode: str, *, t1: float, fixed: float) -> float:
+def _resolve_relax_delay(
+    mode: str, *, t1: float, fixed: float, relax_factor: float
+) -> float:
     if mode == _RELAX_DELAY_MODE_AUTO_T1:
-        return 3.0 * float(t1)
+        return float(relax_factor) * float(t1)
     if mode == _RELAX_DELAY_MODE_FIXED:
         return float(fixed)
     raise RuntimeError(f"unsupported ro_optimize relax_delay_mode: {mode!r}")
@@ -245,9 +289,6 @@ class RoOptimizeNode(Node):
     def produce(self, snapshot: Snapshot) -> Patch:
         env = self._env
 
-        _ = snapshot["best_ro_freq"]  # optional — make_cfg centres the freq window
-        _ = snapshot["best_ro_gain"]  # optional — make_cfg centres the gain window
-        _ = snapshot["t1"]  # declared optional; relax_delay = 3·T1 in make_cfg
         _ = snapshot.module("pi_pulse")  # required — ge-branch excitation
         _ = snapshot.module("readout")  # required — the swept readout pulse
 
@@ -407,6 +448,9 @@ class RoOptimizeBuilder(Builder):
 
     def make_default_schema(self, ctx: Any | None = None) -> NodeCfgSchema:
         """Adapter-backed default cfg plus autofluxdep generation controls."""
+        t1_seed = _seed_t1(ctx)
+        freq_seed = _seed_readout_freq(ctx)
+        gain_seed = _seed_readout_gain(ctx)
         return adapter_node_schema(
             RoOptFreqGainAdapter,
             ctx,
@@ -449,7 +493,64 @@ class RoOptimizeBuilder(Builder):
                     ),
                     _RELAX_DELAY_MODE_AUTO_T1,
                 ),
+                generation_field(
+                    "t1_seed_us",
+                    "t1_seed_us",
+                    FloatSpec(label="t1_seed_us"),
+                    t1_seed,
+                ),
+                generation_field(
+                    "relax_factor",
+                    "relax_factor",
+                    FloatSpec(label="relax_factor"),
+                    _DEFAULT_RELAX_FACTOR,
+                ),
+                generation_field(
+                    "freq_window_mode",
+                    "freq_window_mode",
+                    str_choice_spec(
+                        "freq_window_mode",
+                        (_WINDOW_MODE_FIXED_HALF_WIDTH, _WINDOW_MODE_DEFAULT_SWEEP),
+                    ),
+                    _WINDOW_MODE_FIXED_HALF_WIDTH,
+                ),
+                generation_field(
+                    "freq_half_width_mhz",
+                    "freq_half_width_mhz",
+                    FloatSpec(label="freq_half_width_mhz"),
+                    _DEFAULT_FREQ_HALF_WIDTH,
+                ),
+                generation_field(
+                    "gain_window_mode",
+                    "gain_window_mode",
+                    str_choice_spec(
+                        "gain_window_mode",
+                        (_WINDOW_MODE_FIXED_HALF_WIDTH, _WINDOW_MODE_DEFAULT_SWEEP),
+                    ),
+                    _WINDOW_MODE_FIXED_HALF_WIDTH,
+                ),
+                generation_field(
+                    "gain_half_width",
+                    "gain_half_width",
+                    FloatSpec(label="gain_half_width"),
+                    _DEFAULT_GAIN_HALF_WIDTH,
+                ),
             ),
+            default_overrides={
+                "reps": 1000,
+                "rounds": 10,
+                "relax_delay": _DEFAULT_RELAX_FACTOR * t1_seed,
+                "freq_range": SweepValue(
+                    freq_seed - _DEFAULT_FREQ_HALF_WIDTH,
+                    freq_seed + _DEFAULT_FREQ_HALF_WIDTH,
+                    expts=31,
+                ),
+                "gain_range": SweepValue(
+                    max(0.0, gain_seed - _DEFAULT_GAIN_HALF_WIDTH),
+                    min(1.0, gain_seed + _DEFAULT_GAIN_HALF_WIDTH),
+                    expts=31,
+                ),
+            },
         )
 
     def make_init_result(
@@ -467,17 +568,19 @@ class RoOptimizeBuilder(Builder):
         # acquiring.
         freq_range = _resolve_range(
             str(knobs["freq_range_mode"]),
-            previous=_DEFAULT_CENTER_FREQ,
+            previous=_center_of(freq_range_knob),
             fixed=freq_range_knob,
             label="freq",
-            default_previous=_DEFAULT_CENTER_FREQ,
+            window_mode=str(knobs["freq_window_mode"]),
+            half_width=float(knobs["freq_half_width_mhz"]),
         )
         gain_range = _resolve_range(
             str(knobs["gain_range_mode"]),
-            previous=_DEFAULT_CENTER_GAIN,
+            previous=_center_of(gain_range_knob),
             fixed=gain_range_knob,
             label="gain",
-            default_previous=_DEFAULT_CENTER_GAIN,
+            window_mode=str(knobs["gain_window_mode"]),
+            half_width=float(knobs["gain_half_width"]),
         )
         freqs = np.linspace(freq_range[0], freq_range[1], freq_expts)
         gains = np.linspace(gain_range[0], gain_range[1], gain_expts)
@@ -521,23 +624,30 @@ class RoOptimizeBuilder(Builder):
         gain_range_knob = knobs["gain_range"]
         freq_range = _resolve_range(
             str(knobs["freq_range_mode"]),
-            previous=float(snapshot["best_ro_freq"]),
+            previous=_snapshot_float(
+                snapshot, "best_ro_freq", _center_of(freq_range_knob)
+            ),
             fixed=freq_range_knob,
             label="freq",
-            default_previous=_DEFAULT_CENTER_FREQ,
+            window_mode=str(knobs["freq_window_mode"]),
+            half_width=float(knobs["freq_half_width_mhz"]),
         )
         gain_range = _resolve_range(
             str(knobs["gain_range_mode"]),
-            previous=float(snapshot["best_ro_gain"]),
+            previous=_snapshot_float(
+                snapshot, "best_ro_gain", _center_of(gain_range_knob)
+            ),
             fixed=gain_range_knob,
             label="gain",
-            default_previous=_DEFAULT_CENTER_GAIN,
+            window_mode=str(knobs["gain_window_mode"]),
+            half_width=float(knobs["gain_half_width"]),
         )
-        t1 = float(snapshot["t1"])
+        t1 = _snapshot_float(snapshot, "t1", float(knobs["t1_seed_us"]))
         relax_delay = _resolve_relax_delay(
             str(knobs["relax_delay_mode"]),
             t1=t1,
             fixed=float(knobs["relax_delay"]),
+            relax_factor=float(knobs["relax_factor"]),
         )
         move_module(raw_cfg, "qub_pulse", "pi_pulse")
         raw_cfg["modules"]["pi_pulse"] = pi_pulse

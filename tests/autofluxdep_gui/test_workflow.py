@@ -67,15 +67,21 @@ def _builders():
         p.set("pi_length", 0.1)
         p.set("pi2_length", 0.05)
         p.set("rabi_freq", 0.5)
+        p.set("pi_product", 0.03)
         p.set_module("pi_pulse", {"length": 0.1})
         p.set_module("pi2_pulse", {"length": 0.05})
         return p
 
     lenrabi = make_builder(
         "lenrabi",
-        provides=("pi_length", "pi2_length", "rabi_freq"),
+        provides=("pi_length", "pi2_length", "rabi_freq", "pi_product"),
         provides_modules=("pi_pulse", "pi2_pulse"),
         requires=(Dependency("qubit_freq"),),
+        optional=(
+            Dependency("t1", smooth="ewma", default=lambda: None),
+            Dependency("pi_length", default=lambda: None),
+            Dependency("pi_product", smooth="step_weighted", default=lambda: None),
+        ),
         optional_modules=(ModuleDep("opt_readout", default=lambda: None),),
         produce_fn=lenrabi_produce,
         result_factory=_filling_result,
@@ -94,9 +100,9 @@ def _builders():
         provides=("best_ro_freq", "best_ro_gain"),
         provides_modules=("opt_readout",),
         optional=(
-            Dependency("t1", smooth="ewma", default=lambda: 10.0),
-            Dependency("best_ro_freq", default=lambda: 7444.6),
-            Dependency("best_ro_gain", default=lambda: 0.5),
+            Dependency("t1", smooth="ewma", default=lambda: None),
+            Dependency("best_ro_freq", default=lambda: None),
+            Dependency("best_ro_gain", default=lambda: None),
         ),
         requires_modules=(ModuleDep("pi_pulse"),),
         optional_modules=(ModuleDep("readout", default=lambda: None),),
@@ -113,7 +119,7 @@ def _builders():
     t1 = make_builder(
         "t1",
         provides=("t1",),
-        optional=(Dependency("t1", smooth="ewma", default=lambda: 10.0),),
+        optional=(Dependency("t1", smooth="ewma", default=lambda: None),),
         requires_modules=(ModuleDep("pi_pulse"),),
         optional_modules=(ModuleDep("opt_readout", default=lambda: None),),
         produce_fn=t1_produce,
@@ -131,8 +137,8 @@ def _builders():
         "t2ramsey",
         provides=("t2r", "t2r_detune"),
         optional=(
-            Dependency("t1", smooth="ewma", default=lambda: 10.0),
-            Dependency("t2r", smooth="ewma", default=lambda: 5.0),
+            Dependency("t1", smooth="ewma", default=lambda: None),
+            Dependency("t2r", smooth="ewma", default=lambda: None),
         ),
         requires_modules=(ModuleDep("pi2_pulse"),),
         optional_modules=(ModuleDep("opt_readout", default=lambda: None),),
@@ -150,8 +156,8 @@ def _builders():
         "t2echo",
         provides=("t2e",),
         optional=(
-            Dependency("t1", smooth="ewma", default=lambda: 10.0),
-            Dependency("t2e", smooth="ewma", default=lambda: 5.0),
+            Dependency("t1", smooth="ewma", default=lambda: None),
+            Dependency("t2e", smooth="ewma", default=lambda: None),
         ),
         requires_modules=(ModuleDep("pi_pulse"), ModuleDep("pi2_pulse")),
         optional_modules=(ModuleDep("opt_readout", default=lambda: None),),
@@ -200,6 +206,7 @@ def test_full_workflow_produces_every_scalar():
         "pi_length",
         "pi2_length",
         "rabi_freq",
+        "pi_product",
         "best_ro_freq",
         "best_ro_gain",
         "t1",
@@ -222,7 +229,7 @@ def test_full_workflow_flows_modules():
 def test_full_workflow_projects_smoothed_values():
     _ctrl, info = _run_all([0.0, 0.5, 1.0])
     # consumer-declared smoothing fired for the keys downstream reads smoothed
-    for key in ("t1", "t2r", "t2e", "qfw_factor"):
+    for key in ("t1", "t2r", "t2e", "qfw_factor", "pi_product"):
         assert key in info.point_smoothed
 
 
