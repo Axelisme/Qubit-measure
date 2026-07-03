@@ -100,22 +100,29 @@ def ctrl_node():
 
 
 def _section(form: NodeCfgForm, key: str) -> SectionLiveField:
-    field = form._model.fields[key]
+    field = form._default_model.fields[key]
     assert isinstance(field, SectionLiveField)
     return cast(SectionLiveField, field)
+
+
+def _generation(form: NodeCfgForm) -> SectionLiveField:
+    field = form._generation_model
+    assert isinstance(field, SectionLiveField)
+    return field
 
 
 def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
     ctrl, node, index = ctrl_node
     form = NodeCfgForm(ctrl, node, index)
     try:
-        # The LiveModel renders the sectioned root; the schema keeps logical keys.
-        assert set(form._model.fields.keys()) == {
+        # Default cfg and generation behavior render as separate editor blocks; the
+        # schema keeps logical keys.
+        assert set(form._default_model.fields.keys()) == {
             "sweep",
             "acquire",
             "drive",
-            "generation",
         }
+        assert set(_generation(form).fields.keys()) == {"drive_gain_mode"}
         assert set(node.schema.keys) == {
             "detune_sweep",
             "reps",
@@ -155,7 +162,7 @@ def test_edit_scalar_writes_back_to_schema(ctrl_node, qapp):
         # schema_changed → controller.set_node_params → schema SSOT)
         _section(form, "acquire").fields["reps"].set_value(DirectValue(value=321))
         _section(form, "drive").fields["gain"].set_value(DirectValue(value=0.42))
-        _section(form, "generation").fields["drive_gain_mode"].set_value(
+        _generation(form).fields["drive_gain_mode"].set_value(
             DirectValue(value="fixed")
         )
         knobs = node.schema.lower(None)
@@ -190,7 +197,8 @@ def test_sectioned_form_commit_projects_to_logical_keys(qapp):
     index = ctrl.state.nodes.index(node)
     form = NodeCfgForm(ctrl, node, index)
     try:
-        assert set(form._model.fields) == {"acquire", "drive"}
+        assert set(form._default_model.fields) == {"acquire", "drive"}
+        assert form._generation_model is None
         assert node.schema.keys == ("reps", "qub_gain")
 
         _section(form, "acquire").fields["reps"].set_value(DirectValue(value=432))
@@ -230,7 +238,7 @@ def test_invalid_required_scalar_is_rejected(ctrl_node, qapp):
         nqz = _section(form, "drive").fields["nqz"]
         nqz.set_value(DirectValue(value=None))
         assert not nqz.is_valid()
-        assert not form._form.is_valid()  # the whole form reports invalid
+        assert not form._default_form.is_valid()  # the whole default block is invalid
         with pytest.raises(RuntimeError, match="drive\\.nqz"):
             node.schema.lower(None)
     finally:
@@ -242,11 +250,15 @@ def test_read_only_lock_keeps_values_visible(ctrl_node, qapp):
     form = NodeCfgForm(ctrl, node, index)
     try:
         form.set_read_only(True)
-        assert not form._form.isEnabled()  # editing disabled
+        assert not form._default_form.isEnabled()  # editing disabled
+        assert (
+            form._generation_form is not None and not form._generation_form.isEnabled()
+        )
         # the model (values) is untouched — "what this run used" stays visible
         reps_value = _section(form, "acquire").fields["reps"].get_value()
         assert isinstance(reps_value, DirectValue) and reps_value.value == 1000
         form.set_read_only(False)
-        assert form._form.isEnabled()
+        assert form._default_form.isEnabled()
+        assert form._generation_form is not None and form._generation_form.isEnabled()
     finally:
         form.teardown()
