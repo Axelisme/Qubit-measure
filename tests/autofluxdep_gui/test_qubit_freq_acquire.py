@@ -18,6 +18,7 @@ from __future__ import annotations
 import numpy as np
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.cfg import SweepValue
+from zcu_tools.gui.app.autofluxdep.feedback import build_feedback_runtime
 from zcu_tools.gui.session.services.mock_flux import FAKE_FLUX_DEVICE_NAME
 
 from ._helpers import connect_mock, run_controller_to_completion
@@ -34,6 +35,13 @@ _READOUT = {
     },
     "ro_cfg": {"ro_ch": 0, "ro_length": 0.9, "trig_offset": 0.6},
 }
+
+
+class _Provider:
+    def __init__(self, name, builder, schema):
+        self.name = name
+        self.builder = builder
+        self.schema = schema
 
 
 def _configure_context(ctrl) -> None:
@@ -123,6 +131,7 @@ def test_plotter_update_runs_after_a_real_produce():
     figure = Figure()
     plotter = builder.make_plotter(figure)
     ctx = ctrl.state.exp_context
+    feedback = build_feedback_runtime([_Provider("qubit_freq", builder, schema)])
     env = RunEnv(
         flux=0.0,
         flux_idx=0,
@@ -170,6 +179,7 @@ def test_good_fit_calibrates_the_predictor():
     predictor = SimplePredictor(base=600.0, slope=50.0)
     before = predictor.predict_freq(0.0)
     ctx = ctrl.state.exp_context
+    feedback = build_feedback_runtime([_Provider("qubit_freq", builder, schema)])
     env = RunEnv(
         flux=0.0,
         flux_idx=0,
@@ -179,7 +189,8 @@ def test_good_fit_calibrates_the_predictor():
         ml=ctx.ml,
         flux_device=FAKE_FLUX_DEVICE_NAME,
         result=result,
-        tools=Tools(predictor=predictor),
+        tools=Tools(predictor=predictor, feedback=feedback),
+        feedback=feedback.view_for("qubit_freq"),
     )
     patch = builder.build_node(env).produce(
         Snapshot(
@@ -190,9 +201,14 @@ def test_good_fit_calibrates_the_predictor():
     assert "qubit_freq" in values  # a good fit
     assert "qfw_factor" in values
     assert abs(values["qfw_factor"] - values["fit_kappa"] / 0.3) < 1e-9
-    # the predictor was calibrated at flux 0 toward the measured frequency
-    assert predictor.predict_freq(0.0) != before
-    assert abs(predictor.predict_freq(0.0) - values["qubit_freq"]) < 1e-6
+    # SimplePredictor has no physical calibration loop; the generic estimator owns
+    # the residual correction and composes with the base predictor.
+    assert predictor.predict_freq(0.0) == before
+    correction = env.feedback.estimator("predict_freq_correction")
+    assert correction is not None
+    estimate = correction.estimate(0.0)
+    assert estimate is not None
+    assert abs(predictor.predict_freq(0.0) + estimate - values["qubit_freq"]) < 1e-6
 
 
 def _mocked_qubit_freq_produce_env(monkeypatch, real, fit_return):
@@ -235,6 +251,7 @@ def _mocked_qubit_freq_produce_env(monkeypatch, real, fit_return):
     monkeypatch.setattr(qf_mod, "fit_qubit_freq", lambda _freqs, _real: fit_return)
 
     predictor = SimplePredictor(base=600.0, slope=0.0)
+    feedback = build_feedback_runtime([_Provider("qubit_freq", builder, schema)])
     env = RunEnv(
         flux=0.0,
         flux_idx=0,
@@ -244,7 +261,8 @@ def _mocked_qubit_freq_produce_env(monkeypatch, real, fit_return):
         ml=ctrl.state.exp_context.ml,
         flux_device=FAKE_FLUX_DEVICE_NAME,
         result=result,
-        tools=Tools(predictor=predictor),
+        tools=Tools(predictor=predictor, feedback=feedback),
+        feedback=feedback.view_for("qubit_freq"),
     )
     return builder, env, result, predictor
 
@@ -274,8 +292,12 @@ def test_medium_fit_calibrates_predictor_without_linewidth_feedback(monkeypatch)
     assert "fit_kappa" not in values
     assert "qfw_factor" not in values
     assert result.fit_freq[0] == 605.0
-    assert predictor.predict_freq(0.0) != before
-    assert abs(predictor.predict_freq(0.0) - 605.0) < 1e-6
+    assert predictor.predict_freq(0.0) == before
+    correction = env.feedback.estimator("predict_freq_correction")
+    assert correction is not None
+    estimate = correction.estimate(0.0)
+    assert estimate is not None
+    assert abs(predictor.predict_freq(0.0) + estimate - 605.0) < 1e-6
 
 
 def test_poor_fit_skips_patch_and_predictor_calibration(monkeypatch):
@@ -299,6 +321,9 @@ def test_poor_fit_skips_patch_and_predictor_calibration(monkeypatch):
     assert patch.values() == {}
     assert np.isnan(result.fit_freq[0])
     assert predictor.predict_freq(0.0) == before
+    correction = env.feedback.estimator("predict_freq_correction")
+    assert correction is not None
+    assert correction.estimate(0.0) is None
 
 
 def test_linewidth_gate_rejects_invalid_width_and_window_bounds():

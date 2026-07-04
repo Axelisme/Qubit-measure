@@ -61,7 +61,7 @@ class AutoFluxDepState(SessionState):
 
     The soc / soccfg / predictor the run needs live in the inherited
     ``exp_context`` (the session SSOT, written by Setup / the session services);
-    ``run_predictor`` holds the adaptive predictor the current run was built with.
+    ``run_predictor`` holds the base predictor the current run was built with.
     """
 
     def __init__(self, ctx: ExpContext, project: ProjectInfo | None = None) -> None:
@@ -78,7 +78,7 @@ class AutoFluxDepState(SessionState):
         # None = unset (the flux values are then bare numbers).
         self.flux_device_name: str | None = None
         self.run_results: dict[str, Any] = {}
-        # The adaptive predictor the current/last run was built with (made per-run
+        # The base predictor the current/last run was built with (made per-run
         # from ``exp_context.predictor`` in ``Controller._build_tools``). Run-lived
         # and non-serialisable — like ``run_results`` — so an Info dialog / a test
         # can inspect the predictor the run calibrated.

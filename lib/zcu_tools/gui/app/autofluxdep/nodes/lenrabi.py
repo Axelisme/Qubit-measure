@@ -25,6 +25,7 @@ Fast Fails when the context is unconfigured. Compare ``notebook_md/autofluxdep.m
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Callable, MutableMapping
 from dataclasses import dataclass
 from typing import Any, cast
@@ -38,6 +39,10 @@ from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2_gui.adapters.twotone.rabi.len_rabi import LenRabiAdapter
 from zcu_tools.gui.app.autofluxdep.cfg import FloatSpec, SweepValue, str_choice_spec
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
+from zcu_tools.gui.app.autofluxdep.feedback import (
+    FeedbackSlotDecl,
+    feedback_generation_fields,
+)
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     SnrProbe,
     acquire_to_complex,
@@ -99,6 +104,13 @@ _RELAX_DELAY_MODE_AUTO_T1 = "auto_t1"
 _RELAX_DELAY_MODE_FIXED = "fixed"
 _DRIVE_GAIN_MODE_AUTO_PI_PRODUCT = "auto_pi_product"
 _DRIVE_GAIN_MODE_FIXED = "fixed"
+_DRIVE_GAIN_SLOT = FeedbackSlotDecl(
+    key="drive_gain",
+    kind="controller",
+    prefix="pi_gain_feedback",
+    default_enabled=True,
+    default_step_gain=1.0,
+)
 
 
 class LenRabiModuleCfg(ConfigBase):
@@ -250,6 +262,12 @@ def _resolve_drive_gain(
     raise RuntimeError(f"unsupported lenrabi drive_gain_mode: {mode!r}")
 
 
+def _clamp_drive_gain(value: float, knobs: dict[str, Any]) -> float:
+    gain = _require_positive_finite("drive_gain", value)
+    max_gain = _require_positive_finite("max_drive_gain", knobs["max_drive_gain"])
+    return min(max_gain, gain)
+
+
 def _drive_pulse_with_length(base: PulseCfg, length: float) -> dict[str, Any]:
     pulse = base.model_copy(deep=True)
     pulse.set_param("length", float(length))
@@ -392,6 +410,25 @@ def _patch_from_lenrabi_fit(fit: _LenRabiFit, base_drive_pulse: PulseCfg) -> Pat
     return patch
 
 
+def _update_drive_gain_feedback(
+    env: RunEnv, fit: _LenRabiFit, base_drive_pulse: PulseCfg
+) -> None:
+    if env.feedback is None:
+        return
+    knobs = env.schema.lower(env.ml, md=env.md)
+    if str(knobs["drive_gain_mode"]) != _DRIVE_GAIN_MODE_AUTO_PI_PRODUCT:
+        return
+    controller = env.feedback.controller(_DRIVE_GAIN_SLOT.key)
+    if controller is None:
+        return
+    target = _require_positive_finite("expected_pi_length", knobs["expected_pi_length"])
+    current_gain = _require_positive_finite("drive_gain", base_drive_pulse.gain)
+    normalized_error = math.log(
+        _require_positive_finite("pi_length", fit.pi_length) / target
+    )
+    controller.propose(current_gain, normalized_error)
+
+
 class LenRabiNode(Node):
     """One flux point's lenrabi: set flux → real acquire → fit_rabi → fill row → Patch.
 
@@ -481,6 +518,7 @@ class LenRabiNode(Node):
             fit.pi_length,
             fit.pi2_length,
         )
+        _update_drive_gain_feedback(env, fit, base_drive_pulse)
 
         return _patch_from_lenrabi_fit(fit, base_drive_pulse)
 
@@ -505,6 +543,7 @@ class LenRabiBuilder(Builder):
             "opt_readout", default=_default_readout, aliases=READOUT_LIBRARY_ALIASES
         ),
     )
+    feedback_slots = (_DRIVE_GAIN_SLOT,)
 
     def make_default_schema(self, ctx: Any | None = None) -> NodeCfgSchema:
         """Adapter-backed default cfg plus autofluxdep generation controls."""
@@ -633,6 +672,7 @@ class LenRabiBuilder(Builder):
                     _DEFAULT_MAX_DRIVE_GAIN,
                     group="feedback",
                 ),
+                *feedback_generation_fields(_DRIVE_GAIN_SLOT),
             ),
             default_overrides={
                 "rounds": 10,
@@ -703,13 +743,24 @@ class LenRabiBuilder(Builder):
         feedback = _resolve_feedback_inputs(snapshot, knobs)
 
         move_module(raw_cfg, "qub_pulse", "rabi_pulse")
-        raw_cfg["modules"]["rabi_pulse"]["gain"] = _resolve_drive_gain(
-            str(knobs["drive_gain_mode"]),
+        drive_gain_mode = str(knobs["drive_gain_mode"])
+        drive_gain = _resolve_drive_gain(
+            drive_gain_mode,
             pi_product=feedback.feedback_pi_product,
             target_pi_length=feedback.target_pi_length,
             fixed=float(raw_cfg["modules"]["rabi_pulse"]["gain"]),
             knobs=knobs,
         )
+        if (
+            env.feedback is not None
+            and drive_gain_mode == _DRIVE_GAIN_MODE_AUTO_PI_PRODUCT
+        ):
+            controller = env.feedback.controller(_DRIVE_GAIN_SLOT.key)
+            if controller is not None:
+                latest = controller.latest()
+                if latest is not None:
+                    drive_gain = _clamp_drive_gain(latest, knobs)
+        raw_cfg["modules"]["rabi_pulse"]["gain"] = drive_gain
         raw_cfg["modules"]["rabi_pulse"]["freq"] = qubit_freq
         raw_cfg["modules"]["readout"] = readout
         raw_cfg.pop("sweep", None)

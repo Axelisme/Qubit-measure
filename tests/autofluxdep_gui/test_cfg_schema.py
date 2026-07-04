@@ -184,6 +184,10 @@ _EXPECTED_KEYS = {
         "max_drive_gain",
         "qf_width_seed",
         "qfw_seed_gain",
+        "pred_freq_correction_enabled",
+        "pred_freq_correction_strategy",
+        "pred_freq_correction_idw_k",
+        "pred_freq_correction_idw_epsilon",
     },
     "lenrabi": {
         "sweep_range",
@@ -210,6 +214,9 @@ _EXPECTED_KEYS = {
         "pi_product_seed",
         "pi_product_factor",
         "max_drive_gain",
+        "pi_gain_feedback_enabled",
+        "pi_gain_feedback_strategy",
+        "pi_gain_feedback_step_gain",
     },
     "ro_optimize": {
         "freq_range",
@@ -325,6 +332,18 @@ _EXPECTED_PATHS = {
         "max_drive_gain": "generation.feedback.max_drive_gain",
         "qf_width_seed": "generation.feedback.qf_width_seed",
         "qfw_seed_gain": "generation.feedback.qfw_seed_gain",
+        "pred_freq_correction_enabled": (
+            "generation.feedback.pred_freq_correction_enabled"
+        ),
+        "pred_freq_correction_strategy": (
+            "generation.feedback.pred_freq_correction_strategy"
+        ),
+        "pred_freq_correction_idw_k": (
+            "generation.feedback.pred_freq_correction_idw_k"
+        ),
+        "pred_freq_correction_idw_epsilon": (
+            "generation.feedback.pred_freq_correction_idw_epsilon"
+        ),
     },
     "lenrabi": {
         "sweep_range": "sweep.length",
@@ -351,6 +370,11 @@ _EXPECTED_PATHS = {
         "pi_product_seed": "generation.feedback.pi_product_seed",
         "pi_product_factor": "generation.feedback.pi_product_factor",
         "max_drive_gain": "generation.feedback.max_drive_gain",
+        "pi_gain_feedback_enabled": "generation.feedback.pi_gain_feedback_enabled",
+        "pi_gain_feedback_strategy": "generation.feedback.pi_gain_feedback_strategy",
+        "pi_gain_feedback_step_gain": (
+            "generation.feedback.pi_gain_feedback_step_gain"
+        ),
     },
     "ro_optimize": {
         "freq_range": "sweep.freq",

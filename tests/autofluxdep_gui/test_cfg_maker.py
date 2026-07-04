@@ -8,10 +8,12 @@ the real ``ml.make_cfg`` lowering path without hardware.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import pytest
 from zcu_tools.gui.app.autofluxdep.cfg import NodeCfgSchema, SweepValue
+from zcu_tools.gui.app.autofluxdep.feedback import build_feedback_runtime
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import (
@@ -32,6 +34,13 @@ _READOUT = {
     },
     "ro_cfg": {"ro_ch": 0, "ro_length": 0.9, "trig_offset": 0.6},
 }
+
+
+class _Provider:
+    def __init__(self, name: str, builder: Builder, schema: NodeCfgSchema) -> None:
+        self.name = name
+        self.builder = builder
+        self.schema = schema
 
 
 def _ml() -> ModuleLibrary:
@@ -82,6 +91,24 @@ def test_qubit_freq_make_cfg_lowers_context():
     assert float(cfg.modules.qub_pulse.gain) == 0.05
     assert int(cfg.modules.qub_pulse.ch) == 3
     assert cfg.reps == 100 and cfg.rounds == 2
+
+
+def test_qubit_freq_make_cfg_composes_prediction_correction():
+    builder = QubitFreqBuilder()
+    schema = builder.make_default_schema()
+    feedback = build_feedback_runtime([_Provider("qf", builder, schema)])
+    view = feedback.view_for("qf")
+    estimator = view.estimator("predict_freq_correction")
+    assert estimator is not None
+    estimator.observe(0.0, 7.5)
+    env = RunEnv(flux=0.0, flux_idx=0, schema=schema, ml=_ml(), feedback=view)
+    snap = Snapshot(
+        {"predict_freq": 5135.0, "qfw_factor": None}, modules={"readout": _READOUT}
+    )
+
+    cfg = builder.make_cfg(env, snap)
+
+    assert float(cfg.modules.qub_pulse.freq) == pytest.approx(5142.5)
 
 
 def test_qubit_freq_make_cfg_uses_qfw_factor_feedback():
@@ -183,6 +210,34 @@ def test_lenrabi_make_cfg_lowers_context():
     # sweep_range still tracks the latest measured pi_length by default.
     assert cfg.sweep_range == (0.05, 2.5)
     assert cfg.relax_delay == 30.0
+
+
+def test_lenrabi_make_cfg_uses_controller_proposal_with_use_site_clamp():
+    from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import LenRabiBuilder
+
+    ml = _ml()
+    builder = LenRabiBuilder()
+    schema = _schema(
+        builder,
+        {
+            "qub_ch": 4,
+            "qub_nqz": 2,
+            "expected_pi_length": 0.25,
+            "max_drive_gain": 0.5,
+            "sweep_range": SweepValue(start=0.05, stop=2.5, expts=61),
+        },
+    )
+    feedback = build_feedback_runtime([_Provider("rabi", builder, schema)])
+    view = feedback.view_for("rabi")
+    controller = view.controller("drive_gain")
+    assert controller is not None
+    assert controller.propose(0.3, math.log(2.0)) == pytest.approx(0.6)
+    env = RunEnv(flux=0.0, flux_idx=0, schema=schema, ml=ml, feedback=view)
+    snap = Snapshot({"qubit_freq": 5135.0}, modules={"opt_readout": _READOUT})
+
+    cfg = builder.make_cfg(env, snap)
+
+    assert float(cfg.modules.rabi_pulse.gain) == pytest.approx(0.5)
 
 
 def test_lenrabi_make_cfg_uses_matching_pi_seed_for_first_pass_gain():

@@ -171,6 +171,10 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
             "max_drive_gain",
             "qf_width_seed",
             "qfw_seed_gain",
+            "pred_freq_correction_enabled",
+            "pred_freq_correction_strategy",
+            "pred_freq_correction_idw_k",
+            "pred_freq_correction_idw_epsilon",
         }
         assert set(node.schema.keys) == {
             "detune_sweep",
@@ -190,6 +194,10 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
             "max_drive_gain",
             "qf_width_seed",
             "qfw_seed_gain",
+            "pred_freq_correction_enabled",
+            "pred_freq_correction_strategy",
+            "pred_freq_correction_idw_k",
+            "pred_freq_correction_idw_epsilon",
         }
     finally:
         form.teardown()

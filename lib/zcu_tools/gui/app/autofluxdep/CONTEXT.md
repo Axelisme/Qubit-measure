@@ -145,20 +145,32 @@ _Avoid_: log line, Labber channel, debug message.
 
 **Tools**:
 The container of **general, sweep-lived, stateful services** curried into Nodes
-by their Builder (predictor, an IDW error-corrector, ...). Services
-hold the cross-flux-point state that a short-lived Node cannot. Per-node private
-services built by a `make_services` hook were rejected as over-design — a
-capability used by only one Builder today is still a general Tools service.
+by their Builder (predictor, feedback runtime, ...). Services hold the
+cross-flux-point state that a short-lived Node cannot. Per-node private services
+built by a `make_services` hook were rejected as over-design — a capability used
+by only one Builder today is still a general Tools service.
 _Avoid_: per-node service, make_services.
 
 The **predictor service** has two faces. *Query* (general): `predict_freq(flux)`
 and `predict_matrix_element(flux)` — the predictor predicts both, used by the
-predictor Node to produce `predict_freq` / `cur_m`. *Calibration* (a service
+predictor Node to produce base `predict_freq` / `cur_m`. *Calibration* (a service
 method triggered by a Node, NOT by the orchestrator): `calibrate(flux,
 measured_freq)` — qubit_freq, after fitting, hands its measured freq to the
-service to adjust the prediction; the bias/IDW correction logic is encapsulated
-in the service, so qubit_freq never touches the predictor's internals. The
-orchestrator never calibrates.
+service to adjust the physical/base prediction when the backend supports it. The
+predictor does **not** hide residual IDW correction; qubit_freq owns composition
+of `base predict_freq + correction`, and the correction estimator is a generic
+feedback slot in `Tools.feedback`. The orchestrator never calibrates and never
+updates feedback slots itself.
+
+**Feedback capability**:
+A run-lived, placement-scoped map of generic scalar estimators/controllers,
+built from Builder-declared slots and the placed node's Generation overrides.
+It is exposed to a Node as `RunEnv.feedback`. The generic layer provides only
+mechanics: `idw` / `last_good` estimators and a `log_step` controller. It does
+not know what the scalar means, does not emit Patch keys, and does not apply
+fit gates, clamps, bounds, stop/fail policy, or fallback defaults. A disabled
+declared slot returns `None`; an undeclared slot lookup fast-fails.
+_Avoid_: feedback patch, node-private controller state, orchestrator feedback.
 
 **Result**:
 A Node's domain output, distinct from its **Patch**. It is **sweep-lived and

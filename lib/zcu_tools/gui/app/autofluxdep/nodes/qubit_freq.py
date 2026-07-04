@@ -45,6 +45,10 @@ from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2_gui.adapters.twotone.freq import FreqAdapter
 from zcu_tools.gui.app.autofluxdep.cfg import FloatSpec, SweepValue, str_choice_spec
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
+from zcu_tools.gui.app.autofluxdep.feedback import (
+    FeedbackSlotDecl,
+    feedback_generation_fields,
+)
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     SnrProbe,
     acquire_to_complex,
@@ -82,6 +86,13 @@ _FREQ_FIT_RESIDUAL_RATIO = 0.2
 _LINEWIDTH_FIT_RESIDUAL_RATIO = 0.1
 _DRIVE_GAIN_MODE_ADAPTIVE = "adaptive"
 _DRIVE_GAIN_MODE_FIXED = "fixed"
+_PREDICT_FREQ_CORRECTION_SLOT = FeedbackSlotDecl(
+    key="predict_freq_correction",
+    kind="estimator",
+    prefix="pred_freq_correction",
+    default_enabled=True,
+    default_strategy="idw",
+)
 
 
 class QubitFreqCfgTemplate(TwoToneCfg, ExpCfgModel):
@@ -138,6 +149,29 @@ def _resolve_drive_gain(
     if mode == _DRIVE_GAIN_MODE_FIXED:
         return float(initial_gain)
     raise RuntimeError(f"unsupported qubit_freq drive_gain_mode: {mode!r}")
+
+
+def _predict_freq_correction(env: RunEnv) -> float:
+    if env.feedback is None:
+        return 0.0
+    estimator = env.feedback.estimator(_PREDICT_FREQ_CORRECTION_SLOT.key)
+    if estimator is None:
+        return 0.0
+    estimate = estimator.estimate(env.flux)
+    if estimate is None:
+        return 0.0
+    return float(estimate)
+
+
+def _observe_predict_freq_residual(
+    env: RunEnv, measured_freq: float, base_after_calibration: float
+) -> None:
+    if env.feedback is None:
+        return
+    estimator = env.feedback.estimator(_PREDICT_FREQ_CORRECTION_SLOT.key)
+    if estimator is None:
+        return
+    estimator.observe(env.flux, float(measured_freq) - float(base_after_calibration))
 
 
 def _qf_width_seed(ctx: Any | None) -> float | None:
@@ -228,7 +262,7 @@ class QubitFreqNode(Node):
 
     def produce(self, snapshot: Snapshot) -> Patch:
         env = self._env
-        pred_qf = float(snapshot["predict_freq"])
+        base_pred_qf = float(snapshot["predict_freq"])
 
         result: QubitFreqResult = env.result
         idx = env.flux_idx
@@ -239,6 +273,7 @@ class QubitFreqNode(Node):
         # the predicted qubit freq (make_cfg sets qub_pulse.freq = predict_freq).
         cfg = self._builder.make_cfg(env, snapshot)
         center = float(cfg.modules.qub_pulse.freq)
+        pred_qf = center
         freqs = center + detunes  # absolute frequency axis (for the fit + plot)
 
         # Point the flux device at this sweep point and push it to hardware (mock:
@@ -312,15 +347,18 @@ class QubitFreqNode(Node):
         if env.round_hook is not None:
             env.round_hook(idx)
 
-        # CLOSED-LOOP FEEDBACK: hand the measured frequency to the predictor so
-        # the next flux point's predict_freq adapts (bias + IDW). qubit_freq
-        # triggers calibration; it never touches the predictor's internals.
+        # CLOSED-LOOP FEEDBACK: hand the measured frequency to the base predictor
+        # for backend-supported physical calibration, then observe the remaining
+        # residual in qubit_freq's generic correction estimator.
+        base_after_calibration = base_pred_qf
         if env.tools is not None and env.tools.predictor is not None:
             env.tools.predictor.calibrate(env.flux, float(freq))
+            base_after_calibration = float(env.tools.predictor.predict_freq(env.flux))
+        _observe_predict_freq_residual(env, float(freq), base_after_calibration)
 
         logger.debug(
             "qubit_freq fit @flux%d: freq=%.3f (predict=%.3f, detune=%+.3f) kappa=%.3f"
-            " → calibrated predictor",
+            " → updated prediction feedback",
             idx,
             float(freq),
             pred_qf,
@@ -431,6 +469,7 @@ class QubitFreqBuilder(Builder):
     optional_modules = (
         ModuleDep("readout", default=_default_readout, aliases=READOUT_LIBRARY_ALIASES),
     )
+    feedback_slots = (_PREDICT_FREQ_CORRECTION_SLOT,)
 
     def make_default_schema(self, ctx: Any | None = None) -> NodeCfgSchema:
         """Adapter-backed default cfg plus autofluxdep generation controls."""
@@ -499,6 +538,7 @@ class QubitFreqBuilder(Builder):
                     _DEFAULT_QFW_SEED_GAIN,
                     group="feedback",
                 ),
+                *feedback_generation_fields(_PREDICT_FREQ_CORRECTION_SLOT),
             ),
             default_overrides={"detune_sweep": _DEFAULT_DETUNE_SWEEP, "rounds": 10},
         )
@@ -540,7 +580,7 @@ class QubitFreqBuilder(Builder):
             )
         raw_cfg = env.schema.lower_raw(ml, md=env.md)
         knobs = env.schema.lower(ml, md=env.md)
-        predict_freq = float(snapshot["predict_freq"])
+        predict_freq = float(snapshot["predict_freq"]) + _predict_freq_correction(env)
         qub_pulse = module_dict(raw_cfg, "qub_pulse")
         qfw_factor = snapshot.get("qfw_factor")
         if qfw_factor is None:

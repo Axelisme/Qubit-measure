@@ -52,6 +52,8 @@ class RunEnv:
     through (the user's flux-source pick, ``state.flux_device_name``); a real
     acquire writes ``flux`` into ``cfg.dev[flux_device]`` so ``setup_devices``
     pushes it to that device. None when no flux source is picked.
+    ``feedback`` — placement-scoped feedback capabilities built once at run start;
+    None for callers that do not bind generic feedback.
     ``result`` — the sweep-lived Result this Node fills (its row ``flux_idx``);
     None for pure-compute Nodes. ``round_hook`` — called by acquire each round
     (fill row + notify); None for pure-compute Nodes. ``should_stop`` — the run's
@@ -68,6 +70,7 @@ class RunEnv:
     ml: Any = None
     md: Any = None
     tools: Any = None
+    feedback: Any = None
     flux_device: str | None = None
     result: Any = None
     round_hook: RoundHook | None = None
@@ -121,6 +124,7 @@ class Builder(ABC):
     requires_modules: tuple[ModuleDep, ...] = ()
     optional_modules: tuple[ModuleDep, ...] = ()
     provides_modules: tuple[str, ...] = ()
+    feedback_slots: tuple[Any, ...] = ()
 
     # --- declaration helpers (the orchestrator reads these) ---
 

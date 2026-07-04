@@ -267,8 +267,8 @@ class Orchestrator:
     user's GUI layout) — no topo sort. Each provider is a ``PlacedNode``
     (Builder + params).
 
-    ``tools`` is the sweep-lived stateful service injected into Nodes (the
-    adaptive predictor), owned for the whole sweep so its state persists.
+    ``tools`` is the sweep-lived stateful service container injected into Nodes
+    (predictor, feedback runtime), owned for the whole sweep so state persists.
 
     ``ml`` is the read-only module library: when a declared module is not
     produced by any Node, the snapshot falls back to ``ml.get_module(name)``.
@@ -345,6 +345,7 @@ class Orchestrator:
             ml=self.ml,
             md=self.md,
             tools=self.tools,
+            feedback=self.tools.feedback.view_for(provider.name),
             flux_device=self.flux_device,
             result=result,
             round_hook=round_hook,

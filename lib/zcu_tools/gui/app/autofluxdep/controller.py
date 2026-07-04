@@ -46,6 +46,7 @@ from zcu_tools.gui.app.autofluxdep.events.workflow import (
     FluxChangedPayload,
     WorkflowChangedPayload,
 )
+from zcu_tools.gui.app.autofluxdep.feedback import build_feedback_runtime
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, PlacedNode
 from zcu_tools.gui.app.autofluxdep.nodes.predictor import PredictorBuilder
 from zcu_tools.gui.app.autofluxdep.operation_gate import OperationGate, OperationKind
@@ -746,14 +747,14 @@ class Controller(SessionControllerMixin):
         service = PlacedNode(builder=PredictorBuilder())
         return [service, *self._enabled_nodes()]
 
-    def _build_tools(self) -> Tools:
-        """Build the sweep's adaptive predictor from the active context.
+    def _build_tools(self, providers: list[PlacedNode] | None = None) -> Tools:
+        """Build the sweep's run-lived predictor and feedback capabilities.
 
         ``exp_context.predictor`` holds the raw ``FluxoniumPredictor`` (loaded at
         setup / by PredictorService) or None. A real predictor is wrapped into
-        the adaptive ``FluxoniumPredictorAdapter``; with none loaded we fall back
-        to the ``SimplePredictor`` stand-in, so a mock / unconfigured run still
-        drives the same calibrate loop.
+        ``FluxoniumPredictorAdapter``; with none loaded we fall back to the
+        base-only ``SimplePredictor`` stand-in. Feedback capabilities are built
+        from placed-node declarations and generation policy.
         """
         raw = self._state.exp_context.predictor
         predictor = (
@@ -761,7 +762,11 @@ class Controller(SessionControllerMixin):
             if raw is not None
             else SimplePredictor()
         )
-        return Tools(predictor=predictor)
+        feedback = build_feedback_runtime(
+            providers or self._build_providers(),
+            md=self._state.exp_context.md,
+        )
+        return Tools(predictor=predictor, feedback=feedback)
 
     def _emit_point_done_on_main(self, idx: int) -> None:
         self._cur_idx = idx
@@ -898,11 +903,11 @@ class Controller(SessionControllerMixin):
         def on_flux_committed(idx: int, flux: float, info: InfoStore) -> None:
             store.commit_flux(idx, flux, info)
 
-        # Build the sweep's adaptive predictor once and stash it as run-lived
+        # Build the sweep's predictor/feedback once and stash the predictor as run-lived
         # state (like run_results) so an Info dialog / a test can inspect the
         # predictor the run calibrated.
         try:
-            tools = self._build_tools()
+            tools = self._build_tools(providers)
         except Exception:
             self._clear_run_products()
             raise
@@ -1138,9 +1143,10 @@ class Controller(SessionControllerMixin):
         smoothing is auto-built from declarations, ``derivations`` are extra
         producers. Returns the final InfoStore. Providers run in list order (no
         topo sort)."""
+        providers = self._build_providers()
         orch = Orchestrator(
-            providers=self._build_providers(),
-            tools=tools or Tools(predictor=SimplePredictor()),
+            providers=providers,
+            tools=tools or self._build_tools(providers),
             ml=ml,
             derivations=derivations or [],
         )
