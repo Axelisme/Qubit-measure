@@ -727,6 +727,31 @@ def test_run_start_exception_does_not_escape_qt_slot(app, monkeypatch):
     assert not ctrl.is_running
     assert win._list._run_btn.text() == "▶ Run"
     assert any("store failed" in message for message in shown)
+    assert ctrl.state.run_results == {}
+    assert ctrl.state.run_predictor is None
+
+
+def test_run_build_plot_exception_clears_stale_products(app, monkeypatch):
+    from zcu_tools.gui.app.autofluxdep.tools import SimplePredictor
+
+    ctrl, win = app
+    shown: list[str] = []
+    monkeypatch.setattr(
+        QMessageBox, "warning", lambda *a, **k: shown.append(a[2] if len(a) > 2 else "")
+    )
+
+    def fail_after_publish() -> None:
+        ctrl.prepare_run_results()
+        ctrl.state.run_predictor = SimplePredictor()
+        raise RuntimeError("plot build failed")
+
+    monkeypatch.setattr(win, "_build_plots", fail_after_publish)
+
+    win._start()
+
+    assert ctrl.state.run_results == {}
+    assert ctrl.state.run_predictor is None
+    assert any("plot build failed" in message for message in shown)
 
 
 def test_row_update_plotter_exception_is_logged_and_coalescing_released(

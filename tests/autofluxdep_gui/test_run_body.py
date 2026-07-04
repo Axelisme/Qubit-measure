@@ -417,6 +417,8 @@ def test_operation_begin_failure_finalizes_created_artifact(tmp_path, monkeypatc
     manifest = load_manifest(run_dir / "manifest.json")
     assert manifest["terminal"]["status"] == "failed"
     assert not ctrl.is_running
+    assert ctrl.state.run_results == {}
+    assert ctrl.state.run_predictor is None
     events = load_journal_events(run_dir / "journal.jsonl")
     assert [event["type"] for event in events] == ["run_failed", "run_finalized"]
 

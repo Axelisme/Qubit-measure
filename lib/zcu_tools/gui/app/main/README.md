@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-04 - shared operation shutdown
+**Last updated:** 2026-07-04 - missing linked refs
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -85,8 +85,9 @@ resolve-once: it reads the session `ValueLookup` immediately and stores the
 resolved direct scalar in the value tree.
 
 Linked `ModuleRef` / `WaveformRef` fields preserve their embedded value snapshot
-when the library key is missing. The field stays LINKED and invalid so re-adding
-the same key relinks it, while persistence can still serialize the snapshot
+when the library key is missing. The field stays library-keyed and invalid so
+re-adding the same key relinks it, including restored overridden refs whose key
+is absent at load time, while persistence can still serialize the snapshot
 without consulting `ModuleLibrary`.
 
 Adapter defaults are assembled in `experiment/v2_gui` with `CfgBuilder` and the

@@ -731,7 +731,8 @@ class PredictorDialog(QDialog):
         """Fill f / |n| / |phi| columns for every tracked transition at the marker.
 
         Called by the debounce timer.  Uses point-predict for each row so each value
-        is as accurate as possible.  Any failure per-row shows "—".
+        is as accurate as possible.  Expected unavailable-model failures show "—";
+        unexpected backend failures fail the whole update once to avoid log storms.
         """
         from zcu_tools.gui.session.services.predictor import (
             PredictFreqRequest,
@@ -739,41 +740,49 @@ class PredictorDialog(QDialog):
         )
 
         marker_value = self._predict_value_spin.value()
-        for row_idx, transition in enumerate(self._tracked):
-            # Freq column: per-row scalar predict_freq (most accurate)
-            try:
-                freq = self._pred.predict_freq(
-                    PredictFreqRequest(value=marker_value, transition=transition)
-                )
-                freq_text = f"{freq:.4f}"
-            except (PredictorNotLoaded, ValueError):
-                freq_text = "—"
-            except Exception as exc:
-                logger.exception(
-                    "predictor value-column frequency update failed: transition=%s",
-                    transition,
-                )
-                self._set_status(str(exc), error=True)
-                freq_text = "—"
-            freq_item = self._table.item(row_idx, _COL_FREQ)
-            if freq_item is not None:
-                freq_item.setText(freq_text)
+        try:
+            for row_idx, transition in enumerate(self._tracked):
+                # Freq column: per-row scalar predict_freq (most accurate)
+                try:
+                    freq = self._pred.predict_freq(
+                        PredictFreqRequest(value=marker_value, transition=transition)
+                    )
+                    freq_text = f"{freq:.4f}"
+                except (PredictorNotLoaded, ValueError):
+                    freq_text = "—"
 
-            # |n| and |phi| columns: one single-point matrix curve call per
-            # operator (avoids the level<=1 cap in predict_matrix_element).
-            n_item = self._table.item(row_idx, _COL_MAG_N)
-            if n_item is not None:
-                n_item.setText(self._point_matrix_text(marker_value, transition, "n"))
-            phi_item = self._table.item(row_idx, _COL_MAG_PHI)
-            if phi_item is not None:
-                phi_item.setText(
-                    self._point_matrix_text(marker_value, transition, "phi")
-                )
+                freq_item = self._table.item(row_idx, _COL_FREQ)
+                if freq_item is not None:
+                    freq_item.setText(freq_text)
+
+                # |n| and |phi| columns: one single-point matrix curve call per
+                # operator (avoids the level<=1 cap in predict_matrix_element).
+                n_item = self._table.item(row_idx, _COL_MAG_N)
+                if n_item is not None:
+                    n_item.setText(
+                        self._point_matrix_text(marker_value, transition, "n")
+                    )
+                phi_item = self._table.item(row_idx, _COL_MAG_PHI)
+                if phi_item is not None:
+                    phi_item.setText(
+                        self._point_matrix_text(marker_value, transition, "phi")
+                    )
+        except Exception as exc:
+            logger.exception("predictor value-column update failed")
+            self._set_status(str(exc), error=True)
+            self._set_all_value_columns("—")
+
+    def _set_all_value_columns(self, text: str) -> None:
+        for row_idx in range(self._table.rowCount()):
+            for col_idx in (_COL_FREQ, _COL_MAG_N, _COL_MAG_PHI):
+                item = self._table.item(row_idx, col_idx)
+                if item is not None:
+                    item.setText(text)
 
     def _point_matrix_text(
         self, value: float, transition: tuple[int, int], operator: str
     ) -> str:
-        """|<i|operator|j>| at a single device value, formatted, or "—" on failure."""
+        """|<i|operator|j>| at a single device value, formatted, or "—" on expected failure."""
         from zcu_tools.gui.session.services.predictor import (
             PredictMatrixCurveRequest,
             PredictorNotLoaded,
@@ -789,14 +798,6 @@ class PredictorDialog(QDialog):
             )
             return f"{mat_result.mags[0, 0]:.5f}"
         except (PredictorNotLoaded, ValueError):
-            return "—"
-        except Exception as exc:
-            logger.exception(
-                "predictor value-column matrix update failed: transition=%s operator=%s",
-                transition,
-                operator,
-            )
-            self._set_status(str(exc), error=True)
             return "—"
 
     # ------------------------------------------------------------------

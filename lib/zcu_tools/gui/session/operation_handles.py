@@ -209,7 +209,10 @@ class OperationChannel:
         """
         self._q.put(Stop(reason))
         if self._cancel_hook is not None:
-            self._cancel_hook()
+            try:
+                self._cancel_hook()
+            except Exception:
+                logger.exception("operation cancel hook failed")
 
     # ------------------------------------------------------------------
     # Consumer interface (single consumer assumed)

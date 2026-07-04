@@ -458,16 +458,33 @@ def test_linked_ref_normalizes_locked_literals_without_override(env):
     assert pulse_cfg.fields["freq"] == DirectValue(0.0)
 
 
-def test_module_ref_overridden_dangling_self_heals_to_custom(env):
-    """A persisted MODIFIED library ref whose key is now absent self-heals to
-    inline Custom (the value is already the user's inline copy); the override
-    flag is meaningless once Custom, and the field stays valid."""
+def test_module_ref_overridden_dangling_stays_relinkable(env, monkeypatch):
+    """A restored overridden library ref whose key is absent keeps its key.
+
+    The field is invalid while missing, but re-adding the same key relinks it
+    instead of losing the relink target by converting to Custom.
+    """
+    from zcu_tools.gui.session.events import SessionEvent
+
     inner = CfgSectionSpec(
         label="Pulse",
         fields={"type": LiteralSpec("pulse"), "ch": ScalarSpec(label="Ch", type=int)},
     )
     spec = CfgSectionSpec(fields={"module": ModuleRefSpec(allowed=[inner])})
 
+    present = {"yes": False}
+    import zcu_tools.gui.app.main.ui.fields.utils as _utils
+
+    _orig = _utils._spec_value_for_chosen
+
+    def _fake_lookup(chosen_key, allowed, ml):
+        if chosen_key == "some_lib_module" and present["yes"]:
+            return inner, CfgSectionValue(
+                fields={"type": DirectValue("pulse"), "ch": DirectValue(11)}
+            )
+        return _orig(chosen_key, allowed, ml)
+
+    monkeypatch.setattr(_utils, "_spec_value_for_chosen", _fake_lookup)
     initial = CfgSectionValue(
         fields={
             "module": ModuleRefValue(
@@ -484,12 +501,28 @@ def test_module_ref_overridden_dangling_self_heals_to_custom(env):
     section = SectionLiveField(spec, env, initial_val=initial)
     field = cast(ModuleRefLiveField, section.fields["module"])
 
-    assert field.get_chosen_key() == "<Custom:Pulse>"
-    assert field.is_valid() is True
+    assert field.get_chosen_key() == "some_lib_module"
+    assert field.has_missing_library_ref() is True
+    assert field.is_valid() is False
     out = field.get_value()
-    assert out is not None
+    assert isinstance(out, ModuleRefValue)
+    assert out.chosen_key == "some_lib_module"
+    assert out.is_overridden is True
     ch = out.value.fields["ch"]
     assert isinstance(ch, DirectValue) and ch.value == 7
+
+    present["yes"] = True
+    field.refresh_external(SessionEvent.ML_CHANGED)
+
+    assert field.get_chosen_key() == "some_lib_module"
+    assert field._binding_state is LibraryBindingState.LINKED
+    assert field.has_missing_library_ref() is False
+    assert field.is_valid() is True
+    out = field.get_value()
+    assert isinstance(out, ModuleRefValue)
+    assert out.is_overridden is False
+    ch = out.value.fields["ch"]
+    assert isinstance(ch, DirectValue) and ch.value == 11
 
 
 def test_modified_ref_self_heals_when_library_key_deleted_at_runtime(env, monkeypatch):

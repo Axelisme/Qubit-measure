@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-04 — operation callback hardening
+**Last updated:** 2026-07-04 — shutdown/cancel callback hardening
 
 # gui/session/ — 量測 session core（measure + autofluxdep 共用）
 
@@ -12,7 +12,7 @@ session/
 ├── events.py           — SessionEvent enum + SessionPayload base + 8 payload（Md/Ml/ContextSwitched/Soc/Predictor/Device{Changed,SetupStarted,SetupFinished}）
 ├── state.py            — SessionState（exp_context+devices/DeviceState+startup_prefs/StartupPrefs+shared VersionTable+device mutators）；DeviceStatus
 ├── ports.py            — session service 依賴的 driven-adapter/seam ports：ExclusionGate(+OperationKind/OperationConflictError)、BackgroundExecutor（純 off-main 執行器，`submit(work,*,run_in_pool,on_done,on_error)` 無 scopes 參數）、ProgressHub、ProgressEvent/Kind/Transport、DriverFactoryPort、RememberedDevicePort、DeviceRegistryPort（GlobalDeviceManager classmethod 面的 instance 化，DeviceService 依契約存取、測試注 in-memory fake，ADR-0026 §6）、ProjectIOPort、ContextReadPort、StartupContextPort
-├── operation_handles.py— OperationHandles（async Handle/Cancel facet，零 kind）+ per-op OperationChannel（單一有序事件 FIFO Settled/Message/Stop，取代舊 FeedbackInbox + poll-loop，ADR-0025）+ OperationOutcome/OperationStatus/AwaitResult/CancelHook；`create(cancel_hook=)`、`has_cancel_hook`/channel.`can_cancel`（gate 'Send & Stop' 鈕，無 op-kind 知識）
+├── operation_handles.py— OperationHandles（async Handle/Cancel facet，零 kind）+ per-op OperationChannel（單一有序事件 FIFO Settled/Message/Stop，取代舊 FeedbackInbox + poll-loop，ADR-0025）+ OperationOutcome/OperationStatus/AwaitResult/CancelHook；`create(cancel_hook=)`、`has_cancel_hook`/channel.`can_cancel`（gate 'Send & Stop' 鈕，無 op-kind 知識）；cancel hook 例外只 log，Stop 事件仍入列且 cancel_all 繼續處理其它 operation
 ├── operation_runner.py — OperationRunner（唯一 kind-agnostic operation 生命週期機制，ADR-0026 §1：ensure_can_start→create→register→progress factory→submit→終局 settle）+ OperationSpec（各 op 把領域 policy 交給 runner）；run/analyze/device/SoC-connect 都是它的 client，runner 只認 port 不認行為，並隔離 terminal callback / cleanup 例外，確保 handle settle 與 exclusion release 仍 best-effort 執行
 ├── scopes.py           — progress_ambient（session 層：pbar ContextVar，無 Qt；ADR-0026 §2，取代舊 executor `_entered`/OffMainScopes 的 pbar 欄位）。figure_ambient（Qt）住 app 層 `gui/app/main/services/scopes.py`
 ├── notify_handles.py   — NotifyChannel/NotifyHandles（agent→user prompt 的跨線程 channel，事件集 Reply/Dismiss/Timeout，獨立於 operation 的 Settled/Message/Stop；鏡像 OperationChannel 四不變式，ADR-0025）
@@ -27,14 +27,14 @@ session/
 ├── pbar_host.py        — ProgressBar(worker)/ProgressBarModel(主線程 SSOT)，Qt-free；worker API 同時支援 incremental `update(delta)` 與 absolute `set_progress(n)`
 ├── adapters/
 │   ├── qt_progress_transport.py — QtProgressTransport（worker→主線程 progress marshal，queued signal；app-agnostic）
-│   └── qt_shutdown_driver.py — QtShutdownDriver（shared QTimer driving adapter，輪詢 ShutdownCoordinator，供 measure/autofluxdep closeEvent 使用）
+│   └── qt_shutdown_driver.py — QtShutdownDriver（shared QTimer driving adapter，輪詢 ShutdownCoordinator，供 measure/autofluxdep closeEvent 使用；QTimer tick/close callback 例外被 adapter 邊界 log 並 guarded close）
 ├── services/
 │   ├── connection.py   — SoCConnectionService（SoC connect op；硬體 facet、OperationRunner client、cancel_hook=None 無 cancellation point；終局經 connection_finished/connection_failed signal，typed requests/failures）
 │   ├── predictor.py    — PredictorService（predictor load/set_model_params〔typed EJ/EC/EL→FluxoniumPredictor，走 install_predictor in-memory seam〕/clear/install + predict_freq + 批次曲線計算 predict_freq_curve/predict_matrix_element_curve〔委派 simulate `FluxoniumPrediction` engine 的 affine/array paths〕；get_predictor_info 含 EJ/EC/EL；純函式 read_fluxdep_fit_params〔經 meta_tool.QubitParams 讀 params.json→typed model query〕；純計算，無 Qt signal/runner/gate，擁有 exp_context.predictor 寫 seam，ADR-0026 §5 自 connection.py 拆出）
 │   ├── context.py      — ContextService（context-switch + md ops + ml del/rename + 單一寫入 primitive apply_ml_writes，CfgSchema lowering 經 callback 注入；MdValueError/MlEntryValidationError）
 │   ├── device.py       — DeviceService（connect/disconnect/setup off-main，**全 port 注入**：gate/bg/progress 必傳）；`_mode_dependent_unit(dev)` module-level helper 集中 YOKOGS200 voltage/current→V/A 判斷（`get_device_unit` + `get_device_unit_strict` 共用，消除逐字重複）；`poll_device_info(name)` = best-effort off-main live-read（worker 純讀 driver、on_done 主線做 cache 比對+bump+DEVICE_CHANGED；memory-only/connect/disconnect skip，setup/ramp 允許 current-value refresh；單次讀失敗吞掉，不寫 State 於 worker）
 │   ├── startup.py      — StartupService + PersistedStartup/PersistedDeviceEntry memento + requests；startup memento 保存 result scope id / chip-qubit-res / connection prefill / remembered devices；委派 `gui/result_scope.py` 做 result-scope discovery / generated path，params.json identity migration 由 `meta_tool.QubitParams` 擁有
-│   ├── progress.py     — ProgressService（per-operation pbar 容器 + bound factory，吃 ProgressTransport；**共用**，非 app-held；owner listener 例外逐一 log 並隔離，不阻斷其他 listener 或 terminal cleanup）
+│   ├── progress.py     — ProgressService（per-operation pbar 容器 + bound factory，吃 ProgressTransport；**共用**，非 app-held；owner listener 例外逐一 log 並隔離，壞 listener 會 detach，不阻斷其他 listener 或 terminal cleanup）
 │   ├── shutdown.py     — ShutdownCoordinator（Qt-free cancel-all + poll state machine，吃 OperationHandles，ADR-0003；QTimer driver 在 adapters/）
 │   ├── io_manager.py   — IOManager（ExperimentManager 包裝，實作 ProjectIOPort；**共用**；把 project `result_dir` 映射到 `result_dir/exps` 作為 context root）
 │   ├── mock_flux.py    — MockFluxProvisioner（FLUX-AWARE-MOCK：訂閱 SOC_CHANGED，mock connect 時 ① 綁定/provision fake_flux 源 ② 從 mock soc 自身 SimParams 建 FluxoniumPredictor 經 connection seam 安裝——不蓋使用者已載入的 predictor）

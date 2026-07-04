@@ -50,13 +50,25 @@ class QtShutdownDriver(QObject):
         self._on_tick()
 
     def _on_tick(self) -> None:
-        state = self._coordinator.tick()
+        try:
+            state = self._coordinator.tick()
+        except Exception:
+            logger.exception("shutdown coordinator tick failed")
+            self._timer.stop()
+            self._finish_shutdown()
+            return
         if state is ShutdownState.WAITING:
             if not self._timer.isActive():
                 self._timer.start()
             return
         self._timer.stop()
+        self._finish_shutdown()
+
+    def _finish_shutdown(self) -> None:
         on_closed = self._on_closed
         self._on_closed = None
         if on_closed is not None:
-            on_closed()
+            try:
+                on_closed()
+            except Exception:
+                logger.exception("shutdown close callback failed")

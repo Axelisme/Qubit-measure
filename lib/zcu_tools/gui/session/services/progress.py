@@ -182,3 +182,8 @@ class ProgressService:
                 listener()
             except Exception:
                 logger.exception("progress listener failed: owner_id=%r", owner_id)
+                listeners = self._listeners.get(owner_id)
+                if listeners is not None and listener in listeners:
+                    listeners.remove(listener)
+                    if not listeners:
+                        del self._listeners[owner_id]

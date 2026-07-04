@@ -98,6 +98,12 @@ def test_listener_exception_is_logged_and_next_listener_still_runs(caplog):
     assert calls == ["broken", "healthy"]
     assert "progress listener failed" in caplog.text
 
+    caplog.clear()
+    _update(svc, 1, 0, 1)
+
+    assert calls == ["broken", "healthy", "healthy"]
+    assert "progress listener failed" not in caplog.text
+
 
 def test_attach_before_any_operation_returns_empty():
     svc = ProgressService(DirectProgressTransport())

@@ -311,6 +311,47 @@ def test_cancel_all_invokes_every_live_hook_and_returns_tokens() -> None:
     assert setup_called == [True]
 
 
+def test_cancel_hook_exception_is_logged_and_stop_event_stays_queued(caplog) -> None:
+    def bad_hook() -> None:
+        raise RuntimeError("hook boom")
+
+    ch = OperationChannel(cancel_hook=bad_hook)
+
+    with caplog.at_level("ERROR"):
+        ch.stop("abort anyway")
+
+    ch.settle(OperationOutcome("cancelled"))
+    result = ch.consume(timeout=1.0)
+
+    assert result.reason == "completed"
+    assert result.outcome is not None
+    assert result.outcome.status == "cancelled"
+    assert result.feedback == "abort anyway"
+    assert "operation cancel hook failed" in caplog.text
+
+
+def test_cancel_all_continues_after_cancel_hook_exception(caplog) -> None:
+    calls: list[str] = []
+
+    def bad_hook() -> None:
+        calls.append("bad")
+        raise RuntimeError("hook boom")
+
+    def good_hook() -> None:
+        calls.append("good")
+
+    handles = OperationHandles()
+    bad_token = handles.create(cancel_hook=bad_hook)
+    good_token = handles.create(cancel_hook=good_hook)
+
+    with caplog.at_level("ERROR"):
+        tokens = handles.cancel_all()
+
+    assert tokens == [bad_token, good_token]
+    assert calls == ["bad", "good"]
+    assert "operation cancel hook failed" in caplog.text
+
+
 def test_cancel_all_ignores_already_settled_operations() -> None:
     handles = OperationHandles()
     token = handles.create(cancel_hook=lambda: None)

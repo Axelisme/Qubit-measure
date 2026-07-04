@@ -28,6 +28,7 @@ import threading
 from typing import TYPE_CHECKING, Any
 
 from qtpy.QtCore import QObject, Qt, QTimer, Signal  # type: ignore[attr-defined]
+from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QDialog,
     QHBoxLayout,
@@ -320,9 +321,10 @@ class MainWindow(QMainWindow):
         self._ctrl.quiesce_background()
         self.close()
 
-    def closeEvent(self, a0: Any) -> None:
+    def closeEvent(self, a0: QCloseEvent | None) -> None:
         if self._closing:
-            super().closeEvent(a0)
+            if a0 is not None:
+                super().closeEvent(a0)
             return
 
         active = self._ctrl.active_operation_count()
@@ -497,6 +499,7 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             logger.exception("autofluxdep run failed to start")
             self._clear_plots()
+            self._ctrl.clear_run_products()
             self._run_active = False
             self._active_run_node_name = None
             self._live_predictor_flux_idx = None

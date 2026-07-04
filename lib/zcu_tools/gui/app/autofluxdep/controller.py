@@ -442,6 +442,10 @@ class Controller(SessionControllerMixin):
         self._state.run_results = {}
         self._state.run_predictor = None
 
+    def clear_run_products(self) -> None:
+        """Clear run-lived products after a synchronous start failure."""
+        self._clear_run_products()
+
     # -- setup dialog: project / startup --
     # apply_startup_project diverges (autofluxdep returns bool; measure returns the
     # resolved-project dict per WIRE-48) so it stays a per-app override. get_bus /
@@ -827,21 +831,30 @@ class Controller(SessionControllerMixin):
         if not self._state.run_results or not set(self._state.run_results).issubset(
             enabled_names
         ):
-            self.prepare_run_results()
+            try:
+                self.prepare_run_results()
+            except Exception:
+                self._clear_run_products()
+                raise
         results = self._state.run_results
         flux_values = list(self._state.flux_values)
         providers = self._build_providers()
         flux_device = self._state.flux_device_name
         project = self._state.project
         if project is None:
+            self._clear_run_products()
             raise RuntimeError("autofluxdep run requires a configured project")
-        store = RunStore.create(
-            project=project,
-            flux_values=flux_values,
-            flux_device_name=flux_device,
-            nodes=enabled_nodes,
-            results=results,
-        )
+        try:
+            store = RunStore.create(
+                project=project,
+                flux_values=flux_values,
+                flux_device_name=flux_device,
+                nodes=enabled_nodes,
+                results=results,
+            )
+        except Exception:
+            self._clear_run_products()
+            raise
 
         def on_point(idx: int, flux: float, info: InfoStore) -> None:
             del flux, info  # POINT_DONE carries only the index
@@ -888,7 +901,11 @@ class Controller(SessionControllerMixin):
         # Build the sweep's adaptive predictor once and stash it as run-lived
         # state (like run_results) so an Info dialog / a test can inspect the
         # predictor the run calibrated.
-        tools = self._build_tools()
+        try:
+            tools = self._build_tools()
+        except Exception:
+            self._clear_run_products()
+            raise
         self._state.run_predictor = tools.predictor
         stop_event = threading.Event()
         self._run_stop_event = stop_event
@@ -1051,6 +1068,7 @@ class Controller(SessionControllerMixin):
             token = self._runner.begin(spec)
         except Exception as exc:
             self._run_stop_event = None
+            self._clear_run_products()
             try:
                 store.record_run_failed(exc, stage="operation_begin")
                 store.finalize("failed", error=exc)

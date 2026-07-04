@@ -1010,8 +1010,14 @@ def test_predictor_dialog_value_column_runtime_error_is_logged(qapp, caplog):
         for col in (_COL_FREQ, _COL_MAG_N, _COL_MAG_PHI):
             item = dialog._table.item(row, col)
             assert item is not None and item.text() == "—"
-    assert "predictor value-column frequency update failed" in caplog.text
-    assert "predictor value-column matrix update failed" in caplog.text
+    records = [
+        record
+        for record in caplog.records
+        if record.message == "predictor value-column update failed"
+    ]
+    assert len(records) == 1
+    assert "predictor value-column frequency update failed" not in caplog.text
+    assert "predictor value-column matrix update failed" not in caplog.text
 
 
 def test_predictor_dialog_canvas_follow_updates_spinbox_no_recompute(qapp):

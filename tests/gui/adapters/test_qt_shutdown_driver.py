@@ -69,3 +69,36 @@ def test_timeout_forces_close(qapp) -> None:
     assert closed == []  # waiting on the unstoppable connect
 
     assert _spin(lambda: closed == [True]), "driver did not force-close on timeout"
+
+
+def test_tick_exception_is_logged_and_forces_close(qapp, monkeypatch, caplog) -> None:
+    del qapp
+    handles = OperationHandles()
+    driver = QtShutdownDriver(handles)
+    closed: list[bool] = []
+
+    def tick_boom():
+        raise RuntimeError("tick boom")
+
+    monkeypatch.setattr(driver._coordinator, "tick", tick_boom)
+
+    with caplog.at_level("ERROR"):
+        driver.begin(lambda: closed.append(True))
+
+    assert closed == [True]
+    assert not driver._timer.isActive()
+    assert "shutdown coordinator tick failed" in caplog.text
+
+
+def test_close_callback_exception_is_logged(qapp, caplog) -> None:
+    del qapp
+    handles = OperationHandles()
+    driver = QtShutdownDriver(handles)
+
+    def close_boom() -> None:
+        raise RuntimeError("close boom")
+
+    with caplog.at_level("ERROR"):
+        driver.begin(close_boom)
+
+    assert "shutdown close callback failed" in caplog.text
